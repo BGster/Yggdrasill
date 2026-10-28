@@ -1,0 +1,124 @@
+# GitHub Pages 部署预案（M0 web-closure）。
+#
+# ⚠️ 预案状态：本文件存在无害——只有仓库设置启用 Pages 后才会真正部署。
+#   启用属用户显式批准动作（一次性）：Settings → Pages → Build and
+#   deployment → Source = GitHub Actions。在此之前任何 push 都只跑 build job
+#   的产物校验、不上传不部署（upload/deploy 依赖 Pages 许可，未启用时该
+#   workflow 不会被仓库执行 Pages 流程——建议未启用前勿手动触发）。
+#
+# 链路（与 B3 本地构建逐字一致）：
+#   rust + wasm32 target + wasi-sdk 34（linux）→ scripts/build-wasm.sh
+#   （cargo build → wasm-bindgen --target web --reference-types → 胶水 WASI
+#   重写，版本门与 wasm-pack 缓存路径脚本内置）→ pnpm install → vite build
+#   （base "./" 相对路径，项目站 /<repo>/ 前缀安全）→ 上传 dist → 部署。
+#
+# 供应链：全部 uses 按 zizmor 纪律 pin 到 commit SHA（注释保留版本号）；
+#   权限面最小化：顶层只读，pages:write / id-token:write 只授予 deploy job。
+name: deploy-pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {} # 手动触发便于首启验证（仍以 Pages 已启用为前提）。
+
+permissions:
+  contents: read
+
+# 同一时间只保留一个部署（排队不取消，避免并发 Pages 版本回跳）。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4.2.2（workflow 内无 push，不持久化凭据）。
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      # pnpm/action-setup v4.1.0（pnpm 版本取自根 package.json 的
+      # packageManager 字段）。
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
+
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # dtolnay/rust-toolchain（moving branch stable，pin 到当时 head）。
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Swatinem/rust-cache v2.8.0
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+
+      # wasm-bindgen CLI 版本必须与 Cargo.lock 的 wasm-bindgen crate 一致
+      # （build-wasm.sh 内置同款版本门，此处预装让脚本 command -v 命中）。
+      - name: Install wasm-bindgen-cli (version locked to Cargo.lock)
+        run: |
+          VERSION="$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock \
+            | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)"
+          echo "wasm-bindgen crate version: ${VERSION}"
+          cargo install --locked "wasm-bindgen-cli@${VERSION}"
+
+      # wasi-sdk 34（mlua wasm32 构建链前置，见 scripts/build-wasm.sh 头注）。
+      # 下载面按 runner 架构取官方 release 包，解压到 $HOME/wasi-sdk。
+      - name: Install wasi-sdk 34
+        run: |
+          case "${{ runner.arch }}" in
+            X64)   WASI_ARCH="x86_64" ;;
+            ARM64) WASI_ARCH="arm64" ;;
+            *) echo "unsupported runner arch: ${{ runner.arch }}" >&2; exit 1 ;;
+          esac
+          WASI_BASE="https://github.com/WebAssembly/wasi-sdk/releases/download"
+          WASI_URL="${WASI_BASE}/wasi-sdk-34/wasi-sdk-34.0-${WASI_ARCH}-linux.tar.gz"
+          curl -fL "$WASI_URL" | tar -xz -C "$HOME"
+          echo "WASI_SDK_PATH=${HOME}/wasi-sdk-34.0-${WASI_ARCH}-linux" \
+            >> "$GITHUB_ENV"
+
+      - name: Build wasm (cargo → wasm-bindgen)
+        run: ./scripts/build-wasm.sh
+
+      # 哨兵：锁文件 tarball 必须全部指向公网 registry——内网/镜像环境
+      # 生成的锁文件（非 npmjs.org 的 tarball URL）会让 runner 解析失败。
+      # 仓库根 .npmrc 已固定公网 registry 从源头预防，此步为最后防线。
+      - name: "Guard — lockfile tarballs must use public registry"
+        run: |
+          BAD=$(grep 'tarball:' pnpm-lock.yaml | grep -vc 'registry.npmjs.org' || true)
+          if [ "${BAD:-0}" -gt 0 ]; then
+            MSG="pnpm-lock.yaml 含内网镜像 tarball URL"
+            echo "::error::${MSG}——请在仓库根（有 .npmrc）重跑 pnpm install 重新生成" >&2
+            exit 1
+          fi
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build client-web
+        run: pnpm --filter @ygg/client-web build
+
+      # actions/upload-pages-artifact v3.0.1（SHA 行超 80，用折叠标量承载）。
+      - uses: >-
+          actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa
+        with:
+          path: packages/client-web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # 部署面最小权限：pages:write + id-token:write 只在本 job 生效。
+    permissions:
+      pages: write
+      id-token: write
+    # github-pages 环境由仓库启用 Pages 时自动提供（部署 URL 回填此处）。
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        # actions/deploy-pages v4.0.5
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e

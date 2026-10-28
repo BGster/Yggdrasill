@@ -1,0 +1,12 @@
+[package]
+name = "ygg-core"
+version.workspace = true
+edition.workspace = true
+
+# 零依赖铁律（AGENTS.md:52）：白名单 = serde / thiserror（S1）+ serde_json（S2，D-补充-1）。
+# 禁止渲染 / 平台 / IO 类依赖；纯度门禁（AGENTS.md:129）无例外机制。
+# serde_json 禁用保序 feature（默认 Map=BTreeMap 即规范序，D-继承-5）。
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

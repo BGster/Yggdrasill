@@ -1,0 +1,37 @@
+[package]
+name = "ygg-sandbox"
+version.workspace = true
+edition.workspace = true
+
+# 依赖纪律（白名单制，逐 slice 填充）：
+# - S7 填充：mlua git pin（features = ["lua54", "vendored"]；wasm32 支持未进 crates.io，
+#   pin 指向 mlua-rs/mlua，rev 锚定具体 commit）。
+# - S8 填充：ygg-core path 依赖（FuelMeter trait 反转面实现，D-继承-4——core 定义面、
+#   sandbox 实现面；S10 驱动以 &mut dyn FuelMeter 接入 run_transition）。
+# - S10 填充：include_dir（ygg stdlib 嵌入）+ serde_json（信封/存档线格式）+
+#   thiserror（KernelError；ygg-core 已有同版本依赖，本 crate 独立声明）。
+# - S11 填充：ygg-schema path 依赖（资源 manifest / 内容寻址 / 校验机器复用；
+#   **不引入 sha2**——内容寻址经 ygg-schema verify_entry，D-继承-5 双宿不变）。
+# - S12 填充：sha2（状态哈希——D-继承-5：状态哈希归 sandbox、内容寻址归 ygg-schema，
+#   ygg-core 零哈希）。
+[dependencies]
+# S8 填充：ygg-core path 依赖（FuelMeter trait 反转面实现，D-继承-4——core 定义
+# 面、sandbox 实现面，S10 驱动以 &mut dyn FuelMeter 接入 run_transition）。
+ygg-core = { path = "../ygg-core" }
+# S7 填充：mlua git pin（features = ["lua54", "vendored"]；wasm32 支持未进 crates.io，
+# pin 指向 mlua-rs/mlua，rev 锚定具体 commit；wasm 单线程不启用 send）。
+mlua = { git = "https://github.com/mlua-rs/mlua", rev = "ff96ed786295cae96f43ef1372bd22be0fbf7866", features = [
+    "lua54",
+    "vendored",
+] }
+# S10 填充：include_dir 嵌入（stdlib 目录快照，构建期定型）+ serde_json（信封/
+# 存档线格式）+ thiserror（KernelError；ygg-core 已有同版本依赖，本 crate 独立声明）。
+include_dir = "0.7"
+serde_json = "1"
+thiserror = "2"
+# S11 填充：ygg-schema path 依赖（资源 manifest / 内容寻址 / 校验机器复用；
+# **不引入 sha2**——内容寻址经 ygg-schema verify_entry，D-继承-5 双宿不变）。
+ygg-schema = { path = "../ygg-schema" }
+# S12 填充：sha2（状态哈希——D-继承-5：状态哈希归 sandbox、内容寻址归 ygg-schema，
+# ygg-core 零哈希；状态哈希 = SHA-256(canonical_state_bytes)，D-继承-5 归位）。
+sha2 = "0.10"

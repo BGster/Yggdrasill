@@ -1,0 +1,21 @@
+[package]
+name = "ygg-godot-spike"
+version = "0.1.0"
+edition = "2021"
+
+# M2.5 spike：独立小 crate，不进主 workspace。
+# 空 [workspace] 表 = 自成 workspace 根，阻断对上层 Yggdrasill workspace
+# 继承（版本/edition 在此显式声明）；path 依赖 ygg-sandbox 时，cargo 会对
+# 该包按它自己的 workspace（仓库根）解析继承——两侧互不污染。
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# gdext：与 Godot 4.7.2-stable 匹配（0.5.x 支持 api-4-2..api-4-7，实证见
+# crates.io index features；显式钉 api-4-7 防默认 minor 漂移）。
+godot = { version = "0.5.5", features = ["api-4-7"] }
+# 内核驱动面（KernelFacade）：workspace 内包按其自身 workspace 解析继承。
+ygg-sandbox = { path = "../../../crates/ygg-sandbox" }
+serde_json = "1"

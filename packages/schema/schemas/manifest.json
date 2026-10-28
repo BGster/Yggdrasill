@@ -1,0 +1,41 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://yggdrasill.dev/schemas/v1/manifest.json",
+    "title": "Yggdrasill M0 resource manifest",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["schemaVersion", "entries"],
+    "properties": {
+        "schemaVersion": { "const": 1 },
+        "entries": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/entry" }
+        }
+    },
+    "$defs": {
+        "entry": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "schema", "path", "sha256", "byteLength"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^ygg:[a-z0-9][a-z0-9/._-]*$",
+                    "maxLength": 128
+                },
+                "kind": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "schema": {
+                    "type": "string",
+                    "pattern": "^https://yggdrasill[.]dev/schemas/v1/[a-z0-9-]+[.]json$"
+                },
+                "path": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9/._-]*$",
+                    "maxLength": 256
+                },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "byteLength": { "type": "integer", "minimum": 1 }
+            }
+        }
+    }
+}

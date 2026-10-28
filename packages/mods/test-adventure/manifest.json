@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "ygg:scene/texts",
+      "kind": "scene-texts",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+      "path": "data/scenes.json",
+      "sha256": "1c5b5c316ecd6673e8e85fa40ddd5ec8cd79d1f78894e65df45f5e343b17914b",
+      "byteLength": 2396
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+---@meta
+-- ygg.lua —— Yggdrasill M0 `ygg` 全局 Lua 类型 stub（迭代 C2，LuaLS 注解面）。
+--
+-- 本文件是**纯类型声明**（---@meta：LuaLS 不执行、不参与运行时），只服务于
+-- 独立 Lua 工具链（lua-language-server / IDE 补全与 undefined-global 静默）。
+-- 声明面与内核实际 API 一一对应，权威源（改动 API 时同步改本文件）：
+--   crates/ygg-sandbox/src/host_api.rs   on / emit / narrate / choice / kv / entity
+--   crates/ygg-sandbox/src/resources.rs  data（单函数：ygg.data(id)）
+--   crates/ygg-sandbox/src/inject.rs     ticks
+--   crates/ygg-sandbox/src/sandbox.rs    engine_version（字符串字段，非函数）
+--   crates/ygg-sandbox/stdlib/fsm.lua    fsm.define
+--   crates/ygg-sandbox/stdlib/narrative.lua  narrative.node / narrative["goto"]
+--
+-- ── 覆盖清单（M0 精确集）───────────────────────────────────────────────
+--   ✅ ygg.on(event, handler)              装载期注册；seal 后运行期拒绝
+--   ✅ ygg.emit(event, payload?)           payload = JSON 标量（见 YggScalar）
+--   ✅ ygg.narrate(text)
+--   ✅ ygg.choice(prompt, options)         终结语义：必须为 handler 最后一个输出
+--   ✅ ygg.kv.get / ygg.kv.set
+--   ✅ ygg.entity.spawn / get_attribute / set_attribute
+--      ygg.entity.has_tag / add_tag / remove_tag
+--   ✅ ygg.data(id)                        单函数（非 .get 命名空间）
+--   ✅ ygg.fsm.define(spec)                含 when 条件边（B1）
+--   ✅ ygg.narrative.node(id, body) / ygg.narrative["goto"](id)  括号形态已注解
+--   ✅ ygg.engine_version / ygg.stdlib_version  均为**字符串字段**（非函数；
+--                                              两值同源相等，见 sandbox.rs /
+--                                              stdlib.rs）
+--   ✅ ygg.ticks()                         宿主侧显式推进；Mod 内只读
+-- mod.lua 走查（packages/mods/test-adventure/mod.lua 逐行核对）：全部 ygg.* 调用点
+-- （on / emit / narrate / choice / kv.get / kv.set / entity.spawn /
+-- entity.get_attribute / entity.set_attribute / entity.add_tag / entity.has_tag /
+-- data / fsm.define / narrative.node / narrative["goto"]）均有对应声明，无遗漏。
+--
+-- ── 接入 LuaLS ─────────────────────────────────────────────────────────
+-- 仓库根（或 Mod 工程根）放一个 .luarc.json：
+--
+--   {
+--     "workspace.library": { "lua-stubs": true },
+--     "runtime.version": "Lua 5.4"
+--   }
+--
+-- 或在 Mod 目录独立使用时把 `lua-stubs/` 目录拷到工程内同法引用。
+-- 生效后 mod.lua 的 62 条 undefined-global `ygg` 警告消失，ygg.* 获得
+-- 补全与形参提示（含 ygg.narrative["goto"] 括号形态）。
+
+---@alias YggScalar integer|number|boolean|string
+-- 内核 core Value 四标量（Int/Float/Bool/Str）：KV、实体属性、事件 payload、
+-- ygg.data 叶子值的统一值域。table / function / nil 不能作为写值。
+
+---@class YggKv
+--- 读持久 KV（miss = nil）。
+---@field get fun(key: string): YggScalar
+--- 写持久 KV（随存档往返；非标量值由内核门拒绝）。
+---@field set fun(key: string, value: YggScalar)
+
+---@class YggEntity
+--- 生成实体，返回实体 id（整数句柄；读档后经 kv 取回，勿存 local）。
+---@field spawn fun(): integer
+--- 读实体属性（实体/属性缺失 = nil）。
+---@field get_attribute fun(id: integer, name: string): YggScalar
+--- 写实体属性（实体缺失 = 可读错误；非标量值拒绝）。
+---@field set_attribute fun(id: integer, name: string, value: YggScalar)
+--- 标签判定（实体缺失 = false）。
+---@field has_tag fun(id: integer, tag: string): boolean
+--- 打标签（幂等；返回本次是否新打）。句柄模式：id 从 kv 取回。
+---@field add_tag fun(id: integer, tag: string): boolean
+--- 摘标签（幂等；返回本次是否摘除）。
+---@field remove_tag fun(id: integer, tag: string): boolean
+
+---@class YggNarrative
+--- 装载期声明叙事节点（重复定义拒绝）。
+---@field node fun(id: string, body: fun())
+--- 叙事跳转。`goto` 是 Lua 5.4 保留字，**只可写括号形态**
+--- `ygg.narrative["goto"](id)`（点号形态是语法错误）。
+---@field ["goto"] fun(id: string)
+
+---@class YggFsmTransition
+---@field from string
+---@field to string
+--- 可选条件谓词（B1）：truthy 即通过；声明序首个 from 匹配且 when 成立的边胜出。
+---@field when? fun(payload: YggScalar): boolean
+
+---@class YggFsmSpec
+---@field name string 状态持久化于 kv 键 "fsm." .. name
+---@field initial string
+---@field event string 一机一事件
+---@field transitions YggFsmTransition[]
+
+---@class YggFsm
+--- 声明一台状态机并注册其事件 handler（仅装载期可用）。
+---@field define fun(spec: YggFsmSpec)
+
+---@class Ygg
+--- 注册事件 handler（仅装载期；运行期 seal 后调用以可读错误拒绝）。
+---@field on fun(event: string, handler: fun(payload: YggScalar))
+--- 发派生事件（payload 缺省视为空标量调用；handler 内按 FIFO 于本转换内排空）。
+---@field emit fun(event: string, payload?: YggScalar)
+--- 输出一行叙述。
+---@field narrate fun(text: string)
+--- 挂起玩家选择（终结语义：以哨兵错误终止当前 handler——**必须是 handler 内
+--- 最后一个输出调用**；先 emit 后 choice 会静默丢弃先入队的派生事件）。
+---@field choice fun(prompt: string, options: string[])
+--- 玩家选择回应事件（payload = 1 起始序号；越界由驱动域内校验拒绝）。
+---@field choice_selected fun(payload: YggScalar)
+--- 只读资源表读取：id 命中返回资源值（JSON→Lua），缺失/非字符串 = 可读错误。
+--- 装载期与 handler 期均可读；资源是数据不是状态——不入档、restore 后不变。
+---@field data fun(id: string): table
+---@field kv YggKv
+---@field entity YggEntity
+---@field fsm YggFsm
+---@field narrative YggNarrative
+--- 引擎版本（**字符串字段**，非函数）。
+---@field engine_version string
+--- stdlib 版本（**字符串字段**，与 engine_version 同源相等——stdlib.rs 取值）。
+---@field stdlib_version string
+--- 单调时钟读数（整数；仅宿主侧显式推进，Mod 内只读）。
+---@field ticks fun(): integer
+
+---@type Ygg
+ygg = {}

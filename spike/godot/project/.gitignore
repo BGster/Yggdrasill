@@ -1,0 +1,4 @@
+# Godot 编辑器缓存（运行时生成）
+.godot/
+# 构建产物（dylib 由 cargo 构建后拷入，不入 git）
+bin/*.dylib

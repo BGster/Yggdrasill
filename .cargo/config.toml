@@ -1,0 +1,51 @@
+# luai_makeseed 构建期常量覆盖（D-继承-3 / S7）。
+#
+# 机制（已在源码层核实）：vendored Lua 的 C 构建链为 lua-src crate → cc，cc 会把
+# CFLAGS / TARGET_CFLAGS 追加到编译命令行；Lua 5.4.x lstate.c 的默认种子函数
+# `static unsigned int luai_makeseed(lua_State*)`（time(NULL) + 地址混合）被
+# `#if !defined(luai_makeseed)` 守卫——命令行 -D 函数式宏即可整体替换之。
+# 常量取 0x59474452（"YGDR" 的 ASCII）：同进程任意多个 Lua 状态、跨进程、
+# native/wasm 均得同一种子 → 字符串哈希序确定（跨进程一致性由 S12 golden-vector
+# 实证；进程内两态一致性由 sandbox.rs 的种子锚测试实证）。
+# 代价声明：CFLAGS 面向 workspace 内全部 C 构建——M0 唯一 C 代码即 vendored Lua，
+# 无外溢面。
+[env]
+CFLAGS = "-Dluai_makeseed(L)=0x59474452u"
+TARGET_CFLAGS = "-Dluai_makeseed(L)=0x59474452u"
+
+# B1 wasm32 构建链（mlua-rs/mlua docs/wasm32 + tests/wasm/setup.sh recipe，
+# mlua@ff96ed7 tests/wasm 同型；Lua 5.4 纯 C，错误处理走 C setjmp——异常旗面
+# 与上游 lua54 wasm 测试一致，不加 C++ 异常旗）。
+#
+# WASI SDK 约定安装路径：/opt/wasi-sdk（上游文档默认）。本机装在别处时导出
+# 同名变量覆盖——以下全部 force = false，导出值优先、不覆盖已导出环境：
+#   export CC_wasm32_unknown_unknown="$HOME/.local/wasi-sdk-34.0-arm64-macos/bin/clang"
+#   export CXX_wasm32_unknown_unknown="$HOME/.local/wasi-sdk-34.0-arm64-macos/bin/clang++"
+#   export AR_wasm32_unknown_unknown="$HOME/.local/wasi-sdk-34.0-arm64-macos/bin/llvm-ar"
+#   export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-Ctarget-feature=+reference-types -Lnative=$HOME/.local/wasi-sdk-34.0-arm64-macos/share/wasi-sysroot/lib/wasm32-wasip1/eh -Lnative=$HOME/.local/wasi-sdk-34.0-arm64-macos/share/wasi-sysroot/lib/wasm32-wasip1 -lstatic=c++abi -lstatic=unwind -lstatic=wasi-emulated-process-clocks -lstatic=c"
+# ⚠ 覆盖 CFLAGS_wasm32_unknown_unknown 必须重带 luai_makeseed 定义：
+#   cc crate 取旗优先级 CFLAGS_<target> > TARGET_CFLAGS——本行存在即屏蔽
+#   上方 TARGET_CFLAGS，漏带 = wasm 侧哈希种子回到随机（native/wasm 漂移）。
+CC_wasm32_unknown_unknown = { value = "/opt/wasi-sdk/bin/clang", force = false }
+CXX_wasm32_unknown_unknown = { value = "/opt/wasi-sdk/bin/clang++", force = false }
+AR_wasm32_unknown_unknown = { value = "/opt/wasi-sdk/bin/llvm-ar", force = false }
+CXXSTDLIB_wasm32_unknown_unknown = { value = "c++", force = false }
+CFLAGS_wasm32_unknown_unknown = { value = "--target=wasm32-wasip1 -Dluai_makeseed(L)=0x59474452u", force = false }
+
+# Rust 链接旗（wasi C runtime：EH 变体库目录 + 静态 c++abi/unwind/时钟仿真 +
+# wasip1 静态 libc；+reference-types 供 wasm-bindgen catch wrappers 的 externref
+# 表——wasi-sdk 标准异常 ABI 模块喂给 wasm-bindgen 0.2.129 的硬要求，缺失即
+# "externref table required for catch wrappers" 构建失败）。本机 SDK 非约定
+# 路径时用上方导出行覆盖——cargo 对 [target] rustflags 与
+# CARGO_TARGET_*_RUSTFLAGS 取并集（配置在前、环境在后），不存在的 -L 路径
+# 无害，库目录以真实路径为准。
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "target-feature=+reference-types",
+    "-L", "native=/opt/wasi-sdk/share/wasi-sysroot/lib/wasm32-wasip1/eh",
+    "-L", "native=/opt/wasi-sdk/share/wasi-sysroot/lib/wasm32-wasip1",
+    "-l", "static=c++abi",
+    "-l", "static=unwind",
+    "-l", "static=wasi-emulated-process-clocks",
+    "-l", "static=c",
+]

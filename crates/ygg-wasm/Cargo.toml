@@ -1,0 +1,22 @@
+[package]
+name = "ygg-wasm"
+version.workspace = true
+edition.workspace = true
+
+# B1 实装：wasm-bindgen 导出面（YggKernel wrapping KernelFacade）。
+# [lib] crate-type：wasm-pack 门禁（AGENTS.md §五）要求 cdylib 出 wasm 产物；
+# rlib 并存使 cargo test --workspace 仍可在 host 上对壳（解析/编解码/信封
+# 透传面）收集单测——wasm-bindgen 在 host 目标同构编译，分配器等 wasm 专属
+# 面 cfg(target_arch = "wasm32") 门控。
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# 壳导出宏（版本与 wasm-pack 下载的 wasm-bindgen-cli 锁定一致——wasm-pack 按
+# Cargo.lock 的 wasm-bindgen 版本取 CLI，二者不匹配会在 build 期报错）。
+wasm-bindgen = "0.2"
+# marshal 面解析（schemas/resources JSON）+ 构造期域失败信封封装（无 serde
+# derive 需求——壳不做结构化建模，语义面在 sandbox/driver）。
+serde_json = "1"
+# 语义面单一来源（KernelFacade / KernelError 稳定码映射）。
+ygg-sandbox = { path = "../ygg-sandbox" }

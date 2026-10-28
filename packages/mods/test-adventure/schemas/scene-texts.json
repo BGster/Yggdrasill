@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scenes", "endings", "prompts", "options", "beats", "tuning"],
+  "properties": {
+    "scenes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prologue", "tavern", "crossroad", "cellar_dark", "cellar_lit", "inn"],
+      "properties": {
+        "prologue": { "type": "string", "minLength": 1 },
+        "tavern": { "type": "string", "minLength": 1 },
+        "crossroad": { "type": "string", "minLength": 1 },
+        "cellar_dark": { "type": "string", "minLength": 1 },
+        "cellar_lit": { "type": "string", "minLength": 1 },
+        "inn": { "type": "string", "minLength": 1 }
+      }
+    },
+    "endings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b", "c"],
+      "properties": {
+        "a": { "type": "string", "minLength": 1 },
+        "b": { "type": "string", "minLength": 1 },
+        "c": { "type": "string", "minLength": 1 }
+      }
+    },
+    "prompts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tavern", "crossroad"],
+      "properties": {
+        "tavern": { "type": "string", "minLength": 1 },
+        "crossroad": { "type": "string", "minLength": 1 }
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tavern_yes", "tavern_no", "crossroad_cellar", "crossroad_inn"],
+      "properties": {
+        "tavern_yes": { "type": "string", "minLength": 1 },
+        "tavern_no": { "type": "string", "minLength": 1 },
+        "crossroad_cellar": { "type": "string", "minLength": 1 },
+        "crossroad_inn": { "type": "string", "minLength": 1 }
+      }
+    },
+    "beats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lantern_taken", "lantern_left", "cellar_choice_hint"],
+      "properties": {
+        "lantern_taken": { "type": "string", "minLength": 1 },
+        "lantern_left": { "type": "string", "minLength": 1 },
+        "cellar_choice_hint": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tuning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dark_fall_damage"],
+      "properties": {
+        "dark_fall_damage": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

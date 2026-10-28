@@ -1,0 +1,24 @@
+# Workspace 根：成员一次成型（D-补充-2），后续 slice 不改 members。
+[workspace]
+resolver = "2"
+members = [
+    "crates/ygg-core",
+    "crates/ygg-schema",
+    "crates/ygg-sandbox",
+    "crates/ygg-lint",
+    "crates/ygg-wasm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+# B1：wasm 体积预算面（research §7）：fat LTO + 体积级优化 + 单 codegen unit
+# + strip。仅作用 release（wasm-pack 默认 release 出 pkg/）；门禁
+# （cargo test/clippy/fmt）走 dev/test profile，不受影响。panic 行为不在此
+# 设定：wasm32-unknown-unknown 默认即 abort，host release 无门禁消费面。
+[profile.release]
+lto = "fat"
+opt-level = "s"
+codegen-units = 1
+strip = true

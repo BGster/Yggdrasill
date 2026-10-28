@@ -1,0 +1,9 @@
+{
+  "name": "@ygg/schema",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Yggdrasill JSON Schema 契约单一事实源（D15）：TS 侧 ajv 与 Rust 侧 jsonschema 读同一份文件",
+  "files": [
+    "schemas"
+  ]
+}

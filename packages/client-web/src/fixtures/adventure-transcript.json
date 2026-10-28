@@ -1,0 +1,584 @@
+{
+  "branches": {
+    "a": {
+      "path": [
+        1,
+        1
+      ],
+      "steps": [
+        {
+          "cmd": "event.start",
+          "envelope": {
+            "event": "event.start",
+            "eventsDerived": 2,
+            "eventsDropped": 0,
+            "eventsProcessed": 3,
+            "narrative": [
+              "序章·雨夜：你在山道上走了一整天，终于望见山坳里透出灯火——「灯下谜径」客栈到了。推门时门轴吱呀作响，风铃轻晃。",
+              "酒馆·大堂：壁炉噼啪作响，掌柜擦着一只旧铜提灯，灯光昏黄。桌上留着前任房客的地图残页，一角画着地下室的暗门。"
+            ],
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "接过提灯",
+                "轻装出发"
+              ],
+              "prompt": "掌柜把铜提灯推向你：『地窖黑得很，带上它吧？』"
+            },
+            "revision": 5
+          },
+          "load": {
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "接过提灯",
+                "轻装出发"
+              ],
+              "prompt": "掌柜把铜提灯推向你：『地窖黑得很，带上它吧？』"
+            },
+            "restored": true
+          },
+          "payload": "0",
+          "save": {
+            "ok": true,
+            "save": {
+              "engine_version": "0.1.0",
+              "entities": {
+                "entities": {
+                  "1": {
+                    "attributes": {
+                      "hp": 10
+                    },
+                    "id": 1,
+                    "tags": [
+                      "char:hero"
+                    ]
+                  },
+                  "2": {
+                    "attributes": {},
+                    "id": 2,
+                    "tags": [
+                      "item:copper"
+                    ]
+                  }
+                },
+                "next_id": 3,
+                "revision": 5
+              },
+              "format_version": 1,
+              "kv": {
+                "entries": {
+                  "hero.id": 1,
+                  "lantern.id": 2,
+                  "stage": "tavern"
+                },
+                "revision": 3
+              },
+              "pending_choice": {
+                "options": [
+                  "接过提灯",
+                  "轻装出发"
+                ],
+                "prompt": "掌柜把铜提灯推向你：『地窖黑得很，带上它吧？』"
+              }
+            }
+          },
+          "state": {
+            "engineVersion": "0.1.0",
+            "kvRevision": 3,
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "接过提灯",
+                "轻装出发"
+              ],
+              "prompt": "掌柜把铜提灯推向你：『地窖黑得很，带上它吧？』"
+            },
+            "revision": 5,
+            "snapshotBytes": 174
+          }
+        },
+        {
+          "cmd": "ygg.choice_selected",
+          "envelope": {
+            "event": "ygg.choice_selected",
+            "eventsDerived": 2,
+            "eventsDropped": 0,
+            "eventsProcessed": 3,
+            "narrative": [
+              "你接过提灯。灯芯点燃，一小团暖光随你而行。",
+              "岔路·后廊：酒馆后廊尽头分出两条路——左边的石阶向下没入黑暗（通往地窖），右边的木梯向上通向温暖的客房。风从地窖方向吹来，带着潮湿的土腥味。"
+            ],
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "沿石阶下地窖",
+                "上楼回客房"
+              ],
+              "prompt": "后廊岔路——你的脚步停在哪里？"
+            },
+            "revision": 6
+          },
+          "load": {
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "沿石阶下地窖",
+                "上楼回客房"
+              ],
+              "prompt": "后廊岔路——你的脚步停在哪里？"
+            },
+            "restored": true
+          },
+          "payload": "1",
+          "save": {
+            "ok": true,
+            "save": {
+              "engine_version": "0.1.0",
+              "entities": {
+                "entities": {
+                  "1": {
+                    "attributes": {
+                      "hp": 10
+                    },
+                    "id": 1,
+                    "tags": [
+                      "char:hero"
+                    ]
+                  },
+                  "2": {
+                    "attributes": {},
+                    "id": 2,
+                    "tags": [
+                      "item:copper",
+                      "item:lantern"
+                    ]
+                  }
+                },
+                "next_id": 3,
+                "revision": 6
+              },
+              "format_version": 1,
+              "kv": {
+                "entries": {
+                  "fsm.chapter": "road",
+                  "hero.id": 1,
+                  "lantern.id": 2,
+                  "stage": "crossroad",
+                  "took_lantern": true
+                },
+                "revision": 7
+              },
+              "pending_choice": {
+                "options": [
+                  "沿石阶下地窖",
+                  "上楼回客房"
+                ],
+                "prompt": "后廊岔路——你的脚步停在哪里？"
+              }
+            }
+          },
+          "state": {
+            "engineVersion": "0.1.0",
+            "kvRevision": 7,
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "沿石阶下地窖",
+                "上楼回客房"
+              ],
+              "prompt": "后廊岔路——你的脚步停在哪里？"
+            },
+            "revision": 6,
+            "snapshotBytes": 189
+          }
+        },
+        {
+          "cmd": "ygg.choice_selected",
+          "envelope": {
+            "event": "ygg.choice_selected",
+            "eventsDerived": 3,
+            "eventsDropped": 0,
+            "eventsProcessed": 4,
+            "narrative": [
+              "你的选择已定——脚步声在走廊里回响。",
+              "地窖·灯光所及：提灯的光晕推开黑暗。石阶尽头立着一扇刻满星图的暗门，门缝里透出微光——这正是地图残页上标记的「灯下秘藏」。",
+              "【结局A】灯下秘藏：暗门在你掌下缓缓开启，星图与灯光在门楣上重合。前任房客留下的手记摊在石台上——你找到了他毕生追寻的答案。"
+            ],
+            "ok": true,
+            "pendingChoice": null,
+            "revision": 6
+          },
+          "load": {
+            "ok": true,
+            "pendingChoice": null,
+            "restored": true
+          },
+          "payload": "1",
+          "save": {
+            "ok": true,
+            "save": {
+              "engine_version": "0.1.0",
+              "entities": {
+                "entities": {
+                  "1": {
+                    "attributes": {
+                      "hp": 10
+                    },
+                    "id": 1,
+                    "tags": [
+                      "char:hero"
+                    ]
+                  },
+                  "2": {
+                    "attributes": {},
+                    "id": 2,
+                    "tags": [
+                      "item:copper",
+                      "item:lantern"
+                    ]
+                  }
+                },
+                "next_id": 3,
+                "revision": 6
+              },
+              "format_version": 1,
+              "kv": {
+                "entries": {
+                  "ending": "A",
+                  "fsm.chapter": "cellar",
+                  "hero.id": 1,
+                  "lantern.id": 2,
+                  "stage": "crossroad",
+                  "took_lantern": true
+                },
+                "revision": 9
+              },
+              "pending_choice": null
+            }
+          },
+          "state": {
+            "engineVersion": "0.1.0",
+            "kvRevision": 9,
+            "ok": true,
+            "pendingChoice": null,
+            "revision": 6,
+            "snapshotBytes": 189
+          }
+        }
+      ]
+    },
+    "b": {
+      "path": [
+        2,
+        2
+      ],
+      "steps": [
+        {
+          "cmd": "event.start",
+          "envelope": {
+            "event": "event.start",
+            "eventsDerived": 2,
+            "eventsDropped": 0,
+            "eventsProcessed": 3,
+            "narrative": [
+              "序章·雨夜：你在山道上走了一整天，终于望见山坳里透出灯火——「灯下谜径」客栈到了。推门时门轴吱呀作响，风铃轻晃。",
+              "酒馆·大堂：壁炉噼啪作响，掌柜擦着一只旧铜提灯，灯光昏黄。桌上留着前任房客的地图残页，一角画着地下室的暗门。"
+            ],
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "接过提灯",
+                "轻装出发"
+              ],
+              "prompt": "掌柜把铜提灯推向你：『地窖黑得很，带上它吧？』"
+            },
+            "revision": 5
+          },
+          "load": {
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "接过提灯",
+                "轻装出发"
+              ],
+              "prompt": "掌柜把铜提灯推向你：『地窖黑得很，带上它吧？』"
+            },
+            "restored": true
+          },
+          "payload": "0",
+          "save": {
+            "ok": true,
+            "save": {
+              "engine_version": "0.1.0",
+              "entities": {
+                "entities": {
+                  "1": {
+                    "attributes": {
+                      "hp": 10
+                    },
+                    "id": 1,
+                    "tags": [
+                      "char:hero"
+                    ]
+                  },
+                  "2": {
+                    "attributes": {},
+                    "id": 2,
+                    "tags": [
+                      "item:copper"
+                    ]
+                  }
+                },
+                "next_id": 3,
+                "revision": 5
+              },
+              "format_version": 1,
+              "kv": {
+                "entries": {
+                  "hero.id": 1,
+                  "lantern.id": 2,
+                  "stage": "tavern"
+                },
+                "revision": 3
+              },
+              "pending_choice": {
+                "options": [
+                  "接过提灯",
+                  "轻装出发"
+                ],
+                "prompt": "掌柜把铜提灯推向你：『地窖黑得很，带上它吧？』"
+              }
+            }
+          },
+          "state": {
+            "engineVersion": "0.1.0",
+            "kvRevision": 3,
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "接过提灯",
+                "轻装出发"
+              ],
+              "prompt": "掌柜把铜提灯推向你：『地窖黑得很，带上它吧？』"
+            },
+            "revision": 5,
+            "snapshotBytes": 174
+          }
+        },
+        {
+          "cmd": "ygg.choice_selected",
+          "envelope": {
+            "event": "ygg.choice_selected",
+            "eventsDerived": 2,
+            "eventsDropped": 0,
+            "eventsProcessed": 3,
+            "narrative": [
+              "你谢绝了提灯，只凭窗外的微光辨路。",
+              "岔路·后廊：酒馆后廊尽头分出两条路——左边的石阶向下没入黑暗（通往地窖），右边的木梯向上通向温暖的客房。风从地窖方向吹来，带着潮湿的土腥味。"
+            ],
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "沿石阶下地窖",
+                "上楼回客房"
+              ],
+              "prompt": "后廊岔路——你的脚步停在哪里？"
+            },
+            "revision": 5
+          },
+          "load": {
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "沿石阶下地窖",
+                "上楼回客房"
+              ],
+              "prompt": "后廊岔路——你的脚步停在哪里？"
+            },
+            "restored": true
+          },
+          "payload": "2",
+          "save": {
+            "ok": true,
+            "save": {
+              "engine_version": "0.1.0",
+              "entities": {
+                "entities": {
+                  "1": {
+                    "attributes": {
+                      "hp": 10
+                    },
+                    "id": 1,
+                    "tags": [
+                      "char:hero"
+                    ]
+                  },
+                  "2": {
+                    "attributes": {},
+                    "id": 2,
+                    "tags": [
+                      "item:copper"
+                    ]
+                  }
+                },
+                "next_id": 3,
+                "revision": 5
+              },
+              "format_version": 1,
+              "kv": {
+                "entries": {
+                  "fsm.chapter": "road",
+                  "hero.id": 1,
+                  "lantern.id": 2,
+                  "stage": "crossroad",
+                  "took_lantern": false
+                },
+                "revision": 7
+              },
+              "pending_choice": {
+                "options": [
+                  "沿石阶下地窖",
+                  "上楼回客房"
+                ],
+                "prompt": "后廊岔路——你的脚步停在哪里？"
+              }
+            }
+          },
+          "state": {
+            "engineVersion": "0.1.0",
+            "kvRevision": 7,
+            "ok": true,
+            "pendingChoice": {
+              "options": [
+                "沿石阶下地窖",
+                "上楼回客房"
+              ],
+              "prompt": "后廊岔路——你的脚步停在哪里？"
+            },
+            "revision": 5,
+            "snapshotBytes": 174
+          }
+        },
+        {
+          "cmd": "ygg.choice_selected",
+          "envelope": {
+            "event": "ygg.choice_selected",
+            "eventsDerived": 3,
+            "eventsDropped": 0,
+            "eventsProcessed": 4,
+            "narrative": [
+              "你的选择已定——脚步声在走廊里回响。",
+              "客栈·客房：你推开客房的门，炉火已生好，被褥干燥。窗外的雨声渐密，你把地图残页压在灯座下，明天再说。",
+              "【结局B】平安一夜：你在温暖的客房里安然入睡。秘密仍在地窖深处沉睡，但今夜无人受伤——有时平安也是一种结局。"
+            ],
+            "ok": true,
+            "pendingChoice": null,
+            "revision": 5
+          },
+          "load": {
+            "ok": true,
+            "pendingChoice": null,
+            "restored": true
+          },
+          "payload": "2",
+          "save": {
+            "ok": true,
+            "save": {
+              "engine_version": "0.1.0",
+              "entities": {
+                "entities": {
+                  "1": {
+                    "attributes": {
+                      "hp": 10
+                    },
+                    "id": 1,
+                    "tags": [
+                      "char:hero"
+                    ]
+                  },
+                  "2": {
+                    "attributes": {},
+                    "id": 2,
+                    "tags": [
+                      "item:copper"
+                    ]
+                  }
+                },
+                "next_id": 3,
+                "revision": 5
+              },
+              "format_version": 1,
+              "kv": {
+                "entries": {
+                  "ending": "B",
+                  "fsm.chapter": "road",
+                  "fsm.inn_route": "inn",
+                  "hero.id": 1,
+                  "lantern.id": 2,
+                  "stage": "crossroad",
+                  "took_lantern": false
+                },
+                "revision": 10
+              },
+              "pending_choice": null
+            }
+          },
+          "state": {
+            "engineVersion": "0.1.0",
+            "kvRevision": 10,
+            "ok": true,
+            "pendingChoice": null,
+            "revision": 5,
+            "snapshotBytes": 174
+          }
+        }
+      ]
+    }
+  },
+  "meta": {
+    "branchNote": "分支 a = 选择 1→1（带灯下地窖→结局A·灯下秘藏）；分支 b = 选择 2→2（上楼回客房→结局B·平安一夜）",
+    "capturedFrom": "KernelFacade::with_resources(test-adventure mod + manifest + scene schema + scenes.json)",
+    "description": "《灯下谜径》（packages/mods/test-adventure）真实内核信封采集——client-web ReplayKernel 离线回放源",
+    "engineVersion": "0.1.0",
+    "envelopeNote": "信封键序 = serde_json 字典序；域错误永不 throw，一律 {ok:false,error:{code,message}}",
+    "generator": "cargo run -p ygg-sandbox --example capture_transcript（临时采集脚本，采集后已删除）",
+    "stepNote": "每步 = 一次玩家可见 dispatch（cmd+payload）+ 同刻 state/save/load 三个保留命令信封（load 为读回刚存档的回包）",
+    "warningsNote": "samples.warnings 来自最小演示 Mod（choice 前 emit 两条），非 test-adventure——后者主线路径无 D1 警告"
+  },
+  "samples": {
+    "choiceOutOfRange": {
+      "error": {
+        "code": "VALIDATION",
+        "message": "选项不存在：有效范围 1..2"
+      },
+      "ok": false
+    },
+    "loadRejected": {
+      "error": {
+        "code": "VALIDATION",
+        "message": "load rejected: save snapshot encoding failed: expected ident at line 1 column 2"
+      },
+      "ok": false
+    },
+    "warnings": {
+      "event": "event.go",
+      "eventsDerived": 2,
+      "eventsDropped": 2,
+      "eventsProcessed": 1,
+      "narrative": [],
+      "ok": true,
+      "pendingChoice": {
+        "options": [
+          "拨亮",
+          "算了"
+        ],
+        "prompt": "灯芯要拨亮吗？"
+      },
+      "revision": 0,
+      "warnings": [
+        "事件 `event.go` 的 handler 在 ygg.choice 之前产生了 2 条派生事件（ygg.emit），已按语义丢弃（choice 须为 handler 最后一个输出调用）"
+      ]
+    }
+  }
+}

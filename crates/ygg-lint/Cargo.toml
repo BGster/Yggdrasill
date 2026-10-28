@@ -1,0 +1,19 @@
+[package]
+name = "ygg-lint"
+version.workspace = true
+edition.workspace = true
+description = "Yggdrasill Lua 静态检查（D12 第五 crate）：mod.lua 创作规则 lint，lib + CLI 双形态，零内核依赖"
+
+# 依赖纪律（白名单，全 crate 共 4 项，零 ygg-* 内核依赖——模块耦合硬约束：
+# lint 独立于管线与内核运行，FR-5）：
+# - full_moon：Lua 5.4 lossless parser（selene/stylua 引擎底座）。必须显式
+#   features = ["lua54"]——full_moon 3.0 默认无任何 Lua 版本 feature
+#   （docs.rs 实证 default = ["serde"]），而 R3 的判定前提是「goto 在
+#   Lua 5.4 是保留字」，默认集下点形态不会被拒绝。
+# - codespan-reporting：人读诊断渲染（bin 面）。
+# - serde/serde_json：--json 机器契约序列化（serde 仅 derive）。
+[dependencies]
+full_moon = { version = "3.0.0", default-features = false, features = ["lua54"] }
+codespan-reporting = "0.13.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
