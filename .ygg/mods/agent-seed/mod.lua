@@ -2248,13 +2248,38 @@ ygg.on("proposal.submit", function(payload)
     return reject_payload("proposal.submit", fill(TEXTS.beats.req_unknown, { id = tostring(spec.req) }))
   end
   local status = req_status(index)
-  local expect = { analysis = R_ANALYZING, plan = R_PLANNING, development = R_DEVELOPING }
-  if status ~= expect[spec.stage] then
+  -- 每个阶段两态可收提案：「工作中」（首次）与该阶段的 review（**重定基**）。
+  -- review 态只在「本需求没有待验收提案」时收（旧提案已 stale / 被拒），
+  -- 有正常待验收提案时绝不覆盖（必须先 proposal.accept / reject）。
+  local slots = {
+    analysis = { working = R_ANALYZING, review = R_ANALYSIS_REVIEW },
+    plan = { working = R_PLANNING, review = R_PLAN_REVIEW },
+    development = { working = R_DEVELOPING, review = R_DEV_REVIEW },
+  }
+  local slot = slots[spec.stage]
+  if status ~= slot.working and status ~= slot.review then
     return reject_payload("proposal.submit", fill(TEXTS.beats.req_prop_stage_mismatch, {
       id = req_id(index),
       stage = spec.stage,
       status = status,
     }))
+  end
+  if status == slot.review then
+    local blocking = nil
+    for i = 1, prop_count() do
+      if prop_status(i) == P_PENDING and prop_req(i) == index then
+        blocking = i
+        break
+      end
+    end
+    if blocking ~= nil then
+      return refuse(TEXTS.beats.req_wait_rejected, "proposal.submit", fill(TEXTS.beats.req_prop_busy, {
+        id = req_id(index),
+        prop = prop_id(blocking),
+      }))
+    end
+    -- 重定基：旧提案已作废，清掉需求的 stale 标记（本次提案重新起算）。
+    ygg.kv.set(req_key(index, "stale"), false)
   end
   local summarize = spec.summary
   if summarize == "" then

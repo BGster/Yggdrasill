@@ -103,6 +103,11 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 
 - `changes` 形如 `split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`：
   subagent 只**建议**，`proposal.accept` 时才落地。
+- **stale 与重定基**：验收时 `rev ≠ req.<i>.rev` → 提案置 `stale`、需求置 `stale` 标记（可读拒绝，
+  旧提案不得覆盖新决定）。恢复路径：提交**同阶段、当前 rev** 的新提案即可——
+  `analysis_review` / `plan_review` / `dev_review` 在「该需求**没有**待验收提案」时接受这种重定基提案；
+  仍有正常待验收提案时一律拒绝（`已有一条待验收提案…先 accept / reject`），不覆盖。
+  重定基提案落地后需求的 `stale` 标记自动清除。
 - 越阶动作 → `【动作被拒】`；载荷不合法 → `【载荷被拒】`；前置不满足 → `【需求待办】`。
   三者都原地重渲染（主状态不变）。
 - 收口判据：`req_all_done()`（含 split/merged 的后继全部 done）+ 0 待验收提案 + 0 在跑 job + 0 冲突。

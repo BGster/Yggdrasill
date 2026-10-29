@@ -53,8 +53,10 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 
 - `stage ∈ analysis | plan | development`，必须与需求当前状态匹配（`analyzing` / `planning`(job) / `developing`）。
 - `changes` 是**拟议变更**，验收时才应用：`split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`。
-- 验收时 `rev ≠ req.<i>.rev` → 提案置 `stale`、需求置 `stale` 标记，可读拒绝（旧提案不得覆盖新决定；
-  重提新 rev 即可）。`external_id` 幂等（`【提案重放】`）。
+- 验收时 `rev ≠ req.<i>.rev` → 提案置 `stale`、需求置 `stale` 标记，可读拒绝（旧提案不得覆盖新决定）。
+  **重定基**：直接提交同阶段、**当前 rev** 的新提案即可——`analysis_review` / `plan_review` /
+  `dev_review` 在「该需求没有待验收提案」时接受；仍有正常 pending 提案时拒绝（`先 accept / reject`），
+  不覆盖；重定基提案落地后 `stale` 自动清除。`external_id` 幂等（`【提案重放】`）。
 - 多个需求可以同时在 analyze / plan / develop（job 上限 4），**验收一次只处理一条需求**。
 
 ## 四、主 Agent 的需求图命令（串行）

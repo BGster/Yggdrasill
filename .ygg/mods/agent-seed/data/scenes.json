@@ -231,7 +231,8 @@
     "slice_already": "（兼容占位：本设计不再使用切片上报）",
     "req_replayed_op": "【异步重放】external_id `{{ext}}` 已应用过——幂等返回，不重复执行。",
     "req_gate_pause_hint": "（占位键：宿主暂停提示在 CLI 侧生成）",
-    "req_gate_reject_default": "检查清单未通过（占位理由）"
+    "req_gate_reject_default": "检查清单未通过（占位理由）",
+    "req_prop_busy": "{{id}} 已有一条待验收提案（{{prop}}）——先 proposal.accept / reject 再重提（不覆盖）"
   },
   "tuning": {
     "min_slices": 1,
