@@ -1,0 +1,29 @@
+{
+  "entries": [
+    {
+      "byteLength": 11356,
+      "id": "ygg:scene/texts",
+      "kind": "scene-texts",
+      "path": "data/scenes.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+      "sha256": "dcd7511ec871f202d1822675ec5d05a607778766996b93e63b7c022efebd3b0b"
+    },
+    {
+      "byteLength": 200,
+      "id": "ygg:agent/config",
+      "kind": "agent-config",
+      "path": "data/config.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
+      "sha256": "8b74030e43cb7e1ac6515d627e93da0d885b467d03a161a98178e51c5dfd2e42"
+    },
+    {
+      "byteLength": 34774,
+      "id": "ygg:agent/playbook",
+      "kind": "agent-playbook",
+      "path": "data/playbook.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
+      "sha256": "61a610b5910394bc2a7f97ed63e938b660e844e683f152aa3de507909ed43834"
+    }
+  ],
+  "schemaVersion": 1
+}

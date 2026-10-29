@@ -1,0 +1,254 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
+    "title": "Yggdrasill agent-playbook（AGENTS.md 规则资源化：按阶段呈现的现场手册）",
+    "description": "M-Agent 切片 s1 落地：把仓库根 AGENTS.md 的十条约定拆成**可装载、可按 section id 取用、可按阶段呈现**的规则资源。设计口径三条：① sections 是**有序数组**而非以 id 为键的对象——Lua table 的遍历序不稳定，数组 + order 字段才能保证同一份资源在任意宿主上叙事序一致（确定性立身承诺，D13/D14）；② 每条 rule 带稳定 id（点号命名空间，如 `gates.no-wasm-pack`），供叙事标注出处与后续跨 section 引用，id 全局唯一由作者纪律保证（JSON Schema 无法表达集合内唯一性）；③ 一切「怎么验证」的现场知识落 commands（可原样拷贝进终端的命令行 + 前置条件 + 门禁级别），一切「去哪看」落 pointers（只放指针不复述内容，内容归属被指向的文档）。资源只读：装载期快照进 local，handler 闭包消费，不入存档。",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["schemaVersion", "title", "summary", "source", "sections"],
+    "properties": {
+        "schemaVersion": {
+            "description": "线格式版本（与 manifest.json 同口径；破坏性改动才递增）。",
+            "const": 1
+        },
+        "title": {
+            "description": "手册标题（叙事开场用）。",
+            "type": "string",
+            "minLength": 1
+        },
+        "summary": {
+            "description": "一句话概括：这本手册是什么、给谁用、与 AGENTS.md 的关系。",
+            "type": "string",
+            "minLength": 1
+        },
+        "source": {
+            "description": "迁移来源与修订口径——资源是派生面，发生冲突时以被迁移文档的当次正文为准并回改本资源。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["document", "revision", "note"],
+            "properties": {
+                "document": {
+                    "description": "被迁移的源文档路径（相对仓库根）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "revision": {
+                    "description": "迁移依据的源文档修订日期（YYYY-MM-DD）；源文档语义变更后须复查本资源并更新该日期。",
+                    "type": "string",
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                },
+                "note": {
+                    "description": "迁移口径说明（哪些是照搬、哪些按当前仓库形态更新过时状态、哪些是新决策不许发明）。",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "sections": {
+            "description": "规则章节的有序集合（order 升序即叙事序；section id 全局唯一）。",
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/section" }
+        }
+    },
+    "$defs": {
+        "stage": {
+            "description": "seed mod 六态工作流的阶段名（与 mod.lua 的 STAGE 常量同源同值）。",
+            "enum": ["intake", "decompose", "implement", "verify", "review", "done"]
+        },
+        "modality": {
+            "description": "规则的模态，决定叙事前缀：must = 必须做 / must-not = 禁止 / should = 应当（可解释例外的软约束）。",
+            "enum": ["must", "must-not", "should"]
+        },
+        "source": {
+            "description": "章节来源锚（形如 `AGENTS.md §三`）。",
+            "type": "string",
+            "minLength": 1
+        },
+        "rule": {
+            "description": "一条**原子**规则：一句可执行/可判定的约束，不做复合陈述（复合陈述拆成多条 rule，叙事才能逐条点名）。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "modality", "text"],
+            "properties": {
+                "id": {
+                    "description": "稳定规则 id（小写点号命名空间，如 `gates.no-wasm-pack`）：跨章节引用与叙事标注出处的锚点；全局唯一由作者纪律保证。",
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9._-]*$",
+                    "maxLength": 64
+                },
+                "modality": { "$ref": "#/$defs/modality" },
+                "text": {
+                    "description": "规则正文（中文；命令、路径、标识符保持原样英文）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "basis": {
+                    "description": "依据指针（文档章节 / 决策编号 / 源码位置），叙事需要交代「凭什么」时回读这里。",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "layoutEntry": {
+            "description": "仓库形态的一行（目录 → 职责），供叙事渲染成树。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "role"],
+            "properties": {
+                "path": {
+                    "description": "仓库内路径（相对根，以 / 结尾表示目录）。",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                },
+                "role": {
+                    "description": "该路径的职责一句话。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "status": {
+                    "description": "落地状态：delivered = 已在仓库内；planned = 规划中尚未落地（叙事须如实标注，不得说成已存在）。",
+                    "enum": ["delivered", "planned"]
+                }
+            }
+        },
+        "command": {
+            "description": "一条可原样拷贝进终端的验证命令（门禁/探针/构建）。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label", "run"],
+            "properties": {
+                "id": {
+                    "description": "稳定命令 id（点号命名空间，如 `rust.clippy`），供规则引用与叙事点名。",
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9._-]*$",
+                    "maxLength": 64
+                },
+                "label": {
+                    "description": "命令的中文短标签（叙事里的一句话说明）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "run": {
+                    "description": "命令行本体（原样英文，含管道/&& 照抄；由调用方在 shell 中执行）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "cwd": {
+                    "description": "运行目录（相对仓库根；缺省 = 仓库根）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "gate": {
+                    "description": "门禁级别：required = 合并前必过；optional = 可用可不用（如体积后处理）；pending = 既定但尚未落地（叙事须声明「门禁未覆盖」）。",
+                    "enum": ["required", "optional", "pending"]
+                },
+                "precondition": {
+                    "description": "前置条件（工具链/SDK/环境变量/阶段门槛），不满足时不得声称命令结果。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "note": {
+                    "description": "口径注记（已知坑、基线变更禁令等）。",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "pointer": {
+            "description": "一条「想做什么 → 去哪看」指针（只放指针，不复述被指向文档的正文）。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["goal", "where"],
+            "properties": {
+                "goal": {
+                    "description": "想做的事 / 想查的事。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "where": {
+                    "description": "去处（文档路径，可带 §章节）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "note": {
+                    "description": "补充说明（如「参考根目录现有一份」这类非纯路径的去处）。",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "section": {
+            "description": "一章规则：标题 + 摘要 + 原子规则集，可附带仓库布局、验证命令、指针与备注。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "order", "title", "summary", "source", "rules"],
+            "properties": {
+                "id": {
+                    "description": "稳定 section id（小写下划线，如 `live_evidence`）：mod.lua 取章节的唯一键，也是阶段呈现的检索面。",
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$",
+                    "maxLength": 64
+                },
+                "order": {
+                    "description": "叙事序（升序；对应 AGENTS.md 原章节顺序，1 起）。",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99
+                },
+                "title": {
+                    "description": "章节标题（含原文档序号，如「一、凭据与数据红线」）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "summary": {
+                    "description": "章节摘要一句话：先给结论，再让规则逐条展开。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "source": { "$ref": "#/$defs/source" },
+                "priority": {
+                    "description": "优先级：critical = 不可协商的红线章（叙事须前置警示）；standard = 常规纪律章（缺省值）。",
+                    "enum": ["critical", "standard"]
+                },
+                "applies_to": {
+                    "description": "适用阶段（缺省 = 全程适用）：implement 阶段只呈现 implement 相关章，verify/review 阶段呈现验证与复盘相关章——这就是「现场性」的检索面。",
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": { "$ref": "#/$defs/stage" }
+                },
+                "rules": {
+                    "description": "该章的原子规则集（至少一条）。",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "#/$defs/rule" }
+                },
+                "layout": {
+                    "description": "仓库形态行（仅 repository 这类需要展开目录树的章节使用）。",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "#/$defs/layoutEntry" }
+                },
+                "commands": {
+                    "description": "该章涉及的验证命令（仅 gates 这类命令密集的章节使用）。",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "#/$defs/command" }
+                },
+                "pointers": {
+                    "description": "该章的「去哪找」指针（仅 pointers 这类索引章节使用）。",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "#/$defs/pointer" }
+                },
+                "notes": {
+                    "description": "章节备注（不属于任何单条规则的事实/状态面，如受管凭据面的枚举、部署通道状态）。",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        }
+    }
+}

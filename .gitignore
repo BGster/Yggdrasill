@@ -228,3 +228,7 @@ crates/ygg-wasm/pkg/
 # M1 生成物（D-6：UGC 前身默认不入 git；人工收编 = 移出 generated/ + git add）
 packages/mods/generated/
 .rpiv/
+
+# 项目内 Agent harness：仅 Mod 入库；二进制与局运行产物不入库
+.ygg/bin/
+.ygg/runs/

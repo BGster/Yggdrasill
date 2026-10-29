@@ -1,0 +1,54 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://yggdrasill.dev/schemas/v1/agent-config.json",
+    "title": "Yggdrasill agent-config（M-Agent 元工作流 Mod 的静态配置形）",
+    "description": "M-Agent 泳道 A 落地（packages/mods/agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。evolution.mode 决定局末复盘的修订口径（off 仅报告 / suggest 产出建议包 / auto 白名单内自动修订），gates.require_all_green 决定门禁失败是否打回切片执行。",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["evolution", "autosave", "hot_reload", "gates"],
+    "properties": {
+        "evolution": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mode", "allow_paths", "max_per_run"],
+            "properties": {
+                "mode": {
+                    "description": "运行期演进模式默认值：off 仅报告 / suggest 产出修订建议包 / auto 白名单内自动修订。",
+                    "enum": ["off", "suggest", "auto"]
+                },
+                "allow_paths": {
+                    "description": "自动修订的白名单面：只允许改动 Mod 的提示词与叙事节（prompts / beats），不得触碰状态机与动作协议。",
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": { "enum": ["prompts", "beats"] }
+                },
+                "max_per_run": {
+                    "description": "单局自动修订次数上限（0 = 本局不得自动修订，仅报告）。",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8
+                }
+            }
+        },
+        "autosave": {
+            "description": "每个状态回执后是否自动存档（宿主侧消费；内核不解释该值）。",
+            "type": "boolean"
+        },
+        "hot_reload": {
+            "description": "资源改动是否允许热重载（宿主侧消费；内核不解释该值）。",
+            "type": "boolean"
+        },
+        "gates": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["require_all_green"],
+            "properties": {
+                "require_all_green": {
+                    "description": "true = 门禁必须全绿才进复盘（失败打回切片执行）；false = 失败也放行进复盘（宽放，回执注明）。",
+                    "type": "boolean"
+                }
+            }
+        }
+    }
+}
