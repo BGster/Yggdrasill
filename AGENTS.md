@@ -1,8 +1,8 @@
-# Yggdrasill · Agent Harness 游玩指南
+# Yggdrasill · Agent Harness 游玩指南（双层状态机 + 提案验收）
 
 > **本文件只教怎么玩，不装规则。**
 > 内核同时是 Agent harness：一次完整的 Agent 工作 = 一个可游玩的 Mod（`.ygg/mods/agent-seed`）。
-> 每步回执 = 处境叙事 + 进度 + **pendingChoice**（当前允许的动作集——协议约束，不是提示词约束）。
+> 每步回执 = 处境叙事 + 双层进度 + **pendingChoice**（当前允许的动作集——协议约束，不是提示词约束）。
 > 项目规则（凭据红线、仓库形态、分支/泳道、集成/部署、门禁命令、证据口径…）是 Mod 资源
 > `.ygg/mods/agent-seed/data/playbook.json`，随时用 `guide.show` 现场查，不在本文件复述。
 > `CLAUDE.md` 是本文件的软链。
@@ -21,184 +21,207 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 
 ---
 
-## 2. 开局（冷启动）
+## 2. 两层状态机（这是全部玩法）
+
+```text
+协调器（fsm.stage）
+  intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done
+                             ▲                                 │
+                             └──── verify.submit=false ────────┘   （门禁失败打回）
+
+需求级流水线（每条需求一条，KV req.<i>.status）
+  draft ──dispatch──▶ analyzing ──proposal──▶ analysis_review ──accept──▶ planning
+       ──dispatch──▶ planning(job) ──proposal──▶ plan_review ──accept──▶ **plan_gate**
+       ──gate.approve──▶ ready ──dispatch──▶ developing(lane) ──proposal──▶ dev_review
+       ──accept──▶ **accept**（执行方自检交付）──gate.approve──▶ done
+       另有 split / merged / dropped（可追溯终态）与 blocked（冲突）/ stale（提案 rev 过期）
+```
+
+**协调器只做四件事**：派活（`requirement.dispatch`）、串行验收提案（`proposal.accept` / `proposal.reject`）、
+过两个强制门禁（`gate.approve` / `gate.reject`）、最终复盘（`verify.submit` → `review.note`）。
+它**不承载开发本身**，也不允许绕过任何门禁。
+
+### 两个强制主 Agent 门禁（不可跳过）
+
+| 门禁 | 触发状态 | 通过后 | 驳回后 | 校验 |
+| --- | --- | --- | --- | --- |
+| `plan_gate` | plan 提案验收后 | `ready`（才可 dispatch 进开发） | 回 `planning` 重做 | `gate_rev == req.rev`（否则 stale 不得批） |
+| `accept` → accept_gate | 开发提案验收后（执行方交付） | `done` | 回 `ready`（重新进开发队列） | 同上 + **artifacts 必须非空**（不接受只有 summary 的完成自称） |
+
+- `accept` 是**执行方自检并交付**，不等于主 Agent 已验收；`gate.approve` 才是核验。
+- 两个门禁都是真实状态 + 动作约束：处于 `plan_gate` / `accept` 的需求**不能派活、不能被跳过**，
+  goal 模式同样各走一次 `gate.approve`（只是宿主自动取 pendingChoice 序号 1）。
+
+---
+
+## 3. 开局与运行模式
 
 ```bash
+# 开局（冷启动）
 .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed \
   --run-id my-task --runs-root .ygg/runs --event event.start
 ```
 
-- `--run-id` 只允许字母数字与 `-` `_` `.`；产物落 `<runs-root>/<run-id>/`（`--runs-root` 缺省 `./runs`，本项目约定 `.ygg/runs`）。
-- 回执是 **stdout 单行 JSON**：
-
-  ```json
-  {"ok":true,"event":"event.start","narrative":["…"],"pendingChoice":{"prompt":"…","options":["…"]},
-   "autosave":".ygg/runs/my-task/autosave.json","seq":0,"revision":0}
-  ```
-
-- **怎么读**：`narrative` = 这一步发生了什么（叙事行，最后一行若是 `【结局…` 即本局收口）；
-  `pendingChoice` = 下一步的合法动作（`null` = 局末无待选）；加性键 `warnings`（内核警告 + 宿主提示）、
-  `hotReload`（本次派发前的热载结果）、`ending`（本步出现结局行）；失败时 `error` 带稳定码 + 文案，
-  并补一次 `state` 回填当前 `pendingChoice`（出错后仍能接着走）。
-- 退出码：`0` ok / `1` 内核错误或装载失败 / `2` 用法错误。
-- 交互模式：省略 `--event`（按序号推进，`q` 退出；加 `--watch` 每步检查 Mod 改动并热载）；
-  它按 `play.mode` 运行——`guide` 逐步确认（缺省）/ `goal` 挂机，见 §3。
-
----
-
-## 3. 运行模式：`goal` 挂机 / `guide` 逐步确认
-
-交互模式（省略 `--event`）按 **`play.mode`** 运行：`guide`（缺省）逐步确认，`goal` 挂机自动推进。
+交互模式（省略 `--event`）按 `play.mode` 运行：
 
 | 模式 | 行为 | 退出 |
 | --- | --- | --- |
-| `guide` | 每一步推进都要你输入（提示符 `[guide] >`），Mod 不会自动连跑 | `q` / 输入结束 |
-| `goal` | 不读 stdin：自动取 `pendingChoice` 序号 1（推荐主动作）推进，到结局自动结算 | 结算码（与 `ok` 同值） |
+| `guide`（缺省） | 每一步推进、每一次提案验收与门禁都要你输入序号 | `q` / 输入结束 |
+| `goal` | 不读 stdin：自动取 `pendingChoice` 序号 1 推进；**无外部提案时提交明确标注的占位提案**走通同一套状态与门禁；到结局自动结算 | 结算码 |
 
-```bash
-# goal 挂机：先写动态配置，然后交互模式直接跑完一局（无需任何 stdin）
-.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task --runs-root .ygg/runs \
-  --resume --event config.set --payload '"play.mode=goal"'
-.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task --runs-root .ygg/runs \
-  --resume < /dev/null
-
-# guide 逐步确认（缺省）：同样一条命令、不给 goal——每一步都要你输入序号
-.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task --runs-root .ygg/runs --resume
-```
-
-- **两层配置**：静态 `data/config.json` 的 `play.mode`（缺省 `guide`）+ 动态 KV
-  `settings.play.mode`（`config.set play.mode=<goal|guide>` 写入），判定恒为「动态覆盖 > 静态默认」。
-  CLI **每步现读**——中途 `config.set` 下一步即生效（guide 会话里改成 goal 就转入挂机，一直到结局）。
-- **分阶段提示词差异**：每个阶段两版文案，按当前模式取一（goal = `<stage>_goal`，
-  guide = `<stage>_guide`），每阶段回执顶部固定一行 `【运行模式】play.mode = …`：
-  - guide：`逐步确认（guide）：… **这一步由你确认后提交** …`
-  - goal：`挂机（goal）：无需确认——宿主自动…`（各阶段写各自的推进动作，不是一句全局套话）
-- **失控防护**（goal）：最多 64 步；派发失败 / 无 `pendingChoice` 且未到结局 → 可读错误 + 退出码 `1`。
-- **单发模式不受影响**：`--event` 一次只派发一个事件，不自动连跑（Agent 的调用语义）。
+- **goal 遇冲突必暂停**：打印冲突双方与说明，等你选 `pendingChoice` 的 1/2/3（`keep_both` /
+  `keep_first` / `revise`）；**不自动选路径**。无 stdin（`< /dev/null`）→ 安全暂停并退出 `0`，
+  解决后 `--resume` 继续。
+- **占位提案不冒充真实开发**：summary / artifacts 都带 `[占位·模拟]` 前缀；已有待验收提案时
+  绝不覆盖（外部真实提案优先）。
+- 失控防护：基础 64 步 + 每条需求 16 步；另有「连续 12 步 `pendingChoice` 无变化」判停。
 
 ---
 
-## 4. 单发推进（Agent 脚本化）
+## 4. 动作协议（Agent 直接派发；与菜单同一套守卫）
 
-```bash
-.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task \
-  --runs-root .ygg/runs --resume --event <动作> --payload '<JSON 标量>'
-```
-
-`--payload` 必须是 **JSON 标量**（整数/浮点/布尔/字符串；缺省 `"0"`）——内核 payload 只有四标量，
-复合载荷压成**单个字符串**：
-
-| 动作 | 载荷（注意外层 JSON 引号） | 迁移 |
+| 动作 | 载荷（JSON 字符串） | 作用 |
 | --- | --- | --- |
-| `task.intake` | `'"title\|description"'`（空串 = 默认占位任务） | intake → decompose |
-| `plan.submit` | `'"s1=标题; s2=标题; s3=标题"'`（1–8 片；只给标题则自动编号） | decompose → implement |
-| `slice.report` | `'"s1\|summary\|a.md,b.md"'`（顺序上报，跳片会被拒） | implement → implement / verify |
-| `verify.submit` | `'"true"'` 或 `'"all_green=false;report=门禁输出摘要"'` | verify → review（全绿）/ implement（要求全绿时打回） |
-| `review.note` | `'"lesson\|4"'`（评分 1–5，缺省 3） | review → done（叙事以 `【结局` 收口） |
-| `config.set` | `'"play.mode=goal"'`、`'"gates.require_all_green=false"'`、`'"evolution.mode=suggest"'`（`settings.` 前缀可省） | 任意阶段，**不改变**主状态 |
-| `guide.show` | `'"credentials"'`；`'""'` = 本阶段默认节 | 任意阶段，**不改变**主状态 |
-| `map.show` | `'""'` / `'"0"'` / `'"full"'`（三者同一张全图） | 任意阶段，**不改变**主状态 |
+| `task.intake` | `"title\|description"` | intake → coordinate |
+| `requirement.add` | `"title\|description[\|external_id[\|depends_on]]"` | 入队（draft）；同 external_id 幂等 |
+| `requirement.list` | `""` / `"0"` / `"full"` | 只读：需求图 + 提案 + 泳道 |
+| `requirement.dispatch` | `""` | 按就绪序派活（draft→analysis / planning→plan / ready→development·lane），job 上限 4 |
+| `proposal.submit` | `"r1\|1\|analysis\|summary\|artifacts[\|changes[\|external_id]]"` | subagent 提议（stage ∈ analysis/plan/development；changes 可选） |
+| `proposal.accept` | `"pN"` / `"rN"` / `""` | **串行**验收一条（空 = requirement_id canonical 序）；rev 不匹配 → stale |
+| `proposal.reject` | `"pN\|理由"` / `"rN\|理由"` / `""` | 打回：analysis→draft / plan→planning / development→ready |
+| `gate.approve` | `"rN[|说明]"` / `""` | 过门禁（plan_gate → ready；accept → done） |
+| `gate.reject` | `"rN\|反馈"` / `""` | 门禁打回（plan_gate → planning；accept → ready） |
+| `coordinate.submit` | `""` | 全部叶子需求 done ∧ 无待验收提案 ∧ 无在跑 job ∧ 无冲突 → review |
+| `verify.submit` | `"true"` / `"all_green=false;report=…"` | review 内门禁自检（失败打回 coordinate） |
+| `review.note` | `"lesson\|score(1-5)"` | 收口到 done（叙事以【结局 收口） |
+| `requirement.split` | `"父id\|子标题A\|子标题B[|…]"` | 主 Agent 直改：父置 split，子需求继承依赖（≥2 子） |
+| `requirement.merge` | `"源id1,源id2\|合并标题\|合并描述"` | 主 Agent 直改：源置 merged，新需求依赖取并集 |
+| `requirement.amend` | `"id\|新标题\|新描述\|新依赖"` | 主 Agent 直改：rev+1；done 修订**派生新需求**；开发中只改说明 |
+| `requirement.conflict` | `"id1,id2\|说明"` | 主 Agent 标记冲突（blocked，派活与收口都跳过） |
+| `requirement.resolve` | `"id1,id2\|keep_both\|keep_first\|revise[|说明]"` | 冲突解决三条路径 |
+| `config.set` / `guide.show` / `map.show` | 同既有语义 | 常驻只读/配置动作 |
 
-- 越阶动作（当前阶段不允许）→ `【动作被拒】` + 当前阶段允许动作清单；载荷不合法 → `【载荷被拒】` + 原因。
-  两种拒绝都**原地重渲染**（主状态不变、pendingChoice 保持），改对载荷重发即可。
-- 两层配置：`data/config.json` 是静态默认，`config.set` 写 KV `settings.*` 动态覆盖，判定恒为「动态覆盖 > 静态默认」。
-
----
-
-## 5. 查规则与节点图：`guide.show` · `map.show`
-
-```bash
-.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task \
-  --runs-root .ygg/runs --resume --event guide.show --payload '"gates"'
-```
-
-- 12 个 section id：`credentials`、`repository`、`branches`、`lanes`、`dispatch`、`integration`、
-  `gates`、`live_evidence`、`evidence`、`output`、`pointers`、`hard_constraints`。
-- 回执 = 该节全文：标题 + 摘要 + 每条原子规则（带「必须 / 禁止 / 应当」标记与依据），
-  以及该节附带的验证命令、仓库布局、文档指针、备注。
-- 载荷为空（`'""'`）→ 取**本阶段默认节**；非法 id → `【指南被拒】` + 全部合法 id，主状态不变。
-- 每阶段回执已带一行 `现场规则 · <节标题>：<摘要>` 提示，`pendingChoice` 里紧随主前进动作也有
-  `guide.show` 入口。默认节按阶段轮换（不写状态，纯按进度计数）：
-
-  | 阶段 | 默认节 |
-  | --- | --- |
-  | `intake` | `output`（语言与输出） |
-  | `decompose` | `integration`（收口流程） |
-  | `implement` | `repository` → `lanes` → `dispatch`（逐片轮换） |
-  | `verify` | `gates`；被打回后转 `live_evidence` |
-  | `review` | `evidence` / `hard_constraints`（按计划规模） |
-
-- 想一次看全：连续 `guide.show` 12 个 id，或直接读 `.ygg/mods/agent-seed/data/playbook.json`。
-
-### 看节点图：`map.show`
-
-本 Mod 的「剧情」就是那台六态工作流，`map.show` 把它渲染成一张节点图（节点 + 带动作名的边），
-常驻只读——不推进任何状态。
-
-```bash
-.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task \
-  --runs-root .ygg/runs --resume --event map.show --payload '"full"'
-```
-
-```text
-【剧情节点图 · 六态工作流】当前 >> [implement] << ← 你在这里｜进度 1/3 片
-  [intake]    ──task.intake──▶ [decompose]
-  [decompose] ──plan.submit──▶ [implement]
-▶ [implement] ├─slice.report──▶ [implement]（非最后一片，同态继续）
-              └─slice.report──▶ [verify]（全部切片后）
-  [verify]    ├─verify.submit=true──▶ [review]
-              └─verify.submit=false──▶ [implement]（打回，重做最后一片）
-  [review]    ──review.note──▶ [done]（局末【结局）
-  [done]      ──（局末·无出边）
-常驻动作（不推进主图，任意阶段可用）：config.set · guide.show · map.show——任务/切片/门禁/配置一律不变
-```
-
-- 头行读三件事：`>> [<stage>] << ← 你在这里` = KV `fsm.stage` 的当前节点；`｜进度 X/Y 片` =
-  已上报切片 / 计划片数（`plan.submit` 之前不显示）；行首 `▶` = 当前节点的出边行
-  （`├─` / `└─` 是同一节点的分支，缩进行是续行）。
-- 载荷只接空 / `0` / `"full"`（同一个全图，不做局部视图）；其他值 → `【地图被拒】` + 用法，
-  主状态不变。看完照旧按 `pendingChoice` 继续——地图是旁挂只读，不占掉主前进动作。
-- `pendingChoice` 顺序固定为「主前进 → `guide.show` → `map.show` → `config.set`（`play.mode` →
-  `evolution.mode` → `gates`）」，两个只读动作都在改配置之前；每阶段回执顶部还有一行
-  `【运行模式】play.mode = …`（当前模式与它的推进纪律，见 §3）。
+- `changes` 形如 `split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`：
+  subagent 只**建议**，`proposal.accept` 时才落地。
+- **stale 与重定基**：验收时 `rev ≠ req.<i>.rev` → 提案置 `stale`、需求置 `stale` 标记（可读拒绝，
+  旧提案不得覆盖新决定）。恢复路径：提交**同阶段、当前 rev** 的新提案即可——
+  `analysis_review` / `plan_review` / `dev_review` 在「该需求**没有**待验收提案」时接受这种重定基提案；
+  仍有正常待验收提案时一律拒绝（`已有一条待验收提案…先 accept / reject`），不覆盖。
+  重定基提案落地后需求的 `stale` 标记自动清除。
+- 越阶动作 → `【动作被拒】`；载荷不合法 → `【载荷被拒】`；前置不满足 → `【需求待办】`。
+  三者都原地重渲染（主状态不变）。
+- 收口判据：`req_all_done()`（含 split/merged 的后继全部 done）+ 0 待验收提案 + 0 在跑 job + 0 冲突。
 
 ---
 
-## 6. runs 产物与局末结算
+## 5. 异步入口（inbox：另一个进程随时进来）
+
+inbox 是 JSONL：`<runs-root>/<run-id>/inbox.jsonl`，每行
+
+```json
+{"external_id":"inbox-…","kind":"add|amend|split|merge|conflict|resolve|proposal","title":…,"description":…,"payload":"…","created_at":…}
+```
+
+| 命令 | kind | 说明 |
+| --- | --- | --- |
+| `--requirement '标题\|描述'` | add | 新增需求（title/description 字段） |
+| `--proposal 'r1\|1\|analysis\|summary\|artifacts[\|changes]'` | proposal | **外部 subagent 提交提案**；external_id 自动补第 7 段 |
+| `--amend 'r1\|新标题\|新描述\|依赖'` | amend | 异步修订（rev+1） |
+| `--split 'r1\|子A\|子B'` | split | 异步拆分命令 |
+| `--merge 'r2,r3\|标题\|描述'` | merge | 异步合并命令 |
+| `--conflict 'r1,r2\|说明'` | conflict | 异步标冲突（goal 会停下问用户） |
+| `--resolve 'r1,r2\|keep_both'` | resolve | 异步解决冲突 |
+
+```bash
+.ygg/bin/ygg-agent --run-id my-task --runs-root .ygg/runs \
+  --proposal 'r1|1|analysis|影响面：core.rs 两个函数|notes/analysis-r1.md'
+```
+
+- **不必给 `--mod`**：这些命令只做 `OpenOptions::append`，不读写 autosave，可与运行中的 goal/guide 并发。
+- **消费时机**：goal 每个自动动作前、guide 每次提示前、单发每次派发前 drain 新行并按 kind 派发。
+- **跨进程写入/收口协议**（协议级互斥，不是「多读一次文件」）：
+  run 目录下有 `coordination.lock`（create_new 互斥，陈旧按 mtime 2s 抢占）与
+  `coordination.json`（`{phase, writers, owner_pid, heartbeat_at}`）：
+  1. 写命令先登记：`phase=running` → 计入 `writers` 并保持到行落盘；
+     `phase=closing`（心跳未过期）→ **命令本身非零拒绝（exit 3）**；
+     `phase=finalized` → **非零拒绝（exit 3，需开新局）**。
+  2. goal 在派发最后的 `review.note` 前把 phase 切到 `closing`，**等在途写者落盘归零**，
+     然后在同一保护下做最后一次 drain：
+     · 有新需求且未 done → 解除 closing、继续 loop（不结局）；
+     · 无新需求 → 同一保护下完成 `review.note` + settle，随后 `phase=finalized`。
+     因此「写命令成功但 goal 已跨过最后一次 drain」在协议上不可能发生：
+     写入要么 happens-before 那次 drain，要么被拒。
+  3. 陈旧行与崩溃恢复：closing 用心跳续命（10s 过期），过期后写命令或 `--resume`
+     会把它判死并恢回到 `running`；锁也按 mtime 抢占。两者都不会因进程崩溃永久卡死。
+  4. 独立 `--settle` 同样走 closing：已有未消费行 → `ok=false` 并退回 running（可 resume 消费）；
+     已 finalized → 幂等返回旧报告，不重写。
+- **幂等 / 崩溃安全**：cursor（`inbox.cursor` 的 `{consumed:N}`）只在 dispatch 成功且存档落盘后前移；
+  重放靠 `external_id`：
+  - `add` / `proposal` → Mod 侧 per-entity ext 查重（`【需求重放】` / `【提案重放】`）；
+  - `amend` / `split` / `merge` / `conflict` / `resolve` → 载荷末尾 `@ext=` + `inbox.last` 去重（`【异步重放】`）。
+- 坏行跳过并前移（否则永久阻塞）；**结算硬门禁**：`--settle` 若发现未消费行 → `ok=false` 且非零
+  （写完还要再核一次，结算期间又到的行会让报告作废）。因此「结局后投递」不会静默成功，只能开新局。
+- **跨进程时序约定**：goal 在每次可能收口的动作前都会再 drain 一次（自动推进前、`coordinate.submit` /
+  `verify.submit` / `review.note` 之前、自动 settle 之前），运行期间到达的行**不得漏**；
+  但进程退出后的投递属于新局（`inbox` 保留待新局消费，`settlement` 会报错提示）。
+
+---
+
+## 6. 看进度：`requirement.list` 与 `map.show`
+
+```bash
+.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task --runs-root .ygg/runs \
+  --resume --event map.show --payload '"full"'
+```
+
+- `requirement.list`：需求图逐条（状态 + 依赖 + rev + 泳道 + job + 冲突/stale 追溯）、待验收提案列表、
+  泳道台账、图例。
+- `map.show`：**双层图**——协调器 4 态节点图 + 需求级流水线（含两个门禁）+ job/泳道台账。
+- `pendingChoice` 顺序：解决冲突（如有）→ 主前进动作（`proposal.accept` > `gate.approve` >
+  `requirement.dispatch` > `coordinate.submit`）→ `guide.show` → `map.show` → `requirement.list` →
+  `requirement.add` → `config.set`（play.mode → evolution.mode → gates）。
+
+---
+
+## 7. runs 产物与局末结算
 
 | 文件 | 内容 |
 | --- | --- |
-| `autosave.json` | 每步自动存档（引擎版本 + 实体表 + KV + 待决选择），可直接作 `load` 载荷 |
-| `events.jsonl` | 每派发一行：`{seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}` |
-| `run.json` | `{run_id, mod, mod_signature, started_at, updated_at}`（热载比对与结算取 `mod`） |
-| `settlement.json` | 局末结算报告（仅 `--settle` 写出） |
+| `autosave.json` | 每步自动存档（实体表 + KV + 待决选择），可直接作 `load` 载荷 |
+| `events.jsonl` | 每派发一行：`{seq,event,payload,ok,narrative_count,timestamp,ending,ending_line?}` |
+| `run.json` | `{run_id,mod,mod_signature,started_at,updated_at}` |
+| `settlement.json` | 局末结算（仅 `--settle` 写出） |
+| `inbox.jsonl` | 异步操作队列（只追加；运行侧消费） |
+| `inbox.cursor` | 已消费行数（dispatch + 存档成功后才前移） |
+| `coordination.json` | 跨进程协议：`{phase, writers, owner_pid, heartbeat_at}`（running / closing / finalized） |
+| `coordination.lock` | 短临界区互斥锁（create_new；陈旧按 mtime 抢占，崩溃不卡死） |
 
 ```bash
 .ygg/bin/ygg-agent --run-id my-task --runs-root .ygg/runs --settle
 ```
 
-`ok` = 事件日志非空 ∧ 无失败步 ∧ 出现结局叙事行；退出码与 `ok` 同值。结算摘要会打出终局面
-（`ending` / `score` / `exp`）与 KV 摘要。
+`ok` = 事件日志非空 ∧ 无失败步 ∧ 出现结局叙事行 ∧ **inbox 无未消费行**；退出码与 `ok` 同值。
+未消费行存在时报告会带 `结局后仍有 N 条未消费 inbox 行——需开新局` 的错误且 `ok=false`，
+写盘后还会再核一次（结算期间新到的行 → 报告重写为 `ok=false`、退出非零）。
 
 ---
 
-## 7. 改完 Mod 之后
+## 8. 改完 Mod 之后
 
 ```bash
-cargo run --example pack -- .ygg/mods/agent-seed        # 必跑：动了 data/ 或 schemas/ 就重算 manifest
-cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua   # 可选：Lua 静态检查（choice 后 emit 等规则）
-cargo run --example playtest -- .ygg/mods/agent-seed    # 冒烟：全 1 贪心应通关到【结局
+cargo run --example pack -- .ygg/mods/agent-seed        # 动了 data/ 或 schemas/ 必跑
+cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua   # Lua 静态检查（应 0 error / 0 warning）
+cargo run --example playtest -- .ygg/mods/agent-seed    # 冒烟：默认全 1 走查到【结局
 ```
 
-- **manifest 是内容寻址**（`sha256` + `byteLength`）：手改 `data/*.json` 后不重算 `pack`，装载会以
-  「内容哈希不符」拒绝。
-- **热载**：单发模式每次新进程、开局即按磁盘现状装载——`--resume` 回执里 `hotReload.source="resume"`
-  即说明改动已生效；交互模式加 `--watch`。重载失败会**沿用旧 Mod 继续**（回执 `warnings` 提示），不中断局。
-- **存档只带状态**（实体表 / KV / 待决选择），资源不入档：改资源后 `--resume` 即刻用新资源 + 旧状态续局。
+- **manifest 是内容寻址**（sha256 + byteLength）：改 `data/*.json` 不重算 `pack`，装载会以内容哈希不符拒绝。
+- **热载**：单发模式每次新进程按磁盘现状装载；`--resume` 回执里 `hotReload.source="resume"` 即说明改动已生效。
+- 两个 Mod（`.ygg/mods/agent-seed` 与 `packages/mods/agent-seed`）现在是**同一份实现与资源**（含 playbook），
+  改动要同步两侧并各自重算 manifest。
 
 ---
 
-## 8. 本地凭据
+## 9. 本地凭据
 
 本地凭据放 `.env` / `.env.local`（均已 gitignore，权限 600，绝不入库）。Mod 资源、静态配置、动态
 `settings.*` 与报告里只出现**键名**，不出现值——完整红线见 `guide.show credentials`。
