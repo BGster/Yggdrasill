@@ -277,15 +277,13 @@ mod tests {
         assert!(!reply_choice.1.is_empty(), "恢复的选项非空");
 
         // 读档后继续按通关路径走完 → 结局 A（状态面真恢复，不只是字节相等）。
-        for index in [1usize] {
-            let after = choose(&mut fresh, index);
-            assert!(
-                after["narrative"].as_array().is_some_and(|arr| arr
-                    .iter()
-                    .any(|line| line.as_str().is_some_and(is_ending_line))),
-                "读档后继续推进到达结局"
-            );
-        }
+        let after = choose(&mut fresh, 1);
+        assert!(
+            after["narrative"].as_array().is_some_and(|arr| arr
+                .iter()
+                .any(|line| line.as_str().is_some_and(is_ending_line))),
+            "读档后继续推进到达结局：{after}"
+        );
     }
 
     /// 存档往返字节稳定（同状态两次存档 = 同文本）。
