@@ -14,7 +14,10 @@
     "skipLibCheck": true,
     "noEmit": true,
     "useDefineForClassFields": true,
+    "paths": {
+      "@ygg/pipeline/sse": ["../pipeline/src/sse.ts"]
+    },
     "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts", "vite.plugin.mods.ts"]
+  "include": ["src", "vite.config.ts", "vite.plugin.mods.ts", "vite.plugin.generate.ts"]
 }

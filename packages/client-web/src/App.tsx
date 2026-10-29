@@ -7,6 +7,7 @@
 // 重开语义：新 KernelBridge 实例 + key 变更整树重挂（两种内核同为全新
 // 实例——wasm 侧重新装载 Mod，回放侧重放首屏）。
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GeneratePanel } from "./generate/GeneratePanel";
 import { ReplayKernel, type Envelope, type KernelBridge } from "./kernel";
 import { createWasmKernel, describeInitError } from "./kernel-wasm";
 import { GeneratedModError, loadGeneratedBundle } from "./mod-loader";
@@ -260,7 +261,21 @@ function initialSource(): KernelSource {
   return isMockForced(window.location.search) ? replaySource(false, null) : { phase: "loading" };
 }
 
-export default function App() {
+/** 顶层视图：游戏面板 / AI 生成面板（?gen=1 或 ?generate=1 直达后者）。 */
+export type AppView = "play" | "generate";
+
+/** URL 视图参数解析（纯函数，单测锚）：`?gen` / `?generate` 有参即生成面。 */
+export function viewFromSearch(search: string): AppView {
+  const params = new URLSearchParams(search);
+  return params.has("gen") || params.has("generate") ? "generate" : "play";
+}
+
+/**
+ * 游戏面：内核源状态机 + 降级横幅 + 叙事面板。
+ * 从 App 拆出（A2）：生成面不该在挂载时启动 wasm 装载；拆开后两个视图各自
+ * 只承担自己的副作用。
+ */
+function PlaySurface() {
   const { source, generation, restart } = useKernelSource();
 
   if (source.phase === "loading") {
@@ -286,6 +301,53 @@ export default function App() {
         </div>
       )}
       <GamePanel key={generation} kernel={source.kernel} mode={source.mode} onRestart={restart} />
+    </>
+  );
+}
+
+export default function App() {
+  const [view, setView] = useState<AppView>(() => viewFromSearch(window.location.search));
+  // 已挂载过的视图：面切换后保留在树上（hidden）——否则回生成面再回来，
+  // 游戏会话/生成结果全丢（重开语义不该由导航承担）。
+  const [mountedViews, setMountedViews] = useState<ReadonlySet<AppView>>(
+    () => new Set<AppView>([viewFromSearch(window.location.search)]),
+  );
+  useEffect(() => {
+    setMountedViews((previous) =>
+      previous.has(view) ? previous : new Set([...previous, view]),
+    );
+  }, [view]);
+
+  return (
+    <>
+      <nav className="view-tabs" aria-label="视图切换">
+        <button
+          type="button"
+          className={`view-tab${view === "play" ? " view-tab-active" : ""}`}
+          aria-pressed={view === "play"}
+          onClick={() => setView("play")}
+        >
+          游玩
+        </button>
+        <button
+          type="button"
+          className={`view-tab${view === "generate" ? " view-tab-active" : ""}`}
+          aria-pressed={view === "generate"}
+          onClick={() => setView("generate")}
+        >
+          AI 生成
+        </button>
+      </nav>
+      {mountedViews.has("play") && (
+        <div className="view-surface" hidden={view !== "play"}>
+          <PlaySurface />
+        </div>
+      )}
+      {mountedViews.has("generate") && (
+        <div className="view-surface" hidden={view !== "generate"}>
+          <GeneratePanel />
+        </div>
+      )}
     </>
   );
 }

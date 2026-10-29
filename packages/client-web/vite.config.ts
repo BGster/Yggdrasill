@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { generatedModsMiddleware } from "./vite.plugin.mods";
+import { generateMiddleware } from "./vite.plugin.generate";
 
 // B2 面板：Vite 构建 + vitest（jsdom）单测；信封 fixture 由 vite 原生 JSON 导入承载。
 //
@@ -18,6 +19,12 @@ import { generatedModsMiddleware } from "./vite.plugin.mods";
 //   pnpm-workspace.yaml 本就使仓库根成为缺省 workspace 根，此处显式固化）；
 // - base "./"：相对 base——GitHub Pages 项目站（/<repo>/ 前缀）安全；
 //   build.outDir dist（Pages workflow 上传目录）。
+//
+// A2 追加：
+// - alias "@ygg/pipeline/sse" → packages/pipeline/src/sse.ts：浏览器侧复用 pipeline
+//   的 SSE 分帧器（纯函数、零 node 依赖，已被 provider 双协议流式实测覆盖）；
+//   tsconfig paths 里声明同一映射（typecheck 与构建共用一份源）；
+// - plugins 追加 generateMiddleware（POST /__generate，仅 dev）。
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -27,7 +34,7 @@ export default defineConfig(({ mode }) => {
       ? fileURLToPath(new URL("./src/wasm-stub.ts", import.meta.url))
       : fileURLToPath(new URL("../../crates/ygg-wasm/pkg/ygg_wasm.js", import.meta.url));
   return {
-    plugins: [react(), generatedModsMiddleware()],
+    plugins: [react(), generatedModsMiddleware(), generateMiddleware()],
     base: "./",
     resolve: {
       alias: {
@@ -35,6 +42,7 @@ export default defineConfig(({ mode }) => {
         "@ygg/wasm-shim": fileURLToPath(
           new URL("../../crates/ygg-wasm/wasi-shim.js", import.meta.url),
         ),
+        "@ygg/pipeline/sse": fileURLToPath(new URL("../pipeline/src/sse.ts", import.meta.url)),
       },
     },
     server: {
