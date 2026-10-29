@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "ygg:scene/texts",
+      "kind": "scene-texts",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+      "path": "data/scenes.json"
+    },
+    {
+      "id": "ygg:agent/config",
+      "kind": "agent-config",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
+      "path": "data/config.json"
+    }
+  ],
+  "schemaFiles": ["schemas/scene-texts.json", "schemas/agent-config.json"]
+}
