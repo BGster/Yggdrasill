@@ -1,4 +1,7 @@
 {
+  "play": {
+    "mode": "guide"
+  },
   "evolution": {
     "mode": "suggest",
     "allow_paths": ["prompts", "beats"],

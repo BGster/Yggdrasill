@@ -1,20 +1,20 @@
 {
   "entries": [
     {
-      "byteLength": 12656,
+      "byteLength": 15403,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "8130b0e3c4c7dceb12f67d2bc765e72269fd538fef7349db44df3a8227c875ac"
+      "sha256": "7d27326fad1b0c45044b0ba99b4ceff733757b2e7cf97fe4b7be32c4a1698c06"
     },
     {
-      "byteLength": 200,
+      "byteLength": 237,
       "id": "ygg:agent/config",
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "8b74030e43cb7e1ac6515d627e93da0d885b467d03a161a98178e51c5dfd2e42"
+      "sha256": "b952ae76c803b2bf4f6d073dd9e02e3eb5fad03fbd24e35b420b3972f354ce58"
     },
     {
       "byteLength": 34774,
