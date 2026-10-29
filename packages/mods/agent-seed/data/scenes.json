@@ -30,7 +30,9 @@
     "config_gates": "config.set —— 门禁 require_all_green {{state}} → {{next}}",
     "req_resolve_keep": "requirement.resolve keep_both —— {{ids}} 保留双方并重新排队",
     "req_resolve_first": "requirement.resolve keep_first —— {{ids}} 保留首条，另一条置 dropped",
-    "req_resolve_revise": "requirement.resolve revise —— {{ids}} 保留但置「待修订」"
+    "req_resolve_revise": "requirement.resolve revise —— {{ids}} 保留但置「待修订」",
+    "gate_approve": "gate.approve —— 通过 {{id}} 的 {{kind}} 门禁（剩余 {{gates}}）",
+    "gate_reject": "gate.reject —— 驳回 {{id}} 的 {{kind}} 门禁并打回重做"
   },
   "beats": {
     "prologue_guide": "guide 逐步确认：每一步推进都要你选。需求可以异步补（--requirement / --proposal），但提案验收与两个门禁都由你确认。",
@@ -226,7 +228,10 @@
     "req_resolve_revised": "双方保留但置「待修订」（先 amend 才可派活）",
     "req_resolve_keep_first": "{{id}} 置 dropped（可追溯）",
     "req_resolve_ok": "【冲突已解决】{{first}} / {{second}} → {{mode}}：{{effect}}",
-    "slice_already": "（兼容占位：本设计不再使用切片上报）"
+    "slice_already": "（兼容占位：本设计不再使用切片上报）",
+    "req_replayed_op": "【异步重放】external_id `{{ext}}` 已应用过——幂等返回，不重复执行。",
+    "req_gate_pause_hint": "（占位键：宿主暂停提示在 CLI 侧生成）",
+    "req_gate_reject_default": "检查清单未通过（占位理由）"
   },
   "tuning": {
     "min_slices": 1,

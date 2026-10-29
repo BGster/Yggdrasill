@@ -1,137 +1,111 @@
-# agent-seed · 通用冷启动元工作流 Mod
+# agent-seed · 双层状态机 + 提案验收的元工作流 Mod
 
-M-Agent 泳道的 seed mod：把「一次完整的 Agent 工作」配置成一个可游玩的 Mod。
-任何 Agent 装载它 + 注入任务描述即可开工，**零定制**——状态机、动作协议、门禁
-口径、演进策略、运行模式全在 Mod 里，不在提示词里。
+M-Agent 泳道的 seed mod：把「一次完整的 Agent 工作」配置成一个可游玩的 Mod——协调器派活/验收，
+每条需求各自跑 analyze → plan → 门禁 → develop → 交付 → 门禁。任何 Agent 装载它 + 注入任务描述
+即可开工，**零定制**。怎么玩（构建 / 开局 / 单发 / 异步 / 结算）见仓库根 `AGENTS.md`；本文件只说
+Mod 内部结构。
 
-```bash
-# 装载 + 全 1 贪心走查到【结局
-cargo run --example playtest -- packages/mods/agent-seed
-
-# 门禁失败 → 打回 implement → 再全绿（回退路径）
-cargo run --example playtest -- packages/mods/agent-seed --choices 1,1,1,1,1,2,1,1,1
-
-# 门禁宽放（config.set 控制流转：失败也放行进复盘；verify 序号 5 = 关掉 require_all_green）
-cargo run --example playtest -- packages/mods/agent-seed --choices 1,1,1,1,1,5,2,1
-
-# 中途切 goal 挂机（intake 序号 3 = config.set play.mode=goal，之后按 1 推进；提示词切成挂机版）
-cargo run --example playtest -- packages/mods/agent-seed --choices 3,1,1,1,1,1,1,1,1
-
-# verify 态的选项顺序：1 全绿 / 2 报失败 / 3 map.show / 4-6 config.set
-# （config.set 内部固定 play.mode → gates → evolution）
-# 下面这条：verify 先看节点图（3）→ 关掉门禁（5）→ 报失败（2）→ 宽放进复盘（1）
-cargo run --example playtest -- packages/mods/agent-seed --choices 1,1,1,1,1,3,5,2,1
-```
-
-## 状态机（六态）
+## 一、协调器（`fsm.stage`，单机单事件 `stage.advance`）
 
 ```text
-intake ──task.intake──▶ decompose ──plan.submit──▶ implement
-                                                    │
-                              slice.report（最后一片）│
-                                                    ▼
-             implement ◀──verify.submit（失败，打回）── verify
-                                                    │
-                                verify.submit（全绿/宽放）│
-                                                    ▼
-                         review ──review.note──▶ done（局末【结局）
+intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done
+                           ▲                                 │
+                           └──────── verify.submit=false ─────┘（门禁失败打回）
 ```
 
-状态由 `ygg.fsm` 单机单事件 `stage.advance` 承载（payload = 目标态，边 = 上图
-合法转移，`when` 按目标态白名单），落 KV `fsm.stage`，随存档往返。非法目标 =
-静默 no-op；真正的门在 handler 里（阶段守卫 → 拒绝回执）。
+- `coordinate.submit` 有硬门禁：全部叶子需求 `done` ∧ 0 待验收提案 ∧ 0 在跑 job ∧ 0 未解决冲突。
+- `review` 里 `verify.submit=true` 只记录门禁证据（要求全绿时才允许之后收口），`review.note` 才收口。
 
-## 动作协议
-
-pendingChoice = **当前阶段允许的动作集**（协议约束，不是提示词约束）。选项文本
-自带载荷形状，选中序号即派发同名动作事件；Agent 也可以直接派发事件（走同一套
-守卫与副作用）。内核 payload 只能是 JSON 标量，故复合载荷压成单个字符串：
-
-| 事件 | 载荷（字符串 wire format） | 迁移 |
-| --- | --- | --- |
-| `task.intake` | `title\|description`（空载荷 = 默认占位任务） | intake → decompose |
-| `plan.submit` | `s1=标题; s2=标题; …`（1–8 片；只给标题时自动 id） | decompose → implement |
-| `slice.report` | `slice_id\|summary\|artifacts`（artifacts 半角逗号分隔） | implement → implement / verify |
-| `verify.submit` | `true` / `false` / `all_green=…;report=…` | verify → review（绿/宽放）/ implement（打回） |
-| `review.note` | `lesson\|score(1-5)`（缺省分 3） | review → done |
-| `config.set` | `settings.<key>=<value>`（`settings.` 可省） | 任意态，不改变主状态 |
-| `map.show` | 空 / `0` / `full`（同一张全图） | 任意态，不改变主状态 |
-
-**菜单顺序**：每态第一条 = 主前进动作（全 1 贪心走查可通关）；`map.show` 紧随主前进动作
-（verify 态排在其失败分支之后），`config.set` 常驻且置末，配置内部固定为
-`play.mode` → `evolution.mode` → `gates.require_all_green`——只读动作总在改配置之前。
-
-越阶动作以可读回执拒绝：`【动作被拒】` + 当前阶段允许的动作清单；载荷不合法为
-`【载荷被拒】` + 具体原因。两者都**原地重渲染**（主状态不变、pendingChoice 保持）。
-
-## 剧情节点图（map.show）
-
-本 Mod 的「剧情」就是六态工作流，`map.show` 把状态机图渲染成 ASCII 节点图。图**不是手画**：
-`mod.lua` 里 `MAP_NODES`（有序节点表）+ `MAP_EDGES`（带动作名的边表）是单源，渲染器逐节点取出边
-——改状态机就改这两张表，不会出现图文不一致。不额外加资源/Schema（图是代码的结构事实，不是可
-编辑的故事内容；文本词条仍在 `data/scenes.json` 的 `beats.map_*`）。
+## 二、需求级流水线（`req.<i>.status`）
 
 ```text
-【剧情节点图 · 六态工作流】当前 >> [implement] << ← 你在这里｜进度 1/3 片
-  [intake]    ──task.intake──▶ [decompose]
-  [decompose] ──plan.submit──▶ [implement]
-▶ [implement] ├─slice.report──▶ [implement]（非最后一片，同态继续）
-              └─slice.report──▶ [verify]（全部切片后）
-  [verify]    ├─verify.submit=true──▶ [review]
-              └─verify.submit=false──▶ [implement]（打回，重做最后一片）
-  [review]    ──review.note──▶ [done]（局末【结局）
-  [done]      ──（局末·无出边）
-常驻动作（不推进主图，任意阶段可用）：config.set · map.show——任务/切片/门禁/配置一律不变
+draft ─dispatch→ analyzing ─proposal→ analysis_review ─accept→ planning
+      ─dispatch→ planning(job) ─proposal→ plan_review ─accept→ plan_gate
+      ─gate.approve→ ready ─dispatch→ developing(lane) ─proposal→ dev_review
+      ─accept→ accept(执行方交付) ─gate.approve→ done
 ```
 
-- **载荷**：空 / `0` / `"full"` → 同一张全图（内核 `--payload` 缺省值就是 `0`）；其他值 →
-  `【地图被拒】` + 用法，主状态不变。目前不做局部视图（六态图本来就一眼看得完）。
-- **当前节点**：头行 `>> [<stage>] << ← 你在这里` 与行首 `▶` 同源于 KV `fsm.stage`；有计划时头行
-  额外附 `｜进度 X/Y 片`（`plan.done` / `plan.count`）。
-- **不改状态**：与 `config.set` 一样是常驻动作，回执末尾重渲染当前阶段的 `pendingChoice`——不会
-  吞掉主前进动作。
+| 状态 | 含义 |
+| --- | --- |
+| `draft` / `planning` / `ready` | 可派活（分别派 analysis / plan / development） |
+| `analyzing` / `developing` | job 在跑（`req.<i>.job` 标记阶段；开发另占 `lane.<k>`） |
+| `analysis_review` / `plan_review` / `dev_review` | 提案已到、待主 Agent 串行验收 |
+| `plan_gate` | **强制门禁**：plan 批了才能 `ready` → 开发 |
+| `accept` | **执行方已交付**（自检 + artifacts），不等于验收；等 accept_gate |
+| `done` / `split` / `merged` / `dropped` | 终态（拆并/弃用保留可追溯性） |
 
-## 两层配置
+另有标记：`conflict`（+`conflict_peer`，展示为 `blocked`）、`needs_amend`（待修订）、
+`stale`（提案 rev 过期）、`gate_rev`（门禁绑定 revision）。
 
-- **静态默认**：`data/config.json`（schema `agent-config.json`，`ygg.data` 装载期快照）
-- **动态覆盖**：KV `settings.*`（`config.set` 写入）——如 `config.set play.mode=goal`
-- **判定**：动态覆盖 > 静态默认
+**两个强制门禁**（真实状态 + 动作约束，goal 也不能跳）：
 
-### `play.mode`：`goal` 挂机 / `guide` 逐步确认（缺省 `guide`）
+1. `plan_gate`：`gate.approve` → `ready`；`gate.reject` → `planning`（重做）。
+2. `accept` → accept_gate：`gate.approve` 要求 **artifacts 非空** → `done`；`gate.reject` → `ready`（重进开发队列）。
+   两者都校验 `gate_rev == req.rev`，待批期间被 amend 即判 stale，不得批准。
 
-| 值 | 含义 | 每阶段提示词面（两版取一） |
+## 三、提案协议（subagent 只建议，不改共享状态）
+
+```text
+proposal.submit  "r1|1|analysis|summary|artifacts[|changes[|external_id]]"
+proposal.accept  "pN" / "rN" / ""      → 空 = requirement_id canonical 序取一条（串行验收）
+proposal.reject  "pN|理由" / "rN|理由" / ""
+```
+
+- `stage ∈ analysis | plan | development`，必须与需求当前状态匹配（`analyzing` / `planning`(job) / `developing`）。
+- `changes` 是**拟议变更**，验收时才应用：`split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`。
+- 验收时 `rev ≠ req.<i>.rev` → 提案置 `stale`、需求置 `stale` 标记，可读拒绝（旧提案不得覆盖新决定；
+  重提新 rev 即可）。`external_id` 幂等（`【提案重放】`）。
+- 多个需求可以同时在 analyze / plan / develop（job 上限 4），**验收一次只处理一条需求**。
+
+## 四、主 Agent 的需求图命令（串行）
+
+| 动作 | 载荷 | 说明 |
 | --- | --- | --- |
-| `guide`（缺省） | 每一步推进都要人选择/提交，Mod 不自动连跑 | `逐步确认（guide）：…**这一步由你确认后提交**…` |
-| `goal` | 宿主（CLI 交互模式）免 stdin 自动推进到结局并自动结算 | `挂机（goal）：无需确认——宿主自动…` |
+| `requirement.split` | `父id\|子A\|子B[|…]` | 父置 `split`，子需求 `draft` 并**继承父依赖**（≥2 子） |
+| `requirement.merge` | `id1,id2\|标题\|描述` | 源置 `merged`（`into` 指向新需求），新需求依赖取**并集** |
+| `requirement.amend` | `id\|标题\|描述\|依赖` | rev+1；`draft/planning/ready` 直改、开发中只改说明、`done` **派生新需求** |
+| `requirement.conflict` | `id1,id2\|说明` | 双向标 `blocked`；冲突需求不派活、不许收口 |
+| `requirement.resolve` | `id1,id2\|keep_both\|keep_first\|revise` | 保留双方 / 放弃第二条 / 保留但置待修订 |
 
-- 每个阶段各有两版文案（`data/scenes.json` 的 `beats.<stage>_guide` / `beats.<stage>_goal`），
-  按该阶段动作写（立项要人确认提交描述、切片要人确认计划与上报、门禁要人确认结果…），
-  不是一句全局套话；局末另有 `beats.play_done_goal` 说明本局是挂机跑完的。
-- 每阶段回执顶部固定一行 `【运行模式】play.mode = …`（拒绝回执与局末也带）——当前模式始终可见。
-- 模式只改**提示词与宿主推进节奏**：状态机、动作协议、只读动作（`config.set` / `map.show`）
-  行为完全不变；查询类动作在两种模式下都可用。
-- 宿主（`examples/agent.rs`）**每步现读**（静态 `data/config.json` → 最新 autosave 的 KV
-  `settings.play.mode`）：guide 阶段 `config.set play.mode=goal` 下一步即生效，转入挂机直到结局。
-- 合法性：`play.mode` 只认 `goal` / `guide`，其他值走 `【载荷被拒】`（KV 不写、状态不变）。
+终态（`split`/`merged`/`dropped`）不再接受修订与冲突；`coordinate.submit` 会把拆并的**后继**一并要求 done。
 
-配置控制状态流转的三处实证：
+## 五、job 槽位与开发泳道
 
-1. `play.mode` 决定推进节奏：`goal` = 宿主自动按推荐主动作推进到结局，`guide` = 每步都要人确认；
-   每个阶段的提示词与 `【运行模式】` 行都跟着变。
-2. `gates.require_all_green=false` → `verify.submit all_green=false` 也放行进 review
-   （回执注明宽放路径）；`true` → 打回 implement，退回最后一片重做。
-3. `evolution.mode` 决定局末复盘的修订回执：`auto` 已在白名单（prompts/beats）内
-   登记自动修订请求、`suggest` 产出建议包、`off` 仅报告；额度由 `evolution.max_per_run`
-   约束（运行期可用 `config.set evolution.max_per_run=<0-8>` 改），进入复盘的瞬间
-   结算（`evolution.requested` 落 KV，不随后续 `config.set` 抖动）。`auto` 仅登记
-   宿主可执行的自动修订请求；真实 revise 执行面待接，内核无 IO 不改文件。
+- `tuning.job_capacity`（默认 4）：分析 / 规划 / 开发共用 job 槽位（`req.<i>.job` 非空即占用）。
+- 开发额外占 lane（`lane.<k>.req`）；只有「`ready` ∧ 依赖全部满足 ∧ 无冲突 ∧ 不需要修订」的需求能进开发。
+- 相互声明冲突的需求不可能同时 `developing`（冲突标记让两者都不可调度）。
+- **内核仍单线程 dispatch + 单 autosave**：泳道只是宿主侧并行工作单元，结果一律经 inbox 回来，
+  宿主按 `requirement_id` / `external_id` canonical 序合流。
 
-## 文件
+## 六、增量配置
+
+- 静态 `data/config.json` + 动态 KV `settings.*`（`config.set`）：`play.mode`（guide/goal）、
+  `gates.require_all_green`、`evolution.mode` / `evolution.max_per_run`。
+- `tuning`：`req_capacity`（需求上限 32）、`job_capacity`（4）、`min_slices` / `max_slices`（历史遗留）、
+  `default_score`。
+
+## 七、文件
 
 | 文件 | 作用 |
 | --- | --- |
-| `mod.lua` | Mod 本体：状态机（含节点图表）/ 动作协议 / 渲染 / 两层配置（含 `play.mode`） |
-| `pack.json` / `manifest.json` | 打包声明与内容寻址清单（`cargo run --example pack` 生成） |
-| `data/scenes.json` | 六节文本资源（scenes/endings/prompts/options/beats/tuning） |
+| `mod.lua` | Mod 本体：协调器 FSM / 需求流水线 / 提案与门禁 / 泳道 / 渲染 / 解析 |
+| `data/scenes.json` | 文本资源（scenes / endings / prompts / options / beats / tuning） |
+| `data/playbook.json` | 现场规则资源（`guide.show` 按 section id 取用） |
 | `data/config.json` | 静态配置默认值 |
+| `pack.json` / `manifest.json` | 打包声明与内容寻址清单（`cargo run --example pack` 生成） |
 | `schemas/*.json` | 资源 schema（与 `packages/schema/schemas/` 单源一致） |
+
+## 八、走查
+
+```bash
+# 默认全 1 贪心：intake → coordinate.submit → verify → review.note → 【结局
+cargo run --example playtest -- .ygg/mods/agent-seed
+
+# 多需求 multi-stage（外部提案 / goal 占位提案均可）：
+#   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
+#   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
+#   .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id t --runs-root .ygg/runs --resume
+
+# 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
+cargo run --example pack -- .ygg/mods/agent-seed
+```

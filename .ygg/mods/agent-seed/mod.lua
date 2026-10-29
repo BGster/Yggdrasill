@@ -1504,6 +1504,31 @@ local function accept_item()
   }
 end
 
+-- 两个强制门禁的菜单入口（canonical 序；approve 是主前进动作之一）
+local function gate_items()
+  local index = gate_next()
+  if index == nil then
+    return {}
+  end
+  local kind = gate_kind(index)
+  return {
+    {
+      text = fill(TEXTS.options.gate_approve, {
+        id = req_id(index),
+        kind = kind,
+        gates = tostring(gate_total()),
+      }),
+      action = "gate.approve",
+      payload = req_id(index),
+    },
+    {
+      text = fill(TEXTS.options.gate_reject, { id = req_id(index), kind = kind }),
+      action = "gate.reject",
+      payload = req_id(index) .. "|" .. TEXTS.beats.req_gate_reject_default,
+    },
+  }
+end
+
 MENU[STAGE.intake] = function()
   local items = append_all({}, resolve_items())
   items[#items + 1] = {
@@ -1523,11 +1548,14 @@ end
 
 MENU[STAGE.coordinate] = function()
   local items = append_all({}, resolve_items())
-  -- 主前进动作优先级：验收提案 > 派活 > 收口进 review（canonical 串行）。
+  -- 主前进动作优先级：验收提案 > 过门禁 > 派活 > 收口进 review（canonical 串行）。
   local accept = accept_item()
+  local gates = gate_items()
   local dispatch = dispatch_item()
   if accept ~= nil then
     items[#items + 1] = accept
+  elseif #gates > 0 then
+    items = append_all(items, gates)
   elseif dispatch ~= nil then
     items[#items + 1] = dispatch
   else
@@ -1855,7 +1883,39 @@ local function parse_requirement(payload)
   return title, description, ext, parse_deps(dep_raw), nil
 end
 
--- proposal.submit：req_id|revision|stage|summary|artifacts[|changes]
+-- 载荷末尾可选 `|@ext=<external_id>`：CLI inbox 注入的幂等键（手写单发可省略）。
+local function strip_ext(payload)
+  if type(payload) ~= "string" then
+    return payload, ""
+  end
+  local marker = "|@ext="
+  local index = payload:find(marker, 1, true)
+  if index == nil then
+    return payload, ""
+  end
+  return payload:sub(1, index - 1), trim(payload:sub(index + #marker))
+end
+
+-- 异步重放：同一个 external_id 已经成功落地 → 幂等返回（不重复 amend / split / …）。
+-- cursor 崩溃安全的最后一道兵底：重启后重放同一行不会把状态推两次。
+local function inbox_replay(ext)
+  if type(ext) ~= "string" or ext == "" then
+    return false
+  end
+  if text_of("inbox.last", "") ~= ext then
+    return false
+  end
+  ygg.narrate(fill(TEXTS.beats.req_replayed_op, { ext = ext }))
+  return true
+end
+
+local function inbox_mark(ext)
+  if type(ext) == "string" and ext ~= "" then
+    ygg.kv.set("inbox.last", ext)
+  end
+end
+
+-- proposal.submit：req_id|revision|stage|summary|artifacts[|changes[|external_id]]
 local function parse_proposal(payload)
   if type(payload) ~= "string" then
     return nil, fill(TEXTS.beats.bad_payload, { action = "proposal.submit" })
@@ -1877,6 +1937,7 @@ local function parse_proposal(payload)
     summary = trim(parts[4] or ""),
     artifacts = trim(parts[5] or ""),
     changes = trim(parts[6] or ""),
+    ext = trim(parts[7] or ""),
   }, nil
 end
 
@@ -2440,6 +2501,12 @@ end)
 -- ---- 主 Agent 的需求图命令（串行；subagent 只能用 proposal 建议）--------
 
 ygg.on("requirement.split", function(payload)
+  local ext
+  payload, ext = strip_ext(payload)
+  if inbox_replay(ext) then
+    render()
+    return
+  end
   local parent_id, children, problem = parse_split(payload)
   if problem ~= nil then
     return reject_payload("requirement.split", problem)
@@ -2463,6 +2530,7 @@ ygg.on("requirement.split", function(payload)
   end
   local ids = req_do_split(parent, children)
   req_sync_conflicts()
+  inbox_mark(ext)
   ygg.narrate(fill(TEXTS.beats.req_split_ok, {
     id = req_id(parent),
     ids = join(ids, ","),
@@ -2472,6 +2540,12 @@ ygg.on("requirement.split", function(payload)
 end)
 
 ygg.on("requirement.merge", function(payload)
+  local ext
+  payload, ext = strip_ext(payload)
+  if inbox_replay(ext) then
+    render()
+    return
+  end
   local ids, title, description, problem = parse_merge(payload)
   if problem ~= nil then
     return reject_payload("requirement.merge", problem)
@@ -2498,6 +2572,7 @@ ygg.on("requirement.merge", function(payload)
   end
   local target, next_title, deps = req_do_merge(sources, title, description)
   req_sync_conflicts()
+  inbox_mark(ext)
   ygg.narrate(fill(TEXTS.beats.req_merge_ok, {
     ids = join(ids, ","),
     id = req_id(target),
@@ -2508,6 +2583,12 @@ ygg.on("requirement.merge", function(payload)
 end)
 
 ygg.on("requirement.amend", function(payload)
+  local ext
+  payload, ext = strip_ext(payload)
+  if inbox_replay(ext) then
+    render()
+    return
+  end
   local id, title, description, dep_raw, problem = parse_amend(payload)
   if problem ~= nil then
     return reject_payload("requirement.amend", problem)
@@ -2538,6 +2619,7 @@ ygg.on("requirement.amend", function(payload)
     local created = req_append(next_title, next_desc, "", deps, req_id(index))
     local rev = req_bump_rev(index)
     req_push_history(index, fill(TEXTS.beats.req_amend_derive_hist, { rev = tostring(rev), id = req_id(created) }))
+    inbox_mark(ext)
     ygg.narrate(fill(TEXTS.beats.req_amend_derived, {
       id = req_id(index),
       new = req_id(created),
@@ -2559,6 +2641,7 @@ ygg.on("requirement.amend", function(payload)
     end
     local rev = req_bump_rev(index)
     req_push_history(index, fill(TEXTS.beats.req_amend_hist_active, { rev = tostring(rev) }))
+    inbox_mark(ext)
     ygg.narrate(fill(TEXTS.beats.req_amend_active, { id = req_id(index), rev = tostring(rev) }))
     render()
     return
@@ -2584,6 +2667,7 @@ ygg.on("requirement.amend", function(payload)
   local rev = req_bump_rev(index)
   req_push_history(index, fill(TEXTS.beats.req_amend_hist, { rev = tostring(rev) }))
   req_sync_conflicts()
+  inbox_mark(ext)
   ygg.narrate(fill(TEXTS.beats.req_amend_ok, {
     id = req_id(index),
     rev = tostring(rev),
@@ -2594,6 +2678,12 @@ ygg.on("requirement.amend", function(payload)
 end)
 
 ygg.on("requirement.conflict", function(payload)
+  local ext
+  payload, ext = strip_ext(payload)
+  if inbox_replay(ext) then
+    render()
+    return
+  end
   local ids, note, problem = parse_conflict(payload)
   if problem ~= nil then
     return reject_payload("requirement.conflict", problem)
@@ -2630,6 +2720,7 @@ ygg.on("requirement.conflict", function(payload)
   end
   req_do_conflict(first, second, note)
   req_sync_conflicts()
+  inbox_mark(ext)
   ygg.narrate(fill(TEXTS.beats.req_conflict_ok, {
     first = req_id(first),
     second = req_id(second),
@@ -2640,6 +2731,12 @@ ygg.on("requirement.conflict", function(payload)
 end)
 
 ygg.on("requirement.resolve", function(payload)
+  local ext
+  payload, ext = strip_ext(payload)
+  if inbox_replay(ext) then
+    render()
+    return
+  end
   local ids, mode, note, problem = parse_resolve(payload)
   if problem ~= nil then
     return reject_payload("requirement.resolve", problem)
@@ -2693,6 +2790,7 @@ ygg.on("requirement.resolve", function(payload)
     effect = TEXTS.beats.req_resolve_kept
   end
   req_sync_conflicts()
+  inbox_mark(ext)
   ygg.narrate(fill(TEXTS.beats.req_resolve_ok, {
     first = req_id(first),
     second = req_id(second),
