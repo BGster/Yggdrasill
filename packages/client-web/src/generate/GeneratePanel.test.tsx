@@ -156,6 +156,23 @@ describe("GeneratePanel — 终态", () => {
   });
 });
 
+describe("GeneratePanel — 修改入口（A5）", () => {
+  it("idle 不挂修改面板；done 后出现修订区并带产物 slug", async () => {
+    render(<GeneratePanel run={fakeRun([{ type: "done", slug: "lighthouse-keeper" }])} />);
+    expect(screen.queryByRole("region", { name: "修改作品" })).toBeNull();
+    submit("灯塔");
+    await screen.findByRole("link", { name: "开始游玩" });
+    expect(screen.getByRole("region", { name: "修改作品" })).toBeTruthy();
+    expect(screen.getByText("lighthouse-keeper")).toBeTruthy();
+  });
+
+  it("initialSlug（?mod= 入口）→ 不必先生成就能提修改意见", () => {
+    render(<GeneratePanel run={fakeRun([])} initialSlug="lighthouse-keeper" />);
+    expect(screen.getByRole("region", { name: "修改作品" })).toBeTruthy();
+    expect(screen.getByText("lighthouse-keeper")).toBeTruthy();
+  });
+});
+
 describe("progressPercent（纯函数）", () => {
   it("idle/零 token → 0；运行中封顶 99；done → 100", () => {
     expect(progressPercent(initialGenerateState())).toBe(0);

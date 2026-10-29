@@ -20,16 +20,18 @@
 // （esbuild 会把 ./x.js 解析到 x.ts），bare import（ajv）由 vite 按 importer 位置
 // 改写成绝对 file URL——所以 ajv 从 packages/pipeline 自己的 node_modules 解析，
 // 不需要 client-web 声明该依赖。
+//
+// A5：请求体读取 / JSON 回包 / LLM 装配 / 错误投影抽到 vite.dev-endpoint.ts
+// （与 /__revise 共用一份 redact 实现——凭据边界的单点）。
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
-import { loadDotEnv, readLlmEnv } from "../pipeline/src/env.js";
-import { createProvider } from "../pipeline/src/provider.js";
 import { generate } from "../pipeline/src/repair.js";
 import { execRunner } from "../pipeline/src/runner.js";
-import type { GateIssue, GenerateProgress } from "../pipeline/src/types.js";
-import type { GenerateEvent, GenerateIssueView } from "./src/generate/protocol";
+import type { GenerateProgress } from "../pipeline/src/types.js";
+import { describeError, loadLlmProvider, readJsonBody, sendJson, toIssueView } from "./vite.dev-endpoint";
+import type { GenerateEvent } from "./src/generate/protocol";
 
 export const GENERATE_ENDPOINT = "/__generate";
 
@@ -41,29 +43,6 @@ const EMIT_INTERVAL_MS = 120;
 
 /** 仓库根（本文件在 packages/client-web/ 下）。 */
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-
-/** 请求体读取（上限 1MB；超限即拒）。 */
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
-    size += buffer.length;
-    if (size > 1024 * 1024) {
-      throw new Error("请求体过大");
-    }
-    chunks.push(buffer);
-  }
-  const text = Buffer.concat(chunks).toString("utf8");
-  if (text.length === 0) {
-    return null;
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new Error("请求体不是合法 JSON");
-  }
-}
 
 /** SSE 输出面：客户端断开后静默丢弃（不让写入异常冒到 connect）。 */
 function openSse(response: ServerResponse, isClientGone: () => boolean): {
@@ -96,12 +75,6 @@ function openSse(response: ServerResponse, isClientGone: () => boolean): {
   };
 }
 
-/** 门错误 → wire 投影（只留可展示字段；行号折进 file，丢掉 hint/severity）。 */
-function toIssueView(issue: GateIssue): GenerateIssueView {
-  const location = issue.line !== undefined ? `${issue.file}:${issue.line}` : issue.file;
-  return { gate: issue.gate, code: issue.code, file: location, message: issue.message };
-}
-
 /** dev-only 生成端点插件（vite.config.ts plugins 挂载）。 */
 export function generateMiddleware(): Plugin {
   return {
@@ -122,14 +95,8 @@ async function handleGenerate(
   response: ServerResponse,
   log: (message: string) => void,
 ): Promise<void> {
-  const sendJson = (status: number, body: unknown): void => {
-    response.statusCode = status;
-    response.setHeader("content-type", "application/json; charset=utf-8");
-    response.end(JSON.stringify(body));
-  };
-
   if (request.method !== "POST") {
-    sendJson(405, { error: "只接受 POST" });
+    sendJson(response, 405, { error: "只接受 POST" });
     return;
   }
 
@@ -138,16 +105,16 @@ async function handleGenerate(
     const body = await readJsonBody(request);
     const candidate = (body as { story?: unknown } | null)?.story;
     if (typeof candidate !== "string" || candidate.trim().length === 0) {
-      sendJson(400, { error: "缺少 story（剧本描述）" });
+      sendJson(response, 400, { error: "缺少 story（剧本描述）" });
       return;
     }
     if (candidate.length > MAX_STORY_CHARS) {
-      sendJson(413, { error: `剧本描述过长（上限 ${MAX_STORY_CHARS} 字）` });
+      sendJson(response, 413, { error: `剧本描述过长（上限 ${MAX_STORY_CHARS} 字）` });
       return;
     }
     story = candidate.trim();
   } catch (error) {
-    sendJson(400, {
+    sendJson(response, 400, {
       error: `请求体不可用：${error instanceof Error ? error.message : String(error)}`,
     });
     return;
@@ -155,22 +122,12 @@ async function handleGenerate(
 
   // env 装配：只报键名（readLlmEnv 的契约），缺配置时给干净的 HTTP 错误而不是
   // 一条空 SSE 流——面板据此显示可操作的提示。
-  loadDotEnv();
-  const env = readLlmEnv();
-  if ("error" in env) {
-    sendJson(503, { error: env.error });
+  const llm = loadLlmProvider();
+  if ("error" in llm) {
+    sendJson(response, 503, { error: llm.error });
     return;
   }
-
-  // 凭据红线兜底：任何要外发的文本都不许带 apiKey 原值。
-  const redact = (text: string): string =>
-    env.apiKey.length > 0 ? text.split(env.apiKey).join("[redacted]") : text;
-
-  const provider = createProvider(env.protocol, {
-    baseUrl: env.baseUrl,
-    apiKey: env.apiKey,
-    model: env.model,
-  });
+  const { provider, redact } = llm;
 
   let clientGone = false;
   response.on("close", () => {
@@ -243,11 +200,7 @@ async function handleGenerate(
     }
   } catch (error) {
     // provider 错误自带「只含状态码」的契约；redact 只兜底不自证的上游文案。
-    sink.send({
-      type: "error",
-      message: redact(error instanceof Error ? error.message : String(error)),
-      issues: [],
-    });
+    sink.send({ type: "error", message: describeError(redact, error), issues: [] });
   } finally {
     sink.close();
   }

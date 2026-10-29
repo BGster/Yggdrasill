@@ -4,6 +4,10 @@
 // 已闭合场景文案）→ 完成后给「开始游玩」链接（?mod=generated/<slug>，走既有
 // mod-loader 装载路径，不新开路由）。
 //
+// A5 追加第四段：有了产物就挂「提出修改意见」面板（RevisePanel）——done 之后
+// 针对本次 slug 迭代；?mod=generated/<slug> 进来时（initialSlug）针对 URL 里的
+// 作品迭代，两处落的是同一个面板实例语义。
+//
 // 边界：面板只与 /__generate 的 SSE 事件面耦合（protocol.ts）；LLM 凭据只在
 // vite 进程侧，浏览器侧全程不接触。run 可注入（测试用假流，不触网）。
 import { useCallback, useState } from "react";
@@ -16,6 +20,7 @@ import {
   startGenerate,
   type GenerateState,
 } from "./state";
+import { RevisePanel } from "../revise/RevisePanel";
 
 /** 进度条的「软满格」token 数：生成体量随故事浮动，这里只做量级参照。 */
 const PROGRESS_TOKEN_HORIZON = 4000;
@@ -39,10 +44,19 @@ export function progressPercent(state: GenerateState): number {
   return Math.min(99, Math.round((state.tokens / PROGRESS_TOKEN_HORIZON) * 100));
 }
 
-export function GeneratePanel({ run = defaultRun }: { run?: RunGenerateStream }) {
+export function GeneratePanel({
+  run = defaultRun,
+  initialSlug = null,
+}: {
+  run?: RunGenerateStream;
+  /** ?mod=generated/<slug> 进来的作品：不必先生成就能直接提修改意见。 */
+  initialSlug?: string | null;
+}) {
   const [story, setStory] = useState("");
   const [state, setState] = useState<GenerateState>(initialGenerateState);
   const running = state.phase === "running";
+  // 修改对象：本次生成产物优先，其次 URL 指定的既有作品（重跑期间不漂移）。
+  const reviseSlug = state.phase === "done" ? state.slug : initialSlug;
   const submit = useCallback(() => {
     const text = story.trim();
     if (text.length === 0 || running) {
@@ -168,6 +182,11 @@ export function GeneratePanel({ run = defaultRun }: { run?: RunGenerateStream })
         </p>
       )}
 
+      {reviseSlug !== null && (
+        // key：换作品必须换面板实例（否则上一轮的摘要/勾选会串到新作品上）。
+        <RevisePanel key={reviseSlug} slug={reviseSlug} />
+      )}
+
       {state.phase === "error" && (
         <div className="error-box" role="alert">
           <p className="gen-error-line">
@@ -186,7 +205,7 @@ export function GeneratePanel({ run = defaultRun }: { run?: RunGenerateStream })
       )}
 
       <footer className="panel-footer">
-        生成端点 /__generate 仅在 vite dev 时存在（生产构建无此面）
+        生成端点 /__generate 与修改端点 /__revise 仅在 vite dev 时存在（生产构建无此面）
       </footer>
     </main>
   );

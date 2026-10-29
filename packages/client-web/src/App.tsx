@@ -261,6 +261,22 @@ function initialSource(): KernelSource {
   return isMockForced(window.location.search) ? replaySource(false, null) : { phase: "loading" };
 }
 
+/**
+ * 游玩面顶部：生成作品的自证条 + 修改入口（A5）。
+ * 为什么是链接而不是切视图按钮：改一个作品要重新装载 Mod 与重开存档键，
+ * 跨页导航（?gen=1&mod=…）天然承担这件事，也把 slug 带到生成面。
+ */
+export function GeneratedModBanner({ slug }: { slug: string }) {
+  return (
+    <div className="mode-banner" role="status">
+      正在游玩生成作品「{slug}」 ·{" "}
+      <a className="play-link" href={`?gen=1&mod=generated/${slug}`}>
+        修改此作品
+      </a>
+    </div>
+  );
+}
+
 /** 顶层视图：游戏面板 / AI 生成面板（?gen=1 或 ?generate=1 直达后者）。 */
 export type AppView = "play" | "generate";
 
@@ -277,6 +293,7 @@ export function viewFromSearch(search: string): AppView {
  */
 function PlaySurface() {
   const { source, generation, restart } = useKernelSource();
+  const modSlug = generatedModSlug(window.location.search);
 
   if (source.phase === "loading") {
     return (
@@ -289,6 +306,7 @@ function PlaySurface() {
 
   return (
     <>
+      {modSlug !== null && <GeneratedModBanner slug={modSlug} />}
       {source.degraded && (
         <div className="mode-banner" role="status">
           wasm 不可用，回放模式
@@ -345,7 +363,7 @@ export default function App() {
       )}
       {mountedViews.has("generate") && (
         <div className="view-surface" hidden={view !== "generate"}>
-          <GeneratePanel />
+          <GeneratePanel initialSlug={generatedModSlug(window.location.search)} />
         </div>
       )}
     </>

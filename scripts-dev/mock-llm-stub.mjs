@@ -100,6 +100,64 @@ function pickStory(userContent) {
   return withPadding(STORIES.lighthouse);
 }
 
+// ── A5：revise 轮（prompt 含「## 修改意见」）→ 在基线上做确定性定向修改 ──────
+//
+// 为什么需要这一段：revise 的 user prompt 里已经包含整段 story JSON（基线），
+// 而它几乎必然包含「灯塔」等关键词——直接用 pickStory 会把 revise 变成
+// 「重新生成同一个故事」（恒空 diff）。所以先识别 revise 轮，解析出基线与意见，
+// 再按意见做**确定的、可复现的**改动：
+// - 总是给首个场景追加一句带意见摘要的尾巴→ 内容变更（scenes.scenes.<key>）；
+// - 意见提到 lua → 额外追加一行 Lua 注释→ mod.lua 变更（实测 REVISE_LUA_FROZEN
+//   拒绝面与 --allow-lua 放行面）。
+// 两条都不会破坏 story 契约 / ygg-lint 三规则 / playtest 可通关性。
+const REVISE_MARKER = "## 修改意见（本轮唯一的改动依据）";
+const PRIOR_MARKER = "## 现有 Mod（当前磁盘产物，即修改基线）";
+
+function parseRevisePrompt(userContent) {
+  if (typeof userContent !== "string" || !userContent.includes(REVISE_MARKER)) {
+    return null;
+  }
+  const feedback = userContent
+    .slice(userContent.indexOf(REVISE_MARKER) + REVISE_MARKER.length)
+    .split(PRIOR_MARKER)[0]
+    .trim();
+  const priorAt = userContent.indexOf(PRIOR_MARKER);
+  const fenceStart = priorAt < 0 ? -1 : userContent.indexOf("```json", priorAt);
+  const fenceEnd = fenceStart < 0 ? -1 : userContent.indexOf("```", fenceStart + 7);
+  if (fenceStart < 0 || fenceEnd < 0) {
+    return null;
+  }
+  try {
+    return { feedback, prior: JSON.parse(userContent.slice(fenceStart + 7, fenceEnd).trim()) };
+  } catch {
+    return null; // 基线解析失败 → 回退 pickStory（不至于把 mock 打吐）
+  }
+}
+
+/** 意见摘要（单行 + 截断）：写进场景文案尾巴，便于肉眼辨认改动来源。 */
+function feedbackSnippet(text) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const LIMIT = 24;
+  return flat.length > LIMIT ? `${flat.slice(0, LIMIT)}…` : flat;
+}
+
+function reviseStory(userContent) {
+  const parsed = parseRevisePrompt(userContent);
+  if (parsed === null || typeof parsed.prior !== "object" || parsed.prior === null) {
+    return null;
+  }
+  const next = structuredClone(parsed.prior);
+  const firstKey = Object.keys(next?.scenes?.scenes ?? {})[0];
+  if (firstKey !== undefined) {
+    next.scenes.scenes[firstKey] =
+      `${next.scenes.scenes[firstKey]}（已按意见调整：${feedbackSnippet(parsed.feedback)}）`;
+  }
+  if (/lua/i.test(parsed.feedback) && typeof next.modLua === "string") {
+    next.modLua = `${next.modLua}-- A5 mock：按意见调整（结构面）\n`;
+  }
+  return next;
+}
+
 /**
  * 可选垫长（MOCK_LLM_PAD_CHARS）：把首个场景文案按确定性句子重复到指定字符数。
  * 用途：A2 进度演示需要跨多个千 token 桶的长输出（默认 0 = 不垫，行为不变）。
@@ -168,7 +226,8 @@ createServer((req, res) => {
     } catch {
       // 解析失败按缺省故事处理（mock 不做严格校验）。
     }
-    const story = pickStory(user);
+    // revise 轮优先：它有明确的基线（见 reviseStory 注释），不能走 pickStory。
+    const story = reviseStory(user) ?? pickStory(user);
     const content = JSON.stringify(story, null, 2);
     if (wantsStream(body)) {
       void streamStory(res, content);

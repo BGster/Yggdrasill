@@ -3,7 +3,7 @@
 // 下走 stub → 自动降级回放，确定性不变）。
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import App, { viewFromSearch } from "./App";
+import App, { GeneratedModBanner, viewFromSearch } from "./App";
 
 afterEach(() => {
   cleanup();
@@ -39,5 +39,16 @@ describe("App 视图切换", () => {
     render(<App />);
     expect(await screen.findByLabelText("剧本描述")).toBeTruthy();
     expect(screen.queryByRole("log")).toBeNull();
+  });
+});
+
+// A5：?mod=generated/<slug> 游玩页的「修改此作品」入口——链接式导航（不是切视图
+// 按钮）：改一个作品要重新装载 Mod 与重开存档键，跨页导航天然承担这件事。
+describe("GeneratedModBanner（游玩面修改入口）", () => {
+  it("展示当前作品 slug；链接带 ?gen=1 + 同一 mod 参数", () => {
+    render(<GeneratedModBanner slug="lighthouse-keeper" />);
+    expect(screen.getByRole("status").textContent).toContain("lighthouse-keeper");
+    const link = screen.getByRole("link", { name: "修改此作品" }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("?gen=1&mod=generated/lighthouse-keeper");
   });
 });
