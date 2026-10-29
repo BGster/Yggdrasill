@@ -73,6 +73,7 @@
 3. **每步自动存档**：每事件后自动 save（host 薄策略）
 4. **类肉鸽进化**：一局=一个任务全流程；局末存档+报告 → 经验压缩 → revise 修订 Mod（A4 diff 白名单直接复用）
 5. **冷启动 seed mod**：通用元工作流 Mod（intake→decompose→implement→verify→review→done），新 Agent 零定制接入
+6. **配置与成长产物入库红线**：游戏设置（静态 `data/config.json` 与动态 `settings.*`）及成长/演进 Mod 均可入库，**只存非敏感行为开关、数值与经验文本**；LLM key、token、连接串、subagent 模型参数等敏感信息只存本地 `.env` / `.env.local`（gitignore），入库资源与报告只允许出现键名（2026-10-29 用户补充）
 
 **架构前提**：不动 ygg-core——全部能力在 host/CLI/内容层生长（D17 actor 语义天然契合 Agent 隔离）。
 
