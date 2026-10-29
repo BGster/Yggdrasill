@@ -28,6 +28,7 @@
 --   review.note   "lesson|score(1-5)"                        review    → done（局末【结局）
 --   config.set    "settings.<key>=<value>"                    任意态（常驻动作，不改主状态）
 --   guide.show    "<section id>"（空 = 本阶段默认节）          任意态（常驻动作，不改主状态）
+--   map.show      "" / 0 / "full"（剧情 = 本六态节点图）       任意态（常驻动作，不改主状态）
 --
 -- 时序纪律（两条内核语义，实证沉淀）：
 --   1. `ygg.choice` 是 handler 的**最后一个输出**（终结语义）——本文件一律
@@ -292,6 +293,152 @@ local function verify_state_word()
 end
 
 -- ============================================================================
+-- §地图 剧情节点图 = 六态工作流的**单源**：节点有序表 + 带动作名的边表。
+-- 本 Mod 的「剧情」就是这张状态机图，故 map.show 直接由这两张表渲染 ASCII
+-- 图——不额外加资源/Schema（图是代码里的结构事实，不是可编辑的故事内容）。
+-- 常驻动作（config.set / guide.show / map.show）不属于主图，图末一行另注。
+-- 渲染只读 KV（fsm.stage / plan.*），不写任何状态（同一步重渲染不漂移）。
+-- ============================================================================
+local MAP_NODES = {
+  STAGE.intake,
+  STAGE.decompose,
+  STAGE.implement,
+  STAGE.verify,
+  STAGE.review,
+  STAGE.done,
+}
+
+-- note = beats 里的注记键名（缺省 = 无注记）；边序即渲染序（先主轴后分支）。
+local MAP_EDGES = {
+  { from = STAGE.intake, to = STAGE.decompose, action = "task.intake" },
+  { from = STAGE.decompose, to = STAGE.implement, action = "plan.submit" },
+  {
+    from = STAGE.implement,
+    to = STAGE.implement,
+    action = "slice.report",
+    note = "map_note_partial",
+  },
+  {
+    from = STAGE.implement,
+    to = STAGE.verify,
+    action = "slice.report",
+    note = "map_note_all",
+  },
+  { from = STAGE.verify, to = STAGE.review, action = "verify.submit=true" },
+  {
+    from = STAGE.verify,
+    to = STAGE.implement,
+    action = "verify.submit=false",
+    note = "map_note_back",
+  },
+  { from = STAGE.review, to = STAGE.done, action = "review.note", note = "map_note_ending" },
+}
+
+-- 标签列宽 = `[最长节点名]`，供多出边的续行做左对齐缩进。
+local MAP_LABEL_WIDTH = 0
+for i = 1, #MAP_NODES do
+  local width = #MAP_NODES[i] + 2
+  if width > MAP_LABEL_WIDTH then
+    MAP_LABEL_WIDTH = width
+  end
+end
+
+-- 沙箱不暴露 string 库的静态面（只经字符串元表可达）——自备空格填充。
+local function spaces(count)
+  local out = ""
+  for _ = 1, count do
+    out = out .. " "
+  end
+  return out
+end
+
+local function pad_label(label)
+  return label .. spaces(MAP_LABEL_WIDTH - #label)
+end
+
+local function out_edges(node)
+  local out = {}
+  for i = 1, #MAP_EDGES do
+    if MAP_EDGES[i].from == node then
+      out[#out + 1] = MAP_EDGES[i]
+    end
+  end
+  return out
+end
+
+-- 全图渲染：表头（当前节点 + 若有计划则附进度）→ 逐节点出边（当前节点行
+-- 加 `▶` 标记，多出边用 ├─/└─ 分行）→ 无出边节点收口行 → 常驻动作注记。
+local function narrate_map(current)
+  local progress = ""
+  if plan_count() > 0 then
+    progress = fill(TEXTS.beats.map_progress, {
+      done = tostring(plan_done()),
+      count = tostring(plan_count()),
+    })
+  end
+  ygg.narrate(fill(TEXTS.beats.map_head, { stage = current, progress = progress }))
+  local blank = spaces(MAP_LABEL_WIDTH)
+  for i = 1, #MAP_NODES do
+    local node = MAP_NODES[i]
+    local mark = spaces(2)
+    if node == current then
+      mark = TEXTS.beats.map_mark
+    end
+    local label = pad_label("[" .. node .. "]")
+    local edges = out_edges(node)
+    if #edges == 0 then
+      ygg.narrate(fill(TEXTS.beats.map_row_leaf, {
+        mark = mark,
+        node = label,
+        branch = TEXTS.beats.map_branch_single,
+        text = TEXTS.beats.map_terminal,
+      }))
+    end
+    for j = 1, #edges do
+      local edge = edges[j]
+      local branch = TEXTS.beats.map_branch_single
+      if #edges > 1 then
+        if j == #edges then
+          branch = TEXTS.beats.map_branch_last
+        else
+          branch = TEXTS.beats.map_branch_first
+        end
+      end
+      local note = ""
+      if edge.note ~= nil then
+        note = TEXTS.beats[edge.note]
+      end
+      local lead = spaces(2)
+      if j == 1 then
+        lead = mark
+      end
+      local head = blank
+      if j == 1 then
+        head = label
+      end
+      ygg.narrate(fill(TEXTS.beats.map_row, {
+        mark = lead,
+        node = head,
+        branch = branch,
+        action = edge.action,
+        target = "[" .. edge.to .. "]",
+        note = note,
+      }))
+    end
+  end
+  ygg.narrate(TEXTS.beats.map_foot)
+end
+
+-- 菜单入口：与 guide.show 同为常驻只读动作（载荷 "full" = 全图）。
+local function map_item(st)
+  return {
+    text = fill(TEXTS.options.map, { stage = st }),
+    action = "map.show",
+    payload = "full",
+  }
+end
+
+-- ============================================================================
 -- §指南 现场规则（ygg:agent/playbook）——AGENTS.md 迁移来的规则资源。
 -- sections 是**有序数组**（Lua table 遍历序不稳定，顺序由 order 字段承载），
 -- 此处建 id→section 索引供 guide.show 直取，并按阶段轮换默认节：每阶段回执
@@ -488,8 +635,9 @@ end
 -- ============================================================================
 -- §菜单 选项文本 ↔ 动作载荷的**单一来源**：同一张 MENU 表既产出 pendingChoice
 -- 的选项文案，又决定选中序号对应的动作与默认载荷（杜绝文案/动作漂移）。
--- 规则：每态第一条 = 主前进动作（全 1 贪心走查可通关）；guide.show 紧随主前进
--- 动作（verify 态排在其失败分支之后），config.set 常驻且置末。
+-- 规则：每态第一条 = 主前进动作（全 1 贪心走查可通关）；guide.show → map.show
+-- 依次紧随主前进动作（verify 态排在其失败分支之后），config.set 常驻且置末。
+-- 顺序即契约：两个只读动作排在 config.set 之前，改配置永远是最后一档。
 -- ============================================================================
 local MENU = {}
 
@@ -523,6 +671,7 @@ MENU[STAGE.intake] = function()
       payload = TEXTS.beats.default_task_title .. "|" .. TEXTS.beats.default_task_desc,
     },
     guide_item(STAGE.intake),
+    map_item(STAGE.intake),
     config_evolution_item(),
     config_gates_item(),
   }
@@ -536,6 +685,7 @@ MENU[STAGE.decompose] = function()
       payload = TEXTS.beats.default_plan,
     },
     guide_item(STAGE.decompose),
+    map_item(STAGE.decompose),
     config_evolution_item(),
     config_gates_item(),
   }
@@ -550,6 +700,7 @@ MENU[STAGE.implement] = function()
       payload = id .. "|" .. TEXTS.beats.default_summary .. "|" .. TEXTS.beats.default_artifacts,
     },
     guide_item(STAGE.implement),
+    map_item(STAGE.implement),
     config_evolution_item(),
     config_gates_item(),
   }
@@ -565,6 +716,7 @@ MENU[STAGE.verify] = function()
       payload = "all_green=false;report=" .. TEXTS.beats.default_gate_report,
     },
     guide_item(STAGE.verify),
+    map_item(STAGE.verify),
     config_gates_item(),
     config_evolution_item(),
   }
@@ -578,6 +730,7 @@ MENU[STAGE.review] = function()
       payload = TEXTS.beats.default_lesson .. "|" .. tostring(TEXTS.tuning.default_score),
     },
     guide_item(STAGE.review),
+    map_item(STAGE.review),
     config_evolution_item(),
     config_gates_item(),
   }
@@ -1224,6 +1377,38 @@ ygg.on("guide.show", function(payload)
     end
   end
   narrate_guide(id) -- 非法 id 时该函数自己 narrate 合法清单（不改变状态）
+  render()
+end)
+
+-- ============================================================================
+-- §地图动作 map.show（常驻只读动作，任意主状态可用）：本 Mod 的「剧情」= 六态
+-- 工作流，故地图 = 上面 §地图 的节点/边表渲染出的 ASCII 图。
+-- 载荷只接空 / 0 / "full"（三者为同一张全图，不做局部视图）；其余载荷回执
+-- 用法后原样重渲染——与 config.set / guide.show 一样**不吞主前进动作**。
+-- ============================================================================
+local function map_payload_ok(payload)
+  if payload == nil then
+    return true
+  end
+  if type(payload) == "number" then
+    return payload == 0 -- 内核 --payload 缺省值就是 0
+  end
+  if type(payload) == "string" then
+    local raw = trim(payload)
+    return raw == "" or raw == "0" or raw == "full"
+  end
+  return false
+end
+
+ygg.on("map.show", function(payload)
+  if map_payload_ok(payload) then
+    narrate_map(stage())
+  else
+    ygg.narrate(fill(TEXTS.beats.map_rejected, {
+      got = tostring(payload),
+      usage = TEXTS.beats.map_usage,
+    }))
+  end
   render()
 end)
 

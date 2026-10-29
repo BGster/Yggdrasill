@@ -64,6 +64,7 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `review.note` | `'"lesson\|4"'`（评分 1–5，缺省 3） | review → done（叙事以 `【结局` 收口） |
 | `config.set` | `'"gates.require_all_green=false"'`、`'"evolution.mode=suggest"'`（`settings.` 前缀可省） | 任意阶段，**不改变**主状态 |
 | `guide.show` | `'"credentials"'`；`'""'` = 本阶段默认节 | 任意阶段，**不改变**主状态 |
+| `map.show` | `'""'` / `'"0"'` / `'"full"'`（三者同一张全图） | 任意阶段，**不改变**主状态 |
 
 - 越阶动作（当前阶段不允许）→ `【动作被拒】` + 当前阶段允许动作清单；载荷不合法 → `【载荷被拒】` + 原因。
   两种拒绝都**原地重渲染**（主状态不变、pendingChoice 保持），改对载荷重发即可。
@@ -71,7 +72,7 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 
 ---
 
-## 4. 查规则：`guide.show`
+## 4. 查规则与节点图：`guide.show` · `map.show`
 
 ```bash
 .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task \
@@ -95,6 +96,37 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
   | `review` | `evidence` / `hard_constraints`（按计划规模） |
 
 - 想一次看全：连续 `guide.show` 12 个 id，或直接读 `.ygg/mods/agent-seed/data/playbook.json`。
+
+### 看节点图：`map.show`
+
+本 Mod 的「剧情」就是那台六态工作流，`map.show` 把它渲染成一张节点图（节点 + 带动作名的边），
+常驻只读——不推进任何状态。
+
+```bash
+.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task \
+  --runs-root .ygg/runs --resume --event map.show --payload '"full"'
+```
+
+```text
+【剧情节点图 · 六态工作流】当前 >> [implement] << ← 你在这里｜进度 1/3 片
+  [intake]    ──task.intake──▶ [decompose]
+  [decompose] ──plan.submit──▶ [implement]
+▶ [implement] ├─slice.report──▶ [implement]（非最后一片，同态继续）
+              └─slice.report──▶ [verify]（全部切片后）
+  [verify]    ├─verify.submit=true──▶ [review]
+              └─verify.submit=false──▶ [implement]（打回，重做最后一片）
+  [review]    ──review.note──▶ [done]（局末【结局）
+  [done]      ──（局末·无出边）
+常驻动作（不推进主图，任意阶段可用）：config.set · guide.show · map.show——任务/切片/门禁/配置一律不变
+```
+
+- 头行读三件事：`>> [<stage>] << ← 你在这里` = KV `fsm.stage` 的当前节点；`｜进度 X/Y 片` =
+  已上报切片 / 计划片数（`plan.submit` 之前不显示）；行首 `▶` = 当前节点的出边行
+  （`├─` / `└─` 是同一节点的分支，缩进行是续行）。
+- 载荷只接空 / `0` / `"full"`（同一个全图，不做局部视图）；其他值 → `【地图被拒】` + 用法，
+  主状态不变。看完照旧按 `pendingChoice` 继续——地图是旁挂只读，不占掉主前进动作。
+- `pendingChoice` 顺序固定为「主前进 → `guide.show` → `map.show` → `config.set`」，两个只读动作都
+  在改配置之前。
 
 ---
 

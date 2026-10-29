@@ -25,10 +25,11 @@
     "verify_fail": "verify.submit all_green=false —— 如实上报失败（载荷 \"all_green=false;report=…\"）",
     "review_note": "review.note —— 记录经验并收口（载荷 \"lesson|score(1-5)\"）",
     "config_evolution": "config.set —— 演进模式 {{mode}} → {{next}}（载荷 \"evolution.mode={{next}}\"）",
-    "config_gates": "config.set —— 门禁 require_all_green {{state}} → {{next}}（载荷 \"gates.require_all_green={{next}}\"）"
+    "config_gates": "config.set —— 门禁 require_all_green {{state}} → {{next}}（载荷 \"gates.require_all_green={{next}}\"）",
+    "map": "map.show —— 看剧情节点图（本 Mod 的剧情 = 六态工作流；当前 {{stage}}）"
   },
   "beats": {
-    "prologue_guide": "你正在冷启动。当前允许的动作只有 pendingChoice 里列出的几项，选一个内核就推进一格；不在这张表里的动作会被拒绝且不改变状态。配置口径：演进 {{mode}}、门禁 {{gates}}——想改就先选 config.set。",
+    "prologue_guide": "你正在冷启动。当前允许的动作只有 pendingChoice 里列出的几项，选一个内核就推进一格；不在这张表里的动作会被拒绝且不改变状态。配置口径：演进 {{mode}}、门禁 {{gates}}——想改就先选 config.set。看不清位置就用 map.show 看一眼剧情（六态工作流）节点图。",
     "intake_guide": "你正在立项。把任务描述写成 \"title|description\" 一个字符串提交（竖线分隔；缺省部分自动补占位）。目标要一句话说完，边界要能挡住跑偏。",
     "decompose_guide": "你正在切片。切成 {{min}}–{{max}} 片，每片都必须能独立验收（一句话说清做了什么、怎么验证）。计划一旦提交就按序执行，不能跳片。",
     "implement_guide": "你正在执行切片 `{{slice_id}}`。做完立刻上报 slice.report：\"id|summary|artifacts\"（产物路径用半角逗号分隔）；顺序错了会被打回重报。当前策略口径：演进 {{mode}}。",
@@ -85,7 +86,23 @@
     "default_plan": "环境就绪; 核心实现; 门禁自检",
     "default_summary": "本片按计划完成，自检通过（占位小结：真实执行时由 Agent 提交具体结论）",
     "default_artifacts": "docs/artifacts/slice-note.md",
-    "default_lesson": "先切片再动手，比一口气写完更容易通过门禁。"
+    "default_lesson": "先切片再动手，比一口气写完更容易通过门禁。",
+    "map_head": "【剧情节点图 · 六态工作流】当前 >> [{{stage}}] << ← 你在这里{{progress}}",
+    "map_progress": "｜进度 {{done}}/{{count}} 片",
+    "map_row": "{{mark}}{{node}} {{branch}}{{action}}──▶ {{target}}{{note}}",
+    "map_row_leaf": "{{mark}}{{node}} {{branch}}{{text}}",
+    "map_mark": "▶ ",
+    "map_branch_single": "──",
+    "map_branch_first": "├─",
+    "map_branch_last": "└─",
+    "map_note_partial": "（非最后一片，同态继续）",
+    "map_note_all": "（全部切片后）",
+    "map_note_back": "（打回，重做最后一片）",
+    "map_note_ending": "（局末【结局）",
+    "map_terminal": "（局末·无出边）",
+    "map_usage": "map.show [\"\"|0|full]",
+    "map_rejected": "【地图被拒】map.show 只接空载荷、\"0\" 或 \"full\"（三者为同一张全图），收到 `{{got}}`。用法：{{usage}}——主状态未改变，按 pendingChoice 继续。",
+    "map_foot": "常驻动作（不推进主图，任意阶段可用）：config.set · map.show——任务/切片/门禁/配置一律不变"
   },
   "tuning": {
     "min_slices": 1,

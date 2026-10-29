@@ -1,12 +1,12 @@
 {
   "entries": [
     {
-      "byteLength": 11356,
+      "byteLength": 12656,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "dcd7511ec871f202d1822675ec5d05a607778766996b93e63b7c022efebd3b0b"
+      "sha256": "8130b0e3c4c7dceb12f67d2bc765e72269fd538fef7349db44df3a8227c875ac"
     },
     {
       "byteLength": 200,

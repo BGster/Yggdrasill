@@ -40,9 +40,10 @@ payload 只能是 JSON 标量，故复合载荷压成单个字符串：
 | `review.note` | `lesson\|score(1-5)`（缺省分 3） | review → done |
 | `config.set` | `settings.<key>=<value>`（`settings.` 可省） | 任意态，不改变主状态 |
 | `guide.show` | `<section id>`（空载荷 = 本阶段默认节） | 任意态，不改变主状态 |
+| `map.show` | 空 / `0` / `full`（同一张全图） | 任意态，不改变主状态 |
 
-**菜单顺序**：每态第一条 = 主前进动作（全 1 贪心走查可通关）；`guide.show` 紧随主前进动作
-（verify 态排在其失败分支之后）；`config.set` 常驻且置末。
+**菜单顺序**：每态第一条 = 主前进动作（全 1 贪心走查可通关）；`guide.show` → `map.show` 依次紧随
+主前进动作（verify 态排在其失败分支之后）；`config.set` 常驻且置末。两个只读动作都在改配置之前。
 
 越阶动作以可读回执拒绝：`【动作被拒】` + 当前阶段允许的动作清单；载荷不合法为 `【载荷被拒】`
 + 具体原因。两者都**原地重渲染**（主状态不变、pendingChoice 保持）。
@@ -72,6 +73,33 @@ payload 只能是 JSON 标量，故复合载荷压成单个字符串：
 - **非法 id**：`【指南被拒】` + 全部 12 个合法 id，主状态与 pendingChoice 不变。
 - 渲染路径不写任何状态（默认节的轮换只读 KV 计数），故同一步重渲染不会漂移。
 
+## 剧情节点图（map.show）
+
+本 Mod 的「剧情」就是六态工作流，`map.show` 把状态机图渲染成 ASCII 节点图。图**不是手画**：
+`mod.lua` 里 `MAP_NODES`（有序节点表）+ `MAP_EDGES`（带动作名的边表）是单源，渲染器逐节点
+取出边——改状态机就改这两张表，不会出现图文不一致。不额外加资源/Schema（图是代码的结构事实，
+不是可编辑的故事内容；文本词条仍在 `data/scenes.json` 的 `beats.map_*`）。
+
+```text
+【剧情节点图 · 六态工作流】当前 >> [implement] << ← 你在这里｜进度 1/3 片
+  [intake]    ──task.intake──▶ [decompose]
+  [decompose] ──plan.submit──▶ [implement]
+▶ [implement] ├─slice.report──▶ [implement]（非最后一片，同态继续）
+              └─slice.report──▶ [verify]（全部切片后）
+  [verify]    ├─verify.submit=true──▶ [review]
+              └─verify.submit=false──▶ [implement]（打回，重做最后一片）
+  [review]    ──review.note──▶ [done]（局末【结局）
+  [done]      ──（局末·无出边）
+常驻动作（不推进主图，任意阶段可用）：config.set · guide.show · map.show——任务/切片/门禁/配置一律不变
+```
+
+- **载荷**：空 / `0` / `"full"` → 同一张全图（内核 `--payload` 缺省值就是 `0`）；其他值 →
+  `【地图被拒】` + 用法，主状态不变。目前不做局部视图（六态图本来就一眼看得完）。
+- **当前节点**：头行 `>> [<stage>] << ← 你在这里` 与行首 `▶` 同源于 KV `fsm.stage`；有计划时头行
+  额外附 `｜进度 X/Y 片`（`plan.done` / `plan.count`）。
+- **不改状态**：与 `config.set` / `guide.show` 一样是常驻动作，回执末尾重渲染当前阶段的
+  `pendingChoice`——不会吞掉主前进动作。
+
 ## 两层配置
 
 - **静态默认**：`data/config.json`（schema `agent-config.json`，`ygg.data` 装载期快照）
@@ -98,7 +126,7 @@ subagent 参数只在本地 `.env` / `.env.local`；Mod 资源与报告只出现
 
 | 文件 | 作用 |
 | --- | --- |
-| `mod.lua` | Mod 本体：状态机 / 动作协议 / 指南渲染 / 两层配置 |
+| `mod.lua` | Mod 本体：状态机（含节点图表）/ 动作协议 / 指南渲染 / 两层配置 |
 | `pack.json` / `manifest.json` | 打包声明与内容寻址清单（`cargo run --example pack` 生成） |
 | `data/scenes.json` | 六节文本资源（scenes/endings/prompts/options/beats/tuning） |
 | `data/config.json` | 静态配置默认值 |
@@ -114,12 +142,20 @@ cargo run --example playtest -- .ygg/mods/agent-seed
 # 门禁失败 → 打回 implement → 再全绿（verify 序号 2 = 如实报失败）
 cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,1,2,1,1,1
 
-# 门禁宽放（verify 序号 4 = config.set 关掉 require_all_green，再报失败）
-cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,1,4,2,1
+# 门禁宽放（verify 序号 5 = config.set 关掉 require_all_green，再报失败）
+cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,1,5,2,1
+
+# verify 态的选项顺序：1 全绿 / 2 报失败 / 3 guide.show / 4 map.show / 5-6 config.set
+# 下面这条：verify 先看地图（4）→ 关掉门禁（5）→ 报失败（2）→ 宽放进复盘（1）
+cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,1,4,5,2,1
 
 # 查一节规则（任意阶段可用；换成 guide.show 的默认载荷 = 本阶段默认节）
 .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id probe \
   --runs-root .ygg/runs --resume --event guide.show --payload '"gates"'
+
+# 看剧情节点图（空 / 0 / full 同一张全图）
+.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id probe \
+  --runs-root .ygg/runs --resume --event map.show --payload '"full"'
 
 # 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
 cargo run --example pack -- .ygg/mods/agent-seed
