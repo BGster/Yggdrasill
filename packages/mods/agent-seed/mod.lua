@@ -408,7 +408,7 @@ local function evolution_receipt()
   local cap = max_per_run()
   local paths = allow_paths_text()
   if current == "auto" then
-    if ygg.kv.get("evolution.applied") == true then
+    if ygg.kv.get("evolution.requested") == true then
       return fill(TEXTS.beats.evolution_auto, {
         paths = paths,
         used = tostring(used),
@@ -818,14 +818,15 @@ local function apply_config(key, value)
   })
 end
 
--- 进入复盘的唯一出口：按**进入时刻**的演进模式结算本局自动修订额度
--- （applied 是状态、mode 是配置——回执据此稳定，不随后续 config.set 抖动）。
+-- 进入复盘的唯一出口：按**进入时刻**的演进模式登记本局自动修订请求。
+-- （requested 是状态、mode 是配置——回执据此稳定，不随后续 config.set 抖动）。
+-- 真实 revise 由宿主执行；内核无 IO，不能在此声称 Mod 文件已被改写。
 local function enter_review()
   local used = num("evolution.used", 0)
   local cap = max_per_run()
   if mode() == "auto" and used < cap then
     ygg.kv.set("evolution.used", used + 1)
-    ygg.kv.set("evolution.applied", true)
+    ygg.kv.set("evolution.requested", true)
   end
   advance(STAGE.review)
 end

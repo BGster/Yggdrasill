@@ -70,7 +70,7 @@
     "bad_index": "【选项越界】当前阶段 {{stage}} 只有 {{count}} 个选项，收到 {{index}}——按 pendingChoice 重选。",
     "unknown_choice": "【局末】当前阶段 {{stage}} 已无待选动作，这次选择被忽略。",
     "unknown_stage": "【状态异常】KV 中的阶段 `{{stage}}` 不在六态表内，回落到冷启动起点（不静默死路）。",
-    "evolution_auto": "演进 auto：本局已在白名单（{{paths}}）内自动修订 Mod，用量 {{used}}/{{cap}}。",
+    "evolution_auto": "演进 auto：本局已登记自动修订请求（白名单 {{paths}}，用量 {{used}}/{{cap}}），由宿主执行 revise；内核不直接改写 Mod 文件。",
     "evolution_auto_pending": "演进 auto 已就位，但本局入口那一刻的模式不是 auto：本局按报告收口，自动修订从下一局生效。",
     "evolution_suggest": "演进 suggest：已产出修订建议包（白名单 {{paths}}），等待人工采纳。",
     "evolution_off": "演进 off：仅产出报告，不改动任何 Mod 文件。",

@@ -62,9 +62,10 @@ pendingChoice = **当前阶段允许的动作集**（协议约束，不是提示
 1. `gates.require_all_green=false` → `verify.submit all_green=false` 也放行进 review
    （回执注明宽放路径）；`true` → 打回 implement，退回最后一片重做。
 2. `evolution.mode` 决定局末复盘的修订回执：`auto` 已在白名单（prompts/beats）内
-   自动修订、`suggest` 产出建议包、`off` 仅报告；额度由 `evolution.max_per_run`
+   登记自动修订请求、`suggest` 产出建议包、`off` 仅报告；额度由 `evolution.max_per_run`
    约束（运行期可用 `config.set evolution.max_per_run=<0-8>` 改），进入复盘的瞬间
-   结算（`evolution.applied` 落 KV，不随后续 `config.set` 抖动）。
+   结算（`evolution.requested` 落 KV，不随后续 `config.set` 抖动）。`auto` 仅登记
+   宿主可执行的自动修订请求；真实 revise 执行面待接，内核无 IO 不改文件。
 
 ## 文件
 
