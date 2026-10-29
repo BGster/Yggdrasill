@@ -1,0 +1,12 @@
+{
+  "evolution": {
+    "mode": "suggest",
+    "allow_paths": ["prompts", "beats"],
+    "max_per_run": 1
+  },
+  "autosave": true,
+  "hot_reload": true,
+  "gates": {
+    "require_all_green": true
+  }
+}

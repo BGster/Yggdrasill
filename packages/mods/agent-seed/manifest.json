@@ -1,0 +1,21 @@
+{
+  "entries": [
+    {
+      "byteLength": 9493,
+      "id": "ygg:scene/texts",
+      "kind": "scene-texts",
+      "path": "data/scenes.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+      "sha256": "90e5d11327bbec59dc24e12d7e785d9b5324a7e7201464e58f948c88c5e69402"
+    },
+    {
+      "byteLength": 200,
+      "id": "ygg:agent/config",
+      "kind": "agent-config",
+      "path": "data/config.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
+      "sha256": "8b74030e43cb7e1ac6515d627e93da0d885b467d03a161a98178e51c5dfd2e42"
+    }
+  ],
+  "schemaVersion": 1
+}
