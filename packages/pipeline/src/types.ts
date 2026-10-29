@@ -1,5 +1,7 @@
 // types.ts — 管线内部契约：LLM story 输出面 + 三道门错误面 + 产物/报告面。
 
+import type { StoryPreview } from "./preview.js";
+
 /** LLM story 输出（D-9：LLM 只产双件，管线独占 pack.json / schemas / manifest 组装权）。 */
 export interface StoryMod {
   slug: string;
@@ -60,9 +62,12 @@ export const STORY_SCHEMA = {
   },
 } as const;
 
-/** 三道门统一错误面（research Q1 错误聚合形态：同构后合并反喂）。 */
+/**
+ * 三道门 + revise 白名单校验的统一错误面（research Q1 错误聚合形态：同构后合并反喂）。
+ * gate = "revise" 的是 A4 的 diff 白名单诊断（revise 编排独有，不进 generate 的聚合面）。
+ */
 export interface GateIssue {
-  gate: "schema" | "lint" | "playtest";
+  gate: "schema" | "lint" | "playtest" | "revise";
   /** Mod 包内相对路径；story 契约错误固定 "<response>"。 */
   file: string;
   line?: number;
@@ -93,6 +98,34 @@ export interface ModCandidate {
   manifestJson: string;
   /** schemas/scene-texts.json 文本（自 packages/schema 复制，D-10）。 */
   sceneSchemaJson: string;
+}
+
+/**
+ * 流式生成进度（A2）：CLI 进度行与 dev 生成端点的 progress 事件共用同一面。
+ * 每次 provider 分片回调一次（收尾分片只载用量时内容不变）。
+ */
+export interface GenerateProgress {
+  /** 当前轮次（1 起；重试轮次重新计数）。 */
+  round: number;
+  /** 本次 generate 累计收到的流式字符数（跨轮次累加）。 */
+  chars: number;
+  /** 粗估 token（estimateTokens：4 字符 ≈ 1 token；真实用量以 usage 为准）。 */
+  tokens: number;
+  /** 当前轮已到达前缀能确定的预览（标题 / 已闭合的场景与结局）。 */
+  preview: StoryPreview;
+}
+
+/** revise 结果（A4；cli 退出码映射的依据，语义对齐 GenerateResult）。 */
+export interface ReviseResult {
+  ok: boolean;
+  slug: string;
+  /** 覆盖落盘的 bundle 目录；被白名单/门拒绝时为空串（现场保持原样）。 */
+  outDir: string;
+  /** 变更路径清单（点分：modLua / scenes.<节>.<键>），供 log 与 A5 展示。 */
+  changed: string[];
+  /** 白名单诊断（可能只含 REVISE_NOOP 警告）+ 门失败错误。 */
+  issues: GateIssue[];
+  tokenUsage: { inputTokens: number; outputTokens: number };
 }
 
 /** generate 结果（cli 退出码映射的依据）。 */
