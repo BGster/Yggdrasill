@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "title": "Yggdrasill 开发主 Agent 现场手册（AGENTS.md 规则资源化）",
-  "summary": "开发 Yggdrasill 的 Agent 在规划、开发、集成、合并、部署全流程中必须遵守的现场规则：按 section 取用、按阶段呈现。仓库根 AGENTS.md 是本资源的迁移来源与游玩入口。",
+  "summary": "开发 Yggdrasill 的 Agent 在规划、开发、集成、合并、部署全流程中必须遵守的现场规则：按 section 取用、按阶段呈现。规则正文只在本资源，游玩指南见仓库根 AGENTS.md。",
   "source": {
     "document": "AGENTS.md",
     "revision": "2026-10-29",
-    "note": "由仓库根 AGENTS.md 十节逐条迁移：每条约束拆成原子规则（原复合句按判定点分开），仓库形态按当前仓库实况更新（五 crate workspace / packages 四包 / clients/godot / .ygg 项目 harness），过时状态（「M0 落地中」「packages 规划中」等）不再保留；原文档未载的约束一律不新增。例外一处（2026-10-29 用户当次指令，本切片纳入）：credentials 章的「入库面敏感信息禁令」四条规则为增补，basis 标为「用户决策」而非 AGENTS.md 原文。"
+    "note": "由仓库根 AGENTS.md 十节逐条迁移：每条约束拆成原子规则（原复合句按判定点分开），仓库形态按当前仓库实况更新（五 crate workspace / packages 四包 / clients/godot / .ygg 项目 harness），过时状态（「M0 落地中」「packages 规划中」等）不再保留；原文档未载的约束一律不新增。例外一处（2026-10-29 用户当次指令，本切片纳入）：credentials 章的「入库面敏感信息禁令」四条规则为增补，basis 标为「用户决策」而非 AGENTS.md 原文。**AGENTS.md 已于 s2 收缩为纯游玩指南**——规则正文只在本资源；basis 里的 `AGENTS.md §X` 指迁移前原文（见 git 历史）。"
   },
   "sections": [
     {
@@ -138,7 +138,7 @@
         }
       ],
       "layout": [
-        { "path": "AGENTS.md", "role": "开发侧主 Agent 定义（游玩入口）；`CLAUDE.md` 是它的软链", "status": "delivered" },
+        { "path": "AGENTS.md", "role": "Agent harness 游玩指南（构建 / 开局 / 单步推进 / 查现场规则 / 局末结算）；`CLAUDE.md` 是它的软链", "status": "delivered" },
         { "path": "docs/", "role": "人读文档：愿景与决策表 / 架构原则 / 模块与技术栈 / Mod 作者指南", "status": "delivered" },
         { "path": "crates/ygg-core/", "role": "规则内核：实体/属性/状态机/事件驱动，纯逻辑零 IO 零渲染依赖", "status": "delivered" },
         { "path": "crates/ygg-sandbox/", "role": "确定性 Lua 沙箱：mlua + host API 白名单 + ygg stdlib 嵌入", "status": "delivered" },
@@ -616,7 +616,7 @@
         { "goal": "内核设计约束（实体/事件/状态机/叙事；条件归 Lua，D11）", "where": "docs/architecture-principles.md §3" },
         { "goal": "写 Mod：实体句柄 / choice 终结语义 / fsm / 资源包 / 存读档", "where": "docs/mod-authoring.md" },
         { "goal": "Mod 的 Lua API 类型注解（IDE 补全）", "where": "lua-stubs/README.md" },
-        { "goal": "本资源的迁移来源（仓库根约定原文）", "where": "AGENTS.md" },
+        { "goal": "怎么玩：构建 CLI / 开局 / 单步推进 / 查现场规则 / 局末结算", "where": "AGENTS.md", "note": "规则正文已迁入本资源；AGENTS.md 只保留游玩指南，迁移前原文见 git 历史。" },
         { "goal": "Agent harness 的装载面与本局运行产物", "where": ".ygg/mods/ 与 .ygg/runs/", "note": "runs 与 bin 均 gitignore；seed mod 说明见 .ygg/mods/agent-seed/README.md。" },
         { "goal": "改 `.gitignore`", "where": ".gitignore", "note": "参考根目录现有一份；改动说明写进 commit message。" }
       ]
