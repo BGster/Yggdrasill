@@ -73,7 +73,8 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
   guide = `<stage>_guide`），每阶段回执顶部固定一行 `【运行模式】play.mode = …`：
   - guide：`逐步确认（guide）：… **这一步由你确认后提交** …`
   - goal：`挂机（goal）：无需确认——宿主自动…`（各阶段写各自的推进动作，不是一句全局套话）
-- **失控防护**（goal）：最多 64 步；派发失败 / 无 `pendingChoice` 且未到结局 → 可读错误 + 退出码 `1`。
+- **失控防护**（goal）：步数预算 = 基础 64 步 + 每条需求 4 步；另有「连续 12 步 `pendingChoice` 无变化」判停。
+  派发失败 / 无 `pendingChoice` 且未到结局 → 可读错误 + 退出码 `1`。
 - **单发模式不受影响**：`--event` 一次只派发一个事件，不自动连跑（Agent 的调用语义）。
 
 ---
@@ -98,6 +99,9 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `config.set` | `'"play.mode=goal"'`、`'"gates.require_all_green=false"'`、`'"evolution.mode=suggest"'`（`settings.` 前缀可省） | 任意阶段，**不改变**主状态 |
 | `guide.show` | `'"credentials"'`；`'""'` = 本阶段默认节 | 任意阶段，**不改变**主状态 |
 | `map.show` | `'""'` / `'"0"'` / `'"full"'`（三者同一张全图） | 任意阶段，**不改变**主状态 |
+| `requirement.add` | `'"标题|描述"'` 或 `'"标题|描述|外部幂等 id"'`（空串 = 默认占位需求） | 任意活跃阶段入队，**不改变**主状态（`done` 拒绝；同 external_id 幂等重放） |
+| `requirement.list` | `'""'` / `'"0"'` / `'"full"'` | 任意阶段只读，**不改变**主状态 |
+| `requirement.schedule` | `'""'` / `'"0"'` | implement（切片已收口）/ verify / review → implement（追加新切片） |
 
 - 越阶动作（当前阶段不允许）→ `【动作被拒】` + 当前阶段允许动作清单；载荷不合法 → `【载荷被拒】` + 原因。
   两种拒绝都**原地重渲染**（主状态不变、pendingChoice 保持），改对载荷重发即可。
@@ -105,7 +109,33 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 
 ---
 
-## 5. 查规则与节点图：`guide.show` · `map.show`
+## 5. 异步补需求（inbox：另一个进程随时加需求）
+
+需求是**可调度工作单元**：进 FIFO 队列，不打断当前切片。另一进程随时能加，运行中的局下一步就看见。
+
+```bash
+# 只往 <run 目录>/inbox.jsonl 追加一行后退出（不读不写 autosave，可与 goal/guide 并发）
+.ygg/bin/ygg-agent --run-id my-task --runs-root .ygg/runs \
+  --requirement '补一条门禁日志|把 verify 的失败原因写进 events.jsonl'
+```
+
+- **不需要 `--mod`**：这条命令只做 `OpenOptions::append`，按 `--run-id` + `--runs-root` 定位 run 目录（不存在会创建）；
+  `--requirement` 不能与 `--event` / `--settle` 同用。
+- **消费时机**：goal 每个自动动作**之前**、guide 每次提示**之前**、单发每次派发**之前**都会 drain inbox 新行并 dispatch
+  `requirement.add`；终端里会打 `[inbox] 已消费 N 条异步需求…`。
+- **队列语义**：`requirement.add` 入队（上限 32 条 `queued`）→ 当前切片**不打断** → 收口后主前进动作变成
+  `requirement.schedule`（取 FIFO 队首追加为新切片并置 `active`）→ 该片用同一套 `slice.report` 上报即把需求置 `done`。
+  初始切片与后续需求全部 `done` 才允许 `verify.submit=true` / `review.note` 收口（否则可读拒绝，状态不变）。
+- **上游协议**：`inbox.jsonl` 每行 `{"external_id","title","description","created_at"}`；`inbox.cursor` 记消费位移
+  （已消费非空行数）。文件保留作审计。
+- **崩溃安全**：dispatch 成功且 autosave 落盘后才前移 cursor。若「存档成功、cursor 未写」时挂掉，重启会重放同一行——
+  `external_id` 是 Mod 侧幂等键，重放返回已有需求（叙事 `【需求重放】`），不会重复入队。
+- **局末**：结局后 inbox 里还有未消费行 → **非零退出**并提示开新局（换 `--run-id`），不静默丢弃。
+- **goal 步数预算**：基础 64 步 + 每条需求 4 步 + 「连续 12 步 `pendingChoice` 无变化」判停。
+
+---
+
+## 6. 查规则与节点图：`guide.show` · `map.show`
 
 ```bash
 .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task \
@@ -154,17 +184,17 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 ```
 
 - 头行读三件事：`>> [<stage>] << ← 你在这里` = KV `fsm.stage` 的当前节点；`｜进度 X/Y 片` =
-  已上报切片 / 计划片数（`plan.submit` 之前不显示）；行首 `▶` = 当前节点的出边行
-  （`├─` / `└─` 是同一节点的分支，缩进行是续行）。
+  已上报切片 / 计划片数（`plan.submit` 之前不显示）；有需求时尾随 `｜需求 排队 a / 进行中 b / 完成 c`；行首 `▶` = 当前节点的出边行
+  （`├─` / `└─` 是同一节点的分支，缩进行是续行）。图末还有一段**需求队列子图**（入队 → 排队 → 调度成切片 → 上报收口）。
 - 载荷只接空 / `0` / `"full"`（同一个全图，不做局部视图）；其他值 → `【地图被拒】` + 用法，
   主状态不变。看完照旧按 `pendingChoice` 继续——地图是旁挂只读，不占掉主前进动作。
-- `pendingChoice` 顺序固定为「主前进 → `guide.show` → `map.show` → `config.set`（`play.mode` →
-  `evolution.mode` → `gates`）」，两个只读动作都在改配置之前；每阶段回执顶部还有一行
-  `【运行模式】play.mode = …`（当前模式与它的推进纪律，见 §3）。
+- `pendingChoice` 顺序固定为「主前进 → 向导 / 地图 / 需求队列入口（`guide.show` → `map.show` → `requirement.list` → `requirement.add`）→
+  `config.set`（`play.mode` → `evolution.mode` → `gates`）」；队列有需求时主前进动作换成 `requirement.schedule`，
+  只读动作都在改配置之前；每阶段回执顶部还有一行 `【运行模式】play.mode = …`（见 §3）与一行 `【需求 loop】…`（见 §5）。
 
 ---
 
-## 6. runs 产物与局末结算
+## 7. runs 产物与局末结算
 
 | 文件 | 内容 |
 | --- | --- |
@@ -172,6 +202,8 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `events.jsonl` | 每派发一行：`{seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}` |
 | `run.json` | `{run_id, mod, mod_signature, started_at, updated_at}`（热载比对与结算取 `mod`） |
 | `settlement.json` | 局末结算报告（仅 `--settle` 写出） |
+| `inbox.jsonl` | 异步需求队列（`--requirement` 只追加；运行侧消费，见 §5） |
+| `inbox.cursor` | 已消费行数 `{"consumed": N}`（dispatch + 存档成功后才前移） |
 
 ```bash
 .ygg/bin/ygg-agent --run-id my-task --runs-root .ygg/runs --settle
@@ -182,7 +214,7 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 
 ---
 
-## 7. 改完 Mod 之后
+## 8. 改完 Mod 之后
 
 ```bash
 cargo run --example pack -- .ygg/mods/agent-seed        # 必跑：动了 data/ 或 schemas/ 就重算 manifest
@@ -198,7 +230,7 @@ cargo run --example playtest -- .ygg/mods/agent-seed    # 冒烟：全 1 贪心�
 
 ---
 
-## 8. 本地凭据
+## 9. 本地凭据
 
 本地凭据放 `.env` / `.env.local`（均已 gitignore，权限 600，绝不入库）。Mod 资源、静态配置、动态
 `settings.*` 与报告里只出现**键名**，不出现值——完整红线见 `guide.show credentials`。
