@@ -54,11 +54,18 @@ const INTEGRATION_STORY = {
 };
 
 function mockProvider(): LlmProvider {
+  const complete = async (request: StructuredRequest): Promise<ProviderReply> => {
+    void request;
+    return { story: INTEGRATION_STORY, usage: { inputTokens: 1, outputTokens: 1 } };
+  };
   return {
     protocol: "openai-chat",
-    async complete(request: StructuredRequest): Promise<ProviderReply> {
-      void request;
-      return { story: INTEGRATION_STORY, usage: { inputTokens: 1, outputTokens: 1 } };
+    complete,
+    // 流式替身：generate 编排目前只走 complete（provider 层流式细测见 provider-stream.test.ts）。
+    async completeStream(request, onProgress) {
+      const reply = await complete(request);
+      onProgress({ text: JSON.stringify(reply.story) });
+      return reply;
     },
   };
 }

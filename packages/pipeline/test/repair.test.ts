@@ -27,14 +27,23 @@ const BAD_STORY = { ...GOOD_STORY, slug: "Invalid Slug!" };
 function scriptedProvider(script: unknown[]): LlmProvider & { prompts: string[] } {
   const prompts: string[] = [];
   let index = 0;
+  const complete = async (request: StructuredRequest): Promise<ProviderReply> => {
+    prompts.push(request.user);
+    const story = script[Math.min(index, script.length - 1)]!;
+    index += 1;
+    return { story, usage: { inputTokens: 10, outputTokens: 20 } };
+  };
   return {
     protocol: "openai-chat",
     prompts,
-    async complete(request: StructuredRequest): Promise<ProviderReply> {
-      prompts.push(request.user);
-      const story = script[Math.min(index, script.length - 1)]!;
-      index += 1;
-      return { story, usage: { inputTokens: 10, outputTokens: 20 } };
+    complete,
+    // 流式替身：generate 编排目前只走 complete；一次性把整段 story 当「单个分片」
+    // 上报，保持 onProgress 累计文本 == 最终 story 文本的契约（provider 层流式
+    // 细节在 provider-stream.test.ts）。
+    async completeStream(request, onProgress) {
+      const reply = await complete(request);
+      onProgress({ text: JSON.stringify(reply.story) });
+      return reply;
     },
   };
 }
