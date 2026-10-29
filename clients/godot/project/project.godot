@@ -1,0 +1,26 @@
+; Yggdrasill Godot 客户端——工程配置。
+;
+; 内核（ygg-core / ygg-sandbox）经 gdext 原生链接进本工程；绑定 dylib 由
+; clients/godot/rust 的 `cargo build` 产出后拷入 res://bin（不入 git）。
+; 渲染后端固定 gl_compatibility：headless 走查与窗口运行同一条渲染路径。
+config_version=5
+
+[application]
+
+config/name="Yggdrasill 灯下谜径"
+config/description="Yggdrasill Godot 客户端：内核原生链接的可玩垂直切片"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=840
+window/size/window_width_override=1280
+window/size/window_height_override=840
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.101961, 0.0862745, 0.0784314, 1)

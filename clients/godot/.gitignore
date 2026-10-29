@@ -1,0 +1,9 @@
+# gdext 构建产物（cargo target/；根 .gitignore 已有 `target/`，此处显式声明
+# 便于本目录被单独拷出时仍正确忽略）
+rust/target/
+# 绑定 dylib：由 cargo build 产出后拷入 project/bin（见 README 构建段）
+project/bin/*.dylib
+# Godot 编辑器 / 运行期缓存（导入缓存、全局类缓存、编辑器布局）
+project/.godot/
+# 导出产物（本切片暂无导出通道，预留）
+export/
