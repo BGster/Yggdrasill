@@ -1349,6 +1349,16 @@ fn inbox_line_count(path: &Path) -> usize {
     })
 }
 
+/// run 目录里**尚未消费**的 inbox 行数（现读文件 + 现读 cursor，不信任缓存）。
+/// 这是结算硬门禁：inbox 还有行却报 `ok=true` = 静默丢需求。
+fn unconsumed_inbox_lines(run_dir: &Path) -> usize {
+    let lines = inbox_line_count(&run_dir.join(INBOX_FILE));
+    let consumed = read_json(&run_dir.join(INBOX_CURSOR_FILE))
+        .and_then(|cursor| cursor["consumed"].as_u64())
+        .map_or(0, |value| value as usize);
+    lines.saturating_sub(consumed)
+}
+
 /// 外部幂等 id：`inbox-<行号>-<纳秒>-<pid>`。
 /// 行号保证顺序追加唯一，纳秒 + pid 做并发编写的兵底——两者只用于去重，
 /// 不参与任何演示 / 状态判定。
@@ -1637,6 +1647,16 @@ fn run_interactive(args: &Args) -> i32 {
             let limit = goal_step_limit(&session);
             match goal_step(&session, &current, auto_steps, limit) {
                 GoalStep::Run => {
+                    // 收口前保险：本步可能推进到 review/done（下一拍就结算），
+                    // 先把刚到达的行吃掉——否则只能靠结算硬门禁报错，白跑一局。
+                    let pre = session.drain_inbox();
+                    if pre.applied > 0 {
+                        if let Some(receipt) = pre.last {
+                            current = receipt;
+                            fresh = true;
+                            continue;
+                        }
+                    }
                     // 无进展判据：上一步的 pendingChoice 指纹与本次相同 = 状态没变。
                     let signature = choice_signature(&current);
                     if signature == last_signature {
@@ -1677,12 +1697,12 @@ fn run_interactive(args: &Args) -> i32 {
                     println!();
                     println!("[goal] 已到结局（自动推进 {auto_steps} 步），开始结算…");
                     let code = run_settle(args);
-                    if final_drain.remaining > 0 {
-                        // 局已收口：inbox 里的行 Mod 侧必然拒绝（done）——不静默丢弃。
+                    // 用**现读**的未消费行数报错（不用 final_drain 的快照：结算本身要花时间）。
+                    let leftover = unconsumed_inbox_lines(&session.run_dir);
+                    if leftover > 0 {
                         eprintln!(
-                            "error: 结局后仍有 {} 条未消费需求（{}）——本局已收口，\
-                             请开新局（换 --run-id）再并入",
-                            final_drain.remaining,
+                            "error: 结局后仍有 {leftover} 条未消费 inbox 行（{}）——本局已收口，\
+                             需开新局（换 --run-id）再并入；settlement 已标 ok=false",
                             session.inbox_path.display()
                         );
                         return if code == 0 { 1 } else { code };
@@ -1998,8 +2018,10 @@ fn run_settle(args: &Args) -> i32 {
         "entities": save["entities"]["entities"].as_object().map_or(0, serde_json::Map::len),
     });
 
-    // ⑤ 结论：无失败步 ∧ 有事件 ∧ 达结局（未达结局 = 局未收口，ok=false）。
-    let ok = !events.is_empty() && failed == 0 && reached_ending;
+    // ⑤ 结论：无失败步 ∧ 有事件 ∧ 达结局 ∧ **无未消费 inbox 行**。
+    //    最后一条是硬门禁：inbox 还有行却报 ok=true 等于静默丢需求（实测缺陷）。
+    let pending_inbox = unconsumed_inbox_lines(&run_dir);
+    let ok = !events.is_empty() && failed == 0 && reached_ending && pending_inbox == 0;
     if failed > 0 {
         errors.push(format!("{failed} 条事件记录为失败步"));
     }
@@ -2009,8 +2031,13 @@ fn run_settle(args: &Args) -> i32 {
     if events.is_empty() {
         errors.push("事件日志为空：本局无任何派发记录".to_owned());
     }
+    if pending_inbox > 0 {
+        errors.push(format!(
+            "结局后仍有 {pending_inbox} 条未消费 inbox 行（{INBOX_FILE}）——本局已收口，需开新局（换 --run-id）"
+        ));
+    }
 
-    let report = json!({
+    let mut report = json!({
         "run_id": args.run_id,
         "mod": run_mod_label(&run_dir, args),
         "steps": steps,
@@ -2030,11 +2057,28 @@ fn run_settle(args: &Args) -> i32 {
         return 1;
     }
     print_settlement(&report, &settlement_path, ending_line.as_deref(), failed);
-    if ok {
-        0
-    } else {
-        1
+    if !ok {
+        return 1;
     }
+    // ⑦ 写完再核一次 inbox：结算本身要花时间，期间可能又到了新行——
+    //    此时报告作废（重写为 ok=false），绝不返回「绿报告 + 未消费行」。
+    let after = unconsumed_inbox_lines(&run_dir);
+    if after > 0 {
+        eprintln!(
+            "error: 结算期间又到达 {after} 条未消费 inbox 行——报告作废（ok=false），需开新局处理"
+        );
+        report["ok"] = json!(false);
+        if let Some(list) = report["errors"].as_array_mut() {
+            list.push(json!(format!(
+                "结算期间又到达 {after} 条未消费 inbox 行（需开新局）"
+            )));
+        }
+        if let Err(message) = write_json_pretty(&settlement_path, &report) {
+            eprintln!("error: {message}");
+        }
+        return 1;
+    }
+    0
 }
 
 /// 结算报告的 `mod` 标签：run.json 元信息优先（最贴近本局实际装载），

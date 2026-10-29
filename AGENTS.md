@@ -143,7 +143,11 @@ inbox 是 JSONL：`<runs-root>/<run-id>/inbox.jsonl`，每行
   重放靠 `external_id`：
   - `add` / `proposal` → Mod 侧 per-entity ext 查重（`【需求重放】` / `【提案重放】`）；
   - `amend` / `split` / `merge` / `conflict` / `resolve` → 载荷末尾 `@ext=` + `inbox.last` 去重（`【异步重放】`）。
-- 坏行跳过并前移（否则永久阻塞）；结局后仍有未消费行 → 非零退出（提示开新局）。
+- 坏行跳过并前移（否则永久阻塞）；**结算硬门禁**：`--settle` 若发现未消费行 → `ok=false` 且非零
+  （写完还要再核一次，结算期间又到的行会让报告作废）。因此「结局后投递」不会静默成功，只能开新局。
+- **跨进程时序约定**：goal 在每次可能收口的动作前都会再 drain 一次（自动推进前、`coordinate.submit` /
+  `verify.submit` / `review.note` 之前、自动 settle 之前），运行期间到达的行**不得漏**；
+  但进程退出后的投递属于新局（`inbox` 保留待新局消费，`settlement` 会报错提示）。
 
 ---
 
@@ -178,7 +182,9 @@ inbox 是 JSONL：`<runs-root>/<run-id>/inbox.jsonl`，每行
 .ygg/bin/ygg-agent --run-id my-task --runs-root .ygg/runs --settle
 ```
 
-`ok` = 事件日志非空 ∧ 无失败步 ∧ 出现结局叙事行；退出码与 `ok` 同值。
+`ok` = 事件日志非空 ∧ 无失败步 ∧ 出现结局叙事行 ∧ **inbox 无未消费行**；退出码与 `ok` 同值。
+未消费行存在时报告会带 `结局后仍有 N 条未消费 inbox 行——需开新局` 的错误且 `ok=false`，
+写盘后还会再核一次（结算期间新到的行 → 报告重写为 `ok=false`、退出非零）。
 
 ---
 
