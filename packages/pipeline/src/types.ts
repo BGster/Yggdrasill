@@ -1,5 +1,7 @@
 // types.ts — 管线内部契约：LLM story 输出面 + 三道门错误面 + 产物/报告面。
 
+import type { StoryPreview } from "./preview.js";
+
 /** LLM story 输出（D-9：LLM 只产双件，管线独占 pack.json / schemas / manifest 组装权）。 */
 export interface StoryMod {
   slug: string;
@@ -93,6 +95,21 @@ export interface ModCandidate {
   manifestJson: string;
   /** schemas/scene-texts.json 文本（自 packages/schema 复制，D-10）。 */
   sceneSchemaJson: string;
+}
+
+/**
+ * 流式生成进度（A2）：CLI 进度行与 dev 生成端点的 progress 事件共用同一面。
+ * 每次 provider 分片回调一次（收尾分片只载用量时内容不变）。
+ */
+export interface GenerateProgress {
+  /** 当前轮次（1 起；重试轮次重新计数）。 */
+  round: number;
+  /** 本次 generate 累计收到的流式字符数（跨轮次累加）。 */
+  chars: number;
+  /** 粗估 token（estimateTokens：4 字符 ≈ 1 token；真实用量以 usage 为准）。 */
+  tokens: number;
+  /** 当前轮已到达前缀能确定的预览（标题 / 已闭合的场景与结局）。 */
+  preview: StoryPreview;
 }
 
 /** generate 结果（cli 退出码映射的依据）。 */

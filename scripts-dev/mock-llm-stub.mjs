@@ -2,6 +2,10 @@
 // mock-llm-stub.mjs — S4 同款本地 mock LLM（openai-chat 协议形态）：
 // POST /v1/chat/completions → 依剧本关键词返回确定性 story JSON（无真凭据）。
 // 用法：node scripts-dev/mock-llm-stub.mjs [port]   （仅本地开发/验收用）
+//
+// A2 追加：支持 `stream: true`（SSE 增量）——无真凭据时也能实测 provider.completeStream
+// 的整条流式链路（CLI 进度行 / /__generate 的 progress+preview 事件）。分片按固定
+// 字符数切片并带小延迟，让进度肉眼可见。
 
 import { createServer } from "node:http";
 
@@ -90,10 +94,60 @@ end)
 
 function pickStory(userContent) {
   if (typeof userContent === "string") {
-    if (userContent.includes("灯塔") || userContent.includes("信天翁")) return STORIES.lighthouse;
-    if (userContent.includes("潮池") || userContent.includes("退潮")) return STORIES.tidepool;
+    if (userContent.includes("灯塔") || userContent.includes("信天翁")) return withPadding(STORIES.lighthouse);
+    if (userContent.includes("潮池") || userContent.includes("退潮")) return withPadding(STORIES.tidepool);
   }
-  return STORIES.lighthouse;
+  return withPadding(STORIES.lighthouse);
+}
+
+/**
+ * 可选垫长（MOCK_LLM_PAD_CHARS）：把首个场景文案按确定性句子重复到指定字符数。
+ * 用途：A2 进度演示需要跨多个千 token 桶的长输出（默认 0 = 不垫，行为不变）。
+ */
+function withPadding(story) {
+  const padChars = Number(process.env.MOCK_LLM_PAD_CHARS ?? 0);
+  if (!Number.isFinite(padChars) || padChars <= 0) {
+    return story;
+  }
+  const sentence = "潮声在礁石间来回。";
+  const [firstKey, firstText] = Object.entries(story.scenes.scenes)[0];
+  let padded = firstText;
+  while (padded.length < padChars) {
+    padded += sentence;
+  }
+  return {
+    ...story,
+    scenes: { ...story.scenes, scenes: { ...story.scenes.scenes, [firstKey]: padded } },
+  };
+}
+
+/** 请求体是否要求流式（A2 实测路径）。 */
+function wantsStream(body) {
+  try {
+    return JSON.parse(body)?.stream === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 流式响应：按 CHUNK_CHARS 切片推 delta，收尾补用量与 [DONE]。 */
+async function streamStory(res, content) {
+  const CHUNK_CHARS = 96;
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  for (let i = 0; i < content.length; i += CHUNK_CHARS) {
+    const piece = content.slice(i, i + CHUNK_CHARS);
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`);
+    await new Promise((resolve) => setTimeout(resolve, 12));
+  }
+  res.write(
+    `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 128, completion_tokens: 512 } })}\n\n`,
+  );
+  res.write("data: [DONE]\n\n");
+  res.end();
 }
 
 createServer((req, res) => {
@@ -115,8 +169,13 @@ createServer((req, res) => {
       // 解析失败按缺省故事处理（mock 不做严格校验）。
     }
     const story = pickStory(user);
+    const content = JSON.stringify(story, null, 2);
+    if (wantsStream(body)) {
+      void streamStory(res, content);
+      return;
+    }
     const payload = {
-      choices: [{ message: { role: "assistant", content: JSON.stringify(story, null, 2) } }],
+      choices: [{ message: { role: "assistant", content } }],
       usage: { prompt_tokens: 128, completion_tokens: 512 },
     };
     res.writeHead(200, { "content-type": "application/json" });

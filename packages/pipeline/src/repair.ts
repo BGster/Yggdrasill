@@ -20,11 +20,13 @@ import {
   buildSystemPrompt,
 } from "./prompt.js";
 import { playtestGate } from "./playtest-gate.js";
-import type { LlmProvider } from "./provider.js";
+import { estimateTokens, parseStoryPreview } from "./preview.js";
+import type { LlmProvider, ProviderReply, StreamDelta, StructuredRequest } from "./provider.js";
 import { loadSchemaSchemas, validateBundle, validateStory } from "./schema-gate.js";
 import type {
   CommandRunner,
   GateIssue,
+  GenerateProgress,
   GenerateResult,
   ModCandidate,
   StoryMod,
@@ -44,10 +46,16 @@ export interface GenerateOptions {
   /** 注入面：cli.ts 提供真实子进程 runner；测试注入 fake。 */
   runner?: CommandRunner;
   log?: (message: string) => void;
+  /**
+   * 流式进度回调（A2）：给了就走 provider.completeStream（每分片回调一次），
+   * 不给则与旧行为逐位一致（provider.complete，一次性等完整 JSON）。
+   */
+  onProgress?: (progress: GenerateProgress) => void;
 }
 
 export async function generate(options: GenerateOptions): Promise<GenerateResult> {
   const log = options.log ?? (() => {});
+  const onProgress = options.onProgress;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   if (options.provider === undefined || options.runner === undefined) {
     throw new Error("provider/runner 未注入（cli.ts 装配真实实现；测试注入 fake）");
@@ -61,12 +69,14 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   let tokenUsage = { inputTokens: 0, outputTokens: 0 };
   let priorStoryJson: string | null = null;
   let issues: GateIssue[] = [];
+  /** 跨轮次累计的流式字符数（进度面的「累计」口径 = 本次 generate 全程）。 */
+  let streamedChars = 0;
   /** 最后一轮是否通过 story 契约校验（额度耗尽时决定是否保留现场，D-15）。 */
   let lastRoundContractValid = false;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const round = attempt + 1;
-    const prompt =
+    const prompt: StructuredRequest =
       attempt === 0 || priorStoryJson === null
         ? { system: buildSystemPrompt(), user: buildStoryPrompt(options.story) }
         : {
@@ -74,7 +84,25 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
             user: buildRepairPrompt(options.story, priorStoryJson, formatIssues(issues)),
           };
     log(`[round ${round}/${maxRetries + 1}] 调用 LLM（${provider.protocol}）…`);
-    const reply = await provider.complete(prompt);
+    let roundText = "";
+    const reportDelta = (delta: StreamDelta): void => {
+      if (delta.text.length > 0) {
+        roundText += delta.text;
+        streamedChars += delta.text.length;
+      }
+      // 每次回调重扫本轮全文（O(n)，分片总量几十 KB 级）——最后一次分片（只载
+      // 用量的收尾分片）因此总能给出完整预览，消费者不必自己再补一发。
+      onProgress?.({
+        round,
+        chars: streamedChars,
+        tokens: estimateTokens(streamedChars),
+        preview: parseStoryPreview(roundText),
+      });
+    };
+    const reply: ProviderReply =
+      onProgress === undefined
+        ? await provider.complete(prompt)
+        : await provider.completeStream(prompt, reportDelta);
     tokenUsage = {
       inputTokens: tokenUsage.inputTokens + reply.usage.inputTokens,
       outputTokens: tokenUsage.outputTokens + reply.usage.outputTokens,
