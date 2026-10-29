@@ -120,8 +120,8 @@ const ENTRY_EVENT: &str = "event.start";
 const CHOICE_EVENT: &str = "ygg.choice_selected";
 /// goal 挂机模式的基础步数硬顶（无新增需求时正常一局 9 步；上限是死循环的硬防御）。
 const MAX_GOAL_STEPS: usize = 64;
-/// 每条需求（异步补入的）额外放宽的自动步数：schedule + report + 余量。
-const GOAL_STEPS_PER_REQUIREMENT: usize = 4;
+/// 每条需求（异步补入的）额外放宽的自动步数：三个 job + 两个门禁 + 余量。
+const GOAL_STEPS_PER_REQUIREMENT: usize = 16;
 /// 连续「无进展」步数硬顶（pendingChoice 指纹不变 = 绕圈；死循环的第二道闸）。
 const MAX_GOAL_STALL: usize = 12;
 /// goal 自动推进时派发的选择序号（pendingChoice 的推荐主动作恒为第 1 项）。
@@ -134,8 +134,6 @@ const SETTLEMENT_FILE: &str = "settlement.json";
 const INBOX_FILE: &str = "inbox.jsonl";
 const INBOX_CURSOR_FILE: &str = "inbox.cursor";
 
-/// 需求入队动作名（与 agent-seed 系 Mod 的动作协议同源）。
-const REQUIREMENT_ADD: &str = "requirement.add";
 /// Mod 侧拒绝的叙事前缀（契约面：`agent-seed` 系 Mod 用叙事而不是错误码表达
 /// 「动作被拒 / 载荷被拒 / 需求待排」，内核信封仍是 ok——宿主必须识别，否则会把
 /// 被拒的需求误记成已入队）。
@@ -149,7 +147,7 @@ const PACK_FILE: &str = "pack.json";
 
 fn main() {
     let args = parse_args();
-    let code = if args.requirement.is_some() {
+    let code = if args.inbox.is_some() {
         run_inbox_append(&args)
     } else if args.settle {
         run_settle(&args)
@@ -165,6 +163,58 @@ fn main() {
 // §参数 命令行解析（std-only 手写；用法错误 = 退出码 2）
 // ============================================================================
 
+/// 异步 inbox 的操作种类（JSONL `kind` 字段；缺省 = add，兼容旧行）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InboxKind {
+    Add,
+    Amend,
+    Split,
+    Merge,
+    Conflict,
+    Resolve,
+    Proposal,
+}
+
+impl InboxKind {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "add" => Some(Self::Add),
+            "amend" => Some(Self::Amend),
+            "split" => Some(Self::Split),
+            "merge" => Some(Self::Merge),
+            "conflict" => Some(Self::Conflict),
+            "resolve" => Some(Self::Resolve),
+            "proposal" => Some(Self::Proposal),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Amend => "amend",
+            Self::Split => "split",
+            Self::Merge => "merge",
+            Self::Conflict => "conflict",
+            Self::Resolve => "resolve",
+            Self::Proposal => "proposal",
+        }
+    }
+
+    /// kind → 内核事件名（drain 时 dispatch）。
+    fn event(self) -> &'static str {
+        match self {
+            Self::Add => "requirement.add",
+            Self::Amend => "requirement.amend",
+            Self::Split => "requirement.split",
+            Self::Merge => "requirement.merge",
+            Self::Conflict => "requirement.conflict",
+            Self::Resolve => "requirement.resolve",
+            Self::Proposal => "proposal.submit",
+        }
+    }
+}
+
 struct Args {
     mod_dir: Option<PathBuf>,
     run_id: String,
@@ -174,8 +224,8 @@ struct Args {
     watch: bool,
     event: Option<String>,
     payload: String,
-    /// `--requirement '标题|描述'`：只追 inbox.jsonl 后退出（不读写 autosave）。
-    requirement: Option<String>,
+    /// 异步 inbox 操作（只追 inbox.jsonl 后退出，不读写 autosave）。
+    inbox: Option<(InboxKind, String)>,
 }
 
 fn parse_args() -> Args {
@@ -187,7 +237,15 @@ fn parse_args() -> Args {
     let mut watch = false;
     let mut event: Option<String> = None;
     let mut payload = DEFAULT_PAYLOAD.to_owned();
-    let mut requirement: Option<String> = None;
+    let mut inbox: Option<(InboxKind, String)> = None;
+
+    // 写 inbox 的六个参数共享同一套「只能给一个」的校验。
+    fn set_inbox(inbox: &mut Option<(InboxKind, String)>, kind: InboxKind, value: String) {
+        if inbox.is_some() {
+            usage_error("一次只能提交一个 inbox 操作");
+        }
+        *inbox = Some((kind, value));
+    }
 
     let mut iter = std::env::args().skip(1);
     while let Some(argument) = iter.next() {
@@ -200,7 +258,41 @@ fn parse_args() -> Args {
             "--watch" => watch = true,
             "--event" => event = Some(next_value(&mut iter, "--event")),
             "--payload" => payload = next_value(&mut iter, "--payload"),
-            "--requirement" => requirement = Some(next_value(&mut iter, "--requirement")),
+            "--requirement" => set_inbox(
+                &mut inbox,
+                InboxKind::Add,
+                next_value(&mut iter, "--requirement"),
+            ),
+            "--amend" => set_inbox(
+                &mut inbox,
+                InboxKind::Amend,
+                next_value(&mut iter, "--amend"),
+            ),
+            "--split" => set_inbox(
+                &mut inbox,
+                InboxKind::Split,
+                next_value(&mut iter, "--split"),
+            ),
+            "--merge" => set_inbox(
+                &mut inbox,
+                InboxKind::Merge,
+                next_value(&mut iter, "--merge"),
+            ),
+            "--conflict" => set_inbox(
+                &mut inbox,
+                InboxKind::Conflict,
+                next_value(&mut iter, "--conflict"),
+            ),
+            "--resolve" => set_inbox(
+                &mut inbox,
+                InboxKind::Resolve,
+                next_value(&mut iter, "--resolve"),
+            ),
+            "--proposal" => set_inbox(
+                &mut inbox,
+                InboxKind::Proposal,
+                next_value(&mut iter, "--proposal"),
+            ),
             "-h" | "--help" => usage(0),
             other => usage_error(&format!("未知参数 `{other}`")),
         }
@@ -215,18 +307,17 @@ fn parse_args() -> Args {
     if settle && event.is_some() {
         usage_error("--settle 与 --event 不能同时使用");
     }
-    if requirement.is_some() {
+    if let Some((kind, text)) = &inbox {
         if settle || event.is_some() {
-            usage_error("--requirement 与 --event / --settle 不能同时使用");
+            usage_error(
+                "inbox 操作（--requirement / --proposal / …）与 --event / --settle 不能同时使用",
+            );
         }
-        if requirement
-            .as_deref()
-            .is_none_or(|text| text.trim().is_empty())
-        {
-            usage_error("--requirement 需要非空载荷（'标题|描述'）");
+        if text.trim().is_empty() {
+            usage_error(&format!("--{} 需要非空载荷", kind.label()));
         }
     } else if !settle && mod_dir.is_none() {
-        usage_error("缺少 --mod <mod目录>（仅 --settle / --requirement 可省略）");
+        usage_error("缺少 --mod <mod目录>（仅 --settle / inbox 操作可省略）");
     }
     if let Some(name) = &event {
         if name.trim().is_empty() {
@@ -243,7 +334,7 @@ fn parse_args() -> Args {
         watch,
         event,
         payload,
-        requirement,
+        inbox,
     }
 }
 
@@ -779,6 +870,77 @@ impl Session {
             .map_or(0, |count| count as usize)
     }
 
+    /// autosave 的 KV 面（只读；宿主侧判定用）。
+    fn kv(&self) -> Json {
+        read_json(&self.autosave_path)
+            .map(|save| save["kv"]["entries"].clone())
+            .unwrap_or(Json::Null)
+    }
+
+    /// 待验收提案数（`prop.<i>.status == pending`）。
+    fn pending_proposals(&self) -> usize {
+        let kv = self.kv();
+        let total = kv["prop.count"].as_u64().unwrap_or(0);
+        (1..=total)
+            .filter(|i| kv[format!("prop.{i}.status")].as_str() == Some("pending"))
+            .count()
+    }
+
+    /// 未解决冲突（`req.<i>.conflict` 非空）→ `(需求 id, "对侧 + 说明")`。
+    fn conflicts(&self) -> Vec<(String, String)> {
+        let kv = self.kv();
+        let total = kv["req.count"].as_u64().unwrap_or(0);
+        let mut out = Vec::new();
+        for i in 1..=total {
+            let note = kv[format!("req.{i}.conflict")]
+                .as_str()
+                .unwrap_or("")
+                .trim()
+                .to_owned();
+            if note.is_empty() {
+                continue;
+            }
+            let peer = kv[format!("req.{i}.conflict_peer")]
+                .as_str()
+                .unwrap_or("?")
+                .to_owned();
+            out.push((format!("r{i}"), format!("⇄ {peer}：{note}")));
+        }
+        out
+    }
+
+    /// 有 job 在跑、且当前没有任何待验收提案的需求（canonical 取最小 id）。
+    /// 返回 `(req_id, rev, stage)`。
+    fn awaiting_proposal(&self) -> Option<(String, u64, String)> {
+        let kv = self.kv();
+        let total = kv["req.count"].as_u64().unwrap_or(0);
+        for i in 1..=total {
+            let job = kv[format!("req.{i}.job")].as_str().unwrap_or("");
+            match job {
+                "analysis" | "plan" | "development" => {
+                    let rev = kv[format!("req.{i}.rev")].as_u64().unwrap_or(1);
+                    return Some((format!("r{i}"), rev, job.to_owned()));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// goal 无外部 worker 时的**占位提案**（明确标注模拟；不冒充真实开发）。
+    /// 只在一份待验收提案都没有时生成——外部真实提案存在时绝不覆盖。
+    fn placeholder_proposal(&self) -> Option<(String, String)> {
+        if self.pending_proposals() > 0 {
+            return None;
+        }
+        let (req, rev, stage) = self.awaiting_proposal()?;
+        let summary =
+            format!("[占位·模拟] {req} 的 {stage} 结果（goal 无外部 worker，非真实执行）");
+        let artifacts = format!("[占位·模拟] {stage}-{req}.md（占位产物，仅用于走通状态机与门禁）");
+        let payload = format!("{req}|{rev}|{stage}|{summary}|{artifacts}||");
+        Some((payload, format!("{req} / {stage} rev {rev}")))
+    }
+
     /// inbox 已消费行数（cursor 文件缺失 / 损坏 = 0：重放由 Mod 侧幂等去重兵底）。
     fn inbox_cursor(&self) -> usize {
         read_json(&self.inbox_cursor_path)
@@ -827,18 +989,38 @@ impl Session {
                     .push(format!("inbox 第 {consumed} 行不是合法 JSON，已跳过"));
                 continue;
             };
-            let Some(fields) = inbox_payload(&record) else {
+            let external = record["external_id"]
+                .as_str()
+                .unwrap_or("")
+                .trim()
+                .to_owned();
+            // kind 缺省 = add（旧行只有 title / description）。
+            let kind = match record["kind"].as_str() {
+                None => InboxKind::Add,
+                Some(raw) => match InboxKind::parse(raw) {
+                    Some(kind) => kind,
+                    None => {
+                        consumed += 1;
+                        drain.skipped += 1;
+                        self.write_inbox_cursor(consumed);
+                        self.notices
+                            .push(format!("inbox 第 {consumed} 行 kind 未知，已跳过"));
+                        continue;
+                    }
+                },
+            };
+            let Some(fields) = inbox_dispatch_payload(kind, &record, &external) else {
                 consumed += 1;
                 drain.skipped += 1;
                 self.write_inbox_cursor(consumed);
                 self.notices.push(format!(
-                    "inbox 第 {consumed} 行缺 title / external_id，已跳过"
+                    "inbox 第 {consumed} 行缺字段（external_id / title / payload），已跳过"
                 ));
                 continue;
             };
             // payload 必须是 **JSON 字符串**（内核要求 JSON 标量），不是裸 wire format。
             let payload = json!(fields).to_string();
-            let receipt = self.dispatch_event(REQUIREMENT_ADD, &payload);
+            let receipt = self.dispatch_event(kind.event(), &payload);
             if receipt["ok"] != Json::Bool(true) || dispatch_rejected(&receipt) {
                 // 内核错误信封（载荷 / 校验失败）与 Mod 侧拒绝同属「未入队」：
                 // cursor 不前移，留给调用方报错与重启重放。
@@ -1067,20 +1249,46 @@ fn sanitize_field(text: &str) -> String {
         .to_owned()
 }
 
-/// inbox 记录的 dispatch 载荷：`title|description|external_id`（三段式）。
-fn inbox_payload(record: &Json) -> Option<String> {
-    let title = record["title"].as_str()?.trim();
-    let external = record["external_id"].as_str()?.trim();
-    if title.is_empty() || external.is_empty() {
+/// inbox 记录的 dispatch 载荷组装（不含外层 JSON 引号）。
+/// - add：`title|description|external_id`（external_id 是 Mod 侧幂等键）
+/// - proposal：`req|rev|stage|summary|artifacts[|changes]` → 补齐第 7 段 external_id
+/// - amend / split / merge / conflict / resolve：`<wire>|@ext=<external_id>`
+fn inbox_dispatch_payload(kind: InboxKind, record: &Json, external: &str) -> Option<String> {
+    if external.is_empty() {
         return None;
     }
-    let description = record["description"].as_str().unwrap_or("").trim();
-    Some(format!(
-        "{}|{}|{}",
-        sanitize_field(title),
-        sanitize_field(description),
-        external
-    ))
+    match kind {
+        InboxKind::Add => {
+            let title = record["title"].as_str()?.trim();
+            if title.is_empty() {
+                return None;
+            }
+            let description = record["description"].as_str().unwrap_or("").trim();
+            Some(format!(
+                "{}|{}|{}",
+                sanitize_field(title),
+                sanitize_field(description),
+                external
+            ))
+        }
+        InboxKind::Proposal => {
+            let raw = record["payload"].as_str()?.trim();
+            let segments = raw.split('|').count();
+            match segments {
+                0..=4 => None,
+                5 => Some(format!("{raw}||{external}")),
+                6 => Some(format!("{raw}|{external}")),
+                _ => Some(raw.to_owned()),
+            }
+        }
+        _ => {
+            let raw = record["payload"].as_str()?.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            Some(format!("{raw}|@ext={external}"))
+        }
+    }
 }
 
 /// Mod 侧拒绝的识别（叙事前缀）：内核信封仍是 ok，宿主必须显式看叙事。
@@ -1198,33 +1406,43 @@ fn run_single(args: &Args) -> i32 {
 /// 这是「新需求随时能进」的真实异步入口：goal / guide 在另一个进程里跑时，
 /// 这里只做 `OpenOptions::append`，不存在与运行中局的状态竞争。
 fn run_inbox_append(args: &Args) -> i32 {
-    let text = args.requirement.as_deref().unwrap_or("");
-    let (title, description) = split_requirement(text);
+    let Some((kind, text)) = args.inbox.clone() else {
+        return 2;
+    };
     let run_dir = args.runs_root.join(&args.run_id);
     if let Err(err) = fs::create_dir_all(&run_dir) {
         eprintln!("error: 创建 run 目录 {} 失败：{err}", run_dir.display());
         return 2;
     }
     let path = run_dir.join(INBOX_FILE);
-    let record = json!({
+    let mut record = json!({
         "external_id": new_external_id(&args.run_id, inbox_line_count(&path)),
-        "title": title,
-        "description": description,
+        "kind": kind.label(),
         "created_at": now_secs(),
     });
+    if kind == InboxKind::Add {
+        // add 保留 title / description 字段（旧行兼容：旧行只有这两个字段）。
+        let (title, description) = split_requirement(&text);
+        record["title"] = json!(title);
+        record["description"] = json!(description);
+    } else {
+        record["payload"] = json!(text.trim());
+    }
     let receipt = match append_inbox_line(&path, &record) {
         Ok(()) => json!({
             "ok": true,
             "inbox": path.display().to_string(),
+            "kind": kind.label(),
             "external_id": record["external_id"].clone(),
-            "title": record["title"].clone(),
-            "description": record["description"].clone(),
+            "payload": record.get("payload").cloned().unwrap_or(Json::Null),
+            "title": record.get("title").cloned().unwrap_or(Json::Null),
         }),
         Err(message) => {
             eprintln!("error: {message}");
             json!({
                 "ok": false,
                 "inbox": path.display().to_string(),
+                "kind": kind.label(),
                 "error": {"code": "INBOX", "message": message},
             })
         }
@@ -1384,7 +1602,38 @@ fn run_interactive(args: &Args) -> i32 {
         }
 
         // goal：不读 stdin，按推荐主动作（序号 1）自动推进；到结局自动结算。
+        let mut paused_for_conflict = false;
         if mode == PlayMode::Goal {
+            // ① 冲突 = **用户门禁**：必须停下打印双方与说明，绝不自动选解决路径。
+            let conflicts = session.conflicts();
+            if !conflicts.is_empty() {
+                println!();
+                println!("[goal] 需求冲突——需要你确认解决路径（不会自动选择）：");
+                for (id, detail) in &conflicts {
+                    println!("  {id} {detail}");
+                }
+                println!(
+                    "  请选 pendingChoice 的 1/2/3（keep_both / keep_first / revise），或 q 退出后 --resume 继续。"
+                );
+                paused_for_conflict = true;
+            }
+        }
+        if mode == PlayMode::Goal && !paused_for_conflict {
+            // ② 无外部提案 → 提交**占位**提案（明确标注模拟），走同一套 proposal 与门禁；
+            //    已有待验收提案时绝不覆盖（外部真实提案优先）。
+            if let Some((payload, label)) = session.placeholder_proposal() {
+                println!("[goal] 无外部提案 → 提交占位提案（模拟，非真实开发）：{label}");
+                let body = json!(payload).to_string();
+                current = session.dispatch_event("proposal.submit", &body);
+                if current["ok"] != Json::Bool(true) || dispatch_rejected(&current) {
+                    eprintln!("error: [goal] 占位提案被拒：{}", first_rejection(&current));
+                    print_receipt(&current, true, mode);
+                    return 1;
+                }
+                fresh = true;
+                stall_steps = 0;
+                continue;
+            }
             let limit = goal_step_limit(&session);
             match goal_step(&session, &current, auto_steps, limit) {
                 GoalStep::Run => {
@@ -1457,7 +1706,13 @@ fn run_interactive(args: &Args) -> i32 {
             }
             None => {
                 println!();
-                println!("（输入结束，退出。）");
+                if paused_for_conflict {
+                    println!(
+                        "（冲突未解决：挂机已安全暂停，未自动选择路径。解决后 --resume 可继续。）"
+                    );
+                } else {
+                    println!("（输入结束，退出。）");
+                }
                 return 0;
             }
         };
