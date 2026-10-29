@@ -62,9 +62,12 @@ export const STORY_SCHEMA = {
   },
 } as const;
 
-/** 三道门统一错误面（research Q1 错误聚合形态：同构后合并反喂）。 */
+/**
+ * 三道门 + revise 白名单校验的统一错误面（research Q1 错误聚合形态：同构后合并反喂）。
+ * gate = "revise" 的是 A4 的 diff 白名单诊断（revise 编排独有，不进 generate 的聚合面）。
+ */
 export interface GateIssue {
-  gate: "schema" | "lint" | "playtest";
+  gate: "schema" | "lint" | "playtest" | "revise";
   /** Mod 包内相对路径；story 契约错误固定 "<response>"。 */
   file: string;
   line?: number;
@@ -110,6 +113,19 @@ export interface GenerateProgress {
   tokens: number;
   /** 当前轮已到达前缀能确定的预览（标题 / 已闭合的场景与结局）。 */
   preview: StoryPreview;
+}
+
+/** revise 结果（A4；cli 退出码映射的依据，语义对齐 GenerateResult）。 */
+export interface ReviseResult {
+  ok: boolean;
+  slug: string;
+  /** 覆盖落盘的 bundle 目录；被白名单/门拒绝时为空串（现场保持原样）。 */
+  outDir: string;
+  /** 变更路径清单（点分：modLua / scenes.<节>.<键>），供 log 与 A5 展示。 */
+  changed: string[];
+  /** 白名单诊断（可能只含 REVISE_NOOP 警告）+ 门失败错误。 */
+  issues: GateIssue[];
+  tokenUsage: { inputTokens: number; outputTokens: number };
 }
 
 /** generate 结果（cli 退出码映射的依据）。 */

@@ -23,6 +23,7 @@ import { playtestGate } from "./playtest-gate.js";
 import { estimateTokens, parseStoryPreview } from "./preview.js";
 import type { LlmProvider, ProviderReply, StreamDelta, StructuredRequest } from "./provider.js";
 import { loadSchemaSchemas, validateBundle, validateStory } from "./schema-gate.js";
+import { writeStoryMeta } from "./story-bundle.js";
 import type {
   CommandRunner,
   GateIssue,
@@ -140,6 +141,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     if (issues.length === 0) {
       const slug = safeSlug(story.slug);
       const { dir } = emitModBundle(outRoot, slug, candidate);
+      writeStoryMeta(outRoot, slug, story); // revise 的 title 锚点（A4：五件套不含 title）
       log(`[round ${round}] 三道门全绿 → ${dir}`);
       return { ok: true, slug, outDir: dir, attempts: round, issues: [], tokenUsage };
     }
@@ -166,11 +168,13 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   const candidate = buildCandidate(lastStory, sceneSchemaJson);
   const slug = safeSlug(lastStory.slug);
   const { dir } = emitModBundle(outRoot, slug, candidate);
+  writeStoryMeta(outRoot, slug, lastStory); // 现场保留的产物同样要能后续 revise
   log(`[exhausted] 重试额度耗尽，最后产物保留于 ${dir}`);
   return { ok: false, slug, outDir: dir, attempts: maxRetries + 1, issues, tokenUsage };
 }
 
-function buildCandidate(story: StoryMod, sceneSchemaJson: string): ModCandidate {
+/** 候选五件套装配（纯内存，D-15）——generate 与 revise（A4）共用同一形态。 */
+export function buildCandidate(story: StoryMod, sceneSchemaJson: string): ModCandidate {
   const scenesJson = buildScenesJson(story.scenes);
   return {
     story,

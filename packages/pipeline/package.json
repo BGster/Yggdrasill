@@ -6,6 +6,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "generate": "tsx src/cli.ts",
+    "revise": "tsx src/revise-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts"
