@@ -2,11 +2,22 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://yggdrasill.dev/schemas/v1/agent-config.json",
     "title": "Yggdrasill agent-config（M-Agent 元工作流 Mod 的静态配置形）",
-    "description": "M-Agent 泳道 A 落地（packages/mods/agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。evolution.mode 决定局末复盘的修订口径（off 仅报告 / suggest 产出建议包 / auto 白名单内自动修订），gates.require_all_green 决定门禁失败是否打回切片执行。",
+    "description": "M-Agent 泳道 A 落地（packages/mods/agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。play.mode 决定本局的**交互模式**（goal 挂机 / guide 逐步确认，缺省 guide），evolution.mode 决定局末复盘的修订口径（off 仅报告 / suggest 产出建议包 / auto 白名单内自动修订），gates.require_all_green 决定门禁失败是否打回切片执行。",
     "type": "object",
     "additionalProperties": false,
-    "required": ["evolution", "autosave", "hot_reload", "gates"],
+    "required": ["play", "evolution", "autosave", "hot_reload", "gates"],
     "properties": {
+        "play": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mode"],
+            "properties": {
+                "mode": {
+                    "description": "本局交互模式的静态默认值：guide = 逐步确认（每一步推进都必须由人选择/提交，缺省值）/ goal = 挂机（宿主按每步推荐主动作自动推进到结局并自动结算，无需逐步确认）。运行期可用 `config.set play.mode=<goal|guide>` 覆盖（写 KV `settings.play.mode`，动态覆盖静态）。",
+                    "enum": ["goal", "guide"]
+                }
+            }
+        },
         "evolution": {
             "type": "object",
             "additionalProperties": false,

@@ -2,7 +2,7 @@
 
 M-Agent 泳道的 seed mod：把「一次完整的 Agent 工作」配置成一个可游玩的 Mod。
 任何 Agent 装载它 + 注入任务描述即可开工，**零定制**——状态机、动作协议、门禁
-口径、演进策略全在 Mod 里，不在提示词里。
+口径、演进策略、运行模式全在 Mod 里，不在提示词里。
 
 ```bash
 # 装载 + 全 1 贪心走查到【结局
@@ -11,12 +11,16 @@ cargo run --example playtest -- packages/mods/agent-seed
 # 门禁失败 → 打回 implement → 再全绿（回退路径）
 cargo run --example playtest -- packages/mods/agent-seed --choices 1,1,1,1,1,2,1,1,1
 
-# 门禁宽放（config.set 控制流转：失败也放行进复盘；verify 序号 4 = 关掉 require_all_green）
-cargo run --example playtest -- packages/mods/agent-seed --choices 1,1,1,1,1,4,2,1
+# 门禁宽放（config.set 控制流转：失败也放行进复盘；verify 序号 5 = 关掉 require_all_green）
+cargo run --example playtest -- packages/mods/agent-seed --choices 1,1,1,1,1,5,2,1
 
-# verify 态的选项顺序：1 全绿 / 2 报失败 / 3 map.show / 4-5 config.set
-# 下面这条：verify 先看节点图（3）→ 关掉门禁（4）→ 报失败（2）→ 宽放进复盘（1）
-cargo run --example playtest -- packages/mods/agent-seed --choices 1,1,1,1,1,3,4,2,1
+# 中途切 goal 挂机（intake 序号 3 = config.set play.mode=goal，之后按 1 推进；提示词切成挂机版）
+cargo run --example playtest -- packages/mods/agent-seed --choices 3,1,1,1,1,1,1,1,1
+
+# verify 态的选项顺序：1 全绿 / 2 报失败 / 3 map.show / 4-6 config.set
+# （config.set 内部固定 play.mode → gates → evolution）
+# 下面这条：verify 先看节点图（3）→ 关掉门禁（5）→ 报失败（2）→ 宽放进复盘（1）
+cargo run --example playtest -- packages/mods/agent-seed --choices 1,1,1,1,1,3,5,2,1
 ```
 
 ## 状态机（六态）
@@ -54,7 +58,8 @@ pendingChoice = **当前阶段允许的动作集**（协议约束，不是提示
 | `map.show` | 空 / `0` / `full`（同一张全图） | 任意态，不改变主状态 |
 
 **菜单顺序**：每态第一条 = 主前进动作（全 1 贪心走查可通关）；`map.show` 紧随主前进动作
-（verify 态排在其失败分支之后），`config.set` 常驻且置末——只读动作总在改配置之前。
+（verify 态排在其失败分支之后），`config.set` 常驻且置末，配置内部固定为
+`play.mode` → `evolution.mode` → `gates.require_all_green`——只读动作总在改配置之前。
 
 越阶动作以可读回执拒绝：`【动作被拒】` + 当前阶段允许的动作清单；载荷不合法为
 `【载荷被拒】` + 具体原因。两者都**原地重渲染**（主状态不变、pendingChoice 保持）。
@@ -89,14 +94,33 @@ pendingChoice = **当前阶段允许的动作集**（协议约束，不是提示
 ## 两层配置
 
 - **静态默认**：`data/config.json`（schema `agent-config.json`，`ygg.data` 装载期快照）
-- **动态覆盖**：KV `settings.*`（`config.set` 写入）
+- **动态覆盖**：KV `settings.*`（`config.set` 写入）——如 `config.set play.mode=goal`
 - **判定**：动态覆盖 > 静态默认
 
-配置控制状态流转的两处实证：
+### `play.mode`：`goal` 挂机 / `guide` 逐步确认（缺省 `guide`）
 
-1. `gates.require_all_green=false` → `verify.submit all_green=false` 也放行进 review
+| 值 | 含义 | 每阶段提示词面（两版取一） |
+| --- | --- | --- |
+| `guide`（缺省） | 每一步推进都要人选择/提交，Mod 不自动连跑 | `逐步确认（guide）：…**这一步由你确认后提交**…` |
+| `goal` | 宿主（CLI 交互模式）免 stdin 自动推进到结局并自动结算 | `挂机（goal）：无需确认——宿主自动…` |
+
+- 每个阶段各有两版文案（`data/scenes.json` 的 `beats.<stage>_guide` / `beats.<stage>_goal`），
+  按该阶段动作写（立项要人确认提交描述、切片要人确认计划与上报、门禁要人确认结果…），
+  不是一句全局套话；局末另有 `beats.play_done_goal` 说明本局是挂机跑完的。
+- 每阶段回执顶部固定一行 `【运行模式】play.mode = …`（拒绝回执与局末也带）——当前模式始终可见。
+- 模式只改**提示词与宿主推进节奏**：状态机、动作协议、只读动作（`config.set` / `map.show`）
+  行为完全不变；查询类动作在两种模式下都可用。
+- 宿主（`examples/agent.rs`）**每步现读**（静态 `data/config.json` → 最新 autosave 的 KV
+  `settings.play.mode`）：guide 阶段 `config.set play.mode=goal` 下一步即生效，转入挂机直到结局。
+- 合法性：`play.mode` 只认 `goal` / `guide`，其他值走 `【载荷被拒】`（KV 不写、状态不变）。
+
+配置控制状态流转的三处实证：
+
+1. `play.mode` 决定推进节奏：`goal` = 宿主自动按推荐主动作推进到结局，`guide` = 每步都要人确认；
+   每个阶段的提示词与 `【运行模式】` 行都跟着变。
+2. `gates.require_all_green=false` → `verify.submit all_green=false` 也放行进 review
    （回执注明宽放路径）；`true` → 打回 implement，退回最后一片重做。
-2. `evolution.mode` 决定局末复盘的修订回执：`auto` 已在白名单（prompts/beats）内
+3. `evolution.mode` 决定局末复盘的修订回执：`auto` 已在白名单（prompts/beats）内
    登记自动修订请求、`suggest` 产出建议包、`off` 仅报告；额度由 `evolution.max_per_run`
    约束（运行期可用 `config.set evolution.max_per_run=<0-8>` 改），进入复盘的瞬间
    结算（`evolution.requested` 落 KV，不随后续 `config.set` 抖动）。`auto` 仅登记
@@ -106,7 +130,7 @@ pendingChoice = **当前阶段允许的动作集**（协议约束，不是提示
 
 | 文件 | 作用 |
 | --- | --- |
-| `mod.lua` | Mod 本体：状态机（含节点图表）/ 动作协议 / 渲染 / 两层配置 |
+| `mod.lua` | Mod 本体：状态机（含节点图表）/ 动作协议 / 渲染 / 两层配置（含 `play.mode`） |
 | `pack.json` / `manifest.json` | 打包声明与内容寻址清单（`cargo run --example pack` 生成） |
 | `data/scenes.json` | 六节文本资源（scenes/endings/prompts/options/beats/tuning） |
 | `data/config.json` | 静态配置默认值 |

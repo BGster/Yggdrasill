@@ -38,8 +38,14 @@
 --
 -- 两层配置：data/config.json（静态默认，ygg.data 装载期快照）+ KV `settings.*`
 -- （config.set 动态覆盖）；判定恒为「动态覆盖 > 静态默认」。配置控制流转：
+-- play.mode 决定本局**交互模式**（guide 逐步确认 / goal 挂机）、
 -- gates.require_all_green 决定门禁失败是否打回；evolution.mode 决定局末复盘的
 -- 修订口径（off 仅报告 / suggest 建议包 / auto 白名单内自动修订）。
+--
+-- 交互模式（play.mode，静态缺省 guide）：每阶段的推进提示词按模式分叉——guide 版
+-- 强调「确认后由你选择/提交」，goal 版强调「挂机，宿主按推荐主动作自动推进，无需
+-- 确认」；每阶段回执顶部固定一行【运行模式】写明当前模式。模式只影响提示词与宿主
+-- 推进节奏，**不改**状态机、动作协议与只读动作（config.set / map.show 行为不变）。
 
 -- ============================================================================
 -- §资源 装载期快照（ygg.data 在 host 之后、stdlib 之前安装，Mod 顶层即可读；
@@ -194,6 +200,30 @@ local function next_mode()
     end
   end
   return MODES[1]
+end
+
+-- 交互模式（play.mode）：goal = 挂机（宿主按每步推荐主动作自动推进到结局并结算，
+-- 无需逐步确认）；guide = 逐步确认（每一步推进都必须由人选择/提交）。缺省 guide——
+-- 安全默认，不改变既有玩法。模式只影响提示词与宿主推进节奏，不改状态机与动作协议。
+local PLAY_MODES = { "goal", "guide" }
+local DEFAULT_PLAY_MODE = "guide"
+
+local function play_mode()
+  local value = effective("play.mode")
+  if type(value) == "string" and contains(PLAY_MODES, value) then
+    return value
+  end
+  return DEFAULT_PLAY_MODE
+end
+
+local function next_play_mode()
+  local current = play_mode()
+  for i = 1, #PLAY_MODES do
+    if PLAY_MODES[i] == current then
+      return PLAY_MODES[(i % #PLAY_MODES) + 1]
+    end
+  end
+  return PLAY_MODES[1]
 end
 
 local function strict_gates()
@@ -444,6 +474,17 @@ end
 -- ============================================================================
 local MENU = {}
 
+-- play.mode 的常驻开关：放**第一个** config.set（最全局的一档），位置在 map.show
+-- 之后——只读动作仍排在改配置之前（菜单顺序契约不变）。
+local function config_play_item()
+  local next_value = next_play_mode()
+  return {
+    text = fill(TEXTS.options.config_play, { mode = play_mode(), next = next_value }),
+    action = "config.set",
+    payload = "play.mode=" .. next_value,
+  }
+end
+
 local function config_evolution_item()
   local next_value = next_mode()
   return {
@@ -474,6 +515,7 @@ MENU[STAGE.intake] = function()
       payload = TEXTS.beats.default_task_title .. "|" .. TEXTS.beats.default_task_desc,
     },
     map_item(STAGE.intake),
+    config_play_item(),
     config_evolution_item(),
     config_gates_item(),
   }
@@ -487,6 +529,7 @@ MENU[STAGE.decompose] = function()
       payload = TEXTS.beats.default_plan,
     },
     map_item(STAGE.decompose),
+    config_play_item(),
     config_evolution_item(),
     config_gates_item(),
   }
@@ -501,6 +544,7 @@ MENU[STAGE.implement] = function()
       payload = id .. "|" .. TEXTS.beats.default_summary .. "|" .. TEXTS.beats.default_artifacts,
     },
     map_item(STAGE.implement),
+    config_play_item(),
     config_evolution_item(),
     config_gates_item(),
   }
@@ -516,6 +560,7 @@ MENU[STAGE.verify] = function()
       payload = "all_green=false;report=" .. TEXTS.beats.default_gate_report,
     },
     map_item(STAGE.verify),
+    config_play_item(),
     config_gates_item(),
     config_evolution_item(),
   }
@@ -529,6 +574,7 @@ MENU[STAGE.review] = function()
       payload = TEXTS.beats.default_lesson .. "|" .. tostring(TEXTS.tuning.default_score),
     },
     map_item(STAGE.review),
+    config_play_item(),
     config_evolution_item(),
     config_gates_item(),
   }
@@ -555,6 +601,42 @@ end
 -- 渲染器只读 KV、只 narrate/choice——不写状态、不 emit（choice 必须是最后输出）。
 -- ============================================================================
 local RENDER = {}
+
+-- 每阶段的推进提示词按 play.mode 分叉：guide 版强调「确认后由你选择/提交」，goal
+-- 版强调「挂机，宿主按推荐主动作自动推进，无需确认」。goal 键缺失时回落 guide 版
+-- ——数据漂移不静默丢提示。
+local function stage_prompt(st)
+  if play_mode() == "goal" then
+    return TEXTS.beats[st .. "_goal"] or TEXTS.beats[st .. "_guide"]
+  end
+  return TEXTS.beats[st .. "_guide"]
+end
+
+-- 提示词占位符的**超集**：guide / goal 两个变体共用一份（fill 只替换模板里出现的
+-- 键，多余键无副作用）。全部值只读 KV / 资源现算，渲染路径仍无副作用。
+local function prompt_vars()
+  return {
+    engine = tostring(ygg.engine_version),
+    stage = stage(),
+    play = play_mode(),
+    mode = mode(),
+    gates = gates_word(),
+    min = tostring(TEXTS.tuning.min_slices),
+    max = tostring(TEXTS.tuning.max_slices),
+    slice_id = slice_id(next_index()),
+    score = tostring(TEXTS.tuning.default_score),
+  }
+end
+
+-- 每阶段回执顶部固定一行：当前模式 + 该模式的推进纪律（含拒绝回执与局末——
+-- 「现在是什么模式、这一步要不要人确认」永远在回执里可见）。
+local function narrate_play_mode()
+  local hint = TEXTS.beats.play_hint_guide
+  if play_mode() == "goal" then
+    hint = TEXTS.beats.play_hint_goal
+  end
+  ygg.narrate(fill(TEXTS.beats.play_receipt, { play = play_mode(), hint = hint }))
+end
 
 local function evolution_receipt()
   local current = mode()
@@ -586,10 +668,7 @@ RENDER[STAGE.intake] = function()
     mode = mode(),
     gates = gates_word(),
   }))
-  ygg.narrate(fill(TEXTS.beats.intake_guide, {
-    min = tostring(TEXTS.tuning.min_slices),
-    max = tostring(TEXTS.tuning.max_slices),
-  }))
+  ygg.narrate(fill(stage_prompt(STAGE.intake), prompt_vars()))
   ygg.choice(TEXTS.prompts.intake, option_texts(menu(current)))
 end
 
@@ -602,10 +681,7 @@ RENDER[STAGE.decompose] = function()
     max = tostring(TEXTS.tuning.max_slices),
     mode = mode(),
   }))
-  ygg.narrate(fill(TEXTS.beats.decompose_guide, {
-    min = tostring(TEXTS.tuning.min_slices),
-    max = tostring(TEXTS.tuning.max_slices),
-  }))
+  ygg.narrate(fill(stage_prompt(STAGE.decompose), prompt_vars()))
   ygg.choice(TEXTS.prompts.decompose, option_texts(menu(current)))
 end
 
@@ -621,10 +697,7 @@ RENDER[STAGE.implement] = function()
     done_ids = done_ids(),
     mode = mode(),
   }))
-  ygg.narrate(fill(TEXTS.beats.implement_guide, {
-    slice_id = slice_id(index),
-    mode = mode(),
-  }))
+  ygg.narrate(fill(stage_prompt(STAGE.implement), prompt_vars()))
   ygg.choice(TEXTS.prompts.implement, option_texts(menu(current)))
 end
 
@@ -637,7 +710,7 @@ RENDER[STAGE.verify] = function()
     failures = tostring(num("verify.failures", 0)),
     gates = gates_word(),
   }))
-  ygg.narrate(fill(TEXTS.beats.verify_guide, { gates = gates_word() }))
+  ygg.narrate(fill(stage_prompt(STAGE.verify), prompt_vars()))
   ygg.choice(TEXTS.prompts.verify, option_texts(menu(current)))
 end
 
@@ -653,7 +726,7 @@ RENDER[STAGE.review] = function()
   -- auto 本局未触发 / suggest 建议包 / off 仅报告）——这就是「配置控制
   -- 状态回执」的观测面，不做提示词式的笼统描述。
   ygg.narrate(evolution_receipt())
-  ygg.narrate(fill(TEXTS.beats.review_guide, { score = tostring(TEXTS.tuning.default_score) }))
+  ygg.narrate(fill(stage_prompt(STAGE.review), prompt_vars()))
   ygg.choice(TEXTS.prompts.review, option_texts(menu(current)))
 end
 
@@ -668,10 +741,16 @@ RENDER[STAGE.done] = function()
     mode = mode(),
     lesson = review_lesson(),
   }))
+  if play_mode() == "goal" then
+    -- 挂机完成说明：goal 下本局全程无人工确认，结算报告由宿主 `--settle` 生成。
+    ygg.narrate(TEXTS.beats.play_done_goal)
+  end
 end
 
 local function render()
   local current = stage()
+  -- 模式行先行：goal/guide 的推进纪律在每个回执里都可见（含拒绝与局末）。
+  narrate_play_mode()
   local renderer = RENDER[current]
   if renderer == nil then
     ygg.narrate(fill(TEXTS.beats.unknown_stage, { stage = tostring(current) }))
@@ -903,7 +982,9 @@ end
 -- 只认 settings.* 命名空间下的白名单键（其余可读拒绝，不改任何状态）。
 -- ============================================================================
 local function config_scope(key)
-  if key == "evolution.mode" then
+  if key == "play.mode" then
+    return TEXTS.beats.scope_play_mode
+  elseif key == "evolution.mode" then
     return TEXTS.beats.scope_evolution_mode
   elseif key == "evolution.max_per_run" then
     return TEXTS.beats.scope_evolution_cap
@@ -914,7 +995,18 @@ local function config_scope(key)
 end
 
 local function apply_config(key, value)
-  if key == "evolution.mode" then
+  if key == "play.mode" then
+    -- 只认 goal / guide：非法值走可读拒绝，KV 不写（状态与模式都不变）。
+    if not contains(PLAY_MODES, value) then
+      return fill(TEXTS.beats.bad_config_value, {
+        key = key,
+        value = value,
+        allowed = join(PLAY_MODES, " / "),
+      })
+    end
+    ygg.kv.set("settings.play.mode", value)
+    return nil
+  elseif key == "evolution.mode" then
     if not contains(MODES, value) then
       return fill(TEXTS.beats.bad_config_value, {
         key = key,
@@ -1217,7 +1309,7 @@ ygg.on("event.start", function()
     stage = stage(),
     mode = mode(),
   }))
-  ygg.narrate(fill(TEXTS.beats.prologue_guide, { mode = mode(), gates = gates_word() }))
+  ygg.narrate(fill(stage_prompt("prologue"), prompt_vars()))
   render()
 end)
 
