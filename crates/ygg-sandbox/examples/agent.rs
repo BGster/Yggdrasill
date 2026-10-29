@@ -19,6 +19,19 @@
 //! cargo run -p ygg-sandbox --example agent -- --run-id my-task --settle
 //! ```
 //!
+//! 交互模式有**两种运行模式**（`play.mode`：静态 `data/config.json` 的 `play.mode`，
+//! 被最新存档的 KV `settings.play.mode` 动态覆盖——动态优先）：
+//!
+//! | 模式 | 行为 | 退出 |
+//! | --- | --- | --- |
+//! | `guide`（缺省） | 逐步确认：每一步推进都要 stdin 输入（提示符 `[guide] >`），不自动连跑 | `q` / 输入结束 |
+//! | `goal` | 挂机：不读 stdin，自动取 pendingChoice 序号 1（推荐主动作）推进，到结局自动结算 | 结算码 |
+//!
+//! `goal` 的失控防护：最多 [`MAX_GOAL_STEPS`] 步；派发失败 / 无 pendingChoice 且未
+//! 到结局 → 可读错误并非零退出（绝不静默死循环）。模式**每步现读**——中途
+//! `config.set play.mode=<goal|guide>` 下一步即生效（guide 阶段改成 goal 就转挂机）。
+//! 单发模式不受影响：`--event` 一次只派发一个事件，不自动连跑（Agent 的调用语义）。
+//!
 //! run 目录产物（`<runs-root>/<run-id>/`，默认 `./runs/<run-id>/`）：
 //!
 //! | 文件 | 内容 |
@@ -78,6 +91,10 @@ const DEFAULT_PAYLOAD: &str = "0";
 const ENTRY_EVENT: &str = "event.start";
 /// 选择事件的规范名（与内核保留路由同值）。
 const CHOICE_EVENT: &str = "ygg.choice_selected";
+/// goal 挂机模式的步数硬顶（正常一局 9 步；上限是死循环的硬防御）。
+const MAX_GOAL_STEPS: usize = 64;
+/// goal 自动推进时派发的选择序号（pendingChoice 的推荐主动作恒为第 1 项）。
+const GOAL_CHOICE_PAYLOAD: &str = "1";
 
 const AUTOSAVE_FILE: &str = "autosave.json";
 const EVENTS_FILE: &str = "events.jsonl";
@@ -207,7 +224,12 @@ fn usage(code: i32) -> ! {
   --event <名称>     单发模式：派发一个事件后退出（stdout 单行 JSON 回执）
   --payload <JSON>   事件 payload（默认 \"0\"；必须 JSON 标量）
   --settle           读 autosave + events.jsonl 写 settlement.json
-  -h, --help         本帮助";
+  -h, --help         本帮助
+
+运行模式（play.mode，仅交互模式生效：静态 data/config.json + 动态 settings.play.mode）:
+  guide              逐步确认（缺省）：每一步推进都要你输入（提示符 `[guide] >`）
+  goal               挂机：不读 stdin，自动按 pendingChoice 序号 1 推进到结局并结算
+                     （上限 64 步；失败 / 无待选且未结局 → 非零退出）";
     if code == 0 {
         println!("{text}");
     } else {
@@ -220,6 +242,68 @@ fn usage_error(message: &str) -> ! {
     eprintln!("error: {message}");
     eprintln!();
     usage(2)
+}
+
+// ============================================================================
+// §运行模式 play.mode = goal 挂机 / guide 逐步确认（缺省 guide）
+// ============================================================================
+
+/// 对局交互模式（`play.mode` 的两值枚举；未知值一律按 guide 处理）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlayMode {
+    /// 挂机：宿主按 pendingChoice 的推荐主动作（序号 1）自动推进到结局并结算。
+    Goal,
+    /// 逐步确认：每一步推进都要人输入（交互模式 stdin；单发模式每次一条事件）。
+    Guide,
+}
+
+impl PlayMode {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "goal" => Some(Self::Goal),
+            "guide" => Some(Self::Guide),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Goal => "goal",
+            Self::Guide => "guide",
+        }
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Goal => "挂机：不读 stdin，自动按推荐主动作推进到结局并结算",
+            Self::Guide => "逐步确认：每一步推进都要你输入，Mod 不会自动连跑",
+        }
+    }
+}
+
+/// 静态面：`<mod>/<config_rel>` 的 `play.mode`（缺键 / 非法值 → None，由调用方回落）。
+fn static_play_mode(mod_dir: &Path, config_rel: &str) -> Option<PlayMode> {
+    let text = fs::read_to_string(mod_dir.join(config_rel)).ok()?;
+    let config: Json = serde_json::from_str(&text).ok()?;
+    config["play"]["mode"].as_str().and_then(PlayMode::parse)
+}
+
+/// 静态配置的包内路径（pack.json 条目 `ygg:agent/config`；缺声明时按约定回落）。
+fn agent_config_path(dir: &Path) -> String {
+    let fallback = "data/config.json".to_owned();
+    let Some(pack) = fs::read_to_string(dir.join(PACK_FILE))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Json>(&text).ok())
+    else {
+        return fallback;
+    };
+    pack["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|entry| entry["id"].as_str() == Some("ygg:agent/config"))
+        .and_then(|entry| entry["path"].as_str())
+        .map_or(fallback, str::to_owned)
 }
 
 // ============================================================================
@@ -385,6 +469,8 @@ impl Reload {
 struct Session {
     run_id: String,
     mod_dir: PathBuf,
+    /// 静态配置资源的包内路径（`play.mode` 的静态面；来自 pack.json 声明）。
+    config_rel: String,
     mod_label: String,
     run_dir: PathBuf,
     autosave_path: PathBuf,
@@ -425,6 +511,7 @@ impl Session {
         let mut session = Self {
             run_id: args.run_id.clone(),
             mod_dir: mod_dir.clone(),
+            config_rel: agent_config_path(&mod_dir),
             mod_label: mod_dir.display().to_string(),
             autosave_path: run_dir.join(AUTOSAVE_FILE),
             events_path: run_dir.join(EVENTS_FILE),
@@ -553,6 +640,31 @@ impl Session {
     /// `state` 诊断信封（不推进状态）。
     fn state_envelope(&mut self) -> Json {
         parse_envelope(&self.kernel.dispatch("state", ""))
+    }
+
+    /// 当前生效的 `play.mode`：静态 `data/config.json` → 最新存档 KV
+    /// `settings.play.mode` 覆盖。**每次推进前现读**——中途 `config.set` 下一步
+    /// 即生效；存档缺失（新局）时就是静态默认，两者都缺则回落 guide。
+    fn play_mode(&self) -> PlayMode {
+        self.dynamic_play_mode()
+            .or_else(|| static_play_mode(&self.mod_dir, &self.config_rel))
+            .unwrap_or(PlayMode::Guide)
+    }
+
+    /// 动态面：最新 autosave 的 KV `settings.play.mode`（非法值忽略，回落静态）。
+    /// 只有成功步会改 KV，而成功步必然重写 autosave——所以磁盘存档就是最新态。
+    fn dynamic_play_mode(&self) -> Option<PlayMode> {
+        let save = read_json(&self.autosave_path)?;
+        save["kv"]["entries"]["settings.play.mode"]
+            .as_str()
+            .and_then(PlayMode::parse)
+    }
+
+    /// 存档里的结局标记（`ending` = 结局态）：续局落在局末时 pendingChoice 为空，
+    /// 靠它区分「已收口」与「无路可走」（goal 挂机的中止判据）。
+    fn recorded_ending(&self) -> bool {
+        read_json(&self.autosave_path)
+            .is_some_and(|save| save["kv"]["entries"]["ending"].as_str() == Some("done"))
     }
 
     /// 热载检查：mod 目录文件 mtime + 字节数变化 → 状态无损换新 mod。
@@ -784,7 +896,42 @@ fn single_shot_error(args: &Args, event: &str, message: &str) -> i32 {
 
 // ============================================================================
 // §交互模式 数字选项 / event / s / l / i / config / q（现场感：每步打印处境）
+// 运行模式（play.mode）在这里落地：goal 自动推进，guide 每步等输入。
 // ============================================================================
+
+/// goal 模式一步的决策（派发留在主循环里，统一打印与计数）。
+enum GoalStep {
+    /// 可以再自动推进一步（pendingChoice 序号 1）。
+    Run,
+    /// 本局已收口：调用现有结算逻辑写 settlement.json。
+    Settle,
+    /// 无路可走 / 超步数：打印可读错误并非零退出（不死循环、不静默成功）。
+    Stuck(String),
+}
+
+/// goal 的一步决策：结局 → 结算；无待选 → 已收口则结算，否则中止；步数硬顶防绕圈。
+fn goal_step(session: &Session, current: &Json, auto_steps: usize) -> GoalStep {
+    // ① 本步叙事出现结局行：本局收口，自动结算。
+    if current["ending"] == Json::Bool(true) {
+        return GoalStep::Settle;
+    }
+    // ② 无待决动作：续局落在局末（存档 KV 已记结局）也直接结算；否则是死路。
+    if current["pendingChoice"].is_null() {
+        if session.recorded_ending() {
+            return GoalStep::Settle;
+        }
+        return GoalStep::Stuck(
+            "[goal] 当前无 pendingChoice 且未到结局——挂机中止（Mod 没给出下一步动作）".to_owned(),
+        );
+    }
+    // ③ 防失控：步数硬顶（正常一局 9 步，64 是死循环的硬防御）。
+    if auto_steps >= MAX_GOAL_STEPS {
+        return GoalStep::Stuck(format!(
+            "[goal] 已达最大步数 {MAX_GOAL_STEPS} 仍未到结局——挂机中止（防死循环）"
+        ));
+    }
+    GoalStep::Run
+}
 
 fn run_interactive(args: &Args) -> i32 {
     let mut session = match Session::open(args) {
@@ -795,10 +942,15 @@ fn run_interactive(args: &Args) -> i32 {
         }
     };
 
+    let mode = session.play_mode();
     println!("== Yggdrasill Agent Harness · 交互模式 ==");
     println!("mod      : {}", session.mod_label);
     println!("run 目录 : {}", session.run_dir.display());
+    println!("运行模式 : {}（{}）", mode.label(), mode.hint());
     println!("命令：数字=选择 / event <名称> [JSON] / s=存档 / l=读档 / i=状态 / config / q=退出");
+    if mode == PlayMode::Goal {
+        println!("挂机提示 : 本局不需要 stdin，自动按 pendingChoice 序号 1 推进到结局并结算");
+    }
     if args.watch {
         println!("热载     : 开启（每步检查 mod 目录 mtime）");
     }
@@ -822,15 +974,61 @@ fn run_interactive(args: &Args) -> i32 {
         session.dispatch_event(ENTRY_EVENT, DEFAULT_PAYLOAD)
     };
     let mut fresh = true;
+    // goal 自动推进计数（`[goal] 自动推进 N` 与步数硬顶共用）。
+    let mut auto_steps: usize = 0;
+    // 模式迁移的可观测面：每步现读 play.mode，变了就打一行。
+    let mut last_mode = session.play_mode();
 
     // stdin 只锁一次（与 adventure.rs 同纪律：锁内单循环，无递归重入）。
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
 
     loop {
-        print_receipt(&current, fresh);
-        print_prompt(&current);
+        // 每步现读：静态 config.json → 最新 autosave 的 KV `settings.play.mode`
+        // 动态覆盖（中途 config.set 后下一步即生效）。
+        let mode = session.play_mode();
+        print_receipt(&current, fresh, mode);
         fresh = false;
+        if mode != last_mode {
+            println!(
+                "[运行模式] {} → {}：{}",
+                last_mode.label(),
+                mode.label(),
+                mode.hint()
+            );
+            last_mode = mode;
+        }
+
+        // goal：不读 stdin，按推荐主动作（序号 1）自动推进；到结局自动结算。
+        if mode == PlayMode::Goal {
+            match goal_step(&session, &current, auto_steps) {
+                GoalStep::Run => {
+                    auto_steps += 1;
+                    println!(
+                        "[goal] 自动推进 {auto_steps}/{MAX_GOAL_STEPS}（pendingChoice 序号 1）"
+                    );
+                    current = session.dispatch_event(CHOICE_EVENT, GOAL_CHOICE_PAYLOAD);
+                    if current["ok"] != Json::Bool(true) {
+                        eprintln!("error: [goal] 自动推进失败：{}", error_text(&current));
+                        print_receipt(&current, true, mode);
+                        return 1;
+                    }
+                    fresh = true;
+                    continue;
+                }
+                GoalStep::Settle => {
+                    println!();
+                    println!("[goal] 已到结局（自动推进 {auto_steps} 步），开始结算…");
+                    return run_settle(args);
+                }
+                GoalStep::Stuck(message) => {
+                    eprintln!("error: {message}");
+                    return 1;
+                }
+            }
+        }
+
+        print_prompt(&current, mode);
 
         let line = match lines.next() {
             Some(Ok(line)) => line,
@@ -906,7 +1104,7 @@ fn dispatch_with_watch(session: &mut Session, args: &Args, name: &str, payload: 
 }
 
 /// 打印一步回执（`fresh=false` 时只打印错误——存读档等不推进剧情）。
-fn print_receipt(receipt: &Json, fresh: bool) {
+fn print_receipt(receipt: &Json, fresh: bool, mode: PlayMode) {
     if receipt["ok"] != Json::Bool(true) {
         println!("[错误 {}] {}", error_code(receipt), error_message(receipt));
         return;
@@ -937,12 +1135,15 @@ fn print_receipt(receipt: &Json, fresh: bool) {
     }
     if receipt["ending"] == Json::Bool(true) {
         println!();
-        println!("—— 本局已到结局（q 退出后可 --settle 结算）——");
+        match mode {
+            PlayMode::Goal => println!("—— 本局已到结局（goal 挂机：自动结算中）——"),
+            PlayMode::Guide => println!("—— 本局已到结局（q 退出后可 --settle 结算）——"),
+        }
     }
 }
 
 /// 处境提示面：待决选择（编号选项）或无选择时的可用命令。
-fn print_prompt(receipt: &Json) {
+fn print_prompt(receipt: &Json, mode: PlayMode) {
     println!();
     match receipt["pendingChoice"].as_object() {
         Some(choice) => {
@@ -963,7 +1164,7 @@ fn print_prompt(receipt: &Json) {
             println!("（无待决选择。数字=选择 / event <名称> [JSON] / s / l / i / config / q）")
         }
     }
-    print!("> ");
+    print!("[{}] > ", mode.label());
     let _ = io::stdout().flush();
 }
 
@@ -1026,6 +1227,11 @@ fn print_config(session: &Session, args: &Args) {
     println!("run-id   : {}", session.run_id);
     println!("run 目录 : {}", session.run_dir.display());
     println!("autosave : {}", session.autosave_path.display());
+    println!(
+        "运行模式 : {}（静态 {}/play.mode + 动态 settings.play.mode；config.set 后下一步生效）",
+        session.play_mode().label(),
+        session.config_rel
+    );
     println!(
         "事件日志 : {}（已记录 {} 条，下一条 seq={}）",
         session.events_path.display(),
@@ -1162,6 +1368,11 @@ fn run_mod_label(run_dir: &Path, args: &Args) -> String {
 
 /// run.json 元信息（缺失 / 非法一律 None：元信息是便利面，不是判据）。
 fn read_meta(path: &Path) -> Option<Json> {
+    read_json(path)
+}
+
+/// 读一个 JSON 文件（缺失 / 非法 → None；宿主侧便利面，不吞错、不死循环）。
+fn read_json(path: &Path) -> Option<Json> {
     fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str::<Json>(&text).ok())

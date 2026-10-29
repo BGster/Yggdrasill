@@ -41,11 +41,44 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
   `hotReload`（本次派发前的热载结果）、`ending`（本步出现结局行）；失败时 `error` 带稳定码 + 文案，
   并补一次 `state` 回填当前 `pendingChoice`（出错后仍能接着走）。
 - 退出码：`0` ok / `1` 内核错误或装载失败 / `2` 用法错误。
-- 交互模式：省略 `--event`（按序号推进，`q` 退出；加 `--watch` 每步检查 Mod 改动并热载）。
+- 交互模式：省略 `--event`（按序号推进，`q` 退出；加 `--watch` 每步检查 Mod 改动并热载）；
+  它按 `play.mode` 运行——`guide` 逐步确认（缺省）/ `goal` 挂机，见 §3。
 
 ---
 
-## 3. 单发推进（Agent 脚本化）
+## 3. 运行模式：`goal` 挂机 / `guide` 逐步确认
+
+交互模式（省略 `--event`）按 **`play.mode`** 运行：`guide`（缺省）逐步确认，`goal` 挂机自动推进。
+
+| 模式 | 行为 | 退出 |
+| --- | --- | --- |
+| `guide` | 每一步推进都要你输入（提示符 `[guide] >`），Mod 不会自动连跑 | `q` / 输入结束 |
+| `goal` | 不读 stdin：自动取 `pendingChoice` 序号 1（推荐主动作）推进，到结局自动结算 | 结算码（与 `ok` 同值） |
+
+```bash
+# goal 挂机：先写动态配置，然后交互模式直接跑完一局（无需任何 stdin）
+.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task --runs-root .ygg/runs \
+  --resume --event config.set --payload '"play.mode=goal"'
+.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task --runs-root .ygg/runs \
+  --resume < /dev/null
+
+# guide 逐步确认（缺省）：同样一条命令、不给 goal——每一步都要你输入序号
+.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task --runs-root .ygg/runs --resume
+```
+
+- **两层配置**：静态 `data/config.json` 的 `play.mode`（缺省 `guide`）+ 动态 KV
+  `settings.play.mode`（`config.set play.mode=<goal|guide>` 写入），判定恒为「动态覆盖 > 静态默认」。
+  CLI **每步现读**——中途 `config.set` 下一步即生效（guide 会话里改成 goal 就转入挂机，一直到结局）。
+- **分阶段提示词差异**：每个阶段两版文案，按当前模式取一（goal = `<stage>_goal`，
+  guide = `<stage>_guide`），每阶段回执顶部固定一行 `【运行模式】play.mode = …`：
+  - guide：`逐步确认（guide）：… **这一步由你确认后提交** …`
+  - goal：`挂机（goal）：无需确认——宿主自动…`（各阶段写各自的推进动作，不是一句全局套话）
+- **失控防护**（goal）：最多 64 步；派发失败 / 无 `pendingChoice` 且未到结局 → 可读错误 + 退出码 `1`。
+- **单发模式不受影响**：`--event` 一次只派发一个事件，不自动连跑（Agent 的调用语义）。
+
+---
+
+## 4. 单发推进（Agent 脚本化）
 
 ```bash
 .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task \
@@ -62,7 +95,7 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `slice.report` | `'"s1\|summary\|a.md,b.md"'`（顺序上报，跳片会被拒） | implement → implement / verify |
 | `verify.submit` | `'"true"'` 或 `'"all_green=false;report=门禁输出摘要"'` | verify → review（全绿）/ implement（要求全绿时打回） |
 | `review.note` | `'"lesson\|4"'`（评分 1–5，缺省 3） | review → done（叙事以 `【结局` 收口） |
-| `config.set` | `'"gates.require_all_green=false"'`、`'"evolution.mode=suggest"'`（`settings.` 前缀可省） | 任意阶段，**不改变**主状态 |
+| `config.set` | `'"play.mode=goal"'`、`'"gates.require_all_green=false"'`、`'"evolution.mode=suggest"'`（`settings.` 前缀可省） | 任意阶段，**不改变**主状态 |
 | `guide.show` | `'"credentials"'`；`'""'` = 本阶段默认节 | 任意阶段，**不改变**主状态 |
 | `map.show` | `'""'` / `'"0"'` / `'"full"'`（三者同一张全图） | 任意阶段，**不改变**主状态 |
 
@@ -72,7 +105,7 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 
 ---
 
-## 4. 查规则与节点图：`guide.show` · `map.show`
+## 5. 查规则与节点图：`guide.show` · `map.show`
 
 ```bash
 .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id my-task \
@@ -125,12 +158,13 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
   （`├─` / `└─` 是同一节点的分支，缩进行是续行）。
 - 载荷只接空 / `0` / `"full"`（同一个全图，不做局部视图）；其他值 → `【地图被拒】` + 用法，
   主状态不变。看完照旧按 `pendingChoice` 继续——地图是旁挂只读，不占掉主前进动作。
-- `pendingChoice` 顺序固定为「主前进 → `guide.show` → `map.show` → `config.set`」，两个只读动作都
-  在改配置之前。
+- `pendingChoice` 顺序固定为「主前进 → `guide.show` → `map.show` → `config.set`（`play.mode` →
+  `evolution.mode` → `gates`）」，两个只读动作都在改配置之前；每阶段回执顶部还有一行
+  `【运行模式】play.mode = …`（当前模式与它的推进纪律，见 §3）。
 
 ---
 
-## 5. runs 产物与局末结算
+## 6. runs 产物与局末结算
 
 | 文件 | 内容 |
 | --- | --- |
@@ -148,7 +182,7 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 
 ---
 
-## 6. 改完 Mod 之后
+## 7. 改完 Mod 之后
 
 ```bash
 cargo run --example pack -- .ygg/mods/agent-seed        # 必跑：动了 data/ 或 schemas/ 就重算 manifest
@@ -164,7 +198,7 @@ cargo run --example playtest -- .ygg/mods/agent-seed    # 冒烟：全 1 贪心�
 
 ---
 
-## 7. 本地凭据
+## 8. 本地凭据
 
 本地凭据放 `.env` / `.env.local`（均已 gitignore，权限 600，绝不入库）。Mod 资源、静态配置、动态
 `settings.*` 与报告里只出现**键名**，不出现值——完整红线见 `guide.show credentials`。
