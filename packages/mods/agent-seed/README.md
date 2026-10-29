@@ -79,14 +79,30 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 - **内核仍单线程 dispatch + 单 autosave**：泳道只是宿主侧并行工作单元，结果一律经 inbox 回来，
   宿主按 `requirement_id` / `external_id` canonical 序合流。
 
-## 六、增量配置
+## 六、宿主侧跨进程协议（Mod 不感知，但影响玩法）
+
+Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
+
+| 文件 | 作用 |
+| --- | --- |
+| `coordination.json` | `{phase: running\|closing\|finalized, writers, owner_pid, heartbeat_at}` |
+| `coordination.lock` | 短临界区互斥（`create_new`；陈旧按 mtime 2s 抢占） |
+
+- **写命令**（`--requirement` / `--proposal` / …）：先在 `running` 下登记 `writers`，行落盘后才摘除；
+  `closing` → 非零拒绝；`finalized` → 非零拒绝（需开新局）。
+- **收口**：goal 在最后的 `review.note` 前切到 `closing`，等在途写者归零，**同一保护下**最后一次 drain：
+  有新需求就解除 closing 继续 loop，无新需求才 `review.note` + settle → `finalized`。
+- **崩溃恢复**：closing 用心跳续命（10s），过期后写命令或 resume 会恢回 `running`；锁也按 mtime 抢占，
+  不会永久卡死。
+
+## 七、增量配置
 
 - 静态 `data/config.json` + 动态 KV `settings.*`（`config.set`）：`play.mode`（guide/goal）、
   `gates.require_all_green`、`evolution.mode` / `evolution.max_per_run`。
 - `tuning`：`req_capacity`（需求上限 32）、`job_capacity`（4）、`min_slices` / `max_slices`（历史遗留）、
   `default_score`。
 
-## 七、文件
+## 八、文件
 
 | 文件 | 作用 |
 | --- | --- |
@@ -97,7 +113,7 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 | `pack.json` / `manifest.json` | 打包声明与内容寻址清单（`cargo run --example pack` 生成） |
 | `schemas/*.json` | 资源 schema（与 `packages/schema/schemas/` 单源一致） |
 
-## 八、走查
+## 九、走查
 
 ```bash
 # 默认全 1 贪心：intake → coordinate.submit → verify → review.note → 【结局

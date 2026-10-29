@@ -139,6 +139,22 @@ inbox 是 JSONL：`<runs-root>/<run-id>/inbox.jsonl`，每行
 
 - **不必给 `--mod`**：这些命令只做 `OpenOptions::append`，不读写 autosave，可与运行中的 goal/guide 并发。
 - **消费时机**：goal 每个自动动作前、guide 每次提示前、单发每次派发前 drain 新行并按 kind 派发。
+- **跨进程写入/收口协议**（协议级互斥，不是「多读一次文件」）：
+  run 目录下有 `coordination.lock`（create_new 互斥，陈旧按 mtime 2s 抢占）与
+  `coordination.json`（`{phase, writers, owner_pid, heartbeat_at}`）：
+  1. 写命令先登记：`phase=running` → 计入 `writers` 并保持到行落盘；
+     `phase=closing`（心跳未过期）→ **命令本身非零拒绝（exit 3）**；
+     `phase=finalized` → **非零拒绝（exit 3，需开新局）**。
+  2. goal 在派发最后的 `review.note` 前把 phase 切到 `closing`，**等在途写者落盘归零**，
+     然后在同一保护下做最后一次 drain：
+     · 有新需求且未 done → 解除 closing、继续 loop（不结局）；
+     · 无新需求 → 同一保护下完成 `review.note` + settle，随后 `phase=finalized`。
+     因此「写命令成功但 goal 已跨过最后一次 drain」在协议上不可能发生：
+     写入要么 happens-before 那次 drain，要么被拒。
+  3. 陈旧行与崩溃恢复：closing 用心跳续命（10s 过期），过期后写命令或 `--resume`
+     会把它判死并恢回到 `running`；锁也按 mtime 抢占。两者都不会因进程崩溃永久卡死。
+  4. 独立 `--settle` 同样走 closing：已有未消费行 → `ok=false` 并退回 running（可 resume 消费）；
+     已 finalized → 幂等返回旧报告，不重写。
 - **幂等 / 崩溃安全**：cursor（`inbox.cursor` 的 `{consumed:N}`）只在 dispatch 成功且存档落盘后前移；
   重放靠 `external_id`：
   - `add` / `proposal` → Mod 侧 per-entity ext 查重（`【需求重放】` / `【提案重放】`）；
@@ -177,6 +193,8 @@ inbox 是 JSONL：`<runs-root>/<run-id>/inbox.jsonl`，每行
 | `settlement.json` | 局末结算（仅 `--settle` 写出） |
 | `inbox.jsonl` | 异步操作队列（只追加；运行侧消费） |
 | `inbox.cursor` | 已消费行数（dispatch + 存档成功后才前移） |
+| `coordination.json` | 跨进程协议：`{phase, writers, owner_pid, heartbeat_at}`（running / closing / finalized） |
+| `coordination.lock` | 短临界区互斥锁（create_new；陈旧按 mtime 抢占，崩溃不卡死） |
 
 ```bash
 .ygg/bin/ygg-agent --run-id my-task --runs-root .ygg/runs --settle
