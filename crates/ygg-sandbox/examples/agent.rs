@@ -48,7 +48,7 @@
 //! | 模式 | 行为 | 退出 |
 //! | --- | --- | --- |
 //! | `guide`（缺省） | 逐步确认：每一步推进都要 stdin 输入（提示符 `[guide] >`），不自动连跑 | `q` / 输入结束 |
-//! | `goal` | 挂机：不读 stdin，自动取 pendingChoice 序号 1（推荐主动作）推进，到结局自动结算 | 结算码 |
+//! | `goal` | 挂机：不读 stdin，由外部决策命令选择 pendingChoice；HUMAN/异常安全暂停，到结局自动结算 | 结算码；人工暂停为 0 |
 //!
 //! `goal` 的失控防护：步数硬顶 [`MAX_GOAL_STEPS`] + 每条需求（异步补入的）额外
 //! 放宽 [`GOAL_STEPS_PER_REQUIREMENT`] 步 + 连续无进展 [`MAX_GOAL_STALL`] 步判停
@@ -100,8 +100,8 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::process::exit;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::process::{exit, Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::KernelFacade;
@@ -124,8 +124,10 @@ const MAX_GOAL_STEPS: usize = 64;
 const GOAL_STEPS_PER_REQUIREMENT: usize = 16;
 /// 连续「无进展」步数硬顶（pendingChoice 指纹不变 = 绕圈；死循环的第二道闸）。
 const MAX_GOAL_STALL: usize = 12;
-/// goal 自动推进时派发的选择序号（pendingChoice 的推荐主动作恒为第 1 项）。
-const GOAL_CHOICE_PAYLOAD: &str = "1";
+/// goal 决策命令的最长执行时间；任何异常都 fail closed，绝不回退到固定序号。
+const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
+/// goal 决策轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
+const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 const AUTOSAVE_FILE: &str = "autosave.json";
 const EVENTS_FILE: &str = "events.jsonl";
@@ -133,6 +135,7 @@ const META_FILE: &str = "run.json";
 const SETTLEMENT_FILE: &str = "settlement.json";
 const INBOX_FILE: &str = "inbox.jsonl";
 const INBOX_CURSOR_FILE: &str = "inbox.cursor";
+const DECIDE_INPUT_FILE: &str = "decide-input.json";
 
 /// Mod 侧拒绝的叙事前缀（契约面：`agent-seed` 系 Mod 用叙事而不是错误码表达
 /// 「动作被拒 / 载荷被拒 / 需求待排」，内核信封仍是 ok——宿主必须识别，否则会把
@@ -382,8 +385,8 @@ fn usage(code: i32) -> ! {
 
 运行模式（play.mode，仅交互模式生效：静态 data/config.json + 动态 settings.play.mode）:
   guide              逐步确认（缺省）：每一步推进都要你输入（提示符 `[guide] >`）
-  goal               挂机：不读 stdin，自动按 pendingChoice 序号 1 推进到结局并结算
-                     （基础 64 步 + 每条需求 4 步；连续 12 步无进展 → 非零退出）
+  goal               挂机：不读 stdin，由外部决策命令选择 pendingChoice
+                     （HUMAN/异常安全暂停；基础 64 步 + 每条需求 16 步；连续 12 步无进展 → 非零退出）
 
 异步需求（inbox）：goal 每个自动动作前、guide 每次提示前、单发每次派发前都会消费
   inbox.jsonl 的新行并 dispatch requirement.add；dispatch 成功且存档后才前移 cursor，
@@ -1799,13 +1802,155 @@ fn single_shot_error(args: &Args, event: &str, message: &str) -> i32 {
 }
 
 // ============================================================================
+// §goal 外部决策 回调协议 + 5 秒 fail-closed 暂停
+// ============================================================================
+
+#[derive(Debug, PartialEq, Eq)]
+enum DecideOutcome {
+    /// 经 pendingChoice 范围校验后的序号（从 1 开始）。
+    Index(String),
+    /// 需要人判断，或决策链路的任何一环失败；主状态不得推进。
+    Human(String),
+}
+
+/// 解析决策命令的唯一 stdout 行：`N` 或 `HUMAN[:理由]`。
+/// 非法输出、非数字、0 与越界序号全部按 HUMAN 处理。
+fn parse_decision_output(stdout: &str, option_count: usize) -> DecideOutcome {
+    let text = stdout.trim();
+    if text.contains(['\n', '\r']) {
+        return DecideOutcome::Human(
+            "决策命令输出非法：协议只接受单行 N 或 HUMAN[:理由]".to_owned(),
+        );
+    }
+    if text == "HUMAN" {
+        return DecideOutcome::Human("决策命令要求人工处理".to_owned());
+    }
+    if let Some(reason) = text.strip_prefix("HUMAN:") {
+        let reason = reason.trim();
+        return DecideOutcome::Human(if reason.is_empty() {
+            "决策命令要求人工处理".to_owned()
+        } else {
+            reason.to_owned()
+        });
+    }
+    if !text.is_empty() && text.chars().all(|ch| ch.is_ascii_digit()) {
+        if let Ok(index) = text.parse::<usize>() {
+            if (1..=option_count).contains(&index) {
+                return DecideOutcome::Index(index.to_string());
+            }
+        }
+        return DecideOutcome::Human(format!(
+            "决策命令返回越界序号（合法范围 1..={option_count}）"
+        ));
+    }
+    DecideOutcome::Human("决策命令输出非法：仅接受 N 或 HUMAN[:理由]".to_owned())
+}
+
+/// 把完整当前回执交给外部决策命令。命令缺失、spawn/读写失败、超时、非零退出、
+/// 非法输出与越界序号全部 fail closed；这里不存在「回退选 1」分支。
+fn decide_choice(session: &Session, current: &Json) -> DecideOutcome {
+    let Some(options) = current["pendingChoice"]["options"].as_array() else {
+        return DecideOutcome::Human("当前回执缺少 pendingChoice.options".to_owned());
+    };
+    if options.is_empty() {
+        return DecideOutcome::Human("pendingChoice.options 为空".to_owned());
+    }
+    let input_path = session.run_dir.join(DECIDE_INPUT_FILE);
+    if let Err(message) = write_json_pretty(&input_path, current) {
+        return DecideOutcome::Human(format!("写入决策输入失败：{message}"));
+    }
+
+    // 显式 env 覆盖优先；即使它指向不存在的命令也不回退到 Mod 或序号 1。
+    let program = std::env::var_os("YGG_DECIDE_CMD")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| session.mod_dir.join("decide.py"));
+    if program.as_os_str().is_empty() {
+        return DecideOutcome::Human("YGG_DECIDE_CMD 为空".to_owned());
+    }
+    let mut child = match Command::new(&program)
+        .arg(&input_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => {
+            return DecideOutcome::Human(format!("无法启动决策命令 {}：{err}", program.display()));
+        }
+    };
+
+    let deadline = Instant::now() + DECIDE_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(DECIDE_POLL_INTERVAL);
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return DecideOutcome::Human("决策命令超过 5 秒，已终止".to_owned());
+            }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return DecideOutcome::Human(format!("等待决策命令失败：{err}"));
+            }
+        }
+    }
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(err) => return DecideOutcome::Human(format!("读取决策命令输出失败：{err}")),
+    };
+    if !output.status.success() {
+        return DecideOutcome::Human(format!("决策命令非零退出（{}）", output.status));
+    }
+    let stdout = match String::from_utf8(output.stdout) {
+        Ok(stdout) => stdout,
+        Err(_) => return DecideOutcome::Human("决策命令 stdout 不是合法 UTF-8".to_owned()),
+    };
+    parse_decision_output(&stdout, options.len())
+}
+
+#[cfg(test)]
+mod decide_tests {
+    use super::{parse_decision_output, DecideOutcome};
+
+    #[test]
+    fn accepts_only_valid_choice_numbers() {
+        assert_eq!(
+            parse_decision_output("2\n", 3),
+            DecideOutcome::Index("2".to_owned())
+        );
+        for output in ["0", "4", "-1", "+1", "1 2", ""] {
+            assert!(matches!(
+                parse_decision_output(output, 3),
+                DecideOutcome::Human(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn preserves_human_reason_and_rejects_multiline_output() {
+        assert_eq!(
+            parse_decision_output("HUMAN: 门禁需要核验", 3),
+            DecideOutcome::Human("门禁需要核验".to_owned())
+        );
+        assert!(matches!(
+            parse_decision_output("HUMAN: first\nsecond", 3),
+            DecideOutcome::Human(reason) if reason.contains("单行")
+        ));
+    }
+}
+
+// ============================================================================
 // §交互模式 数字选项 / event / s / l / i / config / q（现场感：每步打印处境）
 // 运行模式（play.mode）在这里落地：goal 自动推进，guide 每步等输入。
 // ============================================================================
 
 /// goal 模式一步的决策（派发留在主循环里，统一打印与计数）。
 enum GoalStep {
-    /// 可以再自动推进一步（pendingChoice 序号 1）。
+    /// 可以再请求外部决策命令推进一步。
     Run,
     /// 本局已收口：调用现有结算逻辑写 settlement.json。
     Settle,
@@ -1854,7 +1999,7 @@ fn run_interactive(args: &Args) -> i32 {
     println!("运行模式 : {}（{}）", mode.label(), mode.hint());
     println!("命令：数字=选择 / event <名称> [JSON] / s=存档 / l=读档 / i=状态 / config / q=退出");
     if mode == PlayMode::Goal {
-        println!("挂机提示 : 本局不需要 stdin，自动按 pendingChoice 序号 1 推进到结局并结算");
+        println!("挂机提示 : 本局不需要 stdin；由外部决策命令选择动作，需要人工时安全暂停");
     }
     if args.watch {
         println!("热载     : 开启（每步检查 mod 目录 mtime）");
@@ -1930,7 +2075,7 @@ fn run_interactive(args: &Args) -> i32 {
             last_mode = mode;
         }
 
-        // goal：不读 stdin，按推荐主动作（序号 1）自动推进；到结局自动结算。
+        // goal：不读 stdin；每个待选动作交给外部决策命令，HUMAN/异常即安全暂停。
         let mut paused_for_conflict = false;
         if mode == PlayMode::Goal {
             // ① 冲突 = **用户门禁**：必须停下打印双方与说明，绝不自动选解决路径。
@@ -2020,8 +2165,22 @@ fn run_interactive(args: &Args) -> i32 {
                         return 1;
                     }
                     auto_steps += 1;
-                    println!("[goal] 自动推进 {auto_steps}/{limit}（pendingChoice 序号 1）");
-                    current = session.dispatch_event(CHOICE_EVENT, GOAL_CHOICE_PAYLOAD);
+                    let choice = match decide_choice(&session, &current) {
+                        DecideOutcome::Index(index) => index,
+                        DecideOutcome::Human(reason) => {
+                            eprintln!(
+                                "[goal] 需要人工决策：{reason}——安全暂停，处理后 --resume 继续"
+                            );
+                            print_receipt(&current, true, mode);
+                            println!("当前回执：{current}");
+                            if closing_held {
+                                leave_closing(&session.run_dir);
+                            }
+                            return 0;
+                        }
+                    };
+                    println!("[goal] 自动推进 {auto_steps}/{limit}（决策命令返回序号 {choice}）");
+                    current = session.dispatch_event(CHOICE_EVENT, &choice);
                     if current["ok"] != Json::Bool(true) {
                         eprintln!("error: [goal] 自动推进失败：{}", error_text(&current));
                         print_receipt(&current, true, mode);
