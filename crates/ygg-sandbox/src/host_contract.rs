@@ -25,12 +25,13 @@
 //! | 面 | 口径 | 消费方 |
 //! | --- | --- | --- |
 //! | 登记面 | `code.{entry, modules[]}`：入口**不**登记为模块（同一源码两个装载身份让缓存与定位歧义）；模块**逐条枚举**，无 glob；`entry ↔ modules` 与 `manifest.json` 的 `code` 数组双向相等 | [`crate::pack::CodeSpec`]、[`crate::modload::ModBundle`] |
-//! | 装载期边界 | `require` 只在**装载期**可用：入口 chunk（含其间嵌套的模块装载）跑完，驱动在 `host.seal` 的**同一处**翻 `ModuleHandle::seal`，此后 `require` 是可读拒绝——handler 里不能懒加载 | [`crate::modules::ModuleHandle`] |
+//! | 装载期边界 | **只有注册面有边界**：`host.seal` 封 `ygg.on`（运行期注册禁令）。`require` **不**在边界上——装载期与 handler 内部一视同仁（懒加载成立） | [`crate::modules`]、[`crate::host_api::HostApi::seal`] |
+//! | 副作用边界 | **入口可注册，模块只导出**：入口 chunk 顶层就是装配清单（注册 / 写状态 / 输出都是它的职责）；模块 chunk 顶层只做纯导出（定义函数与常量），注册 / 写状态 / 输出一律搬进模块函数体，由入口显式调用（`M.install(deps)`）。理由：`ygg.on` 的注册序就是派发序——模块自己注册，等于让「文件怎么拆」决定「运行时行为」，拆文件或调 require 顺序就改行为。禁止面清单在 `ygg_modules::effects`，运行期由影子表执行、静态由 `ygg-lint --pack` 的 `YGG-MOD-EFFECT` 报 | [`crate::modules`]、[`ygg_modules::effects`] |
 //! | 错误前缀口径 | 装载器自判的拒绝带**调用点**（`src/a.lua:3: <原因>`）；模块 chunk 自身的错误按 Lua 原生错误链浮出（每层 `path:line:` + traceback）——两类同形，都带真实文件与行号，禁止「拼回单文件再报错」 | [`crate::modules`] |
 //!
 //! 与四段 host 契约的差别：`code` 段可以整段缺失（缺 = 单文件 Mod，行为逐字节
 //! 不变）；存在则**全量校验**，不允许半声明。边界细节见 `docs/mod-authoring.md`
-//! §5「多文件 Mod」。
+//! §5「多文件 Mod」的「require 语义」与「副作用边界」两节。
 //!
 //! 绑定特定 Mod 的应用（`examples/adventure.rs`、`clients/godot`、
 //! `packages/client-web`…）不属本模块的消费方：它们各自服务固定 Mod，文件头

@@ -11,9 +11,14 @@
 //!   Mod chunk 之前，Mod 顶层即可读资源）→ `stdlib::install`（S10 stdlib：先于
 //!   Mod chunk，注册序即派发序）→ **模块表注入**（r1：`ModuleHandle::set_modules`,
 //!   入口 chunk 之前——入口顶层即可 `require`）→ Mod chunk（失败 =
-//!   [`KernelError::ModLoad`]）→ `host.seal` + `ModuleHandle::seal`（**同一处**
-//!   收口：运行期注册禁令与 require 装载面同时关闸）→
-//!   `register_into(&mut registry, "mod")`（ygg.on 调用序 = 注册序 = 派发序）。
+//!   [`KernelError::ModLoad`]）→ `host.seal`（运行期注册禁令：只封
+//!   `ygg.on`）→ `register_into(&mut registry, "mod")`（ygg.on 调用序 =
+//!   注册序 = 派发序）。
+//!
+//!   **`require` 不在这条分界上**：装载期与运行期（handler 内部）一视同仁。
+//!   模块顶层是纯导出面（禁止面清单在 `ygg_modules::effects`，构造在
+//!   [`crate::modules`] 的影子表），所以模块的执行时机不影响 handler 派发序——
+//!   这也正是懒加载能成立的前提。
 //! - **统一 store 代决（S10）**：`entities` / `kv` 为 `Rc<RefCell<..>>`
 //!   单实例——handler 经 host 桥的即席状态写**直接落在 canonical store**；
 //!   转换输入侧以快照克隆（snapshot-out，见 `cmd_event`）喂给
@@ -226,10 +231,9 @@ fn build_kernel(
         return Err(KernelError::ModLoad(err.to_string()));
     }
     // ⑧ 分相收口：seal（运行期注册禁令）→ 注册转出进注册表。
-    //    require 面的收口与 `host.seal` **同一处**——装载期与运行期的分界
-    //    只有一个，不另立时序（seal 后 require 返回可读拒绝，不是裸 nil-call）。
+    //    只封 `ygg.on`——`require` 不在装载期边界上（模块顶层是纯导出面，
+    //    执行时机不影响派发序，见 `crate::modules::ShadowBanned`）。
     host.seal(&lua).map_err(KernelError::Sandbox)?;
-    sandbox.modules().seal();
     let mut registry = HandlerRegistry::new();
     host.register_into(&mut registry, "mod");
     Ok(KernelParts {
@@ -292,7 +296,8 @@ impl KernelFacade {
 
     /// r1：多文件 Mod 构造——除入口 source 外另给已登记的模块表（`src/*.lua`
     /// 拆出的子模块）。模块表在入口 chunk 之前注入，所以入口顶层就能
-    /// `require("src.util")`；装载结束后 require 面随 `host.seal` 一并收口。
+    /// `require("src.util")`；入口之后的 handler 里同样可以 `require`（懒加
+    /// 载），模块 chunk 受影子表约束（只能纯导出）。
     ///
     /// 无资源路径（资源表为空基线）；带资源的多文件 Mod 走
     /// [`KernelFacade::with_resources_and_modules`]。

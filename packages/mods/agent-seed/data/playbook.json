@@ -335,6 +335,12 @@
           "basis": "harness 机制（多文件 Mod）"
         },
         {
+          "id": "harness.module-pure-export",
+          "modality": "must",
+          "text": "多文件 Mod 的模块 chunk 只做纯导出（定义函数与常量），不做任何有副作用的事：注册 / 写状态 / 输出全部集中在入口。模块把注册面做成函数（`function M.install(deps)`），由入口显式按序调用；模块顶层碰 `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / `ygg.entity` 的写类成员 / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative[\"goto\"]` 即被拒（静态检查与运行期影子表共用同一份清单），顶层只允许纯读（`ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity` 的读类成员）；入口 chunk 不受此约束（它就是装配清单）。理由：handler 的派发序 = `ygg.on` 的注册序——让模块自己注册，等于让「文件怎么拆 / 先 require 谁」决定运行时行为，拆文件或调 require 顺序就改派发序，重构不保行为。`require` 因此在任何时机都可用（含 handler 内懒加载纯库），但懒加载不放宽边界：懒加载到的模块顶层照样只能纯导出。细则见 Mod 作者指南的「多文件 Mod」副作用边界小节。",
+          "basis": "harness 机制（多文件 Mod）"
+        },
+        {
           "id": "harness.mod-change-triple",
           "modality": "must",
           "text": "改完 Mod 必须跑完三件套：① 重算打包清单 ② Lua 静态检查（应 0 error / 0 warning）③ 冒烟走查（必须到达结局）。缺一不算改完。",

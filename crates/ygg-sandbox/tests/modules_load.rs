@@ -2,8 +2,8 @@
 //!
 //! 覆盖 require 契约：同状态同 globals 共享、只经返回值跨模块、缓存与 table
 //! 身份、`nil`/无返回值 → `true` 且只执行一次、chunk 名（错误文本带真实文件
-//! 与行号）、循环与深度的可读链条、seal 后拒绝（可读错误而非裸 nil-call）、
-//! 装载期独立燃料预算（不挤占单转换预算）。
+//! 与行号）、循环与深度的可读链条、**调用时机不受装载期限制**（封的只是注册
+//! 面，见 `host.seal`）、装载期独立燃料预算（不挤占单转换预算）。
 
 use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::{KernelError, KernelFacade, DEFAULT_FUEL_BUDGET};
@@ -47,18 +47,6 @@ fn reply_ok(reply: &str) -> Json {
     let parsed = parse(reply);
     assert_eq!(parsed["ok"], json!(true), "expected ok reply: {reply}");
     parsed
-}
-
-fn reply_error(reply: &str) -> (String, String) {
-    let parsed = parse(reply);
-    assert_eq!(parsed["ok"], json!(false), "expected error reply: {reply}");
-    (
-        parsed["error"]["code"].as_str().expect("code").to_owned(),
-        parsed["error"]["message"]
-            .as_str()
-            .expect("message")
-            .to_owned(),
-    )
 }
 
 #[test]
@@ -277,36 +265,24 @@ fn invalid_module_names_are_readable_denials() {
 }
 
 #[test]
-fn require_after_load_is_a_readable_denial_not_a_nil_call() {
+fn require_has_no_load_time_boundary() {
+    // r1：`require` 不再封在装载期——封的是注册面（`host.seal` 只锁 `ygg.on`），
+    // 不是模块面。这两件事共用一个开关曾经把懒加載直接封死。
+    // 完整的懒加载契约（缓存 / 只执行一次 / 反射边界）在 tests/modules_effects.rs。
     let mut kernel = KernelFacade::with_modules(
         r#"
-ygg.on("kind", function()
-  ygg.narrate("require_is_" .. type(require))
-end)
-ygg.on("late", function()
-  require("src.util")
+ygg.on("probe", function()
+  local util = require("src.util")
+  ygg.narrate("late=" .. util.tag .. ";kind=" .. type(require))
 end)
 "#,
-        modules(&[("src.util", "return true")]),
+        modules(&[("src.util", "return { tag = \"util\" }")]),
     )
     .expect("multi-file mod loads");
 
-    let (code, message) = reply_error(&kernel.dispatch("late", "0"));
-    assert_eq!(code, "SANDBOX_DENIED", "sealed require is a sandbox denial");
-    assert!(message.contains("sandbox denied"), "readable: {message}");
-    assert!(
-        message.contains("load-time-only surface"),
-        "explains the phase boundary: {message}"
-    );
-    assert!(message.contains("src.util"), "names the module: {message}");
-    assert!(
-        !message.contains("attempt to call a nil value"),
-        "must not degrade to a bare nil-call: {message}"
-    );
-
-    // `require` 本身仍在 globals 里（是拒绝，不是缺席）。
-    let parsed = reply_ok(&kernel.dispatch("kind", "0"));
-    assert_eq!(parsed["narrative"], json!(["require_is_function"]));
+    // 装载结束后（= seal 之后）的 dispatch 里 require 仍然可用。
+    let parsed = reply_ok(&kernel.dispatch("probe", "0"));
+    assert_eq!(parsed["narrative"], json!(["late=util;kind=function"]));
 }
 
 #[test]

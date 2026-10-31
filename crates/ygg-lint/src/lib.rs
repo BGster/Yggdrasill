@@ -18,6 +18,9 @@
 //!   handler 内捕获且本体内无 kv 化证据——D-11 双档口径）；
 //! - `YGG-R3` `ygg.narrative.goto(` 点形态（Lua 5.4 语法错误，parse 前
 //!   文本预扫——AST 在该处无法构建）；
+//! - `YGG-MOD-EFFECT` `--pack` 面：模块 chunk **顶层**调用 / 引用有副作用的 host
+//!   API（`ygg.on` / `ygg.kv.set` …）。禁止面清单来自 [`ygg_modules::effects`]
+//!   ——与装载期影子表同一份，lint 不另写名单；
 //! - `YGG-PARSE` 解析失败（非 R3 形态的语法错误）。
 
 pub mod diagnostic;

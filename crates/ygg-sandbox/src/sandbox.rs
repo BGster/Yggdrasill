@@ -12,16 +12,16 @@
 //!   整体替换——原 globals（含 ALL_SAFE 加载的 io/string/table/math/package 等）
 //!   自此不可达。新表只暴露三类面：base 纯计算子集（[`BASE_WHITELIST`]：无
 //!   dofile/loadfile/load/print/rawset/collectgarbage——文件系统、任意编译与
-//!   GC 干预面全部拒之门外）；`require` 受控模块面（r1：装载期按已登记模块表
-//!   装载同 Mod 的其它文件，其它一切名字可读拒绝；seal 后整面关闭——实现见
+//!   GC 干预面全部拒之门外）；`require` 受控模块面（r1：按已登记模块表装载
+//!   同 Mod 的其它文件，其它一切名字可读拒绝；调用时机不设边界——实现见
 //!   [`crate::modules`]，见下）；`ygg = { engine_version }` host API 占位（完整
 //!   host API 落 S9/S10）。首个 host API 面刻意极小：M0 骨架期不预支 S9 的
 //!   白名单决策。
 //! - **require 面**（r1）：不在本文件直接实现——[`crate::modules::install`]
-//!   装上「查已登记模块表 + 缓存 + 循环/深度判栈」的装载器；模块表由驱动在
-//!   入口 chunk 之前注入（[`Sandbox::modules`] 句柄），装载结束在 `host.seal`
-//!   同一处收口。空表 + 未收口时 `require` 对任何名字给可读拒绝（单文件 Mod
-//!   的既有行为不变）。
+//!   装上「查已登记模块表 + 缓存 + 循环/深度判栈 + 副作用影子表」的装载器；
+//!   模块表由驱动在入口 chunk 之前注入（[`Sandbox::modules`] 句柄），装载期
+//!   与运行期（handler 内部）都能 require。空表时 `require` 对任何名字给可读
+//!   拒绝（单文件 Mod 的既有行为不变）。
 //! - **燃料计量**（D-继承-2 / D-B1）：正式燃料落 [`crate::fuel`] 模块
 //!   （`set_hook` 指令计数 + 每转换共享预算），经 `fuel::install(&Lua, budget)`
 //!   在沙箱构造后接入——构造本体不内建任何 hook（S8 amendment：S7 的临时
@@ -101,7 +101,8 @@ impl Sandbox {
 
         // ④ require 面：受控模块装载器（r1）。空模块表就位——未注入模块的
         //    沙箱对任何名字都给可读拒绝（白名单面不放行外部模块）；模块表由
-        //    驱动在入口 chunk 之前注入，装载结束在 `host.seal` 同一处收口。
+        //    驱动在入口 chunk 之前注入。调用时机不设边界（封的是注册面，
+        //    不是模块面）。
         let modules = modules::install(&lua, &fresh)?;
 
         // ⑤ host API 占位：ygg = { engine_version }（完整 host API 落 S9/S10）。
@@ -119,8 +120,8 @@ impl Sandbox {
         &self.lua
     }
 
-    /// 模块装载面句柄（驱动：`set_modules` 注入模块表 / `seal` 收口 /
-    /// `load_budget` 接装载期燃料）。
+    /// 模块装载面句柄（驱动：`set_modules` 注入模块表 / `load_budget` 接
+    /// 装载期燃料）。
     pub fn modules(&self) -> &ModuleHandle {
         &self.modules
     }

@@ -319,3 +319,216 @@ fn chain_deeper_than_the_load_limit_is_reported() {
     );
     assert_eq!(diagnostic.line, 1);
 }
+
+// ---------------------------------------------------------------------------
+// YGG-MOD-EFFECT（L1 主防线）：模块 chunk 顶层不得触碰有副作用的 host API
+//
+// 判定口径与装载期影子表共用 `ygg_modules::effects`（清单只有一份）：下面的
+// 「共享清单逐条驱动」用例就是这条纪律的可执行版本——内核加一个禁止成员，
+// 它自动覆盖，lint 侧不需要同步改测试。
+// ---------------------------------------------------------------------------
+
+/// 模块源码 + 一个干净入口（入口只 require 并调用 install）。
+fn effect_report(module_source: &str) -> PackReport {
+    check(
+        &pack_json("mod.lua", &["src/util.lua"]),
+        &[
+            (
+                "mod.lua",
+                "local util = require(\"src.util\")\nreturn util.install()\n",
+            ),
+            ("src/util.lua", module_source),
+        ],
+    )
+}
+
+#[test]
+fn module_top_level_effect_call_is_reported_with_position() {
+    let report = effect_report(
+        "local util = {}\n\
+         \n\
+         ygg.on(\"probe\", function() end)\n\
+         \n\
+         return util\n",
+    );
+    let diagnostic = only(&report, code::MOD_EFFECT);
+    assert_eq!(diagnostic.file, "src/util.lua");
+    assert_eq!(diagnostic.line, 3);
+    assert_eq!(diagnostic.column, 1);
+    assert_eq!(diagnostic.severity, Severity::Error);
+    // 文案要同时说清「做了什么」（顶层调用 ygg.on）/「为什么」（注册序即派发序）。
+    assert!(
+        diagnostic.message.contains("`ygg.on`"),
+        "message must name what was touched: {}",
+        diagnostic.message
+    );
+    assert!(
+        diagnostic.message.contains("注册序就是派发序"),
+        "message must explain why: {}",
+        diagnostic.message
+    );
+    // 「该怎么做」必须是 `M.install(deps)` 形态（不是「别这么写」）。
+    assert!(
+        diagnostic.fix.contains("M.install(deps)"),
+        "fix must point at the install form: {}",
+        diagnostic.fix
+    );
+}
+
+#[test]
+fn effect_inside_a_function_body_is_allowed() {
+    // 这正是官方写法：模块只导出，注册集中在 install 里由入口调用。
+    // 三类函数节点都要把深度算进去（声明 / local function / 匿名函数）。
+    let report = effect_report(
+        "local util = {}\n\
+         \n\
+         function util.install(deps)\n\
+         \x20 ygg.on(\"probe\", function() ygg.narrate(\"x\") end)\n\
+         \x20 ygg.kv.set(\"k\", 1)\n\
+         end\n\
+         \n\
+         local function helper()\n\
+         \x20 ygg.fsm.define({})\n\
+         end\n\
+         \n\
+         local install_alias = function()\n\
+         \x20 ygg.narrative.node(\"n\", function() end)\n\
+         end\n\
+         \n\
+         return util\n",
+    );
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn entry_is_exempt_from_the_effect_rule() {
+    // 入口就是装配清单：顶层的 ygg.on / ygg.narrative.node 是它的职责。
+    let report = check(
+        &pack_json("mod.lua", &["src/util.lua"]),
+        &[
+            (
+                "mod.lua",
+                "local util = require(\"src.util\")\n\
+                 ygg.on(\"probe\", function() end)\n\
+                 ygg.narrative.node(\"n\", function() end)\n\
+                 return util\n",
+            ),
+            ("src/util.lua", "return { install = function() end }\n"),
+        ],
+    );
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn reference_and_bracket_forms_are_reported() {
+    // 取引用也算（顶层拿到 `ygg.on` 的下一步必然是注册）；
+    // 字符串下标形态与点形态同一判定（`narrative.goto` 只有这种写法能过解析）。
+    let report = effect_report(
+        "local util = {}\n\
+         local register = ygg.on\n\
+         local write = ygg[\"kv\"][\"set\"]\n\
+         return util\n",
+    );
+    let hits: Vec<&Diagnostic> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == code::MOD_EFFECT)
+        .collect();
+    assert_eq!(hits.len(), 2, "{:?}", report.diagnostics);
+    // 定位到 `ygg.on` 本身（第 2 行第 18 列），不是整条语句。
+    assert_eq!((hits[0].line, hits[0].column), (2, 18));
+    assert!(
+        hits[0].message.contains("取用"),
+        "reference form must read as a reference, not a call: {}",
+        hits[0].message
+    );
+    assert_eq!((hits[1].line, hits[1].column), (3, 15));
+    assert!(
+        hits[1].message.contains("`ygg.kv.set`"),
+        "{}",
+        hits[1].message
+    );
+}
+
+#[test]
+fn pure_reads_and_unlisted_members_stay_allowed() {
+    // 顶层允许的读面（effects::PURE_READ_*）+ 未列入禁止面的值字段。
+    let report = effect_report(
+        "local util = {}\n\
+         local texts = ygg.data(\"ygg:scene/texts\")\n\
+         local ticks = ygg.ticks()\n\
+         local stage = ygg.kv.get(\"stage\")\n\
+         local tagged = ygg.entity.has_tag(\"e\", \"t\")\n\
+         local attribute = ygg.entity.get_attribute(\"e\", \"a\")\n\
+         local version = ygg.stdlib_version\n\
+         return util\n",
+    );
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn every_name_in_the_shared_ban_list_is_reported() {
+    use ygg_modules::effects;
+
+    for &name in effects::BANNED_CALLS {
+        let report = effect_report(&format!("ygg.{name}(1)\n"));
+        let diagnostic = only(&report, code::MOD_EFFECT);
+        assert_eq!(diagnostic.line, 1);
+        assert!(
+            diagnostic.message.contains(&format!("`ygg.{name}`")),
+            "{}",
+            diagnostic.message
+        );
+    }
+    for &(table, member) in effects::BANNED_TABLE_MEMBERS {
+        // 统一走括号形态：`narrative.goto` 的点形态在 Lua 5.4 是语法错误
+        // （YGG-R3），点形态与括号形态本是同一条静态路径。
+        let report = effect_report(&format!("ygg.{table}[\"{member}\"](1)\n"));
+        let diagnostic = only(&report, code::MOD_EFFECT);
+        assert!(
+            diagnostic
+                .message
+                .contains(&format!("`ygg.{table}.{member}`")),
+            "{}",
+            diagnostic.message
+        );
+    }
+    for &name in effects::PURE_READ_CALLS {
+        let report = effect_report(&format!("ygg.{name}()\n"));
+        assert!(
+            report.diagnostics.is_empty(),
+            "ygg.{name} 是纯读面，不该报：{:?}",
+            report.diagnostics
+        );
+    }
+    for &(table, member) in effects::PURE_READ_TABLE_MEMBERS {
+        let report = effect_report(&format!("ygg.{table}[\"{member}\"]()\n"));
+        assert!(
+            report.diagnostics.is_empty(),
+            "ygg.{table}.{member} 是纯读面，不该报：{:?}",
+            report.diagnostics
+        );
+    }
+}
+
+#[test]
+fn alias_escape_is_not_tracked_by_the_ast_walk() {
+    // 已知局限（**不是**遗漏）：`local y = ygg` 之后静态不可判 `y` 就是 ygg。
+    // 运行时影子表是这一层的兜底——模块执行期间 `ygg.on` 已被换成拒绝桩，
+    // 别名拿到的是同一张表上的同一个桩，装载期仍会失败。
+    let report = effect_report(
+        "local util = {}\nlocal y = ygg\ny.on(\"probe\", function() end)\nreturn util\n",
+    );
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn dynamic_index_is_truncated_instead_of_guessed() {
+    // 动态下标（`ygg[key]`，key 非字面量）静态不可判：路径在截断处停下，
+    // 不把后续段拼到一个**错的**前缀上（那会把「不知道」伪装成「知道」，
+    // 既可能漏报也可能误报）。运行时影子表兜底。
+    let report = effect_report(
+        "local util = {}\nlocal key = \"kv\"\nlocal use = ygg[key].set\nreturn util\n",
+    );
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}

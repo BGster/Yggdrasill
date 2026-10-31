@@ -129,3 +129,16 @@ fn golden_test_adventure_is_clean() {
         "golden few-shot 种子必须零告警（FRD 验收锚）"
     );
 }
+
+// ── YGG-MOD-EFFECT 只属于整包面 ──────────────────────────────────────
+
+#[test]
+fn top_level_effect_is_a_pack_rule_not_a_single_file_rule() {
+    // 单文件 Mod 的顶层就是装配面：`ygg.on` 写在 mod.lua 顶层是标准写法。
+    // YGG-MOD-EFFECT 只在 `--pack` 的 `code.modules` 上生效（入口豁免）。
+    let diagnostics = lint_source("mod.lua", "ygg.on(\"x\", function() end)\n");
+    assert!(
+        diagnostics.iter().all(|d| d.code != code::MOD_EFFECT),
+        "{diagnostics:?}"
+    );
+}
