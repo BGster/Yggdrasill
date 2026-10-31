@@ -6,6 +6,7 @@
 | --- | --- |
 | `build-wasm.sh` | 构建 wasm 目标产物（WASI SDK 探测器；`crates/ygg-wasm/*.mjs` 冒烟与确定性校验的构建前置） |
 | `decide-choice.sh` | `--drive cmd:` 的**最小可用决策命令示例/兜底**（见下） |
+| `sync-seed-mod.sh` | 同步 seed 模板与项目实例的**骨架文件**（`mod.lua` + `schemas/`）并重算两侧 manifest（见下） |
 
 ---
 
@@ -39,3 +40,29 @@
 
 协议细节（超时 5 秒、非零退出 / 多行输出 / 越界序号一律 fail closed、`YGG_DECIDE_CMD` 覆盖路径）
 见仓库根 `AGENTS.md` §3。
+
+---
+
+## `sync-seed-mod.sh` —— 骨架面同步（实例面不碰）
+
+仓库里有两份同构的 Mod，**不是同一份东西**：
+
+| 位置 | 角色 |
+| --- | --- |
+| `packages/mods/agent-seed/` | 对外分发的**种子模板**（`data/playbook.json` 只装通用纪律） |
+| `.ygg/mods/agent-seed/` | **本项目实例**（`data/` 装本仓库自己的规则与配置） |
+
+分工：**骨架面**（`mod.lua` + `schemas/`）逐字节一致；**实例面**（`data/`）各自维护。
+本脚本只搬骨架，并重算**两侧** `manifest.json`（内容寻址：少算一侧就会以哈希不符拒绝装载）。
+
+```bash
+scripts/sync-seed-mod.sh                 # 默认 seed → project
+scripts/sync-seed-mod.sh --from project  # 反向：项目侧改的机制回流到模板
+scripts/sync-seed-mod.sh --no-pack       # 只同步文件，不重算 manifest
+```
+
+- **幂等**：内容已一致时不写文件，只打印「骨架已一致」，重复跑不产生新 diff。
+- **镜像** `schemas/`：源侧删掉的 schema 文件会在目标侧删除（仍只限 `schemas/` 内）。
+- **不碰** `data/` 与 `pack.json`：前者是各项目实例数据，后者是各项目自己的声明。
+- CI 的骨架守卫（`.github/workflows/check.yml` 第一步）会用 `diff` 拦下只改一侧的提交，
+  失败文案直接指向本脚本。
