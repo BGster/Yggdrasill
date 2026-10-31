@@ -195,7 +195,11 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 照样存在，但对任何名字都给可读拒绝
 （`sandbox denied: module 'x.y' is not available …`）——这就是既有行为，
 **现有单文件 Mod 零迁移**，行为逐字节不变。`mod.lua` 超过几百行、或想按职责
-切分之后，再写 `pack.json` 的可选 `code` 段：
+切分之后，再写 `pack.json` 的可选 `code` 段。
+
+拆文件之前先记住那条不变量：**模块 chunk 只做纯导出（定义函数与常量），注册 /
+写状态 / 输出全部集中在入口 `mod.lua`**——所以「文件怎么拆」不影响运行时行为，
+重构保行为。细则见下文「副作用边界」。
 
 ```json
 {
@@ -229,7 +233,7 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 - `require` 的入参必须是**规范名**：`require("src/util")` 是非法名
   （`ygg-lint --pack` 报 `YGG-MOD-NAME`，并给出正确写法）。
 
-#### require 语义（装载期）
+#### require 语义
 
 - 模块 chunk 与入口共享同一 Lua 状态与 globals：模块顶层 `local` 不跨模块可见，
   **跨模块共享只经返回值**。
@@ -237,17 +241,166 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
   一致）。模块 `return nil` 或无返回值 → 缓存 `true`，同样只执行一次。
 - 循环依赖报**完整链条**：`circular require: src.a -> src.b -> src.a`；装载深度
   显式判栈（上限 64），不靠 Lua / Rust 栈溢出兜底。
-- 模块体是**装载期代码**：资源面（`ygg.data`）与 stdlib（`ygg.on` /
-  `ygg.narrative.node` / `ygg.fsm.define`）此时都已就位，模块体里可以直接注册。
-  `ygg.on` 的调用序就是派发序——**模块的 require 序会决定 handler 的派发序**，
-  要固定派发序就在入口按序 `require`，`pack.json` 的 `modules` 声明序不参与定序。
-- **`require` 是装载期专属面**：入口 chunk 跑完、`host.seal` 一翻，`require` 即
-  返回可读拒绝（`require is a load-time-only surface: it closes once the mod has
-  finished loading`）。**handler 里不能懒加载模块**——要用什么在装载期 `require`
-  进 local，handler 闭包消费（模块返回值是装载期构造的只读面，读档时 Mod chunk
-  重跑、local 随之重建；**状态仍必须落 kv**，见 §1）。
+- **`require` 在任何时机都可用**：装载期（入口顶层、模块体）与运行期（事件
+  handler 内部）一视同仁。`host.seal()` 只封 `ygg.on`（运行期注册禁令），不顺手
+  封 `require`——「注册必须在装载期」与「模块必须在装载期拉齐」是两件事，把后者
+  当前者的代价是懒加载直接不成立。所以**纯库可以懒加载**（示例见「副作用边界」）：
+  第一次用到时装载，之后跨事件命中同一份缓存。
+- 代价是模块顶层必须是纯导出面（下一节）：懒加载放开的是**时机**，不是**约束**
+  ——handler 里 `require` 到的模块照样不许在顶层注册。
 - 模块装载消耗**独立燃料预算**（`LoadBudget`），不挤占单转换预算：模块再多，
   每次转换的可用步数不变。
+- 读档重建缓存：模块内的 `local` / 计数器属「代码的加载产物」，不是状态——读档
+  后每个模块重新执行一次、返回对象重建，**状态必须落 kv**（§1）。
+
+#### 副作用边界：入口装配，模块纯导出
+
+**不变量（一句话）**：模块 chunk 只做纯导出（定义函数与常量），不做任何有副作用的
+事；注册 / 写状态 / 输出全部集中在入口 `mod.lua`。
+
+**为什么**：`ygg.on` 的**调用序就是 handler 的派发序**。模块顶层若能自由注册，
+「文件怎么拆」「先 `require` 谁」就直接决定「谁先被派发」——把一个大文件拆成三个
+会改变运行时行为，重构不保行为。收紧之后派发序只有一个来源：**入口里那几行显式
+调用的先后**（`M.install(deps)` / `M.register()` …），与 `require` 顺序、与
+`pack.json` 的 `modules` 声明序都无关。
+
+禁止面与允许面（清单唯一实现是 `crates/ygg-modules/src/lib.rs` 的
+`pub mod effects`，内核影子表与 lint 都只读它，不各自维护一份）：
+
+| 面 | 禁（模块 chunk 顶层碰即拒绝） | 允（模块顶层可用） | 清单常量 |
+| --- | --- | --- | --- |
+| 注册 | `ygg.on` / `ygg.fsm.define` / `ygg.narrative.node` | — | `BANNED_CALLS` / `BANNED_TABLE_MEMBERS` |
+| 写状态 | `ygg.kv.set` / `ygg.entity.spawn` / `ygg.entity.set_attribute` / `ygg.entity.add_tag` / `ygg.entity.remove_tag` | — | `BANNED_TABLE_MEMBERS` |
+| 输出 | `ygg.narrate` / `ygg.emit` / `ygg.choice` / `ygg.meta` / `ygg.narrative["goto"]` | — | `BANNED_CALLS` / `BANNED_TABLE_MEMBERS` |
+| 纯读 | — | `ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity.has_tag` / `ygg.entity.get_attribute` | `PURE_READ_CALLS` / `PURE_READ_TABLE_MEMBERS` |
+
+- 清单是**穷举式禁止面**，不是白名单：未列出的名字（含 `ygg.stdlib_version` /
+  `ygg.engine_version` 这类值字段）在模块顶层照旧可用。`fsm` / `narrative` 是
+  stdlib 在装载期用 Lua 挂出来的子表，按「子表 + 成员」处理，不当成 `ygg` 直系函数。
+- **函数体内完全合法**：`function M.install(deps) ygg.on(…) end` 是这套边界的标准
+  出口——禁的只是「模块 chunk 顶层」，不是「模块文件」。
+- **入口 chunk 不受约束**：入口本来就是装配清单，注册 / 初始化是它的职责。单文件
+  Mod（无 `code` 段）因此逐字节不变——它只有入口。
+- **两道防线、一份清单**：运行时由 `ygg-sandbox/src/modules.rs` 的 `ShadowBanned`
+  在模块 chunk 执行期间把禁止面原位换成拒绝桩（`Drop` 恢复，模块抛错也恢复，失败
+  的模块不入缓存）；静态由 `ygg-lint --pack` 的 `YGG-MOD-EFFECT` 在作者侧提前报
+  同一件事（顶层**取引用**也算违规，哪怕只是 `local f = ygg.on`）。lint 的已知局限
+  ——别名逃逸（`local y = ygg; y.on(…)`）与动态下标静态不可判、顶层立刻执行的
+  `pcall(function() … end)` 分不出——一律由运行时影子表兜底：那时别名拿到的也是桩。
+
+模块（只导出）：
+
+```lua
+-- src/door.lua —— 模块 chunk：只定义，不注册
+local TEXTS = ygg.data("ygg:scene/texts") -- 纯读面：顶层快照资源是允许的
+
+local door = {}
+
+function door.title()
+  return TEXTS.scenes.begin
+end
+
+-- 注册面做成函数：函数体内的注册 / 写状态 / 输出都合法
+function door.install(deps)
+  ygg.narrative.node("node:door", function()
+    ygg.narrate(door.title())
+    ygg.choice(TEXTS.prompts.door, { TEXTS.options.enter, TEXTS.options.leave })
+  end)
+  ygg.on("ygg.choice_selected", deps.on_choice)
+end
+
+return door
+```
+
+入口（装配）：
+
+```lua
+-- mod.lua —— 入口：唯一的装配点（顶层注册是它的职责）
+local door = require("src.door")
+local choices = require("src.choices")
+
+-- 派发序 = 下面两行的调用序（与上面 require 的顺序无关）：
+door.install({ on_choice = choices.select })
+choices.install()
+```
+
+handler 内懒加载纯库（这条能力是本次收紧一起拿回来的——模块纯了，`require` 才不必
+和注册时机绑在一起）：
+
+```lua
+-- mod.lua：装载期不 require 这个库，第一次用到时才装载
+ygg.on("agent.summary", function()
+  local report = require("src.report") -- 运行期首次装载；之后跨事件命中缓存
+  ygg.narrate(report.line())
+end)
+```
+
+```lua
+-- src/report.lua —— 照样是纯导出面（懒加载不放宽边界）
+local report = {}
+
+function report.line()
+  return "需求 " .. tostring(ygg.kv.get("req.count"))
+end
+
+return report
+```
+
+#### 迁移：旧写法（模块顶层注册）怎么改
+
+改造前模块可以在自己的顶层 `ygg.on(…)`，那时「`require` 序 = 注册序 = 派发序」。
+现在这种模块**装载期就红**（不是静默改变派发序）——它必须改，改法只有一种形状：
+
+```lua
+-- 旧（改造前合法，现在拒绝）
+ygg.on("probe.order", function()
+  ygg.narrate("sneaky")
+end)
+return shared
+
+-- 新（注册进函数体，入口显式调用）
+function shared.install()
+  ygg.on("probe.order", function()
+    ygg.narrate("sneaky")
+  end)
+end
+return shared
+```
+
+入口补一行按原注册序的调用（`shared.install()`）。**为什么值得改**：拆文件、挪
+`require` 顺序、把函数搬到另一个模块，都不再改运行时行为；handler 里能懒加载纯库；
+注册点收敛到入口一处，读入口即知派发序。
+
+#### 错误示例（两种形态，照文案改）
+
+静态检查（`ygg-lint --pack`，有 error 即退出码 1）：
+
+```text
+error[YGG-MOD-EFFECT]: 模块顶层调用了有副作用的 host API `ygg.on`：模块 chunk 在装载期执行，注册 / 写状态 / 输出会随 require 一起发生。注册序就是派发序：模块自己注册，等于让「文件怎么拆」决定「运行时行为」，拆文件或调整 require 顺序都会改派发序，重构不再安全
+   ┌─ src/shared.lua:21:1
+   │
+21 │ ygg.on("probe.order", function() ygg.narrate("sneaky") end)
+   │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 模块顶层只留纯导出（函数定义与常量）：把这段搬进模块函数 `function M.install(deps) … ygg.on(…) … end`，由入口（pack.json 的 code.entry）require 后显式调用 `M.install(deps)`——函数体内调用完全合法。顶层仍允许纯读面（ygg.data / ygg.ticks / ygg.kv.get / ygg.entity.has_tag / ygg.entity.get_attribute）
+```
+
+（同一段建议还会以 `= fix:` 行重复一遍，此处略。）运行期由影子表拦下，装载即失败
+（`ModLoad` 形态）：
+
+```text
+mod load failed: runtime error: src/shared.lua:21: 模块顶层不能调用 `ygg.on`
+  模块顶层只做纯导出（定义函数与常量），不注册、不写状态、不产生输出；
+  装配集中在入口 mod.lua：
+    1) 模块里写 function M.install(deps) ... ygg.on(...) ... end（在函数体内调用是允许的）
+    2) 入口 require 该模块并调用 M.install(deps)
+  原因：handler 的注册序就是派发序。让模块自己注册，等于让「文件怎么拆」决定「运行时行为」，
+  重构就不再安全。模块纯了以后，require 才能在 handler 里按需调用。
+  见 docs/mod-authoring.md §5 多文件 Mod
+```
+
+- 拒绝覆盖**整条依赖链**：中间层模块（不是入口、也不是第一个被 `require` 的）写错
+  一样装载期红，报错指向**模块自己**的文件与行号。
+- 影子表 `Drop` 恢复：拒绝之后同一次运行里 `kv` / `narrate` 照常可用（桩不残留）；
+  失败的模块不写缓存，再 `require` 得同一个可读拒绝，不会留下半个模块。
 
 #### 内容寻址：改模块必须重跑 `pack`
 
@@ -283,7 +436,8 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
   依赖图，循环与深度用装载器同一份 `LoadStack` 判。错误面：`YGG-MOD-MISSING`
   （声明了读不到）/ `YGG-MOD-NAME`（名字或路径非法）/ `YGG-MOD-UNDECLARED`
   （require 了没登记）/ `YGG-MOD-CYCLE`（循环，链条与装载期同形）/ `YGG-MOD-LIMIT`
-  （数量 / 深度 / 字节超限）/ `YGG-MOD-UNUSED`（登记了从入口不可达，warning 不拦门）。
+  （数量 / 深度 / 字节超限）/ `YGG-MOD-EFFECT`（模块顶层碰副作用面，见「副作用
+  边界」，error 拦门）/ `YGG-MOD-UNUSED`（登记了从入口不可达，warning 不拦门）。
   有 error 时退出码 1；没有 `code` 段的包给一句「该 Mod 为单文件」提示，退出码 0。
 
 #### 上限（装载前判）
@@ -295,20 +449,22 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 | 单模块源码 | 1 MiB | `MAX_CODE_BYTES` |
 | 整包模块源码合计 | 1 MiB | `MAX_TOTAL_CODE_BYTES` |
 
-#### 已知缺口：装载期的 `ygg.narrate` 会被静默丢弃
+#### 已知缺口：入口装载期（Mod 顶层）的 `ygg.narrate` 会被静默丢弃
 
 `ygg.narrate` 是**收集-回放**面：Lua 执行期只把调用追加进收集缓冲，回放发生在
 handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序回放进 sink）。因此：
 
-- **装载期**（Mod 顶层或模块体）调用 `ygg.narrate`：调用进了缓冲，但第一个 handler
-  调用前的清空会把它丢掉——**不回放、无告警**。装载期的叙事输出无效。
+- **入口顶层**调用 `ygg.narrate`：调用进了缓冲，但第一个 handler 调用前的清空会把
+  它丢掉——**不回放、无告警**。入口装载期的叙事输出无效。
+- 模块体不在此列：模块顶层调 `ygg.narrate` 直接是**可读拒绝**（副作用面，见「副作用
+  边界」一节），不会跌进「静默丢弃」这个更差的行为。
 - 同族一条已有注记：`ygg.narrative["goto"]`（`stdlib/narrative.lua`：「装载期调用
   会进收集缓冲、不被回放」）。`ygg.emit` 与 `ygg.narrate` 走的是同一份缓冲，装载期
-  调用同样不会派发 / 不会回放，此前没有注记——这里补上：**叙事与派生事件都只在
-  handler 期有效**。
-- 装载期该做的是注册（`ygg.on` / `ygg.narrative.node` / `ygg.fsm.define`）与快照
-  （`ygg.data`）。`ygg.kv.*` / `ygg.entity.*` 是即席状态写，不经缓冲、装载期调用
-  立即生效（所以 §1 的 spawn 门禁照样适用）。
+  调用同样不会派发 / 不会回放，此前没有注记——这里补上：**叙事与派生事件都只有在
+  handler 内执行才有效**。
+- 入口装载期该做的是注册（`ygg.on` / `ygg.narrative.node` / `ygg.fsm.define`）与快照
+  （`ygg.data`）；模块顶层只做纯导出。`ygg.kv.*` / `ygg.entity.*` 是即席状态写，不经
+  缓冲、入口装载期调用立即生效（所以 §1 的 spawn 门禁照样适用）。
 
 #### KV 前缀归属（拆文件时先定这个）
 
@@ -342,9 +498,12 @@ handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序
 
 `crates/ygg-sandbox/tests/fixtures/multi-script/` 是一个**真跑**的三层依赖 Mod
 （入口 → `src.handlers` → `src.util`），外加「三处 require 同一模块」与一个
-`return nil` 的模块；`pack.json` 的声明序故意不等于 require 序。它的 `README.md`
-列了依赖形状、装载期观测面与逐文件的内容寻址归属，被
-`tests/modules_e2e.rs` / `tests/modules_negative.rs` / `tests/modules_lifecycle.rs`
+`return nil` 的模块。它演示的正是本节的写法：每个模块只导出 `register()` /
+`register_order()`，入口按 `util → shared → handlers` 的顺序显式调用它们——
+**派发序 = 这几行的 call 序**，而 `pack.json` 的声明序与 `require` 序都故意不同
+（改了 `require` 序，派发序不动）。它的 `README.md` 列了依赖形状、装载期观测面
+与逐文件的内容寻址归属，被 `tests/modules_e2e.rs` /
+`tests/modules_negative.rs` / `tests/modules_lifecycle.rs` / `tests/modules_pure_export.rs`
 直接装载——**要照抄一个多文件 Mod 的结构，抄它**。
 
 #### 热载与续局的签名口径
@@ -497,9 +656,9 @@ sha256 → JSON 解析 → schema 分发校验），任何一条不过即装载�
 
 | 交付面 | 验收判据 | 证据 |
 | --- | --- | --- |
-| 解析面（`crates/ygg-modules`）+ 装载器（`modules.rs`）+ 装载期燃料（`fuel.rs` 的 `LoadBudget`） | 名字规范化与路径双射（`name_of_path(path_of(n)) == n`）；缓存与 table 身份；`nil` / 无返回值 → `true` 且只执行一次；循环报完整链条；深度显式判栈；`seal` 后可读拒绝；模块装载消耗独立预算（不挤占单转换预算） | `cargo test -p ygg-sandbox --test modules_unit --test modules_load` |
+| 解析面（`crates/ygg-modules`）+ 装载器（`modules.rs`）+ 装载期燃料（`fuel.rs` 的 `LoadBudget`）+ 副作用影子表（`ShadowBanned`） | 名字规范化与路径双射（`name_of_path(path_of(n)) == n`）；缓存与 table 身份；`nil` / 无返回值 → `true` 且只执行一次；循环报完整链条；深度显式判栈；`require` 装载期与 handler 内部均可用；模块顶层碰禁止面即可读拒绝（含调用点与真实文件行号），影子表 `Drop` 恢复；模块装载消耗独立预算（不挤占单转换预算） | `cargo test -p ygg-sandbox --test modules_unit --test modules_load --test modules_pure_export` |
 | `pack.json` 的 `code` 段 + `manifest.json` 的 `code` 数组 + 热载监视清单 | 声明全量校验（路径规则 / 形状 / 规模）；三方对账（声明 ↔ 登记 ↔ 字节）；内容寻址（byteLength 先于 sha256）；`watched_files` 纳管每个模块与**配置解析结果** | `cargo test -p ygg-sandbox --test pack_code`、`cargo test --example agent` |
-| 唯一装载口 `modload.rs` + `ygg-lint --pack` | `load_mod` 全仓单点（走查与实跑同一份装载语义）；lint 逐模块独立 parse（不拼接）+ AST 依赖图 + 与装载器同一份 `LoadStack`；错误面 MISSING / NAME / UNDECLARED / UNUSED / CYCLE / LIMIT，有 error 退出码 1 | `cargo test -p ygg-sandbox --test modload_bundle`、`cargo run -p ygg-lint -- --pack crates/ygg-sandbox/tests/fixtures/multi-script` |
+| 唯一装载口 `modload.rs` + `ygg-lint --pack` | `load_mod` 全仓单点（走查与实跑同一份装载语义）；lint 逐模块独立 parse（不拼接）+ AST 依赖图 + 与装载器同一份 `LoadStack` + 副作用面（`YGG-MOD-EFFECT`）；错误面 MISSING / NAME / UNDECLARED / UNUSED / CYCLE / LIMIT / EFFECT，有 error 退出码 1 | `cargo test -p ygg-sandbox --test modload_bundle`、`cargo run -p ygg-lint -- --pack crates/ygg-sandbox/tests/fixtures/multi-script` |
 | 测试面：fixture（三层依赖 + 重复 require + `return nil`）+ 正/负/生命周期 | 每条拒绝路径断言错误文本的**关键片段**（模块路径 / 行号 / 完整链条 / 上限常量），不用 `is_err()` 糊过去；读档重建缓存、模块内状态归零、handler 不重复注册；128 模块整包装载 < 2s；重复装载注册序逐项相等 | `cargo test -p ygg-sandbox --test modules_e2e --test modules_negative --test modules_lifecycle` |
 
 单文件零迁移的证据面（每次合并都跑）：`.ygg/mods/agent-seed` 与 `packages/mods/agent-seed`
@@ -514,7 +673,8 @@ sha256 → JSON 解析 → schema 分发校验），任何一条不过即装载�
 | 骨架面两侧逐字节一致 | `scripts/sync-seed-mod.sh` 后 `diff -q .ygg/mods/agent-seed/mod.lua packages/mods/agent-seed/mod.lua` 无输出；`schemas/` 同法（CI 有骨架守卫） |
 | 整包静态检查干净 | `cargo run -p ygg-lint -- --pack <两侧目录>` 均 0 error 0 warning，且无 `YGG-MOD-UNUSED`（每个登记模块从入口可达） |
 | 上限内 | 模块数 ≤ 128、装载深度 ≤ 64、模块源码合计 ≤ 1 MiB |
-| **派发序不变** | handler 派发序与拆分前逐项一致——`ygg.on` 调用序就是派发序，`pack.json` 的 `modules` 声明序不参与定序；要保序就在入口按原注册序显式 `require` |
+| **派发序不变** | handler 派发序与拆分前逐项一致——派发序**只来自入口**：模块纯导出，`ygg.on` 由入口按原注册序显式调用（`M.install(deps)` / `M.register()`）；`require` 序与 `pack.json` 的 `modules` 声明序都不参与定序 |
+| 模块纯导出 | 每个模块 chunk 顶层只有函数 / 常量定义与纯读（`ygg.data` 等）；注册 / 写状态 / 输出全部在模块函数体内、由入口调用；`ygg-lint --pack` 不得出现 `YGG-MOD-EFFECT` |
 | KV 前缀单一写方 | 按 §5「KV 前缀归属」逐前缀核对；**无自动校验**，只能人工过 |
 | 存读档 | 读档后模块缓存重建（每个模块各执行一次）、模块内 `local` / 计数归零、handler 不重复注册 |
 | 内容寻址 | 每次改模块后重跑 `pack`，`manifest.json` 的 `code` 数组随之变化（不重跑就装载失败） |
@@ -523,5 +683,7 @@ sha256 → JSON 解析 → schema 分发校验），任何一条不过即装载�
 两个不能省的说明：
 
 - **拆分最容易漏的回归是派发序**，不是语法：派发序变了不会报错，只会行为不同。
+  它的唯一来源是入口那几行调用——所以拆分时先照原注册序排好入口的 `install()` 调用，
+  其余（模块里怎么写、`require` 谁先）就都不影响派发。
 - `YGG-MOD-UNUSED` 是 **warning，不拦门**（退出码 0）：拆分后忘删的死模块不会让门禁变红，
   只能人看报告。

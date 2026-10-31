@@ -1064,8 +1064,14 @@
         {
           "id": "harness.multi-script-load",
           "modality": "must",
-          "text": "多文件 Mod 只在 `pack.json` 的 `code` 段登记：`entry` 不登记为模块，`modules` 逐条枚举（无 glob）；缺 `code` 段就是单文件 Mod（现有 Mod 零迁移）。`require` 只在装载期可用——`host.seal` 之后（任何 handler 内）调用即被可读拒绝，handler 不能懒加载。改了任一模块文件必须重跑 pack（内容寻址：字节数或哈希不符即装载失败）。",
+          "text": "多文件 Mod 只在 `pack.json` 的 `code` 段登记：`entry` 不登记为模块，`modules` 逐条枚举（无 glob）；缺 `code` 段就是单文件 Mod（现有 Mod 零迁移）。`require` 在装载期与运行期（handler 内部）都可用——`host.seal` 只封 `ygg.on`，所以纯库可以懒加载；代价是模块顶层只能是纯导出面（见 harness.module-pure-export）。改了任一模块文件必须重跑 pack（内容寻址：字节数或哈希不符即装载失败）。",
           "basis": "docs/mod-authoring.md §5「多文件 Mod」（r5 文档面；同名小节逐条展开）"
+        },
+        {
+          "id": "harness.module-pure-export",
+          "modality": "must",
+          "text": "多文件 Mod 的模块 chunk 只做纯导出（定义函数与常量），不做任何有副作用的事：注册 / 写状态 / 输出全部集中在入口 `mod.lua`。模块把注册面做成函数（`function M.install(deps)`），由入口显式按序调用；模块顶层碰 `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / `ygg.entity.spawn` / `ygg.entity.set_attribute` / `ygg.entity.add_tag` / `ygg.entity.remove_tag` / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative[\"goto\"]` 即被拒（静态 `YGG-MOD-EFFECT` 与运行期影子表共用同一份清单 `ygg_modules::effects`），顶层只允许纯读（`ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity.has_tag` / `ygg.entity.get_attribute`）；入口 chunk 不受此约束（它就是装配清单）。理由：handler 的派发序 = `ygg.on` 的注册序——让模块自己注册，等于让「文件怎么拆 / 先 require 谁」决定运行时行为，拆文件或调 require 顺序就改派发序，重构不保行为。`require` 因此在任何时机都可用（含 handler 内懒加载纯库），但懒加载不放宽边界：懒加载到的模块顶层照样只能纯导出。见 `docs/mod-authoring.md` §5「多文件 Mod」的「副作用边界：入口装配，模块纯导出」。",
+          "basis": "docs/mod-authoring.md §5「多文件 Mod」副作用边界（r1/r2/r3 语义收紧；两份清单单一事实源 ygg_modules::effects）"
         },
         {
           "id": "harness.kv-prefix-owner",
