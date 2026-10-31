@@ -75,6 +75,11 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 - **`cmd:` 决策命令协议**：stdin 不参与。命令以 `decide-input.json`（完整当前回执）路径为唯一参数，
   stdout 只允许**一行** `N`（`1..=选项数`）或 `HUMAN[:理由]`；5 秒超时、非零退出、非法输出、
   越界序号一律 fail closed（安全暂停，状态不推进）。`YGG_DECIDE_CMD` 可临时覆盖路径。
+- **自备决策命令的起点**：仓库自带 `scripts/decide-choice.sh`（POSIX sh + python3，std-only）——
+  它**只是最小可用示例/兜底**：默认取菜单首项 `1`，遇到未解决冲突或验收/门禁类选项
+  （`proposal.*` / `gate.*` / `requirement.resolve`）输出 `HUMAN:<理由>` 安全暂停。
+  **真实决策应由主 Agent 或外部编排提供**（读同一份 `decide-input.json` 再给判断），
+  而不是把这个脚本当策略用。用法：`--drive cmd:scripts/decide-choice.sh`。
 - **不造内容**：有 job 在跑却一份待验收提案都没有时，宿主**不生成占位提案**（门禁必须由真实
   交付满足）——打印可读原因、安全暂停并退出 `0`，等外部执行方提交提案后重跑本命令继续。
 - **失控防护**：阈值读 Mod 的 `data/config.json` 的 `drive` 段（缺失 / 非法逐字段回落兜底）：
