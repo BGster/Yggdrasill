@@ -1,9 +1,15 @@
 //! Agent harness CLI（M-Agent 泳道 B）：把内核当 **Agent 的执行骨架**用。
 //!
 //! Agent 主导驱动：Agent 调本 CLI 派发动作，CLI 回执「处境叙事 + 可选动作」，
-//! 每步自动存档，mod 改动热载，局末产出结算报告。全部策略在宿主侧，内核
-//! 零改动（`KernelFacade` 的 `dispatch` 信封即唯一接驳面——与
-//! `adventure.rs` / `playtest.rs` 同构）。
+//! 每步自动存档，mod 改动热载，局末产出结算报告。内核零改动（`KernelFacade`
+//! 的 `dispatch` 信封即唯一接驳面——与 `adventure.rs` / `playtest.rs` 同构）。
+//!
+//! 职责边界：宿主只做**内核物理上做不到的事**（文件 / stdin / 时钟 / 锁 / 跨进程
+//! 互斥），**不持有推进策略也不认识 Mod 内部状态**：
+//! - 推进策略由 `--drive` 选定（跟人读 stdin、或交给外部决策命令、或什么都不做）；
+//! - “何时收口 / 有无冲突 / 有无待验收提案”只问 Mod 自己声明的摘要
+//!   （[`SUMMARY_EVENT`] 的 `【摘要】` 行），不读 `ending` / `fsm.stage` /
+//!   `prop.*` / `req.*` 等 Mod 私有 KV 键。
 //!
 //! 三种形态：
 //!
@@ -19,7 +25,7 @@
 //! cargo run -p ygg-sandbox --example agent -- --run-id my-task --settle
 //!
 //! # ④ 异步补需求（只追 inbox.jsonl 后退出；不碰 autosave，故可在另一进程跑
-//! #    goal/guide 的**同时**安全调用）
+//! #    本局的同时安全调用）
 //! cargo run -p ygg-sandbox --example agent -- --run-id my-task --runs-root .ygg/runs \
 //!   --requirement '补一条门禁日志|把 verify 的失败原因写进 events.jsonl'
 //! ```
@@ -31,7 +37,7 @@
 //! `OpenOptions::append`，**不读写 autosave**，所以与运行中的局无锁竞争。
 //! 文件保留作审计；消费位移记在 `inbox.cursor`（`{"consumed": N}`，按非空行数）。
 //!
-//! 消费时机：goal 每个自动动作**之前**、guide 每次提示**之前**、单发每次派发**之前**
+//! 消费时机：cmd 自动推进**之前**、stdin 每次提示**之前**、单发每次派发**之前**
 //! 都会 drain 新行并 dispatch `requirement.add`（Mod 侧 FIFO 入队）。
 //!
 //! 崩溃安全：**dispatch 成功且 autosave 落盘后**才推进 cursor。若「存档成功、cursor
@@ -42,19 +48,19 @@
 //!
 //! 回执加性键 `inbox`：`{applied, skipped, remaining}`（本次 drain 的账）。
 //!
-//! 交互模式有**两种运行模式**（`play.mode`：静态 `data/config.json` 的 `play.mode`，
-//! 被最新存档的 KV `settings.play.mode` 动态覆盖——动态优先）：
+//! 交互模式的推进方式由 `--drive` 决定（**宿主不解释 Mod 的 `play.mode`**；
+//! `config.set play.mode=…` 仍可用，但只影响 Mod 自己的叙事）：
 //!
-//! | 模式 | 行为 | 退出 |
+//! | `--drive` | 行为 | 退出 |
 //! | --- | --- | --- |
-//! | `guide`（缺省） | 逐步确认：每一步推进都要 stdin 输入（提示符 `[guide] >`），不自动连跑 | `q` / 输入结束 |
-//! | `goal` | 挂机：不读 stdin，由外部决策命令选择 pendingChoice；HUMAN/异常安全暂停，到结局自动结算 | 结算码；人工暂停为 0 |
+//! | `stdin`（缺省） | 读 stdin：数字选 / `event <名称> [JSON]` / `s` / `l` / `i` / `config` / `q` | `q` / 输入结束 |
+//! | `cmd:<路径>` | 不读 stdin：每个待选动作交给决策命令（stdout 单行 `N` 或 `HUMAN[:理由]`）；到结局自动结算 | 结算码；HUMAN / 异常 = 0 |
+//! | `none` | 只打印当前回执就退出（不推进、不读 stdin） | 0 |
 //!
-//! `goal` 的失控防护：步数硬顶 [`MAX_GOAL_STEPS`] + 每条需求（异步补入的）额外
+//! 自动推进的失控防护：步数硬顶 [`MAX_GOAL_STEPS`] + 每条需求（异步补入的）额外
 //! 放宽 [`GOAL_STEPS_PER_REQUIREMENT`] 步 + 连续无进展 [`MAX_GOAL_STALL`] 步判停
 //! ——合法多需求局不会被误杀，真循环仍会停；派发失败 / 无 pendingChoice 且未到
-//! 结局 → 可读错误并非零退出（绝不静默死循环）。模式**每步现读**——中途
-//! `config.set play.mode=<goal|guide>` 下一步即生效（guide 阶段改成 goal 就转挂机）。
+//! 结局 → 可读错误并非零退出（绝不静默死循环）。
 //! 单发模式不受影响：`--event` 一次只派发一个事件，不自动连跑（Agent 的调用语义）。
 //!
 //! run 目录产物（`<runs-root>/<run-id>/`，默认 `./runs/<run-id>/`）：
@@ -118,15 +124,15 @@ const DEFAULT_PAYLOAD: &str = "0";
 const ENTRY_EVENT: &str = "event.start";
 /// 选择事件的规范名（与内核保留路由同值）。
 const CHOICE_EVENT: &str = "ygg.choice_selected";
-/// goal 挂机模式的基础步数硬顶（无新增需求时正常一局 9 步；上限是死循环的硬防御）。
+/// 自动推进的基础步数硬顶（无新增需求时正常一局 9 步；上限是死循环的硬防御）。
 const MAX_GOAL_STEPS: usize = 64;
 /// 每条需求（异步补入的）额外放宽的自动步数：三个 job + 两个门禁 + 余量。
 const GOAL_STEPS_PER_REQUIREMENT: usize = 16;
 /// 连续「无进展」步数硬顶（pendingChoice 指纹不变 = 绕圈；死循环的第二道闸）。
 const MAX_GOAL_STALL: usize = 12;
-/// goal 决策命令的最长执行时间；任何异常都 fail closed，绝不回退到固定序号。
+/// 外部决策命令的最长执行时间；任何异常都 fail closed，绝不回退到固定序号。
 const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
-/// goal 决策轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
+/// 决策命令轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
 const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Mod 自报摘要的只读动作名（Mod 侧 `ygg.on("agent.summary")`）。
@@ -236,6 +242,8 @@ struct Args {
     watch: bool,
     event: Option<String>,
     payload: String,
+    /// 交互模式推方式（`--drive`；缺省 stdin）。
+    drive: Drive,
     /// 异步 inbox 操作（只追 inbox.jsonl 后退出，不读写 autosave）。
     inbox: Option<(InboxKind, String)>,
 }
@@ -249,6 +257,7 @@ fn parse_args() -> Args {
     let mut watch = false;
     let mut event: Option<String> = None;
     let mut payload = DEFAULT_PAYLOAD.to_owned();
+    let mut drive = Drive::Stdin;
     let mut inbox: Option<(InboxKind, String)> = None;
 
     // 写 inbox 的六个参数共享同一套「只能给一个」的校验。
@@ -270,6 +279,13 @@ fn parse_args() -> Args {
             "--watch" => watch = true,
             "--event" => event = Some(next_value(&mut iter, "--event")),
             "--payload" => payload = next_value(&mut iter, "--payload"),
+            "--drive" => {
+                let text = next_value(&mut iter, "--drive");
+                drive = match parse_drive(&text) {
+                    Ok(drive) => drive,
+                    Err(message) => usage_error(&message),
+                };
+            }
             "--requirement" => set_inbox(
                 &mut inbox,
                 InboxKind::Add,
@@ -346,6 +362,7 @@ fn parse_args() -> Args {
         watch,
         event,
         payload,
+        drive,
         inbox,
     }
 }
@@ -371,7 +388,8 @@ fn is_valid_run_id(run_id: &str) -> bool {
 fn usage(code: i32) -> ! {
     let text = "\
 用法:
-  agent --mod <mod目录> --run-id <标识> [--resume] [--watch]    交互模式
+  agent --mod <mod目录> --run-id <标识> [--resume] [--watch] [--drive <方式>]
+                                                                交互模式
   agent --mod <mod目录> --run-id <标识> --event <名称> [--payload <JSON>] [--resume]
                                                                 单发模式（Agent 脚本化）
   agent --run-id <标识> --settle                                局末结算
@@ -387,17 +405,21 @@ fn usage(code: i32) -> ! {
   --watch            交互模式下每步检查 mod 目录 mtime 变化并热载
   --event <名称>     单发模式：派发一个事件后退出（stdout 单行 JSON 回执）
   --payload <JSON>   事件 payload（默认 \"0\"；必须 JSON 标量）
+  --drive <方式>     交互模式推方式（默认 stdin；宿主不替你做决策）：
+                       stdin      读 stdin：数字=选择 / event <名称> [JSON] / s / l / i / config / q
+                       cmd:<路径> 不读 stdin：每个待选动作交给决策命令（stdout 单行 `N` 或
+                                  `HUMAN[:理由]`）；HUMAN / 超时 / 非零退出一律安全暂停并退出 0
+                                  （环境变量 YGG_DECIDE_CMD 可临时覆盖路径）
+                       none       只打印当前回执就退出（不推进、不读 stdin）
   --requirement <串> 只把 '标题|描述' 追加到 <run 目录>/inbox.jsonl 后退出；
-                     不读写 autosave，可在别一进程跑 goal/guide 时安全并发调用
+                     不读写 autosave，可在别一进程跑本局时安全并发调用
   --settle           读 autosave + events.jsonl 写 settlement.json
   -h, --help         本帮助
 
-运行模式（play.mode，仅交互模式生效：静态 data/config.json + 动态 settings.play.mode）:
-  guide              逐步确认（缺省）：每一步推进都要你输入（提示符 `[guide] >`）
-  goal               挂机：不读 stdin，由外部决策命令选择 pendingChoice
-                     （HUMAN/异常安全暂停；基础 64 步 + 每条需求 16 步；连续 12 步无进展 → 非零退出）
+自动推进的失控防护：基础步数 + 每条需求额外步数 + 连续无进展判停；阙值读
+  <mod>/data/config.json 的 drive 段（缺失 / 非法 → 代码内兜底值，不中断局）。
 
-异步需求（inbox）：goal 每个自动动作前、guide 每次提示前、单发每次派发前都会消费
+异步需求（inbox）：每个自动动作前、stdin 每次提示前、单发每次派发前都会消费
   inbox.jsonl 的新行并 dispatch requirement.add；dispatch 成功且存档后才前移 cursor，
   重放靠 Mod 侧 external_id 幂等去重。局已收口后仍有未消费行 → 非零退出。";
     if code == 0 {
@@ -415,47 +437,53 @@ fn usage_error(message: &str) -> ! {
 }
 
 // ============================================================================
-// §运行模式 play.mode = goal 挂机 / guide 逐步确认（缺省 guide）
+// §驱动 交互模式的推进方式（宿主只提供通道，**不替决策**）
+//
+// 推进策略不在宿主里：宿主要么等 stdin，要么把当前回执交给外部决策命令，
+// 要么什么都不做只回显。Mod 的 `play.mode` 仍由 Mod 在叙事层使用（`config.set`
+// 动作照旧可用），但 **host 不再读它、也不再解释它**。
 // ============================================================================
 
-/// 对局交互模式（`play.mode` 的两值枚举；未知值一律按 guide 处理）。
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PlayMode {
-    /// 挂机：宿主按 pendingChoice 的推荐主动作（序号 1）自动推进到结局并结算。
-    Goal,
-    /// 逐步确认：每一步推进都要人输入（交互模式 stdin；单发模式每次一条事件）。
-    Guide,
+/// 交互模式的推进方式。
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Drive {
+    /// 缺省：读 stdin，每一步推进都由人输入（数字 / event / s / l / i / config / q）。
+    Stdin,
+    /// 不读 stdin：每个待选动作交给外部决策命令（stdout 单行 `N` 或 `HUMAN[:理由]`）。
+    Cmd(PathBuf),
+    /// 只打印当前回执就退出（不推进、不读 stdin）。
+    None,
 }
 
-impl PlayMode {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "goal" => Some(Self::Goal),
-            "guide" => Some(Self::Guide),
-            _ => None,
+impl Drive {
+    /// 人读标签（启动头 / `config` 命令共用）。
+    fn label(&self) -> String {
+        match self {
+            Self::Stdin => "stdin（你逐步输入）".to_owned(),
+            Self::Cmd(path) => format!("cmd:{}（外部决策命令自动推进）", path.display()),
+            Self::None => "none（只打印当前回执，不推进）".to_owned(),
         }
     }
 
-    fn label(self) -> &'static str {
-        match self {
-            Self::Goal => "goal",
-            Self::Guide => "guide",
-        }
-    }
-
-    fn hint(self) -> &'static str {
-        match self {
-            Self::Goal => "挂机：不读 stdin，自动按推荐主动作推进到结局并结算",
-            Self::Guide => "逐步确认：每一步推进都要你输入，Mod 不会自动连跑",
-        }
+    fn is_cmd(&self) -> bool {
+        matches!(self, Self::Cmd(_))
     }
 }
 
-/// 静态面：`<mod>/<config_rel>` 的 `play.mode`（缺键 / 非法值 → None，由调用方回落）。
-fn static_play_mode(mod_dir: &Path, config_rel: &str) -> Option<PlayMode> {
-    let text = fs::read_to_string(mod_dir.join(config_rel)).ok()?;
-    let config: Json = serde_json::from_str(&text).ok()?;
-    config["play"]["mode"].as_str().and_then(PlayMode::parse)
+/// `--drive` 取值解析：`stdin` / `cmd:<路径>` / `none`（其余一律用法错误）。
+fn parse_drive(text: &str) -> Result<Drive, String> {
+    let text = text.trim();
+    match text {
+        "stdin" => Ok(Drive::Stdin),
+        "none" => Ok(Drive::None),
+        _ => match text.strip_prefix("cmd:") {
+            Some(path) if !path.trim().is_empty() => Ok(Drive::Cmd(PathBuf::from(path.trim()))),
+            Some(_) => Err("--drive cmd: 后面必须给决策命令路径".to_owned()),
+            None => Err(format!(
+                "未知的 --drive 取值 `{text}`（只接受 stdin / cmd:<路径> / none）"
+            )),
+        },
+    }
 }
 
 /// 静态配置的包内路径（pack.json 条目 `ygg:agent/config`；缺声明时按约定回落）。
@@ -756,7 +784,7 @@ impl Reload {
     }
 }
 
-/// 一次 inbox 消费的账（回执 `inbox` 键 + goal/guide 提示共用）。
+/// 一次 inbox 消费的账（回执 `inbox` 键 + 自动推进 / stdin 提示共用）。
 #[derive(Default)]
 struct InboxDrain {
     /// 本次成功消费的需求条数（cursor 已前移；含幂等重放）。
@@ -767,7 +795,7 @@ struct InboxDrain {
     skipped: usize,
     /// 未消费条数（dispatch 未成功 → cursor 不前移，重启可重放）。
     remaining: usize,
-    /// 最近一次成功 dispatch 的回执（goal 据此刷新 pendingChoice）。
+    /// 最近一次成功 dispatch 的回执（自动推进据此刷新 pendingChoice）。
     last: Option<Json>,
     /// 阻塞原因（`remaining > 0` 时非空）。
     error: Option<String>,
@@ -982,24 +1010,6 @@ impl Session {
     /// `state` 诊断信封（不推进状态）。
     fn state_envelope(&mut self) -> Json {
         parse_envelope(&self.kernel.dispatch("state", ""))
-    }
-
-    /// 当前生效的 `play.mode`：静态 `data/config.json` → 最新存档 KV
-    /// `settings.play.mode` 覆盖。**每次推进前现读**——中途 `config.set` 下一步
-    /// 即生效；存档缺失（新局）时就是静态默认，两者都缺则回落 guide。
-    fn play_mode(&self) -> PlayMode {
-        self.dynamic_play_mode()
-            .or_else(|| static_play_mode(&self.mod_dir, &self.config_rel))
-            .unwrap_or(PlayMode::Guide)
-    }
-
-    /// 动态面：最新 autosave 的 KV `settings.play.mode`（非法值忽略，回落静态）。
-    /// 只有成功步会改 KV，而成功步必然重写 autosave——所以磁盘存档就是最新态。
-    fn dynamic_play_mode(&self) -> Option<PlayMode> {
-        let save = read_json(&self.autosave_path)?;
-        save["kv"]["entries"]["settings.play.mode"]
-            .as_str()
-            .and_then(PlayMode::parse)
     }
 
     /// 回执标准字段：一次只读动作（[`SUMMARY_EVENT`]）取 Mod **自报**的摘要。
@@ -1395,7 +1405,7 @@ fn first_rejection(receipt: &Json) -> String {
         })
         .unwrap_or_else(|| error_text(receipt))
 }
-/// pendingChoice 指纹（goal 的「无进展」判据：提示词 + 全部选项文本）。
+/// pendingChoice 指纹（自动推进的「无进展」判据：提示词 + 全部选项文本）。
 fn choice_signature(receipt: &Json) -> String {
     let Some(choice) = receipt["pendingChoice"].as_object() else {
         return "(none)".to_owned();
@@ -1412,7 +1422,7 @@ fn choice_signature(receipt: &Json) -> String {
 }
 
 /// 自动推进的步数预算：基础硬顶 + 每条需求额外步数（合法多需求局不会被误杀）。
-fn goal_step_limit(summary: &Summary) -> usize {
+fn drive_step_limit(summary: &Summary) -> usize {
     MAX_GOAL_STEPS + GOAL_STEPS_PER_REQUIREMENT * summary.requirement_count
 }
 
@@ -1447,7 +1457,7 @@ fn unconsumed_inbox_lines(run_dir: &Path) -> usize {
 // §协调协议 run 目录内的跨进程「写入 ↔ 收口」互斥（std-only，无新依赖）
 //
 // 要解决的问题不是「再读一次文件」，而是两个进程对「本局还能不能收增量」的**共识**：
-// `--requirement` 是独立进程，goal 最后一次 drain 之后、进程退出之前的写入会
+// `--requirement` 是独立进程，本局最后一次 drain 之后、进程退出之前的写入会
 // 「成功落盘但永远不被消费」。只靠新增检查点只能降低概率。
 //
 // 三个文件（全部在 run 目录）：
@@ -1463,7 +1473,7 @@ fn unconsumed_inbox_lines(run_dir: &Path) -> usize {
 //      与「最后 drain」之间不会插进写者）。
 //   ③ 加锁摘除自己的 token。
 //
-// 收口侧（goal 自动 settle / 独立 --settle）：
+// 收口侧（自动推进到结局后的 settle / 独立 --settle）：
 //   ① phase=running → closing（记 owner_pid + 心跳）；finalized → 直接拒绝。
 //   ② 轮等 writers 归零（在途写者只是一行追加的时长）。
 //   ③ **在 closing 保护下**做最后一次 drain：任何成功写入都 happens-before 它。
@@ -1778,7 +1788,7 @@ fn run_single(args: &Args) -> i32 {
 
 /// `--requirement`：只往 inbox.jsonl 追加一行，不读不写 autosave 后退出。
 ///
-/// 这是「新需求随时能进」的真实异步入口：goal / guide 在另一个进程里跑时，
+/// 这是「新需求随时能进」的真实异步入口：本局在另一个进程里跑时，
 /// 这里只做 `OpenOptions::append`，不存在与运行中局的状态竞争。
 fn run_inbox_append(args: &Args) -> i32 {
     let Some((kind, text)) = args.inbox.clone() else {
@@ -1790,7 +1800,7 @@ fn run_inbox_append(args: &Args) -> i32 {
         return 2;
     }
     // 协议：写前登记。closing / finalized 一律**命令本身非零拒绝**——
-    // 不允许出现「写得很成功但 goal 已无声跨过最后一次 drain」。
+    // 不允许出现「写得很成功但运行侧已无声跨过最后一次 drain」。
     let token = match begin_write(&run_dir) {
         Ok(token) => token,
         Err(WriteGate::Finalized) => {
@@ -1872,7 +1882,7 @@ fn single_shot_error(args: &Args, event: &str, message: &str) -> i32 {
 }
 
 // ============================================================================
-// §goal 外部决策 回调协议 + 5 秒 fail-closed 暂停
+// §drive 外部决策 回调协议 + 5 秒 fail-closed 暂停
 // ============================================================================
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1918,7 +1928,9 @@ fn parse_decision_output(stdout: &str, option_count: usize) -> DecideOutcome {
 
 /// 把完整当前回执交给外部决策命令。命令缺失、spawn/读写失败、超时、非零退出、
 /// 非法输出与越界序号全部 fail closed；这里不存在「回退选 1」分支。
-fn decide_choice(session: &Session, current: &Json) -> DecideOutcome {
+///
+/// `program` 来自 `--drive cmd:<路径>`（`YGG_DECIDE_CMD` 可临时覆盖）。
+fn decide_choice(session: &Session, program: &Path, current: &Json) -> DecideOutcome {
     let Some(options) = current["pendingChoice"]["options"].as_array() else {
         return DecideOutcome::Human("当前回执缺少 pendingChoice.options".to_owned());
     };
@@ -1930,12 +1942,12 @@ fn decide_choice(session: &Session, current: &Json) -> DecideOutcome {
         return DecideOutcome::Human(format!("写入决策输入失败：{message}"));
     }
 
-    // 显式 env 覆盖优先；即使它指向不存在的命令也不回退到 Mod 或序号 1。
+    // 显式 env 覆盖优先；即使它指向不存在的命令也不回退到任何默认序号。
     let program = std::env::var_os("YGG_DECIDE_CMD")
         .map(PathBuf::from)
-        .unwrap_or_else(|| session.mod_dir.join("decide.py"));
+        .unwrap_or_else(|| program.to_path_buf());
     if program.as_os_str().is_empty() {
-        return DecideOutcome::Human("YGG_DECIDE_CMD 为空".to_owned());
+        return DecideOutcome::Human("决策命令路径为空".to_owned());
     }
     let mut child = match Command::new(&program)
         .arg(&input_path)
@@ -2015,11 +2027,12 @@ mod decide_tests {
 
 // ============================================================================
 // §交互模式 数字选项 / event / s / l / i / config / q（现场感：每步打印处境）
-// 运行模式（play.mode）在这里落地：goal 自动推进，guide 每步等输入。
+// 推进方式由 `--drive` 决定（stdin / cmd:<路径> / none）：宿主只提供通道，
+// 不持有推进策略——决策由人或外部决策命令给出。
 // ============================================================================
 
-/// goal 模式一步的决策（派发留在主循环里，统一打印与计数）。
-enum GoalStep {
+/// 自动推进一步的决策（派发留在主循环里，统一打印与计数）。
+enum DriveStep {
     /// 可以再请求外部决策命令推进一步。
     Run,
     /// 本局已收口：调用现有结算逻辑写 settlement.json。
@@ -2028,29 +2041,30 @@ enum GoalStep {
     Stuck(String),
 }
 
-/// goal 的一步决策：结局 → 结算；无待选 → 已收口则结算，否则中止；步数硬顶防绕圈。
-/// `limit` = 本次局的步数预算（基础硬顶 + 每条需求额外预算，见 [`goal_step_limit`]）。
-fn goal_step(summary: &Summary, current: &Json, auto_steps: usize, limit: usize) -> GoalStep {
+/// 自动推进的一步决策：结局 → 结算；无待选 → 已收口则结算，否则中止；步数硬顶防绕圈。
+/// `limit` = 本次局的步数预算（基础硬顶 + 每条需求额外预算，见 [`drive_step_limit`]）。
+fn drive_step(summary: &Summary, current: &Json, auto_steps: usize, limit: usize) -> DriveStep {
     // ① 本步叙事出现结局行：本局收口，自动结算。
     if current["ending"] == Json::Bool(true) {
-        return GoalStep::Settle;
+        return DriveStep::Settle;
     }
     // ② 无待决动作：续局落在局末（Mod 自报 ending）也直接结算；否则是死路。
     if current["pendingChoice"].is_null() {
         if summary.ending() == Some(true) {
-            return GoalStep::Settle;
+            return DriveStep::Settle;
         }
-        return GoalStep::Stuck(
-            "[goal] 当前无 pendingChoice 且未到结局——挂机中止（Mod 没给出下一步动作）".to_owned(),
+        return DriveStep::Stuck(
+            "[drive] 当前无 pendingChoice 且未到结局——自动推进中止（Mod 没给出下一步动作）"
+                .to_owned(),
         );
     }
-    // ③ 防失控：步数预算（无需求 64 步；每条异步需求再放宽 4 步）。
+    // ③ 防失控：步数预算（基础步数 + 每条异步需求额外步数）。
     if auto_steps >= limit {
-        return GoalStep::Stuck(format!(
-            "[goal] 已达最大步数 {limit} 仍未到结局——挂机中止（防死循环）"
+        return DriveStep::Stuck(format!(
+            "[drive] 已达最大步数 {limit} 仍未到结局——自动推进中止（防死循环）"
         ));
     }
-    GoalStep::Run
+    DriveStep::Run
 }
 
 fn run_interactive(args: &Args) -> i32 {
@@ -2062,14 +2076,14 @@ fn run_interactive(args: &Args) -> i32 {
         }
     };
 
-    let mode = session.play_mode();
+    let drive = args.drive.clone();
     println!("== Yggdrasill Agent Harness · 交互模式 ==");
     println!("mod      : {}", session.mod_label);
     println!("run 目录 : {}", session.run_dir.display());
-    println!("运行模式 : {}（{}）", mode.label(), mode.hint());
+    println!("驱动     : {}", drive.label());
     println!("命令：数字=选择 / event <名称> [JSON] / s=存档 / l=读档 / i=状态 / config / q=退出");
-    if mode == PlayMode::Goal {
-        println!("挂机提示 : 本局不需要 stdin；由外部决策命令选择动作，需要人工时安全暂停");
+    if drive.is_cmd() {
+        println!("自动推进 : 由决策命令替选动作；返回 HUMAN / 超时 / 非零退出即安全暂停（exit 0）");
     }
     if args.watch {
         println!("热载     : 开启（每步检查 mod 目录 mtime）");
@@ -2094,19 +2108,18 @@ fn run_interactive(args: &Args) -> i32 {
         session.dispatch_event(ENTRY_EVENT, DEFAULT_PAYLOAD)
     };
     let mut fresh = true;
-    // goal 自动推进计数（`[goal] 自动推进 N` 与步数预算共用）。
+    // 自动推进计数（`[drive] 自动推进 N` 与步数预算共用）。
     let mut auto_steps: usize = 0;
     // 连续「无进展」计数（pendingChoice 指纹不变 = 绕圈；防死循环第二道闸）。
     let mut stall_steps: usize = 0;
     let mut last_signature = choice_signature(&current);
     // 协议状态：本进程是否已持有 closing（收口保护）。
     let mut closing_held = false;
-    // 模式迁移的可观测面：每步现读 play.mode，变了就打一行。
-    let mut last_mode = session.play_mode();
 
     // stdin 只锁一次（与 adventure.rs 同纪律：锁内单循环，无递归重入）。
+    // 只有 stdin 驱动才占用 stdin：cmd / none 不读输入。
     let stdin = io::stdin();
-    let mut lines = stdin.lock().lines();
+    let mut lines = matches!(drive, Drive::Stdin).then(|| stdin.lock().lines());
 
     loop {
         // 每步开头先消费 inbox：新需求入队会改变 pendingChoice，所以拿到新回执就
@@ -2130,51 +2143,34 @@ fn run_interactive(args: &Args) -> i32 {
             );
         }
 
-        // 每步现读：静态 config.json → 最新 autosave 的 KV `settings.play.mode`
-        // 动态覆盖（中途 config.set 后下一步即生效）。
-        let mode = session.play_mode();
-        print_receipt(&current, fresh, mode);
+        print_receipt(&current, fresh);
         fresh = false;
-        if mode != last_mode {
-            println!(
-                "[运行模式] {} → {}：{}",
-                last_mode.label(),
-                mode.label(),
-                mode.hint()
-            );
-            last_mode = mode;
-        }
 
-        // goal：不读 stdin；每个待选动作交给外部决策命令，HUMAN/异常即安全暂停。
-        let mut paused_for_conflict = false;
-        let mut summary = Summary::unknown();
-        if mode == PlayMode::Goal {
+        // cmd 驱动：不读 stdin；每个待选动作交给外部决策命令，HUMAN/异常即安全暂停。
+        if let Drive::Cmd(program) = &drive {
             // ⓪ 回执标准字段（Mod 自报）：没有它 = 旧 Mod / 摘要行损坏，
-            //    自动派进无法判定 → 安全停等（绝不回退到读 KV）。
-            summary = session.summary();
+            //    自动推进无法判定 → 安全停等（绝不回退到读 KV）。
+            let summary = session.summary();
             if !summary.available {
                 eprintln!(
                     "error: Mod 未提供 summary（{} 无摘要行），无法自动判定——\
-                     改用 stdin 驱动或升级 Mod；本步未推进",
+                     改用 --drive stdin 或升级 Mod；本步未推进",
                     SUMMARY_EVENT
                 );
-                print_receipt(&current, true, mode);
                 return 0;
             }
             // ① 冲突 = **用户门禁**：必须停下打印双方与说明，绝不自动选解决路径。
             if !summary.conflicts.is_empty() {
                 println!();
-                println!("[goal] 需求冲突——需要你确认解决路径（不会自动选择）：");
+                println!("[drive] 需求冲突——需要你确认解决路径（不会自动选择）：");
                 for conflict in &summary.conflicts {
                     println!("  {}", conflict.label());
                 }
                 println!(
-                    "  请选 pendingChoice 的 1/2/3（keep_both / keep_first / revise），或 q 退出后 --resume 继续。"
+                    "  解决后重跑本命令；或改用 --drive stdin 手动选 pendingChoice 的 1/2/3（keep_both / keep_first / revise）。"
                 );
-                paused_for_conflict = true;
+                return 0;
             }
-        }
-        if mode == PlayMode::Goal && !paused_for_conflict {
             // 协议：下一步若是收口动作（Mod 自报 nextEndsRun），先进入 closing——
             // 阻止新写入，并在保护下把最后一次 drain 排在收口之前。
             if !closing_held && summary.next_ends_run {
@@ -2209,23 +2205,23 @@ fn run_interactive(args: &Args) -> i32 {
                 if let Some(awaiting) = &summary.awaiting {
                     println!();
                     println!(
-                        "[goal] {} 的 {} 作业在跑（rev {}），但没有任何待验收提案——",
+                        "[drive] {} 的 {} 作业在跑（rev {}），但没有任何待验收提案——",
                         awaiting.req, awaiting.stage, awaiting.rev
                     );
                     println!(
-                        "       宿主不生成提案内容，等待外部执行方提交（proposal.submit / --proposal）。"
+                        "        宿主不生成提案内容，等待外部执行方提交（proposal.submit / --proposal）。"
                     );
-                    println!("       安全暂停：状态未推进，收到提案后 --resume 继续。");
-                    print_receipt(&current, true, mode);
+                    println!("        安全暂停：状态未推进，收到提案后重跑本命令继续。");
+                    print_receipt(&current, true);
                     if closing_held {
                         leave_closing(&session.run_dir);
                     }
                     return 0;
                 }
             }
-            let limit = goal_step_limit(&summary);
-            match goal_step(&summary, &current, auto_steps, limit) {
-                GoalStep::Run => {
+            let limit = drive_step_limit(&summary);
+            match drive_step(&summary, &current, auto_steps, limit) {
+                DriveStep::Run => {
                     // 收口前保险：本步可能推进到 review/done（下一拍就结算），
                     // 先把刚到达的行吃掉——否则只能靠结算硬门禁报错，白跑一局。
                     let pre = session.drain_inbox();
@@ -2246,20 +2242,20 @@ fn run_interactive(args: &Args) -> i32 {
                     }
                     if stall_steps >= MAX_GOAL_STALL {
                         eprintln!(
-                            "error: [goal] 连续 {MAX_GOAL_STALL} 步 pendingChoice 无变化——\
-                             挂机中止（防死循环）"
+                            "error: [drive] 连续 {MAX_GOAL_STALL} 步 pendingChoice 无变化——\
+                             自动推进中止（防死循环）"
                         );
-                        print_receipt(&current, true, mode);
+                        print_receipt(&current, true);
                         return 1;
                     }
                     auto_steps += 1;
-                    let choice = match decide_choice(&session, &current) {
+                    let choice = match decide_choice(&session, program, &current) {
                         DecideOutcome::Index(index) => index,
                         DecideOutcome::Human(reason) => {
                             eprintln!(
-                                "[goal] 需要人工决策：{reason}——安全暂停，处理后 --resume 继续"
+                                "[drive] 需要人工决策：{reason}——安全暂停，处理后重跑本命令继续"
                             );
-                            print_receipt(&current, true, mode);
+                            print_receipt(&current, true);
                             println!("当前回执：{current}");
                             if closing_held {
                                 leave_closing(&session.run_dir);
@@ -2267,17 +2263,17 @@ fn run_interactive(args: &Args) -> i32 {
                             return 0;
                         }
                     };
-                    println!("[goal] 自动推进 {auto_steps}/{limit}（决策命令返回序号 {choice}）");
+                    println!("[drive] 自动推进 {auto_steps}/{limit}（决策命令返回序号 {choice}）");
                     current = session.dispatch_event(CHOICE_EVENT, &choice);
                     if current["ok"] != Json::Bool(true) {
-                        eprintln!("error: [goal] 自动推进失败：{}", error_text(&current));
-                        print_receipt(&current, true, mode);
+                        eprintln!("error: [drive] 自动推进失败：{}", error_text(&current));
+                        print_receipt(&current, true);
                         return 1;
                     }
                     fresh = true;
                     continue;
                 }
-                GoalStep::Settle => {
+                DriveStep::Settle => {
                     // 协议：收口必须先把本局从 running 切到 closing，
                     // 之后任何 `--requirement` 都会被命令本身非零拒绝。
                     if !closing_held {
@@ -2308,7 +2304,7 @@ fn run_interactive(args: &Args) -> i32 {
                         }
                     }
                     println!();
-                    println!("[goal] 已到结局（自动推进 {auto_steps} 步），开始结算…");
+                    println!("[drive] 已到结局（自动推进 {auto_steps} 步），开始结算…");
                     let code = run_settle(args, true);
                     // 用**现读**的未消费行数报错（不用 final_drain 的快照：结算本身要花时间）。
                     let leftover = unconsumed_inbox_lines(&session.run_dir);
@@ -2322,15 +2318,30 @@ fn run_interactive(args: &Args) -> i32 {
                     }
                     return code;
                 }
-                GoalStep::Stuck(message) => {
+                DriveStep::Stuck(message) => {
                     eprintln!("error: {message}");
                     return 1;
                 }
             }
         }
 
-        print_prompt(&current, mode);
+        // none 驱动：只回显当前回执，不推进、不读 stdin。
+        if matches!(drive, Drive::None) {
+            print_choices(&current);
+            println!();
+            println!(
+                "（--drive none：只打印当前回执，未推进；要推进请用 --drive stdin 或 --drive cmd:<路径>）"
+            );
+            return 0;
+        }
 
+        print_prompt(&current);
+
+        // 能走到这里的只有 stdin 驱动（cmd 已在上面的分支推进或返回）。
+        let Some(lines) = lines.as_mut() else {
+            eprintln!("error: 内部错误：非 stdin 驱动却走到输入环节");
+            return 1;
+        };
         let line = match lines.next() {
             Some(Ok(line)) => line,
             Some(Err(err)) => {
@@ -2339,13 +2350,7 @@ fn run_interactive(args: &Args) -> i32 {
             }
             None => {
                 println!();
-                if paused_for_conflict {
-                    println!(
-                        "（冲突未解决：挂机已安全暂停，未自动选择路径。解决后 --resume 可继续。）"
-                    );
-                } else {
-                    println!("（输入结束，退出。）");
-                }
+                println!("（输入结束，退出。）");
                 return 0;
             }
         };
@@ -2411,7 +2416,8 @@ fn dispatch_with_watch(session: &mut Session, args: &Args, name: &str, payload: 
 }
 
 /// 打印一步回执（`fresh=false` 时只打印错误——存读档等不推进剧情）。
-fn print_receipt(receipt: &Json, fresh: bool, mode: PlayMode) {
+/// 无模式分支：结局行本身由 Mod 的 narrative 提供，宿主只加一条通用分隔。
+fn print_receipt(receipt: &Json, fresh: bool) {
     if receipt["ok"] != Json::Bool(true) {
         println!("[错误 {}] {}", error_code(receipt), error_message(receipt));
         return;
@@ -2442,15 +2448,13 @@ fn print_receipt(receipt: &Json, fresh: bool, mode: PlayMode) {
     }
     if receipt["ending"] == Json::Bool(true) {
         println!();
-        match mode {
-            PlayMode::Goal => println!("—— 本局已到结局（goal 挂机：自动结算中）——"),
-            PlayMode::Guide => println!("—— 本局已到结局（q 退出后可 --settle 结算）——"),
-        }
+        println!("———————————");
     }
 }
 
-/// 处境提示面：待决选择（编号选项）或无选择时的可用命令。
-fn print_prompt(receipt: &Json, mode: PlayMode) {
+/// 处境面：待决选择（编号选项）或无选择时的可用命令
+/// （`--drive none` 只回显这一屏，stdin 驱动则在后面接提示符）。
+fn print_choices(receipt: &Json) {
     println!();
     match receipt["pendingChoice"].as_object() {
         Some(choice) => {
@@ -2471,7 +2475,12 @@ fn print_prompt(receipt: &Json, mode: PlayMode) {
             println!("（无待决选择。数字=选择 / event <名称> [JSON] / s / l / i / config / q）")
         }
     }
-    print!("[{}] > ", mode.label());
+}
+
+/// 处境提示面 + 输入提示符（提示符不携带推进方式语义）。
+fn print_prompt(receipt: &Json) {
+    print_choices(receipt);
+    print!("[ygg] > ");
     let _ = io::stdout().flush();
 }
 
@@ -2535,9 +2544,12 @@ fn print_config(session: &Session, args: &Args) {
     println!("run 目录 : {}", session.run_dir.display());
     println!("autosave : {}", session.autosave_path.display());
     println!(
-        "运行模式 : {}（静态 {}/play.mode + 动态 settings.play.mode；config.set 后下一步生效）",
-        session.play_mode().label(),
-        session.config_rel
+        "配置      : {}（play.mode 归 Mod 叙事层；宿主只读其中的 drive 阈值）",
+        session.mod_dir.join(&session.config_rel).display()
+    );
+    println!(
+        "驱动     : {}（推进方式由 --drive 给定；Mod 的 play.mode 仅叙事层自用）",
+        args.drive.label()
     );
     println!(
         "事件日志 : {}（已记录 {} 条，下一条 seq={}）",
@@ -2573,7 +2585,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
 
     // ⓞ 协议：结算必须持有 closing（与 inbox 写入者互斥）。
     //    - finalized：幂等返回已有报告的 ok，不重写；
-    //    - 本进程已持 closing（goal 自动 settle）：直接进；
+    //    - 本进程已持 closing（自动推进到结局后的 settle）：直接进；
     //    - 否则现在就进入并等在途写者落盘。
     match enter_closing(&run_dir) {
         Ok(ClosingEntry::AlreadyFinalized) => {
