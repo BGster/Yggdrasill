@@ -205,12 +205,16 @@ mod binding {
             }
         };
 
-        // ③ 循环 / 深度判栈（纯 Rust；失败不入栈）。
+        // ③ chunk 名：`@<相对路径>`（traceback 带真实文件与行号）。`path_of`
+        //    与 `normalize` 同源，今天不会失败；仍在**判栈之前**算——否则万一
+        //    两者口径分叉，失败会留下一个存活帧，让后续的循环/深度诊断报出
+        //    一条假链条（r4 报告的健壮性 nit）。
+        let chunk_name = format!("@{}", path_of(&name)?);
+
+        // ④ 循环 / 深度判栈（纯 Rust；失败不入栈）。
         ctx.borrow_mut().stack.push(&name)?;
 
-        // ④ 执行：chunk 名 `@<相对路径>`（traceback 带真实文件与行号）；
-        //    装载期预算由 require 边界进出（hook 据此分流，不挤占转换预算）。
-        let chunk_name = format!("@{}", path_of(&name)?);
+        // ⑤ 执行：装载期预算由 require 边界进出（hook 据此分流，不挤占转换预算）。
         let outcome: Result<MultiValue, Error> = {
             let budget = ctx.borrow().budget.clone();
             budget.begin();
@@ -219,7 +223,7 @@ mod binding {
             outcome
         };
 
-        // ⑤ 出栈（成败都出）+ 成功写缓存（`nil` / 无返回值 → `true`）。
+        // ⑥ 出栈（成败都出）+ 成功写缓存（`nil` / 无返回值 → `true`）。
         match outcome {
             Ok(values) => {
                 let value = match values.into_vec().into_iter().next() {

@@ -509,6 +509,12 @@ fn watched_files(dir: &Path) -> Vec<String> {
         MANIFEST_FILE.to_owned(),
         PACK_FILE.to_owned(),
     ];
+    // 配置的实际解析结果必须纳管：pack 未声明 `ygg:agent/config` 时
+    // [`agent_config_path`] 回落 `data/config.json`，而下面只收**声明过的**
+    // 路径——只改回落配置（如 `drive.maxSteps`）会让签名不变，热载直接 return，
+    // 新阈值与结算口径永不生效且无告警。收「解析结果」而不是「声明」才能对齐
+    // 监视面与实际使用面。
+    files.push(agent_config_path(dir));
     if let Ok(text) = fs::read_to_string(dir.join(PACK_FILE)) {
         if let Ok(pack) = serde_json::from_str::<Json>(&text) {
             for entry in pack["entries"].as_array().into_iter().flatten() {
@@ -3686,11 +3692,15 @@ mod multiscript_hot_reload_tests {
     fn module_files_are_watched_so_editing_one_flips_the_signature() {
         let dir = fixture_copy("watch-modules");
         let watched = watched_files(&dir);
-        // 五件套 + 资源 + schema + **每个模块**（r2：漏一个就静默跑旧代码）。
+        // 五件套 + 资源 + schema + **每个模块**（r2：漏一个就静默跑旧代码）
+        // + **配置的解析结果**（r4 缺陷：本 fixture 的 pack 未声明
+        // `ygg:agent/config`，走回落 `data/config.json`——只收声明路径时，
+        // 改回落配置不翻转签名，热载静默不触发）。
         for path in [
             "mod.lua",
             "pack.json",
             "manifest.json",
+            "data/config.json",
             "data/scenes.json",
             "schemas/scene-texts.json",
             "src/util.lua",
