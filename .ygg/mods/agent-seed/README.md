@@ -164,15 +164,79 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 
 终态（`split`/`merged`/`dropped`）不再接受修订与冲突；`coordinate.submit` 会把拆并的**后继**一并要求 done。
 
-## 五、job 槽位与开发泳道
+## 五、人类动作门禁与二级菜单页（展示 / 防自批两层，不改状态机）
+
+### 5.1 人类动作门禁
+
+引擎不区分「谁派发的」——`--event 动作` 与 TTY 按键走同一套通道。所以 Mod 自己把这层
+从隐式变成显式：**guide 下「会产生通过效果」的动作只能经 `ygg.choice_selected` 路由进入**，
+单发直派被可读拒绝（`【动作被拒】`，落在 `pack.json.agent.rejectionPrefixes` 内——宿主因此
+判为「未生效」，不前移 cursor、不记失败步，`ok` 仍为 `true`）：
+
+| 受门禁的动作 | 理由 |
+| --- | --- |
+| `proposal.accept` | 验收判断（自批 = 伪造验收结论） |
+| `gate.approve` | 两个强制门禁 |
+| `coordinate.submit` | 收口进 review |
+| `verify.submit` | 门禁自检结论 |
+| `review.note` | 结局评分 / 经验 |
+| `config.set play.mode` | 切模式改变「谁在派发」，是自批链条的第一环 |
+
+- 打回类（`gate.reject` / `proposal.reject`）**故意不在内**：打回不产生任何通过效果，自打回
+  只会让自己返工；而它是唯一的纠错通道（菜单本就没有带理由的 reject 项）。
+- 机制是**一次性票据**：`ygg.emit` 是入队而非同步派发，所以不能用调用栈深度表达「这一步来自
+  菜单」——菜单路由在 emit 前盖章，对应 handler 取证即消费；非人类动作不盖章，票据不会泄到
+  下一个直派。
+- `goal` 模式同样走 `ygg.choice_selected`，但是否派发由外部决策命令决定（`HUMAN:…` 即安全
+  暂停），不会默认批准。**所以 `--drive cmd` 的决策脚本等于「人」**——它的判断力由脚本自负。
+
+### 5.2 二级菜单页
+
+顶层菜单只留一个 `config` 入口，三项设置进子页：运行模式 / 演进模式 / 门禁。
+
+| 动作 | 载荷 | 作用 |
+| --- | --- | --- |
+| `config.open` | `""` | 进子页（KV `ui.page=config`、`ui.page.stage=<当前阶段>`） |
+| `config.close` | `""` | 回阶段菜单 |
+
+- 纯展示层：**不参与状态机**，只改 `ui.page` / `ui.page.stage` 两个展示键；不进摘要、不影响
+  派活，也**不占顶层首项**（主前进动作永远是 `pendingChoice` 第 1 项，`playtest` 全 1 照旧通关）。
+- 清空时机：阶段变化（`advance()` 清、`render()` 再兜一次）、选了任何非 `config.*` 的菜单项、
+  以及**切换运行模式**——驱动者换了人，子页处境已失效；不这样做，goal / `--drive cmd` 会在
+  子页首项上来回翻模式直到步数上限。
+
+## 六、job 槽位与开发泳道（含账本）
 
 - `tuning.job_capacity`（默认 4）：分析 / 规划 / 开发共用 job 槽位（`req.<i>.job` 非空即占用）。
-- 开发额外占 lane（`lane.<k>.req`）；只有「`ready` ∧ 依赖全部满足 ∧ 无冲突 ∧ 不需要修订」的需求能进开发。
+- 开发额外占一条泳道，账本是 `lane.<k>.{req,branch,base,since,clean}`（`k` = 1..`job_capacity`；
+  **单仓无 `repo` 层**——多仓版是 `lane.<repo>.<k>.*`，本 Mod 不移植那一层，泳道号即全局槽位号）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `req` | 占用者需求 id（`""` = 空闲）。**兼容读**旧存档的数字 index 写法，故不需要一次性迁移 |
+| `branch` / `base` | 物理 worktree 的分支与 base（由 `lane.claim` 记）；`requirement.dispatch` 自动挂牌时留空 = **未断言** |
+| `since` | 挂牌序号（单调递增，KV `lane.seq`）。沙箱没有墙钟，`since` 只表达先后；真实时间由主 Agent 写在 worktree 根的 `.lane` |
+| `clean` | `"1"` = 主 Agent 已断言工作区干净（**mod 不能跑 git**，只认这个断言；空 = 未断言） |
+
+- 只有「`ready` ∧ 依赖全部满足 ∧ 无冲突 ∧ 不需要修订」的需求能进开发；`requirement.dispatch`
+  在**同一次事务**里挂牌（写五键 + `req.<i>.lane`）。若主 Agent 已用 `lane.claim` 预挂牌，
+  dispatch **沿用**那条，不覆盖已记的 `branch` / `base` / `clean`。
+- 释放：执行方交付（进 `accept`）、门禁吊销、拆并 / 弃用都走同一处 → `LANES.release`
+  （五键一起清，且只在账本确实记着它时才清，不误伤别人）。
+- `map.show` 的账本块逐条显示 `lane-<k> ← <需求>（阶段）｜分支｜base｜since #N｜clean`；
+  空字段显示 `—`（未断言的部分不假装知道）。
 - 相互声明冲突的需求不可能同时 `developing`（冲突标记让两者都不可调度）。
 - **内核仍单线程 dispatch + 单 autosave**：泳道只是宿主侧并行工作单元，结果一律经 inbox 回来，
   宿主按 `requirement_id` / `external_id` canonical 序合流。
 
-## 六、宿主侧跨进程协议（Mod 不感知，但影响玩法）
+| 泳道动作 | 载荷 | 作用 |
+| --- | --- | --- |
+| `lane.claim` | `"泳道号\|需求id\|分支\|base\|clean"` | 挂牌 / 补记。`clean` 必须是 `"1"`（脏树禁挂牌）；泳道被别人占 / 本条已持有另一条 / 需求终态 → 可读拒绝 |
+| `lane.release` | `"泳道号"` | 摘牌（幂等：本就空闲也算成功） |
+
+两者都**不进**人类动作门禁：只记账本，不产生「通过」效果。
+
+## 七、宿主侧跨进程协议（Mod 不感知，但影响玩法）
 
 Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
 
@@ -209,14 +273,16 @@ end)
 - `meta` 是瞬态回执面，不进存档也不进状态哈希（调不调它不影响 `state_hash`）。
 - 值面约束（内核把关）：标量 / 稠密序列 / 字符串键表；非有限值拒绝；空表读作 `[]`。
 
-## 七、增量配置
+## 八、增量配置
 
 - 静态 `data/config.json` + 动态 KV `settings.*`（`config.set`）：`play.mode`（guide/goal）、
   `gates.require_all_green`、`evolution.mode` / `evolution.max_per_run`。
+- 顶层菜单只暴露一个 `config` 入口，三项常用设置走二级页（见 §5.2）；其余键仍可直接
+  `config.set "<键>=<值>"` 派发（配置写不产生「通过」效果，不设人类门禁——只有 `play.mode` 除外）。
 - `tuning`：`req_capacity`（需求上限 32）、`job_capacity`（4）、`min_slices` / `max_slices`（历史遗留）、
   `default_score`。
 
-## 八、文件
+## 九、文件
 
 | 文件 | 作用 |
 | --- | --- |
@@ -227,7 +293,7 @@ end)
 | `pack.json` / `manifest.json` | 打包声明与内容寻址清单（`cargo run --example pack` 生成） |
 | `schemas/*.json` | 资源 schema（与 `packages/schema/schemas/` 单源一致） |
 
-## 九、走查
+## 十、走查
 
 ```bash
 # 默认全 1 贪心：intake → coordinate.submit → verify → review.note → 【结局

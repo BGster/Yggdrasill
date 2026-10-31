@@ -78,6 +78,11 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 - **自备决策命令的起点**：仓库自带 `scripts/decide-choice.sh`（POSIX sh + python3，std-only）——
   它**只是最小可用示例/兜底**：默认取菜单首项 `1`，遇到未解决冲突或验收/门禁类选项
   （`proposal.*` / `gate.*` / `requirement.resolve`）输出 `HUMAN:<理由>` 安全暂停。
+- **人类动作门禁（Mod 层，guide 生效）**：`proposal.accept` / `gate.approve` / `coordinate.submit` /
+  `verify.submit` / `review.note` / `config.set play.mode` 在 `play.mode=guide` 下**只能经
+  `ygg.choice_selected` 进入**——`--event` 单发直派会被 `【动作被拒】` 拒绝（`ok` 仍为 `true`，
+  主状态不变）。所以「脚本 / Agent 替人验收」只能通过决策命令（`--drive cmd:…`），单发直派不行；
+  打回类（`gate.reject` / `proposal.reject`）不受限，留给纠错。
   **真实决策应由主 Agent 或外部编排提供**（读同一份 `decide-input.json` 再给判断），
   而不是把这个脚本当策略用。用法：`--drive cmd:scripts/decide-choice.sh`。
 - **不造内容**：有 job 在跑却一份待验收提案都没有时，宿主**不生成占位提案**（门禁必须由真实
@@ -102,17 +107,20 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `proposal.submit` | `"r1\|1\|analysis\|summary\|artifacts[\|changes[\|external_id]]"` | subagent 提议（stage ∈ analysis/plan/development；changes 可选） |
 | `proposal.accept` | `"pN"` / `"rN"` / `""` | **串行**验收一条（空 = requirement_id canonical 序）；rev 不匹配 → stale |
 | `proposal.reject` | `"pN\|理由"` / `"rN\|理由"` / `""` | 打回：analysis→draft / plan→planning / development→ready |
-| `gate.approve` | `"rN[|说明]"` / `""` | 过门禁（plan_gate → ready；accept → done） |
+| `gate.approve` | `"rN[\|说明]"` / `""` | 过门禁（plan_gate → ready；accept → done） |
 | `gate.reject` | `"rN\|反馈"` / `""` | 门禁打回（plan_gate → planning；accept → ready） |
 | `coordinate.submit` | `""` | 全部叶子需求 done ∧ 无待验收提案 ∧ 无在跑 job ∧ 无冲突 → review |
 | `verify.submit` | `"true"` / `"all_green=false;report=…"` | review 内门禁自检（失败打回 coordinate） |
 | `review.note` | `"lesson\|score(1-5)"` | 收口到 done（叙事以【结局 收口） |
-| `requirement.split` | `"父id\|子标题A\|子标题B[|…]"` | 主 Agent 直改：父置 split，子需求继承依赖（≥2 子） |
+| `requirement.split` | `"父id\|子标题A\|子标题B[\|…]"` | 主 Agent 直改：父置 split，子需求继承依赖（≥2 子） |
 | `requirement.merge` | `"源id1,源id2\|合并标题\|合并描述"` | 主 Agent 直改：源置 merged，新需求依赖取并集 |
 | `requirement.amend` | `"id\|新标题\|新描述\|新依赖"` | 主 Agent 直改：rev+1；done 修订**派生新需求**；开发中只改说明 |
 | `requirement.conflict` | `"id1,id2\|说明"` | 主 Agent 标记冲突（blocked，派活与收口都跳过） |
-| `requirement.resolve` | `"id1,id2\|keep_both\|keep_first\|revise[|说明]"` | 冲突解决三条路径 |
-| `config.set` / `guide.show` / `map.show` | 同既有语义 | 常驻只读/配置动作 |
+| `requirement.resolve` | `"id1,id2\|keep_both\|keep_first\|revise[\|说明]"` | 冲突解决三条路径 |
+| `config.open` / `config.close` | `""` | 二级菜单页：进 / 出「运行模式 · 演进模式 · 门禁」子页（纯展示层，不推进状态） |
+| `config.set` / `guide.show` / `map.show` | 同既有语义 | 常驻只读/配置动作（`config.set play.mode=…` 受人类动作门禁） |
+| `lane.claim` | `"泳道号\|需求id\|分支\|base\|clean"` | 泳道账本挂牌 / 补记（`clean` 必须是 `"1"`；脏树禁挂牌） |
+| `lane.release` | `"泳道号"` | 泳道账本摘牌（幂等） |
 | `agent.summary` | `"0"` | 只读：Mod 通过 `ygg.meta("summary", …)` 自报**回执标准字段**（阶段 / 结局 / 待验收提案 / 冲突 / 空等 job），落在回执 `meta.summary` |
 
 - `changes` 形如 `split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`：
@@ -122,8 +130,9 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
   `analysis_review` / `plan_review` / `dev_review` 在「该需求**没有**待验收提案」时接受这种重定基提案；
   仍有正常待验收提案时一律拒绝（`已有一条待验收提案…先 accept / reject`），不覆盖。
   重定基提案落地后需求的 `stale` 标记自动清除。
-- 越阶动作 → `【动作被拒】`；载荷不合法 → `【载荷被拒】`；前置不满足 → `【需求待办】`。
-  三者都原地重渲染（主状态不变）。
+- 越阶动作 → `【动作被拒】`；载荷不合法 → `【载荷被拒】`；前置不满足 → `【需求待办】`；
+  人类动作被单发直派 → 同样是 `【动作被拒】`。四者都原地重渲染（主状态不变），且都命中
+  `pack.json.agent.rejectionPrefixes`（宿主据此判「未生效」，不记失败步）。
 - 收口判据：`req_all_done()`（含 split/merged 的后继全部 done）+ 0 待验收提案 + 0 在跑 job + 0 冲突。
 - **宿主不读 Mod 私有 KV**：`agent.summary` 用内核的结构化回执通道
   `ygg.meta("summary", {…})`，数据落在回执信封的 `meta.summary`，宿主只认这个字段
@@ -201,7 +210,9 @@ inbox 是 JSONL：`<runs-root>/<run-id>/inbox.jsonl`，每行
 - `map.show`：**双层图**——协调器 4 态节点图 + 需求级流水线（含两个门禁）+ job/泳道台账。
 - `pendingChoice` 顺序：解决冲突（如有）→ 主前进动作（`proposal.accept` > `gate.approve` >
   `requirement.dispatch` > `coordinate.submit`）→ `guide.show` → `map.show` → `requirement.list` →
-  `requirement.add` → `config.set`（play.mode → evolution.mode → gates）。
+  `requirement.add` → `config`（进子页后才是 play.mode → evolution.mode → gates + 返回）。
+- `map.show` 的泳道账本块逐条显示 `lane-<k> ← <需求>｜分支｜base｜since #N｜clean`
+  （`branch` / `base` / `clean` 由 `lane.claim` 记，未记时显示 `—`）。
 
 ---
 
