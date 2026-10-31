@@ -25,7 +25,7 @@
 //! | 面 | 口径 | 消费方 |
 //! | --- | --- | --- |
 //! | 登记面 | `code.{entry, modules[]}`：入口**不**登记为模块（同一源码两个装载身份让缓存与定位歧义）；模块**逐条枚举**，无 glob；`entry ↔ modules` 与 `manifest.json` 的 `code` 数组双向相等 | [`crate::pack::CodeSpec`]、[`crate::modload::ModBundle`] |
-//! | 装载期边界 | `require` 只在**装载期**可用：入口 chunk（含其间嵌套的模块装载）跑完，驱动在 `host.seal` 的**同一处**翻 `ModuleHandle::seal`，此后 `require` 是可读拒绝——handler 里不能懒加载 | [`crate::modules::ModuleHandle`] |
+//! | 装载期边界 | **只有注册面有边界**：`host.seal` 封 `ygg.on`（运行期注册禁令）。`require` **不**在边界上——装载期与 handler 内部一视同仁（懒加载成立）；代价是模块顶层必须是纯导出面（禁止面清单在 `ygg_modules::effects`，运行时由影子表执行） | [`crate::modules`]、[`crate::host_api::HostApi::seal`] |
 //! | 错误前缀口径 | 装载器自判的拒绝带**调用点**（`src/a.lua:3: <原因>`）；模块 chunk 自身的错误按 Lua 原生错误链浮出（每层 `path:line:` + traceback）——两类同形，都带真实文件与行号，禁止「拼回单文件再报错」 | [`crate::modules`] |
 //!
 //! 与四段 host 契约的差别：`code` 段可以整段缺失（缺 = 单文件 Mod，行为逐字节

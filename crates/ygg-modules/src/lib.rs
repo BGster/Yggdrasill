@@ -3,10 +3,13 @@
 //! 这里是「什么是合法的模块名 / 模块路径 / 模块集合 / 装载栈」的**唯一实现**。
 //! 三个消费方共用它，因此不会出现「装载能过但静态检查判非法」这类双份口径：
 //!
-//! - `ygg_sandbox::modules`：装载器（`require` 闭包 + 缓存 + `seal`）的 Lua 面
-//!   留在该 crate 的 `binding` 子模块里，判定面全部来自本 crate；
+//! - `ygg_sandbox::modules`：装载器（`require` 闭包 + 缓存 + 副作用影子表）的
+//!   Lua 面留在该 crate 的 `binding` 子模块里，判定面全部来自本 crate；
 //! - `ygg_sandbox::pack`：打包期把 `pack.json` 的 `code` 声明对成 `ModuleSet`；
 //! - `ygg-lint --pack`：静态检查逐模块 parse + 依赖图。
+//!
+//! 另有一个**共用清单**：[`effects`]——「模块顶层不得触碰的 `ygg` 面」。
+//! 内核的影子表与 lint 的 `YGG-MOD-EFFECT` 规则都只读它，不各自维护一份。
 //!
 //! **为什么要独立成 crate**：最后一条是唯一理由。lint 的耦合纪律是「独立于
 //! 管线与内核运行」（`ygg-lint/Cargo.toml` 的依赖白名单），若为了复用这几个
@@ -61,6 +64,89 @@ pub const MAX_SEGMENT_LEN: usize = 64;
 /// 模块源码扩展名（[`path_of`] 追加、[`name_of_path`] 剥离）。
 pub const MODULE_EXTENSION: &str = ".lua";
 
+/// Mod 模块的**副作用边界**（单一事实源）。
+///
+/// 新不变量：**模块 chunk 的顶层是纯导出面**——只允许 `local` / 函数定义 /
+/// `require` 其它纯模块 / 纯读。任何**注册进内核**（`ygg.on` / `fsm.define` /
+/// `narrative.node`）、**写宿主状态**（`kv.set` / `entity.*` 写类）或
+/// **产生输出**（`narrate` / `emit` / `choice` / `meta` / `narrative.goto`）的
+/// 调用都必须发生在函数体内，由入口显式装配调用。
+///
+/// **为什么**：`ygg.on` 的注册序就是 handler 的派发序。模块顶层能自由注册，
+/// 等于让「文件怎么拆」决定「运行时行为」——重构（把函数挪到另一个文件、
+/// 调换 require 顺序）就不再安全。模块纯了以后，`require` 才可以在任何时机
+/// 调用（包括事件 handler 内部），懒加载与按需装载才成立。
+///
+/// **入口 chunk 不受这份清单约束**：入口本来就是装配清单，要注册、要初始化。
+///
+/// 这份清单被两个消费方共用，**不得各写一份**（否则「运行期放过的写法被 lint
+/// 判非法」这类双份口径必然出现）：
+/// - 内核：`ygg-sandbox::modules` 的副作用影子表——模块 chunk 执行期间把这些
+///   面原位替换成拒绝桩，执行完恢复；
+/// - 静态检查：`ygg-lint` 的 `YGG-MOD-EFFECT` 规则——模块顶层触及即报。
+pub mod effects {
+    /// 顶层调用即违规的 `ygg` 直系成员。
+    ///
+    /// `on` 是注册；`narrate` / `emit` / `choice` 是输出；`meta` 是宿主回执
+    /// 通道（宿主据此判定，属输出类）。
+    pub const BANNED_CALLS: &[&str] = &["on", "emit", "narrate", "choice", "meta"];
+
+    /// 顶层调用即违规的 `ygg` 子表成员：(子表名, 成员名)。
+    ///
+    /// `fsm` / `narrative` **不是** Rust 侧 `raw_set` 的成员——它们是 stdlib
+    /// 在装载期用 Lua 声明出来的表（`stdlib/init.lua` 建命名空间，`fsm.lua` /
+    /// `narrative.lua` 挂成员）。影子表与 lint 一样按「子表 + 成员」处理，
+    /// 不把它当成 `ygg` 的直系函数。
+    ///
+    /// `narrative` 的 `goto` 走 `ygg.narrative["goto"](id)`（`goto` 是 Lua 5.4
+    /// 保留字，点号形态是语法错误）。它经 `ygg.emit` 发派生事件，与 `emit`
+    /// 同属输出面；单独列出是为了让报错落在**调用点**（否则错误只报
+    /// `ygg.emit`、位置落在 stdlib 的 `goto` 体内，作者看不出自己写了什么）。
+    pub const BANNED_TABLE_MEMBERS: &[(&str, &str)] = &[
+        ("kv", "set"),
+        ("entity", "spawn"),
+        ("entity", "set_attribute"),
+        ("entity", "add_tag"),
+        ("entity", "remove_tag"),
+        ("fsm", "define"),
+        ("narrative", "node"),
+        ("narrative", "goto"),
+    ];
+
+    /// 纯读面——显式列出，作为「这些是**允许**的」的依据（lint 与文档用）。
+    ///
+    /// 未列进禁止面的名字一律放行；这里只钉住「顶层读它不改变任何状态」的
+    /// 那几个，免得作者的合法写法被误判。
+    ///
+    /// 注意 `ygg.stdlib_version` / `ygg.engine_version` 是**值字段**不是函数
+    /// （见 `stdlib.rs` / `sandbox.rs`），读字段天然无副作用，不需要列进
+    /// 「可调用面」。
+    pub const PURE_READ_CALLS: &[&str] = &["data", "ticks"];
+
+    /// 纯读的子表成员（**允许**在顶层调用；miss 返回 `nil` / `false`，不写状态）。
+    pub const PURE_READ_TABLE_MEMBERS: &[(&str, &str)] = &[
+        ("kv", "get"),
+        ("entity", "has_tag"),
+        ("entity", "get_attribute"),
+    ];
+
+    /// 禁止面判定（**唯一查询面**，内核影子表与 lint 共用）。
+    ///
+    /// `path` = `ygg` 之后的成员路径：`["on"]` 命中直系成员，
+    /// `["kv", "set"]` 命中子表成员。命中返回规范访问形态（`on` /
+    /// `kv.set`，供报错文案直接拼成 `ygg.kv.set`），未命中 = `None`
+    /// （含纯读面与一切未列出的名字）。
+    pub fn banned(path: &[&str]) -> Option<String> {
+        match path {
+            [name] => BANNED_CALLS.contains(name).then(|| (*name).to_owned()),
+            [table, member] => BANNED_TABLE_MEMBERS
+                .contains(&(*table, *member))
+                .then(|| format!("{table}.{member}")),
+            _ => None,
+        }
+    }
+}
+
 /// 模块名 / 路径 / 装载边的拒绝原因（装载器自判面；模块 chunk 自身的错误
 /// 不在此列——那是 Lua 原生错误链，按原文浮出）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,8 +191,6 @@ pub enum ModuleError {
     Circular { chain: String },
     /// 装载深度超过 [`MAX_DEPTH`]。
     DepthExceeded { chain: String, limit: usize },
-    /// `seal` 之后的 require（装载期专属面）。
-    Sealed { name: String },
     /// 装载器内部面（registry 表访问等）失败——出现即装载器 bug。
     Loader { details: String },
 }
@@ -172,11 +256,6 @@ impl fmt::Display for ModuleError {
             ModuleError::DepthExceeded { chain, limit } => write!(
                 f,
                 "require depth exceeded ({limit} nested modules): {chain}"
-            ),
-            ModuleError::Sealed { name } => write!(
-                f,
-                "sandbox denied: module '{name}' cannot be loaded here (require is a \
-                 load-time-only surface: it closes once the mod has finished loading)"
             ),
             ModuleError::Loader { details } => {
                 write!(f, "module loader internal error: {details}")
