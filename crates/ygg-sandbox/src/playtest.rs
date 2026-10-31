@@ -51,7 +51,7 @@ impl Default for PlaytestOptions {
 /// 走查收口四态（D-12）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reached {
-    /// 叙事行出现【结局前缀。
+    /// 叙事行出现契约 `agent.endingPrefix` 前缀。
     Ending,
     /// 脚本耗尽，停在待决选择点。
     Choice,

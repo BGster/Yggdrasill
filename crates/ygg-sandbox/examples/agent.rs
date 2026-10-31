@@ -20,7 +20,7 @@
 //!
 //! # ② 单发模式（Agent 脚本化调用：动作 → JSON 回执 → 退出）
 //! cargo run -p ygg-sandbox --example agent -- --mod <目录> --run-id my-task \
-//!   --resume --event ygg.choice_selected --payload '1'
+//!   --resume --event <Mod 的 choiceEvent> --payload '1'
 //!
 //! # ③ 局末结算（读 autosave + events.jsonl → settlement.json）
 //! cargo run -p ygg-sandbox --example agent -- --run-id my-task --settle
@@ -95,7 +95,7 @@
 //! 单发回执契约（stdout 单行 JSON；Agent 的解析面）：
 //!
 //! ```json
-//! {"ok":true,"event":"event.start","narrative":["…"],"pendingChoice":{"prompt":"…","options":["…"]},
+//! {"ok":true,"event":"<事件名>","narrative":["…"],"pendingChoice":{"prompt":"…","options":["…"]},
 //!  "autosave":"runs/my-task/autosave.json","seq":0,"revision":5}
 //! ```
 //!
