@@ -1,0 +1,97 @@
+# 回归门禁：本地门禁的 CI 投影（读：AGENTS §五 gates / playbook `gates` 章）。
+#
+# 与 deploy-pages 的分工：本文件只做**校验**，不产出部署物；deploy-pages 只做
+# wasm + 前端构建与 Pages 发布。两者共享同一套 toolchain 版本与供应链 pin 纪律
+# （所有 uses 按 zizmor 纪律 pin 到 commit SHA，注释保留版本号）。
+#
+# 覆盖口径 = playbook `gates` 章里无需额外前置条件的必过项：
+#   rust.fmt / rust.clippy / rust.test / rust.agent.test
+#   ts.typecheck / ts.test
+# 不含的项与原因：
+#   - wasm.build / wasm.determinism：需 WASI SDK + wasm-bindgen CLI，成本高，
+#     由 deploy-pages 的 build job 与本地门禁承担（其产物即 wasm 实例）。
+#   - ts.build：deploy-pages 已构建 client-web，重复无增益。
+name: check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# 同 ref 只保留最新一次校验（force-push / 连推时取消旧跑，省 runner）。
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4.2.2（本 job 无 push，不持久化凭据）。
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      # dtolnay/rust-toolchain（moving branch stable，pin 到当时 head）。
+      # fmt/clippy 必须显式声明 components：rustup 默认 profile 不含它们。
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          components: rustfmt, clippy
+
+      # Swatinem/rust-cache v2.8.0
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy（警告即错误）
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test（workspace）
+        run: cargo test --workspace
+
+      # `cargo test --workspace` 不覆盖 example 内的 #[cfg(test)]；
+      # `--examples` 在本仓会跑出 0 tests，必须用 `--example agent` 指定目标。
+      - name: cargo test（agent example）
+        run: cargo test --example agent -p ygg-sandbox
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      # pnpm/action-setup v4.1.0（版本取自根 package.json 的 packageManager）。
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
+
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # 哨兵：锁文件 tarball 必须全部指向公网 registry（与 deploy-pages 一致）。
+      - name: "Guard — lockfile tarballs must use public registry"
+        run: |
+          BAD=$(grep 'tarball:' pnpm-lock.yaml \
+            | grep -vc 'registry.npmjs.org' || true)
+          if [ "${BAD:-0}" -gt 0 ]; then
+            MSG="pnpm-lock.yaml 含内网镜像 tarball URL"
+            echo "::error::${MSG}——请在仓库根（有 .npmrc）重跑 pnpm install 重新生成" >&2
+            exit 1
+          fi
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm typecheck
+        run: pnpm typecheck
+
+      - name: pnpm test
+        run: pnpm test
