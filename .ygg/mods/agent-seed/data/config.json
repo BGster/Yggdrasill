@@ -3,13 +3,16 @@
     "mode": "guide"
   },
   "drive": {
-    "maxSteps": 64,
-    "stallLimit": 12,
-    "stepsPerRequirement": 16
+    "maxSteps": 200,
+    "stallLimit": 20,
+    "stepsPerRequirement": 20
   },
   "evolution": {
     "mode": "suggest",
-    "allow_paths": ["prompts", "beats"],
+    "allow_paths": [
+      "prompts",
+      "beats"
+    ],
     "max_per_run": 1
   },
   "autosave": true,
