@@ -242,6 +242,14 @@ fn write_mini_mod(tag: &str, mod_lua: &str) -> PathBuf {
                 "path": "data/scenes.json",
             }],
             "schemaFiles": ["schemas/scene-texts.json"],
+            // host 契约（必填）：事件名 / 结局前缀由 Mod 自己声明。
+            "agent": {
+                "entryEvent": "event.start",
+                "choiceEvent": "ygg.choice_selected",
+                "summaryEvent": "agent.summary",
+                "endingPrefix": "【结局",
+            },
+            "inboxRoutes": {},
         }))
         .expect("pack"),
     )

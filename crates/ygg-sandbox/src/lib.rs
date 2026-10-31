@@ -14,6 +14,7 @@ pub mod driver;
 pub mod fuel;
 pub mod hash;
 pub mod host_api;
+pub mod host_contract;
 pub mod inject;
 pub mod playtest;
 pub mod resources;

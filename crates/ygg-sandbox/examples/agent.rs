@@ -8,7 +8,7 @@
 //! 互斥），**不持有推进策略也不认识 Mod 内部状态**：
 //! - 推进策略由 `--drive` 选定（跟人读 stdin、或交给外部决策命令、或什么都不做）；
 //! - “何时收口 / 有无冲突 / 有无待验收提案”只问 Mod 自己声明的摘要
-//!   （[`SUMMARY_EVENT`] 回执信封的 `meta.summary` 结构化字段），不读
+//!   （契约 `summaryEvent` 回执信封的 `meta.summary` 结构化字段），不读
 //!   `ending` / `fsm.stage` / `prop.*` / `req.*` 等 Mod 私有 KV 键，
 //!   也不从人读叙事里剖数据（旧「`【摘要】` 前缀 + JSON」契约已删除）。
 //!
@@ -31,6 +31,19 @@
 //!   --requirement '补一条门禁日志|把 verify 的失败原因写进 events.jsonl'
 //! ```
 //!
+//! ## host 契约（**必填、无默认值**；宿主代码不含任何事件名字面量）
+//!
+//! | 声明位置 | 段 | 内容 |
+//! | --- | --- | --- |
+//! | `pack.json` | `agent` | `entryEvent` / `choiceEvent` / `summaryEvent` / `endingPrefix` |
+//! | `pack.json` | `inboxRoutes` | `kind` → `{action, fields[, write]}`（可为 `{}`） |
+//! | `data/config.json` | `settlement` | `requireEvents` / `requireNoFailedSteps` / `requireEnding` / `requireInboxConsumed` |
+//! | `data/config.json` | `drive` | `maxSteps` / `stallLimit` / `stepsPerRequirement` |
+//!
+//! 缺任何一段 / 缺任一字段 / 类型不符 / 非正整数 → **装载期失败**（非零退出，
+//! 错误文案点名缺失字段、给出应有形状与文档定位）。这是 fail-closed 的刻意选择：
+//! 宿主宁可拒绝启动，也不猜 Mod 的意图（`ygg_sandbox::host_contract` 是唯一解析点）。
+//!
 //! ## 异步需求 inbox（④，跨进程队列入口）
 //!
 //! 协议：`<runs-root>/<run-id>/inbox.jsonl`，每行一个 JSON
@@ -39,7 +52,10 @@
 //! 文件保留作审计；消费位移记在 `inbox.cursor`（`{"consumed": N}`，按非空行数）。
 //!
 //! 消费时机：cmd 自动推进**之前**、stdin 每次提示**之前**、单发每次派发**之前**
-//! 都会 drain 新行并 dispatch `requirement.add`（Mod 侧 FIFO 入队）。
+//! 都会 drain 新行，按 `inboxRoutes` 声明的路由（kind → 动作 + 段序）派发。
+//! 写命令（`--requirement` / `--proposal` / …）同样只认 Mod 的声明：某条路由带
+//! `"write": {"flag": "<旗标名>", "shape": "named|payload"}` 才有对应的 CLI 旗标，
+//! 未声明即明确拒绝（退出码 3，不静默丢行）。
 //!
 //! 崩溃安全：**dispatch 成功且 autosave 落盘后**才推进 cursor。若「存档成功、cursor
 //! 未推进」时进程挂掉，重启会重放同一行——`external_id` 是 Mod 侧幂等键，重放返回
@@ -59,9 +75,8 @@
 //! | `none` | 只打印当前回执就退出（不推进、不读 stdin） | 0 |
 //!
 //! 自动推进的失控防护：步数硬顶 + 每条需求（异步补入的）额外步数 + 连续无进展
-//! 判停——阈值读 `<mod>/data/config.json` 的 `drive` 段（[`DriveLimits`]，
-//! 缺失 / 非法回落 [`DEFAULT_MAX_STEPS`] / [`DEFAULT_STEPS_PER_REQUIREMENT`] /
-//! [`DEFAULT_STALL_LIMIT`]，不因配置问题报错中断局）。合法多需求局不会被误杀，
+//! 判停——阈值读 `<mod>/data/config.json` 的 `drive` 段（[`DriveLimits`]，**必填且
+//! 必须正整数**；缺失 / 非法即装载期失败，见下节）。合法多需求局不会被误杀，
 //! 真循环仍会停；派发失败 / 无 pendingChoice 且未到结局 → 可读错误并非零退出
 //! （绝不静默死循环）。
 //! 单发模式不受影响：`--event` 一次只派发一个事件，不自动连跑（Agent 的调用语义）。
@@ -114,40 +129,30 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::KernelFacade;
+use ygg_sandbox::host_contract::{
+    sanitize_field, AgentContract, DriveLimits, InboxRoutes, SettlementPolicy, WriteShape,
+    CONTRACT_DOC,
+};
 
 // ============================================================================
-// §常量 文件名 / 契约字面量（与 adventure.rs / playtest.rs / client-web 同源）
+// §常量 只有**不是契约**的东西：文件名、内核 payload 约定、宿主自身的超时。
+//
+// 事件名 / inbox kind / 结算口径 / 推进阈值**一律来自 Mod 自己的声明**
+// （`pack.json` 的 `agent` / `inboxRoutes` + `config.json` 的 `settlement` /
+// `drive`，解析在 `ygg_sandbox::host_contract`）。本文件**不含任何事件名字面量**
+// 与回退默认值：契约缺失即装载期失败（fail-closed）。
 // ============================================================================
 
-/// 结局叙事行前缀（出现即本局收口；结算判据，与 playtest 同源同值）。
-const ENDING_PREFIX: &str = "【结局";
 /// 事件 payload 缺省值（内核口径：事件路径 payload 必填且须为 JSON 标量）。
 const DEFAULT_PAYLOAD: &str = "0";
-/// 新局自动派发的入口事件名（交互模式；与 test-adventure / seed mod 约定一致）。
-const ENTRY_EVENT: &str = "event.start";
-/// 选择事件的规范名（与内核保留路由同值）。
-const CHOICE_EVENT: &str = "ygg.choice_selected";
-/// 自动推进阈值的内置兜底：`<mod>/<data/config.json>` 的 `drive` 段缺失 / 非法时用它。
-/// 步数 = 基础硬顶（正常一局 9 步内收口；上限是死循环的硬防御）。
-const DEFAULT_MAX_STEPS: usize = 64;
-/// 每条需求（异步补入的）额外放宽的自动步数：三个 job + 两个门禁 + 余量。
-const DEFAULT_STEPS_PER_REQUIREMENT: usize = 16;
-/// 连续「无进展」步数兜底（pendingChoice 指纹不变 = 绕圈；死循环的第二道闸）。
-const DEFAULT_STALL_LIMIT: usize = 12;
 /// 外部决策命令的最长执行时间；任何异常都 fail closed，绝不回退到固定序号。
 const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 决策命令轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
 const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-/// Mod 自报摘要的只读动作名（Mod 侧 `ygg.on("agent.summary")`）。
-///
-/// 宿主判定「何时收口 / 有无冲突 / 有无待验收提案」只认这一条动作的回执，
-/// **绝不读 autosave 的 Mod 私有 KV 键**——旧 Mod 没有该处理器时回执无 `meta`，
-/// 宿主判为「未知」并安全停等，不回退到读 KV。
-const SUMMARY_EVENT: &str = "agent.summary";
 /// 摘要结构化字段在回执信封里的位置（内核 `ygg.meta(key, value)` → 信封 `meta`）。
 /// 键名是本宿主与 Mod 的契约键，**不是叙事前缀**：Mod 在叙事里写同样的字
-/// 也不会被误判。
+/// 也不会被误判。摘要动作名本身来自 `pack.json` 的 `agent.summaryEvent`。
 const SUMMARY_META_KEY: &str = "summary";
 
 const AUTOSAVE_FILE: &str = "autosave.json";
@@ -158,9 +163,9 @@ const INBOX_FILE: &str = "inbox.jsonl";
 const INBOX_CURSOR_FILE: &str = "inbox.cursor";
 const DECIDE_INPUT_FILE: &str = "decide-input.json";
 
-/// Mod 侧拒绝的叙事前缀（契约面：`agent-seed` 系 Mod 用叙事而不是错误码表达
-/// 「动作被拒 / 载荷被拒 / 需求待排」，内核信封仍是 ok——宿主必须识别，否则会把
-/// 被拒的需求误记成已入队）。
+/// Mod 侧拒绝的叙事前缀（`agent-seed` 系 Mod 用叙事而不是错误码表达「动作被拒 /
+/// 载荷被拒 / 需求待排」，内核信封仍是 ok——宿主必须识别，否则会把被拒的需求
+/// 误记成已入队）。**这是 seed Mod 的叙事约定**（见该 Mod README 的契约章节）。
 const REJECTION_PREFIXES: [&str; 3] = ["【动作被拒】", "【载荷被拒】", "【需求待排】"];
 /// Mod 侧幂等重放的叙事前缀（同 external_id 重放：**算成功消费**，只是没新增）。
 const REPLAY_PREFIX: &str = "【需求重放】";
@@ -187,56 +192,17 @@ fn main() {
 // §参数 命令行解析（std-only 手写；用法错误 = 退出码 2）
 // ============================================================================
 
-/// 异步 inbox 的操作种类（JSONL `kind` 字段；缺省 = add，兼容旧行）。
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum InboxKind {
-    Add,
-    Amend,
-    Split,
-    Merge,
-    Conflict,
-    Resolve,
-    Proposal,
-}
-
-impl InboxKind {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "add" => Some(Self::Add),
-            "amend" => Some(Self::Amend),
-            "split" => Some(Self::Split),
-            "merge" => Some(Self::Merge),
-            "conflict" => Some(Self::Conflict),
-            "resolve" => Some(Self::Resolve),
-            "proposal" => Some(Self::Proposal),
-            _ => None,
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Add => "add",
-            Self::Amend => "amend",
-            Self::Split => "split",
-            Self::Merge => "merge",
-            Self::Conflict => "conflict",
-            Self::Resolve => "resolve",
-            Self::Proposal => "proposal",
-        }
-    }
-
-    /// kind → 内核事件名（drain 时 dispatch）。
-    fn event(self) -> &'static str {
-        match self {
-            Self::Add => "requirement.add",
-            Self::Amend => "requirement.amend",
-            Self::Split => "requirement.split",
-            Self::Merge => "requirement.merge",
-            Self::Conflict => "requirement.conflict",
-            Self::Resolve => "requirement.resolve",
-            Self::Proposal => "proposal.submit",
-        }
-    }
+/// 一次 inbox 写命令（宿主 CLI 侧）。
+///
+/// 只带「哪个旗标 + 原始载荷」：**记录形态与 kind 都由 Mod 的
+/// `pack.json` → `inboxRoutes.<kind>.write` 声明**（`flag` + `shape`），宿主不枚举
+/// kind、也不猜记录形态。本 Mod 没声明匹配的写命令 → 明确拒绝（不静默丢行）。
+#[derive(Clone)]
+struct InboxWrite {
+    /// CLI 旗标名（不带 `--`）：路由表的查找键。
+    flag: &'static str,
+    /// 命令行给的原始载荷（形态由声明决定怎么落到记录里）。
+    value: String,
 }
 
 struct Args {
@@ -251,7 +217,7 @@ struct Args {
     /// 交互模式推方式（`--drive`；缺省 stdin）。
     drive: Drive,
     /// 异步 inbox 操作（只追 inbox.jsonl 后退出，不读写 autosave）。
-    inbox: Option<(InboxKind, String)>,
+    inbox: Option<InboxWrite>,
 }
 
 fn parse_args() -> Args {
@@ -264,14 +230,14 @@ fn parse_args() -> Args {
     let mut event: Option<String> = None;
     let mut payload = DEFAULT_PAYLOAD.to_owned();
     let mut drive = Drive::Stdin;
-    let mut inbox: Option<(InboxKind, String)> = None;
+    let mut inbox: Option<InboxWrite> = None;
 
-    // 写 inbox 的六个参数共享同一套「只能给一个」的校验。
-    fn set_inbox(inbox: &mut Option<(InboxKind, String)>, kind: InboxKind, value: String) {
+    // 写 inbox 的七个参数共享同一套「只能给一个」的校验。
+    fn set_inbox(inbox: &mut Option<InboxWrite>, flag: &'static str, value: String) {
         if inbox.is_some() {
             usage_error("一次只能提交一个 inbox 操作");
         }
-        *inbox = Some((kind, value));
+        *inbox = Some(InboxWrite { flag, value });
     }
 
     let mut iter = std::env::args().skip(1);
@@ -294,39 +260,15 @@ fn parse_args() -> Args {
             }
             "--requirement" => set_inbox(
                 &mut inbox,
-                InboxKind::Add,
+                "requirement",
                 next_value(&mut iter, "--requirement"),
             ),
-            "--amend" => set_inbox(
-                &mut inbox,
-                InboxKind::Amend,
-                next_value(&mut iter, "--amend"),
-            ),
-            "--split" => set_inbox(
-                &mut inbox,
-                InboxKind::Split,
-                next_value(&mut iter, "--split"),
-            ),
-            "--merge" => set_inbox(
-                &mut inbox,
-                InboxKind::Merge,
-                next_value(&mut iter, "--merge"),
-            ),
-            "--conflict" => set_inbox(
-                &mut inbox,
-                InboxKind::Conflict,
-                next_value(&mut iter, "--conflict"),
-            ),
-            "--resolve" => set_inbox(
-                &mut inbox,
-                InboxKind::Resolve,
-                next_value(&mut iter, "--resolve"),
-            ),
-            "--proposal" => set_inbox(
-                &mut inbox,
-                InboxKind::Proposal,
-                next_value(&mut iter, "--proposal"),
-            ),
+            "--amend" => set_inbox(&mut inbox, "amend", next_value(&mut iter, "--amend")),
+            "--split" => set_inbox(&mut inbox, "split", next_value(&mut iter, "--split")),
+            "--merge" => set_inbox(&mut inbox, "merge", next_value(&mut iter, "--merge")),
+            "--conflict" => set_inbox(&mut inbox, "conflict", next_value(&mut iter, "--conflict")),
+            "--resolve" => set_inbox(&mut inbox, "resolve", next_value(&mut iter, "--resolve")),
+            "--proposal" => set_inbox(&mut inbox, "proposal", next_value(&mut iter, "--proposal")),
             "-h" | "--help" => usage(0),
             other => usage_error(&format!("未知参数 `{other}`")),
         }
@@ -341,14 +283,14 @@ fn parse_args() -> Args {
     if settle && event.is_some() {
         usage_error("--settle 与 --event 不能同时使用");
     }
-    if let Some((kind, text)) = &inbox {
+    if let Some(write) = &inbox {
         if settle || event.is_some() {
             usage_error(
                 "inbox 操作（--requirement / --proposal / …）与 --event / --settle 不能同时使用",
             );
         }
-        if text.trim().is_empty() {
-            usage_error(&format!("--{} 需要非空载荷", kind.label()));
+        if write.value.trim().is_empty() {
+            usage_error(&format!("--{} 需要非空载荷", write.flag));
         }
     } else if !settle && mod_dir.is_none() {
         usage_error("缺少 --mod <mod目录>（仅 --settle / inbox 操作可省略）");
@@ -404,7 +346,10 @@ fn usage(code: i32) -> ! {
 
 选项:
   --mod <目录>       Mod 目录（五件套：pack.json / manifest.json / mod.lua /
-                     schemas/*.json / data/*.json；--settle / --requirement 可省略）
+                     schemas/*.json / data/*.json）。host 契约（pack.json 的 agent /
+                     inboxRoutes、config.json 的 settlement / drive）**必填**；缺任一
+                     即装载期失败。--settle / inbox 写命令可省略（改读 run.json 记录的
+                     本局 mod 路径，两者都没有则报错）
   --run-id <标识>    本局标识：产物落 <runs-root>/<标识>/（必填）
   --runs-root <目录> runs 根目录（默认 ./runs）
   --resume           从 autosave.json 续局（缺存档则按新局开局）
@@ -419,14 +364,26 @@ fn usage(code: i32) -> ! {
                        none       只打印当前回执就退出（不推进、不读 stdin）
   --requirement <串> 只把 '标题|描述' 追加到 <run 目录>/inbox.jsonl 后退出；
                      不读写 autosave，可在别一进程跑本局时安全并发调用
+                     （旗标是否可用由 Mod 的 inboxRoutes.<kind>.write 声明）
+  --amend <串>       --split <串>    --merge <串>    --conflict <串>
+  --resolve <串>     --proposal <串>（同上：只在 Mod 声明了对应 write 时可用）
   --settle           读 autosave + events.jsonl 写 settlement.json
   -h, --help         本帮助
 
-自动推进的失控防护：基础步数 + 每条需求额外步数 + 连续无进展判停；阙值读
-  <mod>/data/config.json 的 drive 段（缺失 / 非法 → 代码内兜底值，不中断局）。
+host 契约（**必填、无默认值**，宿主代码不含任何事件名字面量）：
+  <mod>/pack.json       agent{entryEvent,choiceEvent,summaryEvent,endingPrefix}
+                        inboxRoutes{<kind>:{action,fields[,write]}}
+  <mod>/data/config.json settlement{requireEvents,requireNoFailedSteps,
+                        requireEnding,requireInboxConsumed}
+                        drive{maxSteps,stallLimit,stepsPerRequirement}（正整数）
+  缺段 / 缺字段 / 类型不符 / 非正整数 → 装载期失败（点名缺失字段 + 应有形状 +
+  文档定位：.ygg/mods/agent-seed/README.md 的「host 契约」章节）。
+
+自动推进的失控防护：基础步数 + 每条需求额外步数 + 连续无进展判停；阈值读
+  <mod>/data/config.json 的 drive 段（必填）。
 
 异步需求（inbox）：每个自动动作前、stdin 每次提示前、单发每次派发前都会消费
-  inbox.jsonl 的新行并 dispatch requirement.add；dispatch 成功且存档后才前移 cursor，
+  inbox.jsonl 的新行，按 inboxRoutes 声明派发；dispatch 成功且存档后才前移 cursor，
   重放靠 Mod 侧 external_id 幂等去重。局已收口后仍有未消费行 → 非零退出。";
     if code == 0 {
         println!("{text}");
@@ -489,59 +446,6 @@ fn parse_drive(text: &str) -> Result<Drive, String> {
                 "未知的 --drive 取值 `{text}`（只接受 stdin / cmd:<路径> / none）"
             )),
         },
-    }
-}
-
-/// 自动推进阈值（读 `<mod>/<config_rel>` 的 `drive` 段；缺失 / 非法逐字段回落兜底）。
-///
-/// 阈值是**配置**而不是代码常量，因为「几步算多」取决于 Mod 的流程长度；
-/// 但配置是便利面，读不懂的字段一律回落——绝不因配置问题打断一局。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct DriveLimits {
-    /// 基础步数硬顶。
-    max_steps: usize,
-    /// 连续无进展判停阈值。
-    stall_limit: usize,
-    /// 每条需求额外放宽的步数。
-    steps_per_requirement: usize,
-}
-
-impl Default for DriveLimits {
-    fn default() -> Self {
-        Self {
-            max_steps: DEFAULT_MAX_STEPS,
-            stall_limit: DEFAULT_STALL_LIMIT,
-            steps_per_requirement: DEFAULT_STEPS_PER_REQUIREMENT,
-        }
-    }
-}
-
-impl DriveLimits {
-    /// 从 Mod 静态配置读 `drive` 段（`maxSteps` / `stallLimit` / `stepsPerRequirement`）。
-    /// 缺失、非整数、负数、0 一律取该项兜底值；`stepsPerRequirement` 允许 0。
-    fn from_config(config: &Json) -> Self {
-        let fallback = Self::default();
-        let positive = |key: &str, default: usize| {
-            let value = config["drive"][key]
-                .as_u64()
-                .map_or(default, |n| n as usize);
-            if value == 0 {
-                default
-            } else {
-                value
-            }
-        };
-        Self {
-            max_steps: positive("maxSteps", fallback.max_steps),
-            stall_limit: positive("stallLimit", fallback.stall_limit),
-            steps_per_requirement: positive("stepsPerRequirement", fallback.steps_per_requirement),
-        }
-    }
-
-    /// 本局步数预算：基础硬顶 + 每条需求额外步数（饱和运算，不溢出）。
-    fn step_limit(&self, requirement_count: usize) -> usize {
-        self.max_steps
-            .saturating_add(self.steps_per_requirement.saturating_mul(requirement_count))
     }
 }
 
@@ -877,6 +781,15 @@ struct Session {
     mod_dir: PathBuf,
     /// 静态配置资源的包内路径（`play.mode` 的静态面；来自 pack.json 声明）。
     config_rel: String,
+    /// 事件名契约（`pack.json` 的 `agent` 段；热载时随之刷新）。
+    contract: AgentContract,
+    /// inbox 路由表（`pack.json` 的 `inboxRoutes` 段；热载时随之刷新）。
+    inbox_routes: InboxRoutes,
+    /// 自动推进阈值（`config.json` 的 `drive` 段；装载期校验，热载时随之刷新）。
+    limits: DriveLimits,
+    /// 结算口径（`config.json` 的 `settlement` 段；装载期校验 = 缺段即拒绝启动，
+    /// 不把「口径缺失」推迟到结算那一刻才暴露）。
+    settlement: SettlementPolicy,
     mod_label: String,
     run_dir: PathBuf,
     autosave_path: PathBuf,
@@ -912,6 +825,13 @@ impl Session {
         // 先装载（失败即退出，run 目录不留空壳），再建 run 目录接管产物。
         let bundle = ModBundle::load(&mod_dir)?;
         let kernel = bundle.kernel()?;
+        // host 契约是**必填面**：事件名 / inbox 路由 / 结算口径 / 推进阈值全部来自
+        // Mod 声明，缺任何一项即装载期失败（宿主不保留任何默认值，fail-closed）。
+        let contract = AgentContract::load(&mod_dir)?;
+        let inbox_routes = InboxRoutes::load(&mod_dir)?;
+        let config_rel = agent_config_path(&mod_dir);
+        let limits = DriveLimits::load(&mod_dir.join(&config_rel))?;
+        let settlement = SettlementPolicy::load(&mod_dir.join(&config_rel))?;
         fs::create_dir_all(&run_dir)
             .map_err(|err| format!("创建 run 目录 {} 失败：{err}", run_dir.display()))?;
         // 装载即取签名：开局装载永远读的是磁盘现状，之后的差异才是热载触发。
@@ -923,7 +843,11 @@ impl Session {
         let mut session = Self {
             run_id: args.run_id.clone(),
             mod_dir: mod_dir.clone(),
-            config_rel: agent_config_path(&mod_dir),
+            config_rel,
+            contract,
+            inbox_routes,
+            limits,
+            settlement,
             mod_label: mod_dir.display().to_string(),
             autosave_path: run_dir.join(AUTOSAVE_FILE),
             events_path: run_dir.join(EVENTS_FILE),
@@ -1068,15 +992,7 @@ impl Session {
         parse_envelope(&self.kernel.dispatch("state", ""))
     }
 
-    /// 自动推进阈值：读 Mod 静态配置的 `drive` 段（读不到 / 不是 JSON → 全兜底）。
-    /// 每步现读（阈值只影响失控防护，不影响状态），改配置后下一步即生效。
-    fn drive_limits(&self) -> DriveLimits {
-        read_json(&self.mod_dir.join(&self.config_rel))
-            .map(|config| DriveLimits::from_config(&config))
-            .unwrap_or_default()
-    }
-
-    /// 回执标准字段：一次只读动作（[`SUMMARY_EVENT`]）取 Mod **自报**的摘要。
+    /// 回执标准字段：一次只读动作（契约的 `summaryEvent`）取 Mod **自报**的摘要。
     ///
     /// 这里**不读 autosave**：宿主对「结局 / 冲突 / 待验收提案 / 收口前一步」的
     /// 全部认知只来自这一条回执。缺失（旧 Mod）→ [`Summary::unknown`]，调用方
@@ -1085,7 +1001,8 @@ impl Session {
         if let Some(cached) = &self.summary_cache {
             return cached.clone();
         }
-        let envelope = parse_envelope(&self.kernel.dispatch(SUMMARY_EVENT, DEFAULT_PAYLOAD));
+        let summary_event = self.contract.summary_event.clone();
+        let envelope = parse_envelope(&self.kernel.dispatch(&summary_event, DEFAULT_PAYLOAD));
         let summary = if envelope["ok"] == Json::Bool(true) {
             Summary::from_receipt(&envelope)
         } else {
@@ -1143,38 +1060,31 @@ impl Session {
                     .push(format!("inbox 第 {consumed} 行不是合法 JSON，已跳过"));
                 continue;
             };
-            let external = record["external_id"]
-                .as_str()
-                .unwrap_or("")
-                .trim()
-                .to_owned();
-            // kind 缺省 = add（旧行只有 title / description）。
-            let kind = match record["kind"].as_str() {
-                None => InboxKind::Add,
-                Some(raw) => match InboxKind::parse(raw) {
-                    Some(kind) => kind,
-                    None => {
-                        consumed += 1;
-                        drain.skipped += 1;
-                        self.write_inbox_cursor(consumed);
-                        self.notices
-                            .push(format!("inbox 第 {consumed} 行 kind 未知，已跳过"));
-                        continue;
-                    }
-                },
-            };
-            let Some(fields) = inbox_dispatch_payload(kind, &record, &external) else {
+            // kind 缺省 = add（旧行只有 title / description / external_id）。
+            let kind = record["kind"].as_str().unwrap_or("add");
+            // kind → 动作 + 段序完全来自 Mod 声明（宿主不枚举 kind）。
+            let Some(route) = self.inbox_routes.get(kind) else {
                 consumed += 1;
                 drain.skipped += 1;
                 self.write_inbox_cursor(consumed);
                 self.notices.push(format!(
-                    "inbox 第 {consumed} 行缺字段（external_id / title / payload），已跳过"
+                    "inbox 第 {consumed} 行 kind 未在 pack.json 的 inboxRoutes 声明，已跳过"
+                ));
+                continue;
+            };
+            let Some(fields) = self.inbox_routes.payload_for(route, &record) else {
+                consumed += 1;
+                drain.skipped += 1;
+                self.write_inbox_cursor(consumed);
+                self.notices.push(format!(
+                    "inbox 第 {consumed} 行缺字段（external_id / 声明的段全为空），已跳过"
                 ));
                 continue;
             };
             // payload 必须是 **JSON 字符串**（内核要求 JSON 标量），不是裸 wire format。
             let payload = json!(fields).to_string();
-            let receipt = self.dispatch_event(kind.event(), &payload);
+            let action = route.action.clone();
+            let receipt = self.dispatch_event(&action, &payload);
             if receipt["ok"] != Json::Bool(true) || dispatch_rejected(&receipt) {
                 // 内核错误信封（载荷 / 校验失败）与 Mod 侧拒绝同属「未入队」：
                 // cursor 不前移，留给调用方报错与重启重放。
@@ -1226,7 +1136,13 @@ impl Session {
         let save_text = save.to_string();
 
         // ② 新包重装载 + 回灌（一次原子构造；失败即回滚到旧驱动）。
+        //    契约（agent / inboxRoutes / drive）也在这一步现读：任一项不合法即整体
+        //    判定热载失败——**不**存在「内核换了、契约沿用旧的」半更新态。
         let outcome = ModBundle::load(&self.mod_dir).and_then(|bundle| {
+            let contract = AgentContract::load(&self.mod_dir)?;
+            let inbox_routes = InboxRoutes::load(&self.mod_dir)?;
+            let limits = DriveLimits::load(&self.mod_dir.join(&self.config_rel))?;
+            let settlement = SettlementPolicy::load(&self.mod_dir.join(&self.config_rel))?;
             KernelFacade::restore_with_resources(
                 save_text.as_bytes(),
                 &bundle.mod_source,
@@ -1234,12 +1150,17 @@ impl Session {
                 &bundle.schemas,
                 &bundle.resources,
             )
+            .map(|kernel| (kernel, contract, inbox_routes, limits, settlement))
             .map_err(|err| format!("内核重装载失败：{err}"))
         });
         match outcome {
-            Ok(kernel) => {
+            Ok((kernel, contract, inbox_routes, limits, settlement)) => {
                 self.kernel = kernel;
-                // 换了 Mod 就换了摘要约定 → 丢掉缓存，下一步重新问。
+                // 换了 Mod 就换了契约（事件名 / inbox 路由 / 摘要约定 / 推进阈值）。
+                self.contract = contract;
+                self.inbox_routes = inbox_routes;
+                self.limits = limits;
+                self.settlement = settlement;
                 self.summary_cache = None;
                 self.reload = Some(Reload {
                     reloaded: true,
@@ -1271,7 +1192,7 @@ impl Session {
         let narrative = narrative_lines(&envelope);
         let ending = narrative
             .iter()
-            .find(|line| line.starts_with(ENDING_PREFIX))
+            .find(|line| line.starts_with(&self.contract.ending_prefix))
             .cloned();
         let seq = self.seq;
         self.seq += 1;
@@ -1402,56 +1323,6 @@ fn split_requirement(text: &str) -> (String, String) {
         None => (text.trim(), ""),
     };
     (sanitize_field(title), sanitize_field(description))
-}
-
-/// 把分隔符换成全角形态（保留可读性，不丢字）。
-fn sanitize_field(text: &str) -> String {
-    text.replace('|', "｜")
-        .replace(['\n', '\r'], " ")
-        .trim()
-        .to_owned()
-}
-
-/// inbox 记录的 dispatch 载荷组装（不含外层 JSON 引号）。
-/// - add：`title|description|external_id`（external_id 是 Mod 侧幂等键）
-/// - proposal：`req|rev|stage|summary|artifacts[|changes]` → 补齐第 7 段 external_id
-/// - amend / split / merge / conflict / resolve：`<wire>|@ext=<external_id>`
-fn inbox_dispatch_payload(kind: InboxKind, record: &Json, external: &str) -> Option<String> {
-    if external.is_empty() {
-        return None;
-    }
-    match kind {
-        InboxKind::Add => {
-            let title = record["title"].as_str()?.trim();
-            if title.is_empty() {
-                return None;
-            }
-            let description = record["description"].as_str().unwrap_or("").trim();
-            Some(format!(
-                "{}|{}|{}",
-                sanitize_field(title),
-                sanitize_field(description),
-                external
-            ))
-        }
-        InboxKind::Proposal => {
-            let raw = record["payload"].as_str()?.trim();
-            let segments = raw.split('|').count();
-            match segments {
-                0..=4 => None,
-                5 => Some(format!("{raw}||{external}")),
-                6 => Some(format!("{raw}|{external}")),
-                _ => Some(raw.to_owned()),
-            }
-        }
-        _ => {
-            let raw = record["payload"].as_str()?.trim();
-            if raw.is_empty() {
-                return None;
-            }
-            Some(format!("{raw}|@ext={external}"))
-        }
-    }
 }
 
 /// Mod 侧拒绝的识别（叙事前缀）：内核信封仍是 ok，宿主必须显式看叙事。
@@ -1813,11 +1684,18 @@ fn new_external_id(run_id: &str, line_index: usize) -> String {
 // ============================================================================
 
 fn run_single(args: &Args) -> i32 {
-    let event = args.event.clone().unwrap_or_else(|| ENTRY_EVENT.to_owned());
     let mut session = match Session::open(args) {
         Ok(session) => session,
-        Err(message) => return single_shot_error(args, &event, &message),
+        Err(message) => {
+            let event = args.event.clone().unwrap_or_default();
+            return single_shot_error(args, &event, &message);
+        }
     };
+    // 缺 --event 时用 Mod 声明的入口事件（宿主不持有任何事件名）。
+    let event = args
+        .event
+        .clone()
+        .unwrap_or_else(|| session.contract.entry_event.clone());
 
     // 单发每次派发前检查热载：Agent 侧改了 mod，下一条动作即生效。
     session.maybe_reload();
@@ -1850,12 +1728,60 @@ fn run_single(args: &Args) -> i32 {
     }
 }
 
+/// 本局的 Mod 目录：`--mod` 优先，其次 run.json 里记录的本局 mod 路径。
+///
+/// 两者都没有 → 可读错误。契约是**必填面**：没有 Mod 目录就读不到声明，
+/// 宿主不会猜任何默认值（fail-closed）。
+fn resolve_mod_dir(args: &Args, run_dir: &Path) -> Result<PathBuf, String> {
+    args.mod_dir
+        .clone()
+        .or_else(|| {
+            read_meta(&run_dir.join(META_FILE))
+                .and_then(|meta| meta["mod"].as_str().map(PathBuf::from))
+        })
+        .ok_or_else(|| {
+            format!(
+                "本局没有可用的 Mod 目录（缺 --mod，且 {} 里没有记录本局的 mod 路径）——\
+                 契约（pack.json / config.json）必须现读，无法继续",
+                run_dir.join(META_FILE).display()
+            )
+        })
+}
+
+/// 宿主 CLI 写命令 → `(kind, 记录形态)`：完全由 Mod 的 `inboxRoutes` 声明决定。
+///
+/// 未声明该写命令 → 可读拒绝（调用方报错退出，**不**静默写一行宿主猜的记录）。
+fn resolve_write_binding(
+    args: &Args,
+    run_dir: &Path,
+    flag: &str,
+) -> Result<(String, WriteShape), String> {
+    let mod_dir = resolve_mod_dir(args, run_dir)?;
+    let routes = InboxRoutes::load(&mod_dir)?;
+    if routes.is_empty() {
+        return Err(format!(
+            "本 Mod 的 pack.json `inboxRoutes` 为 {{}}（不支持异步 inbox）——`--{flag}` 无处可写"
+        ));
+    }
+    let Some((kind, route)) = routes.write_binding(flag) else {
+        return Err(format!(
+            "本 Mod 的 pack.json `inboxRoutes` 未声明 `--{flag}` 的写命令（需要某条路由带 \
+             `\"write\": {{\"flag\": \"{flag}\", \"shape\": \"named|payload\"}}`；{CONTRACT_DOC}）"
+        ));
+    };
+    let binding = route
+        .write
+        .as_ref()
+        .ok_or_else(|| "内部错误：write_binding 只返回带 write 的路由".to_owned())?;
+    Ok((kind.to_owned(), binding.shape))
+}
+
 /// `--requirement`：只往 inbox.jsonl 追加一行，不读不写 autosave 后退出。
 ///
 /// 这是「新需求随时能进」的真实异步入口：本局在另一个进程里跑时，
 /// 这里只做 `OpenOptions::append`，不存在与运行中局的状态竞争。
 fn run_inbox_append(args: &Args) -> i32 {
-    let Some((kind, text)) = args.inbox.clone() else {
+    let Some(write) = args.inbox.clone() else {
         return 2;
     };
     let run_dir = args.runs_root.join(&args.run_id);
@@ -1863,6 +1789,15 @@ fn run_inbox_append(args: &Args) -> i32 {
         eprintln!("error: 创建 run 目录 {} 失败：{err}", run_dir.display());
         return 2;
     }
+    // 记录形态与 kind 都来自 Mod 声明：契约读不到 / 没声明该写命令 → fail-closed
+    // （明确拒绝 + 退出码 3，绝不静默写一行宿主猜出来的记录）。
+    let (kind, shape) = match resolve_write_binding(args, &run_dir, write.flag) {
+        Ok(binding) => binding,
+        Err(message) => {
+            eprintln!("error: {message}；本条未写入");
+            return 3;
+        }
+    };
     // 协议：写前登记。closing / finalized 一律**命令本身非零拒绝**——
     // 不允许出现「写得很成功但运行侧已无声跨过最后一次 drain」。
     let token = match begin_write(&run_dir) {
@@ -1885,22 +1820,24 @@ fn run_inbox_append(args: &Args) -> i32 {
     let path = run_dir.join(INBOX_FILE);
     let mut record = json!({
         "external_id": new_external_id(&args.run_id, inbox_line_count(&path)),
-        "kind": kind.label(),
+        "kind": kind,
         "created_at": now_secs(),
     });
-    if kind == InboxKind::Add {
-        // add 保留 title / description 字段（旧行兼容：旧行只有这两个字段）。
-        let (title, description) = split_requirement(&text);
-        record["title"] = json!(title);
-        record["description"] = json!(description);
-    } else {
-        record["payload"] = json!(text.trim());
+    match shape {
+        // 命名段形态：写 title / description 字段（旧行兼容：旧行只有这两个字段）。
+        WriteShape::Named => {
+            let (title, description) = split_requirement(&write.value);
+            record["title"] = json!(title);
+            record["description"] = json!(description);
+        }
+        // 预成形 wire 形态：整串载荷进 payload（宿主不解析、不重排）。
+        WriteShape::Payload => record["payload"] = json!(write.value.trim()),
     }
     let receipt = match append_inbox_line(&path, &record) {
         Ok(()) => json!({
             "ok": true,
             "inbox": path.display().to_string(),
-            "kind": kind.label(),
+            "kind": kind,
             "external_id": record["external_id"].clone(),
             "payload": record.get("payload").cloned().unwrap_or(Json::Null),
             "title": record.get("title").cloned().unwrap_or(Json::Null),
@@ -1910,7 +1847,7 @@ fn run_inbox_append(args: &Args) -> i32 {
             json!({
                 "ok": false,
                 "inbox": path.display().to_string(),
-                "kind": kind.label(),
+                "kind": kind,
                 "error": {"code": "INBOX", "message": message},
             })
         }
@@ -2161,34 +2098,53 @@ mod drive_tests {
 
 #[cfg(test)]
 mod drive_limits_tests {
-    use super::{
-        DriveLimits, DEFAULT_MAX_STEPS, DEFAULT_STALL_LIMIT, DEFAULT_STEPS_PER_REQUIREMENT,
-    };
+    use super::{DriveLimits, Path};
     use serde_json::json;
 
-    #[test]
-    fn missing_section_falls_back_to_builtin_defaults() {
-        let limits = DriveLimits::from_config(&json!({"play": {"mode": "guide"}}));
-        assert_eq!(limits, DriveLimits::default());
-        assert_eq!(limits.max_steps, DEFAULT_MAX_STEPS);
-        assert_eq!(limits.stall_limit, DEFAULT_STALL_LIMIT);
-        assert_eq!(limits.steps_per_requirement, DEFAULT_STEPS_PER_REQUIREMENT);
-        // 整份配置不是对象 / 全是 null 也不得 panic
-        assert_eq!(
-            DriveLimits::from_config(&json!(null)),
-            DriveLimits::default()
-        );
-        assert_eq!(
-            DriveLimits::from_config(&json!({"drive": []})),
-            DriveLimits::default()
-        );
+    fn source() -> &'static Path {
+        Path::new("data/config.json")
     }
 
+    /// 段缺失 / 非对象 / 缺字段 / 非正整数一律**硬错误**（无兜底、无默认值）。
     #[test]
-    fn reads_valid_section_and_computes_the_budget() {
-        let limits = DriveLimits::from_config(&json!({
-            "drive": {"maxSteps": 10, "stallLimit": 3, "stepsPerRequirement": 5}
-        }));
+    fn missing_or_invalid_thresholds_are_hard_errors() {
+        for (config, needle) in [
+            (json!({"play": {"mode": "guide"}}), "缺少 `drive` 段"),
+            (json!({"drive": []}), "必须是对象"),
+            (
+                json!({"drive": {"maxSteps": 64, "stallLimit": 12}}),
+                "`stepsPerRequirement`",
+            ),
+            (
+                json!({"drive": {"maxSteps": 0, "stallLimit": 12, "stepsPerRequirement": 16}}),
+                "`maxSteps`",
+            ),
+            (
+                json!({"drive": {"maxSteps": "64", "stallLimit": 12, "stepsPerRequirement": 16}}),
+                "`maxSteps`",
+            ),
+            (
+                json!({"drive": {"maxSteps": 64, "stallLimit": -3, "stepsPerRequirement": 16}}),
+                "`stallLimit`",
+            ),
+        ] {
+            let message = DriveLimits::from_config(&config, source()).expect_err("必须报错");
+            assert!(message.contains(needle), "文案应点名 `{needle}`：{message}");
+            assert!(
+                message.contains("README.md"),
+                "文案应给出文档定位：{message}"
+            );
+        }
+    }
+
+    /// 三项都声明了就用声明值；步数预算按需求数线性放宽（饱和不溢出）。
+    #[test]
+    fn reads_the_three_required_thresholds_and_computes_the_budget() {
+        let limits = DriveLimits::from_config(
+            &json!({"drive": {"maxSteps": 10, "stallLimit": 3, "stepsPerRequirement": 5}}),
+            source(),
+        )
+        .expect("合法 drive 段");
         assert_eq!(limits.max_steps, 10);
         assert_eq!(limits.stall_limit, 3);
         assert_eq!(limits.steps_per_requirement, 5);
@@ -2202,117 +2158,323 @@ mod drive_limits_tests {
         };
         assert_eq!(huge.step_limit(2), usize::MAX);
     }
+}
 
+#[cfg(test)]
+mod contract_tests {
+    use super::{AgentContract, Path};
+    use serde_json::json;
+
+    /// 完整合法段（错误用例在此基础上逐字段挖掉）。
+    fn full_section() -> serde_json::Value {
+        json!({
+            "entryEvent": "mod.entry",
+            "choiceEvent": "mod.choice",
+            "summaryEvent": "mod.summary",
+            "endingPrefix": "END:"
+        })
+    }
+
+    /// 段缺失 / 四个字段缺任一 → 硬错误（点名缺失字段 + 形状示例 + 文档定位）。
     #[test]
-    fn invalid_fields_fall_back_per_field() {
-        // 字符串 / 0 / 负数都不是合法阈值：逐字段回落，不整份作废
-        let limits = DriveLimits::from_config(&json!({
-            "drive": {"maxSteps": "64", "stallLimit": 0, "stepsPerRequirement": -3}
-        }));
-        assert_eq!(limits.max_steps, DEFAULT_MAX_STEPS);
-        assert_eq!(limits.stall_limit, DEFAULT_STALL_LIMIT);
-        assert_eq!(limits.steps_per_requirement, DEFAULT_STEPS_PER_REQUIREMENT);
-        // 只给一段也算数：给了的生效，没给的回落
-        let partial = DriveLimits::from_config(&json!({"drive": {"maxSteps": 7}}));
-        assert_eq!(partial.max_steps, 7);
-        assert_eq!(partial.stall_limit, DEFAULT_STALL_LIMIT);
-        assert_eq!(partial.steps_per_requirement, DEFAULT_STEPS_PER_REQUIREMENT);
+    fn missing_section_or_field_is_a_hard_error() {
+        let message = AgentContract::from_pack(&json!({"entries": []})).expect_err("必须报错");
+        assert!(message.contains("`agent` 段"), "{message}");
+        assert!(
+            message.contains("\"entryEvent\""),
+            "应给出形状示例：{message}"
+        );
+        assert!(message.contains("README.md"), "应给出文档定位：{message}");
+        // 读不到 pack.json 也是硬错误（不兜底）
+        assert!(AgentContract::load(Path::new("/nonexistent/ygg-mod")).is_err());
+
+        for field in ["entryEvent", "choiceEvent", "summaryEvent", "endingPrefix"] {
+            let mut section = full_section();
+            section.as_object_mut().expect("对象").remove(field);
+            let message =
+                AgentContract::from_pack(&json!({"agent": section})).expect_err("缺字段必须报错");
+            assert!(
+                message.contains(&format!("`{field}`")),
+                "必须点名缺失字段 `{field}`：{message}"
+            );
+            assert!(message.contains("expected") == false);
+            assert!(message.contains("README.md"), "{message}");
+        }
+        // 空串 / 非字符串 / 段不是对象 → 同样硬错误
+        for broken in [
+            json!({"agent": {"entryEvent": "  ", "choiceEvent": "c", "summaryEvent": "s", "endingPrefix": "E"}}),
+            json!({"agent": {"entryEvent": 7, "choiceEvent": "c", "summaryEvent": "s", "endingPrefix": "E"}}),
+            json!({"agent": []}),
+            json!({"agent": "x"}),
+        ] {
+            assert!(AgentContract::from_pack(&broken).is_err(), "{broken}");
+        }
+    }
+
+    /// 声明了就用声明值（换 Mod 只改 pack.json，宿主不认字面量）。
+    #[test]
+    fn reads_the_four_declared_events() {
+        let contract =
+            AgentContract::from_pack(&json!({"agent": full_section()})).expect("合法 agent 段");
+        assert_eq!(contract.entry_event, "mod.entry");
+        assert_eq!(contract.choice_event, "mod.choice");
+        assert_eq!(contract.summary_event, "mod.summary");
+        assert_eq!(contract.ending_prefix, "END:");
     }
 }
 
 #[cfg(test)]
-mod summary_tests {
-    use super::{Summary, SUMMARY_META_KEY};
-    use serde_json::{json, Value as Json};
+mod inbox_routes_tests {
+    use super::{InboxRoutes, Path};
+    use serde_json::json;
 
-    /// 回执信封造形：`{"ok":true, "meta": {...}}`（内核 `ygg.meta` 的落点）。
-    fn receipt(meta: Json) -> Json {
-        json!({"ok": true, "meta": meta})
+    /// seed Mod 的契约目录（本仓内的真实契据，测试直接读它——避免在测试里
+    /// 复刻一份 kind 表，哪边改了都只有一处）。
+    fn seed_mod_dir() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.ygg/mods/agent-seed")
     }
 
-    /// 旧 Mod（该动作不调 `ygg.meta`）→ 安全值、不 panic、不猜（`ending()` 为 None）。
+    /// 段缺失 / 单条非法 → 硬错误；`{}` 合法（= 本 Mod 不支持异步 inbox）。
     #[test]
-    fn missing_summary_yields_safe_values_without_panicking() {
-        // 完全没有 meta 键（旧宿主回执形态）
-        let summary = Summary::from_receipt(&json!({"ok": true, "narrative": ["普通叙事"]}));
-        assert!(!summary.available);
-        assert_eq!(summary.pending_proposals, 0);
-        assert!(summary.conflicts.is_empty());
-        assert!(summary.awaiting.is_none());
-        assert_eq!(summary.ending(), None);
-        assert!(!summary.next_ends_run);
-        assert_eq!(summary.requirement_count, 0);
-        // meta 存在但没有 summary 键 / 形状不是对象：判为未知，不 panic 也不半信半疑
-        for broken in [
-            json!({"ok": true}),
-            json!({"ok": true, "meta": {}}),
-            json!({"ok": true, "meta": {"other": 1}}),
-            json!({"ok": true, "meta": {SUMMARY_META_KEY: []}}),
-            json!({"ok": true, "meta": {SUMMARY_META_KEY: null}}),
-            json!({"ok": true, "meta": {SUMMARY_META_KEY: "review"}}),
-            json!({"ok": true, "meta": "不是对象"}),
+    fn missing_section_is_a_hard_error_but_an_empty_table_is_legal() {
+        let message = InboxRoutes::from_pack(&json!({"entries": []})).expect_err("必须报错");
+        assert!(message.contains("`inboxRoutes` 段"), "{message}");
+        assert!(message.contains("\"action\""), "应给出形状示例：{message}");
+        assert!(message.contains("README.md"), "应给出文档定位：{message}");
+
+        let empty = InboxRoutes::from_pack(&json!({"inboxRoutes": {}})).expect("{} 合法");
+        assert!(empty.is_empty());
+        assert!(empty.write_binding("requirement").is_none());
+
+        for (broken, needle) in [
+            (json!({"inboxRoutes": {"k": {"fields": ["a"]}}}), "`action`"),
+            (json!({"inboxRoutes": {"k": {"action": "a"}}}), "`fields`"),
+            (
+                json!({"inboxRoutes": {"k": {"action": "a", "fields": []}}}),
+                "不得为空数组",
+            ),
+            (
+                json!({"inboxRoutes": {"k": {"action": "a", "fields": ["x"], "write": {"shape": "named"}}}}),
+                "`flag`",
+            ),
+            (
+                json!({"inboxRoutes": {"k": {"action": "a", "fields": ["x"], "write": {"flag": "f", "shape": "guess"}}}}),
+                "`named` 或 `payload`",
+            ),
+            (json!({"inboxRoutes": []}), "必须是对象"),
         ] {
-            assert!(
-                !Summary::from_receipt(&broken).available,
-                "非对象摘要必须判为未知：{broken}"
-            );
+            let message = InboxRoutes::from_pack(&broken).expect_err("必须报错");
+            assert!(message.contains(needle), "文案应点名 `{needle}`：{message}");
         }
     }
 
+    /// 声明表真的驱动派发：kind → action + 段序 + 写命令绑定，宿主零 kind 字面量。
     #[test]
-    fn parses_the_declared_fields_and_conflicts() {
-        let envelope = receipt(json!({
-            SUMMARY_META_KEY: {
-                "stage": "review",
-                "ending": false,
-                "verifyPassed": true,
-                "nextEndsRun": true,
-                "pendingProposals": 2,
-                "requirementCount": 3,
-                "conflicts": [
-                    {"id": "r1", "peer": "r2", "note": "同一文件"},
-                    {"id": "r2", "peer": "r1", "note": "  "}
-                ],
-                "awaiting": {"req": "r3", "rev": 4, "stage": "development"}
+    fn declared_routes_drive_the_dispatch() {
+        let routes = InboxRoutes::from_pack(&json!({
+            "inboxRoutes": {
+                "mine": {
+                    "action": "requirement.add",
+                    "fields": ["title", "description", "external_id"],
+                    "write": {"flag": "requirement", "shape": "named"}
+                },
+                "raw": {
+                    "action": "proposal.submit",
+                    "fields": ["req", "rev", "stage", "summary", "artifacts", "external_id"],
+                    "write": {"flag": "proposal", "shape": "payload"}
+                }
             }
-        }));
-        let summary = Summary::from_receipt(&envelope);
-        assert!(summary.available);
-        assert_eq!(summary.stage, "review");
-        assert_eq!(summary.ending(), Some(false));
-        assert_eq!(summary.pending_proposals, 2);
-        assert_eq!(summary.requirement_count, 3);
-        // 空白说明的冲突不算真冲突（只报未解决的）
-        assert_eq!(summary.conflicts.len(), 1);
-        assert_eq!(summary.conflicts[0].label(), "r1 ⇄ r2：同一文件");
-        let awaiting = summary.awaiting.expect("awaiting 应被解析");
-        assert_eq!(awaiting.req, "r3");
-        assert_eq!(awaiting.rev, 4);
-        assert_eq!(awaiting.stage, "development");
+        }))
+        .expect("合法 inboxRoutes");
+        assert_eq!(routes.len(), 2);
+        let (kind, route) = routes.write_binding("requirement").expect("声明了写命令");
+        assert_eq!(kind, "mine");
+        assert_eq!(route.action, "requirement.add");
+        assert_eq!(
+            routes.payload_for(
+                route,
+                &json!({"title": "t", "description": "d", "external_id": "e"})
+            ),
+            Some("t|d|e".to_owned())
+        );
+        // 未声明的旗标 → None（调用方明确拒绝，不猜）
+        assert!(routes.write_binding("amend").is_none());
+        // 未声明的 kind 不被认识（= 坏行）
+        assert!(routes.get("add").is_none());
     }
 
-    /// `ending` 未声明 / 缺字段时只能读成 false，绝不能借用其他字段推断。
+    /// **向后兼容的字节面**：真实 seed Mod 契约对旧形态记录产出的载荷与改造前一致。
     #[test]
-    fn ending_requires_the_declared_boolean() {
-        let declared_true = receipt(json!({SUMMARY_META_KEY: {"ending": true}}));
-        assert_eq!(Summary::from_receipt(&declared_true).ending(), Some(true));
-        let missing = receipt(json!({SUMMARY_META_KEY: {"stage": "done"}}));
-        assert_eq!(Summary::from_receipt(&missing).ending(), Some(false));
+    fn seed_contract_reproduces_the_legacy_payloads() {
+        let routes = InboxRoutes::load(&seed_mod_dir()).expect("seed Mod 的契约必须合法");
+        let payload = |flag: &str, record: serde_json::Value| {
+            let (_, route) = routes.write_binding(flag).expect("声明了写命令");
+            routes.payload_for(route, &record)
+        };
+
+        // 命名段形态（`--requirement`）：title|description|external_id
+        assert_eq!(
+            payload(
+                "requirement",
+                json!({"title": "标题", "description": "描述", "external_id": "inbox-1"})
+            ),
+            Some("标题|描述|inbox-1".to_owned())
+        );
+        // 段内 `|` / 换行必须被清洗（否则破坏 wire format）
+        assert_eq!(
+            payload(
+                "requirement",
+                json!({"title": "a|b", "description": "c\nd", "external_id": "inbox-2"})
+            ),
+            Some("a｜b|c d|inbox-2".to_owned())
+        );
+        // 描述为空 → 中间段留空但位置对齐；幂等键缺失 → 坏行
+        assert_eq!(
+            payload(
+                "requirement",
+                json!({"title": "只有标题", "external_id": "inbox-3"})
+            ),
+            Some("只有标题||inbox-3".to_owned())
+        );
+        assert_eq!(payload("requirement", json!({"title": "t"})), None);
+
+        // 预成形 wire 形态：proposal 的段数补齐（5 段补空 changes，6 段直接补，7 段原样）
+        assert_eq!(
+            payload(
+                "proposal",
+                json!({"payload": "r1|1|analysis|摘要|notes/a.md", "external_id": "inbox-5"})
+            ),
+            Some("r1|1|analysis|摘要|notes/a.md||inbox-5".to_owned())
+        );
+        assert_eq!(
+            payload(
+                "proposal",
+                json!({"payload": "r1|1|analysis|摘要|notes/a.md|split=a,b", "external_id": "inbox-6"})
+            ),
+            Some("r1|1|analysis|摘要|notes/a.md|split=a,b|inbox-6".to_owned())
+        );
+        assert_eq!(
+            payload(
+                "proposal",
+                json!({"payload": "r1|1|analysis|摘要|notes/a.md|split=a,b|my-ext", "external_id": "inbox-7"})
+            ),
+            Some("r1|1|analysis|摘要|notes/a.md|split=a,b|my-ext".to_owned())
+        );
+
+        // 其余写命令：载荷原样透传 + `|@ext=<external_id>` 幂等后缀
+        for (flag, raw) in [
+            ("amend", "r1|新标题|新描述|依赖"),
+            ("split", "r1|子A|子B"),
+            ("merge", "r2,r3|合并标题|合并描述"),
+            ("conflict", "r1,r2|说明"),
+            ("resolve", "r1,r2|keep_both"),
+        ] {
+            assert_eq!(
+                payload(flag, json!({"payload": raw, "external_id": "inbox-8"})),
+                Some(format!("{raw}|@ext=inbox-8")),
+                "`--{flag}` 的载荷必须保持改造前形态"
+            );
+        }
+        // 空载荷 → 坏行
+        assert_eq!(
+            payload("split", json!({"payload": "  ", "external_id": "inbox-9"})),
+            None
+        );
+    }
+}
+
+#[cfg(test)]
+mod settlement_policy_tests {
+    use super::{Path, SettlementCheck, SettlementPolicy};
+    use serde_json::json;
+
+    fn source() -> &'static Path {
+        Path::new("data/config.json")
     }
 
-    /// 摘要只认 `meta`：叙事里出现旧前缀（或任何 JSON 文本）都不再被当成摘要。
+    /// 段缺失 / 四个开关缺任一 / 非布尔 → 硬错误（无「默认开启」）。
     #[test]
-    fn narrative_is_never_parsed_as_the_summary() {
-        let envelope = json!({
-            "ok": true,
-            "narrative": ["【摘要】{\"ending\":true,\"pendingProposals\":9}"],
-            "meta": {SUMMARY_META_KEY: {"ending": false}}
-        });
-        let summary = Summary::from_receipt(&envelope);
-        assert!(summary.available);
-        // 只信 meta：叙事里的 ending:true 不生效
-        assert_eq!(summary.ending(), Some(false));
-        assert_eq!(summary.pending_proposals, 0);
+    fn missing_section_or_switch_is_a_hard_error() {
+        let message = SettlementPolicy::from_config(&json!({"play": {}}), source())
+            .expect_err("缺段必须报错");
+        assert!(message.contains("`settlement` 段"), "{message}");
+        assert!(
+            message.contains("\"requireEvents\""),
+            "应给出形状示例：{message}"
+        );
+        assert!(message.contains("README.md"), "{message}");
+
+        for field in [
+            "requireEvents",
+            "requireNoFailedSteps",
+            "requireEnding",
+            "requireInboxConsumed",
+        ] {
+            let mut section = json!({
+                "requireEvents": true,
+                "requireNoFailedSteps": true,
+                "requireEnding": true,
+                "requireInboxConsumed": true,
+            });
+            section.as_object_mut().expect("对象").remove(field);
+            let message = SettlementPolicy::from_config(&json!({"settlement": section}), source())
+                .expect_err("缺开关必须报错");
+            assert!(
+                message.contains(&format!("`{field}`")),
+                "必须点名缺失字段 `{field}`：{message}"
+            );
+        }
+        // 非布尔也报错（不做「读不懂按 true」）
+        for broken in [
+            json!({"settlement": {"requireEvents": "true", "requireNoFailedSteps": true, "requireEnding": true, "requireInboxConsumed": true}}),
+            json!({"settlement": []}),
+        ] {
+            assert!(SettlementPolicy::from_config(&broken, source()).is_err());
+        }
+        // 文件读不到同样是硬错误
+        assert!(SettlementPolicy::load(Path::new("/nonexistent/config.json")).is_err());
+    }
+
+    /// 四项按声明生效（关 = 不参与 `ok`）。
+    #[test]
+    fn reads_the_four_required_switches() {
+        let policy = SettlementPolicy::from_config(
+            &json!({
+                "settlement": {
+                    "requireEvents": true,
+                    "requireNoFailedSteps": false,
+                    "requireEnding": false,
+                    "requireInboxConsumed": true
+                }
+            }),
+            source(),
+        )
+        .expect("合法 settlement 段");
+        assert!(policy.require_events);
+        assert!(!policy.require_no_failed_steps);
+        assert!(!policy.require_ending);
+        assert!(policy.require_inbox_consumed);
+    }
+
+    /// 关掉的项一律算满足（`ok` 由声明口径决定），但事实仍如实记录。
+    #[test]
+    fn disabled_checks_are_satisfied_but_still_reported() {
+        let check = SettlementCheck {
+            name: "ending",
+            enabled: false,
+            passed: false,
+            error: "未见结局叙事行：本局未收口".to_owned(),
+        };
+        assert!(check.satisfied());
+        assert_eq!(
+            check.to_json(),
+            json!({"name": "ending", "enabled": false, "passed": false})
+        );
+        let enabled = SettlementCheck {
+            enabled: true,
+            ..check
+        };
+        assert!(!enabled.satisfied());
     }
 }
 
@@ -2386,13 +2548,14 @@ fn run_interactive(args: &Args) -> i32 {
 
     // 新局自动派发入口事件（与 adventure.rs 同为「开局即给处境」）；
     // 续局 / none 驱动只回显当前处境（pendingChoice 随存档往返），不推进剧情。
+    let entry_event = session.contract.entry_event.clone();
     let mut current = if session.resumed {
         state_receipt(&mut session, "resume", Vec::new())
     } else if matches!(drive, Drive::None) {
         // none = 只读回显：新局也不派发入口事件（零副作用）。
         state_receipt(&mut session, "state", Vec::new())
     } else {
-        session.dispatch_event(ENTRY_EVENT, DEFAULT_PAYLOAD)
+        session.dispatch_event(&entry_event, DEFAULT_PAYLOAD)
     };
     let mut fresh = true;
     // 自动推进计数（`[drive] 自动推进 N` 与步数预算共用）。
@@ -2440,9 +2603,9 @@ fn run_interactive(args: &Args) -> i32 {
             let summary = session.summary();
             if !summary.available {
                 eprintln!(
-                    "error: Mod 未提供 summary（{} 无摘要行），无法自动判定——\
+                    "error: Mod 未提供 summary（动作 `{}` 无摘要行），无法自动判定——\
                      改用 --drive stdin 或升级 Mod；本步未推进",
-                    SUMMARY_EVENT
+                    session.contract.summary_event
                 );
                 return 0;
             }
@@ -2506,7 +2669,7 @@ fn run_interactive(args: &Args) -> i32 {
                     return 0;
                 }
             }
-            let limits = session.drive_limits();
+            let limits = session.limits;
             let limit = limits.step_limit(summary.requirement_count);
             match drive_step(&summary, &current, auto_steps, limit) {
                 DriveStep::Run => {
@@ -2552,7 +2715,8 @@ fn run_interactive(args: &Args) -> i32 {
                         }
                     };
                     println!("[drive] 自动推进 {auto_steps}/{limit}（决策命令返回序号 {choice}）");
-                    current = session.dispatch_event(CHOICE_EVENT, &choice);
+                    let choice_event = session.contract.choice_event.clone();
+                    current = session.dispatch_event(&choice_event, &choice);
                     if current["ok"] != Json::Bool(true) {
                         eprintln!("error: [drive] 自动推进失败：{}", error_text(&current));
                         print_receipt(&current, true);
@@ -2678,8 +2842,9 @@ fn run_interactive(args: &Args) -> i32 {
                         println!("（选项序号从 1 起。）");
                         continue;
                     }
+                    let choice_event = session.contract.choice_event.clone();
                     current =
-                        dispatch_with_watch(&mut session, args, CHOICE_EVENT, &index.to_string());
+                        dispatch_with_watch(&mut session, args, &choice_event, &index.to_string());
                     fresh = true;
                 } else {
                     println!(
@@ -2844,13 +3009,21 @@ fn print_config(session: &Session, args: &Args) {
         "配置      : {}（play.mode 归 Mod 叙事层；宿主只读其中的 drive 阈值）",
         session.mod_dir.join(&session.config_rel).display()
     );
-    let limits = session.drive_limits();
+    let limits = session.limits;
     println!(
         "推进阈值 : 步数硬顶 {} = {} + {}×需求数；无进展判停 {}",
         limits.step_limit(0),
         limits.max_steps,
         limits.steps_per_requirement,
         limits.stall_limit
+    );
+    let settlement = session.settlement;
+    println!(
+        "结算口径 : events={} noFailedSteps={} ending={} inboxConsumed={}（config.json 的 settlement 段）",
+        settlement.require_events,
+        settlement.require_no_failed_steps,
+        settlement.require_ending,
+        settlement.require_inbox_consumed
     );
     println!(
         "驱动     : {}（推进方式由 --drive 给定；Mod 的 play.mode 仅叙事层自用）",
@@ -2882,6 +3055,38 @@ fn print_config(session: &Session, args: &Args) {
 // ============================================================================
 // §结算 --settle：autosave + events.jsonl → settlement.json + 人读摘要
 // ============================================================================
+
+/// 一条结算判定项（`settlement.json` 的 `checks` 元素）。
+///
+/// `enabled` = Mod 在 `config.json` 的 `settlement` 段声明它是否参与 `ok`；
+/// `passed` = 该项本身的事实（关掉也照实记录，便于人读诊断）。
+struct SettlementCheck {
+    name: &'static str,
+    enabled: bool,
+    passed: bool,
+    /// 生效但未通过时的可读错误（进报告 `errors`）。
+    error: String,
+}
+
+impl SettlementCheck {
+    /// 该项是否满足（关掉的项一律算满足——口径由 Mod 声明）。
+    fn satisfied(&self) -> bool {
+        !self.enabled || self.passed
+    }
+
+    fn to_json(&self) -> Json {
+        json!({"name": self.name, "enabled": self.enabled, "passed": self.passed})
+    }
+}
+
+/// 结算口径：从本局 Mod 的 `config.json` 现读 `settlement` 段（必填，无默认值）。
+///
+/// Mod 目录解析见 [`resolve_mod_dir`]；段缺失 / 缺键 → 可读错误（fail-closed），
+/// 由调用方报错退出——**不**用任何「默认开启」兜底。
+fn load_settlement_policy(run_dir: &Path, args: &Args) -> Result<SettlementPolicy, String> {
+    let mod_dir = resolve_mod_dir(args, run_dir)?;
+    SettlementPolicy::load(&mod_dir.join(agent_config_path(&mod_dir)))
+}
 
 fn run_settle(args: &Args, auto: bool) -> i32 {
     let run_dir = args.runs_root.join(&args.run_id);
@@ -2991,25 +3196,56 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
         "entities": save["entities"]["entities"].as_object().map_or(0, serde_json::Map::len),
     });
 
-    // ⑤ 结论：无失败步 ∧ 有事件 ∧ 达结局 ∧ **无未消费 inbox 行**。
-    //    最后一条是硬门禁：inbox 还有行却报 ok=true 等于静默丢需求。
-    //    closing 已阻止新写入，故 `pending_before` 就是最终口径；仍现读一次作交叉校验。
+    // ⑤ 结论：四个判定项，各自受 Mod 声明的结算口径开关控制（`settlement` 段必填，
+    //    无默认值）。`inboxConsumed` 那条是硬门禁：inbox 还有行却报 ok=true 等于
+    //    静默丢需求。closing 已阻止新写入，故 `pending_before` 就是最终口径；
+    //    仍现读一次作交叉校验。口径读不到 → fail-closed（报告作废并退出非零）。
+    let policy = match load_settlement_policy(&run_dir, args) {
+        Ok(policy) => policy,
+        Err(message) => {
+            eprintln!("error: {message}");
+            if !auto {
+                leave_closing(&run_dir);
+            }
+            return 1;
+        }
+    };
     let pending_inbox = unconsumed_inbox_lines(&run_dir).max(pending_before);
-    let ok = !events.is_empty() && failed == 0 && reached_ending && pending_inbox == 0;
-    if failed > 0 {
-        errors.push(format!("{failed} 条事件记录为失败步"));
+    let checks = vec![
+        SettlementCheck {
+            name: "events",
+            enabled: policy.require_events,
+            passed: !events.is_empty(),
+            error: "事件日志为空：本局无任何派发记录".to_owned(),
+        },
+        SettlementCheck {
+            name: "noFailedSteps",
+            enabled: policy.require_no_failed_steps,
+            passed: failed == 0,
+            error: format!("{failed} 条事件记录为失败步"),
+        },
+        SettlementCheck {
+            name: "ending",
+            enabled: policy.require_ending,
+            passed: reached_ending,
+            error: "未见结局叙事行：本局未收口".to_owned(),
+        },
+        SettlementCheck {
+            name: "inboxConsumed",
+            enabled: policy.require_inbox_consumed,
+            passed: pending_inbox == 0,
+            error: format!(
+                "结局后仍有 {pending_inbox} 条未消费 inbox 行（{INBOX_FILE}）——本局已收口，需开新局（换 --run-id）"
+            ),
+        },
+    ];
+    let ok = checks.iter().all(SettlementCheck::satisfied);
+    for check in &checks {
+        if check.enabled && !check.passed {
+            errors.push(check.error.clone());
+        }
     }
-    if !reached_ending {
-        errors.push("未见结局叙事行：本局未收口".to_owned());
-    }
-    if events.is_empty() {
-        errors.push("事件日志为空：本局无任何派发记录".to_owned());
-    }
-    if pending_inbox > 0 {
-        errors.push(format!(
-            "结局后仍有 {pending_inbox} 条未消费 inbox 行（{INBOX_FILE}）——本局已收口，需开新局（换 --run-id）"
-        ));
-    }
+    let checks_json: Vec<Json> = checks.iter().map(SettlementCheck::to_json).collect();
 
     let mut report = json!({
         "run_id": args.run_id,
@@ -3020,6 +3256,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
         "duration_events": records.len(),
         "reached": if reached_ending { "ending" } else { "open" },
         "ok": ok,
+        "checks": checks_json,
         "errors": errors,
         "settled_at": now_secs(),
     });
@@ -3046,7 +3283,12 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
     }
     // ⑦ closing 保护下的交叉校验：进入 closing 后不应再出现新行，
     //    但保留一次现读作为兵底检查（万一有绕过协议的写入）。
-    let after = unconsumed_inbox_lines(&run_dir);
+    //    与 ⑤ 的 `inboxConsumed` 同一开关：关掉它 = 明确接受结局后的残留行。
+    let after = if policy.require_inbox_consumed {
+        unconsumed_inbox_lines(&run_dir)
+    } else {
+        0
+    };
     if after > 0 {
         eprintln!(
             "error: closing 保护下仍发现 {after} 条未消费 inbox 行（协议外写入）——报告作废（ok=false），需开新局"
@@ -3124,6 +3366,21 @@ fn print_settlement(report: &Json, path: &Path, ending_line: Option<&str>, faile
         "规模     : 实体 {} 个 / kvRevision {}",
         report["final_state"]["entities"], report["final_state"]["kvRevision"]
     );
+    // 判定口径：只有被 Mod 关掉的项才打印（缺省全开 = 不占一行）。
+    let waived: Vec<&str> = report["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|check| check["enabled"] != Json::Bool(true))
+        .filter_map(|check| check["name"].as_str())
+        .collect();
+    if !waived.is_empty() {
+        println!(
+            "口径     : {} 项已按 config.settlement 关闭（{}）",
+            waived.len(),
+            waived.join(" / ")
+        );
+    }
     if let Some(errors) = report["errors"].as_array() {
         if !errors.is_empty() {
             println!("问题     : {}", errors.len());
