@@ -93,7 +93,7 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `task.intake` | `"title\|description"` | intake → coordinate |
 | `requirement.add` | `"title\|description[\|external_id[\|depends_on]]"` | 入队（draft）；同 external_id 幂等 |
 | `requirement.list` | `""` / `"0"` / `"full"` | 只读：需求图 + 提案 + 泳道 |
-| `requirement.dispatch` | `""` | 按就绪序派活（draft→analysis / planning→plan / ready→development·lane），job 上限 4 |
+| `requirement.dispatch` | `""` | 按就绪序派活（draft→analysis / planning→plan / ready→development·lane），job 上限 4；**无候选/槽位满 = 正常回执「0 条可派」**（幂等，不计失败步） |
 | `proposal.submit` | `"r1\|1\|analysis\|summary\|artifacts[\|changes[\|external_id]]"` | subagent 提议（stage ∈ analysis/plan/development；changes 可选） |
 | `proposal.accept` | `"pN"` / `"rN"` / `""` | **串行**验收一条（空 = requirement_id canonical 序）；rev 不匹配 → stale |
 | `proposal.reject` | `"pN\|理由"` / `"rN\|理由"` / `""` | 打回：analysis→draft / plan→planning / development→ready |

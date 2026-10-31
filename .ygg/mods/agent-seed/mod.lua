@@ -2256,9 +2256,17 @@ ygg.on("requirement.dispatch", function(payload)
       usage = TEXTS.beats.req_dispatch_usage,
     }))
   end
+  -- 「按就绪序派活」是幂等语义：**没东西可派是正常结果**（需求都在 job
+  -- 中 / 在门禁 / 在待验收 / 已完成，或 job 槽位 / 泳道已满）——自动化的
+  -- 连续 dispatch 不得因此记失败步（伪失败会把正常等待当成故障）。
+  -- 只留两个真拒绝：阶段已收口（done）与载荷非法。
   local candidates = dispatch_candidates()
   if #candidates == 0 then
-    return reject_payload("requirement.dispatch", TEXTS.beats.req_dispatch_none)
+    ygg.narrate(fill(TEXTS.beats.req_dispatch_noop_none, {
+      jobs = tostring(job_total()),
+      cap = tostring(job_capacity()),
+    }))
+    return render()
   end
   local lanes = free_lanes()
   local filled = {}
@@ -2298,12 +2306,13 @@ ygg.on("requirement.dispatch", function(payload)
     end
   end
   if #filled == 0 then
-    return reject_payload("requirement.dispatch", fill(TEXTS.beats.req_dispatch_blocked, {
+    ygg.narrate(fill(TEXTS.beats.req_dispatch_noop_blocked, {
       jobs = tostring(job_total()),
       cap = tostring(job_capacity()),
       lanes = lane_text(),
       reasons = req_dev_blocked_text(),
     }))
+    return render()
   end
   ygg.narrate(fill(TEXTS.beats.req_dispatch_ok, {
     items = join(filled, "；"),
