@@ -255,8 +255,10 @@ cargo run --example playtest -- .ygg/mods/agent-seed    # 冒烟：默认全 1 �
 
 - **manifest 是内容寻址**（sha256 + byteLength）：改 `data/*.json` 不重算 `pack`，装载会以内容哈希不符拒绝。
 - **热载**：单发模式每次新进程按磁盘现状装载；`--resume` 回执里 `hotReload.source="resume"` 即说明改动已生效。
-- 两个 Mod（`.ygg/mods/agent-seed` 与 `packages/mods/agent-seed`）现在是**同一份实现与资源**（含 playbook），
-  改动要同步两侧并各自重算 manifest。
+- 两个 Mod 分工（**不是同一份**）：**骨架面** `mod.lua` + `schemas/` 逐字节一致，用
+  `scripts/sync-seed-mod.sh` 同步（CI 有骨架守卫）；**实例面** `data/` 各自维护——
+  `packages/mods/agent-seed` 是对外种子模板（通用 5 章，零本项目规则），
+  `.ygg/mods/agent-seed` 是本项目实例（12 章项目规则）。
 
 ---
 
