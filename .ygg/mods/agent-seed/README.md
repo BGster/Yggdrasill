@@ -12,14 +12,18 @@ Mod 内部结构。
 任何一段缺失 / 字段缺失 / 类型不符 / 非正整数 → **装载期失败**（非零退出或 `ok=false` 报告），
 错误文案会点名缺失字段并给回本节的定位。旧 Mod 升级 = 补齐下面四段。
 
-### 1. `pack.json` → `agent`（四个字段全部必填）
+### 1. `pack.json` → `agent`（八个字段全部必填）
 
 ```json
 "agent": {
   "entryEvent": "event.start",
   "choiceEvent": "ygg.choice_selected",
   "summaryEvent": "agent.summary",
-  "endingPrefix": "【结局"
+  "endingPrefix": "【结局",
+  "metaKey": "summary",
+  "rejectionPrefixes": ["【动作被拒】", "【载荷被拒】", "【需求待办】"],
+  "replayPrefix": "【需求重放】",
+  "defaultPayload": "0"
 }
 ```
 
@@ -27,17 +31,26 @@ Mod 内部结构。
 | --- | --- | --- |
 | `entryEvent` | 新局入口事件 | 交互模式开局自动派发；`--event` 省略时的缺省 |
 | `choiceEvent` | 玩家选择事件 | `--drive cmd` 每步派发；stdin 数字输入 |
-| `summaryEvent` | Mod 自报摘要的只读动作 | 自动推进的唯一判定面（回执信封 `meta.summary`） |
+| `summaryEvent` | Mod 自报摘要的只读动作 | 自动推进的唯一判定面 |
 | `endingPrefix` | 结局叙事行前缀 | 收口判据（回执 `ending` / 事件日志 / 结算） |
+| `metaKey` | 摘要结构化字段在回执信封 `meta` 里的键名 | 宿主只读 `meta.<metaKey>`，不读 Mod 私有 KV |
+| `rejectionPrefixes` | 「动作未被接受」的叙事行前缀集合（≥1 条） | 宿主据此判定**未生效**（不推 cursor、不算成功） |
+| `replayPrefix` | 「幂等重放」的叙事行前缀 | 宿主据此判定重放（算成功消费，只是没新增） |
+| `defaultPayload` | 入口事件首次派发的载荷（JSON 标量文本；可为空串） | 开局派发 / `--payload` 缺省 / `event` 命令省略载荷 |
 
 - `choiceEvent` 必须与**内核保留路由**同名（`ygg.choice_selected`）：内核只对该事件名做
   「序号在 `1..=选项数` 内」的域校验，改名即失去这层校验。
-- `summaryEvent` 由 Mod 自己 `ygg.on(...)` 注册，回执里用 `ygg.meta("summary", {...})` 给结构化摘要。
+- `summaryEvent` 由 Mod 自己 `ygg.on(...)` 注册，回执里用 `ygg.meta("<metaKey>", {...})` 给结构化摘要。
+- `rejectionPrefixes` 必须是 **Mod 真实在用的叙事前缀**：写错了宿主就把被拒派发当成已生效
+  （早前宿主硬编码的第三条 `【需求待排】` 就是这种失效——本 Mod 实际是 `【需求待办】`）。
 
-### 2. `pack.json` → `inboxRoutes`（必填；不接受异步 inbox 时写 `{}`）
+### 2. `pack.json` → `inboxRoutes`（必填；三个保留键与 kind 同层）
 
 ```json
 "inboxRoutes": {
+  "externalIdField": "external_id",
+  "payloadField": "payload",
+  "extMarker": "@ext=",
   "add": {
     "action": "requirement.add",
     "fields": ["title", "description", "external_id", "depends_on"],
@@ -48,13 +61,20 @@ Mod 内部结构。
 
 | 键 | 必填 | 含义 |
 | --- | --- | --- |
-| 路由键（`add` …） | 是 | inbox 行的 `kind` 字面值 |
+| `externalIdField` | 是 | inbox 记录里**幂等键**的字段名（也用于 `fields` 里标记幂等键段） |
+| `payloadField` | 是 | inbox 记录里**预成形载荷**的字段名（整串 wire，宿主不解析） |
+| `extMarker` | 是 | 幂等键拼到预成形载荷末尾时的**后缀标记** |
+| 路由键（`add` …） | 是 | inbox 行的 `kind` 字面值（**不得与三个保留键同名**） |
 | `action` | 是 | 派发的内核动作名 |
-| `fields` | 是 | wire format 的段序：按此序从记录取值，用 `|` 连接（`external_id` = 幂等键） |
+| `fields` | 是 | wire format 的段序：按此序从记录取值，用 `\|` 连接；值等于 `externalIdField` 的段填幂等键 |
 | `write.flag` | 否 | 宿主 CLI 旗标名（`--requirement` → `requirement`）；不写则宿主不提供该写命令 |
-| `write.shape` | 否 | `named`（写 `title`/`description` 字段）或 `payload`（整串进 `payload`） |
+| `write.shape` | 否 | `named`（前两个非幂等键段依次填「首段 / 余下」，典型即标题与描述）或 `payload`（整串进 `payloadField`） |
 
-记录两种形态都认：**命名段**（记录带同名字段）与**预成形 wire**（记录只有 `payload`，原样透传）。
+- 三个保留键**必填**，但**允许一个 kind 都不声明**（= 本 Mod 不支持异步 inbox；宿主写命令退出码 3）。
+- 保留键与 kind 同层：kind 名不得与它们同名（同名会被当成保留键消费，形不成路由）。
+- `write.shape = "named"` 要求 `fields` 里至少有一个非幂等键段（否则写出来的记录无载荷，装载期报错）。
+
+记录两种形态都认：**命名段**（记录带同名字段）与**预成形 wire**（记录只有 `payloadField` 指名的载荷，原样透传）。
 未声明的 `kind` = 坏行（跳过并前移 cursor，不阻塞队列）；未声明的写命令 = 明确拒绝（退出码 3）。
 
 ### 3. `data/config.json` → `settlement`（四个开关全部必填）
@@ -136,7 +156,7 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 
 | 动作 | 载荷 | 说明 |
 | --- | --- | --- |
-| `requirement.split` | `父id\|子A\|子B[|…]` | 父置 `split`，子需求 `draft` 并**继承父依赖**（≥2 子） |
+| `requirement.split` | `父id\|子A\|子B[\|…]` | 父置 `split`，子需求 `draft` 并**继承父依赖**（≥2 子） |
 | `requirement.merge` | `id1,id2\|标题\|描述` | 源置 `merged`（`into` 指向新需求），新需求依赖取**并集** |
 | `requirement.amend` | `id\|标题\|描述\|依赖` | rev+1；`draft/planning/ready` 直改、开发中只改说明、`done` **派生新需求** |
 | `requirement.conflict` | `id1,id2\|说明` | 双向标 `blocked`；冲突需求不派活、不许收口 |
