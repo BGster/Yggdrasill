@@ -2359,16 +2359,12 @@ fn run_interactive(args: &Args) -> i32 {
     println!();
 
     // 新局自动派发入口事件（与 adventure.rs 同为「开局即给处境」）；
-    // 续局只回显当前处境（pendingChoice 随存档往返），不推进剧情。
+    // 续局 / none 驱动只回显当前处境（pendingChoice 随存档往返），不推进剧情。
     let mut current = if session.resumed {
-        let state = session.state_envelope();
-        json!({
-            "ok": true,
-            "event": "resume",
-            "narrative": [],
-            "pendingChoice": state["pendingChoice"].clone(),
-            "autosave": session.autosave_path.display().to_string(),
-        })
+        state_receipt(&mut session, "resume", Vec::new())
+    } else if matches!(drive, Drive::None) {
+        // none = 只读回显：新局也不派发入口事件（零副作用）。
+        state_receipt(&mut session, "state", Vec::new())
     } else {
         session.dispatch_event(ENTRY_EVENT, DEFAULT_PAYLOAD)
     };
@@ -2636,14 +2632,11 @@ fn run_interactive(args: &Args) -> i32 {
             },
             "l" => match session.load_autosave() {
                 Ok(()) => {
-                    let state = session.state_envelope();
-                    current = json!({
-                        "ok": true,
-                        "event": "load",
-                        "narrative": ["（读档完成，进度已恢复。）"],
-                        "pendingChoice": state["pendingChoice"].clone(),
-                        "autosave": session.autosave_path.display().to_string(),
-                    });
+                    current = state_receipt(
+                        &mut session,
+                        "load",
+                        vec!["（读档完成，进度已恢复。）".to_owned()],
+                    );
                     fresh = true;
                 }
                 Err(message) => println!("[错误] {message}"),
@@ -2748,6 +2741,18 @@ fn print_prompt(receipt: &Json) {
     print_choices(receipt);
     print!("[ygg] > ");
     let _ = io::stdout().flush();
+}
+
+/// 不推进状态的回执（续局 / 读档 / none 驱动共用）：`pendingChoice` 现取 `state` 信封。
+fn state_receipt(session: &mut Session, event: &str, narrative: Vec<String>) -> Json {
+    let state = session.state_envelope();
+    json!({
+        "ok": true,
+        "event": event,
+        "narrative": narrative,
+        "pendingChoice": state["pendingChoice"].clone(),
+        "autosave": session.autosave_path.display().to_string(),
+    })
 }
 
 /// `event <名称> [JSON]` 解析（JSON 可含空格——只切首段）。

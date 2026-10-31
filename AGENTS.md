@@ -110,11 +110,6 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `config.set` / `guide.show` / `map.show` | 同既有语义 | 常驻只读/配置动作 |
 | `agent.summary` | `"0"` | 只读：Mod 自报**回执标准字段**（阶段 / 结局 / 待验收提案 / 冲突 / 空等 job） |
 
-- **宿主不读 Mod 私有 KV**：`agent.summary` 回一行 `【摘要】<单行 JSON>`，宿主只认这一行
-  （`stage` / `ending` / `verifyPassed` / `nextEndsRun` / `pendingProposals` /
-  `requirementCount` / `conflicts` / `awaiting`）。旧 Mod 没有该动作时宿主判为「未知」
-  并安全停等，**不回退到读 `ending` / `fsm.stage` / `prop.*` / `req.*`**。
-
 - `changes` 形如 `split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`：
   subagent 只**建议**，`proposal.accept` 时才落地。
 - **stale 与重定基**：验收时 `rev ≠ req.<i>.rev` → 提案置 `stale`、需求置 `stale` 标记（可读拒绝，
@@ -125,6 +120,10 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 - 越阶动作 → `【动作被拒】`；载荷不合法 → `【载荷被拒】`；前置不满足 → `【需求待办】`。
   三者都原地重渲染（主状态不变）。
 - 收口判据：`req_all_done()`（含 split/merged 的后继全部 done）+ 0 待验收提案 + 0 在跑 job + 0 冲突。
+- **宿主不读 Mod 私有 KV**：`agent.summary` 回一行 `【摘要】<单行 JSON>`，宿主只认这一行
+  （`stage` / `ending` / `verifyPassed` / `nextEndsRun` / `pendingProposals` /
+  `requirementCount` / `conflicts` / `awaiting`）。旧 Mod 没有该动作时宿主判为「未知」
+  并安全停等，**不回退到读 `ending` / `fsm.stage` / `prop.*` / `req.*`**。
 
 ---
 
