@@ -16,5 +16,11 @@
   "hot_reload": true,
   "gates": {
     "require_all_green": true
+  },
+  "settlement": {
+    "requireEvents": true,
+    "requireNoFailedSteps": true,
+    "requireEnding": true,
+    "requireInboxConsumed": true
   }
 }

@@ -24,5 +24,48 @@
     "schemas/scene-texts.json",
     "schemas/agent-config.json",
     "schemas/agent-playbook.json"
-  ]
+  ],
+  "agent": {
+    "entryEvent": "event.start",
+    "choiceEvent": "ygg.choice_selected",
+    "summaryEvent": "agent.summary",
+    "endingPrefix": "【结局"
+  },
+  "inboxRoutes": {
+    "add": {
+      "action": "requirement.add",
+      "fields": ["title", "description", "external_id", "depends_on"],
+      "write": { "flag": "requirement", "shape": "named" }
+    },
+    "amend": {
+      "action": "requirement.amend",
+      "fields": ["req", "title", "description", "depends"],
+      "write": { "flag": "amend", "shape": "payload" }
+    },
+    "split": {
+      "action": "requirement.split",
+      "fields": ["req", "children"],
+      "write": { "flag": "split", "shape": "payload" }
+    },
+    "merge": {
+      "action": "requirement.merge",
+      "fields": ["reqs", "title", "description"],
+      "write": { "flag": "merge", "shape": "payload" }
+    },
+    "conflict": {
+      "action": "requirement.conflict",
+      "fields": ["reqs", "note"],
+      "write": { "flag": "conflict", "shape": "payload" }
+    },
+    "resolve": {
+      "action": "requirement.resolve",
+      "fields": ["reqs", "mode", "note"],
+      "write": { "flag": "resolve", "shape": "payload" }
+    },
+    "proposal": {
+      "action": "proposal.submit",
+      "fields": ["req", "rev", "stage", "summary", "artifacts", "changes", "external_id"],
+      "write": { "flag": "proposal", "shape": "payload" }
+    }
+  }
 }

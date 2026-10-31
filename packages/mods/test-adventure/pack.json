@@ -8,5 +8,12 @@
       "path": "data/scenes.json"
     }
   ],
-  "schemaFiles": ["schemas/scene-texts.json"]
+  "schemaFiles": ["schemas/scene-texts.json"],
+  "agent": {
+    "entryEvent": "event.start",
+    "choiceEvent": "ygg.choice_selected",
+    "summaryEvent": "agent.summary",
+    "endingPrefix": "【结局"
+  },
+  "inboxRoutes": {}
 }

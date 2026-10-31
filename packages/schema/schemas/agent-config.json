@@ -2,7 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://yggdrasill.dev/schemas/v1/agent-config.json",
     "title": "Yggdrasill agent-config（M-Agent 元工作流 Mod 的静态配置形）",
-    "description": "M-Agent 泳道 A 落地（packages/mods/agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。play.mode 决定本局的**交互模式**（goal 挂机 / guide 逐步确认，缺省 guide），evolution.mode 决定局末复盘的修订口径（off 仅报告 / suggest 产出建议包 / auto 白名单内自动修订），gates.require_all_green 决定门禁失败是否打回切片执行，drive 段决定宿主自动推进的步数 / 无进展阈值（内核不解释）。",
+    "description": "M-Agent 泳道 A 落地（packages/mods/agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。play.mode 决定本局的**交互模式**（goal 挂机 / guide 逐步确认，缺省 guide），evolution.mode 决定局末复盘的修订口径（off 仅报告 / suggest 产出建议包 / auto 白名单内自动修订），gates.require_all_green 决定门禁失败是否打回切片执行，drive 段决定宿主自动推进的步数 / 无进展阈值，settlement 段决定 `--settle` 的判定口径（均宿主侧消费、内核不解释）。",
     "type": "object",
     "additionalProperties": false,
     "required": ["play", "evolution", "autosave", "hot_reload", "gates"],
@@ -84,6 +84,29 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 100000
+                }
+            }
+        },
+        "settlement": {
+            "description": "宿主 `--settle` 的判定口径（**可选段**；缺段或缺键一律 true = 历史口径）：四项各自可关，关掉的项不参与 `ok`，但仍逐项记入结算报告的 `checks`（`{name, enabled, passed}`）。内核不解释该段——它是宿主与 Mod 的契约面，不是运行期状态。",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "requireEvents": {
+                    "description": "true = 事件日志必须非空（没有任何派发记录即不通过）。",
+                    "type": "boolean"
+                },
+                "requireNoFailedSteps": {
+                    "description": "true = 事件日志不得有失败步（`ok=false` 的记录）。",
+                    "type": "boolean"
+                },
+                "requireEnding": {
+                    "description": "true = 必须出现结局叙事行（`pack.json` `agent.endingPrefix` 前缀）。",
+                    "type": "boolean"
+                },
+                "requireInboxConsumed": {
+                    "description": "true = inbox 不得有未消费行（结局后仍有行 = 静默丢需求，硬门禁）；false = 明确接受残留行。",
+                    "type": "boolean"
                 }
             }
         }

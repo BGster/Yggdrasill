@@ -5,6 +5,79 @@ M-Agent 泳道的 seed mod：把「一次完整的 Agent 工作」配置成一�
 即可开工，**零定制**。怎么玩（构建 / 开局 / 单发 / 异步 / 结算）见仓库根 `AGENTS.md`；本文件只说
 Mod 内部结构。
 
+## 零、host 契约（**必填；宿主不含任何默认值**）
+
+宿主（`crates/ygg-sandbox/examples/agent.rs`、`src/playtest.rs`）不含任何事件名字面量与回退默认值：
+事件名、inbox 路由、结算口径、推进阈值**全部**从本 Mod 的 `pack.json` 与 `data/config.json` 读。
+任何一段缺失 / 字段缺失 / 类型不符 / 非正整数 → **装载期失败**（非零退出或 `ok=false` 报告），
+错误文案会点名缺失字段并给回本节的定位。旧 Mod 升级 = 补齐下面四段。
+
+### 1. `pack.json` → `agent`（四个字段全部必填）
+
+```json
+"agent": {
+  "entryEvent": "event.start",
+  "choiceEvent": "ygg.choice_selected",
+  "summaryEvent": "agent.summary",
+  "endingPrefix": "【结局"
+}
+```
+
+| 字段 | 含义 | 宿主用途 |
+| --- | --- | --- |
+| `entryEvent` | 新局入口事件 | 交互模式开局自动派发；`--event` 省略时的缺省 |
+| `choiceEvent` | 玩家选择事件 | `--drive cmd` 每步派发；stdin 数字输入 |
+| `summaryEvent` | Mod 自报摘要的只读动作 | 自动推进的唯一判定面（回执信封 `meta.summary`） |
+| `endingPrefix` | 结局叙事行前缀 | 收口判据（回执 `ending` / 事件日志 / 结算） |
+
+- `choiceEvent` 必须与**内核保留路由**同名（`ygg.choice_selected`）：内核只对该事件名做
+  「序号在 `1..=选项数` 内」的域校验，改名即失去这层校验。
+- `summaryEvent` 由 Mod 自己 `ygg.on(...)` 注册，回执里用 `ygg.meta("summary", {...})` 给结构化摘要。
+
+### 2. `pack.json` → `inboxRoutes`（必填；不接受异步 inbox 时写 `{}`）
+
+```json
+"inboxRoutes": {
+  "add": {
+    "action": "requirement.add",
+    "fields": ["title", "description", "external_id", "depends_on"],
+    "write": { "flag": "requirement", "shape": "named" }
+  }
+}
+```
+
+| 键 | 必填 | 含义 |
+| --- | --- | --- |
+| 路由键（`add` …） | 是 | inbox 行的 `kind` 字面值 |
+| `action` | 是 | 派发的内核动作名 |
+| `fields` | 是 | wire format 的段序：按此序从记录取值，用 `|` 连接（`external_id` = 幂等键） |
+| `write.flag` | 否 | 宿主 CLI 旗标名（`--requirement` → `requirement`）；不写则宿主不提供该写命令 |
+| `write.shape` | 否 | `named`（写 `title`/`description` 字段）或 `payload`（整串进 `payload`） |
+
+记录两种形态都认：**命名段**（记录带同名字段）与**预成形 wire**（记录只有 `payload`，原样透传）。
+未声明的 `kind` = 坏行（跳过并前移 cursor，不阻塞队列）；未声明的写命令 = 明确拒绝（退出码 3）。
+
+### 3. `data/config.json` → `settlement`（四个开关全部必填）
+
+```json
+"settlement": {
+  "requireEvents": true,
+  "requireNoFailedSteps": true,
+  "requireEnding": true,
+  "requireInboxConsumed": true
+}
+```
+
+关掉的项不参与结算 `ok`（但仍逐项记入 `settlement.json` 的 `checks`：`{name, enabled, passed}`）。
+
+### 4. `data/config.json` → `drive`（三项全部必填、必须正整数）
+
+```json
+"drive": { "maxSteps": 64, "stallLimit": 12, "stepsPerRequirement": 16 }
+```
+
+失败即装载期报错：`pack.json` 的 `agent` / `inboxRoutes`、`data/config.json` 的 `settlement` / `drive`。
+
 ## 一、协调器（`fsm.stage`，单机单事件 `stage.advance`）
 
 ```text
