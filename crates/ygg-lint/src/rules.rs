@@ -26,9 +26,21 @@ use crate::locate::{find_goto_dot_calls, line_col};
 
 /// 单文件 lint 入口（lib 稳定 API；bin 与测试共用，零 IO）。
 pub fn lint_source(file: &str, source: &str) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
+    match parse_gate(file, source) {
+        Ok(ast) => rules_for_ast(file, source, &ast),
+        Err(diagnostics) => diagnostics,
+    }
+}
 
+/// 解析门：R3 预扫（parser 之外）→ full_moon 解析。
+///
+/// 两个消费方共用同一道门：单文件 [`lint_source`] 与 `--pack` 的逐模块检查
+/// （[`crate::pack`]）。R3 命中即语法错误已成定局（AST 在该处构不出来），此时
+/// 只报 R3 不报 PARSE；其余语法错误按 full_moon 的错误区间给真实行列——多文件
+/// Mod 的报错因此能指到具体模块的具体行，而不是「某个文件第 1 行」。
+pub(crate) fn parse_gate(file: &str, source: &str) -> Result<full_moon::ast::Ast, Vec<Diagnostic>> {
     // ① R3 预扫（parser 之外）：命中即语法错误已成定局，跳过 R1/R2。
+    let mut diagnostics = Vec::new();
     for offset in find_goto_dot_calls(source) {
         let end = source[offset..]
             .find('(')
@@ -47,34 +59,67 @@ pub fn lint_source(file: &str, source: &str) -> Vec<Diagnostic> {
         });
     }
     if !diagnostics.is_empty() {
-        return diagnostics;
+        return Err(diagnostics);
     }
 
-    // ② 解析 + AST 规则（R1/R2）。
+    // ② 解析（失败按错误区间定位）。
     match full_moon::parse(source) {
-        Ok(ast) => {
-            let mut visitor = RuleVisitor::new(file, source);
-            visitor.visit_ast(&ast);
-            visitor.into_diagnostics()
-        }
+        Ok(ast) => Ok(ast),
         Err(err) => {
             let messages: Vec<String> = err
                 .iter()
                 .map(|error| error.error_message().to_string())
                 .collect();
-            vec![Diagnostic {
+            let (start, end) = parse_error_span(source, &err);
+            let (line, column) = line_col(source, start);
+            Err(vec![Diagnostic {
                 file: file.to_owned(),
-                offset: 0,
-                end_offset: 0,
-                line: 1,
-                column: 1,
+                offset: start,
+                end_offset: end,
+                line,
+                column,
                 code: code::PARSE,
                 severity: Severity::Error,
                 message: format!("Lua 解析失败：{}", messages.join("；")),
                 fix: "修复语法错误后重试（点形态 goto 已由 R3 预扫单列）".to_owned(),
-            }]
+            }])
         }
     }
+}
+
+/// 解析错误区间 → 夹进源码范围的 `(start, end)`。
+///
+/// full_moon 的 `Position::bytes()` 与 AST 节点同口径（`node_span` 用的也是它），
+/// 所以这里不另做基准换算；只保证区间落进源码且非退化（空区间无法划线）。
+fn parse_error_span(source: &str, errors: &[full_moon::Error]) -> (usize, usize) {
+    let limit = source.len().max(1);
+    let start = errors
+        .iter()
+        .map(|error| error.range().0.bytes())
+        .min()
+        .unwrap_or(0)
+        .min(limit - 1);
+    let end = errors
+        .iter()
+        .map(|error| error.range().1.bytes())
+        .max()
+        .unwrap_or(start + 1)
+        .clamp(start + 1, limit);
+    (start, end)
+}
+
+/// 已解析 AST 上的规则检查（R1/R2）。
+///
+/// 独立于解析：`--pack` 要在同一份 AST 上再抽一层依赖信息（`require` 字面量），
+/// 一次 parse 做两份判定，不重复解析。
+pub(crate) fn rules_for_ast(
+    file: &str,
+    source: &str,
+    ast: &full_moon::ast::Ast,
+) -> Vec<Diagnostic> {
+    let mut visitor = RuleVisitor::new(file, source);
+    visitor.visit_ast(ast);
+    visitor.into_diagnostics()
 }
 
 /// handler 体内收集帧（调用序 / local spawn / kv 化证据）。
@@ -284,7 +329,10 @@ fn node_span<N: Node>(node: &N) -> (usize, usize) {
 /// FunctionCall → 点路径（`ygg.narrative["goto"]` 归一为 `ygg.narrative.goto`）；
 /// 调用目标为表达式等不可解析形态 → None。对两种解析形态鲁棒：点链可能
 /// 挂在 call 的 suffixes 上，也可能整体在其 prefix 的 VarExpression 内。
-fn call_path(call: &FunctionCall) -> Option<String> {
+///
+/// `--pack` 的 `require` 扫描共用它（路径判定只有一份：`require` 与
+/// `ygg.kv.set` 这类点链调用在 AST 上同形，没必要写第二套遍历）。
+pub(crate) fn call_path(call: &FunctionCall) -> Option<String> {
     let mut parts = Vec::new();
     collect_prefix(call.prefix(), &mut parts);
     collect_suffix_index_names(call.suffixes(), &mut parts);
@@ -326,8 +374,37 @@ fn collect_suffix_index_names<'a>(
     }
 }
 
+/// 调用的**单一字符串实参**（`f("x")` 与 `f "x"` 两种形态）；其余形态 → None。
+///
+/// `require` 只认字面量：拼接出来的名字（`require("src." .. name)`）静态不可判，
+/// 由 lint 侧按「非法/不可解析」提示，装载期再按真实字符串判定。
+pub(crate) fn string_argument(call: &FunctionCall) -> Option<TokenReference> {
+    for suffix in call.suffixes() {
+        match suffix {
+            Suffix::Call(full_moon::ast::Call::AnonymousCall(args)) => {
+                return match args.as_ref() {
+                    FunctionArgs::Parentheses { arguments, .. } => {
+                        let mut arguments = arguments.iter();
+                        match (arguments.next(), arguments.next()) {
+                            (Some(Expression::String(token)), None) => Some(token.clone()),
+                            _ => None,
+                        }
+                    }
+                    FunctionArgs::String(token) => Some(token.clone()),
+                    // 表构造实参（`require{...}`）或未来新增形态：都不是字面量。
+                    _ => None,
+                };
+            }
+            // 点链/索引后缀继续找调用位；其他后缀（方法调用等）不是本形态。
+            Suffix::Index(_) => continue,
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// 字符串字面量 → 去引号值（TokenType::StringLiteral 的 literal 已去引号）。
-fn string_literal_value(token: &TokenReference) -> String {
+pub(crate) fn string_literal_value(token: &TokenReference) -> String {
     match token.token_type() {
         TokenType::StringLiteral { literal, .. } => literal.to_string(),
         _ => token.to_string(),

@@ -22,6 +22,22 @@ pub mod code {
     pub const R3_GOTO_DOT_FORM: &str = "YGG-R3";
     /// 解析失败（非 R3 形态；message 为 full_moon 错误原文）。
     pub const PARSE: &str = "YGG-PARSE";
+    /// `--pack`：`pack.json` 的 `code` 段形状不合法（字段缺失 / 类型不符 /
+    /// 重复登记 / 入口与模块重叠）。
+    pub const PACK_DECL: &str = "YGG-PACK";
+    /// `--pack`：模块路径不能规范化为模块名（标识符字符集 / 段内含点 /
+    /// 非 `.lua` / 绝对路径 / 超长）。
+    pub const MOD_NAME: &str = "YGG-MOD-NAME";
+    /// `--pack`：`code.modules` 声明了但磁盘上读不到该文件。
+    pub const MOD_MISSING: &str = "YGG-MOD-MISSING";
+    /// `--pack`：源码 `require` 了但仍未在 `code.modules` 登记（装载期必挂）。
+    pub const MOD_UNDECLARED: &str = "YGG-MOD-UNDECLARED";
+    /// `--pack`：登记了但从入口出发不可达（warning：死模块，或依赖链断了）。
+    pub const MOD_UNUSED: &str = "YGG-MOD-UNUSED";
+    /// `--pack`：循环依赖（链条文本与装载期同形）。
+    pub const MOD_CYCLE: &str = "YGG-MOD-CYCLE";
+    /// `--pack`：模块数 / 装载深度 / 单模块或整包字节数超限。
+    pub const MOD_LIMIT: &str = "YGG-MOD-LIMIT";
 }
 
 /// 一条 lint 诊断（line/column 由 offset 推导，均 1 起、字节列口径；

@@ -135,7 +135,7 @@ use ygg_sandbox::host_contract::{
     sanitize_field, AgentContract, DriveLimits, InboxRoutes, SettlementPolicy, WriteShape,
     CONTRACT_DOC,
 };
-use ygg_sandbox::modules::ModuleSet;
+use ygg_sandbox::modload::ModBundle;
 
 // ============================================================================
 // §常量 只有**不是契约**的东西：run 目录文件名、宿主自身的超时。
@@ -462,149 +462,27 @@ fn agent_config_path(dir: &Path) -> String {
 }
 
 // ============================================================================
-// §Mod 目录 五件套读盘与装载（运行期读盘——agent 必须支持任意 mod 目录，
-//             不能像 adventure.rs 那样 include_str! 编译期固化）
+// §Mod 目录装载（运行期读盘——agent 必须支持任意 mod 目录，不能像
+//   adventure.rs 那样 include_str! 编译期固化）
+//
+//   读盘/声明对账只走 `ygg_sandbox::modload`（与走查 playtest 同一份实现）：
+//   本文件多出来的诉求只有两条——① 热载要**反复**从同一份参数重建驱动
+//   （签名变了才重读），所以持有 `ModBundle` 而非一次性内核；② 错误文案要带
+//   宿主口径的前缀。所以下面只有两层薄包装，不复制任何读盘/对账逻辑。
 // ============================================================================
 
-struct ModBundle {
-    mod_source: String,
-    manifest_bytes: Vec<u8>,
-    schemas: Vec<(String, String)>,
-    resources: Vec<(String, Vec<u8>)>,
-    /// 代码模块表（r2）：空 = 单文件 Mod（`require` 对任何名字可读拒绝）。
-    modules: ModuleSet,
+/// [`ModBundle::kernel`] 的宿主错误文案（装载失败 = 启动失败）。
+fn kernel_from(bundle: &ModBundle) -> Result<KernelFacade, String> {
+    bundle
+        .kernel()
+        .map_err(|err| format!("内核装载失败：{err}"))
 }
 
-impl ModBundle {
-    /// 读盘装载五件套（pack.json 声明面 → 装载参数；与
-    /// `src/playtest.rs::read_mod_bundle` 同形，example 侧独立一份以便热载重读）。
-    fn load(dir: &Path) -> Result<Self, String> {
-        if !dir.is_dir() {
-            return Err(format!("mod 目录不存在或不可读：{}", dir.display()));
-        }
-        let pack_text = fs::read_to_string(dir.join(PACK_FILE))
-            .map_err(|err| format!("读取 {}/{PACK_FILE} 失败：{err}", dir.display()))?;
-        let pack: Json = serde_json::from_str(&pack_text)
-            .map_err(|err| format!("{}/{PACK_FILE} 不是合法 JSON：{err}", dir.display()))?;
-        let entries = pack["entries"]
-            .as_array()
-            .ok_or_else(|| format!("{}/{PACK_FILE} 缺少 entries 数组", dir.display()))?;
-        let schema_files = pack["schemaFiles"]
-            .as_array()
-            .ok_or_else(|| format!("{}/{PACK_FILE} 缺少 schemaFiles 数组", dir.display()))?;
-
-        // r2 `code` 段（可选）：声明了就是多文件 Mod——入口名取 `code.entry`，
-        // 模块字节只从 manifest 校验过的模块表取（未登记的模块装载前就失败）。
-        let code = ygg_sandbox::pack::CodeSpec::parse(&pack)
-            .map_err(|err| format!("{}/{PACK_FILE} 的 code 段非法：{err}", dir.display()))?;
-        let entry_file = code.as_ref().map_or(MOD_SOURCE_FILE, |spec| spec.entry());
-        let mod_source = fs::read_to_string(dir.join(entry_file))
-            .map_err(|err| format!("读取 {}/{entry_file} 失败：{err}", dir.display()))?;
-        let manifest_bytes = fs::read(dir.join(MANIFEST_FILE))
-            .map_err(|err| format!("读取 {}/{MANIFEST_FILE} 失败：{err}", dir.display()))?;
-        let modules = match &code {
-            None => ModuleSet::new(),
-            Some(spec) => load_code_modules(dir, spec, &manifest_bytes)?,
-        };
-
-        // schema 文本按文件内 `$id` 注册（与 pack.rs / playtest 同口径：
-        // schema 不进 manifest，装载方按 id 供给）。
-        let mut schemas = Vec::new();
-        for file in schema_files {
-            let rel = file
-                .as_str()
-                .ok_or_else(|| "schemaFiles 必须是字符串数组".to_owned())?;
-            let text = fs::read_to_string(dir.join(rel))
-                .map_err(|err| format!("读取 schema 文件 {rel} 失败：{err}"))?;
-            let parsed: Json = serde_json::from_str(&text)
-                .map_err(|err| format!("schema 文件 {rel} 不是合法 JSON：{err}"))?;
-            let id = parsed["$id"]
-                .as_str()
-                .ok_or_else(|| format!("schema 文件 {rel} 缺少 $id"))?
-                .to_owned();
-            schemas.push((id, text));
-        }
-
-        let mut resources = Vec::new();
-        for entry in entries {
-            let rel = entry["path"]
-                .as_str()
-                .ok_or_else(|| "entries[].path 必须是字符串".to_owned())?;
-            let bytes =
-                fs::read(dir.join(rel)).map_err(|err| format!("读取资源文件 {rel} 失败：{err}"))?;
-            resources.push((rel.to_owned(), bytes));
-        }
-
-        Ok(Self {
-            mod_source,
-            manifest_bytes,
-            schemas,
-            resources,
-            modules,
-        })
-    }
-
-    /// 按本包构造驱动（资源表 fail-fast 先于任何 Lua 状态；有模块表则入口顶层
-    /// 即可 `require`）。
-    fn kernel(&self) -> Result<KernelFacade, String> {
-        let built = if self.modules.is_empty() {
-            KernelFacade::with_resources(
-                &self.mod_source,
-                &self.manifest_bytes,
-                &self.schemas,
-                &self.resources,
-            )
-        } else {
-            KernelFacade::with_resources_and_modules(
-                &self.mod_source,
-                self.modules.clone(),
-                &self.manifest_bytes,
-                &self.schemas,
-                &self.resources,
-            )
-        };
-        built.map_err(|err| format!("内核装载失败：{err}"))
-    }
-
-    /// 读档重建（热载路径）：与 [`ModBundle::kernel`] 同一分派（有模块表就走
-    /// 多文件变体）——模块文件变了而入口没变时，热载签名会变并走到这里，若
-    /// 这里丢掉模块表，跑起来的仍是旧代码或入口 require 直接失败。
-    fn restore(&self, save_bytes: &[u8]) -> Result<KernelFacade, String> {
-        let restored = if self.modules.is_empty() {
-            KernelFacade::restore_with_resources(
-                save_bytes,
-                &self.mod_source,
-                &self.manifest_bytes,
-                &self.schemas,
-                &self.resources,
-            )
-        } else {
-            KernelFacade::restore_with_resources_and_modules(
-                save_bytes,
-                &self.mod_source,
-                self.modules.clone(),
-                &self.manifest_bytes,
-                &self.schemas,
-                &self.resources,
-            )
-        };
-        restored.map_err(|err| format!("内核重装载失败：{err}"))
-    }
-}
-
-/// 多文件 Mod 的模块表：声明 → manifest 登记 → 实际字节三者对账（装载前
-/// 全部失败可见；装载器不对文件系统做任何事）。
-fn load_code_modules(
-    dir: &Path,
-    spec: &ygg_sandbox::pack::CodeSpec,
-    manifest_bytes: &[u8],
-) -> Result<ModuleSet, String> {
-    let manifest = ygg_schema::manifest::parse_manifest(manifest_bytes)
-        .map_err(|err| format!("{}/{MANIFEST_FILE} 不合契约：{err}", dir.display()))?;
-    let module_bytes = ygg_sandbox::pack::collect_bytes(spec, |rel| fs::read(dir.join(rel)))
-        .map_err(|err| format!("{}/code 段读取失败：{err}", dir.display()))?;
-    ygg_sandbox::pack::assemble(spec, manifest.code(), &module_bytes)
-        .map_err(|err| format!("{}/code 段校验失败：{err}", dir.display()))
+/// [`ModBundle::restore`] 的宿主错误文案（热载/续局重建失败 = 回滚到旧驱动）。
+fn restore_from(bundle: &ModBundle, save_bytes: &[u8]) -> Result<KernelFacade, String> {
+    bundle
+        .restore(save_bytes)
+        .map_err(|err| format!("内核重装载失败：{err}"))
 }
 
 /// 单文件监视快照（热载变更判据：mtime + 字节数）。
@@ -895,7 +773,7 @@ impl Session {
 
         // 先装载（失败即退出，run 目录不留空壳），再建 run 目录接管产物。
         let bundle = ModBundle::load(&mod_dir)?;
-        let kernel = bundle.kernel()?;
+        let kernel = kernel_from(&bundle)?;
         // host 契约是**必填面**：事件名 / inbox 路由 / 结算口径 / 推进阈值全部来自
         // Mod 声明，缺任何一项即装载期失败（宿主不保留任何默认值，fail-closed）。
         let contract = AgentContract::load(&mod_dir)?;
@@ -1218,8 +1096,7 @@ impl Session {
             let inbox_routes = InboxRoutes::load(&self.mod_dir)?;
             let limits = DriveLimits::load(&self.mod_dir.join(&self.config_rel))?;
             let settlement = SettlementPolicy::load(&self.mod_dir.join(&self.config_rel))?;
-            bundle
-                .restore(save_text.as_bytes())
+            restore_from(&bundle, save_text.as_bytes())
                 .map(|kernel| (kernel, contract, inbox_routes, limits, settlement))
         });
         match outcome {

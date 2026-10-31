@@ -1079,7 +1079,12 @@ dependencies = [
  "full_moon",
  "serde",
  "serde_json",
+ "ygg-modules",
 ]
+
+[[package]]
+name = "ygg-modules"
+version = "0.1.0"
 
 [[package]]
 name = "ygg-sandbox"
@@ -1091,6 +1096,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "ygg-core",
+ "ygg-modules",
  "ygg-schema",
 ]
 
