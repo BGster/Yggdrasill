@@ -31,12 +31,12 @@
 //!   --requirement '补一条门禁日志|把 verify 的失败原因写进 events.jsonl'
 //! ```
 //!
-//! ## host 契约（**必填、无默认值**；宿主代码不含任何事件名字面量）
+//! ## host 契约（**必填、无默认值**；宿主代码不含任何事件名与叙事约定字面量）
 //!
 //! | 声明位置 | 段 | 内容 |
 //! | --- | --- | --- |
-//! | `pack.json` | `agent` | `entryEvent` / `choiceEvent` / `summaryEvent` / `endingPrefix` |
-//! | `pack.json` | `inboxRoutes` | `kind` → `{action, fields[, write]}`（可为 `{}`） |
+//! | `pack.json` | `agent` | `entryEvent` / `choiceEvent` / `summaryEvent` / `endingPrefix` / `metaKey` / `rejectionPrefixes` / `replayPrefix` / `defaultPayload` |
+//! | `pack.json` | `inboxRoutes` | 三个保留键 `externalIdField` / `payloadField` / `extMarker` + `kind` → `{action, fields[, write]}` |
 //! | `data/config.json` | `settlement` | `requireEvents` / `requireNoFailedSteps` / `requireEnding` / `requireInboxConsumed` |
 //! | `data/config.json` | `drive` | `maxSteps` / `stallLimit` / `stepsPerRequirement` |
 //!
@@ -46,10 +46,11 @@
 //!
 //! ## 异步需求 inbox（④，跨进程队列入口）
 //!
-//! 协议：`<runs-root>/<run-id>/inbox.jsonl`，每行一个 JSON
-//! `{external_id, title, description, created_at}`；`--requirement` 只做
-//! `OpenOptions::append`，**不读写 autosave**，所以与运行中的局无锁竞争。
-//! 文件保留作审计；消费位移记在 `inbox.cursor`（`{"consumed": N}`，按非空行数）。
+//! 协议：`<runs-root>/<run-id>/inbox.jsonl`，每行一个 JSON 对象（记录字段名由
+//! `inboxRoutes` 的三个保留键声明：幂等键 / 预成形载荷 / 幂等后缀标记）；
+//! `--requirement` 只做 `OpenOptions::append`，**不读写 autosave**，所以与运行中
+//! 的局无锁竞争。文件保留作审计；消费位移记在 `inbox.cursor`（`{"consumed": N}`，
+//! 按非空行数）。
 //!
 //! 消费时机：cmd 自动推进**之前**、stdin 每次提示**之前**、单发每次派发**之前**
 //! 都会 drain 新行，按 `inboxRoutes` 声明的路由（kind → 动作 + 段序）派发。
@@ -58,8 +59,9 @@
 //! 未声明即明确拒绝（退出码 3，不静默丢行）。
 //!
 //! 崩溃安全：**dispatch 成功且 autosave 落盘后**才推进 cursor。若「存档成功、cursor
-//! 未推进」时进程挂掉，重启会重放同一行——`external_id` 是 Mod 侧幂等键，重放返回
-//! 已有需求、不会重复入队（回执叙事 `【需求重放】`）。坏 JSON 行跳过并前移 cursor
+//! 未推进」时进程挂掉，重启会重放同一行——幂等键（`inboxRoutes.externalIdField`）
+//! 是 Mod 侧去重依据，重放返回已有需求、不会重复入队（回执叙事以契约的
+//! `agent.replayPrefix` 开头）。坏 JSON 行跳过并前移 cursor
 //! （否则永久阻塞）。局已收口（stage=done）后仍有未消费行 → 非零退出并提示开新局，
 //! 不静默丢弃。
 //!
@@ -135,25 +137,19 @@ use ygg_sandbox::host_contract::{
 };
 
 // ============================================================================
-// §常量 只有**不是契约**的东西：文件名、内核 payload 约定、宿主自身的超时。
+// §常量 只有**不是契约**的东西：run 目录文件名、宿主自身的超时。
 //
-// 事件名 / inbox kind / 结算口径 / 推进阈值**一律来自 Mod 自己的声明**
-// （`pack.json` 的 `agent` / `inboxRoutes` + `config.json` 的 `settlement` /
-// `drive`，解析在 `ygg_sandbox::host_contract`）。本文件**不含任何事件名字面量**
-// 与回退默认值：契约缺失即装载期失败（fail-closed）。
+// 事件名 / 叙事前缀 / 摘要键名 / 入口载荷 / inbox 字段名与幂等标记 / 结算口径 /
+// 推进阈值**一律来自 Mod 自己的声明**（`pack.json` 的 `agent` / `inboxRoutes` +
+// `config.json` 的 `settlement` / `drive`，解析在 `ygg_sandbox::host_contract`）。
+// 本文件**不含任何 Mod 语义字面量**与回退默认值：契约缺失即装载期失败（fail-closed）。
+// 归属边界（哪些字面量属于 host）见 `AGENTS.md` 的「硬编码归属表」。
 // ============================================================================
 
-/// 事件 payload 缺省值（内核口径：事件路径 payload 必填且须为 JSON 标量）。
-const DEFAULT_PAYLOAD: &str = "0";
 /// 外部决策命令的最长执行时间；任何异常都 fail closed，绝不回退到固定序号。
 const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 决策命令轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
 const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
-
-/// 摘要结构化字段在回执信封里的位置（内核 `ygg.meta(key, value)` → 信封 `meta`）。
-/// 键名是本宿主与 Mod 的契约键，**不是叙事前缀**：Mod 在叙事里写同样的字
-/// 也不会被误判。摘要动作名本身来自 `pack.json` 的 `agent.summaryEvent`。
-const SUMMARY_META_KEY: &str = "summary";
 
 const AUTOSAVE_FILE: &str = "autosave.json";
 const EVENTS_FILE: &str = "events.jsonl";
@@ -162,13 +158,6 @@ const SETTLEMENT_FILE: &str = "settlement.json";
 const INBOX_FILE: &str = "inbox.jsonl";
 const INBOX_CURSOR_FILE: &str = "inbox.cursor";
 const DECIDE_INPUT_FILE: &str = "decide-input.json";
-
-/// Mod 侧拒绝的叙事前缀（`agent-seed` 系 Mod 用叙事而不是错误码表达「动作被拒 /
-/// 载荷被拒 / 需求待排」，内核信封仍是 ok——宿主必须识别，否则会把被拒的需求
-/// 误记成已入队）。**这是 seed Mod 的叙事约定**（见该 Mod README 的契约章节）。
-const REJECTION_PREFIXES: [&str; 3] = ["【动作被拒】", "【载荷被拒】", "【需求待排】"];
-/// Mod 侧幂等重放的叙事前缀（同 external_id 重放：**算成功消费**，只是没新增）。
-const REPLAY_PREFIX: &str = "【需求重放】";
 
 const MOD_SOURCE_FILE: &str = "mod.lua";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -213,7 +202,8 @@ struct Args {
     settle: bool,
     watch: bool,
     event: Option<String>,
-    payload: String,
+    /// `--payload` 的值；`None` = 用 Mod 契约的 `agent.defaultPayload`（宿主不猜）。
+    payload: Option<String>,
     /// 交互模式推方式（`--drive`；缺省 stdin）。
     drive: Drive,
     /// 异步 inbox 操作（只追 inbox.jsonl 后退出，不读写 autosave）。
@@ -228,7 +218,7 @@ fn parse_args() -> Args {
     let mut settle = false;
     let mut watch = false;
     let mut event: Option<String> = None;
-    let mut payload = DEFAULT_PAYLOAD.to_owned();
+    let mut payload: Option<String> = None;
     let mut drive = Drive::Stdin;
     let mut inbox: Option<InboxWrite> = None;
 
@@ -250,7 +240,7 @@ fn parse_args() -> Args {
             "--settle" => settle = true,
             "--watch" => watch = true,
             "--event" => event = Some(next_value(&mut iter, "--event")),
-            "--payload" => payload = next_value(&mut iter, "--payload"),
+            "--payload" => payload = Some(next_value(&mut iter, "--payload")),
             "--drive" => {
                 let text = next_value(&mut iter, "--drive");
                 drive = match parse_drive(&text) {
@@ -355,7 +345,7 @@ fn usage(code: i32) -> ! {
   --resume           从 autosave.json 续局（缺存档则按新局开局）
   --watch            交互模式下每步检查 mod 目录 mtime 变化并热载
   --event <名称>     单发模式：派发一个事件后退出（stdout 单行 JSON 回执）
-  --payload <JSON>   事件 payload（默认 \"0\"；必须 JSON 标量）
+  --payload <JSON>   事件 payload（缺省 = Mod 契约的 agent.defaultPayload；必须 JSON 标量）
   --drive <方式>     交互模式推方式（默认 stdin；宿主不替你做决策）：
                        stdin      读 stdin：数字=选择 / event <名称> [JSON] / s / l / i / config / q
                        cmd:<路径> 不读 stdin：每个待选动作交给决策命令（stdout 单行 `N` 或
@@ -370,9 +360,11 @@ fn usage(code: i32) -> ! {
   --settle           读 autosave + events.jsonl 写 settlement.json
   -h, --help         本帮助
 
-host 契约（**必填、无默认值**，宿主代码不含任何事件名字面量）：
-  <mod>/pack.json       agent{entryEvent,choiceEvent,summaryEvent,endingPrefix}
-                        inboxRoutes{<kind>:{action,fields[,write]}}
+host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字面量）：
+  <mod>/pack.json       agent{entryEvent,choiceEvent,summaryEvent,endingPrefix,
+                              metaKey,rejectionPrefixes,replayPrefix,defaultPayload}
+                        inboxRoutes{externalIdField,payloadField,extMarker,
+                                    <kind>:{action,fields[,write]}}
   <mod>/data/config.json settlement{requireEvents,requireNoFailedSteps,
                         requireEnding,requireInboxConsumed}
                         drive{maxSteps,stallLimit,stepsPerRequirement}（正整数）
@@ -384,7 +376,8 @@ host 契约（**必填、无默认值**，宿主代码不含任何事件名字�
 
 异步需求（inbox）：每个自动动作前、stdin 每次提示前、单发每次派发前都会消费
   inbox.jsonl 的新行，按 inboxRoutes 声明派发；dispatch 成功且存档后才前移 cursor，
-  重放靠 Mod 侧 external_id 幂等去重。局已收口后仍有未消费行 → 非零退出。";
+  重放靠 Mod 侧幂等键去重（字段名由 inboxRoutes.externalIdField 声明）；
+  局已收口后仍有未消费行 → 非零退出。";
     if code == 0 {
         println!("{text}");
     } else {
@@ -678,12 +671,12 @@ impl Summary {
         }
     }
 
-    /// 从回执信封取结构化摘要：读 `meta.summary`（[`SUMMARY_META_KEY`]）。
+    /// 从回执信封取结构化摘要：读 `meta.<agent.metaKey>`（键名由 Mod 声明）。
     ///
-    /// 缺失（旧 Mod / 该动作没调 `ygg.meta`）或形状不是对象 → [`Summary::unknown`]
+    /// 缺失（旧 Mod / 该动作没调摘要写入接口）或形状不是对象 → [`Summary::unknown`]
     /// （安全值，调用方停等而不是猜）。
-    fn from_receipt(receipt: &Json) -> Self {
-        match &receipt["meta"][SUMMARY_META_KEY] {
+    fn from_receipt(receipt: &Json, meta_key: &str) -> Self {
+        match &receipt["meta"][meta_key] {
             value if value.is_object() => Self::from_json(value),
             _ => Self::unknown(),
         }
@@ -1002,9 +995,11 @@ impl Session {
             return cached.clone();
         }
         let summary_event = self.contract.summary_event.clone();
-        let envelope = parse_envelope(&self.kernel.dispatch(&summary_event, DEFAULT_PAYLOAD));
+        let payload = self.contract.default_payload.clone();
+        let meta_key = self.contract.meta_key.clone();
+        let envelope = parse_envelope(&self.kernel.dispatch(&summary_event, &payload));
         let summary = if envelope["ok"] == Json::Bool(true) {
-            Summary::from_receipt(&envelope)
+            Summary::from_receipt(&envelope, &meta_key)
         } else {
             Summary::unknown()
         };
@@ -1085,17 +1080,19 @@ impl Session {
             let payload = json!(fields).to_string();
             let action = route.action.clone();
             let receipt = self.dispatch_event(&action, &payload);
-            if receipt["ok"] != Json::Bool(true) || dispatch_rejected(&receipt) {
+            let rejected =
+                receipt["ok"] != Json::Bool(true) || dispatch_rejected(&self.contract, &receipt);
+            if rejected {
                 // 内核错误信封（载荷 / 校验失败）与 Mod 侧拒绝同属「未入队」：
                 // cursor 不前移，留给调用方报错与重启重放。
-                drain.error = Some(first_rejection(&receipt));
+                drain.error = Some(first_rejection(&self.contract, &receipt));
                 break;
             }
             consumed += 1;
             drain.applied += 1;
             if narrative_lines(&receipt)
                 .iter()
-                .any(|line| line.starts_with(REPLAY_PREFIX))
+                .any(|line| self.contract.is_replay(line))
             {
                 drain.replayed += 1;
             }
@@ -1315,8 +1312,8 @@ impl Session {
 // ============================================================================
 
 /// `--requirement` 的载荷切分：`标题|描述`（只切首段——描述里的竖线保留）。
-/// 标题 / 描述里的 `|` 换成全角 `｜`：竖线是 Mod 侧的三段式分隔符（`title|description|external_id`），
-/// 混进去会把描述尾部误当幂等键。
+/// 标题 / 描述里的 `|` 换成全角 `｜`：竖线是 Mod 侧的分段分隔符，混进去会把
+/// 描述尾部误当幂等键。
 fn split_requirement(text: &str) -> (String, String) {
     let (title, description) = match text.split_once('|') {
         Some((head, tail)) => (head.trim(), tail.trim()),
@@ -1326,23 +1323,19 @@ fn split_requirement(text: &str) -> (String, String) {
 }
 
 /// Mod 侧拒绝的识别（叙事前缀）：内核信封仍是 ok，宿主必须显式看叙事。
-fn dispatch_rejected(receipt: &Json) -> bool {
-    narrative_lines(receipt).iter().any(|line| {
-        REJECTION_PREFIXES
-            .iter()
-            .any(|prefix| line.starts_with(prefix))
-    })
+///
+/// 前缀集合由 Mod 契约声明（`agent.rejectionPrefixes`），宿主不认识具体文案。
+fn dispatch_rejected(contract: &AgentContract, receipt: &Json) -> bool {
+    narrative_lines(receipt)
+        .iter()
+        .any(|line| contract.is_rejection(line))
 }
 
 /// 拒绝原因（回执里的第一条拒绝叙事；缺失则给错误码文案）。
-fn first_rejection(receipt: &Json) -> String {
+fn first_rejection(contract: &AgentContract, receipt: &Json) -> String {
     narrative_lines(receipt)
         .into_iter()
-        .find(|line| {
-            REJECTION_PREFIXES
-                .iter()
-                .any(|prefix| line.starts_with(prefix))
-        })
+        .find(|line| contract.is_rejection(line))
         .unwrap_or_else(|| error_text(receipt))
 }
 /// pendingChoice 指纹（自动推进的「无进展」判据：提示词 + 全部选项文本）。
@@ -1371,7 +1364,7 @@ fn append_inbox_line(path: &Path, record: &Json) -> Result<(), String> {
     writeln!(file, "{record}").map_err(|err| format!("写入 {} 失败：{err}", path.display()))
 }
 
-/// inbox 现有非空行数（external_id 的序号部分；与消费侧的计数口径一致）。
+/// inbox 现有非空行数（宿主的 audit 计数；与消费侧的计数口径一致）。
 fn inbox_line_count(path: &Path) -> usize {
     fs::read_to_string(path).map_or(0, |text| {
         text.lines().filter(|line| !line.trim().is_empty()).count()
@@ -1696,6 +1689,11 @@ fn run_single(args: &Args) -> i32 {
         .event
         .clone()
         .unwrap_or_else(|| session.contract.entry_event.clone());
+    // 载荷缺省 = Mod 契约声明（宿主不持有任何 payload 字面量）。
+    let payload = args
+        .payload
+        .clone()
+        .unwrap_or_else(|| session.contract.default_payload.clone());
 
     // 单发每次派发前检查热载：Agent 侧改了 mod，下一条动作即生效。
     session.maybe_reload();
@@ -1704,7 +1702,7 @@ fn run_single(args: &Args) -> i32 {
     // 被拒（局末 / 队列满 / 载荷）不阻碍本次派发，但会落 `inbox.remaining` + 警告。
     let drain = session.drain_inbox();
 
-    let mut receipt = session.dispatch_event(&event, &args.payload);
+    let mut receipt = session.dispatch_event(&event, &payload);
     if drain.touched() {
         receipt["inbox"] = drain.to_json();
     }
@@ -1748,32 +1746,29 @@ fn resolve_mod_dir(args: &Args, run_dir: &Path) -> Result<PathBuf, String> {
         })
 }
 
-/// 宿主 CLI 写命令 → `(kind, 记录形态)`：完全由 Mod 的 `inboxRoutes` 声明决定。
+/// 宿主 CLI 写命令 → `(路由表, kind)`：完全由 Mod 的 `inboxRoutes` 声明决定。
 ///
 /// 未声明该写命令 → 可读拒绝（调用方报错退出，**不**静默写一行宿主猜的记录）。
+/// 同时返回整张表：记录字段名（幂等键 / 预成形载荷）也是契约的一部分。
 fn resolve_write_binding(
     args: &Args,
     run_dir: &Path,
     flag: &str,
-) -> Result<(String, WriteShape), String> {
+) -> Result<(InboxRoutes, String), String> {
     let mod_dir = resolve_mod_dir(args, run_dir)?;
     let routes = InboxRoutes::load(&mod_dir)?;
     if routes.is_empty() {
         return Err(format!(
-            "本 Mod 的 pack.json `inboxRoutes` 为 {{}}（不支持异步 inbox）——`--{flag}` 无处可写"
+            "本 Mod 的 pack.json `inboxRoutes` 未声明任何 kind（不支持异步 inbox）——`--{flag}` 无处可写"
         ));
     }
-    let Some((kind, route)) = routes.write_binding(flag) else {
+    let Some(kind) = routes.write_binding(flag).map(|(kind, _)| kind.to_owned()) else {
         return Err(format!(
             "本 Mod 的 pack.json `inboxRoutes` 未声明 `--{flag}` 的写命令（需要某条路由带 \
              `\"write\": {{\"flag\": \"{flag}\", \"shape\": \"named|payload\"}}`；{CONTRACT_DOC}）"
         ));
     };
-    let binding = route
-        .write
-        .as_ref()
-        .ok_or_else(|| "内部错误：write_binding 只返回带 write 的路由".to_owned())?;
-    Ok((kind.to_owned(), binding.shape))
+    Ok((routes, kind))
 }
 
 /// `--requirement`：只往 inbox.jsonl 追加一行，不读不写 autosave 后退出。
@@ -1791,12 +1786,20 @@ fn run_inbox_append(args: &Args) -> i32 {
     }
     // 记录形态与 kind 都来自 Mod 声明：契约读不到 / 没声明该写命令 → fail-closed
     // （明确拒绝 + 退出码 3，绝不静默写一行宿主猜出来的记录）。
-    let (kind, shape) = match resolve_write_binding(args, &run_dir, write.flag) {
+    let (routes, kind) = match resolve_write_binding(args, &run_dir, write.flag) {
         Ok(binding) => binding,
         Err(message) => {
             eprintln!("error: {message}；本条未写入");
             return 3;
         }
+    };
+    let Some(route) = routes.get(&kind) else {
+        eprintln!("error: 内部错误：写命令绑定的 kind `{kind}` 不在路由表里；本条未写入");
+        return 3;
+    };
+    let Some(shape) = route.write.as_ref().map(|binding| binding.shape) else {
+        eprintln!("error: 内部错误：write_binding 只返回带 write 的路由；本条未写入");
+        return 3;
     };
     // 协议：写前登记。closing / finalized 一律**命令本身非零拒绝**——
     // 不允许出现「写得很成功但运行侧已无声跨过最后一次 drain」。
@@ -1818,30 +1821,45 @@ fn run_inbox_append(args: &Args) -> i32 {
         }
     };
     let path = run_dir.join(INBOX_FILE);
+    // 记录字段名全部来自契约保留键：宿主不知道幂等键 / 载荷字段叫什么。
+    let external_field = routes.external_id_field();
+    let payload_field = routes.payload_field();
     let mut record = json!({
-        "external_id": new_external_id(&args.run_id, inbox_line_count(&path)),
         "kind": kind,
         "created_at": now_secs(),
     });
+    record[external_field] = json!(new_external_id(&args.run_id, inbox_line_count(&path)));
     match shape {
-        // 命名段形态：写 title / description 字段（旧行兼容：旧行只有这两个字段）。
+        // 命名段形态：「首段|余下全部」分别落到路由声明的**前两个**非幂等键段
+        // （典型就是标题 / 描述；段名由 Mod 声明，宿主不认业务字段名）。
         WriteShape::Named => {
-            let (title, description) = split_requirement(&write.value);
-            record["title"] = json!(title);
-            record["description"] = json!(description);
+            let (first, rest) = split_requirement(&write.value);
+            let mut named = route.named_fields(external_field);
+            if let Some(field) = named.next() {
+                record[field.as_str()] = json!(first);
+            }
+            if let Some(field) = named.next() {
+                record[field.as_str()] = json!(rest);
+            }
         }
-        // 预成形 wire 形态：整串载荷进 payload（宿主不解析、不重排）。
-        WriteShape::Payload => record["payload"] = json!(write.value.trim()),
+        // 预成形 wire 形态：整串载荷进契约声明的载荷字段（宿主不解析、不重排）。
+        WriteShape::Payload => record[payload_field] = json!(write.value.trim()),
     }
     let receipt = match append_inbox_line(&path, &record) {
-        Ok(()) => json!({
-            "ok": true,
-            "inbox": path.display().to_string(),
-            "kind": kind,
-            "external_id": record["external_id"].clone(),
-            "payload": record.get("payload").cloned().unwrap_or(Json::Null),
-            "title": record.get("title").cloned().unwrap_or(Json::Null),
-        }),
+        Ok(()) => {
+            // 回执键 = 记录的契约字段名（幂等键 / 载荷 / 各命名段）：调用方不必猜。
+            let mut receipt = json!({
+                "ok": true,
+                "inbox": path.display().to_string(),
+                "kind": kind,
+            });
+            receipt[external_field] = record[external_field].clone();
+            receipt[payload_field] = record.get(payload_field).cloned().unwrap_or(Json::Null);
+            for field in route.named_fields(external_field) {
+                receipt[field.as_str()] = record.get(field.as_str()).cloned().unwrap_or(Json::Null);
+            }
+            receipt
+        }
         Err(message) => {
             eprintln!("error: {message}");
             json!({
@@ -2165,30 +2183,47 @@ mod contract_tests {
     use super::{AgentContract, Path};
     use serde_json::json;
 
+    /// `agent` 段的八个字段名（与本模块上一层的 `AGENT_FIELDS` 同集合；这里显式列
+    /// 出来是为了让「逐个缺字段」用例覆盖完整形状）。
+    const DECLARED_FIELDS: [&str; 8] = [
+        "entryEvent",
+        "choiceEvent",
+        "summaryEvent",
+        "endingPrefix",
+        "metaKey",
+        "rejectionPrefixes",
+        "replayPrefix",
+        "defaultPayload",
+    ];
+
     /// 完整合法段（错误用例在此基础上逐字段挖掉）。
     fn full_section() -> serde_json::Value {
         json!({
             "entryEvent": "mod.entry",
             "choiceEvent": "mod.choice",
             "summaryEvent": "mod.summary",
-            "endingPrefix": "END:"
+            "endingPrefix": "END:",
+            "metaKey": "digest",
+            "rejectionPrefixes": ["NOPE:", "BAD:"],
+            "replayPrefix": "AGAIN:",
+            "defaultPayload": "-"
         })
     }
 
-    /// 段缺失 / 四个字段缺任一 → 硬错误（点名缺失字段 + 形状示例 + 文档定位）。
+    /// 段缺失 / 八个字段缺任一 → 硬错误（点名缺失字段 + 形状示例 + 文档定位）。
     #[test]
     fn missing_section_or_field_is_a_hard_error() {
         let message = AgentContract::from_pack(&json!({"entries": []})).expect_err("必须报错");
         assert!(message.contains("`agent` 段"), "{message}");
         assert!(
-            message.contains("\"entryEvent\""),
-            "应给出形状示例：{message}"
+            message.contains("\"entryEvent\"") && message.contains("\"defaultPayload\""),
+            "应给出完整形状示例：{message}"
         );
         assert!(message.contains("README.md"), "应给出文档定位：{message}");
         // 读不到 pack.json 也是硬错误（不兜底）
         assert!(AgentContract::load(Path::new("/nonexistent/ygg-mod")).is_err());
 
-        for field in ["entryEvent", "choiceEvent", "summaryEvent", "endingPrefix"] {
+        for field in DECLARED_FIELDS {
             let mut section = full_section();
             section.as_object_mut().expect("对象").remove(field);
             let message =
@@ -2197,36 +2232,80 @@ mod contract_tests {
                 message.contains(&format!("`{field}`")),
                 "必须点名缺失字段 `{field}`：{message}"
             );
-            assert!(message.contains("expected") == false);
             assert!(message.contains("README.md"), "{message}");
         }
         // 空串 / 非字符串 / 段不是对象 → 同样硬错误
         for broken in [
-            json!({"agent": {"entryEvent": "  ", "choiceEvent": "c", "summaryEvent": "s", "endingPrefix": "E"}}),
-            json!({"agent": {"entryEvent": 7, "choiceEvent": "c", "summaryEvent": "s", "endingPrefix": "E"}}),
             json!({"agent": []}),
             json!({"agent": "x"}),
+            json!({"agent": {"entryEvent": 7, "choiceEvent": "c", "summaryEvent": "s", "endingPrefix": "E", "metaKey": "m", "rejectionPrefixes": ["R"], "replayPrefix": "P", "defaultPayload": "0"}}),
         ] {
             assert!(AgentContract::from_pack(&broken).is_err(), "{broken}");
         }
     }
 
+    /// 每个字段的类型 / 空值约束都单独成立（含拒绝前缀数组的三道检查）。
+    #[test]
+    fn field_types_and_emptiness_are_enforced() {
+        let broken = |field: &str, value: serde_json::Value| {
+            let mut section = full_section();
+            section[field] = value;
+            AgentContract::from_pack(&json!({"agent": section})).expect_err("非法字段必须报错")
+        };
+        for field in [
+            "entryEvent",
+            "choiceEvent",
+            "summaryEvent",
+            "endingPrefix",
+            "metaKey",
+            "replayPrefix",
+        ] {
+            let message = broken(field, json!("   "));
+            assert!(
+                message.contains(&format!("`{field}`")) && message.contains("空串"),
+                "空串必须被拦：{message}"
+            );
+            assert!(broken(field, json!(42)).contains(&format!("`{field}`")));
+        }
+        // 拒绝前缀：空数组 / 含空串 / 非数组 → 三道都拦
+        for value in [json!([]), json!(["OK:", ""]), json!("OK:")] {
+            let message = broken("rejectionPrefixes", value);
+            assert!(message.contains("`rejectionPrefixes`"), "{message}");
+        }
+        // 入口载荷允许空串（显式声明「空载荷」是合法意图），但不是字符串即错
+        let mut section = full_section();
+        section["defaultPayload"] = json!("");
+        let contract = AgentContract::from_pack(&json!({"agent": section})).expect("空载荷合法");
+        assert_eq!(contract.default_payload, "");
+        assert!(broken("defaultPayload", json!(null)).contains("`defaultPayload`"));
+    }
+
     /// 声明了就用声明值（换 Mod 只改 pack.json，宿主不认字面量）。
     #[test]
-    fn reads_the_four_declared_events() {
+    fn reads_the_eight_declared_fields() {
         let contract =
             AgentContract::from_pack(&json!({"agent": full_section()})).expect("合法 agent 段");
         assert_eq!(contract.entry_event, "mod.entry");
         assert_eq!(contract.choice_event, "mod.choice");
         assert_eq!(contract.summary_event, "mod.summary");
         assert_eq!(contract.ending_prefix, "END:");
+        assert_eq!(contract.meta_key, "digest");
+        assert_eq!(contract.rejection_prefixes, ["NOPE:", "BAD:"]);
+        assert_eq!(contract.replay_prefix, "AGAIN:");
+        assert_eq!(contract.default_payload, "-");
+        // 判定面也只认声明值
+        assert!(contract.is_rejection("NOPE: 动作越阶"));
+        assert!(contract.is_rejection("BAD: 载荷非法"));
+        assert!(!contract.is_rejection("动作越阶"));
+        assert!(contract.is_replay("AGAIN: 同键重放"));
+        assert!(!contract.is_replay("NOPE: 动作越阶"));
     }
 }
 
 #[cfg(test)]
 mod inbox_routes_tests {
     use super::{InboxRoutes, Path};
-    use serde_json::json;
+    use serde_json::{json, Value as Json};
 
     /// seed Mod 的契约目录（本仓内的真实契据，测试直接读它——避免在测试里
     /// 复刻一份 kind 表，哪边改了都只有一处）。
@@ -2234,80 +2313,164 @@ mod inbox_routes_tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.ygg/mods/agent-seed")
     }
 
-    /// 段缺失 / 单条非法 → 硬错误；`{}` 合法（= 本 Mod 不支持异步 inbox）。
+    /// 三个保留键（与 kind 同层）。测试里显式声明：宿主不得内置任何字段名。
+    /// 后缀标记故意用与真 Mod 不同的值，以证明它只认声明。
+    fn record_keys() -> Json {
+        json!({
+            "externalIdField": "external_id",
+            "payloadField": "payload",
+            "extMarker": "~ext~"
+        })
+    }
+
+    /// 保留键 + 若干 kind → 一段合法声明。
+    fn section(kinds: Json) -> Json {
+        let mut table = record_keys();
+        for (kind, spec) in kinds.as_object().expect("对象") {
+            table[kind] = spec.clone();
+        }
+        json!({"inboxRoutes": table})
+    }
+
+    /// 缺段 / 缺保留键 / 单条非法 → 硬错误；只声明保留键（零 kind）才合法。
     #[test]
-    fn missing_section_is_a_hard_error_but_an_empty_table_is_legal() {
+    fn missing_section_or_reserved_key_is_a_hard_error() {
         let message = InboxRoutes::from_pack(&json!({"entries": []})).expect_err("必须报错");
         assert!(message.contains("`inboxRoutes` 段"), "{message}");
         assert!(message.contains("\"action\""), "应给出形状示例：{message}");
         assert!(message.contains("README.md"), "应给出文档定位：{message}");
 
-        let empty = InboxRoutes::from_pack(&json!({"inboxRoutes": {}})).expect("{} 合法");
+        // 空表不再是合法声明：三个保留键必填（零 kind 仍然合法）
+        let message =
+            InboxRoutes::from_pack(&json!({"inboxRoutes": {}})).expect_err("缺保留键必须报错");
+        assert!(message.contains("externalIdField"), "{message}");
+        for key in ["externalIdField", "payloadField", "extMarker"] {
+            let mut table = record_keys();
+            table.as_object_mut().expect("对象").remove(key);
+            let message = InboxRoutes::from_pack(&json!({"inboxRoutes": table}))
+                .expect_err("缺保留键必须报错");
+            assert!(
+                message.contains(&format!("`{key}`")),
+                "必须点名 `{key}`：{message}"
+            );
+            assert!(message.contains("README.md"), "{message}");
+        }
+        // 保留键空串 / 非字符串 → 同样硬错误
+        for (key, value) in [
+            ("externalIdField", json!("  ")),
+            ("payloadField", json!(7)),
+            ("extMarker", Json::Null),
+        ] {
+            let mut table = record_keys();
+            table[key] = value;
+            assert!(
+                InboxRoutes::from_pack(&json!({"inboxRoutes": table})).is_err(),
+                "`{key}` 非法值必须报错"
+            );
+        }
+
+        let empty = InboxRoutes::from_pack(&section(json!({}))).expect("零 kind 合法");
         assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+        assert_eq!(empty.external_id_field(), "external_id");
+        assert_eq!(empty.payload_field(), "payload");
+        assert_eq!(empty.ext_marker(), "~ext~");
         assert!(empty.write_binding("requirement").is_none());
 
-        for (broken, needle) in [
-            (json!({"inboxRoutes": {"k": {"fields": ["a"]}}}), "`action`"),
-            (json!({"inboxRoutes": {"k": {"action": "a"}}}), "`fields`"),
+        // 单条非法（保留键齐全）→ 逐项点名
+        for (kinds, needle) in [
+            (json!({"k": {"fields": ["a"]}}), "`action`"),
+            (json!({"k": {"action": "a"}}), "`fields`"),
+            (json!({"k": {"action": "a", "fields": []}}), "不得为空数组"),
             (
-                json!({"inboxRoutes": {"k": {"action": "a", "fields": []}}}),
-                "不得为空数组",
-            ),
-            (
-                json!({"inboxRoutes": {"k": {"action": "a", "fields": ["x"], "write": {"shape": "named"}}}}),
+                json!({"k": {"action": "a", "fields": ["x"], "write": {"shape": "named"}}}),
                 "`flag`",
             ),
             (
-                json!({"inboxRoutes": {"k": {"action": "a", "fields": ["x"], "write": {"flag": "f", "shape": "guess"}}}}),
+                json!({"k": {"action": "a", "fields": ["x"], "write": {"flag": "f", "shape": "guess"}}}),
                 "`named` 或 `payload`",
             ),
-            (json!({"inboxRoutes": []}), "必须是对象"),
+            // 命名段形态必须至少有一个非幂等键段（否则写出来的记录无载荷）
+            (
+                json!({"k": {"action": "a", "fields": ["external_id"], "write": {"flag": "f", "shape": "named"}}}),
+                "没有可写段",
+            ),
         ] {
-            let message = InboxRoutes::from_pack(&broken).expect_err("必须报错");
+            let message = InboxRoutes::from_pack(&section(kinds)).expect_err("必须报错");
             assert!(message.contains(needle), "文案应点名 `{needle}`：{message}");
         }
+        assert!(InboxRoutes::from_pack(&json!({"inboxRoutes": []})).is_err());
     }
 
     /// 声明表真的驱动派发：kind → action + 段序 + 写命令绑定，宿主零 kind 字面量。
     #[test]
     fn declared_routes_drive_the_dispatch() {
-        let routes = InboxRoutes::from_pack(&json!({
-            "inboxRoutes": {
-                "mine": {
-                    "action": "requirement.add",
-                    "fields": ["title", "description", "external_id"],
-                    "write": {"flag": "requirement", "shape": "named"}
-                },
-                "raw": {
-                    "action": "proposal.submit",
-                    "fields": ["req", "rev", "stage", "summary", "artifacts", "external_id"],
-                    "write": {"flag": "proposal", "shape": "payload"}
-                }
+        let routes = InboxRoutes::from_pack(&section(json!({
+            "mine": {
+                "action": "requirement.add",
+                "fields": ["title", "description", "external_id"],
+                "write": {"flag": "requirement", "shape": "named"}
+            },
+            "raw": {
+                "action": "proposal.submit",
+                "fields": ["req", "rev", "stage", "summary", "artifacts", "external_id"],
+                "write": {"flag": "proposal", "shape": "payload"}
+            },
+            "note": {
+                "action": "requirement.conflict",
+                "fields": ["reqs", "note"],
+                "write": {"flag": "conflict", "shape": "payload"}
             }
-        }))
+        })))
         .expect("合法 inboxRoutes");
-        assert_eq!(routes.len(), 2);
+        assert_eq!(routes.len(), 3);
         let (kind, route) = routes.write_binding("requirement").expect("声明了写命令");
         assert_eq!(kind, "mine");
         assert_eq!(route.action, "requirement.add");
+        assert!(route.declares_external(routes.external_id_field()));
         assert_eq!(
-            routes.payload_for(
-                route,
-                &json!({"title": "t", "description": "d", "external_id": "e"})
-            ),
-            Some("t|d|e".to_owned())
+            routes
+                .payload_for(
+                    route,
+                    &json!({"title": "t", "description": "d", "external_id": "e"})
+                )
+                .expect("命名段形态"),
+            "t|d|e"
+        );
+        // 把幂等键声明成段的路径：按段补齐（不拼后缀）
+        let (_, raw) = routes.write_binding("proposal").expect("声明了写命令");
+        assert_eq!(
+            routes
+                .payload_for(
+                    &raw,
+                    &json!({"payload": "r1|1|analysis", "external_id": "e"})
+                )
+                .expect("预成形形态"),
+            "r1|1|analysis|||e"
+        );
+        // 没把幂等键声明成段的路径：按契约声明的后缀标记注入
+        let (_, note) = routes.write_binding("conflict").expect("声明了写命令");
+        assert!(!note.declares_external(routes.external_id_field()));
+        assert_eq!(
+            routes
+                .payload_for(&note, &json!({"payload": "r1,r2|说明", "external_id": "e"}))
+                .expect("后缀形态"),
+            "r1,r2|说明|~ext~e"
         );
         // 未声明的旗标 → None（调用方明确拒绝，不猜）
         assert!(routes.write_binding("amend").is_none());
-        // 未声明的 kind 不被认识（= 坏行）
+        // 未声明的 kind 与保留键本身都不被当成 kind（= 坏行）
         assert!(routes.get("add").is_none());
+        assert!(routes.get("externalIdField").is_none());
+        assert!(routes.get("extMarker").is_none());
     }
 
     /// **向后兼容的字节面**：真实 seed Mod 契约对旧形态记录产出的载荷与改造前一致。
     #[test]
     fn seed_contract_reproduces_the_legacy_payloads() {
         let routes = InboxRoutes::load(&seed_mod_dir()).expect("seed Mod 的契约必须合法");
-        let payload = |flag: &str, record: serde_json::Value| {
+        let marker = routes.ext_marker();
+        let payload = |flag: &str, record: Json| {
             let (_, route) = routes.write_binding(flag).expect("声明了写命令");
             routes.payload_for(route, &record)
         };
@@ -2361,7 +2524,7 @@ mod inbox_routes_tests {
             Some("r1|1|analysis|摘要|notes/a.md|split=a,b|my-ext".to_owned())
         );
 
-        // 其余写命令：载荷原样透传 + `|@ext=<external_id>` 幂等后缀
+        // 其余写命令：载荷原样透传 + 契约声明的幂等后缀
         for (flag, raw) in [
             ("amend", "r1|新标题|新描述|依赖"),
             ("split", "r1|子A|子B"),
@@ -2371,7 +2534,7 @@ mod inbox_routes_tests {
         ] {
             assert_eq!(
                 payload(flag, json!({"payload": raw, "external_id": "inbox-8"})),
-                Some(format!("{raw}|@ext=inbox-8")),
+                Some(format!("{raw}|{marker}inbox-8")),
                 "`--{flag}` 的载荷必须保持改造前形态"
             );
         }
@@ -2549,13 +2712,14 @@ fn run_interactive(args: &Args) -> i32 {
     // 新局自动派发入口事件（与 adventure.rs 同为「开局即给处境」）；
     // 续局 / none 驱动只回显当前处境（pendingChoice 随存档往返），不推进剧情。
     let entry_event = session.contract.entry_event.clone();
+    let entry_payload = session.contract.default_payload.clone();
     let mut current = if session.resumed {
         state_receipt(&mut session, "resume", Vec::new())
     } else if matches!(drive, Drive::None) {
         // none = 只读回显：新局也不派发入口事件（零副作用）。
         state_receipt(&mut session, "state", Vec::new())
     } else {
-        session.dispatch_event(&entry_event, DEFAULT_PAYLOAD)
+        session.dispatch_event(&entry_event, &entry_payload)
     };
     let mut fresh = true;
     // 自动推进计数（`[drive] 自动推进 N` 与步数预算共用）。
@@ -2834,7 +2998,8 @@ fn run_interactive(args: &Args) -> i32 {
             "i" => print_state(&mut session),
             "config" => print_config(&session, args),
             _ => {
-                if let Some((name, payload)) = split_event_command(input) {
+                let default_payload = session.contract.default_payload.clone();
+                if let Some((name, payload)) = split_event_command(input, &default_payload) {
                     current = dispatch_with_watch(&mut session, args, &name, &payload);
                     fresh = true;
                 } else if let Ok(index) = input.parse::<i64>() {
@@ -2947,7 +3112,9 @@ fn state_receipt(session: &mut Session, event: &str, narrative: Vec<String>) -> 
 }
 
 /// `event <名称> [JSON]` 解析（JSON 可含空格——只切首段）。
-fn split_event_command(input: &str) -> Option<(String, String)> {
+///
+/// 省略载荷时用 Mod 契约声明的入口载荷（`default_payload`），宿主不持有字面量。
+fn split_event_command(input: &str, default_payload: &str) -> Option<(String, String)> {
     let (head, tail) = match input.split_once(char::is_whitespace) {
         Some((head, tail)) => (head, tail),
         None => (input, ""),
@@ -2964,7 +3131,7 @@ fn split_event_command(input: &str) -> Option<(String, String)> {
         None => (tail, ""),
     };
     let payload = if payload.is_empty() {
-        DEFAULT_PAYLOAD
+        default_payload
     } else {
         payload
     };

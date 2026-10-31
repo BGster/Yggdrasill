@@ -13,7 +13,15 @@
     "entryEvent": "event.start",
     "choiceEvent": "ygg.choice_selected",
     "summaryEvent": "agent.summary",
-    "endingPrefix": "【结局"
+    "endingPrefix": "【结局",
+    "metaKey": "summary",
+    "rejectionPrefixes": ["【拒绝】"],
+    "replayPrefix": "【重放】",
+    "defaultPayload": "0"
   },
-  "inboxRoutes": {}
+  "inboxRoutes": {
+    "externalIdField": "external_id",
+    "payloadField": "payload",
+    "extMarker": "@ext="
+  }
 }

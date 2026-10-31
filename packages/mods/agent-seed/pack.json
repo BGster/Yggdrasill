@@ -29,9 +29,16 @@
     "entryEvent": "event.start",
     "choiceEvent": "ygg.choice_selected",
     "summaryEvent": "agent.summary",
-    "endingPrefix": "【结局"
+    "endingPrefix": "【结局",
+    "metaKey": "summary",
+    "rejectionPrefixes": ["【动作被拒】", "【载荷被拒】", "【需求待办】"],
+    "replayPrefix": "【需求重放】",
+    "defaultPayload": "0"
   },
   "inboxRoutes": {
+    "externalIdField": "external_id",
+    "payloadField": "payload",
+    "extMarker": "@ext=",
     "add": {
       "action": "requirement.add",
       "fields": ["title", "description", "external_id", "depends_on"],

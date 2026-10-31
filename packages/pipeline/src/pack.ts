@@ -26,15 +26,23 @@ export function buildPackJson(): string {
       },
     ],
     schemaFiles: [SCENE_SCHEMA_PATH],
-    // host 契约（必填）：事件名与结局前缀由 Mod 自己声明，通用工具
-    // （playtest / agent）不含字面量。生成物没有异步 inbox → `{}`。
+    // host 契约（必填）：事件名 / 结局前缀 / 叙事约定由 Mod 自己声明，通用工具
+    // （playtest / agent）不含字面量。生成物没有异步 inbox → 只声明三个保留键。
     agent: {
       entryEvent: "event.start",
       choiceEvent: "ygg.choice_selected",
       summaryEvent: "agent.summary",
       endingPrefix: "【结局",
+      metaKey: "summary",
+      rejectionPrefixes: ["【拒绝】"],
+      replayPrefix: "【重放】",
+      defaultPayload: "0",
     },
-    inboxRoutes: {},
+    inboxRoutes: {
+      externalIdField: "external_id",
+      payloadField: "payload",
+      extMarker: "@ext=",
+    },
   };
   return `${JSON.stringify(pack, null, 2)}\n`;
 }

@@ -10,7 +10,7 @@
 //! 码（契约文本见 examples/playtest.rs 头注）——管线侧零内核符号依赖
 //! （D-8：子进程边界即全部耦合）。
 //!
-//! 走查语义（D-12 定稿）：装载 → `dispatch(<agent.entryEvent>,"0")`（序章叙事
+//! 走查语义（D-12 定稿）：装载 → `dispatch(<agent.entryEvent>, <agent.defaultPayload>)`（序章叙事
 //! 非空为硬门）→ 循环{有待决选择 → 按（脚本下一位或默认 1）派发
 //! `<agent.choiceEvent>`；叙事行含 `agent.endingPrefix` → 收口}。脚本耗尽停在
 //! 当前选择点（reached=Choice）；无选择且未达结局 = DeadEnd；步数上限 = Limit。
@@ -166,7 +166,7 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
     let mut envelope = take_envelope(
         &mut kernel,
         &contract.entry_event,
-        "0",
+        &contract.default_payload,
         &mut errors,
         &mut events_processed,
     );
