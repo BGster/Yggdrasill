@@ -2,6 +2,11 @@
   "play": {
     "mode": "guide"
   },
+  "drive": {
+    "maxSteps": 64,
+    "stallLimit": 12,
+    "stepsPerRequirement": 16
+  },
   "evolution": {
     "mode": "suggest",
     "allow_paths": ["prompts", "beats"],

@@ -2,7 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://yggdrasill.dev/schemas/v1/agent-config.json",
     "title": "Yggdrasill agent-config（M-Agent 元工作流 Mod 的静态配置形）",
-    "description": "M-Agent 泳道 A 落地（packages/mods/agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。play.mode 决定本局的**交互模式**（goal 挂机 / guide 逐步确认，缺省 guide），evolution.mode 决定局末复盘的修订口径（off 仅报告 / suggest 产出建议包 / auto 白名单内自动修订），gates.require_all_green 决定门禁失败是否打回切片执行。",
+    "description": "M-Agent 泳道 A 落地（packages/mods/agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。play.mode 决定本局的**交互模式**（goal 挂机 / guide 逐步确认，缺省 guide），evolution.mode 决定局末复盘的修订口径（off 仅报告 / suggest 产出建议包 / auto 白名单内自动修订），gates.require_all_green 决定门禁失败是否打回切片执行，drive 段决定宿主自动推进的步数 / 无进展阈值（内核不解释）。",
     "type": "object",
     "additionalProperties": false,
     "required": ["play", "evolution", "autosave", "hot_reload", "gates"],
@@ -58,6 +58,32 @@
                 "require_all_green": {
                     "description": "true = 门禁必须全绿才进复盘（失败打回切片执行）；false = 失败也放行进复盘（宽放，回执注明）。",
                     "type": "boolean"
+                }
+            }
+        }
+,
+        "drive": {
+            "description": "自动推进（`--drive cmd:<路径>`）的失控防护阈值：宿主读取并执行，内核不解释。整段可选；缺失或非法字段一律回落到宿主内置兜底值（64 / 12 / 16，见 usage），不因配置问题报错中断一局。",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "maxSteps": {
+                    "description": "基础步数硬顶（无新增需求时一局正常 9 步内收口；上限是死循环的硬防御）。",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000
+                },
+                "stallLimit": {
+                    "description": "连续无进展（pendingChoice 提示词 + 选项完全不变）判停阈值；死循环的第二道闸。",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000
+                },
+                "stepsPerRequirement": {
+                    "description": "每条需求（异步补入的）额外放宽的自动步数：三个 job + 两个门禁 + 余量。",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100000
                 }
             }
         }

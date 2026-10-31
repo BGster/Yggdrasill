@@ -57,10 +57,12 @@
 //! | `cmd:<路径>` | 不读 stdin：每个待选动作交给决策命令（stdout 单行 `N` 或 `HUMAN[:理由]`）；到结局自动结算 | 结算码；HUMAN / 异常 = 0 |
 //! | `none` | 只打印当前回执就退出（不推进、不读 stdin） | 0 |
 //!
-//! 自动推进的失控防护：步数硬顶 [`MAX_GOAL_STEPS`] + 每条需求（异步补入的）额外
-//! 放宽 [`GOAL_STEPS_PER_REQUIREMENT`] 步 + 连续无进展 [`MAX_GOAL_STALL`] 步判停
-//! ——合法多需求局不会被误杀，真循环仍会停；派发失败 / 无 pendingChoice 且未到
-//! 结局 → 可读错误并非零退出（绝不静默死循环）。
+//! 自动推进的失控防护：步数硬顶 + 每条需求（异步补入的）额外步数 + 连续无进展
+//! 判停——阈值读 `<mod>/data/config.json` 的 `drive` 段（[`DriveLimits`]，
+//! 缺失 / 非法回落 [`DEFAULT_MAX_STEPS`] / [`DEFAULT_STEPS_PER_REQUIREMENT`] /
+//! [`DEFAULT_STALL_LIMIT`]，不因配置问题报错中断局）。合法多需求局不会被误杀，
+//! 真循环仍会停；派发失败 / 无 pendingChoice 且未到结局 → 可读错误并非零退出
+//! （绝不静默死循环）。
 //! 单发模式不受影响：`--event` 一次只派发一个事件，不自动连跑（Agent 的调用语义）。
 //!
 //! run 目录产物（`<runs-root>/<run-id>/`，默认 `./runs/<run-id>/`）：
@@ -124,12 +126,13 @@ const DEFAULT_PAYLOAD: &str = "0";
 const ENTRY_EVENT: &str = "event.start";
 /// 选择事件的规范名（与内核保留路由同值）。
 const CHOICE_EVENT: &str = "ygg.choice_selected";
-/// 自动推进的基础步数硬顶（无新增需求时正常一局 9 步；上限是死循环的硬防御）。
-const MAX_GOAL_STEPS: usize = 64;
+/// 自动推进阈值的内置兜底：`<mod>/<data/config.json>` 的 `drive` 段缺失 / 非法时用它。
+/// 步数 = 基础硬顶（正常一局 9 步内收口；上限是死循环的硬防御）。
+const DEFAULT_MAX_STEPS: usize = 64;
 /// 每条需求（异步补入的）额外放宽的自动步数：三个 job + 两个门禁 + 余量。
-const GOAL_STEPS_PER_REQUIREMENT: usize = 16;
-/// 连续「无进展」步数硬顶（pendingChoice 指纹不变 = 绕圈；死循环的第二道闸）。
-const MAX_GOAL_STALL: usize = 12;
+const DEFAULT_STEPS_PER_REQUIREMENT: usize = 16;
+/// 连续「无进展」步数兜底（pendingChoice 指纹不变 = 绕圈；死循环的第二道闸）。
+const DEFAULT_STALL_LIMIT: usize = 12;
 /// 外部决策命令的最长执行时间；任何异常都 fail closed，绝不回退到固定序号。
 const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 决策命令轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
@@ -483,6 +486,59 @@ fn parse_drive(text: &str) -> Result<Drive, String> {
                 "未知的 --drive 取值 `{text}`（只接受 stdin / cmd:<路径> / none）"
             )),
         },
+    }
+}
+
+/// 自动推进阈值（读 `<mod>/<config_rel>` 的 `drive` 段；缺失 / 非法逐字段回落兜底）。
+///
+/// 阈值是**配置**而不是代码常量，因为「几步算多」取决于 Mod 的流程长度；
+/// 但配置是便利面，读不懂的字段一律回落——绝不因配置问题打断一局。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DriveLimits {
+    /// 基础步数硬顶。
+    max_steps: usize,
+    /// 连续无进展判停阈值。
+    stall_limit: usize,
+    /// 每条需求额外放宽的步数。
+    steps_per_requirement: usize,
+}
+
+impl Default for DriveLimits {
+    fn default() -> Self {
+        Self {
+            max_steps: DEFAULT_MAX_STEPS,
+            stall_limit: DEFAULT_STALL_LIMIT,
+            steps_per_requirement: DEFAULT_STEPS_PER_REQUIREMENT,
+        }
+    }
+}
+
+impl DriveLimits {
+    /// 从 Mod 静态配置读 `drive` 段（`maxSteps` / `stallLimit` / `stepsPerRequirement`）。
+    /// 缺失、非整数、负数、0 一律取该项兜底值；`stepsPerRequirement` 允许 0。
+    fn from_config(config: &Json) -> Self {
+        let fallback = Self::default();
+        let positive = |key: &str, default: usize| {
+            let value = config["drive"][key]
+                .as_u64()
+                .map_or(default, |n| n as usize);
+            if value == 0 {
+                default
+            } else {
+                value
+            }
+        };
+        Self {
+            max_steps: positive("maxSteps", fallback.max_steps),
+            stall_limit: positive("stallLimit", fallback.stall_limit),
+            steps_per_requirement: positive("stepsPerRequirement", fallback.steps_per_requirement),
+        }
+    }
+
+    /// 本局步数预算：基础硬顶 + 每条需求额外步数（饱和运算，不溢出）。
+    fn step_limit(&self, requirement_count: usize) -> usize {
+        self.max_steps
+            .saturating_add(self.steps_per_requirement.saturating_mul(requirement_count))
     }
 }
 
@@ -1012,6 +1068,14 @@ impl Session {
         parse_envelope(&self.kernel.dispatch("state", ""))
     }
 
+    /// 自动推进阈值：读 Mod 静态配置的 `drive` 段（读不到 / 不是 JSON → 全兜底）。
+    /// 每步现读（阈值只影响失控防护，不影响状态），改配置后下一步即生效。
+    fn drive_limits(&self) -> DriveLimits {
+        read_json(&self.mod_dir.join(&self.config_rel))
+            .map(|config| DriveLimits::from_config(&config))
+            .unwrap_or_default()
+    }
+
     /// 回执标准字段：一次只读动作（[`SUMMARY_EVENT`]）取 Mod **自报**的摘要。
     ///
     /// 这里**不读 autosave**：宿主对「结局 / 冲突 / 待验收提案 / 收口前一步」的
@@ -1419,11 +1483,6 @@ fn choice_signature(receipt: &Json) -> String {
         .collect::<Vec<_>>()
         .join("\u{1f}");
     format!("{prompt}\u{1e}{options}")
-}
-
-/// 自动推进的步数预算：基础硬顶 + 每条需求额外步数（合法多需求局不会被误杀）。
-fn drive_step_limit(summary: &Summary) -> usize {
-    MAX_GOAL_STEPS + GOAL_STEPS_PER_REQUIREMENT * summary.requirement_count
 }
 
 /// 追加一行到 inbox（`OpenOptions::append`；不影响 autosave，故可跨进程并发）。
@@ -2042,7 +2101,7 @@ enum DriveStep {
 }
 
 /// 自动推进的一步决策：结局 → 结算；无待选 → 已收口则结算，否则中止；步数硬顶防绕圈。
-/// `limit` = 本次局的步数预算（基础硬顶 + 每条需求额外预算，见 [`drive_step_limit`]）。
+/// `limit` = 本次局的步数预算（基础硬顶 + 每条需求额外预算，见 [`DriveLimits`]）。
 fn drive_step(summary: &Summary, current: &Json, auto_steps: usize, limit: usize) -> DriveStep {
     // ① 本步叙事出现结局行：本局收口，自动结算。
     if current["ending"] == Json::Bool(true) {
@@ -2219,7 +2278,8 @@ fn run_interactive(args: &Args) -> i32 {
                     return 0;
                 }
             }
-            let limit = drive_step_limit(&summary);
+            let limits = session.drive_limits();
+            let limit = limits.step_limit(summary.requirement_count);
             match drive_step(&summary, &current, auto_steps, limit) {
                 DriveStep::Run => {
                     // 收口前保险：本步可能推进到 review/done（下一拍就结算），
@@ -2240,10 +2300,10 @@ fn run_interactive(args: &Args) -> i32 {
                         stall_steps = 0;
                         last_signature = signature;
                     }
-                    if stall_steps >= MAX_GOAL_STALL {
+                    if stall_steps >= limits.stall_limit {
                         eprintln!(
-                            "error: [drive] 连续 {MAX_GOAL_STALL} 步 pendingChoice 无变化——\
-                             自动推进中止（防死循环）"
+                            "error: [drive] 连续 {} 步 pendingChoice 无变化——自动推进中止（防死循环）",
+                            limits.stall_limit
                         );
                         print_receipt(&current, true);
                         return 1;
@@ -2546,6 +2606,14 @@ fn print_config(session: &Session, args: &Args) {
     println!(
         "配置      : {}（play.mode 归 Mod 叙事层；宿主只读其中的 drive 阈值）",
         session.mod_dir.join(&session.config_rel).display()
+    );
+    let limits = session.drive_limits();
+    println!(
+        "推进阈值 : 步数硬顶 {} = {} + {}×需求数；无进展判停 {}",
+        limits.step_limit(0),
+        limits.max_steps,
+        limits.steps_per_requirement,
+        limits.stall_limit
     );
     println!(
         "驱动     : {}（推进方式由 --drive 给定；Mod 的 play.mode 仅叙事层自用）",
