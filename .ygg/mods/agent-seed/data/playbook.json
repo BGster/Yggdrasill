@@ -1126,6 +1126,12 @@
           "modality": "must-not",
           "text": "只有绑定特定 Mod 的应用与生成器侧可以保留事件名 / 结局前缀字面量，每个文件头有「绑定型 / 生成器侧文件」声明：adventure.rs、clients/godot/rust/src/logic.rs、clients/godot/project/main.gd|session.gd、spike/godot/**、packages/client-web/src/{kernel,session,kernel-wasm}.ts、crates/ygg-wasm/smoke.mjs 绑定 packages/mods/test-adventure；packages/pipeline/src/{prompt,types,pack}.ts 与 scripts-dev/mock-llm-stub.mjs 是生成器侧；crates/ygg-sandbox|ygg-lint 的通用工具与 tests/ 测试夹具不得新增字面量，ygg.choice_selected 是内核域校验的保留事件名（契约的 choiceEvent 必须同名）。",
           "basis": "AGENTS.md §9 硬编码归属表（迁移前）"
+        },
+        {
+          "id": "harness.choice-payload-type",
+          "modality": "must",
+          "text": "`ygg.choice_selected` 的载荷必须是 **JSON 数字**（`--payload '1'`）；写成字符串（`--payload '\"1\"'`）会被内核域校验拒为 VALIDATION「选项不存在」。其余动作的载荷都是字符串。菜单选择是人类动作门禁的**唯一**放行通道——通过 `--event` 直派 `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` 一律被拒（回执首行 `【动作被拒】`）。",
+          "basis": "guide.show harness"
         }
       ],
       "notes": "本章是「怎么玩」而非「项目规则」：项目规则章（credentials / repository / branches / lanes / dispatch / integration / gates / live_evidence / evidence / output / pointers / hard_constraints）沿用原样，本章只补 Harness 自身的运行玩法与宿主契约。AGENTS.md 已收缩为「强制约束 + 冷启动」，被删的玩法段一律在本章逐条落地，basis 指收缩前原文节号（见 git 历史）。"
