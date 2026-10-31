@@ -8,7 +8,9 @@
 //! `stdlib`（include_dir 嵌入 + 语义装载序）；S11 填充 `resources`
 //! 【S11 改名说明：原拟名 `data`，避让 Lua 侧 `ygg.data` API 名——模块名
 //! 采用资源面本名，Rust 侧不再出现与 API 同名的模块】；S12 填充 `hash`
-//! （状态哈希，D-继承-5 归位；探针在 tests/probe_determinism.rs）。
+//! （状态哈希，D-继承-5 归位；探针在 tests/probe_determinism.rs）；
+//! r1 填充 `modules`（受控 require 的模块装载面：点分名解析 + 装载栈 + 缓存，
+//! 解析面零 Lua 依赖供 pack/lint 复用）。
 
 pub mod driver;
 pub mod fuel;
@@ -16,6 +18,7 @@ pub mod hash;
 pub mod host_api;
 pub mod host_contract;
 pub mod inject;
+pub mod modules;
 pub mod playtest;
 pub mod resources;
 pub mod sandbox;
