@@ -14,9 +14,12 @@ function util.suffix()
   return "（多文件 Mod）"
 end
 
--- 装载期注册：注册序 = 模块执行序（确定性断言的观测面之一）。
-ygg.on("probe.order", function()
-  ygg.narrate("util")
-end)
+-- 注册面由入口调用：模块只导出（顶层不碰任何有副作用的 host API）。
+-- 派发序因此只由入口的调用顺序决定，与 require 顺序无关。
+function util.register()
+  ygg.on("probe.order", function()
+    ygg.narrate("util")
+  end)
+end
 
 return util

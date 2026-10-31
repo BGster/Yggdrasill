@@ -43,8 +43,11 @@ function handlers.register()
   end)
 end
 
-ygg.on("probe.order", function()
-  ygg.narrate("handlers")
-end)
+-- 注册面由入口调用（顶层不碰有副作用的 host API）；调用序决定派发序。
+function handlers.register_order()
+  ygg.on("probe.order", function()
+    ygg.narrate("handlers")
+  end)
+end
 
 return handlers

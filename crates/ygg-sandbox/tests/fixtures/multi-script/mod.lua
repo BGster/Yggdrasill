@@ -17,6 +17,12 @@ local TEXTS = ygg.data("ygg:scene/texts")
 -- 正向用例 1 的落点：模块返回的 table 里的函数被入口用来注册 handler。
 handlers.register()
 
+-- 派发序 = 这两行的调用序（不是上面的 require 序）：模块纯导出，装配集中在入口。
+-- 把 require 顺序调换不会改变 probe.order 的派发顺序——测试据这条断言"拆文件不改行为"。
+util.register()
+shared.register()
+handlers.register_order()
+
 -- 执行顺序（模块体进入序）与身份/次数观测面。
 ygg.on("probe.trace", function()
   ygg.narrate("trace=" .. load_trace)

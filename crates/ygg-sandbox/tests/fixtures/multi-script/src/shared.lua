@@ -9,8 +9,11 @@ function shared.bump(step)
   return shared.count
 end
 
-ygg.on("probe.order", function()
-  ygg.narrate("shared")
-end)
+-- 注册面由入口调用（顶层不碰有副作用的 host API）。
+function shared.register()
+  ygg.on("probe.order", function()
+    ygg.narrate("shared")
+  end)
+end
 
 return shared
