@@ -129,6 +129,15 @@ const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
 /// goal 决策轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
 const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
+/// Mod 自报摘要的只读动作名（Mod 侧 `ygg.on("agent.summary")`）。
+///
+/// 宿主判定「何时收口 / 有无冲突 / 有无待验收提案」只认这一条动作的回执，
+/// **绝不读 autosave 的 Mod 私有 KV 键**——旧 Mod 没有该处理器时回执无摘要行，
+/// 宿主判为「未知」并安全停等，不回退到读 KV。
+const SUMMARY_EVENT: &str = "agent.summary";
+/// 摘要行前缀（Mod 与宿主之间唯一的字符串契约：前缀 + 单行 JSON）。
+const SUMMARY_PREFIX: &str = "【摘要】";
+
 const AUTOSAVE_FILE: &str = "autosave.json";
 const EVENTS_FILE: &str = "events.jsonl";
 const META_FILE: &str = "run.json";
@@ -604,6 +613,126 @@ fn mod_signature(dir: &Path) -> Vec<FileStamp> {
 }
 
 // ============================================================================
+// §摘要 Mod 回执标准字段（宿主唯一的语义判定面）
+//
+// 反耦合的落点：宿主不再认识 `ending` / `fsm.stage` / `verify.passed` / `prop.*` /
+// `req.*` 这些 **Mod 私有 KV 键**，只读 Mod **自己声明**的一行摘要（前缀 +
+// 单行 JSON）。换 Mod（或 Mod 改内部键名）不需要改宿主。
+//
+// 缺摘要（旧 Mod / 摘要行坏 JSON）→ [`Summary::unknown`]：各判定返回安全值
+// （0 / false / 空），宿主**不回退到读 KV**，驱动侧据此安全停等。
+// ============================================================================
+
+/// 一条未解决冲突（Mod 自报：需求 id / 对侧 / 说明）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ConflictNote {
+    id: String,
+    peer: String,
+    note: String,
+}
+
+impl ConflictNote {
+    /// 人读形态（`r2 ⇄ r3：说明`）。
+    fn label(&self) -> String {
+        format!("{} ⇄ {}：{}", self.id, self.peer, self.note)
+    }
+}
+
+/// 一个在跑但还没有提案的作业（Mod 自报：需求 id / 修订号 / 作业阶段）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct AwaitingJob {
+    req: String,
+    rev: u64,
+    stage: String,
+}
+
+/// Mod 回执标准字段快照。
+///
+/// `available = false` = Mod 没给摘要（旧 Mod / 坏 JSON），此时**所有**判定
+/// 返回保守值；驱动侧必须停等而不是猜。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Summary {
+    available: bool,
+    /// 当前阶段（仅展示用——宿主不按它分支）。
+    stage: String,
+    /// 本局已到结局（Mod 侧收口标记）。
+    ending: bool,
+    /// review 阶段的门禁自检已过。
+    verify_passed: bool,
+    /// **下一步就是收口动作**（Mod 用「菜单首项是否 review.note」判定）：
+    /// 宿主据此在派发前先进 closing，把最后一次 drain 排在收口之前。
+    next_ends_run: bool,
+    /// 待验收提案数。
+    pending_proposals: usize,
+    /// 已入队需求总数（步数预算按它放宽）。
+    requirement_count: usize,
+    /// 未解决冲突（非空 = 用户门禁，自动推进必须停下）。
+    conflicts: Vec<ConflictNote>,
+    /// 在跑但无提案的作业（非空 = 等外部执行方，宿主不造内容）。
+    awaiting: Option<AwaitingJob>,
+}
+
+impl Summary {
+    /// 未知摘要：安全值（`available=false`）。
+    fn unknown() -> Self {
+        Self::default()
+    }
+
+    /// 本局是否已收口：`None` = Mod 未提供摘要（不得猜）。
+    fn ending(&self) -> Option<bool> {
+        if self.available {
+            Some(self.ending)
+        } else {
+            None
+        }
+    }
+
+    /// 从回执叙事里取摘要行（首个前缀行的 JSON 对象）。
+    fn from_narrative(lines: &[String]) -> Self {
+        for line in lines {
+            let Some(rest) = line.strip_prefix(SUMMARY_PREFIX) else {
+                continue;
+            };
+            return match serde_json::from_str::<Json>(rest) {
+                Ok(value) if value.is_object() => Self::from_json(&value),
+                _ => Self::unknown(),
+            };
+        }
+        Self::unknown()
+    }
+
+    /// JSON → 摘要（缺字段一律取保守默认值；只有「是对象」才算 available）。
+    fn from_json(value: &Json) -> Self {
+        let count = |key: &str| value[key].as_u64().map_or(0, |n| n as usize);
+        Self {
+            available: true,
+            stage: value["stage"].as_str().unwrap_or("").to_owned(),
+            ending: value["ending"] == Json::Bool(true),
+            verify_passed: value["verifyPassed"] == Json::Bool(true),
+            next_ends_run: value["nextEndsRun"] == Json::Bool(true),
+            pending_proposals: count("pendingProposals"),
+            requirement_count: count("requirementCount"),
+            conflicts: value["conflicts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|item| ConflictNote {
+                    id: item["id"].as_str().unwrap_or("").to_owned(),
+                    peer: item["peer"].as_str().unwrap_or("?").to_owned(),
+                    note: item["note"].as_str().unwrap_or("").to_owned(),
+                })
+                .filter(|item| !item.note.trim().is_empty())
+                .collect(),
+            awaiting: value["awaiting"].as_object().map(|item| AwaitingJob {
+                req: item["req"].as_str().unwrap_or("").to_owned(),
+                rev: item["rev"].as_u64().unwrap_or(1),
+                stage: item["stage"].as_str().unwrap_or("").to_owned(),
+            }),
+        }
+    }
+}
+
+// ============================================================================
 // §Session 一局的宿主侧状态：驱动 + run 目录 + 事件序号 + 热载签名
 // ============================================================================
 
@@ -682,6 +811,8 @@ struct Session {
     notices: Vec<String>,
     /// 本次派发前的热载结果（一次性；派发收口后清空）。
     reload: Option<Reload>,
+    /// 回执标准字段缓存（每次真实派发 / 读档 / 热载后失效）。
+    summary_cache: Option<Summary>,
     /// 是否由 `--resume` 成功续局（交互模式据此决定回显而非推进）。
     resumed: bool,
 }
@@ -721,6 +852,7 @@ impl Session {
             signature,
             notices: Vec::new(),
             reload: None,
+            summary_cache: None,
             resumed: false,
         };
 
@@ -753,8 +885,14 @@ impl Session {
         }
         session.write_meta();
         // 崩溃恢复：上次若在 closing 中挂掉（owner 心跳过期）且本局未 done，收回到 running。
-        if let Some(notice) = recover_stale_closing(&session.run_dir, session.recorded_ending()) {
-            session.notices.push(notice);
+        // 只有真的处在 closing 才去问 Mod 的摘要（省一次派发）；摘要缺失（旧 Mod）
+        // 时不动协议状态——猜错方向比不动更坏。
+        if read_coordination(&session.run_dir)["phase"].as_str() == Some(PHASE_CLOSING) {
+            if let Some(ended) = session.summary().ending() {
+                if let Some(notice) = recover_stale_closing(&session.run_dir, ended) {
+                    session.notices.push(notice);
+                }
+            }
         }
         Ok(session)
     }
@@ -837,6 +975,7 @@ impl Session {
         if envelope["ok"] != Json::Bool(true) {
             return Err(format!("读档失败：{}", error_text(&envelope)));
         }
+        self.summary_cache = None;
         Ok(())
     }
 
@@ -863,82 +1002,23 @@ impl Session {
             .and_then(PlayMode::parse)
     }
 
-    /// 存档里的结局标记（`ending` = 结局态）：续局落在局末时 pendingChoice 为空，
-    /// 靠它区分「已收口」与「无路可走」（goal 挂机的中止判据）。
-    fn recorded_ending(&self) -> bool {
-        read_json(&self.autosave_path)
-            .is_some_and(|save| save["kv"]["entries"]["ending"].as_str() == Some("done"))
-    }
-
-    /// 已入队需求总数（`kv.req.count`；goal 步数预算按它放宽）。
-    fn requirement_count(&self) -> usize {
-        read_json(&self.autosave_path)
-            .and_then(|save| save["kv"]["entries"]["req.count"].as_u64())
-            .map_or(0, |count| count as usize)
-    }
-
-    /// autosave 的 KV 面（只读；宿主侧判定用）。
-    fn kv(&self) -> Json {
-        read_json(&self.autosave_path)
-            .map(|save| save["kv"]["entries"].clone())
-            .unwrap_or(Json::Null)
-    }
-
-    /// 下一步是否就是「收口」动作（review 已过门禁 → menu[1] = review.note）。
-    /// 协议契约：goal 在派发这一步之前必须先进入 closing。
-    fn next_step_ends_run(&self) -> bool {
-        let kv = self.kv();
-        kv["fsm.stage"].as_str() == Some("review") && kv["verify.passed"] == Json::Bool(true)
-    }
-
-    /// 待验收提案数（`prop.<i>.status == pending`）。
-    fn pending_proposals(&self) -> usize {
-        let kv = self.kv();
-        let total = kv["prop.count"].as_u64().unwrap_or(0);
-        (1..=total)
-            .filter(|i| kv[format!("prop.{i}.status")].as_str() == Some("pending"))
-            .count()
-    }
-
-    /// 未解决冲突（`req.<i>.conflict` 非空）→ `(需求 id, "对侧 + 说明")`。
-    fn conflicts(&self) -> Vec<(String, String)> {
-        let kv = self.kv();
-        let total = kv["req.count"].as_u64().unwrap_or(0);
-        let mut out = Vec::new();
-        for i in 1..=total {
-            let note = kv[format!("req.{i}.conflict")]
-                .as_str()
-                .unwrap_or("")
-                .trim()
-                .to_owned();
-            if note.is_empty() {
-                continue;
-            }
-            let peer = kv[format!("req.{i}.conflict_peer")]
-                .as_str()
-                .unwrap_or("?")
-                .to_owned();
-            out.push((format!("r{i}"), format!("⇄ {peer}：{note}")));
+    /// 回执标准字段：一次只读动作（[`SUMMARY_EVENT`]）取 Mod **自报**的摘要。
+    ///
+    /// 这里**不读 autosave**：宿主对「结局 / 冲突 / 待验收提案 / 收口前一步」的
+    /// 全部认知只来自这一条回执。缺失（旧 Mod）→ [`Summary::unknown`]，调用方
+    /// 按安全值处理并停等。结果缓存到本步结束（一次派发只问一次）。
+    fn summary(&mut self) -> Summary {
+        if let Some(cached) = &self.summary_cache {
+            return cached.clone();
         }
-        out
-    }
-
-    /// 有 job 在跑、且当前没有任何待验收提案的需求（canonical 取最小 id）。
-    /// 返回 `(req_id, rev, stage)`。
-    fn awaiting_proposal(&self) -> Option<(String, u64, String)> {
-        let kv = self.kv();
-        let total = kv["req.count"].as_u64().unwrap_or(0);
-        for i in 1..=total {
-            let job = kv[format!("req.{i}.job")].as_str().unwrap_or("");
-            match job {
-                "analysis" | "plan" | "development" => {
-                    let rev = kv[format!("req.{i}.rev")].as_u64().unwrap_or(1);
-                    return Some((format!("r{i}"), rev, job.to_owned()));
-                }
-                _ => {}
-            }
-        }
-        None
+        let envelope = parse_envelope(&self.kernel.dispatch(SUMMARY_EVENT, DEFAULT_PAYLOAD));
+        let summary = if envelope["ok"] == Json::Bool(true) {
+            Summary::from_narrative(&narrative_lines(&envelope))
+        } else {
+            Summary::unknown()
+        };
+        self.summary_cache = Some(summary.clone());
+        summary
     }
 
     /// inbox 已消费行数（cursor 文件缺失 / 损坏 = 0：重放由 Mod 侧幂等去重兵底）。
@@ -1085,6 +1165,8 @@ impl Session {
         match outcome {
             Ok(kernel) => {
                 self.kernel = kernel;
+                // 换了 Mod 就换了摘要约定 → 丢掉缓存，下一步重新问。
+                self.summary_cache = None;
                 self.reload = Some(Reload {
                     reloaded: true,
                     source: "watch",
@@ -1109,6 +1191,8 @@ impl Session {
     /// 派发一步：dispatch → 事件日志 → 自动存档（仅成功步）→ 回执。
     fn dispatch_event(&mut self, name: &str, payload: &str) -> Json {
         let envelope = parse_envelope(&self.kernel.dispatch(name, payload));
+        // 真实派发可能已经改变语义面（阶段 / 结局 / 提案 / 冲突）→ 摘要缓存失效。
+        self.summary_cache = None;
         let ok = envelope["ok"] == Json::Bool(true);
         let narrative = narrative_lines(&envelope);
         let ending = narrative
@@ -1327,9 +1411,9 @@ fn choice_signature(receipt: &Json) -> String {
     format!("{prompt}\u{1e}{options}")
 }
 
-/// goal 的步数预算：基础硬顶 + 每条需求 4 步（合法多需求局不会被误杀）。
-fn goal_step_limit(session: &Session) -> usize {
-    MAX_GOAL_STEPS + GOAL_STEPS_PER_REQUIREMENT * session.requirement_count()
+/// 自动推进的步数预算：基础硬顶 + 每条需求额外步数（合法多需求局不会被误杀）。
+fn goal_step_limit(summary: &Summary) -> usize {
+    MAX_GOAL_STEPS + GOAL_STEPS_PER_REQUIREMENT * summary.requirement_count
 }
 
 /// 追加一行到 inbox（`OpenOptions::append`；不影响 autosave，故可跨进程并发）。
@@ -1946,14 +2030,14 @@ enum GoalStep {
 
 /// goal 的一步决策：结局 → 结算；无待选 → 已收口则结算，否则中止；步数硬顶防绕圈。
 /// `limit` = 本次局的步数预算（基础硬顶 + 每条需求额外预算，见 [`goal_step_limit`]）。
-fn goal_step(session: &Session, current: &Json, auto_steps: usize, limit: usize) -> GoalStep {
+fn goal_step(summary: &Summary, current: &Json, auto_steps: usize, limit: usize) -> GoalStep {
     // ① 本步叙事出现结局行：本局收口，自动结算。
     if current["ending"] == Json::Bool(true) {
         return GoalStep::Settle;
     }
-    // ② 无待决动作：续局落在局末（存档 KV 已记结局）也直接结算；否则是死路。
+    // ② 无待决动作：续局落在局末（Mod 自报 ending）也直接结算；否则是死路。
     if current["pendingChoice"].is_null() {
-        if session.recorded_ending() {
+        if summary.ending() == Some(true) {
             return GoalStep::Settle;
         }
         return GoalStep::Stuck(
@@ -2063,14 +2147,26 @@ fn run_interactive(args: &Args) -> i32 {
 
         // goal：不读 stdin；每个待选动作交给外部决策命令，HUMAN/异常即安全暂停。
         let mut paused_for_conflict = false;
+        let mut summary = Summary::unknown();
         if mode == PlayMode::Goal {
+            // ⓪ 回执标准字段（Mod 自报）：没有它 = 旧 Mod / 摘要行损坏，
+            //    自动派进无法判定 → 安全停等（绝不回退到读 KV）。
+            summary = session.summary();
+            if !summary.available {
+                eprintln!(
+                    "error: Mod 未提供 summary（{} 无摘要行），无法自动判定——\
+                     改用 stdin 驱动或升级 Mod；本步未推进",
+                    SUMMARY_EVENT
+                );
+                print_receipt(&current, true, mode);
+                return 0;
+            }
             // ① 冲突 = **用户门禁**：必须停下打印双方与说明，绝不自动选解决路径。
-            let conflicts = session.conflicts();
-            if !conflicts.is_empty() {
+            if !summary.conflicts.is_empty() {
                 println!();
                 println!("[goal] 需求冲突——需要你确认解决路径（不会自动选择）：");
-                for (id, detail) in &conflicts {
-                    println!("  {id} {detail}");
+                for conflict in &summary.conflicts {
+                    println!("  {}", conflict.label());
                 }
                 println!(
                     "  请选 pendingChoice 的 1/2/3（keep_both / keep_first / revise），或 q 退出后 --resume 继续。"
@@ -2079,9 +2175,9 @@ fn run_interactive(args: &Args) -> i32 {
             }
         }
         if mode == PlayMode::Goal && !paused_for_conflict {
-            // 协议：下一步若是收口动作（review.note），先进入 closing——
+            // 协议：下一步若是收口动作（Mod 自报 nextEndsRun），先进入 closing——
             // 阻止新写入，并在保护下把最后一次 drain 排在收口之前。
-            if !closing_held && session.next_step_ends_run() {
+            if !closing_held && summary.next_ends_run {
                 match enter_closing(&session.run_dir) {
                     Ok(ClosingEntry::AlreadyFinalized) => {
                         eprintln!("error: 本局已 finalized（settlement 已定稿）——需开新局");
@@ -2109,11 +2205,12 @@ fn run_interactive(args: &Args) -> i32 {
             // ② 有 job 在跑却一份待验收提案都没有 → 宿主**不造内容**（门禁必须由
             //    真实交付满足）。这是「等待外部执行方」的正常停等态：不推进状态、
             //    打印可读原因、退出码 0，收到提案后 --resume 继续。
-            if session.pending_proposals() == 0 {
-                if let Some((req, rev, stage)) = session.awaiting_proposal() {
+            if summary.pending_proposals == 0 {
+                if let Some(awaiting) = &summary.awaiting {
                     println!();
                     println!(
-                        "[goal] {req} 的 {stage} 作业在跑（rev {rev}），但没有任何待验收提案——"
+                        "[goal] {} 的 {} 作业在跑（rev {}），但没有任何待验收提案——",
+                        awaiting.req, awaiting.stage, awaiting.rev
                     );
                     println!(
                         "       宿主不生成提案内容，等待外部执行方提交（proposal.submit / --proposal）。"
@@ -2126,8 +2223,8 @@ fn run_interactive(args: &Args) -> i32 {
                     return 0;
                 }
             }
-            let limit = goal_step_limit(&session);
-            match goal_step(&session, &current, auto_steps, limit) {
+            let limit = goal_step_limit(&summary);
+            match goal_step(&summary, &current, auto_steps, limit) {
                 GoalStep::Run => {
                     // 收口前保险：本步可能推进到 review/done（下一拍就结算），
                     // 先把刚到达的行吃掉——否则只能靠结算硬门禁报错，白跑一局。

@@ -1724,6 +1724,135 @@ local function render()
   renderer()
 end
 
+-- ============================================================================
+-- §摘要 回执标准字段（宿主唯一的语义判定面）
+--
+-- 只读动作 `agent.summary` 回一行 `【摘要】<单行 JSON>`（前缀 + JSON 是宿主与
+-- Mod 之间唯一的字符串契约）。宿主据此判定「何时收口 / 有无冲突 / 有无待验收
+-- 提案 / 是否有 job 空等」，**不再读任何 Mod 私有 KV 键**（ending、fsm.stage、
+-- verify.passed、prop.*、req.*）——换 Mod 或改内部键名不再需要改宿主。
+--
+-- 字段：stage（展示用）/ ending / verifyPassed / nextEndsRun /
+--       pendingProposals / requirementCount / conflicts[{id,peer,note}] /
+--       awaiting{req,rev,stage}|null
+--
+-- 读的都是本文档已有的只读访问器：不改业务逻辑、不改 KV 键、不改动作语义。
+-- 旧宿主不认得该动作 → 它只会当一条普通叙事看，既有回执不受影响。
+-- ============================================================================
+local SUMMARY_PREFIX = "【摘要】"
+local HEX_DIGITS = "0123456789abcdef"
+-- 在跑的 job 阶段（与 req_job 写入的三个值同源）。
+local SUMMARY_JOB_STAGES = { analysis = true, plan = true, development = true }
+
+-- 沙箱无 string.format：自备 JSON 编码（只覆盖字符串 / 整数 / 布尔三种形态）。
+local function json_text(value)
+  local escaped = tostring(value):gsub('[%c"\\]', function(ch)
+    if ch == '"' then
+      return '\\"'
+    elseif ch == "\\" then
+      return "\\\\"
+    elseif ch == "\n" then
+      return "\\n"
+    elseif ch == "\r" then
+      return "\\r"
+    elseif ch == "\t" then
+      return "\\t"
+    end
+    local digits = ""
+    local rest = ch:byte()
+    for _ = 1, 4 do
+      local digit = rest % 16
+      digits = HEX_DIGITS:sub(digit + 1, digit + 1) .. digits
+      rest = math.floor(rest / 16)
+    end
+    return "\\u" .. digits
+  end)
+  return '"' .. escaped .. '"'
+end
+
+local function json_count(value)
+  local number = tonumber(value) or 0
+  if number < 0 then
+    number = 0
+  end
+  return tostring(math.floor(number))
+end
+
+local function json_flag(value)
+  if value then
+    return "true"
+  end
+  return "false"
+end
+
+local function summary_conflicts()
+  local parts = {}
+  for i = 1, req_count() do
+    local note = req_conflict(i)
+    if note ~= "" then
+      parts[#parts + 1] = '{"id":'
+        .. json_text(req_id(i))
+        .. ',"peer":'
+        .. json_text(req_conflict_peer(i))
+        .. ',"note":'
+        .. json_text(note)
+        .. "}"
+    end
+  end
+  return "[" .. join(parts, ",") .. "]"
+end
+
+local function summary_awaiting()
+  for i = 1, req_count() do
+    local job = req_job(i)
+    if SUMMARY_JOB_STAGES[job] == true then
+      return '{"req":'
+        .. json_text(req_id(i))
+        .. ',"rev":'
+        .. json_count(req_rev(i))
+        .. ',"stage":'
+        .. json_text(job)
+        .. "}"
+    end
+  end
+  return "null"
+end
+
+-- 「下一步就是收口动作」= 当前阶段的菜单首项是 review.note（阶段名不进宿主）。
+local function summary_next_ends_run()
+  local items = menu(stage())
+  if items == nil or #items == 0 then
+    return false
+  end
+  return items[1].action == "review.note"
+end
+
+local function summary_json()
+  return '{"stage":'
+    .. json_text(stage())
+    .. ',"ending":'
+    .. json_flag(ygg.kv.get("ending") == STAGE.done)
+    .. ',"verifyPassed":'
+    .. json_flag(ygg.kv.get("verify.passed") == true)
+    .. ',"nextEndsRun":'
+    .. json_flag(summary_next_ends_run())
+    .. ',"pendingProposals":'
+    .. json_count(prop_pending_total())
+    .. ',"requirementCount":'
+    .. json_count(req_count())
+    .. ',"conflicts":'
+    .. summary_conflicts()
+    .. ',"awaiting":'
+    .. summary_awaiting()
+    .. "}"
+end
+
+-- 只读动作：只 narrate 一行摘要 + 原地重渲染（pendingChoice 与上一步一致）。
+ygg.on("agent.summary", function()
+  ygg.narrate(SUMMARY_PREFIX .. summary_json())
+  render()
+end)
+
 -- 提示词占位符（各阶段共用超集；fill 只替换模板里出现的键）。
 prompt_vars = function()
   return {

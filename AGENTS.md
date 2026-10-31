@@ -100,6 +100,12 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `requirement.conflict` | `"id1,id2\|说明"` | 主 Agent 标记冲突（blocked，派活与收口都跳过） |
 | `requirement.resolve` | `"id1,id2\|keep_both\|keep_first\|revise[|说明]"` | 冲突解决三条路径 |
 | `config.set` / `guide.show` / `map.show` | 同既有语义 | 常驻只读/配置动作 |
+| `agent.summary` | `"0"` | 只读：Mod 自报**回执标准字段**（阶段 / 结局 / 待验收提案 / 冲突 / 空等 job） |
+
+- **宿主不读 Mod 私有 KV**：`agent.summary` 回一行 `【摘要】<单行 JSON>`，宿主只认这一行
+  （`stage` / `ending` / `verifyPassed` / `nextEndsRun` / `pendingProposals` /
+  `requirementCount` / `conflicts` / `awaiting`）。旧 Mod 没有该动作时宿主判为「未知」
+  并安全停等，**不回退到读 `ending` / `fsm.stage` / `prop.*` / `req.*`**。
 
 - `changes` 形如 `split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`：
   subagent 只**建议**，`proposal.accept` 时才落地。
