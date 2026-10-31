@@ -941,20 +941,6 @@ impl Session {
         None
     }
 
-    /// goal 无外部 worker 时的**占位提案**（明确标注模拟；不冒充真实开发）。
-    /// 只在一份待验收提案都没有时生成——外部真实提案存在时绝不覆盖。
-    fn placeholder_proposal(&self) -> Option<(String, String)> {
-        if self.pending_proposals() > 0 {
-            return None;
-        }
-        let (req, rev, stage) = self.awaiting_proposal()?;
-        let summary =
-            format!("[占位·模拟] {req} 的 {stage} 结果（goal 无外部 worker，非真实执行）");
-        let artifacts = format!("[占位·模拟] {stage}-{req}.md（占位产物，仅用于走通状态机与门禁）");
-        let payload = format!("{req}|{rev}|{stage}|{summary}|{artifacts}||");
-        Some((payload, format!("{req} / {stage} rev {rev}")))
-    }
-
     /// inbox 已消费行数（cursor 文件缺失 / 损坏 = 0：重放由 Mod 侧幂等去重兵底）。
     fn inbox_cursor(&self) -> usize {
         read_json(&self.inbox_cursor_path)
@@ -2120,20 +2106,25 @@ fn run_interactive(args: &Args) -> i32 {
                 // 确认没有新需求 → 在 closing 保护下继续推进收口。
                 closing_held = true;
             }
-            // ② 无外部提案 → 提交**占位**提案（明确标注模拟），走同一套 proposal 与门禁；
-            //    已有待验收提案时绝不覆盖（外部真实提案优先）。
-            if let Some((payload, label)) = session.placeholder_proposal() {
-                println!("[goal] 无外部提案 → 提交占位提案（模拟，非真实开发）：{label}");
-                let body = json!(payload).to_string();
-                current = session.dispatch_event("proposal.submit", &body);
-                if current["ok"] != Json::Bool(true) || dispatch_rejected(&current) {
-                    eprintln!("error: [goal] 占位提案被拒：{}", first_rejection(&current));
+            // ② 有 job 在跑却一份待验收提案都没有 → 宿主**不造内容**（门禁必须由
+            //    真实交付满足）。这是「等待外部执行方」的正常停等态：不推进状态、
+            //    打印可读原因、退出码 0，收到提案后 --resume 继续。
+            if session.pending_proposals() == 0 {
+                if let Some((req, rev, stage)) = session.awaiting_proposal() {
+                    println!();
+                    println!(
+                        "[goal] {req} 的 {stage} 作业在跑（rev {rev}），但没有任何待验收提案——"
+                    );
+                    println!(
+                        "       宿主不生成提案内容，等待外部执行方提交（proposal.submit / --proposal）。"
+                    );
+                    println!("       安全暂停：状态未推进，收到提案后 --resume 继续。");
                     print_receipt(&current, true, mode);
-                    return 1;
+                    if closing_held {
+                        leave_closing(&session.run_dir);
+                    }
+                    return 0;
                 }
-                fresh = true;
-                stall_steps = 0;
-                continue;
             }
             let limit = goal_step_limit(&session);
             match goal_step(&session, &current, auto_steps, limit) {
