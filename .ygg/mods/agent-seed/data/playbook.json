@@ -780,15 +780,9 @@
           "basis": "AGENTS.md §3（迁移前）"
         },
         {
-          "id": "harness.decide-choice-sh",
-          "modality": "should",
-          "text": "仓库自带 scripts/decide-choice.sh（POSIX sh + python3，std-only）只是最小可用示例/兜底：默认取菜单首项 1，遇未解决冲突或验收/门禁类选项（proposal.* / gate.* / requirement.resolve）输出 HUMAN:<理由> 安全暂停；真实决策应由主 Agent 或外部编排读同一份 decide-input.json 后给出，不把这个脚本当策略用。",
-          "basis": "AGENTS.md §3（迁移前）"
-        },
-        {
           "id": "harness.human-action-gate",
           "modality": "must",
-          "text": "人类动作门禁（play.mode=guide 生效）：proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / config.set play.mode 只能经 ygg.choice_selected 进入；--event 单发直派会被【动作被拒】拒绝（ok 仍为 true，主状态不变）；打回类（gate.reject / proposal.reject）不受限，留给纠错。所以「脚本 / Agent 替人验收」只能通过决策命令（--drive cmd:…）。",
+          "text": "人类动作门禁（play.mode=guide 生效）：proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / config.set play.mode 只能经 ygg.choice_selected 进入；--event 单发直派会被【动作被拒】拒绝（ok 仍为 true，主状态不变）；打回类（gate.reject / proposal.reject）不受限，留给纠错。所以替人验收有且只有一条通道：`ygg.choice_selected`（人工输入，或 Agent 读回执后自行发序号）。",
           "basis": "AGENTS.md §3（迁移前）"
         },
         {
@@ -808,6 +802,12 @@
           "modality": "must",
           "text": "play.mode 是 Mod 叙事层语义，host 不解释：config.set play.mode=<goal|guide> 只切换 Mod 的提示词 / 旁白口吻；推进方式只看 --drive——host 既不读 data/config.json 的 play.mode，也不读存档 KV settings.play.mode。",
           "basis": "AGENTS.md §3（迁移前）"
+        },
+        {
+          "id": "harness.goal-mode-decider",
+          "modality": "must",
+          "text": "goal 模式的决策者是 **Agent 本身**，不是脚本、不是「总选 1」：Mod 在 goal 下只改文案与提示口吻，推进仍走 `ygg.choice_selected`，每一步都由 Agent 读叙事与候选自行判断——该驳回的验收要驳回、该停等的门禁要停等，机械取首项等于伪造结论。仓库不提供默认决策脚本；菜单首项按设计是主前进动作，但**不保证在该步正确**。",
+          "basis": "用户指令：决策权在 Agent，不在脚本"
         },
         {
           "id": "harness.payload-formats",
