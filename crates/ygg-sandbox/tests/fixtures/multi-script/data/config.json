@@ -1,0 +1,13 @@
+{
+  "settlement": {
+    "requireEvents": true,
+    "requireNoFailedSteps": true,
+    "requireEnding": true,
+    "requireInboxConsumed": true
+  },
+  "drive": {
+    "maxSteps": 8,
+    "stallLimit": 4,
+    "stepsPerRequirement": 2
+  }
+}

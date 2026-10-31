@@ -1,0 +1,20 @@
+{
+  "scenes": {
+    "begin": "多文件 Mod：入口 → src.handlers → src.util（+ src.shared / src.silent）"
+  },
+  "endings": {
+    "brave": "【结局A】推门：三层依赖都走到了。",
+    "cautious": "【结局B】离开：装载链同样完整。"
+  },
+  "prompts": {
+    "door": "推门还是离开？"
+  },
+  "options": {
+    "enter": "推门",
+    "leave": "离开"
+  },
+  "beats": {},
+  "tuning": {
+    "seed": 7
+  }
+}

@@ -1,0 +1,37 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+    "title": "Yggdrasill scene-texts（生成 Mod 通用模板：六节结构固定，键集故事自定）",
+    "description": "M1 管线预置的资源 schema 模板（D-5/D-10）：管线复制进生成 Mod 的 schemas/ 目录（每包自带、装载方按包内文件注册）。test-adventure 自带的同名文件是故事特化形态、保持原样不受影响。endings 值必须以【结局开头——无头走查的收口判据（ENDING_PREFIX）依赖该契约，schema 门与 playtest 门互相咬合。",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["scenes", "endings", "prompts", "options", "beats", "tuning"],
+    "properties": {
+        "scenes": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "endings": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": { "type": "string", "minLength": 1, "pattern": "^【结局" }
+        },
+        "prompts": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "options": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "beats": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "tuning": {
+            "type": "object",
+            "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+    }
+}
