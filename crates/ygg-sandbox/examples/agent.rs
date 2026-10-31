@@ -8,8 +8,9 @@
 //! 互斥），**不持有推进策略也不认识 Mod 内部状态**：
 //! - 推进策略由 `--drive` 选定（跟人读 stdin、或交给外部决策命令、或什么都不做）；
 //! - “何时收口 / 有无冲突 / 有无待验收提案”只问 Mod 自己声明的摘要
-//!   （[`SUMMARY_EVENT`] 的 `【摘要】` 行），不读 `ending` / `fsm.stage` /
-//!   `prop.*` / `req.*` 等 Mod 私有 KV 键。
+//!   （[`SUMMARY_EVENT`] 回执信封的 `meta.summary` 结构化字段），不读
+//!   `ending` / `fsm.stage` / `prop.*` / `req.*` 等 Mod 私有 KV 键，
+//!   也不从人读叙事里剖数据（旧「`【摘要】` 前缀 + JSON」契约已删除）。
 //!
 //! 三种形态：
 //!
@@ -141,11 +142,13 @@ const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// Mod 自报摘要的只读动作名（Mod 侧 `ygg.on("agent.summary")`）。
 ///
 /// 宿主判定「何时收口 / 有无冲突 / 有无待验收提案」只认这一条动作的回执，
-/// **绝不读 autosave 的 Mod 私有 KV 键**——旧 Mod 没有该处理器时回执无摘要行，
+/// **绝不读 autosave 的 Mod 私有 KV 键**——旧 Mod 没有该处理器时回执无 `meta`，
 /// 宿主判为「未知」并安全停等，不回退到读 KV。
 const SUMMARY_EVENT: &str = "agent.summary";
-/// 摘要行前缀（Mod 与宿主之间唯一的字符串契约：前缀 + 单行 JSON）。
-const SUMMARY_PREFIX: &str = "【摘要】";
+/// 摘要结构化字段在回执信封里的位置（内核 `ygg.meta(key, value)` → 信封 `meta`）。
+/// 键名是本宿主与 Mod 的契约键，**不是叙事前缀**：Mod 在叙事里写同样的字
+/// 也不会被误判。
+const SUMMARY_META_KEY: &str = "summary";
 
 const AUTOSAVE_FILE: &str = "autosave.json";
 const EVENTS_FILE: &str = "events.jsonl";
@@ -771,18 +774,15 @@ impl Summary {
         }
     }
 
-    /// 从回执叙事里取摘要行（首个前缀行的 JSON 对象）。
-    fn from_narrative(lines: &[String]) -> Self {
-        for line in lines {
-            let Some(rest) = line.strip_prefix(SUMMARY_PREFIX) else {
-                continue;
-            };
-            return match serde_json::from_str::<Json>(rest) {
-                Ok(value) if value.is_object() => Self::from_json(&value),
-                _ => Self::unknown(),
-            };
+    /// 从回执信封取结构化摘要：读 `meta.summary`（[`SUMMARY_META_KEY`]）。
+    ///
+    /// 缺失（旧 Mod / 该动作没调 `ygg.meta`）或形状不是对象 → [`Summary::unknown`]
+    /// （安全值，调用方停等而不是猜）。
+    fn from_receipt(receipt: &Json) -> Self {
+        match &receipt["meta"][SUMMARY_META_KEY] {
+            value if value.is_object() => Self::from_json(value),
+            _ => Self::unknown(),
         }
-        Self::unknown()
     }
 
     /// JSON → 摘要（缺字段一律取保守默认值；只有「是对象」才算 available）。
@@ -1087,7 +1087,7 @@ impl Session {
         }
         let envelope = parse_envelope(&self.kernel.dispatch(SUMMARY_EVENT, DEFAULT_PAYLOAD));
         let summary = if envelope["ok"] == Json::Bool(true) {
-            Summary::from_narrative(&narrative_lines(&envelope))
+            Summary::from_receipt(&envelope)
         } else {
             Summary::unknown()
         };
@@ -1365,6 +1365,11 @@ impl Session {
         }
         if ending.is_some() {
             receipt["ending"] = json!(true);
+        }
+        // TD1：结构化 meta 原样透传（宿主只读其中的 `summary`，不解释其他键；
+        // 它不进叙事、不进存档，只作为回执的独立字段给调用方用）。
+        if envelope.get("meta").is_some() {
+            receipt["meta"] = envelope["meta"].clone();
         }
 
         // 警告面：内核 D1 warnings + 宿主侧 notices（热载 / 存档 / 重置）。
@@ -2217,13 +2222,19 @@ mod drive_limits_tests {
 
 #[cfg(test)]
 mod summary_tests {
-    use super::{Summary, SUMMARY_PREFIX};
-    use serde_json::json;
+    use super::{Summary, SUMMARY_META_KEY};
+    use serde_json::{json, Value as Json};
 
-    /// 旧 Mod（无摘要行）→ 安全值、不 panic、不猜（`ending()` 为 None）。
+    /// 回执信封造形：`{"ok":true, "meta": {...}}`（内核 `ygg.meta` 的落点）。
+    fn receipt(meta: Json) -> Json {
+        json!({"ok": true, "meta": meta})
+    }
+
+    /// 旧 Mod（该动作不调 `ygg.meta`）→ 安全值、不 panic、不猜（`ending()` 为 None）。
     #[test]
     fn missing_summary_yields_safe_values_without_panicking() {
-        let summary = Summary::from_narrative(&["普通叙事".to_owned()]);
+        // 完全没有 meta 键（旧宿主回执形态）
+        let summary = Summary::from_receipt(&json!({"ok": true, "narrative": ["普通叙事"]}));
         assert!(!summary.available);
         assert_eq!(summary.pending_proposals, 0);
         assert!(summary.conflicts.is_empty());
@@ -2231,24 +2242,27 @@ mod summary_tests {
         assert_eq!(summary.ending(), None);
         assert!(!summary.next_ends_run);
         assert_eq!(summary.requirement_count, 0);
-        // 空叙事同样安全
-        assert!(!Summary::from_narrative(&[]).available);
-        // 坏 JSON / 非对象：判为未知，不 panic 也不半信半疑
+        // meta 存在但没有 summary 键 / 形状不是对象：判为未知，不 panic 也不半信半疑
         for broken in [
-            format!("{SUMMARY_PREFIX}{{不是 JSON"),
-            format!("{SUMMARY_PREFIX}[]"),
-            format!("{SUMMARY_PREFIX}null"),
-            SUMMARY_PREFIX.to_owned(),
+            json!({"ok": true}),
+            json!({"ok": true, "meta": {}}),
+            json!({"ok": true, "meta": {"other": 1}}),
+            json!({"ok": true, "meta": {SUMMARY_META_KEY: []}}),
+            json!({"ok": true, "meta": {SUMMARY_META_KEY: null}}),
+            json!({"ok": true, "meta": {SUMMARY_META_KEY: "review"}}),
+            json!({"ok": true, "meta": "不是对象"}),
         ] {
-            assert!(!Summary::from_narrative(&[broken]).available);
+            assert!(
+                !Summary::from_receipt(&broken).available,
+                "非对象摘要必须判为未知：{broken}"
+            );
         }
     }
 
     #[test]
     fn parses_the_declared_fields_and_conflicts() {
-        let line = format!(
-            "{SUMMARY_PREFIX}{}",
-            json!({
+        let envelope = receipt(json!({
+            SUMMARY_META_KEY: {
                 "stage": "review",
                 "ending": false,
                 "verifyPassed": true,
@@ -2260,9 +2274,9 @@ mod summary_tests {
                     {"id": "r2", "peer": "r1", "note": "  "}
                 ],
                 "awaiting": {"req": "r3", "rev": 4, "stage": "development"}
-            })
-        );
-        let summary = Summary::from_narrative(&["前一行".to_owned(), line]);
+            }
+        }));
+        let summary = Summary::from_receipt(&envelope);
         assert!(summary.available);
         assert_eq!(summary.stage, "review");
         assert_eq!(summary.ending(), Some(false));
@@ -2280,13 +2294,25 @@ mod summary_tests {
     /// `ending` 未声明 / 缺字段时只能读成 false，绝不能借用其他字段推断。
     #[test]
     fn ending_requires_the_declared_boolean() {
-        let declared_true = format!("{SUMMARY_PREFIX}{}", json!({"ending": true}));
-        assert_eq!(
-            Summary::from_narrative(&[declared_true]).ending(),
-            Some(true)
-        );
-        let missing = format!("{SUMMARY_PREFIX}{}", json!({"stage": "done"}));
-        assert_eq!(Summary::from_narrative(&[missing]).ending(), Some(false));
+        let declared_true = receipt(json!({SUMMARY_META_KEY: {"ending": true}}));
+        assert_eq!(Summary::from_receipt(&declared_true).ending(), Some(true));
+        let missing = receipt(json!({SUMMARY_META_KEY: {"stage": "done"}}));
+        assert_eq!(Summary::from_receipt(&missing).ending(), Some(false));
+    }
+
+    /// 摘要只认 `meta`：叙事里出现旧前缀（或任何 JSON 文本）都不再被当成摘要。
+    #[test]
+    fn narrative_is_never_parsed_as_the_summary() {
+        let envelope = json!({
+            "ok": true,
+            "narrative": ["【摘要】{\"ending\":true,\"pendingProposals\":9}"],
+            "meta": {SUMMARY_META_KEY: {"ending": false}}
+        });
+        let summary = Summary::from_receipt(&envelope);
+        assert!(summary.available);
+        // 只信 meta：叙事里的 ending:true 不生效
+        assert_eq!(summary.ending(), Some(false));
+        assert_eq!(summary.pending_proposals, 0);
     }
 }
 

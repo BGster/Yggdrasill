@@ -108,7 +108,7 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 | `requirement.conflict` | `"id1,id2\|说明"` | 主 Agent 标记冲突（blocked，派活与收口都跳过） |
 | `requirement.resolve` | `"id1,id2\|keep_both\|keep_first\|revise[|说明]"` | 冲突解决三条路径 |
 | `config.set` / `guide.show` / `map.show` | 同既有语义 | 常驻只读/配置动作 |
-| `agent.summary` | `"0"` | 只读：Mod 自报**回执标准字段**（阶段 / 结局 / 待验收提案 / 冲突 / 空等 job） |
+| `agent.summary` | `"0"` | 只读：Mod 通过 `ygg.meta("summary", …)` 自报**回执标准字段**（阶段 / 结局 / 待验收提案 / 冲突 / 空等 job），落在回执 `meta.summary` |
 
 - `changes` 形如 `split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`：
   subagent 只**建议**，`proposal.accept` 时才落地。
@@ -120,10 +120,14 @@ cp target/release/examples/agent .ygg/bin/ygg-agent
 - 越阶动作 → `【动作被拒】`；载荷不合法 → `【载荷被拒】`；前置不满足 → `【需求待办】`。
   三者都原地重渲染（主状态不变）。
 - 收口判据：`req_all_done()`（含 split/merged 的后继全部 done）+ 0 待验收提案 + 0 在跑 job + 0 冲突。
-- **宿主不读 Mod 私有 KV**：`agent.summary` 回一行 `【摘要】<单行 JSON>`，宿主只认这一行
+- **宿主不读 Mod 私有 KV**：`agent.summary` 用内核的结构化回执通道
+  `ygg.meta("summary", {…})`，数据落在回执信封的 `meta.summary`，宿主只认这个字段
   （`stage` / `ending` / `verifyPassed` / `nextEndsRun` / `pendingProposals` /
-  `requirementCount` / `conflicts` / `awaiting`）。旧 Mod 没有该动作时宿主判为「未知」
-  并安全停等，**不回退到读 `ending` / `fsm.stage` / `prop.*` / `req.*`**。
+  `requirementCount` / `conflicts` / `awaiting`）。**叙事里不再有 `【摘要】` 前缀行**，
+  宿主也不从叙事里剖数据——Mod 在叙事里写同样内容不会被误判。旧 Mod 没有该动作时
+  宿主判为「未知」并安全停等，**不回退到读 `ending` / `fsm.stage` / `prop.*` / `req.*`**。
+  `meta` 是**瞬态回执面**：不入存档、不入 canonical snapshot / 状态哈希（同一事件序列
+  调不调 `ygg.meta`，`state_hash` 相同）。
 
 ---
 
