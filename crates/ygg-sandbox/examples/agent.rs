@@ -2082,6 +2082,212 @@ mod decide_tests {
             DecideOutcome::Human(reason) if reason.contains("单行")
         ));
     }
+
+    /// 协议的五种返回：合法序号 / HUMAN / 空 / 越界 / 多行——除第一种外一律 Human。
+    #[test]
+    fn covers_the_five_protocol_returns() {
+        // ① 合法序号（含恰好等于选项数的边界）
+        assert_eq!(
+            parse_decision_output("3", 3),
+            DecideOutcome::Index("3".to_owned())
+        );
+        // ② HUMAN（无理由 / 带理由）
+        assert!(matches!(
+            parse_decision_output("HUMAN", 1),
+            DecideOutcome::Human(reason) if !reason.is_empty()
+        ));
+        assert_eq!(
+            parse_decision_output("HUMAN: 需要人核验", 1),
+            DecideOutcome::Human("需要人核验".to_owned())
+        );
+        // ③ 空输出（纯空白等价空串）
+        for output in ["", "   \n"] {
+            assert!(matches!(
+                parse_decision_output(output, 1),
+                DecideOutcome::Human(_)
+            ));
+        }
+        // ④ 越界序号（含 0）
+        for output in ["0", "4"] {
+            assert!(matches!(
+                parse_decision_output(output, 3),
+                DecideOutcome::Human(reason) if reason.contains("越界")
+            ));
+        }
+        // ⑤ 多行（只接受单行）
+        assert!(matches!(
+            parse_decision_output("1\n2", 3),
+            DecideOutcome::Human(reason) if reason.contains("单行")
+        ));
+    }
+}
+
+#[cfg(test)]
+mod drive_tests {
+    use super::{parse_drive, Drive};
+    use std::path::PathBuf;
+
+    #[test]
+    fn parses_the_three_states() {
+        assert_eq!(parse_drive("stdin"), Ok(Drive::Stdin));
+        assert_eq!(parse_drive("none"), Ok(Drive::None));
+        assert_eq!(
+            parse_drive("cmd:/tmp/decide.py"),
+            Ok(Drive::Cmd(PathBuf::from("/tmp/decide.py")))
+        );
+        // 前后空白容忍（命令行粘贴常态）
+        assert_eq!(
+            parse_drive(" cmd: /tmp/x "),
+            Ok(Drive::Cmd(PathBuf::from("/tmp/x")))
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_and_empty_cmd_path() {
+        for bad in ["", "goal", "guide", "STDIN", "cmd:", "cmd:   "] {
+            assert!(parse_drive(bad).is_err(), "`{bad}` 应为用法错误");
+        }
+        // 错误文案要点出合法取值，便于命令行纠错
+        let message = parse_drive("goal").unwrap_err();
+        assert!(message.contains("stdin"), "{message}");
+        assert!(message.contains("none"), "{message}");
+    }
+}
+
+#[cfg(test)]
+mod drive_limits_tests {
+    use super::{
+        DriveLimits, DEFAULT_MAX_STEPS, DEFAULT_STALL_LIMIT, DEFAULT_STEPS_PER_REQUIREMENT,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn missing_section_falls_back_to_builtin_defaults() {
+        let limits = DriveLimits::from_config(&json!({"play": {"mode": "guide"}}));
+        assert_eq!(limits, DriveLimits::default());
+        assert_eq!(limits.max_steps, DEFAULT_MAX_STEPS);
+        assert_eq!(limits.stall_limit, DEFAULT_STALL_LIMIT);
+        assert_eq!(limits.steps_per_requirement, DEFAULT_STEPS_PER_REQUIREMENT);
+        // 整份配置不是对象 / 全是 null 也不得 panic
+        assert_eq!(
+            DriveLimits::from_config(&json!(null)),
+            DriveLimits::default()
+        );
+        assert_eq!(
+            DriveLimits::from_config(&json!({"drive": []})),
+            DriveLimits::default()
+        );
+    }
+
+    #[test]
+    fn reads_valid_section_and_computes_the_budget() {
+        let limits = DriveLimits::from_config(&json!({
+            "drive": {"maxSteps": 10, "stallLimit": 3, "stepsPerRequirement": 5}
+        }));
+        assert_eq!(limits.max_steps, 10);
+        assert_eq!(limits.stall_limit, 3);
+        assert_eq!(limits.steps_per_requirement, 5);
+        assert_eq!(limits.step_limit(0), 10);
+        assert_eq!(limits.step_limit(4), 30);
+        // 饱和运算：极大值不溢出
+        let huge = DriveLimits {
+            max_steps: usize::MAX,
+            stall_limit: 1,
+            steps_per_requirement: usize::MAX,
+        };
+        assert_eq!(huge.step_limit(2), usize::MAX);
+    }
+
+    #[test]
+    fn invalid_fields_fall_back_per_field() {
+        // 字符串 / 0 / 负数都不是合法阈值：逐字段回落，不整份作废
+        let limits = DriveLimits::from_config(&json!({
+            "drive": {"maxSteps": "64", "stallLimit": 0, "stepsPerRequirement": -3}
+        }));
+        assert_eq!(limits.max_steps, DEFAULT_MAX_STEPS);
+        assert_eq!(limits.stall_limit, DEFAULT_STALL_LIMIT);
+        assert_eq!(limits.steps_per_requirement, DEFAULT_STEPS_PER_REQUIREMENT);
+        // 只给一段也算数：给了的生效，没给的回落
+        let partial = DriveLimits::from_config(&json!({"drive": {"maxSteps": 7}}));
+        assert_eq!(partial.max_steps, 7);
+        assert_eq!(partial.stall_limit, DEFAULT_STALL_LIMIT);
+        assert_eq!(partial.steps_per_requirement, DEFAULT_STEPS_PER_REQUIREMENT);
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::{Summary, SUMMARY_PREFIX};
+    use serde_json::json;
+
+    /// 旧 Mod（无摘要行）→ 安全值、不 panic、不猜（`ending()` 为 None）。
+    #[test]
+    fn missing_summary_yields_safe_values_without_panicking() {
+        let summary = Summary::from_narrative(&["普通叙事".to_owned()]);
+        assert!(!summary.available);
+        assert_eq!(summary.pending_proposals, 0);
+        assert!(summary.conflicts.is_empty());
+        assert!(summary.awaiting.is_none());
+        assert_eq!(summary.ending(), None);
+        assert!(!summary.next_ends_run);
+        assert_eq!(summary.requirement_count, 0);
+        // 空叙事同样安全
+        assert!(!Summary::from_narrative(&[]).available);
+        // 坏 JSON / 非对象：判为未知，不 panic 也不半信半疑
+        for broken in [
+            format!("{SUMMARY_PREFIX}{{不是 JSON"),
+            format!("{SUMMARY_PREFIX}[]"),
+            format!("{SUMMARY_PREFIX}null"),
+            SUMMARY_PREFIX.to_owned(),
+        ] {
+            assert!(!Summary::from_narrative(&[broken]).available);
+        }
+    }
+
+    #[test]
+    fn parses_the_declared_fields_and_conflicts() {
+        let line = format!(
+            "{SUMMARY_PREFIX}{}",
+            json!({
+                "stage": "review",
+                "ending": false,
+                "verifyPassed": true,
+                "nextEndsRun": true,
+                "pendingProposals": 2,
+                "requirementCount": 3,
+                "conflicts": [
+                    {"id": "r1", "peer": "r2", "note": "同一文件"},
+                    {"id": "r2", "peer": "r1", "note": "  "}
+                ],
+                "awaiting": {"req": "r3", "rev": 4, "stage": "development"}
+            })
+        );
+        let summary = Summary::from_narrative(&["前一行".to_owned(), line]);
+        assert!(summary.available);
+        assert_eq!(summary.stage, "review");
+        assert_eq!(summary.ending(), Some(false));
+        assert_eq!(summary.pending_proposals, 2);
+        assert_eq!(summary.requirement_count, 3);
+        // 空白说明的冲突不算真冲突（只报未解决的）
+        assert_eq!(summary.conflicts.len(), 1);
+        assert_eq!(summary.conflicts[0].label(), "r1 ⇄ r2：同一文件");
+        let awaiting = summary.awaiting.expect("awaiting 应被解析");
+        assert_eq!(awaiting.req, "r3");
+        assert_eq!(awaiting.rev, 4);
+        assert_eq!(awaiting.stage, "development");
+    }
+
+    /// `ending` 未声明 / 缺字段时只能读成 false，绝不能借用其他字段推断。
+    #[test]
+    fn ending_requires_the_declared_boolean() {
+        let declared_true = format!("{SUMMARY_PREFIX}{}", json!({"ending": true}));
+        assert_eq!(
+            Summary::from_narrative(&[declared_true]).ending(),
+            Some(true)
+        );
+        let missing = format!("{SUMMARY_PREFIX}{}", json!({"stage": "done"}));
+        assert_eq!(Summary::from_narrative(&[missing]).ending(), Some(false));
+    }
 }
 
 // ============================================================================
