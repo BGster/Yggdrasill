@@ -228,7 +228,7 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 - `pack` 工具对这两段做**可选前置校验**：声明了就按运行期同一套规则解析，写坏了打包期即拦下；
   没声明不报错（冒险类 Mod 不吃 host 契约）。
 - 只有吃契约的通用工具需要它；**绑定特定 Mod 的应用**（`clients/godot`、`packages/client-web`、
-  `examples/adventure.rs`…）各自服务固定 Mod，字面量归属见 `AGENTS.md` 的「硬编码归属表」。
+  `examples/adventure.rs`…）各自服务固定 Mod，字面量归属见 `guide.show harness` 的 `literal-ownership` 规则。
 
 ### host 契约段（`settlement` / `drive`，在 `data/config.json`）
 

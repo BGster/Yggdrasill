@@ -39,7 +39,7 @@
 `verify.submit` 直接选首项（等于无条件上报全绿），且它对任何验收动作一律停等。
 
 协议细节（超时 5 秒、非零退出 / 多行输出 / 越界序号一律 fail closed、`YGG_DECIDE_CMD` 覆盖路径）
-见仓库根 `AGENTS.md` §3。
+见 `guide.show harness` → decide-protocol / decide-fail-closed。
 
 ---
 

@@ -11,7 +11,7 @@
 #        `gate.*`、`requirement.resolve`）——这些是「验收判断」，让脚本代选
 #        等于伪造验收结论。
 #
-# 协议（宿主侧权威说明见仓库根 `AGENTS.md` §3）：
+# 协议（权威说明见 `guide.show harness` → decide-protocol / decide-fail-closed）：
 #   argv[1] = decide-input.json 的路径（宿主把完整当前回执写在那里）；
 #   stdout 必须**恰好一行**：`N`（1..=选项数）或 `HUMAN[:理由]`；
 #   非零退出 / 多行输出 / 越界序号一律被宿主判为 fail closed（安全暂停）。
