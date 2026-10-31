@@ -1,8 +1,13 @@
 # fixture：multi-script（r4 测试面）
 
 一个**真跑**的多文件 Mod（不是空壳），被 `tests/modules_e2e.rs` /
-`tests/modules_negative.rs` / `tests/modules_lifecycle.rs` 与 `examples/agent.rs`
-的测试直接装载。
+`tests/modules_negative.rs` / `tests/modules_lifecycle.rs` /
+`tests/modules_pure_export.rs` 与 `examples/agent.rs` 的测试直接装载。
+
+后者的用法最容易误导未来的读者：`tests/modules_pure_export.rs` 把它复制到临时
+目录后**只改入口**（调换 require 序 / install 序），断言「模块体执行序变了、
+handler 派发序不变」。所以入口里那几行 `M.register()` 的**写法与顺序**是测试
+契约的一部分：重排它们会同时弄坏本 fixture 与那份用例。
 
 ## 依赖形状
 
