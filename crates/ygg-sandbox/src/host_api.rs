@@ -33,6 +33,20 @@
 //! - **注册序**（D-S9-4）：`ygg.on` 调用序 = `Vec` 追加序；
 //!   [`HostApi::register_into`] 在 seal 后按该序逐条
 //!   `HandlerRegistry::register`（每条一个 [`LuaHandler`]），注册序即派发序。
+//! - **结构化 meta 通道**（TD1）：`ygg.meta(key, value)` 把**结构化数据**写进
+//!   [`HostState::meta`]（`BTreeMap<String, MetaValue>`），与叙事面完全分离——
+//!   Mod 不必再把人读文本当结构化传输（旧 `【摘要】<JSON>` 前端耦合已删除）。
+//!   三条纪律：① 不走 [`HostState::calls`] 缓冲（不回放、不改 core trait），
+//!   驱动在转换结束后经 [`HostApi::take_meta`] 取走并拼进信封 `meta` 键；
+//!   ② key 必须是长度 1..=`META_KEY_MAX_BYTES` 的字符串（非空、可读报错）；
+//!   ③ value 只允许标量 / 稠密序列 / 字符串键表（深度 `META_MAX_DEPTH` 封顶），
+//!   非有限值（NaN/±∞）fail-fast 拒绝——与 `ygg.emit` 同纪律。
+//!   **meta 是瞬态回执面**：不入 canonical store / 存档 / 状态哈希（驱动侧
+//!   每次 dispatch 入口 clear、转换后 take，生命周期不跨事件）。
+//!   **值类型取 `serde_json::Value` 而非 core `Value`**：core `Value` 只有四个
+//!   标量，装不下回执需要的对象/序列（`meta.summary.conflicts` 就是数组）；
+//!   标量 leaf 仍走 [`value_from_lua`]（同一套类型门），容器内层用
+//!   `BTreeMap` 序 + serde_json 默认字典序 Map 保证确定性字节。
 //! - **payload 双向 marshal**：Integer↔`Int`、Number↔`Float`、String↔`Str`、
 //!   Boolean↔`Bool`；Lua→core 遇 NaN/±∞ 由 core 门拒绝（可读 mlua 错误）、
 //!   `-0.0` 由 core 规范化；`nil` 仅在 get 类miss 上作为 Lua `nil` 返回；
@@ -40,11 +54,13 @@
 //!   `ygg.choice` 的 options 必须是字符串的 Lua 序列，否则可读报错。
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mlua::{Error, Function, Lua, Table, Value as LuaValue};
+use serde_json::{Map as JsonMap, Value as MetaValue};
 use ygg_core::bus::{EventHandler, HandlerError, HandlerRegistry, NarrationSink, PendingChoice};
-use ygg_core::entity::{EntityStore, Value};
+use ygg_core::entity::{normalize_f64, EntityStore, Value};
 use ygg_core::event::Event;
 use ygg_core::kv::KvStore;
 
@@ -53,6 +69,13 @@ use crate::inject::splitmix64;
 /// 运行期注册禁令的可读报错文案（seal 后 `ygg.on` 桩与 sealed 双检共用）。
 const SEALED_MESSAGE: &str = "ygg.on is sealed: runtime handler registration is forbidden \
  (handlers may only be registered during the load phase)";
+
+/// `ygg.meta` 键长上限（字节）。键是**回执字段名**，不是数据面通道——
+/// 上限防「把人读内容塞键名」的滥用回流。
+const META_KEY_MAX_BYTES: usize = 64;
+
+/// `ygg.meta` 值嵌套深度上限（含顶层表：1 层）。超限可读报错而非爆栈。
+const META_MAX_DEPTH: usize = 8;
 
 /// 宿主侧状态句柄（S9 测试 / S10 驱动的注入面）。
 pub struct HostHandles {
@@ -83,6 +106,10 @@ pub struct HostState {
     pre_choice_emits: u64,
     /// 本次 dispatch 的人读警告（D1；至多一条，首个胜出，驱动 drain 后清空）。
     warning: Option<String>,
+    /// 结构化 meta（TD1）：`ygg.meta(key, value)` 写入面，键序 = `BTreeMap`
+    /// 序（天然确定性）。瞬态——驱动每次 dispatch 入口 clear、转换后 take，
+    /// 不入 canonical snapshot / autosave / 状态哈希。
+    meta: BTreeMap<String, MetaValue>,
 }
 
 /// 宿主 API 的 Rust 侧控制柄：seal / 注册进注册表。
@@ -274,6 +301,7 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         },
         pre_choice_emits: 0,
         warning: None,
+        meta: BTreeMap::new(),
     }));
 
     let ygg: Table = lua.globals().raw_get("ygg")?;
@@ -343,6 +371,22 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
                     .calls
                     .push(HostCall::Choose(PendingChoice::new(prompt, opts)));
                 Err(Error::runtime(sentinel))
+            },
+        )?,
+    )?;
+
+    // ---- ygg.meta（结构化回执面，TD1）：不进 calls 缓冲、不回放、不改 core
+    //      trait；驱动转换结束后 take_meta 拼进信封。key 长度/类型与非有限值
+    //      在调用点 fail-fast 拒绝（与 ygg.emit 同纪律）。----
+    let st = Rc::clone(&state);
+    ygg.raw_set(
+        "meta",
+        lua.create_function(
+            move |_, (key, payload): (LuaValue, LuaValue)| -> Result<(), Error> {
+                let name = meta_key_from_lua(&key)?;
+                let value = meta_value_from_lua(&payload, 0)?;
+                st.borrow_mut().meta.insert(name, value);
+                Ok(())
             },
         )?,
     )?;
@@ -474,6 +518,134 @@ fn ent_get_tag(entities: &Rc<RefCell<EntityStore>>, id: u64, tag: &str) -> bool 
         .unwrap_or(false)
 }
 
+/// `ygg.meta` 的键校验：必须是长度 1..=`META_KEY_MAX_BYTES` 的字符串
+/// （非字符串 / 空串 / 超长均为可读报错；键是回执字段名，不承载数据）。
+fn meta_key_from_lua(key: &LuaValue) -> Result<String, Error> {
+    let name = match key {
+        LuaValue::String(s) => s.to_str()?.to_owned(),
+        other => {
+            return Err(Error::runtime(format!(
+                "ygg.meta key must be a string, got {}",
+                lua_type_name(other)
+            )))
+        }
+    };
+    if name.is_empty() {
+        return Err(Error::runtime("ygg.meta key must not be empty"));
+    }
+    if name.len() > META_KEY_MAX_BYTES {
+        return Err(Error::runtime(format!(
+            "ygg.meta key `{name}` is too long: {} bytes exceeds limit {META_KEY_MAX_BYTES}",
+            name.len()
+        )));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(Error::runtime(format!(
+            "ygg.meta key `{name}` must not contain control characters"
+        )));
+    }
+    Ok(name)
+}
+
+/// `ygg.meta` 的值转换：标量走 [`value_from_lua`]（同一套四标量校验），
+/// 表递归成 JSON 序列/对象（深度封顶 [`META_MAX_DEPTH`]）。
+/// 数值纪律与 core 写入门同源：非有限值拒绝（`-0.0` 经 `normalize_f64`
+/// 规范化——meta 是回执面，跨进程字节稳定由规范形承担）。
+fn meta_value_from_lua(value: &LuaValue, depth: usize) -> Result<MetaValue, Error> {
+    if let LuaValue::Table(table) = value {
+        if depth >= META_MAX_DEPTH {
+            return Err(Error::runtime(format!(
+                "ygg.meta value nesting exceeds {META_MAX_DEPTH} levels"
+            )));
+        }
+        return meta_table_to_json(table, depth + 1);
+    }
+    meta_scalar_from_lua(value)
+}
+
+/// 标量 leaf：`value_from_lua` 把关类型，此处补浮点纪律（非有限值拒绝 +
+/// 规范形）。
+fn meta_scalar_from_lua(value: &LuaValue) -> Result<MetaValue, Error> {
+    Ok(match value_from_lua(value)? {
+        Value::Int(v) => MetaValue::from(v),
+        Value::Float(v) => {
+            if !v.is_finite() {
+                return Err(Error::runtime(
+                    "ygg.meta value is non-finite (NaN / +inf / -inf are rejected)",
+                ));
+            }
+            match serde_json::Number::from_f64(normalize_f64(v)) {
+                Some(number) => MetaValue::Number(number),
+                None => {
+                    return Err(Error::runtime(
+                        "ygg.meta value is non-finite (NaN / +inf / -inf are rejected)",
+                    ))
+                }
+            }
+        }
+        Value::Bool(v) => MetaValue::Bool(v),
+        Value::Str(v) => MetaValue::String(v),
+    })
+}
+
+/// Lua 表 → JSON：稠密 `1..n` 数值键 = 序列；纯字符串键 = 对象；
+/// 混合 / 稀疏数值键 / 其他键型都是可读报错（**不做静默猜测**：
+/// 猜测会让同一 Mod 在不同输入下产出不同形状的回执）。
+///
+/// **空表 = 空序列 `[]`**：Lua 无法区分空表 / 空序列，取「空列表」这一更常用
+/// 语义（`conflicts = {}` 读成 `[]`）；需要空对象时给一个键（或读侧按缺键处理）。
+fn meta_table_to_json(table: &Table, depth: usize) -> Result<MetaValue, Error> {
+    let len = table.raw_len();
+    let mut int_keys: Vec<i64> = Vec::new();
+    let mut str_keys: Vec<String> = Vec::new();
+    for pair in table.pairs::<LuaValue, LuaValue>() {
+        let (key, _) = pair?;
+        match &key {
+            LuaValue::Integer(i) => int_keys.push(*i),
+            LuaValue::Number(n) if n.fract() == 0.0 && n.is_finite() => {
+                int_keys.push(*n as i64);
+            }
+            LuaValue::String(s) => str_keys.push(s.to_str()?.to_owned()),
+            other => {
+                return Err(Error::runtime(format!(
+                    "ygg.meta table keys must be integers or strings, got {}",
+                    lua_type_name(other)
+                )))
+            }
+        }
+    }
+    if str_keys.is_empty() {
+        int_keys.sort_unstable();
+        let dense = int_keys.len() == len
+            && int_keys
+                .iter()
+                .enumerate()
+                .all(|(position, key)| *key == position as i64 + 1);
+        if !dense {
+            return Err(Error::runtime(
+                "ygg.meta table is not a dense 1..n sequence (numeric keys must be exactly 1..n)",
+            ));
+        }
+        let mut out = Vec::with_capacity(len);
+        for index in 1..=len {
+            let item: LuaValue = table.raw_get(index)?;
+            out.push(meta_value_from_lua(&item, depth)?);
+        }
+        return Ok(MetaValue::Array(out));
+    }
+    if !int_keys.is_empty() {
+        return Err(Error::runtime(
+            "ygg.meta table mixes array indices and string keys",
+        ));
+    }
+    let mut map = JsonMap::new();
+    for key in str_keys {
+        let item: LuaValue = table.raw_get(key.as_str())?;
+        map.insert(key, meta_value_from_lua(&item, depth)?);
+    }
+    Ok(MetaValue::Object(map))
+}
+
 impl HostApi {
     /// 分相收口（D-S9-1）：置 sealed 标志并把 `ygg.on` 原位替换为可读报错桩
     /// （运行期注册禁令）。重复 seal 为可读错误。
@@ -514,6 +686,18 @@ impl HostApi {
     /// 每次 dispatch 至多一条，信封仅在非空时加 `warnings` 键）。
     pub fn take_dispatch_warning(&self) -> Option<String> {
         self.state.borrow_mut().warning.take()
+    }
+
+    /// 取走本次 dispatch 累积的结构化 meta（TD1；**取走即清空**）。驱动在
+    /// 转换结束后 drain：非空才在信封加 `meta` 键，空则保持既有线格式。
+    pub fn take_meta(&self) -> BTreeMap<String, MetaValue> {
+        std::mem::take(&mut self.state.borrow_mut().meta)
+    }
+
+    /// 清空结构化 meta（驱动在每次 dispatch **入口**调用：上一条的残留
+    /// 不得混进本条的收据）。
+    pub fn clear_meta(&self) {
+        self.state.borrow_mut().meta.clear();
     }
 
     /// 装载期收集的事件名（按注册序；诊断面）。

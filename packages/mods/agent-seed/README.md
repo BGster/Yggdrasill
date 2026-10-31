@@ -95,6 +95,27 @@ Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
 - **崩溃恢复**：closing 用心跳续命（10s），过期后写命令或 resume 会恢回 `running`；锁也按 mtime 抢占，
   不会永久卡死。
 
+### 宿主读的摘要字段（`agent.summary` → `ygg.meta("summary", …)`）
+
+宿主（`crates/ygg-sandbox/examples/agent.rs`）对「何时收口 / 有无冲突 / 有无待验收提案 / 是否有 job
+空等」的认知**只来自本 Mod 自报的结构化摘要**，不读任何 `req.*` / `prop.*` / `fsm.stage` / `ending` 私有键：
+
+```lua
+ygg.on("agent.summary", function()
+  ygg.meta("summary", { stage = ..., ending = ..., verifyPassed = ..., nextEndsRun = ...,
+                        pendingProposals = ..., requirementCount = ...,
+                        conflicts = { { id = ..., peer = ..., note = ... } },
+                        awaiting = { req = ..., rev = ..., stage = ... } })  -- 无在跑 job 时缺省
+  render()
+end)
+```
+
+- 数据落在**回执信封**的 `meta.summary`（内核 `ygg.meta` 结构化回执通道），与人读叙事完全分离：
+  叙事里**没有** `【摘要】` 前缀行，宿主也不从叙事文本里剖 JSON。
+- 该动作**只读**：不推进状态、不改 KV、`pendingChoice` 保持不变（只重渲染一屏）。
+- `meta` 是瞬态回执面，不进存档也不进状态哈希（调不调它不影响 `state_hash`）。
+- 值面约束（内核把关）：标量 / 稠密序列 / 字符串键表；非有限值拒绝；空表读作 `[]`。
+
 ## 七、增量配置
 
 - 静态 `data/config.json` + 动态 KV `settings.*`（`config.set`）：`play.mode`（guide/goal）、
@@ -119,7 +140,7 @@ Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
 # 默认全 1 贪心：intake → coordinate.submit → verify → review.note → 【结局
 cargo run --example playtest -- .ygg/mods/agent-seed
 
-# 多需求 multi-stage（外部提案 / goal 占位提案均可）：
+# 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
 #   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
 #   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
 #   .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id t --runs-root .ygg/runs --resume

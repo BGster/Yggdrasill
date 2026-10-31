@@ -1,28 +1,28 @@
 {
   "entries": [
     {
-      "byteLength": 20237,
+      "byteLength": 20319,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "061eda94b337e99d2610ff0a4da781797f18112ba8cc27922751f3265dd4a4f0"
+      "sha256": "113e95337067b2984f26c342e4e0f312f4293a7915456a676bbe8ea0db40a14b"
     },
     {
-      "byteLength": 237,
+      "byteLength": 327,
       "id": "ygg:agent/config",
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "b952ae76c803b2bf4f6d073dd9e02e3eb5fad03fbd24e35b420b3972f354ce58"
+      "sha256": "7650275895f7ada338f721e5874f9143df4e896cbcbe000920e22fea52810c96"
     },
     {
-      "byteLength": 34774,
+      "byteLength": 35204,
       "id": "ygg:agent/playbook",
       "kind": "agent-playbook",
       "path": "data/playbook.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
-      "sha256": "61a610b5910394bc2a7f97ed63e938b660e844e683f152aa3de507909ed43834"
+      "sha256": "e4be508312547a7bb582bea372ff205a1ff5f02ab694e8a9e5fe1fcb52542a5a"
     }
   ],
   "schemaVersion": 1

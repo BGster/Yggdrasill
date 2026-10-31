@@ -25,6 +25,10 @@
 //!   加性可选键 `warnings`（D1）：仅当 handler 在 `ygg.choice` 之前产生过
 //!   `ygg.emit`（将被语义丢弃）时出现，单元素字符串数组；serde_json 字典序
 //!   键序下确定性不变（同输入 → 同警告 → 同字节）。
+//!   加性可选键 `meta`（TD1）：仅当 handler 调用过 `ygg.meta`（结构化回执面）
+//!   时出现，内容为 `BTreeMap` 序的对象——与 `narrative` 完全分离，宿主不再
+//!   从人读文本里剖结构化数据。**瞬态**：每次 dispatch 入口 clear、转换后
+//!   take，不入 canonical snapshot / 存档 / 状态哈希。
 //! - **payload 口径（A3）**：事件路径 payload 必填且须为 JSON 标量——
 //!   空串、嵌套对象/数组/null 均为 VALIDATION（空 payload 放宽与否后续
 //!   有真实需求再议，当前不放宽）；保留命令（save/load/state/log/drain）
@@ -36,10 +40,11 @@
 //!   为常量响应，字段保留以镜像 A1 线格式（历史形态兼容）。
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mlua::Error as LuaError;
-use serde_json::{json, Value as Json};
+use serde_json::{json, Map as JsonMap, Value as Json};
 use thiserror::Error as ThisError;
 
 use ygg_core::bus::{HandlerError, HandlerRegistry, PendingChoice};
@@ -349,7 +354,11 @@ impl KernelFacade {
 
     /// 命令分发（保留名 `save/load/state/log/drain`；其余一律按外部事件名
     /// 进入转换路径 [`KernelFacade::cmd_event`]）。
+    ///
+    /// TD1：入口先清空结构化 meta——上一条回执的 meta 不得残留到本条
+    /// （尤其不得让保留命令的回执带上上一条事件的 meta）。
     fn dispatch_inner(&mut self, cmd: &str, payload_json: &str) -> String {
+        self.host.clear_meta();
         match cmd {
             "save" => self.cmd_save(),
             "load" => self.cmd_load(payload_json),
@@ -488,6 +497,9 @@ impl KernelFacade {
         // ⑤' D1：无论转换成败都取走本次 dispatch 的警告（choice 前置丢弃
         // 面；每 dispatch 至多一条，drain 即清空，不泄漏到后续 dispatch）。
         let warning = self.host.take_dispatch_warning();
+        // ⑤'' TD1：meta 同样无论成败都 drain（两条路径不留残渣），但只在
+        // 成功信封里露出——错误信封不夹带 Mod 侧数据。
+        let meta = self.host.take_meta();
         // ⑥ 裁定：成功更新 pending_choice；错误映射稳定码信封。
         let result = match outcome {
             Ok(result) => result,
@@ -512,6 +524,12 @@ impl KernelFacade {
         // 不变：同输入 → 同警告 → 同字节）。
         if let Some(warning) = warning {
             envelope["warnings"] = json!([warning]);
+        }
+        // TD1：加性可选键——结构化 meta（Mod 自报数据，与叙事分离）。
+        // 键序 = BTreeMap 遍历序 → serde_json 默认 Map（BTreeMap）序：
+        // 同输入同字节，不依赖 Mod 的写入次序。
+        if !meta.is_empty() {
+            envelope["meta"] = meta_to_json(&meta);
         }
         envelope.to_string()
     }
@@ -608,6 +626,16 @@ fn value_to_json(value: &Value) -> Json {
     }
 }
 
+/// 结构化 meta → JSON 对象（TD1）：键序 = `BTreeMap` 序遍历（确定性；
+/// serde_json 默认无 `preserve_order`，`Map` 也是 `BTreeMap`，两重保险）。
+fn meta_to_json(meta: &BTreeMap<String, Json>) -> Json {
+    let mut map = JsonMap::new();
+    for (key, value) in meta {
+        map.insert(key.clone(), value.clone());
+    }
+    Json::Object(map)
+}
+
 /// 待决选择 → JSON（prompt + options 序保真）。
 fn choice_to_json(choice: &PendingChoice) -> Json {
     json!({
@@ -628,10 +656,15 @@ fn error_envelope(code_str: &str, message: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash::state_hash;
 
     fn reply_code(reply: &str) -> String {
         let parsed: Json = serde_json::from_str(reply).unwrap();
         parsed["error"]["code"].as_str().unwrap_or("").to_owned()
+    }
+
+    fn reply(reply: &str) -> Json {
+        serde_json::from_str(reply).unwrap()
     }
 
     /// 空转 Mod：无任何注册——事件无 handler，转换空跑即成功。
@@ -692,6 +725,157 @@ mod tests {
                 Err(KernelError::EngineMismatch { ref saved, .. }) if saved == "0.0.0-foreign"
             ),
             "engine mismatch must be rejected (restore must not succeed)"
+        );
+    }
+
+    // ---- TD1：结构化 meta 通道（回执 `meta` 键 / 瞬态 / 不进状态哈希）----
+
+    /// 同一套状态写；`META` 版额外调 `ygg.meta`（瞬态回执面）——
+    /// 两版状态哈希必须一致（meta 不入 canonical snapshot）。
+    const PLAIN_MOD: &str = r#"
+ygg.on("event.work", function()
+  ygg.narrate("干活")
+  local id = ygg.entity.spawn()
+  ygg.entity.set_attribute(id, "hp", 7)
+  ygg.kv.set("k", "v")
+end)
+"#;
+
+    const META_MOD: &str = r#"
+ygg.on("event.work", function()
+  ygg.narrate("干活")
+  local id = ygg.entity.spawn()
+  ygg.entity.set_attribute(id, "hp", 7)
+  ygg.kv.set("k", "v")
+  ygg.meta("summary", {
+    stage = "review",
+    ending = false,
+    pendingProposals = 2,
+    conflicts = { { id = "r1", peer = "r2", note = "同一文件" } },
+  })
+end)
+
+-- 嵌套 / 非 ASCII / 序列 / 空表
+ ygg.on("event.shapes", function()
+  ygg.meta("obj", { deep = { deeper = { 1, 2.5, true, "中文" } }, empty = {}, list = { "a", "b" } })
+end)
+
+-- 校验面：空键 / 超长键 / 非有限值都应在 Lua 侧 fail-fast（→ VALIDATION）
+ygg.on("event.badkey", function()
+  ygg.meta("", 1)
+end)
+ygg.on("event.longkey", function()
+  ygg.meta("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1)
+end)
+ygg.on("event.nankey", function()
+  ygg.meta("x", 0 / 0)
+end)
+"#;
+
+    #[test]
+    fn meta_lands_in_the_receipt_and_only_for_the_event_that_wrote_it() {
+        let mut kernel = KernelFacade::new(META_MOD).expect("kernel construction");
+        // 无 meta 的事件：信封不带 meta 键（线格式与旧版一致）
+        let plain = reply(&kernel.dispatch("event.plain", "0"));
+        assert!(
+            plain.get("meta").is_none(),
+            "未调 ygg.meta 的事件不得带 meta"
+        );
+        // 调了 ygg.meta 的事件：结构化字段原样进 meta
+        let envelope = reply(&kernel.dispatch("event.work", "0"));
+        assert_eq!(envelope["ok"], Json::Bool(true));
+        assert_eq!(envelope["meta"]["summary"]["stage"], json!("review"));
+        assert_eq!(envelope["meta"]["summary"]["pendingProposals"], json!(2));
+        assert_eq!(
+            envelope["meta"]["summary"]["conflicts"][0]["peer"],
+            json!("r2")
+        );
+        // 叙事不含任何结构化残留（meta 与 narrative 完全分离）
+        let narrative = envelope["narrative"].to_string();
+        assert!(
+            !narrative.contains("meta"),
+            "叙事不得携带 meta：{narrative}"
+        );
+
+        // 瞬态：保留命令不产生 meta（上一条的 meta 不得残留）
+        for command in ["state", "save", "log", "drain"] {
+            let envelope = reply(&kernel.dispatch(command, ""));
+            assert!(
+                envelope.get("meta").is_none(),
+                "保留命令 `{command}` 不得带 meta"
+            );
+        }
+        // 且下一条事件也没继承上一条的 meta
+        let again = reply(&kernel.dispatch("event.plain", "0"));
+        assert!(again.get("meta").is_none(), "meta 不得跨 dispatch 残留");
+    }
+
+    #[test]
+    fn meta_values_round_trip_as_json_structures() {
+        let mut kernel = KernelFacade::new(META_MOD).expect("kernel construction");
+        let envelope = reply(&kernel.dispatch("event.shapes", "0"));
+        assert_eq!(
+            envelope["meta"]["obj"],
+            json!({
+                "deep": {"deeper": [1, 2.5, true, "中文"]},
+                // 空表只能读成空序列（Lua 无空对象字面形态，已在 host_api 声明）
+                "empty": [],
+                "list": ["a", "b"]
+            })
+        );
+    }
+
+    #[test]
+    fn meta_key_and_value_validation_fails_fast() {
+        let mut kernel = KernelFacade::new(META_MOD).expect("kernel construction");
+        let empty_key = kernel.dispatch("event.badkey", "0");
+        assert_eq!(reply_code(&empty_key), code::VALIDATION);
+        assert!(
+            empty_key.contains("ygg.meta key must not be empty"),
+            "{empty_key}"
+        );
+        let long_key = kernel.dispatch("event.longkey", "0");
+        assert_eq!(reply_code(&long_key), code::VALIDATION);
+        assert!(long_key.contains("too long"), "{long_key}");
+        let nan = kernel.dispatch("event.nankey", "0");
+        assert_eq!(reply_code(&nan), code::VALIDATION);
+        assert!(nan.contains("non-finite"), "{nan}");
+        // 拒绝不污染后续：同进程再派发仍正常
+        let envelope = reply(&kernel.dispatch("event.work", "0"));
+        assert_eq!(envelope["ok"], Json::Bool(true));
+        assert!(envelope["meta"]["summary"].is_object());
+    }
+
+    /// 确定性硬要求：同一事件序列，调不调 `ygg.meta` 状态哈希必须相同；
+    /// meta 也不得进存档（`save` 的字节里没有它）。
+    #[test]
+    fn meta_never_enters_state_hash_or_save() {
+        let mut plain = KernelFacade::new(PLAIN_MOD).expect("plain kernel");
+        let mut with_meta = KernelFacade::new(META_MOD).expect("meta kernel");
+        for _ in 0..3 {
+            assert_eq!(
+                reply(&plain.dispatch("event.work", "0"))["ok"],
+                Json::Bool(true)
+            );
+            assert_eq!(
+                reply(&with_meta.dispatch("event.work", "0"))["ok"],
+                Json::Bool(true)
+            );
+        }
+        assert_eq!(
+            state_hash(&plain).expect("plain hash"),
+            state_hash(&with_meta).expect("meta hash"),
+            "meta 调用与否不得改变 canonical 状态哈希"
+        );
+        let save = with_meta.dispatch("save", "");
+        assert!(!save.contains("\"meta\""), "meta 不得进存档：{save}");
+        // 存档往返后哈希仍一致（瞬态面不参与持久化）
+        let envelope = reply(&save);
+        let restored = KernelFacade::restore(envelope["save"].to_string().as_bytes(), META_MOD)
+            .expect("restore");
+        assert_eq!(
+            state_hash(&plain).expect("plain hash"),
+            state_hash(&restored).expect("restored hash")
         );
     }
 }

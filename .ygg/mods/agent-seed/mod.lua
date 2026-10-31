@@ -1724,6 +1724,92 @@ local function render()
   renderer()
 end
 
+-- ============================================================================
+-- §摘要 回执标准字段（宿主唯一的语义判定面）
+--
+-- 只读动作 `agent.summary` 走内核的**结构化回执通道**：`ygg.meta("summary", {...})`
+-- 把结构化数据投进回执信封的 `meta` 键，与人读叙事完全分离——不再拼
+-- `【摘要】<JSON>` 这类「前缀 + 字符串」契约（Mod 在叙事里写同样前缀不会被误判，
+-- 宿主也不再从人读文本里剖数据）。宿主据此判定「何时收口 / 有无冲突 /
+-- 有无待验收提案 / 是否有 job 空等」，**不读任何 Mod 私有 KV 键**
+-- （ending、fsm.stage、verify.passed、prop.*、req.*）——换 Mod 或改内部键名
+-- 不再需要改宿主。
+--
+-- 字段：stage（展示用）/ ending / verifyPassed / nextEndsRun /
+--       pendingProposals / requirementCount / conflicts[{id,peer,note}] /
+--       awaiting{req,rev,stage}（无在跑 job 时该键缺失）
+--
+-- 值面纪律（内核 `ygg.meta` 把关）：标量 / 稠密序列 / 字符串键表，非有限值拒绝。
+-- 读的都是本文档已有的只读访问器：不改业务逻辑、不改 KV 键、不改动作语义。
+-- 旧宿主不认得该动作 → 只会当一条普通叙事看（本动作不 narrate 摘要行）。
+-- ============================================================================
+-- 在跑的 job 阶段（与 req_job 写入的三个值同源）。
+local SUMMARY_JOB_STAGES = { analysis = true, plan = true, development = true }
+
+-- 计数归一：进 meta 的计数必须是整数（宿主按整型读；字符串/浮点都会读成 0）。
+local function summary_int(value)
+  local number = tonumber(value) or 0
+  if number < 0 then
+    number = 0
+  end
+  return math.floor(number)
+end
+
+local function summary_conflicts()
+  local out = {}
+  for i = 1, req_count() do
+    local note = req_conflict(i)
+    if note ~= "" then
+      out[#out + 1] = { id = req_id(i), peer = req_conflict_peer(i), note = note }
+    end
+  end
+  return out
+end
+
+-- 首个在跑 job（无则 nil → meta 里不出现该键，宿主读成「无空等」）。
+local function summary_awaiting()
+  for i = 1, req_count() do
+    local job = req_job(i)
+    if SUMMARY_JOB_STAGES[job] == true then
+      return { req = req_id(i), rev = summary_int(req_rev(i)), stage = job }
+    end
+  end
+  return nil
+end
+
+-- 「下一步就是收口动作」= 当前阶段的菜单首项是 review.note（阶段名不进宿主）。
+local function summary_next_ends_run()
+  local items = menu(stage())
+  if items == nil or #items == 0 then
+    return false
+  end
+  return items[1].action == "review.note"
+end
+
+local function summary_fields()
+  local fields = {
+    stage = stage(),
+    ending = ygg.kv.get("ending") == STAGE.done,
+    verifyPassed = ygg.kv.get("verify.passed") == true,
+    nextEndsRun = summary_next_ends_run(),
+    pendingProposals = summary_int(prop_pending_total()),
+    requirementCount = summary_int(req_count()),
+    conflicts = summary_conflicts(),
+  }
+  local awaiting = summary_awaiting()
+  if awaiting ~= nil then
+    fields.awaiting = awaiting
+  end
+  return fields
+end
+
+-- 只读动作：只投结构化 meta（不 narrate 摘要、不推进状态、不改 KV）+ 原地重渲染
+-- （pendingChoice 与上一步一致）。
+ygg.on("agent.summary", function()
+  ygg.meta("summary", summary_fields())
+  render()
+end)
+
 -- 提示词占位符（各阶段共用超集；fill 只替换模板里出现的键）。
 prompt_vars = function()
   return {
@@ -2170,9 +2256,17 @@ ygg.on("requirement.dispatch", function(payload)
       usage = TEXTS.beats.req_dispatch_usage,
     }))
   end
+  -- 「按就绪序派活」是幂等语义：**没东西可派是正常结果**（需求都在 job
+  -- 中 / 在门禁 / 在待验收 / 已完成，或 job 槽位 / 泳道已满）——自动化的
+  -- 连续 dispatch 不得因此记失败步（伪失败会把正常等待当成故障）。
+  -- 只留两个真拒绝：阶段已收口（done）与载荷非法。
   local candidates = dispatch_candidates()
   if #candidates == 0 then
-    return reject_payload("requirement.dispatch", TEXTS.beats.req_dispatch_none)
+    ygg.narrate(fill(TEXTS.beats.req_dispatch_noop_none, {
+      jobs = tostring(job_total()),
+      cap = tostring(job_capacity()),
+    }))
+    return render()
   end
   local lanes = free_lanes()
   local filled = {}
@@ -2212,12 +2306,13 @@ ygg.on("requirement.dispatch", function(payload)
     end
   end
   if #filled == 0 then
-    return reject_payload("requirement.dispatch", fill(TEXTS.beats.req_dispatch_blocked, {
+    ygg.narrate(fill(TEXTS.beats.req_dispatch_noop_blocked, {
       jobs = tostring(job_total()),
       cap = tostring(job_capacity()),
       lanes = lane_text(),
       reasons = req_dev_blocked_text(),
     }))
+    return render()
   end
   ygg.narrate(fill(TEXTS.beats.req_dispatch_ok, {
     items = join(filled, "；"),
