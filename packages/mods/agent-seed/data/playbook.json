@@ -434,6 +434,13 @@
           "gate": "required"
         },
         {
+          "id": "rust.agent.test",
+          "label": "agent example 内测试（--drive 三态 / 决策协议 / drive 阈值 / 摘要缺失）",
+          "run": "cargo test --example agent -p ygg-sandbox",
+          "gate": "required",
+          "note": "`cargo test --workspace` 不覆盖 example 内的 #[cfg(test)]；`--examples` 在本仓会跑出 0 tests，必须用 `--example agent` 指定目标。"
+        },
+        {
           "id": "wasm.build",
           "label": "wasm 构建 + 冒烟",
           "run": "./scripts/build-wasm.sh && node crates/ygg-wasm/smoke.mjs",

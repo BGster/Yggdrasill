@@ -119,7 +119,7 @@ Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
 # 默认全 1 贪心：intake → coordinate.submit → verify → review.note → 【结局
 cargo run --example playtest -- .ygg/mods/agent-seed
 
-# 多需求 multi-stage（外部提案 / goal 占位提案均可）：
+# 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
 #   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
 #   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
 #   .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id t --runs-root .ygg/runs --resume
