@@ -1,5 +1,7 @@
 //! M2.5 Godot 底座可行性 spike——gdext 绑定面（最小实证面）。
 //!
+//! **绑定型文件**：本文件绑定 `packages/mods/test-adventure` 的 agent 契约（事件名 / 结局前缀硬编码在字面量里）；换 Mod 需同步修改。通用工具（examples/agent.rs、src/playtest.rs）不在此列——它们从 pack.json 读契约。
+//!
 //! 绑定类 [`YggKernel`]：`load_mod(目录)` / `dispatch(cmd, payload)` /
 //! 叙事与选择 getter。核心逻辑收在纯 Rust [`logic`] 模块——不经 Godot
 //! 引擎也可原生测试（`cargo test` 走查 test-adventure，作为 headless

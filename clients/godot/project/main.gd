@@ -18,6 +18,7 @@ extends Control
 ##   Godot --headless --path clients/godot/project -- --choices=1,1 --auto-quit=1
 ## 窗口运行（人工点选）：
 ##   Godot --path clients/godot/project
+## **绑定型文件**：本文件绑定 `packages/mods/test-adventure` 的 agent 契约（事件名 / 结局前缀硬编码在字面量里）；换 Mod 需同步修改。
 
 const SESSION_SCRIPT := preload("res://session.gd")
 const THEME_FACTORY := preload("res://theme_factory.gd")

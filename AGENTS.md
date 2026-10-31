@@ -249,7 +249,52 @@ cargo run --example playtest -- .ygg/mods/agent-seed    # 冒烟：默认全 1 �
 
 ---
 
-## 9. 本地凭据
+## 9. host 契约：**必填，宿主不含任何默认值**
+
+通用工具（`examples/agent.rs`、`src/playtest.rs`）不再硬编码事件名 / inbox kind / 结算判定项，
+它们从**被装载的那个 Mod** 读契约。契约是 Mod 的**必填部分**：缺任一段 / 缺任一字段 / 类型不符 /
+非正整数 → **装载期失败**（非零退出或 `ok=false` 报告），错误文案点名缺失字段 + 给出应有形状 +
+指回 `.ygg/mods/agent-seed/README.md` 的「零、host 契约」章节。这是 fail-closed 的刻意选择：
+宿主宁可拒绝启动，也不猜 Mod 的意图。
+
+| 声明位置 | 段 | 字段 |
+| --- | --- | --- |
+| `pack.json` | `agent` | `entryEvent` / `choiceEvent` / `summaryEvent` / `endingPrefix` |
+| `pack.json` | `inboxRoutes` | `<kind>` → `{action, fields[, write]}`（可为 `{}`，= 不支持异步 inbox） |
+| `<config.json>` | `settlement` | `requireEvents` / `requireNoFailedSteps` / `requireEnding` / `requireInboxConsumed` |
+| `<config.json>` | `drive` | `maxSteps` / `stallLimit` / `stepsPerRequirement`（正整数） |
+
+`<config.json>` = `pack.json` 里 `ygg:agent/config` 条目声明的路径（seed Mod 是 `data/config.json`）。
+
+**旧 Mod 升级**：补齐上面四段即可（三段在 `pack.json` / 一段在 `config.json`，`settlement` 与 `drive`
+同属 `config.json`）；`cargo run --example pack -- <mod目录>` 会在打包期校验形状（声明了才校验）。
+
+### 硬编码归属表（谁可以保留字面量，绑定谁）
+
+只有**绑定特定 Mod 的应用**与**生成器侧**可以保留事件名 / 结局前缀字面量，每个文件头都有一行
+「绑定型/生成器侧文件」声明；通用工具里不允许出现。
+
+| 文件 | 归属 | 绑定对象 |
+| --- | --- | --- |
+| `crates/ygg-sandbox/examples/adventure.rs` | 绑定型 | `packages/mods/test-adventure` |
+| `crates/ygg-sandbox/examples/playtest.rs`（薄壳） | 通用工具 | 无（`--max-steps` 缺省值不是契约） |
+| `crates/ygg-sandbox/examples/agent.rs` | 通用工具 | 无（零事件名，全读契约） |
+| `crates/ygg-sandbox/src/playtest.rs` | 通用工具 | 无（`agent` 段必填，缺失 → `ok=false`） |
+| `crates/ygg-sandbox/src/host_contract.rs` | 通用工具 | 无（契约解析单点，含形状示例文案） |
+| `crates/ygg-sandbox/examples/pack.rs` | 通用工具 | 无（声明了才校验契约形状） |
+| `clients/godot/rust/src/logic.rs` | 绑定型 | `packages/mods/test-adventure` |
+| `clients/godot/project/main.gd` / `session.gd` | 绑定型 | `packages/mods/test-adventure` |
+| `spike/godot/rust/src/lib.rs` / `spike/godot/project/main.gd` | 绑定型 | `packages/mods/test-adventure` |
+| `packages/client-web/src/kernel.ts` / `session.ts` / `kernel-wasm.ts` | 绑定型 | `packages/mods/test-adventure` |
+| `packages/pipeline/src/{prompt,types,pack}.ts` | 生成器侧 | 产出与 `packages/mods/test-adventure` 同构的 Mod（模板里带 `agent` 段） |
+| `scripts-dev/mock-llm-stub.mjs` | 生成器侧替身 | 同上（mock 剧本里的结局前缀） |
+| `crates/ygg-wasm/smoke.mjs` | 绑定型（冒烟） | `packages/mods/test-adventure` |
+| `crates/ygg-sandbox/tests/*`、`crates/ygg-lint/tests/*` | 测试夹具 | `packages/mods/test-adventure` / 内联 Mod 夹具 |
+| `crates/ygg-core/src/event.rs`、`crates/ygg-sandbox/src/driver.rs`、`crates/ygg-lint/src/rules.rs` | 内核保留路由 | `ygg.choice_selected` 是内核域校验的保留事件名（契约的 `choiceEvent` 必须与它同名） |
+| `packages/mods/agent-seed/{mod.lua,data/*.json,pack.json}`、`packages/mods/test-adventure/*` | Mod 自身 | 这两个 Mod 是这些事件名的**权威定义处** |
+| `AGENTS.md`、`docs/*.md`、各 `README.md` | 文档示例 | — |
+
+## 10. 本地凭据
 
 本地凭据放 `.env` / `.env.local`（均已 gitignore，权限 600，绝不入库）。Mod 资源、静态配置、动态
 `settings.*` 与报告里只出现**键名**，不出现值——完整红线见 `guide.show credentials`。

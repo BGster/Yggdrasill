@@ -1,6 +1,7 @@
 // prompt.ts — few-shot 组装（test-adventure 全套为 golden 种子，FR-2；
 // 13.3KB 全套注入，research Q1 实测在预算内）+ 修复轮 prompt（FR-7 错误
 // 反喂；全量重生成保持双件套键引用一致性，research Q1 推荐形态）。
+// **生成器侧文件**：本文件生成的是 `packages/mods/test-adventure` 同构的 Mod（结局前缀 / 入口事件写进生成物与提示词）；换 Mod 契约需同步修改。
 
 import { readFileSync } from "node:fs";
 import { repoRoot } from "./env.js";

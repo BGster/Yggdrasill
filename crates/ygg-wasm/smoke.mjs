@@ -8,6 +8,7 @@
 //   scripts/build-wasm.sh            # 先出产物（或手工两步构建）
 //   node crates/ygg-wasm/smoke.mjs
 // 退出码 0 = 活链通过；非 0 = 任一断言/异常失败（含信封 ok=false）。
+// **绑定型/生成器侧**：本文件服务于 `packages/mods/test-adventure` 同构 Mod 的开发替身（事件名 / 结局前缀写死在剧本里）；换 Mod 契约需同步修改。
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

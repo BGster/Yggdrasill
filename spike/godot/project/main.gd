@@ -1,4 +1,5 @@
 extends Control
+## **绑定型文件**：本文件绑定 `packages/mods/test-adventure` 的 agent 契约（事件名 / 结局前缀硬编码在字面量里）；换 Mod 需同步修改。
 
 ## M2.5 spike UI 接线：叙事显示 + 选项按钮列 + headless 自动走查。
 ##
