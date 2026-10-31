@@ -17,7 +17,7 @@ export interface PendingChoice {
 }
 
 /** 信封错误（稳定字符串码，下游按码分支不解析 message）。 */
-export interface EnvelopeError {
+interface EnvelopeError {
   code: string;
   message: string;
 }
@@ -26,7 +26,7 @@ export interface EnvelopeError {
  * 内核存档本体（`save` 信封的 `save` 字段 = `load` 的 payload 原文）。
  * 结构由内核 SaveFile 定型：引擎版本门 + 实体表 + 持久 KV + 待决选择。
  */
-export interface SaveData {
+interface SaveData {
   format_version: number;
   engine_version: string;
   entities: unknown;
@@ -115,16 +115,10 @@ export function parseEnvelope(raw: string): Envelope {
   return obj as unknown as Envelope;
 }
 
-/** 稳定错误码速查（driver.rs `code` 模块面；判断一律比对字符串）。 */
-export const ENVELOPE_ERROR_CODES = {
-  OK: "OK",
-  VALIDATION: "VALIDATION",
-  FUEL_EXHAUSTED: "FUEL_EXHAUSTED",
-  SANDBOX_DENIED: "SANDBOX_DENIED",
-  KV_LIMIT: "KV_LIMIT",
-  ENGINE_MISMATCH: "ENGINE_MISMATCH",
-  INTERNAL: "INTERNAL",
-} as const;
+/** 稳定错误码速查（driver.rs `code` 模块面；判断一律比对字符串）：
+ *  `OK` / `VALIDATION` / `FUEL_EXHAUSTED` / `SANDBOX_DENIED` / `KV_LIMIT` /
+ *  `ENGINE_MISMATCH` / `INTERNAL`。本包不导出常量表——消费方按码字符串比对即可。
+ */
 
 // ── 回放 fixture 结构 ────────────────────────────────────────────────────
 

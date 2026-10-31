@@ -7,8 +7,8 @@
 
 import { createHash } from "node:crypto";
 
-export const SCENE_RESOURCE_ID = "ygg:scene/texts";
-export const SCENE_RESOURCE_KIND = "scene-texts";
+const SCENE_RESOURCE_ID = "ygg:scene/texts";
+const SCENE_RESOURCE_KIND = "scene-texts";
 export const SCENE_SCHEMA_URL = "https://yggdrasill.dev/schemas/v1/scene-texts.json";
 export const SCENE_DATA_PATH = "data/scenes.json";
 export const SCENE_SCHEMA_PATH = "schemas/scene-texts.json";
