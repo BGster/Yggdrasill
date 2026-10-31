@@ -3,6 +3,7 @@
 //   顶层 ["entries","schemaVersion"]，entry ["byteLength","id","kind","path","schema","sha256"]。
 // 序列化 = 2 空格缩进 + 尾部换行（pack.rs:137）。内核装载期内容寻址校验兜底
 // 一致性（不对齐即 ContentMismatch 暴露）——TS 侧不需要 Rust 工具链在环。
+// **生成器侧文件**：本文件生成的是 `packages/mods/test-adventure` 同构的 Mod（结局前缀 / 入口事件写进生成物与提示词）；换 Mod 契约需同步修改。
 
 import { createHash } from "node:crypto";
 
@@ -25,6 +26,23 @@ export function buildPackJson(): string {
       },
     ],
     schemaFiles: [SCENE_SCHEMA_PATH],
+    // host 契约（必填）：事件名 / 结局前缀 / 叙事约定由 Mod 自己声明，通用工具
+    // （playtest / agent）不含字面量。生成物没有异步 inbox → 只声明三个保留键。
+    agent: {
+      entryEvent: "event.start",
+      choiceEvent: "ygg.choice_selected",
+      summaryEvent: "agent.summary",
+      endingPrefix: "【结局",
+      metaKey: "summary",
+      rejectionPrefixes: ["【拒绝】"],
+      replayPrefix: "【重放】",
+      defaultPayload: "0",
+    },
+    inboxRoutes: {
+      externalIdField: "external_id",
+      payloadField: "payload",
+      extMarker: "@ext=",
+    },
   };
   return `${JSON.stringify(pack, null, 2)}\n`;
 }

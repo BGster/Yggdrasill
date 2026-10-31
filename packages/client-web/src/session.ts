@@ -8,6 +8,7 @@
 //   UI 侧保留以便重试——刻意偏差，见 commit 汇报）；
 // - 存档/状态/读档完成 → 系统行（不重放叙事——对应 CLI 的 fresh=false）。
 // ============================================================================
+// **绑定型文件**：本文件绑定 `packages/mods/test-adventure` 的 agent 契约（事件名 / 结局前缀硬编码在字面量里）；换 Mod 需同步修改。
 
 import type { Envelope, PendingChoice } from "./kernel";
 

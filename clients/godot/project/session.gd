@@ -1,4 +1,5 @@
 extends RefCounted
+## **绑定型文件**：本文件绑定 `packages/mods/test-adventure` 的 agent 契约（事件名 / 结局前缀硬编码在字面量里）；换 Mod 需同步修改。
 class_name YggSession
 ## 会话状态机（UI 无关，headless 下同样执行）。
 ##

@@ -6,6 +6,7 @@
 // A2 追加：支持 `stream: true`（SSE 增量）——无真凭据时也能实测 provider.completeStream
 // 的整条流式链路（CLI 进度行 / /__generate 的 progress+preview 事件）。分片按固定
 // 字符数切片并带小延迟，让进度肉眼可见。
+// **绑定型/生成器侧**：本文件服务于 `packages/mods/test-adventure` 同构 Mod 的开发替身（事件名 / 结局前缀写死在剧本里）；换 Mod 契约需同步修改。
 
 import { createServer } from "node:http";
 

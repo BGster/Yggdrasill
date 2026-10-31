@@ -242,6 +242,23 @@ fn write_mini_mod(tag: &str, mod_lua: &str) -> PathBuf {
                 "path": "data/scenes.json",
             }],
             "schemaFiles": ["schemas/scene-texts.json"],
+            // host 契约（必填）：事件名 / 结局前缀 / 叙事约定由 Mod 自己声明。
+            "agent": {
+                "entryEvent": "event.start",
+                "choiceEvent": "ygg.choice_selected",
+                "summaryEvent": "agent.summary",
+                "endingPrefix": "【结局",
+                "metaKey": "summary",
+                "rejectionPrefixes": ["【拒绝】"],
+                "replayPrefix": "【重放】",
+                "defaultPayload": "0",
+            },
+            // 三个保留键必填；一个 kind 都不声明 = 不支持异步 inbox。
+            "inboxRoutes": {
+                "externalIdField": "external_id",
+                "payloadField": "payload",
+                "extMarker": "@ext=",
+            },
         }))
         .expect("pack"),
     )

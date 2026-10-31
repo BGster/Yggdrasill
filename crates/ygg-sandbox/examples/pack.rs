@@ -31,6 +31,11 @@
 //!   不改写声明面）；
 //! - `schemaFiles`：随包分发的 schema 文件清单（工具校验存在性，不进
 //!   manifest——schema 文本由装载方按 id 注册，不经 manifest 寻址）。
+//!
+//! **host 契约的可选前置校验**：`pack.json` 若声明了 `agent` / `inboxRoutes`
+//! 段，打包期即按运行期同一套规则解析（`ygg_sandbox::host_contract`：字段必填、
+//! 类型 / 形状校验，错误文案与运行时一致）。段缺失**不算错**——本工具服务所有
+//! Mod（含不吃 host 契约的冒险类 Mod），但**写坏了**必须在此拦下，别等装载期。
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -38,6 +43,7 @@ use std::process::exit;
 
 use serde_json::{json, Value as Json};
 use sha2::{Digest, Sha256};
+use ygg_sandbox::host_contract::{AgentContract, InboxRoutes};
 
 /// pack.json 的条目声明面（工具消费的最小集）。
 struct EntryDecl {
@@ -105,6 +111,20 @@ fn main() {
                 ));
             }
             println!("  schema   {} ✓", file);
+        }
+    }
+
+    // ④' host 契约前置校验（声明了才校验；写坏了这里就拦下，不等装载期）。
+    if pack.get("agent").is_some() {
+        match AgentContract::from_pack(&pack) {
+            Ok(contract) => println!("  agent    → {}", contract.entry_event),
+            Err(message) => fail(message),
+        }
+    }
+    if pack.get("inboxRoutes").is_some() {
+        match InboxRoutes::from_pack(&pack) {
+            Ok(routes) => println!("  inbox    {} 条路由 ✓", routes.len()),
+            Err(message) => fail(message),
         }
     }
 

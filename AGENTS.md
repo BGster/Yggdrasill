@@ -249,7 +249,75 @@ cargo run --example playtest -- .ygg/mods/agent-seed    # 冒烟：默认全 1 �
 
 ---
 
-## 9. 本地凭据
+## 9. host 契约：**必填，宿主不含任何默认值**
+
+通用工具（`examples/agent.rs`、`src/playtest.rs`）不再硬编码事件名 / 叙事前缀 / 摘要键名 / 入口载荷 /
+inbox 字段名 / 结算判定项 / 推进阈值，它们从**被装载的那个 Mod** 读契约。契约是 Mod 的**必填部分**：
+缺任一段 / 缺任一字段 / 类型不符 / 非正整数 → **装载期失败**（非零退出或 `ok=false` 报告），
+错误文案点名缺失字段 + 给出应有形状 + 指回 `.ygg/mods/agent-seed/README.md` 的「零、host 契约」章节。
+这是 fail-closed 的刻意选择：宿主宁可拒绝启动，也不猜 Mod 的意图。
+
+| 声明位置 | 段 | 字段 |
+| --- | --- | --- |
+| `pack.json` | `agent` | `entryEvent` / `choiceEvent` / `summaryEvent` / `endingPrefix` / `metaKey` / `rejectionPrefixes`（≥1 条）/ `replayPrefix` / `defaultPayload` |
+| `pack.json` | `inboxRoutes` | 保留键 `externalIdField` / `payloadField` / `extMarker` + `<kind>` → `{action, fields[, write]}`（零 kind 合法） |
+| `<config.json>` | `settlement` | `requireEvents` / `requireNoFailedSteps` / `requireEnding` / `requireInboxConsumed` |
+| `<config.json>` | `drive` | `maxSteps` / `stallLimit` / `stepsPerRequirement`（正整数） |
+
+`<config.json>` = `pack.json` 里 `ygg:agent/config` 条目声明的路径（seed Mod 是 `data/config.json`）。
+
+**旧 Mod 升级**：补齐上面四段即可（两段在 `pack.json` / 两段在 `config.json`）；
+`cargo run --example pack -- <mod目录>` 会在打包期校验形状（声明了才校验）。
+
+### “彻底清掉硬编码”的边界（防止无限扩张）
+
+**属于契约、必须 Mod 声明**（host 里不得出现字面量）：
+
+- 事件名（入口 / 选择 / 摘要动作）与结局行前缀；
+- 摘要键名（`metaKey`）、拒绝与重放叙事前缀、入口默认载荷；
+- inbox 记录字段名（幂等键 / 预成形载荷）、幂等后缀标记、kind→action 路由与段序；
+- 结算口径（`settlement` 开关）与自动推进阈值（`drive`）、决策命令超时与轮询间隔之外的一切推进参数。
+
+**属于 host、可以保留字面量**（Mod 不感知，也不应该感知）：
+
+| 类别 | 具体项 |
+| --- | --- |
+| run 目录文件名 | `autosave.json` / `events.jsonl` / `run.json` / `settlement.json` / `inbox.jsonl` / `inbox.cursor` / `decide-input.json` / `coordination.json` / `coordination.lock` |
+| 协调协议阶段名 | `running` / `closing` / `finalized` |
+| 宿主自身超时 | 决策命令超时（`DECIDE_TIMEOUT`）与轮询间隔（`DECIDE_POLL_INTERVAL`） |
+| `--drive` 三态名 | `stdin` / `cmd:<路径>` / `none` |
+| 五件套文件名 | `pack.json` / `manifest.json` / `mod.lua` / `schemas/` / `data/` |
+| 内核接驳面 | `save` / `load` / `state` 等内核自带动作名，`ygg.choice_selected` 保留路由 |
+
+理由：这些是 host 自身的文件布局与跨进程协议，Mod 不感知。要加新字面量到“属于 host”表，
+必须先回答“换一个 Mod，这个字面量会变吗？”——会变就属于契约。
+
+### 硬编码归属表（谁可以保留字面量，绑定谁）
+
+只有**绑定特定 Mod 的应用**与**生成器侧**可以保留事件名 / 结局前缀字面量，每个文件头都有一行
+「绑定型/生成器侧文件」声明；通用工具里不允许出现。
+
+| 文件 | 归属 | 绑定对象 |
+| --- | --- | --- |
+| `crates/ygg-sandbox/examples/adventure.rs` | 绑定型 | `packages/mods/test-adventure` |
+| `crates/ygg-sandbox/examples/playtest.rs`（薄壳） | 通用工具 | 无（`--max-steps` 缺省值不是契约） |
+| `crates/ygg-sandbox/examples/agent.rs` | 通用工具 | 无（零事件名，全读契约） |
+| `crates/ygg-sandbox/src/playtest.rs` | 通用工具 | 无（`agent` 段必填，缺失 → `ok=false`） |
+| `crates/ygg-sandbox/src/host_contract.rs` | 通用工具 | 无（契约解析单点，含形状示例文案） |
+| `crates/ygg-sandbox/examples/pack.rs` | 通用工具 | 无（声明了才校验契约形状） |
+| `clients/godot/rust/src/logic.rs` | 绑定型 | `packages/mods/test-adventure` |
+| `clients/godot/project/main.gd` / `session.gd` | 绑定型 | `packages/mods/test-adventure` |
+| `spike/godot/rust/src/lib.rs` / `spike/godot/project/main.gd` | 绑定型 | `packages/mods/test-adventure` |
+| `packages/client-web/src/kernel.ts` / `session.ts` / `kernel-wasm.ts` | 绑定型 | `packages/mods/test-adventure` |
+| `packages/pipeline/src/{prompt,types,pack}.ts` | 生成器侧 | 产出与 `packages/mods/test-adventure` 同构的 Mod（模板里带 `agent` 段） |
+| `scripts-dev/mock-llm-stub.mjs` | 生成器侧替身 | 同上（mock 剧本里的结局前缀） |
+| `crates/ygg-wasm/smoke.mjs` | 绑定型（冒烟） | `packages/mods/test-adventure` |
+| `crates/ygg-sandbox/tests/*`、`crates/ygg-lint/tests/*` | 测试夹具 | `packages/mods/test-adventure` / 内联 Mod 夹具 |
+| `crates/ygg-core/src/event.rs`、`crates/ygg-sandbox/src/driver.rs`、`crates/ygg-lint/src/rules.rs` | 内核保留路由 | `ygg.choice_selected` 是内核域校验的保留事件名（契约的 `choiceEvent` 必须与它同名） |
+| `packages/mods/agent-seed/{mod.lua,data/*.json,pack.json}`、`packages/mods/test-adventure/*` | Mod 自身 | 这两个 Mod 是这些事件名的**权威定义处** |
+| `AGENTS.md`、`docs/*.md`、各 `README.md` | 文档示例 | — |
+
+## 10. 本地凭据
 
 本地凭据放 `.env` / `.env.local`（均已 gitignore，权限 600，绝不入库）。Mod 资源、静态配置、动态
 `settings.*` 与报告里只出现**键名**，不出现值——完整红线见 `guide.show credentials`。

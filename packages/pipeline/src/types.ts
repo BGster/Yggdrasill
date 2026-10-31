@@ -1,4 +1,5 @@
 // types.ts — 管线内部契约：LLM story 输出面 + 三道门错误面 + 产物/报告面。
+// **生成器侧文件**：本文件生成的是 `packages/mods/test-adventure` 同构的 Mod（结局前缀 / 入口事件写进生成物与提示词）；换 Mod 契约需同步修改。
 
 import type { StoryPreview } from "./preview.js";
 

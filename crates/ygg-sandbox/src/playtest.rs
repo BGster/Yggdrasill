@@ -1,15 +1,19 @@
-//! 无头走查（playtest）：任意 Mod 目录的装载 + `event.start` 自动推进 +
+//! 无头走查（playtest）：任意 Mod 目录的装载 + 契约入口事件自动推进 +
 //! 结构化报告（FR-6 验收门本体；D-12 走查策略）。
+//!
+//! **零硬编码**：走查用的事件名与结局行前缀全部来自该 Mod `pack.json` 的
+//! `agent` 段（[`crate::host_contract::AgentContract`]）；缺失即返回
+//! `ok=false` 的可读错误报告，**不**回退到任何内置事件名。
 //!
 //! 与内核的接驳面 = `KernelFacade::with_resources` + dispatch 信封（与
 //! examples/adventure.rs 同构）；与管线的接驳面 = stdout JSON 报告 + 退出
 //! 码（契约文本见 examples/playtest.rs 头注）——管线侧零内核符号依赖
 //! （D-8：子进程边界即全部耦合）。
 //!
-//! 走查语义（D-12 定稿）：装载 → `dispatch("event.start","0")`（序章叙事
+//! 走查语义（D-12 定稿）：装载 → `dispatch(<agent.entryEvent>, <agent.defaultPayload>)`（序章叙事
 //! 非空为硬门）→ 循环{有待决选择 → 按（脚本下一位或默认 1）派发
-//! `ygg.choice_selected`；叙事行含【结局前缀 → 收口}。脚本耗尽停在当前
-//! 选择点（reached=Choice）；无选择且未达结局 = DeadEnd；步数上限 = Limit。
+//! `<agent.choiceEvent>`；叙事行含 `agent.endingPrefix` → 收口}。脚本耗尽停在
+//! 当前选择点（reached=Choice）；无选择且未达结局 = DeadEnd；步数上限 = Limit。
 
 use std::fs;
 use std::path::Path;
@@ -17,12 +21,10 @@ use std::path::Path;
 use serde_json::{json, Value as Json};
 
 use crate::driver::KernelFacade;
+use crate::host_contract::AgentContract;
 
-/// 默认步数上限（防生成物死循环；`--max-steps` 可覆盖）。
+/// 默认步数上限（**宿主侧**的失控防护参数，不是 Mod 契约；`--max-steps` 可覆盖）。
 pub const DEFAULT_MAX_STEPS: usize = 64;
-
-/// 结局叙事行前缀（与 examples/adventure.rs / client-web kernel.ts 同源同值）。
-pub const ENDING_PREFIX: &str = "【结局";
 
 /// 报告 narrativeSample 保留行数上限（报告体积面）。
 const SAMPLE_LIMIT: usize = 8;
@@ -49,7 +51,7 @@ impl Default for PlaytestOptions {
 /// 走查收口四态（D-12）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reached {
-    /// 叙事行出现【结局前缀。
+    /// 叙事行出现契约 `agent.endingPrefix` 前缀。
     Ending,
     /// 脚本耗尽，停在待决选择点。
     Choice,
@@ -129,6 +131,16 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
         }
     };
 
+    // ①' host 契约（`pack.json` 的 `agent` 段，必填）：入口 / 选择事件名与结局
+    //     前缀都从该 Mod 的声明里取。缺失即可读错误报告（不 panic、不兜底）。
+    let contract = match AgentContract::load(mod_dir) {
+        Ok(contract) => contract,
+        Err(message) => {
+            errors.push(message);
+            return empty_report(errors);
+        }
+    };
+
     // ② 装载（fail-fast：预算/寻址/校验先于任何 Lua 状态）。
     let mut kernel = match KernelFacade::with_resources(
         &bundle.mod_source,
@@ -143,7 +155,7 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
         }
     };
 
-    // ③ event.start → 序章非空硬门 → 选择驱动循环。
+    // ③ 入口事件 → 序章非空硬门 → 选择驱动循环（事件名全来自契约）。
     let mut steps = 0usize;
     let mut events_processed = 0usize;
     let mut narrative_sample: Vec<String> = Vec::new();
@@ -153,8 +165,8 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
 
     let mut envelope = take_envelope(
         &mut kernel,
-        "event.start",
-        "0",
+        &contract.entry_event,
+        &contract.default_payload,
         &mut errors,
         &mut events_processed,
     );
@@ -167,7 +179,7 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
             .filter(|value| value.as_str().is_some_and(|line| !line.trim().is_empty()))
             .count()
     });
-    if has_ending_line(&envelope) {
+    if has_ending_line(&envelope, &contract.ending_prefix) {
         reached = Some(Reached::Ending);
     }
 
@@ -185,7 +197,7 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
         choice_cursor += 1;
         envelope = take_envelope(
             &mut kernel,
-            "ygg.choice_selected",
+            &contract.choice_event,
             &picked.to_string(),
             &mut errors,
             &mut events_processed,
@@ -193,7 +205,7 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
         collect_narrative(&envelope, &mut narrative_sample);
         collect_warnings(&envelope, &mut warnings);
         steps += 1;
-        if has_ending_line(&envelope) {
+        if has_ending_line(&envelope, &contract.ending_prefix) {
             reached = Some(Reached::Ending);
         }
     }
@@ -239,12 +251,13 @@ fn take_envelope(
     value
 }
 
-fn has_ending_line(envelope: &Json) -> bool {
+/// 叙事里是否出现结局行（前缀来自契约 `agent.endingPrefix`）。
+fn has_ending_line(envelope: &Json, prefix: &str) -> bool {
     envelope["narrative"].as_array().is_some_and(|lines| {
         lines
             .iter()
             .filter_map(|value| value.as_str())
-            .any(|line| line.starts_with(ENDING_PREFIX))
+            .any(|line| line.starts_with(prefix))
     })
 }
 

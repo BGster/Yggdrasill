@@ -1,5 +1,7 @@
 //! 交互式 CLI 游玩入口：《灯下谜径》（packages/mods/test-adventure）终端直玩。
 //!
+//! **绑定型文件**：本文件绑定 `packages/mods/test-adventure` 的 agent 契约（事件名 / 结局前缀硬编码在字面量里）；换 Mod 需同步修改。通用工具（examples/agent.rs、src/playtest.rs）不在此列——它们从 pack.json 读契约。
+//!
 //! std-only 示例（不新增依赖）：装载真实资源包 → 自动派发 `event.start`
 //! → 待决选择驱动的主循环（数字选项 / q 退出 / s 存档 / l 读档 / i 状态）。
 //!

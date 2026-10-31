@@ -45,7 +45,7 @@
 | D16 | Lua 方言 | **Lua 5.4**（非 Luau）：保住 busted 验收与标准语义；代价接受：燃料用 `set_hook`、沙箱手动加固、`luai_makeseed` 构建期覆盖 | ✅ |
 | D17 | 并发模型 | **串行确定性内核 + 宿主侧分片（预留架构）**：内核单实例永远同步串行 FIFO（确定性立身承诺）；规模需求出现时以 `KernelFacade` 实例为分片单元在宿主侧并行——禁止跨片引用，实体不直接感知用户或其他实体，一切交互经消息通道，跨片消息在 tick 边界按 canonical 序合流保全全局确定性。规模实证（10k 实体单事件毫秒级）已入探针门禁。M0-M2 不启用，M3+/平台服务规模启用 | 📌 预留 |
 | D18 | LLM provider 面 | **双协议抽象 + `.env` 四键**（`YGG_LLM_*`）：内网 OpenAI 兼容面为默认，anthropic-messages 为已实证回退协议；provider 可插拔，切换零代码变更 | ✅（M1 交付） |
-| D19 | 走查验收契约 | **playtest JSON 报告**为唯一机读面（八键）；选择策略 = 默认全 1 贪心 + `--choices` 脚本 + `--max-steps`；收口四态 ending/choice/limit/deadend；结局判据 = 叙事行 `^【结局` 前缀 | ✅（M1 交付） |
+| D19 | 走查验收契约 | **playtest JSON 报告**为唯一机读面（八键）；选择策略 = 默认全 1 贪心 + `--choices` 脚本 + `--max-steps`；收口四态 ending/choice/limit/deadend；结局判据 = 叙事行 `^【结局` 前缀（M6 起前缀由 Mod 的 `pack.json` → `agent.endingPrefix` 声明，宿主不再硬编码） | ✅（M1 交付） |
 | D20 | 资源模板单源 | **scene-texts 模板落 `packages/schema/schemas/`**（铁律 2）；STORY_SCHEMA 的 scenes 子树与该模板同步演进；LLM 不生成 schema | ✅（M1 交付） |
 
 ## 4. 里程碑路线图

@@ -6,6 +6,7 @@
 // （真实内核 dispatch 回包采集，见 meta.generator）。信封键序 = serde_json
 // 字典序；域错误永不 throw，一律 `{ok:false, error:{code,message}}`。
 // ============================================================================
+// **绑定型文件**：本文件绑定 `packages/mods/test-adventure` 的 agent 契约（事件名 / 结局前缀硬编码在字面量里）；换 Mod 需同步修改。
 
 import transcriptJson from "./fixtures/adventure-transcript.json";
 

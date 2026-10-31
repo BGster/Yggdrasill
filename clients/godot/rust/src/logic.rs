@@ -1,5 +1,7 @@
 //! 纯 Rust 逻辑面（Godot 无关）：Mod 装载、信封拆解、存读档。
 //!
+//! **绑定型文件**：本文件绑定 `packages/mods/test-adventure` 的 agent 契约（事件名 / 结局前缀硬编码在字面量里）；换 Mod 需同步修改。通用工具（examples/agent.rs、src/playtest.rs）不在此列——它们从 pack.json 读契约。
+//!
 //! 与内核的接驳面 = `ygg_sandbox::driver::KernelFacade` + dispatch JSON 信封
 //! （与 playtest.rs / examples/adventure.rs 同构）。本模块刻意不 `use godot`：
 //! `cargo test` 不经 Godot 引擎即可直调走查（headless 运行之外的第二证据面）。

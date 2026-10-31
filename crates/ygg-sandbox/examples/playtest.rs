@@ -1,4 +1,4 @@
-//! 无头走查 CLI：任意 Mod 目录装载 + `event.start` 自动推进 + JSON 报告
+//! 无头走查 CLI：任意 Mod 目录装载 + 契约入口事件自动推进 + JSON 报告
 //! （playtest 逻辑在 src/playtest.rs，本文件只是参数解析薄壳——与
 //! pack.rs / adventure.rs 同为 example 形态惯例）。
 //!
@@ -11,7 +11,7 @@
 //! ```
 //!
 //! - `ok` = 装载成功 ∧ 全程无错误信封 ∧ 序章叙事非空 ∧ reached ∈ {ending, choice}；
-//! - `reached`：ending（叙事出现【结局行）/ choice（`--choices` 脚本耗尽
+//! - `reached`：ending（叙事出现 `agent.endingPrefix` 行）/ choice（`--choices` 脚本耗尽
 //!   停在选择点）/ limit（`--max-steps` 上限）/ deadend（无选择且未达结局）；
 //! - 退出码：0 = ok；1 = !ok；2 = 用法错误。
 //!

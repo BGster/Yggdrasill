@@ -171,6 +171,68 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 可读报错覆盖：pack.json 缺失 / 非法 JSON / 字段缺失、id 或 path 重复
 声明、path 越界（`..` 或绝对路径）、数据文件缺失。
 
+### host 契约段（`agent` / `inboxRoutes`）
+
+通用 Mod 工具（`cargo run --example agent`、`--example playtest`）**不含任何 Mod 语义字面量与
+回退默认值**（事件名 / 叙事前缀 / 摘要键名 / 入口载荷 / inbox 字段名与幂等标记均属于契约）：
+它们从被装载的 Mod 自己的 `pack.json` 读契约。这两段对这两个工具是**必填**（缺失即报错退出 /
+`ok=false` 报告），写法见 `.ygg/mods/agent-seed/README.md` 的「零、host 契约」章节：
+
+```json
+{
+  "agent": {
+    "entryEvent": "<新局入口事件名>",
+    "choiceEvent": "<玩家选择事件名；须与内核保留路由 ygg.choice_selected 同名，否则失去序号域校验>",
+    "summaryEvent": "<Mod 自报摘要的只读动作名>",
+    "endingPrefix": "<结局叙事行前缀>",
+    "metaKey": "<回执信封 meta 里摘要的键名>",
+    "rejectionPrefixes": ["<拒绝叙事行前缀>", "<至少一条>"],
+    "replayPrefix": "<幂等重放叙事行前缀>",
+    "defaultPayload": "<入口事件首次派发的载荷（JSON 标量文本）>"
+  },
+  "inboxRoutes": {
+    "externalIdField": "<inbox 记录里幂等键的字段名>",
+    "payloadField": "<inbox 记录里预成形载荷的字段名>",
+    "extMarker": "<幂等键拼到载荷末尾的后缀标记>",
+    "<kind>": {
+      "action": "<内核动作名>",
+      "fields": ["<段1>", "<段2>", "<幂等键字段名>"],
+      "write": { "flag": "<宿主 CLI 旗标名>", "shape": "named|payload" }
+    }
+  }
+}
+```
+
+- `inboxRoutes` 的三个保留键**必填**，但**允许一个 kind 都不声明**（= 本 Mod 不支持异步 inbox，
+  宿主的 `--requirement` 等写命令会明确拒绝，退出码 3）。三个保留键与 kind **同层**，kind 名不得与它们同名。
+- `agent.rejectionPrefixes` 必须写 **Mod 真实在用的**叙事前缀（≥1 条）：宿主靠它判定「派发未生效」，
+  写错了就把被拒当成成功。`defaultPayload` 允许空串，但必须显式声明。
+- `pack` 工具对这两段做**可选前置校验**：声明了就按运行期同一套规则解析，写坏了打包期即拦下；
+  没声明不报错（冒险类 Mod 不吃 host 契约）。
+- 只有吃契约的通用工具需要它；**绑定特定 Mod 的应用**（`clients/godot`、`packages/client-web`、
+  `examples/adventure.rs`…）各自服务固定 Mod，字面量归属见 `AGENTS.md` 的「硬编码归属表」。
+
+### host 契约段（`settlement` / `drive`，在 `data/config.json`）
+
+宿主的结算口径与自动推进阈值同样**必填、无默认值**（缺段 / 缺字段 / 非正整数 = 装载期失败）：
+
+```json
+{
+  "settlement": {
+    "requireEvents": true,
+    "requireNoFailedSteps": true,
+    "requireEnding": true,
+    "requireInboxConsumed": true
+  },
+  "drive": { "maxSteps": 64, "stallLimit": 12, "stepsPerRequirement": 16 }
+}
+```
+
+- `settlement` 的四项各自可关（关掉不参与结算 `ok`，但仍记入 `settlement.json` 的 `checks`）。
+- `drive` 三项必须是正整数（`maxSteps` / `stallLimit` / `stepsPerRequirement`）。
+- 这两段属于 `agent-config` schema 的**可选属性**（内核不解释，只做形状校验）；缺段时内核装载照过，
+  但 `--example agent` 会拒绝启动——口径来自 Mod，宿主不猜。
+
 ### 装载期会发生什么
 
 资源在内核装载时按 manifest 逐条**内容寻址校验**（byteLength 预检 →

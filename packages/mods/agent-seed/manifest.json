@@ -9,12 +9,12 @@
       "sha256": "113e95337067b2984f26c342e4e0f312f4293a7915456a676bbe8ea0db40a14b"
     },
     {
-      "byteLength": 327,
+      "byteLength": 471,
       "id": "ygg:agent/config",
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "7650275895f7ada338f721e5874f9143df4e896cbcbe000920e22fea52810c96"
+      "sha256": "62bbe79b84dd6e8fabeca2a5804f0ec614926808f4299c3ac0197855f6efb229"
     },
     {
       "byteLength": 35204,
