@@ -16,6 +16,22 @@
 //! 必须在升级时补齐这四段（见 `docs/mod-authoring.md` 与
 //! `.ygg/mods/agent-seed/README.md` 的「host 契约」章节）。
 //!
+//! # 代码面契约（`pack.json` 的 `code` 段，可选）
+//!
+//! 同一份 `pack.json` 上还有第五个声明面，但它**不由本模块解析**（消费方是
+//! [`crate::pack`] 与 [`crate::modload`]）——列在这里是因为它与上面四段同属
+//! 「宿主不猜、出事即失败」的契约面，且两者容易漂移：
+//!
+//! | 面 | 口径 | 消费方 |
+//! | --- | --- | --- |
+//! | 登记面 | `code.{entry, modules[]}`：入口**不**登记为模块（同一源码两个装载身份让缓存与定位歧义）；模块**逐条枚举**，无 glob；`entry ↔ modules` 与 `manifest.json` 的 `code` 数组双向相等 | [`crate::pack::CodeSpec`]、[`crate::modload::ModBundle`] |
+//! | 装载期边界 | `require` 只在**装载期**可用：入口 chunk（含其间嵌套的模块装载）跑完，驱动在 `host.seal` 的**同一处**翻 `ModuleHandle::seal`，此后 `require` 是可读拒绝——handler 里不能懒加载 | [`crate::modules::ModuleHandle`] |
+//! | 错误前缀口径 | 装载器自判的拒绝带**调用点**（`src/a.lua:3: <原因>`）；模块 chunk 自身的错误按 Lua 原生错误链浮出（每层 `path:line:` + traceback）——两类同形，都带真实文件与行号，禁止「拼回单文件再报错」 | [`crate::modules`] |
+//!
+//! 与四段 host 契约的差别：`code` 段可以整段缺失（缺 = 单文件 Mod，行为逐字节
+//! 不变）；存在则**全量校验**，不允许半声明。边界细节见 `docs/mod-authoring.md`
+//! §5「多文件 Mod」。
+//!
 //! 绑定特定 Mod 的应用（`examples/adventure.rs`、`clients/godot`、
 //! `packages/client-web`…）不属本模块的消费方：它们各自服务固定 Mod，文件头
 //! 注明绑定对象即可（归属边界见 `guide.show harness` 的 `literal-ownership`）。

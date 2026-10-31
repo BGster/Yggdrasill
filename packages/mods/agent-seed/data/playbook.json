@@ -323,6 +323,18 @@
           "basis": "harness 机制"
         },
         {
+          "id": "harness.kv-prefix-owner",
+          "modality": "must",
+          "text": "多文件 Mod 的 KV 前缀按归属划分，一个前缀只有一个写方：内核 / 标准库前缀（`fsm.*`）由 `ygg.fsm` 独占写、Mod 只读；配置覆盖前缀（`settings.*`）只由配置写入动作写；其余业务前缀由各自模块独占。跨模块写同一前缀 = 隐式耦合，要共享就经模块返回值导出。这是文档约定，装载期不做前缀校验。",
+          "basis": "harness 机制（多文件 Mod）"
+        },
+        {
+          "id": "harness.module-error-locates",
+          "modality": "must-not",
+          "text": "禁止把多文件 Mod「拼回单文件再报错」：模块 chunk 名必须带真实文件与行号，装载阶段自判的拒绝必须带调用点（`文件:行号: 原因`）与 require 链，静态检查必须逐模块独立 parse（模块的 `local` 本就不跨 chunk）。行号对不上真实文件的诊断按缺陷处理。",
+          "basis": "harness 机制（多文件 Mod）"
+        },
+        {
           "id": "harness.mod-change-triple",
           "modality": "must",
           "text": "改完 Mod 必须跑完三件套：① 重算打包清单 ② Lua 静态检查（应 0 error / 0 warning）③ 冒烟走查（必须到达结局）。缺一不算改完。",

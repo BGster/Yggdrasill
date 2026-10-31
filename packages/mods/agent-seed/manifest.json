@@ -17,12 +17,12 @@
       "sha256": "62bbe79b84dd6e8fabeca2a5804f0ec614926808f4299c3ac0197855f6efb229"
     },
     {
-      "byteLength": 19201,
+      "byteLength": 20280,
       "id": "ygg:agent/playbook",
       "kind": "agent-playbook",
       "path": "data/playbook.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
-      "sha256": "75628efffec9bc3a962fad6e72f092f0c96cb74f460554b3263cb3c15c07bbf6"
+      "sha256": "30c2df823dcaa36dcaa1aaf607836c3db40045faf94f84a55c9b1d87479bfd23"
     }
   ],
   "schemaVersion": 1
