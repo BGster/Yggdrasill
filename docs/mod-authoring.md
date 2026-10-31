@@ -159,6 +159,24 @@ packages/mods/<你的mod>/
 }
 ```
 
+### seed 模板与项目实例的分层
+
+同一个仓库里可以有两份同构的 Mod，但**它们不是同一份东西**：
+
+| 位置 | 角色 |
+| --- | --- |
+| `packages/mods/agent-seed/` | **种子模板**：通用元工作流，对外分发；`data/playbook.json` 只装通用纪律 |
+| `.ygg/mods/agent-seed/` | **本项目实例**：`data/` 装本仓库自己的规则与配置 |
+
+- **骨架面**（`mod.lua` + `schemas/`）必须逐字节一致——「同一套 harness」不允许有两种机制行为。
+  用 `scripts/sync-seed-mod.sh` 同步（`--from project` 反向回流），脚本自动重算两侧
+  `manifest.json`；CI 有一道骨架守卫，单侧改动会在合入前失败。
+- **实例面**（`data/`）必然不同（playbook 装的是各自项目的规则），任何同步都会毁掉其中一侧，
+  所以脚本不碰 `data/`、CI 也不校验它。
+- 拿模板开新项目：复制到目标仓 `.ygg/mods/` → 填 `data/playbook.json` 的项目章节 →
+  改 `data/config.json` → 跑 `pack` / `ygg-lint` / `playtest` 三件套。步骤见
+  `packages/mods/agent-seed/README.md`。
+
 ### 生成 manifest
 
 ```bash
@@ -210,7 +228,7 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 - `pack` 工具对这两段做**可选前置校验**：声明了就按运行期同一套规则解析，写坏了打包期即拦下；
   没声明不报错（冒险类 Mod 不吃 host 契约）。
 - 只有吃契约的通用工具需要它；**绑定特定 Mod 的应用**（`clients/godot`、`packages/client-web`、
-  `examples/adventure.rs`…）各自服务固定 Mod，字面量归属见 `AGENTS.md` 的「硬编码归属表」。
+  `examples/adventure.rs`…）各自服务固定 Mod，字面量归属见 `guide.show harness` 的 `literal-ownership` 规则。
 
 ### host 契约段（`settlement` / `drive`，在 `data/config.json`）
 

@@ -11,6 +11,9 @@
 #   - wasm.build / wasm.determinism：需 WASI SDK + wasm-bindgen CLI，成本高，
 #     由 deploy-pages 的 build job 与本地门禁承担（其产物即 wasm 实例）。
 #   - ts.build：deploy-pages 已构建 client-web，重复无增益。
+#
+# 另有一条**结构守卫**（不属于 playbook `gates` 章的门禁命令）：seed Mod 与项目 Mod 的
+# 骨架文件（`mod.lua` + `schemas/`）必须逐字节一致——`data/` 是各自实例数据，允许不同。
 name: check
 
 on:
@@ -35,6 +38,26 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
+      # 骨架一致性守卫（最先跑：只用 diff，不需要工具链，失败最快）。
+      # 两个 Mod 分工——骨架面（机制）逐字节一致，实例面（data/）各自维护：
+      #   packages/mods/agent-seed  = 对外分发的种子模板
+      #   .ygg/mods/agent-seed      = 本项目实际装载的实例
+      # 只校验 mod.lua 与 schemas/，**不校验 data/**（playbook 等必然不同）。
+      - name: "Guard — seed/project mod skeleton must match"
+        run: |
+          seed=packages/mods/agent-seed
+          proj=.ygg/mods/agent-seed
+          fail=0
+          if ! diff -u "$seed/mod.lua" "$proj/mod.lua"; then
+            echo "::error::mod.lua 两侧不一致——请运行 scripts/sync-seed-mod.sh" >&2
+            fail=1
+          fi
+          if ! diff -ru "$seed/schemas" "$proj/schemas"; then
+            echo "::error::schemas/ 两侧不一致——请运行 scripts/sync-seed-mod.sh" >&2
+            fail=1
+          fi
+          exit "$fail"
 
       # dtolnay/rust-toolchain（moving branch stable，pin 到当时 head）。
       # fmt/clippy 必须显式声明 components：rustup 默认 profile 不含它们。

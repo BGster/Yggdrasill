@@ -36,14 +36,22 @@
 --   - 冲突仍需**用户确认**：goal 遇到未解决冲突会停下等你选（不自动选默认路径）。
 --
 -- 四、泳道：分析 / 规划 / 开发都是异步 job，全局上限 `tuning.job_capacity`（默认 4）；
---   开发额外占一条 lane（`lane.<k>`），只有「依赖就绪 + 无冲突」的需求能进开发泳道，
---   相互声明冲突的需求不可能同时 developing（冲突标记让两者都不可调度）。
+--   开发额外占一条 lane（`lane.<k>`，账本 `lane.<k>.{req,branch,base,since,clean}`），
+--   只有「依赖就绪 + 无冲突」的需求能进开发泳道，相互声明冲突的需求不可能同时
+--   developing（冲突标记让两者都不可调度）。
 --   内核仍**单线程 dispatch + 单 autosave**：泳道只是宿主侧的并行工作单元，结果一律
 --   通过 inbox 回到这里，宿主按 requirement_id / external_id canonical 序合流。
 --
 -- 五、收口语义：所有需求 `done`（或已 split/merged/dropped 且其后继全部 done）
 --   ∧ 无待验收提案 ∧ 无未解决冲突 → `coordinate.submit` 才允许进 review；
 --   review 里 `verify.submit=true` 进复盘，`review.note` 收口到 done（【结局）。
+--
+-- 六、展示与防自批两层（不影响状态机语义）：
+--   - **人类动作门禁**（§人类动作门禁）：guide 下「会产生通过效果」的动作（验收 / 门禁 /
+--     收口 / 复盘 / 切运行模式）只能经 `ygg.choice_selected` 路由进入，单发直派被可读拒绝；
+--     goal 也走同一条路由，由外部决策命令决定是否派发（不会默认批准）。
+--   - **二级菜单页**（§二级菜单页）：`config` 收敛为顶层单一入口，三项设置进子页；
+--     纯展示层（KV `ui.page` / `ui.page.stage`），阶段一变即清空，不占主前进位置。
 
 -- ============================================================================
 -- §资源 装载期快照（资源只读、不入档）
@@ -587,10 +595,116 @@ local function req_capacity()
   return 32
 end
 
+-- ============================================================================
+-- §泳道 泳道账本（`lane.<k>.{req,branch,base,since,clean}`）
+--
+-- 与多仓参照实现（`lane.<repo>.<k>.*`）的差异：本 Mod 单仓、无 `repo` 层，泳道号就是
+-- 全局 job 槽位号（1..`tuning.job_capacity`），账本与旧编号**同一批键**——不新开命名空间，
+-- 旧存档的 `lane.<k>.req`（数字 index）照样读得懂（见 LANES.req_of），因此**不需要一次性迁移**。
+--
+-- 物理 worktree 由主 Agent 操作（建 / 删 / `git status` 检查都是它的事），mod 只记事实：
+-- 谁占了哪条泳道、分支、base、挂牌序号，以及 clean 断言的结论（**mod 不能跑 git**）。
+-- `since` 记的是单调挂牌序号（沙箱没有墙钟）；真正的墙钟时间由主 Agent 写在 worktree 根的
+-- `.lane`。`branch` / `base` / `clean` 由 `lane.claim` 填；`requirement.dispatch` 自动挂牌时
+-- 三者留空 = **未断言**（不是「干净」，也不是「没有分支」）。
+-- ============================================================================
+local LANES = {}
+
+function LANES.key(k, name)
+  return "lane." .. tostring(k) .. "." .. name
+end
+
+-- 读账本占用者（需求 id 字符串；"" = 空闲）。容忍旧式数字写法（旧存档写的是 index）。
+function LANES.req_of(k)
+  local value = ygg.kv.get(LANES.key(k, "req"))
+  if type(value) == "string" then
+    return trim(value)
+  end
+  if type(value) == "number" and value > 0 then
+    return req_id(math.floor(value))
+  end
+  return ""
+end
+
+-- 挂牌序号（单调递增）：沙箱没有墙钟，`since` 只表达「第几次挂牌」，不表达时间点。
+function LANES.tick()
+  local next_tick = num("lane.seq", 0) + 1
+  ygg.kv.set("lane.seq", next_tick)
+  return next_tick
+end
+
+-- 摘牌：五键一起清（漏清一个就会留下幽灵 branch/base）。
+function LANES.clear(k)
+  ygg.kv.set(LANES.key(k, "req"), "")
+  ygg.kv.set(LANES.key(k, "branch"), "")
+  ygg.kv.set(LANES.key(k, "base"), "")
+  ygg.kv.set(LANES.key(k, "since"), 0)
+  ygg.kv.set(LANES.key(k, "clean"), "")
+end
+
+-- 挂牌（同一次事务写五键 + 需求的泳道号）。branch/base/clean 缺省 = 未断言。
+function LANES.bind(k, index, branch, base, clean)
+  ygg.kv.set(LANES.key(k, "req"), req_id(index))
+  ygg.kv.set(LANES.key(k, "branch"), branch or "")
+  ygg.kv.set(LANES.key(k, "base"), base or "")
+  ygg.kv.set(LANES.key(k, "since"), LANES.tick())
+  ygg.kv.set(LANES.key(k, "clean"), clean or "")
+  ygg.kv.set(req_key(index, "lane"), k)
+end
+
+-- 该需求的预挂牌泳道（0 = 没有）：dispatch 复用它，不覆盖已记的 branch/base/clean。
+function LANES.bound(index)
+  local k = req_lane(index)
+  if k > 0 and LANES.req_of(k) == req_id(index) then
+    return k
+  end
+  return 0
+end
+
+-- 摘掉该需求持有的泳道（幽灵防护：只在账本确实记着它时才清，不误伤别人）。
+function LANES.release(index)
+  local k = req_lane(index)
+  if k > 0 and LANES.req_of(k) == req_id(index) then
+    LANES.clear(k)
+  end
+  ygg.kv.set(req_key(index, "lane"), 0)
+end
+
+-- 第一条空闲泳道号；0 = 全占。
+function LANES.free()
+  for k = 1, job_capacity() do
+    if LANES.req_of(k) == "" then
+      return k
+    end
+  end
+  return 0
+end
+
+-- 展示用：空字段读成「—」（mod 不知道的部分不假装知道）。
+function LANES.text_or(value, fallback)
+  local text = trim(value)
+  if text == "" then
+    return fallback
+  end
+  return text
+end
+
+-- 展示用阶段：在跑 job 优先，否则用需求状态（空括号会让人误读成「没状态」）。
+function LANES.stage_of(index)
+  if index == nil then
+    return "?"
+  end
+  local job = req_job(index)
+  if job ~= "" then
+    return job
+  end
+  return req_status(index)
+end
+
 local function free_lanes()
   local out = {}
   for number = 1, job_capacity() do
-    if num("lane." .. tostring(number) .. ".req", 0) == 0 then
+    if LANES.req_of(number) == "" then
       out[#out + 1] = number
     end
   end
@@ -600,20 +714,57 @@ end
 local function lane_text()
   local parts = {}
   for number = 1, job_capacity() do
-    local bound = num("lane." .. tostring(number) .. ".req", 0)
-    if bound == 0 then
-      parts[#parts + 1] = fill(TEXTS.beats.req_lane_free, {
-        lane = "lane-" .. tostring(number),
-      })
+    local label = "lane-" .. tostring(number)
+    local holder = LANES.req_of(number)
+    if holder == "" then
+      parts[#parts + 1] = fill(TEXTS.beats.req_lane_free, { lane = label })
     else
       parts[#parts + 1] = fill(TEXTS.beats.req_lane_used, {
-        lane = "lane-" .. tostring(number),
-        id = req_id(bound),
-        stage = req_job(bound),
+        lane = label,
+        id = holder,
+        stage = LANES.stage_of(req_index_of(holder)),
       })
     end
   end
   return join(parts, TEXTS.beats.req_lane_sep)
+end
+
+-- 账本明细（map.show 专用：紧凑的 lane_text 塞不下 branch/base/since/clean）。
+local function narrate_lane_ledger()
+  local total = job_capacity()
+  local used = 0
+  local free = {}
+  local rows = {}
+  for number = 1, total do
+    local holder = LANES.req_of(number)
+    if holder == "" then
+      free[#free + 1] = "lane-" .. tostring(number)
+    else
+      used = used + 1
+      local none = TEXTS.beats.lane_field_none
+      rows[#rows + 1] = fill(TEXTS.beats.lane_ledger_used, {
+        k = tostring(number),
+        id = holder,
+        stage = LANES.stage_of(req_index_of(holder)),
+        branch = LANES.text_or(text_of(LANES.key(number, "branch"), ""), none),
+        base = LANES.text_or(text_of(LANES.key(number, "base"), ""), none),
+        since = tostring(num(LANES.key(number, "since"), 0)),
+        clean = LANES.text_or(text_of(LANES.key(number, "clean"), ""), none),
+      })
+    end
+  end
+  ygg.narrate(fill(TEXTS.beats.lane_ledger_head, {
+    used = tostring(used),
+    total = tostring(total),
+  }))
+  for i = 1, #rows do
+    ygg.narrate(rows[i])
+  end
+  if #free == 0 then
+    ygg.narrate(fill(TEXTS.beats.lane_ledger_all_free, { total = tostring(total) }))
+  else
+    ygg.narrate(fill(TEXTS.beats.lane_ledger_none, { lanes = join(free, "、") }))
+  end
 end
 
 -- 入队 / 派生 / 拆并共用的唯一写入点。
@@ -949,12 +1100,8 @@ local function req_advance_after_accept(index, stage_name)
   ygg.kv.set(req_key(index, "status"), next_status)
   ygg.kv.set(req_key(index, "job"), "")
   if next_status == R_ACCEPT then
-    -- 交付后释放泳道；重做时重新分配（不长期占位）。
-    local lane = req_lane(index)
-    if lane > 0 then
-      ygg.kv.set("lane." .. tostring(lane) .. ".req", 0)
-    end
-    ygg.kv.set(req_key(index, "lane"), 0)
+    -- 交付后释放泳道（连同 branch/base/since/clean 一起清）；重做时重新分配（不长期占位）。
+    LANES.release(index)
   end
   return next_status
 end
@@ -1267,6 +1414,7 @@ local function narrate_map(current)
     cap = tostring(job_capacity()),
     pending = tostring(prop_pending_total()),
   }))
+  narrate_lane_ledger()
   ygg.narrate(TEXTS.beats.map_foot)
 end
 
@@ -1361,13 +1509,62 @@ local function map_item(st)
 end
 
 -- ============================================================================
--- §菜单 选项文本 ↔ 动作载荷的单一来源；每阶段第一条 = 主前进动作。
--- 需求动作（split / merge / amend / conflict / resolve）是主 Agent 的显式命令，
--- 不进常驻菜单（避免误触）；冲突时三条解决路径会出现在最前。
+-- §二级菜单页 纯展示层：不参与状态机，阶段一变即清空。
+-- 顶层菜单只留「config」一个入口，三项设置进子页（收敛入口，不让三条 config.set
+-- 平铺占住阶段菜单）。状态落 KV `ui.page` / `ui.page.stage`（纯展示态：不进摘要、
+-- 不影响派活，也不改任何业务动作语义）。
 -- ============================================================================
-local MENU = {}
+local CONFIG_UI = {}
 
-local function config_play_item()
+function CONFIG_UI.page()
+  local value = ygg.kv.get("ui.page")
+  if type(value) ~= "string" then
+    return ""
+  end
+  return value
+end
+
+function CONFIG_UI.page_stage()
+  local value = ygg.kv.get("ui.page.stage")
+  if type(value) ~= "string" then
+    return ""
+  end
+  return value
+end
+
+function CONFIG_UI.set_page(page, st)
+  local next_page = page or ""
+  ygg.kv.set("ui.page", next_page)
+  if next_page == "" then
+    ygg.kv.set("ui.page.stage", "")
+  else
+    ygg.kv.set("ui.page.stage", st or stage())
+  end
+end
+
+-- 子页是否正占着「当前阶段」的菜单
+function CONFIG_UI.open(st)
+  return CONFIG_UI.page() == "config" and CONFIG_UI.page_stage() == (st or stage())
+end
+
+-- 顶层唯一入口
+function CONFIG_UI.item()
+  return {
+    text = TEXTS.options.config,
+    action = "config.open",
+    payload = "",
+  }
+end
+
+function CONFIG_UI.close_item()
+  return {
+    text = TEXTS.options.config_close,
+    action = "config.close",
+    payload = "",
+  }
+end
+
+function CONFIG_UI.play_item()
   local next_value = next_play_mode()
   return {
     text = fill(TEXTS.options.config_play, { mode = play_mode(), next = next_value }),
@@ -1376,7 +1573,7 @@ local function config_play_item()
   }
 end
 
-local function config_evolution_item()
+function CONFIG_UI.evolution_item()
   local next_value = next_mode()
   return {
     text = fill(TEXTS.options.config_evolution, { mode = mode(), next = next_value }),
@@ -1385,7 +1582,7 @@ local function config_evolution_item()
   }
 end
 
-local function config_gates_item()
+function CONFIG_UI.gates_item()
   local current = strict_gates()
   return {
     text = fill(TEXTS.options.config_gates, { state = tostring(current), next = tostring(not current) }),
@@ -1393,6 +1590,22 @@ local function config_gates_item()
     payload = "gates.require_all_green=" .. tostring(not current),
   }
 end
+
+function CONFIG_UI.page_items()
+  return {
+    CONFIG_UI.play_item(),
+    CONFIG_UI.evolution_item(),
+    CONFIG_UI.gates_item(),
+    CONFIG_UI.close_item(),
+  }
+end
+
+-- ============================================================================
+-- §菜单 选项文本 ↔ 动作载荷的单一来源；每阶段第一条 = 主前进动作。
+-- 需求动作（split / merge / amend / conflict / resolve）是主 Agent 的显式命令，
+-- 不进常驻菜单（避免误触）；冲突时三条解决路径会出现在最前。
+-- ============================================================================
+local MENU = {}
 
 local function req_list_item()
   return {
@@ -1540,9 +1753,7 @@ MENU[STAGE.intake] = function()
   items[#items + 1] = map_item(STAGE.intake)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
-  items[#items + 1] = config_play_item()
-  items[#items + 1] = config_evolution_item()
-  items[#items + 1] = config_gates_item()
+  items[#items + 1] = CONFIG_UI.item()
   return items
 end
 
@@ -1569,9 +1780,7 @@ MENU[STAGE.coordinate] = function()
   items[#items + 1] = map_item(STAGE.coordinate)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
-  items[#items + 1] = config_play_item()
-  items[#items + 1] = config_evolution_item()
-  items[#items + 1] = config_gates_item()
+  items[#items + 1] = CONFIG_UI.item()
   return items
 end
 
@@ -1587,13 +1796,15 @@ MENU[STAGE.review] = function()
   items[#items + 1] = map_item(STAGE.review)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
-  items[#items + 1] = config_play_item()
-  items[#items + 1] = config_evolution_item()
-  items[#items + 1] = config_gates_item()
+  items[#items + 1] = CONFIG_UI.item()
   return items
 end
 
 local function menu(st)
+  -- 二级页生效时只返回子页项（渲染与选择都走这里，顶层项暂时让位）。
+  if CONFIG_UI.open(st) then
+    return CONFIG_UI.page_items()
+  end
   local builder = MENU[st]
   if builder == nil then
     return nil
@@ -1715,6 +1926,10 @@ end
 
 local function render()
   local current = stage()
+  -- 二级页不跨阶段存活：阶段一变就清空（子页是当前处境的入口，不是全局抽屉）。
+  if CONFIG_UI.page() ~= "" and CONFIG_UI.page_stage() ~= current then
+    CONFIG_UI.set_page("")
+  end
   narrate_play_mode()
   local renderer = RENDER[current]
   if renderer == nil then
@@ -1779,7 +1994,13 @@ end
 
 -- 「下一步就是收口动作」= 当前阶段的菜单首项是 review.note（阶段名不进宿主）。
 local function summary_next_ends_run()
-  local items = menu(stage())
+  -- 只看阶段菜单（MENU 本体）：二级页打开时 pendingChoice 是子页（首项 config.set），
+  -- 不能因此把自己报成「不结局」——收口判定不能被展示层带偏。
+  local builder = MENU[stage()]
+  if builder == nil then
+    return false
+  end
+  local items = builder()
   if items == nil or #items == 0 then
     return false
   end
@@ -1833,6 +2054,8 @@ end
 -- §推进 转场 + 渲染的唯二出口；拒绝路径 = narrate + 原地重渲染。
 -- ============================================================================
 local function advance(target)
+  -- 转场即离开二级页（子页跟着阶段走，不跨阶段）。
+  CONFIG_UI.set_page("")
   if target ~= stage() then
     ygg.emit("stage.advance", target)
   end
@@ -1840,7 +2063,12 @@ local function advance(target)
 end
 
 local function allowed_list(current)
-  local items = menu(current)
+  -- 只看阶段菜单本体：拒绝文案里不能列出 config 子页的项（子页是展示层，不是阶段能力）。
+  local builder = MENU[current]
+  local items = nil
+  if builder ~= nil then
+    items = builder()
+  end
   if items == nil then
     return TEXTS.beats.allowed_none
   end
@@ -1870,6 +2098,68 @@ end
 
 local function reject_payload(action, detail)
   return refuse(TEXTS.beats.rejected_payload, action, detail)
+end
+
+-- ============================================================================
+-- §人类动作门禁：guide 模式下「会产生通过效果」的动作只认菜单选择，单发直派一律拒绝
+--
+-- 引擎不区分「谁派发的」（`--event 动作` 与 TTY 按键走同一套通道），所以本层把这件事
+-- 从隐式变成显式：guide 下这些动作必须经 ygg.choice_selected 路由进入；goal 也走
+-- choice_selected，但是否派发由外部决策命令决定，不会默认批准。
+--
+-- 人类动作 = 会产生「通过」效果的动作（自批风险）。打回类（gate.reject /
+-- proposal.reject）故意不在内：打回不产生任何通过效果，自打回只会让自己返工，
+-- 不构成伪造验收；而它是唯一的纠错通道，堵死它等于堵死返工路径（菜单本就没有带
+-- 理由的 reject 项）。与多仓参照实现的差异：那边的 integration.* / release.* /
+-- lane.bootstrap 在本 Mod 没有对应动作，集合只留五条；`config.set play.mode`
+-- 单独门禁（切模式改变「谁在派发」，是自批链条的第一环）。
+-- ============================================================================
+local HUMAN = {}
+
+HUMAN.ACTIONS = {
+  ["proposal.accept"] = true,
+  ["gate.approve"] = true,
+  ["coordinate.submit"] = true,
+  ["verify.submit"] = true,
+  ["review.note"] = true,
+}
+
+-- 一次性票据：`ygg.emit` 是**入队**而非同步派发，派生事件到达时菜单 handler 早已返回，
+-- 所以不能用调用栈深度表达「这一步来自菜单」。菜单路由在 emit 前盖章，
+-- 对应 handler 取证即消费；非人类动作不盖章，票据不会泄到下一个直派。
+HUMAN.ticket = nil
+
+function HUMAN.needs(label)
+  if play_mode() ~= "guide" then
+    return true
+  end
+  if HUMAN.ticket == label then
+    HUMAN.ticket = nil
+    return true
+  end
+  return refuse(TEXTS.beats.guide_human_blocked, label)
+end
+
+function HUMAN.gated(action)
+  if HUMAN.ACTIONS[action] ~= true then
+    return true
+  end
+  return HUMAN.needs(action)
+end
+
+-- 菜单项的 action 与「人类动作」的标签不一定同名（`config.set play.mode=…`），
+-- 盖章与取证必须用同一套标签，否则人从菜单选了也会被拒。
+function HUMAN.label(action, payload)
+  if HUMAN.ACTIONS[action] == true then
+    return action
+  end
+  if action == "config.set" and type(payload) == "string" then
+    local head = trim(payload)
+    if head:sub(1, 9) == "play.mode" then
+      return "config.set play.mode"
+    end
+  end
+  return nil
 end
 
 -- ============================================================================
@@ -2159,9 +2449,7 @@ MENU[STAGE.review] = function()
   items[#items + 1] = map_item(STAGE.review)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
-  items[#items + 1] = config_play_item()
-  items[#items + 1] = config_evolution_item()
-  items[#items + 1] = config_gates_item()
+  items[#items + 1] = CONFIG_UI.item()
   return items
 end
 
@@ -2171,12 +2459,8 @@ end
 
 -- 释放 job / 泳道（验收、拒绝、拆并都用这一处，避免漏释放）。
 local function req_release(index)
-  local lane = req_lane(index)
   ygg.kv.set(req_key(index, "job"), "")
-  if lane > 0 then
-    ygg.kv.set("lane." .. tostring(lane) .. ".req", 0)
-    ygg.kv.set(req_key(index, "lane"), 0)
-  end
+  LANES.release(index)
 end
 
 ygg.on("task.intake", function(payload)
@@ -2275,9 +2559,17 @@ ygg.on("requirement.dispatch", function(payload)
       local index = candidates[i]
       local stage_name = req_job_stage(index)
       local lane = 0
+      local claimed = 0
       local ok = true
       if stage_name == "development" then
-        if req_dev_ready(index) and #lanes > 0 then
+        -- 主 Agent 已用 lane.claim 预挂牌 → 直接沿用那条（不重复分配、不覆盖已记的
+        -- branch/base/clean）；否则取第一条空闲泳道，同事务挂牌（branch/base/clean 留空 = 未断言）。
+        claimed = req_dev_ready(index) and LANES.bound(index) or 0
+        if not req_dev_ready(index) then
+          ok = false
+        elseif claimed > 0 then
+          lane = claimed
+        elseif #lanes > 0 then
           lane = lanes[1]
           local kept = {}
           for j = 2, #lanes do
@@ -2294,8 +2586,9 @@ ygg.on("requirement.dispatch", function(payload)
           ygg.kv.set(req_key(index, "status"), R_ANALYZING)
         elseif stage_name == "development" then
           ygg.kv.set(req_key(index, "status"), R_DEVELOPING)
-          ygg.kv.set(req_key(index, "lane"), lane)
-          ygg.kv.set("lane." .. tostring(lane) .. ".req", index)
+          if claimed == 0 then
+            LANES.bind(lane, index)
+          end
         end
         filled[#filled + 1] = fill(TEXTS.beats.req_dispatch_item, {
           id = req_id(index),
@@ -2320,6 +2613,136 @@ ygg.on("requirement.dispatch", function(payload)
     jobs = tostring(job_total()),
     cap = tostring(job_capacity()),
   }))
+  render()
+end)
+
+-- ============================================================================
+-- §泳道动作 泳道账本的人工入口
+--
+-- 两个都不进 HUMAN.ACTIONS：不产生「通过」效果（只记账本），也没有自批风险。
+-- 常规路径不用调它们：挂牌由 requirement.dispatch 同事务完成（branch/base/clean
+-- 留空 = 未断言），摘牌走 req_release / 交付晋升。它们的用途是「主 Agent 已建好
+-- worktree 并验过脏树」时把 branch / base / clean 记进账本，让 map.show 的账本
+-- 对得上物理事实。
+--
+-- **mod 不能跑 git**：`clean` 只能是主 Agent 的判断结果——它在 lane.claim 前
+-- 已跑过 `git status --porcelain`（除 `.lane` 外必须为空）并把结论写成 "1"。
+-- ============================================================================
+
+-- 解析（挂在 LANES 上而不新增顶层 local：本 chunk 的 local 名额已接近 Lua 上限）
+function LANES.parse_claim(payload)
+  local max = job_capacity()
+  if type(payload) ~= "string" then
+    return nil, fill(TEXTS.beats.bad_payload, { action = "lane.claim" })
+  end
+  local parts = split(trim(payload), "|")
+  local k = tonumber(trim(parts[1] or ""))
+  local id = trim(parts[2] or "")
+  if k == nil or id == "" then
+    return nil, fill(TEXTS.beats.lane_claim_usage, { max = tostring(max) })
+  end
+  k = math.floor(k)
+  if k < 1 or k > max then
+    return nil, fill(TEXTS.beats.lane_bad_k, { k = tostring(k), max = tostring(max) })
+  end
+  return {
+    k = k,
+    id = id,
+    branch = trim(parts[3] or ""),
+    base = trim(parts[4] or ""),
+    clean = trim(parts[5] or ""),
+  }, nil
+end
+
+function LANES.parse_ref(payload)
+  local max = job_capacity()
+  if type(payload) ~= "string" then
+    return nil, fill(TEXTS.beats.bad_payload, { action = "lane.release" })
+  end
+  local parts = split(trim(payload), "|")
+  local k = tonumber(trim(parts[1] or ""))
+  if k == nil then
+    return nil, fill(TEXTS.beats.lane_release_usage, { max = tostring(max) })
+  end
+  k = math.floor(k)
+  if k < 1 or k > max then
+    return nil, fill(TEXTS.beats.lane_bad_k, { k = tostring(k), max = tostring(max) })
+  end
+  return k, nil
+end
+
+-- lane.claim：泳道号|需求id|分支|base|clean
+-- 预挂牌（需求还没进开发）与补记（已开发中，补充 branch/base）都走这一个入口。
+ygg.on("lane.claim", function(payload)
+  if stage() == STAGE.done then
+    return reject("lane.claim", TEXTS.beats.req_after_done)
+  end
+  local spec, problem = LANES.parse_claim(payload)
+  if problem ~= nil then
+    return reject_payload("lane.claim", problem)
+  end
+  -- 脏树禁挂牌：主 Agent 已确认工作区干净才允许挂牌（这里只验它的断言）。
+  if spec.clean ~= "1" then
+    return refuse(TEXTS.beats.req_wait_rejected, "lane.claim", fill(TEXTS.beats.lane_claim_dirty, {
+      k = tostring(spec.k),
+    }))
+  end
+  local holder = LANES.req_of(spec.k)
+  if holder ~= "" and holder ~= spec.id then
+    return refuse(TEXTS.beats.req_wait_rejected, "lane.claim", fill(TEXTS.beats.lane_claim_occupied, {
+      k = tostring(spec.k),
+      id = holder,
+    }))
+  end
+  local index = req_index_of(spec.id)
+  if index == nil then
+    return reject_payload("lane.claim", fill(TEXTS.beats.req_unknown, { id = tostring(spec.id) }))
+  end
+  if req_closed(index) then
+    return refuse(TEXTS.beats.req_wait_rejected, "lane.claim", fill(TEXTS.beats.lane_claim_closed, {
+      id = req_id(index),
+      status = req_status(index),
+    }))
+  end
+  local bound = req_lane(index)
+  if bound > 0 and bound ~= spec.k then
+    return refuse(TEXTS.beats.req_wait_rejected, "lane.claim", fill(TEXTS.beats.lane_claim_bound, {
+      id = req_id(index),
+      k = tostring(bound),
+    }))
+  end
+  LANES.bind(spec.k, index, spec.branch, spec.base, spec.clean)
+  ygg.narrate(fill(TEXTS.beats.lane_claimed, {
+    k = tostring(spec.k),
+    id = req_id(index),
+    title = req_title(index),
+    branch = LANES.text_or(spec.branch, TEXTS.beats.lane_field_none),
+    base = LANES.text_or(spec.base, TEXTS.beats.lane_field_none),
+    since = tostring(num(LANES.key(spec.k, "since"), 0)),
+  }))
+  render()
+end)
+
+-- lane.release：泳道号
+ygg.on("lane.release", function(payload)
+  if stage() == STAGE.done then
+    return reject("lane.release", TEXTS.beats.req_after_done)
+  end
+  local k, problem = LANES.parse_ref(payload)
+  if problem ~= nil then
+    return reject_payload("lane.release", problem)
+  end
+  local holder = LANES.req_of(k)
+  LANES.clear(k)
+  local freed = TEXTS.beats.lane_release_idle
+  local index = req_index_of(holder)
+  if index ~= nil and req_lane(index) == k then
+    ygg.kv.set(req_key(index, "lane"), 0)
+    freed = req_id(index)
+  elseif holder ~= "" then
+    freed = holder
+  end
+  ygg.narrate(fill(TEXTS.beats.lane_released, { k = tostring(k), id = freed }))
   render()
 end)
 
@@ -2432,6 +2855,9 @@ local function pick_prop(target, allow_pending_only)
 end
 
 ygg.on("proposal.accept", function(payload)
+  if not HUMAN.gated("proposal.accept") then
+    return
+  end
   if stage() == STAGE.done then
     return reject("proposal.accept", TEXTS.beats.req_after_done)
   end
@@ -2501,6 +2927,9 @@ ygg.on("proposal.reject", function(payload)
 end)
 
 ygg.on("coordinate.submit", function(payload)
+  if not HUMAN.gated("coordinate.submit") then
+    return
+  end
   local current = stage()
   if current ~= STAGE.coordinate then
     return reject("coordinate.submit", fill(TEXTS.beats.stage_expected, { expected = STAGE.coordinate }))
@@ -2522,6 +2951,9 @@ ygg.on("coordinate.submit", function(payload)
 end)
 
 ygg.on("verify.submit", function(payload)
+  if not HUMAN.gated("verify.submit") then
+    return
+  end
   local current = stage()
   if current ~= STAGE.review then
     return reject("verify.submit", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
@@ -2582,6 +3014,9 @@ ygg.on("verify.submit", function(payload)
 end)
 
 ygg.on("review.note", function(payload)
+  if not HUMAN.gated("review.note") then
+    return
+  end
   local current = stage()
   if current ~= STAGE.review then
     return reject("review.note", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
@@ -2935,6 +3370,9 @@ local function pick_gate(target)
 end
 
 ygg.on("gate.approve", function(payload)
+  if not HUMAN.gated("gate.approve") then
+    return
+  end
   if stage() == STAGE.done then
     return reject("gate.approve", TEXTS.beats.req_after_done)
   end
@@ -3013,10 +3451,16 @@ ygg.on("config.set", function(payload)
   end
   local problem = nil
   if key == "play.mode" then
+    -- 切模式会改变「谁在派发」：guide→goal 等于给后续直派开闸，故单重门禁。
+    if not HUMAN.needs("config.set play.mode") then
+      return
+    end
     if not contains(PLAY_MODES, value) then
       problem = fill(TEXTS.beats.bad_config_value, { key = key, value = value, allowed = join(PLAY_MODES, " / ") })
     else
       ygg.kv.set("settings.play.mode", value)
+      -- 驱动者换了人，二级页的「当前处境」已失效：退出子页回阶段菜单。
+      CONFIG_UI.set_page("")
     end
   elseif key == "evolution.mode" then
     if not contains(MODES, value) then
@@ -3049,6 +3493,35 @@ ygg.on("config.set", function(payload)
     value = tostring(effective(key)),
     stage = current,
   }))
+  render()
+end)
+
+-- ---- 二级菜单页的两个入口（纯展示层：只改 ui.page / ui.page.stage）----
+-- 子页不占顶层首项：只有人主动选 config.open 才进，进了也只换菜单不换阶段。
+
+ygg.on("config.open", function(payload)
+  if not probe_payload_ok(payload) then
+    return reject_payload("config.open", fill(TEXTS.beats.probe_rejected, {
+      action = "config.open",
+      got = tostring(payload),
+      usage = TEXTS.beats.config_open_usage,
+    }))
+  end
+  CONFIG_UI.set_page("config", stage())
+  ygg.narrate(TEXTS.beats.config_opened)
+  render()
+end)
+
+ygg.on("config.close", function(payload)
+  if not probe_payload_ok(payload) then
+    return reject_payload("config.close", fill(TEXTS.beats.probe_rejected, {
+      action = "config.close",
+      got = tostring(payload),
+      usage = TEXTS.beats.config_open_usage,
+    }))
+  end
+  CONFIG_UI.set_page("")
+  ygg.narrate(fill(TEXTS.beats.config_closed, { stage = stage() }))
   render()
 end)
 
@@ -3089,6 +3562,15 @@ ygg.on("ygg.choice_selected", function(index)
     }))
     render()
     return
+  end
+  -- 盖章：只能在这里盖章（菜单路由），单发直派没有盖章机会。
+  local label = HUMAN.label(items[picked].action, items[picked].payload)
+  if label ~= nil then
+    HUMAN.ticket = label
+  end
+  -- 二级页只跟 config.* 走：选了任何阶段动作就离开子页（否则子页会占住阶段菜单）。
+  if items[picked].action:sub(1, 7) ~= "config." then
+    CONFIG_UI.set_page("")
   end
   ygg.emit(items[picked].action, items[picked].payload)
 end)
