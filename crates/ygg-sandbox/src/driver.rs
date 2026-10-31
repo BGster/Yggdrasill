@@ -352,6 +352,30 @@ impl KernelFacade {
         Ok(kernel)
     }
 
+    /// S11 + r2：带资源包的多文件 Mod 读档重建——[`KernelFacade::restore_with_resources`]
+    /// 的模块表变体。热载路径必须走这条：模块文件变了而入口没变时，宿主签名
+    /// 会变并触发重装载，若重装载丢掉模块表（只重供资源），跑起来的仍是旧代码
+    /// 或入口 require 直接失败——两种都不是「热载成功」。
+    pub fn restore_with_resources_and_modules(
+        save_bytes: &[u8],
+        mod_source: &str,
+        modules: ModuleSet,
+        manifest_bytes: &[u8],
+        schemas: &[(String, String)],
+        resources: &[(String, Vec<u8>)],
+    ) -> Result<Self, KernelError> {
+        let save = SaveFile::from_bytes(save_bytes)?;
+        let mut kernel = Self::with_resources_and_modules(
+            mod_source,
+            modules,
+            manifest_bytes,
+            schemas,
+            resources,
+        )?;
+        kernel.apply_save(&save)?;
+        Ok(kernel)
+    }
+
     /// 构件包 + 资源表 + Mod 源 → 驱动实例（字段装配单点；三个构造入口共用）。
     fn from_parts(parts: KernelParts, resources: Rc<ResourceTable>, mod_source: &str) -> Self {
         Self {

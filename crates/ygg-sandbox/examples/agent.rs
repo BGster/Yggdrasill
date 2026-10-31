@@ -135,6 +135,7 @@ use ygg_sandbox::host_contract::{
     sanitize_field, AgentContract, DriveLimits, InboxRoutes, SettlementPolicy, WriteShape,
     CONTRACT_DOC,
 };
+use ygg_sandbox::modules::ModuleSet;
 
 // ============================================================================
 // §常量 只有**不是契约**的东西：run 目录文件名、宿主自身的超时。
@@ -470,6 +471,8 @@ struct ModBundle {
     manifest_bytes: Vec<u8>,
     schemas: Vec<(String, String)>,
     resources: Vec<(String, Vec<u8>)>,
+    /// 代码模块表（r2）：空 = 单文件 Mod（`require` 对任何名字可读拒绝）。
+    modules: ModuleSet,
 }
 
 impl ModBundle {
@@ -490,10 +493,19 @@ impl ModBundle {
             .as_array()
             .ok_or_else(|| format!("{}/{PACK_FILE} 缺少 schemaFiles 数组", dir.display()))?;
 
-        let mod_source = fs::read_to_string(dir.join(MOD_SOURCE_FILE))
-            .map_err(|err| format!("读取 {}/{MOD_SOURCE_FILE} 失败：{err}", dir.display()))?;
+        // r2 `code` 段（可选）：声明了就是多文件 Mod——入口名取 `code.entry`，
+        // 模块字节只从 manifest 校验过的模块表取（未登记的模块装载前就失败）。
+        let code = ygg_sandbox::pack::CodeSpec::parse(&pack)
+            .map_err(|err| format!("{}/{PACK_FILE} 的 code 段非法：{err}", dir.display()))?;
+        let entry_file = code.as_ref().map_or(MOD_SOURCE_FILE, |spec| spec.entry());
+        let mod_source = fs::read_to_string(dir.join(entry_file))
+            .map_err(|err| format!("读取 {}/{entry_file} 失败：{err}", dir.display()))?;
         let manifest_bytes = fs::read(dir.join(MANIFEST_FILE))
             .map_err(|err| format!("读取 {}/{MANIFEST_FILE} 失败：{err}", dir.display()))?;
+        let modules = match &code {
+            None => ModuleSet::new(),
+            Some(spec) => load_code_modules(dir, spec, &manifest_bytes)?,
+        };
 
         // schema 文本按文件内 `$id` 注册（与 pack.rs / playtest 同口径：
         // schema 不进 manifest，装载方按 id 供给）。
@@ -528,19 +540,71 @@ impl ModBundle {
             manifest_bytes,
             schemas,
             resources,
+            modules,
         })
     }
 
-    /// 按本包构造驱动（资源表 fail-fast 先于任何 Lua 状态）。
+    /// 按本包构造驱动（资源表 fail-fast 先于任何 Lua 状态；有模块表则入口顶层
+    /// 即可 `require`）。
     fn kernel(&self) -> Result<KernelFacade, String> {
-        KernelFacade::with_resources(
-            &self.mod_source,
-            &self.manifest_bytes,
-            &self.schemas,
-            &self.resources,
-        )
-        .map_err(|err| format!("内核装载失败：{err}"))
+        let built = if self.modules.is_empty() {
+            KernelFacade::with_resources(
+                &self.mod_source,
+                &self.manifest_bytes,
+                &self.schemas,
+                &self.resources,
+            )
+        } else {
+            KernelFacade::with_resources_and_modules(
+                &self.mod_source,
+                self.modules.clone(),
+                &self.manifest_bytes,
+                &self.schemas,
+                &self.resources,
+            )
+        };
+        built.map_err(|err| format!("内核装载失败：{err}"))
     }
+
+    /// 读档重建（热载路径）：与 [`ModBundle::kernel`] 同一分派（有模块表就走
+    /// 多文件变体）——模块文件变了而入口没变时，热载签名会变并走到这里，若
+    /// 这里丢掉模块表，跑起来的仍是旧代码或入口 require 直接失败。
+    fn restore(&self, save_bytes: &[u8]) -> Result<KernelFacade, String> {
+        let restored = if self.modules.is_empty() {
+            KernelFacade::restore_with_resources(
+                save_bytes,
+                &self.mod_source,
+                &self.manifest_bytes,
+                &self.schemas,
+                &self.resources,
+            )
+        } else {
+            KernelFacade::restore_with_resources_and_modules(
+                save_bytes,
+                &self.mod_source,
+                self.modules.clone(),
+                &self.manifest_bytes,
+                &self.schemas,
+                &self.resources,
+            )
+        };
+        restored.map_err(|err| format!("内核重装载失败：{err}"))
+    }
+}
+
+/// 多文件 Mod 的模块表：声明 → manifest 登记 → 实际字节三者对账（装载前
+/// 全部失败可见；装载器不对文件系统做任何事）。
+fn load_code_modules(
+    dir: &Path,
+    spec: &ygg_sandbox::pack::CodeSpec,
+    manifest_bytes: &[u8],
+) -> Result<ModuleSet, String> {
+    let manifest = ygg_schema::manifest::parse_manifest(manifest_bytes)
+        .map_err(|err| format!("{}/{MANIFEST_FILE} 不合契约：{err}", dir.display()))?;
+    let module_bytes = ygg_sandbox::pack::collect_bytes(spec, |rel| fs::read(dir.join(rel)))
+        .map_err(|err| format!("{}/code 段读取失败：{err}", dir.display()))?;
+    ygg_sandbox::pack::assemble(spec, manifest.code(), &module_bytes)
+        .map_err(|err| format!("{}/code 段校验失败：{err}", dir.display()))
 }
 
 /// 单文件监视快照（热载变更判据：mtime + 字节数）。
@@ -554,8 +618,13 @@ struct FileStamp {
     modified: Option<SystemTime>,
 }
 
-/// 监视文件清单：五件套 + pack.json 声明的每个条目 / schema 文件
+/// 监视文件清单：五件套 + pack.json 声明的每个条目 / schema 文件 / 代码模块
 /// （pack.json 本身损坏时退化为固定三件，仍能检测修复动作）。
+///
+/// **`code` 段必须在这里纳管**（r2）：只监视 `mod.lua` 时，改 `src/*.lua` 而入口
+/// 一字未动 → 签名不变 → 热载不触发、续局静默跑旧代码，无任何报错。签名本身
+/// 只回答「变没变」（路径 + 字节数 + mtime），内容精度由 manifest 的 sha256
+/// 在装载时承担——两步分工是既定口径，不为 resume 重算全量哈希。
 fn watched_files(dir: &Path) -> Vec<String> {
     let mut files = vec![
         MOD_SOURCE_FILE.to_owned(),
@@ -571,6 +640,15 @@ fn watched_files(dir: &Path) -> Vec<String> {
             }
             for file in pack["schemaFiles"].as_array().into_iter().flatten() {
                 if let Some(path) = file.as_str() {
+                    files.push(path.to_owned());
+                }
+            }
+            // r2：代码模块（含入口——声明了 `code.entry` 时入口名不一定叫 mod.lua）。
+            if let Some(entry) = pack["code"]["entry"].as_str() {
+                files.push(entry.to_owned());
+            }
+            for module in pack["code"]["modules"].as_array().into_iter().flatten() {
+                if let Some(path) = module.as_str() {
                     files.push(path.to_owned());
                 }
             }
@@ -1140,15 +1218,9 @@ impl Session {
             let inbox_routes = InboxRoutes::load(&self.mod_dir)?;
             let limits = DriveLimits::load(&self.mod_dir.join(&self.config_rel))?;
             let settlement = SettlementPolicy::load(&self.mod_dir.join(&self.config_rel))?;
-            KernelFacade::restore_with_resources(
-                save_text.as_bytes(),
-                &bundle.mod_source,
-                &bundle.manifest_bytes,
-                &bundle.schemas,
-                &bundle.resources,
-            )
-            .map(|kernel| (kernel, contract, inbox_routes, limits, settlement))
-            .map_err(|err| format!("内核重装载失败：{err}"))
+            bundle
+                .restore(save_text.as_bytes())
+                .map(|kernel| (kernel, contract, inbox_routes, limits, settlement))
         });
         match outcome {
             Ok((kernel, contract, inbox_routes, limits, settlement)) => {

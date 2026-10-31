@@ -189,6 +189,53 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 可读报错覆盖：pack.json 缺失 / 非法 JSON / 字段缺失、id 或 path 重复
 声明、path 越界（`..` 或绝对路径）、数据文件缺失。
 
+### 多文件 Mod（`code` 段，可选）
+
+`mod.lua` 超过几百行之后想拆文件，就写 `pack.json` 的可选 `code` 段：
+
+```json
+{
+  "schemaVersion": 1,
+  "entries": [ ... ],
+  "schemaFiles": [ ... ],
+  "code": { "entry": "mod.lua", "modules": ["src/util.lua", "src/deep/leaf.lua"] }
+}
+```
+
+- `entry`：入口文件名（宿主按它读 Mod 源；不登记进模块表）。
+- `modules`：**逐条枚举**能被 `require` 的模块文件。没有 glob 展开；
+  `src/a.lua` 对应 `require("src.a")`（点分名 ↔ 路径双射）。
+- **缺这一段就是单文件 Mod**，行为与此前逐字节一致——不写 `code` 不会被收编。
+
+装载期语义（`src/modules.rs` / `src/pack.rs`）：
+
+- `require` 只查已登记模块表，名字不合法 / 未登记 / 循环 / 超深都会在装载期
+  给可读拒绝（带调用点与 require 链）。`require` 只活在装载期：入口跑完即收口，
+  运行期 handler 里 `require` 会被拒。
+- 模块与入口共享同一 Lua 状态与 globals；跨模块只通过**返回值**传东西
+  （模块里的顶层 `local` 不跨模块可见）。按规范名缓存：重复 `require` 只执行一次。
+- 上限（装载前判）：模块数 ≤ 128、代码总量 ≤ 1 MiB、装载深度 ≤ 64。
+
+打包：声明了 `code` 段后，`pack` 工具会逐模块读盘现算 sha256 / byteLength，写进
+`manifest.json` 的 **`code` 数组**（与 `entries` 同构但独立），并用装载期同一套判定
+（集合一致 / 上限 / 内容寻址）再校一遍——**打包过了但装载不过**这条路被堵死了。
+
+```json
+"code": [ { "path": "src/util.lua", "sha256": "<64 位小写 hex>", "byteLength": 123 } ]
+```
+
+- 改了模块文件**必须重跑 `pack`**：manifest 里的 sha256 对不上时装载直接失败
+  （可读错误带模块路径），不会静默跑旧代码。
+- 声明与 manifest 双向相等：声明了没登记（忘了打包）/ 登记了没声明（改了声明没重打）
+  都拒绝——不接受「半份模块表」。
+
+**热载与续局的签名口径**：宿主监视的文件清单 = 五件套 + `entries` / `schemaFiles` +
+**`code.entry` 与 `code.modules` 的每个路径**。签名本身是 `路径 + 字节数 + mtime`
+（只回答「变没变」，不回答「内容是否相同」）——所以续局不必为每次读盘重算全量哈希；
+**内容精确性由 manifest 的 sha256 在装载时承担**。两者分工的结果：模块文件一改，
+签名就变 → 热载触发重装载 → 内容寻址当场校验。缺了「纳管监视」这半边，改 `src/*.lua`
+而入口没动就会静默跑旧代码（无任何报错）——这是本设计最不能省的一步。
+
 ### host 契约段（`agent` / `inboxRoutes`）
 
 通用 Mod 工具（`cargo run --example agent`、`--example playtest`）**不含任何 Mod 语义字面量与
