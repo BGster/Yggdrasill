@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "ygg:scene/texts",
+      "kind": "scene-texts",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+      "path": "data/scenes.json",
+      "sha256": "5d2df9c03232e6151d912205a1944f11ee5ee99fb511a0986775fc531303de17",
+      "byteLength": 441
+    }
+  ],
+  "code": [
+    {
+      "path": "src/handlers.lua",
+      "sha256": "6cfae029b684ded968f41476adbda3dbb7a5f06f234b9e923774e4f35173c50a",
+      "byteLength": 1275
+    },
+    {
+      "path": "src/shared.lua",
+      "sha256": "a417bc5b66bb95a7e440c984d89162fd040cff8897ffab22c4837c8f71f468a2",
+      "byteLength": 400
+    },
+    {
+      "path": "src/silent.lua",
+      "sha256": "01a1c5abdd8d6f1c408e3c2a2bb999120c26132785e2485bdaaede5d48e6386a",
+      "byteLength": 194
+    },
+    {
+      "path": "src/util.lua",
+      "sha256": "3c59c95681a1aa4a64471be83dac38d33861c858093f371b5884508375569268",
+      "byteLength": 606
+    }
+  ]
+}

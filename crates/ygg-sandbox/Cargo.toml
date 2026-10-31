@@ -18,6 +18,10 @@ edition.workspace = true
 # S8 填充：ygg-core path 依赖（FuelMeter trait 反转面实现，D-继承-4——core 定义
 # 面、sandbox 实现面，S10 驱动以 &mut dyn FuelMeter 接入 run_transition）。
 ygg-core = { path = "../ygg-core" }
+# r3 填充：ygg-modules path 依赖（r1 `modules.rs` 的纯解析面下沉——装载器、
+# 打包与静态检查三处共用同一份判定；本 crate 对解析面做 `pub use` 全量再导出，
+# `ygg_sandbox::modules::*` 路径与语义不变）。
+ygg-modules = { path = "../ygg-modules" }
 # S7 填充：mlua git pin（features = ["lua54", "vendored"]；wasm32 支持未进 crates.io，
 # pin 指向 mlua-rs/mlua，rev 锚定具体 commit；wasm 单线程不启用 send）。
 mlua = { git = "https://github.com/mlua-rs/mlua", rev = "ff96ed786295cae96f43ef1372bd22be0fbf7866", features = [

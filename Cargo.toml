@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "crates/ygg-core",
     "crates/ygg-schema",
+    "crates/ygg-modules",
     "crates/ygg-sandbox",
     "crates/ygg-lint",
     "crates/ygg-wasm",
@@ -12,6 +13,11 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+
+# members 一次成型的约束（D-补充-2）在 r3 有一次受控例外：`ygg-modules`
+# 是 r1 `modules.rs` 纯解析面的**下沉**（不是第 N 个业务 crate）。理由见
+# crates/ygg-modules/src/lib.rs 头注——lint 必须能在不依赖 ygg-sandbox
+# （⇒ 不依赖 mlua / ygg-schema / 内核 host 面）的前提下复用同一份模块判定。
 
 # B1：wasm 体积预算面（research §7）：fat LTO + 体积级优化 + 单 codegen unit
 # + strip。仅作用 release（wasm-pack 默认 release 出 pkg/）；门禁

@@ -1,16 +1,19 @@
 //! S10 KernelFacade：装载/转换接线的单一驱动面（JSON 信封 API，镜像 A1
 //! 线格式——未来 wasm 壳 JS 侧仅换 loader，语义面不变）。
 //!
-//! - **装载序**（S10 锁定，S11 扩展资源步；管线单一收口于 [`build_kernel`]）：
-//!   `Sandbox::new`（stdlib 裁剪 + 内存上限 + 白名单环境）→ `fuel::install`
-//!   （正式燃料，每 dispatch 面重置 [`DEFAULT_FUEL_BUDGET`]）→
-//!   `inject::install`（math 精确集 + 内核种子 random + ticks）→
-//!   `host_api::install`（装载期 `ygg` 完整面）→ `resources::install`
-//!   （S11：`ygg.data` 只读数据面——host 之后、stdlib 之前、Mod chunk 之前，
-//!   Mod 顶层即可读资源）→ `stdlib::install`（S10 stdlib：先于 Mod chunk，
-//!   注册序即派发序）→ Mod chunk（失败 = [`KernelError::ModLoad`]）→
-//!   `host.seal`（运行期注册禁令收口）→ `register_into(&mut registry, "mod")`
-//!   （ygg.on 调用序 = 注册序 = 派发序）。
+//! - **装载序**（S10 锁定，S11 扩展资源步，r1 扩展模块表；管线单一收口于
+//!   [`build_kernel`]）：`Sandbox::new`（stdlib 裁剪 + 内存上限 + 白名单环境）
+//!   → `fuel::install_with_load_budget`（正式燃料，每 dispatch 面重置
+//!   [`DEFAULT_FUEL_BUDGET`]；装载期记独立预算
+//!   [`fuel::FUEL_LOAD_BUDGET`]）→ `inject::install`（math 精确集 + 内核种子
+//!   random + ticks）→ `host_api::install`（装载期 `ygg` 完整面）→
+//!   `resources::install`（S11：`ygg.data` 只读数据面——host 之后、stdlib 之前、
+//!   Mod chunk 之前，Mod 顶层即可读资源）→ `stdlib::install`（S10 stdlib：先于
+//!   Mod chunk，注册序即派发序）→ **模块表注入**（r1：`ModuleHandle::set_modules`,
+//!   入口 chunk 之前——入口顶层即可 `require`）→ Mod chunk（失败 =
+//!   [`KernelError::ModLoad`]）→ `host.seal` + `ModuleHandle::seal`（**同一处**
+//!   收口：运行期注册禁令与 require 装载面同时关闸）→
+//!   `register_into(&mut registry, "mod")`（ygg.on 调用序 = 注册序 = 派发序）。
 //! - **统一 store 代决（S10）**：`entities` / `kv` 为 `Rc<RefCell<..>>`
 //!   单实例——handler 经 host 桥的即席状态写**直接落在 canonical store**；
 //!   转换输入侧以快照克隆（snapshot-out，见 `cmd_event`）喂给
@@ -58,6 +61,7 @@ use ygg_core::transition::{run_transition, TransitionError};
 use crate::fuel::{self, HookFuelMeter};
 use crate::host_api::{self, HostApi, HostHandles};
 use crate::inject::{self, DeterminismHandle};
+use crate::modules::{ModuleError, ModuleSet};
 use crate::resources::{ResourceError, ResourceTable};
 use crate::sandbox::{Sandbox, ENGINE_VERSION};
 use crate::stdlib;
@@ -146,6 +150,14 @@ fn resource_error_to_kernel(err: ResourceError) -> KernelError {
     }
 }
 
+/// [`ModuleError`] → [`KernelError`]：模块面拒绝一律走 `ModLoad`（装载期
+/// 模块错误与 Mod 源码错误的同一出口，便于上层按码分类）。
+impl From<ModuleError> for KernelError {
+    fn from(err: ModuleError) -> Self {
+        KernelError::ModLoad(err.to_string())
+    }
+}
+
 /// S10/S11 装载管线的构件包（[`build_kernel`] 产出、
 /// [`KernelFacade::from_parts`] 消费；字段顺序即生命周期挂靠面）。
 struct KernelParts {
@@ -158,20 +170,26 @@ struct KernelParts {
     kv: Rc<RefCell<KvStore>>,
 }
 
-/// 装载序单一管线（S10 锁定序 + S11 资源步；`new` / `with_resources` 共享）。
+/// 装载序单一管线（S10 锁定序 + S11 资源步 + r1 模块表；`new` /
+/// `with_resources` / `with_modules` / `with_resources_and_modules` 共享）。
 ///
 /// `resources = Some(table)` 时在 host API 之后、stdlib 之前安装 `ygg.data`；
-/// `None` 时跳过该步——`KernelFacade::new` 全序行为与 S10 逐字节一致
-/// （S10 测试不加改动保持全绿即本函数的回归证据）。
+/// `None` 时跳过该步——`KernelFacade::new` 全序行为与 S10 逐字节一致（S10
+/// 测试不加改动保持全绿即本函数的回归证据）。`modules = Some(set)` 时在入口
+/// chunk 之前注入模块表；`None` 时 require 保持空表（单文件 Mod 的既有行为）。
 fn build_kernel(
     mod_source: &str,
     resources: Option<&ResourceTable>,
+    modules: Option<ModuleSet>,
 ) -> Result<KernelParts, KernelError> {
-    // ① 沙箱构造：stdlib 裁剪 + 内存上限 + 白名单环境（ygg 占位表就位）。
+    // ① 沙箱构造：stdlib 裁剪 + 内存上限 + 白名单环境（ygg 占位表 + require 面就位）。
     let sandbox = Sandbox::new().map_err(KernelError::Sandbox)?;
     let lua = sandbox.lua().clone();
-    // ② 正式燃料：两面共享预算，注入 hook（转换边界 reset）。
-    let fuel_meter = fuel::install(&lua, DEFAULT_FUEL_BUDGET).map_err(KernelError::Sandbox)?;
+    // ② 正式燃料：转换预算 + 装载预算分流（hook 按 require 边界判相位），
+    //    转换边界 reset 转换预算。
+    let fuel_meter =
+        fuel::install_with_load_budget(&lua, DEFAULT_FUEL_BUDGET, sandbox.modules().load_budget())
+            .map_err(KernelError::Sandbox)?;
     // ③ 确定性注入：math 精确集 + 内核种子 random + ygg.ticks。
     let determinism = inject::install(&lua).map_err(KernelError::Sandbox)?;
     // ④ canonical store 先建：host 桥句柄与驱动共享同一 Rc（统一 store）。
@@ -193,6 +211,11 @@ fn build_kernel(
     }
     // ⑥ stdlib：命名空间 + fsm + narrative（先于 Mod chunk，注册序即派发序）。
     stdlib::install(&lua).map_err(KernelError::Sandbox)?;
+    // ⑥' r1 模块表注入：入口 chunk 之前（入口顶层即可 require）；空模块表时
+    //     跳过——require 面仍在，只是对任何名字可读拒绝。
+    if let Some(set) = modules {
+        sandbox.modules().set_modules(set);
+    }
     // ⑦ Mod chunk：装载期注册面收集 Mod handler；失败 = ModLoad。chunk
     //    命名 `@mod.lua`（与 stdlib `@stdlib/<name>` 同法，迭代 C3）：
     //    handler 报错 traceback 携带 mod 侧位置，排障不再只见 Lua 桥行号
@@ -203,7 +226,10 @@ fn build_kernel(
         return Err(KernelError::ModLoad(err.to_string()));
     }
     // ⑧ 分相收口：seal（运行期注册禁令）→ 注册转出进注册表。
+    //    require 面的收口与 `host.seal` **同一处**——装载期与运行期的分界
+    //    只有一个，不另立时序（seal 后 require 返回可读拒绝，不是裸 nil-call）。
     host.seal(&lua).map_err(KernelError::Sandbox)?;
+    sandbox.modules().seal();
     let mut registry = HandlerRegistry::new();
     host.register_into(&mut registry, "mod");
     Ok(KernelParts {
@@ -256,7 +282,22 @@ impl KernelFacade {
     /// [`KernelError::ModLoad`]（含 mlua 可读错误文本）。无资源路径：资源表
     /// 为空基线（[`ResourceTable::empty`]），其余序与 `with_resources` 全同。
     pub fn new(mod_source: &str) -> Result<Self, KernelError> {
-        let parts = build_kernel(mod_source, None)?;
+        let parts = build_kernel(mod_source, None, None)?;
+        Ok(Self::from_parts(
+            parts,
+            Rc::new(ResourceTable::empty()),
+            mod_source,
+        ))
+    }
+
+    /// r1：多文件 Mod 构造——除入口 source 外另给已登记的模块表（`src/*.lua`
+    /// 拆出的子模块）。模块表在入口 chunk 之前注入，所以入口顶层就能
+    /// `require("src.util")`；装载结束后 require 面随 `host.seal` 一并收口。
+    ///
+    /// 无资源路径（资源表为空基线）；带资源的多文件 Mod 走
+    /// [`KernelFacade::with_resources_and_modules`]。
+    pub fn with_modules(mod_source: &str, modules: ModuleSet) -> Result<Self, KernelError> {
+        let parts = build_kernel(mod_source, None, Some(modules))?;
         Ok(Self::from_parts(
             parts,
             Rc::new(ResourceTable::empty()),
@@ -275,7 +316,22 @@ impl KernelFacade {
     ) -> Result<Self, KernelError> {
         let table = ResourceTable::build(manifest_bytes, schemas, resources)
             .map_err(resource_error_to_kernel)?;
-        let parts = build_kernel(mod_source, Some(&table))?;
+        let parts = build_kernel(mod_source, Some(&table), None)?;
+        Ok(Self::from_parts(parts, Rc::new(table), mod_source))
+    }
+
+    /// S11 + r1：带资源包的多文件 Mod——资源表 fail-fast 与模块表注入的
+    /// 唯一组合面（装载序：资源 → stdlib → 模块表 → 入口 chunk → seal）。
+    pub fn with_resources_and_modules(
+        mod_source: &str,
+        modules: ModuleSet,
+        manifest_bytes: &[u8],
+        schemas: &[(String, String)],
+        resources: &[(String, Vec<u8>)],
+    ) -> Result<Self, KernelError> {
+        let table = ResourceTable::build(manifest_bytes, schemas, resources)
+            .map_err(resource_error_to_kernel)?;
+        let parts = build_kernel(mod_source, Some(&table), Some(modules))?;
         Ok(Self::from_parts(parts, Rc::new(table), mod_source))
     }
 
@@ -292,6 +348,30 @@ impl KernelFacade {
     ) -> Result<Self, KernelError> {
         let save = SaveFile::from_bytes(save_bytes)?;
         let mut kernel = Self::with_resources(mod_source, manifest_bytes, schemas, resources)?;
+        kernel.apply_save(&save)?;
+        Ok(kernel)
+    }
+
+    /// S11 + r2：带资源包的多文件 Mod 读档重建——[`KernelFacade::restore_with_resources`]
+    /// 的模块表变体。热载路径必须走这条：模块文件变了而入口没变时，宿主签名
+    /// 会变并触发重装载，若重装载丢掉模块表（只重供资源），跑起来的仍是旧代码
+    /// 或入口 require 直接失败——两种都不是「热载成功」。
+    pub fn restore_with_resources_and_modules(
+        save_bytes: &[u8],
+        mod_source: &str,
+        modules: ModuleSet,
+        manifest_bytes: &[u8],
+        schemas: &[(String, String)],
+        resources: &[(String, Vec<u8>)],
+    ) -> Result<Self, KernelError> {
+        let save = SaveFile::from_bytes(save_bytes)?;
+        let mut kernel = Self::with_resources_and_modules(
+            mod_source,
+            modules,
+            manifest_bytes,
+            schemas,
+            resources,
+        )?;
         kernel.apply_save(&save)?;
         Ok(kernel)
     }

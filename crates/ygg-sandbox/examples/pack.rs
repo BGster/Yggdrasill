@@ -30,7 +30,13 @@
 //! - `entries[].id / kind / schema / path`：条目元数据（工具只补哈希与长度，
 //!   不改写声明面）；
 //! - `schemaFiles`：随包分发的 schema 文件清单（工具校验存在性，不进
-//!   manifest——schema 文本由装载方按 id 注册，不经 manifest 寻址）。
+//!   manifest——schema 文本由装载方按 id 注册，不经 manifest 寻址）；
+//! - `code`（可选，r2）：`{ "entry": "mod.lua", "modules": ["src/util.lua"] }`
+//!   ——多文件 Mod 的代码声明面。声明了就逐模块读盘现算 sha256 / byteLength
+//!   写进 manifest 的 `code` 数组（与 `entries` 同构但独立），并用**装载期同
+//!   一套** `ygg_sandbox::pack::assemble` 再校一遍（集合一致 / 总量 1 MiB /
+//!   模块数 128 / 内容寻址）。缺失该段 = 单文件 Mod，manifest 与此前逐字节
+//!   一致（不给旧 Mod 制造无意义的 diff）。
 //!
 //! **host 契约的可选前置校验**：`pack.json` 若声明了 `agent` / `inboxRoutes`
 //! 段，打包期即按运行期同一套规则解析（`ygg_sandbox::host_contract`：字段必填、
@@ -44,6 +50,7 @@ use std::process::exit;
 use serde_json::{json, Value as Json};
 use sha2::{Digest, Sha256};
 use ygg_sandbox::host_contract::{AgentContract, InboxRoutes};
+use ygg_sandbox::pack::{self, CodeSpec};
 
 /// pack.json 的条目声明面（工具消费的最小集）。
 struct EntryDecl {
@@ -128,6 +135,48 @@ fn main() {
         }
     }
 
+    // ④'' r2 code 段（可选）：多文件 Mod 的代码声明面。声明了就逐模块读盘现算
+    //      哈希——漏算 = 装载期内容寻址失败；不声明则 manifest 与此前逐字节一致。
+    let code_spec = match CodeSpec::parse(&pack) {
+        Ok(spec) => spec,
+        Err(err) => fail(format!("pack.json 的 code 段非法：{err}")),
+    };
+    let mut manifest_code: Vec<Json> = Vec::new();
+    if let Some(spec) = &code_spec {
+        // 入口文件必须存在：宿主按 `code.entry` 读 Mod 源，缺了要到装载期才发现。
+        let entry_path = dir.join(spec.entry());
+        if !entry_path.is_file() {
+            fail(format!(
+                "code.entry 声明的入口文件缺失: {}（pack.json code.entry）",
+                entry_path.display()
+            ));
+        }
+        println!("  code     entry {} ✓", spec.entry());
+        // 字节按声明清单读（缺文件 / 不可读 → 可读退出，文案带路径）。
+        let bytes = match pack::collect_bytes(spec, |rel| fs::read(dir.join(rel))) {
+            Ok(bytes) => bytes,
+            Err(err) => fail(format!("code 段读取失败：{err}")),
+        };
+        let code_entries = pack::entries_for(&bytes);
+        // 打包期复用**装载期同一套**判定（集合一致 / 总量与数量上限 / 内容寻址）
+        // ——「打包过了但装载不过」这类分叉在这里就断掉。
+        if let Err(err) = pack::assemble(spec, &code_entries, &bytes) {
+            fail(format!("code 段校验失败：{err}"));
+        }
+        for entry in &code_entries {
+            println!(
+                "  code     {} ({} bytes)",
+                entry.path(),
+                entry.byte_length()
+            );
+            manifest_code.push(json!({
+                "path": entry.path(),
+                "sha256": entry.sha256(),
+                "byteLength": entry.byte_length(),
+            }));
+        }
+    }
+
     // ⑤ 逐条目：读实际字节 → sha256 小写 hex + byteLength。
     let mut manifest_entries = Vec::with_capacity(entries.len());
     for entry in &entries {
@@ -150,18 +199,25 @@ fn main() {
     }
 
     // ⑥ 生成 manifest.json（schemaVersion 1 线格式；pretty 2 空格缩进）。
-    let manifest = json!({
-        "schemaVersion": 1,
-        "entries": manifest_entries,
-    });
-    let mut out = serde_json::to_string_pretty(&manifest).expect("manifest serialize");
+    //    `code` 只在声明了该段时出现——旧 Mod 的 manifest 不会因本工具升级而变。
+    let mut manifest = serde_json::Map::new();
+    manifest.insert("schemaVersion".to_owned(), json!(1));
+    manifest.insert("entries".to_owned(), json!(manifest_entries));
+    if code_spec.is_some() {
+        manifest.insert("code".to_owned(), json!(manifest_code));
+    }
+    let mut out =
+        serde_json::to_string_pretty(&Json::Object(manifest)).expect("manifest serialize");
     out.push('\n');
     let manifest_path = dir.join("manifest.json");
     if let Err(err) = fs::write(&manifest_path, out) {
         fail(format!("写入 {} 失败: {err}", manifest_path.display()));
     }
+    let code_note = code_spec.as_ref().map_or(String::new(), |spec| {
+        format!(", {} code modules", spec.modules().len())
+    });
     println!(
-        "manifest 已生成 → {} ({} entries)",
+        "manifest 已生成 → {} ({} entries{code_note})",
         manifest_path.display(),
         entries.len()
     );

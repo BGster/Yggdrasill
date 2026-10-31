@@ -1,0 +1,9 @@
+[package]
+name = "ygg-modules"
+version.workspace = true
+edition.workspace = true
+description = "Yggdrasill Mod 代码模块的纯解析面（名字 / 路径 / 上限 / 装载栈；零依赖，无 Lua 无 IO）"
+
+# 依赖纪律：**零依赖**（无 dependencies 段）。解析面必须能被 lint 独立消费
+# ——这是本 crate 存在的唯一理由（见 src/lib.rs 头注）。任何新增依赖都要先
+# 回答「为什么不能留在 ygg-sandbox 侧」。

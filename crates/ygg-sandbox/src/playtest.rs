@@ -14,14 +14,19 @@
 //! 非空为硬门）→ 循环{有待决选择 → 按（脚本下一位或默认 1）派发
 //! `<agent.choiceEvent>`；叙事行含 `agent.endingPrefix` → 收口}。脚本耗尽停在
 //! 当前选择点（reached=Choice）；无选择且未达结局 = DeadEnd；步数上限 = Limit。
+//!
+//! **装载面不在这里**（r3）：读盘/声明对账/构造驱动全部走
+//! [`crate::modload`]——与宿主实跑同一份语义。本文件只负责「怎么驱动」
+//! （事件序列与收口判定），不负责「怎么装」：两份装载实现迟早会在 `code`
+//! 段这类新声明面上分叉，症状是「playtest 全绿、实跑必挂」而日志都不指向根因。
 
-use std::fs;
 use std::path::Path;
 
 use serde_json::{json, Value as Json};
 
 use crate::driver::KernelFacade;
 use crate::host_contract::AgentContract;
+use crate::modload::ModBundle;
 
 /// 默认步数上限（**宿主侧**的失控防护参数，不是 Mod 契约；`--max-steps` 可覆盖）。
 pub const DEFAULT_MAX_STEPS: usize = 64;
@@ -106,8 +111,8 @@ impl PlaytestReport {
     }
 }
 
-/// 入口：读 Mod 目录五件套 → 装载 → 自动推进 → 报告（零 stdout 副作用，
-/// 打印归 example 薄壳）。
+/// 入口：[`ModBundle`] 装载（与宿主实跑同一份语义）→ 自动推进 → 报告
+/// （零 stdout 副作用，打印归 example 薄壳）。
 pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
     let dir_label = mod_dir.display().to_string();
     let mut errors = Vec::new();
@@ -122,8 +127,9 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
         errors,
     };
 
-    // ① 五件套读取（pack.json 声明面 → 装载参数；schema $id 从文件内容读）。
-    let bundle = match read_mod_bundle(mod_dir) {
+    // ① 装载：包读取 + 声明对账 + 内核构造（[`ModBundle`]：与宿主实跑同一
+    //    份装载语义，含 `pack.json` 的 `code` 段模块表）。
+    let bundle = match ModBundle::load(mod_dir) {
         Ok(bundle) => bundle,
         Err(message) => {
             errors.push(message);
@@ -142,12 +148,7 @@ pub fn playtest(mod_dir: &Path, options: &PlaytestOptions) -> PlaytestReport {
     };
 
     // ② 装载（fail-fast：预算/寻址/校验先于任何 Lua 状态）。
-    let mut kernel = match KernelFacade::with_resources(
-        &bundle.mod_source,
-        &bundle.manifest_bytes,
-        &bundle.schemas,
-        &bundle.resources,
-    ) {
+    let mut kernel = match bundle.kernel() {
         Ok(kernel) => kernel,
         Err(err) => {
             errors.push(format!("装载失败：{err}"));
@@ -283,64 +284,4 @@ fn collect_warnings(envelope: &Json, warnings: &mut Vec<String>) {
             warnings.push(item.to_owned());
         }
     }
-}
-
-/// Mod 目录五件套（pack.json 声明面 → 装载参数；对齐 pack.rs 的声明消费
-/// 语义：entries[].path 原样读字节、schemaFiles 存在性 + $id 提取）。
-struct ModBundle {
-    mod_source: String,
-    manifest_bytes: Vec<u8>,
-    schemas: Vec<(String, String)>,
-    resources: Vec<(String, Vec<u8>)>,
-}
-
-fn read_mod_bundle(dir: &Path) -> Result<ModBundle, String> {
-    let pack_text = fs::read_to_string(dir.join("pack.json"))
-        .map_err(|err| format!("读取 pack.json 失败：{err}"))?;
-    let pack: Json = serde_json::from_str(&pack_text)
-        .map_err(|err| format!("pack.json 不是合法 JSON：{err}"))?;
-    let entries = pack["entries"]
-        .as_array()
-        .ok_or_else(|| "pack.json 缺少 entries 数组".to_owned())?;
-    let schema_files = pack["schemaFiles"]
-        .as_array()
-        .ok_or_else(|| "pack.json 缺少 schemaFiles 数组".to_owned())?;
-
-    let mod_source = fs::read_to_string(dir.join("mod.lua"))
-        .map_err(|err| format!("读取 mod.lua 失败：{err}"))?;
-    let manifest_bytes = fs::read(dir.join("manifest.json"))
-        .map_err(|err| format!("读取 manifest.json 失败：{err}"))?;
-
-    let mut schemas = Vec::new();
-    for file in schema_files {
-        let rel = file
-            .as_str()
-            .ok_or_else(|| "schemaFiles 必须是字符串数组".to_owned())?;
-        let text = fs::read_to_string(dir.join(rel))
-            .map_err(|err| format!("读取 schema 文件 {rel} 失败：{err}"))?;
-        let parsed: Json = serde_json::from_str(&text)
-            .map_err(|err| format!("schema 文件 {rel} 不是合法 JSON：{err}"))?;
-        let id = parsed["$id"]
-            .as_str()
-            .ok_or_else(|| format!("schema 文件 {rel} 缺少 $id"))?
-            .to_owned();
-        schemas.push((id, text));
-    }
-
-    let mut resources = Vec::new();
-    for entry in entries {
-        let rel = entry["path"]
-            .as_str()
-            .ok_or_else(|| "entries[].path 必须是字符串".to_owned())?;
-        let bytes =
-            fs::read(dir.join(rel)).map_err(|err| format!("读取资源文件 {rel} 失败：{err}"))?;
-        resources.push((rel.to_owned(), bytes));
-    }
-
-    Ok(ModBundle {
-        mod_source,
-        manifest_bytes,
-        schemas,
-        resources,
-    })
 }

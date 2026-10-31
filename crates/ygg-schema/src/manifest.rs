@@ -24,11 +24,19 @@ pub const MANIFEST_SCHEMA: &str = include_str!("../../../packages/schema/schemas
 pub const RESOURCE_SCHEMA_PREFIX: &str = "https://yggdrasill.dev/schemas/v1/";
 
 /// 资源包 manifest 模型（D-A2）：schemaVersion + entries（serde 小驼峰同形）。
+///
+/// `code`（r2）是**代码模块**的内容寻址清单，与 `entries` 同构但独立：entries
+/// 管数据资源（manifest 必填），code 管可 `require` 的模块源码（可选，缺失即
+/// 单文件 Mod）。两者不混入同一数组——资源的 schema 分发校验与模块的
+/// `ModuleSet` 登记是两条装载面，混装会让「谁是模块」要靠 kind 猜。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     schema_version: u32,
     entries: Vec<ManifestEntry>,
+    /// 代码模块清单（r2；缺省 = 单文件 Mod，旧 manifest 逐字节可解析）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    code: Vec<ManifestCodeEntry>,
 }
 
 /// 单条资源条目：URI 风格 id + 资源分发 schema id + 内容寻址（sha256/byteLength）。
@@ -105,12 +113,57 @@ impl Manifest {
         &self.entries
     }
 
+    /// 代码模块清单（r2；空 = 单文件 Mod，require 对任何名字可读拒绝）。
+    ///
+    /// 顺序不作语义面：装载方按 `path` 查表（`ygg-sandbox::pack::assemble`），
+    /// 不依赖本数组的排列。
+    pub fn code(&self) -> &[ManifestCodeEntry] {
+        &self.code
+    }
+
     /// 装载序 = id 升序（D-A2 sorted manifest 序：与文件系统枚举序解耦，
     /// native/wasm 装载序一致）。
     pub fn entries_in_load_order(&self) -> Vec<&ManifestEntry> {
         let mut refs: Vec<&ManifestEntry> = self.entries.iter().collect();
         refs.sort_by(|a, b| a.id.cmp(&b.id));
         refs
+    }
+}
+
+/// 单条代码模块条目（r2）：包内相对路径 + 内容寻址（sha256/byteLength）。
+///
+/// 与 [`ManifestEntry`] 的差别只在**没有** id/kind/schema——模块源码是代码不是
+/// 数据，没有 schema 分发面（它的合法性由装载器在装载期按 Lua 语法判定）。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestCodeEntry {
+    path: String,
+    sha256: String,
+    byte_length: u64,
+}
+
+impl ManifestCodeEntry {
+    pub fn new(path: impl Into<String>, sha256: impl Into<String>, byte_length: u64) -> Self {
+        Self {
+            path: path.into(),
+            sha256: sha256.into(),
+            byte_length,
+        }
+    }
+
+    /// 包内相对路径（如 `src/util.lua`）。
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// 期望内容摘要（小写十六进制 sha256）。
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+
+    /// 期望字节数（廉价预检，先于哈希）。
+    pub fn byte_length(&self) -> u64 {
+        self.byte_length
     }
 }
 
@@ -147,18 +200,34 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, SchemaError> {
 /// S11 装载面按此逐文件把关：`verify_entry(bytes, entry)` 通过后，payload 才
 /// 进入对应 schema 的分发校验。
 pub fn verify_entry(bytes: &[u8], entry: &ManifestEntry) -> Result<(), SchemaError> {
-    if bytes.len() as u64 != entry.byte_length {
+    verify_content(entry.path(), entry.sha256(), entry.byte_length(), bytes)
+}
+
+/// 代码模块的内容寻址校验（r2，同一套判定：byteLength 先于 sha256）。
+pub fn verify_code_entry(bytes: &[u8], entry: &ManifestCodeEntry) -> Result<(), SchemaError> {
+    verify_content(entry.path(), entry.sha256(), entry.byte_length(), bytes)
+}
+
+/// 内容寻址判定单点（[`verify_entry`] / [`verify_code_entry`] 共用——两条
+/// 装载面但一套口径，避免「数据校验严、代码校验松」这类分叉）。
+fn verify_content(
+    path: &str,
+    expected_sha256: &str,
+    expected_len: u64,
+    bytes: &[u8],
+) -> Result<(), SchemaError> {
+    if bytes.len() as u64 != expected_len {
         return Err(SchemaError::ByteLengthMismatch {
-            file: entry.path.clone(),
-            expected: entry.byte_length,
+            file: path.to_owned(),
+            expected: expected_len,
             actual: bytes.len(),
         });
     }
     let actual = sha256_hex(bytes);
-    if actual != entry.sha256 {
+    if actual != expected_sha256 {
         return Err(SchemaError::ContentMismatch {
-            file: entry.path.clone(),
-            expected: entry.sha256.clone(),
+            file: path.to_owned(),
+            expected: expected_sha256.to_owned(),
             actual,
         });
     }
@@ -294,5 +363,74 @@ mod tests {
         assert_eq!(file, "data/act1.dialogues.json");
         // 摘要生成与校验同口径：sha256_hex 产出可作 manifest sha256 字段
         assert_eq!(entry.sha256(), &sha);
+    }
+
+    #[test]
+    fn code_array_is_optional_and_round_trips() {
+        // 缺 code：旧 manifest 逐字节不变（多文件 Mod 上线前的形态）。
+        let legacy = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world"))
+        );
+        let manifest = parse_manifest(legacy.as_bytes()).unwrap();
+        assert!(manifest.code().is_empty());
+
+        // 带 code：schema 放行，具型后可按 path/sha256/byteLength 读。
+        let code_text = "return {}";
+        let with_code = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}], "code": [{{"path": "src/util.lua", "sha256": "{}", "byteLength": {}}}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world")),
+            sha_of(code_text),
+            code_text.len()
+        );
+        let manifest = parse_manifest(with_code.as_bytes()).unwrap();
+        assert_eq!(manifest.code().len(), 1);
+        assert_eq!(manifest.code()[0].path(), "src/util.lua");
+        assert_eq!(manifest.code()[0].byte_length(), code_text.len() as u64);
+        // 条目与模块是两个独立数组：code 不污染 entries 装载面。
+        assert_eq!(manifest.entries().len(), 1);
+    }
+
+    #[test]
+    fn code_entry_violations_point_at_the_module_array() {
+        let bad = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}], "code": [{{"path": "src/util.lua", "sha256": "{}", "byteLength": 11}}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world")),
+            "Z".repeat(64)
+        );
+        let err = parse_manifest(bad.as_bytes()).unwrap_err();
+        let SchemaError::InvalidManifest { issues, .. } = err else {
+            panic!("expected InvalidManifest");
+        };
+        assert_eq!(issues[0].pointer, "/code/0/sha256");
+
+        // 非 .lua 路径：schema pattern 拦下（模块清单只装 Lua 源码）。
+        let not_lua = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}], "code": [{{"path": "src/util.txt", "sha256": "{}", "byteLength": 11}}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world")),
+            sha_of("hello world")
+        );
+        let err = parse_manifest(not_lua.as_bytes()).unwrap_err();
+        let SchemaError::InvalidManifest { issues, .. } = err else {
+            panic!("expected InvalidManifest");
+        };
+        assert_eq!(issues[0].pointer, "/code/0/path");
+    }
+
+    #[test]
+    fn verify_code_entry_uses_the_same_content_addressing_rules() {
+        let content = b"return {}\n";
+        let entry =
+            ManifestCodeEntry::new("src/util.lua", sha256_hex(content), content.len() as u64);
+        assert!(verify_code_entry(content, &entry).is_ok());
+        // byteLength 先于 sha256（廉价预检优先）。
+        let err = verify_code_entry(b"return {}", &entry).unwrap_err();
+        assert!(matches!(err, SchemaError::ByteLengthMismatch { .. }));
+        // 字节数同、内容换：ContentMismatch 带模块路径。
+        let err = verify_code_entry(b"return []\n", &entry).unwrap_err();
+        let SchemaError::ContentMismatch { file, .. } = err else {
+            panic!("expected ContentMismatch");
+        };
+        assert_eq!(file, "src/util.lua");
     }
 }

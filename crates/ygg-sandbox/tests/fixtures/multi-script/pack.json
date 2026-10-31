@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "ygg:scene/texts",
+      "kind": "scene-texts",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+      "path": "data/scenes.json"
+    }
+  ],
+  "schemaFiles": ["schemas/scene-texts.json"],
+  "code": {
+    "entry": "mod.lua",
+    "modules": [
+      "src/util.lua",
+      "src/handlers.lua",
+      "src/silent.lua",
+      "src/shared.lua"
+    ]
+  },
+  "agent": {
+    "entryEvent": "event.start",
+    "choiceEvent": "ygg.choice_selected",
+    "summaryEvent": "agent.summary",
+    "endingPrefix": "【结局",
+    "metaKey": "summary",
+    "rejectionPrefixes": ["【拒绝】"],
+    "replayPrefix": "【重放】",
+    "defaultPayload": "0"
+  },
+  "inboxRoutes": {
+    "externalIdField": "external_id",
+    "payloadField": "payload",
+    "extMarker": "@ext="
+  }
+}

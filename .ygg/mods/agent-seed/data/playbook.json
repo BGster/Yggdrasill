@@ -621,7 +621,7 @@
         { "goal": "架构铁律 / 内核组件边界 / 开源评估", "where": "docs/architecture-principles.md" },
         { "goal": "模块划分 / 技术栈 / 否决项", "where": "docs/modules-and-tech-stack.md" },
         { "goal": "内核设计约束（实体/事件/状态机/叙事；条件归 Lua，D11）", "where": "docs/architecture-principles.md §3" },
-        { "goal": "写 Mod：实体句柄 / choice 终结语义 / fsm / 资源包 / 存读档", "where": "docs/mod-authoring.md" },
+        { "goal": "写 Mod：实体句柄 / choice 终结语义 / fsm / 资源包 / 存读档 / 多文件 Mod（`code` 段）", "where": "docs/mod-authoring.md" },
         { "goal": "Mod 的 Lua API 类型注解（IDE 补全）", "where": "lua-stubs/README.md" },
         { "goal": "怎么玩：构建 CLI / 开局 / 单步推进 / 查现场规则 / 局末结算", "where": "AGENTS.md", "note": "规则正文已迁入本资源；AGENTS.md 只保留游玩指南，迁移前原文见 git 历史。" },
         { "goal": "Agent harness 的装载面与本局运行产物", "where": ".ygg/mods/ 与 .ygg/runs/", "note": "runs 与 bin 均 gitignore；seed mod 说明见 .ygg/mods/agent-seed/README.md。" },
@@ -1060,6 +1060,24 @@
           "modality": "must",
           "text": "manifest 是内容寻址（sha256 + byteLength）：改 data/*.json 不重算 pack，装载会以内容哈希不符拒绝。",
           "basis": "AGENTS.md §8（迁移前）"
+        },
+        {
+          "id": "harness.multi-script-load",
+          "modality": "must",
+          "text": "多文件 Mod 只在 `pack.json` 的 `code` 段登记：`entry` 不登记为模块，`modules` 逐条枚举（无 glob）；缺 `code` 段就是单文件 Mod（现有 Mod 零迁移）。`require` 只在装载期可用——`host.seal` 之后（任何 handler 内）调用即被可读拒绝，handler 不能懒加载。改了任一模块文件必须重跑 pack（内容寻址：字节数或哈希不符即装载失败）。",
+          "basis": "docs/mod-authoring.md §5「多文件 Mod」（r5 文档面；同名小节逐条展开）"
+        },
+        {
+          "id": "harness.kv-prefix-owner",
+          "modality": "must",
+          "text": "多文件 Mod 的 KV 前缀按归属划分，一个前缀只有一个写方（文档约定，装载期不校验）：`fsm.*` 由 stdlib 的 `ygg.fsm` 独占写、Mod 只读；`settings.*` 只有 `config.set` 写；`req.*` = 需求表、`prop.*` = 提案表、`lane.*` = 泳道台账、`ui.*` = 纯展示层（不进摘要、不影响派活）、`task.*` / `verify.*` / `review.*` / `inbox.*` 与裸键 `ending` 各自单一写入点。跨模块写同一前缀 = 隐式耦合，要共享就经模块返回值导出。",
+          "basis": "docs/mod-authoring.md §5「KV 前缀归属」（用户决策：只做文档约定，不引入装载期校验面）"
+        },
+        {
+          "id": "harness.module-error-locates",
+          "modality": "must-not",
+          "text": "禁止把多文件 Mod「拼回单文件再报错」：模块 chunk 名必须带真实文件（`@src/util.lua`），装载阶段自判的拒绝必须带调用点（`src/a.lua:3: <原因>`）与 require 链，静态检查必须逐模块独立 parse（模块的 `local` 本就不跨 chunk，拼接会制造装载期不存在的共享作用域）。行号对不上真实文件的诊断按缺陷处理。",
+          "basis": "docs/mod-authoring.md §5「错误定位：真实文件 + 真实行号」"
         },
         {
           "id": "harness.hot-reload",

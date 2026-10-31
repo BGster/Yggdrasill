@@ -135,6 +135,7 @@ use ygg_sandbox::host_contract::{
     sanitize_field, AgentContract, DriveLimits, InboxRoutes, SettlementPolicy, WriteShape,
     CONTRACT_DOC,
 };
+use ygg_sandbox::modload::ModBundle;
 
 // ============================================================================
 // §常量 只有**不是契约**的东西：run 目录文件名、宿主自身的超时。
@@ -461,86 +462,27 @@ fn agent_config_path(dir: &Path) -> String {
 }
 
 // ============================================================================
-// §Mod 目录 五件套读盘与装载（运行期读盘——agent 必须支持任意 mod 目录，
-//             不能像 adventure.rs 那样 include_str! 编译期固化）
+// §Mod 目录装载（运行期读盘——agent 必须支持任意 mod 目录，不能像
+//   adventure.rs 那样 include_str! 编译期固化）
+//
+//   读盘/声明对账只走 `ygg_sandbox::modload`（与走查 playtest 同一份实现）：
+//   本文件多出来的诉求只有两条——① 热载要**反复**从同一份参数重建驱动
+//   （签名变了才重读），所以持有 `ModBundle` 而非一次性内核；② 错误文案要带
+//   宿主口径的前缀。所以下面只有两层薄包装，不复制任何读盘/对账逻辑。
 // ============================================================================
 
-struct ModBundle {
-    mod_source: String,
-    manifest_bytes: Vec<u8>,
-    schemas: Vec<(String, String)>,
-    resources: Vec<(String, Vec<u8>)>,
+/// [`ModBundle::kernel`] 的宿主错误文案（装载失败 = 启动失败）。
+fn kernel_from(bundle: &ModBundle) -> Result<KernelFacade, String> {
+    bundle
+        .kernel()
+        .map_err(|err| format!("内核装载失败：{err}"))
 }
 
-impl ModBundle {
-    /// 读盘装载五件套（pack.json 声明面 → 装载参数；与
-    /// `src/playtest.rs::read_mod_bundle` 同形，example 侧独立一份以便热载重读）。
-    fn load(dir: &Path) -> Result<Self, String> {
-        if !dir.is_dir() {
-            return Err(format!("mod 目录不存在或不可读：{}", dir.display()));
-        }
-        let pack_text = fs::read_to_string(dir.join(PACK_FILE))
-            .map_err(|err| format!("读取 {}/{PACK_FILE} 失败：{err}", dir.display()))?;
-        let pack: Json = serde_json::from_str(&pack_text)
-            .map_err(|err| format!("{}/{PACK_FILE} 不是合法 JSON：{err}", dir.display()))?;
-        let entries = pack["entries"]
-            .as_array()
-            .ok_or_else(|| format!("{}/{PACK_FILE} 缺少 entries 数组", dir.display()))?;
-        let schema_files = pack["schemaFiles"]
-            .as_array()
-            .ok_or_else(|| format!("{}/{PACK_FILE} 缺少 schemaFiles 数组", dir.display()))?;
-
-        let mod_source = fs::read_to_string(dir.join(MOD_SOURCE_FILE))
-            .map_err(|err| format!("读取 {}/{MOD_SOURCE_FILE} 失败：{err}", dir.display()))?;
-        let manifest_bytes = fs::read(dir.join(MANIFEST_FILE))
-            .map_err(|err| format!("读取 {}/{MANIFEST_FILE} 失败：{err}", dir.display()))?;
-
-        // schema 文本按文件内 `$id` 注册（与 pack.rs / playtest 同口径：
-        // schema 不进 manifest，装载方按 id 供给）。
-        let mut schemas = Vec::new();
-        for file in schema_files {
-            let rel = file
-                .as_str()
-                .ok_or_else(|| "schemaFiles 必须是字符串数组".to_owned())?;
-            let text = fs::read_to_string(dir.join(rel))
-                .map_err(|err| format!("读取 schema 文件 {rel} 失败：{err}"))?;
-            let parsed: Json = serde_json::from_str(&text)
-                .map_err(|err| format!("schema 文件 {rel} 不是合法 JSON：{err}"))?;
-            let id = parsed["$id"]
-                .as_str()
-                .ok_or_else(|| format!("schema 文件 {rel} 缺少 $id"))?
-                .to_owned();
-            schemas.push((id, text));
-        }
-
-        let mut resources = Vec::new();
-        for entry in entries {
-            let rel = entry["path"]
-                .as_str()
-                .ok_or_else(|| "entries[].path 必须是字符串".to_owned())?;
-            let bytes =
-                fs::read(dir.join(rel)).map_err(|err| format!("读取资源文件 {rel} 失败：{err}"))?;
-            resources.push((rel.to_owned(), bytes));
-        }
-
-        Ok(Self {
-            mod_source,
-            manifest_bytes,
-            schemas,
-            resources,
-        })
-    }
-
-    /// 按本包构造驱动（资源表 fail-fast 先于任何 Lua 状态）。
-    fn kernel(&self) -> Result<KernelFacade, String> {
-        KernelFacade::with_resources(
-            &self.mod_source,
-            &self.manifest_bytes,
-            &self.schemas,
-            &self.resources,
-        )
-        .map_err(|err| format!("内核装载失败：{err}"))
-    }
+/// [`ModBundle::restore`] 的宿主错误文案（热载/续局重建失败 = 回滚到旧驱动）。
+fn restore_from(bundle: &ModBundle, save_bytes: &[u8]) -> Result<KernelFacade, String> {
+    bundle
+        .restore(save_bytes)
+        .map_err(|err| format!("内核重装载失败：{err}"))
 }
 
 /// 单文件监视快照（热载变更判据：mtime + 字节数）。
@@ -554,14 +496,25 @@ struct FileStamp {
     modified: Option<SystemTime>,
 }
 
-/// 监视文件清单：五件套 + pack.json 声明的每个条目 / schema 文件
+/// 监视文件清单：五件套 + pack.json 声明的每个条目 / schema 文件 / 代码模块
 /// （pack.json 本身损坏时退化为固定三件，仍能检测修复动作）。
+///
+/// **`code` 段必须在这里纳管**（r2）：只监视 `mod.lua` 时，改 `src/*.lua` 而入口
+/// 一字未动 → 签名不变 → 热载不触发、续局静默跑旧代码，无任何报错。签名本身
+/// 只回答「变没变」（路径 + 字节数 + mtime），内容精度由 manifest 的 sha256
+/// 在装载时承担——两步分工是既定口径，不为 resume 重算全量哈希。
 fn watched_files(dir: &Path) -> Vec<String> {
     let mut files = vec![
         MOD_SOURCE_FILE.to_owned(),
         MANIFEST_FILE.to_owned(),
         PACK_FILE.to_owned(),
     ];
+    // 配置的实际解析结果必须纳管：pack 未声明 `ygg:agent/config` 时
+    // [`agent_config_path`] 回落 `data/config.json`，而下面只收**声明过的**
+    // 路径——只改回落配置（如 `drive.maxSteps`）会让签名不变，热载直接 return，
+    // 新阈值与结算口径永不生效且无告警。收「解析结果」而不是「声明」才能对齐
+    // 监视面与实际使用面。
+    files.push(agent_config_path(dir));
     if let Ok(text) = fs::read_to_string(dir.join(PACK_FILE)) {
         if let Ok(pack) = serde_json::from_str::<Json>(&text) {
             for entry in pack["entries"].as_array().into_iter().flatten() {
@@ -571,6 +524,15 @@ fn watched_files(dir: &Path) -> Vec<String> {
             }
             for file in pack["schemaFiles"].as_array().into_iter().flatten() {
                 if let Some(path) = file.as_str() {
+                    files.push(path.to_owned());
+                }
+            }
+            // r2：代码模块（含入口——声明了 `code.entry` 时入口名不一定叫 mod.lua）。
+            if let Some(entry) = pack["code"]["entry"].as_str() {
+                files.push(entry.to_owned());
+            }
+            for module in pack["code"]["modules"].as_array().into_iter().flatten() {
+                if let Some(path) = module.as_str() {
                     files.push(path.to_owned());
                 }
             }
@@ -817,7 +779,7 @@ impl Session {
 
         // 先装载（失败即退出，run 目录不留空壳），再建 run 目录接管产物。
         let bundle = ModBundle::load(&mod_dir)?;
-        let kernel = bundle.kernel()?;
+        let kernel = kernel_from(&bundle)?;
         // host 契约是**必填面**：事件名 / inbox 路由 / 结算口径 / 推进阈值全部来自
         // Mod 声明，缺任何一项即装载期失败（宿主不保留任何默认值，fail-closed）。
         let contract = AgentContract::load(&mod_dir)?;
@@ -1140,15 +1102,8 @@ impl Session {
             let inbox_routes = InboxRoutes::load(&self.mod_dir)?;
             let limits = DriveLimits::load(&self.mod_dir.join(&self.config_rel))?;
             let settlement = SettlementPolicy::load(&self.mod_dir.join(&self.config_rel))?;
-            KernelFacade::restore_with_resources(
-                save_text.as_bytes(),
-                &bundle.mod_source,
-                &bundle.manifest_bytes,
-                &bundle.schemas,
-                &bundle.resources,
-            )
-            .map(|kernel| (kernel, contract, inbox_routes, limits, settlement))
-            .map_err(|err| format!("内核重装载失败：{err}"))
+            restore_from(&bundle, save_text.as_bytes())
+                .map(|kernel| (kernel, contract, inbox_routes, limits, settlement))
         });
         match outcome {
             Ok((kernel, contract, inbox_routes, limits, settlement)) => {
@@ -3660,4 +3615,193 @@ fn write_json_pretty(path: &Path, value: &Json) -> Result<(), String> {
         .map_err(|err| format!("序列化 {} 失败：{err}", path.display()))?;
     text.push('\n');
     fs::write(path, text).map_err(|err| format!("写入 {} 失败：{err}", path.display()))
+}
+
+// ============================================================================
+// §多文件 Mod 的热载（r4）：签名纳管模块文件 + 换装原子性
+//
+// 这两条是 r2 的核心承诺，且都只在宿主侧可观测：
+//  ① `watched_files` 必须把 `pack.json` 的 `code.modules` 全部纳管——只监视
+//     `mod.lua` 时，改 `src/*.lua` 而入口一字未动 → 签名不变 → 热载不触发、
+//     续局静默跑旧代码，**没有任何报错**（这是最难查的一类 bug）；
+//  ② `maybe_reload` 必须是"换得成就换、换不成就照旧跑"：成功时 `reloaded=true`
+//     且新代码立即生效；失败时 `reloaded=false`、旧驱动继续服务，不留半更新。
+// ============================================================================
+#[cfg(test)]
+mod multiscript_hot_reload_tests {
+    use super::{fs, mod_signature, watched_files, Args, Drive, Path, PathBuf, Session};
+    use serde_json::Value as Json;
+
+    /// 入库 fixture 的目录（`tests/fixtures/multi-script`；与 r4 的三个测试目标同一份）。
+    fn fixture_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/multi-script")
+    }
+
+    /// 递归复制（测试要改文件，不能动入库 fixture）。
+    fn copy_dir(from: &Path, to: &Path) {
+        fs::create_dir_all(to).expect("建目标目录");
+        for item in fs::read_dir(from).expect("读源目录") {
+            let item = item.expect("目录项");
+            let source = item.path();
+            let target = to.join(item.file_name());
+            if source.is_dir() {
+                copy_dir(&source, &target);
+            } else {
+                fs::copy(&source, &target).expect("复制文件");
+            }
+        }
+    }
+
+    /// fixture 的临时副本（每个用例独占目录）。
+    fn fixture_copy(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-agent-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        copy_dir(&fixture_dir(), &dir);
+        dir
+    }
+
+    /// 单发模式的宿主参数（`--drive none`：测试自己派发，不推 stdin）。
+    fn args_for(dir: &Path, run_id: &str) -> Args {
+        Args {
+            mod_dir: Some(dir.to_path_buf()),
+            run_id: run_id.to_owned(),
+            runs_root: dir.join("runs"),
+            resume: false,
+            settle: false,
+            watch: false,
+            event: None,
+            payload: None,
+            drive: Drive::None,
+            inbox: None,
+        }
+    }
+
+    /// 派发一步并取叙事行（信封必须 ok）。
+    #[track_caller]
+    fn narrate(session: &mut Session, event: &str) -> Vec<String> {
+        let envelope = super::parse_envelope(&session.kernel.dispatch(event, "0"));
+        assert_eq!(
+            envelope["ok"],
+            Json::Bool(true),
+            "{event} 派发失败：{envelope}"
+        );
+        super::narrative_lines(&envelope)
+    }
+
+    #[test]
+    fn module_files_are_watched_so_editing_one_flips_the_signature() {
+        let dir = fixture_copy("watch-modules");
+        let watched = watched_files(&dir);
+        // 五件套 + 资源 + schema + **每个模块**（r2：漏一个就静默跑旧代码）
+        // + **配置的解析结果**（r4 缺陷：本 fixture 的 pack 未声明
+        // `ygg:agent/config`，走回落 `data/config.json`——只收声明路径时，
+        // 改回落配置不翻转签名，热载静默不触发）。
+        for path in [
+            "mod.lua",
+            "pack.json",
+            "manifest.json",
+            "data/config.json",
+            "data/scenes.json",
+            "schemas/scene-texts.json",
+            "src/util.lua",
+            "src/handlers.lua",
+            "src/shared.lua",
+            "src/silent.lua",
+        ] {
+            assert!(
+                watched.iter().any(|entry| entry == path),
+                "watched_files 必须纳管 `{path}`：{watched:?}"
+            );
+        }
+
+        let before = mod_signature(&dir);
+        // 只改一个模块文件（长度也变：不依赖 mtime 分辨率）。
+        let util = fs::read_to_string(dir.join("src/util.lua")).expect("读模块");
+        fs::write(dir.join("src/util.lua"), format!("{util}\n-- 热载探针\n")).expect("写模块");
+        let after = mod_signature(&dir);
+        assert!(before != after, "改模块文件必须让 mod_signature 变");
+
+        // 变的**只有**被改的那个文件（签名不是"任何风吹草动都变"）。
+        let changed: Vec<&str> = before
+            .iter()
+            .zip(after.iter())
+            .filter(|(left, right)| left != right)
+            .map(|(stamp, _)| stamp.path.as_str())
+            .collect();
+        assert_eq!(changed, vec!["src/util.lua"], "签名变化面必须精确");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hot_reload_swaps_the_code_and_rolls_back_on_failure() {
+        let dir = fixture_copy("hot-reload");
+        let mut session = Session::open(&args_for(&dir, "hot-reload")).expect("开局");
+        assert!(session.reload.is_none(), "开局不该有热载事件");
+
+        // 模块真的装上了：handler 来自 src.util 的 table（`probe.kv` 由入口注册）。
+        assert_eq!(narrate(&mut session, "probe.kv"), ["stage=nil"]);
+
+        // ① 合法改动（只动入口：`mod.lua` 不在内容寻址清单里，改它不需要重算
+        //    manifest）→ 签名变 → 热载成功 → 新代码立即生效。
+        let entry = fs::read_to_string(dir.join("mod.lua")).expect("读入口");
+        fs::write(
+            dir.join("mod.lua"),
+            format!(
+                "{entry}\nygg.on(\"probe.kv\", function()\n  ygg.narrate(\"entry-v2\")\nend)\n"
+            ),
+        )
+        .expect("写入口");
+
+        session.maybe_reload();
+        let reload = session.reload.take().expect("签名变了必须触发热载");
+        assert!(
+            reload.reloaded,
+            "合法改动必须换上新包：{:?}",
+            reload.message
+        );
+        assert_eq!(reload.source, "watch");
+        assert_eq!(
+            narrate(&mut session, "probe.kv"),
+            ["stage=nil", "entry-v2"],
+            "新入口的 handler 必须立即生效"
+        );
+        // 换装不是"再叠一层"：模块各执行一次、handler 注册序不重复。
+        assert_eq!(
+            narrate(&mut session, "probe.order"),
+            ["util", "shared", "handlers", "entry"],
+            "热载后注册序必须与首装一致（不重复注册）"
+        );
+        assert_eq!(
+            narrate(&mut session, "probe.stats"),
+            ["util_execs=1;shared_runs=1;silent_runs=1;util_count=0;shared_count=0"],
+            "热载重建模块缓存（各执行一次，模块内状态归零）"
+        );
+
+        // ② 破损改动（入口语法错）→ 装载失败 → `reloaded=false` + 旧 mod 继续跑。
+        let broken = format!("{entry}\nygg.on(\"probe.kv\", function()\n  ygg.narrate(\"entry-v3\")\nend\nlocal oops = = 1\n");
+        fs::write(dir.join("mod.lua"), broken).expect("写破损入口");
+        session.maybe_reload();
+        let reload = session.reload.take().expect("签名变了必须尝试热载");
+        assert!(!reload.reloaded, "破损包不得换上");
+        let message = reload.message.unwrap_or_default();
+        assert!(
+            message.contains("mod.lua"),
+            "失败原因必须点名入口文件：{message}"
+        );
+
+        // 旧驱动仍在跑：上一个成功版本的行为原样保留（不留半更新 —— 既没上新的
+        // 半截代码，也没丢掉已经生效的 v2）。
+        assert_eq!(
+            narrate(&mut session, "probe.kv"),
+            ["stage=nil", "entry-v2"],
+            "热载失败后旧 mod 必须继续服务"
+        );
+        assert_eq!(
+            narrate(&mut session, "probe.order"),
+            ["util", "shared", "handlers", "entry"]
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
