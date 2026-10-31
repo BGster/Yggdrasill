@@ -14,12 +14,14 @@
 //! - **R3** 见 [`crate::locate::find_goto_dot_calls`]；命中即跳过解析。
 
 use full_moon::ast::{
-    Expression, FunctionArgs, FunctionBody, FunctionCall, Index, LocalAssignment, Prefix, Suffix,
-    Var,
+    AnonymousFunction, Ast, Expression, FunctionArgs, FunctionBody, FunctionCall,
+    FunctionDeclaration, Index, LocalAssignment, LocalFunction, Prefix, Suffix, Var, VarExpression,
 };
 use full_moon::node::Node;
 use full_moon::tokenizer::{TokenReference, TokenType};
 use full_moon::visitors::Visitor;
+
+use ygg_modules::effects;
 
 use crate::diagnostic::{code, Diagnostic, Severity};
 use crate::locate::{find_goto_dot_calls, line_col};
@@ -366,6 +368,11 @@ fn collect_suffix_index_names<'a>(
             Suffix::Index(Index::Brackets { expression, .. }) => {
                 if let Expression::String(token) = expression.as_ref() {
                     parts.push(string_literal_value(token));
+                } else {
+                    // 动态下标（`ygg[k]`）：静态不可判，路径到此为止。
+                    // 继续往下拼会拼出一个**错的**路径（`ygg[k].set` 变成
+                    // `ygg.set`），把「不知道」伪装成「知道」——那才是误报的来源。
+                    break;
                 }
             }
             // 调用边界（Call / MethodCall）：路径收集到此为止。
@@ -424,4 +431,210 @@ fn kv_set_second_arg_name(call: &FunctionCall) -> Option<String> {
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// L1 主防线：模块 chunk 顶层不得触碰有副作用的 host API（`YGG-MOD-EFFECT`）
+// ---------------------------------------------------------------------------
+
+/// 模块 chunk 顶层（`function_depth == 0`）的禁止面检查（诊断码
+/// [`code::MOD_EFFECT`]）。
+///
+/// **只给 `code.modules` 里的文件跑**：入口是装配清单，注册 / 初始化本来就是
+/// 它的职责（[`crate::pack`] 挑文件进来，本函数不猜）。
+///
+/// 判定与装载期影子表（`ygg-sandbox` 的 `ShadowBanned`）**共用同一份清单**：
+/// [`ygg_modules::effects::banned`] 是唯一查询面，这里不维护第二份名单——内核
+/// 往禁止面加一个名字，这条规则自动跟着报（tests/pack.rs 有逐条驱动的回归）。
+///
+/// **取引用也算**：顶层出现 `ygg.on`（哪怕只是 `local f = ygg.on`）就已经违规
+/// ——拿它的下一步只可能是注册，而顶层赋值在装载期就执行了；再传出去更是谁在
+/// 什么时候注册都说不清。函数体内（`M.install(deps)`）则完全合法。
+///
+/// **已知局限**（AST 不做数据流跟踪）：别名逃逸（`local y = ygg; y.on(…)`）与
+/// 动态下标（`ygg[k].on(…)`，`k` 非字面量）静态不可判；另外「函数体一律放行」
+/// 分不出 `pcall(function() ygg.on(…) end)` 这种顶层立刻执行的包装。三种都交给
+/// 装载期影子表兜底——那时 `ygg.on` 已经是拒绝桩，别名拿到的也是桩，绕不过去。
+pub(crate) fn effects_for_ast(file: &str, source: &str, ast: &Ast) -> Vec<Diagnostic> {
+    let mut visitor = EffectVisitor::new(file, source);
+    visitor.visit_ast(ast);
+    visitor.into_diagnostics()
+}
+
+/// 顶层的哪种触碰形态：调用与取引用报同一件事，但「做了什么」不同。
+enum TouchForm {
+    Call,
+    Reference,
+}
+
+/// 顶层禁止面访问器：只维护函数深度，深度为 0 时判定调用 / 取引用。
+///
+/// 只管深度，不管「当前在哪个 chunk」：单文件 Mod 里顶层调 `ygg.on` 是正常
+/// 写法（R1/R2 在那儿判 handler 内部），所以本访问器不进 [`lint_source`]。
+struct EffectVisitor<'src> {
+    source: &'src str,
+    file: String,
+    diagnostics: Vec<Diagnostic>,
+    /// 函数嵌套深度：0 = 模块 chunk 顶层（装载期就会执行的面）。
+    ///
+    /// 三类函数节点都必须数：`function a.b()` / `local function f()` /
+    /// `function() … end` 表达式。漏一类就会把「函数体内合法」误报成违规
+    /// （例如 `M.install = function() ygg.on(…) end` 的赋值简写）。
+    function_depth: usize,
+}
+
+impl<'src> EffectVisitor<'src> {
+    fn new(file: &str, source: &'src str) -> Self {
+        Self {
+            source,
+            file: file.to_owned(),
+            diagnostics: Vec::new(),
+            function_depth: 0,
+        }
+    }
+
+    fn into_diagnostics(self) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
+    fn report(&mut self, member: &str, form: TouchForm, span: (usize, usize)) {
+        let (line, column) = line_col(self.source, span.0);
+        let (message, fix) = effect_wording(member, form);
+        self.diagnostics.push(Diagnostic {
+            file: self.file.clone(),
+            offset: span.0,
+            end_offset: span.1.max(span.0 + 1),
+            line,
+            column,
+            code: code::MOD_EFFECT,
+            severity: Severity::Error,
+            message,
+            fix,
+        });
+    }
+}
+
+impl Visitor for EffectVisitor<'_> {
+    fn visit_function_declaration(&mut self, _node: &FunctionDeclaration) {
+        self.function_depth += 1;
+    }
+
+    fn visit_function_declaration_end(&mut self, _node: &FunctionDeclaration) {
+        self.function_depth = self.function_depth.saturating_sub(1);
+    }
+
+    fn visit_local_function(&mut self, _node: &LocalFunction) {
+        self.function_depth += 1;
+    }
+
+    fn visit_local_function_end(&mut self, _node: &LocalFunction) {
+        self.function_depth = self.function_depth.saturating_sub(1);
+    }
+
+    fn visit_anonymous_function(&mut self, _node: &AnonymousFunction) {
+        self.function_depth += 1;
+    }
+
+    fn visit_anonymous_function_end(&mut self, _node: &AnonymousFunction) {
+        self.function_depth = self.function_depth.saturating_sub(1);
+    }
+
+    fn visit_function_call(&mut self, node: &FunctionCall) {
+        if self.function_depth > 0 {
+            return;
+        }
+        // 点链 / 字符串下标两种形态在 `call_path` 里已经归一
+        // （`ygg["kv"]["set"](…)` → `ygg.kv.set`）；动态下标在拼路径处截断，
+        // 因此这里拿到的要么是完整可判的字面路径，要么就是短的。
+        let Some(path) = call_path(node) else {
+            return;
+        };
+        let Some(member) = banned_member(&path) else {
+            return;
+        };
+        self.report(&member, TouchForm::Call, node_span(node));
+    }
+
+    fn visit_var_expression(&mut self, node: &VarExpression) {
+        if self.function_depth > 0 {
+            return;
+        }
+        // 取引用（`local f = ygg.on` / `return ygg.kv.set` / `M.on = ygg.on`）。
+        // 正常调用形态不会走到这里：`ygg.on(…)` 的 `ygg.on` 挂在 `FunctionCall`
+        // 的 prefix+suffixes 上，不是独立的 VarExpression——所以调用与取引用
+        // 各报一次，同一处不会叠两条。
+        let Some(path) = var_expression_path(node) else {
+            return;
+        };
+        let Some(member) = banned_member(&path) else {
+            return;
+        };
+        self.report(&member, TouchForm::Reference, node_span(node));
+    }
+}
+
+/// `VarExpression` → 点路径（与 [`call_path`] 同口径：点链与字符串下标都算）。
+fn var_expression_path(node: &VarExpression) -> Option<String> {
+    let mut parts = Vec::new();
+    collect_prefix(node.prefix(), &mut parts);
+    collect_suffix_index_names(node.suffixes(), &mut parts);
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("."))
+    }
+}
+
+/// 路径 → 禁止面成员（`ygg.on` → `Some("on")`；`ygg.kv.set` → `Some("kv.set")`）。
+///
+/// 只认 `ygg` 根：`M.on = ygg.on` 左边的 `M.on` 不能被当成 host API。
+/// 判定本身交给 [`effects::banned`]——那是内核影子表用的同一个查询面。
+fn banned_member(path: &str) -> Option<String> {
+    let mut segments = path.split('.');
+    if segments.next()? != "ygg" {
+        return None;
+    }
+    effects::banned(&segments.collect::<Vec<_>>())
+}
+
+/// 禁止面命中的文案：**做了什么 + 为什么**进 `message`，**该怎么做**进 `fix`。
+///
+/// 顶层仍允许的纯读面从清单现拼（[`effects::PURE_READ_CALLS`] /
+/// [`effects::PURE_READ_TABLE_MEMBERS`]）：作者要知道「只有副作用面需要搬走」，
+/// 而这份名字表不能在这里再抄一遍。
+fn effect_wording(member: &str, form: TouchForm) -> (String, String) {
+    const WHY: &str = "注册序就是派发序：模块自己注册，等于让「文件怎么拆」决定「运行时行为」，\
+                       拆文件或调整 require 顺序都会改派发序，重构不再安全";
+    let message = match form {
+        TouchForm::Call => format!(
+            "模块顶层调用了有副作用的 host API `ygg.{member}`：模块 chunk 在装载期执行，\
+             注册 / 写状态 / 输出会随 require 一起发生。{WHY}"
+        ),
+        TouchForm::Reference => format!(
+            "模块顶层取用了 `ygg.{member}` 的引用：拿它只可能是为了注册 / 写状态 / 输出，\
+             而顶层代码在装载期就执行了。{WHY}"
+        ),
+    };
+    let fix = format!(
+        "模块顶层只留纯导出（函数定义与常量）：把这段搬进模块函数 \
+         `function M.install(deps) … ygg.{member}(…) … end`，由入口（pack.json 的 \
+         code.entry）require 后显式调用 `M.install(deps)`——函数体内调用完全合法。\
+         顶层仍允许纯读面（{}）",
+        pure_read_list()
+    );
+    (message, fix)
+}
+
+/// 顶层仍允许的纯读面清单（`ygg.data` / `ygg.kv.get` …），现拼不写死。
+fn pure_read_list() -> String {
+    effects::PURE_READ_CALLS
+        .iter()
+        .map(|name| format!("ygg.{name}"))
+        .chain(
+            effects::PURE_READ_TABLE_MEMBERS
+                .iter()
+                .map(|(table, member)| format!("ygg.{table}.{member}")),
+        )
+        .collect::<Vec<_>>()
+        .join(" / ")
 }

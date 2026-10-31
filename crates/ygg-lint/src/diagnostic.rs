@@ -38,6 +38,13 @@ pub mod code {
     pub const MOD_CYCLE: &str = "YGG-MOD-CYCLE";
     /// `--pack`：模块数 / 装载深度 / 单模块或整包字节数超限。
     pub const MOD_LIMIT: &str = "YGG-MOD-LIMIT";
+    /// `--pack`：模块 chunk **顶层**触碰有副作用的 host API（调用或取引用）。
+    ///
+    /// 与 `ygg-sandbox` 装载期的影子表（`ShadowBanned`）是**同一条不变量**的
+    /// 两套执行面：影子表在装载时拒绝，这条在编辑 / CI 阶段就报——静态面更
+    /// 早（不必真的装载）也更完整（懒加载没走到也一样报）。两份清单只有一份
+    /// （[`ygg_modules::effects`]）。
+    pub const MOD_EFFECT: &str = "YGG-MOD-EFFECT";
 }
 
 /// 一条 lint 诊断（line/column 由 offset 推导，均 1 起、字节列口径；
