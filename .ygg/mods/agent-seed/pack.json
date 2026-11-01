@@ -140,7 +140,10 @@
       "src/requirements.lua",
       "src/lanes.lua",
       "src/proposals.lua",
-      "src/gates.lua"
+      "src/gates.lua",
+      "src/guide.lua",
+      "src/menus.lua",
+      "src/render.lua"
     ]
   }
 }

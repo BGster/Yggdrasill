@@ -11,14 +11,29 @@
       "sha256": "f1118fa8aee43441315ca604afad69594eaabbe426f04511f689429cdcc431c1"
     },
     {
+      "byteLength": 2515,
+      "path": "src/guide.lua",
+      "sha256": "33780c0dea2f972542b8a75333412d0ce091eaea7d3a8ef01cf9758040f6aac0"
+    },
+    {
       "byteLength": 4636,
       "path": "src/lanes.lua",
       "sha256": "2292617251d6c99e38329ccf2d169c1fdbba897f9bf07eb803543f66ea7bc1fb"
     },
     {
+      "byteLength": 10303,
+      "path": "src/menus.lua",
+      "sha256": "421d55bb6e41834fa8b22f6154ab8c244db56ded8596e48cbd78f5be5e21cc35"
+    },
+    {
       "byteLength": 7703,
       "path": "src/proposals.lua",
       "sha256": "f95c78e037ed321a7b9633484037deb16d1e11b0c4eb2b57e67e514e9a88a038"
+    },
+    {
+      "byteLength": 17213,
+      "path": "src/render.lua",
+      "sha256": "c4496aeaadab8681f382c833e4bb5ac3a0dbaf2114bd785035956914e0a2b543"
     },
     {
       "byteLength": 13035,
