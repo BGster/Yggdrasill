@@ -10,8 +10,8 @@ local util = require("src.util")
 local TEXTS
 local CONFIG
 
-local contains, split =
-  util.contains, util.split
+local contains, split, trim =
+  util.contains, util.split, util.trim
 
 local function static(path)
   local node = CONFIG
@@ -110,6 +110,23 @@ local function task_desc()
   return text_of("task.description", TEXTS.beats.default_task_desc)
 end
 
+-- E2 登记面读取（写入方：src/handlers/config.lua）。两者都是自声明，不是身份凭据。
+local function goal_authorization()
+  local value = effective("goal.authorization")
+  if type(value) == "string" then
+    return trim(value)
+  end
+  return ""
+end
+
+local function executor_raw(req_id, stage)
+  local value = effective("executor." .. tostring(req_id) .. "." .. tostring(stage))
+  if type(value) == "string" then
+    return trim(value)
+  end
+  return ""
+end
+
 function M.install(deps)
   TEXTS = deps.texts
   CONFIG = deps.config
@@ -119,6 +136,8 @@ M.DEFAULT_PLAY_MODE = DEFAULT_PLAY_MODE
 M.MODES = MODES
 M.PLAY_MODES = PLAY_MODES
 M.effective = effective
+M.executor_raw = executor_raw
+M.goal_authorization = goal_authorization
 M.max_per_run = max_per_run
 M.mode = mode
 M.next_mode = next_mode

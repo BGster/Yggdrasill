@@ -442,11 +442,79 @@ local function parse_review_note(payload)
   return out, nil
 end
 
+-- ============================================================================
+-- §E2 登记面：goal 授权 + 执行者账本（`config.set` 的两个键族）
+--
+-- 两个都是**自声明**：状态机只能校形状与「换人必给原因」，读不到会话，也不验证 id 真伪。
+-- 落点：`settings.goal.authorization` / `settings.executor.<rN>.<stage>`（`settings.*` 唯一写方 = config.set）。
+-- ============================================================================
+local EXECUTOR_STAGES = { "analysis", "plan", "development" }
+
+local GOAL_AUTH_MAX = 200
+
+local function parse_goal_auth(value)
+  local raw = trim(value or "")
+  if raw == "" then
+    return "", nil
+  end
+  if #raw > GOAL_AUTH_MAX or raw:find("[\r\n]") ~= nil then
+    return nil, TEXTS.beats.goal_auth_bad
+  end
+  return raw, nil
+end
+
+local function executor_stage_ok(stage)
+  return contains(EXECUTOR_STAGES, stage)
+end
+
+-- `executor.rN.<stage>` → req_id, stage；其它形状 → nil（由调用方报可读错误）。
+local function parse_executor_key(key)
+  if type(key) ~= "string" then
+    return nil, nil
+  end
+  return key:match("^executor%.(r%d+)%.([a-z_]+)$")
+end
+
+-- 值形：`<id>` 或 `<id>|<原因>`；`""` = 显式解绑。
+local function parse_executor_value(value)
+  local raw = trim(value or "")
+  if raw == "" then
+    return "", "", nil
+  end
+  local id, reason = cut(raw, "|")
+  id = trim(id or "")
+  reason = trim(reason or "")
+  if id == "" or #id > 64 or id:find("%s") ~= nil then
+    return nil, nil, TEXTS.beats.executor_bad_id
+  end
+  return id, reason, nil
+end
+
+local function format_executor(id, reason)
+  if reason ~= nil and reason ~= "" then
+    return id .. "|" .. reason
+  end
+  return id
+end
+
+-- 只取 id 部分（忽略 `|原因`）：列表展示与前序阶段比较都用它。
+local function executor_id_of(raw)
+  local id = cut(trim(raw or ""), "|")
+  return trim(id or "")
+end
+
 function M.install(deps)
   TEXTS = deps.texts
 end
 
 M.EVOLUTION_CLASSES = EVOLUTION_CLASSES
+M.EXECUTOR_STAGES = EXECUTOR_STAGES
+M.executor_id_of = executor_id_of
+M.executor_stage_ok = executor_stage_ok
+M.format_executor = format_executor
+M.parse_executor_key = parse_executor_key
+M.parse_executor_value = parse_executor_value
+M.parse_goal_auth = parse_goal_auth
 M.EVOLUTION_KEPT = EVOLUTION_KEPT
 M.evolution_path_ok = evolution_path_ok
 M.evolution_settings = evolution_settings

@@ -15,20 +15,95 @@ local wire = require("src.wire")
 
 local TEXTS
 
-local MODES, PLAY_MODES, effective =
-  config.MODES, config.PLAY_MODES, config.effective
-local reject, reject_payload =
-  flow.reject, flow.reject_payload
+local MODES, PLAY_MODES, effective, executor_raw =
+  config.MODES, config.PLAY_MODES, config.effective, config.executor_raw
+local refuse, reject, reject_payload =
+  flow.refuse, flow.reject, flow.reject_payload
 local CONFIG_UI =
   menus.CONFIG_UI
 local render =
   render_mod.receipt
-local stage =
-  reqs.stage
+local req_index_of, req_id, req_push_history, stage =
+  reqs.req_index_of, reqs.req_id, reqs.req_push_history, reqs.stage
 local contains, cut, fill, join, to_bool, trim =
   util.contains, util.cut, util.fill, util.join, util.to_bool, util.trim
 local probe_payload_ok =
   wire.probe_payload_ok
+
+-- 执行者账本的单点写入（`executor.<rN>.<stage>`）。
+-- 自声明；只校形状与「换人必给原因」，不验证 id 真伪。
+local function executor_set(key, value)
+  local req_text, stage_name = wire.parse_executor_key(key)
+  if req_text == nil or not wire.executor_stage_ok(stage_name) then
+    return reject_payload("config.set", fill(TEXTS.beats.executor_bad_key, {
+      key = tostring(key),
+      stages = join(wire.EXECUTOR_STAGES, " / "),
+    }))
+  end
+  local index = req_index_of(req_text)
+  if index == nil then
+    return reject_payload("config.set", fill(TEXTS.beats.executor_unknown_req, { id = req_text }))
+  end
+  local agent, reason, id_problem = wire.parse_executor_value(value)
+  if id_problem ~= nil then
+    return reject_payload("config.set", id_problem)
+  end
+  local slot = "settings.executor." .. req_text .. "." .. stage_name
+  local current = wire.executor_id_of(executor_raw(req_text, stage_name))
+  if agent == "" then
+    ygg.kv.set(slot, "")
+    ygg.narrate(fill(TEXTS.beats.executor_cleared, { id = req_id(index), stage = stage_name }))
+    return render()
+  end
+  if current == agent then
+    ygg.narrate(fill(TEXTS.beats.executor_same, {
+      id = req_id(index),
+      stage = stage_name,
+      agent = agent,
+    }))
+    return render()
+  end
+  -- 跨阶段：plan 看 analysis；development 看 plan（plan 缺失时回看 analysis）。
+  local prev_stage = nil
+  if stage_name == "plan" then
+    prev_stage = "analysis"
+  elseif stage_name == "development" then
+    prev_stage = "plan"
+  end
+  local prev = ""
+  if prev_stage ~= nil then
+    prev = wire.executor_id_of(executor_raw(req_text, prev_stage))
+    if prev == "" and stage_name == "development" then
+      prev = wire.executor_id_of(executor_raw(req_text, "analysis"))
+    end
+  end
+  local handoff_from = current ~= "" and current or prev
+  local needs_reason = handoff_from ~= "" and handoff_from ~= agent
+  if needs_reason and reason == "" then
+    return refuse(TEXTS.beats.req_wait_rejected, "config.set", fill(TEXTS.beats.executor_reason_required, {
+      id = req_id(index),
+      stage = stage_name,
+      prev = handoff_from,
+      agent = agent,
+    }))
+  end
+  ygg.kv.set(slot, wire.format_executor(agent, reason))
+  -- 只有「真的换了人」才留痕；跨阶段同 id 是正常连续（首次绑定该 stage），不写 hist。
+  if handoff_from ~= "" and handoff_from ~= agent then
+    req_push_history(index, fill(TEXTS.beats.executor_hist, {
+      stage = stage_name,
+      from = handoff_from,
+      to = agent,
+      reason = reason ~= "" and reason or TEXTS.beats.executor_no_reason,
+    }))
+  end
+  ygg.narrate(fill(TEXTS.beats.executor_bound, {
+    id = req_id(index),
+    stage = stage_name,
+    agent = agent,
+  }))
+  return render()
+end
 
 
 
@@ -61,6 +136,22 @@ function M.install(deps)
         -- 驱动者换了人，二级页的「当前处境」已失效：退出子页回阶段菜单。
         CONFIG_UI.set_page("")
       end
+    elseif key == "goal.authorization" then
+      -- 自声明：只校形状（单行、trim 后 ≤200），空值 = 显式清除。
+      local auth, auth_problem = wire.parse_goal_auth(value)
+      if auth_problem ~= nil then
+        return reject_payload("config.set", auth_problem)
+      end
+      ygg.kv.set("settings.goal.authorization", auth)
+      if auth == "" then
+        ygg.narrate(TEXTS.beats.goal_auth_cleared)
+      else
+        ygg.narrate(fill(TEXTS.beats.goal_auth_registered, { auth = auth }))
+      end
+      render()
+      return
+    elseif key:sub(1, 9) == "executor." then
+      return executor_set(key, value)
     elseif key == "evolution.mode" then
       if not contains(MODES, value) then
         problem = fill(TEXTS.beats.bad_config_value, { key = key, value = value, allowed = join(MODES, " / ") })

@@ -205,6 +205,22 @@ review.note "lesson|score[|ev=artifacts/<file>.md|c=<kept>/<screened>[|cls=<kind
 - **声明 ≠ 证明**：沙箱没有文件系统（无 `io`/`os`），Mod 读不到 artifact、也不认识 subagent 会话，
   只校验形状与计数自洽；`agent.summary.evolution` 是这三个键的回显，随 `settlement.json` 自然可见。
 
+### goal 授权与执行者账本（骨架职责，接入时不要改）
+
+```text
+config.set goal.authorization=<单行说明>                                  # run 级 goal 授权；空值 = 清除
+config.set executor.<rN>.<analysis|plan|development>=<agent_id>[|<原因>]   # 执行者账本；空值 = 解绑
+```
+
+- **goal 授权**：落 `settings.goal.authorization`。只有**运行期进入 goal**（`settings.play.mode=goal`）的局在
+  `review.note` 收口前校验（缺记录 → 旁白阻断）；静态 `data/config.json` 预设 goal 不在校验范围（仓库所有者常设配置，
+  否则全 1 冒烟会断）；切回 guide 不校验，resume 保留。它只证明「登记过一句话」，不是身份认证，不进 `agent.summary`。
+- **执行者账本**：落 `settings.executor.<rN>.<stage>`。同一 (req,stage) 换人与**跨阶段换人**（plan ≠ analysis、
+  development ≠ plan 且无 plan 时比 analysis）都必须带原因；换人成功写 `id|原因` 并向 `req.<i>.hist` 追加一条
+  （滚动上限沿用）；首次干净绑定不写 hist。账本不带 rev：`amend` 不变、`split`/`merge` 不继承。
+  `proposal.submit` **不做硬校验**（外部提案与同 ext 重放照旧），未登记只在 `requirement.list` 显示「未登记」。
+- **同为自声明**：两者都只证明主 Agent 登记了什么，不证明宿主身份或真实执行者。
+
 ---
 
 ## 四、骨架面不要按项目改

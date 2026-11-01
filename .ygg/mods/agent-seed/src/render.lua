@@ -13,12 +13,13 @@ local menus = require("src.menus")
 local props = require("src.proposals")
 local reqs = require("src.requirements")
 local util = require("src.util")
+local wire = require("src.wire")
 
 local TEXTS
 local CONFIG
 
-local max_per_run, mode, num, play_mode, strict_gates, task_desc, task_title, text_of =
-  config.max_per_run, config.mode, config.num, config.play_mode, config.strict_gates, config.task_desc, config.task_title, config.text_of
+local max_per_run, mode, num, play_mode, strict_gates, task_desc, task_title, text_of, executor_raw, goal_authorization =
+  config.max_per_run, config.mode, config.num, config.play_mode, config.strict_gates, config.task_desc, config.task_title, config.text_of, config.executor_raw, config.goal_authorization
 local gate_total =
   gates.gate_total
 local narrate_stage_guide =
@@ -96,6 +97,23 @@ local function req_trace(index)
   local job = req_job(index)
   if job ~= "" then
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_job, { job = job })
+  end
+  -- E2 执行者账本（自声明）：已登记就列出来；当前 job 对应阶段未登记就明说。
+  local exec_ids = {}
+  local exec_list = {}
+  for i = 1, #wire.EXECUTOR_STAGES do
+    local name = wire.EXECUTOR_STAGES[i]
+    local agent = wire.executor_id_of(executor_raw(req_id(index), name))
+    if agent ~= "" then
+      exec_ids[name] = agent
+      exec_list[#exec_list + 1] = name .. "=" .. agent
+    end
+  end
+  if #exec_list > 0 then
+    parts[#parts + 1] = fill(TEXTS.beats.req_trace_exec, { list = join(exec_list, " ") })
+  end
+  if wire.executor_stage_ok(job) and exec_ids[job] == nil then
+    parts[#parts + 1] = fill(TEXTS.beats.req_trace_exec_missing, { stage = job })
   end
   if req_rev(index) > 1 then
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_rev, { rev = tostring(req_rev(index)) })
@@ -449,6 +467,12 @@ local function render()
   -- 演进建议只在配置二级页输出：它是「要你决定的事」而不是每步都要读的处境。
   if CONFIG_UI.page() == "config" then
     ygg.narrate(evolution_receipt())
+    local auth = goal_authorization()
+    if auth == "" then
+      ygg.narrate(TEXTS.beats.config_goal_auth_none)
+    else
+      ygg.narrate(fill(TEXTS.beats.config_goal_auth, { auth = auth }))
+    end
   end
   local renderer = RENDER[current]
   if renderer == nil then

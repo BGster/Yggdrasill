@@ -494,7 +494,7 @@ handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序
 | 前缀 | 键形 | 写方 |
 | --- | --- | --- |
 | `fsm.*` | `fsm.<机器名>` | stdlib `ygg.fsm`（Mod 只读） |
-| `settings.*` | `settings.<配置路径>` | `config.set` 动作（动态覆盖 > `data/config.json` 静态默认） |
+| `settings.*` | `settings.<路径>`：配置覆盖 + **运行期登记面**（`review.evolution.*` / `goal.authorization` / `executor.<rN>.<stage>`） | `config.set` 动作（动态覆盖 > `data/config.json` 静态默认；登记面同样是自声明，不是身份凭据） |
 | `req.*` | `req.<i>.<字段>` + `req.count` / `req.last` / `req.conflicts` | 需求表 |
 | `prop.*` | `prop.<i>.<字段>` + `prop.count` | 提案表 |
 | `lane.*` | `lane.<k>.<字段>` + `lane.seq` | 泳道台账（`lane.claim` / `lane.release`） |

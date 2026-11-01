@@ -16,8 +16,8 @@ local wire = require("src.wire")
 
 local TEXTS
 
-local num, strict_gates =
-  config.num, config.strict_gates
+local goal_authorization, num, strict_gates =
+  config.goal_authorization, config.num, config.strict_gates
 local advance, refuse, reject, reject_payload =
   flow.advance, flow.refuse, flow.reject, flow.reject_payload
 local gate_problem =
@@ -138,6 +138,15 @@ function M.install(deps)
     end
     if strict_gates() and ygg.kv.get("verify.passed") ~= true then
       ygg.narrate(TEXTS.beats.req_gate_verify)
+      render()
+      return
+    end
+    -- 运行期进入 goal 的局：收口前必须有 run 级授权声明（静态 data/config.json 预设 goal 不校验）。
+    if ygg.kv.get("settings.play.mode") == "goal" and goal_authorization() == "" then
+      ygg.narrate(fill(TEXTS.beats.req_gate_block, {
+        action = "review.note",
+        detail = TEXTS.beats.goal_auth_required,
+      }))
       render()
       return
     end

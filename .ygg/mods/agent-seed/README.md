@@ -180,7 +180,6 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 | `coordinate.submit` | 收口进 review |
 | `verify.submit` | 门禁自检结论 |
 | `review.note` | 结局评分 / 经验 + 进化候选声明（`ev=` / `c=` / `cls=`，见 §八） |
-| `config.set play.mode` | 切模式改变「谁在派发」，是自批链条的第一环 |
 
 - 打回类（`gate.reject` / `proposal.reject`）**故意不在内**：打回不产生任何通过效果，自打回
   只会让自己返工；而它是唯一的纠错通道（菜单本就没有带理由的 reject 项）。
@@ -286,7 +285,10 @@ end)
   不登记修订请求、不参与任何判定）、`review.evolution.artifact` / `review.evolution.candidates` /
   `review.evolution.classes`（进化候选声明，见下）。
 - 顶层菜单只暴露一个 `config` 入口，三项常用设置走二级页（见 §5.2）；其余键仍可直接
-  `config.set "<键>=<值>"` 派发（配置写不产生「通过」效果，不设人类门禁——只有 `play.mode` 除外）。
+  `config.set "<键>=<值>"` 派发。**配置写一律不设人类动作门禁**（不产生「通过」效果）；`play.mode` 的切换是
+  决策权移交，由 AGENTS §8 约束（用户当次授权下可自行切，goal 局收口前要交代授权），不走票据闸。
+- `goal.authorization`（run 级 goal 授权，见 §8.2）与 `executor.<rN>.<stage>`（执行者账本，见 §8.3）同样走
+  `config.set` 直派，不占菜单项。
 - `tuning`：`req_capacity`（需求上限 32）、`job_capacity`（4）、`min_slices` / `max_slices`（历史遗留）、
   `default_score`。
 
@@ -312,6 +314,41 @@ review.note "lesson|score[|ev=artifacts/<file>.md|c=<kept>/<screened>[|cls=<kind
   之和必须等于 `kept`。非法值【载荷被拒】，主状态不变。
 - **声明 ≠ 证明**：沙箱读不到文件，Mod 只校形状与计数自洽；不校验 artifact 内容、也不知道复核是否独立执行。
   `agent.summary.evolution` 只是这三个键的回显，随存档与 `settlement.json.final_state.kv` 自然可见。
+
+### 8.2 goal 授权（run 级自声明）
+
+```text
+config.set goal.authorization=<单行说明>      # trim ≤200、无换行；空值 = 显式清除
+```
+
+- 落点 `settings.goal.authorization`；**只有运行期进入 goal**（`settings.play.mode=goal`）的局在 `review.note`
+  收口前校验：缺记录则旁白阻断（不写 `ending`、不推进），登记后即可收口；resume 保留；切回 guide 不校验。
+- 静态 `data/config.json` 预设 goal 视为仓库所有者常设配置，**不在校验范围**（否则全 1 冒烟会断）；若静态 goal 的局
+  中途切过一次模式（`settings.play.mode` 被写入），之后收口就会要求授权——语义是「运行期重新进入 goal 要说清谁授权」。
+- 它只证明「登记过一句话」，不是身份认证，也不进 `agent.summary`；配置页会回显摘要或「未登记」。
+
+### 8.3 执行者账本（自声明）
+
+```text
+config.set executor.<rN>.<analysis|plan|development>=<agent_id>[|<handoff_reason>]
+config.set executor.<rN>.<stage>=            # 空值 = 显式解绑
+```
+
+| 情形 | 结果 |
+| --- | --- |
+| 首次绑定（且与前一阶段 id 相同/无前序） | 写 `settings.executor.<rN>.<stage>`；旁白；**不写 hist** |
+| 同一 (req,stage) 同 id 重绑 | 幂等：旁白「执行者未变」，不改值、不写 hist |
+| 同一 (req,stage) 换不同 id | **必须带原因**（`=<id>|<原因>`），否则【需求待办】拒绝、不写 KV |
+| 跨阶段换人（plan ≠ analysis；development ≠ plan，无 plan 时比 analysis） | **同样必须带原因**；不得以「首次绑定该 stage」静默覆盖 |
+| 换人成功（含跨阶段） | 写 `id|原因`，并向 `req.<i>.hist` 追加一条（滚动上限沿用，不另建 history/handoff 键） |
+| `amend` | 绑定不变（账本不带 rev） |
+| `split` / `merge` | 子需求 / 合并目标**不继承**绑定；父/源终态只作历史可读 |
+| `proposal.submit` | **不做硬校验**：外部提案与同 ext 重放照旧；未登记只在 `requirement.list` 显示「未登记」 |
+
+- `requirement.list` 的 trace 会以紧凑 clause 列出各阶段执行者（`〔exec analysis=S1 plan=S1〕`）；当前 `job` 对应阶段
+  未登记时显示 `〔exec <stage>=未登记〕`。
+- id 形状：trim 非空、≤64、无空白、不含 `|`；`external` 可作为「用户/外部提案人」的约定 token（Mod 不特殊处理）。
+- 同样是**自声明**：它只证明主 Agent 登记了什么，不证明宿主身份或真实执行者，不得包装成身份认证。
 
 ## 九、文件
 

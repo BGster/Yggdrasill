@@ -265,6 +265,12 @@
       "applies_to": ["implement"],
       "rules": [
         {
+          "id": "dispatch.executor-ledger",
+          "modality": "must",
+          "text": "派发之后必须登记执行者（**自声明账本**，不是身份认证）：`config.set executor.<rN>.<stage>=<agent_id>`，stage ∈ analysis / plan / development；同一个 subagent 连续负责三段时逐阶段登记同一个 id。同一 (req,stage) 换成不同 id **必须**写原因（`=<new_id>|<原因>`）；**跨阶段换人**（plan 与 analysis 的 id 不同、或无 plan 时与 analysis 不同）同样必须写原因，不得以「首次绑定该 stage」静默覆盖断链。换人成功写 `id|原因` 并往 `req.<i>.hist` 追加一条（沿用滚动上限，不另建 history/handoff 键）；首次干净绑定不写 hist。账本不带 rev：`amend` 不改绑定，`split` / `merge` 不继承。`proposal.submit` 不做硬校验——未登记只在 `requirement.list` 显示「未登记」，不阻断外部提案与同 ext 重放。",
+          "basis": "用户决策 2026-11-01（E2 裁决：复用 config.set、不绑 rev、不做提交硬门禁、跨阶段换人必给原因）"
+        },
+        {
           "id": "dispatch.background-only",
           "modality": "must",
           "text": "创建 subagent 执行任务一律后台运行，主会话不原地等待——派发期间继续推进其他泳道、核验或规划，收到完成通知后再核验合流。",
@@ -690,6 +696,12 @@
       "priority": "standard",
       "rules": [
         {
+          "id": "harness.goal-authorization",
+          "modality": "must",
+          "text": "goal 授权是 **run 级自声明记录**：`config.set goal.authorization=<单行说明>` 写 `settings.goal.authorization`（trim 后 ≤200、无换行；空值 = 显式清除）。只有**运行期进入 goal** 的局（`settings.play.mode=goal`）在 `review.note` 收口前校验，缺记录则旁白阻断、不写 `ending`、不推进；静态 `data/config.json` 预设 goal 视为仓库所有者常设配置，**不在校验范围**（否则全 1 冒烟会断）。切回 guide 不校验；resume 保留记录。该记录只证明「登记过一句话」，不证明用户说过——不得据此声称身份认证，也不进 `agent.summary`。",
+          "basis": "用户决策 2026-11-01（E2 裁决：收口校验仅限运行期 goal；静态默认不阻断）"
+        },
+        {
           "id": "harness.coordinator-chain",
           "modality": "must",
           "text": "协调器四态链：intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done；review 里 verify.submit=false 打回 coordinate（门禁失败打回）。",
@@ -890,7 +902,7 @@
         {
           "id": "harness.config-subpage",
           "modality": "must",
-          "text": "config.open / config.close 进 / 出二级配置子页（运行模式 · 演进偏好 · 门禁），纯展示层、不推进状态；config.set / guide.show / map.show 是常驻只读 / 配置动作。进化声明的登记键 review.evolution.artifact / candidates / classes 走 config.set 直派（不占菜单项），落 settings.review.evolution.*，收口时由 review.note 落到 review.evolution.*。",
+          "text": "config.open / config.close 进 / 出二级配置子页（运行模式 · 演进偏好 · 门禁），纯展示层、不推进状态；config.set / guide.show / map.show 是常驻只读 / 配置动作。不占菜单项的登记键走 config.set 直派：review.evolution.artifact / candidates / classes（落 settings.review.evolution.*，收口时由 review.note 落到 review.evolution.*）、goal.authorization（run 级 goal 授权，收口校验用）、executor.<rN>.<stage>（执行者账本，收口不校验、只做展示）。",
           "basis": "AGENTS.md §4（迁移前）"
         },
         {
