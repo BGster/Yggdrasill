@@ -402,4 +402,3 @@ git checkout -- .ygg/mods/agent-seed   # 丢掉本阶段改动
 
 经验：`§泳道动作` 这类「什么都装」的大块按**动作族**切；两处无法机械搬运的耦合是
 `HUMAN.ticket`（与 choice 路由同模块）和 `stage_ticket`（与 advance 同模块）。
-
