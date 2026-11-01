@@ -37,6 +37,13 @@
      （拒绝文案 / 状态不变 / 载荷被拒）？③ 下次用什么**确认它生效**（一条可跑的命令或一次探针）？
      三问答不全 = 没写完，不得声称已进化完毕。
    - **口头承诺不算进化**：不得用“我会注意 / 下次读全”作结论；没有落在上面两个落点的，一律视为未处理。
+   - **先筛后写**：局末建议进 backlog 前先按 Mod 的 `evolution` 章筛——长期优先（换任务 / 换仓库还会遇到吗）；
+     已有未用必须查根因（调用链 / 可发现性 / 契约适配 / 主动不用 / 确无场景 / 冗余退役，六选一）；
+     逐项独立复核（artifact 必含`文件:行号` + 可跑命令与实际输出 + 语义依据 + 根因分类与结论）；
+     场景先于技术（实际场景 → 流程哪一步不满足 → 代码与复现 → 根因 → 长期收益 → 改造面与验证）。
+     单次任务约束、临时工具与探针口径、已在当次解决的问题默认不进。
+   - **声明 ≠ 证明**：`review.note` 的 `ev=` / `c=` / `cls=` 只是声明登记（Mod 只校路径形状、
+     计数与分类自洽）；沙箱读不到 artifact，也不认识 subagent 会话——不得据此声称已证明建议质量或复核独立性。
 
 ### 8. goal / guide：决策权在谁手里
 
@@ -65,7 +72,8 @@
   0 个在跑 job ∧ 0 个未解决冲突 ∧ 全部需求处于终态（`done`，或已 split / merged / dropped 且后继全都 done）。
 - `coordinate.submit` 只在 `coordinate` 阶段可用，成功即进 `review` 并把 `verify.passed` 置 false；
   `verify.submit` 在 `review` 记录全绿（`all_green=false` 在 `gates.require_all_green=true` 时打回 `coordinate`）；
-  `review.note` 写 `review.lesson` / `review.score` / `ending` 后进 `done`（【结局）。
+  `review.note` 写 `review.lesson` / `review.score` / `review.evolution.*`（`ev=` / `c=` / `cls=` 可选段，
+  缺省即显式 0/0）/ `ending` 后进 `done`（【结局）。
 - 宿主靠 `agent.summary` 的 `nextEndsRun` 判定「下一步会收口」：仅当 review 阶段菜单首项是 `review.note` 时为真，
   此时先切 `closing`（阻止新写入 + 最后一次 drain 排在收口之前）再派发。
 
@@ -110,6 +118,8 @@ $A --resume --event map.show                                  # 当前节点 + �
 
 1. 确认所有需求进入 done / split / merged / dropped 等终态、inbox 无未消费行，并通过 `verify.submit`
    记录全绿证据（收口前件见 §一·9）。
-2. `coordinate.submit` → `review`，再 `review.note` 收口到 `done`（写复盘经验与评分）。
+2. `coordinate.submit` → `review`，再 `review.note` 收口到 `done`（写复盘经验、评分与进化候选声明；
+   候选先按 `evolution` 章筛，登记用 `ev=artifacts/<file>.md|c=<kept>/<screened>|cls=<kind>:<n>,...`；
+   guide 下可先 `config.set review.evolution.*` 登记，菜单会把已登记值带进载荷）。
 3. 执行 `--settle` 并核验 `settlement.json` 的 `ok`（四项开关：事件非空 / 无失败步 / 出现结局行 / inbox 已消费）。
 4. **清空主会话 Todo 列表**（`todo clear`，含已完成与历史任务）后再结束本局；不得把已结束局的任务带入下一局。

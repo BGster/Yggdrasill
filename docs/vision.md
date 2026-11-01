@@ -59,7 +59,7 @@
 | **M2.5 Godot 底座** | gdext 原生链接内核（Rust 动态库，不走 wasm）驱动测试冒险 | Godot 场景内完整通关测试冒险（spike GO，估 1.5-2 周垂直切片） |
 | **M3 RPG 扩展** | 地图/移动、回合制战斗、成长/背包/装备 | 第二个示例游戏验证内核扩展性（复用而非重写） |
 | **M4 多人** | 基于确定性内核的指令回放/同步方案（D17 分片消息模型为架构起点） | 联机原型 |
-| **M-Agent Agent Harness** | 内核作为 Agent 工作流运行时：「工作流即游戏，harness 即内核」——任务/状态流转定义为 Mod，Agent 经事件信封交互，动作面由当前状态约束（现场性替代 AGENTS.md 静态宣读） | 完整可用初版：Agent CLI + 冷启动 seed mod + 每步自动存档 + 热修改 + 局末沉淀进化 |
+| **M-Agent Agent Harness** | 内核作为 Agent 工作流运行时：「工作流即游戏，harness 即内核」——任务/状态流转定义为 Mod，Agent 经事件信封交互，动作面由当前状态约束（现场性替代 AGENTS.md 静态宣读） | 完整可用初版：Agent CLI + 冷启动 seed mod + 每步自动存档 + 热修改 + 局末沉淀**声明**（候选筛选与复核走 `evolution` 章，登记走 `review.note` 可选段；自动修订未实现） |
 
 > 底座排期原则：M0.5-CS 与 M2.5 均待正式立项（先走需求捕获 FRD，再进研究/设计）；与 M1/M2 无依赖冲突可视泳道余量并行，收口串行。
 
@@ -71,7 +71,7 @@
 1. **Agent 交互接口**：CLI 为基础；约束三层——①动作面收敛（dispatch 事件 + pendingChoice 即动作白名单，协议约束非提示词约束）②工具调用代理（`ygg.tool` 白名单，二期）③现场感注入（叙事化状态回执）
 2. **Mod 热修改**：host 侧 watch + 安全点重载（内核 save/load 保状态）
 3. **每步自动存档**：每事件后自动 save（host 薄策略）
-4. **类肉鸽进化**：一局=一个任务全流程；局末存档+报告 → 经验压缩 → revise 修订 Mod（A4 diff 白名单直接复用）
+4. **类肉鸽进化**：一局=一个任务全流程；局末存档+报告 → 经验压缩 → 候选筛选与复核（`evolution` 章）→ 登记声明（`review.note` 的 `ev=` / `c=` / `cls=`，随 `settlement.json` 可见）。⚠️ 现状只到「声明登记」：`evolution.mode` / `allow_paths` / `max_per_run` 是叙事偏好，**不自动修订、不登记修订请求**；revise 修订 Mod（A4 diff 白名单）仍是后续里程碑
 5. **冷启动 seed mod**：通用元工作流 Mod（intake→decompose→implement→verify→review→done），新 Agent 零定制接入
 6. **配置与成长产物入库红线**：游戏设置（静态 `data/config.json` 与动态 `settings.*`）及成长/演进 Mod 均可入库，**只存非敏感行为开关、数值与经验文本**；LLM key、token、连接串、subagent 模型参数等敏感信息只存本地 `.env` / `.env.local`（gitignore），入库资源与报告只允许出现键名（2026-10-29 用户补充）
 

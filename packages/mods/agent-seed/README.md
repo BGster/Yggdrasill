@@ -77,7 +77,7 @@ cp -R packages/mods/agent-seed <目标仓>/.ygg/mods/agent-seed
 | `play.mode` | `guide`（逐步确认，稳妥）还是 `goal`（挂机，快） |
 | `drive` | `maxSteps`（基础步数硬顶）/ `stallLimit`（连续无进展判停）/ `stepsPerRequirement`（每条需求追加步数），三项必须是正整数 |
 | `settlement` | 四个开关：事件日志非空 / 无失败步 / 出现结局行 / inbox 已消费 |
-| `evolution` | 局末复盘口径：`off` 只报告 / `suggest` 出建议包 / `auto` 白名单内自动修订 + `max_per_run` |
+| `evolution` | **仅叙事偏好**：`off` / `suggest` / `auto` 只影响建议口径的旁白；本 Mod 不自动修订、不登记修订请求、不参与任何判定（`max_per_run` 只是标注值）。局末进化声明走 `review.note` 可选段，与这三项无关 |
 | `gates.require_all_green` | 门禁失败是否打回 |
 
 ### 4. 跑三件套（缺一不算接入完成）
@@ -183,6 +183,26 @@ cargo run --example playtest -- "$mod"          # ③ 冒烟：必须 "ok": true
 | `config.json` | 静态默认（下层），运行期 KV `settings.*` 是上层（`config.set` 写入），判定恒为「动态覆盖 > 静态默认」 | 改 `drive` / `settlement` 会影响宿主如何推进与结算 |
 | `scenes.json` | 全部文案与调参（scenes / endings / prompts / options / beats / tuning） | 换世界观只改这里 |
 
+### `review.note` 的可选段（骨架职责，接入时不要改）
+
+```text
+review.note "lesson|score[|ev=artifacts/<file>.md|c=<kept>/<screened>[|cls=<kind>:<n>,...]]"
+```
+
+| 段 | 形状 | 缺省 | 落到 |
+| --- | --- | --- | --- |
+| `ev` | `artifacts/` 前缀 + `.md` 尾，禁 `..` 与空白 | 空 | `review.evolution.artifact` |
+| `c` | 两个非负整数，`kept ≤ screened` | `0/0` | `review.evolution.candidates` |
+| `cls` | `<kind>:<n>` 逗号分隔，kind ∈ `long_term` / `unused` / `one_off` / `temp_tool` / `redundant` / `no_scene` | 空 | `review.evolution.classes` |
+
+- **guide 也能登记**：菜单载荷是固定文案，但会读 `settings.review.evolution.*`——先
+  `config.set review.evolution.artifact=artifacts/xxx.md`（另两个键同理）登记，再在 review 菜单选
+  `review.note` 就会把已登记值拼进载荷；goal 下可直接写段，缺段同样回落到已登记值。
+- **写前校验**：`cls` 和必须等于 `screened`，保留类（`long_term` + `unused` + `redundant`）之和必须等于 `kept`；
+  非法值【载荷被拒】，主状态不变。
+- **声明 ≠ 证明**：沙箱没有文件系统（无 `io`/`os`），Mod 读不到 artifact、也不认识 subagent 会话，
+  只校验形状与计数自洽；`agent.summary.evolution` 是这三个键的回显，随 `settlement.json` 自然可见。
+
 ---
 
 ## 四、骨架面不要按项目改
@@ -258,10 +278,14 @@ util ← config ← requirements ← lanes ← proposals ← gates ← guide / m
 - **单仓版**：泳道账本是 `lane.<k>.*`，没有 `repo` 层（多仓版另有分层，不在本模板内）。
 - **`pack` 不校验资源内容**：它只校验 `pack.json` 结构、`schemaFiles` 存在性与内容哈希；
   `data/*.json` 是否合 schema 由**装载期**校验。所以改了资源要跑 `playtest`，光跑 `pack` 不够。
+- **菜单不变式（骨架级，接入时不要破）**：`pendingChoice` 首项必须是主前进动作（review 阶段就是
+  `review.note`），因为 `playtest` 默认**恒选 1**（`src/playtest.rs`），且骨架菜单没有 `enabled` 概念。
+  「先登记后收口」的实例只能在收口前单独跑一次 `config.set`（不进菜单、不改首项）；
+  把登记项塞到首项会让 `playtest` 全 1 走查停在步数上限（`ok=false`）。
 - **按阶段提示是 `src/guide.lua` 里写死的映射**（intake → `output` / coordinate → `dispatch` /
-  review → `gates` / done → `pointers`）：项目的 playbook 没有对应章节时，回落到第一章的标题与摘要。
+  review → `evolution` / done → `pointers`）：项目的 playbook 没有对应章节时，回落到第一章的标题与摘要。
   这是优雅降级，不是错误——但如果你希望 review / done 阶段提示自己的章节，就补上
-  `gates` / `pointers` 这两章。
+  `evolution` / `pointers` 这两章（种子模板自带 `evolution` 章，可直接沿用）。
 - **没有规则闸**：不设「已读规则」标记，也不做「未读规则即拒绝」——本模板里没有任何「先读才放行」的前件。
   规则提示每步一行，要全文就 `guide.show <section_id>`。
 - **`map.show` 两个视图**：默认只出「当前节点 + 出边」（剧情为点、选择为边），`map.show full` 才出设计全图。

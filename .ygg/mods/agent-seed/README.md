@@ -179,7 +179,7 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 | `gate.approve` | 两个强制门禁 |
 | `coordinate.submit` | 收口进 review |
 | `verify.submit` | 门禁自检结论 |
-| `review.note` | 结局评分 / 经验 |
+| `review.note` | 结局评分 / 经验 + 进化候选声明（`ev=` / `c=` / `cls=`，见 §八） |
 | `config.set play.mode` | 切模式改变「谁在派发」，是自批链条的第一环 |
 
 - 打回类（`gate.reject` / `proposal.reject`）**故意不在内**：打回不产生任何通过效果，自打回
@@ -192,7 +192,10 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 
 ### 5.2 二级菜单页
 
-顶层菜单只留一个 `config` 入口，三项设置进子页：运行模式 / 演进模式 / 门禁。
+顶层菜单只留一个 `config` 入口，三项设置进子页：运行模式 / 演进偏好 / 门禁。进化声明的登记键
+（`review.evolution.artifact` / `candidates` / `classes`）**不占菜单项**——菜单没有自由文本输入，
+所以它们走 `config.set` 直派，写 `settings.review.evolution.*`；`review.note` 的菜单载荷会自动把已登记值
+拼进 `ev=` / `c=` / `cls=` 段（见 §八）。
 
 | 动作 | 载荷 | 作用 |
 | --- | --- | --- |
@@ -262,6 +265,7 @@ ygg.on("agent.summary", function()
   ygg.meta("summary", { stage = ..., ending = ..., verifyPassed = ..., nextEndsRun = ...,
                         pendingProposals = ..., requirementCount = ...,
                         conflicts = { { id = ..., peer = ..., note = ... } },
+                        evolution = { artifact = ..., candidates = ..., classes = ... },
                         awaiting = { req = ..., rev = ..., stage = ... } })  -- 无在跑 job 时缺省
   render()
 end)
@@ -271,16 +275,40 @@ end)
   叙事里**没有** `【摘要】` 前缀行，宿主也不从叙事文本里剖 JSON。
 - 该动作**只读**：不推进状态、不改 KV、`pendingChoice` 保持不变（只重渲染一屏）。
 - `meta` 是瞬态回执面，不进存档也不进状态哈希（调不调它不影响 `state_hash`）。
+- `evolution` 三个子键是**声明回显**（`review.evolution.*` 的同一份值，缺省 `""` / `"0/0"` / `""`）：
+  它可以被断言「声明了没有」，不能拿来断言建议质量或复核独立性。
 - 值面约束（内核把关）：标量 / 稠密序列 / 字符串键表；非有限值拒绝；空表读作 `[]`。
 
 ## 八、增量配置
 
 - 静态 `data/config.json` + 动态 KV `settings.*`（`config.set`）：`play.mode`（guide/goal）、
-  `gates.require_all_green`、`evolution.mode` / `evolution.max_per_run`。
+  `gates.require_all_green`、`evolution.mode` / `evolution.max_per_run`（**仅叙事偏好**：不自动修订、
+  不登记修订请求、不参与任何判定）、`review.evolution.artifact` / `review.evolution.candidates` /
+  `review.evolution.classes`（进化候选声明，见下）。
 - 顶层菜单只暴露一个 `config` 入口，三项常用设置走二级页（见 §5.2）；其余键仍可直接
   `config.set "<键>=<值>"` 派发（配置写不产生「通过」效果，不设人类门禁——只有 `play.mode` 除外）。
 - `tuning`：`req_capacity`（需求上限 32）、`job_capacity`（4）、`min_slices` / `max_slices`（历史遗留）、
   `default_score`。
+
+### 8.1 进化候选声明（`review.note` 可选段）
+
+```text
+review.note "lesson|score[|ev=artifacts/<file>.md|c=<kept>/<screened>[|cls=<kind>:<n>,...]]"
+```
+
+| 段 | 形状 | 缺省 | 落到 |
+| --- | --- | --- | --- |
+| `ev` | `artifacts/` 前缀 + `.md` 尾，禁 `..` 与空白 | 空 | `review.evolution.artifact` |
+| `c` | 两个非负整数，`kept ≤ screened` | `0/0` | `review.evolution.candidates` |
+| `cls` | `<kind>:<n>` 逗号分隔，kind ∈ `long_term` / `unused` / `one_off` / `temp_tool` / `redundant` / `no_scene` | 空 | `review.evolution.classes` |
+
+- **向导通道**：guide 下菜单载荷是固定文案，但会读 `settings.review.evolution.*`——先
+  `config.set review.evolution.artifact=artifacts/xxx.md`（另两个键同理）登记，再在 review 菜单选 `review.note`
+  即可把已登记值带进载荷；goal 下可直接在载荷写段（缺段时同样回落到已登记值）。
+- **自洽校验**（写状态前）：`cls` 各计数之和必须等于 `screened`；保留类（`long_term` + `unused` + `redundant`）
+  之和必须等于 `kept`。非法值【载荷被拒】，主状态不变。
+- **声明 ≠ 证明**：沙箱读不到文件，Mod 只校形状与计数自洽；不校验 artifact 内容、也不知道复核是否独立执行。
+  `agent.summary.evolution` 只是这三个键的回显，随存档与 `settlement.json.final_state.kv` 自然可见。
 
 ## 九、文件
 
