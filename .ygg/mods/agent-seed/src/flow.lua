@@ -1,7 +1,8 @@
--- src/flow.lua —— 转场与拒绝的唯二出口（`advance` / `refuse`）+ 状态机票据。
+-- src/flow.lua —— 转场与拒绝的唯二出口（`advance` / `refuse`）+ 状态机票据 + 拒绝留痕。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
--- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（转场由 fsm 写 `fsm.stage`）。
+-- 资源由入口 install(deps) 注入。本模块写的 KV 前缀：`reject.*`（拒绝留痕，只读查询用）；
+-- `fsm.stage` 由状态机独占写，本模块只 `emit` 转场事件。
 
 local M = {}
 
@@ -21,13 +22,33 @@ local stage =
 local contains, fill, join =
   util.contains, util.fill, util.join
 
+-- 转场票据：`stage.advance` 本身是可被外部直派的事件（`--event stage.advance`）。
+-- 不设闸就能把协调器从 intake 直接搬到 coordinate、从 review 直接搬进 done，
+-- 绕过 task.intake / coordinate.submit / review.note 与全部前置校验。
+-- 只给 advance() 盖章，FSM 的 when 取证即消费——外部直派没有章，一律静默 no-op。
+local stage_ticket = nil
+local reject_count = 0
+
 local function advance(target)
   -- 转场即离开二级页（子页跟着阶段走，不跨阶段）。
   CONFIG_UI.set_page("")
   if target ~= stage() then
+    stage_ticket = target
     ygg.emit("stage.advance", target)
   end
   ygg.narrative["goto"]("node:render")
+end
+
+-- 状态机 when 的唯一判据：目标态正确 ∧ 本步由 advance() 发起（取章即消费）。
+function M.allowed(target, expected)
+  if target ~= expected then
+    return false
+  end
+  if stage_ticket ~= expected then
+    return false
+  end
+  stage_ticket = nil
+  return true
 end
 
 local function allowed_list(current)
@@ -51,6 +72,10 @@ end
 
 local function refuse(template, action, detail)
   local current = stage()
+  -- 拒绝留痕：宿主按 pack.json 的 rejectionPrefixes 判「未生效」，这里再给可审计计数。
+  reject_count = reject_count + 1
+  ygg.kv.set("reject.count", reject_count)
+  ygg.kv.set("reject.last", tostring(action) .. ": " .. (detail or TEXTS.beats.rejected_default))
   ygg.narrate(fill(template, {
     action = tostring(action),
     stage = current,
@@ -70,6 +95,10 @@ end
 
 function M.install(deps)
   TEXTS = deps.texts
+  local saved = ygg.kv.get("reject.count")
+  if type(saved) == "number" then
+    reject_count = saved
+  end
 end
 
 M.advance = advance

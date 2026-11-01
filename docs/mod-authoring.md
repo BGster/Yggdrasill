@@ -491,6 +491,7 @@ handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序
 | `prop.*` | `prop.<i>.<字段>` + `prop.count` | 提案表 |
 | `lane.*` | `lane.<k>.<字段>` + `lane.seq` | 泳道台账（`lane.claim` / `lane.release`） |
 | `ui.*` | `ui.page` / `ui.page.stage` | 纯展示层（不进摘要、不影响派活，也不改任何业务动作语义） |
+| `reject.*` | `reject.count` / `reject.last` | 拒绝留痕（`flow.refuse` 的唯一写入点）：只做只读查询，**不是**纪律闸 |
 | `task.*` / `verify.*` / `review.*` / `inbox.*`，裸键 `ending` | 各自单一用途 | 各自的单一写入点 |
 
 **这是文档约定，装载期不校验前缀归属**——没有新增校验面，别指望内核替你拦跨模块写。

@@ -81,28 +81,28 @@ ygg.fsm.define({
       from = STAGE.intake,
       to = STAGE.coordinate,
       when = function(target)
-        return target == STAGE.coordinate
+        return flow.allowed(target, STAGE.coordinate)
       end,
     },
     {
       from = STAGE.coordinate,
       to = STAGE.review,
       when = function(target)
-        return target == STAGE.review
+        return flow.allowed(target, STAGE.review)
       end,
     },
     {
       from = STAGE.review,
       to = STAGE.coordinate,
       when = function(target)
-        return target == STAGE.coordinate
+        return flow.allowed(target, STAGE.coordinate)
       end,
     },
     {
       from = STAGE.review,
       to = STAGE.done,
       when = function(target)
-        return target == STAGE.done
+        return flow.allowed(target, STAGE.done)
       end,
     },
   },
