@@ -349,11 +349,10 @@ local RENDER = {}
 
 local prompt_vars
 
+-- 剧情是点：一个节点只有一段文本（`<节点>_common`）。
+-- goal / guide 的差异只在「谁派发」，由 narrate_play_mode 每条回执报一次，不在每个节点重复。
 local function stage_prompt(st)
-  if play_mode() == "goal" then
-    return TEXTS.beats[st .. "_goal"] or TEXTS.beats[st .. "_guide"]
-  end
-  return TEXTS.beats[st .. "_guide"]
+  return TEXTS.beats[st .. "_common"] or TEXTS.beats.stage_prompt_missing
 end
 
 local function narrate_play_mode()
