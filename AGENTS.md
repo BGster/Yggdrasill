@@ -73,7 +73,8 @@
 - `coordinate.submit` 只在 `coordinate` 阶段可用，成功即进 `review` 并把 `verify.passed` 置 false；
   `verify.submit` 在 `review` 记录全绿（`all_green=false` 在 `gates.require_all_green=true` 时打回 `coordinate`）；
   `review.note` 写 `review.lesson` / `review.score` / `review.evolution.*`（`ev=` / `c=` / `cls=` 可选段，
-  缺省即显式 0/0）/ `ending` 后进 `done`（【结局）。
+  缺省即显式 0/0）/ `ending` 后进 `done`（【结局）。**`c` 的 `screened > 0` 时 `ev` 与 `cls` 必填**（收口前拒），
+  0/0 可只带 `ev`（复核后无候选）。
 - 宿主靠 `agent.summary` 的 `nextEndsRun` 判定「下一步会收口」：仅当 review 阶段菜单首项是 `review.note` 时为真，
   此时先切 `closing`（阻止新写入 + 最后一次 drain 排在收口之前）再派发。
 

@@ -252,15 +252,17 @@
     "prologue_common": "两模式共用：提案验收与两个门禁仍各走一次真实动作与校验，不会跳过；需求可以异步补（--requirement / --proposal）。",
     "intake_common": "写 \"title|description\" 提交；确认后按序号提交。",
     "coordinate_common": "先验提案（proposal.accept），再过门禁（gate.approve/reject），再派活（requirement.dispatch），最后 coordinate.submit。",
-    "review_common": "门禁全绿后记录经验收口（review.note）；进化建议先按 evolution 章筛（长期优先 / 已有未用查根因 / 逐项复核 / 场景先行），再登记 ev= / c= / cls=——声明只证明「声明了什么」，不证明建议质量。",
+    "review_common": "门禁全绿后记录经验收口（review.note）；进化建议先按 evolution 章筛（长期优先 / 已有未用查根因 / 逐项复核 / 场景先行），再登记 ev= / c= / cls=——screened > 0 时 ev 与 cls 必填；声明只证明「声明了什么」，不证明建议质量。",
     "stage_prompt_missing": "（本节点的提示词缺失：检查 data/scenes.json 的 <节点>_common）",
     "evolution_auto": "演进偏好 auto：仅偏好标记（标注额度 {{cap}}、面 {{paths}}）——不自动修订、不登记修订请求；建议仍走 review.note 的 ev/c/cls 段。",
     "evolution_none": "0/0",
-    "review_evolution_usage": "review.note 可选段形状：ev=artifacts/<file>.md｜c=<kept>/<screened>｜cls=<kind>:<n>,...（kind ∈ long_term / unused / one_off / temp_tool / redundant / no_scene）",
+    "review_evolution_usage": "review.note 可选段形状：ev=artifacts/<file>.md｜c=<kept>/<screened>｜cls=<kind>:<n>,...（kind ∈ long_term / unused / one_off / temp_tool / redundant / no_scene）；screened > 0 时 ev 与 cls 都必须给。",
     "review_evolution_bad_path": "进化 artifact 路径不合法：必须是 `artifacts/<file>.md`，禁止 `..` 与空白。",
     "review_evolution_bad_candidates": "进化候选计数不合法：`c=<kept>/<screened>`，两个非负整数且 kept ≤ screened。",
     "review_evolution_bad_classes": "进化候选分类不合法：`cls=<kind>:<n>,...`，kind 必须是六类之一、计数为非负整数且不重复。",
-    "review_evolution_mismatch": "进化声明不自洽：cls 各计数之和必须等于 screened，保留类（long_term + unused + redundant）之和必须等于 kept。"
+    "review_evolution_mismatch": "进化声明不自洽：cls 各计数之和必须等于 screened，保留类（long_term + unused + redundant）之和必须等于 kept。",
+    "review_evolution_need_artifact": "有候选（screened > 0）必须给复核 artifact：ev=artifacts/<file>.md——所有被筛选的候选都要有复核记录，不只是保留的那几条。",
+    "review_evolution_need_classes": "有候选（screened > 0）必须给逐类根因计数：cls=<kind>:<n>,...（六类之和 = screened，保留类之和 = kept）。"
   },
   "tuning": {
     "min_slices": 1,

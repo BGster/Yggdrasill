@@ -101,19 +101,19 @@
       "sha256": "79cc86d03760e4af0faaab66a6ce5c619609f890808b61e185c21aece5555e00"
     },
     {
-      "byteLength": 13762,
+      "byteLength": 14319,
       "path": "src/wire.lua",
-      "sha256": "4535488e63a6d5d49e3746d293a86a513b2f29268d37104625fb0ef72c7caaab"
+      "sha256": "32daa715462f1d08d0fbb3d74620c98b2509d6e2c9f89a64265b999f4b0e594b"
     }
   ],
   "entries": [
     {
-      "byteLength": 24703,
+      "byteLength": 25161,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "83a03a963da1af49d5f3c9062f9ebad57c0be162241f770911a9d08530f5b6f2"
+      "sha256": "f972dd6450c1366f4bc8d3739b3b40c15b95e1cf2ac5a76d49c78c5d7ebf285d"
     },
     {
       "byteLength": 471,
@@ -124,12 +124,12 @@
       "sha256": "62bbe79b84dd6e8fabeca2a5804f0ec614926808f4299c3ac0197855f6efb229"
     },
     {
-      "byteLength": 26692,
+      "byteLength": 26986,
       "id": "ygg:agent/playbook",
       "kind": "agent-playbook",
       "path": "data/playbook.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
-      "sha256": "d50c005166c391c23b26a13d67ca2fe07ef0e30e364c0ee16fd84359108712bd"
+      "sha256": "cdd17206be9bb590c797b4109fd213287c250791b543c9ead40969a29f8dd336"
     }
   ],
   "schemaVersion": 1

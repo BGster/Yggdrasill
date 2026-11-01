@@ -1193,7 +1193,7 @@
         {
           "id": "evolution.review-artifact",
           "modality": "must",
-          "text": "每条要保留的建议必须有独立复核 artifact，含四要素：① 文件与行号；② 可原样执行的命令与实际输出（不是「已生成」）；③ 语义依据（该行为符合还是违背当前契约）；④ 根因分类与复核结论（确认存在 / 证据不足 / 不成立 / 仅当次 / 暂缓）。",
+          "text": "每条被筛选的候选（保留与不保留都算）都要在复核 artifact 里留结论，含四要素：① 文件与行号；② 可原样执行的命令与实际输出（不是「已生成」）；③ 语义依据（该行为符合还是违背当前契约）；④ 根因分类与复核结论（确认存在 / 证据不足 / 不成立 / 仅当次 / 暂缓）。",
           "basis": "evidence 章三要素 + 用户决策 2026-11-01（E1 §4）"
         },
         {
@@ -1205,7 +1205,7 @@
         {
           "id": "evolution.record-shape",
           "modality": "must",
-          "text": "收口时用 `review.note` 的可选段登记声明：`ev=artifacts/<file>.md`（复核 artifact）、`c=<kept>/<screened>`（保留数/筛选数）、`cls=<kind>:<n>,...`（六类逐类计数，和必须等于 screened，保留类之和必须等于 kept）。guide 下先 `config.set review.evolution.artifact|candidates|classes=<值>` 登记，菜单会把已登记值带进 review.note 载荷；什么都没登记就是显式 0/0。",
+          "text": "收口时用 `review.note` 的可选段登记声明：`ev=artifacts/<file>.md`（复核 artifact）、`c=<kept>/<screened>`（保留数/筛选数）、`cls=<kind>:<n>,...`（六类逐类计数，和必须等于 screened，保留类之和必须等于 kept）。**screened > 0 时 ev 与 cls 必填**——筛过的候选都要有复核记录与根因分类，不能只登记保留的那几条；`c=0/0` 仍可带 artifact 作为「复核后无候选」的记录。guide 下先 `config.set review.evolution.artifact|candidates|classes=<值>` 登记（允许分次中间态，完整性在收口处校），菜单会把已登记值带进 review.note 载荷；什么都没登记就是显式 0/0。",
           "basis": "review.note / config.set 契约（本 Mod）"
         },
         {

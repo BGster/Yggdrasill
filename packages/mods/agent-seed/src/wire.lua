@@ -260,8 +260,8 @@ end
 -- ============================================================================
 -- §review.note 进化声明段（`ev=` / `c=` / `cls=`）
 --
--- 声明 ≠ 证明：这里只校验**形状**（路径形状、两个整数、六类计数自洽），
--- 沙箱读不到文件，也不判断建议质量或复核是否真的独立执行过。
+-- 声明 ≠ 证明：这里只校验**形状与完整性**（路径形状、两个整数、六类计数自洽、
+-- screened > 0 时 ev 与 cls 都不得缺），沙箱读不到文件，也不判断建议质量或复核是否真的独立执行过。
 -- ============================================================================
 local EVOLUTION_CLASSES = { "long_term", "unused", "one_off", "temp_tool", "redundant", "no_scene" }
 
@@ -350,6 +350,8 @@ end
 
 -- 三路输入一律是字符串（缺省 = ""）：artifact 空 = 未登记；candidates 空 = 0/0；classes 空 = 未分类。
 -- 跨字段自洽只在收口处校（登记阶段允许分次登记）。
+-- 完整性同样是收口硬条件：screened > 0 就必须同时有复核 artifact 与逐类计数——
+-- 「筛了几条、留了几分」而把复核记录与根因分类留在散文里，等于没登记。
 local function normalize_evolution(artifact, candidates, classes)
   local record = { artifact = "", kept = 0, screened = 0, classes = {} }
   local artifact_text = trim(artifact or "")
@@ -368,11 +370,22 @@ local function normalize_evolution(artifact, candidates, classes)
     record.kept, record.screened = kept, screened
   end
   local classes_text = trim(classes or "")
+  local parsed, total = nil, 0
   if classes_text ~= "" then
-    local parsed, total = parse_classes(classes_text)
+    parsed, total = parse_classes(classes_text)
     if parsed == nil or total == 0 then
       return nil, TEXTS.beats.review_evolution_bad_classes
     end
+  end
+  if record.screened > 0 then
+    if record.artifact == "" then
+      return nil, TEXTS.beats.review_evolution_need_artifact
+    end
+    if parsed == nil then
+      return nil, TEXTS.beats.review_evolution_need_classes
+    end
+  end
+  if parsed ~= nil then
     if total ~= record.screened or kept_total(parsed) ~= record.kept then
       return nil, TEXTS.beats.review_evolution_mismatch
     end

@@ -198,7 +198,9 @@ review.note "lesson|score[|ev=artifacts/<file>.md|c=<kept>/<screened>[|cls=<kind
 - **guide 也能登记**：菜单载荷是固定文案，但会读 `settings.review.evolution.*`——先
   `config.set review.evolution.artifact=artifacts/xxx.md`（另两个键同理）登记，再在 review 菜单选
   `review.note` 就会把已登记值拼进载荷；goal 下可直接写段，缺段同样回落到已登记值。
-- **写前校验**：`cls` 和必须等于 `screened`，保留类（`long_term` + `unused` + `redundant`）之和必须等于 `kept`；
+- **写前校验（完整性）**：`screened > 0` 时 `ev` 与 `cls` 必填——筛过的候选都要有复核记录与根因分类；
+  `c=0/0` 可只带 `ev`（复核后无候选）。登记（`config.set`）允许分次中间态，完整性只在收口处校。
+- **写前校验（自洽）**：`cls` 和必须等于 `screened`，保留类（`long_term` + `unused` + `redundant`）之和必须等于 `kept`；
   非法值【载荷被拒】，主状态不变。
 - **声明 ≠ 证明**：沙箱没有文件系统（无 `io`/`os`），Mod 读不到 artifact、也不认识 subagent 会话，
   只校验形状与计数自洽；`agent.summary.evolution` 是这三个键的回显，随 `settlement.json` 自然可见。

@@ -507,8 +507,9 @@ handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序
 
 进化声明是**两层**的（同一份口径、两个前缀）：`config.set review.evolution.artifact|candidates|classes=<值>`
 写运行期覆盖层 `settings.review.evolution.*`（`settings.*` 的单一写方仍是 `config.set`），收口时
-`review.note` 把它落到 `review.evolution.*`。种子只校**形状**——`ev` 的 `artifacts/*.md` 路径、
-`c` 的两个非负整数、`cls` 的六类计数，且 `cls` 和必须等于 `screened`、保留类之和必须等于 `kept`；
+`review.note` 把它落到 `review.evolution.*`。种子只校**形状与完整性**——`ev` 的 `artifacts/*.md` 路径、
+`c` 的两个非负整数、`cls` 的六类计数；`screened > 0` 时 `ev` 与 `cls` 都必填（`c=0/0` 可只带 `ev`），
+且 `cls` 和必须等于 `screened`、保留类之和必须等于 `kept`；
 沙箱没有文件系统（无 `io`/`os`），所以**读不到 artifact 内容**，也无法判断复核是否独立执行。
 
 补一句关于「状态」的边界：KV 本就不进状态哈希（哈希只覆盖实体面），所以别把 `ui.*`

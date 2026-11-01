@@ -305,6 +305,9 @@ review.note "lesson|score[|ev=artifacts/<file>.md|c=<kept>/<screened>[|cls=<kind
 - **向导通道**：guide 下菜单载荷是固定文案，但会读 `settings.review.evolution.*`——先
   `config.set review.evolution.artifact=artifacts/xxx.md`（另两个键同理）登记，再在 review 菜单选 `review.note`
   即可把已登记值带进载荷；goal 下可直接在载荷写段（缺段时同样回落到已登记值）。
+- **完整性校验**（写状态前）：`screened > 0` 时 `ev` 与 `cls` 必填——所有被筛选的候选都要有复核记录与
+  根因分类，不能只登记保留的那几条；`c=0/0` 仍可带 `ev`（复核后无候选）。登记阶段允许分次中间态
+  （`config.set` 逐键校形状），完整性只在收口处校。
 - **自洽校验**（写状态前）：`cls` 各计数之和必须等于 `screened`；保留类（`long_term` + `unused` + `redundant`）
   之和必须等于 `kept`。非法值【载荷被拒】，主状态不变。
 - **声明 ≠ 证明**：沙箱读不到文件，Mod 只校形状与计数自洽；不校验 artifact 内容、也不知道复核是否独立执行。
