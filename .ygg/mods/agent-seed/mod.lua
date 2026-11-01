@@ -1,1158 +1,46 @@
--- packages/mods/agent-seed/mod.lua
--- M-Agent 泳道 A：冷启动 seed mod —— **双层状态机 + 提案验收**的 Agent 元工作流。
+-- .ygg/mods/agent-seed/mod.lua —— 装配入口（不是 Mod 本体）
 --
--- 一、协调器（`fsm.stage`，单机单事件 `stage.advance`，payload = 目标态）：
+-- 本文件只做装配：读资源快照 → require 模块 → 纯模块 install → render.register →
+-- handlers install → node:render → fsm.define。业务实现都在 src/ 下。
 --
---   intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done
---                              ▲                                 │
---                              └────── verify.submit=false ───────┘（打回重做）
---
---   协调器只管「派活 / 收提案 / 串行验收 / 最终复盘」；**不承载开发本身**。
---
--- 二、需求级流水线（每条需求独立生命周期，落 KV `req.<i>.status`）：
---
---   draft ──requirement.dispatch──▶ analyzing ──proposal──▶ analysis_review
---     ──accept──▶ planning ──dispatch──▶ planning(job) ──proposal──▶ plan_review
---     ──accept──▶ ready ──dispatch──▶ developing(lane) ──proposal──▶ dev_review
---     ──accept──▶ done
---
---   另有可追溯终态 split（已拆分）/ merged（已并入）/ dropped（已弃）与派生标记
---   blocked（= 有未解决冲突，展示态）。**多条需求的分析 / 规划 / 开发都可异步并行**
---   （全局最多 `tuning.job_capacity` 个 job），主 Agent 的**提案验收、共享需求图修改、
---   集成与最终 review 一律串行**（同一份需求图、同一个结论）。
---
--- 三、提案协议（subagent 不直接改共享状态）：
---
---   proposal.submit  "req_id|revision|stage|summary|artifacts[|changes]"
---   proposal.accept  "pN" / "rN" / ""（空 = 按 requirement_id canonical 序取一条）
---   proposal.reject  "pN[|reason]" / "rN[|reason]"
---
---   - stage ∈ analysis | plan | development；changes 可选（subagent 只**建议**）：
---     `split=a,b` / `merge=r5` / `amend=title:desc` / `conflict=r5:note`
---   - 提案绑定 revision：验收时 `revision ≠ req.<i>.rev` → 判 **stale**（可读拒绝，
---     旧提案不得覆盖新决定，需 rebase 后重提）。
---   - split / merge / amend / conflict 由**主 Agent 验收后**才能落地（提案里的 changes
---     在 proposal.accept 内应用）；subagent 无法直接改需求图。
---   - 冲突仍需**用户确认**：goal 遇到未解决冲突会停下等你选（不自动选默认路径）。
---
--- 四、泳道：分析 / 规划 / 开发都是异步 job，全局上限 `tuning.job_capacity`（默认 4）；
---   开发额外占一条 lane（`lane.<k>`，账本 `lane.<k>.{req,branch,base,since,clean}`），
---   只有「依赖就绪 + 无冲突」的需求能进开发泳道，相互声明冲突的需求不可能同时
---   developing（冲突标记让两者都不可调度）。
---   内核仍**单线程 dispatch + 单 autosave**：泳道只是宿主侧的并行工作单元，结果一律
---   通过 inbox 回到这里，宿主按 requirement_id / external_id canonical 序合流。
---
--- 五、收口语义：所有需求 `done`（或已 split/merged/dropped 且其后继全部 done）
---   ∧ 无待验收提案 ∧ 无未解决冲突 → `coordinate.submit` 才允许进 review；
---   review 里 `verify.submit=true` 进复盘，`review.note` 收口到 done（【结局）。
---
--- 六、展示与防自批两层（不影响状态机语义）：
---   - **人类动作门禁**（§人类动作门禁）：guide 下「会产生通过效果」的动作（验收 / 门禁 /
---     收口 / 复盘 / 切运行模式）只能经 `ygg.choice_selected` 路由进入，单发直派被可读拒绝；
---     goal 也走同一条路由，由外部决策命令决定是否派发（不会默认批准）。
---   - **二级菜单页**（§二级菜单页）：`config` 收敛为顶层单一入口，三项设置进子页；
---     纯展示层（KV `ui.page` / `ui.page.stage`），阶段一变即清空，不占主前进位置。
+-- 派发序 = 下面 install() 的调用序（不是 require 序、也不是 pack.json 的 code.modules 声明序）。
 
--- ============================================================================
--- §资源 装载期快照（资源只读、不入档）
--- ============================================================================
 local TEXTS = ygg.data("ygg:scene/texts")
 local CONFIG = ygg.data("ygg:agent/config")
 local PLAYBOOK = ygg.data("ygg:agent/playbook")
 
--- ============================================================================
--- §工具 沙箱无 table 库，自备纯函数小工具
--- ============================================================================
-local function fill(template, vars)
-  if type(template) ~= "string" then
-    return ""
-  end
-  return (template:gsub("{{([%w_]+)}}", function(key)
-    local value = vars[key]
-    if value == nil then
-      return "{{" .. key .. "}}"
-    end
-    return tostring(value)
-  end))
-end
+local util = require("src.util")
+local config = require("src.config")
+local reqs = require("src.requirements")
+local lanes = require("src.lanes")
+local props = require("src.proposals")
+local gates = require("src.gates")
+
+config.install({ texts = TEXTS, config = CONFIG })
+reqs.install({ texts = TEXTS, lanes = lanes.LANES })
+lanes.install({ texts = TEXTS })
+props.install({ texts = TEXTS })
+gates.install({ texts = TEXTS })
+
+local MODES, PLAY_MODES, effective, max_per_run, mode, next_mode, next_play_mode, num, play_mode, strict_gates, task_desc, task_title, text_of =
+  config.MODES, config.PLAY_MODES, config.effective, config.max_per_run, config.mode, config.next_mode, config.next_play_mode, config.num, config.play_mode, config.strict_gates, config.task_desc, config.task_title, config.text_of
+local gate_evidence_problem, gate_kind, gate_next, gate_problem, gate_rev_ok, gate_total, req_artifacts =
+  gates.gate_evidence_problem, gates.gate_kind, gates.gate_next, gates.gate_problem, gates.gate_rev_ok, gates.gate_total, gates.req_artifacts
+local LANES, free_lanes, lane_text, narrate_lane_ledger =
+  lanes.LANES, lanes.free_lanes, lanes.lane_text, lanes.narrate_lane_ledger
+local P_ACCEPTED, P_PENDING, P_REJECTED, P_STALE, apply_changes, prop_append, prop_by_ext, prop_count, prop_id, prop_key, prop_next, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status, req_do_conflict, req_do_merge, req_do_split =
+  props.P_ACCEPTED, props.P_PENDING, props.P_REJECTED, props.P_STALE, props.apply_changes, props.prop_append, props.prop_by_ext, props.prop_count, props.prop_id, props.prop_key, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status, props.req_do_conflict, props.req_do_merge, props.req_do_split
+local R_ACCEPT, R_ANALYSIS_REVIEW, R_ANALYZING, R_DEVELOPING, R_DEV_REVIEW, R_DONE, R_DRAFT, R_DROPPED, R_MERGED, R_PLANNING, R_PLAN_GATE, R_PLAN_REVIEW, R_READY, R_SPLIT, STAGE, job_capacity, job_total, req_advance_after_accept, req_append, req_bump_rev, req_capacity, req_closed, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_deps_text, req_dev_blocked_text, req_dev_ready, req_display, req_id, req_index_of, req_job, req_job_stage, req_key, req_lane, req_needs_amend, req_open_total, req_push_history, req_release, req_rev, req_stale, req_status, req_sync_conflicts, req_tally, req_title, req_validate_deps, stage =
+  reqs.R_ACCEPT, reqs.R_ANALYSIS_REVIEW, reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DEV_REVIEW, reqs.R_DONE, reqs.R_DRAFT, reqs.R_DROPPED, reqs.R_MERGED, reqs.R_PLANNING, reqs.R_PLAN_GATE, reqs.R_PLAN_REVIEW, reqs.R_READY, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_advance_after_accept, reqs.req_append, reqs.req_bump_rev, reqs.req_capacity, reqs.req_closed, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_deps_text, reqs.req_dev_blocked_text, reqs.req_dev_ready, reqs.req_display, reqs.req_id, reqs.req_index_of, reqs.req_job, reqs.req_job_stage, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_sync_conflicts, reqs.req_tally, reqs.req_title, reqs.req_validate_deps, reqs.stage
+local contains, cut, fill, join, spaces, split, to_bool, trim =
+  util.contains, util.cut, util.fill, util.join, util.spaces, util.split, util.to_bool, util.trim
+
+local TEXTS = ygg.data("ygg:scene/texts")
+
+local CONFIG = ygg.data("ygg:agent/config")
+
+local PLAYBOOK = ygg.data("ygg:agent/playbook")
 
-local function split(text, sep)
-  local out = {}
-  if type(text) ~= "string" or text == "" then
-    return out
-  end
-  local start = 1
-  while true do
-    local index, last = text:find(sep, start, true)
-    if index == nil then
-      out[#out + 1] = text:sub(start)
-      return out
-    end
-    out[#out + 1] = text:sub(start, index - 1)
-    start = last + 1
-  end
-end
-
-local function cut(text, sep)
-  local index, last = text:find(sep, 1, true)
-  if index == nil then
-    return text, nil
-  end
-  return text:sub(1, index - 1), text:sub(last + 1)
-end
-
-local function trim(text)
-  if type(text) ~= "string" then
-    return ""
-  end
-  return (text:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
-local function join(items, sep)
-  local out = ""
-  for i = 1, #items do
-    if i > 1 then
-      out = out .. sep
-    end
-    out = out .. tostring(items[i])
-  end
-  return out
-end
-
-local function contains(list, value)
-  for i = 1, #list do
-    if list[i] == value then
-      return true
-    end
-  end
-  return false
-end
-
-local function to_bool(text)
-  if text == "true" then
-    return true
-  end
-  if text == "false" then
-    return false
-  end
-  return nil
-end
-
--- 沙箱不暴露 string 库静态面：自备填充。
-local function spaces(count)
-  local out = ""
-  for _ = 1, count do
-    out = out .. " "
-  end
-  return out
-end
-
--- ============================================================================
--- §状态 协调器阶段（KV `fsm.stage`）
--- ============================================================================
-local STAGE = {
-  intake = "intake",
-  coordinate = "coordinate",
-  review = "review",
-  done = "done",
-}
-
-local function stage()
-  local value = ygg.kv.get("fsm.stage")
-  if type(value) ~= "string" then
-    return STAGE.intake
-  end
-  return value
-end
-
--- ============================================================================
--- §配置 两层配置：动态覆盖（KV `settings.<path>`）> 静态默认（config.json）
--- ============================================================================
-local function static(path)
-  local node = CONFIG
-  for _, part in ipairs(split(path, ".")) do
-    if type(node) ~= "table" then
-      return nil
-    end
-    node = node[part]
-  end
-  return node
-end
-
-local function effective(path)
-  local override = ygg.kv.get("settings." .. path)
-  if override ~= nil then
-    return override
-  end
-  return static(path)
-end
-
-local MODES = { "off", "suggest", "auto" }
-
-local function mode()
-  local value = effective("evolution.mode")
-  if type(value) == "string" then
-    return value
-  end
-  return "off"
-end
-
-local function next_mode()
-  local current = mode()
-  for i = 1, #MODES do
-    if MODES[i] == current then
-      return MODES[(i % #MODES) + 1]
-    end
-  end
-  return MODES[1]
-end
-
-local PLAY_MODES = { "goal", "guide" }
-local DEFAULT_PLAY_MODE = "guide"
-
-local function play_mode()
-  local value = effective("play.mode")
-  if type(value) == "string" and contains(PLAY_MODES, value) then
-    return value
-  end
-  return DEFAULT_PLAY_MODE
-end
-
-local function next_play_mode()
-  local current = play_mode()
-  for i = 1, #PLAY_MODES do
-    if PLAY_MODES[i] == current then
-      return PLAY_MODES[(i % #PLAY_MODES) + 1]
-    end
-  end
-  return PLAY_MODES[1]
-end
-
-local function strict_gates()
-  return effective("gates.require_all_green") == true
-end
-
-local function max_per_run()
-  local value = effective("evolution.max_per_run")
-  if type(value) == "number" then
-    return value
-  end
-  return 0
-end
-
-local function num(key, fallback)
-  local value = ygg.kv.get(key)
-  if type(value) == "number" then
-    return value
-  end
-  return fallback
-end
-
-local function text_of(key, fallback)
-  local value = ygg.kv.get(key)
-  if type(value) == "string" and value ~= "" then
-    return value
-  end
-  return fallback
-end
-
-local function task_title()
-  return text_of("task.title", TEXTS.beats.default_task_title)
-end
-
-local function task_desc()
-  return text_of("task.description", TEXTS.beats.default_task_desc)
-end
-
--- ============================================================================
--- §需求 需求图（KV `req.*`）——状态、依赖、修订、冲突、拆并追溯
---
--- status ∈ draft / analyzing / analysis_review / planning / plan_review /
---          ready / developing / dev_review / done / split / merged / dropped
--- 另有：conflict（未解决冲突说明 → 展示为 blocked）、needs_amend（待修订）、
---       stale（提案 rev 过期提示）、job（在跑的 job 阶段）、lane（开发泳道）。
--- ============================================================================
-local R_DRAFT = "draft"
-local R_ANALYZING = "analyzing"
-local R_ANALYSIS_REVIEW = "analysis_review"
-local R_PLANNING = "planning"
-local R_PLAN_REVIEW = "plan_review"
-local R_PLAN_GATE = "plan_gate"
-local R_READY = "ready"
-local R_DEVELOPING = "developing"
-local R_DEV_REVIEW = "dev_review"
-local R_ACCEPT = "accept"
-local R_DONE = "done"
-local R_SPLIT = "split"
-local R_MERGED = "merged"
-local R_DROPPED = "dropped"
-
--- 终态：不再需要调度，也不再阻塞收口（done 或已转化 / 已弃）。
-local R_TERMINAL = {
-  [R_DONE] = true,
-  [R_SPLIT] = true,
-  [R_MERGED] = true,
-  [R_DROPPED] = true,
-}
-
-local function req_count()
-  return num("req.count", 0)
-end
-
-local function req_key(index, name)
-  return "req." .. tostring(index) .. "." .. name
-end
-
-local function req_id(index)
-  return "r" .. tostring(index)
-end
-
-local function req_status(index)
-  local value = ygg.kv.get(req_key(index, "status"))
-  if type(value) == "string" then
-    return value
-  end
-  return ""
-end
-
-local function req_title(index)
-  return text_of(req_key(index, "title"), TEXTS.beats.default_req_title)
-end
-
-local function req_rev(index)
-  return num(req_key(index, "rev"), 1)
-end
-
-local function req_deps(index)
-  local out = {}
-  for _, part in ipairs(split(text_of(req_key(index, "deps"), ""), ",")) do
-    local piece = trim(part)
-    if piece ~= "" then
-      out[#out + 1] = piece
-    end
-  end
-  return out
-end
-
-local function req_deps_text(index)
-  local deps = req_deps(index)
-  if #deps == 0 then
-    return TEXTS.beats.req_deps_none
-  end
-  return fill(TEXTS.beats.req_deps_have, { ids = join(deps, ",") })
-end
-
-local function req_index_of(id)
-  if type(id) ~= "string" then
-    return nil
-  end
-  local raw = trim(id)
-  if raw:sub(1, 1) ~= "r" then
-    return nil
-  end
-  local number = tonumber(raw:sub(2))
-  if number == nil then
-    return nil
-  end
-  number = math.floor(number)
-  if number < 1 or number > req_count() or req_status(number) == "" then
-    return nil
-  end
-  return number
-end
-
-local function req_conflict(index)
-  return text_of(req_key(index, "conflict"), "")
-end
-
-local function req_conflict_peer(index)
-  return text_of(req_key(index, "conflict_peer"), "")
-end
-
-local function req_needs_amend(index)
-  return ygg.kv.get(req_key(index, "needs_amend")) == true
-end
-
-local function req_stale(index)
-  return ygg.kv.get(req_key(index, "stale")) == true
-end
-
-local function req_successors(index)
-  local status = req_status(index)
-  local raw = ""
-  if status == R_SPLIT then
-    raw = text_of(req_key(index, "children"), "")
-  elseif status == R_MERGED then
-    raw = text_of(req_key(index, "into"), "")
-  end
-  local out = {}
-  for _, part in ipairs(split(raw, ",")) do
-    local piece = trim(part)
-    if piece ~= "" then
-      out[#out + 1] = piece
-    end
-  end
-  return out
-end
-
--- 依赖（以及收口判定）用的「已满足」递归：done / dropped 满足；split / merged
--- 看其后继是否全部满足；其余一律不满足。visiting 走路径防环（写路径已拦环）。
-local req_satisfied
-
-req_satisfied = function(index, visiting)
-  visiting = visiting or {}
-  if visiting[index] then
-    return false
-  end
-  local status = req_status(index)
-  if status == R_DONE or status == R_DROPPED then
-    return true
-  end
-  if status == R_SPLIT or status == R_MERGED then
-    local successors = req_successors(index)
-    if #successors == 0 then
-      return false
-    end
-    visiting[index] = true
-    local ok = true
-    for _, id in ipairs(successors) do
-      local child = req_index_of(id)
-      if child == nil or not req_satisfied(child, visiting) then
-        ok = false
-        break
-      end
-    end
-    visiting[index] = nil
-    return ok
-  end
-  return false
-end
-
-local function req_deps_ok(index)
-  for _, id in ipairs(req_deps(index)) do
-    local dep = req_index_of(id)
-    if dep == nil or not req_satisfied(dep, nil) then
-      return false
-    end
-  end
-  return true
-end
-
-local function req_unmet_deps(index)
-  local out = {}
-  for _, id in ipairs(req_deps(index)) do
-    local dep = req_index_of(id)
-    if dep == nil or not req_satisfied(dep, nil) then
-      out[#out + 1] = id
-    end
-  end
-  return join(out, ",")
-end
-
--- 开发候选未就绪的原因（派活被拒时给人看）。
-local function req_dev_blocked_text()
-  local parts = {}
-  for i = 1, req_count() do
-    if req_status(i) == R_READY and not req_dev_ready(i) then
-      if req_conflict(i) ~= "" then
-        parts[#parts + 1] = fill(TEXTS.beats.req_why_conflict, { id = req_id(i) })
-      elseif req_needs_amend(i) then
-        parts[#parts + 1] = fill(TEXTS.beats.req_why_amend, { id = req_id(i) })
-      else
-        parts[#parts + 1] = fill(TEXTS.beats.req_why_deps, { id = req_id(i), ids = req_unmet_deps(i) })
-      end
-      if #parts >= 3 then
-        break
-      end
-    end
-  end
-  if #parts == 0 then
-    return TEXTS.beats.req_why_none
-  end
-  return join(parts, TEXTS.beats.req_why_sep)
-end
-
--- 可进「开发」的前提：ready + 依赖已满足 + 无冲突 + 不需要修订。
-local function req_dev_ready(index)
-  return req_status(index) == R_READY
-    and req_conflict(index) == ""
-    and not req_needs_amend(index)
-    and req_deps_ok(index)
-end
-
--- 展示态：blocked = 有未解决冲突或待修订（需人工）；stale 单独提示。
-local function req_display(index)
-  local status = req_status(index)
-  if status == "" then
-    return "?"
-  end
-  if req_conflict(index) ~= "" or req_needs_amend(index) then
-    if status ~= R_DONE and status ~= R_SPLIT and status ~= R_MERGED and status ~= R_DROPPED then
-      return "blocked"
-    end
-  end
-  return status
-end
-
-local function req_closed(index)
-  return R_TERMINAL[req_status(index)] == true
-end
-
-local function req_tally(status)
-  local total = 0
-  for i = 1, req_count() do
-    if req_status(i) == status then
-      total = total + 1
-    end
-  end
-  return total
-end
-
-local function req_conflict_total()
-  local total = 0
-  for i = 1, req_count() do
-    if (req_conflict(i) ~= "" or req_needs_amend(i)) and not req_closed(i) then
-      total = total + 1
-    end
-  end
-  return total
-end
-
--- 冲突计数镜像落盘（宿主 goal 的暂停判据；不解析 KV 键、不推断）。
-local function req_sync_conflicts()
-  local total = req_conflict_total()
-  ygg.kv.set("req.conflicts", total)
-  return total
-end
-
--- 未收口需求（non-terminal）数量。
-local function req_open_total()
-  local total = 0
-  for i = 1, req_count() do
-    if not req_closed(i) then
-      total = total + 1
-    end
-  end
-  return total
-end
-
--- 全部需求都已滿足（-done / dropped / 拆并后继全 done）。
-local function req_all_done()
-  for i = 1, req_count() do
-    if not req_satisfied(i, nil) then
-      return false
-    end
-  end
-  return true
-end
-
--- 派活候选：状态 → 该跑的 job 阶段（nil = 现在不派）。
-local function req_job_stage(index)
-  local status = req_status(index)
-  if status == R_DRAFT then
-    return "analysis"
-  elseif status == R_PLANNING then
-    return "plan"
-  elseif status == R_READY then
-    return "development"
-  end
-  return nil
-end
-
-local function req_job(index)
-  return text_of(req_key(index, "job"), "")
-end
-
-local function req_lane(index)
-  return num(req_key(index, "lane"), 0)
-end
-
--- 在跑 job 数量（全局并行上限的判据）。
-local function job_total()
-  local total = 0
-  for i = 1, req_count() do
-    if req_job(i) ~= "" then
-      total = total + 1
-    end
-  end
-  return total
-end
-
-local function job_capacity()
-  local value = TEXTS.tuning.job_capacity
-  if type(value) == "number" and value > 0 then
-    return value
-  end
-  return 4
-end
-
--- 需求总数上限（防需求图无限膨胀）
-local function req_capacity()
-  local value = TEXTS.tuning.req_capacity
-  if type(value) == "number" and value > 0 then
-    return value
-  end
-  return 32
-end
-
--- ============================================================================
--- §泳道 泳道账本（`lane.<k>.{req,branch,base,since,clean}`）
---
--- 与多仓参照实现（`lane.<repo>.<k>.*`）的差异：本 Mod 单仓、无 `repo` 层，泳道号就是
--- 全局 job 槽位号（1..`tuning.job_capacity`），账本与旧编号**同一批键**——不新开命名空间，
--- 旧存档的 `lane.<k>.req`（数字 index）照样读得懂（见 LANES.req_of），因此**不需要一次性迁移**。
---
--- 物理 worktree 由主 Agent 操作（建 / 删 / `git status` 检查都是它的事），mod 只记事实：
--- 谁占了哪条泳道、分支、base、挂牌序号，以及 clean 断言的结论（**mod 不能跑 git**）。
--- `since` 记的是单调挂牌序号（沙箱没有墙钟）；真正的墙钟时间由主 Agent 写在 worktree 根的
--- `.lane`。`branch` / `base` / `clean` 由 `lane.claim` 填；`requirement.dispatch` 自动挂牌时
--- 三者留空 = **未断言**（不是「干净」，也不是「没有分支」）。
--- ============================================================================
-local LANES = {}
-
-function LANES.key(k, name)
-  return "lane." .. tostring(k) .. "." .. name
-end
-
--- 读账本占用者（需求 id 字符串；"" = 空闲）。容忍旧式数字写法（旧存档写的是 index）。
-function LANES.req_of(k)
-  local value = ygg.kv.get(LANES.key(k, "req"))
-  if type(value) == "string" then
-    return trim(value)
-  end
-  if type(value) == "number" and value > 0 then
-    return req_id(math.floor(value))
-  end
-  return ""
-end
-
--- 挂牌序号（单调递增）：沙箱没有墙钟，`since` 只表达「第几次挂牌」，不表达时间点。
-function LANES.tick()
-  local next_tick = num("lane.seq", 0) + 1
-  ygg.kv.set("lane.seq", next_tick)
-  return next_tick
-end
-
--- 摘牌：五键一起清（漏清一个就会留下幽灵 branch/base）。
-function LANES.clear(k)
-  ygg.kv.set(LANES.key(k, "req"), "")
-  ygg.kv.set(LANES.key(k, "branch"), "")
-  ygg.kv.set(LANES.key(k, "base"), "")
-  ygg.kv.set(LANES.key(k, "since"), 0)
-  ygg.kv.set(LANES.key(k, "clean"), "")
-end
-
--- 挂牌（同一次事务写五键 + 需求的泳道号）。branch/base/clean 缺省 = 未断言。
-function LANES.bind(k, index, branch, base, clean)
-  ygg.kv.set(LANES.key(k, "req"), req_id(index))
-  ygg.kv.set(LANES.key(k, "branch"), branch or "")
-  ygg.kv.set(LANES.key(k, "base"), base or "")
-  ygg.kv.set(LANES.key(k, "since"), LANES.tick())
-  ygg.kv.set(LANES.key(k, "clean"), clean or "")
-  ygg.kv.set(req_key(index, "lane"), k)
-end
-
--- 该需求的预挂牌泳道（0 = 没有）：dispatch 复用它，不覆盖已记的 branch/base/clean。
-function LANES.bound(index)
-  local k = req_lane(index)
-  if k > 0 and LANES.req_of(k) == req_id(index) then
-    return k
-  end
-  return 0
-end
-
--- 摘掉该需求持有的泳道（幽灵防护：只在账本确实记着它时才清，不误伤别人）。
-function LANES.release(index)
-  local k = req_lane(index)
-  if k > 0 and LANES.req_of(k) == req_id(index) then
-    LANES.clear(k)
-  end
-  ygg.kv.set(req_key(index, "lane"), 0)
-end
-
--- 第一条空闲泳道号；0 = 全占。
-function LANES.free()
-  for k = 1, job_capacity() do
-    if LANES.req_of(k) == "" then
-      return k
-    end
-  end
-  return 0
-end
-
--- 展示用：空字段读成「—」（mod 不知道的部分不假装知道）。
-function LANES.text_or(value, fallback)
-  local text = trim(value)
-  if text == "" then
-    return fallback
-  end
-  return text
-end
-
--- 展示用阶段：在跑 job 优先，否则用需求状态（空括号会让人误读成「没状态」）。
-function LANES.stage_of(index)
-  if index == nil then
-    return "?"
-  end
-  local job = req_job(index)
-  if job ~= "" then
-    return job
-  end
-  return req_status(index)
-end
-
-local function free_lanes()
-  local out = {}
-  for number = 1, job_capacity() do
-    if LANES.req_of(number) == "" then
-      out[#out + 1] = number
-    end
-  end
-  return out
-end
-
-local function lane_text()
-  local parts = {}
-  for number = 1, job_capacity() do
-    local label = "lane-" .. tostring(number)
-    local holder = LANES.req_of(number)
-    if holder == "" then
-      parts[#parts + 1] = fill(TEXTS.beats.req_lane_free, { lane = label })
-    else
-      parts[#parts + 1] = fill(TEXTS.beats.req_lane_used, {
-        lane = label,
-        id = holder,
-        stage = LANES.stage_of(req_index_of(holder)),
-      })
-    end
-  end
-  return join(parts, TEXTS.beats.req_lane_sep)
-end
-
--- 账本明细（map.show 专用：紧凑的 lane_text 塞不下 branch/base/since/clean）。
-local function narrate_lane_ledger()
-  local total = job_capacity()
-  local used = 0
-  local free = {}
-  local rows = {}
-  for number = 1, total do
-    local holder = LANES.req_of(number)
-    if holder == "" then
-      free[#free + 1] = "lane-" .. tostring(number)
-    else
-      used = used + 1
-      local none = TEXTS.beats.lane_field_none
-      rows[#rows + 1] = fill(TEXTS.beats.lane_ledger_used, {
-        k = tostring(number),
-        id = holder,
-        stage = LANES.stage_of(req_index_of(holder)),
-        branch = LANES.text_or(text_of(LANES.key(number, "branch"), ""), none),
-        base = LANES.text_or(text_of(LANES.key(number, "base"), ""), none),
-        since = tostring(num(LANES.key(number, "since"), 0)),
-        clean = LANES.text_or(text_of(LANES.key(number, "clean"), ""), none),
-      })
-    end
-  end
-  ygg.narrate(fill(TEXTS.beats.lane_ledger_head, {
-    used = tostring(used),
-    total = tostring(total),
-  }))
-  for i = 1, #rows do
-    ygg.narrate(rows[i])
-  end
-  if #free == 0 then
-    ygg.narrate(fill(TEXTS.beats.lane_ledger_all_free, { total = tostring(total) }))
-  else
-    ygg.narrate(fill(TEXTS.beats.lane_ledger_none, { lanes = join(free, "、") }))
-  end
-end
-
--- 入队 / 派生 / 拆并共用的唯一写入点。
-local function req_append(title, description, ext, deps, origin)
-  local index = req_count() + 1
-  ygg.kv.set("req.count", index)
-  ygg.kv.set(req_key(index, "title"), title)
-  ygg.kv.set(req_key(index, "description"), description)
-  ygg.kv.set(req_key(index, "status"), R_DRAFT)
-  ygg.kv.set(req_key(index, "ext"), ext or "")
-  ygg.kv.set(req_key(index, "deps"), join(deps or {}, ","))
-  ygg.kv.set(req_key(index, "rev"), 1)
-  ygg.kv.set(req_key(index, "hist"), "")
-  ygg.kv.set(req_key(index, "conflict"), "")
-  ygg.kv.set(req_key(index, "conflict_peer"), "")
-  ygg.kv.set(req_key(index, "needs_amend"), false)
-  ygg.kv.set(req_key(index, "stale"), false)
-  ygg.kv.set(req_key(index, "job"), "")
-  ygg.kv.set(req_key(index, "lane"), 0)
-  ygg.kv.set(req_key(index, "artifacts"), "")
-  ygg.kv.set(req_key(index, "summary"), "")
-  ygg.kv.set(req_key(index, "children"), "")
-  ygg.kv.set(req_key(index, "into"), "")
-  ygg.kv.set(req_key(index, "origin"), origin or "")
-  ygg.kv.set(req_key(index, "proposal"), 0)
-  ygg.kv.set("req.last", req_id(index))
-  return index
-end
-
-local function req_push_history(index, note)
-  local entries = {}
-  for _, part in ipairs(split(text_of(req_key(index, "hist"), ""), ";")) do
-    local piece = trim(part)
-    if piece ~= "" then
-      entries[#entries + 1] = piece
-    end
-  end
-  entries[#entries + 1] = note
-  while #entries > 4 do
-    local kept = {}
-    for i = 2, #entries do
-      kept[#kept + 1] = entries[i]
-    end
-    entries = kept
-  end
-  ygg.kv.set(req_key(index, "hist"), join(entries, ";"))
-end
-
-local function req_bump_rev(index)
-  local rev = req_rev(index) + 1
-  ygg.kv.set(req_key(index, "rev"), rev)
-  ygg.kv.set(req_key(index, "stale"), false)
-  return rev
-end
-
--- 依赖防环：沿 from 的依赖链能否回到 target。
-local function req_reaches(from, target, visiting)
-  if from == target then
-    return true
-  end
-  visiting = visiting or {}
-  if visiting[from] then
-    return false
-  end
-  visiting[from] = true
-  for _, id in ipairs(req_deps(from)) do
-    local dep = req_index_of(id)
-    if dep ~= nil and req_reaches(dep, target, visiting) then
-      return true
-    end
-  end
-  return false
-end
-
-local function req_validate_deps(index, ids)
-  local seen = {}
-  for _, id in ipairs(ids) do
-    local dep = req_index_of(id)
-    if dep == nil then
-      return fill(TEXTS.beats.req_bad_dep, { id = tostring(id) })
-    end
-    if dep == index then
-      return fill(TEXTS.beats.req_self_dep, { id = req_id(index) })
-    end
-    if seen[dep] then
-      return fill(TEXTS.beats.req_dup_dep, { id = req_id(dep) })
-    end
-    seen[dep] = true
-    if req_reaches(dep, index, nil) then
-      return fill(TEXTS.beats.req_cycle_dep, { id = req_id(index), dep = req_id(dep) })
-    end
-  end
-  return nil
-end
-
--- ============================================================================
--- §提案 subagent 只提议、不改共享状态：提案落 KV `prop.*`，主 Agent 串行验收。
--- 状态：pending / accepted / rejected / stale（rev 不匹配 → stale）。
--- ============================================================================
-local P_PENDING = "pending"
-local P_ACCEPTED = "accepted"
-local P_REJECTED = "rejected"
-local P_STALE = "stale"
-
-local function prop_count()
-  return num("prop.count", 0)
-end
-
-local function prop_key(index, name)
-  return "prop." .. tostring(index) .. "." .. name
-end
-
-local function prop_id(index)
-  return "p" .. tostring(index)
-end
-
-local function prop_status(index)
-  local value = ygg.kv.get(prop_key(index, "status"))
-  if type(value) == "string" then
-    return value
-  end
-  return ""
-end
-
-local function prop_req(index)
-  return num(prop_key(index, "req"), 0)
-end
-
-local function prop_rev(index)
-  return num(prop_key(index, "rev"), 0)
-end
-
-local function prop_stage(index)
-  return text_of(prop_key(index, "stage"), "")
-end
-
-local function prop_append(req_index, rev, stage_name, summary, artifacts, ext, changes)
-  local index = prop_count() + 1
-  ygg.kv.set("prop.count", index)
-  ygg.kv.set(prop_key(index, "req"), req_index)
-  ygg.kv.set(prop_key(index, "rev"), rev)
-  ygg.kv.set(prop_key(index, "stage"), stage_name)
-  ygg.kv.set(prop_key(index, "summary"), summary)
-  ygg.kv.set(prop_key(index, "artifacts"), artifacts)
-  ygg.kv.set(prop_key(index, "status"), P_PENDING)
-  ygg.kv.set(prop_key(index, "ext"), ext or "")
-  ygg.kv.set(prop_key(index, "changes"), changes or "")
-  return index
-end
-
-local function prop_pending_total()
-  local total = 0
-  for i = 1, prop_count() do
-    if prop_status(i) == P_PENDING then
-      total = total + 1
-    end
-  end
-  return total
-end
-
--- canonical 验收序：requirement_id 升序，同一需求内提案 id 升序。
-local function prop_next()
-  local best = nil
-  for i = 1, prop_count() do
-    if prop_status(i) == P_PENDING then
-      if best == nil then
-        best = i
-      else
-        local a = prop_req(i)
-        local b = prop_req(best)
-        if a < b or (a == b and i < best) then
-          best = i
-        end
-      end
-    end
-  end
-  return best
-end
-
--- 外部幂等键：同一 external_id 的提案不重复入账。
-local function prop_by_ext(ext)
-  if type(ext) ~= "string" or ext == "" then
-    return nil
-  end
-  for i = 1, prop_count() do
-    if ygg.kv.get(prop_key(i, "ext")) == ext then
-      return i
-    end
-  end
-  return nil
-end
-
--- ---- 共享需求图操作（主 Agent 直改与提案验收应用共用同一套规则）----------
-
-local function req_do_split(parent, children)
-  local deps = req_deps(parent)
-  local ids = {}
-  for i = 1, #children do
-    local child = req_append(children[i], fill(TEXTS.beats.req_split_desc, { id = req_id(parent) }), "", deps, req_id(parent))
-    ids[#ids + 1] = req_id(child)
-  end
-  ygg.kv.set(req_key(parent, "status"), R_SPLIT)
-  ygg.kv.set(req_key(parent, "children"), join(ids, ","))
-  req_push_history(parent, fill(TEXTS.beats.req_split_hist, { ids = join(ids, ",") }))
-  return ids
-end
-
-local function req_do_merge(sources, title, description)
-  local seen = {}
-  for i = 1, #sources do
-    seen[sources[i]] = true
-  end
-  local dep_seen = {}
-  local dep_order = {}
-  for i = 1, #sources do
-    for _, dep in ipairs(req_deps(sources[i])) do
-      local dep_index = req_index_of(dep)
-      if dep_index ~= nil then
-        if not seen[dep_index] and not dep_seen[dep_index] then
-          dep_seen[dep_index] = true
-          dep_order[#dep_order + 1] = req_id(dep_index)
-        end
-      elseif not dep_seen[dep] then
-        dep_seen[dep] = true
-        dep_order[#dep_order + 1] = dep
-      end
-    end
-  end
-  local ids = {}
-  for i = 1, #sources do
-    ids[#ids + 1] = req_id(sources[i])
-  end
-  local next_title = title
-  if next_title == "" then
-    next_title = fill(TEXTS.beats.req_merge_title, { ids = join(ids, ",") })
-  end
-  local next_desc = description
-  if next_desc == "" then
-    next_desc = fill(TEXTS.beats.req_merge_desc, { ids = join(ids, ",") })
-  end
-  local target = req_append(next_title, next_desc, "", dep_order, "")
-  for i = 1, #sources do
-    local index = sources[i]
-    ygg.kv.set(req_key(index, "status"), R_MERGED)
-    ygg.kv.set(req_key(index, "into"), req_id(target))
-    ygg.kv.set(req_key(index, "conflict"), "")
-    ygg.kv.set(req_key(index, "conflict_peer"), "")
-    ygg.kv.set(req_key(index, "job"), "")
-    req_push_history(index, fill(TEXTS.beats.req_merge_hist, { id = req_id(target) }))
-  end
-  return target, next_title, dep_order
-end
-
-local function req_do_conflict(first, second, note)
-  ygg.kv.set(req_key(first, "conflict"), note)
-  ygg.kv.set(req_key(first, "conflict_peer"), req_id(second))
-  ygg.kv.set(req_key(second, "conflict"), note)
-  ygg.kv.set(req_key(second, "conflict_peer"), req_id(first))
-  req_push_history(first, TEXTS.beats.req_conflict_hist)
-  req_push_history(second, TEXTS.beats.req_conflict_hist)
-end
-
--- 验收提案时应用的拟议变更（subagent 只能建议，落不落地看验收）。
-local function apply_changes(index, changes)
-  if type(changes) ~= "string" or trim(changes) == "" then
-    return ""
-  end
-  local kind, body = cut(trim(changes), "=")
-  kind = trim(kind)
-  body = trim(body or "")
-  if kind == "split" then
-    local children = {}
-    for _, part in ipairs(split(body, ",")) do
-      local piece = trim(part)
-      if piece ~= "" then
-        children[#children + 1] = piece
-      end
-    end
-    if #children < 2 then
-      return ""
-    end
-    local ids = req_do_split(index, children)
-    return fill(TEXTS.beats.req_split_ok, { id = req_id(index), ids = join(ids, ","), deps = join(req_deps(index), ",") })
-  elseif kind == "merge" then
-    local other = req_index_of(body)
-    if other == nil or other == index then
-      return ""
-    end
-    local sources = { index, other }
-    local target, title = req_do_merge(sources, "", "")
-    return fill(TEXTS.beats.req_merge_ok, {
-      ids = req_id(index) .. "," .. req_id(other),
-      id = req_id(target),
-      title = title,
-    })
-  elseif kind == "amend" then
-    local title, description = cut(body, ":")
-    title = trim(title)
-    description = trim(description or "")
-    if title ~= "" then
-      ygg.kv.set(req_key(index, "title"), title)
-    end
-    if description ~= "" then
-      ygg.kv.set(req_key(index, "description"), description)
-    end
-    return fill(TEXTS.beats.req_amend_ok_short, { id = req_id(index) })
-  elseif kind == "conflict" then
-    local peer_id, note = cut(body, ":")
-    local peer = req_index_of(trim(peer_id or ""))
-    if peer == nil or peer == index then
-      return ""
-    end
-    req_do_conflict(index, peer, trim(note or "") ~= "" and trim(note) or TEXTS.beats.req_conflict_default)
-    return fill(TEXTS.beats.req_conflict_ok_short, { first = req_id(index), second = req_id(peer) })
-  end
-  return ""
-end
-
--- 验收后推进需求自己的状态机（analysis → planning → ready → done）。
-local function req_advance_after_accept(index, stage_name)
-  local next_status
-  if stage_name == "analysis" then
-    next_status = R_PLANNING
-  elseif stage_name == "plan" then
-    -- plan 完成后进**plan_gate**：主 Agent 批了才能 develop（不能自动跳过）。
-    next_status = R_PLAN_GATE
-  elseif stage_name == "development" then
-    -- 执行方交付（accept）≠ 主 Agent 已验收：先落 accept，等 accept_gate。
-    next_status = R_ACCEPT
-  else
-    return nil
-  end
-  ygg.kv.set(req_key(index, "status"), next_status)
-  ygg.kv.set(req_key(index, "job"), "")
-  if next_status == R_ACCEPT then
-    -- 交付后释放泳道（连同 branch/base/since/clean 一起清）；重做时重新分配（不长期占位）。
-    LANES.release(index)
-  end
-  return next_status
-end
-
--- 两个**强制主 Agent 门禁**：plan 批后才 develop，accept（执行方交付）核验后才 done。
--- 门禁是真实状态 + 动作约束（不是提示词）：status ∈ {plan_gate, accept} 时不能派活、
--- 不能跳过，必须由 gate.approve / gate.reject 显式推进（goal 也不能绕过）。
-local GATE_STATES = { [R_PLAN_GATE] = "plan", [R_ACCEPT] = "accept" }
-
-local function gate_kind(index)
-  return GATE_STATES[req_status(index)]
-end
-
--- 待门禁需求（canonical 序：需求 id 升序）；主 Agent 串行处理，不阻塞其他需求。
-local function gate_next()
-  for i = 1, req_count() do
-    if gate_kind(i) ~= nil then
-      return i
-    end
-  end
-  return nil
-end
-
-local function gate_total()
-  local total = 0
-  for i = 1, req_count() do
-    if gate_kind(i) ~= nil then
-      total = total + 1
-    end
-  end
-  return total
-end
-
-local function req_artifacts(index)
-  return text_of(req_key(index, "artifacts"), "")
-end
-
--- accept_gate 的证据硬约束：不接受「只写 summary 的完成自称」，必须有产物路径。
-local function gate_evidence_problem(index, kind)
-  if kind == "accept" and req_artifacts(index) == "" then
-    return fill(TEXTS.beats.req_gate_no_evidence, { id = req_id(index) })
-  end
-  return nil
-end
-
--- 门禁绑定 revision：待批期间需求被 amend → 旧门禁失效（stale），不得批准。
-local function gate_rev_ok(index)
-  return num(req_key(index, "gate_rev"), 0) == req_rev(index)
-end
-
--- 流程面板：job 槽位 + 待验收提案 + 需求流水线分布（只读）。
 local function req_panel_text()
   local parts = {}
   parts[#parts + 1] = fill(TEXTS.beats.req_panel_counts, {
@@ -1174,7 +62,6 @@ local function req_panel_text()
   return join(parts, "｜")
 end
 
--- 展示态标记（list / map 共用）。
 local R_MARK = {
   [R_DRAFT] = "·",
   [R_ANALYZING] = "◐",
@@ -1273,10 +160,6 @@ local function narrate_req_list()
   ygg.narrate(TEXTS.beats.req_list_legend)
 end
 
--- ============================================================================
--- §地图 双层节点图：协调器（4 态）+ 需求流水线（8 态）+ job/泳道台账
--- 单源 = 下面两张节点/边表；不另加资源/Schema。
--- ============================================================================
 local MAP_NODES = { STAGE.intake, STAGE.coordinate, STAGE.review, STAGE.done }
 
 local MAP_EDGES = {
@@ -1326,6 +209,7 @@ local PIPELINE = {
 }
 
 local MAP_LABEL_WIDTH = 0
+
 for i = 1, #MAP_NODES do
   local width = #MAP_NODES[i] + 2
   if width > MAP_LABEL_WIDTH then
@@ -1334,6 +218,7 @@ for i = 1, #MAP_NODES do
 end
 
 local PIPE_LABEL_WIDTH = 0
+
 for i = 1, #PIPELINE do
   local width = #PIPELINE[i].node
   if width > PIPE_LABEL_WIDTH then
@@ -1418,11 +303,10 @@ local function narrate_map(current)
   ygg.narrate(TEXTS.beats.map_foot)
 end
 
--- ============================================================================
--- §指南 现场规则资源（guide.show 按 section id 取用；每阶段只提示一行）
--- ============================================================================
 local SECTIONS = {}
+
 local SECTION_IDS = {}
+
 for i = 1, #PLAYBOOK.sections do
   local entry = PLAYBOOK.sections[i]
   SECTIONS[entry.id] = entry
@@ -1508,12 +392,6 @@ local function map_item(st)
   }
 end
 
--- ============================================================================
--- §二级菜单页 纯展示层：不参与状态机，阶段一变即清空。
--- 顶层菜单只留「config」一个入口，三项设置进子页（收敛入口，不让三条 config.set
--- 平铺占住阶段菜单）。状态落 KV `ui.page` / `ui.page.stage`（纯展示态：不进摘要、
--- 不影响派活，也不改任何业务动作语义）。
--- ============================================================================
 local CONFIG_UI = {}
 
 function CONFIG_UI.page()
@@ -1542,12 +420,10 @@ function CONFIG_UI.set_page(page, st)
   end
 end
 
--- 子页是否正占着「当前阶段」的菜单
 function CONFIG_UI.open(st)
   return CONFIG_UI.page() == "config" and CONFIG_UI.page_stage() == (st or stage())
 end
 
--- 顶层唯一入口
 function CONFIG_UI.item()
   return {
     text = TEXTS.options.config,
@@ -1600,11 +476,6 @@ function CONFIG_UI.page_items()
   }
 end
 
--- ============================================================================
--- §菜单 选项文本 ↔ 动作载荷的单一来源；每阶段第一条 = 主前进动作。
--- 需求动作（split / merge / amend / conflict / resolve）是主 Agent 的显式命令，
--- 不进常驻菜单（避免误触）；冲突时三条解决路径会出现在最前。
--- ============================================================================
 local MENU = {}
 
 local function req_list_item()
@@ -1626,7 +497,6 @@ local function req_add_item()
   }
 end
 
--- 冲突解决三选项（只有真冲突对时出现；goal 会停下来等你选）
 local function resolve_items()
   local first = nil
   local peer = ""
@@ -1670,7 +540,6 @@ local function append_all(items, extra)
   return items
 end
 
--- 派活候选（按需求 id 升序，canonical）。
 local function dispatch_candidates()
   local out = {}
   for i = 1, req_count() do
@@ -1717,7 +586,6 @@ local function accept_item()
   }
 end
 
--- 两个强制门禁的菜单入口（canonical 序；approve 是主前进动作之一）
 local function gate_items()
   local index = gate_next()
   if index == nil then
@@ -1820,12 +688,8 @@ local function option_texts(items)
   return out
 end
 
--- ============================================================================
--- §渲染 回执 = 处境 + 双层进度（协调器阶段 + 需求流水线）+ 指导 + pendingChoice
--- 渲染只读 KV，不写状态（同一步重渲染不漂移）。
--- ============================================================================
 local RENDER = {}
--- 前向声明：RENDER 里要用 prompt_vars（定义在它之后）。
+
 local prompt_vars
 
 local function stage_prompt(st)
@@ -1939,29 +803,8 @@ local function render()
   renderer()
 end
 
--- ============================================================================
--- §摘要 回执标准字段（宿主唯一的语义判定面）
---
--- 只读动作 `agent.summary` 走内核的**结构化回执通道**：`ygg.meta("summary", {...})`
--- 把结构化数据投进回执信封的 `meta` 键，与人读叙事完全分离——不再拼
--- `【摘要】<JSON>` 这类「前缀 + 字符串」契约（Mod 在叙事里写同样前缀不会被误判，
--- 宿主也不再从人读文本里剖数据）。宿主据此判定「何时收口 / 有无冲突 /
--- 有无待验收提案 / 是否有 job 空等」，**不读任何 Mod 私有 KV 键**
--- （ending、fsm.stage、verify.passed、prop.*、req.*）——换 Mod 或改内部键名
--- 不再需要改宿主。
---
--- 字段：stage（展示用）/ ending / verifyPassed / nextEndsRun /
---       pendingProposals / requirementCount / conflicts[{id,peer,note}] /
---       awaiting{req,rev,stage}（无在跑 job 时该键缺失）
---
--- 值面纪律（内核 `ygg.meta` 把关）：标量 / 稠密序列 / 字符串键表，非有限值拒绝。
--- 读的都是本文档已有的只读访问器：不改业务逻辑、不改 KV 键、不改动作语义。
--- 旧宿主不认得该动作 → 只会当一条普通叙事看（本动作不 narrate 摘要行）。
--- ============================================================================
--- 在跑的 job 阶段（与 req_job 写入的三个值同源）。
 local SUMMARY_JOB_STAGES = { analysis = true, plan = true, development = true }
 
--- 计数归一：进 meta 的计数必须是整数（宿主按整型读；字符串/浮点都会读成 0）。
 local function summary_int(value)
   local number = tonumber(value) or 0
   if number < 0 then
@@ -1981,7 +824,6 @@ local function summary_conflicts()
   return out
 end
 
--- 首个在跑 job（无则 nil → meta 里不出现该键，宿主读成「无空等」）。
 local function summary_awaiting()
   for i = 1, req_count() do
     local job = req_job(i)
@@ -1992,7 +834,6 @@ local function summary_awaiting()
   return nil
 end
 
--- 「下一步就是收口动作」= 当前阶段的菜单首项是 review.note（阶段名不进宿主）。
 local function summary_next_ends_run()
   -- 只看阶段菜单（MENU 本体）：二级页打开时 pendingChoice 是子页（首项 config.set），
   -- 不能因此把自己报成「不结局」——收口判定不能被展示层带偏。
@@ -2024,14 +865,11 @@ local function summary_fields()
   return fields
 end
 
--- 只读动作：只投结构化 meta（不 narrate 摘要、不推进状态、不改 KV）+ 原地重渲染
--- （pendingChoice 与上一步一致）。
 ygg.on("agent.summary", function()
   ygg.meta("summary", summary_fields())
   render()
 end)
 
--- 提示词占位符（各阶段共用超集；fill 只替换模板里出现的键）。
 prompt_vars = function()
   return {
     engine = tostring(ygg.engine_version),
@@ -2048,11 +886,6 @@ prompt_vars = function()
   }
 end
 
--- 提示词占位符的赋值已完成（前向声明见 §渲染 上方）。
-
--- ============================================================================
--- §推进 转场 + 渲染的唯二出口；拒绝路径 = narrate + 原地重渲染。
--- ============================================================================
 local function advance(target)
   -- 转场即离开二级页（子页跟着阶段走，不跨阶段）。
   CONFIG_UI.set_page("")
@@ -2100,20 +933,6 @@ local function reject_payload(action, detail)
   return refuse(TEXTS.beats.rejected_payload, action, detail)
 end
 
--- ============================================================================
--- §人类动作门禁：guide 模式下「会产生通过效果」的动作只认菜单选择，单发直派一律拒绝
---
--- 引擎不区分「谁派发的」（`--event 动作` 与 TTY 按键走同一套通道），所以本层把这件事
--- 从隐式变成显式：guide 下这些动作必须经 ygg.choice_selected 路由进入；goal 也走
--- choice_selected，但是否派发由外部决策命令决定，不会默认批准。
---
--- 人类动作 = 会产生「通过」效果的动作（自批风险）。打回类（gate.reject /
--- proposal.reject）故意不在内：打回不产生任何通过效果，自打回只会让自己返工，
--- 不构成伪造验收；而它是唯一的纠错通道，堵死它等于堵死返工路径（菜单本就没有带
--- 理由的 reject 项）。与多仓参照实现的差异：那边的 integration.* / release.* /
--- lane.bootstrap 在本 Mod 没有对应动作，集合只留五条；`config.set play.mode`
--- 单独门禁（切模式改变「谁在派发」，是自批链条的第一环）。
--- ============================================================================
 local HUMAN = {}
 
 HUMAN.ACTIONS = {
@@ -2124,9 +943,6 @@ HUMAN.ACTIONS = {
   ["review.note"] = true,
 }
 
--- 一次性票据：`ygg.emit` 是**入队**而非同步派发，派生事件到达时菜单 handler 早已返回，
--- 所以不能用调用栈深度表达「这一步来自菜单」。菜单路由在 emit 前盖章，
--- 对应 handler 取证即消费；非人类动作不盖章，票据不会泄到下一个直派。
 HUMAN.ticket = nil
 
 function HUMAN.needs(label)
@@ -2147,8 +963,6 @@ function HUMAN.gated(action)
   return HUMAN.needs(action)
 end
 
--- 菜单项的 action 与「人类动作」的标签不一定同名（`config.set play.mode=…`），
--- 盖章与取证必须用同一套标签，否则人从菜单选了也会被拒。
 function HUMAN.label(action, payload)
   if HUMAN.ACTIONS[action] == true then
     return action
@@ -2162,9 +976,6 @@ function HUMAN.label(action, payload)
   return nil
 end
 
--- ============================================================================
--- §动作解析 wire format：内核 payload 只有四标量，复合载荷压成单字符串。
--- ============================================================================
 local function probe_payload_ok(payload)
   if payload == nil then
     return true
@@ -2228,7 +1039,6 @@ local function parse_deps(raw)
   return out
 end
 
--- requirement.add：title|description[|external_id[|depends_on]]
 local function parse_requirement(payload)
   if type(payload) ~= "string" then
     return nil, nil, nil, nil, fill(TEXTS.beats.bad_payload, { action = "requirement.add" })
@@ -2259,7 +1069,6 @@ local function parse_requirement(payload)
   return title, description, ext, parse_deps(dep_raw), nil
 end
 
--- 载荷末尾可选 `|@ext=<external_id>`：CLI inbox 注入的幂等键（手写单发可省略）。
 local function strip_ext(payload)
   if type(payload) ~= "string" then
     return payload, ""
@@ -2272,8 +1081,6 @@ local function strip_ext(payload)
   return payload:sub(1, index - 1), trim(payload:sub(index + #marker))
 end
 
--- 异步重放：同一个 external_id 已经成功落地 → 幂等返回（不重复 amend / split / …）。
--- cursor 崩溃安全的最后一道兵底：重启后重放同一行不会把状态推两次。
 local function inbox_replay(ext)
   if type(ext) ~= "string" or ext == "" then
     return false
@@ -2291,7 +1098,6 @@ local function inbox_mark(ext)
   end
 end
 
--- proposal.submit：req_id|revision|stage|summary|artifacts[|changes[|external_id]]
 local function parse_proposal(payload)
   if type(payload) ~= "string" then
     return nil, fill(TEXTS.beats.bad_payload, { action = "proposal.submit" })
@@ -2409,26 +1215,6 @@ local function parse_resolve(payload)
   return ids, mode, trim(parts[3] or ""), nil
 end
 
--- ============================================================================
--- §门禁 收口判据（所有验收/收口动作共用同一套）
--- ============================================================================
-local function gate_problem()
-  if prop_pending_total() > 0 then
-    return fill(TEXTS.beats.req_gate_props, { pending = tostring(prop_pending_total()) })
-  end
-  if job_total() > 0 then
-    return fill(TEXTS.beats.req_gate_jobs, { jobs = tostring(job_total()), cap = tostring(job_capacity()) })
-  end
-  if req_conflict_total() > 0 then
-    return fill(TEXTS.beats.req_gate_conflicts, { conflicts = tostring(req_conflict_total()) })
-  end
-  if not req_all_done() then
-    return fill(TEXTS.beats.req_gate_open, { open = tostring(req_open_total()) })
-  end
-  return nil
-end
-
--- review 阶段的菜单（verify.passed 后主前进动作换成 review.note）
 MENU[STAGE.review] = function()
   local items = append_all({}, resolve_items())
   if ygg.kv.get("verify.passed") == true then
@@ -2451,16 +1237,6 @@ MENU[STAGE.review] = function()
   items[#items + 1] = req_add_item()
   items[#items + 1] = CONFIG_UI.item()
   return items
-end
-
--- ============================================================================
--- §动作 handler
--- ============================================================================
-
--- 释放 job / 泳道（验收、拒绝、拆并都用这一处，避免漏释放）。
-local function req_release(index)
-  ygg.kv.set(req_key(index, "job"), "")
-  LANES.release(index)
 end
 
 ygg.on("task.intake", function(payload)
@@ -2616,20 +1392,6 @@ ygg.on("requirement.dispatch", function(payload)
   render()
 end)
 
--- ============================================================================
--- §泳道动作 泳道账本的人工入口
---
--- 两个都不进 HUMAN.ACTIONS：不产生「通过」效果（只记账本），也没有自批风险。
--- 常规路径不用调它们：挂牌由 requirement.dispatch 同事务完成（branch/base/clean
--- 留空 = 未断言），摘牌走 req_release / 交付晋升。它们的用途是「主 Agent 已建好
--- worktree 并验过脏树」时把 branch / base / clean 记进账本，让 map.show 的账本
--- 对得上物理事实。
---
--- **mod 不能跑 git**：`clean` 只能是主 Agent 的判断结果——它在 lane.claim 前
--- 已跑过 `git status --porcelain`（除 `.lane` 外必须为空）并把结论写成 "1"。
--- ============================================================================
-
--- 解析（挂在 LANES 上而不新增顶层 local：本 chunk 的 local 名额已接近 Lua 上限）
 function LANES.parse_claim(payload)
   local max = job_capacity()
   if type(payload) ~= "string" then
@@ -2671,8 +1433,6 @@ function LANES.parse_ref(payload)
   return k, nil
 end
 
--- lane.claim：泳道号|需求id|分支|base|clean
--- 预挂牌（需求还没进开发）与补记（已开发中，补充 branch/base）都走这一个入口。
 ygg.on("lane.claim", function(payload)
   if stage() == STAGE.done then
     return reject("lane.claim", TEXTS.beats.req_after_done)
@@ -2723,7 +1483,6 @@ ygg.on("lane.claim", function(payload)
   render()
 end)
 
--- lane.release：泳道号
 ygg.on("lane.release", function(payload)
   if stage() == STAGE.done then
     return reject("lane.release", TEXTS.beats.req_after_done)
@@ -2746,7 +1505,6 @@ ygg.on("lane.release", function(payload)
   render()
 end)
 
--- 提案提交（subagent 的唯一入口；不直接改需求图）
 ygg.on("proposal.submit", function(payload)
   if stage() == STAGE.done then
     return reject("proposal.submit", TEXTS.beats.req_after_done)
@@ -2822,7 +1580,6 @@ ygg.on("proposal.submit", function(payload)
   render()
 end)
 
--- 提案验收（主 Agent 串行；一次只处理一条需求）
 local function pick_prop(target, allow_pending_only)
   local raw = trim(target or "")
   if raw == "" then
@@ -3052,8 +1809,6 @@ ygg.on("review.note", function(payload)
   ygg.narrate(fill(TEXTS.beats.review_ok, { score = tostring(score), lesson = lesson }))
   advance(STAGE.done)
 end)
-
--- ---- 主 Agent 的需求图命令（串行；subagent 只能用 proposal 建议）--------
 
 ygg.on("requirement.split", function(payload)
   local ext
@@ -3355,8 +2110,6 @@ ygg.on("requirement.resolve", function(payload)
   render()
 end)
 
--- 门禁动作（两个强制主 Agent 节点：plan_gate / accept_gate）。
--- 空载荷 = canonical 序取下一条待批需求；也可显式 `rN[|说明]`。
 local function pick_gate(target)
   local raw = trim(target or "")
   if raw == "" then
@@ -3496,9 +2249,6 @@ ygg.on("config.set", function(payload)
   render()
 end)
 
--- ---- 二级菜单页的两个入口（纯展示层：只改 ui.page / ui.page.stage）----
--- 子页不占顶层首项：只有人主动选 config.open 才进，进了也只换菜单不换阶段。
-
 ygg.on("config.open", function(payload)
   if not probe_payload_ok(payload) then
     return reject_payload("config.open", fill(TEXTS.beats.probe_rejected, {
@@ -3544,7 +2294,6 @@ ygg.on("map.show", function(payload)
   render()
 end)
 
--- 选择路由：序号 → MENU 对应项 → 同名动作事件（与直派事件同一套守卫）。
 ygg.on("ygg.choice_selected", function(index)
   local current = stage()
   local items = menu(current)
@@ -3590,9 +2339,6 @@ ygg.narrative.node("node:render", function()
   render()
 end)
 
--- ============================================================================
--- §状态机 单机单事件：协调器四态；非法目标 = 静默 no-op（真正的门在 handler）。
--- ============================================================================
 ygg.fsm.define({
   name = "stage",
   initial = STAGE.intake,
@@ -3628,3 +2374,4 @@ ygg.fsm.define({
     },
   },
 })
+
