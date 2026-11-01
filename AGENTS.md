@@ -15,6 +15,10 @@
    落在 `/tmp`、落在对话里都算局内产出；“事小”“顺手”“用户没说要走流程”都不构成例外。
 2. **主 Agent 在协调层只做三件事**：派活、串行验收提案、过两个强制门禁；不替泳道写实现。
    需求建单后第一个动作是 `requirement.dispatch`，不是自己先干。
+   - **派发后登记执行者**（自声明账本，不是身份认证）：拿到 subagent id 后
+     `config.set executor.<rN>.<stage>=<id>`（stage ∈ analysis / plan / development）。同一 (req,stage) 换人、
+     或与前一阶段 id 不同的**跨阶段换人**，都必须带原因（`=<id>|<原因>`）；`amend` 不改绑定，`split` / `merge`
+     不继承；`proposal.submit` 不做硬校验——未登记只在 `requirement.list` 显示「未登记」。
 3. **回执整段呈现，禁止解析式截断**：不得 `narrative[0][:N]`、不得只取首行、不得按 `startswith` 做行级过滤、
    不得把回执塞进 `grep` / `python` 后只看摘要。每次派发把 narrative **全部行**打到对话里，
    并把 `pendingChoice` 原文交给用户。要规则就 `guide.show <section_id>` 取整章，不靠记忆。
@@ -37,6 +41,13 @@
      （拒绝文案 / 状态不变 / 载荷被拒）？③ 下次用什么**确认它生效**（一条可跑的命令或一次探针）？
      三问答不全 = 没写完，不得声称已进化完毕。
    - **口头承诺不算进化**：不得用“我会注意 / 下次读全”作结论；没有落在上面两个落点的，一律视为未处理。
+   - **先筛后写**：局末建议进 backlog 前先按 Mod 的 `evolution` 章筛——长期优先（换任务 / 换仓库还会遇到吗）；
+     已有未用必须查根因（调用链 / 可发现性 / 契约适配 / 主动不用 / 确无场景 / 冗余退役，六选一）；
+     逐项独立复核（artifact 必含`文件:行号` + 可跑命令与实际输出 + 语义依据 + 根因分类与结论）；
+     场景先于技术（实际场景 → 流程哪一步不满足 → 代码与复现 → 根因 → 长期收益 → 改造面与验证）。
+     单次任务约束、临时工具与探针口径、已在当次解决的问题默认不进。
+   - **声明 ≠ 证明**：`review.note` 的 `ev=` / `c=` / `cls=` 只是声明登记（Mod 只校路径形状、
+     计数与分类自洽）；沙箱读不到 artifact，也不认识 subagent 会话——不得据此声称已证明建议质量或复核独立性。
 
 ### 8. goal / guide：决策权在谁手里
 
@@ -50,6 +61,10 @@
 - **切模式是决策权移交**：用户当次授权后，主 Agent 可自行执行
   `--event config.set --payload '"play.mode=goal"'`；Mod 会播 `handover_goal`（代办范围 + 证据标准不变 +
   收局复盘要交代）/ `handover_guide`（决策权回到人）。菜单只提供「切到另一模式」的边。
+- **goal 授权是 run 级记录**：`config.set goal.authorization=<单行说明>`（trim ≤200、无换行；空值 = 显式清除）。
+  只有**运行期进入 goal** 的局（`settings.play.mode=goal`）在 `review.note` 收口前校验：缺记录则旁白阻断、
+  不写 `ending`、不推进；静态 `data/config.json` 预设 goal 视为仓库所有者常设配置，**不在校验范围**；
+  切回 guide 不校验，resume 保留。该记录只证明「登记过一句话」，不证明用户说过——不得据此声称身份认证。
 - `--drive stdin|cmd:<路径>|none` 是**宿主**的驱动通道（人工选择 / 外部命令 / 只看不推进），与 `play.mode` 正交；
   goal 不依赖它，删掉外部决策命令不影响 goal 可用。
 
@@ -65,7 +80,10 @@
   0 个在跑 job ∧ 0 个未解决冲突 ∧ 全部需求处于终态（`done`，或已 split / merged / dropped 且后继全都 done）。
 - `coordinate.submit` 只在 `coordinate` 阶段可用，成功即进 `review` 并把 `verify.passed` 置 false；
   `verify.submit` 在 `review` 记录全绿（`all_green=false` 在 `gates.require_all_green=true` 时打回 `coordinate`）；
-  `review.note` 写 `review.lesson` / `review.score` / `ending` 后进 `done`（【结局）。
+  `review.note` 写 `review.lesson` / `review.score` / `review.evolution.*`（`ev=` / `c=` / `cls=` 可选段，
+  缺省即显式 0/0）/ `ending` 后进 `done`（【结局）。**`c` 的 `screened > 0` 时 `ev` 与 `cls` 必填**（收口前拒），
+  0/0 可只带 `ev`（复核后无候选）。**运行期 goal 局**还要求 `settings.goal.authorization` 非空（缺则旁白阻断，
+  静态默认 goal 不校验，见 §8）。
 - 宿主靠 `agent.summary` 的 `nextEndsRun` 判定「下一步会收口」：仅当 review 阶段菜单首项是 `review.note` 时为真，
   此时先切 `closing`（阻止新写入 + 最后一次 drain 排在收口之前）再派发。
 
@@ -92,6 +110,7 @@ mkdir -p .ygg/bin && cp "$YGGDRASILL_ROOT/target/release/examples/agent" .ygg/bi
 ```bash
 A=".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <局名> --runs-root .ygg/runs"
 $A --resume --drive stdin                                     # 交互：人来选（缺省）
+$A --resume --event config.set --payload '"goal.authorization=用户当次授权：使用 goal 模式推进"'   # 先登记本局授权（run 级，可随时切回 guide）
 $A --resume --event config.set --payload '"play.mode=goal"'   # 自行接管决策：读全回执、按处境直接派发（可随时切回 guide）
 $A --resume --drive none                                      # 只看当前处境，不推进
 $A --resume --event guide.show --payload '"harness"'          # 查规则：按章节 id 定点查阅（harness / credentials / gates …）
@@ -110,6 +129,8 @@ $A --resume --event map.show                                  # 当前节点 + �
 
 1. 确认所有需求进入 done / split / merged / dropped 等终态、inbox 无未消费行，并通过 `verify.submit`
    记录全绿证据（收口前件见 §一·9）。
-2. `coordinate.submit` → `review`，再 `review.note` 收口到 `done`（写复盘经验与评分）。
+2. `coordinate.submit` → `review`，再 `review.note` 收口到 `done`（写复盘经验、评分与进化候选声明；
+   候选先按 `evolution` 章筛，登记用 `ev=artifacts/<file>.md|c=<kept>/<screened>|cls=<kind>:<n>,...`；
+   guide 下可先 `config.set review.evolution.*` 登记，菜单会把已登记值带进载荷）。
 3. 执行 `--settle` 并核验 `settlement.json` 的 `ok`（四项开关：事件非空 / 无失败步 / 出现结局行 / inbox 已消费）。
 4. **清空主会话 Todo 列表**（`todo clear`，含已完成与历史任务）后再结束本局；不得把已结束局的任务带入下一局。

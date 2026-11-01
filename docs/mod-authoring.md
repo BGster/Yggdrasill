@@ -494,15 +494,23 @@ handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序
 | 前缀 | 键形 | 写方 |
 | --- | --- | --- |
 | `fsm.*` | `fsm.<机器名>` | stdlib `ygg.fsm`（Mod 只读） |
-| `settings.*` | `settings.<配置路径>` | `config.set` 动作（动态覆盖 > `data/config.json` 静态默认） |
+| `settings.*` | `settings.<路径>`：配置覆盖 + **运行期登记面**（`review.evolution.*` / `goal.authorization` / `executor.<rN>.<stage>`） | `config.set` 动作（动态覆盖 > `data/config.json` 静态默认；登记面同样是自声明，不是身份凭据） |
 | `req.*` | `req.<i>.<字段>` + `req.count` / `req.last` / `req.conflicts` | 需求表 |
 | `prop.*` | `prop.<i>.<字段>` + `prop.count` | 提案表 |
 | `lane.*` | `lane.<k>.<字段>` + `lane.seq` | 泳道台账（`lane.claim` / `lane.release`） |
 | `ui.*` | `ui.page` / `ui.page.stage` | 纯展示层（不进摘要、不影响派活，也不改任何业务动作语义） |
 | `reject.*` | `reject.count` / `reject.last` | 拒绝留痕（`flow.refuse` 的唯一写入点）：只做只读查询，**不是**纪律闸 |
-| `task.*` / `verify.*` / `review.*` / `inbox.*`，裸键 `ending` | 各自单一用途 | 各自的单一写入点 |
+| `task.*` / `verify.*` / `inbox.*`，裸键 `ending` | 各自单一用途 | 各自的单一写入点 |
+| `review.*` | `review.lesson` / `review.score` / `review.evolution.{artifact,candidates,classes}` | `review.note`（单一写入点；进化声明三段缺省即 `""` / `0/0` / `""`） |
 
 **这是文档约定，装载期不校验前缀归属**——没有新增校验面，别指望内核替你拦跨模块写。
+
+进化声明是**两层**的（同一份口径、两个前缀）：`config.set review.evolution.artifact|candidates|classes=<值>`
+写运行期覆盖层 `settings.review.evolution.*`（`settings.*` 的单一写方仍是 `config.set`），收口时
+`review.note` 把它落到 `review.evolution.*`。种子只校**形状与完整性**——`ev` 的 `artifacts/*.md` 路径、
+`c` 的两个非负整数、`cls` 的六类计数；`screened > 0` 时 `ev` 与 `cls` 都必填（`c=0/0` 可只带 `ev`），
+且 `cls` 和必须等于 `screened`、保留类之和必须等于 `kept`；
+沙箱没有文件系统（无 `io`/`os`），所以**读不到 artifact 内容**，也无法判断复核是否独立执行。
 
 补一句关于「状态」的边界：KV 本就不进状态哈希（哈希只覆盖实体面），所以别把 `ui.*`
 当成「可以随便写」的例外——它照样入存档，要响应存读档。
@@ -599,6 +607,9 @@ handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序
 - `drive` 三项必须是正整数（`maxSteps` / `stallLimit` / `stepsPerRequirement`）。
 - 这两段属于 `agent-config` schema 的**可选属性**（内核不解释，只做形状校验）；缺段时内核装载照过，
   但 `--example agent` 会拒绝启动——口径来自 Mod，宿主不猜。
+- 注意区分：这里的 `settlement` 是**宿主配置段**（`--settle` 的判定口径）。种子 Mod **不提供**
+  `settlement.*` 动作族——那属于项目实例的自选面；种子的局末进化声明走 `review.note` 可选段
+  （`ev=` / `c=` / `cls=`），不新增动作、不新增状态。
 
 ### 装载期会发生什么
 

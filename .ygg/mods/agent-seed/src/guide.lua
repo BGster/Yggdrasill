@@ -20,7 +20,7 @@ local SECTION_IDS = {}
 local STAGE_GUIDE = {
   intake = { "output" },
   coordinate = { "dispatch", "lanes", "integration" },
-  review = { "gates", "evidence" },
+  review = { "evolution", "gates", "evidence" },
   done = { "pointers" },
 }
 

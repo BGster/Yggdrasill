@@ -1,4 +1,4 @@
--- src/wire.lua —— payload wire format 解析 + inbox 幂等键（`@ext=`）。
+-- src/wire.lua —— payload wire format 解析 + inbox 幂等键（`@ext=`）+ review.note 进化声明段。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。
@@ -11,8 +11,8 @@ local util = require("src.util")
 
 local TEXTS
 
-local mode, text_of =
-  config.mode, config.text_of
+local effective, mode, text_of =
+  config.effective, config.mode, config.text_of
 local stage =
   reqs.stage
 local contains, cut, fill, join, split, trim =
@@ -257,9 +257,274 @@ local function parse_resolve(payload)
   return ids, mode, trim(parts[3] or ""), nil
 end
 
+-- ============================================================================
+-- §review.note 进化声明段（`ev=` / `c=` / `cls=`）
+--
+-- 声明 ≠ 证明：这里只校验**形状与完整性**（路径形状、两个整数、六类计数自洽、
+-- screened > 0 时 ev 与 cls 都不得缺），沙箱读不到文件，也不判断建议质量或复核是否真的独立执行过。
+-- ============================================================================
+local EVOLUTION_CLASSES = { "long_term", "unused", "one_off", "temp_tool", "redundant", "no_scene" }
+
+-- 允许进入 backlog 的三类：长期机制 / 已有未用（需根因）/ 冗余退役。
+local EVOLUTION_KEPT = { long_term = true, unused = true, redundant = true }
+
+local function evolution_path_ok(path)
+  if type(path) ~= "string" then
+    return false
+  end
+  local raw = trim(path)
+  if raw == "" or #raw > 128 then
+    return false
+  end
+  if raw:sub(1, 10) ~= "artifacts/" or raw:sub(-3) ~= ".md" then
+    return false
+  end
+  if #raw <= 13 or raw:find("..", 1, true) ~= nil or raw:find("%s") ~= nil then
+    return false
+  end
+  return true
+end
+
+local function whole_number(value)
+  local parsed = tonumber(value)
+  if parsed == nil or parsed ~= math.floor(parsed) then
+    return nil
+  end
+  return math.floor(parsed)
+end
+
+local function parse_candidates(text)
+  local kept_text, screened_text = cut(trim(text), "/")
+  local kept = whole_number(trim(kept_text or ""))
+  local screened = whole_number(trim(screened_text or ""))
+  if kept == nil or screened == nil then
+    return nil
+  end
+  if kept < 0 or screened < 0 or kept > screened then
+    return nil
+  end
+  return kept, screened
+end
+
+local function parse_classes(text)
+  local out = {}
+  local total = 0
+  for _, part in ipairs(split(trim(text), ",")) do
+    local piece = trim(part)
+    if piece ~= "" then
+      local kind, count_text = cut(piece, ":")
+      kind = trim(kind or "")
+      local count = whole_number(trim(count_text or ""))
+      if not contains(EVOLUTION_CLASSES, kind) or count == nil or count < 0 or out[kind] ~= nil then
+        return nil
+      end
+      out[kind] = count
+      total = total + count
+    end
+  end
+  return out, total
+end
+
+local function format_classes(classes)
+  local out = {}
+  for i = 1, #EVOLUTION_CLASSES do
+    local kind = EVOLUTION_CLASSES[i]
+    local count = classes[kind]
+    if type(count) == "number" then
+      out[#out + 1] = kind .. ":" .. tostring(count)
+    end
+  end
+  return join(out, ",")
+end
+
+local function kept_total(classes)
+  local total = 0
+  for i = 1, #EVOLUTION_CLASSES do
+    local kind = EVOLUTION_CLASSES[i]
+    if EVOLUTION_KEPT[kind] == true then
+      total = total + (classes[kind] or 0)
+    end
+  end
+  return total
+end
+
+-- 三路输入一律是字符串（缺省 = ""）：artifact 空 = 未登记；candidates 空 = 0/0；classes 空 = 未分类。
+-- 跨字段自洽只在收口处校（登记阶段允许分次登记）。
+-- 完整性同样是收口硬条件：screened > 0 就必须同时有复核 artifact 与逐类计数——
+-- 「筛了几条、留了几分」而把复核记录与根因分类留在散文里，等于没登记。
+local function normalize_evolution(artifact, candidates, classes)
+  local record = { artifact = "", kept = 0, screened = 0, classes = {} }
+  local artifact_text = trim(artifact or "")
+  if artifact_text ~= "" then
+    if not evolution_path_ok(artifact_text) then
+      return nil, TEXTS.beats.review_evolution_bad_path
+    end
+    record.artifact = artifact_text
+  end
+  local candidates_text = trim(candidates or "")
+  if candidates_text ~= "" then
+    local kept, screened = parse_candidates(candidates_text)
+    if kept == nil then
+      return nil, TEXTS.beats.review_evolution_bad_candidates
+    end
+    record.kept, record.screened = kept, screened
+  end
+  local classes_text = trim(classes or "")
+  local parsed, total = nil, 0
+  if classes_text ~= "" then
+    parsed, total = parse_classes(classes_text)
+    if parsed == nil or total == 0 then
+      return nil, TEXTS.beats.review_evolution_bad_classes
+    end
+  end
+  if record.screened > 0 then
+    if record.artifact == "" then
+      return nil, TEXTS.beats.review_evolution_need_artifact
+    end
+    if parsed == nil then
+      return nil, TEXTS.beats.review_evolution_need_classes
+    end
+  end
+  if parsed ~= nil then
+    if total ~= record.screened or kept_total(parsed) ~= record.kept then
+      return nil, TEXTS.beats.review_evolution_mismatch
+    end
+    record.classes = parsed
+  end
+  return record, nil
+end
+
+-- 登记面（`config.set review.evolution.*` → `settings.review.evolution.*`）与收口面读同一份口径。
+local function evolution_settings()
+  local function read(name)
+    local value = effective(name)
+    if type(value) == "string" then
+      return value
+    end
+    return ""
+  end
+  return read("review.evolution.artifact"), read("review.evolution.candidates"), read("review.evolution.classes")
+end
+
+-- 菜单构造 review.note 载荷：已登记就带上，没登记就只给 lesson|score（向后兼容）。
+local function format_review_note(lesson, score, artifact, candidates, classes)
+  local parts = { lesson, score }
+  if artifact ~= "" then
+    parts[#parts + 1] = "ev=" .. artifact
+  end
+  if candidates ~= "" and candidates ~= "0/0" then
+    parts[#parts + 1] = "c=" .. candidates
+  end
+  if classes ~= "" then
+    parts[#parts + 1] = "cls=" .. classes
+  end
+  return join(parts, "|")
+end
+
+local function parse_review_note(payload)
+  if type(payload) ~= "string" then
+    return nil, fill(TEXTS.beats.bad_payload, { action = "review.note" })
+  end
+  local parts = split(trim(payload), "|")
+  local out = { lesson = trim(parts[1] or ""), score_text = trim(parts[2] or ""), segments = {} }
+  for i = 3, #parts do
+    local key, value = cut(trim(parts[i]), "=")
+    key = trim(key or "")
+    value = trim(value or "")
+    if key ~= "ev" and key ~= "c" and key ~= "cls" then
+      return nil, TEXTS.beats.review_evolution_usage
+    end
+    if out.segments[key] ~= nil then
+      return nil, TEXTS.beats.review_evolution_usage
+    end
+    out.segments[key] = value
+  end
+  return out, nil
+end
+
+-- ============================================================================
+-- §E2 登记面：goal 授权 + 执行者账本（`config.set` 的两个键族）
+--
+-- 两个都是**自声明**：状态机只能校形状与「换人必给原因」，读不到会话，也不验证 id 真伪。
+-- 落点：`settings.goal.authorization` / `settings.executor.<rN>.<stage>`（`settings.*` 唯一写方 = config.set）。
+-- ============================================================================
+local EXECUTOR_STAGES = { "analysis", "plan", "development" }
+
+local GOAL_AUTH_MAX = 200
+
+local function parse_goal_auth(value)
+  local raw = trim(value or "")
+  if raw == "" then
+    return "", nil
+  end
+  if #raw > GOAL_AUTH_MAX or raw:find("[\r\n]") ~= nil then
+    return nil, TEXTS.beats.goal_auth_bad
+  end
+  return raw, nil
+end
+
+local function executor_stage_ok(stage)
+  return contains(EXECUTOR_STAGES, stage)
+end
+
+-- `executor.rN.<stage>` → req_id, stage；其它形状 → nil（由调用方报可读错误）。
+local function parse_executor_key(key)
+  if type(key) ~= "string" then
+    return nil, nil
+  end
+  return key:match("^executor%.(r%d+)%.([a-z_]+)$")
+end
+
+-- 值形：`<id>` 或 `<id>|<原因>`；`""` = 显式解绑。
+local function parse_executor_value(value)
+  local raw = trim(value or "")
+  if raw == "" then
+    return "", "", nil
+  end
+  local id, reason = cut(raw, "|")
+  id = trim(id or "")
+  reason = trim(reason or "")
+  if id == "" or #id > 64 or id:find("%s") ~= nil then
+    return nil, nil, TEXTS.beats.executor_bad_id
+  end
+  return id, reason, nil
+end
+
+local function format_executor(id, reason)
+  if reason ~= nil and reason ~= "" then
+    return id .. "|" .. reason
+  end
+  return id
+end
+
+-- 只取 id 部分（忽略 `|原因`）：列表展示与前序阶段比较都用它。
+local function executor_id_of(raw)
+  local id = cut(trim(raw or ""), "|")
+  return trim(id or "")
+end
+
 function M.install(deps)
   TEXTS = deps.texts
 end
+
+M.EVOLUTION_CLASSES = EVOLUTION_CLASSES
+M.EXECUTOR_STAGES = EXECUTOR_STAGES
+M.executor_id_of = executor_id_of
+M.executor_stage_ok = executor_stage_ok
+M.format_executor = format_executor
+M.parse_executor_key = parse_executor_key
+M.parse_executor_value = parse_executor_value
+M.parse_goal_auth = parse_goal_auth
+M.EVOLUTION_KEPT = EVOLUTION_KEPT
+M.evolution_path_ok = evolution_path_ok
+M.evolution_settings = evolution_settings
+M.format_classes = format_classes
+M.format_review_note = format_review_note
+M.kept_total = kept_total
+M.normalize_evolution = normalize_evolution
+M.parse_candidates = parse_candidates
+M.parse_classes = parse_classes
+M.parse_review_note = parse_review_note
 
 M.RESOLVE_MODES = RESOLVE_MODES
 M.inbox_mark = inbox_mark
