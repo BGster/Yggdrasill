@@ -168,11 +168,14 @@ packages/mods/<你的mod>/
 | `packages/mods/agent-seed/` | **种子模板**：通用元工作流，对外分发；`data/playbook.json` 只装通用纪律 |
 | `.ygg/mods/agent-seed/` | **本项目实例**：`data/` 装本仓库自己的规则与配置 |
 
-- **骨架面**（`mod.lua` + `schemas/`）必须逐字节一致——「同一套 harness」不允许有两种机制行为。
-  用 `scripts/sync-seed-mod.sh` 同步（`--from project` 反向回流），脚本自动重算两侧
-  `manifest.json`；CI 有一道骨架守卫，单侧改动会在合入前失败。
-- **实例面**（`data/`）必然不同（playbook 装的是各自项目的规则），任何同步都会毁掉其中一侧，
-  所以脚本不碰 `data/`、CI 也不校验它。
+- **骨架面**（`mod.lua` + `src/**/*.lua` + `schemas/`，以及 `pack.json` 的 `code` 段）必须逐字节一致——
+  「同一套 harness」不允许有两种机制行为，也不允许两份 `code.modules` 声明不同的模块集合。
+  用 `scripts/sync-seed-mod.sh` 同步（`--from project` 反向回流；脚本会检查两侧 `code` 段一致），
+  脚本自动重算两侧 `manifest.json`；CI 有一道骨架守卫（`mod.lua` / `src/` / `schemas/` / `code` 段
+  四查 + schemas 与 `packages/schema/schemas/` 同源），单侧改动会在合入前失败。
+- **实例面**（`data/`，以及 `pack.json` 的 `agent` / `inboxRoutes`）必然不同（playbook 装的是各自项目的
+  规则、前缀集必须与各自 scenes 的实际用词一致），任何同步都会毁掉其中一侧，所以脚本不碰它们、
+  CI 也不校验。
 - 拿模板开新项目：复制到目标仓 `.ygg/mods/` → 填 `data/playbook.json` 的项目章节 →
   改 `data/config.json` → 跑 `pack` / `ygg-lint` / `playtest` 三件套。步骤见
   `packages/mods/agent-seed/README.md`。
@@ -267,6 +270,11 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 会改变运行时行为，重构不保行为。收紧之后派发序只有一个来源：**入口里那几行显式
 调用的先后**（`M.install(deps)` / `M.register()` …），与 `require` 顺序、与
 `pack.json` 的 `modules` 声明序都无关。
+
+补一条容易踩的：**`M.register()` 也是注册面**。典型例子是 `agent.summary`
+（只读摘要动作）——它在 render 模块里，但必须由入口在 `M.install(deps)` 之后显式调用
+`render.register()` 完成注册，不能写在 `src/render.lua` 的模块顶层（`YGG-MOD-EFFECT`
+会直接拒绝）。派发序上把它当作「入口的第一行 install」来排。
 
 禁止面与允许面（清单唯一实现是 `crates/ygg-modules/src/lib.rs` 的
 `pub mod effects`，内核影子表与 lint 都只读它，不各自维护一份）：

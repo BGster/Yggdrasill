@@ -284,14 +284,22 @@ end)
 
 ## 九、文件
 
-| 文件 | 作用 |
-| --- | --- |
-| `mod.lua` | Mod 本体：协调器 FSM / 需求流水线 / 提案与门禁 / 泳道 / 渲染 / 解析 |
-| `data/scenes.json` | 文本资源（scenes / endings / prompts / options / beats / tuning） |
-| `data/playbook.json` | 现场规则资源（`guide.show` 按 section id 取用） |
-| `data/config.json` | 静态配置默认值 |
-| `pack.json` / `manifest.json` | 打包声明与内容寻址清单（`cargo run --example pack` 生成） |
-| `schemas/*.json` | 资源 schema（与 `packages/schema/schemas/` 单源一致） |
+| 文件 | 面 | 作用 |
+| --- | --- | --- |
+| `mod.lua` | 骨架 | **装配入口**：资源快照 → require 21 模块 → install → `render.register()` → `fsm.define`（≈110 行） |
+| `src/*.lua` | 骨架 | 11 个纯导出模块：util / config / requirements / lanes / proposals / gates / guide / menus / render / wire / flow |
+| `src/handlers/*.lua` | 骨架 | 10 个注册模块：actions / lanes / proposals / review / requirement_ops / gate_actions / config / views / choice / lifecycle |
+| `data/scenes.json` | 实例 | 文本资源（scenes / endings / prompts / options / beats / tuning） |
+| `data/playbook.json` | 实例 | 现场规则资源（`guide.show` 按 section id 取用） |
+| `data/config.json` | 实例 | 静态配置默认值 |
+| `pack.json` / `manifest.json` | 骨架 + 生成物 | 打包声明（`code` 段属骨架，`agent`/`inboxRoutes` 属实例）与内容寻址清单 |
+| `schemas/*.json` | 骨架 | 资源 schema（与 `packages/schema/schemas/` 单源一致） |
+
+骨架面（`mod.lua` + `src/**` + `schemas/` + `pack.json` 的 `code` 段）与
+`packages/mods/agent-seed/` 逐字节一致，由 `scripts/sync-seed-mod.sh --from project` 同步；
+模块清单、依赖方向与三条硬规则见种子侧 README 的「模块结构」一节。
+本实例新增的 KV 前缀：`reject.count` / `reject.last`（`flow.refuse` 的拒绝留痕，只读查询用）。
+`data/` 与 `pack.json` 的 `agent`/`inboxRoutes` 属实例面，不参与同步。
 
 ## 十、走查
 

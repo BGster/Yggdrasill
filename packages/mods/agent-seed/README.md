@@ -14,9 +14,10 @@ Mod：协调器派活 / 验收，每条需求各自跑 analyze → plan → 门�
 
 | 文件 | 面 | 新项目要不要改 |
 | --- | --- | --- |
-| `mod.lua` | **骨架**（机制） | 不改。它只读资源、不读项目语义 |
+| `mod.lua` | **骨架**（装配入口） | 不改。只读资源、require 模块、按序 install，不装业务逻辑 |
+| `src/**/*.lua` | **骨架**（机制实现） | 不改。11 个纯导出 + 10 个注册模块；改机制回种子模板改，再同步 |
 | `schemas/*.json` | **骨架**（资源契约） | 不改。改资源格式属于机制变更，回种子模板改 |
-| `pack.json` | **骨架**（声明结构） | 不放宽不改：`entries` / `schemaFiles` / `agent` / `inboxRoutes` 四段结构固定 |
+| `pack.json` | **骨架 + 实例** | `code` 段（entry + modules）不改；`entries` / `schemaFiles` 结构固定；`agent` / `inboxRoutes` 按本项目实际文案与动作集填 |
 | `data/playbook.json` | **实例**（现场规则） | **必改**：五章通用纪律可原样留，另加本项目章节 |
 | `data/config.json` | **实例**（静态默认） | **必改**：`drive` 阈值、`settlement` 口径、`play.mode` 默认 |
 | `data/scenes.json` | **实例**（叙事文案） | 可改：换世界观只改这里，不碰 `mod.lua` |
@@ -30,9 +31,10 @@ packages/mods/agent-seed/   种子模板（本目录）——通用，对外分�
 .ygg/mods/agent-seed/       本项目实例     ——playbook / config 装的是本仓库自己的规则
 ```
 
-- **骨架面逐字节一致**（`mod.lua` + `schemas/`），由 `scripts/sync-seed-mod.sh` 单向同步，
-  并被 CI 的骨架守卫拦（不一致即失败）。
-- **实例面必然不同**（`data/`），任何同步都会毁掉其中一侧，所以脚本不碰 `data/`、CI 也不校验它。
+- **骨架面逐字节一致**（`mod.lua` + `src/**` + `schemas/`，以及 `pack.json` 的 `code` 段），
+  由 `scripts/sync-seed-mod.sh` 单向同步，并被 CI 的骨架守卫拦（不一致即失败）。
+- **实例面必然不同**（`data/`，以及 `pack.json` 的 `agent` / `inboxRoutes`——前缀集必须与各自
+  `data/scenes.json` 的实际用词一致），任何同步都会毁掉其中一侧，所以脚本不碰它们、CI 也不校验。
 
 ---
 
@@ -185,7 +187,8 @@ cargo run --example playtest -- "$mod"          # ③ 冒烟：必须 "ok": true
 
 ## 四、骨架面不要按项目改
 
-`mod.lua` / `schemas/` 是**机制**：两个 Mod 之间必须逐字节一致，否则「同一个 harness」就有两种行为。
+`mod.lua` / `src/` / `schemas/` 是**机制**：两个 Mod 之间必须逐字节一致，否则「同一个 harness」就有两种行为。
+`mod.lua` 只是装配入口（资源快照 → require → install → `render.register()` → `fsm.define`），业务实现都在 `src/`。
 改机制的正确路径：
 
 ```bash
@@ -200,17 +203,67 @@ scripts/sync-seed-mod.sh --from project
 scripts/sync-seed-mod.sh --no-pack
 ```
 
-脚本只碰 `mod.lua` + `schemas/`，幂等（内容一致时不写文件），同步完自动重算**两侧** `manifest.json`。
+脚本只碰 `mod.lua` + `src/**` + `schemas/`，并检查两侧 `pack.json` 的 `code` 段一致；
+幂等（内容一致时不写文件），同步完自动重算**两侧** `manifest.json`。
 CI 里有一道骨架守卫：两侧不一致直接失败并提示运行该脚本——所以「只改一侧」在合入前一定会被抓到。
 
 ---
 
-## 五、已知边界
+## 五、模块结构（原生多文件）
+
+`pack.json` 的 `code` 段声明入口与全部模块，宿主按 `require` **原生装载**——没有构建期拼接、
+没有 build 脚本、也没有单文件产物。`mod.lua` 是装配清单，不是 Mod 本体。
+
+依赖方向（左 → 右；`require` 只向下，无环）：
+
+```text
+util ← config ← requirements ← lanes ← proposals ← gates ← guide / menus ← render
+     ← wire ← flow ← handlers/*
+```
+
+| 模块 | 职责 |
+| --- | --- |
+| `src/util.lua` | 纯函数（fill / split / cut / trim / join / contains / to_bool / spaces），无 install |
+| `src/config.lua` | 两层配置（`settings.*` > `data/config.json`）+ `PLAY_MODES` / 标量读取 |
+| `src/requirements.lua` | 阶段常量与 `stage()`、需求表 `req.*`、依赖校验、摘牌唯一出口 `release` |
+| `src/lanes.lua` | 泳道账本 `lane.<k>.*` + job / 容量计数 |
+| `src/proposals.lua` | 提案表 `prop.*` + `changes`（split / merge / amend / conflict）落地规则 |
+| `src/gates.lua` | 门禁与收口判据（只读选择器） |
+| `src/guide.lua` | 现场规则章节索引与渲染（`guide.show <section_id>`） |
+| `src/menus.lua` | 阶段菜单 + 配置二级页（选项文本 ↔ 动作载荷的唯一来源） |
+| `src/render.lua` | 回执渲染 + 双层图（local/full）+ 结构化摘要（`agent.summary` 的注册面） |
+| `src/wire.lua` | payload wire format + inbox 幂等键（`@ext=`） |
+| `src/flow.lua` | 转场 / 拒绝的唯二出口 + 状态机票据（`stage_ticket` 与用它的函数同模块） |
+| `src/handlers/*.lua` | 10 个注册模块：actions / lanes / proposals / review / requirement_ops / gate_actions / config / views / choice / lifecycle |
+
+三条硬规则：
+
+1. **模块顶层纯导出**。只定义函数与常量：不注册（`ygg.on` / `ygg.fsm.define` / `ygg.narrative.node`）、
+   不写状态（`kv.set` / `entity.*`）、不输出（`narrate` / `emit` / `choice` / `meta`）。所有 ygg 调用都在
+   函数体内。`ygg-lint --pack` 的 `YGG-MOD-EFFECT` 就是这条的静态门。
+2. **派发序 = 入口的 `install()` 调用序**，既不是 `require` 序，也不是 `pack.json` 的 `code.modules` 声明序。
+   入口里那 10 行 `handlers.<x>.install()` 的先后就是 handler 的注册序；调整顺序等于改运行时行为。
+   `agent.summary` 由 `render.register()` 注册，入口把它排在所有 handler 之前（与拆分前逐点一致）。
+3. **改任何模块都必须重跑 `cargo run -p ygg-sandbox --example pack -- <MOD>`**。manifest 的 `code` 数组是
+   内容寻址的（逐模块 sha256 + byteLength），不重算会按字节数 / 哈希拒绝装载。
+
+依赖注入：模块不在顶层读资源，入口把 `TEXTS` / `CONFIG` / `PLAYBOOK` 注入各自的
+`install(deps)`。`requirements` 要清泳道账本而 `lanes` 又要读需求，为避免 require 环，
+`lanes` 的 `LANES` 表由入口注入（`reqs.install{ ..., lanes = lanes.LANES }`）。
+
+---
+
+## 六、已知边界
 
 - **单仓版**：泳道账本是 `lane.<k>.*`，没有 `repo` 层（多仓版另有分层，不在本模板内）。
 - **`pack` 不校验资源内容**：它只校验 `pack.json` 结构、`schemaFiles` 存在性与内容哈希；
   `data/*.json` 是否合 schema 由**装载期**校验。所以改了资源要跑 `playtest`，光跑 `pack` 不够。
-- **按阶段提示是 `mod.lua` 里写死的映射**（intake → `output` / coordinate → `dispatch` /
+- **按阶段提示是 `src/guide.lua` 里写死的映射**（intake → `output` / coordinate → `dispatch` /
   review → `gates` / done → `pointers`）：项目的 playbook 没有对应章节时，回落到第一章的标题与摘要。
   这是优雅降级，不是错误——但如果你希望 review / done 阶段提示自己的章节，就补上
   `gates` / `pointers` 这两章。
+- **没有规则闸**：不设「已读规则」标记，也不做「未读规则即拒绝」——本模板里没有任何「先读才放行」的前件。
+  规则提示每步一行，要全文就 `guide.show <section_id>`。
+- **`map.show` 两个视图**：默认只出「当前节点 + 出边」（剧情为点、选择为边），`map.show full` 才出设计全图。
+- **节点文案只有一段**（`<节点>_common`）：goal / guide 的差异由 `play_receipt` 每条回执报一次，
+  不在每个节点重复。
