@@ -52,7 +52,7 @@
     "rejected": "【动作被拒】`{{action}}` 不属于当前阶段 {{stage}}。允许的动作：{{allowed}}。原因：{{detail}}",
     "rejected_payload": "【载荷被拒】`{{action}}` 载荷无法接受：{{detail}} 主状态未改变。",
     "rejected_default": "（未给出原因）",
-    "guide_human_blocked": "【动作被拒】`{{action}}` 是「人类动作门禁」保护的通过类动作（proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / config.set play.mode）：guide 模式下只能由人在菜单上选（回序号 → ygg.choice_selected），单发直派一律拒绝，主状态未改变。做法：把 pendingChoice 原文交给用户、等用户回序号，不要代替用户按；模式本身也要由人在菜单上切。",
+    "guide_human_blocked": "【动作被拒】`{{action}}` 是「人类动作门禁」保护的通过类动作（proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note）：guide 模式下只能由人在菜单上选（回序号 → ygg.choice_selected），单发直派一律拒绝，主状态未改变。做法：把 pendingChoice 原文交给用户、等用户回序号，不要代替用户按。",
     "stage_expected": "该动作只在 `{{expected}}` 阶段有效。",
     "allowed_none": "（局末，无可用动作）",
     "unknown_stage": "未知阶段 `{{stage}}`。",
@@ -258,7 +258,9 @@
     "map_edge_no_condition": "无额外条件",
     "map_local_head": "【当前节点】[{{stage}}]｜{{panel}}",
     "map_local_edge": "  {{index}}. {{text}} → [{{target}}]（{{state}}；{{when}}）",
-    "map_local_foot": "（完整设计图：map.show full；规则全文：guide.show <章节 id>）"
+    "map_local_foot": "（完整设计图：map.show full；规则全文：guide.show <章节 id>）",
+    "handover_goal": "【决策权移交】play.mode = goal：后续步骤由主 Agent 读全回执后自行派发（不默认首项、不走脚本）；提案验收与两个门禁仍各走一次真实动作与校验，证据标准不变。收局复盘要交代代办范围。",
+    "handover_guide": "【决策权移交】play.mode = guide：后续每一步由人确认（回序号）；里程碑动作仍需菜单票据。"
   },
   "tuning": {
     "min_slices": 1,

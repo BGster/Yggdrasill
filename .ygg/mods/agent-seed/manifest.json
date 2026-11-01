@@ -31,9 +31,9 @@
       "sha256": "54f9a91e193459c26440d3560d0a02581cce9e08bc4ed9efeda3d33f19c7bf1b"
     },
     {
-      "byteLength": 4241,
+      "byteLength": 4363,
       "path": "src/handlers/config.lua",
-      "sha256": "a0280d5f763ff5d95853ad85e2a9b7251a57ba7579888085a55106b1d7361898"
+      "sha256": "887f9aaa5c48307cbc4427317620c95927a8e0840f1b99c7ec307f325a4cec23"
     },
     {
       "byteLength": 4467,
@@ -108,12 +108,12 @@
   ],
   "entries": [
     {
-      "byteLength": 23295,
+      "byteLength": 23657,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "73225437fb9e22b3b598b08b1b567c1475cce882c92f619b9e938dc1c9991620"
+      "sha256": "6546634db959403ce2fbd8b042f427f7072f1ce196168701138df07ace033cb5"
     },
     {
       "byteLength": 490,

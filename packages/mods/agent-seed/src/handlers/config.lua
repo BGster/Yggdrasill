@@ -7,7 +7,6 @@ local M = {}
 
 local config = require("src.config")
 local flow = require("src.flow")
-local choice = require("src.handlers.choice")
 local menus = require("src.menus")
 local render_mod = require("src.render")
 local reqs = require("src.requirements")
@@ -20,8 +19,6 @@ local MODES, PLAY_MODES, effective =
   config.MODES, config.PLAY_MODES, config.effective
 local reject, reject_payload =
   flow.reject, flow.reject_payload
-local HUMAN =
-  choice.HUMAN
 local CONFIG_UI =
   menus.CONFIG_UI
 local render =
@@ -50,14 +47,17 @@ function M.install(deps)
     end
     local problem = nil
     if key == "play.mode" then
-      -- 切模式会改变「谁在派发」：guide→goal 等于给后续直派开闸，故单重门禁。
-      if not HUMAN.needs("config.set play.mode") then
-        return
-      end
+      -- 切模式是「决策权移交」，不是业务判断：主 Agent 在用户当次授权下可自行切
+      -- （人只有对话、没有菜单时，锁住就等于永久锁死 goal）。代价是必须当场留痕。
       if not contains(PLAY_MODES, value) then
         problem = fill(TEXTS.beats.bad_config_value, { key = key, value = value, allowed = join(PLAY_MODES, " / ") })
       else
         ygg.kv.set("settings.play.mode", value)
+        if value == "goal" then
+          ygg.narrate(TEXTS.beats.handover_goal)
+        else
+          ygg.narrate(TEXTS.beats.handover_guide)
+        end
         -- 驱动者换了人，二级页的「当前处境」已失效：退出子页回阶段菜单。
         CONFIG_UI.set_page("")
       end
