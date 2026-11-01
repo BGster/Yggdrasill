@@ -141,13 +141,16 @@ function M.install(deps)
       render()
       return
     end
-    local lesson, score_text = cut(trim(payload), "|")
-    lesson = trim(lesson)
+    local note, note_err = wire.parse_review_note(payload)
+    if note == nil then
+      return reject_payload("review.note", note_err)
+    end
+    local lesson = note.lesson
     if lesson == "" then
       lesson = TEXTS.beats.default_lesson
     end
     local score = TEXTS.tuning.default_score
-    local candidate = trim(score_text or "")
+    local candidate = note.score_text
     if candidate ~= "" then
       local parsed = tonumber(candidate)
       if parsed == nil or parsed < 1 or parsed > 5 then
@@ -155,8 +158,21 @@ function M.install(deps)
       end
       score = math.floor(parsed)
     end
+    -- 进化声明：段 > 已登记设置 > 缺省；形状与计数自洽均在写状态前校验。
+    local registered_artifact, registered_candidates, registered_classes = wire.evolution_settings()
+    local record, record_err = wire.normalize_evolution(
+      note.segments.ev or registered_artifact,
+      note.segments.c or registered_candidates,
+      note.segments.cls or registered_classes
+    )
+    if record == nil then
+      return reject_payload("review.note", record_err)
+    end
     ygg.kv.set("review.lesson", lesson)
     ygg.kv.set("review.score", score)
+    ygg.kv.set("review.evolution.artifact", record.artifact)
+    ygg.kv.set("review.evolution.candidates", tostring(record.kept) .. "/" .. tostring(record.screened))
+    ygg.kv.set("review.evolution.classes", wire.format_classes(record.classes))
     ygg.kv.set("ending", STAGE.done)
     ygg.narrate(fill(TEXTS.beats.review_ok, { score = tostring(score), lesson = lesson }))
     advance(STAGE.done)

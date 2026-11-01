@@ -1,17 +1,17 @@
 {
   "scenes": {
-    "prologue": "【冷启动·引擎就绪】ygg 世界已装载（引擎 {{engine}}），当前阶段 {{stage}}，演进模式 {{mode}}。这里是双层 Agent 元工作流：协调器派活/验收，需求各自 analyze→plan→gate→develop→accept→gate。",
+    "prologue": "【冷启动·引擎就绪】ygg 世界已装载（引擎 {{engine}}），当前阶段 {{stage}}，演进偏好 {{mode}}（仅叙事，不自动改资源）。这里是双层 Agent 元工作流：协调器派活/验收，需求各自 analyze→plan→gate→develop→accept→gate。",
     "intake": "【等待立项】当前阶段 {{stage}}：先提交任务描述。门禁要求全绿 = {{gates}}。",
     "coordinate": "【协调中】任务《{{title}}》：{{description}}｜需求 {{count}} 条（未收口 {{open}}）｜待验收提案 {{pending}}。你在这一层只做三件事：派活、串行验收提案、过两个强制门禁；其他需求的 analyze / plan / develop 可异步并行。",
     "review": "【最终复盘】任务《{{title}}》：需求 {{count}} 条（完成 {{done}}）｜门禁口径 {{gates}}。全部叶子需求 done 且无待验收提案、无未解决冲突，才允许在这里收口。"
   },
   "endings": {
-    "done": "【结局·本局收束】任务《{{title}}》—— 需求 {{count}} 条（完成 {{done}}），复盘评分 {{score}}/5。经验一句话：{{lesson}}"
+    "done": "【结局·本局收束】任务《{{title}}》—— 需求 {{count}} 条（完成 {{done}}），复盘评分 {{score}}/5，进化候选 {{candidates}}（保留/筛选）。经验一句话：{{lesson}}"
   },
   "prompts": {
     "intake": "冷启动起点：提交任务描述，还是先调整运行期配置？",
     "coordinate": "协调下一步：验收提案、过门禁、派活，还是收口进 final review？",
-    "review": "最终复盘：门禁结果如何？通过后记录经验并收口。"
+    "review": "最终复盘：门禁结果如何？通过后按 evolution 章筛进化候选（长期优先 / 已有未用查根因 / 逐项复核 / 场景先行），再记录经验与声明并收口。"
   },
   "options": {
     "intake": "task.intake —— 注入任务描述（载荷 \"title|description\"）",
@@ -20,15 +20,15 @@
     "coordinate_submit": "coordinate.submit —— 需求全部收口后进入最终 review",
     "verify_green": "verify.submit all_green=true —— 门禁全绿（记录证据，进复盘）",
     "verify_fail": "verify.submit all_green=false —— 如实上报失败（打回 coordinate）",
-    "review_note": "review.note —— 记录经验并收口（载荷 \"lesson|score(1-5)\"）",
+    "review_note": "review.note —— 记录经验并收口（载荷 \"lesson|score[|ev=artifacts/<file>.md|c=<kept>/<screened>[|cls=<kind>:<n>,...]]\"）",
     "req_add": "requirement.add —— 补一条需求（载荷 \"title|description[|external_id[|depends_on]]\"）",
     "req_list": "requirement.list —— 看需求图 / 提案 / 泳道（待验收 {{pending}}，未收口 {{open}}）",
     "map": "map.show —— 看双层节点图（协调器 {{stage}}）",
     "guide": "guide.show —— 查现场规则：{{title}}（{{count}} 条）",
-    "config": "config —— 配置入口（运行模式 / 演进模式 / 门禁，进二级页选）",
+    "config": "config —— 配置入口（运行模式 / 演进偏好 / 门禁，进二级页选）",
     "config_close": "返回 —— 回到阶段菜单",
     "config_play": "config.set —— 运行模式 {{mode}} → {{next}}",
-    "config_evolution": "config.set —— 演进模式 {{mode}} → {{next}}",
+    "config_evolution": "config.set —— 演进偏好 {{mode}} → {{next}}（仅叙事，不自动修订）",
     "config_gates": "config.set —— 门禁 require_all_green {{state}} → {{next}}",
     "req_resolve_keep": "requirement.resolve keep_both —— {{ids}} 保留双方并重新排队",
     "req_resolve_first": "requirement.resolve keep_first —— {{ids}} 保留首条，另一条置 dropped",
@@ -67,16 +67,14 @@
     "review_ok": "复盘已记录：{{score}}/5 —— {{lesson}}",
     "secret_redline": "红线：凭据只在 .env / .env.local；Mod 资源、配置与报告只出现键名。",
     "config_changed": "配置已更新：{{key}} = {{value}}（当前阶段 {{stage}}）",
-    "config_opened": "【配置菜单】运行模式 / 演进模式 / 门禁三项——选一项即生效并留在本页；选「返回」回阶段菜单。注意：切换运行模式会退出本页（驱动者换了人，子页处境已失效）。",
+    "config_opened": "【配置菜单】运行模式 / 演进偏好 / 门禁三项——选一项即生效并留在本页；选「返回」回阶段菜单。注意：切换运行模式会退出本页（驱动者换了人，子页处境已失效）。进化声明不占菜单：用 `config.set review.evolution.artifact|candidates|classes=<值>` 登记，收口时由 review.note 带入。",
     "config_closed": "【已返回】回到 {{stage}} 阶段菜单。",
     "config_open_usage": "config.open [] / config.close []",
-    "config_keys": "play.mode / evolution.mode / evolution.max_per_run / gates.require_all_green",
+    "config_keys": "play.mode / evolution.mode / evolution.max_per_run / gates.require_all_green / review.evolution.artifact / review.evolution.candidates / review.evolution.classes",
     "bad_config_key": "未知配置键 `{{key}}`（可用：{{allowed}}）",
     "bad_config_value": "`{{key}}` 不接受 `{{value}}`（可用：{{allowed}}）",
-    "evolution_off": "演进 off：仅报告。",
-    "evolution_suggest": "演进 suggest：建议包（白名单 {{paths}}）。",
-    "evolution_auto_pending": "演进 auto：已登记修订请求（待宿主执行）。",
-    "evolution_capped": "演进 auto：额度用尽（{{cap}}），仅建议 {{paths}}。",
+    "evolution_off": "演进偏好 off：只记录复盘，不产出进化建议。",
+    "evolution_suggest": "演进偏好 suggest：产建议（口径见 evolution 章）；标注面 {{paths}}，不自动改写。",
     "paths_none": "（无）",
     "guide_head": "【现场规则】{{title}} —— {{summary}}（{{count}} 条）",
     "guide_rule": "  {{mark}}{{text}}",
@@ -254,8 +252,15 @@
     "prologue_common": "两模式共用：提案验收与两个门禁仍各走一次真实动作与校验，不会跳过；需求可以异步补（--requirement / --proposal）。",
     "intake_common": "写 \"title|description\" 提交；确认后按序号提交。",
     "coordinate_common": "先验提案（proposal.accept），再过门禁（gate.approve/reject），再派活（requirement.dispatch），最后 coordinate.submit。",
-    "review_common": "门禁全绿后记录经验收口（review.note）。",
-    "stage_prompt_missing": "（本节点的提示词缺失：检查 data/scenes.json 的 <节点>_common）"
+    "review_common": "门禁全绿后记录经验收口（review.note）；进化建议先按 evolution 章筛（长期优先 / 已有未用查根因 / 逐项复核 / 场景先行），再登记 ev= / c= / cls=——声明只证明「声明了什么」，不证明建议质量。",
+    "stage_prompt_missing": "（本节点的提示词缺失：检查 data/scenes.json 的 <节点>_common）",
+    "evolution_auto": "演进偏好 auto：仅偏好标记（标注额度 {{cap}}、面 {{paths}}）——不自动修订、不登记修订请求；建议仍走 review.note 的 ev/c/cls 段。",
+    "evolution_none": "0/0",
+    "review_evolution_usage": "review.note 可选段形状：ev=artifacts/<file>.md｜c=<kept>/<screened>｜cls=<kind>:<n>,...（kind ∈ long_term / unused / one_off / temp_tool / redundant / no_scene）",
+    "review_evolution_bad_path": "进化 artifact 路径不合法：必须是 `artifacts/<file>.md`，禁止 `..` 与空白。",
+    "review_evolution_bad_candidates": "进化候选计数不合法：`c=<kept>/<screened>`，两个非负整数且 kept ≤ screened。",
+    "review_evolution_bad_classes": "进化候选分类不合法：`cls=<kind>:<n>,...`，kind 必须是六类之一、计数为非负整数且不重复。",
+    "review_evolution_mismatch": "进化声明不自洽：cls 各计数之和必须等于 screened，保留类（long_term + unused + redundant）之和必须等于 kept。"
   },
   "tuning": {
     "min_slices": 1,

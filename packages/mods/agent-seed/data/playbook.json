@@ -4,8 +4,8 @@
   "summary": "冷启动种子模板的现场规则：凭据纪律、Subagent 派发、证据优先、输出口径、harness 机制。新项目复制本 Mod 后只改自己的项目章节与配置，这五章可原样沿用；游玩指南见使用方的根文档。",
   "source": {
     "document": "seed template",
-    "revision": "2026-10-30",
-    "note": "本资源是**种子模板**而非某个仓库的规则投影：五章全部为通用元工作流纪律，不含任何具体仓库的目录结构、端口、远端地址、部署通道或门禁命令。使用方复制本 Mod 后，另在自己的 Mod 里编写项目章节（仓库形态 / 分支与泳道 / 集成与部署 / 门禁命令 / 指针 / 硬约束），两者通过 section id 取用、互不覆盖。harness 章只描述 harness 机制本身（两层状态机 / 动作协议 / 异步入口 / 结算 / 改 Mod 三件套 / host 契约），是「怎么用这套 harness」而不是「本仓库怎么规定」。"
+    "revision": "2026-11-01",
+    "note": "本资源是**种子模板**而非某个仓库的规则投影：五章全部为通用元工作流纪律，不含任何具体仓库的目录结构、端口、远端地址、部署通道或门禁命令。使用方复制本 Mod 后，另在自己的 Mod 里编写项目章节（仓库形态 / 分支与泳道 / 集成与部署 / 门禁命令 / 指针 / 硬约束），两者通过 section id 取用、互不覆盖。evolution 章（2026-11-01 增补）是通用元工作流纪律：局末进化建议的候选筛选与复核方法。harness 章只描述 harness 机制本身（两层状态机 / 动作协议 / 异步入口 / 结算 / 改 Mod 三件套 / host 契约），是「怎么用这套 harness」而不是「本仓库怎么规定」。"
   },
   "sections": [
     {
@@ -366,6 +366,69 @@
         }
       ],
       "notes": "本章只写 harness 机制，刻意不含任何具体仓库的目录结构、端口、远端地址、部署通道与门禁命令——那些属于使用方自己的项目章节。新项目接入顺序：复制种子 Mod → 填项目章节与静态配置 → 跑打包 / 静态检查 / 冒烟。"
+    },
+    {
+      "id": "evolution",
+      "order": 6,
+      "title": "六、进化建议方法（候选筛选 · 复核 · 场景化）",
+      "summary": "局末建议进 backlog 前过四道关：长期性优先、已有未用查根因、逐项独立复核、场景先于技术；收口用 review.note 的 ev/c/cls 可选段登记声明——状态机只校验声明形状，不证明建议质量。",
+      "source": "seed template（通用元工作流纪律，与具体仓库无关）",
+      "priority": "standard",
+      "applies_to": [
+        "review",
+        "done"
+      ],
+      "rules": [
+        {
+          "id": "evolution.long-term-screen",
+          "modality": "must",
+          "text": "进 backlog 的建议默认必须是跨任务重复出现的流程机制：判据是「换一条需求/换一个仓库还会再遇到吗」+「它改变下一局哪个动作」。单次任务的执行约束、临时工具或一次性探针的口径、以及已在当次解决的问题默认不进。",
+          "basis": "用户决策 2026-11-01（game-1101-1 结算复核 E1）"
+        },
+        {
+          "id": "evolution.classes",
+          "modality": "must",
+          "text": "每条候选必须归入六类之一并计数：`long_term` 长期机制 / `unused` 已有未用 / `one_off` 单次约束 / `temp_tool` 临时工具 / `redundant` 冗余待退役 / `no_scene` 确无场景。只有 long_term、unused、redundant 三类可以进入 backlog；另三类只能作为「不采纳」记录并写明理由。",
+          "basis": "用户决策 2026-11-01（E1 六类）"
+        },
+        {
+          "id": "evolution.unused-root-cause",
+          "modality": "must",
+          "text": "「已有能力未被调用」不得直接撤下，也不得直接当成能力缺失：必须落到六类根因之一并给出定位证据——调用链缺失或入口不可达 / 可发现性差 / 调用成本或契约不适配 / 执行者知道但选择不用 / 确无使用场景 / 能力已冗余应退役。",
+          "basis": "用户决策 2026-11-01（E1 根因表）"
+        },
+        {
+          "id": "evolution.review-artifact",
+          "modality": "must",
+          "text": "每条要保留的建议必须有独立复核 artifact，含四要素：① 文件与行号；② 可原样执行的命令与实际输出（不是「已生成」）；③ 语义依据（该行为符合还是违背当前契约）；④ 根因分类与复核结论（确认存在 / 证据不足 / 不成立 / 仅当次 / 暂缓）。",
+          "basis": "evidence 章三要素 + 用户决策 2026-11-01（E1 §4）"
+        },
+        {
+          "id": "evolution.scenario-first",
+          "modality": "must",
+          "text": "叙述顺序固定：正在解决什么实际问题 → 当前流程哪一步不满足 → 代码与复现证据 → 根因 → 长期收益 → 改造面与验证方式。文件路径与技术细节只作支撑，不得代替问题叙述；用户不该为看懂收益而追问。",
+          "basis": "用户决策 2026-11-01（E1 §5）"
+        },
+        {
+          "id": "evolution.record-shape",
+          "modality": "must",
+          "text": "收口时用 `review.note` 的可选段登记声明：`ev=artifacts/<file>.md`（复核 artifact）、`c=<kept>/<screened>`（保留数/筛选数）、`cls=<kind>:<n>,...`（六类逐类计数，和必须等于 screened，保留类之和必须等于 kept）。guide 下先 `config.set review.evolution.artifact|candidates|classes=<值>` 登记，菜单会把已登记值带进 review.note 载荷；什么都没登记就是显式 0/0。",
+          "basis": "review.note / config.set 契约（本 Mod）"
+        },
+        {
+          "id": "evolution.declare-not-prove",
+          "modality": "must-not",
+          "text": "不得把登记当成证明：状态机只校验路径形状、计数与分类自洽，读不到 artifact（沙箱无文件系统），也不知道复核是否真的由独立 subagent 执行。任何「已证明建议质量 / 已证明复核独立」的说法都是越界。",
+          "basis": "沙箱白名单（无 io/os）+ review.note 契约"
+        },
+        {
+          "id": "evolution.no-new-carrier",
+          "modality": "must-not",
+          "text": "不为进化流程新增动作族、结算动作、外部检查脚本或宿主改动：载体只允许 AGENTS.md 与 Mod 资源（`src/**` 与 `data/*.json`）。只读查询可以拿来核对声明，但不得成为约束载体。",
+          "basis": "AGENTS.md §一·7"
+        }
+      ],
+      "notes": "登记面是两层：`config.set review.evolution.*` 写运行期覆盖层 `settings.review.evolution.*`，收口时 `review.note` 把它们落到 `review.evolution.*`（单一写入点，随存档与 settlement.json 可见）；`agent.summary.evolution` 只回显这三个键。使用方接入时不需要改这一章，只需在自己的项目章节里补「本仓哪里放复核 artifact」。"
     }
   ]
 }

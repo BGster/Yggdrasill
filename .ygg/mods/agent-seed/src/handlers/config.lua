@@ -74,6 +74,38 @@ function M.install(deps)
       else
         ygg.kv.set("settings.evolution.max_per_run", math.floor(parsed))
       end
+    elseif key == "review.evolution.artifact" then
+      -- 登记面：只校验形状（路径），不读文件、不判断内容。
+      local artifact = trim(value)
+      if artifact ~= "" and not wire.evolution_path_ok(artifact) then
+        problem = TEXTS.beats.review_evolution_bad_path
+      else
+        ygg.kv.set("settings.review.evolution.artifact", artifact)
+      end
+    elseif key == "review.evolution.candidates" then
+      local candidates = trim(value)
+      if candidates == "" then
+        ygg.kv.set("settings.review.evolution.candidates", "")
+      else
+        local kept, screened = wire.parse_candidates(candidates)
+        if kept == nil then
+          problem = TEXTS.beats.review_evolution_bad_candidates
+        else
+          ygg.kv.set("settings.review.evolution.candidates", tostring(kept) .. "/" .. tostring(screened))
+        end
+      end
+    elseif key == "review.evolution.classes" then
+      local classes = trim(value)
+      if classes == "" then
+        ygg.kv.set("settings.review.evolution.classes", "")
+      else
+        local parsed, total = wire.parse_classes(classes)
+        if parsed == nil or total == 0 then
+          problem = TEXTS.beats.review_evolution_bad_classes
+        else
+          ygg.kv.set("settings.review.evolution.classes", wire.format_classes(parsed))
+        end
+      end
     elseif key == "gates.require_all_green" or key == "autosave" or key == "hot_reload" then
       local parsed = to_bool(value)
       if parsed == nil then

@@ -11,6 +11,7 @@ local guide = require("src.guide")
 local props = require("src.proposals")
 local reqs = require("src.requirements")
 local util = require("src.util")
+local wire = require("src.wire")
 
 local TEXTS
 
@@ -26,6 +27,18 @@ local STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_count
   reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_dev_ready, reqs.req_id, reqs.req_job, reqs.req_job_stage, reqs.req_open_total, reqs.stage
 local fill =
   util.fill
+
+-- review.note 载荷：已登记（`config.set review.evolution.*`）就带上，没登记就保持 lesson|score。
+local function review_note_payload()
+  local artifact, candidates, classes = wire.evolution_settings()
+  return wire.format_review_note(
+    TEXTS.beats.default_lesson,
+    tostring(TEXTS.tuning.default_score),
+    artifact,
+    candidates,
+    classes
+  )
+end
 
 local function guide_item(st)
   local section = guide_section(st)
@@ -346,7 +359,7 @@ MENU[STAGE.review] = function()
     items[#items + 1] = {
       text = TEXTS.options.review_note,
       action = "review.note",
-      payload = TEXTS.beats.default_lesson .. "|" .. tostring(TEXTS.tuning.default_score),
+      payload = review_note_payload(),
     }
   else
     items[#items + 1] = { text = TEXTS.options.verify_green, action = "verify.submit", payload = "true" }

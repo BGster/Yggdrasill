@@ -363,17 +363,13 @@ local function narrate_play_mode()
   ygg.narrate(fill(TEXTS.beats.play_receipt, { play = play_mode(), hint = hint }))
 end
 
+-- 演进偏好如实体现在文案：它只是建议口径的标记，本 Mod 不自动修订、不登记修订请求。
 local function evolution_receipt()
   local current = mode()
-  local used = num("evolution.used", 0)
-  local cap = max_per_run()
   local paths = CONFIG.evolution and CONFIG.evolution.allow_paths
   local paths_text = type(paths) == "table" and join(paths, "、") or TEXTS.beats.paths_none
   if current == "auto" then
-    if used >= cap then
-      return fill(TEXTS.beats.evolution_capped, { paths = paths_text, cap = tostring(cap) })
-    end
-    return TEXTS.beats.evolution_auto_pending
+    return fill(TEXTS.beats.evolution_auto, { paths = paths_text, cap = tostring(max_per_run()) })
   elseif current == "suggest" then
     return fill(TEXTS.beats.evolution_suggest, { paths = paths_text })
   end
@@ -436,6 +432,7 @@ RENDER[STAGE.done] = function()
     done = tostring(req_tally(R_DONE)),
     score = tostring(num("review.score", TEXTS.tuning.default_score)),
     lesson = text_of("review.lesson", TEXTS.beats.default_lesson),
+    candidates = text_of("review.evolution.candidates", TEXTS.beats.evolution_none),
   }))
   if play_mode() == "goal" then
     ygg.narrate(TEXTS.beats.play_done_goal)
@@ -515,6 +512,12 @@ local function summary_fields()
     pendingProposals = summary_int(prop_pending_total()),
     requirementCount = summary_int(req_count()),
     conflicts = summary_conflicts(),
+    -- 进化声明（只声称「声明了什么」）：宿主与只读查询可直接核对，不涉及内容质量。
+    evolution = {
+      artifact = text_of("review.evolution.artifact", ""),
+      candidates = text_of("review.evolution.candidates", TEXTS.beats.evolution_none),
+      classes = text_of("review.evolution.classes", ""),
+    },
   }
   local awaiting = summary_awaiting()
   if awaiting ~= nil then
