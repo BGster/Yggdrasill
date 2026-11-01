@@ -354,7 +354,10 @@ git checkout -- .ygg/mods/agent-seed   # 丢掉本阶段改动
 - `manifest.json` 的 `code` 数组已重算
 - 派发序对照通过（§5）
 - `playtest` 到结局，`ygg-lint` 0 error
-- 若有 CI 骨架守卫（种子/项目双层结构），确认 `sync-seed-mod.sh` 已支持 `src/` 目录——**mxbc 不涉及这一条**（它不是双层结构）
+- 若有 CI 骨架守卫（种子/项目双层结构），确认 `sync-seed-mod.sh` 已支持 `src/` 目录：
+  已完成（脚本同步 `mod.lua` + `src/**` + `schemas/`，并检查两侧 `pack.json` 的 `code` 段一致；
+  CI 的骨架守卫四查：`mod.lua` / `src/` / `schemas/` / `code` 段）。**mxbc 不是双层结构，与它无关**；
+  双层实例见下一节的 Yggdrasill 映射。
 
 ---
 
@@ -373,3 +376,29 @@ git checkout -- .ygg/mods/agent-seed   # 丢掉本阶段改动
 | `mod.lua`（入口） | 装配 + 资源读取 + `fsm.define` | ~60 | — |
 
 `§泳道动作` 957 行是最大单块，建议再拆成 `handlers/lanes/{stamp,clear,render}.lua`。
+
+---
+
+## 附二：Yggdrasill agent-seed 的拆分映射表（3630 行 → 21 模块）
+
+双层结构（种子模板 + 项目实例）的实例：两侧骨架逐字节一致，`data/` 各自维护。
+
+| 目标模块 | 来源 `§` 分区 | 风险 | 备注 |
+| --- | --- | --- | --- |
+| `src/util.lua` | `§工具` | 零 | 纯函数，无 install |
+| `src/config.lua` | `§配置` | 低 | 两层配置 + `PLAY_MODES` |
+| `src/requirements.lua` | `§状态` + `§需求` | 中 | `§状态` 与 `§需求` 合一块；`req_satisfied` → `reqs.satisfied` |
+| `src/lanes.lua` | `§泳道`（LANES 表 + lane_text） | 中 | `LANES` 由入口注入 requirements（避免环） |
+| `src/proposals.lua` | `§提案` | 中 | 含 `apply_changes` 与 split/merge/conflict 落地 |
+| `src/gates.lua` | `§门禁` 的函数部分 | 低 | 只读选择器；同段的 `MENU[review]` 归 `menus` |
+| `src/guide.lua` | `§指南` | 低 | 章节索引放进 `install()`（依赖注入后的 PLAYBOOK） |
+| `src/menus.lua` | `§二级菜单页` + `§菜单` + `MENU[STAGE.review]` | 中 | `CONFIG_UI` 折叠成 `menus.*` |
+| `src/render.lua` | `§地图` + `§渲染` + `§摘要` | 中 | `prompt_vars` → `render.prompt_vars`；`agent.summary` 在 `render.register()` |
+| `src/wire.lua` | `§动作解析` | 中 | payload 解析 + `@ext=` 幂等键 |
+| `src/flow.lua` | `§推进` | 中 | `advance` / `refuse` 唯一出口；`stage_ticket` 同模块 |
+| `src/handlers/choice.lua` | `§人类动作门禁` + `ygg.choice_selected` | 高 | **票据与盖章/取证必须同模块** |
+| `src/handlers/*.lua`（其余 9 个） | `§动作 handler` + `§泳道动作` | 中 | 按动作族切：actions / lanes / proposals / review / requirement_ops / gate_actions / config / views / lifecycle |
+| `mod.lua`（入口） | `§资源` + `§状态机` | — | 装配 + `fsm.define`，≈110 行 |
+
+经验：`§泳道动作` 这类「什么都装」的大块按**动作族**切；两处无法机械搬运的耦合是
+`HUMAN.ticket`（与 choice 路由同模块）和 `stage_ticket`（与 advance 同模块）。

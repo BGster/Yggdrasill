@@ -13,7 +13,8 @@
 #   - ts.build：deploy-pages 已构建 client-web，重复无增益。
 #
 # 另有一条**结构守卫**（不属于 playbook `gates` 章的门禁命令）：seed Mod 与项目 Mod 的
-# 骨架文件（`mod.lua` + `schemas/`）必须逐字节一致——`data/` 是各自实例数据，允许不同。
+# 骨架文件（`mod.lua` + `src/**` + `schemas/`，以及 `pack.json` 的 `code` 段）必须一致——
+# `data/` 与 `pack.json` 的 `agent`/`inboxRoutes` 是各自实例数据，允许不同。
 name: check
 
 on:
@@ -50,11 +51,37 @@ jobs:
           proj=.ygg/mods/agent-seed
           fail=0
           if ! diff -u "$seed/mod.lua" "$proj/mod.lua"; then
-            echo "::error::mod.lua 两侧不一致——请运行 scripts/sync-seed-mod.sh" >&2
+            echo "::error::mod.lua 两侧不一致——请运行 scripts/sync-seed-mod.sh --from project" >&2
+            fail=1
+          fi
+          if ! diff -ru "$seed/src" "$proj/src"; then
+            echo "::error::src/ 两侧不一致——请运行 scripts/sync-seed-mod.sh --from project" >&2
             fail=1
           fi
           if ! diff -ru "$seed/schemas" "$proj/schemas"; then
-            echo "::error::schemas/ 两侧不一致——请运行 scripts/sync-seed-mod.sh" >&2
+            echo "::error::schemas/ 两侧不一致——请运行 scripts/sync-seed-mod.sh --from project" >&2
+            fail=1
+          fi
+          # 资源格式契约是三处同源：packages/schema/schemas/ 是单一事实源（D15），
+          # 两份 Mod 的 schemas/ 必须与它逐字节一致。只比 Mod 声明的那几份
+          # （schema 包另有 manifest.json，不是 Mod 资源，不参与）。
+          for f in "$seed"/schemas/*.json; do
+            [ -e "$f" ] || continue
+            name=$(basename "$f")
+            if ! diff -u "packages/schema/schemas/$name" "$f"; then
+              echo "::error::${name} 与 packages/schema/schemas/ 不一致——schema 是单一事实源（D15）" >&2
+              fail=1
+            fi
+          done
+          # pack.json 的 code 段属骨架（agent / inboxRoutes 属实例，允许不同）。
+          if ! python3 - "$seed/pack.json" "$proj/pack.json" <<'PY'
+          import json, sys
+          a = json.load(open(sys.argv[1], encoding="utf-8"))["code"]
+          b = json.load(open(sys.argv[2], encoding="utf-8"))["code"]
+          sys.exit(0 if a == b else 1)
+          PY
+          then
+            echo "::error::pack.json 的 code 段两侧不一致——请运行 scripts/sync-seed-mod.sh --from project" >&2
             fail=1
           fi
           exit "$fail"
