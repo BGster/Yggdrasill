@@ -143,7 +143,9 @@
       "src/gates.lua",
       "src/guide.lua",
       "src/menus.lua",
-      "src/render.lua"
+      "src/render.lua",
+      "src/wire.lua",
+      "src/flow.lua"
     ]
   }
 }

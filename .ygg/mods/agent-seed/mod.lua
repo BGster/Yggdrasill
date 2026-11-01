@@ -18,6 +18,8 @@ local gates = require("src.gates")
 local guide = require("src.guide")
 local menus = require("src.menus")
 local render_mod = require("src.render")
+local wire = require("src.wire")
+local flow = require("src.flow")
 
 config.install({ texts = TEXTS, config = CONFIG })
 reqs.install({ texts = TEXTS, lanes = lanes.LANES })
@@ -27,19 +29,23 @@ gates.install({ texts = TEXTS })
 guide.install({ texts = TEXTS, playbook = PLAYBOOK })
 menus.install({ texts = TEXTS })
 render_mod.install({ texts = TEXTS, config = CONFIG })
+wire.install({ texts = TEXTS })
+flow.install({ texts = TEXTS })
 
 render_mod.register()
 
 local MODES, PLAY_MODES, effective, mode, num, play_mode, strict_gates, text_of =
   config.MODES, config.PLAY_MODES, config.effective, config.mode, config.num, config.play_mode, config.strict_gates, config.text_of
+local advance, refuse, reject, reject_payload =
+  flow.advance, flow.refuse, flow.reject, flow.reject_payload
 local gate_evidence_problem, gate_kind, gate_next, gate_problem, gate_rev_ok, gate_total, req_artifacts =
   gates.gate_evidence_problem, gates.gate_kind, gates.gate_next, gates.gate_problem, gates.gate_rev_ok, gates.gate_total, gates.req_artifacts
 local guide_section, narrate_guide =
   guide.guide_section, guide.narrate_guide
 local LANES, free_lanes, lane_text =
   lanes.LANES, lanes.free_lanes, lanes.lane_text
-local CONFIG_UI, MENU, dispatch_candidates, menu =
-  menus.CONFIG_UI, menus.MENU, menus.dispatch_candidates, menus.menu
+local CONFIG_UI, dispatch_candidates, menu =
+  menus.CONFIG_UI, menus.dispatch_candidates, menus.menu
 local P_ACCEPTED, P_PENDING, P_REJECTED, P_STALE, apply_changes, prop_append, prop_by_ext, prop_count, prop_id, prop_key, prop_next, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status, req_do_conflict, req_do_merge, req_do_split =
   props.P_ACCEPTED, props.P_PENDING, props.P_REJECTED, props.P_STALE, props.apply_changes, props.prop_append, props.prop_by_ext, props.prop_count, props.prop_id, props.prop_key, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status, props.req_do_conflict, props.req_do_merge, props.req_do_split
 local narrate_map, narrate_req_list, prompt_vars, render, req_panel_text, stage_prompt =
@@ -48,59 +54,14 @@ local R_ACCEPT, R_ANALYSIS_REVIEW, R_ANALYZING, R_DEVELOPING, R_DEV_REVIEW, R_DO
   reqs.R_ACCEPT, reqs.R_ANALYSIS_REVIEW, reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DEV_REVIEW, reqs.R_DONE, reqs.R_DRAFT, reqs.R_DROPPED, reqs.R_MERGED, reqs.R_PLANNING, reqs.R_PLAN_GATE, reqs.R_PLAN_REVIEW, reqs.R_READY, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_advance_after_accept, reqs.req_append, reqs.req_bump_rev, reqs.req_capacity, reqs.req_closed, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_deps, reqs.req_deps_text, reqs.req_dev_blocked_text, reqs.req_dev_ready, reqs.req_display, reqs.req_id, reqs.req_index_of, reqs.req_job_stage, reqs.req_key, reqs.req_lane, reqs.req_open_total, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.req_title, reqs.req_validate_deps, reqs.stage
 local contains, cut, fill, join, split, to_bool, trim =
   util.contains, util.cut, util.fill, util.join, util.split, util.to_bool, util.trim
+local inbox_mark, inbox_replay, parse_amend, parse_conflict, parse_deps, parse_intake, parse_merge, parse_proposal, parse_requirement, parse_resolve, parse_split, probe_payload_ok, strip_ext =
+  wire.inbox_mark, wire.inbox_replay, wire.parse_amend, wire.parse_conflict, wire.parse_deps, wire.parse_intake, wire.parse_merge, wire.parse_proposal, wire.parse_requirement, wire.parse_resolve, wire.parse_split, wire.probe_payload_ok, wire.strip_ext
 
 local TEXTS = ygg.data("ygg:scene/texts")
 
 local CONFIG = ygg.data("ygg:agent/config")
 
 local PLAYBOOK = ygg.data("ygg:agent/playbook")
-
-local function advance(target)
-  -- 转场即离开二级页（子页跟着阶段走，不跨阶段）。
-  CONFIG_UI.set_page("")
-  if target ~= stage() then
-    ygg.emit("stage.advance", target)
-  end
-  ygg.narrative["goto"]("node:render")
-end
-
-local function allowed_list(current)
-  -- 只看阶段菜单本体：拒绝文案里不能列出 config 子页的项（子页是展示层，不是阶段能力）。
-  local builder = MENU[current]
-  local items = nil
-  if builder ~= nil then
-    items = builder()
-  end
-  if items == nil then
-    return TEXTS.beats.allowed_none
-  end
-  local names = {}
-  for i = 1, #items do
-    if not contains(names, items[i].action) then
-      names[#names + 1] = items[i].action
-    end
-  end
-  return join(names, "、")
-end
-
-local function refuse(template, action, detail)
-  local current = stage()
-  ygg.narrate(fill(template, {
-    action = tostring(action),
-    stage = current,
-    allowed = allowed_list(current),
-    detail = detail or TEXTS.beats.rejected_default,
-  }))
-  render()
-end
-
-local function reject(action, detail)
-  return refuse(TEXTS.beats.rejected, action, detail)
-end
-
-local function reject_payload(action, detail)
-  return refuse(TEXTS.beats.rejected_payload, action, detail)
-end
 
 local HUMAN = {}
 
@@ -143,245 +104,6 @@ function HUMAN.label(action, payload)
     end
   end
   return nil
-end
-
-local function probe_payload_ok(payload)
-  if payload == nil then
-    return true
-  end
-  if type(payload) == "number" then
-    return payload == 0
-  end
-  if type(payload) == "string" then
-    local raw = trim(payload)
-    return raw == "" or raw == "0" or raw == "full"
-  end
-  return false
-end
-
-local function valid_ext(ext)
-  if type(ext) ~= "string" then
-    return false
-  end
-  local raw = trim(ext)
-  if raw == "" or #raw > 64 then
-    return false
-  end
-  return raw:find("%s") == nil
-end
-
-local function parse_intake(payload)
-  if type(payload) ~= "string" then
-    return nil, nil, fill(TEXTS.beats.bad_payload, { action = "task.intake" })
-  end
-  local raw = trim(payload)
-  if raw == "" then
-    return TEXTS.beats.default_task_title, TEXTS.beats.default_task_desc, nil
-  end
-  local title, description = cut(raw, "|")
-  title = trim(title)
-  description = trim(description or "")
-  if title == "" then
-    title = TEXTS.beats.default_task_title
-  end
-  if description == "" then
-    description = TEXTS.beats.default_task_desc
-  end
-  return title, description, nil
-end
-
-local function parse_deps(raw)
-  local out = {}
-  if type(raw) ~= "string" then
-    return out
-  end
-  local raw_text = trim(raw)
-  if raw_text == "" or raw_text == "-" then
-    return out
-  end
-  for _, part in ipairs(split(raw_text, ",")) do
-    local piece = trim(part)
-    if piece ~= "" then
-      out[#out + 1] = piece
-    end
-  end
-  return out
-end
-
-local function parse_requirement(payload)
-  if type(payload) ~= "string" then
-    return nil, nil, nil, nil, fill(TEXTS.beats.bad_payload, { action = "requirement.add" })
-  end
-  local raw = trim(payload)
-  if raw == "" then
-    return TEXTS.beats.default_req_title, TEXTS.beats.default_req_desc, "", {}, nil
-  end
-  local parts = split(raw, "|")
-  local title = trim(parts[1] or "")
-  local description = trim(parts[2] or "")
-  local ext = ""
-  local dep_raw = ""
-  if #parts >= 3 then
-    if valid_ext(parts[3]) then
-      ext = trim(parts[3])
-      dep_raw = trim(parts[4] or "")
-    else
-      description = trim(description .. "|" .. trim(parts[3]))
-    end
-  end
-  if title == "" then
-    title = TEXTS.beats.default_req_title
-  end
-  if description == "" then
-    description = TEXTS.beats.default_req_desc
-  end
-  return title, description, ext, parse_deps(dep_raw), nil
-end
-
-local function strip_ext(payload)
-  if type(payload) ~= "string" then
-    return payload, ""
-  end
-  local marker = "|@ext="
-  local index = payload:find(marker, 1, true)
-  if index == nil then
-    return payload, ""
-  end
-  return payload:sub(1, index - 1), trim(payload:sub(index + #marker))
-end
-
-local function inbox_replay(ext)
-  if type(ext) ~= "string" or ext == "" then
-    return false
-  end
-  if text_of("inbox.last", "") ~= ext then
-    return false
-  end
-  ygg.narrate(fill(TEXTS.beats.req_replayed_op, { ext = ext }))
-  return true
-end
-
-local function inbox_mark(ext)
-  if type(ext) == "string" and ext ~= "" then
-    ygg.kv.set("inbox.last", ext)
-  end
-end
-
-local function parse_proposal(payload)
-  if type(payload) ~= "string" then
-    return nil, fill(TEXTS.beats.bad_payload, { action = "proposal.submit" })
-  end
-  local parts = split(trim(payload), "|")
-  if #parts < 4 then
-    return nil, TEXTS.beats.req_prop_usage
-  end
-  local req_id_text = trim(parts[1])
-  local rev = tonumber(trim(parts[2] or ""))
-  local stage_name = trim(parts[3] or "")
-  if rev == nil or not contains({ "analysis", "plan", "development" }, stage_name) then
-    return nil, TEXTS.beats.req_prop_usage
-  end
-  return {
-    req = req_id_text,
-    rev = math.floor(rev),
-    stage = stage_name,
-    summary = trim(parts[4] or ""),
-    artifacts = trim(parts[5] or ""),
-    changes = trim(parts[6] or ""),
-    ext = trim(parts[7] or ""),
-  }, nil
-end
-
-local function parse_split(payload)
-  if type(payload) ~= "string" then
-    return nil, nil, fill(TEXTS.beats.bad_payload, { action = "requirement.split" })
-  end
-  local parts = split(trim(payload), "|")
-  local parent = trim(parts[1] or "")
-  local children = {}
-  for i = 2, #parts do
-    local title = trim(parts[i])
-    if title ~= "" then
-      children[#children + 1] = title
-    end
-  end
-  if parent == "" or #children < 2 then
-    return nil, nil, TEXTS.beats.req_split_usage
-  end
-  return parent, children, nil
-end
-
-local function parse_merge(payload)
-  if type(payload) ~= "string" then
-    return nil, nil, nil, fill(TEXTS.beats.bad_payload, { action = "requirement.merge" })
-  end
-  local parts = split(trim(payload), "|")
-  local ids = {}
-  for _, part in ipairs(split(trim(parts[1] or ""), ",")) do
-    local piece = trim(part)
-    if piece ~= "" then
-      ids[#ids + 1] = piece
-    end
-  end
-  if #ids < 2 then
-    return nil, nil, nil, TEXTS.beats.req_merge_usage
-  end
-  return ids, trim(parts[2] or ""), trim(parts[3] or ""), nil
-end
-
-local function parse_amend(payload)
-  if type(payload) ~= "string" then
-    return nil, nil, nil, nil, fill(TEXTS.beats.bad_payload, { action = "requirement.amend" })
-  end
-  local parts = split(trim(payload), "|")
-  local id = trim(parts[1] or "")
-  if id == "" then
-    return nil, nil, nil, nil, TEXTS.beats.req_amend_usage
-  end
-  return id, trim(parts[2] or ""), trim(parts[3] or ""), trim(parts[4] or ""), nil
-end
-
-local function parse_conflict(payload)
-  if type(payload) ~= "string" then
-    return nil, nil, fill(TEXTS.beats.bad_payload, { action = "requirement.conflict" })
-  end
-  local parts = split(trim(payload), "|")
-  local ids = {}
-  for _, part in ipairs(split(trim(parts[1] or ""), ",")) do
-    local piece = trim(part)
-    if piece ~= "" then
-      ids[#ids + 1] = piece
-    end
-  end
-  if #ids ~= 2 then
-    return nil, nil, TEXTS.beats.req_conflict_usage
-  end
-  local note = trim(parts[2] or "")
-  if note == "" then
-    note = TEXTS.beats.req_conflict_default
-  end
-  return ids, note, nil
-end
-
-local RESOLVE_MODES = { "keep_both", "keep_first", "revise" }
-
-local function parse_resolve(payload)
-  if type(payload) ~= "string" then
-    return nil, nil, nil, fill(TEXTS.beats.bad_payload, { action = "requirement.resolve" })
-  end
-  local parts = split(trim(payload), "|")
-  local ids = {}
-  for _, part in ipairs(split(trim(parts[1] or ""), ",")) do
-    local piece = trim(part)
-    if piece ~= "" then
-      ids[#ids + 1] = piece
-    end
-  end
-  local mode = trim(parts[2] or "")
-  if #ids ~= 2 or not contains(RESOLVE_MODES, mode) then
-    return nil, nil, nil, fill(TEXTS.beats.req_resolve_usage, { modes = join(RESOLVE_MODES, " / ") })
-  end
-  return ids, mode, trim(parts[3] or ""), nil
 end
 
 ygg.on("task.intake", function(payload)
