@@ -6,6 +6,7 @@
 local M = {}
 
 local guide = require("src.guide")
+local menus = require("src.menus")
 local render_mod = require("src.render")
 local reqs = require("src.requirements")
 local util = require("src.util")
@@ -15,8 +16,10 @@ local TEXTS
 
 local guide_section, narrate_guide =
   guide.guide_section, guide.narrate_guide
-local narrate_map, render =
-  render_mod.narrate_map, render_mod.receipt
+local narrate_map, render, stage_prompt, prompt_vars =
+  render_mod.narrate_map, render_mod.receipt, render_mod.stage_prompt, render_mod.prompt_vars
+local menu =
+  menus.menu
 local stage =
   reqs.stage
 local fill, trim =
@@ -39,7 +42,10 @@ function M.install(deps)
   end)
   ygg.on("map.show", function(payload)
     if probe_payload_ok(payload) then
-      narrate_map(stage())
+      -- 默认出「当前节点 + 出边」；`map.show full` 才出设计全图。
+      local current = stage()
+      narrate_map(current, trim(payload) == "full", menu(current),
+        fill(stage_prompt(current), prompt_vars()))
     else
       ygg.narrate(fill(TEXTS.beats.map_rejected, { got = tostring(payload), usage = TEXTS.beats.map_usage }))
     end

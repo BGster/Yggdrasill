@@ -31,8 +31,8 @@ local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, pr
   props.P_PENDING, props.prop_count, props.prop_id, props.prop_key, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
 local R_ACCEPT, R_ANALYSIS_REVIEW, R_ANALYZING, R_DEVELOPING, R_DEV_REVIEW, R_DONE, R_DRAFT, R_DROPPED, R_MERGED, R_PLANNING, R_PLAN_GATE, R_PLAN_REVIEW, R_READY, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_rev, req_stale, req_status, req_tally, req_title, stage =
   reqs.R_ACCEPT, reqs.R_ANALYSIS_REVIEW, reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DEV_REVIEW, reqs.R_DONE, reqs.R_DRAFT, reqs.R_DROPPED, reqs.R_MERGED, reqs.R_PLANNING, reqs.R_PLAN_GATE, reqs.R_PLAN_REVIEW, reqs.R_READY, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
-local fill, join, spaces =
-  util.fill, util.join, util.spaces
+local fill, join, spaces, trim =
+  util.fill, util.join, util.spaces, util.trim
 
 local function req_panel_text()
   local parts = {}
@@ -237,7 +237,56 @@ local function out_edges(node)
   return out
 end
 
-local function narrate_map(current)
+-- 出边的目标阶段：`MAP_EDGES` 是唯一来源（不另建第二份边表）。
+-- 不在表里的动作（guide.show / map.show / requirement.* / config.* / lane.*）= 不换阶段（自环）。
+-- 特例：review → coordinate 的打回边在表里记作 `verify.submit=false`，而菜单里的
+-- 失败项载荷是 `all_green=false;report=…`，所以要按载荷前缀补一次查找。
+local function to_stage(action, payload)
+  for i = 1, #MAP_EDGES do
+    if MAP_EDGES[i].action == action then
+      return MAP_EDGES[i].to
+    end
+  end
+  if action == "verify.submit" and type(payload) == "string" then
+    if trim(payload):sub(1, 15) == "all_green=false" then
+      for i = 1, #MAP_EDGES do
+        if MAP_EDGES[i].action == "verify.submit=false" then
+          return MAP_EDGES[i].to
+        end
+      end
+    end
+  end
+  return nil
+end
+
+local function narrate_map(current, full, items, prompt)
+  if not full then
+    -- 操作视图：剧情是当前节点，选择是它的有向出边（与 pendingChoice 同源）。
+    ygg.narrate(fill(TEXTS.beats.map_local_head, { stage = current, panel = req_panel_text() }))
+    if type(prompt) == "string" and prompt ~= "" then
+      ygg.narrate(prompt)
+    end
+    if items == nil or #items == 0 then
+      ygg.narrate(TEXTS.beats.map_terminal)
+    else
+      for i = 1, #items do
+        local item = items[i]
+        -- 当前 MENU 没有 enabled=false 的项，所以 state 恒为「可执行」；
+        -- 引入条件项时必须同时补 map_edge_blocked 与 choice 侧的拦截（不能只改渲染）。
+        ygg.narrate(fill(TEXTS.beats.map_local_edge, {
+          index = tostring(i),
+          text = item.text,
+          target = to_stage(item.action, item.payload) or current,
+          state = TEXTS.beats.map_edge_ready,
+          when = item.when or TEXTS.beats.map_edge_no_condition,
+        }))
+      end
+    end
+    ygg.narrate(TEXTS.beats.map_local_foot)
+    return
+  end
+
+  -- 设计视图：仅 `map.show full` 输出；不是日常操作视图。
   ygg.narrate(fill(TEXTS.beats.map_head, { stage = current, panel = req_panel_text() }))
   local blank = spaces(MAP_LABEL_WIDTH)
   for i = 1, #MAP_NODES do
