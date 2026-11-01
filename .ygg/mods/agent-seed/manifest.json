@@ -86,9 +86,9 @@
       "sha256": "f95c78e037ed321a7b9633484037deb16d1e11b0c4eb2b57e67e514e9a88a038"
     },
     {
-      "byteLength": 17213,
+      "byteLength": 17389,
       "path": "src/render.lua",
-      "sha256": "c4496aeaadab8681f382c833e4bb5ac3a0dbaf2114bd785035956914e0a2b543"
+      "sha256": "c957ad092c9af18edd63ad84a97a2ce16ee2aeeef11c4458c13d889b04371b9b"
     },
     {
       "byteLength": 13035,

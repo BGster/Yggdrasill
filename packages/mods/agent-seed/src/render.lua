@@ -363,7 +363,6 @@ RENDER[STAGE.coordinate] = function()
   }))
   ygg.narrate(fill(stage_prompt(STAGE.coordinate), prompt_vars()))
   narrate_req_panel()
-  ygg.narrate(evolution_receipt())
   narrate_stage_guide(current)
   ygg.choice(TEXTS.prompts.coordinate, option_texts(menu(current)))
 end
@@ -376,8 +375,7 @@ RENDER[STAGE.review] = function()
     done = tostring(req_tally(R_DONE)),
     gates = tostring(strict_gates()),
   }))
-  ygg.narrate(TEXTS.beats.secret_redline)
-  ygg.narrate(evolution_receipt())
+  -- 数据红线只在开局（event.start）与规则章里出现；常规步不重复。
   narrate_req_panel()
   narrate_stage_guide(current)
   ygg.choice(TEXTS.prompts.review, option_texts(menu(current)))
@@ -403,6 +401,10 @@ local function render()
     CONFIG_UI.set_page("")
   end
   narrate_play_mode()
+  -- 演进建议只在配置二级页输出：它是「要你决定的事」而不是每步都要读的处境。
+  if CONFIG_UI.page() == "config" then
+    ygg.narrate(evolution_receipt())
+  end
   local renderer = RENDER[current]
   if renderer == nil then
     ygg.narrate(fill(TEXTS.beats.unknown_stage, { stage = tostring(current) }))
