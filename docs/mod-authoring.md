@@ -191,6 +191,10 @@ cargo run -p ygg-sandbox --example pack -- packages/mods/<你的mod>
 
 ### 多文件 Mod（`code` 段）
 
+> **已有单文件 Mod 想拆分**：分阶段步骤、每阶段验收口径、`§` 分区到模块的映射表、
+> 两类硬骨头（全局函数 / 闭包上值）与派发序对照方法，见
+> [`migration-single-to-multi.md`](migration-single-to-multi.md)。
+
 单文件与多文件走**同一条装载管线**：没有 `code` 段时模块表为空，`require`
 照样存在，但对任何名字都给可读拒绝
 （`sandbox denied: module 'x.y' is not available …`）——这就是既有行为，
