@@ -110,6 +110,7 @@ mkdir -p .ygg/bin && cp "$YGGDRASILL_ROOT/target/release/examples/agent" .ygg/bi
 ```bash
 A=".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <局名> --runs-root .ygg/runs"
 $A --resume --drive stdin                                     # 交互：人来选（缺省）
+$A --resume --event config.set --payload '"goal.authorization=用户当次授权：使用 goal 模式推进"'   # 先登记本局授权（run 级，可随时切回 guide）
 $A --resume --event config.set --payload '"play.mode=goal"'   # 自行接管决策：读全回执、按处境直接派发（可随时切回 guide）
 $A --resume --drive none                                      # 只看当前处境，不推进
 $A --resume --event guide.show --payload '"harness"'          # 查规则：按章节 id 定点查阅（harness / credentials / gates …）
