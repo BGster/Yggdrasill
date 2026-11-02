@@ -317,22 +317,6 @@ MENU[STAGE.coordinate] = function()
   return items
 end
 
-MENU[STAGE.review] = function()
-  local items = append_all({}, resolve_items())
-  items[#items + 1] = { text = TEXTS.options.verify_green, action = "verify.submit", payload = "true" }
-  items[#items + 1] = {
-    text = TEXTS.options.verify_fail,
-    action = "verify.submit",
-    payload = "all_green=false;report=" .. TEXTS.beats.default_gate_report,
-  }
-  items[#items + 1] = guide_item(STAGE.review)
-  items[#items + 1] = map_item(STAGE.review)
-  items[#items + 1] = req_list_item()
-  items[#items + 1] = req_add_item()
-  items[#items + 1] = CONFIG_UI.item()
-  return items
-end
-
 local function menu(st)
   -- 二级页生效时只返回子页项（渲染与选择都走这里，顶层项暂时让位）。
   if CONFIG_UI.open(st) then
