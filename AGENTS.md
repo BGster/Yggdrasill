@@ -102,6 +102,16 @@
   保证全 1 默认路径能走「零候选登记 → review.note」。仅当首项是 `review.note` 时 `nextEndsRun=true`，
   此时先切 `closing`（阻止新写入 + 最后一次 drain 排在收口之前）再派发。
   `agent.summary.evolution` 回显归档的 artifact / summary / candidates / classes 四键。
+- **行为验收（改 Mod 源码 / 剧情图必跑）**：改 `.ygg/mods/agent-seed/src/**`（状态机、门禁、渲染层）
+  或 `.ygg/mods/agent-seed/data/scenes.json` 的 map 文案时，除 lint 与全 1 playtest 外**必须**跑
+  `cargo test -p ygg-sandbox --test agent_seed_semantics`
+  （7 条：accept 门禁正常打回 / accept 门禁 amend→stale / plan 门禁打回 / dev 提案打回（未 amend 与
+  amend 两路）/ legacy 缺 `plan_ok` 存档 / map 操作视图与设计视图文案 / 两侧 Mod 全 1 走查）。
+  全 1 playtest 只覆盖 happy path（`gate.reject` / `requirement.amend` / `proposal.reject` 的分叉一条都不走）；
+  `/tmp` 下的临时探针**只能补充**，不能替代这条测试；没覆盖到的场景必须逐条声明。
+  判据三问（见 §一·7）：① 拦的动作是「改完 Mod 源码或 map 文案，只跑 lint 与全 1 就宣称验收」；
+  ② 违规的可见表现是分叉语义与 map 措辞退化在门禁里恒绿，缺陷只在实跑时暴露；
+  ③ 下次用该命令（7/7）确认生效，并可用一次变异探针（把旧语义改回去 → 该测试必须红）自证断言不是空转。
 
 ## 二、冷启动
 
