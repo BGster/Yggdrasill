@@ -133,7 +133,8 @@ draft ─dispatch→ analyzing ─proposal→ analysis_review ─accept→ plann
 **两个强制门禁**（真实状态 + 动作约束，goal 也不能跳）：
 
 1. `plan_gate`：`gate.approve` → `ready`；`gate.reject` → `planning`（重做）。
-2. `accept` → accept_gate：`gate.approve` 要求 **artifacts 非空** → `done`；`gate.reject` → `ready`（重进开发队列）。
+2. `accept` → accept_gate：`gate.approve` 要求 **artifacts 非空** → `done`；`gate.reject` 保留 `plan_ok`
+   （未 amend → `ready` 重进开发队列；待批期间被 amend 则 `plan_ok` 已作废 → 停在 `planning` 强制重规划）。
    两者都校验 `gate_rev == req.rev`，待批期间被 amend 即判 stale，不得批准。
 
 ## 三、提案协议（subagent 只建议，不改共享状态）

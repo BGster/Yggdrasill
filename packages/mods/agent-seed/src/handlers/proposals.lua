@@ -222,8 +222,9 @@ function M.install(deps)
     local index = prop_req(prop_index)
     local stage_name = prop_stage(prop_index)
     ygg.kv.set(prop_key(prop_index, "status"), P_REJECTED)
-    -- 5 态下三路回退只有两个落点：analysis → draft；plan / development → planning
-    -- （development 回退时 plan_ok 仍为真，展示名即 ready；plan 回退时 plan_ok 仍为假）。
+    -- 5 态下三路回退只有两个落点：analysis → draft；plan / development → planning（展示名由
+    -- plan_ok 派生而不落存储）：development 回退沿用原值——未 amend 即「旧 ready」，amend 过
+    -- 则 req_bump_rev 早已把它置假，落回 planning；plan 回退时 plan_ok 仍为假。
     local back = { analysis = R_DRAFT, plan = R_PLANNING, development = R_PLANNING }
     req_release(index)
     ygg.kv.set(req_key(index, "status"), back[stage_name] or R_DRAFT)

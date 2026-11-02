@@ -25,8 +25,8 @@ local HUMAN =
   choice.HUMAN
 local render =
   render_mod.receipt
-local R_DONE, R_PLANNING, STAGE, req_id, req_index_of, req_key, req_phase_name, req_push_history, req_release, req_rev, req_sync_conflicts, stage =
-  reqs.R_DONE, reqs.R_PLANNING, reqs.STAGE, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_sync_conflicts, reqs.stage
+local R_DONE, R_PLANNING, STAGE, req_id, req_index_of, req_key, req_phase_name, req_plan_ok, req_push_history, req_release, req_rev, req_sync_conflicts, stage =
+  reqs.R_DONE, reqs.R_PLANNING, reqs.STAGE, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_plan_ok, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_sync_conflicts, reqs.stage
 local cut, fill, trim =
   util.cut, util.fill, util.trim
 
@@ -100,10 +100,22 @@ function M.install(deps)
       return reject_payload("gate.reject", TEXTS.beats.req_gate_none)
     end
     local kind = gate_kind(index)
-    -- 打回落点：plan 打回 → planning（plan_ok 仍假）；accept 打回 → planning（plan_ok 置真，即旧 ready）。
+    -- 打回落点（两侧共用一条：存储态一律回 planning，展示名由 plan_ok 派生）：
+    --   plan 打回   → plan_ok 置假 —— 计划没过门禁，必须重派 plan；
+    --   accept 打回 → plan_ok 沿用 keep —— 未 amend 即旧 ready（重进开发队列，
+    --                 再次 dispatch 派的是 development）；amend 过则 req_bump_rev 已把
+    --                 plan_ok 置假，keep 为假 → 停在 planning 强制重规划。
+    -- keep 必须在写 status **之前**取：legacy 行（本模型之前创建，plan_ok 字段缺席）
+    -- 靠 req_plan_ok 按「当前状态」推断——developing / done 视为已过 plan 门禁；
+    -- 先把 status 写成 planning 再推断只会拿到假值，把在途的开发需求误打回 planning。
+    local keep = req_plan_ok(index)
     ygg.kv.set(req_key(index, "status"), R_PLANNING)
     ygg.kv.set(req_key(index, "gate"), "")
-    ygg.kv.set(req_key(index, "plan_ok"), kind ~= "plan")
+    if kind == "plan" then
+      ygg.kv.set(req_key(index, "plan_ok"), false)
+    else
+      ygg.kv.set(req_key(index, "plan_ok"), keep)
+    end
     req_release(index)
     -- 打回不改 rev（执行方下一轮提案仍用当前 rev），但记录反馈供下轮参考。
     ygg.kv.set(req_key(index, "feedback"), trim(feedback or "") ~= "" and trim(feedback) or TEXTS.beats.req_reject_default)

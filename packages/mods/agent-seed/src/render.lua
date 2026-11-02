@@ -186,7 +186,8 @@ local MAP_EDGES = {
   { from = STAGE.review, to = STAGE.done, action = "review.note", note = "map_note_ending" },
 }
 
--- 需求级流水线（设计视图）= 5 个存储态；每行中列是「态内的两跳」（提案 → 验收 / 门禁）。
+-- 需求级流水线（设计视图）= 5 个存储态；每行中列是「态内的三跳」（提案 → 验收 → 门禁）。
+-- 上一轮这里漏了中间那跳 proposal.accept，读起来像「提案直接进门禁」，方向是反的。
 local PIPELINE = {
   { node = "[draft]", action = "requirement.dispatch", target = "[analyzing]", note = "map_note_job" },
   {
@@ -197,7 +198,7 @@ local PIPELINE = {
   },
   {
     node = "[planning]",
-    action = "proposal → gate.approve",
+    action = "proposal → proposal.accept → gate.approve",
     target = "[planning·plan_ok]",
     note = "map_note_gate_plan",
   },
@@ -209,20 +210,33 @@ local PIPELINE = {
   },
   {
     node = "[developing]",
-    action = "proposal → gate.approve",
+    action = "proposal → proposal.accept → gate.approve",
     target = "[done]",
     note = "map_note_gate_accept",
   },
 }
 
--- 旁路（不进主流水线）：split / merge 派生的新需求落回 draft；dropped 是人工放弃。
+-- 旁路（不进主流水线）：左列是**可变前件**（不是状态，是可做该操作的条件），右列是结果终态。
+-- 旧版的左右是反的——把 split / merged / dropped 这些终态摆在左列，读起来像「终态还能再拆
+-- 一次」。方向修正：前件 = draft / analyzing / planning（无在途工作，见 req_graph_mutable）；
+-- keep_first 的前件是「draft / ready 的冲突对」（见 requirement.resolve 的守卫）。
 local PIPELINE_BYPASS = {
-  { node = "[split]", action = "requirement.split", target = "[children·draft]", note = "map_note_split" },
-  { node = "[merged]", action = "requirement.merge", target = "[new·draft]", note = "map_note_merge" },
   {
-    node = "[dropped]",
+    node = "[draft/analyzing/planning]",
+    action = "requirement.split",
+    target = "[split] + [children·draft]",
+    note = "map_note_split",
+  },
+  {
+    node = "[draft/analyzing/planning]",
+    action = "requirement.merge",
+    target = "[merged] + [new·draft]",
+    note = "map_note_merge",
+  },
+  {
+    node = "[draft/ready 冲突对]",
     action = "requirement.resolve keep_first",
-    target = "[—]",
+    target = "[dropped]",
     note = "map_note_dropped",
   },
 }
@@ -318,7 +332,9 @@ local function narrate_map(current, full, items, prompt)
     else
       for i = 1, #items do
         local item = items[i]
-        -- 当前 MENU 没有 enabled=false 的项，所以 state 恒为「可执行」；
+        -- 当前 MENU 没有 enabled=false 的项，所以 state 恒为「可选择」；但当 `item.when`
+        -- 缺失时打印的是「条件未展示」而不是「无额外条件」——渲染层看不见 choice 侧的真实
+        -- 前置（那在候选构造里），不得替它担保「没有条件」。
         -- 引入条件项时必须同时补 map_edge_blocked 与 choice 侧的拦截（不能只改渲染）。
         ygg.narrate(fill(TEXTS.beats.map_local_edge, {
           index = tostring(i),

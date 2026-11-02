@@ -36,9 +36,9 @@
       "sha256": "0cbee24d2a430305e60714b2cc000ca00d30aded29b6381bbfd4a40f961545af"
     },
     {
-      "byteLength": 4921,
+      "byteLength": 5754,
       "path": "src/handlers/gate_actions.lua",
-      "sha256": "13471b3445be1515664eb38b7b646064a99ee0fafe40b23000f88669d0e6dee9"
+      "sha256": "3e350937873f887cbf43530641fdc068c5498c8670588388ac2e8978fd172d82"
     },
     {
       "byteLength": 4930,
@@ -51,9 +51,9 @@
       "sha256": "b2722bab36b04cf6f651ed5ed3557369fbba01f18c1dca3918cb0400922218bd"
     },
     {
-      "byteLength": 9966,
+      "byteLength": 10087,
       "path": "src/handlers/proposals.lua",
-      "sha256": "43b44510e2baab31306961661c9fb6a87b7f746b8479da2f7c18ffdff14c821e"
+      "sha256": "09f387d11439d6f2881fafe80702c54a939d20ab57c918057772b1fd9641132b"
     },
     {
       "byteLength": 14158,
@@ -86,9 +86,9 @@
       "sha256": "7e12c144971a7f971c4b3025c20f0db45aacc419a8ba6fd598dbf33ef6ada8cc"
     },
     {
-      "byteLength": 22096,
+      "byteLength": 22968,
       "path": "src/render.lua",
-      "sha256": "d08c5a52eb76299c04b489fcbe03a4d53b0f83dd7a456c0722a99d6ca259f91d"
+      "sha256": "dee3f2aded37496866ea6f19304620221628df2e24004cdc4311646d48052bd4"
     },
     {
       "byteLength": 17807,
@@ -108,12 +108,12 @@
   ],
   "entries": [
     {
-      "byteLength": 31035,
+      "byteLength": 31087,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "9127e031024495301a0fd5b5d73c0c9090effcb3750cd5f0169a2d4ddf0b3453"
+      "sha256": "0d0b0e1b228c86f63ac81859b3a009d93e25a38cef2db38bf8ad2f4664619dbd"
     },
     {
       "byteLength": 490,
@@ -124,12 +124,12 @@
       "sha256": "33392d0c56007a02dff36cef2c232c299a0cf9c47f3d779fd2e9bf01cb07f4a4"
     },
     {
-      "byteLength": 70449,
+      "byteLength": 71580,
       "id": "ygg:agent/playbook",
       "kind": "agent-playbook",
       "path": "data/playbook.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
-      "sha256": "e9490cfcea9a84e69ccf70d99d20e59100434434a384f2050b847e534793fd62"
+      "sha256": "b52c77a027c03d112502077fb472e60c49bd534ac35533b418eacdfe4e1ef003"
     }
   ],
   "schemaVersion": 1
