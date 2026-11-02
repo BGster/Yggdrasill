@@ -370,6 +370,12 @@
           "basis": "AGENTS.md §五"
         },
         {
+          "id": "gates.mod-semantics-matrix",
+          "modality": "must",
+          "text": "改 `.ygg/mods/agent-seed/src/**`（状态机 / 门禁 / 渲染）或 `.ygg/mods/agent-seed/data/scenes.json` 的 map 文案时，门禁清单在 lint 与全 1 playtest 之外必须加跑 `cargo test -p ygg-sandbox --test agent_seed_semantics`：7 条 = accept 门禁正常打回 / accept 门禁 amend→stale / plan 门禁打回 / dev 提案打回（未 amend 与 amend 两路）/ legacy 缺 `plan_ok` 存档 / map 操作视图与设计视图文案 / 两侧 Mod 全 1 走查。全 1 playtest 只覆盖 happy path，分叉（`gate.reject` / `requirement.amend` / `proposal.reject`）一条都不走；`/tmp` 下的临时探针只能补充、不能替代这条测试；未覆盖的场景必须在汇报里逐条声明。判据三问：① 拦的动作是「改完 Mod 源码或 map 文案只跑 lint 与全 1 就宣称验收」；② 违规的可见表现是分叉语义与 map 措辞退化在门禁里恒绿、缺陷只在实跑时暴露；③ 下次用该命令（7/7）确认生效，并可用一次变异探针（把旧语义改回去 → 该测试必须红）自证断言不是空转。",
+          "basis": "AGENTS.md §一·9 行为验收；crates/ygg-sandbox/tests/agent_seed_semantics.rs"
+        },
+        {
           "id": "gates.no-wasm-pack",
           "modality": "must-not",
           "text": "不得用 wasm-pack 构建 wasm 绑定：EH 模块需 `wasm-bindgen --reference-types`，wasm-pack 不透传该旗标；构建链固定 `scripts/build-wasm.sh`（cargo + wasm-bindgen CLI 两步）。",
@@ -969,8 +975,8 @@
         {
           "id": "harness.playtest",
           "modality": "must",
-          "text": "冒烟：cargo run --example playtest -- .ygg/mods/agent-seed（默认全 1 走查到【结局）。",
-          "basis": "AGENTS.md §8（迁移前）"
+          "text": "冒烟：cargo run --example playtest -- .ygg/mods/agent-seed（默认全 1 走查到【结局）。全 1 只覆盖 happy path——分叉与 map 文案的验收口径见 `gates.mod-semantics-matrix`（cargo test -p ygg-sandbox --test agent_seed_semantics）。",
+          "basis": "AGENTS.md §一·9 行为验收；gates.mod-semantics-matrix"
         },
         {
           "id": "harness.manifest-content-addressed",
