@@ -23,12 +23,37 @@ local req_do_conflict, req_do_merge, req_do_split =
   props.req_do_conflict, props.req_do_merge, props.req_do_split
 local render =
   render_mod.receipt
-local R_DEVELOPING, R_DONE, R_DRAFT, R_DROPPED, R_MERGED, R_READY, R_SPLIT, req_append, req_bump_rev, req_capacity, req_closed, req_conflict, req_conflict_peer, req_count, req_deps, req_deps_text, req_id, req_index_of, req_key, req_open_total, req_push_history, req_release, req_status, req_sync_conflicts, req_title, req_validate_deps =
-  reqs.R_DEVELOPING, reqs.R_DONE, reqs.R_DRAFT, reqs.R_DROPPED, reqs.R_MERGED, reqs.R_READY, reqs.R_SPLIT, reqs.req_append, reqs.req_bump_rev, reqs.req_capacity, reqs.req_closed, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_deps, reqs.req_deps_text, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_open_total, reqs.req_push_history, reqs.req_release, reqs.req_status, reqs.req_sync_conflicts, reqs.req_title, reqs.req_validate_deps
+local R_DEVELOPING, R_DONE, R_DRAFT, R_DROPPED, R_MERGED, R_PLANNING, R_SPLIT, req_append, req_bump_rev, req_capacity, req_closed, req_conflict, req_conflict_peer, req_count, req_deps, req_deps_text, req_gate, req_has_pending, req_id, req_index_of, req_job, req_key, req_lane, req_open_total, req_phase_name, req_plan_ok, req_push_history, req_release, req_status, req_sync_conflicts, req_title, req_validate_deps =
+  reqs.R_DEVELOPING, reqs.R_DONE, reqs.R_DRAFT, reqs.R_DROPPED, reqs.R_MERGED, reqs.R_PLANNING, reqs.R_SPLIT, reqs.req_append, reqs.req_bump_rev, reqs.req_capacity, reqs.req_closed, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_deps, reqs.req_deps_text, reqs.req_gate, reqs.req_has_pending, reqs.req_id, reqs.req_index_of, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_open_total, reqs.req_phase_name, reqs.req_plan_ok, reqs.req_push_history, reqs.req_release, reqs.req_status, reqs.req_sync_conflicts, reqs.req_title, reqs.req_validate_deps
 local fill, join =
   util.fill, util.join
 local inbox_mark, inbox_replay, parse_amend, parse_conflict, parse_deps, parse_merge, parse_resolve, parse_split, strip_ext =
   wire.inbox_mark, wire.inbox_replay, wire.parse_amend, wire.parse_conflict, wire.parse_deps, wire.parse_merge, wire.parse_resolve, wire.parse_split, wire.strip_ext
+
+-- 需求图可变判据（5 态）：split / merge 只允许在「没有在途工作」的需求上做。
+-- 旧白名单是 draft / ready（这两态的 job 与 lane 恒为空且无待验收提案），
+-- 合并成 5 态后这些隐含条件必须写实，否则会在分析/规划在跑时拆掉需求。
+local function req_graph_mutable(index)
+  local status = req_status(index)
+  if status ~= R_DRAFT and status ~= R_ANALYZING and status ~= R_PLANNING then
+    return false
+  end
+  if req_gate(index) ~= "" then
+    return false
+  end
+  if req_has_pending(index) then
+    return false
+  end
+  if req_job(index) ~= "" or req_lane(index) > 0 then
+    return false
+  end
+  return true
+end
+
+-- 旧的 ready 语义 = planning ∧ plan_ok（计划已批准、待派开发）。
+local function req_plan_ready(index)
+  return req_status(index) == R_PLANNING and req_plan_ok(index)
+end
 
 
 
@@ -49,11 +74,10 @@ function M.install(deps)
     if parent == nil then
       return reject_payload("requirement.split", fill(TEXTS.beats.req_unknown, { id = tostring(parent_id) }))
     end
-    local status = req_status(parent)
-    if status ~= R_DRAFT and status ~= R_READY then
+    if not req_graph_mutable(parent) then
       return refuse(TEXTS.beats.req_wait_rejected, "requirement.split", fill(TEXTS.beats.req_split_status, {
         id = req_id(parent),
-        status = status,
+        status = req_phase_name(parent),
       }))
     end
     if req_conflict(parent) ~= "" then
@@ -94,11 +118,10 @@ function M.install(deps)
         return reject_payload("requirement.merge", fill(TEXTS.beats.req_merge_dup, { id = req_id(index) }))
       end
       seen[index] = true
-      local status = req_status(index)
-      if status ~= R_DRAFT and status ~= R_READY then
+      if not req_graph_mutable(index) then
         return refuse(TEXTS.beats.req_wait_rejected, "requirement.merge", fill(TEXTS.beats.req_merge_status, {
           id = req_id(index),
-          status = status,
+          status = req_phase_name(index),
         }))
       end
       sources[#sources + 1] = index
@@ -237,7 +260,7 @@ function M.install(deps)
           status = req_status(index),
         }))
       end
-      if req_status(index) == R_DEVELOPING then
+      if req_status(index) == R_DEVELOPING and req_job(index) == "development" then
         return refuse(TEXTS.beats.req_wait_rejected, "requirement.conflict", fill(TEXTS.beats.req_conflict_busy, {
           id = req_id(index),
         }))
@@ -282,18 +305,18 @@ function M.install(deps)
     if first == second then
       return reject_payload("requirement.resolve", TEXTS.beats.req_conflict_dup)
     end
-    if mode == "keep_first" and req_status(second) ~= R_DRAFT and req_status(second) ~= R_READY then
+    if mode == "keep_first" and req_status(second) ~= R_DRAFT and not req_plan_ready(second) then
       return refuse(TEXTS.beats.req_wait_rejected, "requirement.resolve", fill(TEXTS.beats.req_resolve_drop_busy, {
         id = req_id(second),
-        status = req_status(second),
+        status = req_phase_name(second),
       }))
     end
     if mode == "revise" then
       for _, index in ipairs({ first, second }) do
-        if req_status(index) ~= R_DRAFT and req_status(index) ~= R_READY then
+        if req_status(index) ~= R_DRAFT and not req_plan_ready(index) then
           return refuse(TEXTS.beats.req_wait_rejected, "requirement.resolve", fill(TEXTS.beats.req_resolve_revise_busy, {
             id = req_id(index),
-            status = req_status(index),
+            status = req_phase_name(index),
           }))
         end
       end

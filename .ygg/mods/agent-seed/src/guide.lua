@@ -43,6 +43,10 @@ local MODALITY_MARK = {
 }
 
 local function narrate_section(section)
+  -- priority = critical 的章节先单独警示一行，再逐条展开（不动 head 的计数口径）。
+  if section.priority == "critical" then
+    ygg.narrate(fill(TEXTS.beats.guide_critical, { title = section.title }))
+  end
   ygg.narrate(fill(TEXTS.beats.guide_head, {
     title = section.title,
     summary = section.summary,
@@ -54,6 +58,14 @@ local function narrate_section(section)
       mark = MODALITY_MARK[rule.modality] or "",
       text = rule.text,
     }))
+    -- 规则依据单独成行：不拼进 rule 文本，免得破坏「{{count}} 条」与规则正文的对应。
+    if rule.basis ~= nil then
+      ygg.narrate(fill(TEXTS.beats.guide_basis, { basis = rule.basis }))
+    end
+  end
+  -- 章节备注（不属于任何单条规则的事实面）放在规则之后、尾行之前。
+  if section.notes ~= nil then
+    ygg.narrate(fill(TEXTS.beats.guide_notes, { notes = section.notes }))
   end
   ygg.narrate(fill(TEXTS.beats.guide_tail, { id = section.id, total = tostring(#SECTION_IDS) }))
 end

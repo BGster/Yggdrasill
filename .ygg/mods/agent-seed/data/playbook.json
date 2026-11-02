@@ -92,7 +92,6 @@
       "summary": "Rust 五 crate workspace + pnpm packages + Godot 客户端 + 项目内 .ygg harness；三条形态铁律：决策单源、Schema 单源、内核零依赖。",
       "source": "AGENTS.md §二",
       "priority": "standard",
-      "applies_to": ["intake", "decompose"],
       "rules": [
         {
           "id": "repository.vision-single-source",
@@ -136,28 +135,8 @@
           "text": "依赖方向单向：`ygg-sandbox` → `ygg-core` + `ygg-schema`；`ygg-wasm` → `ygg-sandbox`；`ygg-lint` 零 ygg-* 内核依赖；`ygg-schema` 与 `ygg-core` 无代码依赖边。",
           "basis": "docs/modules-and-tech-stack.md §1 模块间依赖约束；各 crate 的 Cargo.toml 头注"
         }
-      ],
-      "layout": [
-        { "path": "AGENTS.md", "role": "Agent harness 游玩指南（构建 / 开局 / 单步推进 / 查现场规则 / 局末结算）；`CLAUDE.md` 是它的软链", "status": "delivered" },
-        { "path": "docs/", "role": "人读文档：愿景与决策表 / 架构原则 / 模块与技术栈 / Mod 作者指南", "status": "delivered" },
-        { "path": "crates/ygg-core/", "role": "规则内核：实体/属性/状态机/事件驱动，纯逻辑零 IO 零渲染依赖", "status": "delivered" },
-        { "path": "crates/ygg-sandbox/", "role": "确定性 Lua 沙箱：mlua + host API 白名单 + ygg stdlib 嵌入", "status": "delivered" },
-        { "path": "crates/ygg-schema/", "role": "资源数据模型 + 校验（manifest 内容寻址 + JSON Schema）", "status": "delivered" },
-        { "path": "crates/ygg-lint/", "role": "Lua 静态检查（R1/R2/R3/PARSE），lib + CLI 双形态", "status": "delivered" },
-        { "path": "crates/ygg-wasm/", "role": "wasm-bindgen 绑定薄壳（内核对外契约）", "status": "delivered" },
-        { "path": "packages/schema/schemas/", "role": "JSON Schema 单源——资源格式契约（D15）", "status": "delivered" },
-        { "path": "packages/client-web/", "role": "表现层（React + TS）：渲染内核状态、收集输入、音频", "status": "delivered" },
-        { "path": "packages/pipeline/", "role": "M1 内容管线（TS）：LLM 编排 → Schema 校验 → 重生成回路", "status": "delivered" },
-        { "path": "packages/mods/", "role": "Mod 本体：示例游戏 test-adventure、元工作流 agent-seed", "status": "delivered" },
-        { "path": "clients/godot/", "role": "M2.5 Godot 客户端：gdext 原生链接内核（不走 wasm），独立 workspace", "status": "delivered" },
-        { "path": ".ygg/", "role": "项目内 Agent harness：`bin/`（CLI，gitignore）、`mods/`（装载中的 Mod）、`runs/`（本局存档与事件流，gitignore）", "status": "delivered" },
-        { "path": "lua-stubs/", "role": "Mod 的 LuaLS 注解面（IDE 类型补全）", "status": "delivered" },
-        { "path": "scripts/", "role": "构建脚本（`build-wasm.sh`）", "status": "delivered" },
-        { "path": "scripts-dev/", "role": "开发期辅助脚本（mock LLM stub）", "status": "delivered" },
-        { "path": "spike/", "role": "技术验证切片历史档案（不进 cargo workspace，不再演进）", "status": "delivered" },
-        { "path": "services/", "role": "M2+ 平台服务（Rust + Axum）：分享/导入导出/社区化", "status": "planned" },
-        { "path": "tools/", "role": "M2 CLI（Rust + clap）：Mod 校验、打包、示例构建", "status": "planned" }
       ]
+
     },
     {
       "id": "branches",
@@ -166,7 +145,6 @@
       "summary": "master 是唯一主干且只接受合并；一切开发走功能分支；一切合并 no-FF。",
       "source": "AGENTS.md §三 分支模型",
       "priority": "standard",
-      "applies_to": ["implement"],
       "rules": [
         {
           "id": "branches.no-direct-master-work",
@@ -220,7 +198,6 @@
       "summary": "每条泳道一个 worktree + 一个 `.lane` 挂牌；占用即挂牌、收口即摘牌，绝不共享。",
       "source": "AGENTS.md §三 泳道 worktree",
       "priority": "standard",
-      "applies_to": ["implement"],
       "rules": [
         {
           "id": "lanes.path-convention",
@@ -262,7 +239,6 @@
       "summary": "后台派发不阻塞主会话；模型与 thinking 从 `.env.local` 读，只用于派发参数，不打印不入库。",
       "source": "AGENTS.md §三 Subagent 派发纪律",
       "priority": "standard",
-      "applies_to": ["implement"],
       "rules": [
         {
           "id": "dispatch.executor-ledger",
@@ -303,7 +279,6 @@
       "summary": "三级收口：迭代点（功能分支）→ 轮次（可发布批次）→ 部署；集成/合并/部署永远由主 Agent 串行做。",
       "source": "AGENTS.md §四",
       "priority": "standard",
-      "applies_to": ["review"],
       "rules": [
         {
           "id": "integration.serial-closeout",
@@ -375,7 +350,6 @@
       "summary": "门禁是快照基线：验收标准是「不引入新失败」；未接通的模块必须显式声明未覆盖。",
       "source": "AGENTS.md §五",
       "priority": "standard",
-      "applies_to": ["verify"],
       "rules": [
         {
           "id": "gates.baseline-snapshot",
@@ -419,71 +393,8 @@
           "text": "契约一致性判据：同一份 Mod 样例分别过 ajv 与 jsonschema crate，结果必须一致；CI 脚本尚未落地，落地前该面按「门禁未覆盖」声明。",
           "basis": "AGENTS.md §五 契约一致性"
         }
-      ],
-      "commands": [
-        {
-          "id": "rust.fmt",
-          "label": "Rust 格式检查",
-          "run": "cargo fmt --check",
-          "gate": "required"
-        },
-        {
-          "id": "rust.clippy",
-          "label": "Rust 静态检查（警告即错误）",
-          "run": "cargo clippy --workspace --all-targets -- -D warnings",
-          "gate": "required"
-        },
-        {
-          "id": "rust.test",
-          "label": "Rust 全 workspace 单测",
-          "run": "cargo test --workspace",
-          "gate": "required"
-        },
-        {
-          "id": "rust.agent.test",
-          "label": "agent example 内测试（--drive 三态 / 决策协议 / drive 阈值 / 摘要缺失）",
-          "run": "cargo test --example agent -p ygg-sandbox",
-          "gate": "required",
-          "note": "`cargo test --workspace` 不覆盖 example 内的 #[cfg(test)]；`--examples` 在本仓会跑出 0 tests，必须用 `--example agent` 指定目标。"
-        },
-        {
-          "id": "wasm.build",
-          "label": "wasm 构建 + 冒烟",
-          "run": "./scripts/build-wasm.sh && node crates/ygg-wasm/smoke.mjs",
-          "gate": "required",
-          "precondition": "需 WASI SDK（约定 /opt/wasi-sdk 或导出 WASI_SDK_PATH，见 .cargo/config.toml 头注）",
-          "note": "可选后处理：PATH 上有 wasm-opt（binaryen ≥118，brew install binaryen）时自动 -Oz；`YGG_WASM_OPT=off` 关闭、`=on` 令失败致命（binaryen 117 对 EH 模块优化必崩）。"
-        },
-        {
-          "id": "wasm.determinism",
-          "label": "FR-9 native/wasm 双跑哈希等价（node 泳道）",
-          "run": "node crates/ygg-wasm/verify-determinism.mjs",
-          "gate": "required",
-          "precondition": "先跑过 build-wasm 产出 wasm 实例",
-          "note": "golden-vector 同序列双跑，状态哈希必须等于 fixture 钉死的 native 基线。"
-        },
-        {
-          "id": "ts.typecheck",
-          "label": "TS 类型检查",
-          "run": "pnpm typecheck",
-          "gate": "required",
-          "note": "tsc --noEmit；进对应包目录执行（packages/client-web、packages/pipeline 等）。"
-        },
-        {
-          "id": "ts.test",
-          "label": "TS 单测",
-          "run": "pnpm test",
-          "gate": "required",
-          "note": "vitest；进对应包目录执行。"
-        },
-        {
-          "id": "ts.build",
-          "label": "TS 构建",
-          "run": "pnpm build",
-          "gate": "required",
-          "note": "vite build；进对应包目录执行。"
-        }
       ]
+
     },
     {
       "id": "live_evidence",
@@ -492,7 +403,6 @@
       "summary": "门禁单测不证明游戏能玩：迭代点级过活链、轮次级完整通关，两轮缺一不可。",
       "source": "AGENTS.md §六",
       "priority": "standard",
-      "applies_to": ["verify", "review"],
       "rules": [
         {
           "id": "live.gates-do-not-prove-playable",
@@ -533,7 +443,6 @@
       "summary": "结论只能来自命令输出与退出码、产物文件、或读到的源码原文；不确定就说不确定。",
       "source": "AGENTS.md §七",
       "priority": "standard",
-      "applies_to": ["verify", "review"],
       "rules": [
         {
           "id": "evidence.command-and-exit-code",
@@ -621,18 +530,8 @@
           "text": "指针表是「已知去处」的索引：动手前先按本节定位正文，不要凭记忆复述被指向的文档。",
           "basis": "AGENTS.md §九（只放指针的理由：内容只有一处维护）"
         }
-      ],
-      "pointers": [
-        { "goal": "项目定位 / 演进路线 / 决策表", "where": "docs/vision.md" },
-        { "goal": "架构铁律 / 内核组件边界 / 开源评估", "where": "docs/architecture-principles.md" },
-        { "goal": "模块划分 / 技术栈 / 否决项", "where": "docs/modules-and-tech-stack.md" },
-        { "goal": "内核设计约束（实体/事件/状态机/叙事；条件归 Lua，D11）", "where": "docs/architecture-principles.md §3" },
-        { "goal": "写 Mod：实体句柄 / choice 终结语义 / fsm / 资源包 / 存读档 / 多文件 Mod（`code` 段）", "where": "docs/mod-authoring.md" },
-        { "goal": "Mod 的 Lua API 类型注解（IDE 补全）", "where": "lua-stubs/README.md" },
-        { "goal": "怎么玩：构建 CLI / 开局 / 单步推进 / 查现场规则 / 局末结算", "where": "AGENTS.md", "note": "规则正文已迁入本资源；AGENTS.md 只保留游玩指南，迁移前原文见 git 历史。" },
-        { "goal": "Agent harness 的装载面与本局运行产物", "where": ".ygg/mods/ 与 .ygg/runs/", "note": "runs 与 bin 均 gitignore；seed mod 说明见 .ygg/mods/agent-seed/README.md。" },
-        { "goal": "改 `.gitignore`", "where": ".gitignore", "note": "参考根目录现有一份；改动说明写进 commit message。" }
       ]
+
     },
     {
       "id": "hard_constraints",
@@ -710,7 +609,7 @@
         {
           "id": "harness.pipeline-states",
           "modality": "must",
-          "text": "需求级流水线每条需求一条（KV req.<i>.status）：draft ──dispatch──▶ analyzing ──proposal──▶ analysis_review ──accept──▶ planning ──dispatch──▶ planning(job) ──proposal──▶ plan_review ──accept──▶ plan_gate ──gate.approve──▶ ready ──dispatch──▶ developing(lane) ──proposal──▶ dev_review ──accept──▶ accept ──gate.approve──▶ done。",
+          "text": "需求级流水线每条需求一条（KV req.<i>.status，存储 5 态）：draft ──dispatch──▶ analyzing ──proposal / accept──▶ planning ──proposal / gate.approve(plan)──▶ planning+plan_ok ──dispatch──▶ developing(lane) ──proposal / gate.approve(accept)──▶ done。展示名由 status + job / pending 提案 / gate / plan_ok 派生（analysis_review / plan_review / plan_gate / ready / dev_review / accept），不落存储。",
           "basis": "AGENTS.md §2（迁移前）"
         },
         {
@@ -728,13 +627,13 @@
         {
           "id": "harness.plan-gate",
           "modality": "must",
-          "text": "plan_gate 门禁：plan 提案验收后触发；通过 → ready（才可 dispatch 进开发）；驳回 → 回 planning 重做；校验 gate_rev == req.rev（否则 stale 不得批）。",
+          "text": "plan 门禁（req.gate=plan）：plan 提案验收后触发；通过 → 置 plan_ok（即旧 ready，才可 dispatch 进开发）；驳回 → 回 planning 重做；校验 gate_rev == req.rev（否则 stale 不得批）。",
           "basis": "AGENTS.md §2 门禁表（迁移前）"
         },
         {
           "id": "harness.accept-gate",
           "modality": "must",
-          "text": "accept 门禁（accept_gate）：开发提案验收后触发（执行方交付）；通过 → done；驳回 → 回 ready（重新进开发队列）；校验 gate_rev == req.rev，且 artifacts 必须非空——不接受只有 summary 的完成自称。",
+          "text": "accept 门禁（req.gate=accept）：开发提案验收后触发（执行方交付）；通过 → done；驳回 → 回 planning 且 plan_ok 仍为真（即旧 ready，重新进开发队列）；校验 gate_rev == req.rev，且 artifacts 必须非空——不接受只有 summary 的完成自称。",
           "basis": "AGENTS.md §2 门禁表（迁移前）"
         },
         {
@@ -746,7 +645,7 @@
         {
           "id": "harness.gate-not-skippable",
           "modality": "must-not",
-          "text": "处于 plan_gate / accept 的需求不能派活、不能被跳过；自动推进（--drive cmd:…）同样各走一次 gate.approve，只是序号由外部决策命令给出。",
+          "text": "处于 plan / accept 门禁（req.gate ~= \"\"）的需求不能派活、不收新提案、不能被跳过；自动推进（--drive cmd:…）同样各走一次 gate.approve，只是序号由外部决策命令给出。",
           "basis": "AGENTS.md §2（迁移前）"
         },
         {
@@ -1179,10 +1078,6 @@
       "summary": "局末建议进 backlog 前过四道关：长期性优先、已有未用查根因、逐项独立复核、场景先于技术；verify 全绿后用独立 settlement.evolution 登记 summary 与候选声明，review.note 只单源归档——状态机只校验声明形状，不证明建议质量。",
       "source": "用户决策 2026-11-01（game-1101-1 结算复核 E1）",
       "priority": "standard",
-      "applies_to": [
-        "review",
-        "done"
-      ],
       "rules": [
         {
           "id": "evolution.long-term-screen",

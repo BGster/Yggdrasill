@@ -121,6 +121,8 @@ local function req_do_split(parent, children)
   end
   ygg.kv.set(req_key(parent, "status"), R_SPLIT)
   ygg.kv.set(req_key(parent, "children"), join(ids, ","))
+  -- 拆分的父需求进终态：已批准的计划随之作废（子需求各自从头走 plan 门禁）。
+  ygg.kv.set(req_key(parent, "plan_ok"), false)
   req_push_history(parent, fill(TEXTS.beats.req_split_hist, { ids = join(ids, ",") }))
   return ids
 end

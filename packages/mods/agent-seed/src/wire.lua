@@ -259,9 +259,11 @@ end
 
 -- ============================================================================
 -- §settlement.evolution 进化登记 + review.note 复盘载荷
+-- （artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]）
 --
--- 声明 ≠ 证明：这里只校验**形状与完整性**（summary、路径形状、两个整数、
--- 六类计数自洽），沙箱读不到文件，也不判断建议质量或复核是否真的独立执行过。
+-- 声明 ≠ 证明：这里只校验**形状与完整性**（summary、路径形状、两个整数、六类计数自洽、
+-- screened > 0 时 artifact 与 cls 都不得缺），沙箱读不到文件，也不判断建议质量或复核是否真的独立执行过。
+-- 分两层：parse_settlement_evolution 只认载荷形状，normalize_evolution 校跨字段完整性。
 -- ============================================================================
 local EVOLUTION_CLASSES = { "long_term", "unused", "one_off", "temp_tool", "redundant", "no_scene" }
 
@@ -350,7 +352,9 @@ end
 
 -- 四路输入一律是字符串（缺省 = ""）：artifact 可空；summary 去空白后必填；
 -- candidates 空 = 0/0；classes 空 = 未分类。config.set 只逐键校形状，
--- 跨字段完整性集中在 settlement.evolution 登记时校验。
+-- 跨字段完整性集中在这里校（预登记阶段允许分次登记）。
+-- 完整性是结算登记硬条件：screened > 0 就必须同时有复核 artifact 与逐类计数——
+-- 「筛了几条、留了几分」而把复核记录与根因分类留在散文里，等于没登记。
 local function normalize_evolution(artifact, summary, candidates, classes)
   local record = { artifact = "", summary = "", kept = 0, screened = 0, classes = {} }
   local summary_text = trim(summary or "")
@@ -398,7 +402,7 @@ local function normalize_evolution(artifact, summary, candidates, classes)
   return record, nil
 end
 
--- 预登记面（`config.set review.evolution.*` → `settings.review.evolution.*`）。
+-- 预登记面（`config.set review.evolution.*` → `settings.review.evolution.*`）与菜单载荷读同一份口径。
 local function evolution_settings()
   local function read(name)
     local value = effective(name)
@@ -411,17 +415,19 @@ local function evolution_settings()
     read("review.evolution.candidates"), read("review.evolution.classes")
 end
 
--- 菜单构造 settlement.evolution 载荷；未预登记时由调用方补中性 summary 与 0/0。
+-- 菜单构造结算载荷：零候选也有中性 summary 与显式 c=0/0，不需要伪 artifact。
 local function format_settlement_evolution(artifact, summary, candidates, classes)
-  local parts = { trim(artifact or ""), trim(summary or "") }
-  local candidates_text = trim(candidates or "")
-  local classes_text = trim(classes or "")
-  if candidates_text ~= "" or classes_text ~= "" then
-    if candidates_text == "" then
-      candidates_text = "0/0"
-    end
-    parts[#parts + 1] = "c=" .. candidates_text
+  local summary_text = trim(summary or "")
+  if summary_text == "" then
+    summary_text = TEXTS.beats.settlement_evolution_default_summary
   end
+  local candidates_text = trim(candidates or "")
+  local parts = {
+    trim(artifact or ""),
+    summary_text,
+    "c=" .. (candidates_text ~= "" and candidates_text or "0/0"),
+  }
+  local classes_text = trim(classes or "")
   if classes_text ~= "" then
     parts[#parts + 1] = "cls=" .. classes_text
   end
@@ -429,7 +435,8 @@ local function format_settlement_evolution(artifact, summary, candidates, classe
 end
 
 -- `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`。
--- 只认 c=/cls= 可选段；ev=、重复段与未知段都在这里拒绝。
+-- 本函数只解析载荷形状（{artifact, summary, segments}），跨字段完整性交 normalize_evolution；
+-- c / cls 缺段才回落 settings。显式空段、ev=、重复段与未知段都在这里拒绝，未知段点名违规片段。
 local function parse_settlement_evolution(payload)
   if type(payload) ~= "string" then
     return nil, fill(TEXTS.beats.bad_payload, { action = "settlement.evolution" })
@@ -438,32 +445,35 @@ local function parse_settlement_evolution(payload)
   if #parts < 2 then
     return nil, TEXTS.beats.settlement_evolution_usage
   end
-  local out = {
-    artifact = trim(parts[1] or ""),
-    summary = trim(parts[2] or ""),
-    segments = {},
-  }
+  local artifact = trim(parts[1] or "")
+  local summary = trim(parts[2] or "")
+  if summary == "" then
+    return nil, TEXTS.beats.settlement_evolution_need_summary
+  end
+  local segments = {}
   for i = 3, #parts do
-    local key, value = cut(trim(parts[i]), "=")
+    local segment = trim(parts[i])
+    local key, value = cut(segment, "=")
     key = trim(key or "")
     value = trim(value or "")
     if key ~= "c" and key ~= "cls" then
-      return nil, TEXTS.beats.settlement_evolution_usage
+      return nil, fill(TEXTS.beats.settlement_evolution_bad_segment, { segment = segment })
     end
-    if out.segments[key] ~= nil then
-      return nil, TEXTS.beats.settlement_evolution_usage
+    if segments[key] ~= nil then
+      return nil, TEXTS.beats.settlement_evolution_duplicate_segment
     end
-    if key == "c" and value == "" then
-      return nil, TEXTS.beats.review_evolution_bad_candidates
-    end
-    if key == "cls" and value == "" then
+    if value == "" then
+      if key == "c" then
+        return nil, TEXTS.beats.review_evolution_bad_candidates
+      end
       return nil, TEXTS.beats.review_evolution_bad_classes
     end
-    out.segments[key] = value
+    segments[key] = value
   end
-  return out, nil
+  return { artifact = artifact, summary = summary, segments = segments }, nil
 end
 
+-- 菜单构造 review.note 载荷：`lesson|score` 两段，进化声明不从这里走。
 local function format_review_note(lesson, score)
   return join({ lesson, score }, "|")
 end
@@ -474,6 +484,7 @@ local function parse_review_note(payload)
   end
   local parts = split(trim(payload), "|")
   if #parts > 2 then
+    -- 旧版把进化声明塞进 note（ev= / c= / cls=）：一律拒绝，进化只走 settlement.evolution。
     for i = 3, #parts do
       local key = cut(trim(parts[i]), "=")
       key = trim(key or "")

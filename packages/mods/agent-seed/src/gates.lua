@@ -1,4 +1,4 @@
--- src/gates.lua —— 门禁与收口判据（只读选择器）：需求门禁、coordinate.submit 与 settlement 收口。
+-- src/gates.lua —— 门禁与收口判据（只读选择器）：plan_gate / accept_gate / coordinate.submit 共用同一套。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。
@@ -16,15 +16,18 @@ local num, text_of =
   config.num, config.text_of
 local prop_pending_total =
   props.prop_pending_total
-local R_ACCEPT, R_PLAN_GATE, job_capacity, job_total, req_all_done, req_conflict_total, req_count, req_id, req_key, req_open_total, req_rev, req_status =
-  reqs.R_ACCEPT, reqs.R_PLAN_GATE, reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict_total, reqs.req_count, reqs.req_id, reqs.req_key, reqs.req_open_total, reqs.req_rev, reqs.req_status
-local fill, trim =
-  util.fill, util.trim
+local job_capacity, job_total, req_all_done, req_conflict_total, req_count, req_gate, req_id, req_key, req_open_total, req_rev, req_status =
+  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_key, reqs.req_open_total, reqs.req_rev, reqs.req_status
+local fill, join, trim =
+  util.fill, util.join, util.trim
 
-local GATE_STATES = { [R_PLAN_GATE] = "plan", [R_ACCEPT] = "accept" }
-
+-- 门禁种类现在由 `req.gate`（""/"plan"/"accept"）承载，不再是一个状态。
 local function gate_kind(index)
-  return GATE_STATES[req_status(index)]
+  local kind = req_gate(index)
+  if kind == "" then
+    return nil
+  end
+  return kind
 end
 
 local function gate_next()
@@ -58,7 +61,8 @@ local function gate_evidence_problem(index, kind)
 end
 
 local function gate_rev_ok(index)
-  return num(req_key(index, "gate_rev"), 0) == req_rev(index)
+  -- gate_rev 从不清零，所以「仍在门禁上」是硬前提（否则已批准的需求会被重复批准）。
+  return gate_kind(index) ~= nil and num(req_key(index, "gate_rev"), 0) == req_rev(index)
 end
 
 local function gate_problem()
@@ -77,12 +81,26 @@ local function gate_problem()
   return nil
 end
 
+-- 局末清理前件（收口专用，与 gate_problem 分层）：
+-- gate_problem 管需求侧（待验收提案 / 在跑 job / 未解决冲突 / 未 done）；
+-- 这里管 run 级结算（进化复核 / subagent 会话 / 主会话 Todo）。全部通过才允许 review.note。
+-- Lua 沙箱没有文件、会话与 Todo API：本函数只校登记断言，不证明实际复核或清理发生过。
 local function settlement_problem()
   if ygg.kv.get("verify.passed") ~= true then
-    return TEXTS.beats.settlement_evolution_verify_first
+    return TEXTS.beats.settlement_verify_first
   end
+  local missing = {}
   if trim(text_of("settlement.evolution.summary", "")) == "" then
-    return TEXTS.beats.settlement_evolution_missing
+    missing[#missing + 1] = TEXTS.beats.settlement_evolution_missing
+  end
+  if text_of("settlement.sessions.destination", "") == "" then
+    missing[#missing + 1] = TEXTS.beats.settlement_sessions_missing
+  end
+  if num("settlement.todo.remaining", -1) ~= 0 then
+    missing[#missing + 1] = TEXTS.beats.settlement_todo_missing
+  end
+  if #missing > 0 then
+    return join(missing, "；")
   end
   return nil
 end
@@ -91,7 +109,6 @@ function M.install(deps)
   TEXTS = deps.texts
 end
 
-M.GATE_STATES = GATE_STATES
 M.gate_evidence_problem = gate_evidence_problem
 M.gate_kind = gate_kind
 M.gate_next = gate_next

@@ -31,22 +31,22 @@ local views = require("src.handlers.views")
 local choice = require("src.handlers.choice")
 local lifecycle = require("src.handlers.lifecycle")
 
--- 注册序（30 点，拆分前后逐点对照；handler 内的注册顺序 = 其在 install() 里的语句序）：
+-- 注册序（32 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
 --   1     agent.summary（render.register）
 --   2-5   actions: task.intake / requirement.add / requirement.list / requirement.dispatch
 --   6-7   lanes: lane.claim / lane.release
 --   8-10  proposals: proposal.submit / accept / reject
---   11-14 review: coordinate.submit / verify.submit / settlement.evolution / review.note
---   15-19 requirement_ops: split / merge / amend / conflict / resolve
---   20-21 gate_actions: gate.approve / gate.reject
---   22-24 config: config.set / open / close
---   25-26 views: guide.show / map.show
---   27    choice: ygg.choice_selected
---   28-29 lifecycle: event.start / node:render
---   30    fsm.define（本文件末尾）
+--   11-16 review: coordinate.submit / verify.submit / settlement.evolution / settlement.sessions / settlement.todo / review.note
+--   17-21 requirement_ops: split / merge / amend / conflict / resolve
+--   22-23 gate_actions: gate.approve / gate.reject
+--   24-26 config: config.set / open / close
+--   27-28 views: guide.show / map.show
+--   29    choice: ygg.choice_selected
+--   30-31 lifecycle: event.start / node:render
+--   32    fsm.define（本文件末尾）
 
 config.install({ texts = TEXTS, config = CONFIG })
-reqs.install({ texts = TEXTS, lanes = lanes.LANES })
+reqs.install({ texts = TEXTS, lanes = lanes.LANES, props = props })
 lanes.install({ texts = TEXTS })
 props.install({ texts = TEXTS })
 gates.install({ texts = TEXTS })

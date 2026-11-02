@@ -80,9 +80,6 @@
       "summary": "后台派发不阻塞主会话；派发参数从本地 env 读、只用于派发；一个工作区同时只承载一个任务；执行方不做收口。",
       "source": "通用基线（种子模板）",
       "priority": "standard",
-      "applies_to": [
-        "implement"
-      ],
       "rules": [
         {
           "id": "dispatch.executor-ledger",
@@ -141,10 +138,6 @@
       "summary": "结论只能来自命令输出与退出码、产物文件、或读到的源码原文；不确定就说不确定。",
       "source": "通用基线（种子模板）",
       "priority": "standard",
-      "applies_to": [
-        "verify",
-        "review"
-      ],
       "rules": [
         {
           "id": "evidence.command-and-exit-code",
@@ -235,13 +228,13 @@
         {
           "id": "harness.two-layer-state-machine",
           "modality": "must",
-          "text": "认清两层状态机：**协调器**（intake → coordinate → review → done）只做派活、串行验收提案、过门禁、最终复盘，**不承载开发本身**；**需求级流水线**每条需求一条（draft → analyzing → planning → plan_gate → ready → developing → accept → done，另有 split / merged / dropped 终态与 blocked / stale 标记）。",
+          "text": "认清两层状态机：**协调器**（intake → coordinate → review → done）只做派活、串行验收提案、过门禁、最终复盘，**不承载开发本身**；**需求级流水线**每条需求一条（存储 5 态：draft → analyzing → planning → developing → done；plan 门禁批准后置 `plan_ok`（即旧 ready），split / merged / dropped 是旁路终态；展示名仍按 analysis_review / plan_review / plan_gate / dev_review / accept 区分，另有 blocked / stale 标记）。",
           "basis": "harness 机制"
         },
         {
           "id": "harness.mandatory-gates",
           "modality": "must",
-          "text": "两个强制主 Agent 门禁不可跳过：plan 提案验收后的 **plan_gate**（批准才进 ready / 开发）；开发交付后的 **accept_gate**（批准才 done）。处于这两个状态的需求不能派活、不能被跳过，自动推进同样各走一次 `gate.approve`。",
+          "text": "两个强制主 Agent 门禁不可跳过：plan 提案验收后的 **plan 门禁**（`req.gate=plan`，批准才置 `plan_ok` 进开发）；开发交付后 **accept 门禁**（`req.gate=accept`，批准才 done）。门禁待批期间该需求不能派活、不收新提案、不能被跳过，自动推进同样各走一次 `gate.approve`。",
           "basis": "harness 机制"
         },
         {
@@ -386,10 +379,6 @@
       "summary": "局末建议进 backlog 前过四道关：长期性优先、已有未用查根因、逐项独立复核、场景先于技术；verify 全绿后用独立 settlement.evolution 登记 summary 与候选声明，review.note 只单源归档——状态机只校验声明形状，不证明建议质量。",
       "source": "seed template（通用元工作流纪律，与具体仓库无关）",
       "priority": "standard",
-      "applies_to": [
-        "review",
-        "done"
-      ],
       "rules": [
         {
           "id": "evolution.long-term-screen",

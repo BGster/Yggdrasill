@@ -1,8 +1,7 @@
 -- src/render.lua —— 回执渲染 + 双层图（local/full）+ 结构化摘要（`agent.summary` 的注册面）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
--- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`settlement.evolution.*`
--- （仅 reset_settlement 集中重置；其余渲染与摘要只读）。
+-- 资源由入口 install(deps) 注入。本模块写的 KV 前缀：`settlement.*`（仅 reset_settlement；其余只读）。
 
 local M = {}
 
@@ -31,21 +30,21 @@ local CONFIG_UI, MENU, menu, option_texts =
   menus.CONFIG_UI, menus.MENU, menus.menu, menus.option_texts
 local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status =
   props.P_PENDING, props.prop_count, props.prop_id, props.prop_key, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
-local R_ACCEPT, R_ANALYSIS_REVIEW, R_ANALYZING, R_DEVELOPING, R_DEV_REVIEW, R_DONE, R_DRAFT, R_DROPPED, R_MERGED, R_PLANNING, R_PLAN_GATE, R_PLAN_REVIEW, R_READY, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_rev, req_stale, req_status, req_tally, req_title, stage =
-  reqs.R_ACCEPT, reqs.R_ANALYSIS_REVIEW, reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DEV_REVIEW, reqs.R_DONE, reqs.R_DRAFT, reqs.R_DROPPED, reqs.R_MERGED, reqs.R_PLANNING, reqs.R_PLAN_GATE, reqs.R_PLAN_REVIEW, reqs.R_READY, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
+local PHASE, R_ANALYZING, R_DEVELOPING, R_DONE, R_DRAFT, R_DROPPED, R_MERGED, R_PLANNING, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_rev, req_stale, req_status, req_tally, req_title, stage =
+  reqs.PHASE, reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DONE, reqs.R_DRAFT, reqs.R_DROPPED, reqs.R_MERGED, reqs.R_PLANNING, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
 local fill, join, spaces, trim =
   util.fill, util.join, util.spaces, util.trim
 
 local function req_panel_text()
   local parts = {}
   parts[#parts + 1] = fill(TEXTS.beats.req_panel_counts, {
-    draft = tostring(req_tally(R_DRAFT)),
-    analyzing = tostring(req_tally(R_ANALYZING) + req_tally(R_ANALYSIS_REVIEW)),
-    planning = tostring(req_tally(R_PLANNING) + req_tally(R_PLAN_REVIEW)),
+    draft = tostring(req_tally(PHASE.draft)),
+    analyzing = tostring(req_tally(PHASE.analyzing) + req_tally(PHASE.analysis_review)),
+    planning = tostring(req_tally(PHASE.planning) + req_tally(PHASE.plan_review)),
     gate = tostring(gate_total()),
-    ready = tostring(req_tally(R_READY)),
-    developing = tostring(req_tally(R_DEVELOPING) + req_tally(R_DEV_REVIEW)),
-    done = tostring(req_tally(R_DONE)),
+    ready = tostring(req_tally(PHASE.ready)),
+    developing = tostring(req_tally(PHASE.developing) + req_tally(PHASE.dev_review)),
+    done = tostring(req_tally(PHASE.done)),
     total = tostring(req_count()),
   })
   parts[#parts + 1] = fill(TEXTS.beats.req_panel_jobs, {
@@ -57,21 +56,22 @@ local function req_panel_text()
   return join(parts, "｜")
 end
 
+-- 字形表以 PHASE（派生展示名）为键：存储只有 5 态，展示仍有 14 个旧名。
 local R_MARK = {
-  [R_DRAFT] = "·",
-  [R_ANALYZING] = "◐",
-  [R_ANALYSIS_REVIEW] = "◑",
-  [R_PLANNING] = "◇",
-  [R_PLAN_REVIEW] = "◈",
-  [R_PLAN_GATE] = "⊟",
-  [R_READY] = "○",
-  [R_DEVELOPING] = "▶",
-  [R_DEV_REVIEW] = "◀",
-  [R_ACCEPT] = "⊞",
-  [R_DONE] = "✓",
-  [R_SPLIT] = "⑂",
-  [R_MERGED] = "⇄",
-  [R_DROPPED] = "⊘",
+  [PHASE.draft] = "·",
+  [PHASE.analyzing] = "◐",
+  [PHASE.analysis_review] = "◑",
+  [PHASE.planning] = "◇",
+  [PHASE.plan_review] = "◈",
+  [PHASE.plan_gate] = "⊟",
+  [PHASE.ready] = "○",
+  [PHASE.developing] = "▶",
+  [PHASE.dev_review] = "◀",
+  [PHASE.accept] = "⊞",
+  [PHASE.done] = "✓",
+  [PHASE.split] = "⑂",
+  [PHASE.merged] = "⇄",
+  [PHASE.dropped] = "⊘",
   blocked = "⚠",
 }
 
@@ -186,37 +186,44 @@ local MAP_EDGES = {
   { from = STAGE.review, to = STAGE.done, action = "review.note", note = "map_note_ending" },
 }
 
+-- 需求级流水线（设计视图）= 5 个存储态；每行中列是「态内的两跳」（提案 → 验收 / 门禁）。
 local PIPELINE = {
   { node = "[draft]", action = "requirement.dispatch", target = "[analyzing]", note = "map_note_job" },
-  { node = "[analyzing]", action = "proposal", target = "[analysis_review]", note = "map_note_proposal" },
-  { node = "[analysis_review]", action = "proposal.accept", target = "[planning]", note = "map_note_accept" },
-  { node = "[planning]", action = "requirement.dispatch", target = "[plan(job)]", note = "map_note_job" },
-  { node = "[plan(job)]", action = "proposal", target = "[plan_review]", note = "map_note_proposal" },
   {
-    node = "[plan_review]",
-    action = "proposal.accept",
-    target = "[plan_gate]",
-    note = "map_note_gate",
+    node = "[analyzing]",
+    action = "proposal → proposal.accept",
+    target = "[planning]",
+    note = "map_note_accept",
   },
   {
-    node = "[plan_gate]",
-    action = "gate.approve",
-    target = "[ready]",
+    node = "[planning]",
+    action = "proposal → gate.approve",
+    target = "[planning·plan_ok]",
     note = "map_note_gate_plan",
   },
-  { node = "[ready]", action = "requirement.dispatch", target = "[developing·lane]", note = "map_note_lane" },
-  { node = "[developing]", action = "proposal", target = "[dev_review]", note = "map_note_proposal" },
   {
-    node = "[dev_review]",
-    action = "proposal.accept",
-    target = "[accept·执行方交付]",
-    note = "map_note_deliver",
+    node = "[planning·plan_ok]",
+    action = "requirement.dispatch",
+    target = "[developing·lane]",
+    note = "map_note_lane",
   },
   {
-    node = "[accept]",
-    action = "gate.approve",
+    node = "[developing]",
+    action = "proposal → gate.approve",
     target = "[done]",
     note = "map_note_gate_accept",
+  },
+}
+
+-- 旁路（不进主流水线）：split / merge 派生的新需求落回 draft；dropped 是人工放弃。
+local PIPELINE_BYPASS = {
+  { node = "[split]", action = "requirement.split", target = "[children·draft]", note = "map_note_split" },
+  { node = "[merged]", action = "requirement.merge", target = "[new·draft]", note = "map_note_merge" },
+  {
+    node = "[dropped]",
+    action = "requirement.resolve keep_first",
+    target = "[—]",
+    note = "map_note_dropped",
   },
 }
 
@@ -233,6 +240,13 @@ local PIPE_LABEL_WIDTH = 0
 
 for i = 1, #PIPELINE do
   local width = #PIPELINE[i].node
+  if width > PIPE_LABEL_WIDTH then
+    PIPE_LABEL_WIDTH = width
+  end
+end
+
+for i = 1, #PIPELINE_BYPASS do
+  local width = #PIPELINE_BYPASS[i].node
   if width > PIPE_LABEL_WIDTH then
     PIPE_LABEL_WIDTH = width
   end
@@ -276,6 +290,20 @@ local function to_stage(action, payload)
     end
   end
   return nil
+end
+
+local function narrate_pipeline(rows)
+  for i = 1, #rows do
+    local row = rows[i]
+    ygg.narrate(fill(TEXTS.beats.map_row, {
+      mark = spaces(2),
+      node = pad(row.node, PIPE_LABEL_WIDTH),
+      branch = TEXTS.beats.map_branch_single,
+      action = row.action,
+      target = row.target,
+      note = TEXTS.beats[row.note],
+    }))
+  end
 end
 
 local function narrate_map(current, full, items, prompt)
@@ -343,17 +371,9 @@ local function narrate_map(current, full, items, prompt)
     end
   end
   ygg.narrate(TEXTS.beats.map_pipeline_head)
-  for i = 1, #PIPELINE do
-    local row = PIPELINE[i]
-    ygg.narrate(fill(TEXTS.beats.map_row, {
-      mark = spaces(2),
-      node = pad(row.node, PIPE_LABEL_WIDTH),
-      branch = TEXTS.beats.map_branch_single,
-      action = row.action,
-      target = row.target,
-      note = TEXTS.beats[row.note],
-    }))
-  end
+  narrate_pipeline(PIPELINE)
+  ygg.narrate(TEXTS.beats.map_pipeline_bypass_head)
+  narrate_pipeline(PIPELINE_BYPASS)
   ygg.narrate(fill(TEXTS.beats.map_jobs, {
     lanes = lane_text(),
     jobs = tostring(job_total()),
@@ -365,20 +385,6 @@ local function narrate_map(current, full, items, prompt)
 end
 
 local RENDER = {}
-
-local SETTLEMENT_EVOLUTION_KEYS = {
-  "settlement.evolution.artifact",
-  "settlement.evolution.summary",
-  "settlement.evolution.candidates",
-  "settlement.evolution.classes",
-}
-
--- 每轮 review 的登记只清这四键；settings.review.evolution.* 预登记保留。
-local function reset_settlement()
-  for i = 1, #SETTLEMENT_EVOLUTION_KEYS do
-    ygg.kv.set(SETTLEMENT_EVOLUTION_KEYS[i], "")
-  end
-end
 
 local prompt_vars
 
@@ -449,7 +455,7 @@ RENDER[STAGE.review] = function()
   ygg.narrate(fill(TEXTS.scenes.review, {
     title = task_title(),
     count = tostring(req_count()),
-    done = tostring(req_tally(R_DONE)),
+    done = tostring(req_tally(PHASE.done)),
     gates = tostring(strict_gates()),
   }))
   -- 数据红线只在开局（event.start）与规则章里出现；常规步不重复。
@@ -462,7 +468,7 @@ RENDER[STAGE.done] = function()
   ygg.narrate(fill(TEXTS.endings.done, {
     title = task_title(),
     count = tostring(req_count()),
-    done = tostring(req_tally(R_DONE)),
+    done = tostring(req_tally(PHASE.done)),
     score = tostring(num("review.score", TEXTS.tuning.default_score)),
     lesson = text_of("review.lesson", TEXTS.beats.default_lesson),
     candidates = text_of("review.evolution.candidates", TEXTS.beats.evolution_none),
@@ -582,6 +588,20 @@ prompt_vars = function()
   }
 end
 
+-- 三项结算登记的统一重置：coordinate.submit 重入与 verify.submit=false 都调这一处。
+-- 只清本局登记，不动 settings.review.evolution.* 预登记值。
+function M.reset_settlement()
+  ygg.kv.set("settlement.evolution.artifact", "")
+  ygg.kv.set("settlement.evolution.summary", "")
+  ygg.kv.set("settlement.evolution.candidates", "")
+  ygg.kv.set("settlement.evolution.classes", "")
+  ygg.kv.set("settlement.sessions.remaining", -1)
+  ygg.kv.set("settlement.sessions.moved", 0)
+  ygg.kv.set("settlement.sessions.destination", "")
+  ygg.kv.set("settlement.todo.remaining", -1)
+  ygg.kv.set("settlement.todo.verified_by", "")
+end
+
 function M.install(deps)
   TEXTS = deps.texts
   CONFIG = deps.config
@@ -598,6 +618,7 @@ M.MAP_EDGES = MAP_EDGES
 M.MAP_LABEL_WIDTH = MAP_LABEL_WIDTH
 M.MAP_NODES = MAP_NODES
 M.PIPELINE = PIPELINE
+M.PIPELINE_BYPASS = PIPELINE_BYPASS
 M.PIPE_LABEL_WIDTH = PIPE_LABEL_WIDTH
 M.RENDER = RENDER
 M.R_MARK = R_MARK
@@ -613,7 +634,6 @@ M.prompt_vars = prompt_vars
 M.receipt = render
 M.req_panel_text = req_panel_text
 M.req_trace = req_trace
-M.reset_settlement = reset_settlement
 M.stage_prompt = stage_prompt
 M.summary_awaiting = summary_awaiting
 M.summary_conflicts = summary_conflicts

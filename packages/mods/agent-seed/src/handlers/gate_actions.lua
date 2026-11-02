@@ -25,8 +25,8 @@ local HUMAN =
   choice.HUMAN
 local render =
   render_mod.receipt
-local R_DONE, R_PLANNING, R_READY, STAGE, req_id, req_index_of, req_key, req_push_history, req_release, req_rev, req_sync_conflicts, stage =
-  reqs.R_DONE, reqs.R_PLANNING, reqs.R_READY, reqs.STAGE, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_sync_conflicts, reqs.stage
+local R_DONE, R_PLANNING, STAGE, req_id, req_index_of, req_key, req_phase_name, req_push_history, req_release, req_rev, req_sync_conflicts, stage =
+  reqs.R_DONE, reqs.R_PLANNING, reqs.STAGE, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_sync_conflicts, reqs.stage
 local cut, fill, trim =
   util.cut, util.fill, util.trim
 
@@ -70,15 +70,20 @@ function M.install(deps)
     if evidence ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", evidence)
     end
-    local next_status = kind == "plan" and R_READY or R_DONE
+    local next_status = kind == "plan" and R_PLANNING or R_DONE
     ygg.kv.set(req_key(index, "status"), next_status)
+    -- 门禁摘下：plan 批准 → plan_ok 置真（旧的 ready）；accept 批准 → done。
+    ygg.kv.set(req_key(index, "gate"), "")
+    if kind == "plan" then
+      ygg.kv.set(req_key(index, "plan_ok"), true)
+    end
     req_release(index)
     req_push_history(index, fill(TEXTS.beats.req_gate_hist, { kind = kind }))
     req_sync_conflicts()
     ygg.narrate(fill(TEXTS.beats.req_gate_ok, {
       id = req_id(index),
       kind = kind,
-      status = next_status,
+      status = req_phase_name(index),
       note = trim(note or "") ~= "" and trim(note) or TEXTS.beats.req_gate_no_note,
       artifacts = req_artifacts(index) ~= "" and req_artifacts(index) or TEXTS.beats.req_gate_no_artifacts,
       gates = tostring(gate_total()),
@@ -95,8 +100,10 @@ function M.install(deps)
       return reject_payload("gate.reject", TEXTS.beats.req_gate_none)
     end
     local kind = gate_kind(index)
-    local back = kind == "plan" and R_PLANNING or R_READY
-    ygg.kv.set(req_key(index, "status"), back)
+    -- 打回落点：plan 打回 → planning（plan_ok 仍假）；accept 打回 → planning（plan_ok 置真，即旧 ready）。
+    ygg.kv.set(req_key(index, "status"), R_PLANNING)
+    ygg.kv.set(req_key(index, "gate"), "")
+    ygg.kv.set(req_key(index, "plan_ok"), kind ~= "plan")
     req_release(index)
     -- 打回不改 rev（执行方下一轮提案仍用当前 rev），但记录反馈供下轮参考。
     ygg.kv.set(req_key(index, "feedback"), trim(feedback or "") ~= "" and trim(feedback) or TEXTS.beats.req_reject_default)
@@ -105,7 +112,7 @@ function M.install(deps)
     ygg.narrate(fill(TEXTS.beats.req_gate_rejected, {
       id = req_id(index),
       kind = kind,
-      status = back,
+      status = req_phase_name(index),
       feedback = text_of(req_key(index, "feedback"), TEXTS.beats.req_reject_default),
       gates = tostring(gate_total()),
     }))

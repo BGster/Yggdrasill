@@ -1,4 +1,4 @@
--- src/handlers/review.lua —— 协调与复盘：coordinate.submit / verify.submit / settlement.evolution / review.note。
+-- src/handlers/review.lua —— 协调与复盘：coordinate.submit / verify.submit / settlement.* / review.note。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
@@ -24,8 +24,10 @@ local gate_problem, settlement_problem =
   gates.gate_problem, gates.settlement_problem
 local HUMAN =
   choice.HUMAN
-local render, reset_settlement =
-  render_mod.receipt, render_mod.reset_settlement
+local render =
+  render_mod.receipt
+local reset_settlement =
+  render_mod.reset_settlement
 local STAGE, req_count, stage =
   reqs.STAGE, reqs.req_count, reqs.stage
 local cut, fill, split, trim =
@@ -56,8 +58,9 @@ function M.install(deps)
     if problem ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", problem)
     end
-    reset_settlement()
     ygg.kv.set("verify.passed", false)
+    -- 每次进入结算都重新登记三项任务，避免沿用上一轮过期证据。
+    reset_settlement()
     ygg.narrate(fill(TEXTS.beats.coordinate_ok, { count = tostring(req_count()) }))
     advance(STAGE.review)
   end)
@@ -111,11 +114,11 @@ function M.install(deps)
       return
     end
     ygg.kv.set("verify.passed", false)
+    reset_settlement()
     local failures = num("verify.failures", 0) + 1
     ygg.kv.set("verify.failures", failures)
     ygg.kv.set("verify.last", report ~= "" and report or TEXTS.beats.verify_failed_record)
     if strict_gates() then
-      reset_settlement()
       ygg.narrate(fill(TEXTS.beats.verify_fail, { failures = tostring(failures) }))
       advance(STAGE.coordinate)
     else
@@ -124,14 +127,16 @@ function M.install(deps)
       render()
     end
   end)
+  -- 三项结算登记都是自声明：进化复核只校形状与计数，会话 / Todo 只校形状与 remaining=0。
   ygg.on("settlement.evolution", function(payload)
     local current = stage()
     if current ~= STAGE.review then
       return reject("settlement.evolution", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
     end
     if ygg.kv.get("verify.passed") ~= true then
-      return refuse(TEXTS.beats.req_wait_rejected, "settlement.evolution", TEXTS.beats.settlement_evolution_verify_first)
+      return refuse(TEXTS.beats.req_wait_rejected, "settlement.evolution", TEXTS.beats.settlement_verify_first)
     end
+    -- 分层：parse 只认载荷形状（project 的三条精确诊断在这里），normalize 校跨字段完整性。
     local registration, registration_err = wire.parse_settlement_evolution(payload)
     if registration == nil then
       return reject_payload("settlement.evolution", registration_err)
@@ -147,14 +152,65 @@ function M.install(deps)
       return reject_payload("settlement.evolution", record_err)
     end
     local candidates = tostring(record.kept) .. "/" .. tostring(record.screened)
+    local classes_text = wire.format_classes(record.classes)
     ygg.kv.set("settlement.evolution.artifact", record.artifact)
     ygg.kv.set("settlement.evolution.summary", record.summary)
     ygg.kv.set("settlement.evolution.candidates", candidates)
-    ygg.kv.set("settlement.evolution.classes", wire.format_classes(record.classes))
+    ygg.kv.set("settlement.evolution.classes", classes_text)
     ygg.narrate(fill(TEXTS.beats.settlement_evolution_ok, {
+      artifact = record.artifact ~= "" and record.artifact or TEXTS.beats.evolution_artifact_none,
       summary = record.summary,
       candidates = candidates,
+      classes = classes_text ~= "" and classes_text or TEXTS.beats.evolution_classes_none,
     }))
+    render()
+  end)
+  -- 局末两项清理：subagent 会话与主会话 Todo。Mod 读不到会话与 Todo API，真实清理由主会话做。
+  ygg.on("settlement.sessions", function(payload)
+    local current = stage()
+    if current ~= STAGE.review then
+      return reject("settlement.sessions", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
+    end
+    if type(payload) ~= "string" then
+      return reject_payload("settlement.sessions", TEXTS.beats.settlement_sessions_usage)
+    end
+    local parts = split(trim(payload), "|")
+    local moved = tonumber(trim(parts[1] or ""))
+    local remaining = tonumber(trim(parts[2] or ""))
+    local destination = trim(parts[3] or "")
+    if #parts ~= 3 or moved == nil or remaining == nil
+      or moved < 0 or remaining ~= 0 or destination == "" then
+      return reject_payload("settlement.sessions", TEXTS.beats.settlement_sessions_usage)
+    end
+    ygg.kv.set("settlement.sessions.moved", math.floor(moved))
+    ygg.kv.set("settlement.sessions.remaining", 0)
+    ygg.kv.set("settlement.sessions.destination", destination)
+    ygg.narrate(fill(TEXTS.beats.settlement_sessions_ok, {
+      moved = tostring(math.floor(moved)),
+      destination = destination,
+    }))
+    render()
+  end)
+  ygg.on("settlement.todo", function(payload)
+    local current = stage()
+    if current ~= STAGE.review then
+      return reject("settlement.todo", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
+    end
+    -- 载荷 "remaining|verified_by"：恰好两段；remaining 必须恰为 0；verified_by 非空。
+    -- Lua 沙箱没有 Todo API：这里只记「主会话复核到 0 项」这条断言，不声称清理条数。
+    if type(payload) ~= "string" then
+      return reject_payload("settlement.todo", TEXTS.beats.settlement_todo_usage)
+    end
+    local parts = split(trim(payload), "|")
+    local remaining = tonumber(trim(parts[1] or ""))
+    local verified_by = trim(parts[2] or "")
+    if #parts ~= 2 or remaining == nil or remaining ~= 0
+      or verified_by == "" or #verified_by > 120 then
+      return reject_payload("settlement.todo", TEXTS.beats.settlement_todo_usage)
+    end
+    ygg.kv.set("settlement.todo.remaining", 0)
+    ygg.kv.set("settlement.todo.verified_by", verified_by)
+    ygg.narrate(fill(TEXTS.beats.settlement_todo_ok, { verified_by = verified_by }))
     render()
   end)
   ygg.on("review.note", function(payload)
@@ -171,9 +227,15 @@ function M.install(deps)
       render()
       return
     end
-    local settlement_issue = settlement_problem()
-    if settlement_issue ~= nil then
-      ygg.narrate(fill(TEXTS.beats.req_gate_block, { action = "review.note", detail = settlement_issue }))
+    if strict_gates() and ygg.kv.get("verify.passed") ~= true then
+      ygg.narrate(TEXTS.beats.req_gate_verify)
+      render()
+      return
+    end
+    -- 三项结算任务未登记（或 remaining ≠ 0）就不允许收口。
+    local settlement = settlement_problem()
+    if settlement ~= nil then
+      ygg.narrate(fill(TEXTS.beats.req_gate_block, { action = "review.note", detail = settlement }))
       render()
       return
     end
@@ -203,12 +265,12 @@ function M.install(deps)
       end
       score = math.floor(parsed)
     end
+    -- 进化声明只从已登记的 settlement 四键原样归档，不从 note/settings 重算。
     ygg.kv.set("review.lesson", lesson)
     ygg.kv.set("review.score", score)
-    -- 进化记录只从本轮回合的 settlement 登记单源归档，不再读载荷或 settings。
     ygg.kv.set("review.evolution.artifact", text_of("settlement.evolution.artifact", ""))
     ygg.kv.set("review.evolution.summary", text_of("settlement.evolution.summary", ""))
-    ygg.kv.set("review.evolution.candidates", text_of("settlement.evolution.candidates", TEXTS.beats.evolution_none))
+    ygg.kv.set("review.evolution.candidates", text_of("settlement.evolution.candidates", "0/0"))
     ygg.kv.set("review.evolution.classes", text_of("settlement.evolution.classes", ""))
     ygg.kv.set("ending", STAGE.done)
     ygg.narrate(fill(TEXTS.beats.review_ok, { score = tostring(score), lesson = lesson }))

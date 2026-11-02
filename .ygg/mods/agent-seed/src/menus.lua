@@ -23,29 +23,25 @@ local guide_section =
   guide.guide_section
 local prop_id, prop_next, prop_pending_total, prop_req, prop_stage =
   props.prop_id, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_stage
-local STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_count, req_dev_ready, req_id, req_job, req_job_stage, req_open_total, stage =
-  reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_dev_ready, reqs.req_id, reqs.req_job, reqs.req_job_stage, reqs.req_open_total, reqs.stage
-local fill, trim =
-  util.fill, util.trim
+local STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_count, req_dev_ready, req_has_pending, req_id, req_job, req_job_stage, req_open_total, stage =
+  reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_dev_ready, reqs.req_has_pending, reqs.req_id, reqs.req_job, reqs.req_job_stage, reqs.req_open_total, reqs.stage
+local fill =
+  util.fill
+local trim =
+  util.trim
 
--- settlement.evolution 菜单载荷读取预登记面；缺省零候选不需伪 artifact。
+-- settlement.evolution 载荷读预登记面（零候选由 format_settlement_evolution 补中性默认值）。
 local function settlement_evolution_payload()
   local artifact, summary, candidates, classes = wire.evolution_settings()
-  summary = trim(summary)
-  if summary == "" then
-    summary = TEXTS.beats.settlement_evolution_default_summary
-  end
-  candidates = trim(candidates)
-  if candidates == "" then
-    candidates = TEXTS.beats.evolution_none
-  end
   return wire.format_settlement_evolution(artifact, summary, candidates, classes)
 end
 
+-- 「本轮进化登记过了吗」：只看本轮回合 settlement 四键里的 summary，不看预登记面。
 local function settlement_registered()
   return trim(text_of("settlement.evolution.summary", "")) ~= ""
 end
 
+-- review.note 载荷固定 `lesson|score` 两段；进化声明不从这里走（旧 ev/c/cls 段会被拒）。
 local function review_note_payload()
   return wire.format_review_note(TEXTS.beats.default_lesson, tostring(TEXTS.tuning.default_score))
 end
@@ -218,7 +214,9 @@ end
 local function dispatch_candidates()
   local out = {}
   for i = 1, req_count() do
-    if req_job_stage(i) ~= nil and req_job(i) == "" then
+    -- 待验收提案在 5 态下不再是一个状态，所以「等验收期间不重派」必须在这里显式排除
+    -- （旧版靠 analysis_review / plan_review / dev_review 三个状态天然不可派）。
+    if req_job_stage(i) ~= nil and req_job(i) == "" and not req_has_pending(i) then
       if req_job_stage(i) ~= "development" or req_dev_ready(i) then
         out[#out + 1] = i
       end
@@ -349,20 +347,35 @@ end
 
 MENU[STAGE.review] = function()
   local items = append_all({}, resolve_items())
+  -- 全 1 推进顺序：verify → evolution → sessions → todo → review.note。
+  -- 未完成的结算项排在 review.note 前；骨架不引入 enabled 概念。
   if ygg.kv.get("verify.passed") == true then
-    if settlement_registered() then
-      items[#items + 1] = {
-        text = TEXTS.options.review_note,
-        action = "review.note",
-        payload = review_note_payload(),
-      }
-    else
+    if not settlement_registered() then
       items[#items + 1] = {
         text = TEXTS.options.settlement_evolution,
         action = "settlement.evolution",
         payload = settlement_evolution_payload(),
       }
     end
+    if text_of("settlement.sessions.destination", "") == "" then
+      items[#items + 1] = {
+        text = TEXTS.options.settlement_sessions,
+        action = "settlement.sessions",
+        payload = TEXTS.beats.settlement_sessions_payload,
+      }
+    end
+    if config.num("settlement.todo.remaining", -1) ~= 0 then
+      items[#items + 1] = {
+        text = TEXTS.options.settlement_todo,
+        action = "settlement.todo",
+        payload = TEXTS.beats.settlement_todo_payload,
+      }
+    end
+    items[#items + 1] = {
+      text = TEXTS.options.review_note,
+      action = "review.note",
+      payload = review_note_payload(),
+    }
   else
     items[#items + 1] = { text = TEXTS.options.verify_green, action = "verify.submit", payload = "true" }
   end
