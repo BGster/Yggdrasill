@@ -19,6 +19,12 @@
      `config.set executor.<rN>.<stage>=<id>`（stage ∈ analysis / plan / development）。同一 (req,stage) 换人、
      或与前一阶段 id 不同的**跨阶段换人**，都必须带原因（`=<id>|<原因>`）；`amend` 不改绑定，`split` / `merge`
      不继承；`proposal.submit` 不做硬校验——未登记只在 `requirement.list` 显示「未登记」。
+   - **需求粒度：能合并就别新建**：同目标 / 同子系统 / 小改动 / 可共用计划与验收证据的相邻工作，
+     优先并进同一条需求；只有三种情况才新建——**独立交付验收**、**跨仓或跨泳道**、**风险隔离**。
+     相邻新建必须在 description 里写清不可合并的理由（缺理由 = 按可合并处理）。
+     判据三问（见 §一·7）：① 拦的动作是 `requirement.add` / `--requirement` 建档；
+     ② 违规可见表现是相邻需求被执行者指出「只是上一条的一部分」，而 description 里找不到不可合并理由；
+     ③ 下次用 `requirement.list` 逐条核对新增需求的 description 是否带该理由来确认生效。
 3. **回执整段呈现，禁止解析式截断**：不得 `narrative[0][:N]`、不得只取首行、不得按 `startswith` 做行级过滤、
    不得把回执塞进 `grep` / `python` 后只看摘要。每次派发把 narrative **全部行**打到对话里，
    并把 `pendingChoice` 原文交给用户。要规则就 `guide.show <section_id>` 取整章，不靠记忆。
@@ -73,7 +79,9 @@
 - **需求级**：`proposal.accept` 只按阶段推进——`analysis` → `planning`；`plan` → **`plan_gate`**；
   `development` → **`accept`**（执行方交付，同时释放泳道）。
 - **两个强制门禁**：`gate.approve` 在 `plan_gate` → `ready`，在 `accept` → `done`；
-  `gate.reject` 分别回 `planning` / `ready`。
+  `gate.reject` 存储态一律回 `planning`，展示名由 `plan_ok` 派生——`plan` 门禁打回置假（→ 重派 plan），
+  `accept` 门禁打回沿用原值（未 amend 即 `ready` 重进开发队列；amend 过则 `plan_ok` 已作废 → 停在
+  `planning` 强制重规划）。
   批准前校验两条硬约束：`gate_rev == req.rev`（待批期间被 amend → 判 stale，旧批准不得生效）、
   `accept` 类还要求 `artifacts` 非空（不接受只有 summary 的完成自称）。
 - **收口前件**（`coordinate.submit` / `verify.submit=true` / `review.note` 共用同一套）：0 条待验收提案 ∧

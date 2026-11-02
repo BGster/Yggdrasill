@@ -609,7 +609,7 @@
         {
           "id": "harness.pipeline-states",
           "modality": "must",
-          "text": "需求级流水线每条需求一条（KV req.<i>.status，存储 5 态）：draft ──dispatch──▶ analyzing ──proposal / accept──▶ planning ──proposal / gate.approve(plan)──▶ planning+plan_ok ──dispatch──▶ developing(lane) ──proposal / gate.approve(accept)──▶ done。展示名由 status + job / pending 提案 / gate / plan_ok 派生（analysis_review / plan_review / plan_gate / ready / dev_review / accept），不落存储。",
+          "text": "需求级流水线每条需求一条（KV req.<i>.status，存储 5 态）：draft ──dispatch──▶ analyzing ──proposal → proposal.accept──▶ planning ──proposal → proposal.accept → gate.approve(plan)──▶ planning+plan_ok ──dispatch──▶ developing(lane) ──proposal → proposal.accept → gate.approve(accept)──▶ done。展示名由 status + job / pending 提案 / gate / plan_ok 派生（analysis_review / plan_review / plan_gate / ready / dev_review / accept），不落存储。",
           "basis": "AGENTS.md §2（迁移前）"
         },
         {
@@ -625,6 +625,12 @@
           "basis": "AGENTS.md §2（迁移前）"
         },
         {
+          "id": "harness.requirement-granularity",
+          "modality": "must",
+          "text": "需求粒度：同目标 / 同子系统 / 小改动 / 可共用计划与验收证据的相邻工作优先合入同一条需求；只有独立交付验收、跨仓或跨泳道、需要风险隔离才新建。相邻新建必须在 description 里写清不可合并的理由（缺理由 = 按可合并处理）。判据三问：① 拦的动作是 requirement.add / --requirement 建档；② 违规的可见表现是相邻需求被指出「只是上一条的一部分」而 description 里找不到不可合并理由；③ 下次用 requirement.list 逐条核对新增需求的 description 是否带该理由来确认生效。",
+          "basis": "用户决策 2026-11-02（r3 需求合并决策）"
+        },
+        {
           "id": "harness.plan-gate",
           "modality": "must",
           "text": "plan 门禁（req.gate=plan）：plan 提案验收后触发；通过 → 置 plan_ok（即旧 ready，才可 dispatch 进开发）；驳回 → 回 planning 重做；校验 gate_rev == req.rev（否则 stale 不得批）。",
@@ -633,7 +639,7 @@
         {
           "id": "harness.accept-gate",
           "modality": "must",
-          "text": "accept 门禁（req.gate=accept）：开发提案验收后触发（执行方交付）；通过 → done；驳回 → 回 planning 且 plan_ok 仍为真（即旧 ready，重新进开发队列）；校验 gate_rev == req.rev，且 artifacts 必须非空——不接受只有 summary 的完成自称。",
+          "text": "accept 门禁（req.gate=accept）：开发提案验收后触发（执行方交付）；通过 → done；驳回 → 存储态回 planning、plan_ok 沿用原值（未 amend 即旧 ready，重新进开发队列；amend 过则 plan_ok 已作废 → 停在 planning 强制重规划）；校验 gate_rev == req.rev，且 artifacts 必须非空——不接受只有 summary 的完成自称。",
           "basis": "AGENTS.md §2 门禁表（迁移前）"
         },
         {
@@ -747,7 +753,7 @@
         {
           "id": "harness.reject-paths",
           "modality": "must",
-          "text": "打回路径：proposal.reject → analysis→draft / plan→planning / development→ready；gate.reject → plan_gate→planning / accept→ready。",
+          "text": "打回路径：proposal.reject → analysis→draft / plan→planning / development→保留 plan_ok（未 amend 即 ready，amend 过则 planning）；gate.reject 存储态一律回 planning，plan 门禁置 plan_ok 假（重派 plan），accept 门禁沿用原值（未 amend 即 ready，amend 过即 planning）。",
           "basis": "AGENTS.md §4（迁移前）"
         },
         {
