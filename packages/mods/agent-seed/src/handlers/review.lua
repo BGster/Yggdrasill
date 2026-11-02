@@ -1,4 +1,4 @@
--- src/handlers/review.lua —— 协调与复盘：coordinate.submit / verify.submit / review.note。
+-- src/handlers/review.lua —— 协调与复盘：coordinate.submit / verify.submit / settlement.evolution / review.note。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
@@ -16,16 +16,16 @@ local wire = require("src.wire")
 
 local TEXTS
 
-local goal_authorization, num, strict_gates =
-  config.goal_authorization, config.num, config.strict_gates
+local goal_authorization, num, strict_gates, text_of =
+  config.goal_authorization, config.num, config.strict_gates, config.text_of
 local advance, refuse, reject, reject_payload =
   flow.advance, flow.refuse, flow.reject, flow.reject_payload
-local gate_problem =
-  gates.gate_problem
+local gate_problem, settlement_problem =
+  gates.gate_problem, gates.settlement_problem
 local HUMAN =
   choice.HUMAN
-local render =
-  render_mod.receipt
+local render, reset_settlement =
+  render_mod.receipt, render_mod.reset_settlement
 local STAGE, req_count, stage =
   reqs.STAGE, reqs.req_count, reqs.stage
 local cut, fill, split, trim =
@@ -56,6 +56,7 @@ function M.install(deps)
     if problem ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", problem)
     end
+    reset_settlement()
     ygg.kv.set("verify.passed", false)
     ygg.narrate(fill(TEXTS.beats.coordinate_ok, { count = tostring(req_count()) }))
     advance(STAGE.review)
@@ -114,6 +115,7 @@ function M.install(deps)
     ygg.kv.set("verify.failures", failures)
     ygg.kv.set("verify.last", report ~= "" and report or TEXTS.beats.verify_failed_record)
     if strict_gates() then
+      reset_settlement()
       ygg.narrate(fill(TEXTS.beats.verify_fail, { failures = tostring(failures) }))
       advance(STAGE.coordinate)
     else
@@ -121,6 +123,39 @@ function M.install(deps)
       ygg.kv.set("verify.passed", true)
       render()
     end
+  end)
+  ygg.on("settlement.evolution", function(payload)
+    local current = stage()
+    if current ~= STAGE.review then
+      return reject("settlement.evolution", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
+    end
+    if ygg.kv.get("verify.passed") ~= true then
+      return refuse(TEXTS.beats.req_wait_rejected, "settlement.evolution", TEXTS.beats.settlement_evolution_verify_first)
+    end
+    local registration, registration_err = wire.parse_settlement_evolution(payload)
+    if registration == nil then
+      return reject_payload("settlement.evolution", registration_err)
+    end
+    local _, _, registered_candidates, registered_classes = wire.evolution_settings()
+    local record, record_err = wire.normalize_evolution(
+      registration.artifact,
+      registration.summary,
+      registration.segments.c or registered_candidates,
+      registration.segments.cls or registered_classes
+    )
+    if record == nil then
+      return reject_payload("settlement.evolution", record_err)
+    end
+    local candidates = tostring(record.kept) .. "/" .. tostring(record.screened)
+    ygg.kv.set("settlement.evolution.artifact", record.artifact)
+    ygg.kv.set("settlement.evolution.summary", record.summary)
+    ygg.kv.set("settlement.evolution.candidates", candidates)
+    ygg.kv.set("settlement.evolution.classes", wire.format_classes(record.classes))
+    ygg.narrate(fill(TEXTS.beats.settlement_evolution_ok, {
+      summary = record.summary,
+      candidates = candidates,
+    }))
+    render()
   end)
   ygg.on("review.note", function(payload)
     if not HUMAN.gated("review.note") then
@@ -136,8 +171,9 @@ function M.install(deps)
       render()
       return
     end
-    if strict_gates() and ygg.kv.get("verify.passed") ~= true then
-      ygg.narrate(TEXTS.beats.req_gate_verify)
+    local settlement_issue = settlement_problem()
+    if settlement_issue ~= nil then
+      ygg.narrate(fill(TEXTS.beats.req_gate_block, { action = "review.note", detail = settlement_issue }))
       render()
       return
     end
@@ -167,21 +203,13 @@ function M.install(deps)
       end
       score = math.floor(parsed)
     end
-    -- 进化声明：段 > 已登记设置 > 缺省；形状与计数自洽均在写状态前校验。
-    local registered_artifact, registered_candidates, registered_classes = wire.evolution_settings()
-    local record, record_err = wire.normalize_evolution(
-      note.segments.ev or registered_artifact,
-      note.segments.c or registered_candidates,
-      note.segments.cls or registered_classes
-    )
-    if record == nil then
-      return reject_payload("review.note", record_err)
-    end
     ygg.kv.set("review.lesson", lesson)
     ygg.kv.set("review.score", score)
-    ygg.kv.set("review.evolution.artifact", record.artifact)
-    ygg.kv.set("review.evolution.candidates", tostring(record.kept) .. "/" .. tostring(record.screened))
-    ygg.kv.set("review.evolution.classes", wire.format_classes(record.classes))
+    -- 进化记录只从本轮回合的 settlement 登记单源归档，不再读载荷或 settings。
+    ygg.kv.set("review.evolution.artifact", text_of("settlement.evolution.artifact", ""))
+    ygg.kv.set("review.evolution.summary", text_of("settlement.evolution.summary", ""))
+    ygg.kv.set("review.evolution.candidates", text_of("settlement.evolution.candidates", TEXTS.beats.evolution_none))
+    ygg.kv.set("review.evolution.classes", text_of("settlement.evolution.classes", ""))
     ygg.kv.set("ending", STAGE.done)
     ygg.narrate(fill(TEXTS.beats.review_ok, { score = tostring(score), lesson = lesson }))
     advance(STAGE.done)

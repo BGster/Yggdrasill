@@ -15,8 +15,8 @@ local wire = require("src.wire")
 
 local TEXTS
 
-local mode, next_mode, next_play_mode, play_mode, strict_gates =
-  config.mode, config.next_mode, config.next_play_mode, config.play_mode, config.strict_gates
+local mode, next_mode, next_play_mode, play_mode, strict_gates, text_of =
+  config.mode, config.next_mode, config.next_play_mode, config.play_mode, config.strict_gates, config.text_of
 local gate_kind, gate_next, gate_total =
   gates.gate_kind, gates.gate_next, gates.gate_total
 local guide_section =
@@ -25,19 +25,29 @@ local prop_id, prop_next, prop_pending_total, prop_req, prop_stage =
   props.prop_id, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_stage
 local STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_count, req_dev_ready, req_id, req_job, req_job_stage, req_open_total, stage =
   reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_dev_ready, reqs.req_id, reqs.req_job, reqs.req_job_stage, reqs.req_open_total, reqs.stage
-local fill =
-  util.fill
+local fill, trim =
+  util.fill, util.trim
 
--- review.note 载荷：已登记（`config.set review.evolution.*`）就带上，没登记就保持 lesson|score。
+-- settlement.evolution 菜单载荷读取预登记面；缺省零候选不需伪 artifact。
+local function settlement_evolution_payload()
+  local artifact, summary, candidates, classes = wire.evolution_settings()
+  summary = trim(summary)
+  if summary == "" then
+    summary = TEXTS.beats.settlement_evolution_default_summary
+  end
+  candidates = trim(candidates)
+  if candidates == "" then
+    candidates = TEXTS.beats.evolution_none
+  end
+  return wire.format_settlement_evolution(artifact, summary, candidates, classes)
+end
+
+local function settlement_registered()
+  return trim(text_of("settlement.evolution.summary", "")) ~= ""
+end
+
 local function review_note_payload()
-  local artifact, candidates, classes = wire.evolution_settings()
-  return wire.format_review_note(
-    TEXTS.beats.default_lesson,
-    tostring(TEXTS.tuning.default_score),
-    artifact,
-    candidates,
-    classes
-  )
+  return wire.format_review_note(TEXTS.beats.default_lesson, tostring(TEXTS.tuning.default_score))
 end
 
 local function guide_item(st)
@@ -340,11 +350,19 @@ end
 MENU[STAGE.review] = function()
   local items = append_all({}, resolve_items())
   if ygg.kv.get("verify.passed") == true then
-    items[#items + 1] = {
-      text = TEXTS.options.review_note,
-      action = "review.note",
-      payload = review_note_payload(),
-    }
+    if settlement_registered() then
+      items[#items + 1] = {
+        text = TEXTS.options.review_note,
+        action = "review.note",
+        payload = review_note_payload(),
+      }
+    else
+      items[#items + 1] = {
+        text = TEXTS.options.settlement_evolution,
+        action = "settlement.evolution",
+        payload = settlement_evolution_payload(),
+      }
+    end
   else
     items[#items + 1] = { text = TEXTS.options.verify_green, action = "verify.submit", payload = "true" }
   end

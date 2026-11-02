@@ -1,7 +1,8 @@
 -- src/render.lua —— 回执渲染 + 双层图（local/full）+ 结构化摘要（`agent.summary` 的注册面）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
--- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读；渲染不改状态）。
+-- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`settlement.evolution.*`
+-- （仅 reset_settlement 集中重置；其余渲染与摘要只读）。
 
 local M = {}
 
@@ -365,6 +366,20 @@ end
 
 local RENDER = {}
 
+local SETTLEMENT_EVOLUTION_KEYS = {
+  "settlement.evolution.artifact",
+  "settlement.evolution.summary",
+  "settlement.evolution.candidates",
+  "settlement.evolution.classes",
+}
+
+-- 每轮 review 的登记只清这四键；settings.review.evolution.* 预登记保留。
+local function reset_settlement()
+  for i = 1, #SETTLEMENT_EVOLUTION_KEYS do
+    ygg.kv.set(SETTLEMENT_EVOLUTION_KEYS[i], "")
+  end
+end
+
 local prompt_vars
 
 -- 剧情是点：一个节点只有一段文本（`<节点>_common`）。
@@ -539,6 +554,7 @@ local function summary_fields()
     -- 进化声明（只声称「声明了什么」）：宿主与只读查询可直接核对，不涉及内容质量。
     evolution = {
       artifact = text_of("review.evolution.artifact", ""),
+      summary = text_of("review.evolution.summary", ""),
       candidates = text_of("review.evolution.candidates", TEXTS.beats.evolution_none),
       classes = text_of("review.evolution.classes", ""),
     },
@@ -597,6 +613,7 @@ M.prompt_vars = prompt_vars
 M.receipt = render
 M.req_panel_text = req_panel_text
 M.req_trace = req_trace
+M.reset_settlement = reset_settlement
 M.stage_prompt = stage_prompt
 M.summary_awaiting = summary_awaiting
 M.summary_conflicts = summary_conflicts

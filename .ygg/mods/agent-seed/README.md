@@ -107,7 +107,7 @@ intake ──task.intake──▶ coordinate ──coordinate.submit──▶ re
 ```
 
 - `coordinate.submit` 有硬门禁：全部叶子需求 `done` ∧ 0 待验收提案 ∧ 0 在跑 job ∧ 0 未解决冲突。
-- `review` 里 `verify.submit=true` 只记录门禁证据（要求全绿时才允许之后收口），`review.note` 才收口。
+- `review` 里 `verify.submit=true` 只记录门禁证据；随后必须先 `settlement.evolution` 登记，`review.note` 才单源归档并收口。
 
 ## 二、需求级流水线（`req.<i>.status`）
 
@@ -179,7 +179,7 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 | `gate.approve` | 两个强制门禁 |
 | `coordinate.submit` | 收口进 review |
 | `verify.submit` | 门禁自检结论 |
-| `review.note` | 结局评分 / 经验 + 进化候选声明（`ev=` / `c=` / `cls=`，见 §八） |
+| `review.note` | 结局评分 / 经验 + settlement 单源归档（`lesson|score`） |
 
 - 打回类（`gate.reject` / `proposal.reject`）**故意不在内**：打回不产生任何通过效果，自打回
   只会让自己返工；而它是唯一的纠错通道（菜单本就没有带理由的 reject 项）。
@@ -191,10 +191,10 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 
 ### 5.2 二级菜单页
 
-顶层菜单只留一个 `config` 入口，三项设置进子页：运行模式 / 演进偏好 / 门禁。进化声明的登记键
-（`review.evolution.artifact` / `candidates` / `classes`）**不占菜单项**——菜单没有自由文本输入，
-所以它们走 `config.set` 直派，写 `settings.review.evolution.*`；`review.note` 的菜单载荷会自动把已登记值
-拼进 `ev=` / `c=` / `cls=` 段（见 §八）。
+顶层菜单只留一个 `config` 入口，三项设置进子页：运行模式 / 演进偏好 / 门禁。进化声明的预登记键
+（`review.evolution.artifact` / `summary` / `candidates` / `classes`）**不占菜单项**——菜单没有自由文本输入，
+所以它们走 `config.set` 直派，写 `settings.review.evolution.*`；verify 通过后的 `settlement.evolution`
+菜单项读取这些值构造载荷并集中校验（见 §八）。
 
 | 动作 | 载荷 | 作用 |
 | --- | --- | --- |
@@ -264,7 +264,7 @@ ygg.on("agent.summary", function()
   ygg.meta("summary", { stage = ..., ending = ..., verifyPassed = ..., nextEndsRun = ...,
                         pendingProposals = ..., requirementCount = ...,
                         conflicts = { { id = ..., peer = ..., note = ... } },
-                        evolution = { artifact = ..., candidates = ..., classes = ... },
+                        evolution = { artifact = ..., summary = ..., candidates = ..., classes = ... },
                         awaiting = { req = ..., rev = ..., stage = ... } })  -- 无在跑 job 时缺省
   render()
 end)
@@ -274,7 +274,8 @@ end)
   叙事里**没有** `【摘要】` 前缀行，宿主也不从叙事文本里剖 JSON。
 - 该动作**只读**：不推进状态、不改 KV、`pendingChoice` 保持不变（只重渲染一屏）。
 - `meta` 是瞬态回执面，不进存档也不进状态哈希（调不调它不影响 `state_hash`）。
-- `evolution` 三个子键是**声明回显**（`review.evolution.*` 的同一份值，缺省 `""` / `"0/0"` / `""`）：
+- `evolution` 四个子键是**声明回显**（`review.evolution.*` 的同一份值，按 artifact / summary /
+  candidates / classes 顺序缺省 `""` / `""` / `"0/0"` / `""`）：
   它可以被断言「声明了没有」，不能拿来断言建议质量或复核独立性。
 - 值面约束（内核把关）：标量 / 稠密序列 / 字符串键表；非有限值拒绝；空表读作 `[]`。
 
@@ -282,8 +283,8 @@ end)
 
 - 静态 `data/config.json` + 动态 KV `settings.*`（`config.set`）：`play.mode`（guide/goal）、
   `gates.require_all_green`、`evolution.mode` / `evolution.max_per_run`（**仅叙事偏好**：不自动修订、
-  不登记修订请求、不参与任何判定）、`review.evolution.artifact` / `review.evolution.candidates` /
-  `review.evolution.classes`（进化候选声明，见下）。
+  不登记修订请求、不参与任何判定）、`review.evolution.artifact` / `review.evolution.summary` /
+  `review.evolution.candidates` / `review.evolution.classes`（进化候选预登记，见下）。
 - 顶层菜单只暴露一个 `config` 入口，三项常用设置走二级页（见 §5.2）；其余键仍可直接
   `config.set "<键>=<值>"` 派发。**配置写一律不设人类动作门禁**（不产生「通过」效果）；`play.mode` 的切换是
   决策权移交，由 AGENTS §8 约束（用户当次授权下可自行切，goal 局收口前要交代授权），不走票据闸。
@@ -292,28 +293,36 @@ end)
 - `tuning`：`req_capacity`（需求上限 32）、`job_capacity`（4）、`min_slices` / `max_slices`（历史遗留）、
   `default_score`。
 
-### 8.1 进化候选声明（`review.note` 可选段）
+### 8.1 进化候选登记（`settlement.evolution`）与归档（`review.note`）
 
 ```text
-review.note "lesson|score[|ev=artifacts/<file>.md|c=<kept>/<screened>[|cls=<kind>:<n>,...]]"
+settlement.evolution "artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]"
+review.note "lesson|score"
 ```
 
-| 段 | 形状 | 缺省 | 落到 |
+| 段 | 形状 | 缺省 | 归档到 |
 | --- | --- | --- | --- |
-| `ev` | `artifacts/` 前缀 + `.md` 尾，禁 `..` 与空白 | 空 | `review.evolution.artifact` |
-| `c` | 两个非负整数，`kept ≤ screened` | `0/0` | `review.evolution.candidates` |
-| `cls` | `<kind>:<n>` 逗号分隔，kind ∈ `long_term` / `unused` / `one_off` / `temp_tool` / `redundant` / `no_scene` | 空 | `review.evolution.classes` |
+| `artifact` | 可空；非空须为 `artifacts/<file>.md`，禁 `..` 与空白 | 空 | `review.evolution.artifact` |
+| `summary` | 去空白后必填，不能含 `|` | 菜单用中性默认文案 | `review.evolution.summary` |
+| `c` | 两个非负整数，`kept ≤ screened` | 先回落预登记，再 `0/0` | `review.evolution.candidates` |
+| `cls` | `<kind>:<n>` 逗号分隔，kind ∈ `long_term` / `unused` / `one_off` / `temp_tool` / `redundant` / `no_scene` | 先回落预登记，再空 | `review.evolution.classes` |
 
-- **向导通道**：guide 下菜单载荷是固定文案，但会读 `settings.review.evolution.*`——先
-  `config.set review.evolution.artifact=artifacts/xxx.md`（另两个键同理）登记，再在 review 菜单选 `review.note`
-  即可把已登记值带进载荷；goal 下可直接在载荷写段（缺段时同样回落到已登记值）。
-- **完整性校验**（写状态前）：`screened > 0` 时 `ev` 与 `cls` 必填——所有被筛选的候选都要有复核记录与
-  根因分类，不能只登记保留的那几条；`c=0/0` 仍可带 `ev`（复核后无候选）。登记阶段允许分次中间态
-  （`config.set` 逐键校形状），完整性只在收口处校。
-- **自洽校验**（写状态前）：`cls` 各计数之和必须等于 `screened`；保留类（`long_term` + `unused` + `redundant`）
-  之和必须等于 `kept`。非法值【载荷被拒】，主状态不变。
-- **声明 ≠ 证明**：沙箱读不到文件，Mod 只校形状与计数自洽；不校验 artifact 内容、也不知道复核是否独立执行。
-  `agent.summary.evolution` 只是这三个键的回显，随存档与 `settlement.json.final_state.kv` 自然可见。
+- **登记前件**：只在 review 且 `verify.passed=true` 后可用，每轮 done 前都必须登记。成功写
+  `settlement.evolution.{artifact,summary,candidates,classes}`；`c=0/0` 允许 artifact 为空，避免零候选造空文档。
+- **预登记与完整性**：guide 可先 `config.set review.evolution.artifact|summary|candidates|classes=<值>`
+  （空 summary = 清除），逐键校形状；跨字段完整性只在 `settlement.evolution` 校。`screened > 0` 时
+  artifact 与 `cls` 必填，`cls` 总和 = `screened`，保留类（`long_term` + `unused` + `redundant`）总和 = `kept`。
+  可选段只接受 `c=` / `cls=`；`ev=`、重复段与未知段均【载荷被拒】。
+- **菜单不变式**：verify 已通过且未登记时首项是 `settlement.evolution`，载荷由 settings 预登记构造；
+  未预登记时给空 artifact、中性 summary 与 `c=0/0`。登记后首项才是 `review.note`，保持 `nextEndsRun`
+  契约；默认零候选载荷保证全 1 走查可按「登记 → 收口」通关，不引入 disabled 项。
+- **单源归档**：`review.note` 只接受 `lesson|score`；旧 `ev=` / `c=` / `cls=` 段一律拒绝并提示先
+  `settlement.evolution`。它只把本轮 settlement 四键归档到 `review.evolution.*`，不再读载荷或 settings
+  重算。`coordinate.submit` 重入 review、以及 `verify.submit=false` 打回时清空本轮 settlement 四键，
+  但保留 settings 预登记。
+- **声明 ≠ 证明**：沙箱读不到文件，Mod 只校声明形状与计数自洽；不校验 artifact 内容、也不知道复核是否独立执行。
+  `agent.summary.evolution` 回显归档的 artifact / summary / candidates / classes 四键，随存档与
+  `settlement.json.final_state.kv` 自然可见。
 
 ### 8.2 goal 授权（run 级自声明）
 
@@ -372,7 +381,7 @@ config.set executor.<rN>.<stage>=            # 空值 = 显式解绑
 ## 十、走查
 
 ```bash
-# 默认全 1 贪心：intake → coordinate.submit → verify → review.note → 【结局
+# 默认全 1 贪心：intake → coordinate.submit → verify → settlement.evolution → review.note → 【结局
 cargo run --example playtest -- .ygg/mods/agent-seed
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：

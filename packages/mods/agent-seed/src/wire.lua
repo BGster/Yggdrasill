@@ -1,4 +1,4 @@
--- src/wire.lua —— payload wire format 解析 + inbox 幂等键（`@ext=`）+ review.note 进化声明段。
+-- src/wire.lua —— payload wire format 解析 + inbox 幂等键（`@ext=`）+ settlement.evolution 进化登记。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。
@@ -258,10 +258,10 @@ local function parse_resolve(payload)
 end
 
 -- ============================================================================
--- §review.note 进化声明段（`ev=` / `c=` / `cls=`）
+-- §settlement.evolution 进化登记 + review.note 复盘载荷
 --
--- 声明 ≠ 证明：这里只校验**形状与完整性**（路径形状、两个整数、六类计数自洽、
--- screened > 0 时 ev 与 cls 都不得缺），沙箱读不到文件，也不判断建议质量或复核是否真的独立执行过。
+-- 声明 ≠ 证明：这里只校验**形状与完整性**（summary、路径形状、两个整数、
+-- 六类计数自洽），沙箱读不到文件，也不判断建议质量或复核是否真的独立执行过。
 -- ============================================================================
 local EVOLUTION_CLASSES = { "long_term", "unused", "one_off", "temp_tool", "redundant", "no_scene" }
 
@@ -348,12 +348,16 @@ local function kept_total(classes)
   return total
 end
 
--- 三路输入一律是字符串（缺省 = ""）：artifact 空 = 未登记；candidates 空 = 0/0；classes 空 = 未分类。
--- 跨字段自洽只在收口处校（登记阶段允许分次登记）。
--- 完整性同样是收口硬条件：screened > 0 就必须同时有复核 artifact 与逐类计数——
--- 「筛了几条、留了几分」而把复核记录与根因分类留在散文里，等于没登记。
-local function normalize_evolution(artifact, candidates, classes)
-  local record = { artifact = "", kept = 0, screened = 0, classes = {} }
+-- 四路输入一律是字符串（缺省 = ""）：artifact 可空；summary 去空白后必填；
+-- candidates 空 = 0/0；classes 空 = 未分类。config.set 只逐键校形状，
+-- 跨字段完整性集中在 settlement.evolution 登记时校验。
+local function normalize_evolution(artifact, summary, candidates, classes)
+  local record = { artifact = "", summary = "", kept = 0, screened = 0, classes = {} }
+  local summary_text = trim(summary or "")
+  if summary_text == "" then
+    return nil, TEXTS.beats.settlement_evolution_missing
+  end
+  record.summary = summary_text
   local artifact_text = trim(artifact or "")
   if artifact_text ~= "" then
     if not evolution_path_ok(artifact_text) then
@@ -394,7 +398,7 @@ local function normalize_evolution(artifact, candidates, classes)
   return record, nil
 end
 
--- 登记面（`config.set review.evolution.*` → `settings.review.evolution.*`）与收口面读同一份口径。
+-- 预登记面（`config.set review.evolution.*` → `settings.review.evolution.*`）。
 local function evolution_settings()
   local function read(name)
     local value = effective(name)
@@ -403,22 +407,65 @@ local function evolution_settings()
     end
     return ""
   end
-  return read("review.evolution.artifact"), read("review.evolution.candidates"), read("review.evolution.classes")
+  return read("review.evolution.artifact"), read("review.evolution.summary"),
+    read("review.evolution.candidates"), read("review.evolution.classes")
 end
 
--- 菜单构造 review.note 载荷：已登记就带上，没登记就只给 lesson|score（向后兼容）。
-local function format_review_note(lesson, score, artifact, candidates, classes)
-  local parts = { lesson, score }
-  if artifact ~= "" then
-    parts[#parts + 1] = "ev=" .. artifact
+-- 菜单构造 settlement.evolution 载荷；未预登记时由调用方补中性 summary 与 0/0。
+local function format_settlement_evolution(artifact, summary, candidates, classes)
+  local parts = { trim(artifact or ""), trim(summary or "") }
+  local candidates_text = trim(candidates or "")
+  local classes_text = trim(classes or "")
+  if candidates_text ~= "" or classes_text ~= "" then
+    if candidates_text == "" then
+      candidates_text = "0/0"
+    end
+    parts[#parts + 1] = "c=" .. candidates_text
   end
-  if candidates ~= "" and candidates ~= "0/0" then
-    parts[#parts + 1] = "c=" .. candidates
-  end
-  if classes ~= "" then
-    parts[#parts + 1] = "cls=" .. classes
+  if classes_text ~= "" then
+    parts[#parts + 1] = "cls=" .. classes_text
   end
   return join(parts, "|")
+end
+
+-- `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`。
+-- 只认 c=/cls= 可选段；ev=、重复段与未知段都在这里拒绝。
+local function parse_settlement_evolution(payload)
+  if type(payload) ~= "string" then
+    return nil, fill(TEXTS.beats.bad_payload, { action = "settlement.evolution" })
+  end
+  local parts = split(trim(payload), "|")
+  if #parts < 2 then
+    return nil, TEXTS.beats.settlement_evolution_usage
+  end
+  local out = {
+    artifact = trim(parts[1] or ""),
+    summary = trim(parts[2] or ""),
+    segments = {},
+  }
+  for i = 3, #parts do
+    local key, value = cut(trim(parts[i]), "=")
+    key = trim(key or "")
+    value = trim(value or "")
+    if key ~= "c" and key ~= "cls" then
+      return nil, TEXTS.beats.settlement_evolution_usage
+    end
+    if out.segments[key] ~= nil then
+      return nil, TEXTS.beats.settlement_evolution_usage
+    end
+    if key == "c" and value == "" then
+      return nil, TEXTS.beats.review_evolution_bad_candidates
+    end
+    if key == "cls" and value == "" then
+      return nil, TEXTS.beats.review_evolution_bad_classes
+    end
+    out.segments[key] = value
+  end
+  return out, nil
+end
+
+local function format_review_note(lesson, score)
+  return join({ lesson, score }, "|")
 end
 
 local function parse_review_note(payload)
@@ -426,20 +473,17 @@ local function parse_review_note(payload)
     return nil, fill(TEXTS.beats.bad_payload, { action = "review.note" })
   end
   local parts = split(trim(payload), "|")
-  local out = { lesson = trim(parts[1] or ""), score_text = trim(parts[2] or ""), segments = {} }
-  for i = 3, #parts do
-    local key, value = cut(trim(parts[i]), "=")
-    key = trim(key or "")
-    value = trim(value or "")
-    if key ~= "ev" and key ~= "c" and key ~= "cls" then
-      return nil, TEXTS.beats.review_evolution_usage
+  if #parts > 2 then
+    for i = 3, #parts do
+      local key = cut(trim(parts[i]), "=")
+      key = trim(key or "")
+      if key == "ev" or key == "c" or key == "cls" then
+        return nil, TEXTS.beats.review_note_legacy_evolution
+      end
     end
-    if out.segments[key] ~= nil then
-      return nil, TEXTS.beats.review_evolution_usage
-    end
-    out.segments[key] = value
+    return nil, TEXTS.beats.review_note_usage
   end
-  return out, nil
+  return { lesson = trim(parts[1] or ""), score_text = trim(parts[2] or "") }, nil
 end
 
 -- ============================================================================
@@ -520,11 +564,13 @@ M.evolution_path_ok = evolution_path_ok
 M.evolution_settings = evolution_settings
 M.format_classes = format_classes
 M.format_review_note = format_review_note
+M.format_settlement_evolution = format_settlement_evolution
 M.kept_total = kept_total
 M.normalize_evolution = normalize_evolution
 M.parse_candidates = parse_candidates
 M.parse_classes = parse_classes
 M.parse_review_note = parse_review_note
+M.parse_settlement_evolution = parse_settlement_evolution
 
 M.RESOLVE_MODES = RESOLVE_MODES
 M.inbox_mark = inbox_mark

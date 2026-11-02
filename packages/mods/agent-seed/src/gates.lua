@@ -1,4 +1,4 @@
--- src/gates.lua —— 门禁与收口判据（只读选择器）：plan_gate / accept_gate / coordinate.submit 共用同一套。
+-- src/gates.lua —— 门禁与收口判据（只读选择器）：需求门禁、coordinate.submit 与 settlement 收口。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。
@@ -18,8 +18,8 @@ local prop_pending_total =
   props.prop_pending_total
 local R_ACCEPT, R_PLAN_GATE, job_capacity, job_total, req_all_done, req_conflict_total, req_count, req_id, req_key, req_open_total, req_rev, req_status =
   reqs.R_ACCEPT, reqs.R_PLAN_GATE, reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict_total, reqs.req_count, reqs.req_id, reqs.req_key, reqs.req_open_total, reqs.req_rev, reqs.req_status
-local fill =
-  util.fill
+local fill, trim =
+  util.fill, util.trim
 
 local GATE_STATES = { [R_PLAN_GATE] = "plan", [R_ACCEPT] = "accept" }
 
@@ -77,6 +77,16 @@ local function gate_problem()
   return nil
 end
 
+local function settlement_problem()
+  if ygg.kv.get("verify.passed") ~= true then
+    return TEXTS.beats.settlement_evolution_verify_first
+  end
+  if trim(text_of("settlement.evolution.summary", "")) == "" then
+    return TEXTS.beats.settlement_evolution_missing
+  end
+  return nil
+end
+
 function M.install(deps)
   TEXTS = deps.texts
 end
@@ -89,5 +99,6 @@ M.gate_problem = gate_problem
 M.gate_rev_ok = gate_rev_ok
 M.gate_total = gate_total
 M.req_artifacts = req_artifacts
+M.settlement_problem = settlement_problem
 
 return M

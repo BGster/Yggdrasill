@@ -173,6 +173,9 @@ function M.install(deps)
       else
         ygg.kv.set("settings.review.evolution.artifact", artifact)
       end
+    elseif key == "review.evolution.summary" then
+      -- 预登记 summary：去空白；空值 = 显式清除，非空原样写入。
+      ygg.kv.set("settings.review.evolution.summary", trim(value))
     elseif key == "review.evolution.candidates" then
       local candidates = trim(value)
       if candidates == "" then

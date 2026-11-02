@@ -24,7 +24,7 @@
             "required": ["mode", "allow_paths", "max_per_run"],
             "properties": {
                 "mode": {
-                    "description": "演进偏好默认值：off / suggest / auto。三者都只是建议口径的叙事偏好——本 Mod 不自动修订任何资源、不登记修订请求，也不在判定里消费这个值；局末进化建议的登记走 review.note 的可选段（ev= / c= / cls=），与这个偏好无关。",
+                    "description": "演进偏好默认值：off / suggest / auto。三者都只是建议口径的叙事偏好——本 Mod 不自动修订任何资源、不登记修订请求，也不在判定里消费这个值；局末进化建议的登记走独立动作 settlement.evolution（artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]），review.note 只归档已登记记录，与这个偏好无关。",
                     "enum": ["off", "suggest", "auto"]
                 },
                 "allow_paths": {

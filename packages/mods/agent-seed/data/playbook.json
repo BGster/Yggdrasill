@@ -259,7 +259,7 @@
         {
           "id": "harness.action-protocol",
           "modality": "must",
-          "text": "动作经事件派发、载荷是以竖线（`|`）分隔的字符串；回执里的 `pendingChoice` 就是**当前允许的动作集**（协议约束，不是提示词约束）——只在其中选，不臆造动作。",
+          "text": "动作经事件派发、载荷是以竖线（`|`）分隔的字符串；`settlement.evolution` 用 `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`，`review.note` 只用 `lesson|score`。回执里的 `pendingChoice` 就是**当前允许的动作集**（协议约束，不是提示词约束）——只在其中选，不臆造动作。",
           "basis": "harness 机制"
         },
         {
@@ -383,7 +383,7 @@
       "id": "evolution",
       "order": 6,
       "title": "六、进化建议方法（候选筛选 · 复核 · 场景化）",
-      "summary": "局末建议进 backlog 前过四道关：长期性优先、已有未用查根因、逐项独立复核、场景先于技术；收口用 review.note 的 ev/c/cls 可选段登记声明——状态机只校验声明形状，不证明建议质量。",
+      "summary": "局末建议进 backlog 前过四道关：长期性优先、已有未用查根因、逐项独立复核、场景先于技术；verify 全绿后用独立 settlement.evolution 登记 summary 与候选声明，review.note 只单源归档——状态机只校验声明形状，不证明建议质量。",
       "source": "seed template（通用元工作流纪律，与具体仓库无关）",
       "priority": "standard",
       "applies_to": [
@@ -424,23 +424,23 @@
         {
           "id": "evolution.record-shape",
           "modality": "must",
-          "text": "收口时用 `review.note` 的可选段登记声明：`ev=artifacts/<file>.md`（复核 artifact）、`c=<kept>/<screened>`（保留数/筛选数）、`cls=<kind>:<n>,...`（六类逐类计数，和必须等于 screened，保留类之和必须等于 kept）。**screened > 0 时 ev 与 cls 必填**——筛过的候选都要有复核记录与根因分类，不能只登记保留的那几条；`c=0/0` 仍可带 artifact 作为「复核后无候选」的记录。guide 下先 `config.set review.evolution.artifact|candidates|classes=<值>` 登记（允许分次中间态，完整性在收口处校），菜单会把已登记值带进 review.note 载荷；什么都没登记就是显式 0/0。",
-          "basis": "review.note / config.set 契约（本 Mod）"
+          "text": "verify.submit=true 后用 `settlement.evolution` 登记：`artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`。summary 去空白后必填；artifact 可空，但 **screened > 0 时必须是 artifacts/<file>.md 且 cls 必填**；六类计数和 = screened，保留类之和 = kept；**c=0/0 允许 artifact 为空**。c/cls 缺省依次回落 settings.review.evolution.* 与 0/0/空分类。guide 可先 `config.set review.evolution.artifact|summary|candidates|classes=<值>` 预登记（逐键校形状，跨字段完整性只在 settlement.evolution 校），菜单据此构造载荷；未预登记时用中性 summary + c=0/0。随后 review.note 只收 `lesson|score`，并把 settlement 四键单源归档到 review.evolution.*。",
+          "basis": "settlement.evolution / review.note / config.set 契约（本 Mod）"
         },
         {
           "id": "evolution.declare-not-prove",
           "modality": "must-not",
-          "text": "不得把登记当成证明：状态机只校验路径形状、计数与分类自洽，读不到 artifact（沙箱无文件系统），也不知道复核是否真的由独立 subagent 执行。任何「已证明建议质量 / 已证明复核独立」的说法都是越界。",
-          "basis": "沙箱白名单（无 io/os）+ review.note 契约"
+          "text": "不得把登记当成证明：状态机只校验 summary 非空、路径形状、计数与分类自洽，读不到 artifact（沙箱无文件系统），也不知道复核是否真的由独立 subagent 执行。任何「已证明建议质量 / 已证明复核独立」的说法都是越界。",
+          "basis": "沙箱白名单（无 io/os）+ settlement.evolution 契约"
         },
         {
           "id": "evolution.no-new-carrier",
           "modality": "must-not",
-          "text": "不为进化流程新增动作族、结算动作、外部检查脚本或宿主改动：载体只允许 AGENTS.md 与 Mod 资源（`src/**` 与 `data/*.json`）。只读查询可以拿来核对声明，但不得成为约束载体。",
+          "text": "不得为进化流程新增第二登记入口、外部检查脚本或宿主改动：唯一登记动作是 `settlement.evolution`；载体仍只允许 AGENTS.md 与 Mod 资源（`src/**` 与 `data/*.json`）。只读查询可以拿来核对声明，但不得成为约束载体。",
           "basis": "AGENTS.md §一·7"
         }
       ],
-      "notes": "登记面是两层：`config.set review.evolution.*` 写运行期覆盖层 `settings.review.evolution.*`，收口时 `review.note` 把它们落到 `review.evolution.*`（单一写入点，随存档与 settlement.json 可见）；`agent.summary.evolution` 只回显这三个键。使用方接入时不需要改这一章，只需在自己的项目章节里补「本仓哪里放复核 artifact」。"
+      "notes": "每轮 done 前都必须登记。登记面是三层：`config.set review.evolution.*` 写运行期预登记 `settings.review.evolution.*`（含 summary）；`settlement.evolution` 写本轮回合 `settlement.evolution.{artifact,summary,candidates,classes}`；`review.note` 仅将这四键单源归档到 `review.evolution.*` 后写 lesson/score/ending。coordinate.submit 重入 review 与 verify.submit=false 打回会清空本轮 settlement 四键，但保留 settings 预登记；`agent.summary.evolution` 回显 review 归档四键。使用方接入时不需要改这一章，只需在自己的项目章节里补「本仓哪里放复核 artifact」。"
     }
   ]
 }

@@ -46,7 +46,7 @@
      逐项独立复核（artifact 必含`文件:行号` + 可跑命令与实际输出 + 语义依据 + 根因分类与结论）；
      场景先于技术（实际场景 → 流程哪一步不满足 → 代码与复现 → 根因 → 长期收益 → 改造面与验证）。
      单次任务约束、临时工具与探针口径、已在当次解决的问题默认不进。
-   - **声明 ≠ 证明**：`review.note` 的 `ev=` / `c=` / `cls=` 只是声明登记（Mod 只校路径形状、
+   - **声明 ≠ 证明**：`settlement.evolution` 的登记只是声明（Mod 只校 summary 非空、路径形状、
      计数与分类自洽）；沙箱读不到 artifact，也不认识 subagent 会话——不得据此声称已证明建议质量或复核独立性。
 
 ### 8. goal / guide：决策权在谁手里
@@ -78,14 +78,22 @@
   `accept` 类还要求 `artifacts` 非空（不接受只有 summary 的完成自称）。
 - **收口前件**（`coordinate.submit` / `verify.submit=true` / `review.note` 共用同一套）：0 条待验收提案 ∧
   0 个在跑 job ∧ 0 个未解决冲突 ∧ 全部需求处于终态（`done`，或已 split / merged / dropped 且后继全都 done）。
-- `coordinate.submit` 只在 `coordinate` 阶段可用，成功即进 `review` 并把 `verify.passed` 置 false；
-  `verify.submit` 在 `review` 记录全绿（`all_green=false` 在 `gates.require_all_green=true` 时打回 `coordinate`）；
-  `review.note` 写 `review.lesson` / `review.score` / `review.evolution.*`（`ev=` / `c=` / `cls=` 可选段，
-  缺省即显式 0/0）/ `ending` 后进 `done`（【结局）。**`c` 的 `screened > 0` 时 `ev` 与 `cls` 必填**（收口前拒），
-  0/0 可只带 `ev`（复核后无候选）。**运行期 goal 局**还要求 `settings.goal.authorization` 非空（缺则旁白阻断，
-  静态默认 goal 不校验，见 §8）。
-- 宿主靠 `agent.summary` 的 `nextEndsRun` 判定「下一步会收口」：仅当 review 阶段菜单首项是 `review.note` 时为真，
+- `coordinate.submit` 只在 `coordinate` 阶段可用，成功即进 `review`、把 `verify.passed` 置 false，并清空本轮
+  `settlement.evolution.{artifact,summary,candidates,classes}`（保留 settings 预登记）；
+  `verify.submit` 在 `review` 记录全绿（`all_green=false` 在 `gates.require_all_green=true` 时打回 `coordinate`，
+  同样清空本轮 settlement 四键）；
+  `settlement.evolution` 仅在 verify 全绿后登记，载荷为 `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`。
+  summary 去空白后必填；`c=0/0` 允许 artifact 为空，`screened > 0` 时 artifact 与 `cls` 必填且分类计数自洽。
+  `config.set review.evolution.artifact|summary|candidates|classes=<值>` 是 guide 预登记面（逐键校形状，
+  跨字段完整性只在登记处校）；c/cls 缺省回落预登记，再缺省 0/0 与空分类。
+  `review.note` 只收 `lesson|score`（旧 ev/c/cls 段一律拒绝），先过 `gates.settlement_problem()`，再把本轮
+  settlement 四键单源归档到 `review.evolution.*`，写 `review.lesson` / `review.score` / `ending` 后进 `done`（【结局）。
+  **运行期 goal 局**还要求 `settings.goal.authorization` 非空（缺则旁白阻断，静态默认 goal 不校验，见 §8）。
+- 宿主靠 `agent.summary` 的 `nextEndsRun` 判定「下一步会收口」：review 在 verify 通过且未登记时首项为
+  `settlement.evolution`，登记后首项才是 `review.note`；未预登记时默认空 artifact + 中性 summary + `c=0/0`，
+  保证全 1 默认路径能走「零候选登记 → review.note」。仅当首项是 `review.note` 时 `nextEndsRun=true`，
   此时先切 `closing`（阻止新写入 + 最后一次 drain 排在收口之前）再派发。
+  `agent.summary.evolution` 回显归档的 artifact / summary / candidates / classes 四键。
 
 ## 二、冷启动
 
@@ -129,8 +137,9 @@ $A --resume --event map.show                                  # 当前节点 + �
 
 1. 确认所有需求进入 done / split / merged / dropped 等终态、inbox 无未消费行，并通过 `verify.submit`
    记录全绿证据（收口前件见 §一·9）。
-2. `coordinate.submit` → `review`，再 `review.note` 收口到 `done`（写复盘经验、评分与进化候选声明；
-   候选先按 `evolution` 章筛，登记用 `ev=artifacts/<file>.md|c=<kept>/<screened>|cls=<kind>:<n>,...`；
-   guide 下可先 `config.set review.evolution.*` 登记，菜单会把已登记值带进载荷）。
+2. `coordinate.submit` → `review`，verify 全绿后先 `settlement.evolution` 登记，再 `review.note` 收口到 `done`：
+   登记载荷为 `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`（summary 必填；c=0/0 可空 artifact）；
+   候选先按 `evolution` 章筛。guide 下可先 `config.set review.evolution.artifact|summary|candidates|classes=<值>`
+   预登记，菜单据此构造登记载荷；`review.note` 只写 `lesson|score` 并单源归档登记记录。
 3. 执行 `--settle` 并核验 `settlement.json` 的 `ok`（四项开关：事件非空 / 无失败步 / 出现结局行 / inbox 已消费）。
 4. **清空主会话 Todo 列表**（`todo clear`，含已完成与历史任务）后再结束本局；不得把已结束局的任务带入下一局。
