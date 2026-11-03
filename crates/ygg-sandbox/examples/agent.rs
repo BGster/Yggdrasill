@@ -124,7 +124,7 @@
 //! `kv` 面摘出结局 / 评分 / 经验（缺失即 `null`），并附完整 kv 与规模面。
 
 use std::cell::Cell;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
@@ -820,6 +820,8 @@ impl Session {
             resumed: false,
         };
 
+        // 残留 tmp 清理（W3 配套）：持锁 + 10s mtime 窗口，不误删活进程的 tmp。
+        session.cleanup_stale_tmp();
         if args.resume {
             match session.load_autosave() {
                 Ok(()) => session.resumed = true,
@@ -873,6 +875,50 @@ impl Session {
         f(self)
     }
 
+    /// 清理残留的 autosave tmp（崩溃 / kill -9 留下）：只删 mtime 早于
+    /// CLOSING_STALE_MS 的（10s 窗口与 closing 心跳同源，plan-r5 §2.4）；新鲜
+    /// tmp 可能有活进程正在写，绝不误删（R6）。持锁执行；清到即告警（B3）。
+    fn cleanup_stale_tmp(&mut self) {
+        let prefix = format!("{AUTOSAVE_FILE}.tmp.");
+        let outcome = self.with_run_lock(|session| -> Result<(), String> {
+            let entries = match fs::read_dir(&session.run_dir) {
+                Ok(entries) => entries,
+                Err(_) => return Ok(()), // 目录读不到 = 无残留可清
+            };
+            for entry in entries.flatten() {
+                if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+                    continue;
+                }
+                // mtime 读不到 → 无法证明陈旧 → 保守跳过（宁可残留不可误删）。
+                let Some(age) = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|meta| meta.modified().ok())
+                    .and_then(|time| SystemTime::now().duration_since(time).ok())
+                    .map(|elapsed| elapsed.as_millis())
+                else {
+                    continue;
+                };
+                if age <= CLOSING_STALE_MS {
+                    continue;
+                }
+                match fs::remove_file(entry.path()) {
+                    Ok(()) => session
+                        .notices
+                        .push(format!("清理残留 tmp：{}", entry.path().display())),
+                    Err(err) => session.notices.push(format!(
+                        "清理残留 tmp 失败：{}：{err}",
+                        entry.path().display()
+                    )),
+                }
+            }
+            Ok(())
+        });
+        if let Err(message) = outcome {
+            self.notices.push(message);
+        }
+    }
+
     /// 新局重置：截断事件日志 + 移除 autosave（返回值 = 是否真的清过东西）。
     fn reset_artifacts(&mut self) -> bool {
         let had = self.events_path.exists() || self.autosave_path.exists();
@@ -912,6 +958,9 @@ impl Session {
     }
 
     /// 运行元信息（结算取 `mod` 标签；`started_at` 跨续局保留）。
+    ///
+    /// W5 半修（plan-r5 §2.7）：run.json 是人读元信息面（两进程并发时值相同或
+    /// 极近，丢更新无实质后果），**不加锁**；但改走 tmp+rename 消「半截读」。
     fn write_meta(&self) {
         let started_at = read_meta(&self.meta_path)
             .and_then(|meta| meta["started_at"].as_u64())
@@ -923,7 +972,15 @@ impl Session {
             "started_at": started_at,
             "updated_at": now_secs(),
         });
-        if let Err(err) = write_json_pretty(&self.meta_path, &meta) {
+        let mut text = match serde_json::to_string_pretty(&meta) {
+            Ok(text) => text,
+            Err(err) => {
+                eprintln!("[警告] 序列化 {} 失败：{err}", self.meta_path.display());
+                return;
+            }
+        };
+        text.push('\n');
+        if let Err(err) = atomic_write(&self.meta_path, text.as_bytes()) {
             eprintln!("[警告] {err}");
         }
     }
@@ -939,8 +996,9 @@ impl Session {
             return Err("自动存档失败：save 信封缺少 save 字段".to_owned());
         }
         // 原样写 save 对象（紧凑 JSON）——与内核存档字节同形，可直接作 load payload。
-        fs::write(&self.autosave_path, save.to_string())
-            .map_err(|err| format!("写入 {} 失败：{err}", self.autosave_path.display()))
+        // tmp+rename 原子替换（W3）：读者要么看到旧全文、要么新全文，绝无半截；
+        // 本函数只在持久化临界区内被调用（dispatch_event / reset_artifacts）。
+        atomic_write(&self.autosave_path, save.to_string().as_bytes())
     }
 
     /// 磁盘 autosave 回灌进当前驱动（续局 / `l` 命令）。
@@ -3681,6 +3739,22 @@ fn write_json_pretty(path: &Path, value: &Json) -> Result<(), String> {
     fs::write(path, text).map_err(|err| format!("写入 {} 失败：{err}", path.display()))
 }
 
+/// 原子写（tmp + rename）：读者要么看到旧全文、要么看到新全文，绝无半截（W3）。
+/// tmp 名带 pid：固定名会让两个并发写者互踩 tmp 内容，rename 后拿到「别人的
+/// 中间态」——pid 后缀是正确性要求，不是风格（plan-r5 §2.4）。
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let name = path.file_name().map_or_else(
+        || format!(".atomic-{}", std::process::id()),
+        |name| format!("{}.tmp.{}", name.to_string_lossy(), std::process::id()),
+    );
+    let tmp = path.with_file_name(name);
+    let mut file =
+        File::create(&tmp).map_err(|err| format!("写入 {} 失败：{err}", tmp.display()))?;
+    file.write_all(bytes)
+        .map_err(|err| format!("写入 {} 失败：{err}", tmp.display()))?;
+    fs::rename(&tmp, path).map_err(|err| format!("替换 {} 失败：{err}", path.display()))
+}
+
 // ============================================================================
 // §多文件 Mod 的热载（r4）：签名纳管模块文件 + 换装原子性
 //
@@ -3875,7 +3949,7 @@ mod multiscript_hot_reload_tests {
 // ============================================================================
 #[cfg(test)]
 mod persistence_atomicity_tests {
-    use super::{acquire_run_lock, Cell};
+    use super::{acquire_run_lock, atomic_write, Cell};
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
@@ -3931,6 +4005,40 @@ mod persistence_atomicity_tests {
         let again = acquire_run_lock(&dir).expect("释放后必须能重新取锁");
         assert_eq!(super::RUN_LOCK_DEPTH.with(Cell::get), 1);
         drop(again);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// U3：atomic_write —— 写后原文件内容完整；tmp 已不存在；目标目录不存在
+    /// 时返回 Err（不 panic）。
+    #[test]
+    fn u3_atomic_write_semantics() {
+        let dir = case_dir("u3");
+
+        // ① 正常写：内容完整 + 无 tmp 残留。
+        let target = dir.join("autosave.json");
+        atomic_write(&target, br#"{"kv":{"revision":7}}"#).expect("首次写应成功");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("读回"),
+            r#"{"kv":{"revision":7}}"#
+        );
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .expect("读目录")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp."))
+            .collect();
+        assert!(leftovers.is_empty(), "写后不得残留 tmp：{leftovers:?}");
+
+        // ② 覆盖写：旧全文被新全文原子替换。
+        atomic_write(&target, b"second").expect("覆盖写应成功");
+        assert_eq!(std::fs::read_to_string(&target).expect("读回"), "second");
+
+        // ③ 目标目录不存在：返回 Err，不 panic，也不落任何文件。
+        let missing = dir.join("no-such-dir").join("autosave.json");
+        let outcome = atomic_write(&missing, b"x");
+        assert!(outcome.is_err(), "目标目录不存在必须报错");
+        assert!(!dir.join("no-such-dir").exists(), "不得凭空建目录");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
