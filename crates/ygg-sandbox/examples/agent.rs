@@ -839,7 +839,7 @@ impl Session {
                     // 锁内重试读档成功：另一进程已把本局救活（重置后起步 / 修复
                     // 文件），状态已回灌——续当前盘上状态，**不**按新局开局。
                     // 以全新状态混进别人的局，正是二次判定要防的事。
-                    ResetOutcome::Recovered => {
+                    Ok(ResetOutcome::Recovered) => {
                         session.notices.push(format!(
                             "{message}；重试读档成功（另一进程已恢复本局），续当前盘上状态"
                         ));
@@ -848,15 +848,25 @@ impl Session {
                     // 续局失败按新局开局：状态与日志必须同代，混代证据比丢证据更坏。
                     // 旧代事件已归档（含「可解析但不可装载」的档——可解析不等于
                     // 还活着，硬开新局才有同代起点）。
-                    ResetOutcome::Reset { .. } => {
+                    Ok(ResetOutcome::Reset { .. }) => {
                         session.notices.push(format!("{message}；按新局开局"));
                     }
+                    // 重置也失败（锁超时 / 归档失败 / 建档 / 初始存档）：盘上还是
+                    // 旧代产物，此刻继续 = 全新内核混进旧代（fail-closed，plan-r5
+                    // §2.5）。非零退出，把旧代证据留给下一次；已归档的部分也是证据。
+                    Err(reset_error) => return Err(format!("{message}；{reset_error}")),
                 },
             }
-        } else if let ResetOutcome::Reset { had_old: true } = session.reset_artifacts(false) {
-            session
-                .notices
-                .push(format!("run `{}` 已有旧产物，按新局重置", session.run_id));
+        } else {
+            match session.reset_artifacts(false) {
+                Ok(ResetOutcome::Reset { had_old: true }) => {
+                    session
+                        .notices
+                        .push(format!("run `{}` 已有旧产物，按新局重置", session.run_id));
+                }
+                Ok(_) => {}
+                Err(reset_error) => return Err(reset_error),
+            }
         }
         // seq 不再有进程内计数器：每步在持久化临界区内 count_events 重算（P0-3 / B1），
         // 缓存即回到「多进程各自基线」的原点。
@@ -945,10 +955,18 @@ impl Session {
     /// 新局重置（P0-5 / W4）：归档事件日志（**不截断**——`events.jsonl.reset.<纳秒>`）
     /// + 移除旧 autosave + 显式建空文件 + 初始存档同临界区。
     ///
+    /// **fail-closed（plan-r5 §2.5 伪代码的 `?` 语义）**：取锁 / 归档 rename /
+    /// 新建空档 / 初始存档任一步失败 → `Err` 上抛，由 `Session::open` 转为开局
+    /// 失败（非零退出）。绝不返回「看似成功」的重置：盘上还是旧代产物时继续
+    /// 新局 = 全新内核混进旧代（混代比丢开局更坏）。归档已发生的部分留下
+    /// 即证据，但不算成功。`cleanup_stale_tmp` 那类可选清理仍只告警；
+    /// `remove_file(autosave)` 也只告警——真正的一致性屏障是 `save_now` 的
+    /// 原子替换（remove 失败而 save 成功 = 存档仍是新代，状态自洽）。
+    ///
     /// `recheck`：进锁后二次判定「本局是否已被另一进程救活」（resume 失败路径传
     /// `true`；显式新局路径传 `false`，用户明确要求重置不跳过）。
-    fn reset_artifacts(&mut self, recheck: bool) -> ResetOutcome {
-        let outcome = self.with_run_lock(|session| -> Result<ResetOutcome, String> {
+    fn reset_artifacts(&mut self, recheck: bool) -> Result<ResetOutcome, String> {
+        self.with_run_lock(|session| -> Result<ResetOutcome, String> {
             // 二次判定（锁内）：不猜「证据」，直接重试读档。本进程首次读档失败后、
             // 拿到锁之前，另一进程可能已把本局救活（归档重置后起步 / 修复文件）——
             // 此刻盘上状态**可装载**就续它：状态与内存同源，无混代；且不归档
@@ -994,24 +1012,14 @@ impl Session {
                 }
             }
             // 显式建空文件：归档后立刻有新一代日志（与旧日志不再混代）。
-            if let Err(err) = File::create(&session.events_path) {
-                session.notices.push(format!("新建事件日志失败：{err}"));
-            }
-            // 初始存档同临界区：状态与日志同代。
-            if let Err(message) = session.save_now() {
-                session.notices.push(message);
-            }
+            // 建档失败必须 fail-closed：events 缺失/旧态时继续新局 = 混代。
+            File::create(&session.events_path).map_err(|err| format!("新建事件日志失败：{err}"))?;
+            // 初始存档同临界区（plan §2.5：save_now 失败即 `?` 上抛）——
+            // 存档写不出来还继续，等于让无档新局推进（实测 RED-C）。
+            session.save_now()?;
             Ok(ResetOutcome::Reset { had_old })
-        });
-        match outcome {
-            Ok(reset) => reset,
-            Err(message) => {
-                // 锁超时等临界区故障：不重试（避免与另一进程连环互撞），
-                // 告警后按「目录里有旧东西」处理，由调用方继续新局流程。
-                self.notices.push(format!("重置产物失败：{message}"));
-                ResetOutcome::Reset { had_old: true }
-            }
-        }
+        })
+        .map_err(|message| format!("重置产物失败：{message}"))
     }
 
     /// 事件日志既有条数（续局 seq 起点）。
@@ -4581,7 +4589,7 @@ end)
         // ③ 二次判定：重试读档成功 → Recovered，不归档、不动事件日志。
         let outcome = session.reset_artifacts(true);
         assert!(
-            matches!(outcome, ResetOutcome::Recovered),
+            matches!(outcome, Ok(ResetOutcome::Recovered)),
             "盘上状态可装载必须 adopt，不得重置"
         );
         assert!(reset_archives(&run_dir).is_empty(), "不得归档别人的行");
