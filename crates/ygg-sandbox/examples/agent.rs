@@ -768,6 +768,9 @@ struct Session {
     resumed: bool,
 }
 
+/// 单段 drain 的「过慢」阈值（plan-r5 §2.6 临界区时长守护：观测不阻断）。
+const DRAIN_SLOW_WARN_MS: u128 = 1_000;
+
 impl Session {
     /// 开局：读盘装载 → 建 run 目录 → 续局或重置 → 定 seq → 落元信息。
     fn open(args: &Args) -> Result<Self, String> {
@@ -1116,13 +1119,35 @@ impl Session {
         }
     }
 
-    /// 消费 inbox 新行：逐行 dispatch `requirement.add`，成功后前移 cursor。
+    /// 消费 inbox 新行：**整段持锁**（P0-6 / W6——两进程同时 drain 不再重复
+    /// 消费同一行），逐行 dispatch（重入不二次取锁），成功后前移 cursor。
     ///
-    /// 崩溃安全序：dispatch（Mod 侧入队 + 自动存档）→ 成功才写 cursor。因此
-    /// 「存档成功、cursor 未写」的重启会重放同一行，靠 external_id 幂等去重。
-    /// Mod 侧拒绝（done / 队列满 / 载荷）走叙事面，**不算成功**：不推 cursor，
-    /// 留给调用方报错（局末 leftover 必须非零退出，不静默丢弃）。
+    /// 崩溃安全序不变（plan-r5 §2.6「不修 W8」）：dispatch（Mod 侧入队 + 自动
+    /// 存档）→ 成功才写 cursor。「存档成功、cursor 未写」的重启会重放同一行，
+    /// 靠 external_id 幂等去重；cursor 缺失/被截仍全量重放（W8 归 P1）。Mod 侧
+    /// 拒绝（done / 队列满 / 载荷）走叙事面，**不算成功**：不推 cursor，留给
+    /// 调用方报错。坏行跳过策略不变（D5 不在 P0）。
     fn drain_inbox(&mut self) -> InboxDrain {
+        let started = Instant::now();
+        let outcome = self.with_run_lock(|session| Ok(session.drain_inbox_locked()));
+        let drain = outcome.unwrap_or_else(|message| {
+            // 锁超时：本段未消费任何行（cursor 未动），报错留给调用方非零退出。
+            let mut drain = InboxDrain::default();
+            drain.error = Some(message);
+            drain
+        });
+        // 临界区时长守护（P0-11）：>1s 打 drain_slow warning，不阻断（B3）。
+        let elapsed_ms = started.elapsed().as_millis();
+        if elapsed_ms > DRAIN_SLOW_WARN_MS {
+            self.notices.push(format!(
+                "drain_slow：inbox 消费耗时 {elapsed_ms}ms（持久化临界区偏长，观测面）"
+            ));
+        }
+        drain
+    }
+
+    /// drain 的锁内本体（旧逻辑原样；内部 dispatch_event 重入不加锁）。
+    fn drain_inbox_locked(&mut self) -> InboxDrain {
         let mut drain = InboxDrain::default();
         let Ok(text) = fs::read_to_string(&self.inbox_path) else {
             return drain; // 无 inbox 文件 = 本局没有异步需求
