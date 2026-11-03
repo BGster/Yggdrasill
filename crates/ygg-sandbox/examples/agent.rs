@@ -123,7 +123,7 @@
 //! 退出码与 `ok` 同值（与 `playtest` 约定一致）。`final_state` 从 autosave 的
 //! `kv` 面摘出结局 / 评分 / 经验（缺失即 `null`），并附完整 kv 与规模面。
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -1177,6 +1177,9 @@ impl Session {
             consumed = 0;
         }
         while consumed < lines.len() {
+            // 长临界区心跳：逐行续命锁文件 mtime，防等待者按 LOCK_STALE_MS
+            // 误判活锁为崩溃残留而抢占（双持锁 = 互斥失效，实测重复 seq）。
+            run_lock_heartbeat();
             let line = lines[consumed];
             let Ok(record) = serde_json::from_str::<Json>(line) else {
                 // 坏行永远无法 dispatch：跳过并前移，否则整个队列永久阻塞。
@@ -1630,6 +1633,7 @@ impl Drop for DirLock {
             return;
         }
         RUN_LOCK_DEPTH.with(|depth| depth.set(0));
+        RUN_LOCK_FILE.with(|slot| *slot.borrow_mut() = None);
         lock_trace("released");
         let _ = fs::remove_file(&self.path);
     }
@@ -1673,6 +1677,9 @@ thread_local! {
     /// 等协调协议路径不经过 Session 也要取同一把锁，C3「单锁单记账」必须覆盖
     /// 全部取锁点。单线程模型（C4：临界区内不得 spawn 线程取锁），thread_local 安全。
     static RUN_LOCK_DEPTH: Cell<u32> = Cell::new(0);
+    /// 真实持锁期间的锁文件路径（心跳续命用）；重入占位与未持锁时为空。
+    /// Drop（真实持有者）归零 depth 时同步清空，心跳不得越权触碰别人的锁。
+    static RUN_LOCK_FILE: RefCell<Option<PathBuf>> = RefCell::new(None);
 }
 
 /// 调试追踪（仅 debug 构建；`YGG_LOCK_TRACE=1` 时向 stderr 打
@@ -1703,9 +1710,30 @@ fn acquire_run_lock(run_dir: &Path) -> Result<DirLock, String> {
     }
     let dir_lock = acquire_dir_lock(run_dir)?;
     RUN_LOCK_DEPTH.with(|depth| depth.set(1));
+    RUN_LOCK_FILE.with(|slot| *slot.borrow_mut() = Some(dir_lock.path.clone()));
     lock_trace("acquired");
     debug_assert_eq!(RUN_LOCK_DEPTH.with(Cell::get), 1);
     Ok(dir_lock)
+}
+
+/// 长临界区心跳：bump 锁文件 mtime，防活进程的合法长临界区被按「陈旧残留」
+/// 抢占。陈旧抢占判据是 mtime（`LOCK_STALE_MS`），而 mtime 只在 acquire 时写
+/// 一次——临界区一旦超过 2s，等待者就会删锁重建、与持有者双持锁（实测：
+/// 4000 行 inbox drain ≈3.1s，等待者在 2.2s 即进锁，单轮并发出现数百重复
+/// seq）。drain 等无界循环必须逐行续命；其余临界区（seq+事件+存档 /
+/// coordination 读写）亚秒级，不需要心跳。只在本进程真实持锁时生效：
+/// 未持锁不动任何文件（绝不 bump 别人的锁），重入时续命的是外层真实锁。
+fn run_lock_heartbeat() {
+    if RUN_LOCK_DEPTH.with(Cell::get) == 0 {
+        return;
+    }
+    RUN_LOCK_FILE.with(|slot| {
+        if let Some(path) = slot.borrow().as_ref() {
+            if let Ok(file) = fs::OpenOptions::new().write(true).open(path) {
+                let _ = file.set_modified(SystemTime::now());
+            }
+        }
+    });
 }
 
 /// 锁内读—改—写 coordination.json（短临界区，不跨文件 IO）。
