@@ -4320,7 +4320,7 @@ mod persistence_reset_semantics_tests {
     use std::cell::Cell;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{Duration, SystemTime};
+    use std::time::{Duration, Instant, SystemTime};
 
     /// 用例专属临时目录（互不共享；先清空再建）。
     fn case_dir(tag: &str) -> PathBuf {
@@ -4721,6 +4721,132 @@ end)
         assert!(
             matches!(begin_write(&dir), Err(WriteGate::Finalized)),
             "finalized 后必须拒写"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ───────────────────────── reset fail-closed（plan-r5 §2.5 的 `?` 语义）─────────────────────────
+    //
+    // 不变量 R8：reset 的取锁 / 归档 / 建档 / 初始存档任一步失败 → `Session::open`
+    // 必须失败（非零退出），**绝不**伪装 Reset 成功或带全新内核继续新局——盘上
+    // 还是旧代产物时继续 = 混代。错误注入只用目录形态的确定性手段（不依赖权限
+    // 断言、不等 3s 超时：旧 mtime 目录让陈旧抢占路径全速循环到失败）。
+
+    /// `Session::open` 的 fail-closed 断言：必须 Err 且错误串包含全部给定片段
+    ///（Session 未实现 Debug，expect_err 不可用——match 直取错误串）。
+    #[track_caller]
+    fn expect_open_failure(args: &Args, fragments: &[&str]) -> String {
+        match Session::open(args) {
+            Ok(_) => panic!("开局必须失败（不得带未重置的旧代继续）"),
+            Err(message) => {
+                for fragment in fragments {
+                    assert!(
+                        message.contains(fragment),
+                        "错误串缺少「{fragment}」：{message}"
+                    );
+                }
+                message
+            }
+        }
+    }
+
+    /// `coordination.lock` 变成 mtime 陈旧的目录 → `create_new` 恒 EEXIST、
+    /// 陈旧抢占的 `remove_file` 对目录恒败 → `acquire_dir_lock` 快速耗尽重试并
+    /// 报错（实测 0.04s，无 sleep 路径）。
+    fn inject_unacquirable_lock(run_dir: &Path) {
+        let lock = run_dir.join(COORDINATION_LOCK);
+        fs::create_dir_all(&lock).expect("造目录形态的锁");
+        let stale = SystemTime::now() - Duration::from_secs(60);
+        // 目录只能只读打开（write 打开恒 EISDIR）；set_modified 走 futimens，
+        // 属主 + 只读 fd 即生效（macOS/APFS 实测；平台差异归 R8/R9 边界）。
+        fs::OpenOptions::new()
+            .read(true)
+            .open(&lock)
+            .expect("打开目录")
+            .set_modified(stale)
+            .expect("回拨目录 mtime");
+    }
+
+    /// R8a：显式新局 + 锁不可得 → open 失败、旧代产物逐字节不动、无归档。
+    #[test]
+    fn r8a_explicit_reset_without_lock_fails_closed() {
+        let dir = case_dir("r8a");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r8a");
+        let run_dir = runs_root.join("r8a");
+        let autosave_before = fs::read(&run_dir.join(AUTOSAVE_FILE)).expect("读旧存档");
+        inject_unacquirable_lock(&run_dir);
+
+        let started = Instant::now();
+        let message = expect_open_failure(
+            &probe_args(&mod_dir, &runs_root, "r8a", false),
+            &["重置产物失败"],
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "陈旧目录锁必须快速失败（真实 3s 超时路径另有人工用例）"
+        );
+
+        // 旧代证据逐字节不动：未新增、未归档、未覆盖、未混代。
+        assert_eq!(event_line_count(&run_dir), 1, "旧事件不得被动过");
+        assert!(reset_archives(&run_dir).is_empty(), "未取得锁就不得归档");
+        assert_eq!(
+            fs::read(&run_dir.join(AUTOSAVE_FILE)).expect("旧存档还在"),
+            autosave_before,
+            "旧存档不得被重写"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R8b：续局失败（坏档）+ 锁不可得 → reset 的二次判定路径同样 fail-closed：
+    /// open 失败，错误串同时携带读档失败与重置失败；旧事件未新增、无归档。
+    #[test]
+    fn r8b_resume_failed_reset_without_lock_fails_closed() {
+        let dir = case_dir("r8b");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r8b");
+        let run_dir = runs_root.join("r8b");
+        fs::write(run_dir.join(AUTOSAVE_FILE), "corrupted").expect("写坏档");
+        inject_unacquirable_lock(&run_dir);
+
+        expect_open_failure(
+            &probe_args(&mod_dir, &runs_root, "r8b", true),
+            &["读档失败", "重置产物失败"],
+        );
+        assert_eq!(event_line_count(&run_dir), 1, "旧事件不得被动过");
+        assert!(reset_archives(&run_dir).is_empty(), "未取得锁就不得归档");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R8c：重置中途的初始存档失败（autosave 位置是目录 → 原子替换 rename 必败）
+    /// → open 失败；已归档的旧代事件留下即证据，但**不得返回成功**，且新代
+    /// 绝不启动（无任何事件写入）。修复前此路径只告警并继续：全新内核把
+    /// seq 0 写进了新建的空 events（实测 RED）。
+    #[test]
+    fn r8c_mid_reset_save_failure_fails_closed_and_keeps_evidence() {
+        let dir = case_dir("r8c");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r8c");
+        let run_dir = runs_root.join("r8c");
+        fs::remove_file(run_dir.join(AUTOSAVE_FILE)).expect("移除存档文件");
+        fs::create_dir(run_dir.join(AUTOSAVE_FILE)).expect("造目录形态的 autosave");
+
+        expect_open_failure(
+            &probe_args(&mod_dir, &runs_root, "r8c", false),
+            &["重置产物失败", "替换"],
+        );
+
+        // 归档已发生 → 证据留下；但新代绝不启动：events 只有空文件、零事件。
+        let archives = reset_archives(&run_dir);
+        assert_eq!(archives.len(), 1, "归档已发生的部分留下即证据");
+        assert_eq!(archive_line_count(&archives[0]), 1, "旧代行全在归档里");
+        assert_eq!(
+            event_line_count(&run_dir),
+            0,
+            "重置未成功就绝不允许新代事件写入"
         );
         let _ = fs::remove_dir_all(&dir);
     }
