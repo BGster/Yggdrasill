@@ -771,6 +771,16 @@ struct Session {
 /// 单段 drain 的「过慢」阈值（plan-r5 §2.6 临界区时长守护：观测不阻断）。
 const DRAIN_SLOW_WARN_MS: u128 = 1_000;
 
+/// `reset_artifacts` 的裁决结果（resume 失败路径与显式新局路径共用）。
+enum ResetOutcome {
+    /// 已执行重置（含目录本就干净的初次建代）；`had_old` = 目录里本来有旧产物
+    /// （显式新局回执用它提示「已有旧产物，按新局重置」）。
+    Reset { had_old: bool },
+    /// 锁内重试读档成功：本局已被另一进程救活，状态已回灌——不重置、不按新局
+    /// 开局，续当前盘上状态（resume 失败路径专用；显式新局不二次判定，不会返回它）。
+    Recovered,
+}
+
 impl Session {
     /// 开局：读盘装载 → 建 run 目录 → 续局或重置 → 定 seq → 落元信息。
     fn open(args: &Args) -> Result<Self, String> {
@@ -825,13 +835,25 @@ impl Session {
         if args.resume {
             match session.load_autosave() {
                 Ok(()) => session.resumed = true,
-                Err(message) => {
+                Err(message) => match session.reset_artifacts(true) {
+                    // 锁内重试读档成功：另一进程已把本局救活（重置后起步 / 修复
+                    // 文件），状态已回灌——续当前盘上状态，**不**按新局开局。
+                    // 以全新状态混进别人的局，正是二次判定要防的事。
+                    ResetOutcome::Recovered => {
+                        session.notices.push(format!(
+                            "{message}；重试读档成功（另一进程已恢复本局），续当前盘上状态"
+                        ));
+                        session.resumed = true;
+                    }
                     // 续局失败按新局开局：状态与日志必须同代，混代证据比丢证据更坏。
-                    session.notices.push(format!("{message}；按新局开局"));
-                    session.reset_artifacts(true); // 进锁后二次判定（防归档别人的行）
-                }
+                    // 旧代事件已归档（含「可解析但不可装载」的档——可解析不等于
+                    // 还活着，硬开新局才有同代起点）。
+                    ResetOutcome::Reset { .. } => {
+                        session.notices.push(format!("{message}；按新局开局"));
+                    }
+                },
             }
-        } else if session.reset_artifacts(false) {
+        } else if let ResetOutcome::Reset { had_old: true } = session.reset_artifacts(false) {
             session
                 .notices
                 .push(format!("run `{}` 已有旧产物，按新局重置", session.run_id));
@@ -921,17 +943,23 @@ impl Session {
     }
 
     /// 新局重置（P0-5 / W4）：归档事件日志（**不截断**——`events.jsonl.reset.<纳秒>`）
-    /// + 移除旧 autosave + 显式建空文件 + 初始存档同临界区（返回值 = 是否真的清过东西）。
+    /// + 移除旧 autosave + 显式建空文件 + 初始存档同临界区。
     ///
-    /// `recheck`：进锁后二次判定「是否别人已恢复」（plan-r5 §2.5：check-then-act
-    /// 必须两段——resume 失败路径传 `true`，防止两进程同时判定失败时后者把前者
-    /// 刚写的行归档掉；显式新局路径传 `false`，用户明确要求重置不跳过）。
-    fn reset_artifacts(&mut self, recheck: bool) -> bool {
-        let outcome = self.with_run_lock(|session| -> Result<bool, String> {
-            if recheck && session.reset_seems_recovered() {
-                return Ok(false); // 别人已重置并恢复，我不再动手（不归档别人的行）
+    /// `recheck`：进锁后二次判定「本局是否已被另一进程救活」（resume 失败路径传
+    /// `true`；显式新局路径传 `false`，用户明确要求重置不跳过）。
+    fn reset_artifacts(&mut self, recheck: bool) -> ResetOutcome {
+        let outcome = self.with_run_lock(|session| -> Result<ResetOutcome, String> {
+            // 二次判定（锁内）：不猜「证据」，直接重试读档。本进程首次读档失败后、
+            // 拿到锁之前，另一进程可能已把本局救活（归档重置后起步 / 修复文件）——
+            // 此刻盘上状态**可装载**就续它：状态与内存同源，无混代；且不归档
+            // 别人的行。证据启发式（events 非空 + autosave 可解析）不可靠：
+            // ① 可解析 ≠ 可装载（版本不符会误判「已恢复」→ 以全新状态混入旧代
+            // 事件日志，实测 RED）；② 读档恢复可能只进内存，不留盘面证据（漏判）。
+            // 重试读档是唯一忠实判据（终态：不可装载的局不存在活着的使用者）。
+            if recheck && session.load_autosave().is_ok() {
+                return Ok(ResetOutcome::Recovered);
             }
-            let had = session.events_path.exists() || session.autosave_path.exists();
+            let had_old = session.events_path.exists() || session.autosave_path.exists();
             if session.events_path.exists() {
                 let archived = session
                     .run_dir
@@ -969,34 +997,21 @@ impl Session {
             if let Err(err) = File::create(&session.events_path) {
                 session.notices.push(format!("新建事件日志失败：{err}"));
             }
-            // 初始存档同临界区：状态与日志同代——它同时是二次判定的「已恢复」
-            // 信号源（可解析的 autosave + 非空 events = 别人已重置并起步）。
+            // 初始存档同临界区：状态与日志同代。
             if let Err(message) = session.save_now() {
                 session.notices.push(message);
             }
-            Ok(had)
+            Ok(ResetOutcome::Reset { had_old })
         });
         match outcome {
-            Ok(had) => had,
+            Ok(reset) => reset,
             Err(message) => {
                 // 锁超时等临界区故障：不重试（避免与另一进程连环互撞），
                 // 告警后按「目录里有旧东西」处理，由调用方继续新局流程。
                 self.notices.push(format!("重置产物失败：{message}"));
-                true
+                ResetOutcome::Reset { had_old: true }
             }
         }
-    }
-
-    /// 二次判定（锁内）：events 非空 + autosave 可解析 + phase ≠ finalized
-    /// → 视为「别人已重置并恢复」，本次不再动手（plan-r5 §2.5 给定判据，
-    /// 只读已有两文件，不引入新模式）。
-    fn reset_seems_recovered(&self) -> bool {
-        event_count(&self.events_path) > 0
-            && fs::read_to_string(&self.autosave_path)
-                .ok()
-                .and_then(|text| serde_json::from_str::<Json>(&text).ok())
-                .is_some()
-            && read_coordination(&self.run_dir)["phase"].as_str() != Some(PHASE_FINALIZED)
     }
 
     /// 事件日志既有条数（续局 seq 起点）。
