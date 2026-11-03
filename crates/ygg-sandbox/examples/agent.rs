@@ -825,10 +825,10 @@ impl Session {
                 Err(message) => {
                     // 续局失败按新局开局：状态与日志必须同代，混代证据比丢证据更坏。
                     session.notices.push(format!("{message}；按新局开局"));
-                    session.reset_artifacts();
+                    session.reset_artifacts(true); // 进锁后二次判定（防归档别人的行）
                 }
             }
-        } else if session.reset_artifacts() {
+        } else if session.reset_artifacts(false) {
             session
                 .notices
                 .push(format!("run `{}` 已有旧产物，按新局重置", session.run_id));
@@ -917,19 +917,83 @@ impl Session {
         }
     }
 
-    /// 新局重置：截断事件日志 + 移除 autosave（返回值 = 是否真的清过东西）。
-    fn reset_artifacts(&mut self) -> bool {
-        let had = self.events_path.exists() || self.autosave_path.exists();
-        if let Err(err) = fs::write(&self.events_path, "") {
-            self.notices
-                .push(format!("重置事件日志失败：{err}（将续写既有日志）"));
-        }
-        if self.autosave_path.exists() {
-            if let Err(err) = fs::remove_file(&self.autosave_path) {
-                self.notices.push(format!("移除旧 autosave 失败：{err}"));
+    /// 新局重置（P0-5 / W4）：归档事件日志（**不截断**——`events.jsonl.reset.<纳秒>`）
+    /// + 移除旧 autosave + 显式建空文件 + 初始存档同临界区（返回值 = 是否真的清过东西）。
+    ///
+    /// `recheck`：进锁后二次判定「是否别人已恢复」（plan-r5 §2.5：check-then-act
+    /// 必须两段——resume 失败路径传 `true`，防止两进程同时判定失败时后者把前者
+    /// 刚写的行归档掉；显式新局路径传 `false`，用户明确要求重置不跳过）。
+    fn reset_artifacts(&mut self, recheck: bool) -> bool {
+        let outcome = self.with_run_lock(|session| -> Result<bool, String> {
+            if recheck && session.reset_seems_recovered() {
+                return Ok(false); // 别人已重置并恢复，我不再动手（不归档别人的行）
+            }
+            let had = session.events_path.exists() || session.autosave_path.exists();
+            if session.events_path.exists() {
+                let archived = session
+                    .run_dir
+                    .join(format!("{EVENTS_FILE}.reset.{}", now_nanos()));
+                fs::rename(&session.events_path, &archived)
+                    .map_err(|err| format!("归档事件日志失败：{err}"))?;
+                session
+                    .notices
+                    .push(format!("events 已归档至 {}", archived.display()));
+                // 归档堆积提示（R7）：只提示不自动清理（自动删证据违反「保留原始
+                // 证据」的需求精神）；不改 ok / 退出码。
+                let archived_count = fs::read_dir(&session.run_dir).map_or(0, |entries| {
+                    entries
+                        .flatten()
+                        .filter(|entry| {
+                            entry
+                                .file_name()
+                                .to_string_lossy()
+                                .starts_with(&format!("{EVENTS_FILE}.reset."))
+                        })
+                        .count()
+                });
+                if archived_count > 5 {
+                    session.notices.push(format!(
+                        "events 归档已有 {archived_count} 份，建议人工清理（宿主不自动删证据）"
+                    ));
+                }
+            }
+            if session.autosave_path.exists() {
+                if let Err(err) = fs::remove_file(&session.autosave_path) {
+                    session.notices.push(format!("移除旧 autosave 失败：{err}"));
+                }
+            }
+            // 显式建空文件：归档后立刻有新一代日志（与旧日志不再混代）。
+            if let Err(err) = File::create(&session.events_path) {
+                session.notices.push(format!("新建事件日志失败：{err}"));
+            }
+            // 初始存档同临界区：状态与日志同代——它同时是二次判定的「已恢复」
+            // 信号源（可解析的 autosave + 非空 events = 别人已重置并起步）。
+            if let Err(message) = session.save_now() {
+                session.notices.push(message);
+            }
+            Ok(had)
+        });
+        match outcome {
+            Ok(had) => had,
+            Err(message) => {
+                // 锁超时等临界区故障：不重试（避免与另一进程连环互撞），
+                // 告警后按「目录里有旧东西」处理，由调用方继续新局流程。
+                self.notices.push(format!("重置产物失败：{message}"));
+                true
             }
         }
-        had
+    }
+
+    /// 二次判定（锁内）：events 非空 + autosave 可解析 + phase ≠ finalized
+    /// → 视为「别人已重置并恢复」，本次不再动手（plan-r5 §2.5 给定判据，
+    /// 只读已有两文件，不引入新模式）。
+    fn reset_seems_recovered(&self) -> bool {
+        event_count(&self.events_path) > 0
+            && fs::read_to_string(&self.autosave_path)
+                .ok()
+                .and_then(|text| serde_json::from_str::<Json>(&text).ok())
+                .is_some()
+            && read_coordination(&self.run_dir)["phase"].as_str() != Some(PHASE_FINALIZED)
     }
 
     /// 事件日志既有条数（续局 seq 起点）。
