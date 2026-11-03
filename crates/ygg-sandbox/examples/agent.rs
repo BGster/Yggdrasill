@@ -1679,7 +1679,7 @@ thread_local! {
     static RUN_LOCK_DEPTH: Cell<u32> = Cell::new(0);
     /// 真实持锁期间的锁文件路径（心跳续命用）；重入占位与未持锁时为空。
     /// Drop（真实持有者）归零 depth 时同步清空，心跳不得越权触碰别人的锁。
-    static RUN_LOCK_FILE: RefCell<Option<PathBuf>> = RefCell::new(None);
+    static RUN_LOCK_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
 /// 调试追踪（仅 debug 构建；`YGG_LOCK_TRACE=1` 时向 stderr 打
