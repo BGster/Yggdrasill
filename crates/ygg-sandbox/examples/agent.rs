@@ -123,6 +123,7 @@
 //! 退出码与 `ok` 同值（与 `playtest` 约定一致）。`final_state` 从 autosave 的
 //! `kv` 面摘出结局 / 评分 / 经验（缺失即 `null`），并附完整 kv 与规模面。
 
+use std::cell::Cell;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -860,6 +861,18 @@ impl Session {
         Ok(session)
     }
 
+    /// 唯一临界区入口（P0-1）：持久化面的多步临界操作（seq 分配 + 事件 +
+    /// 存档 / drain / reset）都经它持锁。f 拿 `&mut Self`，避免「持锁」与
+    /// 「改状态」的借用冲突；重入（depth>0）时直接执行不重复取锁；panic
+    /// 展开时 guard 的 Drop 归零 depth 并删锁文件（U2 的断言面）。
+    fn with_run_lock<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let _guard = acquire_run_lock(&self.run_dir)?;
+        f(self)
+    }
+
     /// 新局重置：截断事件日志 + 移除 autosave（返回值 = 是否真的清过东西）。
     fn reset_artifacts(&mut self) -> bool {
         let had = self.events_path.exists() || self.autosave_path.exists();
@@ -1407,10 +1420,17 @@ fn write_coordination(run_dir: &Path, value: &Json) -> Result<(), String> {
 
 struct DirLock {
     path: PathBuf,
+    /// true = 同进程重入占位（不持真实锁文件：Drop 不删文件、不重置 depth）。
+    reentrant: bool,
 }
 
 impl Drop for DirLock {
     fn drop(&mut self) {
+        if self.reentrant {
+            return;
+        }
+        RUN_LOCK_DEPTH.with(|depth| depth.set(0));
+        lock_trace("released");
         let _ = fs::remove_file(&self.path);
     }
 }
@@ -1422,7 +1442,10 @@ fn acquire_dir_lock(run_dir: &Path) -> Result<DirLock, String> {
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut file) => {
                 let _ = writeln!(file, "{}", std::process::id());
-                return Ok(DirLock { path });
+                return Ok(DirLock {
+                    path,
+                    reentrant: false,
+                });
             }
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
                 if let Ok(meta) = fs::metadata(&path) {
@@ -1444,9 +1467,50 @@ fn acquire_dir_lock(run_dir: &Path) -> Result<DirLock, String> {
     Err(format!("协调锁争用超时（{}）", path.display()))
 }
 
+thread_local! {
+    /// 进程内锁重入记账（P0-1 / C2）：1 = 本进程已持 `coordination.lock`，重入
+    /// 不再 acquire。放在**公共锁入口**而不是 Session 上：coordination_update
+    /// 等协调协议路径不经过 Session 也要取同一把锁，C3「单锁单记账」必须覆盖
+    /// 全部取锁点。单线程模型（C4：临界区内不得 spawn 线程取锁），thread_local 安全。
+    static RUN_LOCK_DEPTH: Cell<u32> = Cell::new(0);
+}
+
+/// 调试追踪（仅 debug 构建；`YGG_LOCK_TRACE=1` 时向 stderr 打
+/// `acquired / reentered / released` + depth + pid，供 P0-1 重入取证）。
+#[cfg(debug_assertions)]
+fn lock_trace(stage: &str) {
+    if std::env::var_os("YGG_LOCK_TRACE").is_some_and(|value| value == "1") {
+        eprintln!(
+            "[lock-trace] {stage} depth={} pid={}",
+            RUN_LOCK_DEPTH.with(Cell::get),
+            std::process::id()
+        );
+    }
+}
+#[cfg(not(debug_assertions))]
+fn lock_trace(_stage: &str) {}
+
+/// 重入安全的锁入口（P0-1 持久化面唯一临界区入口）：depth>0 = 本进程已持锁，
+/// 直接返回重入占位（不 acquire、不加 depth）；只有真实 acquire 走
+/// `acquire_dir_lock`（现有语义不变：create_new + mtime 陈旧抢占）并置 depth=1。
+fn acquire_run_lock(run_dir: &Path) -> Result<DirLock, String> {
+    if RUN_LOCK_DEPTH.with(Cell::get) > 0 {
+        lock_trace("reentered");
+        return Ok(DirLock {
+            path: run_dir.join(COORDINATION_LOCK),
+            reentrant: true,
+        });
+    }
+    let dir_lock = acquire_dir_lock(run_dir)?;
+    RUN_LOCK_DEPTH.with(|depth| depth.set(1));
+    lock_trace("acquired");
+    debug_assert_eq!(RUN_LOCK_DEPTH.with(Cell::get), 1);
+    Ok(dir_lock)
+}
+
 /// 锁内读—改—写 coordination.json（短临界区，不跨文件 IO）。
 fn coordination_update<T>(run_dir: &Path, f: impl FnOnce(&mut Json) -> T) -> Result<T, String> {
-    let _guard = acquire_dir_lock(run_dir)?;
+    let _guard = acquire_run_lock(run_dir)?;
     let mut record = read_coordination(run_dir);
     let out = f(&mut record);
     record["updated_at"] = json!(now_secs());
@@ -3803,5 +3867,100 @@ mod multiscript_hot_reload_tests {
         );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+// ============================================================================
+// §P0 持久化原子性单测（plan-r5 §4.1；U1–U2 随 S1，U3 随 S2，U4 随 S3）
+// ============================================================================
+#[cfg(test)]
+mod persistence_atomicity_tests {
+    use super::{acquire_run_lock, Cell};
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    /// 用例专属临时目录（互不共享，锁文件互不干扰）。
+    fn case_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-p0-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    /// U1：重入不二次 acquire —— 外层取锁后内层再取必须立即返回、不加 depth、
+    /// 不触碰锁文件；只有真实持有者的 Drop 才归零 depth 并删锁文件。
+    #[test]
+    fn u1_reentrant_lock_does_not_reacquire() {
+        let dir = case_dir("u1");
+        let lock_path = dir.join(super::COORDINATION_LOCK);
+
+        let outer = acquire_run_lock(&dir).expect("首次 acquire 应成功");
+        assert!(lock_path.exists(), "真实 acquire 必须留下锁文件");
+        assert_eq!(super::RUN_LOCK_DEPTH.with(Cell::get), 1);
+        std::fs::write(&lock_path, b"holder-marker").expect("写锁文件探针");
+
+        let started = Instant::now();
+        let inner = acquire_run_lock(&dir).expect("重入必须直接成功，不得阻塞或报超时");
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "重入必须立即返回（真实的第二次 acquire 会阻塞到陈旧抢占/超时）"
+        );
+        assert_eq!(super::RUN_LOCK_DEPTH.with(Cell::get), 1, "重入不得加 depth");
+        assert_eq!(
+            std::fs::read(&lock_path).expect("锁文件应还在"),
+            b"holder-marker",
+            "重入不得触碰锁文件（= 没有第二次 acquire）"
+        );
+
+        drop(inner);
+        assert_eq!(
+            super::RUN_LOCK_DEPTH.with(Cell::get),
+            1,
+            "重入占位的 Drop 不得归零 depth"
+        );
+        assert!(lock_path.exists(), "重入占位的 Drop 不得删锁文件");
+        drop(outer);
+        assert_eq!(
+            super::RUN_LOCK_DEPTH.with(Cell::get),
+            0,
+            "真实持有者的 Drop 必须归零 depth"
+        );
+        assert!(!lock_path.exists(), "真实持有者的 Drop 必须删锁文件");
+
+        // 归零之后必须能立刻重新取锁（释放是真实的，不是记账残留）。
+        let again = acquire_run_lock(&dir).expect("释放后必须能重新取锁");
+        assert_eq!(super::RUN_LOCK_DEPTH.with(Cell::get), 1);
+        drop(again);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// U2：临界区内 panic 展开后锁已释放 —— guard 的 Drop 在 unwind 路径上
+    /// 归零 depth 并删锁文件，随后可以正常重新取锁。
+    #[test]
+    fn u2_panic_unwind_releases_the_lock() {
+        let dir = case_dir("u2");
+        let lock_path = dir.join(super::COORDINATION_LOCK);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = acquire_run_lock(&dir).expect("acquire 应成功");
+            assert_eq!(super::RUN_LOCK_DEPTH.with(Cell::get), 1);
+            panic!("临界区内爆炸");
+        }));
+        assert!(result.is_err(), "panic 必须向上传播（此处只验锁的释放）");
+        assert_eq!(
+            super::RUN_LOCK_DEPTH.with(Cell::get),
+            0,
+            "unwind 后 Drop 必须已归零 depth"
+        );
+        assert!(!lock_path.exists(), "unwind 后 Drop 必须已删锁文件");
+
+        // panic 之后必须能正常重新取锁（无死锁、无记账残留）。
+        let again = acquire_run_lock(&dir).expect("panic 后重新取锁必须成功");
+        assert_eq!(super::RUN_LOCK_DEPTH.with(Cell::get), 1);
+        drop(again);
+        assert_eq!(super::RUN_LOCK_DEPTH.with(Cell::get), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
