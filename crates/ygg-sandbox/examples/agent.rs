@@ -756,8 +756,6 @@ struct Session {
     /// 消费位移（`{consumed: N}`，按非空行数；dispatch + 存档成功后才前移）。
     inbox_cursor_path: PathBuf,
     kernel: KernelFacade,
-    /// 下一条事件记录的序号（续局 = 既有行数，保证 seq 单调且可与日志对账）。
-    seq: u64,
     /// 装载时的 mod 目录签名（热载比对基线；每次成功/失败尝试后前移）。
     signature: Vec<FileStamp>,
     /// 本次回执待携带的宿主侧提示（热载 / 自动存档 / 重置等）。
@@ -812,7 +810,6 @@ impl Session {
             inbox_cursor_path: run_dir.join(INBOX_CURSOR_FILE),
             run_dir,
             kernel,
-            seq: 0,
             signature,
             notices: Vec::new(),
             reload: None,
@@ -836,7 +833,8 @@ impl Session {
                 .notices
                 .push(format!("run `{}` 已有旧产物，按新局重置", session.run_id));
         }
-        session.seq = session.count_events();
+        // seq 不再有进程内计数器：每步在持久化临界区内 count_events 重算（P0-3 / B1），
+        // 缓存即回到「多进程各自基线」的原点。
         // 续局成功且 mod 自上次派发起变过：新包已生效（状态无损），回执标记。
         if session.resumed
             && previous_signature
@@ -936,10 +934,7 @@ impl Session {
 
     /// 事件日志既有条数（续局 seq 起点）。
     fn count_events(&self) -> u64 {
-        match fs::read_to_string(&self.events_path) {
-            Ok(text) => text.lines().filter(|line| !line.trim().is_empty()).count() as u64,
-            Err(_) => 0,
-        }
+        event_count(&self.events_path)
     }
 
     /// mod 目录签名的人读串（落 run.json；跨进程比对「mod 变没变」）。
@@ -1206,10 +1201,15 @@ impl Session {
         }
     }
 
-    /// 派发一步：dispatch → 事件日志 → 自动存档（仅成功步）→ 回执。
+    /// 派发一步：dispatch（锁外）→ 持久化临界区（seq 分配 + 事件行 + 自动存档）→ 回执。
+    ///
+    /// P0-3（plan-r5 §2.3）：三件事同临界区 —— seq 改为**锁内 count_events 重算**
+    /// （唯一事实源，删进程内计数器），事件行单次 write_all，成功步存档同临界区。
+    /// 锁内失败的失败面（写 event 成功、写存档失败的偏斜）在同一进程内被消除；
+    /// 跨进程的「事件与状态原子同提交」不是 P0 的承诺。
     fn dispatch_event(&mut self, name: &str, payload: &str) -> Json {
-        let envelope = parse_envelope(&self.kernel.dispatch(name, payload));
-        // 真实派发可能已经改变语义面（阶段 / 结局 / 提案 / 冲突）→ 摘要缓存失效。
+        let envelope = parse_envelope(&self.kernel.dispatch(name, payload)); // 锁外：Lua 计算
+                                                                             // 真实派发可能已经改变语义面（阶段 / 结局 / 提案 / 冲突）→ 摘要缓存失效。
         self.summary_cache = None;
         let ok = envelope["ok"] == Json::Bool(true);
         let narrative = narrative_lines(&envelope);
@@ -1217,18 +1217,42 @@ impl Session {
             .iter()
             .find(|line| line.starts_with(&self.contract.ending_prefix))
             .cloned();
-        let seq = self.seq;
-        self.seq += 1;
+        let ending_line = ending.as_deref();
 
-        // 事件日志：成功与失败都落一行（ok 自证；结算据 ok 计成功步数）。
-        self.append_event(seq, name, payload, ok, narrative.len(), ending.as_deref());
-
-        // 自动存档：仅成功步（失败步不改状态，重写同一份 autosave 无意义）。
-        if ok {
-            if let Err(message) = self.save_now() {
-                self.notices.push(message);
+        // 持久化临界区：seq 分配 + 事件行 + 存档（仅成功步）三件事同一把锁。
+        let persisted = self.with_run_lock(|session| {
+            let seq = session.count_events(); // 锁内重算：唯一分配点（B1）
+            session.append_event(seq, name, payload, ok, narrative.len(), ending_line);
+            // 自动存档：仅成功步（失败步不改状态，重写同一份 autosave 无意义）。
+            if ok {
+                session.save_now()?;
             }
-        }
+            Ok(seq)
+        });
+        let seq = match persisted {
+            Ok(seq) => seq,
+            Err(message) => {
+                // 锁超时 / 存档失败：状态已进内存但未落盘 —— 回执 fail-closed
+                //（B2：不声称成功；events.jsonl 未新增行）。单发路径凭 ok=false
+                // 非零退出，文案沿用 acquire_dir_lock 的超时报错。
+                eprintln!("error: 持久化失败：{message}");
+                let failed_envelope = json!({
+                    "ok": false,
+                    "error": {"code": "PERSIST", "message": message},
+                });
+                let pending = self.state_envelope()["pendingChoice"].clone();
+                let receipt = self.build_receipt(
+                    name,
+                    self.count_events(),
+                    &failed_envelope,
+                    &narrative,
+                    ending_line,
+                    pending,
+                );
+                self.reload = None;
+                return receipt;
+            }
+        };
 
         // 待决选择：成功信封自带；失败信封补一次 state（不推进状态），
         // 让回执在「越权动作被拒」之后仍能指引下一步。
@@ -1238,8 +1262,7 @@ impl Session {
             self.state_envelope()["pendingChoice"].clone()
         };
 
-        let receipt =
-            self.build_receipt(name, seq, &envelope, &narrative, ending.as_deref(), pending);
+        let receipt = self.build_receipt(name, seq, &envelope, &narrative, ending_line, pending);
         self.reload = None;
         receipt
     }
@@ -1272,9 +1295,24 @@ impl Session {
             .open(&self.events_path)
         {
             Ok(mut file) => {
-                if let Err(err) = writeln!(file, "{record}") {
-                    self.notices
-                        .push(format!("写入 {} 失败：{err}", self.events_path.display()));
+                // 序列化先完成：失败不留半行。单次 write_all 消除 writeln! 的
+                // Formatter 分段写（W2）；跨进程原子性由外层锁保证，write_all
+                // 只负责同进程内的一次 write(2)（行 < 4KiB 时内核一次写入）。
+                match serde_json::to_string(&record) {
+                    Ok(mut line) => {
+                        if line.len() > 16 * 1024 {
+                            self.notices.push(format!(
+                                "事件行超大（{} 字节，seq {seq}）：异常 payload 的可能信号",
+                                line.len()
+                            ));
+                        }
+                        line.push('\n');
+                        if let Err(err) = file.write_all(line.as_bytes()) {
+                            self.notices
+                                .push(format!("写入 {} 失败：{err}", self.events_path.display()));
+                        }
+                    }
+                    Err(err) => self.notices.push(format!("序列化事件记录失败：{err}")),
                 }
             }
             Err(err) => self
@@ -3276,8 +3314,8 @@ fn print_config(session: &Session, args: &Args) {
     println!(
         "事件日志 : {}（已记录 {} 条，下一条 seq={}）",
         session.events_path.display(),
-        session.seq,
-        session.seq
+        session.count_events(),
+        session.count_events()
     );
     println!(
         "需求 inbox: {}（已消费 {} 行 / 共 {} 行；--requirement 只追加）",
@@ -3731,6 +3769,21 @@ fn now_secs() -> u64 {
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
+/// 事件日志既有条数（seq 唯一事实源；锁内调用）。
+fn event_count(path: &Path) -> u64 {
+    match fs::read_to_string(path) {
+        Ok(text) => text.lines().filter(|line| !line.trim().is_empty()).count() as u64,
+        Err(_) => 0,
+    }
+}
+
+/// 宿主侧时钟（unix 纳秒）：只用于归档文件命名（同秒撞名不可能）。
+fn now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos())
+}
+
 /// pretty JSON 落盘（人读证据面；末尾补换行便于 diff）。
 fn write_json_pretty(path: &Path, value: &Json) -> Result<(), String> {
     let mut text = serde_json::to_string_pretty(value)
@@ -3949,7 +4002,7 @@ mod multiscript_hot_reload_tests {
 // ============================================================================
 #[cfg(test)]
 mod persistence_atomicity_tests {
-    use super::{acquire_run_lock, atomic_write, Cell};
+    use super::{acquire_run_lock, atomic_write, event_count, Cell};
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
@@ -4039,6 +4092,35 @@ mod persistence_atomicity_tests {
         let outcome = atomic_write(&missing, b"x");
         assert!(outcome.is_err(), "目标目录不存在必须报错");
         assert!(!dir.join("no-such-dir").exists(), "不得凭空建目录");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// U4：event_count 三种边界 —— 末行无换行 / 空文件 / 只有空行。
+    #[test]
+    fn u4_event_count_edge_cases() {
+        let dir = case_dir("u4");
+        let path = dir.join(super::EVENTS_FILE);
+
+        // 空文件。
+        std::fs::write(&path, "").expect("写空文件");
+        assert_eq!(event_count(&path), 0, "空文件 = 0 条");
+
+        // 只有空行 / 空白行。
+        std::fs::write(&path, "\n\n   \n\t\n").expect("写空白行");
+        assert_eq!(event_count(&path), 0, "空行与空白行不计入");
+
+        // 末行无换行：仍按非空行计数。
+        std::fs::write(&path, "{\"seq\":0}\n{\"seq\":1}").expect("写无尾换行");
+        assert_eq!(event_count(&path), 2, "末行无换行也要计入");
+
+        // 正常形态（对照）。
+        std::fs::write(&path, "{\"seq\":0}\n{\"seq\":1}\n").expect("写正常形态");
+        assert_eq!(event_count(&path), 2);
+
+        // 文件不存在（开局前）。
+        let absent = dir.join("absent.jsonl");
+        assert_eq!(event_count(&absent), 0, "读不到文件 = 0 条");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
