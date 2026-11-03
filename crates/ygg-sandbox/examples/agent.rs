@@ -4779,7 +4779,7 @@ end)
         inject_unacquirable_lock(&run_dir);
 
         let started = Instant::now();
-        let message = expect_open_failure(
+        expect_open_failure(
             &probe_args(&mod_dir, &runs_root, "r8a", false),
             &["重置产物失败"],
         );
