@@ -4286,3 +4286,434 @@ mod persistence_atomicity_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+// ============================================================================
+// §reset 语义 + 锁心跳 通用回归（game-1102-1/r5 接手复核）
+//
+// 不变量（全部通用游戏内核语义，零 agent/Mod 场景假设）：
+//   R1 无副作用 resume 不重置（读档成功根本不进 reset 路径）；
+//   R2 显式新局仍重置，且恰好归档一次（旧行全在归档里，证据不丢）；
+//   R3 续局失败且盘上状态**不可装载**（坏档 / 可解析但版本不符）→ 归档后新局，
+//      绝不以全新状态混入旧代（不混代、旧 autosave 不被无归档覆盖）；
+//   R4 续局失败但盘上状态**已可装载**（另一进程已救活）→ 重试读档 adopt，
+//      不归档别人的行；
+//   R5 持锁心跳：真实持锁才 bump 锁文件 mtime，未持锁绝不触碰别人的锁；
+//   R6 drain 逐行消费一次（cursor 语义）且全程在真实锁内（心跳接线点）；
+//   R7 closing 准入门禁：running 可写 → closing 拒写 → 解除恢复 → finalized 拒写。
+// ============================================================================
+
+#[cfg(test)]
+mod persistence_reset_semantics_tests {
+    use super::{
+        acquire_run_lock, begin_write, enter_closing, finalize_run, leave_closing,
+        run_lock_heartbeat, Args, ClosingEntry, Drive, ResetOutcome, Session, WriteGate,
+        AUTOSAVE_FILE, COORDINATION_LOCK, EVENTS_FILE, INBOX_FILE,
+    };
+    use std::cell::Cell;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime};
+
+    /// 用例专属临时目录（互不共享；先清空再建）。
+    fn case_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-r5-reset-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    /// 最小合成 Mod（2 步到结局 + 摘要 + inbox 路由）：零业务语义，装载期全部
+    /// 校验按宿主 fail-closed 规则现过（pack.json agent 段 / config.json drive
+    /// 与 settlement 段 / manifest）。entries 为空 → manifest 无需内容哈希。
+    fn write_probe_mod(dir: &Path) {
+        fs::create_dir_all(dir.join("data")).expect("建 data 目录");
+        fs::write(
+            dir.join("pack.json"),
+            r#"{
+  "schemaVersion": 1,
+  "entries": [],
+  "schemaFiles": [],
+  "agent": {
+    "entryEvent": "event.start",
+    "choiceEvent": "ygg.choice_selected",
+    "summaryEvent": "agent.summary",
+    "endingPrefix": "【结局",
+    "metaKey": "summary",
+    "rejectionPrefixes": ["【拒绝】"],
+    "replayPrefix": "【重放】",
+    "defaultPayload": "0"
+  },
+  "inboxRoutes": {
+    "externalIdField": "external_id",
+    "payloadField": "payload",
+    "extMarker": "@ext=",
+    "add": {
+      "action": "inbox.add",
+      "fields": ["title", "external_id"],
+      "write": {"flag": "requirement", "shape": "named"}
+    }
+  }
+}"#,
+        )
+        .expect("写 pack.json");
+        fs::write(
+            dir.join("manifest.json"),
+            r#"{"schemaVersion": 1, "entries": [], "code": []}"#,
+        )
+        .expect("写 manifest.json");
+        fs::write(
+            dir.join("mod.lua"),
+            r#"ygg.on("event.start", function()
+  ygg.kv.set("stage", "started")
+  ygg.narrate("开局完成")
+  ygg.choice("下一步？", { "推进", "收尾" })
+end)
+ygg.on("ygg.choice_selected", function(index)
+  if index == 2 then
+    ygg.narrate("【结局】合成结局")
+  else
+    ygg.narrate("推进了一步")
+    ygg.choice("继续？", { "推进", "收尾" })
+  end
+end)
+ygg.on("agent.summary", function()
+  ygg.meta("summary", { open = true })
+  ygg.narrate("摘要就绪")
+end)
+ygg.on("inbox.add", function(payload)
+  ygg.narrate("已入队：" .. tostring(payload))
+end)
+"#,
+        )
+        .expect("写 mod.lua");
+        fs::write(
+            dir.join("data/config.json"),
+            r#"{
+  "drive": {"maxSteps": 50, "stallLimit": 5, "stepsPerRequirement": 20},
+  "settlement": {
+    "requireEvents": true,
+    "requireNoFailedSteps": true,
+    "requireEnding": true,
+    "requireInboxConsumed": true
+  }
+}"#,
+        )
+        .expect("写 config.json");
+    }
+
+    fn probe_args(mod_dir: &Path, runs_root: &Path, run_id: &str, resume: bool) -> Args {
+        Args {
+            mod_dir: Some(mod_dir.to_path_buf()),
+            run_id: run_id.to_owned(),
+            runs_root: runs_root.to_path_buf(),
+            resume,
+            settle: false,
+            watch: false,
+            event: None,
+            payload: None,
+            drive: Drive::None,
+            inbox: None,
+        }
+    }
+
+    /// 开新局并推进一步（events=1 行、autosave 可装载的标准起点）。
+    fn new_game_with_one_step(mod_dir: &Path, runs_root: &Path, run_id: &str) {
+        let mut session = Session::open(&probe_args(mod_dir, runs_root, run_id, false))
+            .expect("新局开局必须成功");
+        let receipt = session.dispatch_event("event.start", "0");
+        assert_eq!(receipt["ok"], serde_json::json!(true), "开局步必须成功");
+        assert_eq!(receipt["seq"], serde_json::json!(0));
+    }
+
+    /// run 目录里 `events.jsonl.reset.*` 归档份数。
+    fn reset_archives(run_dir: &Path) -> Vec<PathBuf> {
+        let mut archives: Vec<PathBuf> = fs::read_dir(run_dir)
+            .expect("读 run 目录")
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name().map_or(false, |name| {
+                    name.to_string_lossy().starts_with("events.jsonl.reset.")
+                })
+            })
+            .collect();
+        archives.sort();
+        archives
+    }
+
+    fn event_line_count(run_dir: &Path) -> usize {
+        fs::read_to_string(run_dir.join(EVENTS_FILE))
+            .map(|text| text.lines().filter(|line| !line.trim().is_empty()).count())
+            .unwrap_or(0)
+    }
+
+    fn archive_line_count(archive: &Path) -> usize {
+        fs::read_to_string(archive)
+            .map(|text| text.lines().filter(|line| !line.trim().is_empty()).count())
+            .expect("归档必须可读")
+    }
+
+    /// R1：无副作用 resume 不重置——健康局续局零归档、零重置痕迹、resumed=true。
+    #[test]
+    fn r1_healthy_resume_never_resets() {
+        let dir = case_dir("r1");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r1");
+        let run_dir = runs_root.join("r1");
+
+        let session = Session::open(&probe_args(&mod_dir, &runs_root, "r1", true))
+            .expect("健康局 resume 必须成功");
+        assert!(session.resumed, "读档成功必须标记 resumed");
+        assert!(
+            reset_archives(&run_dir).is_empty(),
+            "无副作用 resume 不得产生归档"
+        );
+        assert_eq!(event_line_count(&run_dir), 1, "事件日志不得被动过");
+        assert!(
+            !session.notices.iter().any(|notice| notice.contains("重置")),
+            "不得出现重置提示：{:?}",
+            session.notices
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R2：显式新局（非 resume）对已有产物归档**恰好一次**，旧行全在归档里。
+    #[test]
+    fn r2_explicit_new_game_archives_exactly_once() {
+        let dir = case_dir("r2");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r2");
+        let run_dir = runs_root.join("r2");
+
+        let session = Session::open(&probe_args(&mod_dir, &runs_root, "r2", false))
+            .expect("显式新局必须成功");
+        let archives = reset_archives(&run_dir);
+        assert_eq!(archives.len(), 1, "显式新局必须归档恰好一次");
+        assert_eq!(archive_line_count(&archives[0]), 1, "旧代行必须全在归档里");
+        assert_eq!(event_line_count(&run_dir), 0, "新一代事件日志从空起步");
+        assert!(
+            session
+                .notices
+                .iter()
+                .any(|notice| notice.contains("已有旧产物，按新局重置")),
+            "必须有旧产物提示：{:?}",
+            session.notices
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R3：**可解析但不可装载**的 autosave（版本不符）→ 归档后新局，绝不混代。
+    /// 这是旧判据（可解析即「已恢复」）的实测 RED 面：修复前会跳过重置并以
+    /// 全新内核续跑旧代目录——旧 autosave 被无归档覆盖、事件日志混两代。
+    #[test]
+    fn r3_parseable_but_unloadable_autosave_archives_not_joins() {
+        let dir = case_dir("r3");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r3");
+        let run_dir = runs_root.join("r3");
+
+        // 注入「可解析但不可装载」：JSON 合法、engine_version 不符（内核 load 拒绝）。
+        let autosave_path = run_dir.join(AUTOSAVE_FILE);
+        let mut save: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&autosave_path).expect("读存档"))
+                .expect("存档是 JSON");
+        save["engine_version"] = serde_json::json!("0.0.0-not-an-engine");
+        fs::write(&autosave_path, save.to_string()).expect("写坏版本号");
+
+        let mut session = Session::open(&probe_args(&mod_dir, &runs_root, "r3", true))
+            .expect("续局失败按新局开局，open 本身必须成功");
+        assert!(!session.resumed, "不可装载的局不得标记 resumed");
+        assert!(
+            session
+                .notices
+                .iter()
+                .any(|notice| notice.contains("按新局开局")),
+            "必须有按新局开局提示：{:?}",
+            session.notices
+        );
+        let archives = reset_archives(&run_dir);
+        assert_eq!(archives.len(), 1, "不可装载的旧代必须归档（证据不丢）");
+        assert_eq!(archive_line_count(&archives[0]), 1, "旧代行全在归档里");
+        assert_eq!(event_line_count(&run_dir), 0, "新一代从空起步");
+
+        // 关键反混代断言：新局第一步 seq 必须是 0（修复前会接旧代行号 seq=1）。
+        let receipt = session.dispatch_event("event.start", "0");
+        assert_eq!(receipt["ok"], serde_json::json!(true));
+        assert_eq!(
+            receipt["seq"],
+            serde_json::json!(0),
+            "新局第一步必须从 seq 0 起步（混代即 1）"
+        );
+        assert_eq!(event_line_count(&run_dir), 1, "events 里只有新代这一行");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R4：续局失败但盘上状态已可装载（另一进程已救活）→ 锁内重试读档 adopt，
+    /// 不归档别人的行、不重置。复刻 Session::open 的两段序：首次读档失败（坏档）
+    /// → 「另一进程」把档修好 → reset_artifacts(true) 必须 Recovered。
+    #[test]
+    fn r4_recheck_adopts_recovered_state_without_archiving() {
+        let dir = case_dir("r4");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r4");
+        let run_dir = runs_root.join("r4");
+        let autosave_path = run_dir.join(AUTOSAVE_FILE);
+
+        let mut session = Session::open(&probe_args(&mod_dir, &runs_root, "r4", true))
+            .expect("健康局 resume 必须成功");
+        assert!(session.resumed);
+
+        // ① 本进程视角「续局失败」：坏档（复刻 open 的首次读档在锁外失败）。
+        let good_save = fs::read_to_string(&autosave_path).expect("读好档");
+        fs::write(&autosave_path, "corrupted-bytes").expect("写坏档");
+        assert!(
+            session.load_autosave().is_err(),
+            "坏档读档必须失败（进入二次判定路径的前提）"
+        );
+
+        // ② 「另一进程」恢复：把好档写回（重置后起步 / 外部修复，对判据等价）。
+        fs::write(&autosave_path, &good_save).expect("另一进程恢复好档");
+
+        // ③ 二次判定：重试读档成功 → Recovered，不归档、不动事件日志。
+        let outcome = session.reset_artifacts(true);
+        assert!(
+            matches!(outcome, ResetOutcome::Recovered),
+            "盘上状态可装载必须 adopt，不得重置"
+        );
+        assert!(reset_archives(&run_dir).is_empty(), "不得归档别人的行");
+        assert_eq!(event_line_count(&run_dir), 1, "事件日志必须原样保留");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R5：锁心跳——真实持锁才续命（mtime 前移），未持锁绝不触碰别人的锁文件。
+    #[test]
+    fn r5_lock_heartbeat_only_while_holding() {
+        let dir = case_dir("r5");
+        let lock_path = dir.join(COORDINATION_LOCK);
+
+        // ① 未持锁：心跳是空操作，连别人的锁文件都不碰。
+        fs::write(&lock_path, b"someone-else").expect("造一把别人的锁");
+        let stale = SystemTime::now() - Duration::from_secs(60);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&lock_path)
+            .expect("打开别人的锁")
+            .set_modified(stale)
+            .expect("回拨 mtime");
+        run_lock_heartbeat();
+        let untouched = fs::metadata(&lock_path)
+            .expect("锁还在")
+            .modified()
+            .expect("读 mtime");
+        assert!(
+            untouched <= SystemTime::now() - Duration::from_secs(55),
+            "未持锁的心跳绝不能 bump 别人的锁"
+        );
+
+        // ② 真实持锁：心跳把 mtime 从「陈旧」续到「新鲜」（陈旧抢占判据不再误伤活锁）。
+        let _guard = acquire_run_lock(&dir).expect("acquire 应成功");
+        assert_eq!(super::RUN_LOCK_DEPTH.with(Cell::get), 1);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&lock_path)
+            .expect("打开自己的锁")
+            .set_modified(stale)
+            .expect("回拨 mtime（模拟持锁已超过 LOCK_STALE_MS）");
+        run_lock_heartbeat();
+        let refreshed = fs::metadata(&lock_path)
+            .expect("锁还在")
+            .modified()
+            .expect("读 mtime");
+        assert!(
+            refreshed > SystemTime::now() - Duration::from_secs(55),
+            "持锁心跳必须把 mtime 续到新鲜（防等待者按陈旧抢占活锁）"
+        );
+
+        drop(_guard);
+        assert_eq!(
+            super::RUN_LOCK_DEPTH.with(Cell::get),
+            0,
+            "释放后 depth 归零"
+        );
+        assert!(!lock_path.exists(), "释放后锁文件删除");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R6：drain 逐行消费一次（cursor 语义），且全程在真实锁内（心跳接线点冒烟）。
+    #[test]
+    fn r6_drain_consumes_each_line_once_under_lock() {
+        let dir = case_dir("r6");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r6");
+        let run_dir = runs_root.join("r6");
+
+        for index in 0..3 {
+            use std::io::Write as _;
+            let mut inbox = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(run_dir.join(INBOX_FILE))
+                .expect("打开 inbox");
+            writeln!(
+                inbox,
+                "{{\"kind\":\"add\",\"title\":\"t{index}\",\"external_id\":\"ext-{index}\"}}"
+            )
+            .expect("写 inbox 行");
+        }
+
+        let mut session =
+            Session::open(&probe_args(&mod_dir, &runs_root, "r6", true)).expect("resume 必须成功");
+        let first = session.drain_inbox();
+        assert_eq!(first.applied, 3, "三行各消费一次");
+        assert_eq!(first.remaining, 0, "消费完不留尾");
+        assert_eq!(first.error, None, "三行都必须入队成功");
+        // 关键：drain 的 dispatch 走持久化临界区，seq 与开局步连续（无重复/跳号）。
+        assert_eq!(event_line_count(&run_dir), 1 + 3, "开局 1 行 + inbox 3 行");
+
+        // 幂等：cursor 已前移，再 drain 不重放（W8 的 cursor 正常面）。
+        let second = session.drain_inbox();
+        assert_eq!(second.applied, 0, "cursor 已前移不得重放");
+        assert_eq!(event_line_count(&run_dir), 4, "事件日志不得新增");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R7：closing 准入门禁——running 可写 → closing 拒写 → 解除恢复 →
+    /// finalized 拒写。writer token / 收口协议的关键不变量。
+    #[test]
+    fn r7_closing_gate_lifecycle() {
+        let dir = case_dir("r7");
+
+        // running：可写，登记后摘除。
+        let token = match begin_write(&dir) {
+            Ok(token) => token,
+            Err(gate) => panic!("running 必须可写，实际 {gate:?}"),
+        };
+        super::end_write(&dir, &token);
+
+        // closing：写命令被拒（Closing 门）。
+        assert!(matches!(enter_closing(&dir), Ok(ClosingEntry::Entered)));
+        assert!(
+            matches!(begin_write(&dir), Err(WriteGate::Closing)),
+            "closing（心跳未过期）必须拒写"
+        );
+
+        // 解除 closing：恢复可写。
+        leave_closing(&dir);
+        let token = begin_write(&dir).expect("解除 closing 后必须可写");
+        super::end_write(&dir, &token);
+
+        // finalized：永久拒写（需开新局）。
+        enter_closing(&dir).expect("进 closing");
+        finalize_run(&dir);
+        assert!(
+            matches!(begin_write(&dir), Err(WriteGate::Finalized)),
+            "finalized 后必须拒写"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
