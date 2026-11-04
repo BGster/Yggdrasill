@@ -17,6 +17,11 @@
 //! - **哈希覆盖面声明**：canonical 快照 = 实体表面（core `canonical_snapshot`
 //!   既定面）；KV / pending_choice 不入哈希（其保真由存读档往返测试承载，
 //!   S5/S10）——本函数是 canonical_state_bytes 的 SHA-256 投影，不另立状态面。
+//!   写断言时的口径：**「状态哈希不变」只能证明实体面未被改动**；要一并
+//!   证明 KV 面也未变，必须读 `save` 回执（驱动 `dispatch("save","")` 的
+//!   `save.kv.entries`）或比较 save 字节——dispatch 级 savepoint 的回滚回归
+//!   正靠这对证据（`tests/kernel_facade.rs::failed_dispatch_leaves_state_hash_
+//!   and_save_bytes_unchanged`）。
 
 use sha2::{Digest, Sha256};
 

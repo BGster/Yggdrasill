@@ -671,14 +671,59 @@ sha256 → JSON 解析 → schema 分发校验），任何一条不过即装载�
   运行期 handler 报错映射 VALIDATION 码（稳定码契约：按 `error.code`
   分支，勿解析 message）。
 
-## 9. 验收表（宿主 / Mod 迁移，两份）
+## 9. handler 报错即回滚——不需要写补偿逻辑
+
+一次 dispatch 就是一个事务边界：**成功 = 全部生效，失败 = 全部回滚**。
+handler 里 `error(...)`（以及任何被内核拒绝的调用，如 `ygg.kv.set("x", 0/0)`）
+会让本次 dispatch 对状态面的所有写入作废——实体（`spawn` / `set_attribute` /
+`add_tag` / `remove_tag`）与 KV（`ygg.kv.set`）一并回到这一步开始前的样子，
+连实体 id 计数器与两个 `revision` 都退回去。
+
+**反例（手写补偿，已无必要且会出错）**：
+
+```lua
+-- ❌ 旧写法：自己记账回滚——多键写序列里漏一个就是新的半写缺陷
+local ok = pcall(function()
+  ygg.kv.set("prop.count", n + 1)
+  ygg.kv.set("prop." .. n, text)
+end)
+if not ok then ygg.kv.set("prop.count", n) end   -- 补偿逻辑，删掉
+```
+
+```lua
+-- ✅ 正确：直接报错，内核整体回滚；校验失败留下的是干净状态
+local function append(text)
+  assert(type(text) == "string" and #text > 0, "提案正文不能为空")
+  local n = (ygg.kv.get("prop.count") or 0) + 1
+  ygg.kv.set("prop.count", n)
+  ygg.kv.set("prop." .. n, text)
+end
+```
+
+三条边界，写 Mod 时必须知道：
+
+1. **回滚 ≠ 撤销一切**。回滚覆盖**持久状态面**（实体 + KV）。以下面不回滚：
+   - **Lua 全局 / 模块 upvalue**（VM 内的变量不是状态）：要跨步记忆只能落
+     KV，不能靠模块变量缓存（同 §5「副作用边界」的纪律）；
+   - **`ygg.narrate` / `ygg.emit` / `ygg.meta` / `ygg.choice` 的输出**：随失败
+     丢弃（信封是错误形态，本就不携带这些字段），不需要也不可回滚；
+   - **随机数序列**（`math.random`）：失败步消耗的随机数不退还——重放同一
+     事件序列仍逐字节一致，但「失败步对未来零影响」只对状态面成立。
+2. **失败步仍然进 `log`**。`log` 是**尝试日志**（回放前提），不是「有效步
+   日志」：日志里有某事件、状态却无对应效果，是失败步的正常形态，别当
+   异常排查。
+3. **失败步不会污染后续存档**。宿主只在 `ok:true` 时推进游戏状态/存档，
+   而失败步本身对状态零影响，所以「存进 autosave 的脏状态」这条路已经
+   堵死。
+
+## 10. 验收表（宿主 / Mod 迁移，两份）
 
 多文件 Mod 能力分两段：**宿主面**（解析 / 装载 / 打包 / 热载 / 静态检查 + 契约测试）
 已交付；**Mod 迁移**（把 agent-seed 这种大单文件 Mod 真的拆成 `src/*.lua`）是后续
 独立迭代，**不在本次范围**。两张表分开是因为验收主体不同：前者验「机制成立」，
 后者验「某一份 Mod 拆得对不对」。
 
-### 9.1 宿主验收（已交付，本次范围）
+### 10.1 宿主验收（已交付，本次范围）
 
 | 交付面 | 验收判据 | 证据 |
 | --- | --- | --- |
@@ -690,7 +735,7 @@ sha256 → JSON 解析 → schema 分发校验），任何一条不过即装载�
 单文件零迁移的证据面（每次合并都跑）：`.ygg/mods/agent-seed` 与 `packages/mods/agent-seed`
 两侧 `playtest` 都到结局、【结局 叙事行出现、`ygg-lint` 0 error。
 
-### 9.2 Mod 迁移验收（后续独立迭代，不在本次范围）
+### 10.2 Mod 迁移验收（后续独立迭代，不在本次范围）
 
 把 agent-seed 从单文件拆成 `src/*.lua` 时，按这张表验：
 
