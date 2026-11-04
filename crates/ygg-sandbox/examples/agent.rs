@@ -137,6 +137,10 @@ use ygg_sandbox::host_contract::{
     CONTRACT_DOC,
 };
 use ygg_sandbox::modload::ModBundle;
+// 持久化端口（`crates/ygg-store`）：状态事实（存档 / 事件日志 / inbox / 位移 /
+// 重置）全部经它读写。**锁、run.json、settlement.json、coordination.* 仍留在
+// 宿主**——那是跨进程共识与报告面，两后端必须完全一致。
+use ygg_store::{Backend, RunStore, StepDraft, Tick, AUTOSAVE_FILE, INBOX_FILE, SQLITE_FILE_NAME};
 
 // ============================================================================
 // §常量 只有**不是契约**的东西：run 目录文件名、宿主自身的超时。
@@ -153,12 +157,12 @@ const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 决策命令轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
 const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-const AUTOSAVE_FILE: &str = "autosave.json";
-const EVENTS_FILE: &str = "events.jsonl";
+// 产物文件名里，「存档」与「inbox」两个仍被宿主直接引用（`--settle` 的错误文案、
+// 未开局时的回执）；其余文件名（`events.jsonl` / `inbox.cursor` / `run.sqlite`）
+// 已完全归后端所有，宿主不再拼字符串——否则改后端时会出现「宿主拼的名字」与
+// 「后端写的位置」两张皮。
 const META_FILE: &str = "run.json";
 const SETTLEMENT_FILE: &str = "settlement.json";
-const INBOX_FILE: &str = "inbox.jsonl";
-const INBOX_CURSOR_FILE: &str = "inbox.cursor";
 const DECIDE_INPUT_FILE: &str = "decide-input.json";
 
 const MOD_SOURCE_FILE: &str = "mod.lua";
@@ -210,6 +214,9 @@ struct Args {
     drive: Drive,
     /// 异步 inbox 操作（只追 inbox.jsonl 后退出，不读写 autosave）。
     inbox: Option<InboxWrite>,
+    /// `--store`：**开局断言**（`run.json` 的 `store` 字段才是权威事实）。
+    /// `None` = 未指定（旧局按产物推断，新局默认 json）。
+    store: Option<Backend>,
 }
 
 fn parse_args() -> Args {
@@ -223,6 +230,7 @@ fn parse_args() -> Args {
     let mut payload: Option<String> = None;
     let mut drive = Drive::Stdin;
     let mut inbox: Option<InboxWrite> = None;
+    let mut store: Option<Backend> = None;
 
     // 写 inbox 的七个参数共享同一套「只能给一个」的校验。
     fn set_inbox(inbox: &mut Option<InboxWrite>, flag: &'static str, value: String) {
@@ -241,6 +249,16 @@ fn parse_args() -> Args {
             "--resume" => resume = true,
             "--settle" => settle = true,
             "--watch" => watch = true,
+            "--store" => {
+                let text = next_value(&mut iter, "--store");
+                store = match Backend::parse(&text) {
+                    Some(backend) => Some(backend),
+                    None => usage_error(&format!(
+                        "未知的 --store 取值 `{text}`（只接受 {}；json 是默认后端）",
+                        Backend::NAMES.join(" / ")
+                    )),
+                };
+            }
             "--event" => event = Some(next_value(&mut iter, "--event")),
             "--payload" => payload = Some(next_value(&mut iter, "--payload")),
             "--drive" => {
@@ -304,6 +322,7 @@ fn parse_args() -> Args {
         payload,
         drive,
         inbox,
+        store,
     }
 }
 
@@ -360,6 +379,11 @@ fn usage(code: i32) -> ! {
   --amend <串>       --split <串>    --merge <串>    --conflict <串>
   --resolve <串>     --proposal <串>（同上：只在 Mod 声明了对应 write 时可用）
   --settle           读 autosave + events.jsonl 写 settlement.json
+  --store <后端>     存储后端断言：json（默认，autosave.json + events.jsonl）|
+                     sqlite（可选编译，<run 目录>/run.sqlite）。run.json 的
+                     \"store\" 字段是权威：与 --store 不一致即拒绝开局（零写入）；
+                     旧局无该字段时按产物推断（纯 JSON 目录 → json）。
+                     未以 --features store-sqlite 构建时，--store sqlite 报错退出。
   -h, --help         本帮助
 
 host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字面量）：
@@ -748,13 +772,13 @@ struct Session {
     settlement: SettlementPolicy,
     mod_label: String,
     run_dir: PathBuf,
-    autosave_path: PathBuf,
-    events_path: PathBuf,
+    /// 持久化端口（JSON 文件 / sqlite 库）。**状态事实的唯一入口**：存档、
+    /// 事件日志、inbox、位移、重置都经它；锁与 run.json / settlement.json /
+    /// coordination.* 仍在本文件（端口内不得出现任何锁原语）。
+    store: Box<dyn RunStore>,
     meta_path: PathBuf,
-    /// 异步需求队列（`--requirement` 只追加；本进程只消费）。
+    /// 异步需求队列的**文件路径**（仅用于人读输出；真正的读写经 `store`）。
     inbox_path: PathBuf,
-    /// 消费位移（`{consumed: N}`，按非空行数；dispatch + 存档成功后才前移）。
-    inbox_cursor_path: PathBuf,
     kernel: KernelFacade,
     /// 装载时的 mod 目录签名（热载比对基线；每次成功/失败尝试后前移）。
     signature: Vec<FileStamp>,
@@ -799,8 +823,16 @@ impl Session {
         let config_rel = agent_config_path(&mod_dir);
         let limits = DriveLimits::load(&mod_dir.join(&config_rel))?;
         let settlement = SettlementPolicy::load(&mod_dir.join(&config_rel))?;
+        // 存储后端裁决（`run.json` 的 `store` 是权威事实，`--store` 只是开局断言）：
+        // **必须在任何写入之前**（含 create_dir_all / 建库），不一致就零写入失败。
+        let declared = read_meta(&run_dir.join(META_FILE))
+            .and_then(|meta| meta["store"].as_str().map(str::to_owned))
+            .and_then(|text| Backend::parse(&text));
+        let backend =
+            ygg_store::resolve(&run_dir, declared, args.store).map_err(|err| err.to_string())?;
         fs::create_dir_all(&run_dir)
             .map_err(|err| format!("创建 run 目录 {} 失败：{err}", run_dir.display()))?;
+        let store = open_store(backend, &run_dir)?;
         // 装载即取签名：开局装载永远读的是磁盘现状，之后的差异才是热载触发。
         let signature = mod_signature(&mod_dir);
         // 上一局落盘的签名（用于报告「续局时 mod 已被改过」——单发模式下
@@ -816,11 +848,9 @@ impl Session {
             limits,
             settlement,
             mod_label: mod_dir.display().to_string(),
-            autosave_path: run_dir.join(AUTOSAVE_FILE),
-            events_path: run_dir.join(EVENTS_FILE),
+            store,
             meta_path: run_dir.join(META_FILE),
             inbox_path: run_dir.join(INBOX_FILE),
-            inbox_cursor_path: run_dir.join(INBOX_CURSOR_FILE),
             run_dir,
             kernel,
             signature,
@@ -831,6 +861,9 @@ impl Session {
         };
 
         // 残留 tmp 清理（W3 配套）：持锁 + 10s mtime 窗口，不误删活进程的 tmp。
+        // 先把「后端事实」落盘再动状态：`run.json.store` 必须早于第一次写入
+        // 存档，否则旧版工具可能先看到一个无后端声明的目录。
+        session.write_meta();
         session.cleanup_stale_tmp();
         if args.resume {
             match session.load_autosave() {
@@ -911,44 +944,17 @@ impl Session {
     /// 清理残留的 autosave tmp（崩溃 / kill -9 留下）：只删 mtime 早于
     /// CLOSING_STALE_MS 的（10s 窗口与 closing 心跳同源，plan-r5 §2.4）；新鲜
     /// tmp 可能有活进程正在写，绝不误删（R6）。持锁执行；清到即告警（B3）。
+    ///
+    /// 具体清什么由后端决定：JSON 清 `autosave.json.tmp.*`；sqlite 是 no-op
+    /// （`-wal` / `-shm` 是库的活文件，
+    /// 「清理」等同于破坏事务）。
     fn cleanup_stale_tmp(&mut self) {
-        let prefix = format!("{AUTOSAVE_FILE}.tmp.");
-        let outcome = self.with_run_lock(|session| -> Result<(), String> {
-            let entries = match fs::read_dir(&session.run_dir) {
-                Ok(entries) => entries,
-                Err(_) => return Ok(()), // 目录读不到 = 无残留可清
-            };
-            for entry in entries.flatten() {
-                if !entry.file_name().to_string_lossy().starts_with(&prefix) {
-                    continue;
-                }
-                // mtime 读不到 → 无法证明陈旧 → 保守跳过（宁可残留不可误删）。
-                let Some(age) = entry
-                    .metadata()
-                    .ok()
-                    .and_then(|meta| meta.modified().ok())
-                    .and_then(|time| SystemTime::now().duration_since(time).ok())
-                    .map(|elapsed| elapsed.as_millis())
-                else {
-                    continue;
-                };
-                if age <= CLOSING_STALE_MS {
-                    continue;
-                }
-                match fs::remove_file(entry.path()) {
-                    Ok(()) => session
-                        .notices
-                        .push(format!("清理残留 tmp：{}", entry.path().display())),
-                    Err(err) => session.notices.push(format!(
-                        "清理残留 tmp 失败：{}：{err}",
-                        entry.path().display()
-                    )),
-                }
-            }
-            Ok(())
+        let outcome = self.with_run_lock(|session| -> Result<Vec<String>, String> {
+            Ok(session.store.cleanup_stale(CLOSING_STALE_MS))
         });
-        if let Err(message) = outcome {
-            self.notices.push(message);
+        match outcome {
+            Ok(warnings) => self.notices.extend(warnings),
+            Err(message) => self.notices.push(message),
         }
     }
 
@@ -977,54 +983,39 @@ impl Session {
             if recheck && session.load_autosave().is_ok() {
                 return Ok(ResetOutcome::Recovered);
             }
-            let had_old = session.events_path.exists() || session.autosave_path.exists();
-            if session.events_path.exists() {
-                let archived = session
-                    .run_dir
-                    .join(format!("{EVENTS_FILE}.reset.{}", now_nanos()));
-                fs::rename(&session.events_path, &archived)
-                    .map_err(|err| format!("归档事件日志失败：{err}"))?;
-                session
-                    .notices
-                    .push(format!("events 已归档至 {}", archived.display()));
-                // 归档堆积提示（R7）：只提示不自动清理（自动删证据违反「保留原始
-                // 证据」的需求精神）；不改 ok / 退出码。
-                let archived_count = fs::read_dir(&session.run_dir).map_or(0, |entries| {
-                    entries
-                        .flatten()
-                        .filter(|entry| {
-                            entry
-                                .file_name()
-                                .to_string_lossy()
-                                .starts_with(&format!("{EVENTS_FILE}.reset."))
-                        })
-                        .count()
-                });
-                if archived_count > 5 {
-                    session.notices.push(format!(
-                        "events 归档已有 {archived_count} 份，建议人工清理（宿主不自动删证据）"
-                    ));
-                }
+            // 重置整个动作下沉到端口：归档 → 建新代 → 落初始存档。
+            // 初始存档必须**先算出来**（内核 `save` 信封是纯计算，不碰盘）：算不出来
+            // 就不该动盘；算出来之后的任何写失败都是 fail-closed。
+            //
+            // 后端的归档载体不同（JSON = `events.jsonl.reset.<纳秒>` 文件；
+            // sqlite = 新 generation），但都只归档不删证据。
+            let initial_save = session.current_save()?;
+            let info = session
+                .store
+                .reset(&initial_save, reset_reason(recheck), clock())
+                .map_err(|err| err.to_string())?;
+            if let Some(archive) = &info.archive {
+                // 归档载体的措辞按后端分：JSON 是文件路径（历史文案不变），
+                // sqlite 是「第几代」（报路径会让用户去找一个不存在的文件）。
+                let notice = match session.store.backend() {
+                    Backend::Json => format!("events 已归档至 {archive}"),
+                    Backend::Sqlite => format!("旧代已归档为 {archive}"),
+                };
+                session.notices.push(notice);
             }
-            if session.autosave_path.exists() {
-                if let Err(err) = fs::remove_file(&session.autosave_path) {
-                    session.notices.push(format!("移除旧 autosave 失败：{err}"));
-                }
-            }
-            // 显式建空文件：归档后立刻有新一代日志（与旧日志不再混代）。
-            // 建档失败必须 fail-closed：events 缺失/旧态时继续新局 = 混代。
-            File::create(&session.events_path).map_err(|err| format!("新建事件日志失败：{err}"))?;
-            // 初始存档同临界区（plan §2.5：save_now 失败即 `?` 上抛）——
-            // 存档写不出来还继续，等于让无档新局推进（实测 RED-C）。
-            session.save_now()?;
-            Ok(ResetOutcome::Reset { had_old })
+            session.notices.extend(info.warnings);
+            Ok(ResetOutcome::Reset {
+                had_old: info.had_old,
+            })
         })
         .map_err(|message| format!("重置产物失败：{message}"))
     }
 
     /// 事件日志既有条数（续局 seq 起点）。
     fn count_events(&self) -> u64 {
-        event_count(&self.events_path)
+        // seq 唯一事实源在端口内：`next_seq` = 非空行数（含不可解析行），
+        // 不是「可解析记录数」——两者在坏行场景下会不同，别换用 `steps().len()`。
+        self.store.next_seq().unwrap_or(0)
     }
 
     /// mod 目录签名的人读串（落 run.json；跨进程比对「mod 变没变」）。
@@ -1056,6 +1047,9 @@ impl Session {
             "mod_signature": self.signature_label(),
             "started_at": started_at,
             "updated_at": now_secs(),
+            // 存储后端**权威事实**（单源：只在这里写，与状态写入同批落盘）。
+            // `--store` 仅是开局断言；旧局没有这个键 → 按产物推断为 json。
+            "store": self.store.backend().as_str(),
         });
         let mut text = match serde_json::to_string_pretty(&meta) {
             Ok(text) => text,
@@ -1070,8 +1064,11 @@ impl Session {
         }
     }
 
-    /// 现态存档 → `autosave.json`（每成功步自动调用；`s` 命令亦复用）。
-    fn save_now(&mut self) -> Result<(), String> {
+    /// 现态存档字节（内核 `save` 信封 → 紧凑 JSON）：纯计算，不碰盘。
+    ///
+    /// 单独抽出来是为了让「存档算不出来」与「存档写不出去」两类失败在调用方
+    /// 可分辨：前者不应动盘（reset 前先算），后者是持久化失败。
+    fn current_save(&mut self) -> Result<Vec<u8>, String> {
         let envelope = parse_envelope(&self.kernel.dispatch("save", ""));
         if envelope["ok"] != Json::Bool(true) {
             return Err(format!("自动存档失败：{}", error_text(&envelope)));
@@ -1081,15 +1078,27 @@ impl Session {
             return Err("自动存档失败：save 信封缺少 save 字段".to_owned());
         }
         // 原样写 save 对象（紧凑 JSON）——与内核存档字节同形，可直接作 load payload。
-        // tmp+rename 原子替换（W3）：读者要么看到旧全文、要么新全文，绝无半截；
-        // 本函数只在持久化临界区内被调用（dispatch_event / reset_artifacts）。
-        atomic_write(&self.autosave_path, save.to_string().as_bytes())
+        Ok(save.to_string().into_bytes())
     }
 
-    /// 磁盘 autosave 回灌进当前驱动（续局 / `l` 命令）。
+    /// 现态存档 → 端口（每成功步自动调用；`s` 命令亦复用）。
+    fn save_now(&mut self) -> Result<(), String> {
+        let save = self.current_save()?;
+        // 本函数只在持久化临界区内被调用（dispatch_event / `s` 命令）。
+        self.store
+            .set_save(&save, clock())
+            .map_err(|err| err.to_string())
+    }
+
+    /// 磁盘存档回灌进当前驱动（续局 / `l` 命令）。
     fn load_autosave(&mut self) -> Result<(), String> {
-        let text = fs::read_to_string(&self.autosave_path)
-            .map_err(|err| format!("读取 {} 失败：{err}", self.autosave_path.display()))?;
+        let bytes = self
+            .store
+            .latest_save()
+            .map_err(|err| err.to_string())?
+            .ok_or_else(|| format!("读取 {} 失败：无存档", self.store.locator()))?;
+        let text = String::from_utf8(bytes)
+            .map_err(|err| format!("读取 {} 失败：{err}", self.store.locator()))?;
         let envelope = parse_envelope(&self.kernel.dispatch("load", &text));
         if envelope["ok"] != Json::Bool(true) {
             return Err(format!("读档失败：{}", error_text(&envelope)));
@@ -1127,15 +1136,12 @@ impl Session {
 
     /// inbox 已消费行数（cursor 文件缺失 / 损坏 = 0：重放由 Mod 侧幂等去重兵底）。
     fn inbox_cursor(&self) -> usize {
-        read_json(&self.inbox_cursor_path)
-            .and_then(|cursor| cursor["consumed"].as_u64())
-            .map_or(0, |consumed| consumed as usize)
+        self.store.inbox_cursor().unwrap_or(0)
     }
 
     /// 前移消费位移（仅供 `drain_inbox` 在 dispatch + 存档成功后调）。
     fn write_inbox_cursor(&mut self, consumed: usize) {
-        let record = json!({"consumed": consumed, "updated_at": now_secs()});
-        if let Err(message) = write_json_pretty(&self.inbox_cursor_path, &record) {
+        if let Err(message) = self.store.set_inbox_cursor(consumed, clock()) {
             // cursor 写不了不是丢需求：重放靠 external_id 幂等去重，只告警。
             self.notices
                 .push(format!("写入 inbox cursor 失败：{message}"));
@@ -1155,9 +1161,10 @@ impl Session {
         let outcome = self.with_run_lock(|session| Ok(session.drain_inbox_locked()));
         let drain = outcome.unwrap_or_else(|message| {
             // 锁超时：本段未消费任何行（cursor 未动），报错留给调用方非零退出。
-            let mut drain = InboxDrain::default();
-            drain.error = Some(message);
-            drain
+            InboxDrain {
+                error: Some(message),
+                ..InboxDrain::default()
+            }
         });
         // 临界区时长守护（P0-11）：>1s 打 drain_slow warning，不阻断（B3）。
         let elapsed_ms = started.elapsed().as_millis();
@@ -1172,13 +1179,9 @@ impl Session {
     /// drain 的锁内本体（旧逻辑原样；内部 dispatch_event 重入不加锁）。
     fn drain_inbox_locked(&mut self) -> InboxDrain {
         let mut drain = InboxDrain::default();
-        let Ok(text) = fs::read_to_string(&self.inbox_path) else {
-            return drain; // 无 inbox 文件 = 本局没有异步需求
+        let Ok(lines) = self.store.inbox_lines() else {
+            return drain; // 读不到 = 无队列（与「无 inbox 文件」同一语义）
         };
-        let lines: Vec<&str> = text
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .collect();
         let mut consumed = self.inbox_cursor();
         if consumed > lines.len() {
             // inbox 被外部替换 / 截短：按从头消费算（幂等去重保证不重复入队）。
@@ -1188,7 +1191,7 @@ impl Session {
             // 长临界区心跳：逐行续命锁文件 mtime，防等待者按 LOCK_STALE_MS
             // 误判活锁为崩溃残留而抢占（双持锁 = 互斥失效，实测重复 seq）。
             run_lock_heartbeat();
-            let line = lines[consumed];
+            let line = lines[consumed].as_str();
             let Ok(record) = serde_json::from_str::<Json>(line) else {
                 // 坏行永远无法 dispatch：跳过并前移，否则整个队列永久阻塞。
                 consumed += 1;
@@ -1334,15 +1337,31 @@ impl Session {
             .cloned();
         let ending_line = ending.as_deref();
 
-        // 持久化临界区：seq 分配 + 事件行 + 存档（仅成功步）三件事同一把锁。
-        let persisted = self.with_run_lock(|session| {
-            let seq = session.count_events(); // 锁内重算：唯一分配点（B1）
-            session.append_event(seq, name, payload, ok, narrative.len(), ending_line);
-            // 自动存档：仅成功步（失败步不改状态，重写同一份 autosave 无意义）。
-            if ok {
-                session.save_now()?;
-            }
-            Ok(seq)
+        // 持久化临界区：seq 分配 + 事件行 + 存档（仅成功步）三件事同一把锁，
+        // 全部经端口提交（trait 的前置条件正是「调用方已持锁」）。
+        let persisted = self.with_run_lock(|session| -> Result<u64, String> {
+            // 存档字节先算（内核纯计算）——算不出来就不该动盘（不写事件行）。
+            let save = if ok {
+                Some(session.current_save()?)
+            } else {
+                None
+            };
+            let committed = session
+                .store
+                .commit_step(StepDraft {
+                    event: name,
+                    payload,
+                    ok,
+                    narrative_count: narrative.len(),
+                    // 时间戳由宿主给：端口不取时钟（否则黄金样本永不可重放）。
+                    timestamp: now_secs(),
+                    ending_line,
+                    save: save.as_deref(),
+                })
+                .map_err(|err| err.to_string())?;
+            // 非致命告警（事件行超大 / 写入失败但步继续）保持现状语义。
+            session.notices.extend(committed.warnings);
+            Ok(committed.seq)
         });
         let seq = match persisted {
             Ok(seq) => seq,
@@ -1382,60 +1401,6 @@ impl Session {
         receipt
     }
 
-    /// 事件日志追加一行（宿主侧旁路证据；写失败只告警，不中断局）。
-    fn append_event(
-        &mut self,
-        seq: u64,
-        name: &str,
-        payload: &str,
-        ok: bool,
-        narrative_count: usize,
-        ending: Option<&str>,
-    ) {
-        let mut record = json!({
-            "seq": seq,
-            "event": name,
-            "payload": payload,
-            "ok": ok,
-            "narrative_count": narrative_count,
-            "timestamp": now_secs(),
-            "ending": ending.is_some(),
-        });
-        if let Some(line) = ending {
-            record["ending_line"] = json!(line);
-        }
-        match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.events_path)
-        {
-            Ok(mut file) => {
-                // 序列化先完成：失败不留半行。单次 write_all 消除 writeln! 的
-                // Formatter 分段写（W2）；跨进程原子性由外层锁保证，write_all
-                // 只负责同进程内的一次 write(2)（行 < 4KiB 时内核一次写入）。
-                match serde_json::to_string(&record) {
-                    Ok(mut line) => {
-                        if line.len() > 16 * 1024 {
-                            self.notices.push(format!(
-                                "事件行超大（{} 字节，seq {seq}）：异常 payload 的可能信号",
-                                line.len()
-                            ));
-                        }
-                        line.push('\n');
-                        if let Err(err) = file.write_all(line.as_bytes()) {
-                            self.notices
-                                .push(format!("写入 {} 失败：{err}", self.events_path.display()));
-                        }
-                    }
-                    Err(err) => self.notices.push(format!("序列化事件记录失败：{err}")),
-                }
-            }
-            Err(err) => self
-                .notices
-                .push(format!("打开 {} 失败：{err}", self.events_path.display())),
-        }
-    }
-
     /// 单发 / 交互统一回执（stdout 契约本体）。
     fn build_receipt(
         &mut self,
@@ -1452,7 +1417,7 @@ impl Session {
             "event": name,
             "narrative": narrative,
             "pendingChoice": pending,
-            "autosave": self.autosave_path.display().to_string(),
+            "autosave": self.store.locator(),
             "seq": seq,
         });
         if ok {
@@ -1533,31 +1498,49 @@ fn choice_signature(receipt: &Json) -> String {
     format!("{prompt}\u{1e}{options}")
 }
 
-/// 追加一行到 inbox（`OpenOptions::append`；不影响 autosave，故可跨进程并发）。
-fn append_inbox_line(path: &Path, record: &Json) -> Result<(), String> {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|err| format!("打开 {} 失败：{err}", path.display()))?;
-    writeln!(file, "{record}").map_err(|err| format!("写入 {} 失败：{err}", path.display()))
-}
-
-/// inbox 现有非空行数（宿主的 audit 计数；与消费侧的计数口径一致）。
-fn inbox_line_count(path: &Path) -> usize {
-    fs::read_to_string(path).map_or(0, |text| {
-        text.lines().filter(|line| !line.trim().is_empty()).count()
-    })
-}
-
-/// run 目录里**尚未消费**的 inbox 行数（现读文件 + 现读 cursor，不信任缓存）。
+/// run 目录里**尚未消费**的 inbox 行数（现读端口 + 现读 cursor，不信任缓存）。
 /// 这是结算硬门禁：inbox 还有行却报 `ok=true` = 静默丢需求。
-fn unconsumed_inbox_lines(run_dir: &Path) -> usize {
-    let lines = inbox_line_count(&run_dir.join(INBOX_FILE));
-    let consumed = read_json(&run_dir.join(INBOX_CURSOR_FILE))
-        .and_then(|cursor| cursor["consumed"].as_u64())
-        .map_or(0, |value| value as usize);
+///
+/// 口径必须与消费侧（`drain_inbox_locked`）完全一致，所以两者都只走端口：
+/// 自己数文件会让 sqlite 局直接报 0（静默放行）。
+fn unconsumed_inbox_lines(store: &dyn RunStore) -> usize {
+    let lines = store.inbox_len().unwrap_or(0);
+    let consumed = store.inbox_cursor().unwrap_or(0);
     lines.saturating_sub(consumed)
+}
+
+/// 解析并打开本局的持久化后端（宿主**唯一**入口）。
+///
+/// `run.json` 的 `store` 字段是权威事实，`--store` 只是开局断言：两者不一致、
+/// 或目录里混着另一后端的产物 → `Err`（fail-closed，零写入）。
+fn open_store_resolved(run_dir: &Path, flag: Option<Backend>) -> Result<Box<dyn RunStore>, String> {
+    let declared = read_meta(&run_dir.join(META_FILE))
+        .and_then(|meta| meta["store"].as_str().map(str::to_owned))
+        .and_then(|text| Backend::parse(&text));
+    let backend = ygg_store::resolve(run_dir, declared, flag).map_err(|err| err.to_string())?;
+    open_store(backend, run_dir)
+}
+
+/// 按后端打开端口（建目录已由调用方完成）。
+///
+/// sqlite 后端的可用性**不在这里判断**：未以 `--features store-sqlite` 构建时，
+/// `ygg_store::open` 会 fail-closed 报「本构建未启用 sqlite 后端」。
+fn open_store(backend: Backend, run_dir: &Path) -> Result<Box<dyn RunStore>, String> {
+    ygg_store::open(backend, run_dir, clock()).map_err(|err| err.to_string())
+}
+
+/// 宿主时钟（端口不取时铜——时间戳一律由这里给）。
+fn clock() -> Tick {
+    Tick::at(now_secs(), now_nanos())
+}
+
+/// 重置原因（写进后端的归档台账；只用于审计，不参与判定）。
+fn reset_reason(recheck: bool) -> &'static str {
+    if recheck {
+        "resume-failed"
+    } else {
+        "explicit-new-game"
+    }
 }
 
 // ============================================================================
@@ -1684,7 +1667,7 @@ thread_local! {
     /// 不再 acquire。放在**公共锁入口**而不是 Session 上：coordination_update
     /// 等协调协议路径不经过 Session 也要取同一把锁，C3「单锁单记账」必须覆盖
     /// 全部取锁点。单线程模型（C4：临界区内不得 spawn 线程取锁），thread_local 安全。
-    static RUN_LOCK_DEPTH: Cell<u32> = Cell::new(0);
+    static RUN_LOCK_DEPTH: Cell<u32> = const { Cell::new(0) };
     /// 真实持锁期间的锁文件路径（心跳续命用）；重入占位与未持锁时为空。
     /// Drop（真实持有者）归零 depth 时同步清空，心跳不得越权触碰别人的锁。
     static RUN_LOCK_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
@@ -2039,6 +2022,14 @@ fn run_inbox_append(args: &Args) -> i32 {
         eprintln!("error: 创建 run 目录 {} 失败：{err}", run_dir.display());
         return 2;
     }
+    // 写路径同样走端口：sqlite 局没有 inbox.jsonl 可追（追了也永远不被消费）。
+    let mut store = match open_store_resolved(&run_dir, args.store) {
+        Ok(store) => store,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return 2;
+        }
+    };
     // 记录形态与 kind 都来自 Mod 声明：契约读不到 / 没声明该写命令 → fail-closed
     // （明确拒绝 + 退出码 3，绝不静默写一行宿主猜出来的记录）。
     let (routes, kind) = match resolve_write_binding(args, &run_dir, write.flag) {
@@ -2083,7 +2074,10 @@ fn run_inbox_append(args: &Args) -> i32 {
         "kind": kind,
         "created_at": now_secs(),
     });
-    record[external_field] = json!(new_external_id(&args.run_id, inbox_line_count(&path)));
+    record[external_field] = json!(new_external_id(
+        &args.run_id,
+        store.inbox_len().unwrap_or(0)
+    ));
     match shape {
         // 命名段形态：「首段|余下全部」分别落到路由声明的**前两个**非幂等键段
         // （典型就是标题 / 描述；段名由 Mod 声明，宿主不认业务字段名）。
@@ -2100,7 +2094,7 @@ fn run_inbox_append(args: &Args) -> i32 {
         // 预成形 wire 形态：整串载荷进契约声明的载荷字段（宿主不解析、不重排）。
         WriteShape::Payload => record[payload_field] = json!(write.value.trim()),
     }
-    let receipt = match append_inbox_line(&path, &record) {
+    let receipt = match store.inbox_push(&record, clock()) {
         Ok(()) => {
             // 回执键 = 记录的契约字段名（幂等键 / 载荷 / 各命名段）：调用方不必猜。
             let mut receipt = json!({
@@ -2116,18 +2110,19 @@ fn run_inbox_append(args: &Args) -> i32 {
             receipt
         }
         Err(message) => {
-            eprintln!("error: {message}");
+            let text = message.to_string();
+            eprintln!("error: {text}");
             json!({
                 "ok": false,
                 "inbox": path.display().to_string(),
                 "kind": kind,
-                "error": {"code": "INBOX", "message": message},
+                "error": {"code": "INBOX", "message": text},
             })
         }
     };
     println!("{receipt}");
     // 行已落盘 → 摘除 token（closing 侧的「等 writers 归零」以此刻为界）。
-    let pending = unconsumed_inbox_lines(&run_dir);
+    let pending = unconsumed_inbox_lines(store.as_ref());
     end_write(&run_dir, &token);
     if pending > 0 && receipt["ok"] == Json::Bool(true) {
         eprintln!("[提示] 还有 {pending} 条未消费 inbox 行（运行侧下一拍会消费）");
@@ -2141,13 +2136,26 @@ fn run_inbox_append(args: &Args) -> i32 {
 
 /// 装载 / 续局阶段的失败也走回执形态（Agent 只需一条解析路径）。
 fn single_shot_error(args: &Args, event: &str, message: &str) -> i32 {
-    let autosave = args.runs_root.join(&args.run_id).join(AUTOSAVE_FILE);
+    // 回执的 `autosave` 是「存档定位」而不是「一定是 JSON 文件」：本局已声明
+    // 后端（`run.json` 的 `store`）为 sqlite 时必须回 sqlite 的定位串，否则
+    // 工具会顺着这个字段去找一个根本不存在的 `autosave.json`。裁决顺序与
+    // 开局一致：`run.json` 权威 > `--store` 断言 > json 兜底。
+    let run_dir = args.runs_root.join(&args.run_id);
+    let backend = read_meta(&run_dir.join(META_FILE))
+        .and_then(|meta| meta["store"].as_str().map(str::to_owned))
+        .and_then(|text| Backend::parse(&text))
+        .or(args.store)
+        .unwrap_or(Backend::Json);
+    let autosave = match backend {
+        Backend::Json => run_dir.join(AUTOSAVE_FILE).display().to_string(),
+        Backend::Sqlite => format!("{}#latest", run_dir.join(SQLITE_FILE_NAME).display()),
+    };
     let receipt = json!({
         "ok": false,
         "event": event,
         "narrative": [],
         "pendingChoice": Json::Null,
-        "autosave": autosave.display().to_string(),
+        "autosave": autosave,
         "error": {"code": "INTERNAL", "message": message},
     });
     eprintln!("error: {message}");
@@ -3178,7 +3186,7 @@ fn run_interactive(args: &Args) -> i32 {
                     println!("[drive] 已到结局（自动推进 {auto_steps} 步），开始结算…");
                     let code = run_settle(args, true);
                     // 用**现读**的未消费行数报错（不用 final_drain 的快照：结算本身要花时间）。
-                    let leftover = unconsumed_inbox_lines(&session.run_dir);
+                    let leftover = unconsumed_inbox_lines(session.store.as_ref());
                     if leftover > 0 {
                         eprintln!(
                             "error: 结局后仍有 {leftover} 条未消费 inbox 行（{}）——本局已收口，\
@@ -3236,7 +3244,7 @@ fn run_interactive(args: &Args) -> i32 {
                 return 0;
             }
             "s" => match session.save_now() {
-                Ok(()) => println!("已存档 → {}", session.autosave_path.display()),
+                Ok(()) => println!("已存档 → {}", session.store.locator()),
                 Err(message) => println!("[错误] {message}"),
             },
             "l" => match session.load_autosave() {
@@ -3362,7 +3370,7 @@ fn state_receipt(session: &mut Session, event: &str, narrative: Vec<String>) -> 
         "event": event,
         "narrative": narrative,
         "pendingChoice": state["pendingChoice"].clone(),
-        "autosave": session.autosave_path.display().to_string(),
+        "autosave": session.store.locator(),
     })
 }
 
@@ -3426,7 +3434,11 @@ fn print_config(session: &Session, args: &Args) {
     println!("mod      : {}", session.mod_label);
     println!("run-id   : {}", session.run_id);
     println!("run 目录 : {}", session.run_dir.display());
-    println!("autosave : {}", session.autosave_path.display());
+    println!(
+        "存储后端 : {}（存档定位：{}；run.json 的 \"store\" 是权威）",
+        session.store.backend(),
+        session.store.locator()
+    );
     println!(
         "配置      : {}（play.mode 归 Mod 叙事层；宿主只读其中的 drive 阈值）",
         session.mod_dir.join(&session.config_rel).display()
@@ -3453,7 +3465,7 @@ fn print_config(session: &Session, args: &Args) {
     );
     println!(
         "事件日志 : {}（已记录 {} 条，下一条 seq={}）",
-        session.events_path.display(),
+        session.store.locator(),
         session.count_events(),
         session.count_events()
     );
@@ -3461,7 +3473,7 @@ fn print_config(session: &Session, args: &Args) {
         "需求 inbox: {}（已消费 {} 行 / 共 {} 行；--requirement 只追加）",
         session.inbox_path.display(),
         session.inbox_cursor(),
-        inbox_line_count(&session.inbox_path)
+        session.store.inbox_len().unwrap_or(0)
     );
     println!(
         "热载     : {}",
@@ -3512,8 +3524,15 @@ fn load_settlement_policy(run_dir: &Path, args: &Args) -> Result<SettlementPolic
 
 fn run_settle(args: &Args, auto: bool) -> i32 {
     let run_dir = args.runs_root.join(&args.run_id);
-    let autosave_path = run_dir.join(AUTOSAVE_FILE);
-    let events_path = run_dir.join(EVENTS_FILE);
+    // 结算也必须走端口：sqlite 局没有 autosave.json / events.jsonl 可读
+    // （照旧读文件 = 把已收口的局报成「无存档」）。
+    let store = match open_store_resolved(&run_dir, args.store) {
+        Ok(store) => store,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return 1;
+        }
+    };
 
     // ⓞ 协议：结算必须持有 closing（与 inbox 写入者互斥）。
     //    - finalized：幂等返回已有报告的 ok，不重写；
@@ -3547,19 +3566,35 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
         }
     }
     // 进入 closing 后不再有新写入者；此处只需核对存量未消费行。
-    let pending_before = unconsumed_inbox_lines(&run_dir);
+    let pending_before = unconsumed_inbox_lines(store.as_ref());
     if auto {
         closing_heartbeat(&run_dir);
     }
 
     // ① 终局存档（唯一状态事实源；缺档即无法结算）。
-    let save_text = match fs::read_to_string(&autosave_path) {
-        Ok(text) => text,
-        Err(err) => {
+    let save_text = match store.latest_save() {
+        Ok(Some(bytes)) => match String::from_utf8(bytes) {
+            Ok(text) => text,
+            Err(err) => {
+                eprintln!("error: 存档不是合法 UTF-8（{}）：{err}", store.locator());
+                if !auto {
+                    leave_closing(&run_dir);
+                }
+                return 1;
+            }
+        },
+        Ok(None) => {
             eprintln!(
-                "error: 读取 {} 失败：{err}（先跑一局再结算）",
-                autosave_path.display()
+                "error: 读取 {} 失败：无存档（先跑一局再结算）",
+                store.locator()
             );
+            if !auto {
+                leave_closing(&run_dir);
+            }
+            return 1;
+        }
+        Err(err) => {
+            eprintln!("error: {err}（先跑一局再结算）");
             if !auto {
                 leave_closing(&run_dir);
             }
@@ -3569,7 +3604,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
     let save: Json = match serde_json::from_str(&save_text) {
         Ok(value) => value,
         Err(err) => {
-            eprintln!("error: {} 不是合法 JSON：{err}", autosave_path.display());
+            eprintln!("error: {} 不是合法 JSON：{err}", store.locator());
             if !auto {
                 leave_closing(&run_dir);
             }
@@ -3578,7 +3613,25 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
     };
 
     // ② 事件日志（坏行跳过并记入 errors，不整份报废）。
-    let (records, mut errors) = read_event_records(&events_path);
+    let log = match store.steps() {
+        Ok(log) => log,
+        Err(err) => {
+            eprintln!("error: {err}");
+            if !auto {
+                leave_closing(&run_dir);
+            }
+            return 1;
+        }
+    };
+    let records = log.records;
+    let mut errors = Vec::new();
+    if log.skipped > 0 {
+        errors.push(format!(
+            "{} 有 {} 行事件记录无法解析（已跳过）",
+            store.locator(),
+            log.skipped
+        ));
+    }
 
     // ③ 事件面汇总：成功步数 / 失败步 / 结局行。
     let mut steps = 0usize;
@@ -3586,20 +3639,19 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
     let mut ending_line: Option<String> = None;
     let mut events = Vec::with_capacity(records.len());
     for record in &records {
-        let ok = record["ok"].as_bool().unwrap_or(false);
-        if ok {
+        if record.ok {
             steps += 1;
         }
-        if record["ending"].as_bool().unwrap_or(false) {
+        if record.ending {
             reached_ending = true;
-            if let Some(line) = record["ending_line"].as_str() {
-                ending_line = Some(line.to_owned());
+            if let Some(line) = &record.ending_line {
+                ending_line = Some(line.clone());
             }
         }
         events.push(json!({
-            "event": record["event"].as_str().unwrap_or(""),
-            "seq": record["seq"].as_u64().unwrap_or(0),
-            "ok": ok,
+            "event": record.event,
+            "seq": record.seq,
+            "ok": record.ok,
         }));
     }
     let failed = events
@@ -3632,7 +3684,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
             return 1;
         }
     };
-    let pending_inbox = unconsumed_inbox_lines(&run_dir).max(pending_before);
+    let pending_inbox = unconsumed_inbox_lines(store.as_ref()).max(pending_before);
     let checks = vec![
         SettlementCheck {
             name: "events",
@@ -3707,7 +3759,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
     //    但保留一次现读作为兵底检查（万一有绕过协议的写入）。
     //    与 ⑤ 的 `inboxConsumed` 同一开关：关掉它 = 明确接受结局后的残留行。
     let after = if policy.require_inbox_consumed {
-        unconsumed_inbox_lines(&run_dir)
+        unconsumed_inbox_lines(store.as_ref())
     } else {
         0
     };
@@ -3815,30 +3867,6 @@ fn print_settlement(report: &Json, path: &Path, ending_line: Option<&str>, faile
     println!("report   : {}", path.display());
 }
 
-/// 事件日志读盘（逐行 JSON；坏行跳过并记可读错误）。
-fn read_event_records(path: &Path) -> (Vec<Json>, Vec<String>) {
-    let mut records = Vec::new();
-    let mut errors = Vec::new();
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) => {
-            errors.push(format!("读取 {} 失败：{err}", path.display()));
-            return (records, errors);
-        }
-    };
-    for (index, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<Json>(line) {
-            Ok(record) => records.push(record),
-            Err(err) => errors.push(format!("{}:{} 记录非法：{err}", path.display(), index + 1)),
-        }
-    }
-    (records, errors)
-}
-
 /// kv 摘要人读串（`k=v` 逗号分隔，超限截断并注明余量）。
 fn kv_digest(kv: &Json, limit: usize) -> String {
     let Some(map) = kv.as_object() else {
@@ -3907,14 +3935,6 @@ fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs())
-}
-
-/// 事件日志既有条数（seq 唯一事实源；锁内调用）。
-fn event_count(path: &Path) -> u64 {
-    match fs::read_to_string(path) {
-        Ok(text) => text.lines().filter(|line| !line.trim().is_empty()).count() as u64,
-        Err(_) => 0,
-    }
 }
 
 /// 宿主侧时钟（unix 纳秒）：只用于归档文件命名（同秒撞名不可能）。
@@ -4004,6 +4024,7 @@ mod multiscript_hot_reload_tests {
             payload: None,
             drive: Drive::None,
             inbox: None,
+            store: None,
         }
     }
 
@@ -4142,7 +4163,7 @@ mod multiscript_hot_reload_tests {
 // ============================================================================
 #[cfg(test)]
 mod persistence_atomicity_tests {
-    use super::{acquire_run_lock, atomic_write, event_count, Cell};
+    use super::{acquire_run_lock, atomic_write, Cell};
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
@@ -4236,31 +4257,37 @@ mod persistence_atomicity_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// U4：event_count 三种边界 —— 末行无换行 / 空文件 / 只有空行。
+    /// U4：seq 分配口径的三种边界 —— 末行无换行 / 空文件 / 只有空行。
+    ///
+    /// 函数本体已下沉到 `ygg-store`（`JsonFileStore::next_seq`），断言不变：
+    /// seq 的唯一事实源是**非空行数**，末行没有换行也要计入。
     #[test]
     fn u4_event_count_edge_cases() {
+        use ygg_store::{JsonFileStore, RunStore};
+
         let dir = case_dir("u4");
-        let path = dir.join(super::EVENTS_FILE);
+        let path = dir.join(ygg_store::EVENTS_FILE);
+        let store = JsonFileStore::open(&dir).expect("绑到用例目录");
 
         // 空文件。
         std::fs::write(&path, "").expect("写空文件");
-        assert_eq!(event_count(&path), 0, "空文件 = 0 条");
+        assert_eq!(store.next_seq().expect("seq"), 0, "空文件 = 0 条");
 
         // 只有空行 / 空白行。
         std::fs::write(&path, "\n\n   \n\t\n").expect("写空白行");
-        assert_eq!(event_count(&path), 0, "空行与空白行不计入");
+        assert_eq!(store.next_seq().expect("seq"), 0, "空行与空白行不计入");
 
         // 末行无换行：仍按非空行计数。
         std::fs::write(&path, "{\"seq\":0}\n{\"seq\":1}").expect("写无尾换行");
-        assert_eq!(event_count(&path), 2, "末行无换行也要计入");
+        assert_eq!(store.next_seq().expect("seq"), 2, "末行无换行也要计入");
 
         // 正常形态（对照）。
         std::fs::write(&path, "{\"seq\":0}\n{\"seq\":1}\n").expect("写正常形态");
-        assert_eq!(event_count(&path), 2);
+        assert_eq!(store.next_seq().expect("seq"), 2);
 
         // 文件不存在（开局前）。
-        let absent = dir.join("absent.jsonl");
-        assert_eq!(event_count(&absent), 0, "读不到文件 = 0 条");
+        std::fs::remove_file(&path).expect("删事件日志");
+        assert_eq!(store.next_seq().expect("seq"), 0, "读不到文件 = 0 条");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -4315,12 +4342,13 @@ mod persistence_reset_semantics_tests {
     use super::{
         acquire_run_lock, begin_write, enter_closing, finalize_run, leave_closing,
         run_lock_heartbeat, Args, ClosingEntry, Drive, ResetOutcome, Session, WriteGate,
-        AUTOSAVE_FILE, COORDINATION_LOCK, EVENTS_FILE, INBOX_FILE,
+        AUTOSAVE_FILE, COORDINATION_LOCK, INBOX_FILE,
     };
     use std::cell::Cell;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant, SystemTime};
+    use ygg_store::EVENTS_FILE;
 
     /// 用例专属临时目录（互不共享；先清空再建）。
     fn case_dir(tag: &str) -> PathBuf {
@@ -4421,6 +4449,7 @@ end)
             payload: None,
             drive: Drive::None,
             inbox: None,
+            store: None,
         }
     }
 
@@ -4765,6 +4794,130 @@ end)
             .expect("打开目录")
             .set_modified(stale)
             .expect("回拨目录 mtime");
+    }
+
+    /// R9a：旧局（`run.json` 没有 `store` 字段）→ 按产物推断为 `json`，续局成功且
+    /// 开局后把事实**补写**进 `run.json`（单源落盘：只见一个键，不做双写）。
+    #[test]
+    fn r9a_legacy_run_without_store_fact_infers_json() {
+        let dir = case_dir("r9a");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r9a");
+        let run_dir = runs_root.join("r9a");
+        let meta_path = run_dir.join(super::META_FILE);
+
+        // 抹掉 store 事实 → 复刻旧版本 CLI 写的目录（纯 JSON 产物 + 旧 5 键元信息）。
+        let mut meta: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&meta_path).expect("读 run.json"))
+                .expect("run.json 是 JSON");
+        meta.as_object_mut().expect("对象").remove("store");
+        fs::write(&meta_path, meta.to_string()).expect("写回无 store 的 run.json");
+
+        let session = Session::open(&probe_args(&mod_dir, &runs_root, "r9a", true))
+            .expect("旧局必须可续（向后兼容）");
+        assert!(session.resumed, "旧局续局必须标记 resumed");
+        assert_eq!(
+            session.store.backend(),
+            ygg_store::Backend::Json,
+            "无 sqlite 产物 → 推断 json"
+        );
+        drop(session);
+        let meta = super::read_meta(&meta_path).expect("run.json");
+        assert_eq!(
+            meta["store"].as_str(),
+            Some("json"),
+            "开局后必须把后端事实补写进 run.json"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R9b：旧局（无 `store` 字段）+ `--store sqlite` → fail-closed，**零写入**。
+    /// 产物探针说这是 json 局，旗标不得推翻盘上事实。
+    #[test]
+    fn r9b_flag_conflicting_with_products_fails_closed() {
+        let dir = case_dir("r9b");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r9b");
+        let run_dir = runs_root.join("r9b");
+        let meta_path = run_dir.join(super::META_FILE);
+        let mut meta: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&meta_path).expect("读 run.json"))
+                .expect("run.json 是 JSON");
+        meta.as_object_mut().expect("对象").remove("store");
+        fs::write(&meta_path, meta.to_string()).expect("写回无 store 的 run.json");
+
+        let autosave_before = fs::read(run_dir.join(AUTOSAVE_FILE)).expect("读旧存档");
+        let events_before = fs::read(run_dir.join(EVENTS_FILE)).expect("读旧事件");
+
+        let mut args = probe_args(&mod_dir, &runs_root, "r9b", true);
+        args.store = Some(ygg_store::Backend::Sqlite);
+        let message = expect_open_failure(
+            &args,
+            &["json", "sqlite", "autosave.json", "--store", "未做任何写入"],
+        );
+        assert!(
+            message.contains("run.json"),
+            "文案必须指出权威事实的位置：{message}"
+        );
+
+        // 零写入：旧代产物逐字节不动，且没有开出一个 sqlite 库。
+        assert_eq!(
+            fs::read(run_dir.join(AUTOSAVE_FILE)).expect("旧存档还在"),
+            autosave_before,
+            "拒绝开局时存档不得被动"
+        );
+        assert_eq!(
+            fs::read(run_dir.join(EVENTS_FILE)).expect("旧事件还在"),
+            events_before,
+            "拒绝开局时事件日志不得被动"
+        );
+        assert!(
+            !run_dir.join("run.sqlite").exists(),
+            "拒绝开局时不得建库（否则目录就同时有两套产物了）"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R9c：`run.json` 声明 sqlite + `--store json` → fail-closed（事实优先），
+    /// 错误串四个要点齐全：事实值 / 来源 / 旗标值 / 谁权威 + 补救路径。
+    #[test]
+    fn r9c_declared_fact_beats_the_flag() {
+        let dir = case_dir("r9c");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        let run_dir = runs_root.join("r9c");
+        fs::create_dir_all(&run_dir).expect("建 run 目录");
+        // 只有 run.json（声明的后端是 sqlite），没有任何产物 → 杆杆就是「事实 vs 旗标」。
+        fs::write(
+            run_dir.join(super::META_FILE),
+            r#"{"run_id":"r9c","mod":"probe","store":"sqlite"}"#,
+        )
+        .expect("写 run.json");
+
+        let mut args = probe_args(&mod_dir, &runs_root, "r9c", false);
+        args.store = Some(ygg_store::Backend::Json);
+        let message = expect_open_failure(
+            &args,
+            &[
+                "sqlite",
+                "json",
+                "run.json",
+                "--store",
+                "未做任何写入",
+                "换 --run-id",
+            ],
+        );
+        assert!(
+            message.contains("权威"),
+            "必须一句话讲清谁是权威：{message}"
+        );
+        assert!(
+            !run_dir.join("autosave.json").exists() && !run_dir.join("run.sqlite").exists(),
+            "拒绝开局时不得写出任何后端产物"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// R8a：显式新局 + 锁不可得 → open 失败、旧代产物逐字节不动、无归档。
