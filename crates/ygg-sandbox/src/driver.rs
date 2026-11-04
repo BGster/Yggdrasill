@@ -74,6 +74,16 @@ use crate::stdlib;
 /// 每次 dispatch 事件转换的燃料预算（转换边界全额重置，D-B1 每转换共享）。
 pub const DEFAULT_FUEL_BUDGET: u64 = 100_000;
 
+/// 运行期预算解析：`YGG_FUEL_BUDGET` 为正整数时覆盖 [`DEFAULT_FUEL_BUDGET`]，
+/// 非法值或缺省一律回落常量（不静默放大、不改变契约默认值）。
+fn fuel_budget() -> u64 {
+    std::env::var("YGG_FUEL_BUDGET")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_FUEL_BUDGET)
+}
+
 /// 信封错误码（稳定字符串契约，A1 线格式；下游按码分支不解析 message）。
 pub mod code {
     /// 燃料耗尽（内核派发税或 VM 指令计量任一面触发）。
@@ -193,7 +203,7 @@ fn build_kernel(
     // ② 正式燃料：转换预算 + 装载预算分流（hook 按 require 边界判相位），
     //    转换边界 reset 转换预算。
     let fuel_meter =
-        fuel::install_with_load_budget(&lua, DEFAULT_FUEL_BUDGET, sandbox.modules().load_budget())
+        fuel::install_with_load_budget(&lua, fuel_budget(), sandbox.modules().load_budget())
             .map_err(KernelError::Sandbox)?;
     // ③ 确定性注入：math 精确集 + 内核种子 random + ygg.ticks。
     let determinism = inject::install(&lua).map_err(KernelError::Sandbox)?;
@@ -566,7 +576,7 @@ impl KernelFacade {
             "payload": value_to_json(&payload),
         }));
         // ④ 燃料预算每转换重置（D-B1：转换内级联共享同一预算）。
-        self.fuel_meter.reset(DEFAULT_FUEL_BUDGET);
+        self.fuel_meter.reset(fuel_budget());
         // ⑤ snapshot-out：以 canonical 快照克隆喂 run_transition（其
         //    `&mut EntityStore` 形参只作 revision 记账）；canonical RefCell
         //    在转换期间不被借用——handler 即席写经 host 桥 `Rc` 直接落在
