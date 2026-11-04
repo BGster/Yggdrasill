@@ -112,6 +112,17 @@
   判据三问（见 §一·7）：① 拦的动作是「改完 Mod 源码或 map 文案，只跑 lint 与全 1 就宣称验收」；
   ② 违规的可见表现是分叉语义与 map 措辞退化在门禁里恒绿，缺陷只在实跑时暴露；
   ③ 下次用该命令（7/7）确认生效，并可用一次变异探针（把旧语义改回去 → 该测试必须红）自证断言不是空转。
+- **门禁三件套（改内核 / 宿主 CLI 必跑）**：改 `crates/**`（状态机、驱动、宿主持久化面）时
+  **必须**三件套全跑，缺一即假绿：
+  `cargo test --workspace` ∧ `cargo test --example agent -p ygg-sandbox` ∧
+  `cargo test -p ygg-sandbox --test agent_seed_semantics`。
+  第二条不能省：Cargo 的 `--workspace` **不编译 example 目标的单测**，所以
+  `crates/ygg-sandbox/examples/agent.rs` 里的断言（持久化原子性 / 重置语义 / 热载 / 结算策略）
+  在只跑 workspace 时**一条都不执行**，而门禁仍打印 `failed=0`。
+  判据三问（见 §一·7）：① 拦的动作是「改完内核或宿主，只跑 `cargo test --workspace` 就宣称门禁绿」；
+  ② 违规的可见表现是 `--workspace` 与 `--example agent` 的通过条数对不上（前者恒缺 example 那一批）；
+  ③ 下次用 `cargo test --workspace | grep -c '^test result'` 与
+  `cargo test --example agent -p ygg-sandbox | grep -c '^test result'` 两条计数确认都已执行。
 
 ## 二、冷启动
 
