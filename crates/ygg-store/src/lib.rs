@@ -58,8 +58,12 @@ use std::fmt;
 use std::path::Path;
 
 pub mod json;
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
 
 pub use json::{JsonFileStore, AUTOSAVE_FILE, EVENTS_FILE, INBOX_CURSOR_FILE, INBOX_FILE};
+#[cfg(feature = "sqlite")]
+pub use sqlite::{SqliteStore, SQLITE_FILE};
 
 /// sqlite 后端固定文件名（后端探测用；与 [`SQLITE_FILE`] 同源）。
 pub const SQLITE_FILE_NAME: &str = "run.sqlite";
@@ -472,6 +476,12 @@ pub fn open(backend: Backend, run_dir: &Path, tick: Tick) -> Result<Box<dyn RunS
     }
 }
 
+#[cfg(feature = "sqlite")]
+fn open_sqlite(run_dir: &Path, tick: Tick) -> Result<Box<dyn RunStore>, StoreError> {
+    Ok(Box::new(SqliteStore::open(run_dir, tick)?))
+}
+
+#[cfg(not(feature = "sqlite"))]
 fn open_sqlite(_run_dir: &Path, _tick: Tick) -> Result<Box<dyn RunStore>, StoreError> {
     Err(StoreError::Unavailable {
         detail: "本构建未启用 sqlite 后端（sqlite 是编译期可选项，需要以 \
