@@ -280,6 +280,32 @@ impl RunStore for SqliteStore {
                 |row| row.get(0),
             )
             .map_err(|err| db_error(&self.db_path, "统计旧代步数", err))?;
+        // 当前代一步未走过 = 无旧代可归档（新局首开 / 重置后没推进就再重置）。
+        // 此时**不**推一代：推了会让审计面凭空多出一代，回执也会报「已归档」
+        // ——与 JSON 后端「新目录重置无归档」的可见行为对齐。
+        if steps == 0 {
+            // seq 用事务内的子查询算（不能调 `next_seq_in`：tx 已可变借 conn）。
+            let seq: i64 = tx
+                .query_row(
+                    "SELECT COALESCE(MAX(seq) + 1, 0) FROM step WHERE generation = ?1",
+                    params![generation],
+                    |row| row.get(0),
+                )
+                .map_err(|err| db_error(&self.db_path, "读取 seq", err))?;
+            tx.execute(
+                "INSERT INTO snapshot(generation, seq, save, created_at) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![generation, seq, initial_save, tick.secs as i64],
+            )
+            .map_err(|err| db_error(&self.db_path, "写入初始存档", err))?;
+            tx.commit()
+                .map_err(|err| db_error(&self.db_path, "提交写事务", err))?;
+            return Ok(ResetInfo {
+                had_old: false,
+                archive: None,
+                warnings: Vec::new(),
+            });
+        }
         let next = generation + 1;
         tx.execute(
             "INSERT INTO generation(generation, archived_at, reason, steps) \
@@ -296,7 +322,7 @@ impl RunStore for SqliteStore {
             .map_err(|err| db_error(&self.db_path, "提交写事务", err))?;
         self.generation = next;
         Ok(ResetInfo {
-            had_old: steps > 0,
+            had_old: true,
             // 归档载体是「新代」不是文件：旧代仍在库里可查（证据不丢）。
             archive: Some(format!("generation={next}")),
             warnings: Vec::new(),

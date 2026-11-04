@@ -995,7 +995,13 @@ impl Session {
                 .reset(&initial_save, reset_reason(recheck), clock())
                 .map_err(|err| err.to_string())?;
             if let Some(archive) = &info.archive {
-                session.notices.push(format!("events 已归档至 {archive}"));
+                // 归档载体的措辞按后端分：JSON 是文件路径（历史文案不变），
+                // sqlite 是「第几代」（报路径会让用户去找一个不存在的文件）。
+                let notice = match session.store.backend() {
+                    Backend::Json => format!("events 已归档至 {archive}"),
+                    Backend::Sqlite => format!("旧代已归档为 {archive}"),
+                };
+                session.notices.push(notice);
             }
             session.notices.extend(info.warnings);
             Ok(ResetOutcome::Reset {

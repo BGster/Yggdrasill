@@ -253,6 +253,15 @@ fn reset_switches_generation_on_sqlite() {
             .reset(b"{}", "explicit-new-game", TICK)
             .expect("重置必须成功");
         assert!(!info.had_old, "空库不得报旧产物（会误导回执文案）");
+        assert!(
+            info.archive.is_none(),
+            "空库重置不归档（不凭空多出一代，也不会在回执里报「已归档」）"
+        );
+        assert_eq!(
+            fresh_store.next_seq().expect("seq"),
+            0,
+            "空库重置后仍是 0 步"
+        );
     }
     #[cfg(not(feature = "sqlite"))]
     {
