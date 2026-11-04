@@ -26,10 +26,25 @@
 //!   `TransitionResult::revision_after` 为冻结诊断值，信封 revision 一律
 //!   **转换结束后从 canonical store 现读**。读档 = canonical store 整体
 //!   覆写（`apply_save`），后续 handler 写经同一 `Rc` 即时可见。
+//! - **dispatch 原子性（r1 savepoint）**：一次 `cmd_event` 就是一个事务
+//!   边界——取点在「校验全过后、转换开始前」，冻结 `entities` + `kv` 的
+//!   基线副本；转换成功 = 提交（丢弃基线），转换失败 = **先整体还原
+//!   canonical、再返回错误信封**（两个 `revision` 计数器随基线一并回退）。
+//!   基线必须是 canonical 的**副本**而非换出：`ygg.kv.get` /
+//!   `ygg.entity.*` 的读路径直读 canonical，换出会让转换期的 handler
+//!   读到空表。不覆盖的旁路面：`external_log` 照记失败步（它是尝试日志，
+//!   也是回放前提）、`warnings`/`meta` 为瞬态回执面、Lua VM 全局与模块
+//!   upvalue、RNG / ticks 均不回滚（要跨步记忆只能落 KV）；panic 不在
+//!   回滚覆盖内（进程已不可继续）。core `run_transition` 的「无事务语义」
+//!   契约不变——它不持有状态所有权，事务边界归调用方（即本驱动）。
 //! - **JSON 信封（A1）**：[`KernelFacade::dispatch`] 是唯一同步入口，
 //!   成功 = `{"ok":true,...}`，域错误 = `{"ok":false,"error":{code,message}}`
 //!   ——**域错误永不 throw**（Rust 侧返回 String 信封）；只有内部编程
 //!   错误（重入、NotExternal 这类不可能路径）落 [`code::INTERNAL`]。
+//!   **错误信封的状态语义**：`{"ok":false,...}` ⇒ 本次 dispatch 对
+//!   canonical 状态（实体表 + KV + 两个 revision）**零影响**（savepoint
+//!   已整体还原）；信封**不加**任何新字段（线格式零变更），下游据
+//!   `ok:false` 即可判定「本次事件无效」。旁路面例外见上条。
 //!   加性可选键 `warnings`（D1）：仅当 handler 在 `ygg.choice` 之前产生过
 //!   `ygg.emit`（将被语义丢弃）时出现，单元素字符串数组；serde_json 字典序
 //!   键序下确定性不变（同输入 → 同警告 → 同字节）。
@@ -577,14 +592,19 @@ impl KernelFacade {
         }));
         // ④ 燃料预算每转换重置（D-B1：转换内级联共享同一预算）。
         self.fuel_meter.reset(fuel_budget());
-        // ⑤ snapshot-out：以 canonical 快照克隆喂 run_transition（其
-        //    `&mut EntityStore` 形参只作 revision 记账）；canonical RefCell
-        //    在转换期间不被借用——handler 即席写经 host 桥 `Rc` 直接落在
-        //    canonical store（统一 store 代决）。借用为语句级临时
-        //    `Ref`，语句结束即释放，不跨越 run_transition 存活。
-        let mut working = self.entities.borrow().clone();
+        // ⑤ dispatch 级 savepoint，**取点**：校验（⓪①②）全过、副作用
+        //    （③ 日志、④ 燃料）已落之后，转换开始之前——在此冻结 canonical
+        //    的两块状态面基线。基线是 canonical 的**副本**（不是换出）：
+        //    handler 的即席写经 host 桥 `Rc` 直落 canonical，而 `ygg.kv.get`
+        //    / `ygg.entity.*` 的读路径同样直读 canonical——换出会让转换期的
+        //    handler 读到空表。实体基线同时充当 `run_transition` 的
+        //    `&mut EntityStore` 形参（该形参在 facade 路径下只作 revision
+        //    记账诱饵，handler 从不持有它的引用）。借用均为语句级临时
+        //    `Ref`/`RefMut`，不跨越 `run_transition` 存活。
+        let mut baseline = self.entities.borrow().clone();
+        let kv_baseline = self.kv.borrow().clone();
         let outcome = run_transition(
-            &mut working,
+            &mut baseline,
             &mut self.registry,
             &mut self.fuel_meter,
             event,
@@ -595,10 +615,22 @@ impl KernelFacade {
         // ⑤'' TD1：meta 同样无论成败都 drain（两条路径不留残渣），但只在
         // 成功信封里露出——错误信封不夹带 Mod 侧数据。
         let meta = self.host.take_meta();
-        // ⑥ 裁定：成功更新 pending_choice；错误映射稳定码信封。
+        // ⑥ 裁定：成功 = **提交**（丢弃基线——canonical 保留本次全部写入）；
+        //    失败 = **先还原 canonical、再返回信封**。还原语句必须落在错误
+        //    分支内、且先于该分支的返回（`map_transition_error` 只把错误映射
+        //    成信封，不碰状态）；把它挪到 match 之后（错误分支已返回，不可
+        //    达）或只写在成功分支，savepoint 就完全不生效。
         let result = match outcome {
-            Ok(result) => result,
-            Err(err) => return map_transition_error(err),
+            Ok(result) => {
+                drop(baseline);
+                drop(kv_baseline);
+                result
+            }
+            Err(err) => {
+                *self.entities.borrow_mut() = baseline;
+                *self.kv.borrow_mut() = kv_baseline;
+                return map_transition_error(err);
+            }
         };
         self.pending_choice = result.pending_choice().cloned();
         // ⑦ 信封：revision 在转换结束后从 canonical 现读
@@ -971,6 +1003,106 @@ end)
         assert_eq!(
             state_hash(&plain).expect("plain hash"),
             state_hash(&restored).expect("restored hash")
+        );
+    }
+
+    // ---- dispatch 级 savepoint（实体面 + KV 面整体提交/回滚）----
+
+    /// 半写 Mod：handler 先写实体（spawn + set_attribute）与 KV 再报错；
+    /// `event.ok` 同形但不报错（提交对照组），`event.spawn` 暴露 next_id。
+    const SAVEPOINT_MOD: &str = r#"
+ygg.on("event.ok", function()
+  ygg.kv.set("clean", "yes")
+end)
+ygg.on("event.bad", function()
+  local id = ygg.entity.spawn()
+  ygg.entity.set_attribute(id, "hp", 1)
+  ygg.kv.set("dirty", "yes")
+  error("boom")
+end)
+ygg.on("event.spawn", function()
+  ygg.narrate("id=" .. tostring(ygg.entity.spawn()))
+end)
+"#;
+
+    #[test]
+    fn failed_dispatch_restores_the_canonical_baseline() {
+        // 驱动内部状态机：取点冻结基线 → 失败整体还原（实体面与 KV 面）。
+        let mut kernel = KernelFacade::new(SAVEPOINT_MOD).expect("kernel construction");
+        // 先提交一个非空基线（否则「还原到基线」与「清空」不可区分）。
+        let ok = reply(&kernel.dispatch("event.ok", "0"));
+        assert_eq!(ok["ok"], Json::Bool(true));
+        let baseline_bytes = kernel.canonical_state_bytes().expect("bytes");
+        let baseline_save = reply(&kernel.dispatch("save", ""))["save"].to_string();
+        assert_eq!(
+            reply_code(&kernel.dispatch("event.bad", "0")),
+            code::VALIDATION
+        );
+        // 实体面：canonical 字节逐字节回到基线（含 revision / next_entity_id）。
+        assert_eq!(
+            kernel.canonical_state_bytes().expect("bytes"),
+            baseline_bytes
+        );
+        // KV 面不在 canonical 快照里（hash.rs 覆盖面声明），读 save 回执。
+        assert_eq!(
+            reply(&kernel.dispatch("save", ""))["save"].to_string(),
+            baseline_save,
+            "failed dispatch must not change the save bytes"
+        );
+        let state = reply(&kernel.dispatch("state", ""));
+        assert_eq!(
+            state["revision"],
+            Json::from(0),
+            "entity revision rolls back"
+        );
+        assert_eq!(
+            state["kvRevision"],
+            Json::from(1),
+            "kv revision keeps commit"
+        );
+        // 提交路径未被改动：成功步的写入留在 canonical。
+        let ok_again = reply(&kernel.dispatch("event.ok", "0"));
+        assert_eq!(ok_again["ok"], Json::Bool(true));
+        let save = reply(&kernel.dispatch("save", ""));
+        assert_eq!(save["save"]["kv"]["entries"]["clean"], json!("yes"));
+    }
+
+    #[test]
+    fn rollback_rewinds_next_entity_id() {
+        // 回滚连 `next_entity_id` 一起退：失败步 spawn 掉的 id 不得被占用。
+        let mut kernel = KernelFacade::new(SAVEPOINT_MOD).expect("kernel construction");
+        assert_eq!(
+            reply_code(&kernel.dispatch("event.bad", "0")),
+            code::VALIDATION
+        );
+        let spawned = reply(&kernel.dispatch("event.spawn", "0"));
+        assert_eq!(spawned["narrative"], json!(["id=1"]));
+    }
+
+    #[test]
+    fn handler_reads_its_own_writes_during_the_dispatch() {
+        // savepoint 基线是**副本**而非换出：转换期间 canonical 保留原状态 +
+        // 本次写入，`ygg.kv.get` / `ygg.entity.get_attribute` 的读路径看到的
+        // 是自己的写（若改成 mem::swap 换出，此测必红——读路径直读 canonical）。
+        const READ_BACK_MOD: &str = r#"
+ygg.on("event.rb", function()
+  ygg.kv.set("k", "v")
+  local id = ygg.entity.spawn()
+  ygg.entity.set_attribute(id, "hp", 5)
+  local bumped = ygg.entity.get_attribute(id, "hp") + 1
+  ygg.entity.set_attribute(id, "hp", bumped)
+  ygg.narrate("kv=" .. tostring(ygg.kv.get("k")) .. " hp=" .. tostring(ygg.entity.get_attribute(id, "hp")))
+end)
+"#;
+        let mut kernel = KernelFacade::new(READ_BACK_MOD).expect("kernel construction");
+        let out = reply(&kernel.dispatch("event.rb", "0"));
+        assert_eq!(out["narrative"], json!(["kv=v hp=6"]));
+        // 成功步提交后同样可读（canonical 就是写入目标）。
+        let save = reply(&kernel.dispatch("save", ""));
+        assert_eq!(save["save"]["kv"]["entries"]["k"], json!("v"));
+        assert_eq!(
+            save["save"]["entities"]["entities"]["1"]["attributes"]["hp"],
+            json!(6)
         );
     }
 }
