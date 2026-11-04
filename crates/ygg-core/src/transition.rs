@@ -10,8 +10,14 @@
 //! - **回放面**（D-B1）：派生事件不进回放日志——回放 = 外部事件日志重放时
 //!   自动再产生派生事件；[`TransitionResult`] 只携带计数、输出缓冲与
 //!   pending_choice，不携带事件日志（B3：事件日志旁路不入档，日志面归调用方）；
-//! - **无事务语义（M0 明示）**：handler 执行即提交（实体表就地变更），错误
-//!   传播即中断排空、已执行部分不回滚——「无事务面」是 M0 契约的一部分，
+//! - **无事务语义（M0 明示，责任归调用方）**：handler 执行即提交（实体表就地变更），
+//!   错误传播即中断排空、已执行部分不回滚——**本函数不做事务，因为它不持有
+//!   状态所有权**：`store` 是调用方借来的形参，facade 路径下 Lua handler 的
+//!   实体/KV 写根本不经过它（经 `Rc<RefCell<..>>` 直写 canonical store）。
+//!   事务边界因此归调用方——`ygg-sandbox::driver::cmd_event` 已在 dispatch
+//!   层实现 savepoint（取点冻结基线，失败整体还原 entities + kv；见
+//!   `crates/ygg-sandbox/src/driver.rs` 模块文档「dispatch 原子性」）。
+//!   本 crate 的假 handler 用例仍以「无事务」形态验证 core 自身契约；
 //!   转换前后的 `revision_before/after` 与计数是诊断面；
 //! - **燃料预算每转换共享**（D-B1）：per-dispatch 重置会让互发 handler 永动；
 //!   计量面抽象为 [`FuelMeter`] trait，具体计量（Lua 指令级计数）由沙箱
@@ -155,6 +161,12 @@ impl NarrationSink for TransitionDriver {
 /// 流程：外部事件判据先于燃料扣除 → 外部事件派发 → 排空循环
 /// （每轮先查 pending_choice 终结 → FIFO 出队 → 扣 1 单位燃料 → 派发）。
 /// 燃料超支或 handler 错误即中断传播（无事务面，不回滚已执行部分）。
+///
+/// **事务边界归调用方**：本函数只驱动派发，不改写 `store` 之外的状态，也
+/// 不持有状态所有权（`store` 是借来的形参）。Lua facade 路径下 handler 的
+/// 实体/KV 写落在 canonical store，回滚由调用方承担：
+/// `ygg-sandbox::driver::cmd_event` 在 dispatch 层取 savepoint，失败时整体
+/// 还原 `entities` + `kv`（见该函数 ⑤/⑥ 段与模块文档「dispatch 原子性」）。
 pub fn run_transition(
     store: &mut EntityStore,
     registry: &mut HandlerRegistry,
@@ -470,6 +482,8 @@ mod tests {
         ));
         assert_eq!(fuel.remaining, 0);
         // 无事务面：已派发部分不回滚（ext 与 ha 已执行，hb 未执行）
+        // ——core 自身契约：本函数不改写调用方的回滚决策；facade 层另有
+        // dispatch 级 savepoint（`ygg-sandbox::driver::cmd_event`），两者不矛盾。
         assert_eq!(
             *log.borrow(),
             vec!["ext:evt.start".to_string(), "ha:evt.a".to_string()]
