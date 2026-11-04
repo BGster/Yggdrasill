@@ -8,6 +8,7 @@ members = [
     "crates/ygg-sandbox",
     "crates/ygg-lint",
     "crates/ygg-wasm",
+    "crates/ygg-store",
 ]
 
 [workspace.package]
@@ -18,6 +19,14 @@ edition = "2021"
 # 是 r1 `modules.rs` 纯解析面的**下沉**（不是第 N 个业务 crate）。理由见
 # crates/ygg-modules/src/lib.rs 头注——lint 必须能在不依赖 ygg-sandbox
 # （⇒ 不依赖 mlua / ygg-schema / 内核 host 面）的前提下复用同一份模块判定。
+#
+# members 一次成型的第二次受控例外：`ygg-store` 是宿主 CLI 持久化面的**端口下沉**
+# （`RunStore` trait + JSON 后端 + 可选 sqlite 后端），不是第 N 个业务 crate。
+# 理由：第二个后端要能接入，就必须先把「状态事实」收敛成端口；而端口若留在
+# examples/agent.rs 里，两套实现只能各自复制一遍宿主协议。它刻意**只**承接状态
+# 事实（run.json / settlement.json / coordination.* 都留在宿主），依赖面仅
+# serde_json（+ 可选 rusqlite），不被任何业务 crate 依赖（ygg-sandbox 只在
+# dev-dependencies 里引用，故 wasm/lint 的结构面不受影响）。
 
 # B1：wasm 体积预算面（research §7）：fat LTO + 体积级优化 + 单 codegen unit
 # + strip。仅作用 release（wasm-pack 默认 release 出 pkg/）；门禁

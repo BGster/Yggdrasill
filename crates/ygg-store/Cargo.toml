@@ -1,0 +1,25 @@
+[package]
+name = "ygg-store"
+version.workspace = true
+edition.workspace = true
+description = "Yggdrasill run 目录的持久化端口（RunStore trait + JSON 后端 + 可选 sqlite 后端）"
+
+# 依赖纪律：
+# - `serde_json`（JSON 线格式）**不得开启 `preserve_order`**——默认 Map=BTreeMap
+#   即字典序，正是 `autosave.json` / `events.jsonl` 的历史字节形态（见 ygg-core
+#   Cargo.toml 同款注释）。开启它会让键序变成插入序，字节兼容当场破。
+# - `rusqlite` 是 **optional** + `bundled`（自带 amalgamation，无系统库依赖）；
+#   默认 feature 为空 ⇒ 不开 sqlite 的构建路径完全不编 C 代码。
+# - **不引入 serde**：restore/record 的字段映射手写在序列化点，避免为端口加一层
+#   derive 依赖（线格式必须逐字节可控，derive 的字段序不是契约）。
+[dependencies]
+serde_json = "1"
+
+[dependencies.rusqlite]
+version = "0.32"
+optional = true
+features = ["bundled"]
+
+[features]
+default = []
+sqlite = ["dep:rusqlite"]
