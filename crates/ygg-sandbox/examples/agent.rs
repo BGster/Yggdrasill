@@ -140,7 +140,7 @@ use ygg_sandbox::modload::ModBundle;
 // 持久化端口（`crates/ygg-store`）：状态事实（存档 / 事件日志 / inbox / 位移 /
 // 重置）全部经它读写。**锁、run.json、settlement.json、coordination.* 仍留在
 // 宿主**——那是跨进程共识与报告面，两后端必须完全一致。
-use ygg_store::{Backend, RunStore, StepDraft, Tick, AUTOSAVE_FILE, INBOX_FILE};
+use ygg_store::{Backend, RunStore, StepDraft, Tick, AUTOSAVE_FILE, INBOX_FILE, SQLITE_FILE_NAME};
 
 // ============================================================================
 // §常量 只有**不是契约**的东西：run 目录文件名、宿主自身的超时。
@@ -2136,13 +2136,26 @@ fn run_inbox_append(args: &Args) -> i32 {
 
 /// 装载 / 续局阶段的失败也走回执形态（Agent 只需一条解析路径）。
 fn single_shot_error(args: &Args, event: &str, message: &str) -> i32 {
-    let autosave = args.runs_root.join(&args.run_id).join(AUTOSAVE_FILE);
+    // 回执的 `autosave` 是「存档定位」而不是「一定是 JSON 文件」：本局已声明
+    // 后端（`run.json` 的 `store`）为 sqlite 时必须回 sqlite 的定位串，否则
+    // 工具会顺着这个字段去找一个根本不存在的 `autosave.json`。裁决顺序与
+    // 开局一致：`run.json` 权威 > `--store` 断言 > json 兜底。
+    let run_dir = args.runs_root.join(&args.run_id);
+    let backend = read_meta(&run_dir.join(META_FILE))
+        .and_then(|meta| meta["store"].as_str().map(str::to_owned))
+        .and_then(|text| Backend::parse(&text))
+        .or(args.store)
+        .unwrap_or(Backend::Json);
+    let autosave = match backend {
+        Backend::Json => run_dir.join(AUTOSAVE_FILE).display().to_string(),
+        Backend::Sqlite => format!("{}#latest", run_dir.join(SQLITE_FILE_NAME).display()),
+    };
     let receipt = json!({
         "ok": false,
         "event": event,
         "narrative": [],
         "pendingChoice": Json::Null,
-        "autosave": autosave.display().to_string(),
+        "autosave": autosave,
         "error": {"code": "INTERNAL", "message": message},
     });
     eprintln!("error: {message}");
