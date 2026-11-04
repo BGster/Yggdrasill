@@ -51,15 +51,18 @@ jobs:
           proj=.ygg/mods/agent-seed
           fail=0
           if ! diff -u "$seed/mod.lua" "$proj/mod.lua"; then
-            echo "::error::mod.lua 两侧不一致——请运行 scripts/sync-seed-mod.sh --from project" >&2
+            MSG="::error::mod.lua 两侧不一致——请运行"
+            echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
             fail=1
           fi
           if ! diff -ru "$seed/src" "$proj/src"; then
-            echo "::error::src/ 两侧不一致——请运行 scripts/sync-seed-mod.sh --from project" >&2
+            MSG="::error::src/ 两侧不一致——请运行"
+            echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
             fail=1
           fi
           if ! diff -ru "$seed/schemas" "$proj/schemas"; then
-            echo "::error::schemas/ 两侧不一致——请运行 scripts/sync-seed-mod.sh --from project" >&2
+            MSG="::error::schemas/ 两侧不一致——请运行"
+            echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
             fail=1
           fi
           # 资源格式契约是三处同源：packages/schema/schemas/ 是单一事实源（D15），
@@ -69,7 +72,8 @@ jobs:
             [ -e "$f" ] || continue
             name=$(basename "$f")
             if ! diff -u "packages/schema/schemas/$name" "$f"; then
-              echo "::error::${name} 与 packages/schema/schemas/ 不一致——schema 是单一事实源（D15）" >&2
+              MSG="::error::${name} 与 packages/schema/schemas/ 不一致"
+              echo "$MSG——schema 是单一事实源（D15）" >&2
               fail=1
             fi
           done
@@ -81,7 +85,8 @@ jobs:
           sys.exit(0 if a == b else 1)
           PY
           then
-            echo "::error::pack.json 的 code 段两侧不一致——请运行 scripts/sync-seed-mod.sh --from project" >&2
+            MSG="::error::pack.json 的 code 段两侧不一致——请运行"
+            echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
             fail=1
           fi
           exit "$fail"
@@ -108,6 +113,67 @@ jobs:
       # `--examples` 在本仓会跑出 0 tests，必须用 `--example agent` 指定目标。
       - name: cargo test（agent example）
         run: cargo test --example agent -p ygg-sandbox
+
+  # sqlite 后端的独立门禁：主 rust job 走默认特征（不编
+  # sqlite），这里显式开 store-sqlite 覆盖另一半代码面，
+  # 并加结构守卫。缓存按 key 与 rust job 分开，否则两套
+  # target/ 产物会互踩。
+  store-sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      # dtolnay/rust-toolchain（与 rust job 同一 pin）
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+        with:
+          key: store-sqlite
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo test（ygg-store · sqlite 后端）
+        run: cargo test -p ygg-store --features sqlite
+
+      - name: cargo clippy（ygg-store · sqlite 后端）
+        run: |
+          cargo clippy -p ygg-store --features sqlite \
+            --all-targets -- -D warnings
+
+      - name: "Guard — 宿主 example 在 store-sqlite 特征下可编译"
+        run: cargo build -p ygg-sandbox --example agent --features store-sqlite
+
+      # 结构守卫（不是 playbook 门禁命令）：ygg-store 必须
+      # 留在 dev-dependencies。挪进 [dependencies] 会让依赖者
+      # （wasm/lint）间接吃到 rusqlite，wasm 体积与 lint 的
+      # 纯净面同时破——这条守卫让它在 PR 时立刻红。
+      - name: "Guard — wasm/lint 不得间接依赖 sqlite"
+        run: |
+          fail=0
+          for pkg in ygg-wasm ygg-lint; do
+            if cargo tree -p "$pkg" -e features \
+              | grep -Eq 'rusqlite|libsqlite3-sys'; then
+              echo "::error::$pkg must not depend on sqlite" >&2
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      # 字节兼容的反向门禁：一旦给 serde_json 打开
+      # preserve_order，键序就不再是字典序（语义相等、
+      # 字节全变）。
+      - name: "Guard — 不得启用 preserve_order"
+        run: |
+          if cargo tree -p ygg-store -e features | grep -q preserve_order; then
+            echo "::error::preserve_order breaks byte key order" >&2
+            exit 1
+          fi
 
   web:
     runs-on: ubuntu-latest

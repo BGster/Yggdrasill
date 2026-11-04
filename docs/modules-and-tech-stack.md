@@ -12,6 +12,7 @@ yggdrasill/
 │   ├── ygg-sandbox/             # 确定性 Lua 沙箱：mlua + host API 白名单 + ygg stdlib 嵌入
 │   ├── ygg-schema/              # 资源数据模型 + 校验（manifest + sha256 + jsonschema）
 │   ├── ygg-lint/                # Lua 静态检查（full_moon AST，R1/R2/R3/PARSE；lib + CLI）
+│   ├── ygg-store/               # run 目录持久化端口（RunStore + JSON + 可选 sqlite）
 │   └── ygg-wasm/                # wasm-bindgen 绑定层（薄壳，内核的对外契约）
 ├── packages/                    # pnpm workspace
 │   ├── schema/                  # JSON Schema 文件 —— 资源格式契约（单一事实来源，D15）
@@ -24,6 +25,7 @@ yggdrasill/
 ### 模块间依赖约束（硬性）
 
 - `ygg-core` 不依赖任何内部模块；`ygg-schema` 单向依赖 `ygg-core`；`ygg-sandbox` 单向依赖 `ygg-core` 与 `ygg-schema`（资源校验）；`ygg-wasm` 依赖 `ygg-core` 与 `ygg-sandbox`（driver 接线，D12）
+- `ygg-store` **不被任何 crate 依赖**：只有宿主 CLI（`crates/ygg-sandbox/examples/agent.rs`）在 **`[dev-dependencies]`** 里引用它（examples 能见到 dev-deps，而 dev-deps 不向依赖者传播）——所以 `ygg-wasm` / `ygg-lint` 的依赖树里既没有 `ygg-store` 也没有 `rusqlite`（CI 有结构守卫）。它是 r-store 的**受控例外**成员（第二个，第一个是 `ygg-modules`），理由写在根 `Cargo.toml`。
 - **JSON Schema 文件（`packages/schema/`）是资源格式契约的单一事实来源**（D15）：TS 侧用 ajv 校验，Rust 侧用 jsonschema crate 校验，两边读同一份文件，杜绝双实现漂移；Mod 的可执行接口为 Lua（D11），Schema 不约束 Mod 逻辑
 - 表现层只通过 `ygg-wasm` 接口与内核对话——该接口是未来 Godot / CS 服务端适配的同构改动面
 - `pipeline` 与内核之间只通过 Schema 契约耦合，不直接调用内核代码（验证工具走子进程：lint CLI / playtest harness）
@@ -60,6 +62,7 @@ yggdrasill/
 | Lua 沙箱 `ygg-sandbox` | mlua（git master pin，Lua 5.4 + vendored） | D12/D16 | 确定性沙箱 + host API 白名单 + ygg stdlib 嵌入 + 燃料/种子化 RNG |
 | 资源校验 `ygg-schema` | Rust + serde + jsonschema（default-features=false）+ sha2 | D12/D15 | 资源 manifest + sha256 内容寻址 + Schema 校验 |
 | wasm 绑定 `ygg-wasm` | wasm-bindgen（`scripts/build-wasm.sh` 两步构建链：cargo + wasm-bindgen CLI） | D7 | 内核对外契约薄壳；wasm 实机 2.9MB，wasm-opt 兼容已实证 |
+| 持久化端口 `ygg-store` | Rust + serde_json（**禁 `preserve_order`**）+ 可选 rusqlite（`bundled`，feature `sqlite`） | r-store | 宿主把「状态事实」收敛成一个端口，第二个后端才可能接入而不复制一遍宿主协议；JSON 仍是默认后端，字节面逐字节不变 |
 | 表现层 `client-web` | React + TypeScript | D8 | 生态最成熟、AI 辅助语料最丰富；文本密集 UI 用组件库 + CSS 动效即可，M3 若需高性能渲染再评估 Pixi |
 | 内容管线 `pipeline` | TypeScript | D10 | LLM 编排为 IO 密集非性能热点；TS 生态（结构化输出、流式、重试回路）最顺手 |
 | 平台服务 `services` | Rust + Axum | D9 | 与内核同语言，复用 ygg-schema 校验零重复，服务端栈统一；M2 前不动工 |
@@ -74,6 +77,25 @@ yggdrasill/
 - ❌ Phaser / 重型游戏引擎（表现层）：图文冒险阶段过度设计；M3 RPG 时重新评估
 - ❌ XState（内核状态机）：语义过重，自研薄 FSM（见 architecture-principles.md §3.3）
 - ❌ inkjs / json-rules-engine 引入（结论保留，理由更新）：inkjs 为 JS 运行时，叙事语义面已归 ygg Lua stdlib（D11/D16）；json-rules-engine 对应的声明式谓词引擎已从内核范围移除（条件归 Lua，D11）。两者仅作设计参考保留（见 architecture-principles.md §3.4/§3.5）
+
+### 3.1 宿主持久化后端（r-store）
+
+宿主 CLI（`examples/agent.rs`）的状态事实全部经 `ygg_store::RunStore` 读写，两个后端：
+
+| 后端 | 产物 | 崩溃承诺 | 开启方式 |
+| --- | --- | --- | --- |
+| `json`（**默认**） | `autosave.json` + `events.jsonl` + `inbox.jsonl` + `inbox.cursor` | 弱：先追加事件行、再原子替换存档（可只完成前一步） | 无需任何旗标（既有局零改动） |
+| `sqlite`（可选） | `<run-dir>/run.sqlite`（WAL / synchronous=NORMAL / busy_timeout=5s） | 强：单事务写 `step` + `snapshot`（全或无） | `cargo build --example agent --features store-sqlite` + `--store sqlite` |
+
+口径：
+
+- **`run.json` 的 `store` 字段是权威**，`--store` 只是开局断言；不一致 → fail-closed 且零写入。
+  旧局无该字段 → 按产物推断（纯 JSON 目录 → `json`），开局后补写事实。
+- 同一 run 目录出现两套产物 → fail-closed（宿**不**自动删证据）。
+- **字节兼容只对 `json` 后端**成立：紧凑 JSON、键序字典序（不得开 `serde_json/preserve_order`）、
+  `autosave.json` 无尾随换行、`events.jsonl` 每行以 `\n` 结尾；`sqlite` 只承诺语义等价。
+- 锁、`run.json`、`settlement.json`、`coordination.*`、`decide-input.json` **不进 crate**：
+  它们是跨进程共识与报告面，两后端必须完全一致；端口只承接「调用方已持锁」这一前提。
 
 ## 4. 对既有里程碑的影响
 
