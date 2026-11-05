@@ -15,9 +15,9 @@ Mod：协调器派活 / 验收，每条需求各自跑 analyze → plan → 门�
 | 文件 | 面 | 新项目要不要改 |
 | --- | --- | --- |
 | `mod.lua` | **骨架**（装配入口） | 不改。只读资源、require 模块、按序 install，不装业务逻辑 |
-| `src/**/*.lua` | **骨架**（机制实现） | 不改。11 个纯导出 + 10 个注册模块；改机制回种子模板改，再同步 |
+| `src/**/*.lua` | **骨架**（机制实现） | 不改。12 个纯导出 + 10 个注册模块；改机制回种子模板改，再同步 |
 | `schemas/*.json` | **骨架**（资源契约） | 不改。改资源格式属于机制变更，回种子模板改 |
-| `pack.json` | **骨架 + 实例** | `code` 段（entry + modules）不改；`entries` / `schemaFiles` 结构固定；`agent` / `inboxRoutes` 按本项目实际文案与动作集填 |
+| `pack.json` | **骨架 + 实例** | `code` 段（entry + modules）与 `tools` 段（能力声明）不改；`entries` / `schemaFiles` 结构固定；`agent` / `inboxRoutes` 按本项目实际文案与动作集填 |
 | `data/playbook.json` | **实例**（现场规则） | **必改**：五章通用纪律可原样留，另加本项目章节 |
 | `data/config.json` | **实例**（静态默认） | **必改**：`drive` 阈值、`settlement` 口径、`play.mode` 默认 |
 | `data/scenes.json` | **实例**（叙事文案） | 可改：换世界观只改这里，不碰 `mod.lua` |
@@ -146,6 +146,16 @@ cargo run --example playtest -- "$mod"          # ③ 冒烟：必须 "ok": true
 }
 ```
 
+工具结果走**同一条** inbox 通道（kind 由 Mod 声明），所以 `tool_result` 只是一条普通路由：
+
+```json
+"tool_result": {
+  "action": "tool.result",
+  "fields": ["call_id", "tool_id", "status", "code", "output", "external_id"],
+  "write": { "flag": "tool-result", "shape": "payload" }
+}
+```
+
 | 键 | 必填 | 含义 |
 | --- | --- | --- |
 | `externalIdField` | 是 | inbox 记录里**幂等键**的字段名（也用于 `fields` 里标记幂等键段） |
@@ -173,6 +183,20 @@ cargo run --example playtest -- "$mod"          # ③ 冒烟：必须 "ok": true
 
 `settlement` 关掉的项不参与结算 `ok`（但仍逐项记入 `checks`）；`drive` 三项必须正整数。
 
+### 4. `data/config.json` → `allowedTools`（可选；**两层白名单的 Layer 2**）
+
+```json
+"allowedTools": ["git.head_short", "git.status"]
+```
+
+- 缺失 / 非数组 / 元素非法 = **一个也不放行**（fail-closed：抄一份 Mod 不会突然能跑 `git`）。
+- 必须 **⊇** `pack.json` 的 `tools` 键（宿主装载期硬校验，缺一个即拒绝装载）。
+- Mod **读不到** `pack.json`（`ygg.data` 只读 `entries` 声明的资源），所以 Mod 只认这一层；跨层一致性由
+  `agent_seed_semantics` 的声明一致性用例钉住（两侧 `tools` 深相等、`allowedTools` 与 `tools` 同集合、
+  `tool_*` beat 齐全）。
+- **不是**安全边界，而是**防漂移**门禁：能改 `data/config.json` 的人也能改 `pack.json`。真正的边界是
+  宿主的 Layer 1 校验（程序白名单 / 无 shell / 无绝对路径 / 无 `..`）加上沙箱本身没有 IO。
+
 ---
 
 ## 三、`data/` 三份资源各管什么
@@ -180,7 +204,7 @@ cargo run --example playtest -- "$mod"          # ③ 冒烟：必须 "ok": true
 | 文件 | 作用 | 改动后果 |
 | --- | --- | --- |
 | `playbook.json` | 现场规则资源，`guide.show` 按 section id 取用，按阶段呈现 | 改完只是叙事变，不动状态机 |
-| `config.json` | 静态默认（下层），运行期 KV `settings.*` 是上层（`config.set` 写入），判定恒为「动态覆盖 > 静态默认」 | 改 `drive` / `settlement` 会影响宿主如何推进与结算 |
+| `config.json` | 静态默认（下层），运行期 KV `settings.*` 是上层（`config.set` 写入），判定恒为「动态覆盖 > 静态默认」 | 改 `drive` / `settlement` / `allowedTools` 会影响宿主如何推进、结算与放行 |
 | `scenes.json` | 全部文案与调参（scenes / endings / prompts / options / beats / tuning） | 换世界观只改这里 |
 
 ### `settlement.evolution` 登记与 `review.note` 归档（骨架职责，接入时不要改）
@@ -265,6 +289,9 @@ util ← config ← requirements ← lanes ← proposals ← gates ← guide / m
      ← wire ← flow ← handlers/*
 ```
 
+`src/tools.lua` 是叶子：require `config` / `flow` / `hooks` / `render` / `requirements` / `util` / `wire`，
+**没有任何模块 require 它**（反向也不行：`render.lua` 若要工具计数只能读 KV `tool.pending`，否则立刻成环）。
+
 | 模块 | 职责 |
 | --- | --- |
 | `src/util.lua` | 纯函数（fill / split / cut / trim / join / contains / to_bool / spaces），无 install |
@@ -277,6 +304,7 @@ util ← config ← requirements ← lanes ← proposals ← gates ← guide / m
 | `src/menus.lua` | 阶段菜单 + 配置二级页（选项文本 ↔ 动作载荷的唯一来源） |
 | `src/render.lua` | 回执渲染 + 双层图（local/full）+ 结构化摘要（`agent.summary` 的注册面） |
 | `src/wire.lua` | payload wire format + inbox 幂等键（`@ext=`） |
+| `src/tools.lua` | 工具桥的 KV 面与回执面（`tool.*` 唯一写方）+ `tool.call` / `tool.result` 两个 handler + 回执 effect |
 | `src/flow.lua` | 转场 / 拒绝的唯二出口 + 状态机票据（`stage_ticket` 与用它的函数同模块） |
 | `src/handlers/*.lua` | 10 个注册模块：actions / lanes / proposals / review / requirement_ops / gate_actions / config / views / choice / lifecycle |
 
@@ -315,3 +343,38 @@ util ← config ← requirements ← lanes ← proposals ← gates ← guide / m
 - **`map.show` 两个视图**：默认只出「当前节点 + 出边」（剧情为点、选择为边），`map.show full` 才出设计全图。
 - **节点文案只有一段**（`<节点>_common`）：goal / guide 的差异由 `play_receipt` 每条回执报一次，
   不在每个节点重复。
+- **工具桥不设人类菜单项**：`tool.call` / `tool.result` 是**机器动作**（外部派发），不是人类里程碑动作。
+  往菜单里插一条会动 `summary_next_ends_run`（它读阶段菜单首项是否 `review.note`），一旦插到首位就
+  **静默破坏收口判定**。同理不引入第 5 个结算门禁（会让所有既有 Mod 的 `config.json` 失效），
+  工具债务只走 `meta.summary.pendingTools` 回显。
+
+---
+
+## 七、工具桥（可选能力：`tool.call` / `tool.result`）
+
+Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）：一个工具调用是**请求**，不是副作用。
+
+```text
+① Mod 登记请求：ygg.meta("tool_calls", { { id = "t1", tool = "git.head_short", args = { rev = "HEAD" } } })
+② 宿主执行（Layer 1 形状 + Layer 2 放行），把结果作为**普通事件**回投
+③ tool.result "t1|git.head_short|ok|0|abc1234|ext-1"
+```
+
+- **请求 wire**（`tool.call`）：`<tool_id>[|<k=v;...>][|<call_id>]`（位次固定；只要 call_id 就写 `git.status||t2`）。
+- **结果 wire**（`tool.result`）：`<call_id>|<tool_id>|<ok|err>|<code>|<output>[|<external_id>]`
+  （5 或 6 段；也认 `|@ext=` 后缀形态）。`output` 内不得含竖线，CR/LF 折成 ` / `，超 `tuning.tool_output_max`
+  截断并附 `…[truncated N chars]`。
+- **`meta.tool_calls`**：稠密数组、序 = 分配序、只列 `pending` 行；无参数时**省略** `args` 键（Lua 空表
+  只能序列化成 `[]`）。终态后为 `[]`（不是缺键）。它与 `meta.summary` 是 `ygg.meta` 的两个独立槽位。
+- **幂等**：同一 `external_id` 重投 = `[REPLAY:TOOL]`，不改状态、不减计数、不重出 `[TOOL SETTLED]`；
+  一个 call 只有一个终态（换状态是冲突，不静默覆盖）。
+- **两个执行场景**（宿主侧，Mod 看到的形状完全相同）：
+  - **场景 1（同进程内回投）**：`inlineWaitMs > 0` 且 worker 在窗口内写完结果 → 父进程在**同一次派发**里
+    就地回投 `tool.result`（用户可见：一步之内看到 `[TOOL RESULT]` + `[TOOL SETTLED]`）。
+  - **场景 2（异步 inbox 回写）**：`inlineWaitMs = 0` 或超时 → 回执标 `detached`，worker 完成后把同样一段
+    wire 写进 inbox（`tool_result` 路由）→ 下一次 drain 把它作为普通事件回投（用户可见：多一个回合）。
+- **凭据红线**：`pack.json` 的 `args` / `headers` 可写 `$ENV{VAR}`，宿主按
+  `进程环境 > <mod_dir>/.env.local > <mod_dir>/.env` 解析；解析后的值**绝不**进载荷、回执或 notice
+  （报错只出现变量名）。Mod 资源、配置与报告只出现**键名**，`.env*` 必须在 `.gitignore` 里。
+- **可调项**：`tuning.tool_capacity`（生命周期上限，缺省 64）、`tuning.tool_output_max`（缺省 1024，
+  必须 ≥ `pack.json` 里最大的 `maxOutputBytes`）。

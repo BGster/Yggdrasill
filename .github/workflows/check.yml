@@ -77,15 +77,18 @@ jobs:
               fail=1
             fi
           done
-          # pack.json 的 code 段属骨架（agent / inboxRoutes 属实例，允许不同）。
+          # pack.json 的 `code` 段与 `tools` 段属骨架（agent / inboxRoutes 属实例，允许不同）。
+          # `tools` 是**机制面**：哪些程序能被 spawn。两侧漂移等于两个 Mod 跑两套能力，
+          # 所以它和 `code` 一样必须逐字节同构（`agent` / `inboxRoutes` 才是随文案变的实例面）。
           if ! python3 - "$seed/pack.json" "$proj/pack.json" <<'PY'
           import json, sys
-          a = json.load(open(sys.argv[1], encoding="utf-8"))["code"]
-          b = json.load(open(sys.argv[2], encoding="utf-8"))["code"]
-          sys.exit(0 if a == b else 1)
+          keys = ("code", "tools")
+          a = json.load(open(sys.argv[1], encoding="utf-8"))
+          b = json.load(open(sys.argv[2], encoding="utf-8"))
+          sys.exit(0 if all(a.get(k) == b.get(k) for k in keys) else 1)
           PY
           then
-            MSG="::error::pack.json 的 code 段两侧不一致——请运行"
+            MSG="::error::pack.json 的 code / tools 段两侧不一致——请运行"
             echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
             fail=1
           fi

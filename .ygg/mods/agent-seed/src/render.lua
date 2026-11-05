@@ -603,6 +603,8 @@ local function summary_fields()
     pendingProposals = summary_int(prop_pending_total()),
     requirementCount = summary_int(req_count()),
     conflicts = summary_conflicts(),
+    -- 工具桥的在飞计数（只读 KV：`src/render.lua` 不得 require("src.tools")，那会立刻成环）。
+    pendingTools = summary_int(ygg.kv.get("tool.pending")),
     -- 进化声明（只声称「声明了什么」）：宿主与只读查询可直接核对，不涉及内容质量。
     evolution = {
       artifact = text_of("review.evolution.artifact", ""),
