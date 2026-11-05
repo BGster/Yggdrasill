@@ -84,13 +84,16 @@ yggdrasill/
 
 | 后端 | 产物 | 崩溃承诺 | 开启方式 |
 | --- | --- | --- | --- |
-| `json`（**默认**） | `autosave.json` + `events.jsonl` + `inbox.jsonl` + `inbox.cursor` | 弱：先追加事件行、再原子替换存档（可只完成前一步） | 无需任何旗标（既有局零改动） |
-| `sqlite`（可选） | `<run-dir>/run.sqlite`（WAL / synchronous=NORMAL / busy_timeout=5s） | 强：单事务写 `step` + `snapshot`（全或无） | `cargo build --example agent --features store-sqlite` + `--store sqlite` |
+| `sqlite`（**默认**） | `<run-dir>/run.sqlite`（WAL / synchronous=NORMAL / busy_timeout=5s） | 强：单事务写 `step` + `snapshot`（全或无） | 无需任何旗标（`cargo build --example agent` 默认编入）；`--no-default-features` 可关掉 |
+| `json`（兼容后端 / 旧局默认） | `autosave.json` + `events.jsonl` + `inbox.jsonl` + `inbox.cursor` | 弱：先追加事件行、再原子替换存档（可只完成前一步） | `--store json` 显式开新局（既有局零改动：按产物推断仍走 json） |
 
 口径：
 
 - **`run.json` 的 `store` 字段是权威**，`--store` 只是开局断言；不一致 → fail-closed 且零写入。
   旧局无该字段 → 按产物推断（纯 JSON 目录 → `json`），开局后补写事实。
+- **新局默认后端 = `sqlite`**（`ygg_store::DEFAULT_BACKEND`）。生效面仅限「无 `store` 事实且
+  目录里没有任何后端产物」的空目录：既有局按产物推断仍落 `json`，**不做隐式迁移**（旧 JSON 局
+  续局 / `--settle` 绝不建出 `run.sqlite`）。
 - 同一 run 目录出现两套产物 → fail-closed（宿**不**自动删证据）。
 - **字节兼容只对 `json` 后端**成立：紧凑 JSON、键序字典序（不得开 `serde_json/preserve_order`）、
   `autosave.json` 无尾随换行、`events.jsonl` 每行以 `\n` 结尾；`sqlite` 只承诺语义等价。

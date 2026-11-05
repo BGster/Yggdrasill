@@ -25,8 +25,11 @@ use crate::{
     Backend, Committed, ResetInfo, RunStore, StepDraft, StepLog, StepRecord, StoreError, Tick,
 };
 
-/// 库文件名（后端探测与混用检测的识别点）。
-pub const SQLITE_FILE: &str = "run.sqlite";
+/// 库文件名（建库 / 后端探测与混用检测的识别点）。
+///
+/// 字面量只在 [`crate::SQLITE_FILE_NAME`]：这里派生而不是重写一份 `"run.sqlite"`，
+/// 两处漂移 = `detect()` 探不到自己建的库（静默混代）。
+pub const SQLITE_FILE: &str = crate::SQLITE_FILE_NAME;
 /// 本构建支持的 schema 版本（写出即钉住；读到大数即 fail-closed）。
 pub const SCHEMA_VERSION: u32 = 1;
 /// 默认跨进程写等待上限（毫秒）。
