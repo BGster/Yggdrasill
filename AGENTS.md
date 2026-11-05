@@ -1,174 +1,314 @@
-# Yggdrasill · Agent Harness 强制约束与冷启动
+# Yggdrasill · Agent Harness — Hard Constraints and Cold Start
 
-> 本文件只写两件事：不能违反的约束，以及怎么开始 / 继续 / 暂停 / 结束。玩法细节（状态机 / 动作协议 / 异步 inbox /
-> 进度查看 / runs 产物 / Mod 维护 / host 契约）见 `.ygg/mods/agent-seed/README.md` 与 playbook 的 `harness` 章；
-> 现场规则用 `guide.show <section_id>` 按章节取。`CLAUDE.md` 是本文件的软链。
+> This file carries exactly two things: the constraints you may not violate, and how to start /
+> continue / pause / settle a run. The mechanics (state machine / action protocol / async inbox /
+> progress views / run artifacts / Mod maintenance / host contract) live in
+> `.ygg/mods/agent-seed/README.md` and the `harness` chapter of the playbook; fetch field rules by
+> chapter with `guide.show <section_id>`. `CLAUDE.md` is a symlink to this file.
 
-## 一、强制约束（不可协商）
+## 1. Non-negotiable constraints
 
-**0. 数据红线**：不得把真实业务数据（`*.xlsx` / `*.xls` / `*.csv`、涉密挂载目录下的任何文件）读入仓库或上下文，
-也不得对其目录做 `ls` / `stat` / `find` / `du` / `wc` 之类的元信息读取（行数、列名、枚举值同样涉密）。
-需要真实数据的验证由用户运行并回贴输出；`/tmp` 下自造的合成数据不受限。
+**0. Data red line**: never read real business data (`*.xlsx` / `*.xls` / `*.csv`, or anything under
+a classified mount) into the repository or the context, and never take metadata readings of its
+directories (`ls` / `stat` / `find` / `du` / `wc` — row counts, column names and enumerations are as
+classified as the values). Verifications that need real data are run by the user, who pastes the
+output back; synthetic data generated under `/tmp` is unrestricted.
 
-1. **局内一切产出必须先有事件承载**：写文件、改代码、跑命令产出交付物之前，必须先有对应事件把它纳入
-   状态机（`requirement.dispatch` → 提案 → 门禁）。**判定只看事件，不看产物落在哪**——落在 `~/tmp`、
-   落在 `/tmp`、落在对话里都算局内产出；“事小”“顺手”“用户没说要走流程”都不构成例外。
-2. **主 Agent 在协调层只做三件事**：派活、串行验收提案、过两个强制门禁；不替泳道写实现。
-   需求建单后第一个动作是 `requirement.dispatch`，不是自己先干。
-   - **派发后登记执行者**（自声明账本，不是身份认证）：拿到 subagent id 后
-     `config.set executor.<rN>.<stage>=<id>`（stage ∈ analysis / plan / development）。同一 (req,stage) 换人、
-     或与前一阶段 id 不同的**跨阶段换人**，都必须带原因（`=<id>|<原因>`）；`amend` 不改绑定，`split` / `merge`
-     不继承；`proposal.submit` 不做硬校验——未登记只在 `requirement.list` 显示「未登记」。
-   - **需求粒度：能合并就别新建**：同目标 / 同子系统 / 小改动 / 可共用计划与验收证据的相邻工作，
-     优先并进同一条需求；只有三种情况才新建——**独立交付验收**、**跨仓或跨泳道**、**风险隔离**。
-     相邻新建必须在 description 里写清不可合并的理由（缺理由 = 按可合并处理）。
-     判据三问（见 §一·7）：① 拦的动作是 `requirement.add` / `--requirement` 建档；
-     ② 违规可见表现是相邻需求被执行者指出「只是上一条的一部分」，而 description 里找不到不可合并理由；
-     ③ 下次用 `requirement.list` 逐条核对新增需求的 description 是否带该理由来确认生效。
-3. **回执整段呈现，禁止解析式截断**：不得 `narrative[0][:N]`、不得只取首行、不得按 `startswith` 做行级过滤、
-   不得把回执塞进 `grep` / `python` 后只看摘要。每次派发把 narrative **全部行**打到对话里，
-   并把 `pendingChoice` 原文交给用户。要规则就 `guide.show <section_id>` 取整章，不靠记忆。
-4. **单发 ≠ 合规**：不批量刷 `--event` 只防脚本刷状态，替代不了 `requirement.dispatch` → proposal → gate 这条链；
-   不手改 `autosave.json` / `events.jsonl`。**goal 下直派是合法路径**（见 §一·8），但产出仍须有事件链；
-   `--drive cmd` 不得用来伪装决策（它是宿主通道，不是决策者）。
-5. **违规即停**：自查或被告知绕过时，停止一切推进，如实列出「派发了什么 / 自己做了什么 / 哪些产出没有事件」，
-   等用户指示；**不得先补齐流程再报告**——补票会把违规洗成合规记录。
-6. **凭据只在 `.env` / `.env.local`**：Mod 资源、配置、报告只出现键名，不出现值。
-7. **自进化只走两个出口：`AGENTS.md` 或 Mod；不得写旁路脚本、不得改 CLI 源码**：
-   - 发现纪律没被遵守、要“自我进化”时，**只有两个合法落点**——本文件（写成可判定判据）或
-     `.ygg/mods/agent-seed/`（闸门改 `src/flow.lua` 与 `src/handlers/*.lua`，提示词与剧本改 `data/*.json`；
-     `mod.lua` 只是装配入口，不装业务逻辑）。两者可同时改，但**不得新增第三种载体**。
-   - **禁止写检查脚本 / wrapper / hook 当补丁**：不得新增 “check-*.py”、“pre-*-hook”之类“帮自己守纪律”的脚本——
-     那只是把纪律外包给一个自己写的、同样会被自己绕过的检查器。脚本只允许做**只读查询**
-     （`requirement.list` / `map.show` / `events.jsonl` 只读统计），且**不得成为约束载体**。
-   - **禁止改 ygg-agent CLI 源码**（`crates/ygg-sandbox/examples/agent.rs` 与 host 契约）。CLI 是不可协商的宿主，
-     不是本仓库的实现面；确有必须由宿主解决的能力缺口，写清现象与复现交用户定，不自行 patch。
-   - **判据三问，缺一不可**：① 它拦的是哪个**具体动作**？② 违规时**看得见的表现**是什么
-     （拒绝文案 / 状态不变 / 载荷被拒）？③ 下次用什么**确认它生效**（一条可跑的命令或一次探针）？
-     三问答不全 = 没写完，不得声称已进化完毕。
-   - **口头承诺不算进化**：不得用“我会注意 / 下次读全”作结论；没有落在上面两个落点的，一律视为未处理。
-   - **先筛后写**：局末建议进 backlog 前先按 Mod 的 `evolution` 章筛——长期优先（换任务 / 换仓库还会遇到吗）；
-     已有未用必须查根因（调用链 / 可发现性 / 契约适配 / 主动不用 / 确无场景 / 冗余退役，六选一）；
-     逐项独立复核（artifact 必含`文件:行号` + 可跑命令与实际输出 + 语义依据 + 根因分类与结论）；
-     场景先于技术（实际场景 → 流程哪一步不满足 → 代码与复现 → 根因 → 长期收益 → 改造面与验证）。
-     单次任务约束、临时工具与探针口径、已在当次解决的问题默认不进。
-   - **声明 ≠ 证明**：`settlement.evolution` 的登记只是声明（Mod 只校 summary 非空、路径形状、
-     计数与分类自洽）；沙箱读不到 artifact，也不认识 subagent 会话——不得据此声称已证明建议质量或复核独立性。
+1. **Every in-run artifact must be carried by an event first**: before writing a file, changing code
+   or producing a deliverable with a command, an event must bring it into the state machine
+   (`requirement.dispatch` → proposal → gate). **The verdict looks at events, not at where the bytes
+   landed** — `~/tmp`, `/tmp` and the chat transcript all count as in-run output. "It is small", "it
+   was quick", "the user did not ask for the process" are not exemptions.
+2. **The main agent does only three things in the coordination layer**: dispatch work, accept
+   proposals serially, pass the two mandatory gates. It never implements a lane's work itself. After
+   a requirement is filed, the first action is `requirement.dispatch`, not doing the work directly.
+   - **Register the executor after dispatching** (self-declared ledger, not identity proof): once you
+     have the subagent id, run `config.set executor.<rN>.<stage>=<id>` (stage ∈ analysis / plan /
+     development). Replacing the executor for the same (req, stage), or any **cross-stage handoff**
+     to a different id than the previous stage, requires a reason (`=<id>|<reason>`). `amend` does
+     not change the binding; `split` / `merge` do not inherit it. `proposal.submit` does not
+     hard-check the ledger — an unregistered executor only shows as "unregistered" in
+     `requirement.list`.
+   - **Requirement granularity: merge before you create.** Adjacent work with the same goal, the same
+     subsystem, or that is a small change sharing one plan and one acceptance evidence set belongs in
+     the same requirement. Create a new one only for: an **independent delivery + acceptance**, a
+     **cross-repository or cross-lane** change, or **risk isolation**. A new adjacent requirement must
+     state in its description why it cannot be merged (a missing reason means "mergeable").
+     Three-question criterion (see 7 below): ① which action does it block? (`requirement.add` /
+     `--requirement` filing); ② what does a violation look like? (the executor points out that the
+     "new" requirement is just part of the previous one while the description has no
+     cannot-merge reason); ③ how do you confirm it next time? (walk `requirement.list` and check that
+     every new requirement's description carries that reason).
+3. **Render receipts in full; never parse-and-truncate**: no `narrative[0][:N]`, no "first line
+   only", no line filtering with `startswith`, no stuffing a receipt into `grep` / `python` to read
+   just a summary. Every dispatch prints **all narrative lines** into the conversation and hands the
+   raw `pendingChoice` to the user. If you need a rule, fetch the whole chapter with
+   `guide.show <section_id>` instead of trusting memory.
+4. **Single-shot dispatching is not compliance**: batching `--event` flags only hides state from the
+   script guard; it does not replace the `requirement.dispatch` → proposal → gate chain. Never edit
+   `autosave.json` / `events.jsonl` by hand. **Dispatching directly under `goal` mode is a legal
+   path** (see 8), but its output still needs an event chain; `--drive cmd` may never be used to
+   disguise a decision (it is a host input channel, not a decision maker).
+   - **Permanent prohibition of batch event entrypoints**: the host exposes exactly one dispatch per
+     process (`--event`). There is and will be no `--events`, no batch script that replays a
+     timeline, no loop that settles a run, and no wrapper that "just" feeds several actions. Batch
+     entrypoints turn the state machine into a transcript of a decision that was never made; the
+     discipline is **immersive play first** — one real action per turn, read the full receipt, then
+     decide.
+     Three-question criterion (see 7): ① which action does it block? (any argument that a batch
+     entrypoint should be added to `crates/ygg-sandbox/examples/agent.rs` or wrapped by a script);
+     ② what does a violation look like? (a run whose events were produced without a receipt review,
+     or a document that suggests `--events` / a batch loop); ③ how do you confirm it next time?
+     (`grep -n '\-\-events' AGENTS.md README.md .ygg/mods/agent-seed/README.md` finds nothing outside
+     a prohibition sentence, and `cargo build --release --example agent` still has a single
+     `--event`).
+5. **Stop on violation**: when a self-check or a report tells you a constraint was bypassed, stop
+   every step, list honestly "what was dispatched / what I did myself / which output has no event",
+   and wait for the user. **Do not first back-fill the process and then report** — back-filling
+   launders a violation into a compliant-looking record.
+6. **Credentials live only in `.env` / `.env.local`**: Mod resources, configuration and reports
+   mention key names only, never values.
+7. **Self-evolution has exactly two exits: `AGENTS.md` or the Mod — no side scripts, no CLI source
+   changes**:
+   - When a discipline was not followed and you want to "evolve yourself", the only legal landing
+     spots are this file (written as a decidable criterion) and `.ygg/mods/agent-seed/` (gate logic
+     in `src/flow.lua` and `src/handlers/*.lua`, prompts and scripts in `data/*.json`;
+     `mod.lua` is assembly only and carries no business logic). Both may change together, but
+     **no third carrier may be added**.
+   - **Never write a checker script / wrapper / hook as a patch**: no "check-*.py", no
+     "pre-*-hook" that "helps you keep the discipline" — that only outsources discipline to a
+     self-written checker that you will bypass in the same way. Scripts may only perform **read-only
+     queries** (`requirement.list`, `map.show`, read-only statistics over `events.jsonl`) and **may
+     not become the carrier of a constraint**.
+   - **Never patch the ygg-agent CLI source** (`crates/ygg-sandbox/examples/agent.rs` and the host
+     contract). The CLI is a non-negotiable host, not an implementation surface of this repository.
+     If a capability gap genuinely must be solved in the host, describe the symptom and the
+     reproduction and hand it to the user; never patch it yourself.
+   - **Three-question criterion, all three required**: ① which **specific action** does it block?
+     ② what is the **visible symptom** of a violation (refusal text / unchanged state / rejected
+     payload)? ③ how do you **confirm it works** next time (one runnable command or one probe)?
+     Fewer than three answers means it is not written yet; do not claim the evolution is done.
+   - **A verbal promise is not an evolution**: "I will be careful" / "next time I will read it all"
+     is not a conclusion. Anything that did not land in the two exits above counts as unhandled.
+   - **Screen before writing**: before suggesting an item for the backlog, run it through the Mod's
+     `evolution` chapter — long-term priority (would it appear again with another task or another
+     repository?); an existing unused rule must have its root cause named (call chain /
+     discoverability / contract mismatch / deliberately unused / genuinely no scenario / redundant,
+     pick exactly one); review every item independently (the artifact must contain `file:line` plus
+     a runnable command with its real output plus the semantic basis plus the root-cause class and
+     conclusion); scenario before technique (actual scenario → which process step is unsatisfied →
+     code and reproduction → root cause → long-term benefit → change surface and verification).
+     Single-task constraints, temporary tools and probe conventions, and anything already solved in
+     that same task do not enter the backlog.
+   - **Declaring is not proving**: `settlement.evolution` only records a declaration (the Mod
+     verifies that `summary` is non-empty, the path shape, and that the counts and classes are
+     self-consistent). The sandbox cannot read the artifact and does not know the subagent session,
+     so it may never be used to claim that the suggestion quality or the review independence was
+     proven.
 
-### 8. goal / guide：决策权在谁手里
+### 8. `goal` / `guide`: who holds the decision
 
-- `play.mode` **只由 Mod 解释**：`settings.play.mode`（运行期覆盖）> `data/config.json` 的静态默认；
-  宿主 CLI 不读它，也不解释它。
-- **guide**（默认）：里程碑动作（`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` /
-  `review.note`）只认菜单票据——必须经 `ygg.choice_selected`（回序号）进来，单发直派一律【动作被拒】。
-  打回类（`*.reject`）不在闸内：打回不产生通过效果，是唯一的纠错通道。
-- **goal**：主 Agent 读全回执后**自行派发**（票据不参与判定）。不是「自动选序号 1」，也不经任何外部脚本；
-  `pendingChoice` 照常完整输出，证据标准不变。
-- **切模式是决策权移交**：用户当次授权后，主 Agent 可自行执行
-  `--event config.set --payload '"play.mode=goal"'`；Mod 会播 `handover_goal`（代办范围 + 证据标准不变 +
-  收局复盘要交代）/ `handover_guide`（决策权回到人）。菜单只提供「切到另一模式」的边。
-- **goal 授权是 run 级记录**：`config.set goal.authorization=<单行说明>`（trim ≤200、无换行；空值 = 显式清除）。
-  只有**运行期进入 goal** 的局（`settings.play.mode=goal`）在 `review.note` 收口前校验：缺记录则旁白阻断、
-  不写 `ending`、不推进；静态 `data/config.json` 预设 goal 视为仓库所有者常设配置，**不在校验范围**；
-  切回 guide 不校验，resume 保留。该记录只证明「登记过一句话」，不证明用户说过——不得据此声称身份认证。
-- `--drive stdin|cmd:<路径>|none` 是**宿主**的驱动通道（人工选择 / 外部命令 / 只看不推进），与 `play.mode` 正交；
-  goal 不依赖它，删掉外部决策命令不影响 goal 可用。
+- **Only the Mod interprets `play.mode`**: `settings.play.mode` (runtime override) wins over the
+  static default in `data/config.json`. The host CLI neither reads nor interprets it.
+- **`guide`** (default): milestone actions (`proposal.accept` / `gate.approve` / `coordinate.submit` /
+  `verify.submit` / `review.note`) accept only a menu ticket — they must arrive through
+  `ygg.choice_selected` (replying with the index); a direct single-shot dispatch is always
+  **refused**. Rejects (`*.reject`) are outside that gate: they produce no passing effect and are the
+  only correction channel.
+- **`goal`**: the main agent reads the full receipt and **dispatches by itself** (tickets do not
+  participate in the verdict). It is not "automatically pick option 1", and it never goes through an
+  external script; `pendingChoice` is still printed in full and the evidence standard is unchanged.
+- **Switching mode hands over the decision**: after the user authorizes it for that occasion, the
+  main agent may run `--event config.set --payload '"play.mode=goal"'` itself. The Mod announces
+  `handover_goal` (delegated scope + unchanged evidence standard + must be accounted for in the
+  closing review) or `handover_guide` (decision back to the human). The menu only offers the edge to
+  the other mode.
+- **`goal` authorization is a per-run record**: `config.set goal.authorization=<one-line note>`
+  (trimmed, ≤ 200, no newline; an empty value clears it explicitly). Only runs that entered `goal`
+  **at runtime** (`settings.play.mode=goal`) are checked before `review.note` finishes: a missing
+  record blocks with a narrative line, writes no `ending`, and does not advance. A static `goal`
+  preset in `data/config.json` is the repository owner's standing configuration and is **out of
+  scope**; switching back to `guide` is not checked and `resume` keeps the record. The record only
+  proves "one sentence was registered", not that the user said it — never claim it as identity proof.
+- `--drive stdin|cmd:<path>|none` is the **host** input channel (human choice / external command /
+  observe only) and is orthogonal to `play.mode`: `goal` does not depend on it, and deleting an
+  external decision command does not break `goal`.
 
-### 9. 验收与收口边界（状态机强制，不靠自觉）
+### 9. Acceptance and settlement boundaries (enforced by the state machine, not by discipline)
 
-- **需求级**：`proposal.accept` 只按阶段推进——`analysis` → `planning`；`plan` → **`plan_gate`**；
-  `development` → **`accept`**（执行方交付，同时释放泳道）。
-- **两个强制门禁**：`gate.approve` 在 `plan_gate` → `ready`，在 `accept` → `done`；
-  `gate.reject` 存储态一律回 `planning`，展示名由 `plan_ok` 派生——`plan` 门禁打回置假（→ 重派 plan），
-  `accept` 门禁打回沿用原值（未 amend 即 `ready` 重进开发队列；amend 过则 `plan_ok` 已作废 → 停在
-  `planning` 强制重规划）。
-  批准前校验两条硬约束：`gate_rev == req.rev`（待批期间被 amend → 判 stale，旧批准不得生效）、
-  `accept` 类还要求 `artifacts` 非空（不接受只有 summary 的完成自称）。
-- **收口前件**（`coordinate.submit` / `verify.submit=true` / `review.note` 共用同一套）：0 条待验收提案 ∧
-  0 个在跑 job ∧ 0 个未解决冲突 ∧ 全部需求处于终态（`done`，或已 split / merged / dropped 且后继全都 done）。
-- `coordinate.submit` 只在 `coordinate` 阶段可用，成功即进 `review`、把 `verify.passed` 置 false，并清空本轮
-  `settlement.evolution.{artifact,summary,candidates,classes}`（保留 settings 预登记）；
-  `verify.submit` 在 `review` 记录全绿（`all_green=false` 在 `gates.require_all_green=true` 时打回 `coordinate`，
-  同样清空本轮 settlement 四键）；
-  `settlement.evolution` 仅在 verify 全绿后登记，载荷为 `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`。
-  summary 去空白后必填；`c=0/0` 允许 artifact 为空，`screened > 0` 时 artifact 与 `cls` 必填且分类计数自洽。
-  `config.set review.evolution.artifact|summary|candidates|classes=<值>` 是 guide 预登记面（逐键校形状，
-  跨字段完整性只在登记处校）；c/cls 缺省回落预登记，再缺省 0/0 与空分类。
-  `review.note` 只收 `lesson|score`（旧 ev/c/cls 段一律拒绝），先过 `gates.settlement_problem()`，再把本轮
-  settlement 四键单源归档到 `review.evolution.*`，写 `review.lesson` / `review.score` / `ending` 后进 `done`（【结局）。
-  **运行期 goal 局**还要求 `settings.goal.authorization` 非空（缺则旁白阻断，静态默认 goal 不校验，见 §8）。
-- 宿主靠 `agent.summary` 的 `nextEndsRun` 判定「下一步会收口」：review 在 verify 通过且未登记时首项为
-  `settlement.evolution`，登记后首项才是 `review.note`；未预登记时默认空 artifact + 中性 summary + `c=0/0`，
-  保证全 1 默认路径能走「零候选登记 → review.note」。仅当首项是 `review.note` 时 `nextEndsRun=true`，
-  此时先切 `closing`（阻止新写入 + 最后一次 drain 排在收口之前）再派发。
-  `agent.summary.evolution` 回显归档的 artifact / summary / candidates / classes 四键。
-- **行为验收（改 Mod 源码 / 剧情图必跑）**：改 `.ygg/mods/agent-seed/src/**`（状态机、门禁、渲染层）
-  或 `.ygg/mods/agent-seed/data/scenes.json` 的 map 文案时，除 lint 与全 1 playtest 外**必须**跑
-  `cargo test -p ygg-sandbox --test agent_seed_semantics`
-  （7 条：accept 门禁正常打回 / accept 门禁 amend→stale / plan 门禁打回 / dev 提案打回（未 amend 与
-  amend 两路）/ legacy 缺 `plan_ok` 存档 / map 操作视图与设计视图文案 / 两侧 Mod 全 1 走查）。
-  全 1 playtest 只覆盖 happy path（`gate.reject` / `requirement.amend` / `proposal.reject` 的分叉一条都不走）；
-  `/tmp` 下的临时探针**只能补充**，不能替代这条测试；没覆盖到的场景必须逐条声明。
-  判据三问（见 §一·7）：① 拦的动作是「改完 Mod 源码或 map 文案，只跑 lint 与全 1 就宣称验收」；
-  ② 违规的可见表现是分叉语义与 map 措辞退化在门禁里恒绿，缺陷只在实跑时暴露；
-  ③ 下次用该命令（7/7）确认生效，并可用一次变异探针（把旧语义改回去 → 该测试必须红）自证断言不是空转。
-- **门禁三件套（改内核 / 宿主 CLI 必跑）**：改 `crates/**`（状态机、驱动、宿主持久化面）时
-  **必须**三件套全跑，缺一即假绿：
-  `cargo test --workspace` ∧ `cargo test --example agent -p ygg-sandbox` ∧
-  `cargo test -p ygg-sandbox --test agent_seed_semantics`。
-  第二条不能省：Cargo 的 `--workspace` **不编译 example 目标的单测**，所以
-  `crates/ygg-sandbox/examples/agent.rs` 里的断言（持久化原子性 / 重置语义 / 热载 / 结算策略）
-  在只跑 workspace 时**一条都不执行**，而门禁仍打印 `failed=0`。
-  判据三问（见 §一·7）：① 拦的动作是「改完内核或宿主，只跑 `cargo test --workspace` 就宣称门禁绿」；
-  ② 违规的可见表现是 `--workspace` 与 `--example agent` 的通过条数对不上（前者恒缺 example 那一批）；
-  ③ 下次用 `cargo test --workspace | grep -c '^test result'` 与
-  `cargo test --example agent -p ygg-sandbox | grep -c '^test result'` 两条计数确认都已执行。
+- **Requirement level**: `proposal.accept` only advances by stage — `analysis` → `planning`,
+  `plan` → **`plan_gate`**, `development` → **`accept`** (the executor delivers, and the lane is
+  released at the same time). `gate.approve` passes `plan_gate` → `ready` and `accept` → `done`;
+  `gate.reject` always stores `planning` and the display name is derived from `plan_ok`.
+- **Two mandatory gates**: `gate.approve` at `plan_gate` → `ready`, at `accept` → `done`;
+  `gate.reject` stores `planning` in both cases and the display name comes from `plan_ok` — a `plan`
+  reject sets it false (→ a new plan is required), an `accept` reject keeps the previous value (a
+  not-amended requirement is `ready` and re-enters the development queue; an amended one already had
+  `plan_ok` invalidated → it stops in `planning` and must be replanned). Before approving, two hard
+  checks apply: `gate_rev == req.rev` (amended while pending → stale, an old approval must not take
+  effect) and, for `accept`, non-empty `artifacts` (a summary-only claim is not accepted).
+- **Preconditions for closing** (`coordinate.submit` / `verify.submit=true` / `review.note` share
+  them): zero pending proposals ∧ zero running jobs ∧ zero unresolved conflicts ∧ every requirement
+  in a terminal state (`done`, or split / merged / dropped whose successors are all `done`).
+- `coordinate.submit` only works in the `coordinate` stage; on success it moves to `review`, sets
+  `verify.passed=false`, and clears this round's
+  `settlement.evolution.{artifact,summary,candidates,classes}` (settings pre-registrations survive).
+  `verify.submit` records all-green in `review` (`all_green=false` sends the run back to `coordinate`
+  when `gates.require_all_green=true`, and also clears the settlement keys).
+  `settlement.evolution` is registered only after verify is green; its payload is
+  `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`.
+  `summary` is required after trimming; `c=0/0` allows an empty artifact; with `screened > 0` the
+  artifact and `cls` are required and the counts must be self-consistent. The `sessions=` / `todo=`
+  segments settle the two end-of-run cleanups in the same transaction (one turn instead of three);
+  the standalone `settlement.sessions` / `settlement.todo` actions remain available for
+  step-by-step settlement. `config.set review.evolution.artifact|summary|candidates|classes=<value>`
+  is the guide pre-registration surface (shape checked per key; cross-field completeness is checked
+  only at registration). `review.note` accepts only `lesson|score` (the legacy ev/c/cls segments are
+  refused); it first runs `gates.settlement_problem()`, then archives this round's settlement keys
+  single-source into `review.evolution.*`, writes `review.lesson` / `review.score` / `ending` and
+  enters `done` (the **[ENDING** line). **Runtime `goal` runs** additionally require a non-empty
+  `settings.goal.authorization` (missing → narrative block; a static default is not checked, see §8).
+- The host decides "the next step closes the run" from `agent.summary`'s `nextEndsRun`: in `review`,
+  the first item is `settlement.evolution` (after verify passed and nothing is registered) and
+  `review.note` afterwards; with no pre-registration the default is an empty artifact + a neutral
+  summary + `c=0/0`, so the all-1 default path can run "register zero candidates → review.note".
+  Only when the first item is `review.note` is `nextEndsRun=true`; the host then switches to
+  `closing` (blocks new writes, drains one last time) before dispatching.
 
-## 二、冷启动
+#### 9.1 Turn-cut rules (each one is decidable, and each one saves a turn)
 
-### 构建与安装
-CLI 来源只有一个：本仓库的 `crates/ygg-sandbox/examples/agent.rs`（宿主本体，契约驱动 + fail-closed）：
+- **Inline executor ledger**: `proposal.submit` takes an optional trailing segment
+  `exec=<agent_id>[:<reason>]`. It registers the executor ledger through the same
+  `src/executor.lua` implementation as `config.set executor.*`, in the same transaction, before the
+  proposal is stored; a failed registration refuses the payload **and creates no proposal**. `exec=`
+  is only recognised as the **last** segment — anywhere else is refused
+  (`req_prop_exec_misplaced`), because the host pads payloads shorter than the declared 7 fields and
+  would silently move it into the `artifacts` slot. Write the reason with `:` inside that segment
+  (`exec=agent2:handoff`), since the outer payload splits on `|`.
+- **Stage merge (`draft -> planning`)**: `requirement.dispatch` on a `draft` row dispatches **plan**
+  and stores `planning` in the same dispatch; there is no analysis turn in the default pipeline.
+  `analyzing` survives only as a compatibility state (legacy saves, and an explicit `analysis`
+  proposal accepted on a `planning` row), so `R_ANALYZING` and its readers stay — no migration code.
+- **Declared single-successor advancement, reactive and effect-without-render**: `src/hooks.lua`
+  provides `useMemo(key, compute, deps)` / `useEffect(name, deps_fn, effect_fn)` /
+  `flush_effects()`. `render()` calls `hooks.flush_effects()` at its top under a reentrancy guard,
+  **before** it emits the single `ygg.choice`; every `useEffect` therefore converges first. An effect
+  may advance state and narrate, and **must never call `render()` or `ygg.choice`** — once a choice
+  exists the kernel drops the rest of the queue (`transition.rs`), which is exactly why the old
+  "emit at the end of a handler" pattern was wrong. An automatic successor is allowed only when all
+  four hold: ① the `(state, event)` successor is unique and declared in one place; ② it needs no
+  external evidence (no file read, no human judgement, no session); ③ it is not a pass-type action
+  protected by the human-action gate (gates and acceptance are **never** automatic); ④ the effect
+  neither renders nor emits. Today exactly one effect exists — `auto_dispatch` in
+  `src/handlers/actions.lua`: a handler marks the requirement it just made ready
+  (`hooks.mark_auto_dispatch(index)` after `proposal.accept(analysis)` or `gate.approve(plan)`), and
+  the effect dispatches **that requirement only** when the turn has no pending proposal, no pending
+  gate, no conflict and a free job slot. `requirement.add`'s `draft` row is never auto-dispatched.
+  `gate.reject` / `proposal.reject` derive nothing, and `gate.approve(accept) -> done` derives nothing
+  (the freed slot is the main agent's priority decision). Do not add a `derive.auto` switch: it would
+  become a second bypass.
+- `useMemo` dependencies must be scalars derived from KV state (status, job, pending, readiness,
+  counts) — never an implicit Lua-memory diff — so a save/load or a process restart recomputes from
+  the same facts and stays deterministic. `flush_effects()` runs at most `MAX_PASSES = 4` passes and
+  **errors out** instead of looping forever; a non-converging effect is a defect, not a warning.
+
+#### 9.2 Behavioural acceptance (mandatory when touching Mod source or the scenes map)
+
+Changing `.ygg/mods/agent-seed/src/**` (state machine, gates, render layer), `.ygg/mods/agent-seed/mod.lua`
+or the map wording in `data/scenes.json` requires, besides lint and the all-1 playtest:
+`cargo test -p ygg-sandbox --test agent_seed_semantics` (12 cases: stage merge + `analysis` compat,
+accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
+reject, reactive auto-dispatch in the same turn (plus `useMemo` invalidation), development proposal
+reject (not amended / amended), inline `exec=` (misplaced / no reason / `:` form), settlement merge
+with `sessions=` + `todo=` and a refused malformed segment, legacy save without `plan_ok`, and the
+operation/design map contracts on both packs). The all-1 playtest only covers the happy path (it
+never takes `gate.reject` / `requirement.amend` / `proposal.reject`, and it cannot see the turn-cut
+mechanics at all); temporary probes under `/tmp` may supplement it but never replace it, and any
+scenario not covered must be declared case by case. Three-question criterion (see 7): ① which action
+does it block? ("change the Mod source or the map wording, run lint plus all-1, and call it
+accepted"); ② what does a violation look like? (branch semantics and map wording silently regress
+while every gate stays green; the defect only shows in a real run); ③ how do you confirm it next
+time? (that command, 12/12, plus a mutation probe — put the old semantics back and the test must go
+red — to prove the assertions are not vacuous).
+
+#### 9.3 Three-suite gate (mandatory when touching the kernel or the host CLI)
+
+Changing `crates/**` (state machine, driver, host persistence surface) requires all three, and
+missing one is a fake green:
+`cargo test --workspace` ∧ `cargo test --example agent -p ygg-sandbox` ∧
+`cargo test -p ygg-sandbox --test agent_seed_semantics`.
+The second one cannot be skipped: Cargo's `--workspace` **does not compile the example target's unit
+tests**, so the assertions inside `crates/ygg-sandbox/examples/agent.rs` (persistence atomicity,
+reset semantics, hot reload, settlement policy) **never execute** when you only run the workspace,
+and the gate still prints `failed=0`.
+Three-question criterion (see 7): ① which action does it block? ("run only `cargo test --workspace`
+after touching the kernel or the host and call the gate green"); ② what does a violation look like?
+(the pass counts of `--workspace` and of `--example agent` do not match — the former always lacks the
+example batch); ③ how do you confirm it next time? (compare the two counts:
+`cargo test --workspace | grep -c '^test result'` and
+`cargo test --example agent -p ygg-sandbox | grep -c '^test result'`).
+
+## 2. Cold start
+
+### Build and install
+The CLI has a single source: `crates/ygg-sandbox/examples/agent.rs` (the host itself,
+contract-driven and fail-closed):
 
 ```bash
-YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"                  # 本仓库根（或任意检出路径）
+YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"                  # repository root (or any checkout)
 (cd "$YGGDRASILL_ROOT" && cargo build --release --example agent)
 mkdir -p .ygg/bin && cp "$YGGDRASILL_ROOT/target/release/examples/agent" .ygg/bin/ygg-agent
 ```
 
-宿主与 Mod 版本不匹配时装载期直接失败（错误文案点名缺失字段 + 给出应有形状），不静默降级；
-`.ygg/bin/*` 与 `.ygg/runs/*` 在 `.gitignore` 内，`.ygg/mods/` 入库。
+The default build enables `store-sqlite` (`crates/ygg-sandbox/Cargo.toml` sets
+`default = ["store-sqlite"]`), so new runs default to the SQLite backend (`<run-dir>/run.sqlite`).
+Existing legacy JSON runs (directories carrying `autosave.json` / `events.jsonl`) are automatically
+detected and stay on the JSON backend without migration; `--store json` remains available as an
+explicit fallback for new runs, and `run.json`'s `"store"` field is authoritative once written
+(`--store` is an opening assertion only; a mismatch fails closed with zero writes).
 
-### 开始
+When the host and the Mod version do not match, loading fails immediately (the error names the
+missing field and the shape it expected) and never degrades silently; `.ygg/bin/*` and `.ygg/runs/*`
+are git-ignored, `.ygg/mods/` is committed.
+
+### Start
 ```bash
-.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <局名> --runs-root .ygg/runs --event event.start
+.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
 ```
 
-### 继续
+### Continue
 ```bash
-A=".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <局名> --runs-root .ygg/runs"
-$A --resume --drive stdin                                     # 交互：人来选（缺省）
-$A --resume --event config.set --payload '"goal.authorization=用户当次授权：使用 goal 模式推进"'   # 先登记本局授权（run 级，可随时切回 guide）
-$A --resume --event config.set --payload '"play.mode=goal"'   # 自行接管决策：读全回执、按处境直接派发（可随时切回 guide）
-$A --resume --drive none                                      # 只看当前处境，不推进
-$A --resume --event guide.show --payload '"harness"'          # 查规则：按章节 id 定点查阅（harness / credentials / gates …）
-$A --resume --event map.show                                  # 当前节点 + 出边；加 --payload '"full"' 看完整设计图
-.ygg/bin/ygg-agent --run-id <局名> --runs-root .ygg/runs --requirement '<标题>|<描述>'   # 异步补需求/提案，只追加 inbox，可与运行中的局并发
+A=".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs"
+$A --resume --drive stdin                                     # interactive: the human chooses (default)
+$A --resume --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
+$A --resume --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)
+$A --resume --drive none                                      # look at the situation, do not advance
+$A --resume --event guide.show --payload '"harness"'          # fetch a rule chapter by id (harness / credentials / gates …)
+$A --resume --event map.show                                  # current node + out-edges; add --payload '"full"' for the whole design map
+.ygg/bin/ygg-agent --run-id <run-name> --runs-root .ygg/runs --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
 ```
 
-### 暂停
-- 交互模式输入 `q`，或 stdin 结束。
-- 外部驱动（`--drive cmd:<路径>`）返回 `HUMAN[:理由]`、超时、非零退出、非法输出、越界序号——一律安全暂停，
-  状态不推进，不会回退选 1。**goal 不依赖该通道**。
-- 暂停后重新执行「继续」里的命令即可，不会丢状态。
+### Pause
+- In interactive mode type `q`, or end stdin.
+- External driving (`--drive cmd:<path>`) returning `HUMAN[:reason]`, a timeout, a non-zero exit, an
+  invalid output or an out-of-range index all pause safely: the state does not advance and the chooser
+  never falls back to option 1. **`goal` does not depend on that channel.**
+- Re-running the "continue" command resumes; nothing is lost.
 
-### 结束
-结束用 `.ygg/bin/ygg-agent --run-id <局名> --runs-root .ygg/runs --settle`，固定结算顺序（不可跳步）：
+### Settle and finish
+Finish with `.ygg/bin/ygg-agent --run-id <run-name> --runs-root .ygg/runs --settle` in this fixed
+order (no step may be skipped):
 
-1. 确认所有需求进入 done / split / merged / dropped 等终态、inbox 无未消费行，并通过 `verify.submit`
-   记录全绿证据（收口前件见 §一·9）。
-2. `coordinate.submit` → `review`，verify 全绿后先 `settlement.evolution` 登记，再 `review.note` 收口到 `done`：
-   登记载荷为 `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`（summary 必填；c=0/0 可空 artifact）；
-   候选先按 `evolution` 章筛。guide 下可先 `config.set review.evolution.artifact|summary|candidates|classes=<值>`
-   预登记，菜单据此构造登记载荷；`review.note` 只写 `lesson|score` 并单源归档登记记录。
-3. 执行 `--settle` 并核验 `settlement.json` 的 `ok`（四项开关：事件非空 / 无失败步 / 出现结局行 / inbox 已消费）。
-4. **清空主会话 Todo 列表**（`todo clear`，含已完成与历史任务）后再结束本局；不得把已结束局的任务带入下一局。
+1. Make sure every requirement is in a terminal state (done / split / merged / dropped) and the inbox
+   has no unconsumed line, and record the all-green evidence through `verify.submit` (the closing
+   preconditions are in §1.9).
+2. `coordinate.submit` → `review`; once verify is green, register `settlement.evolution` (screen the
+   candidates against the `evolution` chapter first), then close with `review.note`. The registration
+   payload is `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]` with the optional
+   `sessions=` / `todo=` segments described in §1.9; under `guide` you may pre-register with
+   `config.set review.evolution.artifact|summary|candidates|classes=<value>`, and `review.note` only
+   takes `lesson|score` and archives the registration record single-source.
+3. Run `--settle` and verify `ok` in `settlement.json` (four switches: events non-empty / no failed
+   step / an ending line exists / the inbox was consumed).
+4. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
+   before ending this run; never carry a finished run's tasks into the next one.
