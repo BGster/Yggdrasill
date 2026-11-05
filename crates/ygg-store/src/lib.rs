@@ -27,6 +27,11 @@
 //!   「事件有第 N 行、存档还是第 N-1 版」是**允许**的（弱承诺）；
 //! - sqlite：单事务写 `step` + `snapshot`（必全或无），不存在半提交（强承诺）。
 //!
+//! # 默认后端
+//!
+//! 新局（目录里没有任何后端产物）落 [`DEFAULT_BACKEND`] = sqlite；既有 JSON 局
+//! 按**产物**推断仍落 `json`（[`resolve`] 的向后兼容分支），**绝不**隐式迁移。
+//!
 //! 混用两个后端**一律 fail-closed**（见 [`resolve`]）：同目录同时有 JSON 产物与
 //! sqlite 库时无法判定谁是权威，宿主不会替你删证据。
 //!
@@ -65,7 +70,11 @@ pub use json::{JsonFileStore, AUTOSAVE_FILE, EVENTS_FILE, INBOX_CURSOR_FILE, INB
 #[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteStore, SQLITE_FILE};
 
-/// sqlite 后端固定文件名（后端探测用；与 [`SQLITE_FILE`] 同源）。
+/// sqlite 后端固定文件名（后端探测 / 错误文案 / 建库共用的**唯一字面量**）。
+///
+/// `sqlite::SQLITE_FILE` 由它派生（不是第二份 `"run.sqlite"`）：`detect()` 用本
+/// 常量、`SqliteStore` 用派生常量，两处漂移会让「探测到有库」与「实际建的库」
+/// 静默失配。
 pub const SQLITE_FILE_NAME: &str = "run.sqlite";
 
 // ============================================================================
@@ -75,9 +84,9 @@ pub const SQLITE_FILE_NAME: &str = "run.sqlite";
 /// 存储后端。`run.json` 的 `store` 字段是**权威**，`--store` 旗标只是开局断言。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Backend {
-    /// 既有默认后端：`autosave.json` + `events.jsonl` + `inbox.jsonl`。
+    /// 兼容后端 / 旧局默认：`autosave.json` + `events.jsonl` + `inbox.jsonl`。
     Json,
-    /// 可选后端：`<run-dir>/run.sqlite`（WAL）。
+    /// 默认后端（新局）：`<run-dir>/run.sqlite`（WAL）；旧局**绝不**隐式切到它。
     Sqlite,
 }
 
@@ -111,6 +120,13 @@ impl fmt::Display for Backend {
         f.write_str(self.as_str())
     }
 }
+
+/// 新局默认后端（`run.json` 无 `store` 事实，且目录里没有任何后端产物）。
+///
+/// 宿主与命令文案都从这里取，别在第二个地方写字面量：`Backend::Sqlite` 是「新局
+/// 默认」，`Backend::Json` 是「兼容后端 / 旧局默认」——两者不可互换（旧局靠
+/// [`detect`] 的产物探针保住，不靠这里的默认值）。
+pub const DEFAULT_BACKEND: Backend = Backend::Sqlite;
 
 // ============================================================================
 // §数据形状（全部不含锁、不含路径）
@@ -285,11 +301,12 @@ pub fn detect(run_dir: &Path) -> Products {
     }
 }
 
-/// 后端裁决：`run.json` 的 `store` 事实 > 产物探针 > `--store` 旗标 > 默认 json。
+/// 后端裁决：`run.json` 的 `store` 事实 > 产物探针 > `--store` 旗标 > 默认后端。
 ///
 /// 严格按「权威性」排：`run.json` 是权威事实，`--store` 只是开局断言。允许的
 /// 唯一推断是**旧局**（`run.json` 没有 `store` 键，或连 `run.json` 都没有）——
-/// 此时按产物推断，既有的纯 JSON 目录一律落回 `json`（向后兼容）。
+/// 此时按产物推断，既有的纯 JSON 目录一律落回 `json`（向后兼容）。**两者都没有**
+/// 才是新局，落 [`DEFAULT_BACKEND`]（sqlite）。
 pub fn resolve(
     run_dir: &Path,
     declared: Option<Backend>,
@@ -338,7 +355,7 @@ pub fn resolve_with(
         return Ok(declared);
     }
 
-    // 无声明：旧局（按产物推断）或新局（按旗标 / 默认 json 定型）。
+    // 无声明：旧局（按产物推断）或新局（按旗标 / [`DEFAULT_BACKEND`] 定型）。
     if let Some(flag) = flag {
         if let Some(probed) = probed {
             if probed != flag {
@@ -347,7 +364,7 @@ pub fn resolve_with(
         }
         return Ok(flag);
     }
-    Ok(probed.unwrap_or(Backend::Json))
+    Ok(probed.unwrap_or(DEFAULT_BACKEND))
 }
 
 /// 产物文件名（错误文案里点名，用户才知道该看哪两个文件）。
@@ -484,8 +501,9 @@ fn open_sqlite(run_dir: &Path, tick: Tick) -> Result<Box<dyn RunStore>, StoreErr
 #[cfg(not(feature = "sqlite"))]
 fn open_sqlite(_run_dir: &Path, _tick: Tick) -> Result<Box<dyn RunStore>, StoreError> {
     Err(StoreError::Unavailable {
-        detail: "本构建未启用 sqlite 后端（sqlite 是编译期可选项，需要以 \
-                 `--features store-sqlite` 构建宿主）"
+        detail: "本构建未启用 sqlite 后端（sqlite 是编译期面：宿主 `cargo build \
+                 --example agent` 默认带上，`--no-default-features` 会关掉它；\
+                 ygg-store 自身需 `--features sqlite`）"
             .to_owned(),
     })
 }
@@ -513,18 +531,58 @@ mod tests {
         assert!(matches!(err, StoreError::Misconfigured { .. }));
     }
 
-    /// 空目录（新局）：默认 json；给旗标就按旗标定型。
+    /// 空目录（新局）：默认落 [`DEFAULT_BACKEND`] = sqlite（r-evo）。
+    ///
+    /// 这里断言的是**字面量** `Backend::Sqlite`（而不是回引 `DEFAULT_BACKEND`）：
+    /// 常量自己被改回去时，测试必须红——自证自话的断言等于没断言。
     #[test]
-    fn empty_dir_takes_flag_or_default() {
-        let products = Products::default();
+    fn empty_dir_defaults_to_sqlite() {
+        let backend =
+            resolve_with(&dir("new"), None, None, Products::default()).expect("空目录必须可裁决");
+        assert_eq!(backend, Backend::Sqlite);
         assert_eq!(
-            resolve_with(&dir("new"), None, None, products).unwrap(),
+            DEFAULT_BACKEND,
+            Backend::Sqlite,
+            "默认后端常量与裁决结果同源"
+        );
+    }
+
+    /// 回退通道：空目录 + `--store json` → json（旗标压过默认值）。
+    #[test]
+    fn empty_dir_flag_json_still_wins() {
+        assert_eq!(
+            resolve_with(&dir("new"), None, Some(Backend::Json), Products::default()).unwrap(),
             Backend::Json
         );
+    }
+
+    /// 冗余但必要：显式 `--store sqlite` 与默认值一致（不得因「和默认一样」报冲突）。
+    #[test]
+    fn empty_dir_flag_sqlite_agrees_with_default() {
         assert_eq!(
-            resolve_with(&dir("new"), None, Some(Backend::Sqlite), products).unwrap(),
+            resolve_with(
+                &dir("new"),
+                None,
+                Some(Backend::Sqlite),
+                Products::default()
+            )
+            .unwrap(),
             Backend::Sqlite
         );
+    }
+
+    /// 真值表第 2 行：`run.json` 已声明 json（且无任何产物）→ 必须回 json。
+    /// 防「默认值压过权威事实」——这是旧局往后兼容的最后一道门。
+    #[test]
+    fn declared_json_without_products_beats_new_default() {
+        let backend = resolve_with(
+            &dir("declared-json"),
+            Some(Backend::Json),
+            None,
+            Products::default(),
+        )
+        .expect("已声明的后端必须放行");
+        assert_eq!(backend, Backend::Json);
     }
 
     /// `run.json` 的 `store` 是权威：与旗标不一致 → 拒绝，且错误串四个要点齐全。

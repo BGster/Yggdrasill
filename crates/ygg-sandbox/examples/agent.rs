@@ -22,10 +22,10 @@
 //! cargo run -p ygg-sandbox --example agent -- --mod <目录> --run-id my-task \
 //!   --resume --event <Mod 的 choiceEvent> --payload '1'
 //!
-//! # ③ 局末结算（读 autosave + events.jsonl → settlement.json）
+//! # ③ 局末结算（读本局后端的状态事实 → settlement.json；json 局 = autosave + events.jsonl）
 //! cargo run -p ygg-sandbox --example agent -- --run-id my-task --settle
 //!
-//! # ④ 异步补需求（只追 inbox.jsonl 后退出；不碰 autosave，故可在另一进程跑
+//! # ④ 异步补需求（只追本局后端的 inbox 后退出；不碰 autosave，故可在另一进程跑
 //! #    本局的同时安全调用）
 //! cargo run -p ygg-sandbox --example agent -- --run-id my-task --runs-root .ygg/runs \
 //!   --requirement '补一条门禁日志|把 verify 的失败原因写进 events.jsonl'
@@ -212,10 +212,10 @@ struct Args {
     payload: Option<String>,
     /// 交互模式推方式（`--drive`；缺省 stdin）。
     drive: Drive,
-    /// 异步 inbox 操作（只追 inbox.jsonl 后退出，不读写 autosave）。
+    /// 异步 inbox 操作（只往本局后端的 inbox 追加一条后退出，不读写 autosave）。
     inbox: Option<InboxWrite>,
     /// `--store`：**开局断言**（`run.json` 的 `store` 字段才是权威事实）。
-    /// `None` = 未指定（旧局按产物推断，新局默认 json）。
+    /// `None` = 未指定（旧局按产物推断，新局落 `ygg_store::DEFAULT_BACKEND` = sqlite）。
     store: Option<Backend>,
 }
 
@@ -254,7 +254,7 @@ fn parse_args() -> Args {
                 store = match Backend::parse(&text) {
                     Some(backend) => Some(backend),
                     None => usage_error(&format!(
-                        "未知的 --store 取值 `{text}`（只接受 {}；json 是默认后端）",
+                        "未知的 --store 取值 `{text}`（只接受 {}；sqlite 是默认后端，json 是兼容后端）",
                         Backend::NAMES.join(" / ")
                     )),
                 };
@@ -353,7 +353,7 @@ fn usage(code: i32) -> ! {
                                                                 单发模式（Agent 脚本化）
   agent --run-id <标识> --settle                                局末结算
   agent --run-id <标识> [--runs-root <目录>] --requirement '标题|描述'
-                                                                异步补需求（只追 inbox.jsonl）
+                                                                异步补需求（只追本局后端的 inbox）
 
 选项:
   --mod <目录>       Mod 目录（五件套：pack.json / manifest.json / mod.lua /
@@ -363,7 +363,7 @@ fn usage(code: i32) -> ! {
                      本局 mod 路径，两者都没有则报错）
   --run-id <标识>    本局标识：产物落 <runs-root>/<标识>/（必填）
   --runs-root <目录> runs 根目录（默认 ./runs）
-  --resume           从 autosave.json 续局（缺存档则按新局开局）
+  --resume           从本局后端的存档续局（json 局 = autosave.json；缺存档则按新局开局）
   --watch            交互模式下每步检查 mod 目录 mtime 变化并热载
   --event <名称>     单发模式：派发一个事件后退出（stdout 单行 JSON 回执）
   --payload <JSON>   事件 payload（缺省 = Mod 契约的 agent.defaultPayload；必须 JSON 标量）
@@ -373,17 +373,18 @@ fn usage(code: i32) -> ! {
                                   `HUMAN[:理由]`）；HUMAN / 超时 / 非零退出一律安全暂停并退出 0
                                   （环境变量 YGG_DECIDE_CMD 可临时覆盖路径）
                        none       只打印当前回执就退出（不推进、不读 stdin）
-  --requirement <串> 只把 '标题|描述' 追加到 <run 目录>/inbox.jsonl 后退出；
+  --requirement <串> 只把 '标题|描述' 追加到本局后端的 inbox 后退出
+                     （json 局 = <run 目录>/inbox.jsonl；sqlite 局 = run.sqlite 的 inbox 表）；
                      不读写 autosave，可在别一进程跑本局时安全并发调用
                      （旗标是否可用由 Mod 的 inboxRoutes.<kind>.write 声明）
   --amend <串>       --split <串>    --merge <串>    --conflict <串>
   --resolve <串>     --proposal <串>（同上：只在 Mod 声明了对应 write 时可用）
-  --settle           读 autosave + events.jsonl 写 settlement.json
-  --store <后端>     存储后端断言：json（默认，autosave.json + events.jsonl）|
-                     sqlite（可选编译，<run 目录>/run.sqlite）。run.json 的
+  --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）
+  --store <后端>     存储后端断言：sqlite（默认，<run 目录>/run.sqlite）|
+                     json（兼容后端，autosave.json + events.jsonl）。run.json 的
                      \"store\" 字段是权威：与 --store 不一致即拒绝开局（零写入）；
                      旧局无该字段时按产物推断（纯 JSON 目录 → json）。
-                     未以 --features store-sqlite 构建时，--store sqlite 报错退出。
+                     以 --no-default-features 构建时 sqlite 不可用，--store sqlite 报错退出。
   -h, --help         本帮助
 
 host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字面量）：
@@ -1523,8 +1524,9 @@ fn open_store_resolved(run_dir: &Path, flag: Option<Backend>) -> Result<Box<dyn 
 
 /// 按后端打开端口（建目录已由调用方完成）。
 ///
-/// sqlite 后端的可用性**不在这里判断**：未以 `--features store-sqlite` 构建时，
-/// `ygg_store::open` 会 fail-closed 报「本构建未启用 sqlite 后端」。
+/// sqlite 后端的可用性**不在这里判断**：默认构建（`default = ["store-sqlite"]`）
+/// 就带 sqlite；只有 `--no-default-features` 的回退构建才会走到 `Unavailable`，
+/// 由 `ygg_store::open` fail-closed 报「本构建未启用 sqlite 后端」。
 fn open_store(backend: Backend, run_dir: &Path) -> Result<Box<dyn RunStore>, String> {
     ygg_store::open(backend, run_dir, clock()).map_err(|err| err.to_string())
 }
@@ -2009,10 +2011,11 @@ fn resolve_write_binding(
     Ok((routes, kind))
 }
 
-/// `--requirement`：只往 inbox.jsonl 追加一行，不读不写 autosave 后退出。
+/// `--requirement`：只往本局后端的 inbox 追加一条，不读不写 autosave 后退出。
 ///
-/// 这是「新需求随时能进」的真实异步入口：本局在另一个进程里跑时，
-/// 这里只做 `OpenOptions::append`，不存在与运行中局的状态竞争。
+/// 这是「新需求随时能进」的真实异步入口：本局在另一个进程里跑时，这里只做一次
+/// 单调追加（json = `OpenOptions::append`，sqlite = `INSERT`），不存在与运行
+/// 中局的状态竞争。
 fn run_inbox_append(args: &Args) -> i32 {
     let Some(write) = args.inbox.clone() else {
         return 2;
@@ -2139,13 +2142,25 @@ fn single_shot_error(args: &Args, event: &str, message: &str) -> i32 {
     // 回执的 `autosave` 是「存档定位」而不是「一定是 JSON 文件」：本局已声明
     // 后端（`run.json` 的 `store`）为 sqlite 时必须回 sqlite 的定位串，否则
     // 工具会顺着这个字段去找一个根本不存在的 `autosave.json`。裁决顺序与
-    // 开局一致：`run.json` 权威 > `--store` 断言 > json 兜底。
+    // `ygg_store::resolve` 一致：`run.json` 权威 > `--store` 断言 > 产物探针 >
+    // 默认后端。**产物探针不能省**：旧 JSON 局在这里没有 `store` 事实，跳过
+    // 探针就会把它的错误回执指向一个不存在的 `run.sqlite`（默认后端已是 sqlite）。
     let run_dir = args.runs_root.join(&args.run_id);
     let backend = read_meta(&run_dir.join(META_FILE))
         .and_then(|meta| meta["store"].as_str().map(str::to_owned))
         .and_then(|text| Backend::parse(&text))
         .or(args.store)
-        .unwrap_or(Backend::Json);
+        .or_else(|| {
+            let products = ygg_store::detect(&run_dir);
+            if products.sqlite {
+                Some(Backend::Sqlite)
+            } else if products.json {
+                Some(Backend::Json)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(ygg_store::DEFAULT_BACKEND);
     let autosave = match backend {
         Backend::Json => run_dir.join(AUTOSAVE_FILE).display().to_string(),
         Backend::Sqlite => format!("{}#latest", run_dir.join(SQLITE_FILE_NAME).display()),
@@ -4012,6 +4027,10 @@ mod multiscript_hot_reload_tests {
     }
 
     /// 单发模式的宿主参数（`--drive none`：测试自己派发，不推 stdin）。
+    ///
+    /// `store` 钉住 `Some(Json)`：本模块断言的是内核状态与叙事（与存储无关），
+    /// 但后端一旦随默认值漂到 sqlite，热载失败会变成「sqlite 在某平台出问题」
+    /// 的假象。默认后端归 `persistence_reset_semantics_tests` 的 `r10*` 专测。
     fn args_for(dir: &Path, run_id: &str) -> Args {
         Args {
             mod_dir: Some(dir.to_path_buf()),
@@ -4024,7 +4043,7 @@ mod multiscript_hot_reload_tests {
             payload: None,
             drive: Drive::None,
             inbox: None,
-            store: None,
+            store: Some(ygg_store::Backend::Json),
         }
     }
 
@@ -4348,7 +4367,7 @@ mod persistence_reset_semantics_tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant, SystemTime};
-    use ygg_store::EVENTS_FILE;
+    use ygg_store::{EVENTS_FILE, SQLITE_FILE_NAME};
 
     /// 用例专属临时目录（互不共享；先清空再建）。
     fn case_dir(tag: &str) -> PathBuf {
@@ -4437,6 +4456,11 @@ end)
         .expect("写 config.json");
     }
 
+    /// `store` 钉住 `Some(Json)`：**本模块的断言全部读 `autosave.json` /
+    /// `events.jsonl`**（归档台账、事件行数、坏档注入都是 JSON 载体的形状），
+    /// 后端一旦随默认值翻成 sqlite，这些断言会成批变红或变成空真（空真更危险：
+    /// 归档列表恒空 = 「恰好归档一次」永远看不出漏归档）。
+    /// 默认后端（`store: None`）的回归是 `r10*` 系列，二者不合并。
     fn probe_args(mod_dir: &Path, runs_root: &Path, run_id: &str, resume: bool) -> Args {
         Args {
             mod_dir: Some(mod_dir.to_path_buf()),
@@ -4449,7 +4473,24 @@ end)
             payload: None,
             drive: Drive::None,
             inbox: None,
+            store: Some(ygg_store::Backend::Json),
+        }
+    }
+
+    /// 不传 `--store` 的宿主参数（`store: None`）：**默认后端专测面**。
+    ///
+    /// 只有 `r10*` 用它——既有用例都钉住 JSON（见 [`probe_args`]），把「后端
+    /// 是哪个」与「默认值是哪个」拆成两组测试，才能让「默认值改动」与「旧局
+    /// 兼容」各自有独立的判据。
+    fn probe_args_default_store(
+        mod_dir: &Path,
+        runs_root: &Path,
+        run_id: &str,
+        resume: bool,
+    ) -> Args {
+        Args {
             store: None,
+            ..probe_args(mod_dir, runs_root, run_id, resume)
         }
     }
 
@@ -4798,6 +4839,9 @@ end)
 
     /// R9a：旧局（`run.json` 没有 `store` 字段）→ 按产物推断为 `json`，续局成功且
     /// 开局后把事实**补写**进 `run.json`（单源落盘：只见一个键，不做双写）。
+    ///
+    /// 建局显式用 JSON（[`probe_args`] 已钉住）：本用例的主题是「旧局的**产物**
+    /// 推断」，不是「默认后端是哪个」——默认值归 `r10*`。
     #[test]
     fn r9a_legacy_run_without_store_fact_infers_json() {
         let dir = case_dir("r9a");
@@ -4834,6 +4878,8 @@ end)
 
     /// R9b：旧局（无 `store` 字段）+ `--store sqlite` → fail-closed，**零写入**。
     /// 产物探针说这是 json 局，旗标不得推翻盘上事实。
+    ///
+    /// 建局同样显式用 JSON（旧局回归的前提；默认后端归 `r10*`）。
     #[test]
     fn r9b_flag_conflicting_with_products_fails_closed() {
         let dir = case_dir("r9b");
@@ -5001,6 +5047,247 @@ end)
             0,
             "重置未成功就绝不允许新代事件写入"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ─────────── 默认后端（r-evo）：新局落 sqlite，旧局**绝不**被变更 ───────────
+    //
+    // 这组用例是「默认值」（`ygg_store::DEFAULT_BACKEND`）的唯一判据面：既有用例
+    // 全部钉住 JSON（见 [`probe_args`]），所以默认值退化不会把它们的红绿弄反。
+
+    /// R10a：空目录 + 不传 `--store` → 新局落默认后端 sqlite，且**不产任何 JSON 文件**。
+    #[cfg(feature = "store-sqlite")]
+    #[test]
+    fn r10a_fresh_run_defaults_to_sqlite() {
+        let dir = case_dir("r10a");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        let mut session = Session::open(&probe_args_default_store(
+            &mod_dir, &runs_root, "r10a", false,
+        ))
+        .expect("默认后端开局必须成功");
+        assert_eq!(
+            session.store.backend(),
+            ygg_store::Backend::Sqlite,
+            "空目录的新局必须落默认后端 sqlite"
+        );
+        let receipt = session.dispatch_event("event.start", "0");
+        assert_eq!(
+            receipt["ok"],
+            serde_json::json!(true),
+            "开局步必须成功：{receipt}"
+        );
+        let run_dir = runs_root.join("r10a");
+        assert!(
+            run_dir.join(SQLITE_FILE_NAME).exists(),
+            "默认后端必须真的建出 run.sqlite"
+        );
+        assert!(
+            !run_dir.join(AUTOSAVE_FILE).exists() && !run_dir.join(EVENTS_FILE).exists(),
+            "sqlite 局不得写出另一后端的产物"
+        );
+        drop(session);
+        let meta = super::read_meta(&run_dir.join(super::META_FILE)).expect("run.json");
+        assert_eq!(
+            meta["store"].as_str(),
+            Some("sqlite"),
+            "开局即把后端事实写进 run.json（权威面）"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R10b：`--store json` 仍是回退通道——空目录上写 JSON 产物、不建库。
+    #[test]
+    fn r10b_json_flag_new_run_writes_json_files() {
+        let dir = case_dir("r10b");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        let mut session = Session::open(&probe_args(&mod_dir, &runs_root, "r10b", false))
+            .expect("显式 --store json 必须可开新局");
+        assert_eq!(
+            session.store.backend(),
+            ygg_store::Backend::Json,
+            "旗标必须能压过默认值（回退通道）"
+        );
+        let receipt = session.dispatch_event("event.start", "0");
+        assert_eq!(
+            receipt["ok"],
+            serde_json::json!(true),
+            "开局步必须成功：{receipt}"
+        );
+        let run_dir = runs_root.join("r10b");
+        assert_eq!(event_line_count(&run_dir), 1, "json 局必须有事件行");
+        assert!(
+            !run_dir.join(SQLITE_FILE_NAME).exists(),
+            "--store json 不得建出 run.sqlite"
+        );
+        drop(session);
+        let meta = super::read_meta(&run_dir.join(super::META_FILE)).expect("run.json");
+        assert_eq!(
+            meta["store"].as_str(),
+            Some("json"),
+            "run.json 必须是事实值"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R10c：旧 JSON 局（`run.json` 无 `store`）+ 不传 `--store` → 仍按产品推断
+    /// `json`，**绝不**误建 `run.sqlite`（需求 2 的正面判据：改默认值不得改动旧局）。
+    #[test]
+    fn r10c_legacy_json_run_never_gets_sqlite_db() {
+        let dir = case_dir("r10c");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r10c");
+        let run_dir = runs_root.join("r10c");
+
+        // 复刻旧版本 CLI 写的目录：抹掉 store 事实，只留纯 JSON 产物。
+        let meta_path = run_dir.join(super::META_FILE);
+        let mut meta: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&meta_path).expect("读 run.json"))
+                .expect("run.json 是 JSON");
+        meta.as_object_mut().expect("对象").remove("store");
+        fs::write(&meta_path, meta.to_string()).expect("写回无 store 的 run.json");
+        let events_before = event_line_count(&run_dir);
+        let autosave_before = fs::read(run_dir.join(AUTOSAVE_FILE)).expect("读旧存档");
+
+        let session = Session::open(&probe_args_default_store(
+            &mod_dir, &runs_root, "r10c", true,
+        ))
+        .expect("旧 JSON 局必须仍可续局");
+        assert!(session.resumed, "旧局续局必须标记 resumed");
+        assert_eq!(
+            session.store.backend(),
+            ygg_store::Backend::Json,
+            "有 JSON 产物 → 必须推断 json（默认值不得压过产品探针）"
+        );
+        drop(session);
+
+        assert!(
+            !run_dir.join(SQLITE_FILE_NAME).exists(),
+            "旧 JSON 局绝不得被建出 run.sqlite（混代就不可逆了）"
+        );
+        assert_eq!(
+            event_line_count(&run_dir),
+            events_before,
+            "续局不得动旧事件"
+        );
+        assert_eq!(
+            fs::read(run_dir.join(AUTOSAVE_FILE)).expect("旧存档还在"),
+            autosave_before,
+            "续局不得重写旧存档"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R10d：旧 JSON 局 `--settle`（走 `run_settle` → `open_store_resolved`）仍落
+    /// json：报告写得出、无 `run.sqlite`。
+    #[test]
+    fn r10d_settle_on_legacy_json_run_stays_json() {
+        let dir = case_dir("r10d");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        new_game_with_one_step(&mod_dir, &runs_root, "r10d");
+        let run_dir = runs_root.join("r10d");
+        let meta_path = run_dir.join(super::META_FILE);
+        let mut meta: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&meta_path).expect("读 run.json"))
+                .expect("run.json 是 JSON");
+        meta.as_object_mut().expect("对象").remove("store");
+        fs::write(&meta_path, meta.to_string()).expect("写回无 store 的 run.json");
+
+        let mut args = probe_args_default_store(&mod_dir, &runs_root, "r10d", false);
+        args.settle = true;
+        // 只有 1 步、未到结局 → 结算不会给绿；本用例判定的是**后端**，不是结算结论。
+        let code = super::run_settle(&args, false);
+        assert_eq!(code, 1, "只有 1 步（未到结局）→ 结算不得给绿");
+
+        assert!(
+            run_dir.join(super::SETTLEMENT_FILE).exists(),
+            "结算报告必须写得出（旧局读得到自己的产品）"
+        );
+        assert!(
+            !run_dir.join(SQLITE_FILE_NAME).exists(),
+            "旧局 --settle 不得建库"
+        );
+        let store = super::open_store_resolved(&run_dir, None).expect("旧局仍须以 json 打开");
+        assert_eq!(
+            store.backend(),
+            ygg_store::Backend::Json,
+            "--settle 不得把旧局的后端翻成 sqlite"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R10e：新局（默认 sqlite）落定后，`--store json` 只是开局断言 → fail-closed。
+    /// 反向断言：拒绝不得删已有库、也不得写出另一后端的产物。
+    #[cfg(feature = "store-sqlite")]
+    #[test]
+    fn r10e_new_run_then_declared_fact_locks_backend() {
+        let dir = case_dir("r10e");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        let mut session = Session::open(&probe_args_default_store(
+            &mod_dir, &runs_root, "r10e", false,
+        ))
+        .expect("默认后端开局必须成功");
+        let receipt = session.dispatch_event("event.start", "0");
+        assert_eq!(
+            receipt["ok"],
+            serde_json::json!(true),
+            "开局步必须成功：{receipt}"
+        );
+        drop(session);
+        let run_dir = runs_root.join("r10e");
+        assert!(run_dir.join(SQLITE_FILE_NAME).exists(), "前提：新局已落库");
+
+        let args = probe_args(&mod_dir, &runs_root, "r10e", true); // store: Some(Json)
+        let message = expect_open_failure(
+            &args,
+            &[
+                "sqlite",
+                "json",
+                "run.json",
+                "--store",
+                "未做任何写入",
+                "换 --run-id",
+            ],
+        );
+        assert!(
+            message.contains("权威"),
+            "必须一句话讲清谁是权威：{message}"
+        );
+        assert!(
+            run_dir.join(SQLITE_FILE_NAME).exists(),
+            "拒绝开局不得删已有库（证据不删）"
+        );
+        assert!(
+            !run_dir.join(AUTOSAVE_FILE).exists() && !run_dir.join(EVENTS_FILE).exists(),
+            "拒绝开局不得写出另一后端的产物"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// R10f：回退构建（`--no-default-features`）下开新局 → fail-closed 报
+    /// 「未启用 sqlite」，且目录里不出现任何后端产物（默认后端不可用 **不**
+    /// 等于静默降级到 json——那样会在用户不知情时换掉崩溃承诺）。
+    #[cfg(not(feature = "store-sqlite"))]
+    #[test]
+    fn r10f_default_sqlite_without_feature_fails_closed() {
+        let dir = case_dir("r10f");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        expect_open_failure(
+            &probe_args_default_store(&mod_dir, &runs_root, "r10f", false),
+            &["未启用 sqlite 后端", "--no-default-features"],
+        );
+        let run_dir = runs_root.join("r10f");
+        for product in [AUTOSAVE_FILE, EVENTS_FILE, SQLITE_FILE_NAME] {
+            assert!(
+                !run_dir.join(product).exists(),
+                "回退构建不得静默落到某一后端（出现了 {product}）"
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 }

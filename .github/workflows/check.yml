@@ -114,10 +114,14 @@ jobs:
       - name: cargo test（agent example）
         run: cargo test --example agent -p ygg-sandbox
 
-  # sqlite 后端的独立门禁：主 rust job 走默认特征（不编
-  # sqlite），这里显式开 store-sqlite 覆盖另一半代码面，
-  # 并加结构守卫。缓存按 key 与 rust job 分开，否则两套
-  # target/ 产物会互踩。
+  # 存储后端的独立门禁：r-evo 起默认特征已含 sqlite（主 rust job
+  # 会编 rusqlite），本 job 补主 job 覆盖不到的两件事：
+  #   ① ygg-store 自身的 `--features sqlite` 包级测试（crate 的
+  #      default 仍是空，不显式开就不编 sqlite 那半边）；
+  #   ② **回退构建**（`--no-default-features`）必须仍可编译，且
+  #      `--store sqlite` fail-closed——默认值翻面后的新风险面。
+  # 另加结构守卫（dev-dep 纪律 / preserve_order）。缓存按 key 与
+  # rust job 分开，否则两套 target/ 产物会互踩。
   store-sqlite:
     runs-on: ubuntu-latest
     steps:
@@ -146,20 +150,31 @@ jobs:
           cargo clippy -p ygg-store --features sqlite \
             --all-targets -- -D warnings
 
-      - name: "Guard — 宿主 example 在 store-sqlite 特征下可编译"
-        run: cargo build -p ygg-sandbox --example agent --features store-sqlite
+      # r-evo 前这里是 `--features store-sqlite`：默认值翻面后它与不带
+      # 旗标等价（恒真、不再有信息量）。真正的新风险面反过来是**关掉**
+      # sqlite 的回退构建，所以守卫翻转：能编，且 example 单测（含 r10f
+      # 的 fail-closed 断言）能跑。
+      - name: "Guard — 宿主 example 在 --no-default-features 下可编译"
+        run: cargo build -p ygg-sandbox --example agent --no-default-features
+
+      - name: "Guard — 回退构建的默认后端必须 fail-closed（r10f）"
+        run: cargo test --example agent -p ygg-sandbox --no-default-features
 
       # 结构守卫（不是 playbook 门禁命令）：ygg-store 必须
       # 留在 dev-dependencies。挪进 [dependencies] 会让依赖者
       # （wasm/lint）间接吃到 rusqlite，wasm 体积与 lint 的
       # 纯净面同时破——这条守卫让它在 PR 时立刻红。
-      - name: "Guard — wasm/lint 不得间接依赖 sqlite"
+      # r-evo 加强：-e normal 才是「运行期依赖」的准确语义
+      # （-e features 会把 `ygg-sandbox feature "store-sqlite"`
+      # 这类标签当噪声命中），并把包名 `ygg-store` 一并守住
+      # （默认特征转发到 dev-dep 合法，但只能**空指向**）。
+      - name: "Guard — wasm/lint 不得间接依赖 store/sqlite"
         run: |
           fail=0
           for pkg in ygg-wasm ygg-lint; do
-            if cargo tree -p "$pkg" -e features \
-              | grep -Eq 'rusqlite|libsqlite3-sys'; then
-              echo "::error::$pkg must not depend on sqlite" >&2
+            if cargo tree -p "$pkg" -e normal \
+              | grep -Eq 'rusqlite|libsqlite3-sys|ygg-store v'; then
+              echo "::error::$pkg must not depend on ygg-store/rusqlite" >&2
               fail=1
             fi
           done
