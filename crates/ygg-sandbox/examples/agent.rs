@@ -125,16 +125,17 @@
 
 use std::cell::{Cell, RefCell};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
+use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::host_contract::{
-    sanitize_field, AgentContract, DriveLimits, InboxRoutes, SettlementPolicy, WriteShape,
-    CONTRACT_DOC,
+    join_segments, require_tool_allowlist, sanitize_field, AgentContract, DriveLimits, InboxRoutes,
+    SettlementPolicy, ToolAccess, ToolKind, ToolRegistry, ToolSpec, WriteShape, CONTRACT_DOC,
 };
 use ygg_sandbox::modload::ModBundle;
 // 持久化端口（`crates/ygg-store`）：状态事实（存档 / 事件日志 / inbox / 位移 /
@@ -169,9 +170,39 @@ const MOD_SOURCE_FILE: &str = "mod.lua";
 const MANIFEST_FILE: &str = "manifest.json";
 const PACK_FILE: &str = "pack.json";
 
+// ---- 工具执行器的宿主侧常量（不是契约：契约在 pack.json / data/config.json） ----
+
+/// 在飞工具的事实面（只落**未解析模板**，绝不落 `$ENV{}` 解析后的值）。
+const PENDING_TOOLS_FILE: &str = "pending_tools.json";
+/// 工具结果暂存目录（`<run 目录>/tool_results/<call_id>.json`）。
+const TOOL_RESULTS_DIR: &str = "tool_results";
+/// 一条派发链里的工具回投上限（工具结果事件里再请求工具 = 新的一轮）。
+const MAX_TOOL_ROUNDS: usize = 4;
+/// 工具结果轮询间隔（与 `DECIDE_POLL_INTERVAL` 同值同源）。
+const TOOL_POLL_INTERVAL: Duration = Duration::from_millis(20);
+/// 单个参数（含 `$ENV{}` 解析后的值）的字节上限（防凭据被当载荷走私）。
+const MAX_TOOL_ARG_BYTES: usize = 8_192;
+/// `--wait-tools` 的等待上限缺省（毫秒）。
+const WAIT_TOOLS_DEFAULT_MS: u64 = 120_000;
+/// 交付认领的宽限（毫秒）：父进程的等待窗口结束后再多给这么多，才让 worker 认领。
+///
+/// 为什么需要：worker 写完结果文件后会立刻尝试认领。若它比父进程的轮询
+/// （`TOOL_POLL_INTERVAL`）先一步，场景 1（同进程就地回投）就永远不会发生
+/// ——快工具（<20ms）会全部变成「脱体」。worker 因此等「父进程窗口 + 宽限」
+/// 过去再认领：父进程活着就它赢（场景 1），父进程已放弃 / 崩溃才轮到
+/// worker（场景 2）。`inlineWaitMs == 0` 时宽限也为 0（父进程根本不轮询）。
+const TOOL_CLAIM_SLACK_MS: u64 = 100;
+/// `--wait-tools` 的心跳间隔（只在 stderr 上报，不影响状态）。
+const WAIT_TOOLS_HEARTBEAT: Duration = Duration::from_secs(1);
+
 fn main() {
     let args = parse_args();
-    let code = if args.inbox.is_some() {
+    let code = if let Some(call_id) = &args.run_tool_worker {
+        // 内部模式（不在 usage 里列出）：一次工具调用的执行体。
+        run_tool_worker(&args, call_id)
+    } else if args.wait_tools {
+        run_wait_tools(&args)
+    } else if args.inbox.is_some() {
         run_inbox_append(&args)
     } else if args.settle {
         run_settle(&args, false)
@@ -200,6 +231,7 @@ struct InboxWrite {
     value: String,
 }
 
+#[derive(Clone)]
 struct Args {
     mod_dir: Option<PathBuf>,
     run_id: String,
@@ -217,6 +249,12 @@ struct Args {
     /// `--store`：**开局断言**（`run.json` 的 `store` 字段才是权威事实）。
     /// `None` = 未指定（旧局按产物推断，新局落 `ygg_store::DEFAULT_BACKEND` = sqlite）。
     store: Option<Backend>,
+    /// `--wait-tools`：等本局在飞工具全部落地后 drain 一次 inbox 并打印回执。
+    wait_tools: bool,
+    /// `--tool-timeout <ms>`：`--wait-tools` 的总等待上限（缺省 120_000）。
+    tool_timeout_ms: Option<u64>,
+    /// 内部模式：工具 worker（`--run-tool-worker <call_id>`）。不对外宣传、不在 usage 里列出。
+    run_tool_worker: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -231,6 +269,9 @@ fn parse_args() -> Args {
     let mut drive = Drive::Stdin;
     let mut inbox: Option<InboxWrite> = None;
     let mut store: Option<Backend> = None;
+    let mut wait_tools = false;
+    let mut tool_timeout_ms: Option<u64> = None;
+    let mut run_tool_worker: Option<String> = None;
 
     // 写 inbox 的七个参数共享同一套「只能给一个」的校验。
     fn set_inbox(inbox: &mut Option<InboxWrite>, flag: &'static str, value: String) {
@@ -279,6 +320,27 @@ fn parse_args() -> Args {
             "--conflict" => set_inbox(&mut inbox, "conflict", next_value(&mut iter, "--conflict")),
             "--resolve" => set_inbox(&mut inbox, "resolve", next_value(&mut iter, "--resolve")),
             "--proposal" => set_inbox(&mut inbox, "proposal", next_value(&mut iter, "--proposal")),
+            // 工具结果的写命令与 `--requirement` 完全同一条路径：旗标是否可用由
+            // Mod 的 `inboxRoutes.<kind>.write.flag` 声明决定（宿主不枚举 kind）。
+            "--tool-result" => set_inbox(
+                &mut inbox,
+                "tool-result",
+                next_value(&mut iter, "--tool-result"),
+            ),
+            "--wait-tools" => wait_tools = true,
+            "--tool-timeout" => {
+                let text = next_value(&mut iter, "--tool-timeout");
+                match text.trim().parse::<u64>() {
+                    Ok(value) if value > 0 => tool_timeout_ms = Some(value),
+                    _ => usage_error(&format!(
+                        "--tool-timeout 需要正整数的毫秒数（当前是 `{text}`）"
+                    )),
+                }
+            }
+            // 内部模式：父进程 spawn 自己时用（不在 usage 里列出）。
+            "--run-tool-worker" => {
+                run_tool_worker = Some(next_value(&mut iter, "--run-tool-worker"))
+            }
             "-h" | "--help" => usage(0),
             other => usage_error(&format!("未知参数 `{other}`")),
         }
@@ -293,17 +355,23 @@ fn parse_args() -> Args {
     if settle && event.is_some() {
         usage_error("--settle 与 --event 不能同时使用");
     }
+    if wait_tools && (settle || event.is_some()) {
+        usage_error("--wait-tools 与 --event / --settle 不能同时使用");
+    }
+    if tool_timeout_ms.is_some() && !wait_tools {
+        usage_error("--tool-timeout 只能与 --wait-tools 一起用");
+    }
     if let Some(write) = &inbox {
-        if settle || event.is_some() {
+        if settle || event.is_some() || wait_tools {
             usage_error(
-                "inbox 操作（--requirement / --proposal / …）与 --event / --settle 不能同时使用",
+                "inbox 操作（--requirement / --proposal / --tool-result / …）与 --event / --settle / --wait-tools 不能同时使用",
             );
         }
         if write.value.trim().is_empty() {
             usage_error(&format!("--{} 需要非空载荷", write.flag));
         }
-    } else if !settle && mod_dir.is_none() {
-        usage_error("缺少 --mod <mod目录>（仅 --settle / inbox 操作可省略）");
+    } else if !settle && !wait_tools && run_tool_worker.is_none() && mod_dir.is_none() {
+        usage_error("缺少 --mod <mod目录>（仅 --settle / inbox 操作 / --wait-tools 可省略）");
     }
     if let Some(name) = &event {
         if name.trim().is_empty() {
@@ -323,6 +391,9 @@ fn parse_args() -> Args {
         drive,
         inbox,
         store,
+        wait_tools,
+        tool_timeout_ms,
+        run_tool_worker,
     }
 }
 
@@ -378,7 +449,12 @@ fn usage(code: i32) -> ! {
                      不读写 autosave，可在别一进程跑本局时安全并发调用
                      （旗标是否可用由 Mod 的 inboxRoutes.<kind>.write 声明）
   --amend <串>       --split <串>    --merge <串>    --conflict <串>
-  --resolve <串>     --proposal <串>（同上：只在 Mod 声明了对应 write 时可用）
+  --resolve <串>     --proposal <串>
+  --tool-result <串> 只把工具结果 wire payload 追加到本局后端的 inbox 后退出
+                     （kind / 字段 / 写入形态由 Mod 的 inboxRoutes 声明；场景 2 的补票入口）
+  --wait-tools       等本局在飞工具全部落地（结果由脱体 worker 写 inbox）后消费一次
+                     inbox 并打印回执；**不重置本局、不推进状态**（只观察）
+  --tool-timeout <ms> --wait-tools 的总等待上限（缺省 120000）
   --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）
   --store <后端>     存储后端断言：sqlite（默认，<run 目录>/run.sqlite）|
                      json（兼容后端，autosave.json + events.jsonl）。run.json 的
@@ -771,8 +847,18 @@ struct Session {
     /// 结算口径（`config.json` 的 `settlement` 段；装载期校验 = 缺段即拒绝启动，
     /// 不把「口径缺失」推迟到结算那一刻才暴露）。
     settlement: SettlementPolicy,
+    /// 工具声明（`pack.json` 的 `tools` 段；装载期校验，热载时随之刷新）。
+    /// 空 = 本 Mod 不请求外部工具（既有 Mod 零改动照常工作）。
+    tools: ToolRegistry,
+    /// 本局放行清单（`config.json` 的 `allowedTools`；空 = 不允许任何工具）。
+    tool_access: ToolAccess,
+    /// 当前派发链的工具回投深度（`1..=MAX_TOOL_ROUNDS`）。用 `Rc<Cell<_>>` 是为了
+    /// 让 `Drop` guard 能归零（函数体用 `&mut self`，无法用借用式 guard）。
+    tool_depth: Rc<Cell<usize>>,
     mod_label: String,
     run_dir: PathBuf,
+    /// runs 根目录（脱体 worker 需要重建 `--runs-root`，从 run_dir 反推不可靠）。
+    runs_root: PathBuf,
     /// 持久化端口（JSON 文件 / sqlite 库）。**状态事实的唯一入口**：存档、
     /// 事件日志、inbox、位移、重置都经它；锁与 run.json / settlement.json /
     /// coordination.* 仍在本文件（端口内不得出现任何锁原语）。
@@ -797,6 +883,15 @@ struct Session {
 const DRAIN_SLOW_WARN_MS: u128 = 1_000;
 
 /// `reset_artifacts` 的裁决结果（resume 失败路径与显式新局路径共用）。
+/// 开局模式（`--wait-tools` 只观察，**不得**重置别人的局）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenMode {
+    /// 常规开局：`--resume` 续局，否则按新局重置。
+    Normal,
+    /// 只观察：一律读档，读不到就报错（零写入）——`--wait-tools` 专用。
+    ResumeOnly,
+}
+
 enum ResetOutcome {
     /// 已执行重置（含目录本就干净的初次建代）；`had_old` = 目录里本来有旧产物
     /// （显式新局回执用它提示「已有旧产物，按新局重置」）。
@@ -809,6 +904,11 @@ enum ResetOutcome {
 impl Session {
     /// 开局：读盘装载 → 建 run 目录 → 续局或重置 → 定 seq → 落元信息。
     fn open(args: &Args) -> Result<Self, String> {
+        Self::open_mode(args, OpenMode::Normal)
+    }
+
+    /// 开局（带模式）：`ResumeOnly` = 只观察（`--wait-tools`）。
+    fn open_mode(args: &Args, mode: OpenMode) -> Result<Self, String> {
         let Some(mod_dir) = args.mod_dir.clone() else {
             return Err("缺少 --mod <mod目录>".to_owned());
         };
@@ -824,6 +924,12 @@ impl Session {
         let config_rel = agent_config_path(&mod_dir);
         let limits = DriveLimits::load(&mod_dir.join(&config_rel))?;
         let settlement = SettlementPolicy::load(&mod_dir.join(&config_rel))?;
+        // 两层工具白名单也在装载期现读：Layer 1（`tools`）定形状与能力，
+        // Layer 2（`allowedTools`）定本局放行清单；声明的工具未被放行即拒绝启动
+        // （I6：不把半声明推迟到执行时）。两层都缺失 = 工具能力不可用（合法）。
+        let tools = ToolRegistry::load(&mod_dir)?;
+        let tool_access = ToolAccess::load(&mod_dir.join(&config_rel))?;
+        require_tool_allowlist(&tools, &tool_access, &mod_dir.join(&config_rel))?;
         // 存储后端裁决（`run.json` 的 `store` 是权威事实，`--store` 只是开局断言）：
         // **必须在任何写入之前**（含 create_dir_all / 建库），不一致就零写入失败。
         let declared = read_meta(&run_dir.join(META_FILE))
@@ -848,11 +954,15 @@ impl Session {
             inbox_routes,
             limits,
             settlement,
+            tools,
+            tool_access,
+            tool_depth: Rc::new(Cell::new(0)),
             mod_label: mod_dir.display().to_string(),
             store,
             meta_path: run_dir.join(META_FILE),
             inbox_path: run_dir.join(INBOX_FILE),
             run_dir,
+            runs_root: args.runs_root.clone(),
             kernel,
             signature,
             notices: Vec::new(),
@@ -866,7 +976,14 @@ impl Session {
         // 存档，否则旧版工具可能先看到一个无后端声明的目录。
         session.write_meta();
         session.cleanup_stale_tmp();
-        if args.resume {
+        if mode == OpenMode::ResumeOnly {
+            // 只观察面（`--wait-tools`）：读档失败就是失败，**不**按新局重置
+            // ——那会把别人正在跑的局清掉（零写入）。
+            session.load_autosave().map_err(|message| {
+                format!("{message}；--wait-tools 只观察不重置（不按新局开局）")
+            })?;
+            session.resumed = true;
+        } else if args.resume {
             match session.load_autosave() {
                 Ok(()) => session.resumed = true,
                 Err(message) => match session.reset_artifacts(true) {
@@ -1005,6 +1122,11 @@ impl Session {
                 session.notices.push(notice);
             }
             session.notices.extend(info.warnings);
+            // 工具事实面属于本代：重置同时清空在飞调用与结果暂存，否则新局会看到
+            // 上一代的 pending 条目（父进程早死 → `--wait-tools` 永久 PENDING）。
+            // 只告警不阻断（与 `cleanup_stale_tmp` 同纪律：真正的屏障是原子替换）。
+            let _ = fs::remove_file(session.run_dir.join(PENDING_TOOLS_FILE));
+            let _ = fs::remove_dir_all(session.run_dir.join(TOOL_RESULTS_DIR));
             Ok(ResetOutcome::Reset {
                 had_old: info.had_old,
             })
@@ -1287,17 +1409,33 @@ impl Session {
             let inbox_routes = InboxRoutes::load(&self.mod_dir)?;
             let limits = DriveLimits::load(&self.mod_dir.join(&self.config_rel))?;
             let settlement = SettlementPolicy::load(&self.mod_dir.join(&self.config_rel))?;
-            restore_from(&bundle, save_text.as_bytes())
-                .map(|kernel| (kernel, contract, inbox_routes, limits, settlement))
+            // 工具白名单也是契约：热载同一把尺（半声明 / 未放行 = 整体热载失败，
+            // 不存在「内核换了、工具声明沿用旧的」半更新态）。
+            let tools = ToolRegistry::load(&self.mod_dir)?;
+            let tool_access = ToolAccess::load(&self.mod_dir.join(&self.config_rel))?;
+            require_tool_allowlist(&tools, &tool_access, &self.mod_dir.join(&self.config_rel))?;
+            restore_from(&bundle, save_text.as_bytes()).map(|kernel| {
+                (
+                    kernel,
+                    contract,
+                    inbox_routes,
+                    limits,
+                    settlement,
+                    tools,
+                    tool_access,
+                )
+            })
         });
         match outcome {
-            Ok((kernel, contract, inbox_routes, limits, settlement)) => {
+            Ok((kernel, contract, inbox_routes, limits, settlement, tools, tool_access)) => {
                 self.kernel = kernel;
-                // 换了 Mod 就换了契约（事件名 / inbox 路由 / 摘要约定 / 推进阈值）。
+                // 换了 Mod 就换了契约（事件名 / inbox 路由 / 摘要约定 / 推进阈值 / 工具声明）。
                 self.contract = contract;
                 self.inbox_routes = inbox_routes;
                 self.limits = limits;
                 self.settlement = settlement;
+                self.tools = tools;
+                self.tool_access = tool_access;
                 self.summary_cache = None;
                 self.reload = Some(Reload {
                     reloaded: true,
@@ -1397,12 +1535,31 @@ impl Session {
             self.state_envelope()["pendingChoice"].clone()
         };
 
-        let receipt = self.build_receipt(name, seq, &envelope, &narrative, ending_line, pending);
+        // 工具请求（I1：内核只见瞬态 `meta.tool_calls`；结果以**普通事件**回投）。
+        //
+        // 必须在 `build_receipt` **之前**跑完：回执会 `mem::take` 掉 notices（R7）。
+        // 失败步不跑工具：工具只服务成功派发（半个状态上的副作用最难查）。
+        let tool_runs = if ok {
+            self.run_tool_requests(&envelope, seq)
+        } else {
+            Vec::new()
+        };
+
+        let mut receipt =
+            self.build_receipt(name, seq, &envelope, &narrative, ending_line, pending);
+        if !tool_runs.is_empty() {
+            receipt["tools"] = json!(tool_runs);
+        }
         self.reload = None;
         receipt
     }
 
     /// 单发 / 交互统一回执（stdout 契约本体）。
+    ///
+    /// **`seq` 语义**：这里是**本步**的 seq。若本步的 `meta.tool_calls` 在
+    /// `inlineWaitMs` 内落地（场景 1），结果事件会再提交一步——外层回执的 `seq`
+    /// 与回执里 `tools[].seq` 因此可能相差 ≥1（不是「seq 不连续」，而是「同一次
+    /// 用户动作产生了多步事件」）。场景 2 的结果 seq 由后续 drain 的派发出现。
     fn build_receipt(
         &mut self,
         name: &str,
@@ -1448,6 +1605,1154 @@ impl Session {
             receipt["hotReload"] = reload.to_json();
         }
         receipt
+    }
+}
+
+// ============================================================================
+// §工具执行器（场景 1 同进程回投 / 场景 2 脱体 worker + inbox 回写）
+//
+// 设计要点（实现计划 §5.1 的 DC-1 修正）：
+//   ① 真实子进程**只在 worker 里 spawn 一次**——父进程超时后不 kill、不重跑
+//      （I3：非幂等工具的单次执行语义不能被「等不及」打破）；
+//   ② `pending_tools.json` 只落**未解析模板**（I4：`$ENV{}` 的值绝不落盘）；
+//   ③ 两条路径产出**同一 wire 载荷**（I5：Mod 侧只有一套解析）：
+//      `<call_id>|<tool_id>|<status>|<code>|<output>|<external_id>`；
+//   ④ 工具进程的启动与等待**全部在 `coordination.lock` 锁外**（I2 / R1——锁内
+//      只做「读一个 json + 写一个 json」）；
+//   ⑤ 交付责任用 `tool_results/<call_id>.claim`（`O_EXCL`）只认领一次：
+//      父进程认领 = 就地 `dispatch_event`（场景 1）；worker 认领 = 写 inbox（场景 2）。
+// ============================================================================
+
+/// 一条 `meta.tool_calls` 请求（Mod 声明 → 宿主执行）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolRequest {
+    /// 调用 id（缺省 = `<run_id>-<seq>-<index>`；它同时是结果文件名）。
+    id: String,
+    /// 工具 id（`pack.json` 的 `tools` 段的键）。
+    tool: String,
+    /// `{{key}}` 占位值（只放 Mod 给的标量，非凭据）。
+    args: Vec<(String, String)>,
+}
+
+/// call_id 白名单：`[A-Za-z0-9._-]`、1..=64 字节（它同时是 `tool_results/` 的文件名）。
+fn is_valid_call_id(call_id: &str) -> bool {
+    !call_id.is_empty()
+        && call_id.len() <= 64
+        && call_id != "."
+        && call_id != ".."
+        && call_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// JSON 值的类型名（错误文案用；不透传原值）。
+fn json_type_name(value: &Json) -> &'static str {
+    match value {
+        Json::Null => "null",
+        Json::Bool(_) => "布尔",
+        Json::Number(_) => "数字",
+        Json::String(_) => "字符串",
+        Json::Array(_) => "数组",
+        Json::Object(_) => "对象",
+    }
+}
+
+/// `meta.tool_calls` 解析（容错：坏条目只丢该条，绝不把整步判失败）。
+///
+/// 返回 `(请求清单, 警告清单)`：警告由调用方收进 `self.notices`（回执 warnings）。
+fn parse_tool_calls(meta: &Json, prefix: &str) -> (Vec<ToolRequest>, Vec<String>) {
+    let mut requests = Vec::new();
+    let mut notices = Vec::new();
+    let Some(value) = meta.get("tool_calls") else {
+        return (requests, notices);
+    };
+    let Some(items) = value.as_array() else {
+        notices.push(format!(
+            "meta.tool_calls 必须是数组（当前是 {}），已忽略",
+            json_type_name(value)
+        ));
+        return (requests, notices);
+    };
+    for (index, item) in items.iter().enumerate() {
+        match parse_tool_call(item, &format!("{prefix}-{index}")) {
+            Ok(request) => requests.push(request),
+            Err(message) => notices.push(format!(
+                "meta.tool_calls 第 {} 项：{message}（已跳过）",
+                index + 1
+            )),
+        }
+    }
+    (requests, notices)
+}
+
+/// 单条工具请求解析（`args` 只接受标量；值必须 wire 安全）。
+fn parse_tool_call(value: &Json, fallback_id: &str) -> Result<ToolRequest, String> {
+    let Some(object) = value.as_object() else {
+        return Err("不是对象".to_owned());
+    };
+    let tool = object
+        .get("tool")
+        .and_then(Json::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .ok_or_else(|| "缺 `tool`（必需，非空字符串）".to_owned())?;
+    let id = match object.get("id").and_then(Json::as_str).map(str::trim) {
+        Some(text) if is_valid_call_id(text) => text.to_owned(),
+        Some(text) if !text.is_empty() => {
+            return Err(format!(
+                "`id` 不是合法 call_id（只允许 1..=64 字节 `[A-Za-z0-9._-]`，当前是 `{text}`）"
+            ))
+        }
+        _ => fallback_id.to_owned(),
+    };
+    let args = match object.get("args") {
+        None | Some(Json::Null) => Vec::new(),
+        // Lua 空表会序列化成 `[]`（`src/host_api.rs` 的已文档化怪癖）：`[]` = 空参数。
+        Some(Json::Array(items)) if items.is_empty() => Vec::new(),
+        Some(Json::Object(table)) => {
+            let mut args = Vec::with_capacity(table.len());
+            for (key, entry) in table {
+                let key = key.trim();
+                if key.is_empty() || key.chars().any(char::is_control) {
+                    return Err("`args` 的键不得为空或含控制字符".to_owned());
+                }
+                let text = match entry {
+                    Json::String(text) => text.clone(),
+                    Json::Number(number) => number.to_string(),
+                    Json::Bool(flag) => flag.to_string(),
+                    Json::Null => String::new(),
+                    other => {
+                        return Err(format!(
+                            "`args.{key}` 只能是标量（当前是 {}：嵌套参数请拆成多个标量）",
+                            json_type_name(other)
+                        ))
+                    }
+                };
+                if text.contains('|') {
+                    return Err(format!(
+                        "`args.{key}` 含 `|`（wire format 的段分隔符，会打碎回投载荷）"
+                    ));
+                }
+                if text.contains(['\n', '\r', '\0']) {
+                    return Err(format!(
+                        "`args.{key}` 含换行或控制字符（wire format 的行边界）"
+                    ));
+                }
+                if text.len() > MAX_TOOL_ARG_BYTES {
+                    return Err(format!(
+                        "`args.{key}` 超过 {MAX_TOOL_ARG_BYTES} 字节（防凭据走私）"
+                    ));
+                }
+                args.push((key.to_owned(), text));
+            }
+            args
+        }
+        Some(other) => {
+            return Err(format!(
+                "`args` 必须是字符串键的对象（Lua 空表会序列化成 `[]`；当前是 {}）",
+                json_type_name(other)
+            ))
+        }
+    };
+    Ok(ToolRequest {
+        id,
+        tool: tool.to_owned(),
+        args,
+    })
+}
+
+/// 环境变量三层巢（解析序：进程环境 > `<mod>/.env.local` > `<mod>/.env`）。
+struct EnvTable {
+    process: Vec<(String, String)>,
+    env_local: Vec<(String, String)>,
+    env: Vec<(String, String)>,
+}
+
+impl EnvTable {
+    fn lookup(&self, key: &str) -> Option<&str> {
+        for table in [&self.process, &self.env_local, &self.env] {
+            if let Some((_, value)) = table.iter().find(|(name, _)| name == key) {
+                return Some(value);
+            }
+        }
+        None
+    }
+}
+
+/// 读三层环境变量（Mod 目录缺 `.env*` → 空表，不报错；缺失在解析处才报）。
+///
+/// **不**读 CWD 的 `.env`：run 目录在 `runs/` 下、可能被提交，CWD 不可控。
+fn load_env_table(mod_dir: Option<&Path>) -> EnvTable {
+    EnvTable {
+        process: std::env::vars().collect(),
+        env_local: mod_dir.map_or_else(Vec::new, |dir| read_env_file(&dir.join(".env.local"))),
+        env: mod_dir.map_or_else(Vec::new, |dir| read_env_file(&dir.join(".env"))),
+    }
+}
+
+/// 读一个 `.env` 文件（不存在 = 空表）。
+fn read_env_file(path: &Path) -> Vec<(String, String)> {
+    fs::read_to_string(path)
+        .map(|text| parse_env_file(&text))
+        .unwrap_or_default()
+}
+
+/// `.env` 词法：`KEY=VALUE`，跳过 `#` 与空行，容忍 `export ` 前缀，剥一层引号。
+fn parse_env_file(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let legal = !key.is_empty()
+            && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !key.starts_with(|c: char| c.is_ascii_digit());
+        if !legal {
+            continue;
+        }
+        out.push((key.to_owned(), strip_quotes(value.trim()).to_owned()));
+    }
+    out
+}
+
+/// 剥一层引号（`"x"` / `'x'` → `x`）。
+fn strip_quotes(value: &str) -> &str {
+    for quote in ['"', '\''] {
+        if value.len() >= 2 && value.starts_with(quote) && value.ends_with(quote) {
+            return &value[1..value.len() - 1];
+        }
+    }
+    value
+}
+
+/// `$ENV{VAR}` 解析（错误文案**只出现变量名**，绝不出现值）。
+fn resolve_env(name: &str, env: &EnvTable) -> Result<String, String> {
+    env.lookup(name)
+        .map(str::to_owned)
+        .ok_or_else(|| format!("$ENV{{{name}}} 未设置（已查 进程环境 / .env.local / .env）"))
+}
+
+/// 模板替换：`{{key}}` 取请求参数，`$ENV{VAR}` 取环境变量。
+fn substitute(template: &str, args: &[(String, String)], env: &EnvTable) -> Result<String, String> {
+    let bytes = template.as_bytes();
+    let mut out = String::with_capacity(template.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"{{") {
+            let rest = &template[index + 2..];
+            let Some(end) = rest.find("}}") else {
+                return Err("模板里的 `{{` 未闭合".to_owned());
+            };
+            let key = rest[..end].trim();
+            let Some((_, value)) = args.iter().find(|(name, _)| name == key) else {
+                return Err(format!("占位符 {}{}{} 未提供", "{{", key, "}}"));
+            };
+            out.push_str(value);
+            index += 2 + end + 2;
+            continue;
+        }
+        if bytes[index..].starts_with(b"$ENV{") {
+            let rest = &template[index + 5..];
+            let Some(end) = rest.find('}') else {
+                return Err("模板里的 `$ENV{` 未闭合".to_owned());
+            };
+            out.push_str(&resolve_env(&rest[..end], env)?);
+            index += 5 + end + 1;
+            continue;
+        }
+        let ch = template[index..].chars().next().unwrap_or('?');
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+    Ok(out)
+}
+
+/// 父进程侧的展开预检：占位与环境变量现在就能解析、且解析后仍 wire 安全。
+///
+/// 只用于**早报错**（把工具从本步剔掉）；真正执行在 worker 里重新解析，
+/// 解析结果不落盘、不进日志（I4）。
+fn validate_expansion(
+    spec: &ToolSpec,
+    args: &[(String, String)],
+    env: &EnvTable,
+) -> Result<(), String> {
+    let mut templates: Vec<&str> = spec.args.iter().map(String::as_str).collect();
+    if let Some(url) = &spec.url {
+        templates.push(url);
+    }
+    if let Some(body) = &spec.body_template {
+        templates.push(body);
+    }
+    for (_, value) in &spec.headers {
+        templates.push(value);
+    }
+    for template in templates {
+        let expanded = substitute(template, args, env)
+            .map_err(|message| format!("工具 `{}` 的{message}，已跳过", spec.id))?;
+        if expanded.len() > MAX_TOOL_ARG_BYTES {
+            return Err(format!(
+                "工具 `{}` 的一个参数解析后超过 {MAX_TOOL_ARG_BYTES} 字节（防凭据走私），已跳过",
+                spec.id
+            ));
+        }
+        if expanded.contains(['\n', '\r', '\0']) {
+            return Err(format!(
+                "工具 `{}` 的参数解析后含换行或控制字符（会破坏 wire format），已跳过",
+                spec.id
+            ));
+        }
+        if expanded.contains('|') {
+            return Err(format!(
+                "工具 `{}` 的参数解析后含 `|`（会破坏 wire format），已跳过",
+                spec.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 工具输出清洗：`|` → 全角、换行 / NUL → 空格、按 `max_bytes` 在**字符边界**截断。
+fn sanitize_tool_output(text: &str, max_bytes: usize) -> String {
+    let cleaned: String = text
+        .chars()
+        .filter(|ch| *ch != '\0')
+        .map(|ch| match ch {
+            '|' => '｜',
+            '\n' | '\r' => ' ',
+            other => other,
+        })
+        .collect();
+    let (mut out, truncated) = truncate_bytes(&cleaned, max_bytes);
+    if truncated {
+        out.push_str("…[truncated]");
+    }
+    out.trim().to_owned()
+}
+
+/// 按字节上限截断（落在字符中间时回退到边界；返回是否发生截断）。
+fn truncate_bytes(text: &str, max_bytes: usize) -> (String, bool) {
+    if text.len() <= max_bytes {
+        return (text.to_owned(), false);
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (text[..end].to_owned(), true)
+}
+
+/// 一次工具执行的结局（status ∈ `ok` | `err`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolOutcome {
+    status: &'static str,
+    code: String,
+    output: String,
+}
+
+impl ToolOutcome {
+    fn error(code: &str, message: String, max_output_bytes: usize) -> Self {
+        Self {
+            status: "err",
+            code: code.to_owned(),
+            output: sanitize_tool_output(&message, max_output_bytes),
+        }
+    }
+}
+
+/// 一条在飞调用的**完整模板**（落 `pending_tools.json`；不落解析值）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingCall {
+    call_id: String,
+    tool: String,
+    kind: ToolKind,
+    program: Option<String>,
+    args: Vec<String>,
+    method: Option<String>,
+    url: Option<String>,
+    headers: Vec<(String, String)>,
+    body_template: Option<String>,
+    placeholders: Vec<(String, String)>,
+    timeout_ms: u64,
+    max_output_bytes: usize,
+    result_event: String,
+    deadline_unix_ms: u128,
+    started_at_unix_ms: u128,
+    /// 场景 1 的等待窗口（worker 认领前的宽限基准）。
+    inline_wait_ms: u64,
+    root: usize,
+}
+
+impl PendingCall {
+    fn from_spec(
+        spec: &ToolSpec,
+        request: &ToolRequest,
+        deadline_unix_ms: u128,
+        root: usize,
+    ) -> Self {
+        Self {
+            call_id: request.id.clone(),
+            tool: spec.id.clone(),
+            kind: spec.kind,
+            program: spec.program.clone(),
+            args: spec.args.clone(),
+            method: spec.method.clone(),
+            url: spec.url.clone(),
+            headers: spec.headers.clone(),
+            body_template: spec.body_template.clone(),
+            placeholders: request.args.clone(),
+            timeout_ms: spec.timeout_ms,
+            max_output_bytes: spec.max_output_bytes,
+            result_event: spec.result_event.clone(),
+            deadline_unix_ms,
+            started_at_unix_ms: now_ms(),
+            inline_wait_ms: spec.inline_wait_ms,
+            root,
+        }
+    }
+
+    fn to_json(&self) -> Json {
+        let placeholders: serde_json::Map<String, Json> = self
+            .placeholders
+            .iter()
+            .map(|(key, value)| (key.clone(), json!(value)))
+            .collect();
+        let headers: Vec<Json> = self
+            .headers
+            .iter()
+            .map(|(key, value)| json!([key, value]))
+            .collect();
+        json!({
+            "tool": self.tool,
+            "kind": self.kind.as_str(),
+            "program": self.program,
+            "args": self.args,
+            "method": self.method,
+            "url": self.url,
+            "headers": headers,
+            "bodyTemplate": self.body_template,
+            "placeholders": placeholders,
+            "timeoutMs": self.timeout_ms,
+            "maxOutputBytes": self.max_output_bytes,
+            "resultEvent": self.result_event,
+            "deadlineUnixMs": self.deadline_unix_ms as u64,
+            "startedAtUnixMs": self.started_at_unix_ms as u64,
+            "inlineWaitMs": self.inline_wait_ms,
+            "root": self.root,
+        })
+    }
+
+    fn from_json(call_id: &str, value: &Json) -> Result<Self, String> {
+        let kind_text = value["kind"].as_str().unwrap_or_default();
+        let kind = ToolKind::parse(kind_text)
+            .ok_or_else(|| format!("{PENDING_TOOLS_FILE} 里 {call_id} 的 kind 非法"))?;
+        let strings = |key: &str| -> Vec<String> {
+            value[key]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Json::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let headers = value["headers"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|pair| {
+                        let pair = pair.as_array()?;
+                        Some((
+                            pair.first()?.as_str()?.to_owned(),
+                            pair.get(1)?.as_str()?.to_owned(),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let placeholders = value["placeholders"]
+            .as_object()
+            .map(|table| {
+                table
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.as_str().unwrap_or("").to_owned()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(Self {
+            call_id: call_id.to_owned(),
+            tool: value["tool"].as_str().unwrap_or(call_id).to_owned(),
+            kind,
+            program: value["program"].as_str().map(str::to_owned),
+            args: strings("args"),
+            method: value["method"].as_str().map(str::to_owned),
+            url: value["url"].as_str().map(str::to_owned),
+            headers,
+            body_template: value["bodyTemplate"].as_str().map(str::to_owned),
+            placeholders,
+            timeout_ms: value["timeoutMs"].as_u64().unwrap_or(120_000),
+            max_output_bytes: value["maxOutputBytes"].as_u64().unwrap_or(65_536) as usize,
+            result_event: value["resultEvent"].as_str().unwrap_or("").to_owned(),
+            deadline_unix_ms: value["deadlineUnixMs"].as_u64().map_or(0, u128::from),
+            started_at_unix_ms: value["startedAtUnixMs"].as_u64().map_or(0, u128::from),
+            inline_wait_ms: value["inlineWaitMs"].as_u64().unwrap_or(0),
+            root: value["root"].as_u64().unwrap_or(1) as usize,
+        })
+    }
+}
+
+/// 一次工具调用的结局记录（`tool_results/<call_id>.json`，两条路径共用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolResult {
+    call_id: String,
+    tool: String,
+    status: String,
+    code: String,
+    output: String,
+    payload: String,
+    external_id: String,
+}
+
+impl ToolResult {
+    fn from_outcome(call: &PendingCall, outcome: &ToolOutcome, external_id: &str) -> Self {
+        Self {
+            call_id: call.call_id.clone(),
+            tool: call.tool.clone(),
+            status: outcome.status.to_owned(),
+            code: outcome.code.clone(),
+            output: outcome.output.clone(),
+            payload: wire_payload(call, outcome, external_id),
+            external_id: external_id.to_owned(),
+        }
+    }
+
+    fn to_json(&self) -> Json {
+        json!({
+            "call_id": self.call_id,
+            "tool": self.tool,
+            "status": self.status,
+            "code": self.code,
+            "output": self.output,
+            "payload": self.payload,
+            "external_id": self.external_id,
+            "finished_at": now_secs(),
+        })
+    }
+
+    fn from_json(value: &Json) -> Option<Self> {
+        Some(Self {
+            call_id: value["call_id"].as_str()?.to_owned(),
+            tool: value["tool"].as_str()?.to_owned(),
+            status: value["status"].as_str()?.to_owned(),
+            code: value["code"].as_str().unwrap_or("").to_owned(),
+            output: value["output"].as_str().unwrap_or("").to_owned(),
+            payload: value["payload"].as_str()?.to_owned(),
+            external_id: value["external_id"].as_str().unwrap_or("").to_owned(),
+        })
+    }
+}
+
+/// 两条路径共用的 wire 载荷（I5）。
+fn wire_payload(call: &PendingCall, outcome: &ToolOutcome, external_id: &str) -> String {
+    join_segments(vec![
+        sanitize_field(&call.call_id),
+        sanitize_field(&call.tool),
+        outcome.status.to_owned(),
+        sanitize_field(&outcome.code),
+        outcome.output.clone(),
+        external_id.to_owned(),
+    ])
+}
+
+fn pending_tools_path(run_dir: &Path) -> PathBuf {
+    run_dir.join(PENDING_TOOLS_FILE)
+}
+
+fn tool_results_dir(run_dir: &Path) -> PathBuf {
+    run_dir.join(TOOL_RESULTS_DIR)
+}
+
+fn tool_result_path(run_dir: &Path, call_id: &str) -> PathBuf {
+    tool_results_dir(run_dir).join(format!("{call_id}.json"))
+}
+
+fn tool_claim_path(run_dir: &Path, call_id: &str) -> PathBuf {
+    tool_results_dir(run_dir).join(format!("{call_id}.claim"))
+}
+
+/// 在飞调用摘要（`--wait-tools` / `--settle` / 心跳文案共用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingSummary {
+    call_id: String,
+    tool: String,
+    deadline_unix_ms: u128,
+}
+
+/// 无锁读在飞清单（`atomic_write` 保证读者看到旧全文或新全文）。
+///
+/// 轮询路径**不取锁**：取锁会让 `--wait-tools` 与运行中的局互相拖慢。
+fn pending_calls(run_dir: &Path) -> Vec<PendingSummary> {
+    let Some(record) = read_json(&pending_tools_path(run_dir)) else {
+        return Vec::new();
+    };
+    let Some(calls) = record.get("calls").and_then(Json::as_object) else {
+        return Vec::new();
+    };
+    calls
+        .iter()
+        .map(|(call_id, value)| PendingSummary {
+            call_id: call_id.clone(),
+            tool: value["tool"].as_str().unwrap_or("?").to_owned(),
+            deadline_unix_ms: value["deadlineUnixMs"].as_u64().map_or(0, u128::from),
+        })
+        .collect()
+}
+
+/// 锁内读—改—写 `pending_tools.json`（与 `coordination_update` 同一把锁、同风格）。
+///
+/// 临界区只做「读一个文件 + 写一个文件」：工具进程的启动与等待**绝不**在锁内（I2）。
+fn pending_tools_update<T>(run_dir: &Path, f: impl FnOnce(&mut Json) -> T) -> Result<T, String> {
+    let _guard = acquire_run_lock(run_dir)?;
+    let path = pending_tools_path(run_dir);
+    let mut record = read_json(&path).unwrap_or_else(|| json!({"version": 1, "calls": {}}));
+    if !record.get("calls").is_some_and(Json::is_object) {
+        record["calls"] = json!({});
+    }
+    record["version"] = json!(1);
+    let out = f(&mut record);
+    atomic_write(&path, record.to_string().as_bytes())?;
+    Ok(out)
+}
+
+/// 登记一条在飞调用（锁内）。返回 `Ok(true)` 表示首次登记（调用方负责 spawn worker），
+/// `Ok(false)` 表示该 `call_id` 已在飞或已被认领（幂等跳过，绝不二次 spawn —— I3）。
+fn pending_tools_insert(run_dir: &Path, call: &PendingCall) -> Result<bool, String> {
+    if tool_claim_path(run_dir, &call.call_id).exists() {
+        return Ok(false);
+    }
+    pending_tools_update(run_dir, |record| {
+        if let Some(calls) = record["calls"].as_object_mut() {
+            if calls.contains_key(&call.call_id) {
+                return false;
+            }
+            calls.insert(call.call_id.clone(), call.to_json());
+            return true;
+        }
+        false
+    })
+}
+
+/// 摘除一条在飞调用（锁内；已不存在 = 幂等成功）。
+fn pending_tools_remove(run_dir: &Path, call_id: &str) -> Result<(), String> {
+    pending_tools_update(run_dir, |record| {
+        if let Some(calls) = record["calls"].as_object_mut() {
+            calls.remove(call_id);
+        }
+    })
+}
+
+/// 读一条在飞调用的模板（worker 侧；无锁读）。
+fn read_pending_call(run_dir: &Path, call_id: &str) -> Option<PendingCall> {
+    let record = read_json(&pending_tools_path(run_dir))?;
+    let value = record.get("calls")?.get(call_id)?;
+    PendingCall::from_json(call_id, value).ok()
+}
+
+/// 原子写结果文件（读者不会看到半截 JSON）。
+fn write_tool_result(run_dir: &Path, result: &ToolResult) -> Result<(), String> {
+    let dir = tool_results_dir(run_dir);
+    fs::create_dir_all(&dir).map_err(|err| format!("创建 {} 失败：{err}", dir.display()))?;
+    atomic_write(
+        &tool_result_path(run_dir, &result.call_id),
+        result.to_json().to_string().as_bytes(),
+    )
+}
+
+/// 无锁读结果文件（父进程轮询路径）。
+fn read_tool_result(run_dir: &Path, call_id: &str) -> Option<ToolResult> {
+    let value = read_json(&tool_result_path(run_dir, call_id))?;
+    ToolResult::from_json(&value)
+}
+
+/// 交付认领（`O_EXCL`）：**只有一个**进程能认领成功（I3 的交付侧保证）。
+fn claim_tool_result(run_dir: &Path, call_id: &str) -> bool {
+    let dir = tool_results_dir(run_dir);
+    let _ = fs::create_dir_all(&dir);
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(tool_claim_path(run_dir, call_id))
+    {
+        Ok(mut file) => {
+            let _ = writeln!(file, "{}", std::process::id());
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// 启动脱体 worker（`current_exe --run-tool-worker <call_id>`；**不 wait**）。
+fn spawn_tool_worker(
+    mod_dir: &Path,
+    runs_root: &Path,
+    run_id: &str,
+    call_id: &str,
+) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|err| format!("取 current_exe 失败：{err}"))?;
+    let mut command = Command::new(exe);
+    command
+        .arg("--run-tool-worker")
+        .arg(call_id)
+        .arg("--run-id")
+        .arg(run_id)
+        .arg("--runs-root")
+        .arg(runs_root)
+        .arg("--mod")
+        .arg(mod_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+        .spawn()
+        .map(|_child| ())
+        .map_err(|err| format!("启动工具 worker 失败：{err}"))
+}
+
+/// 子进程结局（`TimedOut` = 已被 kill 并回收）。
+enum ChildOutcome {
+    Exited(std::process::ExitStatus),
+    TimedOut,
+}
+
+/// spawn 一个子进程并轮询到退出或超时（stdout / stderr 落临时文件，避开管道死锁）。
+fn run_child(
+    mut command: Command,
+    label: &str,
+    timeout_ms: u64,
+    scratch: &Path,
+    tag: &str,
+) -> Result<ChildOutcome, String> {
+    let stdout_path = scratch.join(format!("{tag}.stdout"));
+    let stderr_path = scratch.join(format!("{tag}.stderr"));
+    let stdout = File::create(&stdout_path)
+        .map_err(|err| format!("创建 {} 失败：{err}", stdout_path.display()))?;
+    let stderr = File::create(&stderr_path)
+        .map_err(|err| format!("创建 {} 失败：{err}", stderr_path.display()))?;
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    let mut child = command
+        .spawn()
+        .map_err(|err| format!("无法启动 `{label}`：{err}"))?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(ChildOutcome::Exited(status)),
+            Ok(None) => {}
+            Err(err) => return Err(format!("等待 `{label}` 失败：{err}")),
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(ChildOutcome::TimedOut);
+        }
+        std::thread::sleep(TOOL_POLL_INTERVAL);
+    }
+}
+
+/// 读一个临时产物文件（最多 `limit` 字节，非法 UTF-8 用替换符兵底）。
+fn read_limited(path: &Path, limit: usize) -> String {
+    let Ok(file) = File::open(path) else {
+        return String::new();
+    };
+    let mut buffer = Vec::new();
+    let _ = file.take(limit as u64).read_to_end(&mut buffer);
+    String::from_utf8_lossy(&buffer).into_owned()
+}
+
+/// 执行一次工具（worker 侧；每轮只调一次）。
+fn execute_tool(call: &PendingCall, env: &EnvTable, scratch: &Path) -> ToolOutcome {
+    let outcome = match call.kind {
+        ToolKind::Cli => execute_cli(call, env, scratch),
+        ToolKind::Http => execute_http(call, env, scratch),
+    };
+    // 暂存文件只服务本次执行：结局已经进内存 / 结果文件，删掉（不把工具输出
+    // 以原形留在 run 目录里等下一次 `git add`）。
+    for suffix in ["stdout", "stderr"] {
+        let _ = fs::remove_file(scratch.join(format!("{}.{suffix}", call.call_id)));
+    }
+    let _ = fs::remove_file(scratch.join(format!("{}-body.out", call.call_id)));
+    outcome
+}
+
+/// `cli`：直接 spawn（**无 shell**），`status.success()` 即 `ok`。
+fn execute_cli(call: &PendingCall, env: &EnvTable, scratch: &Path) -> ToolOutcome {
+    let Some(program) = call.program.clone() else {
+        return ToolOutcome::error(
+            "000",
+            format!("工具 `{}` 的声明缺少 program", call.tool),
+            call.max_output_bytes,
+        );
+    };
+    let mut command = Command::new(&program);
+    for template in &call.args {
+        match substitute(template, &call.placeholders, env) {
+            Ok(value) => {
+                command.arg(value);
+            }
+            Err(message) => {
+                return ToolOutcome::error(
+                    "126",
+                    format!("工具 `{}` 的{message}", call.tool),
+                    call.max_output_bytes,
+                )
+            }
+        }
+    }
+    match run_child(command, &program, call.timeout_ms, scratch, &call.call_id) {
+        Ok(ChildOutcome::Exited(status)) => {
+            let limit = call.max_output_bytes.saturating_add(64);
+            let stdout = read_limited(&scratch.join(format!("{}.stdout", call.call_id)), limit);
+            let stderr = read_limited(&scratch.join(format!("{}.stderr", call.call_id)), limit);
+            let output = if stdout.trim().is_empty() {
+                stderr
+            } else {
+                stdout
+            };
+            let code = match status.code() {
+                Some(code) => code.to_string(),
+                None => "signal".to_owned(),
+            };
+            ToolOutcome {
+                status: if status.success() { "ok" } else { "err" },
+                code,
+                output: sanitize_tool_output(&output, call.max_output_bytes),
+            }
+        }
+        Ok(ChildOutcome::TimedOut) => ToolOutcome::error(
+            "timeout",
+            format!(
+                "工具 `{}` 执行超时（{}ms），已终止",
+                call.tool, call.timeout_ms
+            ),
+            call.max_output_bytes,
+        ),
+        Err(message) => ToolOutcome::error("127", message, call.max_output_bytes),
+    }
+}
+
+/// `http`：经 `curl` 发一次请求（`code` = `%{http_code}`；2xx 即 `ok`）。
+fn execute_http(call: &PendingCall, env: &EnvTable, scratch: &Path) -> ToolOutcome {
+    let (Some(method), Some(url_template)) = (call.method.clone(), call.url.clone()) else {
+        return ToolOutcome::error(
+            "000",
+            format!("工具 `{}` 的声明缺少 method / url", call.tool),
+            call.max_output_bytes,
+        );
+    };
+    let url = match substitute(&url_template, &call.placeholders, env) {
+        Ok(value) => value,
+        Err(message) => {
+            return ToolOutcome::error(
+                "126",
+                format!("工具 `{}` 的{message}", call.tool),
+                call.max_output_bytes,
+            )
+        }
+    };
+    let body_path = scratch.join(format!("{}-body.out", call.call_id));
+    let mut command = Command::new("curl");
+    command
+        .arg("-sS")
+        .arg("-X")
+        .arg(&method)
+        .arg("--max-time")
+        .arg(call.timeout_ms.div_ceil(1000).max(1).to_string())
+        .arg("-o")
+        .arg(&body_path)
+        .arg("-w")
+        .arg("%{http_code}");
+    for (key, template) in &call.headers {
+        match substitute(template, &call.placeholders, env) {
+            Ok(value) => {
+                command.arg("-H").arg(format!("{key}: {value}"));
+            }
+            Err(message) => {
+                return ToolOutcome::error(
+                    "126",
+                    format!("工具 `{}` 的{message}", call.tool),
+                    call.max_output_bytes,
+                )
+            }
+        }
+    }
+    if let Some(template) = &call.body_template {
+        match substitute(template, &call.placeholders, env) {
+            Ok(body) => {
+                command.arg("--data-binary").arg(body);
+            }
+            Err(message) => {
+                return ToolOutcome::error(
+                    "126",
+                    format!("工具 `{}` 的{message}", call.tool),
+                    call.max_output_bytes,
+                )
+            }
+        }
+    }
+    command.arg(&url);
+    match run_child(command, "curl", call.timeout_ms, scratch, &call.call_id) {
+        Ok(ChildOutcome::Exited(status)) => {
+            let limit = call.max_output_bytes.saturating_add(64);
+            let code = {
+                let raw = read_limited(&scratch.join(format!("{}.stdout", call.call_id)), 16);
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    "000".to_owned()
+                } else {
+                    sanitize_tool_output(trimmed, 16)
+                }
+            };
+            let body = read_limited(&body_path, limit);
+            let stderr = read_limited(&scratch.join(format!("{}.stderr", call.call_id)), limit);
+            let output = if body.trim().is_empty() { stderr } else { body };
+            let http_ok = code
+                .parse::<u16>()
+                .is_ok_and(|code| (200..=299).contains(&code));
+            let _ = status; // curl 的退出码不进 wire：`code` 是 HTTP 状态码
+            ToolOutcome {
+                status: if http_ok { "ok" } else { "err" },
+                code,
+                output: sanitize_tool_output(&output, call.max_output_bytes),
+            }
+        }
+        Ok(ChildOutcome::TimedOut) => ToolOutcome::error(
+            "timeout",
+            format!(
+                "工具 `{}` 执行超时（{}ms），已终止",
+                call.tool, call.timeout_ms
+            ),
+            call.max_output_bytes,
+        ),
+        Err(message) => ToolOutcome::error("127", message, call.max_output_bytes),
+    }
+}
+
+/// 写一条工具结果 inbox 记录（worker 侧；与 `--tool-result` 同一条通道）。
+///
+/// 记录字段名 / 写入形态全部来自 Mod 的 `inboxRoutes` 声明；幂等键取 wire 载荷
+/// 的末段（同一值，Mod 侧去重与审计看同一处）。
+fn append_tool_result_record(
+    run_dir: &Path,
+    store: &mut dyn RunStore,
+    routes: &InboxRoutes,
+    kind: &str,
+    payload: &str,
+    run_id: &str,
+) -> Result<Json, String> {
+    let route = routes
+        .get(kind)
+        .ok_or_else(|| format!("inboxRoutes 未声明 kind `{kind}`"))?;
+    let Some(shape) = route.write.as_ref().map(|binding| binding.shape) else {
+        return Err(format!(
+            "inboxRoutes 的 `{kind}` 没有 write 绑定（worker 无处写结果）"
+        ));
+    };
+    let external_field = routes.external_id_field();
+    let payload_field = routes.payload_field();
+    let mut record = json!({"kind": kind, "created_at": now_secs()});
+    let external_id = payload.rsplit('|').next().unwrap_or("").trim();
+    record[external_field] = json!(if external_id.is_empty() {
+        new_external_id(run_id, store.inbox_len().unwrap_or(0))
+    } else {
+        external_id.to_owned()
+    });
+    match shape {
+        WriteShape::Payload => record[payload_field] = json!(payload.trim()),
+        WriteShape::Named => {
+            let (first, rest) = split_requirement(payload);
+            let mut named = route.named_fields(external_field);
+            if let Some(field) = named.next() {
+                record[field.as_str()] = json!(first);
+            }
+            if let Some(field) = named.next() {
+                record[field.as_str()] = json!(rest);
+            }
+        }
+    }
+    // 写前登记（与 `--requirement` 同一准入门禁）：closing / finalized 一律拒绝。
+    let token = begin_write(run_dir).map_err(|gate| match gate {
+        WriteGate::Closing => {
+            "本局正在收口（closing）——工具结果未写入，稍后重试或开新局".to_owned()
+        }
+        WriteGate::Finalized => "本局已 finalized——工具结果未写入，需开新局".to_owned(),
+        WriteGate::Internal(message) => message,
+    })?;
+    let pushed = store.inbox_push(&record, clock());
+    end_write(run_dir, &token);
+    pushed.map_err(|err| err.to_string())?;
+    Ok(record)
+}
+
+/// 工具回投深度的归零守卫（panic 展开也归零）。
+struct ToolDepthGuard(Rc<Cell<usize>>);
+
+impl Drop for ToolDepthGuard {
+    fn drop(&mut self) {
+        self.0.set(self.0.get().saturating_sub(1));
+    }
+}
+
+impl Session {
+    /// 一条派发链里的工具回投：解析 → 登记 + spawn 脱体 worker → 按 `inlineWaitMs` 收口。
+    ///
+    /// 返回回执的 `tools` 数组（空 = 本步没有工具请求，回执不出现该键）。
+    /// `seq` 是本步已提交的步号（call_id 缺省值的片段；**不**再读端口，
+    /// 因为此处已出持久化临界区——trait 的前置条件是「调用方已持锁」）。
+    fn run_tool_requests(&mut self, envelope: &Json, seq: u64) -> Vec<Json> {
+        if envelope["meta"].get("tool_calls").is_none() {
+            return Vec::new();
+        }
+        if self.tool_depth.get() >= MAX_TOOL_ROUNDS {
+            self.notices.push(format!(
+                "工具回投已达 {MAX_TOOL_ROUNDS} 轮上限，本步的 meta.tool_calls 已忽略（防自激循环）"
+            ));
+            return Vec::new();
+        }
+        self.tool_depth.set(self.tool_depth.get() + 1);
+        let _guard = ToolDepthGuard(self.tool_depth.clone());
+        self.run_tool_requests_inner(envelope, seq)
+    }
+
+    /// `run_tool_requests` 的本体（深度已记账）。
+    fn run_tool_requests_inner(&mut self, envelope: &Json, seq: u64) -> Vec<Json> {
+        let prefix = format!("{}-{seq}", self.run_id);
+        let (requests, notices) = parse_tool_calls(&envelope["meta"], &prefix);
+        self.notices.extend(notices);
+        if requests.is_empty() {
+            return Vec::new();
+        }
+        let env = load_env_table(Some(&self.mod_dir));
+        let mut runs = Vec::new();
+        for request in requests {
+            let Some(spec) = self.tools.get(&request.tool).cloned() else {
+                self.notices.push(format!(
+                    "工具 `{}` 未在 pack.json 的 `tools` 段声明，已跳过",
+                    request.tool
+                ));
+                continue;
+            };
+            // 纵深防御：装载期已拦过未放行的声明，这里再确认一次（热载 / 手改档的兵底）。
+            if !self.tool_access.allows(&spec.id) {
+                self.notices.push(format!(
+                    "工具 `{}` 未被本局 `allowedTools` 放行，已跳过",
+                    spec.id
+                ));
+                continue;
+            }
+            if let Err(message) = validate_expansion(&spec, &request.args, &env) {
+                self.notices.push(message);
+                continue;
+            }
+            let call = PendingCall::from_spec(
+                &spec,
+                &request,
+                now_ms() + u128::from(spec.timeout_ms),
+                self.tool_depth.get(),
+            );
+            // 锁内登记（模板 + deadline），锁外 spawn + 轮询（I2）。
+            // 若该 call_id 已在飞（Mod 的 meta.tool_calls 快照重报了尚未收口的后台项），
+            // 直接记为 detached 并跳过二次 spawn，严格守住 I3（单一执行）。
+            match pending_tools_insert(&self.run_dir, &call) {
+                Ok(true) => {}
+                Ok(false) => {
+                    runs.push(json!({
+                        "callId": call.call_id,
+                        "tool": spec.id,
+                        "status": "detached",
+                        "resultEvent": spec.result_event,
+                    }));
+                    continue;
+                }
+                Err(message) => {
+                    self.notices.push(format!(
+                        "工具 `{}` 未能登记到 {PENDING_TOOLS_FILE}（{message}），已跳过",
+                        spec.id
+                    ));
+                    continue;
+                }
+            }
+            if let Err(message) =
+                spawn_tool_worker(&self.mod_dir, &self.runs_root, &self.run_id, &call.call_id)
+            {
+                self.notices.push(format!(
+                    "工具 `{}` 的脱体 worker 无法启动：{message}（结果留在 {PENDING_TOOLS_FILE}，可 --tool-result 补票）",
+                    spec.id
+                ));
+                // 启动失败 = 立刻产出一条错误结果（不覆盖已存在的结果文件）。
+                if read_tool_result(&self.run_dir, &call.call_id).is_none() {
+                    let outcome = ToolOutcome::error("127", message, call.max_output_bytes);
+                    let external_id = new_external_id(&self.run_id, 0);
+                    let result = ToolResult::from_outcome(&call, &outcome, &external_id);
+                    let _ = write_tool_result(&self.run_dir, &result);
+                }
+            }
+            match self.settle_tool_call(&spec, &call) {
+                Some(run) => runs.push(run),
+                None => runs.push(json!({
+                    "callId": call.call_id,
+                    "tool": spec.id,
+                    "status": "detached",
+                    "resultEvent": spec.result_event,
+                })),
+            }
+        }
+        runs
+    }
+
+    /// 场景 1 收敛：轮询结果文件 → **认领** → 摘 pending → 就地 `dispatch_event`。
+    ///
+    /// 返回 `None` = 交付责任在 worker（场景 2：`inlineWaitMs == 0`、超时未落地、
+    /// 或 worker 已先认领）。
+    fn settle_tool_call(&mut self, spec: &ToolSpec, call: &PendingCall) -> Option<Json> {
+        if spec.inline_wait_ms == 0 {
+            return None;
+        }
+        let deadline = Instant::now() + Duration::from_millis(spec.inline_wait_ms);
+        loop {
+            if let Some(result) = read_tool_result(&self.run_dir, &call.call_id) {
+                if claim_tool_result(&self.run_dir, &call.call_id) {
+                    let _ = pending_tools_remove(&self.run_dir, &call.call_id);
+                    let _ = fs::remove_file(tool_result_path(&self.run_dir, &call.call_id));
+                    // 载荷必须是 **JSON 字符串**（与 `drain_inbox_locked` 同形）。
+                    let payload = json!(result.payload.clone()).to_string();
+                    let inner = self.dispatch_event(&spec.result_event, &payload);
+                    return Some(json!({
+                        "callId": result.call_id,
+                        "tool": spec.id,
+                        "status": result.status,
+                        "code": result.code,
+                        "seq": inner["seq"].clone(),
+                        "ok": inner["ok"].clone(),
+                    }));
+                }
+                // worker 已先认领：回投走 inbox（场景 2），本次不重复派发（I3）。
+                return None;
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(TOOL_POLL_INTERVAL);
+        }
     }
 }
 
@@ -2009,6 +3314,184 @@ fn resolve_write_binding(
         ));
     };
     Ok((routes, kind))
+}
+
+/// 内部模式：一次工具调用的执行体（不在 usage 里列出）。
+///
+/// 不打开 state 写面、不装内核、不派发——只做「读模板 → spawn → 等 → 写结果 →
+/// 试认领 →（认领成功时）写 inbox 一条 -> 摘 pending」。这样即使父进程早已
+/// 退出（场景 2），结果也能落地（比「父进程自己等」更强的崩溃语义）。
+fn run_tool_worker(args: &Args, call_id: &str) -> i32 {
+    if !is_valid_call_id(call_id) {
+        eprintln!("error: 非法 call_id `{call_id}`（只允许 1..=64 字节 [A-Za-z0-9._-]）");
+        return 2;
+    }
+    let run_dir = args.runs_root.join(&args.run_id);
+    let Some(call) = read_pending_call(&run_dir, call_id) else {
+        // 父进程已收口 / 本局已重置：无活可干（不是错误）。
+        return 0;
+    };
+    let env = load_env_table(args.mod_dir.as_deref());
+    let scratch = tool_results_dir(&run_dir);
+    if let Err(message) = fs::create_dir_all(&scratch) {
+        eprintln!("error: 创建 {} 失败：{message}", scratch.display());
+        return 1;
+    }
+    let outcome = execute_tool(&call, &env, &scratch);
+    let external_id = new_external_id(&args.run_id, 0);
+    let result = ToolResult::from_outcome(&call, &outcome, &external_id);
+    if let Err(message) = write_tool_result(&run_dir, &result) {
+        eprintln!("error: {message}");
+        return 1;
+    }
+    // 交付责任要等父进程的等待窗口过去（否则快工具永远抢不到场景 1）：
+    // 结果文件已经写好，父进程在 `inlineWaitMs` 内看到就会就地认领并派发。
+    let grace_until = if call.inline_wait_ms == 0 {
+        0
+    } else {
+        call.started_at_unix_ms + u128::from(call.inline_wait_ms) + u128::from(TOOL_CLAIM_SLACK_MS)
+    };
+    let now = now_ms();
+    if grace_until > now {
+        std::thread::sleep(Duration::from_millis((grace_until - now) as u64));
+    }
+    // 父进程已先认领 → 派发责任在父进程，本进程只留结果文件，静默退出。
+    if !claim_tool_result(&run_dir, &call.call_id) {
+        return 0;
+    }
+    // 认领成功 = 交付责任在本进程：写 inbox 一条，成功后摘除 pending 条目。
+    let delivery = (|| -> Result<(), String> {
+        let mod_dir = resolve_mod_dir(args, &run_dir)?;
+        let routes = InboxRoutes::load(&mod_dir)?;
+        let kind = routes
+            .write_binding("tool-result")
+            .map(|(kind, _)| kind.to_owned())
+            .ok_or_else(|| {
+                format!(
+                    "本 Mod 的 pack.json `inboxRoutes` 未声明 `--tool-result` 的写命令；\
+                     结果留在 {} 与 {}（可人工 --tool-result 补票；{CONTRACT_DOC}）",
+                    PENDING_TOOLS_FILE,
+                    tool_result_path(&run_dir, &call.call_id).display()
+                )
+            })?;
+        let mut store = open_store_resolved(&run_dir, args.store)?;
+        append_tool_result_record(
+            &run_dir,
+            store.as_mut(),
+            &routes,
+            &kind,
+            &result.payload,
+            &args.run_id,
+        )
+        .map(|_| ())
+    })();
+    match delivery {
+        Ok(()) => {
+            let _ = pending_tools_remove(&run_dir, call_id);
+            0
+        }
+        Err(message) => {
+            // 交付失败就**保留** pending：`--wait-tools` 会报 TOOLS_PENDING，
+            // 并给出人工补票入口（自动重跑会打破单次执行语义，不做）。
+            eprintln!("error: {message}");
+            1
+        }
+    }
+}
+
+/// `--wait-tools`：等本局在飞工具全部落地（结果由 worker 写 inbox）后消费一次
+/// inbox 并打印回执。
+///
+/// **只观察**：走 `OpenMode::ResumeOnly`——读档失败就失败，绝不重置别人的局。
+fn run_wait_tools(args: &Args) -> i32 {
+    let run_dir = args.runs_root.join(&args.run_id);
+    let timeout = args.tool_timeout_ms.unwrap_or(WAIT_TOOLS_DEFAULT_MS);
+    let deadline = Instant::now() + Duration::from_millis(timeout);
+    let mut last_beat = Instant::now();
+    loop {
+        let pending = pending_calls(&run_dir);
+        if pending.is_empty() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let list: Vec<Json> = pending
+                .iter()
+                .map(|call| {
+                    json!({
+                        "callId": call.call_id,
+                        "tool": call.tool,
+                        "deadlineUnixMs": call.deadline_unix_ms as u64,
+                    })
+                })
+                .collect();
+            let message = format!(
+                "等待在飞工具超时（{timeout}ms）：{} 个调用仍未落地。worker 崩溃留下的条目\
+                 不会自动重跑（重跑会破坏单次执行语义），可用 --tool-result 人工补票",
+                pending.len()
+            );
+            eprintln!("error: {message}");
+            println!(
+                "{}",
+                json!({"ok": false, "error": {"code": "TOOLS_PENDING", "message": message}, "pending": list})
+            );
+            return 1;
+        }
+        if last_beat.elapsed() >= WAIT_TOOLS_HEARTBEAT {
+            let list = pending
+                .iter()
+                .map(|call| format!("{}({})", call.call_id, call.tool))
+                .collect::<Vec<_>>()
+                .join(" ");
+            eprintln!("[wait-tools] 仍在飞：{list}");
+            last_beat = Instant::now();
+        }
+        std::thread::sleep(TOOL_POLL_INTERVAL);
+    }
+    // 在飞清零 → 消费 inbox（结果行已落盘，drain 会按 Mod 的 tool_result 路由派发）
+    let mod_dir = match resolve_mod_dir(args, &run_dir) {
+        Ok(dir) => dir,
+        Err(message) => return wait_tools_failure(&message),
+    };
+    let open_args = Args {
+        mod_dir: Some(mod_dir),
+        ..args.clone()
+    };
+    let mut session = match Session::open_mode(&open_args, OpenMode::ResumeOnly) {
+        Ok(session) => session,
+        Err(message) => return wait_tools_failure(&message),
+    };
+    let drain = session.drain_inbox();
+    let receipt = match &drain.last {
+        Some(receipt) => receipt.clone(),
+        None => state_receipt(&mut session, "", Vec::new()),
+    };
+    // stdout 只留回执行（Agent 的解析面）；警告另走 stderr 便于人读。
+    if let Some(warnings) = receipt["warnings"].as_array() {
+        for warning in warnings.iter().filter_map(Json::as_str) {
+            eprintln!("[警告] {warning}");
+        }
+    }
+    println!("{receipt}");
+    match &drain.error {
+        Some(message) => {
+            eprintln!(
+                "error: inbox 未能全部并入：{message}（剩 {} 行未消费）",
+                drain.remaining
+            );
+            1
+        }
+        None => 0,
+    }
+}
+
+/// `--wait-tools` 的失败回执（与单发模式同一条解析路径）。
+fn wait_tools_failure(message: &str) -> i32 {
+    eprintln!("error: {message}");
+    println!(
+        "{}",
+        json!({"ok": false, "error": {"code": "INTERNAL", "message": message}})
+    );
+    1
 }
 
 /// `--requirement`：只往本局后端的 inbox 追加一条，不读不写 autosave 后退出。
@@ -3750,6 +5233,25 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
         "settled_at": now_secs(),
     });
 
+    // ⑥ 在飞工具（R6）：**不**做第 5 个 settlement 门禁（`SettlementPolicy` 四键是
+    //    Mod 必填面，加键会 break 所有既有 Mod）。只写进报告 + 一行 warning，
+    //    `ok` 不变——「在飞工具要不要清零」由 Mod / 运维自己定。
+    let tools_pending = pending_calls(&run_dir);
+    if !tools_pending.is_empty() {
+        report["toolsPending"] = json!(tools_pending
+            .iter()
+            .map(|call| json!({
+                "callId": call.call_id,
+                "tool": call.tool,
+                "deadlineUnixMs": call.deadline_unix_ms as u64,
+            }))
+            .collect::<Vec<_>>());
+        report["warnings"] = json!([format!(
+            "结算时仍有 {} 个在飞工具（{PENDING_TOOLS_FILE}；worker 可能已崩溃）——结果可用 --tool-result 人工补票",
+            tools_pending.len()
+        )]);
+    }
+
     // ⑥ 落盘（pretty：人读证据）+ 人读摘要。
     let settlement_path = run_dir.join(SETTLEMENT_FILE);
     if let Err(message) = write_json_pretty(&settlement_path, &report) {
@@ -4044,6 +5546,9 @@ mod multiscript_hot_reload_tests {
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
+            wait_tools: false,
+            tool_timeout_ms: None,
+            run_tool_worker: None,
         }
     }
 
@@ -4474,6 +5979,9 @@ end)
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
+            wait_tools: false,
+            tool_timeout_ms: None,
+            run_tool_worker: None,
         }
     }
 
@@ -5288,6 +6796,728 @@ end)
                 "回退构建不得静默落到某一后端（出现了 {product}）"
             );
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+// ============================================================================
+// §工具执行器（r1）：契约装载 / 场景 1 就地回投 / 场景 2 脱体 worker + inbox
+//
+// 全部用例都用**合成 Mod**（本节自己的 `write_tool_mod`）：真实 `.ygg/mods/**`
+// 的 `tools` / `allowedTools` 声明由后续迭代落地，本节的断言不依赖它。
+// ============================================================================
+#[cfg(test)]
+mod tool_runner_tests {
+    use super::*;
+
+    /// 用例专属临时目录（互不共享；先清空再建）。
+    fn case_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-tools-r1-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    /// 最小合成 Mod：两条只读 cli 工具 + `tool_result` inbox 路由 + 三个触发事件。
+    ///
+    /// `probe.echo` 走场景 1（`inlineWaitMs > 0`），`probe.detach` 恒走场景 2
+    /// （`inlineWaitMs = 0`，参数里的 `$ENV{YGG_TOOL_TEST}` 用于验 I4）。
+    fn write_tool_mod(dir: &Path, allowed: &[&str]) {
+        fs::create_dir_all(dir.join("data")).expect("建 data 目录");
+        let pack = json!({
+            "schemaVersion": 1,
+            "entries": [],
+            "schemaFiles": [],
+            "agent": {
+                "entryEvent": "event.start",
+                "choiceEvent": "ygg.choice_selected",
+                "summaryEvent": "agent.summary",
+                "endingPrefix": "【结局",
+                "metaKey": "summary",
+                "rejectionPrefixes": ["【拒绝】"],
+                "replayPrefix": "【重放】",
+                "defaultPayload": "0"
+            },
+            "inboxRoutes": {
+                "externalIdField": "external_id",
+                "payloadField": "payload",
+                "extMarker": "@ext=",
+                "tool_result": {
+                    "action": "tool.result",
+                    "fields": ["call_id", "tool_id", "status", "code", "output", "external_id"],
+                    "write": {"flag": "tool-result", "shape": "payload"}
+                }
+            },
+            "tools": {
+                "probe.echo": {
+                    "kind": "cli",
+                    "program": "printf",
+                    "args": ["%s", "{{text}}"],
+                    "timeoutMs": 5_000u64,
+                    "inlineWaitMs": 2_000u64,
+                    "maxOutputBytes": 1_024u64,
+                    "readOnly": true,
+                    "resultEvent": "tool.result"
+                },
+                "probe.detach": {
+                    "kind": "cli",
+                    "program": "printf",
+                    "args": ["%s", "$ENV{YGG_TOOL_TEST}"],
+                    "timeoutMs": 5_000u64,
+                    "inlineWaitMs": 0u64,
+                    "maxOutputBytes": 1_024u64,
+                    "readOnly": true,
+                    "resultEvent": "tool.result"
+                }
+            }
+        });
+        write_json_pretty(&dir.join(PACK_FILE), &pack).expect("写 pack.json");
+        fs::write(
+            dir.join(MANIFEST_FILE),
+            r#"{"schemaVersion": 1, "entries": [], "code": []}"#,
+        )
+        .expect("写 manifest.json");
+        fs::write(
+            dir.join("mod.lua"),
+            r#"ygg.on("event.plain", function()
+  ygg.narrate("普通一步")
+end)
+ygg.on("event.start", function()
+  ygg.meta("tool_calls", { { id = "c1", tool = "probe.echo", args = { text = "hello" } } })
+  ygg.narrate("已请求工具")
+end)
+ygg.on("event.detach", function()
+  ygg.meta("tool_calls", { { id = "d1", tool = "probe.detach", args = {} } })
+  ygg.narrate("已请求脱体工具")
+end)
+ygg.on("event.unknown", function()
+  ygg.meta("tool_calls", { { id = "u1", tool = "probe.missing", args = {} } })
+  ygg.narrate("已请求未声明工具")
+end)
+ygg.on("tool.result", function(payload)
+  ygg.kv.set("last_tool_payload", tostring(payload))
+  ygg.narrate("工具结果：" .. tostring(payload))
+end)
+ygg.on("agent.summary", function()
+  ygg.meta("summary", { open = true })
+  ygg.narrate("摘要就绪")
+end)
+"#,
+        )
+        .expect("写 mod.lua");
+        let config = json!({
+            "drive": {"maxSteps": 50, "stallLimit": 5, "stepsPerRequirement": 20},
+            "settlement": {
+                "requireEvents": true,
+                "requireNoFailedSteps": true,
+                "requireEnding": true,
+                "requireInboxConsumed": true
+            },
+            "allowedTools": allowed,
+        });
+        write_json_pretty(&dir.join("data/config.json"), &config).expect("写 config.json");
+    }
+
+    /// 单发 / 只观察共用的宿主参数（`store` 钉住 JSON：本节断言都在文件面）。
+    fn tool_args(mod_dir: &Path, runs_root: &Path, run_id: &str) -> Args {
+        Args {
+            mod_dir: Some(mod_dir.to_path_buf()),
+            run_id: run_id.to_owned(),
+            runs_root: runs_root.to_path_buf(),
+            resume: false,
+            settle: false,
+            watch: false,
+            event: None,
+            payload: None,
+            drive: Drive::None,
+            inbox: None,
+            store: Some(ygg_store::Backend::Json),
+            wait_tools: false,
+            tool_timeout_ms: None,
+            run_tool_worker: None,
+        }
+    }
+
+    /// 一步派发 + 回执（断言用）。
+    #[track_caller]
+    fn dispatch(session: &mut Session, event: &str) -> Json {
+        let receipt = session.dispatch_event(event, "0");
+        assert_eq!(
+            receipt["ok"],
+            Json::Bool(true),
+            "{event} 必须成功：{receipt}"
+        );
+        receipt
+    }
+
+    /// 取一条声明 + 一条请求 → 造出待登记的调用（不 spawn，纯内存）。
+    fn pending_call(
+        session: &Session,
+        tool: &str,
+        call_id: &str,
+        args: &[(&str, &str)],
+    ) -> (ToolSpec, PendingCall) {
+        let spec = session.tools.get(tool).cloned().expect("声明必须存在");
+        let request = ToolRequest {
+            id: call_id.to_owned(),
+            tool: tool.to_owned(),
+            args: args
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        };
+        let call = PendingCall::from_spec(&spec, &request, now_ms() + 5_000, 1);
+        (spec, call)
+    }
+
+    // ---- 解析面（§6.1） ----
+
+    #[test]
+    fn parses_meta_tool_calls() {
+        let meta = json!({"tool_calls": [{"tool": "t", "args": {"a": "1"}}]});
+        let (requests, notices) = parse_tool_calls(&meta, "run-0");
+        assert!(notices.is_empty(), "{notices:?}");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].tool, "t");
+        assert_eq!(requests[0].args, vec![("a".to_owned(), "1".to_owned())]);
+        // 缺 id → 缺省 `<prefix>-<index>`
+        assert_eq!(requests[0].id, "run-0-0");
+        // 无该键 / 非数组 / 空数组 → 零请求
+        assert!(parse_tool_calls(&json!({}), "run-0").0.is_empty());
+        assert!(parse_tool_calls(&json!({"tool_calls": []}), "run-0")
+            .0
+            .is_empty());
+        let (requests, notices) = parse_tool_calls(&json!({"tool_calls": {}}), "run-0");
+        assert!(requests.is_empty());
+        assert_eq!(notices.len(), 1);
+    }
+
+    #[test]
+    fn empty_args_array_is_empty_map() {
+        // Lua 空表 `{}` 会序列化成 `[]`（host_api 已文档化的怪癖）：等价于无参数。
+        let meta = json!({"tool_calls": [{"id": "c1", "tool": "probe.echo", "args": []}]});
+        let (requests, notices) = parse_tool_calls(&meta, "run-0");
+        assert!(notices.is_empty(), "{notices:?}");
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].args.is_empty());
+        assert_eq!(requests[0].id, "c1");
+    }
+
+    #[test]
+    fn rejects_args_with_pipe() {
+        let meta = json!({"tool_calls": [{"tool": "t", "args": {"a": "x|y"}}]});
+        let (requests, notices) = parse_tool_calls(&meta, "run-0");
+        assert!(requests.is_empty(), "含 `|` 的条目必须被跳过");
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].contains('|'), "{notices:?}");
+        // 嵌套值 / 非对象 args 也各自只丢该条
+        for bad in [
+            json!({"tool": "t", "args": {"a": ["x"]}}),
+            json!({"tool": "t", "args": 1}),
+        ] {
+            let (requests, notices) = parse_tool_calls(&json!({"tool_calls": [bad]}), "run-0");
+            assert!(requests.is_empty());
+            assert_eq!(notices.len(), 1);
+        }
+        // 缺 tool 的条目同样只丢自己
+        let (requests, notices) = parse_tool_calls(&json!({"tool_calls": [{"args": {}}]}), "run-0");
+        assert!(requests.is_empty());
+        assert_eq!(notices.len(), 1);
+        // id 非法 = 拒绝（不静默换成 fallback，因为它同时是结果文件名）
+        let (requests, notices) = parse_tool_calls(
+            &json!({"tool_calls": [{"id": "../x", "tool": "t"}]}),
+            "run-0",
+        );
+        assert!(requests.is_empty());
+        assert_eq!(notices.len(), 1);
+    }
+
+    // ---- 替换面（§6.2 / §6.3） ----
+
+    #[test]
+    fn substitutes_placeholders() {
+        let args = vec![("repo".to_owned(), ".".to_owned())];
+        let env = EnvTable {
+            process: Vec::new(),
+            env_local: vec![("TOKEN".to_owned(), "secret".to_owned())],
+            env: Vec::new(),
+        };
+        assert_eq!(
+            substitute("{{repo}}/src", &args, &env).expect("替换成功"),
+            "./src"
+        );
+        assert_eq!(
+            substitute("Bearer $ENV{TOKEN}", &args, &env).expect("替换成功"),
+            "Bearer secret"
+        );
+        assert_eq!(
+            substitute("{{ repo }}", &args, &env).expect("键两侧空白容忍"),
+            "."
+        );
+        assert_eq!(
+            substitute("no-templates", &args, &env).expect("原样"),
+            "no-templates"
+        );
+    }
+
+    #[test]
+    fn missing_placeholder_is_per_tool_error() {
+        let args: Vec<(String, String)> = Vec::new();
+        let env = EnvTable {
+            process: Vec::new(),
+            env_local: Vec::new(),
+            env: Vec::new(),
+        };
+        let error = substitute("--repo={{repo}}", &args, &env).expect_err("缺参数必须报错");
+        assert!(error.contains("repo"), "{error}");
+        assert!(error.contains("未提供"), "{error}");
+    }
+
+    #[test]
+    fn env_resolution_precedence() {
+        let dir = case_dir("env");
+        fs::write(dir.join(".env"), "YGG_TOOL_ONLY=y\nPATH=from-env\n").expect("写 .env");
+        fs::write(dir.join(".env.local"), "YGG_TOOL_ONLY=x\nPATH=from-local\n")
+            .expect("写 .env.local");
+        let env = load_env_table(Some(&dir));
+        // 进程环境 > .env.local > .env
+        assert_eq!(
+            env.lookup("PATH"),
+            std::env::var("PATH").ok().as_deref(),
+            "进程环境必须压过两个文件"
+        );
+        assert_eq!(
+            env.lookup("YGG_TOOL_ONLY"),
+            Some("x"),
+            ".env.local 压过 .env"
+        );
+        // 不存在的目录 = 空表（不报错）
+        let empty = load_env_table(Some(&dir.join("missing")));
+        assert_eq!(empty.lookup("YGG_TOOL_ONLY"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn env_missing_reports_key_only() {
+        let env = EnvTable {
+            process: Vec::new(),
+            env_local: Vec::new(),
+            env: Vec::new(),
+        };
+        let error = resolve_env("YGG_TOOL_NOPE", &env).expect_err("未设置必须报错");
+        assert!(error.contains("YGG_TOOL_NOPE"), "{error}");
+        assert!(
+            !error.contains('='),
+            "错误文案不得出现值形态（只有变量名）：{error}"
+        );
+    }
+
+    #[test]
+    fn parse_env_file_lexes_the_usual_forms() {
+        let table = parse_env_file(
+            "# comment\nexport A=1\nB='two'\nC=\"three\"\nD=\nnot a pair\n=bad\nE=unquoted value\n",
+        );
+        assert_eq!(
+            table,
+            vec![
+                ("A".to_owned(), "1".to_owned()),
+                ("B".to_owned(), "two".to_owned()),
+                ("C".to_owned(), "three".to_owned()),
+                ("D".to_owned(), String::new()),
+                ("E".to_owned(), "unquoted value".to_owned()),
+            ]
+        );
+    }
+
+    // ---- 结果面（§7.1） ----
+
+    #[test]
+    fn sanitize_tool_output_wire_safe() {
+        let cleaned = sanitize_tool_output("a|b\nc\0d\r\ne", 1_024);
+        assert!(!cleaned.contains('|'), "{cleaned}");
+        assert!(!cleaned.contains('\n'), "{cleaned}");
+        assert!(!cleaned.contains('\r'), "{cleaned}");
+        assert!(!cleaned.contains('\0'), "{cleaned}");
+        assert_eq!(cleaned.split('|').count(), 1, "输出不得引入段分隔符");
+        assert!(cleaned.contains('｜'), "分隔符换成全角形态（保留可读性）");
+    }
+
+    #[test]
+    fn truncates_on_char_boundary() {
+        // 「中文」每个字 3 字节：把上限切在第 4 字节（字中间）→ 必须回退到边界。
+        let text = "中文中文";
+        let (truncated, hit) = truncate_bytes(text, 4);
+        assert!(hit);
+        assert_eq!(truncated, "中", "必须回退到字符边界");
+        assert!(!truncated.contains('\u{FFFD}'));
+        let cleaned = sanitize_tool_output(&"中".repeat(10), 8);
+        assert!(!cleaned.contains('\u{FFFD}'), "{cleaned}");
+        assert!(cleaned.ends_with("…[truncated]"), "{cleaned}");
+        // 不超限时原样返回（不加标记）
+        assert_eq!(sanitize_tool_output("short", 1_024), "short");
+    }
+
+    #[test]
+    fn result_event_payload_is_json_string() {
+        // 场景 1 的派发载荷必须与 `drain_inbox_locked` 同形：JSON **字符串**。
+        let payload = json!("c1|probe.echo|ok|0|hello|inbox-1").to_string();
+        let parsed: Json = serde_json::from_str(&payload).expect("载荷必须能解析");
+        assert!(matches!(parsed, Json::String(_)), "{payload}");
+    }
+
+    #[test]
+    fn wire_payload_has_six_segments() {
+        let dir = case_dir("wire");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        let session = Session::open(&tool_args(&mod_dir, &runs_root, "wire")).expect("开局");
+        let (_, call) = pending_call(&session, "probe.echo", "c1", &[("text", "hello")]);
+        let outcome = ToolOutcome {
+            status: "ok",
+            code: "0".to_owned(),
+            output: "hello".to_owned(),
+        };
+        let payload = wire_payload(&call, &outcome, "inbox-1");
+        let segments: Vec<&str> = payload.split('|').collect();
+        assert_eq!(segments.len(), 6, "{payload}");
+        assert_eq!(segments[0], "c1");
+        assert_eq!(segments[1], "probe.echo");
+        assert_eq!(segments[2], "ok");
+        assert_eq!(segments[3], "0");
+        assert_eq!(segments[4], "hello");
+        assert_eq!(segments[5], "inbox-1");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- 在飞事实面（§4） ----
+
+    #[test]
+    fn pending_snapshot_never_stores_env_values() {
+        let dir = case_dir("pending-redaction");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        fs::write(mod_dir.join(".env.local"), "YGG_TOOL_TEST=tok-123\n").expect("写 .env.local");
+        let session = Session::open(&tool_args(&mod_dir, &runs_root, "redaction")).expect("开局");
+        let (_, call) = pending_call(&session, "probe.detach", "d1", &[]);
+        pending_tools_insert(&session.run_dir, &call).expect("登记");
+        let snapshot =
+            fs::read_to_string(pending_tools_path(&session.run_dir)).expect("读 pending");
+        assert!(
+            snapshot.contains("$ENV{YGG_TOOL_TEST}"),
+            "模板必须原样保留：{snapshot}"
+        );
+        assert!(
+            !snapshot.contains("tok-123"),
+            "I4：pending 快照绝不得出现解析后的值：{snapshot}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pending_tools_update_is_atomic() {
+        let dir = case_dir("atomic");
+        let run_dir = dir.join("run");
+        fs::create_dir_all(&run_dir).expect("建 run 目录");
+        std::thread::scope(|scope| {
+            for worker in 0..2 {
+                let run_dir = run_dir.clone();
+                scope.spawn(move || {
+                    for index in 0..20 {
+                        pending_tools_update(&run_dir, |record| {
+                            if let Some(calls) = record["calls"].as_object_mut() {
+                                calls.insert(
+                                    format!("c{worker}-{index}"),
+                                    json!({"tool": "probe.echo"}),
+                                );
+                            }
+                        })
+                        .expect("并发登记必须成功");
+                    }
+                });
+            }
+        });
+        assert_eq!(pending_calls(&run_dir).len(), 40, "并发写不得丢更新");
+        // 摘除是幂等的
+        pending_tools_remove(&run_dir, "c0-0").expect("摘除");
+        pending_tools_remove(&run_dir, "c0-0").expect("重复摘除不报错");
+        assert_eq!(pending_calls(&run_dir).len(), 39);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- 场景 1：同进程就地回投 ----
+
+    #[test]
+    fn scenario1_delivers_in_process_and_clears_pending() {
+        let dir = case_dir("scenario1");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        let mut session = Session::open(&tool_args(&mod_dir, &runs_root, "s1")).expect("开局");
+        let (spec, call) = pending_call(&session, "probe.echo", "c1", &[("text", "hello")]);
+        pending_tools_insert(&session.run_dir, &call).expect("登记");
+        // 模拟 worker 已把结果写好（不 spawn：本用例只验父进程的收敛面）。
+        write_tool_result(
+            &session.run_dir,
+            &ToolResult {
+                call_id: "c1".to_owned(),
+                tool: "probe.echo".to_owned(),
+                status: "ok".to_owned(),
+                code: "0".to_owned(),
+                output: "hello".to_owned(),
+                payload: "c1|probe.echo|ok|0|hello|inbox-test".to_owned(),
+                external_id: "inbox-test".to_owned(),
+            },
+        )
+        .expect("写结果");
+        let run = session
+            .settle_tool_call(&spec, &call)
+            .expect("场景 1 必须就地回投");
+        assert_eq!(run["status"], "ok");
+        assert_eq!(run["tool"], "probe.echo");
+        assert_eq!(run["ok"], Json::Bool(true));
+        assert!(
+            run["seq"].as_u64().is_some(),
+            "回投事件必须有自己的 seq：{run}"
+        );
+        // pending 已摘除、结果文件已消费
+        assert!(pending_calls(&session.run_dir).is_empty());
+        assert!(!tool_result_path(&session.run_dir, "c1").exists());
+        // 事件日志里出现 tool.result 一步（结果以普通事件回投）
+        let events =
+            fs::read_to_string(session.run_dir.join(ygg_store::EVENTS_FILE)).expect("读事件日志");
+        assert!(events.contains("\"tool.result\""), "{events}");
+        // 认领文件仍在：它同时是「已交付」标记（防止第二个进程重复派发）
+        assert!(tool_claim_path(&session.run_dir, "c1").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scenario1_zero_inline_wait_never_polls() {
+        let dir = case_dir("scenario1-zero");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        let mut session = Session::open(&tool_args(&mod_dir, &runs_root, "s1z")).expect("开局");
+        let (spec, call) = pending_call(&session, "probe.detach", "d1", &[]);
+        pending_tools_insert(&session.run_dir, &call).expect("登记");
+        // 结果文件就在那里，但 inlineWaitMs = 0 → 父进程不轮询、不认领（场景 2）
+        write_tool_result(
+            &session.run_dir,
+            &ToolResult {
+                call_id: "d1".to_owned(),
+                tool: "probe.detach".to_owned(),
+                status: "ok".to_owned(),
+                code: "0".to_owned(),
+                output: "detached".to_owned(),
+                payload: "d1|probe.detach|ok|0|detached|inbox-d".to_owned(),
+                external_id: "inbox-d".to_owned(),
+            },
+        )
+        .expect("写结果");
+        assert!(session.settle_tool_call(&spec, &call).is_none());
+        assert!(
+            !tool_claim_path(&session.run_dir, "d1").exists(),
+            "父进程不得认领"
+        );
+        assert_eq!(pending_calls(&session.run_dir).len(), 1, "条目留给 worker");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- 场景 2：脱体 worker + inbox 回写 + `--wait-tools` ----
+
+    #[test]
+    fn scenario2_worker_delivers_to_inbox_and_wait_tools_drains() {
+        let dir = case_dir("scenario2");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        fs::write(mod_dir.join(".env.local"), "YGG_TOOL_TEST=tok-123\n").expect("写 .env.local");
+        let args = tool_args(&mod_dir, &runs_root, "s2");
+        let mut session = Session::open(&args).expect("开局");
+        dispatch(&mut session, "event.plain");
+        let (_, call) = pending_call(&session, "probe.detach", "d1", &[]);
+        pending_tools_insert(&session.run_dir, &call).expect("登记");
+
+        // worker 执行体（真子进程：printf，只读无害）
+        assert_eq!(run_tool_worker(&args, "d1"), 0, "worker 必须成功交付");
+        assert!(
+            pending_calls(&session.run_dir).is_empty(),
+            "交付成功后摘除 pending"
+        );
+        assert!(tool_claim_path(&session.run_dir, "d1").exists());
+
+        // --wait-tools：消费 inbox（结果行走 Mod 的 tool_result 路由）
+        let wait_args = Args {
+            wait_tools: true,
+            ..args.clone()
+        };
+        assert_eq!(run_wait_tools(&wait_args), 0);
+        let events =
+            fs::read_to_string(session.run_dir.join(ygg_store::EVENTS_FILE)).expect("读事件日志");
+        assert!(events.contains("\"tool.result\""), "{events}");
+        assert!(
+            events.contains("tok-123"),
+            "工具输出必须进回投载荷：{events}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wait_tools_never_resets_the_run() {
+        let dir = case_dir("wait-tools-no-reset");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        let args = tool_args(&mod_dir, &runs_root, "wnr");
+        let mut session = Session::open(&args).expect("开局");
+        dispatch(&mut session, "event.plain");
+        dispatch(&mut session, "event.plain");
+        let run_dir = session.run_dir.clone();
+        let events_before =
+            fs::read_to_string(run_dir.join(ygg_store::EVENTS_FILE)).expect("读事件日志");
+        let autosave_before = fs::read(run_dir.join(AUTOSAVE_FILE)).expect("读存档");
+        let wait_args = Args {
+            wait_tools: true,
+            tool_timeout_ms: Some(500),
+            ..args.clone()
+        };
+        assert_eq!(run_wait_tools(&wait_args), 0);
+        let events_after =
+            fs::read_to_string(run_dir.join(ygg_store::EVENTS_FILE)).expect("读事件日志");
+        let autosave_after = fs::read(run_dir.join(AUTOSAVE_FILE)).expect("读存档");
+        assert_eq!(
+            events_before, events_after,
+            "--wait-tools 不得新增/重置事件行"
+        );
+        assert_eq!(autosave_before, autosave_after, "--wait-tools 不得重置存档");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wait_tools_reports_pending_after_timeout() {
+        let dir = case_dir("wait-tools-pending");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        let mut session = Session::open(&tool_args(&mod_dir, &runs_root, "wtp")).expect("开局");
+        dispatch(&mut session, "event.plain");
+        let (_, call) = pending_call(&session, "probe.detach", "stuck", &[]);
+        pending_tools_insert(&session.run_dir, &call).expect("登记");
+        let wait_args = Args {
+            wait_tools: true,
+            tool_timeout_ms: Some(150),
+            ..tool_args(&mod_dir, &runs_root, "wtp")
+        };
+        assert_eq!(run_wait_tools(&wait_args), 1, "残留 pending 必须非零退出");
+        assert_eq!(
+            pending_calls(&session.run_dir).len(),
+            1,
+            "残留条目不被自动回收"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- 纵深防御 / 生命周期 ----
+
+    #[test]
+    fn unknown_tool_is_skipped_not_fatal() {
+        let dir = case_dir("unknown-tool");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        let mut session = Session::open(&tool_args(&mod_dir, &runs_root, "unk")).expect("开局");
+        let receipt = dispatch(&mut session, "event.unknown");
+        assert!(
+            receipt.get("tools").is_none(),
+            "未声明工具不得产生 runs：{receipt}"
+        );
+        let warnings = receipt["warnings"].as_array().cloned().unwrap_or_default();
+        let text = warnings
+            .iter()
+            .filter_map(Json::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("未在 pack.json"), "{text}");
+        assert!(pending_calls(&session.run_dir).is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn max_tool_rounds_is_bounded() {
+        let dir = case_dir("rounds");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        let mut session = Session::open(&tool_args(&mod_dir, &runs_root, "rounds")).expect("开局");
+        // 已达上限：再来的请求直接忽略（不递归、不 spawn）
+        session.tool_depth.set(MAX_TOOL_ROUNDS);
+        let receipt = dispatch(&mut session, "event.start");
+        assert!(
+            receipt.get("tools").is_none(),
+            "超限后不得再跑工具：{receipt}"
+        );
+        let warnings = receipt["warnings"].as_array().cloned().unwrap_or_default();
+        let text = warnings
+            .iter()
+            .filter_map(Json::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("轮上限"), "{text}");
+        assert!(pending_calls(&session.run_dir).is_empty());
+        // 归零守卫：未超限的一步把深度还回去（空数组 = 不 spawn，测试不依赖子进程）
+        session.tool_depth.set(MAX_TOOL_ROUNDS - 1);
+        assert!(session
+            .run_tool_requests(&json!({"meta": {"tool_calls": []}}), 0)
+            .is_empty());
+        assert_eq!(
+            session.tool_depth.get(),
+            MAX_TOOL_ROUNDS - 1,
+            "深度必须归零（Drop guard）"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reset_clears_pending_tools() {
+        let dir = case_dir("reset");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        let mut session = Session::open(&tool_args(&mod_dir, &runs_root, "reset")).expect("开局");
+        let (_, call) = pending_call(&session, "probe.detach", "d1", &[]);
+        pending_tools_insert(&session.run_dir, &call).expect("登记");
+        write_tool_result(
+            &session.run_dir,
+            &ToolResult {
+                call_id: "d1".to_owned(),
+                tool: "probe.detach".to_owned(),
+                status: "ok".to_owned(),
+                code: "0".to_owned(),
+                output: String::new(),
+                payload: "d1|probe.detach|ok|0||inbox-d".to_owned(),
+                external_id: "inbox-d".to_owned(),
+            },
+        )
+        .expect("写结果");
+        session.reset_artifacts(false).expect("重置必须成功");
+        assert!(
+            !pending_tools_path(&session.run_dir).exists(),
+            "pending 必须随本代清空"
+        );
+        assert!(
+            !tool_results_dir(&session.run_dir).exists(),
+            "结果暂存必须随本代清空"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn allowlist_gate_is_enforced_at_load_time() {
+        let dir = case_dir("allowlist");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        // 只放行一条：另一条声明必须让开局 fail-closed（I6）。
+        write_tool_mod(&mod_dir, &["probe.echo"]);
+        let error = match Session::open(&tool_args(&mod_dir, &runs_root, "gate")) {
+            Ok(_) => panic!("未放行的声明必须拒绝启动"),
+            Err(message) => message,
+        };
+        assert!(error.contains("probe.detach"), "{error}");
+        assert!(error.contains("allowedTools"), "{error}");
+        // 补上放行清单即可开局
+        write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
+        assert!(Session::open(&tool_args(&mod_dir, &runs_root, "gate")).is_ok());
         let _ = fs::remove_dir_all(&dir);
     }
 }
