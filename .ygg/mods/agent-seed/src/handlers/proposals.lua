@@ -28,8 +28,8 @@ local P_ACCEPTED, P_PENDING, P_REJECTED, P_STALE, apply_changes, prop_append, pr
   props.P_ACCEPTED, props.P_PENDING, props.P_REJECTED, props.P_STALE, props.apply_changes, props.prop_append, props.prop_by_ext, props.prop_count, props.prop_id, props.prop_key, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
 local render =
   render_mod.receipt
-local R_ANALYZING, R_DEVELOPING, R_DRAFT, R_PLANNING, STAGE, req_advance_after_accept, req_gate, req_id, req_index_of, req_key, req_phase_name, req_plan_flag, req_plan_ok, req_push_history, req_release, req_rev, req_status, req_sync_conflicts, stage =
-  reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DRAFT, reqs.R_PLANNING, reqs.STAGE, reqs.req_advance_after_accept, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_plan_flag, reqs.req_plan_ok, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
+local R_ANALYZING, R_DEVELOPING, R_DRAFT, R_PLANNING, STAGE, req_advance_after_accept, req_gate, req_id, req_index_of, req_key, req_phase_name, req_plan_flag, req_push_history, req_release, req_rev, req_status, req_sync_conflicts, stage =
+  reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DRAFT, reqs.R_PLANNING, reqs.STAGE, reqs.req_advance_after_accept, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_plan_flag, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
 local cut, contains, fill, trim =
   util.cut, util.contains, util.fill, util.trim
 local parse_proposal =
@@ -63,11 +63,13 @@ local function submit_slot_ok(index, stage_name)
     end
     return true, nil
   end
-  -- development 槽位：逻辑判定（req_plan_ok 对缺席行按状态推断：已处于 developing
-  -- 就说明旧模型下已过 plan 门禁 → 放行；显式 false 则仍拒收）。
-  if stage_name == "development" and not req_plan_ok(index) then
-    return false, "plan_off"
-  end
+  -- development 槽位：能进入 R_DEVELOPING 的唯一入口是 requirement.dispatch（已验过
+  -- req_dev_ready，即 plan_ok=true）。若施工途中（无 pending 提案、无 gate）发生
+  -- requirement.amend，契约是「只更新标题/描述，进度不重置」（req_amend_active），必须允许
+  -- 按新 rev 提交 development 提案；若此后被 proposal.reject / gate.reject 打回，因
+  -- amend 已将 plan_ok 置 false，打回后会停在 planning 强制重做 plan。这里若再判
+  -- not req_plan_ok 就会把施工中 amend 的需求永久死锁在 developing（无提案可 reject、
+  -- 无门禁可 reject、也交不了新提案）。
   return true, nil
 end
 

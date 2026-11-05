@@ -56,9 +56,9 @@
       "sha256": "b2722bab36b04cf6f651ed5ed3557369fbba01f18c1dca3918cb0400922218bd"
     },
     {
-      "byteLength": 11307,
+      "byteLength": 11665,
       "path": "src/handlers/proposals.lua",
-      "sha256": "2fbd3fea6714729d1aca8b1f5b475df89e95c384200a1178d258ed7638dc3e17"
+      "sha256": "ca5778f0f8d27d8ce055701fbd94f21dd174b6d0111649a16f3cf727cfb73a4b"
     },
     {
       "byteLength": 14158,
