@@ -59,6 +59,16 @@ Mod 内部结构。
 }
 ```
 
+工具结果走同一条 inbox 通道（kind 由 Mod 声明），所以 `tool_result` 只是一条普通路由：
+
+```json
+"tool_result": {
+  "action": "tool.result",
+  "fields": ["call_id", "tool_id", "status", "code", "output", "external_id"],
+  "write": { "flag": "tool-result", "shape": "payload" }
+}
+```
+
 | 键 | 必填 | 含义 |
 | --- | --- | --- |
 | `externalIdField` | 是 | inbox 记录里**幂等键**的字段名（也用于 `fields` 里标记幂等键段） |
@@ -96,7 +106,23 @@ Mod 内部结构。
 "drive": { "maxSteps": 64, "stallLimit": 12, "stepsPerRequirement": 16 }
 ```
 
-失败即装载期报错：`pack.json` 的 `agent` / `inboxRoutes`、`data/config.json` 的 `settlement` / `drive`。
+失败即装载期报错：`pack.json` 的 `agent` / `inboxRoutes` / `tools`、`data/config.json` 的 `settlement` / `drive`。
+
+### 5. `data/config.json` → `allowedTools`（可选段）
+
+```json
+"allowedTools": ["git.head_short", "git.status"]
+```
+
+工具两层白名单的 **Layer 2**（Layer 1 = `pack.json` 的 `tools`，宿主装载期校验）：
+
+- 缺失 / 非数组 / 元素非法 = **一个也不放行**（fail-closed）；逐项按集合语义处理，重复项允许。
+- 必须 **⊇** `pack.json` 的 `tools` 键（宿主装载期硬校验，缺一个即拒绝装载）。
+- Mod **读不到** `pack.json`（`ygg.data` 只读 `entries` 声明的资源），所以本 Mod 只认这一层；
+  跨层一致性由 `agent_seed_semantics` 的声明一致性用例钉住（两侧 `tools` 深相等、`allowedTools` 与
+  `tools` 同集合、19 个 `tool_*` beat 齐全）。
+- **不是**安全边界，而是**防漂移**门禁：能改 `data/config.json` 的人也能改 `pack.json`；真正的边界是
+  宿主的 Layer 1 校验（程序白名单 / 无 shell / 无绝对路径 / 无 `..`）加上沙箱本身没有 IO。
 
 ## 一、协调器（`fsm.stage`，单机单事件 `stage.advance`）
 
@@ -279,6 +305,10 @@ end)
   candidates / classes 顺序缺省 `""` / `""` / `"0/0"` / `""`）：
   它可以被断言「声明了没有」，不能拿来断言建议质量或复核独立性。
 - 值面约束（内核把关）：标量 / 稠密序列 / 字符串键表；非有限值拒绝；空表读作 `[]`。
+- **回执面有两个独立键**：`meta.summary`（人/宿主的处境摘要）与 `meta.tool_calls`（工具请求队列，
+  稠密数组 `[{id, tool, args?}]`，只在 `tool.call` / `tool.result` 两条 dispatch 上出现，终态后为 `[]`）。
+  两者是 `ygg.meta` 的同层 `BTreeMap` 两个槽位（`host_api.rs` 的按键插入），互不覆盖；`meta` 仍是瞬态面
+  （不进存档 / 不进状态哈希）。摘要里的 `pendingTools` 就是 `tool.pending` 的只读回显。
 
 ## 八、增量配置
 
@@ -364,8 +394,8 @@ config.set executor.<rN>.<stage>=            # 空值 = 显式解绑
 
 | 文件 | 面 | 作用 |
 | --- | --- | --- |
-| `mod.lua` | 骨架 | **装配入口**：资源快照 → require 21 模块 → install → `render.register()` → `fsm.define`（≈110 行） |
-| `src/*.lua` | 骨架 | 11 个纯导出模块：util / config / requirements / lanes / proposals / gates / guide / menus / render / wire / flow |
+| `mod.lua` | 骨架 | **装配入口**：资源快照 → require 22 模块 → install → `render.register()` → `tools.register()` → `fsm.define`（≈115 行） |
+| `src/*.lua` | 骨架 | 12 个纯导出模块：util / config / requirements / lanes / proposals / gates / guide / menus / render / wire / tools / flow |
 | `src/handlers/*.lua` | 骨架 | 10 个注册模块：actions / lanes / proposals / review / requirement_ops / gate_actions / config / views / choice / lifecycle |
 | `data/scenes.json` | 实例 | 文本资源（scenes / endings / prompts / options / beats / tuning） |
 | `data/playbook.json` | 实例 | 现场规则资源（`guide.show` 按 section id 取用） |
@@ -376,10 +406,44 @@ config.set executor.<rN>.<stage>=            # 空值 = 显式解绑
 骨架面（`mod.lua` + `src/**` + `schemas/` + `pack.json` 的 `code` 段）与
 `packages/mods/agent-seed/` 逐字节一致，由 `scripts/sync-seed-mod.sh --from project` 同步；
 模块清单、依赖方向与三条硬规则见种子侧 README 的「模块结构」一节。
+`src/tools.lua` 是唯一带 `register()` 的 `src/` 模块（与 `render.lua` 同构：纯导出 + 装配期注册），
+也是 `tool.*` 的**唯一写方**。
 本实例新增的 KV 前缀：`reject.count` / `reject.last`（`flow.refuse` 的拒绝留痕，只读查询用）。
 `data/` 与 `pack.json` 的 `agent`/`inboxRoutes` 属实例面，不参与同步。
 
-## 十、走查
+## 十、工具桥（`tool.call` / `tool.result`）
+
+Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）：一个工具调用是**请求**，不是副作用。
+
+```text
+① Mod 登记请求：ygg.meta("tool_calls", { { id = "t1", tool = "git.head_short", args = { rev = "HEAD" } } })
+② 宿主执行（Layer 1 形状 + Layer 2 放行），把结果作为**普通事件**回投
+③ tool.result "t1|git.head_short|ok|0|abc1234|ext-1"
+```
+
+- **请求 wire**（`tool.call`）：`<tool_id>[|<k=v;...>][|<call_id>]`（位次固定；只要 call_id 就写 `git.status||t2`）。
+  `tool_id` 必须已列在 `allowedTools`；`call_id` 自动分配为 `t1`、`t2`…（也可显式给，保留字
+  `count` / `pending` / `last` / `notified` 不可用）。
+- **结果 wire**（`tool.result`）：`<call_id>|<tool_id>|<ok|err>|<code>|<output>[|<external_id>]`
+  （5 或 6 段；也可用 `|@ext=` 后缀形态）。`output` 内不得含竖线，CR/LF 折成 ` / `，超过
+  `tuning.tool_output_max` 截断并附 `…[truncated N chars]`。
+- **`meta.tool_calls`**：稠密数组、序 = 分配序、**只列 `status = "pending"` 的行**；无参数时
+  **省略** `args` 键（Lua 空表只能序列化成 `[]`）。终态后为 `[]`（不是缺键）。
+- **幂等**：请求侧 `@ext=` 已应用 → `[REPLAY:TOOL]`；结果侧同一 `external_id` 重投 → `[REPLAY:TOOL]`，
+  不改状态、不减计数、不重出 `[TOOL SETTLED]`。一个 call 只有一个终态（换状态是冲突，不静默覆盖）。
+- **KV 面**（`src/tools.lua` 是唯一写方）：`tool.count`（生命周期计数）/ `tool.pending`（未终态计数，
+  摘要字段 `pendingTools` 读它）/ `tool.last` / `tool.seq.<i>`（分配序索引，`flush_meta` 的遍历面）/ 
+  `tool.<id>.{id,tool,args,status,code,output,ext,res_ext}` / `tool.notified.<id>`（回执闩锁）。
+- **回执 effect**：`hooks.useEffect("tools.receipt")` 只置闩锁 + 一行叙事，不 render、不 choose、不改业务状态；
+  因此 `[TOOL SETTLED]` 一定与 `[TOOL RESULT]` 在**同一回合**、且一生只有一次。
+- **两个场景**（宿主侧）：`inlineWaitMs > 0` 且结果及时到位 = **场景 1：同进程内就地回投**（用户可见：
+  一步之内看到结果）；`inlineWaitMs = 0` 或超时 = **场景 2：脱体 worker + `--tool-result` inbox 回写**，
+  回投走 `tool_result` 这条路由，Mod 侧看到的事件形状**完全相同**。
+- **凭据红线**：`pack.json` 的 `args` / `headers` 可写 `$ENV{VAR}`，宿主按
+  `进程环境 > <mod_dir>/.env.local > <mod_dir>/.env` 解析；解析后的值**绝不**进载荷、回执或 notice
+  （报错只出现变量名）。Mod 资源、配置与报告只出现**键名**。
+
+## 十一、走查
 
 ```bash
 # 默认全 1 贪心：intake → coordinate.submit → verify → settlement.evolution → review.note → 【结局

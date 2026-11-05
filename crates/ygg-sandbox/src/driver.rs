@@ -887,6 +887,12 @@ end)
   ygg.meta("obj", { deep = { deeper = { 1, 2.5, true, "中文" } }, empty = {}, list = { "a", "b" } })
 end)
 
+-- 两个 meta 键是同一次 dispatch 里**两个独立槽位**（互不覆盖；Mod 侧不必写任何防御代码）
+ygg.on("event.two", function()
+  ygg.meta("tool_calls", { { id = "t1", tool = "git.head_short", args = { rev = "HEAD" } } })
+  ygg.meta("summary", { stage = "review", nextEndsRun = false })
+end)
+
 -- 校验面：空键 / 超长键 / 非有限值都应在 Lua 侧 fail-fast（→ VALIDATION）
 ygg.on("event.badkey", function()
   ygg.meta("", 1)
@@ -949,6 +955,21 @@ end)
                 "empty": [],
                 "list": ["a", "b"]
             })
+        );
+    }
+
+    #[test]
+    fn meta_keys_are_independent_slots_of_one_dispatch() {
+        // `ygg.meta` 是 `BTreeMap<String, MetaValue>` 的按键插入：`summary` 与 `tool_calls` 分属
+        // 两个槽位，信封拼装是一次性遍历，谁也不会覆盖谁。这条把「不用写防御代码」变成断言。
+        let mut kernel = KernelFacade::new(META_MOD).expect("kernel construction");
+        let envelope = reply(&kernel.dispatch("event.two", "0"));
+        assert_eq!(envelope["meta"]["summary"]["stage"], json!("review"));
+        assert_eq!(envelope["meta"]["summary"]["nextEndsRun"], json!(false));
+        assert_eq!(envelope["meta"]["tool_calls"][0]["id"], json!("t1"));
+        assert_eq!(
+            envelope["meta"]["tool_calls"][0]["args"]["rev"],
+            json!("HEAD")
         );
     }
 

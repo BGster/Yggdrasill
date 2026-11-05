@@ -130,6 +130,43 @@
         "flag": "proposal",
         "shape": "payload"
       }
+    },
+    "tool_result": {
+      "action": "tool.result",
+      "fields": [
+        "call_id",
+        "tool_id",
+        "status",
+        "code",
+        "output",
+        "external_id"
+      ],
+      "write": {
+        "flag": "tool-result",
+        "shape": "payload"
+      }
+    }
+  },
+  "tools": {
+    "git.head_short": {
+      "kind": "cli",
+      "program": "git",
+      "args": ["rev-parse", "--short", "HEAD"],
+      "timeoutMs": 5000,
+      "inlineWaitMs": 2000,
+      "maxOutputBytes": 256,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
+    "git.status": {
+      "kind": "cli",
+      "program": "git",
+      "args": ["status", "--porcelain"],
+      "timeoutMs": 5000,
+      "inlineWaitMs": 2000,
+      "maxOutputBytes": 1024,
+      "readOnly": true,
+      "resultEvent": "tool.result"
     }
   },
   "code": {
@@ -147,6 +184,7 @@
       "src/menus.lua",
       "src/render.lua",
       "src/wire.lua",
+      "src/tools.lua",
       "src/flow.lua",
       "src/handlers/actions.lua",
       "src/handlers/lanes.lua",

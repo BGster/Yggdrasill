@@ -932,3 +932,476 @@ fn map_views_keep_operation_and_design_contracts() {
         assert_map_full(&game.narrate("map.show", &text("full")));
     }
 }
+
+// ───────────────────────── tool bridge ─────────────────────────
+
+/// The narrative array of an envelope (state assertions stay on `kv.entries`, prose assertions
+/// read these lines).
+#[track_caller]
+fn narrative_lines(reply: &Json) -> Vec<String> {
+    reply["narrative"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the narrative is not an array: {reply}"))
+        .iter()
+        .map(|line| {
+            line.as_str()
+                .unwrap_or_else(|| panic!("a narrative line is not a string: {line:?}"))
+                .to_owned()
+        })
+        .collect()
+}
+
+/// How many lines carry a marker (a rewrite must not silently change the count).
+fn count_lines(lines: &[String], needle: &str) -> usize {
+    lines.iter().filter(|line| line.contains(needle)).count()
+}
+
+/// A mod resource read straight from disk (the declaration surface is a file, not Lua state).
+fn read_json(path: &Path) -> Json {
+    let raw = std::fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+    serde_json::from_str(&raw).unwrap_or_else(|err| panic!("parse {}: {err}", path.display()))
+}
+
+/// `<namespace>.<name>`: two segments, lowercase letter first, then lowercase / digits / `_` / `-`.
+fn tool_segment_ok(part: &str) -> bool {
+    let mut chars = part.chars();
+    let first_ok = matches!(chars.next(), Some(first) if first.is_ascii_lowercase());
+    first_ok
+        && part
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+fn tool_id_shape_ok(id: &str) -> bool {
+    let parts: Vec<&str> = id.split('.').collect();
+    parts.len() == 2 && parts.iter().all(|part| tool_segment_ok(part))
+}
+
+/// Programs the host refuses to spawn as a tool (`ToolRegistry`'s shell blacklist).
+const SHELL_BASENAMES: &[&str] = &[
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "fish",
+    "ksh",
+    "csh",
+    "tcsh",
+    "cmd",
+    "cmd.exe",
+    "powershell",
+    "pwsh",
+];
+
+/// T1 The request direction: a `tool.call` publishes **one dense snapshot** (`meta.tool_calls`,
+/// allocation order, `args` omitted when empty) and one self-describing KV row. It never
+/// publishes `meta.summary` — the two keys are independent slots of the same `BTreeMap`.
+#[test]
+fn tool_call_publishes_a_dense_pending_snapshot_and_kv_rows() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("tools gate|synthetic task description"),
+    );
+
+    let first = game.reply("tool.call", &text("git.head_short"));
+    let calls = first["meta"]["tool_calls"]
+        .as_array()
+        .unwrap_or_else(|| panic!("meta.tool_calls must be an array: {first}"));
+    assert_eq!(calls.len(), 1, "one request queues one call: {first}");
+    assert_eq!(calls[0]["id"], json!("t1"));
+    assert_eq!(calls[0]["tool"], json!("git.head_short"));
+    assert!(
+        calls[0].get("args").is_none(),
+        "an empty argument set must omit the `args` key (a Lua empty table can only be `[]`): {first}"
+    );
+    assert!(
+        first["meta"].get("summary").is_none(),
+        "one dispatch writes only the keys its own action set — tool_calls must not drag summary in: {first}"
+    );
+
+    game.assert_kv("tool.count", json!(1));
+    game.assert_kv("tool.pending", json!(1));
+    game.assert_kv("tool.t1.status", json!("pending"));
+    game.assert_kv("tool.t1.code", json!(-1));
+    game.assert_kv("tool.t1.output", json!(""));
+    let first_lines = narrative_lines(&first).join("\n");
+    assert!(
+        first_lines.contains("[TOOL REQUESTED]") && first_lines.contains("t1 -> git.head_short"),
+        "the request must be narrated with its allocation order: {first_lines}"
+    );
+
+    let second = game.reply("tool.call", &text("git.status|path=.|t2"));
+    let calls = second["meta"]["tool_calls"]
+        .as_array()
+        .unwrap_or_else(|| panic!("meta.tool_calls must be an array: {second}"));
+    assert_eq!(calls.len(), 2, "both calls are still pending: {second}");
+    assert_eq!(calls[0]["id"], json!("t1"));
+    assert_eq!(
+        calls[1]["id"],
+        json!("t2"),
+        "the array order is the allocation order: {second}"
+    );
+    assert_eq!(calls[1]["args"]["path"], json!("."));
+    game.assert_kv("tool.pending", json!(2));
+    game.assert_kv("tool.t2.status", json!("pending"));
+}
+
+/// T2 The result direction: `tool.result` writes the row, drops the call from the queue, and the
+/// receipt effect converges **in the same turn** (both lines in one narrative batch).
+#[test]
+fn tool_result_updates_kv_and_the_receipt_effect_fires_in_the_same_turn() {
+    let mut game = drive_to_review();
+    game.narrate("tool.call", &text("git.head_short"));
+
+    let reply = game.reply("tool.result", &text("t1|git.head_short|ok|0|abc1234"));
+    let lines = narrative_lines(&reply);
+    assert_eq!(count_lines(&lines, "[TOOL RESULT]"), 1, "{lines:#?}");
+    assert_eq!(
+        count_lines(&lines, "[TOOL SETTLED]"),
+        1,
+        "the receipt effect must converge before the single choice is produced: {lines:#?}"
+    );
+
+    game.assert_kv("tool.t1.status", json!("ok"));
+    game.assert_kv("tool.t1.code", json!(0));
+    game.assert_kv("tool.t1.output", json!("abc1234"));
+    game.assert_kv("tool.pending", json!(0));
+    game.assert_kv("tool.last", json!("t1"));
+    game.assert_kv("tool.notified.t1", json!(true));
+    assert_eq!(
+        reply["meta"]["tool_calls"],
+        json!([]),
+        "a settled call leaves an empty (not missing) queue: {reply}"
+    );
+}
+
+/// T3 Replay safety: an already-applied `external_id` is an idempotent return (no state change,
+/// no second `[TOOL SETTLED]`), while a conflicting terminal status is refused outright.
+#[test]
+fn tool_result_replay_is_idempotent_and_never_refires_the_effect() {
+    let mut game = drive_to_review();
+    game.narrate("tool.call", &text("git.head_short"));
+    let settled =
+        narrative_lines(&game.reply("tool.result", &text("t1|git.head_short|ok|0|abc1234")));
+    assert_eq!(count_lines(&settled, "[TOOL SETTLED]"), 1, "{settled:#?}");
+
+    // ① applying the same result again under a fresh external_id only fills the idempotency key.
+    game.narrate("tool.result", &text("t1|git.head_short|ok|0|abc1234|ext-1"));
+    game.assert_kv("tool.t1.res_ext", json!("ext-1"));
+
+    // ② the same external_id again is a replay: no `[TOOL RESULT]`, no second `[TOOL SETTLED]`.
+    let replay =
+        narrative_lines(&game.reply("tool.result", &text("t1|git.head_short|ok|0|abc1234|ext-1")));
+    assert_eq!(count_lines(&replay, "[REPLAY:TOOL]"), 1, "{replay:#?}");
+    assert_eq!(count_lines(&replay, "[TOOL RESULT]"), 0, "{replay:#?}");
+    assert_eq!(count_lines(&replay, "[TOOL SETTLED]"), 0, "{replay:#?}");
+    game.assert_kv("tool.pending", json!(0));
+
+    // ③ a different terminal status is a conflict, not an overwrite.
+    let conflict = game.narrate("tool.result", &text("t1|git.head_short|err|1|boom|ext-2"));
+    assert_refused(&conflict, "t1");
+    game.assert_kv("tool.t1.status", json!("ok"));
+    game.assert_kv("tool.t1.output", json!("abc1234"));
+}
+
+/// T4 Payload shapes are checked **before** anything is stored: every refusal below leaves the
+/// allocation counter untouched, and the allowlist is the first gate.
+#[test]
+fn tool_payloads_are_shape_checked_and_allowlisted() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("tools gate|synthetic task description"),
+    );
+
+    let long_value = "v".repeat(96);
+    let long_args = format!("a1={long_value};a2={long_value};a3={long_value}");
+    let long_call_id = format!("t{}", "a".repeat(32));
+    let refusals: Vec<(String, &str)> = vec![
+        ("gh.issue".to_owned(), "gh.issue"),
+        ("Git".to_owned(), "Git"),
+        ("no-dot".to_owned(), "no-dot"),
+        ("git.head_short|rev=HEAD;rev=x".to_owned(), "rev="),
+        ("git.head_short|abc".to_owned(), "not `k=v`"),
+        ("git.head_short|a b=c".to_owned(), "must match"),
+        (
+            "git.head_short|a1=1;a2=2;a3=3;a4=4;a5=5;a6=6;a7=7;a8=8;a9=9".to_owned(),
+            "8",
+        ),
+        (format!("git.head_short|{long_args}"), "192"),
+        ("git.head_short||T1".to_owned(), "T1"),
+        ("git.head_short||count".to_owned(), "count"),
+        (format!("git.head_short||{long_call_id}"), "not usable"),
+    ];
+    for (payload, needle) in refusals {
+        let lines = game.narrate("tool.call", &text(&payload));
+        assert_refused(&lines, needle);
+        game.assert_kv("tool.count", json!(null));
+        game.assert_kv("tool.pending", json!(null));
+    }
+
+    // A real request allocates `t1`; re-using that id is refused (a replay needs the external_id).
+    game.narrate("tool.call", &text("git.head_short"));
+    game.assert_kv("tool.count", json!(1));
+    assert_refused(
+        &game.narrate("tool.call", &text("git.head_short||t1")),
+        "t1",
+    );
+    game.assert_kv("tool.count", json!(1));
+
+    // Result-side shapes: unknown call, tool mismatch, bad status, bad code, bad segment count.
+    let result_refusals: Vec<(String, &str)> = vec![
+        ("t99|git.head_short|ok|0|x".to_owned(), "t99"),
+        ("t1|git.status|ok|0|x".to_owned(), "t1"),
+        ("t1|git.head_short|maybe|0|x".to_owned(), "maybe"),
+        ("t1|git.head_short|ok|1.5|x".to_owned(), "1.5"),
+        ("t1|git.head_short|ok|0".to_owned(), "tool.result"),
+        ("t1|git.head_short|ok|0|x|e|extra".to_owned(), "tool.result"),
+    ];
+    for (payload, needle) in result_refusals {
+        let lines = game.narrate("tool.result", &text(&payload));
+        assert_refused(&lines, needle);
+        game.assert_kv("tool.t1.status", json!("pending"));
+        game.assert_kv("tool.pending", json!(1));
+    }
+
+    // Capacity: the counter is a lifecycle counter, so every slot taken means the next is refused.
+    let capacity = read_json(&project_mod_dir().join("data/scenes.json"))["tuning"]
+        ["tool_capacity"]
+        .as_u64()
+        .expect("tuning.tool_capacity must be an unsigned integer");
+    let mut full = Game::open(&project_mod_dir());
+    full.narrate(
+        "task.intake",
+        &text("tools gate|synthetic task description"),
+    );
+    for _ in 0..capacity {
+        full.narrate("tool.call", &text("git.head_short"));
+    }
+    full.assert_kv("tool.count", json!(capacity));
+    let over = full.narrate("tool.call", &text("git.head_short"));
+    assert_refused(&over, "no free tool slot");
+    full.assert_kv("tool.count", json!(capacity));
+}
+
+/// T5 The declaration surface on both sides: `pack.json` `tools` + `data/config.json`
+/// `allowedTools` + `data/scenes.json` beats. Pure disk reads (no kernel needed) — the two mods
+/// ship the same mechanism, so any drift here is two different capability sets.
+#[test]
+fn tool_declarations_stay_consistent_across_both_mods() {
+    let project = project_mod_dir();
+    let seed = seed_mod_dir();
+    let project_pack = read_json(&project.join("pack.json"));
+    let seed_pack = read_json(&seed.join("pack.json"));
+
+    // ① the mechanism surface is identical on both sides (`tools` is not an instance value).
+    assert_eq!(
+        project_pack["tools"], seed_pack["tools"],
+        "both mods must declare the same tools"
+    );
+    let tools = project_pack["tools"]
+        .as_object()
+        .expect("pack.json tools must be an object");
+    assert!(
+        !tools.is_empty(),
+        "the tool bridge needs at least one declared tool"
+    );
+    let mut declared: Vec<String> = Vec::new();
+    for (id, spec) in tools {
+        assert!(
+            tool_id_shape_ok(id),
+            "tool id `{id}` must be <namespace>.<name>"
+        );
+        assert!(id.len() <= 64, "tool id `{id}` is longer than 64 bytes");
+        declared.push(id.clone());
+        assert_eq!(
+            spec["kind"],
+            json!("cli"),
+            "{id}: this round only declares cli tools"
+        );
+        assert_eq!(
+            spec["readOnly"],
+            json!(true),
+            "{id}: only read-only tools are declared"
+        );
+        assert_eq!(
+            spec["resultEvent"],
+            json!("tool.result"),
+            "{id}: the result must come back as the event the Mod handles"
+        );
+        let timeout = spec["timeoutMs"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{id}: timeoutMs must be an unsigned integer"));
+        let inline = spec["inlineWaitMs"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{id}: inlineWaitMs must be an unsigned integer"));
+        assert!(
+            inline > 0,
+            "{id}: a read-only tool must have a positive inline wait"
+        );
+        assert!(
+            timeout >= inline,
+            "{id}: inlineWaitMs must not exceed timeoutMs"
+        );
+        assert!(
+            spec["maxOutputBytes"].as_u64().unwrap_or(0) >= 1,
+            "{id}: maxOutputBytes must be at least 1"
+        );
+        let program = spec["program"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: program must be a string"));
+        assert!(
+            !program.starts_with('/'),
+            "{id}: program must not be absolute"
+        );
+        assert!(
+            !program.contains(".."),
+            "{id}: program must not escape with .."
+        );
+        let basename = program.rsplit('/').next().unwrap_or(program);
+        assert!(
+            !SHELL_BASENAMES.contains(&basename),
+            "{id}: `{basename}` is on the shell blacklist"
+        );
+        for arg in spec["args"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{id}: args must be an array"))
+        {
+            let arg = arg
+                .as_str()
+                .unwrap_or_else(|| panic!("{id}: args items must be strings"));
+            assert!(
+                !arg.contains("{{") && !arg.contains("$ENV{"),
+                "{id}: `{arg}` uses a placeholder this Mod never fills (no runtime arguments)"
+            );
+        }
+    }
+
+    // ②③ `allowedTools` is the request-time gate: a superset of `tools`, shape-checked, no dups.
+    for dir in [&project, &seed] {
+        let config = read_json(&dir.join("data/config.json"));
+        let allowed = config["allowedTools"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{}: allowedTools must be an array", dir.display()));
+        let mut seen: Vec<String> = Vec::new();
+        for item in allowed {
+            let id = item
+                .as_str()
+                .unwrap_or_else(|| panic!("{}: allowedTools items must be strings", dir.display()));
+            assert!(
+                tool_id_shape_ok(id),
+                "{}: allowed tool id `{id}` must be <namespace>.<name>",
+                dir.display()
+            );
+            assert!(
+                !seen.contains(&id.to_owned()),
+                "{}: allowed tool `{id}` is listed twice",
+                dir.display()
+            );
+            seen.push(id.to_owned());
+        }
+        for id in &declared {
+            assert!(
+                seen.contains(id),
+                "{}: declared tool `{id}` is missing from allowedTools (the host refuses at load)",
+                dir.display()
+            );
+        }
+        seen.sort();
+        let mut declared_sorted = declared.clone();
+        declared_sorted.sort();
+        assert_eq!(
+            seen,
+            declared_sorted,
+            "{}: allowedTools and pack.json tools must be the same set",
+            dir.display()
+        );
+    }
+
+    // ④ both scene resources carry every tool beat (the skeleton is shared, `data/` is not).
+    let beats = [
+        "tool_requested",
+        "tool_result",
+        "tool_settled",
+        "tool_replayed",
+        "tool_after_done",
+        "tool_not_allowed",
+        "tool_allowed_none",
+        "tool_usage",
+        "tool_result_usage",
+        "tool_bad_tool_id",
+        "tool_bad_args",
+        "tool_bad_call_id",
+        "tool_call_dup",
+        "tool_capacity",
+        "tool_unknown_call",
+        "tool_result_mismatch",
+        "tool_bad_status",
+        "tool_bad_code",
+        "tool_output_truncated",
+    ];
+    let mut output_cap = 0;
+    for dir in [&project, &seed] {
+        let scenes = read_json(&dir.join("data/scenes.json"));
+        for key in beats {
+            assert!(
+                scenes["beats"].get(key).and_then(|value| value.as_str()).is_some(),
+                "{}: data/scenes.json beats is missing `{key}` (the shared src/ would render a raw placeholder)",
+                dir.display()
+            );
+        }
+        for spec in tools.values() {
+            output_cap = output_cap.max(spec["maxOutputBytes"].as_u64().unwrap_or(0));
+        }
+        // ⑤ the Mod's own output cap must not be tighter than the host's per-tool cap.
+        let truncate_at = scenes["tuning"]["tool_output_max"]
+            .as_u64()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}: tuning.tool_output_max must be an unsigned integer",
+                    dir.display()
+                )
+            });
+        assert!(
+            truncate_at >= output_cap,
+            "{}: tuning.tool_output_max ({truncate_at}) is below the largest maxOutputBytes ({output_cap})",
+            dir.display()
+        );
+    }
+
+    // ⑥⑦ the module is declared on both sides, in the same position, and the inbox route matches
+    // the wire the handlers produce.
+    assert_eq!(
+        project_pack["code"]["modules"], seed_pack["code"]["modules"],
+        "code.modules is the skeleton surface and must stay identical"
+    );
+    let modules = project_pack["code"]["modules"]
+        .as_array()
+        .expect("code.modules must be an array");
+    assert!(
+        modules.iter().any(|item| item == "src/tools.lua"),
+        "src/tools.lua must be declared in code.modules: {modules:?}"
+    );
+    for pack in [&project_pack, &seed_pack] {
+        let route = &pack["inboxRoutes"]["tool_result"];
+        assert_eq!(route["action"], json!("tool.result"));
+        assert_eq!(
+            route["fields"],
+            json!([
+                "call_id",
+                "tool_id",
+                "status",
+                "code",
+                "output",
+                "external_id"
+            ]),
+            "the inbox route fields are the wire segments, in order"
+        );
+        assert_eq!(
+            route["write"],
+            json!({"flag": "tool-result", "shape": "payload"})
+        );
+    }
+}

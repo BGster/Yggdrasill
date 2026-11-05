@@ -31,8 +31,9 @@ local config_actions = require("src.handlers.config")
 local views = require("src.handlers.views")
 local choice = require("src.handlers.choice")
 local lifecycle = require("src.handlers.lifecycle")
+local tools = require("src.tools")
 
--- 注册序（32 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
+-- 注册序（34 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
 --   1     agent.summary（render.register）
 --   2-5   actions: task.intake / requirement.add / requirement.list / requirement.dispatch
 --   6-7   lanes: lane.claim / lane.release
@@ -44,7 +45,10 @@ local lifecycle = require("src.handlers.lifecycle")
 --   27-28 views: guide.show / map.show
 --   29    choice: ygg.choice_selected
 --   30-31 lifecycle: event.start / node:render
---   32    fsm.define（本文件末尾）
+--   32-33 tools: tool.call / tool.result
+--   34    fsm.define（本文件末尾）
+-- 回执 effect（hooks.useEffect("tools.receipt")）由 `tools.register()` 注册，与 `actions` 的
+-- `auto_dispatch` 同性质：不是 handler，不占注册序号，也不参与「同名事件多 handler」的排序。
 
 config.install({ texts = TEXTS, config = CONFIG })
 reqs.install({ texts = TEXTS, lanes = lanes.LANES, props = props })
@@ -57,6 +61,7 @@ render_mod.install({ texts = TEXTS, config = CONFIG })
 wire.install({ texts = TEXTS })
 flow.install({ texts = TEXTS })
 executor.install({ texts = TEXTS })
+tools.install({ texts = TEXTS })
 
 render_mod.register()
 
@@ -70,6 +75,7 @@ config_actions.install({ texts = TEXTS })
 views.install({ texts = TEXTS })
 choice.install({ texts = TEXTS })
 lifecycle.install({ texts = TEXTS })
+tools.register()
 
 local STAGE =
   reqs.STAGE

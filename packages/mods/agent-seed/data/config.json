@@ -22,5 +22,6 @@
     "requireNoFailedSteps": true,
     "requireEnding": true,
     "requireInboxConsumed": true
-  }
+  },
+  "allowedTools": ["git.head_short", "git.status"]
 }

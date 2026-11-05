@@ -316,13 +316,34 @@
     "settlement_todo_usage": "settlement.todo payload \"remaining|verified_by\": exactly two segments, remaining exactly 0, verified_by non-empty and <= 120 chars.",
     "settlement_todo_segment": "todo=0/main session todo list re-checked to 0 items (done + historical included)",
     "settlement_todo_segment_bad": "the settlement.evolution todo= segment must be `<remaining>/<verified_by>`: remaining exactly 0, verified_by non-empty and <= 120 chars.",
-    "settlement_verify_first": "record all-green evidence with verify.submit first, then register the three settlement tasks (all of them in the review stage)."
+    "settlement_verify_first": "record all-green evidence with verify.submit first, then register the three settlement tasks (all of them in the review stage).",
+    "tool_requested": "[TOOL REQUESTED] {{call_id}} -> {{tool_id}} ({{args}}); pending {{pending}}",
+    "tool_result": "[TOOL RESULT] {{call_id}} ({{tool_id}}) -> {{status}} (code {{code}}): {{output}}",
+    "tool_settled": "[TOOL SETTLED] {{call_id}} -> {{status}} (code {{code}}); nothing else is pending.",
+    "tool_replayed": "[REPLAY:TOOL] call `{{call_id}}` with external_id `{{ext}}` was already applied — idempotent return, not executed twice.",
+    "tool_after_done": "the run has reached its ending: no tool call can be requested or settled any more.",
+    "tool_not_allowed": "tool `{{tool_id}}` is not in data/config.json `allowedTools` (allowed: {{allowed}}) — refused before anything was stored.",
+    "tool_allowed_none": "none",
+    "tool_usage": "tool.call <tool_id>[|<k=v;...>][|<call_id>] — the tool id must be listed in allowedTools; arguments are `k=v` pairs separated by `;`",
+    "tool_result_usage": "tool.result <call_id>|<tool_id>|<ok|err>|<code>|<output>[|<external_id>] (5 or 6 segments; a vertical bar may not appear inside the output)",
+    "tool_bad_tool_id": "tool id `{{tool_id}}` must look like `<namespace>.<name>`: lowercase letters/digits/underscore/hyphen in both segments, at most 64 bytes.",
+    "tool_bad_args": "arguments `{{args}}` are malformed: {{problem}}",
+    "tool_bad_call_id": "call id `{{call_id}}` is not usable: lowercase letters/digits/hyphen/underscore, 1..{{max}} chars, and not one of count / pending / last / notified.",
+    "tool_call_dup": "call id `{{call_id}}` already exists ({{status}}); use a fresh id, or resend the same external_id to replay.",
+    "tool_capacity": "no free tool slot ({{cap}} calls already allocated); settle the pending calls first.",
+    "tool_unknown_call": "no tool call `{{call_id}}` exists in this run.",
+    "tool_result_mismatch": "call `{{call_id}}` does not accept this result: expected {{expected}}, got {{got}}.",
+    "tool_bad_status": "status `{{status}}` must be `ok` or `err`.",
+    "tool_bad_code": "code `{{code}}` must be an integer (use `-1` when the tool never ran).",
+    "tool_output_truncated": "…[truncated {{dropped}} chars]"
   },
   "tuning": {
     "min_slices": 1,
     "max_slices": 8,
     "default_score": 3,
     "req_capacity": 32,
-    "job_capacity": 4
+    "job_capacity": 4,
+    "tool_capacity": 64,
+    "tool_output_max": 1024
   }
 }

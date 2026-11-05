@@ -199,7 +199,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   four hold: ① the `(state, event)` successor is unique and declared in one place; ② it needs no
   external evidence (no file read, no human judgement, no session); ③ it is not a pass-type action
   protected by the human-action gate (gates and acceptance are **never** automatic); ④ the effect
-  neither renders nor emits. Today exactly one effect exists — `auto_dispatch` in
+  neither renders nor emits. Two effects exist today. The first is `auto_dispatch` in
   `src/handlers/actions.lua`: a handler marks the requirement it just made ready
   (`hooks.mark_auto_dispatch(index)` after `proposal.accept(analysis)` or `gate.approve(plan)`), and
   the effect dispatches **that requirement only** when the turn has no pending proposal, no pending
@@ -211,25 +211,63 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   counts) — never an implicit Lua-memory diff — so a save/load or a process restart recomputes from
   the same facts and stays deterministic. `flush_effects()` runs at most `MAX_PASSES = 4` passes and
   **errors out** instead of looping forever; a non-converging effect is a defect, not a warning.
+- **Receipt effect (the second class)**: `hooks.useEffect("tools.receipt", …)` in `src/tools.lua`
+  only latches `tool.notified.<call_id>` and narrates one line once a `tool.result` has landed. It
+  touches no `req.*` / `prop.*` / gate / lane / stage state, never renders and never chooses — the
+  same ① ② ③ ④ rules as `auto_dispatch` apply. Its dependencies are KV-derived scalars and the
+  latch makes it idempotent, so a replay converges in two passes and a second `[TOOL SETTLED]` can
+  never appear.
 
 #### 9.2 Behavioural acceptance (mandatory when touching Mod source or the scenes map)
 
-Changing `.ygg/mods/agent-seed/src/**` (state machine, gates, render layer), `.ygg/mods/agent-seed/mod.lua`
-or the map wording in `data/scenes.json` requires, besides lint and the all-1 playtest:
-`cargo test -p ygg-sandbox --test agent_seed_semantics` (12 cases: stage merge + `analysis` compat,
+Changing `.ygg/mods/agent-seed/src/**` (state machine, gates, render layer, tool bridge),
+`.ygg/mods/agent-seed/mod.lua` or the map wording in `data/scenes.json` requires, besides lint and
+the all-1 playtest:
+`cargo test -p ygg-sandbox --test agent_seed_semantics` (18 cases: stage merge + `analysis` compat,
 accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
 reject, reactive auto-dispatch in the same turn (plus `useMemo` invalidation), development proposal
 reject (not amended / amended), inline `exec=` (misplaced / no reason / `:` form), settlement merge
-with `sessions=` + `todo=` and a refused malformed segment, legacy save without `plan_ok`, and the
-operation/design map contracts on both packs). The all-1 playtest only covers the happy path (it
+with `sessions=` + `todo=` and a refused malformed segment, legacy save without `plan_ok`, the
+operation/design map contracts on both packs, and the tool bridge: request snapshot + KV rows,
+result plus same-turn receipt, replay idempotence, payload/allowlist shape checks, and declaration
+parity across both packs). The all-1 playtest only covers the happy path (it
 never takes `gate.reject` / `requirement.amend` / `proposal.reject`, and it cannot see the turn-cut
 mechanics at all); temporary probes under `/tmp` may supplement it but never replace it, and any
 scenario not covered must be declared case by case. Three-question criterion (see 7): ① which action
 does it block? ("change the Mod source or the map wording, run lint plus all-1, and call it
 accepted"); ② what does a violation look like? (branch semantics and map wording silently regress
 while every gate stays green; the defect only shows in a real run); ③ how do you confirm it next
-time? (that command, 12/12, plus a mutation probe — put the old semantics back and the test must go
+time? (that command, 18/18, plus a mutation probe — put the old semantics back and the test must go
 red — to prove the assertions are not vacuous).
+
+The tool bridge is a **contract**, not an internal detail: the `tool.call` / `tool.result` payload
+shapes and the `meta.tool_calls` encoding (a dense array of `{id, tool, args?}`, with `args`
+**omitted** when empty because a Lua empty table can only serialize to `[]`) are consumed by the
+host, so changing them requires updating `pack.json` `inboxRoutes.tool_result.fields` and the host
+parser in the same batch. A one-sided change is a silent integration defect, not a refactor.
+
+#### 9.2b The tool bridge keeps two whitelists (and the Mod only sees one)
+
+A tool request crosses two independent gates, and neither may be dropped as "redundant":
+
+| layer | lives in | when it is enforced | what it decides |
+| --- | --- | --- | --- |
+| Layer 1 | `pack.json` → `tools` | at load, by the host | the **shape and the capability**: which program may ever be spawned, with which fixed arguments, timeout and output cap |
+| Layer 2 | `data/config.json` → `allowedTools` | at request time, by the Mod | the **release list for this run**: which declared tool the Mod may ask for |
+
+- `allowedTools` must be a **superset** of the `tools` keys (the host refuses to load otherwise), and
+  a missing section allows **nothing** (fail-closed: a copied Mod cannot suddenly run `git`).
+- The Mod **cannot** read `pack.json`: `ygg.data` only resolves the resources declared in `pack.json`
+  `entries`, so the Mod enforces Layer 2 alone. Cross-layer consistency is therefore pinned by the
+  `agent_seed_semantics` declaration-parity case (both packs, deep-equal `tools`, set-equal
+  `allowedTools`, every `tool_*` beat present), never by hoping the two files agree.
+- Honest statement: Layer 2 is a **drift gate**, not a security boundary. The Mod runs in the same
+  sandbox as its own state machine; an actor who can edit `data/config.json` can also edit
+  `pack.json`. The real boundary is the host's Layer 1 validation (program allowlist, no shell, no
+  absolute path, no `..`) plus the sandbox having no IO at all.
+- Credentials are never part of either layer: `$ENV{VAR}` placeholders resolve host-side from the
+  process environment, `<mod_dir>/.env.local` and `<mod_dir>/.env`, and the resolved value never
+  enters a payload, a receipt or a notice (error text names the variable only).
 
 #### 9.3 Three-suite gate (mandatory when touching the kernel or the host CLI)
 

@@ -109,6 +109,12 @@
                     "type": "boolean"
                 }
             }
+        },
+        "allowedTools": {
+            "description": "本局放行给 Mod 请求的外部工具白名单（pack.json 的 tools 键子集）。缺失 = 一个也不放行（fail-closed）；逐项按集合语义处理，重复项允许。此段是宿主侧消费的契约面（两层白名单的 Layer 2），内核不解释它。",
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "maxItems": 64
         }
     }
 }

@@ -427,6 +427,46 @@
           "basis": "AGENTS.md §1.7"
         }
       ]
+    },
+    {
+      "id": "tools",
+      "order": 7,
+      "title": "7. External tools (two-layer allowlist)",
+      "summary": "A tool call is a request, never a side effect: the Mod publishes a pending queue in meta.tool_calls, the host executes, and the result comes back as an ordinary tool.result event.",
+      "source": "the agent-seed host contract (`pack.json` tools + `data/config.json` allowedTools)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "tools.never-io-in-mod",
+          "modality": "must-not",
+          "text": "The Mod never performs IO: no process, no network, no filesystem. It only publishes requests (`meta.tool_calls`) and applies results (`tool.result`).",
+          "basis": "the sandbox allowlist (no io/os/print) + `ygg.data` is a read-only surface"
+        },
+        {
+          "id": "tools.allowlist-fail-closed",
+          "modality": "must",
+          "text": "A tool id that is not listed in `data/config.json` `allowedTools` is refused before any row is stored; a missing section allows nothing, and the refusal happens before the id shape is even judged.",
+          "basis": "src/tools.lua `allowed()` / `request()`"
+        },
+        {
+          "id": "tools.result-idempotent",
+          "modality": "must",
+          "text": "A `tool.result` carrying an `external_id` that was already applied is a replay: narrate `[REPLAY:TOOL]`, change no state and never subtract the pending count twice. A different terminal status for the same call is a conflict, not an overwrite.",
+          "basis": "src/tools.lua `apply_result()`"
+        },
+        {
+          "id": "tools.receipt-effect-bounded",
+          "modality": "must-not",
+          "text": "The tools receipt effect may only latch `tool.notified.<call_id>` and narrate one line; it must never render, choose, or touch requirement / proposal / gate / lane / stage state.",
+          "basis": "AGENTS.md §9.1 + src/tools.lua `receipt_effect()`"
+        },
+        {
+          "id": "tools.no-inline-secrets",
+          "modality": "must",
+          "text": "Never inline a credential in a tool declaration or a request: `$ENV{VAR}` placeholders are resolved host-side from the process environment, `<mod_dir>/.env.local` and `<mod_dir>/.env`, and the resolved value never enters a payload, a receipt or a notice — error text names the variable only.",
+          "basis": "the credentials red line + the host `$ENV{}` resolution order"
+        }
+      ]
     }
   ]
 }
