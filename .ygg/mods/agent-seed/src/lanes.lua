@@ -163,7 +163,7 @@ local function narrate_lane_ledger()
   if #free == 0 then
     ygg.narrate(fill(TEXTS.beats.lane_ledger_all_free, { total = tostring(total) }))
   else
-    ygg.narrate(fill(TEXTS.beats.lane_ledger_none, { lanes = join(free, "、") }))
+    ygg.narrate(fill(TEXTS.beats.lane_ledger_none, { lanes = join(free, ", ") }))
   end
 end
 

@@ -100,7 +100,7 @@ local function settlement_problem()
     missing[#missing + 1] = TEXTS.beats.settlement_todo_missing
   end
   if #missing > 0 then
-    return join(missing, "；")
+    return join(missing, "; ")
   end
   return nil
 end

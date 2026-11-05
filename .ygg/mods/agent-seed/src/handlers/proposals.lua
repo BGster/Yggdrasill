@@ -6,7 +6,9 @@
 local M = {}
 
 local config = require("src.config")
+local executor = require("src.executor")
 local flow = require("src.flow")
+local hooks = require("src.hooks")
 local choice = require("src.handlers.choice")
 local props = require("src.proposals")
 local render_mod = require("src.render")
@@ -26,25 +28,27 @@ local P_ACCEPTED, P_PENDING, P_REJECTED, P_STALE, apply_changes, prop_append, pr
   props.P_ACCEPTED, props.P_PENDING, props.P_REJECTED, props.P_STALE, props.apply_changes, props.prop_append, props.prop_by_ext, props.prop_count, props.prop_id, props.prop_key, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
 local render =
   render_mod.receipt
-local R_ANALYZING, R_DEVELOPING, R_DRAFT, R_PLANNING, STAGE, req_advance_after_accept, req_gate, req_id, req_index_of, req_key, req_phase_name, req_plan_flag, req_plan_ok, req_push_history, req_release, req_rev, req_status, req_sync_conflicts, stage =
-  reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DRAFT, reqs.R_PLANNING, reqs.STAGE, reqs.req_advance_after_accept, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_plan_flag, reqs.req_plan_ok, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
-local cut, fill, trim =
-  util.cut, util.fill, util.trim
+local R_ANALYZING, R_DEVELOPING, R_DRAFT, R_PLANNING, STAGE, req_advance_after_accept, req_gate, req_id, req_index_of, req_key, req_phase_name, req_plan_flag, req_push_history, req_release, req_rev, req_status, req_sync_conflicts, stage =
+  reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DRAFT, reqs.R_PLANNING, reqs.STAGE, reqs.req_advance_after_accept, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_plan_flag, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
+local cut, contains, fill, trim =
+  util.cut, util.contains, util.fill, util.trim
 local parse_proposal =
   wire.parse_proposal
 
 -- 阶段槽位（5 态）：旧的 working / review 两态已合并成同一个存储态，
 -- 槽位只判「这个阶段现在能不能收提案」；「重定基 vs 被占用」由 pending 提案表判。
+-- 数组形：draft 直接派 plan 之后，`analysis` 降级为兼容槽位（legacy analyzing 行，以及
+-- planning 态里仍按旧剧本提上来的分析提案）——它不再是派活路径产生的阶段。
 local WORKING_STATUS = {
-  analysis = R_ANALYZING,
-  plan = R_PLANNING,
-  development = R_DEVELOPING,
+  analysis = { R_ANALYZING, R_PLANNING },
+  plan = { R_PLANNING },
+  development = { R_DEVELOPING },
 }
 
 -- 返回 (ok, reason)：reason ∈ "status" / "gate" / "plan_on" / "plan_off"（ok 时为 nil）。
 -- reason 必须区分开：把「计划未批准」报成「阶段与状态不匹配」会把排错人引到错方向。
 local function submit_slot_ok(index, stage_name)
-  if req_status(index) ~= WORKING_STATUS[stage_name] then
+  if not contains(WORKING_STATUS[stage_name], req_status(index)) then
     return false, "status"
   end
   -- 门禁待批期间不得再收提案（plan 门禁落在 planning、accept 门禁落在 developing）。
@@ -59,11 +63,13 @@ local function submit_slot_ok(index, stage_name)
     end
     return true, nil
   end
-  -- development 槽位：逻辑判定（req_plan_ok 对缺席行按状态推断：已处于 developing
-  -- 就说明旧模型下已过 plan 门禁 → 放行；显式 false 则仍拒收）。
-  if stage_name == "development" and not req_plan_ok(index) then
-    return false, "plan_off"
-  end
+  -- development 槽位：能进入 R_DEVELOPING 的唯一入口是 requirement.dispatch（已验过
+  -- req_dev_ready，即 plan_ok=true）。若施工途中（无 pending 提案、无 gate）发生
+  -- requirement.amend，契约是「只更新标题/描述，进度不重置」（req_amend_active），必须允许
+  -- 按新 rev 提交 development 提案；若此后被 proposal.reject / gate.reject 打回，因
+  -- amend 已将 plan_ok 置 false，打回后会停在 planning 强制重做 plan。这里若再判
+  -- not req_plan_ok 就会把施工中 amend 的需求永久死锁在 developing（无提案可 reject、
+  -- 无门禁可 reject、也交不了新提案）。
   return true, nil
 end
 
@@ -149,6 +155,19 @@ function M.install(deps)
         prop = prop_id(blocking),
       }))
     end
+    -- 执行者登记并入提案提交（省一回合）：校验失败则整体不生效（提案不落库）。
+    if spec.exec ~= nil then
+      local problem = executor.bind(
+        "executor." .. spec.req .. "." .. spec.stage,
+        wire.format_executor(spec.exec, spec.exec_reason)
+      )
+      if problem ~= nil then
+        if problem.kind == "blocked" then
+          return refuse(TEXTS.beats.req_wait_rejected, "proposal.submit", problem.detail)
+        end
+        return reject_payload("proposal.submit", problem.detail)
+      end
+    end
     -- 重定基：旧提案已作废（stale / 被拒），清掉需求的 stale 标记（本次提案重新起算）。
     ygg.kv.set(req_key(index, "stale"), false)
     local summarize = spec.summary
@@ -208,6 +227,11 @@ function M.install(deps)
       change = change_note,
       pending = tostring(prop_pending_total()),
     }))
+    -- 唯一后继自动推进走响应式：分析验收后 plan 槽必然打开，打标后由 render() 入口的
+    -- hooks.flush_effects 在产出 choice 之前同步收敛（不能在这里 emit/render 两次）。
+    if stage_name == "analysis" then
+      hooks.mark_auto_dispatch(index)
+    end
     render()
   end)
   ygg.on("proposal.reject", function(payload)

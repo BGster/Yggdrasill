@@ -29,14 +29,14 @@
     "entryEvent": "event.start",
     "choiceEvent": "ygg.choice_selected",
     "summaryEvent": "agent.summary",
-    "endingPrefix": "【结局",
+    "endingPrefix": "[ENDING",
     "metaKey": "summary",
     "rejectionPrefixes": [
-      "【动作被拒】",
-      "【载荷被拒】",
-      "【需求待办】"
+      "[REJECTED:ACTION]",
+      "[REJECTED:PAYLOAD]",
+      "[BLOCKED:TODO]"
     ],
-    "replayPrefix": "【需求重放】",
+    "replayPrefix": "[REPLAY",
     "defaultPayload": "0"
   },
   "inboxRoutes": {
@@ -141,6 +141,8 @@
       "src/lanes.lua",
       "src/proposals.lua",
       "src/gates.lua",
+      "src/hooks.lua",
+      "src/executor.lua",
       "src/guide.lua",
       "src/menus.lua",
       "src/render.lua",

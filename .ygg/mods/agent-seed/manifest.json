@@ -6,24 +6,29 @@
       "sha256": "9153e0a3a0fd319fad235cc068a0fe904b9793a3a41fb8104f68a361ef3c346e"
     },
     {
-      "byteLength": 3353,
+      "byteLength": 3929,
+      "path": "src/executor.lua",
+      "sha256": "91602ae47c7faf03c509f150b7b6c85b524506966b33b45bd1385594913deeb1"
+    },
+    {
+      "byteLength": 3848,
       "path": "src/flow.lua",
-      "sha256": "f0dd314310b79fe387639d9e1eab40ebee29adffc387e067100f5c2c8ca73cf0"
+      "sha256": "34b81fc2e91df36fb871ab9ae098f103f2aa95a652e7d800c6ea833ab5db8d8e"
     },
     {
-      "byteLength": 3990,
+      "byteLength": 3989,
       "path": "src/gates.lua",
-      "sha256": "09b12f000e2efc6f47d3930b5d329feb80202334baad79e8fe5868803cd165de"
+      "sha256": "1c3c115efa460dedd982888d479211471c55a6070e14890847b626ad370f952c"
     },
     {
-      "byteLength": 3200,
+      "byteLength": 3190,
       "path": "src/guide.lua",
-      "sha256": "2dc234910a25649f8511f94de985d640e848d29057e3ab905b751c584852e874"
+      "sha256": "5b4bc31c0080fe69c42d6af0c1fe389e44d65fd50619b55156877a6db137cc74"
     },
     {
-      "byteLength": 7195,
+      "byteLength": 10355,
       "path": "src/handlers/actions.lua",
-      "sha256": "a83ad66cd956042ad11b64d03a545095c87e639b82a7f50bd3f1908ab7aea244"
+      "sha256": "3431d756e1946f58fc309ccea9278b76c3fe1802fe5b4f06338f35ae1f2ba1e4"
     },
     {
       "byteLength": 2739,
@@ -31,14 +36,14 @@
       "sha256": "54f9a91e193459c26440d3560d0a02581cce9e08bc4ed9efeda3d33f19c7bf1b"
     },
     {
-      "byteLength": 9488,
+      "byteLength": 7172,
       "path": "src/handlers/config.lua",
-      "sha256": "0cbee24d2a430305e60714b2cc000ca00d30aded29b6381bbfd4a40f961545af"
+      "sha256": "77113bb8fd8e0020f12bddf638fe2d4c38156fce431880caa0b7f2f910ecc629"
     },
     {
-      "byteLength": 5754,
+      "byteLength": 6088,
       "path": "src/handlers/gate_actions.lua",
-      "sha256": "3e350937873f887cbf43530641fdc068c5498c8670588388ac2e8978fd172d82"
+      "sha256": "909694be6d2b68f977e579e31257abba64cd6d41c4f9974e449f6450377c7906"
     },
     {
       "byteLength": 4930,
@@ -51,9 +56,9 @@
       "sha256": "b2722bab36b04cf6f651ed5ed3557369fbba01f18c1dca3918cb0400922218bd"
     },
     {
-      "byteLength": 10087,
+      "byteLength": 11665,
       "path": "src/handlers/proposals.lua",
-      "sha256": "09f387d11439d6f2881fafe80702c54a939d20ab57c918057772b1fd9641132b"
+      "sha256": "ca5778f0f8d27d8ce055701fbd94f21dd174b6d0111649a16f3cf727cfb73a4b"
     },
     {
       "byteLength": 14158,
@@ -61,9 +66,9 @@
       "sha256": "3289c75997737f9704a9b0c2790de11d25983934af192feff5e7d32a18e932fc"
     },
     {
-      "byteLength": 11525,
+      "byteLength": 11643,
       "path": "src/handlers/review.lua",
-      "sha256": "230b41f6ac547e5948d89504cd5ec5adff5b9c8c14ecaba54b4d81366c080620"
+      "sha256": "b1c6735827ab1ff7f4fba8be8c794c40eb9011d670db4120fcedaf2414f7a4d2"
     },
     {
       "byteLength": 1602,
@@ -71,14 +76,19 @@
       "sha256": "c9b4537903de18f77b26d2c99d8b801c2e71a4ce36b54a0cdd5b1996f9d81d9d"
     },
     {
-      "byteLength": 4636,
-      "path": "src/lanes.lua",
-      "sha256": "2292617251d6c99e38329ccf2d169c1fdbba897f9bf07eb803543f66ea7bc1fb"
+      "byteLength": 4412,
+      "path": "src/hooks.lua",
+      "sha256": "43d4ba806419a6e97aa1f560d1bfccb07669be78b5455f41441212567e120dfe"
     },
     {
-      "byteLength": 11736,
+      "byteLength": 4635,
+      "path": "src/lanes.lua",
+      "sha256": "8ae36a3c15d611135211b2e03176549462b53293e78f64fcc63205663151d551"
+    },
+    {
+      "byteLength": 13176,
       "path": "src/menus.lua",
-      "sha256": "3c1ebd63215d952206d8367a99cd4a893390e84136007d3c0a53c54a0d5cae07"
+      "sha256": "e44077c1a290e0d04d94a4f901be434549534999fa41399274b7d8c098a4e440"
     },
     {
       "byteLength": 7862,
@@ -86,14 +96,14 @@
       "sha256": "7e12c144971a7f971c4b3025c20f0db45aacc419a8ba6fd598dbf33ef6ada8cc"
     },
     {
-      "byteLength": 22968,
+      "byteLength": 24112,
       "path": "src/render.lua",
-      "sha256": "dee3f2aded37496866ea6f19304620221628df2e24004cdc4311646d48052bd4"
+      "sha256": "462abec39ffe8caa578a37155a2346e9066c63aa3823f513b7ac22187740cc76"
     },
     {
-      "byteLength": 17807,
+      "byteLength": 18311,
       "path": "src/requirements.lua",
-      "sha256": "92ac717a7ad352866172268e938dbc4a4e36053de91fa86e11a512fda5882ada"
+      "sha256": "c6dbfd8fad3256727766de90938bf91d24525b665d03155aef524fd3b8723bbd"
     },
     {
       "byteLength": 2030,
@@ -101,19 +111,19 @@
       "sha256": "79cc86d03760e4af0faaab66a6ce5c619609f890808b61e185c21aece5555e00"
     },
     {
-      "byteLength": 19012,
+      "byteLength": 25627,
       "path": "src/wire.lua",
-      "sha256": "dbf1dd3c2a6e1c08c8abee880a11cfb36d219af3987909d487fb84f48b8a67dc"
+      "sha256": "7ffe94ed97d0d20b15a7a6394cf5c811c11d5a42505c45ab4097cb75dca97d7f"
     }
   ],
   "entries": [
     {
-      "byteLength": 31087,
+      "byteLength": 34185,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "0d0b0e1b228c86f63ac81859b3a009d93e25a38cef2db38bf8ad2f4664619dbd"
+      "sha256": "e93752278ac2382c6fd0d73a950917be92ac087a8b43a67a695b7777db69f019"
     },
     {
       "byteLength": 490,
@@ -124,12 +134,12 @@
       "sha256": "33392d0c56007a02dff36cef2c232c299a0cf9c47f3d779fd2e9bf01cb07f4a4"
     },
     {
-      "byteLength": 73086,
+      "byteLength": 81973,
       "id": "ygg:agent/playbook",
       "kind": "agent-playbook",
       "path": "data/playbook.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
-      "sha256": "54f1af8099f16c1ce37e01ccfd2a934d6077459e9779c15759b147116cb7682a"
+      "sha256": "9564d92882c29cd516682ac134181d67a7ff24be653f668ce18586f8085700c6"
     }
   ],
   "schemaVersion": 1

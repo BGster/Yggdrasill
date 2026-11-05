@@ -1,1146 +1,1136 @@
 {
   "schemaVersion": 1,
-  "title": "Yggdrasill 开发主 Agent 现场手册（AGENTS.md 规则资源化）",
-  "summary": "开发 Yggdrasill 的 Agent 在规划、开发、集成、合并、部署全流程中必须遵守的现场规则：按 section 取用、按阶段呈现。规则正文只在本资源，游玩指南见仓库根 AGENTS.md。",
+  "title": "Yggdrasill main-agent field manual (AGENTS.md turned into a rule resource)",
+  "summary": "The field rules a main agent developing Yggdrasill must follow through planning, development, integration, merging and deployment: fetched per section, presented per stage. The rule text lives only in this resource; the play guide is the repository-root AGENTS.md.",
   "source": {
     "document": "AGENTS.md",
     "revision": "2026-11-01",
-    "note": "由仓库根 AGENTS.md 十节逐条迁移：每条约束拆成原子规则（原复合句按判定点分开），仓库形态按当前仓库实况更新（五 crate workspace / packages 四包 / clients/godot / .ygg 项目 harness），过时状态（「M0 落地中」「packages 规划中」等）不再保留；原文档未载的约束一律不新增。例外一处（2026-10-29 用户当次指令，本切片纳入）：credentials 章的「入库面敏感信息禁令」四条规则为增补，basis 标为「用户决策」而非 AGENTS.md 原文。另增补 evolution 章（2026-11-01 用户决策 E1：局末进化建议的候选筛选与复核方法），同样非 AGENTS.md 原文。**AGENTS.md 已于 s2 收缩为纯游玩指南**——规则正文只在本资源；basis 里的 `AGENTS.md §X` 指迁移前原文（见 git 历史）。"
+    "note": "Migrated item by item from the ten chapters of the repository-root AGENTS.md: every constraint was split into atomic rules (a compound sentence was divided at its decision points), the repository shape was updated to the current reality (a five-crate workspace / four `packages` packages / `clients/godot` / the in-repo `.ygg` harness), stale states (\"M0 in progress\", \"packages planned\", ...) were dropped, and no constraint absent from the original document was added. One exception (the user instruction of 2026-10-29, included in this slice): the four \"no sensitive information on the committed surface\" rules in the credentials chapter are additions, and their `basis` says \"user decision\" instead of quoting AGENTS.md. The evolution chapter (user decision E1 of 2026-11-01: how to screen and review end-of-run evolution candidates) is likewise an addition and not AGENTS.md text. **AGENTS.md was condensed into a pure play guide in s2** - the rule text lives only in this resource; an `AGENTS.md §X` in a `basis` refers to the pre-migration text (see the git history)."
   },
   "sections": [
     {
       "id": "credentials",
       "order": 1,
-      "title": "一、凭据与数据红线",
-      "summary": "最高优先级、不可协商：凭据不进仓库也不进对话产物；入库面（游戏设置 / playbook / 经验成长 Mod / 演进产物）同样禁敏感值，示例数据一律自造合成。",
-      "source": "AGENTS.md §一",
+      "title": "1. Credentials and the data red line",
+      "summary": "Highest priority, non-negotiable: credentials never enter the repository or any conversation artifact; the committed surface (game settings / playbook / experience-growth Mod / evolution output) is equally off limits for sensitive values, and every example uses synthetic data.",
+      "source": "AGENTS.md §1",
       "priority": "critical",
       "rules": [
         {
           "id": "credentials.no-secret-in-repo",
           "modality": "must-not",
-          "text": "禁止把任何凭据、密钥、令牌写入仓库——包括代码、文档、commit message 与 Mod 示例数据。",
-          "basis": "AGENTS.md §一"
+          "text": "Never write a credential, key or token into the repository — including code, documentation, commit messages and Mod example data.",
+          "basis": "AGENTS.md §1"
         },
         {
           "id": "credentials.no-secret-in-artifacts",
           "modality": "must-not",
-          "text": "禁止把凭据写入任何对话产物：汇报、报告、issue/PR 描述、回贴的日志片段。",
-          "basis": "AGENTS.md §一"
+          "text": "Never write a credential into any conversation artifact: reports, summaries, issue/PR descriptions, pasted log excerpts.",
+          "basis": "AGENTS.md §1"
         },
         {
           "id": "credentials.no-secret-in-committed-resources",
           "modality": "must-not",
-          "text": "任何敏感信息不得写入入库资源——入库面明确包含：游戏设置 `data/config.json`、本手册 `data/playbook.json`、经验/成长（演进）Mod 及其产出、其他随仓库提交的 Mod 资源与文档。",
-          "basis": "用户决策 2026-10-29（s1 增补，非 AGENTS.md 原文）"
+          "text": "No sensitive information may enter a committed resource — the committed surface explicitly includes: game settings `data/config.json`, this playbook `data/playbook.json`, the experience/growth (evolution) Mod and its output, and every other Mod resource or document committed with the repository.",
+          "basis": "user decision 2026-10-29 (s1 addition, not in the original AGENTS.md)"
         },
         {
           "id": "credentials.settings-not-a-secret-vault",
           "modality": "must",
-          "text": "运行期动态 KV `settings.*` 不是存放敏感值的例外：静态默认（`data/config.json`）与动态覆盖（`config.set` 写入的 `settings.*`）一律只存非敏感行为开关、数值与经验文本（如 `evolution.mode` / `gates.require_all_green` / `evolution.max_per_run`）。",
-          "basis": "docs/vision.md §4.1 第 6 条（2026-10-29 用户补充决策）"
+          "text": "The runtime KV family `settings.*` is no exception for sensitive values: the static defaults (`data/config.json`) and the dynamic overrides (`settings.*` written by `config.set`) only ever hold non-sensitive behavior switches, numbers and experience text (such as `evolution.mode` / `gates.require_all_green` / `evolution.max_per_run`).",
+          "basis": "docs/vision.md §4.1 item 6 (user decision added 2026-10-29)"
         },
         {
           "id": "credentials.secret-values-local-only",
           "modality": "must",
-          "text": "LLM API key、token、数据库/对象存储连接串、subagent 模型参数（`YGG_SUBAGENT_*`）等敏感值只保留在本地 `.env` / `.env.local`（均 gitignore），不进任何其他文件。",
-          "basis": "用户决策 2026-10-29（s1 增补）；AGENTS.md §一 纪律 1、§三 派发纪律 2"
+          "text": "Sensitive values — LLM API keys, tokens, database/object-storage connection strings, subagent model parameters (`YGG_SUBAGENT_*`) — live only in the local `.env` / `.env.local` (both git-ignored) and in no other file.",
+          "basis": "user decision 2026-10-29 (s1 addition); AGENTS.md §1 rule 1, §3 dispatch discipline 2"
         },
         {
           "id": "credentials.mod-and-report-keys-only",
           "modality": "must",
-          "text": "Mod 资源与报告中只允许出现键名（如 `YGG_LLM_*`、`YGG_SUBAGENT_MODEL`），不出现值——包括叙事文本、`beats`/`prompts`、局末复盘与走查报告。",
-          "basis": "用户决策 2026-10-29（s1 增补）；AGENTS.md §一 纪律 2"
+          "text": "Mod resources and reports may show key names only (such as `YGG_LLM_*`, `YGG_SUBAGENT_MODEL`), never values — including narrative text, `beats`/`prompts`, the closing review and any walk report.",
+          "basis": "user decision 2026-10-29 (s1 addition); AGENTS.md §1 rule 2"
         },
         {
           "id": "credentials.evolution-output-not-exempt",
           "modality": "must-not",
-          "text": "局末进化产出（建议正文、复核 artifact、以及任何据此做的资源修订）同样计入入库面，不得把敏感值随「经验沉淀」写进 Mod 或报告。",
-          "basis": "用户决策 2026-10-29（s1 增补）；data/config.json evolution.allow_paths"
+          "text": "End-of-run evolution output (suggestion text, the review artifact, and any resource edit made from it) also counts as committed surface: never write a sensitive value into a Mod or a report as \"accumulated experience\".",
+          "basis": "user decision 2026-10-29 (s1 addition); `data/config.json` evolution.allow_paths"
         },
         {
           "id": "credentials.env-file",
           "modality": "must",
-          "text": "本地开发凭据一律走 `.env` / `.env.local`（均 gitignore，权限 600）；`.env.example` 只放键名不放值。",
-          "basis": "AGENTS.md §一 纪律 1"
+          "text": "Local development credentials always go through `.env` / `.env.local` (both git-ignored, mode 600); `.env.example` carries key names only, never values.",
+          "basis": "AGENTS.md §1 rule 1"
         },
         {
           "id": "credentials.keys-only",
           "modality": "must",
-          "text": "汇报、文档、commit message、Mod 示例数据中只出现键名，不出现值。",
-          "basis": "AGENTS.md §一 纪律 2"
+          "text": "Reports, documentation, commit messages and Mod example data show key names only, never values.",
+          "basis": "AGENTS.md §1 rule 2"
         },
         {
           "id": "credentials.synthetic-data",
           "modality": "must",
-          "text": "示例与测试数据一律自造合成数据，不引入任何真实个人数据。",
-          "basis": "AGENTS.md §一 纪律 3"
+          "text": "Examples and test data are always synthetic; never introduce real personal data.",
+          "basis": "AGENTS.md §1 rule 3"
         },
         {
           "id": "credentials.breach-disclosure",
           "modality": "must",
-          "text": "违规后如实列出暴露了什么（具体文件 + 内容位置），不淡化、不辩解；随后停止相关操作，等待用户指示。",
-          "basis": "AGENTS.md §一 纪律 4"
+          "text": "After a violation, list honestly what was exposed (the specific file plus the content location), without downplaying or arguing; then stop the affected operations and wait for the user.",
+          "basis": "AGENTS.md §1 rule 4"
         }
-      ],
-      "notes": "受管凭据面（枚举，非穷尽）：LLM API key（M1 内容管线的模型调用凭据）；平台服务数据库连接串与对象存储 AK/SK（M2+）；任何第三方服务的 token；subagent 模型与 thinking 参数。入库面与本资源的配置面同构：`data/config.json` 静态默认、`settings.*` 动态覆盖、playbook 与演进产物——四处都只承载非敏感内容。本仓库无涉密业务数据。"
+      ]
     },
     {
       "id": "repository",
       "order": 2,
-      "title": "二、仓库形态",
-      "summary": "Rust 五 crate workspace + pnpm packages + Godot 客户端 + 项目内 .ygg harness；三条形态铁律：决策单源、Schema 单源、内核零依赖。",
-      "source": "AGENTS.md §二",
+      "title": "2. Repository shape",
+      "summary": "A Rust five-crate workspace plus pnpm packages, a Godot client and the in-repo .ygg harness; three shape invariants: a single source for decisions, a single source for schemas, and a zero-dependency core.",
+      "source": "AGENTS.md §2",
       "priority": "standard",
       "rules": [
         {
           "id": "repository.vision-single-source",
           "modality": "must",
-          "text": "`docs/vision.md` 的决策表是项目决策唯一事实源；任何方案讨论收敛出的新决策（D11+）必须回填该表。",
-          "basis": "AGENTS.md §二 约束 1"
+          "text": "The decision table in `docs/vision.md` is the single source of truth for project decisions; any new decision produced by a design discussion (D11+) must be written back into that table.",
+          "basis": "AGENTS.md §2 (constraint 1)"
         },
         {
           "id": "repository.decision-conflict-is-defect",
           "modality": "must-not",
-          "text": "与决策表冲突的实现一律视为缺陷，不得以「实现已就绪」为由让决策静默漂移。",
-          "basis": "AGENTS.md §二 约束 1"
+          "text": "An implementation that conflicts with the decision table is a defect: never let a decision drift silently on the grounds that \"the implementation is already done\".",
+          "basis": "AGENTS.md §2 (constraint 1)"
         },
         {
           "id": "repository.schema-single-source",
           "modality": "must",
-          "text": "资源格式契约只落 `packages/schema/schemas/`（D15）：TS 侧（ajv）与 Rust 侧（jsonschema crate）读同一份文件，禁止任何一侧另写内联副本。",
-          "basis": "AGENTS.md §二 约束 2；vision.md D15/D20"
+          "text": "Resource format contracts live only in `packages/schema/schemas/` (D15): the TS side (ajv) and the Rust side (jsonschema crate) read the same file, and neither side may keep an inline copy.",
+          "basis": "AGENTS.md §2 constraint 2; vision.md D15/D20"
         },
         {
           "id": "repository.schema-does-not-constrain-lua",
           "modality": "must-not",
-          "text": "Schema 只约束资源文件格式，不约束 Mod 逻辑——Mod 的可执行接口为 Lua 脚本（D11）。",
-          "basis": "AGENTS.md §二 约束 2"
+          "text": "A schema constrains the resource file format, not Mod logic — the executable interface of a Mod is a Lua script (D11).",
+          "basis": "AGENTS.md §2 constraint 2"
         },
         {
           "id": "repository.core-purity",
           "modality": "must-not",
-          "text": "`crates/ygg-core` 零依赖铁律：不依赖任何内部模块、DOM/平台 API、渲染库；白名单仅 serde / serde_json / thiserror。",
-          "basis": "AGENTS.md §二 约束 3；docs/architecture-principles.md §2 三条铁律"
+          "text": "`crates/ygg-core` has a zero-dependency invariant: no internal module, no DOM/platform API, no rendering library; the allowlist is serde / serde_json / thiserror only.",
+          "basis": "AGENTS.md §2 constraint 3; docs/architecture-principles.md §2 (three invariants)"
         },
         {
           "id": "repository.vm-dependency-location",
           "modality": "must",
-          "text": "mlua 等 VM 依赖只允许出现在 `crates/ygg-sandbox`（D12）。",
-          "basis": "AGENTS.md §二 约束 3；vision.md D12"
+          "text": "VM dependencies such as mlua may appear only in `crates/ygg-sandbox` (D12).",
+          "basis": "AGENTS.md §2 constraint 3; vision.md D12"
         },
         {
           "id": "repository.dependency-direction",
           "modality": "must",
-          "text": "依赖方向单向：`ygg-sandbox` → `ygg-core` + `ygg-schema`；`ygg-wasm` → `ygg-sandbox`；`ygg-lint` 零 ygg-* 内核依赖；`ygg-schema` 与 `ygg-core` 无代码依赖边。",
-          "basis": "docs/modules-and-tech-stack.md §1 模块间依赖约束；各 crate 的 Cargo.toml 头注"
+          "text": "Dependency direction is one-way: `ygg-sandbox` → `ygg-core` + `ygg-schema`; `ygg-wasm` → `ygg-sandbox`; `ygg-lint` has no ygg-* kernel dependency; `ygg-schema` and `ygg-core` have no code dependency edge.",
+          "basis": "docs/modules-and-tech-stack.md §1 (inter-module dependency constraints); the Cargo.toml header note of each crate"
         }
       ]
-
     },
     {
       "id": "branches",
       "order": 3,
-      "title": "三、分支管理",
-      "summary": "master 是唯一主干且只接受合并；一切开发走功能分支；一切合并 no-FF。",
-      "source": "AGENTS.md §三 分支模型",
+      "title": "3. Branch management",
+      "summary": "master is the only trunk and accepts merges only; all development happens on feature branches; every merge is no-FF.",
+      "source": "AGENTS.md §3 (branch model)",
       "priority": "standard",
       "rules": [
         {
           "id": "branches.no-direct-master-work",
           "modality": "must-not",
-          "text": "禁止直接在 master 上开发；master 只接受合并。",
-          "basis": "AGENTS.md §三 分支模型"
+          "text": "Never develop directly on master; master accepts merges only.",
+          "basis": "AGENTS.md §3 (branch model)"
         },
         {
           "id": "branches.feature-naming",
           "modality": "must",
-          "text": "一切开发（含文档）都在功能分支进行，命名 `feature/<主题>` 或 `docs/<主题>`。",
-          "basis": "AGENTS.md §三 分支模型"
+          "text": "All work (documentation included) happens on a feature branch named `feature/<topic>` or `docs/<topic>`.",
+          "basis": "AGENTS.md §3 (branch model)"
         },
         {
           "id": "branches.no-ff-merge",
           "modality": "must",
-          "text": "一切分支合并（功能 → 集成 → 主干）一律 `git merge --no-ff`，禁止 fast-forward。",
-          "basis": "AGENTS.md §三 no-FF 铁律"
+          "text": "Every branch merge (feature → integration → trunk) uses `git merge --no-ff`; fast-forward is forbidden.",
+          "basis": "AGENTS.md §3 (no-FF invariant)"
         },
         {
           "id": "branches.merge-node-is-rollback-anchor",
           "modality": "must",
-          "text": "保留合并节点，使迭代批次（如 `v<日期>.<序号>`）在历史图中可追溯、可整体回滚——这是 no-FF 的目的，不是风格偏好。",
-          "basis": "AGENTS.md §三 no-FF 铁律"
+          "text": "Keep the merge node so an iteration batch (such as `v<date>.<n>`) stays traceable in the history graph and can be rolled back as a whole — that is the purpose of no-FF, not a style preference.",
+          "basis": "AGENTS.md §3 (no-FF invariant)"
         },
         {
           "id": "branches.integration-branch-reserved",
           "modality": "should",
-          "text": "集成分支 `develop/yggdrasill` 为预留：迭代轮次多、泳道并行起来后启用；启用前功能分支直接合 master。",
-          "basis": "AGENTS.md §三 分支模型"
+          "text": "The integration branch `develop/yggdrasill` is reserved: enable it once there are many iterations and parallel lanes; before that, feature branches merge into master directly.",
+          "basis": "AGENTS.md §3 (branch model)"
         },
         {
           "id": "branches.push-after-verify",
           "modality": "must",
-          "text": "功能分支核验通过后 push origin（供协同与备份）。",
-          "basis": "AGENTS.md §三 push 纪律"
+          "text": "Push a feature branch to origin once its verification passes (for collaboration and backup).",
+          "basis": "AGENTS.md §3 (push discipline)"
         },
         {
           "id": "branches.pr-and-merge-user-triggered",
           "modality": "must-not",
-          "text": "建 PR、合并入 master 由用户显式触发，Agent 不自行发起。",
-          "basis": "AGENTS.md §三 push 纪律"
+          "text": "Opening a PR and merging into master are triggered explicitly by the user; the agent never starts them on its own.",
+          "basis": "AGENTS.md §3 (push discipline)"
         }
-      ],
-      "notes": "主干 `master` 同时是唯一部署来源（部署纪律见 integration 章）。"
+      ]
     },
     {
       "id": "lanes",
       "order": 4,
-      "title": "三、泳道 worktree",
-      "summary": "每条泳道一个 worktree + 一个 `.lane` 挂牌；占用即挂牌、收口即摘牌，绝不共享。",
-      "source": "AGENTS.md §三 泳道 worktree",
+      "title": "3b. Lane worktrees",
+      "summary": "One worktree and one `.lane` plaque per lane; occupy means plaque up, close means plaque down, and a worktree is never shared.",
+      "source": "AGENTS.md §3 (lane worktrees)",
       "priority": "standard",
       "rules": [
         {
           "id": "lanes.path-convention",
           "modality": "must",
-          "text": "泳道 worktree 约定路径 `~/tmp/worktrees/yggdrasill-<n>`，空闲时 detach 在 `origin/master` 头。",
-          "basis": "AGENTS.md §三 泳道 worktree"
+          "text": "Lane worktrees use the conventional path `~/tmp/worktrees/yggdrasill-<n>` and sit detached at the `origin/master` head while idle.",
+          "basis": "AGENTS.md §3 (lane worktrees)"
         },
         {
           "id": "lanes.plaque-file",
           "modality": "must",
-          "text": "每条泳道 worktree 根维护 `.lane` 文件（不进 git）：`LANE_OCCUPIED=true|false` + `LANE_TASK` / `LANE_BRANCH` / `LANE_SINCE`。",
-          "basis": "AGENTS.md §三 挂牌机制"
+          "text": "Every lane worktree keeps a `.lane` file at its root (never committed): `LANE_OCCUPIED=true|false` plus `LANE_TASK` / `LANE_BRANCH` / `LANE_SINCE`.",
+          "basis": "AGENTS.md §3 (plaque mechanism)"
         },
         {
           "id": "lanes.check-before-dispatch",
           "modality": "must",
-          "text": "派发前必检 `.lane`：`LANE_OCCUPIED=true` 则换泳道或等释放；无文件视为空闲但须补挂牌。",
-          "basis": "AGENTS.md §三 挂牌机制 1"
+          "text": "Always read `.lane` before dispatching: `LANE_OCCUPIED=true` means pick another lane or wait for the release; a missing file counts as free but the plaque must then be created.",
+          "basis": "AGENTS.md §3 (plaque mechanism 1)"
         },
         {
           "id": "lanes.occupy-and-release",
           "modality": "must",
-          "text": "占用即挂牌；收口即摘牌——任务合并/废弃后把 `LANE_OCCUPIED` 改回 false、清空任务字段。",
-          "basis": "AGENTS.md §三 挂牌机制 2"
+          "text": "Occupying means plaque up; closing means plaque down — once the task is merged or abandoned, set `LANE_OCCUPIED` back to false and clear the task fields.",
+          "basis": "AGENTS.md §3 (plaque mechanism 2)"
         },
         {
           "id": "lanes.no-sharing",
           "modality": "must-not",
-          "text": "两个任务不得共用同一 worktree；派发前要求 `git status` 干净（`.lane` 除外）。",
-          "basis": "AGENTS.md §三 挂牌机制 3"
+          "text": "Two tasks may never share one worktree; before dispatching, `git status` must be clean (except `.lane`).",
+          "basis": "AGENTS.md §3 (plaque mechanism 3)"
         }
-      ],
-      "notes": "`.lane` 不在 git 内，因此「`git status` 干净」的判定须显式排除它——它是挂牌本身，不是工作区改动。"
+      ]
     },
     {
       "id": "dispatch",
       "order": 5,
-      "title": "三、Subagent 派发纪律",
-      "summary": "后台派发不阻塞主会话；模型与 thinking 从 `.env.local` 读，只用于派发参数，不打印不入库。",
-      "source": "AGENTS.md §三 Subagent 派发纪律",
+      "title": "3c. Subagent dispatch discipline",
+      "summary": "Background dispatch never blocks the main session; the model and thinking level come from `.env.local`, are used as dispatch parameters only, and are never printed or committed.",
+      "source": "AGENTS.md §3 (subagent dispatch discipline)",
       "priority": "standard",
       "rules": [
         {
           "id": "dispatch.executor-ledger",
           "modality": "must",
-          "text": "派发之后必须登记执行者（**自声明账本**，不是身份认证）：`config.set executor.<rN>.<stage>=<agent_id>`，stage ∈ analysis / plan / development；同一个 subagent 连续负责三段时逐阶段登记同一个 id。同一 (req,stage) 换成不同 id **必须**写原因（`=<new_id>|<原因>`）；**跨阶段换人**（plan 与 analysis 的 id 不同、或无 plan 时与 analysis 不同）同样必须写原因，不得以「首次绑定该 stage」静默覆盖断链。换人成功写 `id|原因` 并往 `req.<i>.hist` 追加一条（沿用滚动上限，不另建 history/handoff 键）；首次干净绑定不写 hist。账本不带 rev：`amend` 不改绑定，`split` / `merge` 不继承。`proposal.submit` 不做硬校验——未登记只在 `requirement.list` 显示「未登记」，不阻断外部提案与同 ext 重放。",
-          "basis": "用户决策 2026-11-01（E2 裁决：复用 config.set、不绑 rev、不做提交硬门禁、跨阶段换人必给原因）"
+          "text": "After dispatching you must register the executor (a **self-declared ledger**, not identity proof): `config.set executor.<rN>.<stage>=<agent_id>`, stage ∈ analysis / plan / development; when one subagent covers all three stages, register the same id stage by stage. Replacing the executor for the same (req, stage) with a different id **requires** a reason (`=<new_id>|<reason>`); a **cross-stage handoff** (a plan id different from the analysis one, or — with no plan — different from the analysis one) equally requires a reason and may never be silently overwritten as a \"first binding for that stage\". A successful handoff writes `id|reason` and appends one entry to `req.<i>.hist` (reusing the rolling cap; no separate history/handoff key); a clean first binding writes no history. The ledger carries no rev: `amend` does not change the binding and `split` / `merge` do not inherit it. `proposal.submit` performs no hard check — an unregistered executor only shows as \"unregistered\" in `requirement.list` and never blocks external proposals or same-ext replays.",
+          "basis": "user decision 2026-11-01 (E2 ruling: reuse config.set, bind no rev, no hard submit gate, a cross-stage handoff must give a reason)"
         },
         {
           "id": "dispatch.background-only",
           "modality": "must",
-          "text": "创建 subagent 执行任务一律后台运行，主会话不原地等待——派发期间继续推进其他泳道、核验或规划，收到完成通知后再核验合流。",
-          "basis": "AGENTS.md §三 派发纪律 1"
+          "text": "Every subagent task runs in the background; the main session never waits in place — keep advancing other lanes, verifications or planning while it runs, and verify and merge once the completion notice arrives.",
+          "basis": "AGENTS.md §3 (dispatch discipline 1)"
         },
         {
           "id": "dispatch.sync-wait-exception",
           "modality": "should",
-          "text": "仅当后续动作严格依赖其结果且无任何可并行推进的工作时，才允许同步等待，并优先把该时间用于其他泳道。",
-          "basis": "AGENTS.md §三 派发纪律 1"
+          "text": "Synchronous waiting is allowed only when the next action strictly depends on the result and nothing else can progress in parallel; even then, spend the waiting time on other lanes first.",
+          "basis": "AGENTS.md §3 (dispatch discipline 1)"
         },
         {
           "id": "dispatch.params-from-env-local",
           "modality": "must",
-          "text": "派发前读仓库根 `.env.local`（已 gitignore，绝不入库）：`YGG_SUBAGENT_MODEL`（subagent 模型，如 `sonnet` / `provider/model-id`）与 `YGG_SUBAGENT_THINKING`（`off|minimal|low|medium|high|xhigh|max`）；未设置则不显式传参，用 harness 默认。",
-          "basis": "AGENTS.md §三 派发纪律 2"
+          "text": "Before dispatching, read the repository-root `.env.local` (git-ignored, never committed): `YGG_SUBAGENT_MODEL` (the subagent model, e.g. `sonnet` / `provider/model-id`) and `YGG_SUBAGENT_THINKING` (`off|minimal|low|medium|high|xhigh|max`); when unset, pass nothing explicitly and use the harness default.",
+          "basis": "AGENTS.md §3 (dispatch discipline 2)"
         },
         {
           "id": "dispatch.params-not-disclosed",
           "modality": "must-not",
-          "text": "这两个值只用于派发参数——不打印、不写文档、不进 commit。",
-          "basis": "AGENTS.md §三 派发纪律 2"
+          "text": "These two values are dispatch parameters only — never printed, never written into documentation, never committed.",
+          "basis": "AGENTS.md §3 (dispatch discipline 2)"
         }
       ]
     },
     {
       "id": "integration",
       "order": 6,
-      "title": "四、开发-集成-合并-部署流程",
-      "summary": "三级收口：迭代点（功能分支）→ 轮次（可发布批次）→ 部署；集成/合并/部署永远由主 Agent 串行做。",
-      "source": "AGENTS.md §四",
+      "title": "4. Develop → integrate → merge → deploy",
+      "summary": "Three closing levels: the iteration point (feature branch) → the round (a releasable batch) → deployment; integration, merging and deployment are always done serially by the main agent.",
+      "source": "AGENTS.md §4",
       "priority": "standard",
       "rules": [
         {
           "id": "integration.serial-closeout",
           "modality": "must",
-          "text": "集成/合并/部署操作由主 Agent（主会话）串行执行；泳道 subagent 只负责开发 + 门禁 + push 功能分支。",
-          "basis": "AGENTS.md §四 串行收口"
+          "text": "Integration, merging and deployment are executed serially by the main agent (the main session); lane subagents only develop, pass their gates and push their feature branch.",
+          "basis": "AGENTS.md §4 (serial closeout)"
         },
         {
           "id": "integration.iter.fetch",
           "modality": "must",
-          "text": "迭代点收口第一步：`git fetch origin`。",
-          "basis": "AGENTS.md §四 ①"
+          "text": "First step of an iteration closeout: `git fetch origin`.",
+          "basis": "AGENTS.md §4 (1)"
         },
         {
           "id": "integration.iter.rebase-on-trunk",
           "modality": "must",
-          "text": "检查主干是否前移：分叉则先 `git pull --ff-only` 对齐，再 rebase 功能分支。",
-          "basis": "AGENTS.md §四 ①"
+          "text": "Check whether the trunk moved: if the histories diverged, align first with `git pull --ff-only`, then rebase the feature branch.",
+          "basis": "AGENTS.md §4 (1)"
         },
         {
           "id": "integration.iter.gates-green-first",
           "modality": "must",
-          "text": "门禁全绿（见 gates 章）才能请求合并——未过门禁不得请求合并。",
-          "basis": "AGENTS.md §四 ①"
+          "text": "All gates must be green (see the gates chapter) before a merge is requested — a merge may never be requested with a failing gate.",
+          "basis": "AGENTS.md §4 (1)"
         },
         {
           "id": "integration.iter.merge-ritual",
           "modality": "must",
-          "text": "合并由用户触发或用户批准后由主 Agent 执行：主检出 `git merge --no-ff <feature>`，随后 push master；删除远端功能分支可选。",
-          "basis": "AGENTS.md §四 ①"
+          "text": "The merge is triggered by the user, or executed by the main agent after the user approves it: in the main checkout run `git merge --no-ff <feature>`, then push master; deleting the remote feature branch is optional.",
+          "basis": "AGENTS.md §4 (1)"
         },
         {
           "id": "integration.round.e2e-acceptance",
           "modality": "must",
-          "text": "轮次级收口先过端到端验收：示例游戏完整通关 + 存档/读档验证；M1 后加 AI 生成 → 可玩闭环。",
-          "basis": "AGENTS.md §四 ②"
+          "text": "A round-level closeout first passes end-to-end acceptance: the example game completed end to end plus save/load verification; after M1 this adds the AI-generated → playable loop.",
+          "basis": "AGENTS.md §4 (2)"
         },
         {
           "id": "integration.round.batch-tag",
           "modality": "must",
-          "text": "验收通过后打批次 tag `v<YYYY.MM.DD>.<序号>`——no-FF 合并节点是回滚锚点。",
-          "basis": "AGENTS.md §四 ②"
+          "text": "Once acceptance passes, tag the batch `v<YYYY.MM.DD>.<n>` — the no-FF merge node is the rollback anchor.",
+          "basis": "AGENTS.md §4 (2)"
         },
         {
           "id": "integration.round.changelog",
           "modality": "should",
-          "text": "批次收口补 CHANGELOG / 汇报（如有）。",
-          "basis": "AGENTS.md §四 ②"
+          "text": "A batch closeout updates the CHANGELOG / report when one exists.",
+          "basis": "AGENTS.md §4 (2)"
         },
         {
           "id": "integration.deploy.master-only",
           "modality": "must-not",
-          "text": "任何通道部署的内容必须已合入 master：非 master ref 直接拒绝，无例外开关。",
-          "basis": "AGENTS.md §四 ③"
+          "text": "Anything deployed through any channel must already be merged into master: a non-master ref is refused outright, with no exception switch.",
+          "basis": "AGENTS.md §4 (3)"
         },
         {
           "id": "integration.deploy.requires-approval",
           "modality": "must",
-          "text": "部署属写操作，每次部署前向用户报备并获批准。",
-          "basis": "AGENTS.md §四 ③"
+          "text": "Deployment is a write operation: report it to the user and get approval before every deployment.",
+          "basis": "AGENTS.md §4 (3)"
         }
-      ],
-      "notes": "部署通道仍为占位（随阶段定稿）：M0-M2 Web 客户端静态托管（候选 GitHub Pages / Cloudflare Pages，待用户定稿后回填）；M2+ `services/` 平台服务方案待定。未定稿前不得声称任一通道已确定。"
+      ]
     },
     {
       "id": "gates",
       "order": 7,
-      "title": "五、验证命令门禁",
-      "summary": "门禁是快照基线：验收标准是「不引入新失败」；未接通的模块必须显式声明未覆盖。",
-      "source": "AGENTS.md §五",
+      "title": "5. Verification-command gates",
+      "summary": "The gate baseline is a snapshot: the acceptance standard is \"introduce no new failure\"; a module whose gate is not wired up must be declared uncovered explicitly.",
+      "source": "AGENTS.md §5",
       "priority": "standard",
       "rules": [
         {
           "id": "gates.baseline-snapshot",
           "modality": "must",
-          "text": "门禁基线是快照（随迭代增长），验收标准是「不引入新失败」——不要求历史欠账清零，但不得新增失败。",
-          "basis": "AGENTS.md §五"
+          "text": "The gate baseline is a snapshot that grows with each iteration, and the acceptance standard is \"introduce no new failure\" — historical debt does not have to be zero, but no new failure may appear.",
+          "basis": "AGENTS.md §5"
         },
         {
           "id": "gates.core-purity-review",
           "modality": "must",
-          "text": "`ygg-core` 的 `Cargo.toml` 依赖清单纳入审查：出现渲染/平台/IO 类依赖即违规，无例外机制。",
-          "basis": "AGENTS.md §五 内核纯度检查"
+          "text": "The dependency list in `ygg-core`'s `Cargo.toml` is part of the review: a rendering, platform or IO dependency is a violation with no exception mechanism.",
+          "basis": "AGENTS.md §5 (kernel purity check)"
         },
         {
           "id": "gates.uncovered-declaration",
           "modality": "must",
-          "text": "门禁未接通的模块（尚未建立测试的）须在汇报中显式声明「门禁未覆盖」，不得默认通过。",
-          "basis": "AGENTS.md §五"
+          "text": "A module whose gate is not wired up yet (no tests exist) must be declared \"gate not covered\" in the report; it never passes by default.",
+          "basis": "AGENTS.md §5"
         },
         {
           "id": "gates.mod-semantics-matrix",
           "modality": "must",
-          "text": "改 `.ygg/mods/agent-seed/src/**`（状态机 / 门禁 / 渲染）或 `.ygg/mods/agent-seed/data/scenes.json` 的 map 文案时，门禁清单在 lint 与全 1 playtest 之外必须加跑 `cargo test -p ygg-sandbox --test agent_seed_semantics`：7 条 = accept 门禁正常打回 / accept 门禁 amend→stale / plan 门禁打回 / dev 提案打回（未 amend 与 amend 两路）/ legacy 缺 `plan_ok` 存档 / map 操作视图与设计视图文案 / 两侧 Mod 全 1 走查。全 1 playtest 只覆盖 happy path，分叉（`gate.reject` / `requirement.amend` / `proposal.reject`）一条都不走；`/tmp` 下的临时探针只能补充、不能替代这条测试；未覆盖的场景必须在汇报里逐条声明。判据三问：① 拦的动作是「改完 Mod 源码或 map 文案只跑 lint 与全 1 就宣称验收」；② 违规的可见表现是分叉语义与 map 措辞退化在门禁里恒绿、缺陷只在实跑时暴露；③ 下次用该命令（7/7）确认生效，并可用一次变异探针（把旧语义改回去 → 该测试必须红）自证断言不是空转。",
-          "basis": "AGENTS.md §一·9 行为验收；crates/ygg-sandbox/tests/agent_seed_semantics.rs"
+          "text": "Changing `.ygg/mods/agent-seed/src/**` (state machine / gates / render layer), `mod.lua`, or the map wording in `.ygg/mods/agent-seed/data/scenes.json` adds `cargo test -p ygg-sandbox --test agent_seed_semantics` to the gate list on top of lint and the all-1 playtest: 12 cases = stage merge plus the compatibility `analysis` slot / accept-gate reject / accept-gate approval releasing the lane / accept-gate amend → stale / plan-gate reject / reactive auto-dispatch in the same turn (with `useMemo` invalidation) / development proposal reject (not amended and amended) / inline `exec=` (misplaced, missing reason, `:` form) / settlement merge with `sessions=` + `todo=` and a refused malformed segment / legacy save without `plan_ok` / the operation and design map wording on both packs / the all-1 walk of both packs. The all-1 playtest only covers the happy path — it never takes a branch (`gate.reject` / `requirement.amend` / `proposal.reject`) and cannot see the turn-cut mechanics at all; a temporary probe under `/tmp` may only supplement this test and never replace it; every uncovered scenario must be declared item by item in the report. Three-question criterion: ① the blocked action is \"change the Mod source or the map wording, run only lint plus all-1, and call it accepted\"; ② the visible symptom of a violation is that branch semantics and map wording regress while every gate stays green, so the defect only shows in a real run; ③ confirm it next time with that command (12/12) plus one mutation probe (put the old semantics back → the test must go red) to prove the assertions are not vacuous.",
+          "basis": "AGENTS.md §1.9 (behavioural acceptance); crates/ygg-sandbox/tests/agent_seed_semantics.rs"
         },
         {
           "id": "gates.no-wasm-pack",
           "modality": "must-not",
-          "text": "不得用 wasm-pack 构建 wasm 绑定：EH 模块需 `wasm-bindgen --reference-types`，wasm-pack 不透传该旗标；构建链固定 `scripts/build-wasm.sh`（cargo + wasm-bindgen CLI 两步）。",
-          "basis": "AGENTS.md §五 wasm 绑定注记；.cargo/config.toml 头注"
+          "text": "Never build the wasm bindings with wasm-pack: the exception-handling module needs `wasm-bindgen --reference-types` and wasm-pack does not pass that flag through; the build chain is fixed to `scripts/build-wasm.sh` (cargo plus the wasm-bindgen CLI, two steps).",
+          "basis": "AGENTS.md §5 (wasm binding note); .cargo/config.toml header note"
         },
         {
           "id": "gates.no-silent-baseline-edit",
           "modality": "must-not",
-          "text": "FR-9 双跑状态哈希不等时不得静默改 fixture 基线——不等即平台间确定性破口，基线变更须显式决策并记录。",
-          "basis": "AGENTS.md §五 FR-9 注记"
+          "text": "When the FR-9 dual-run state hashes differ, never silently edit the fixture baseline — a mismatch is a determinism breach between platforms, and a baseline change requires an explicit decision plus a record.",
+          "basis": "AGENTS.md §5 (FR-9 note)"
         },
         {
           "id": "gates.fr9-browser-lane-gap",
           "modality": "must",
-          "text": "声称 FR-9 全量满足前须补 wasm-bindgen-test 浏览器泳道（真实浏览器 wasm 实例重放同一断言）或走显式决策豁免；当前 node 泳道已覆盖 native/wasm 双跑等价，浏览器泳道未实现。",
-          "basis": "AGENTS.md §五 FR-9 残余缺口注记"
+          "text": "Before claiming full FR-9 compliance, add the wasm-bindgen-test browser lane (replay the same assertions in a real browser wasm instance) or take an explicit waiver decision; today the node lane covers native/wasm dual-run equivalence, and the browser lane does not exist.",
+          "basis": "AGENTS.md §5 (FR-9 residual-gap note)"
         },
         {
           "id": "gates.contract-parity",
           "modality": "must",
-          "text": "契约一致性判据：同一份 Mod 样例分别过 ajv 与 jsonschema crate，结果必须一致；CI 脚本尚未落地，落地前该面按「门禁未覆盖」声明。",
-          "basis": "AGENTS.md §五 契约一致性"
+          "text": "Contract parity criterion: the same Mod sample must produce identical results through ajv and through the jsonschema crate; the CI script does not exist yet, so until it lands that surface is declared \"gate not covered\".",
+          "basis": "AGENTS.md §5 (contract parity)"
         }
       ]
-
     },
     {
       "id": "live_evidence",
       "order": 8,
-      "title": "六、分层验证纪律",
-      "summary": "门禁单测不证明游戏能玩：迭代点级过活链、轮次级完整通关，两轮缺一不可。",
-      "source": "AGENTS.md §六",
+      "title": "6. Layered verification discipline",
+      "summary": "Green unit gates do not prove the game is playable: an iteration point needs a live-chain walk and a round needs a full playthrough; neither may be skipped.",
+      "source": "AGENTS.md §6",
       "priority": "standard",
       "rules": [
         {
           "id": "live.gates-do-not-prove-playable",
           "modality": "must-not",
-          "text": "不得以门禁单测通过作为「游戏能玩」的证据——门禁只证明「没破坏既有断言」。",
-          "basis": "AGENTS.md §六"
+          "text": "A passing unit gate is never evidence that \"the game is playable\" — a gate only proves that no existing assertion broke.",
+          "basis": "AGENTS.md §6"
         },
         {
           "id": "live.iter.kernel-chain",
           "modality": "must",
-          "text": "迭代点级（功能分支合并前），内核改动除门禁外必须过活链验证：Rust 单测 + 一个最小可玩脚本驱动（加载样例 Mod → 推进若干事件 → 断言状态）。",
-          "basis": "AGENTS.md §六 1"
+          "text": "At the iteration-point level (before a feature branch merges), a kernel change must pass live-chain verification beyond the gates: the Rust unit tests plus one minimal playable scripted driver (load the sample Mod → advance several events → assert state).",
+          "basis": "AGENTS.md §6 (1)"
         },
         {
           "id": "live.iter.ui-browser-walk",
           "modality": "must",
-          "text": "表现层改动须浏览器实走并截图。",
-          "basis": "AGENTS.md §六 1"
+          "text": "A presentation-layer change requires a real browser walk-through with screenshots.",
+          "basis": "AGENTS.md §6 (1)"
         },
         {
           "id": "live.round.full-playthrough",
           "modality": "must",
-          "text": "轮次级：一批迭代点合并后完整通关一次示例游戏（M1 后含 AI 生成内容闭环），验证点逐项实证。",
-          "basis": "AGENTS.md §六 2"
+          "text": "At the round level, once a batch of iteration points is merged, play the example game through completely once (after M1 including the AI-generated content loop) and prove every acceptance point item by item.",
+          "basis": "AGENTS.md §6 (2)"
         },
         {
           "id": "live.evidence-per-point",
           "modality": "must",
-          "text": "证据先行：界面结论配截图，接口/内核结论配命令输出与退出码。",
-          "basis": "AGENTS.md §六 2"
+          "text": "Evidence first: a UI conclusion comes with a screenshot, an interface/kernel conclusion comes with command output and the exit code.",
+          "basis": "AGENTS.md §6 (2)"
         }
       ]
     },
     {
       "id": "evidence",
       "order": 9,
-      "title": "七、证据优先",
-      "summary": "结论只能来自命令输出与退出码、产物文件、或读到的源码原文；不确定就说不确定。",
-      "source": "AGENTS.md §七",
+      "title": "7. Evidence first",
+      "summary": "A conclusion may come only from command output and its exit code, from an artifact file, or from the source text you actually read; when unsure, say you are unsure.",
+      "source": "AGENTS.md §7",
       "priority": "standard",
       "rules": [
         {
           "id": "evidence.command-and-exit-code",
           "modality": "must",
-          "text": "用命令输出与退出码作证。",
-          "basis": "AGENTS.md §七"
+          "text": "Prove a point with command output and its exit code.",
+          "basis": "AGENTS.md §7"
         },
         {
           "id": "evidence.artifacts",
           "modality": "must",
-          "text": "用产物文件的存在性与内容作证（存在性 + 关键内容，不只说「已生成」）。",
-          "basis": "AGENTS.md §七"
+          "text": "Prove a point with an artifact's existence and content (existence plus the key content, not merely \"it was generated\").",
+          "basis": "AGENTS.md §7"
         },
         {
           "id": "evidence.source-lines",
           "modality": "must",
-          "text": "引用源码时给出 `文件:行号`。",
-          "basis": "AGENTS.md §七"
+          "text": "When quoting source code, give `file:line`.",
+          "basis": "AGENTS.md §7"
         },
         {
           "id": "evidence.no-impression",
           "modality": "must-not",
-          "text": "不得凭印象断言；不写「我已完成」这类无证据的完成语。",
-          "basis": "AGENTS.md §七"
+          "text": "Never assert from impression; never write evidence-free completion phrases such as \"I have finished\".",
+          "basis": "AGENTS.md §7"
         },
         {
           "id": "evidence.uncertainty-declared",
           "modality": "must",
-          "text": "不确定就说不确定，并给出「下一步怎么验证」。",
-          "basis": "AGENTS.md §七"
+          "text": "When unsure, say you are unsure and state how it will be verified next.",
+          "basis": "AGENTS.md §7"
         }
       ]
     },
     {
       "id": "output",
       "order": 10,
-      "title": "八、语言与输出",
-      "summary": "中文对话、英文标识；先结论后依据；改前先读；机械改写先打印再落盘并回读校验。",
-      "source": "AGENTS.md §八",
+      "title": "8. Language and output",
+      "summary": "Chinese conversation, English identifiers; conclusion before evidence; read before editing; print a mechanical rewrite before writing it and read it back afterwards.",
+      "source": "AGENTS.md §8",
       "priority": "standard",
       "rules": [
         {
           "id": "output.language-split",
           "modality": "must",
-          "text": "与用户对话用中文；代码、标识符、路径、命令保持原样英文。",
-          "basis": "AGENTS.md §八"
+          "text": "Talk to the user in Chinese; keep code, identifiers, paths and commands in their original English.",
+          "basis": "AGENTS.md §8"
         },
         {
           "id": "output.conclusion-first",
           "modality": "must",
-          "text": "报错/结论先给结论，再给依据。",
-          "basis": "AGENTS.md §八"
+          "text": "For an error or a conclusion, state the conclusion first and the evidence after it.",
+          "basis": "AGENTS.md §8"
         },
         {
           "id": "output.read-before-edit",
           "modality": "must",
-          "text": "改文件前先读；改多个文件时逐个说明改了什么、为什么。",
-          "basis": "AGENTS.md §八"
+          "text": "Read a file before editing it; when editing several files, explain file by file what changed and why.",
+          "basis": "AGENTS.md §8"
         },
         {
           "id": "output.mechanical-rewrite-roundtrip",
           "modality": "must",
-          "text": "大段机械改写（尤其 Markdown 树形结构与表格）先打印结果再写盘，写盘后立即回读校验。",
-          "basis": "AGENTS.md §八"
+          "text": "For a large mechanical rewrite (especially Markdown tree structures and tables) print the result first, then write it, then immediately read it back to verify.",
+          "basis": "AGENTS.md §8"
         }
       ]
     },
     {
       "id": "pointers",
       "order": 11,
-      "title": "九、去哪找",
-      "summary": "只放指针，不复制内容——正文归属被指向的文档，改动只有一处需要维护。",
-      "source": "AGENTS.md §九",
+      "title": "9. Where to look",
+      "summary": "Pointers only, never copied content — the referenced document owns the text, so a change is maintained in exactly one place.",
+      "source": "AGENTS.md §9",
       "priority": "standard",
       "rules": [
         {
           "id": "pointers.no-duplication",
           "modality": "must-not",
-          "text": "本章（及任何指针位）只放指针，不复制被指向文档的正文。",
-          "basis": "AGENTS.md §九"
+          "text": "This chapter (and every other pointer slot) holds pointers only and never copies the text of the document it points at.",
+          "basis": "AGENTS.md §9"
         },
         {
           "id": "pointers.why-pointers",
           "modality": "must",
-          "text": "指针表是「已知去处」的索引：动手前先按本节定位正文，不要凭记忆复述被指向的文档。",
-          "basis": "AGENTS.md §九（只放指针的理由：内容只有一处维护）"
+          "text": "The pointer table indexes \"known destinations\": locate the real text through this chapter before acting, and never paraphrase a referenced document from memory.",
+          "basis": "AGENTS.md §9 (why pointers only: the text is maintained in exactly one place)"
         }
       ]
-
     },
     {
       "id": "hard_constraints",
       "order": 12,
-      "title": "十、本仓库硬约束（不要做的事）",
-      "summary": "七条不要做的事，每条指向承载细节的章节——本章是索引式的硬核摘要，不是重复正文。",
-      "source": "AGENTS.md §十",
+      "title": "10. Hard constraints of this repository (what not to do)",
+      "summary": "Seven things not to do, each pointing at the chapter that carries the detail — an index-style summary of the hard core, not a second copy of the text.",
+      "source": "AGENTS.md §10",
       "priority": "critical",
       "rules": [
         {
           "id": "hard.no-credentials-in-repo",
           "modality": "must-not",
-          "text": "不把凭据写进仓库（含游戏设置 / playbook / 经验成长 Mod 与演进产出的入库面）——原文标注为唯一一条不可协商的（细节见 credentials 章）。",
-          "basis": "AGENTS.md §十 1"
+          "text": "Never write a credential into the repository (including the committed surface of game settings / playbook / experience-growth Mod and evolution output) — the source marks this as the one non-negotiable rule (details in the credentials chapter).",
+          "basis": "AGENTS.md §10 item 1"
         },
         {
           "id": "hard.no-master-development",
           "modality": "must-not",
-          "text": "不在 master 上直接开发；master 只接受 no-FF 合并（细节见 branches 章）。",
-          "basis": "AGENTS.md §十 2"
+          "text": "Never develop directly on master; master accepts no-FF merges only (details in the branches chapter).",
+          "basis": "AGENTS.md §10 item 2"
         },
         {
           "id": "hard.no-non-master-deploy",
           "modality": "must-not",
-          "text": "不部署非 master 内容；每次部署前报备并获用户批准（细节见 integration 章）。",
-          "basis": "AGENTS.md §十 3"
+          "text": "Never deploy non-master content; report and obtain user approval before every deployment (details in the integration chapter).",
+          "basis": "AGENTS.md §10 item 3"
         },
         {
           "id": "hard.no-core-impurity",
           "modality": "must-not",
-          "text": "不给 `ygg-core` 加渲染/平台/IO 依赖；发现「内核需要碰 DOM/网络」时，说明架构分层出了问题，回设计层讨论（细节见 repository 章）。",
-          "basis": "AGENTS.md §十 4"
+          "text": "Never add a rendering/platform/IO dependency to `ygg-core`; if \"the kernel needs to touch the DOM or the network\" comes up, the layering is broken — take it back to the design layer (details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 4"
         },
         {
           "id": "hard.no-dual-schema-write",
           "modality": "must-not",
-          "text": "不双写 Schema：资源格式契约只改 `packages/schema/`，Rust/TS 两侧都是从属方（D11/D15；细节见 repository 章）。",
-          "basis": "AGENTS.md §十 5"
+          "text": "Never write a schema twice: change the resource format contract only in `packages/schema/`, both the Rust and the TS side are subordinate (D11/D15; details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 5"
         },
         {
           "id": "hard.no-subagent-closeout",
           "modality": "must-not",
-          "text": "不让 subagent 做集成/合并/部署——收口永远由主 Agent 串行执行（细节见 integration 章）。",
-          "basis": "AGENTS.md §十 6"
+          "text": "Never let a subagent integrate, merge or deploy — the closeout is always executed serially by the main agent (details in the integration chapter).",
+          "basis": "AGENTS.md §10 item 6"
         },
         {
           "id": "hard.decision-change-backfill",
           "modality": "must",
-          "text": "决策变更必须回填 `docs/vision.md` 决策表；代码与决策冲突时，要么改代码、要么走决策变更流程，不允许静默漂移（细节见 repository 章）。",
-          "basis": "AGENTS.md §十 7"
+          "text": "A decision change must be written back into the `docs/vision.md` decision table; when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 7"
         }
-      ],
-      "notes": "原文把第 1 条标为「唯一一条不可协商的」；其余六条为必守纪律，判断边界写在各自承载章节的规则里，本章不重复正文。"
+      ]
     },
     {
       "id": "harness",
       "order": 13,
-      "title": "十三、Agent Harness 玩法（状态机 · 动作协议 · 异步 · 产物 · 契约）",
-      "summary": "承接 AGENTS.md 收缩前的第 2/4/5/6/7/8/9 章：两层状态机与两个强制门禁、动作协议与 --drive 三态、异步 inbox 与跨进程收口、进度查看、runs 产物、改 Mod 三件套、host 契约。玩法细节只在现场查（guide.show harness），不在 AGENTS.md 复述。",
-      "source": "AGENTS.md §2/§4/§5/§6/§7/§8/§9（2026-10-31 收缩前原文）",
+      "title": "13. Agent Harness playbook (state machine · action protocol · async · artifacts · contracts)",
+      "summary": "Succeeds chapters 2/4/5/6/7/8/9 from before AGENTS.md was condensed: the two-layer state machine and its two mandatory gates, the action protocol and the three `--drive` modes, the async inbox and the cross-process closeout, progress views, run artifacts, the Mod-change trio, and the host contract. Mechanics are looked up on the spot (guide.show harness) and never restated in AGENTS.md.",
+      "source": "AGENTS.md §2/§4/§5/§6/§7/§8/§9 (text before the 2026-10-31 condensation)",
       "priority": "standard",
       "rules": [
         {
           "id": "harness.goal-authorization",
           "modality": "must",
-          "text": "goal 授权是 **run 级自声明记录**：`config.set goal.authorization=<单行说明>` 写 `settings.goal.authorization`（trim 后 ≤200、无换行；空值 = 显式清除）。只有**运行期进入 goal** 的局（`settings.play.mode=goal`）在 `review.note` 收口前校验，缺记录则旁白阻断、不写 `ending`、不推进；静态 `data/config.json` 预设 goal 视为仓库所有者常设配置，**不在校验范围**（否则全 1 冒烟会断）。切回 guide 不校验；resume 保留记录。该记录只证明「登记过一句话」，不证明用户说过——不得据此声称身份认证，也不进 `agent.summary`。",
-          "basis": "用户决策 2026-11-01（E2 裁决：收口校验仅限运行期 goal；静态默认不阻断）"
+          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before `review.note` closes: a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the all-1 smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
+          "basis": "user decision 2026-11-01 (E2 ruling: the closing check covers runtime goal only; a static default does not block)"
         },
         {
           "id": "harness.coordinator-chain",
           "modality": "must",
-          "text": "协调器四态链：intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done；review 里 verify.submit=false 打回 coordinate（门禁失败打回）。",
-          "basis": "AGENTS.md §2（迁移前）"
+          "text": "The coordinator has a four-state chain: intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done; inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.pipeline-states",
           "modality": "must",
-          "text": "需求级流水线每条需求一条（KV req.<i>.status，存储 5 态）：draft ──dispatch──▶ analyzing ──proposal → proposal.accept──▶ planning ──proposal → proposal.accept → gate.approve(plan)──▶ planning+plan_ok ──dispatch──▶ developing(lane) ──proposal → proposal.accept → gate.approve(accept)──▶ done。展示名由 status + job / pending 提案 / gate / plan_ok 派生（analysis_review / plan_review / plan_gate / ready / dev_review / accept），不落存储。",
-          "basis": "AGENTS.md §2（迁移前）"
+          "text": "There is one requirement pipeline per requirement (`req.<i>.status`, 5 stored states): draft ──dispatch──▶ planning (job=plan) ──proposal → proposal.accept──▶ planning+gate=plan ──gate.approve(plan)──▶ planning+plan_ok ──dispatch (reactive auto-dispatch)──▶ developing (lane) ──proposal → proposal.accept──▶ developing+gate=accept ──gate.approve(accept)──▶ done. Display names are derived from status + job / pending proposal / gate / plan_ok (analysis_review / plan_review / plan_gate / ready / dev_review / accept) and are never stored. `analyzing` survives only as a compatibility state: legacy saves, and an explicit `analysis` proposal accepted on a planning row.",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.terminal-states",
           "modality": "must",
-          "text": "另有可追溯终态 split / merged / dropped，以及 blocked（冲突）与 stale（提案 rev 过期）两个标记态。",
-          "basis": "AGENTS.md §2（迁移前）"
+          "text": "There are also the traceable terminal states split / merged / dropped, plus the two marker states blocked (conflict) and stale (a proposal whose rev is outdated).",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.coordinator-scope",
           "modality": "must",
-          "text": "协调器只做四件事——派活（requirement.dispatch）、串行验收提案（proposal.accept / proposal.reject）、过两个强制门禁（gate.approve / gate.reject）、最终复盘（verify.submit → settlement.evolution → review.note）；它不承载开发本身，也不允许绕过任何门禁。",
-          "basis": "AGENTS.md §2（迁移前）"
+          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and close with the final review (verify.submit → settlement.evolution → review.note); it never carries development itself and may never bypass a gate.",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.requirement-granularity",
           "modality": "must",
-          "text": "需求粒度：同目标 / 同子系统 / 小改动 / 可共用计划与验收证据的相邻工作优先合入同一条需求；只有独立交付验收、跨仓或跨泳道、需要风险隔离才新建。相邻新建必须在 description 里写清不可合并的理由（缺理由 = 按可合并处理）。判据三问：① 拦的动作是 requirement.add / --requirement 建档；② 违规的可见表现是相邻需求被指出「只是上一条的一部分」而 description 里找不到不可合并理由；③ 下次用 requirement.list 逐条核对新增需求的 description 是否带该理由来确认生效。",
-          "basis": "用户决策 2026-11-02（r3 需求合并决策）"
+          "text": "Requirement granularity: adjacent work with the same goal, the same subsystem, a small change, or that can share one plan and one acceptance evidence set belongs in the same requirement; create a new one only for an independent delivery + acceptance, a cross-repository or cross-lane change, or risk isolation. A new adjacent requirement must state in its description why it cannot be merged (no reason = treat as mergeable). Three-question criterion: ① the blocked action is filing through requirement.add / --requirement; ② the visible symptom of a violation is that the adjacent requirement is pointed out as \"just part of the previous one\" while its description has no cannot-merge reason; ③ confirm it next time by walking `requirement.list` and checking that every new requirement's description carries that reason.",
+          "basis": "user decision 2026-11-02 (r3 requirement-merge decision)"
         },
         {
           "id": "harness.plan-gate",
           "modality": "must",
-          "text": "plan 门禁（req.gate=plan）：plan 提案验收后触发；通过 → 置 plan_ok（即旧 ready，才可 dispatch 进开发）；驳回 → 回 planning 重做；校验 gate_rev == req.rev（否则 stale 不得批）。",
-          "basis": "AGENTS.md §2 门禁表（迁移前）"
+          "text": "The plan gate (`req.gate=plan`) fires after a plan proposal is accepted; approve → `plan_ok` is set (the former `ready`, the only state that may dispatch into development); reject → back to planning for rework; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
+          "basis": "AGENTS.md §2 (gate table, pre-migration)"
         },
         {
           "id": "harness.accept-gate",
           "modality": "must",
-          "text": "accept 门禁（req.gate=accept）：开发提案验收后触发（执行方交付）；通过 → done；驳回 → 存储态回 planning、plan_ok 沿用原值（未 amend 即旧 ready，重新进开发队列；amend 过则 plan_ok 已作废 → 停在 planning 强制重规划）；校验 gate_rev == req.rev，且 artifacts 必须非空——不接受只有 summary 的完成自称。",
-          "basis": "AGENTS.md §2 门禁表（迁移前）"
+          "text": "The accept gate (`req.gate=accept`) fires after a development proposal is accepted (the executor delivered); approve → done; reject → the stored state returns to planning and `plan_ok` keeps its value (not amended → the former ready, back into the development queue; amended → `plan_ok` was already invalidated → it stops in planning and must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
+          "basis": "AGENTS.md §2 (gate table, pre-migration)"
         },
         {
           "id": "harness.accept-vs-gate",
           "modality": "must",
-          "text": "accept 是执行方自检并交付，不等于主 Agent 已验收；gate.approve 才是核验。",
-          "basis": "AGENTS.md §2（迁移前）"
+          "text": "accept means the executor self-checked and delivered; it does not mean the main agent has accepted. Only gate.approve is the verification.",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.gate-not-skippable",
           "modality": "must-not",
-          "text": "处于 plan / accept 门禁（req.gate ~= \"\"）的需求不能派活、不收新提案、不能被跳过；自动推进（--drive cmd:…）同样各走一次 gate.approve，只是序号由外部决策命令给出。",
-          "basis": "AGENTS.md §2（迁移前）"
+          "text": "A requirement sitting on the plan / accept gate (`req.gate ~= \"\"`) cannot be dispatched, accepts no new proposal and cannot be skipped; even automatic advancement (`--drive cmd:…`) runs one `gate.approve` per gate — only the index comes from the external decision command.",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.start-command",
           "modality": "must",
-          "text": "开局冷启动：.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <局名> --runs-root .ygg/runs --event event.start。",
-          "basis": "AGENTS.md §3（迁移前）"
+          "text": "Cold start of a run: `.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.drive-stdin",
           "modality": "must",
-          "text": "--drive stdin（缺省）读 stdin：每一步推进、每一次提案验收与门禁都要人输入序号；q 或输入结束退出。",
-          "basis": "AGENTS.md §3 表（迁移前）"
+          "text": "`--drive stdin` (the default) reads stdin: every step, every proposal acceptance and every gate needs a human-typed index; `q` or end-of-input exits.",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
           "id": "harness.drive-cmd",
           "modality": "must",
-          "text": "--drive cmd:<路径> 不读 stdin：每个待选动作交给决策命令选择，到结局自动结算；返回 HUMAN 即安全暂停（退出 0）。",
-          "basis": "AGENTS.md §3 表（迁移前）"
+          "text": "`--drive cmd:<path>` does not read stdin: every pending choice goes to the decision command, and the run settles automatically at the ending; a `HUMAN` answer pauses safely (exit 0).",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
           "id": "harness.drive-none",
           "modality": "must",
-          "text": "--drive none 只打印当前回执（含 pendingChoice）就退出，不推进、不读 stdin，退出 0。",
-          "basis": "AGENTS.md §3 表（迁移前）"
+          "text": "`--drive none` prints the current receipt (including `pendingChoice`) and exits without advancing or reading stdin (exit 0).",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
           "id": "harness.drive-conflict-pause",
           "modality": "must",
-          "text": "cmd: 遇冲突必须暂停：打印冲突双方与说明后退出 0，不自动选路径；解决后重跑本命令，或改 --drive stdin 手动选 pendingChoice 的 1/2/3（keep_both / keep_first / revise）。",
-          "basis": "AGENTS.md §3（迁移前）"
+          "text": "`cmd:` must pause on a conflict: print both sides and the note, then exit 0 without choosing a path; after resolving it, rerun the command, or switch to `--drive stdin` and pick 1/2/3 (keep_both / keep_first / revise) from `pendingChoice`.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.decide-protocol",
           "modality": "must",
-          "text": "决策命令协议：stdin 不参与；命令以 decide-input.json（完整当前回执）路径为唯一参数，stdout 只允许一行 N（1..=选项数）或 HUMAN[:理由]。",
-          "basis": "AGENTS.md §3（迁移前）"
+          "text": "Decision-command protocol: stdin does not participate; the command receives the path of `decide-input.json` (the full current receipt) as its only argument, and stdout may contain exactly one line — `N` (1..=option count) or `HUMAN[:reason]`.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.decide-fail-closed",
           "modality": "must",
-          "text": "5 秒超时、非零退出、非法输出、越界序号一律 fail closed（安全暂停，状态不推进）；YGG_DECIDE_CMD 可临时覆盖决策命令路径。",
-          "basis": "AGENTS.md §3（迁移前）"
+          "text": "A 5-second timeout, a non-zero exit, an invalid output or an out-of-range index all fail closed (safe pause, state unchanged); `YGG_DECIDE_CMD` may temporarily override the decision-command path.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.human-action-gate",
           "modality": "must",
-          "text": "人类动作门禁（play.mode=guide 生效）：proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / config.set play.mode 只能经 ygg.choice_selected 进入；--event 单发直派会被【动作被拒】拒绝（ok 仍为 true，主状态不变）；打回类（gate.reject / proposal.reject）不受限，留给纠错。所以替人验收有且只有一条通道：`ygg.choice_selected`（人工输入，或 Agent 读回执后自行发序号）。",
-          "basis": "AGENTS.md §3（迁移前）"
+          "text": "Human-action gate (effective when `play.mode=guide`): proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / `config.set play.mode` may only enter through `ygg.choice_selected`; a direct single-shot `--event` is refused with `[REJECTED:ACTION]` (the envelope stays `ok:true` and the primary state is unchanged). Rejects (gate.reject / proposal.reject) are not restricted — they are the correction channel. So there is exactly one way to accept on a human's behalf: `ygg.choice_selected` (typed by the human, or sent by the agent after reading the receipt).",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.no-placeholder-proposal",
           "modality": "must-not",
-          "text": "不造内容：有 job 在跑却一份待验收提案都没有时，宿主不生成占位提案（门禁必须由真实交付满足）——打印可读原因、安全暂停并退出 0，等外部执行方提交提案后重跑。",
-          "basis": "AGENTS.md §3（迁移前）"
+          "text": "Never fabricate content: when a job is running but there is no pending proposal, the host does not generate a placeholder proposal (a gate must be satisfied by a real delivery) — it prints a readable reason, pauses safely and exits 0, waiting for an external executor to submit and the command to be rerun.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.drive-limits",
           "modality": "must",
-          "text": "失控防护阈值读 Mod 的 data/config.json 的 drive 段（缺失 / 非法逐字段回落兜底）：步数硬顶 = maxSteps + stepsPerRequirement × 需求数（兜底 64 + 16×n）；另有「连续 stallLimit 步 pendingChoice 无变化」判停（兜底 12）。",
-          "basis": "AGENTS.md §3（迁移前）"
+          "text": "The runaway guard thresholds come from the Mod's `data/config.json` `drive` section (each field falls back when missing or invalid): the hard step cap is `maxSteps + stepsPerRequirement × requirement count` (fallback 64 + 16×n); a separate stop triggers after `stallLimit` consecutive steps with an unchanged `pendingChoice` (fallback 12).",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.play-mode-is-narrative",
           "modality": "must",
-          "text": "play.mode 是 Mod 叙事层语义，host 不解释：config.set play.mode=<goal|guide> 只切换 Mod 的提示词 / 旁白口吻；推进方式只看 --drive——host 既不读 data/config.json 的 play.mode，也不读存档 KV settings.play.mode。",
-          "basis": "AGENTS.md §3（迁移前）"
+          "text": "`play.mode` is Mod narrative semantics, not something the host interprets: `config.set play.mode=<goal|guide>` only switches the Mod's prompts and narrative tone; advancement is driven by `--drive` alone — the host reads neither `play.mode` from `data/config.json` nor `settings.play.mode` from the save KV.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.goal-mode-decider",
           "modality": "must",
-          "text": "goal 模式的决策者是 **Agent 本身**，不是脚本、不是「总选 1」：Mod 在 goal 下只改文案与提示口吻，推进仍走 `ygg.choice_selected`，每一步都由 Agent 读叙事与候选自行判断——该驳回的验收要驳回、该停等的门禁要停等，机械取首项等于伪造结论。仓库不提供默认决策脚本；菜单首项按设计是主前进动作，但**不保证在该步正确**。",
-          "basis": "用户指令：决策权在 Agent，不在脚本"
+          "text": "In goal mode the decider is **the agent itself**, not a script and not \"always pick 1\": under goal the Mod only changes the wording and the prompt tone, advancement still goes through `ygg.choice_selected`, and the agent judges every step from the narrative and the candidates — an acceptance that should be rejected must be rejected, a gate that should wait must wait, and mechanically taking the first item forges a conclusion. The repository ships no default decision script; by design the menu's first item is the main forward action, but it is **not guaranteed to be correct at that step**.",
+          "basis": "user instruction: the decision belongs to the agent, not to a script"
         },
         {
           "id": "harness.payload-formats",
           "modality": "must",
-          "text": "动作载荷是 JSON 字符串、字段用 | 分隔：task.intake \"title|description\"；requirement.add \"title|description[|external_id[|depends_on]]\"；proposal.submit \"rN|rev|stage|summary|artifacts[|changes[|external_id]]\"；gate.approve \"rN[|说明]\" / \"\"；gate.reject \"rN|反馈\" / \"\"；verify.submit \"true\" / \"all_green=false;report=…\"；settlement.evolution \"artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]\"；review.note \"lesson|score(1-5)\"。拒绝回执括号里的形状就是正确格式，照抄不猜段位。",
-          "basis": "AGENTS.md §4 动作表（迁移前）"
+          "text": "Action payloads are JSON strings whose fields are separated by `|`: task.intake `\"title|description\"`; requirement.add `\"title|description[|external_id[|depends_on]]\"`; requirement.dispatch `\"\"` / `\"0\"` (readiness order) / `\"rN\"` (that requirement only); proposal.submit `\"rN|rev|stage|summary|artifacts[|changes[|external_id[|exec=<agent_id>[:<reason>]]]]\"`; gate.approve `\"rN[|note]\"` / `\"\"`; gate.reject `\"rN|feedback\"` / `\"\"`; verify.submit `\"true\"` / `\"all_green=false;report=…\"`; settlement.evolution `\"artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]\"`; settlement.sessions `\"moved|remaining|destination\"`; settlement.todo `\"remaining|verified_by\"`; review.note `\"lesson|score(1-5)\"`. The shape printed in a rejection receipt is the correct format — copy it, never guess a segment position.",
+          "basis": "AGENTS.md §4 (action table, pre-migration)"
         },
         {
           "id": "harness.dispatch-idempotent",
           "modality": "must",
-          "text": "requirement.dispatch 按就绪序派活（draft→analysis / planning→plan / ready→development·lane），job 上限 4；无候选或槽位满 = 正常回执「0 条可派」（幂等，不计失败步）。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "requirement.dispatch dispatches by readiness order (draft→plan / planning+plan_ok→development·lane; the legacy planning-without-plan→plan), with a job cap of 4; no candidate or a full slot set is a normal `[DISPATCH] 0 candidates` receipt (idempotent, never counted as a failed step).",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.proposal-changes",
           "modality": "must",
-          "text": "proposal 的 changes 形如 split=a,b / merge=r5 / amend=标题:描述 / conflict=r5:说明：subagent 只建议，proposal.accept 时才落地。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "A proposal's `changes` reads like `split=a,b` / `merge=r5` / `amend=title:description` / `conflict=r5:note`: a subagent only suggests, and the change lands at `proposal.accept`.",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.serial-accept",
           "modality": "must",
-          "text": "proposal.accept 串行验收一条：用 \"pN\" / \"rN\" 指名；空载荷 = 按 requirement_id canonical 序取第一条——待验收多于一条时必须指名，否则会验错需求。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "`proposal.accept` accepts exactly one proposal serially and names it with `pN` / `rN`; an empty payload takes the first in requirement-id canonical order — with more than one pending proposal you must name it, otherwise you verify the wrong requirement.",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.reject-paths",
           "modality": "must",
-          "text": "打回路径：proposal.reject → analysis→draft / plan→planning / development→保留 plan_ok（未 amend 即 ready，amend 过则 planning）；gate.reject 存储态一律回 planning，plan 门禁置 plan_ok 假（重派 plan），accept 门禁沿用原值（未 amend 即 ready，amend 过即 planning）。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "Reject paths: `proposal.reject` → analysis→draft / plan→planning / development→keeps `plan_ok` (not amended → ready, amended → planning); `gate.reject` always stores planning, the plan gate sets `plan_ok` false (a new plan is required) and the accept gate keeps the previous value (not amended → ready, amended → planning).",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.stale-rebase",
           "modality": "must",
-          "text": "验收时 rev ≠ req.<i>.rev → 提案置 stale、需求置 stale 标记（可读拒绝，旧提案不得覆盖新决定）；恢复路径是提交同阶段、当前 rev 的新提案——仅当该需求没有待验收提案时接受这种重定基提案，仍有正常待验收提案时一律拒绝；重定基落地后 stale 标记自动清除。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "At acceptance, `rev ≠ req.<i>.rev` → the proposal becomes stale and the requirement gets the stale marker (a readable refusal; an old proposal must never override a newer decision). The recovery path is a new proposal for the same stage at the current rev — such a rebase proposal is accepted only when the requirement has no other pending proposal, and refused otherwise; once the rebase lands the stale marker clears automatically.",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.rejection-prefixes",
           "modality": "must",
-          "text": "越阶动作 →【动作被拒】；载荷不合法 →【载荷被拒】；前置不满足 →【需求待办】；人类动作被单发直派 →【动作被拒】。四者都原地重渲染（主状态不变），且都命中 pack.json 的 agent.rejectionPrefixes（宿主据此判「未生效」，不记失败步）。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "An action outside its stage → `[REJECTED:ACTION]`; an invalid payload → `[REJECTED:PAYLOAD]`; an unmet precondition → `[BLOCKED:TODO]`; a human action dispatched single-shot → `[REJECTED:ACTION]`. All four re-render in place (the primary state is unchanged) and all four match `agent.rejectionPrefixes` in `pack.json` (the host reads that to decide \"no effect\" and does not record a failed step).",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.closeout-criteria",
           "modality": "must",
-          "text": "收口判据 = req_all_done()（含 split/merged 的后继全部 done）+ 0 待验收提案 + 0 在跑 job + 0 冲突。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "The closeout criteria = `req_all_done()` (including successors of split/merged being all done) + 0 pending proposals + 0 running jobs + 0 conflicts.",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.agent-summary",
           "modality": "must",
-          "text": "摘要走内核结构化回执通道 ygg.meta(\"summary\", {…})，落在回执信封 meta.summary（stage / ending / verifyPassed / nextEndsRun / pendingProposals / requirementCount / conflicts / awaiting / evolution{artifact,summary,candidates,classes}）；宿主只认这个字段，叙事里写同样内容不会被误判；payload 为 \"0\" 时只读。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "The summary travels through the kernel's structured receipt channel `ygg.meta(\"summary\", {…})` and lands in the receipt envelope at `meta.summary` (stage / ending / verifyPassed / nextEndsRun / pendingProposals / requirementCount / conflicts / awaiting / evolution{artifact,summary,candidates,classes}); the host only reads that field, so writing the same content into the narrative cannot be misread; a payload of \"0\" is read-only.",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.no-private-kv-reading",
           "modality": "must-not",
-          "text": "宿主不读 Mod 私有 KV：旧 Mod 没有 agent.summary 时宿主判「未知」并安全停等，不回退到读 ending / fsm.stage / prop.* / req.*。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "The host never reads a Mod's private KV: with a Mod that has no `agent.summary`, the host reports \"unknown\" and pauses safely instead of falling back to `ending` / `fsm.stage` / `prop.*` / `req.*`.",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.meta-not-persisted",
           "modality": "must",
-          "text": "meta 是瞬态回执面：不入存档、不入 canonical snapshot / 状态哈希——同一事件序列调不调 ygg.meta，state_hash 相同。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "`meta` is a transient receipt surface: it never enters the save, the canonical snapshot or the state hash — the same event sequence yields the same `state_hash` whether or not `ygg.meta` is called.",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.mutation-actions",
           "modality": "must",
-          "text": "主 Agent 直改动作：requirement.split \"父id|子标题A|子标题B[|…]\"（父置 split、子继承依赖、≥2 子）；requirement.merge \"源id1,源id2|合并标题|合并描述\"（源置 merged、新需求依赖取并集）；requirement.amend \"id|新标题|新描述|新依赖\"（rev+1；done 修订派生新需求，开发中只改说明）；requirement.conflict \"id1,id2|说明\"（置 blocked，派活与收口都跳过）；requirement.resolve \"id1,id2|keep_both|keep_first|revise[|说明]\"。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "Direct mutation actions of the main agent: requirement.split \"parent|child title A|child title B[|…]\" (the parent becomes split, children inherit the deps, at least 2 children); requirement.merge \"source_id_1,source_id_2|merged title|merged description\" (sources become merged, the new requirement unions their deps); requirement.amend \"id|new title|new description|new deps\" (rev+1; amending a done requirement derives a new one, amending a developing one only updates its notes); requirement.conflict \"id1,id2|note\" (both become blocked; dispatch and closing skip them); requirement.resolve \"id1,id2|keep_both|keep_first|revise[|note]\".",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.lane-actions",
           "modality": "must",
-          "text": "泳道账本：lane.claim \"泳道号|需求id|分支|base|clean\" 挂牌 / 补记（clean 必须是 \"1\"，脏树禁挂牌）；lane.release \"泳道号\" 摘牌（幂等）。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "Lane ledger: `lane.claim \"lane|req_id|branch|base|clean\"` claims or backfills a lane (clean must be \"1\"; a dirty tree may not be claimed); `lane.release \"lane\"` releases it (idempotent).",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.config-subpage",
           "modality": "must",
-          "text": "config.open / config.close 进 / 出二级配置子页（运行模式 · 演进偏好 · 门禁），纯展示层、不推进状态；config.set / guide.show / map.show 是常驻只读 / 配置动作。不占菜单项的预登记键走 config.set 直派：review.evolution.artifact / summary / candidates / classes（落 settings.review.evolution.*，逐键校形状；settlement.evolution 集中校验并写本轮登记，review.note 再单源归档到 review.evolution.*）、goal.authorization（run 级 goal 授权，收口校验用）、executor.<rN>.<stage>（执行者账本，收口不校验、只做展示）。",
-          "basis": "AGENTS.md §4（迁移前）"
+          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates); it is a presentation layer only and never advances state. config.set / guide.show / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used by the closing check), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only).",
+          "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
           "id": "harness.inbox-file",
           "modality": "must",
-          "text": "inbox 是 JSONL：<runs-root>/<run-id>/inbox.jsonl，每行 {external_id, kind, title, description, payload, created_at}，kind ∈ add/amend/split/merge/conflict/resolve/proposal。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "The inbox is JSONL: `<runs-root>/<run-id>/inbox.jsonl`, one object per line `{external_id, kind, title, description, payload, created_at}` with kind ∈ add/amend/split/merge/conflict/resolve/proposal.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.inbox-commands",
           "modality": "must",
-          "text": "异步命令表：--requirement '标题|描述'（add）/ --proposal 'rN|rev|stage|summary|artifacts[|changes]'（proposal，external_id 自动补第 7 段）/ --amend 'rN|新标题|新描述|依赖'（rev+1）/ --split 'rN|子A|子B' / --merge 'r2,r3|标题|描述' / --conflict 'r1,r2|说明' / --resolve 'r1,r2|keep_both'。",
-          "basis": "AGENTS.md §5 命令表（迁移前）"
+          "text": "Async command table: `--requirement 'title|description'` (add) / `--proposal 'rN|rev|stage|summary|artifacts[|changes]'` (proposal; the external_id is appended automatically as the 7th segment) / `--amend 'rN|new title|new description|deps'` (rev+1) / `--split 'rN|child A|child B'` / `--merge 'r2,r3|title|description'` / `--conflict 'r1,r2|note'` / `--resolve 'r1,r2|keep_both'`.",
+          "basis": "AGENTS.md §5 (command table, pre-migration)"
         },
         {
           "id": "harness.inbox-no-mod",
           "modality": "must",
-          "text": "异步命令只做 OpenOptions::append，不读写 autosave，所以不必给 --mod，可与运行中的本局并发。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "The async commands only append to the inbox (`OpenOptions::append`); they never read or write the autosave, so `--mod` is not needed and they may run concurrently with a live run.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.inbox-drain",
           "modality": "must",
-          "text": "消费时机：cmd 每次自动推进前、stdin 每次提示前、单发每次派发前 drain 新行并按 kind 派发；运行期间到达的行不得漏。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "Consumption points: before every automatic advancement under `cmd`, before every prompt under `stdin`, and before every single-shot dispatch — new lines are drained and dispatched by kind; a line that arrived while the run was live must never be missed.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.coordination-lock",
           "modality": "must",
-          "text": "跨进程协议是协议级互斥（不是「多读一次文件」）：run 目录下 coordination.lock（create_new 互斥，陈旧按 mtime 2s 抢占）与 coordination.json {phase, writers, owner_pid, heartbeat_at}，phase ∈ running / closing / finalized。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "The cross-process protocol is protocol-level mutual exclusion (not \"read the file one more time\"): `coordination.lock` in the run directory (create_new exclusion, a stale lock is taken over after 2s by mtime) plus `coordination.json` `{phase, writers, owner_pid, heartbeat_at}` with phase ∈ running / closing / finalized.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.coordination-writer",
           "modality": "must",
-          "text": "写命令先登记：phase=running → 计入 writers 并保持到行落盘；phase=closing（心跳未过期）→ 命令本身非零拒绝（exit 3）；phase=finalized → 非零拒绝（exit 3，需开新局）。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "A write command registers first: phase=running → it counts as a writer until its line is on disk; phase=closing (heartbeat not expired) → the command itself fails non-zero (exit 3); phase=finalized → non-zero refusal (exit 3, a new run is required).",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.coordination-closing",
           "modality": "must",
-          "text": "自动推进在派发最后的 review.note 前把 phase 切到 closing，等在途写者落盘归零，再在同一保护下做最后一次 drain：有新需求且未 done → 解除 closing、继续 loop（不结局）；无新需求 → 同一保护下完成 review.note + settle，随后 phase=finalized。因此「写命令成功但运行侧已跨过最后一次 drain」在协议上不可能发生。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "Before dispatching the final `review.note`, automatic advancement switches phase to closing, waits until the in-flight writers reach zero, and then does one last drain under the same protection: when a new requirement exists and is not done → lift closing and continue the loop (no ending); when nothing new arrived → finish `review.note` + settle under the same protection and set phase=finalized. So \"the write command succeeded but the run already crossed the last drain\" is impossible by protocol.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.coordination-recovery",
           "modality": "must",
-          "text": "陈旧行与崩溃恢复：closing 用心跳续命（10s 过期），过期后写命令或 --resume 把它判死并恢回到 running；锁也按 mtime 抢占——两者都不会因进程崩溃永久卡死。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "Stale lines and crash recovery: closing keeps itself alive with a heartbeat (expires after 10s); once expired, a write command or `--resume` declares it dead and returns the phase to running; the lock is taken over by mtime as well — neither can wedge forever after a process crash.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.settle-under-closing",
           "modality": "must",
-          "text": "独立 --settle 同样走 closing：已有未消费行 → ok=false 并退回 running（可 resume 消费）；已 finalized → 幂等返回旧报告，不重写。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "A standalone `--settle` also goes through closing: with unconsumed lines it returns `ok=false` and reverts to running (a resume can consume them); when already finalized it returns the old report idempotently and rewrites nothing.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.inbox-idempotent",
           "modality": "must",
-          "text": "cursor（inbox.cursor 的 {consumed:N}）只在 dispatch 成功且存档落盘后前移；重放靠 external_id：add / proposal → Mod 侧 per-entity ext 查重（【需求重放】/【提案重放】）；amend / split / merge / conflict / resolve → 载荷末尾 @ext= + inbox.last 去重（【异步重放】）。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "The cursor (`{consumed:N}` in `inbox.cursor`) only advances after a dispatch succeeded and its save is on disk; replay relies on `external_id`: add / proposal → the Mod checks per-entity ext duplicates (`[REPLAY:REQ]` / `[REPLAY:PROPOSAL]`); amend / split / merge / conflict / resolve → a trailing `@ext=` on the payload plus `inbox.last` de-duplication (`[REPLAY:ASYNC]`).",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.bad-line-skip",
           "modality": "must",
-          "text": "坏行跳过并前移（否则永久阻塞）。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "A malformed line is skipped and the cursor advances past it (otherwise it would block forever).",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.settle-inbox-gate",
           "modality": "must",
-          "text": "结算硬门禁：--settle 若发现未消费行 → ok=false 且非零（写完还要再核一次，结算期间又到的行会让报告作废）——因此「结局后投递」不会静默成功，只能开新局。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "Hard settlement gate: if `--settle` finds an unconsumed line it returns `ok=false` and a non-zero exit (it re-checks after writing: a line that arrives during settlement invalidates the report) — so \"deliver after the ending\" can never silently succeed; a new run is required.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.inbox-timing",
           "modality": "should",
-          "text": "进程退出后的投递属于新局：inbox 保留待新局消费，settlement 会报错提示。",
-          "basis": "AGENTS.md §5（迁移前）"
+          "text": "Delivery after the process exited belongs to a new run: the inbox keeps the lines for the next run to consume, and settlement reports an error.",
+          "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
           "id": "harness.requirement-list",
           "modality": "must",
-          "text": "requirement.list（\"\" / \"0\" / \"full\"）只读：需求图逐条（状态 + 依赖 + rev + 泳道 + job + 冲突/stale 追溯）、待验收提案列表、泳道台账、图例。",
-          "basis": "AGENTS.md §6（迁移前）"
+          "text": "requirement.list (\"\" / \"0\" / \"full\") is read-only: the requirement graph row by row (status + deps + rev + lane + job + conflict/stale traces), the pending-proposal list, the lane ledger and the legend.",
+          "basis": "AGENTS.md §6 (pre-migration)"
         },
         {
           "id": "harness.map-show",
           "modality": "must",
-          "text": "map.show 出双层图：协调器 4 态节点图 + 需求级流水线（含两个门禁）+ job / 泳道台账；泳道账本块逐条显示 lane-<k> ← <需求>｜分支｜base｜since #N｜clean（未记时显示 —）。",
-          "basis": "AGENTS.md §6（迁移前）"
+          "text": "map.show prints the two-layer map: the coordinator's 4-state node graph + the requirement pipeline (including both gates) + the job / lane ledger; each lane row reads `lane-<k> ← <requirement> | branch | base | since #N | clean` (an unset field shows `-`).",
+          "basis": "AGENTS.md §6 (pre-migration)"
         },
         {
           "id": "harness.pending-choice-order",
           "modality": "must",
-          "text": "pendingChoice 顺序：解决冲突（如有）→ 主前进动作（proposal.accept > gate.approve > requirement.dispatch > coordinate.submit）→ guide.show → map.show → requirement.list → requirement.add → config（进子页后才是 play.mode → evolution.mode → gates + 返回）。",
-          "basis": "AGENTS.md §6（迁移前）"
+          "text": "pendingChoice order: resolve conflict (if any) → main forward action (proposal.accept > gate.approve > requirement.dispatch > coordinate.submit) → guide.show → map.show → requirement.list → requirement.add → config (inside the sub-page: play.mode → evolution.mode → gates + back).",
+          "basis": "AGENTS.md §6 (pre-migration)"
         },
         {
           "id": "harness.run-autosave",
           "modality": "must",
-          "text": "autosave.json = 每步自动存档（实体表 + KV + 待决选择），可直接作 load 载荷。",
-          "basis": "AGENTS.md §7 产物表（迁移前）"
+          "text": "`autosave.json` is the per-step automatic save (entity table + KV + pending choice) and can be fed to `load` directly.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-events",
           "modality": "must",
-          "text": "events.jsonl = 每派发一行 {seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}。",
-          "basis": "AGENTS.md §7 产物表（迁移前）"
+          "text": "`events.jsonl` holds one line per dispatch: `{seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-runjson",
           "modality": "must",
-          "text": "run.json = {run_id, mod, mod_signature, started_at, updated_at}。",
-          "basis": "AGENTS.md §7 产物表（迁移前）"
+          "text": "`run.json` = `{run_id, mod, mod_signature, started_at, updated_at}`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-settlement",
           "modality": "must",
-          "text": "settlement.json = 局末结算，仅 --settle 写出。",
-          "basis": "AGENTS.md §7 产物表（迁移前）"
+          "text": "`settlement.json` is the end-of-run settlement and is written only by `--settle`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-inbox",
           "modality": "must",
-          "text": "inbox.jsonl = 异步操作队列（只追加，运行侧消费）；inbox.cursor = 已消费行数（dispatch + 存档成功后才前移）。",
-          "basis": "AGENTS.md §7 产物表（迁移前）"
+          "text": "`inbox.jsonl` is the async operation queue (append-only, consumed by the running side); `inbox.cursor` is the consumed line count (it only advances after a successful dispatch plus save).",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-coordination",
           "modality": "must",
-          "text": "coordination.json = 跨进程协议 {phase, writers, owner_pid, heartbeat_at}（running / closing / finalized）；coordination.lock = 短临界区互斥锁（create_new，陈旧按 mtime 抢占，崩溃不卡死）。",
-          "basis": "AGENTS.md §7 产物表（迁移前）"
+          "text": "`coordination.json` is the cross-process protocol `{phase, writers, owner_pid, heartbeat_at}` (running / closing / finalized); `coordination.lock` is the short critical-section mutex (create_new, taken over by mtime when stale, so a crash cannot wedge it).",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-decide-input",
           "modality": "must",
-          "text": "decide-input.json = 外部决策命令的输入：--drive cmd: 每次待选都把整份当前回执写到这里再调用命令。",
-          "basis": "AGENTS.md §3 / §7（迁移前）"
+          "text": "`decide-input.json` is the input of an external decision command: under `--drive cmd:` the full current receipt is written there before the command is invoked, on every pending choice.",
+          "basis": "AGENTS.md §3 / §7 (pre-migration)"
         },
         {
           "id": "harness.settle-ok",
           "modality": "must",
-          "text": "settle 的 ok = 事件日志非空 ∧ 无失败步 ∧ 出现结局叙事行 ∧ inbox 无未消费行（开关来自 Mod 契约的 settlement 段）；退出码与 ok 同值；未消费行存在时报告带「结局后仍有 N 条未消费 inbox 行——需开新局」且 ok=false。",
-          "basis": "AGENTS.md §7（迁移前）"
+          "text": "`settle`'s `ok` = the event log is non-empty ∧ no failed step ∧ an ending narrative line appeared ∧ the inbox has no unconsumed line (the switches come from the Mod contract's `settlement` section); the exit code mirrors `ok`; with unconsumed lines the report says \"N unconsumed inbox lines after the ending — a new run is required\" and `ok=false`.",
+          "basis": "AGENTS.md §7 (pre-migration)"
         },
         {
           "id": "harness.pack",
           "modality": "must",
-          "text": "动了 data/ 或 schemas/ 必跑：cargo run --example pack -- .ygg/mods/agent-seed。",
-          "basis": "AGENTS.md §8（迁移前）"
+          "text": "After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/agent-seed`.",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.lint",
           "modality": "must",
-          "text": "Lua 静态检查：cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua，应 0 error / 0 warning。",
-          "basis": "AGENTS.md §8（迁移前）"
+          "text": "Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.playtest",
           "modality": "must",
-          "text": "冒烟：cargo run --example playtest -- .ygg/mods/agent-seed（默认全 1 走查到【结局）。全 1 只覆盖 happy path——分叉与 map 文案的验收口径见 `gates.mod-semantics-matrix`（cargo test -p ygg-sandbox --test agent_seed_semantics）。",
-          "basis": "AGENTS.md §一·9 行为验收；gates.mod-semantics-matrix"
+          "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
+          "basis": "AGENTS.md §1.9 (behavioural acceptance); gates.mod-semantics-matrix"
         },
         {
           "id": "harness.manifest-content-addressed",
           "modality": "must",
-          "text": "manifest 是内容寻址（sha256 + byteLength）：改 data/*.json 不重算 pack，装载会以内容哈希不符拒绝。",
-          "basis": "AGENTS.md §8（迁移前）"
+          "text": "The manifest is content-addressed (sha256 + byteLength): editing `data/*.json` without recomputing the pack makes loading fail with a content-hash mismatch.",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.multi-script-load",
           "modality": "must",
-          "text": "多文件 Mod 只在 `pack.json` 的 `code` 段登记：`entry` 不登记为模块，`modules` 逐条枚举（无 glob）；缺 `code` 段就是单文件 Mod（现有 Mod 零迁移）。`require` 在装载期与运行期（handler 内部）都可用——`host.seal` 只封 `ygg.on`，所以纯库可以懒加载；代价是模块顶层只能是纯导出面（见 harness.module-pure-export）。改了任一模块文件必须重跑 pack（内容寻址：字节数或哈希不符即装载失败）。",
-          "basis": "docs/mod-authoring.md §5「多文件 Mod」（r5 文档面；同名小节逐条展开）"
+          "text": "A multi-file Mod is registered only in the `code` section of `pack.json`: `entry` is not registered as a module, `modules` enumerates every file explicitly (no glob), and a missing `code` section means a single-file Mod (no migration needed for existing Mods). `require` works both at load time and at runtime (inside a handler) — `host.seal` only seals `ygg.on`, so a pure library may be loaded lazily; the price is that a module's top level may be a pure export surface only (see `harness.module-pure-export`). After changing any module file you must rerun pack (content-addressed: a byte-count or hash mismatch fails loading).",
+          "basis": "docs/mod-authoring.md §5 \"multi-file Mod\" (the r5 documentation surface; the same-named subsection expands each item)"
         },
         {
           "id": "harness.module-pure-export",
           "modality": "must",
-          "text": "多文件 Mod 的模块 chunk 只做纯导出（定义函数与常量），不做任何有副作用的事：注册 / 写状态 / 输出全部集中在入口 `mod.lua`。模块把注册面做成函数（`function M.install(deps)`），由入口显式按序调用；模块顶层碰 `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / `ygg.entity.spawn` / `ygg.entity.set_attribute` / `ygg.entity.add_tag` / `ygg.entity.remove_tag` / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative[\"goto\"]` 即被拒（静态 `YGG-MOD-EFFECT` 与运行期影子表共用同一份清单 `ygg_modules::effects`），顶层只允许纯读（`ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity.has_tag` / `ygg.entity.get_attribute`）；入口 chunk 不受此约束（它就是装配清单）。理由：handler 的派发序 = `ygg.on` 的注册序——让模块自己注册，等于让「文件怎么拆 / 先 require 谁」决定运行时行为，拆文件或调 require 顺序就改派发序，重构不保行为。`require` 因此在任何时机都可用（含 handler 内懒加载纯库），但懒加载不放宽边界：懒加载到的模块顶层照样只能纯导出。见 `docs/mod-authoring.md` §5「多文件 Mod」的「副作用边界：入口装配，模块纯导出」。",
-          "basis": "docs/mod-authoring.md §5「多文件 Mod」副作用边界（r1/r2/r3 语义收紧；两份清单单一事实源 ygg_modules::effects）"
+          "text": "A multi-file Mod's module chunk performs pure exports only (function and constant definitions) and does nothing with side effects: registration / state writes / output all live in the entry `mod.lua`. A module exposes registration as a function (`function M.install(deps)`) that the entry calls explicitly in order; touching `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / `ygg.entity.spawn` / `ygg.entity.set_attribute` / `ygg.entity.add_tag` / `ygg.entity.remove_tag` / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative[\"goto\"]` at a module's top level is refused (the static `YGG-MOD-EFFECT` rule and the runtime shadow table share the single list `ygg_modules::effects`); at the top level only pure reads are allowed (`ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity.has_tag` / `ygg.entity.get_attribute`); the entry chunk is exempt (it is the assembly manifest). Why: a handler's dispatch order equals the `ygg.on` registration order — letting a module register itself means \"how the files are split / who is required first\" decides runtime behavior, so splitting a file or reordering a `require` would change the dispatch order and refactoring would not preserve behavior. `require` is therefore usable at any time (including lazy-loading a pure library inside a handler), but lazy loading never relaxes the boundary: a lazily loaded module's top level is still pure exports. See `docs/mod-authoring.md` §5 \"multi-file Mod\", subsection \"side-effect boundary: the entry assembles, modules export\".",
+          "basis": "docs/mod-authoring.md §5 \"multi-file Mod\", side-effect boundary (semantics tightened in r1/r2/r3; the single source for both lists is ygg_modules::effects)"
         },
         {
           "id": "harness.kv-prefix-owner",
           "modality": "must",
-          "text": "多文件 Mod 的 KV 前缀按归属划分，一个前缀只有一个写方（文档约定，装载期不校验）：`fsm.*` 由 stdlib 的 `ygg.fsm` 独占写、Mod 只读；`settings.*` 只有 `config.set` 写；`req.*` = 需求表、`prop.*` = 提案表、`lane.*` = 泳道台账、`ui.*` = 纯展示层（不进摘要、不影响派活）、`task.*` / `verify.*` / `review.*` / `inbox.*` 与裸键 `ending` 各自单一写入点。跨模块写同一前缀 = 隐式耦合，要共享就经模块返回值导出。",
-          "basis": "docs/mod-authoring.md §5「KV 前缀归属」（用户决策：只做文档约定，不引入装载期校验面）"
+          "text": "In a multi-file Mod the KV prefixes are partitioned by ownership and each prefix has exactly one writer (a documentation convention; loading does not validate it): `fsm.*` is written only by the stdlib `ygg.fsm` and read-only for the Mod; `settings.*` is written only by `config.set`; `req.*` = the requirement table, `prop.*` = the proposal table, `lane.*` = the lane ledger, `ui.*` = presentation only (never in the summary, never affecting dispatch), and `task.*` / `verify.*` / `review.*` / `inbox.*` plus the bare key `ending` each have their own single writer. Two modules writing one prefix is implicit coupling — share through a module's return value instead.",
+          "basis": "docs/mod-authoring.md §5 \"KV prefix ownership\" (user decision: documentation convention only, no load-time validation surface)"
         },
         {
           "id": "harness.module-error-locates",
           "modality": "must-not",
-          "text": "禁止把多文件 Mod「拼回单文件再报错」：模块 chunk 名必须带真实文件（`@src/util.lua`），装载阶段自判的拒绝必须带调用点（`src/a.lua:3: <原因>`）与 require 链，静态检查必须逐模块独立 parse（模块的 `local` 本就不跨 chunk，拼接会制造装载期不存在的共享作用域）。行号对不上真实文件的诊断按缺陷处理。",
-          "basis": "docs/mod-authoring.md §5「错误定位：真实文件 + 真实行号」"
+          "text": "Never \"glue a multi-file Mod back into one file and then report errors\": a module chunk name must carry the real file (`@src/util.lua`), a refusal the loader decides itself must carry the call site (`src/a.lua:3: <reason>`) and the require chain, and static checks must parse each module independently (a module's `local` never spans chunks, so gluing would invent a shared scope that does not exist at load time). A diagnostic whose line number does not match the real file is a defect.",
+          "basis": "docs/mod-authoring.md §5 \"error location: real file + real line number\""
         },
         {
           "id": "harness.hot-reload",
           "modality": "must",
-          "text": "热载：单发模式每次新进程按磁盘现状装载；--resume 回执里 hotReload.source=\"resume\" 即说明改动已生效。",
-          "basis": "AGENTS.md §8（迁移前）"
+          "text": "Hot reload: single-shot mode loads from disk in every new process; a `--resume` receipt with `hotReload.source=\"resume\"` proves the change is in effect.",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.two-mods-layering",
           "modality": "must",
-          "text": "两个 Mod 分工（不是同一份）：骨架面 mod.lua + schemas/ 逐字节一致，用 scripts/sync-seed-mod.sh 同步（CI 有骨架守卫）；实例面 data/ 各自维护——packages/mods/agent-seed 是对外种子模板（通用 5 章，零本项目规则），.ygg/mods/agent-seed 是本项目实例（13 章，含本章）。",
-          "basis": "AGENTS.md §8（迁移前）"
+          "text": "The two Mods are a division of labor (not the same file): the skeleton surface (`mod.lua` + `schemas/`) is byte-identical and kept in sync by `scripts/sync-seed-mod.sh` (CI has a skeleton guard); the instance surface `data/` is maintained on each side — `packages/mods/agent-seed` is the distributable seed template (5 generic chapters, zero project rules) and `.ygg/mods/agent-seed` is this project's instance (14 chapters, this one included).",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.contract-required",
           "modality": "must",
-          "text": "通用工具（crates/ygg-sandbox/examples/agent.rs、src/playtest.rs）不硬编码事件名 / 叙事前缀 / 摘要键名 / 入口载荷 / inbox 字段名 / 结算判定项 / 推进阈值，一律从被装载的那个 Mod 读契约；契约必填，缺任一段 / 缺任一字段 / 类型不符 / 非正整数 → 装载期失败（非零退出或 ok=false），这是 fail-closed 的刻意选择。",
-          "basis": "AGENTS.md §9（迁移前）"
+          "text": "The generic tooling (`crates/ygg-sandbox/examples/agent.rs`, `src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.",
+          "basis": "AGENTS.md §9 (pre-migration)"
         },
         {
           "id": "harness.contract-agent-seg",
           "modality": "must",
-          "text": "pack.json 的 agent 段八字段：entryEvent / choiceEvent / summaryEvent / endingPrefix / metaKey / rejectionPrefixes（≥1 条）/ replayPrefix / defaultPayload。",
-          "basis": "AGENTS.md §9 契约表（迁移前）"
+          "text": "The `agent` section of `pack.json` has eight fields: entryEvent / choiceEvent / summaryEvent / endingPrefix / metaKey / rejectionPrefixes (at least one) / replayPrefix / defaultPayload.",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
         },
         {
           "id": "harness.contract-inbox-seg",
           "modality": "must",
-          "text": "pack.json 的 inboxRoutes 段：保留键 externalIdField / payloadField / extMarker + <kind> → {action, fields[, write]}（零 kind 合法）。",
-          "basis": "AGENTS.md §9 契约表（迁移前）"
+          "text": "The `inboxRoutes` section of `pack.json`: reserved keys externalIdField / payloadField / extMarker plus `<kind>` → `{action, fields[, write]}` (zero kinds is legal).",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
         },
         {
           "id": "harness.contract-settlement-seg",
           "modality": "must",
-          "text": "settlement 段（在 <config.json>）：requireEvents / requireNoFailedSteps / requireEnding / requireInboxConsumed。",
-          "basis": "AGENTS.md §9 契约表（迁移前）"
+          "text": "The `settlement` section (in `<config.json>`): requireEvents / requireNoFailedSteps / requireEnding / requireInboxConsumed.",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
         },
         {
           "id": "harness.contract-drive-seg",
           "modality": "must",
-          "text": "drive 段（在 <config.json>）：maxSteps / stallLimit / stepsPerRequirement（正整数）。",
-          "basis": "AGENTS.md §9 契约表（迁移前）"
+          "text": "The `drive` section (in `<config.json>`): maxSteps / stallLimit / stepsPerRequirement (positive integers).",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
         },
         {
           "id": "harness.contract-config-path",
           "modality": "must",
-          "text": "<config.json> = pack.json 里 ygg:agent/config 条目声明的路径（seed Mod 是 data/config.json）。",
-          "basis": "AGENTS.md §9（迁移前）"
+          "text": "`<config.json>` is the path declared by the `ygg:agent/config` entry in `pack.json` (`data/config.json` for the seed Mod).",
+          "basis": "AGENTS.md §9 (pre-migration)"
         },
         {
           "id": "harness.contract-upgrade",
           "modality": "must",
-          "text": "旧 Mod 升级补齐四段即可（两段在 pack.json、两段在 config.json）；cargo run --example pack -- <mod目录> 会在打包期校验形状（声明了才校验）。",
-          "basis": "AGENTS.md §9（迁移前）"
+          "text": "Upgrading an old Mod means filling in the four sections (two in `pack.json`, two in `config.json`); `cargo run --example pack -- <mod dir>` validates their shape at pack time (only what is declared is validated).",
+          "basis": "AGENTS.md §9 (pre-migration)"
         },
         {
           "id": "harness.host-vs-contract",
           "modality": "must",
-          "text": "归属边界：事件名 / 结局前缀 / 摘要键名 / 拒绝与重放前缀 / inbox 字段与路由 / 结算开关 / 推进阈值属于契约，必须 Mod 声明；属于 host 可保留字面量的是 run 目录文件名、协调阶段名 running / closing / finalized、决策命令超时（DECIDE_TIMEOUT）与轮询间隔（DECIDE_POLL_INTERVAL）、--drive 三态名、五件套文件名（pack.json / manifest.json / mod.lua / schemas/ / data/）、内核接驳面（save / load / state，ygg.choice_selected 保留路由）。判据：换一个 Mod 这个字面量会变吗？会变就属于契约。",
-          "basis": "AGENTS.md §9 归属边界（迁移前）"
+          "text": "Ownership boundary: event names / ending prefix / summary key / rejection and replay prefixes / inbox fields and routes / settlement switches / advancement thresholds belong to the contract and must be declared by the Mod; what the host may keep as literals is the run-directory file names, the coordination phase names running / closing / finalized, the decision-command timeout (`DECIDE_TIMEOUT`) and poll interval (`DECIDE_POLL_INTERVAL`), the three `--drive` modes, the five-file set (`pack.json` / `manifest.json` / `mod.lua` / `schemas/` / `data/`), and the kernel seams (`save` / `load` / `state`, and the reserved `ygg.choice_selected` route). Criterion: would this literal change with another Mod? If yes, it belongs to the contract.",
+          "basis": "AGENTS.md §9 (ownership boundary, pre-migration)"
         },
         {
           "id": "harness.literal-ownership",
           "modality": "must-not",
-          "text": "只有绑定特定 Mod 的应用与生成器侧可以保留事件名 / 结局前缀字面量，每个文件头有「绑定型 / 生成器侧文件」声明：adventure.rs、clients/godot/rust/src/logic.rs、clients/godot/project/main.gd|session.gd、spike/godot/**、packages/client-web/src/{kernel,session,kernel-wasm}.ts、crates/ygg-wasm/smoke.mjs 绑定 packages/mods/test-adventure；packages/pipeline/src/{prompt,types,pack}.ts 与 scripts-dev/mock-llm-stub.mjs 是生成器侧；crates/ygg-sandbox|ygg-lint 的通用工具与 tests/ 测试夹具不得新增字面量，ygg.choice_selected 是内核域校验的保留事件名（契约的 choiceEvent 必须同名）。",
-          "basis": "AGENTS.md §9 硬编码归属表（迁移前）"
+          "text": "Only applications bound to a specific Mod and the generator side may keep event-name / ending-prefix literals, and every such file declares \"bound\" or \"generator-side\" in its header: adventure.rs, clients/godot/rust/src/logic.rs, clients/godot/project/main.gd|session.gd, spike/godot/**, packages/client-web/src/{kernel,session,kernel-wasm}.ts and crates/ygg-wasm/smoke.mjs are bound to `packages/mods/test-adventure`; packages/pipeline/src/{prompt,types,pack}.ts and scripts-dev/mock-llm-stub.mjs are generator-side; the generic tooling of crates/ygg-sandbox|ygg-lint and the test fixtures under tests/ may not add literals, and `ygg.choice_selected` is the reserved event name checked by the kernel domain (the contract's `choiceEvent` must use it).",
+          "basis": "AGENTS.md §9 (literal-ownership table, pre-migration)"
         },
         {
           "id": "harness.choice-payload-type",
           "modality": "must",
-          "text": "`ygg.choice_selected` 的载荷必须是 **JSON 数字**（`--payload '1'`）；写成字符串（`--payload '\"1\"'`）会被内核域校验拒为 VALIDATION「选项不存在」。其余动作的载荷都是字符串。菜单选择是人类动作门禁的**唯一**放行通道——通过 `--event` 直派 `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` 一律被拒（回执首行 `【动作被拒】`）。",
+          "text": "The payload of `ygg.choice_selected` must be a **JSON number** (`--payload '1'`); sending it as a string (`--payload '\"1\"'`) is rejected by the kernel domain as VALIDATION \"option does not exist\". Every other action's payload is a string. Menu selection is the **only** passing channel for the human-action gate — dispatching `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` directly through `--event` is always refused (the receipt's first line is `[REJECTED:ACTION]`).",
           "basis": "guide.show harness"
         }
-      ],
-      "notes": "本章是「怎么玩」而非「项目规则」：项目规则章（credentials / repository / branches / lanes / dispatch / integration / gates / live_evidence / evidence / output / pointers / hard_constraints）沿用原样，本章只补 Harness 自身的运行玩法与宿主契约。AGENTS.md 已收缩为「强制约束 + 冷启动」，被删的玩法段一律在本章逐条落地，basis 指收缩前原文节号（见 git 历史）。"
+      ]
     },
     {
       "id": "evolution",
       "order": 14,
-      "title": "十四、进化建议方法（候选筛选 · 复核 · 场景化）",
-      "summary": "局末建议进 backlog 前过四道关：长期性优先、已有未用查根因、逐项独立复核、场景先于技术；verify 全绿后用独立 settlement.evolution 登记 summary 与候选声明，review.note 只单源归档——状态机只校验声明形状，不证明建议质量。",
-      "source": "用户决策 2026-11-01（game-1101-1 结算复核 E1）",
+      "title": "14. How to propose an evolution (candidate screening · review · scenario first)",
+      "summary": "An end-of-run suggestion passes four gates before it may enter the backlog: long-term priority, a root cause for an unused existing capability, an independent review per item, and scenario before technique; after verify is green, `settlement.evolution` registers the summary and the candidate declaration, and `review.note` only archives it single-source — the state machine checks the declaration's shape, never the quality of the suggestion.",
+      "source": "user decision 2026-11-01 (game-1101-1 settlement review E1)",
       "priority": "standard",
       "rules": [
         {
           "id": "evolution.long-term-screen",
           "modality": "must",
-          "text": "进 backlog 的建议默认必须是跨任务重复出现的流程机制：判据是「换一条需求/换一个仓库还会再遇到吗」+「它改变下一局哪个动作」。单次任务的执行约束、临时工具或一次性探针的口径、以及已在当次解决的问题默认不进。",
-          "basis": "用户决策 2026-11-01（game-1101-1 结算复核 E1）"
+          "text": "A suggestion entering the backlog must by default be a process mechanism that recurs across tasks: the criteria are \"would this come up again with another requirement / another repository?\" plus \"which action of the next run would it change?\". Execution constraints of a single task, conventions of a temporary tool or a one-off probe, and anything already solved in that same task do not enter by default.",
+          "basis": "user decision 2026-11-01 (game-1101-1 settlement review E1)"
         },
         {
           "id": "evolution.classes",
           "modality": "must",
-          "text": "每条候选必须归入六类之一并计数：`long_term` 长期机制 / `unused` 已有未用 / `one_off` 单次约束 / `temp_tool` 临时工具 / `redundant` 冗余待退役 / `no_scene` 确无场景。只有 long_term、unused、redundant 三类可以进入 backlog；另三类只能作为「不采纳」记录并写明理由。",
-          "basis": "用户决策 2026-11-01（E1 六类）"
+          "text": "Every candidate must be classified into exactly one of six classes and counted: `long_term` (long-term mechanism) / `unused` (existing but unused) / `one_off` (single-task constraint) / `temp_tool` (temporary tool) / `redundant` (redundant, to retire) / `no_scene` (genuinely no scenario). Only long_term, unused and redundant may enter the backlog; the other three are recorded as \"not adopted\" with a stated reason.",
+          "basis": "user decision 2026-11-01 (E1, six classes)"
         },
         {
           "id": "evolution.unused-root-cause",
           "modality": "must",
-          "text": "「已有能力未被调用」不得直接撤下，也不得直接当成能力缺失：必须落到六类根因之一并给出定位证据——调用链缺失或入口不可达 / 可发现性差 / 调用成本或契约不适配 / 执行者知道但选择不用 / 确无使用场景 / 能力已冗余应退役。",
-          "basis": "用户决策 2026-11-01（E1 根因表）"
+          "text": "\"An existing capability is never called\" may neither be removed outright nor treated as a missing capability: it must be assigned one of six root causes with locating evidence — the call chain is missing or the entry is unreachable / discoverability is poor / the call cost or contract does not fit / the executor knows about it but chooses not to use it / there genuinely is no scenario / the capability is redundant and should be retired.",
+          "basis": "user decision 2026-11-01 (E1, root-cause table)"
         },
         {
           "id": "evolution.review-artifact",
           "modality": "must",
-          "text": "每条被筛选的候选（保留与不保留都算）都要在复核 artifact 里留结论，含四要素：① 文件与行号；② 可原样执行的命令与实际输出（不是「已生成」）；③ 语义依据（该行为符合还是违背当前契约）；④ 根因分类与复核结论（确认存在 / 证据不足 / 不成立 / 仅当次 / 暂缓）。",
-          "basis": "evidence 章三要素 + 用户决策 2026-11-01（E1 §4）"
+          "text": "Every screened candidate (kept or not) leaves a conclusion in the review artifact with four elements: ① the file and line number; ② a command that can be run as written plus its actual output (not \"it was generated\"); ③ the semantic basis (does that behavior match or violate the current contract); ④ the root-cause class and the review conclusion (confirmed / insufficient evidence / does not hold / one-off / deferred).",
+          "basis": "the three elements of the evidence chapter + user decision 2026-11-01 (E1 §4)"
         },
         {
           "id": "evolution.scenario-first",
           "modality": "must",
-          "text": "叙述顺序固定：正在解决什么实际问题 → 当前流程哪一步不满足 → 代码与复现证据 → 根因 → 长期收益 → 改造面与验证方式。文件路径与技术细节只作支撑，不得代替问题叙述；用户不该为看懂收益而追问。",
-          "basis": "用户决策 2026-11-01（E1 §5）"
+          "text": "The narrative order is fixed: which real problem is being solved → which step of the current process is unsatisfied → the code and reproduction evidence → the root cause → the long-term benefit → the change surface and how it is verified. File paths and technical detail only support it and may never replace the problem statement; the user should never have to ask in order to understand the benefit.",
+          "basis": "user decision 2026-11-01 (E1 §5)"
         },
         {
           "id": "evolution.record-shape",
           "modality": "must",
-          "text": "verify.submit=true 后用 `settlement.evolution` 登记：`artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`。summary 去空白后必填；artifact 可空，但 **screened > 0 时必须是 artifacts/<file>.md 且 cls 必填**；六类计数和 = screened，保留类之和 = kept；**c=0/0 允许 artifact 为空**。c/cls 缺省依次回落 settings.review.evolution.* 与 0/0/空分类。guide 可先 `config.set review.evolution.artifact|summary|candidates|classes=<值>` 预登记（逐键校形状，跨字段完整性只在 settlement.evolution 校），菜单据此构造载荷；未预登记时用中性 summary + c=0/0。随后 review.note 只收 `lesson|score`，并把 settlement 四键单源归档到 review.evolution.*。",
-          "basis": "settlement.evolution / review.note / config.set 契约（本 Mod）"
+          "text": "After `verify.submit=true`, register with `settlement.evolution`: `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`. The summary is required after trimming; the artifact may be empty, but **when `screened > 0` it must be `artifacts/<file>.md` and `cls` is required**; the six class counts sum to `screened` and the kept classes sum to `kept`; **c=0/0 allows an empty artifact**. Missing c/cls fall back in order to `settings.review.evolution.*` and then to 0/0 with no classes. Under guide you may pre-register with `config.set review.evolution.artifact|summary|candidates|classes=<value>` (shape checked per key, cross-field completeness only at `settlement.evolution`), and the menu builds the payload from it; with no pre-registration it uses the neutral summary plus c=0/0. The optional `sessions=` / `todo=` segments settle the two end-of-run cleanups in the same transaction. `review.note` afterwards accepts only `lesson|score` and archives the four settlement keys single-source into `review.evolution.*`.",
+          "basis": "the settlement.evolution / review.note / config.set contracts (this Mod)"
         },
         {
           "id": "evolution.declare-not-prove",
           "modality": "must-not",
-          "text": "不得把登记当成证明：状态机只校验 summary 非空、路径形状、计数与分类自洽，读不到 artifact（沙箱无文件系统），也不知道复核是否真的由独立 subagent 执行。任何「已证明建议质量 / 已证明复核独立」的说法都是越界。",
-          "basis": "沙箱白名单（无 io/os）+ settlement.evolution 契约"
+          "text": "Never present a registration as proof: the state machine only checks that the summary is non-empty, the path shape, and that the counts and classes are self-consistent — it cannot read the artifact (the sandbox has no filesystem) and does not know whether the review was really performed by an independent subagent. Any claim such as \"the suggestion quality is proven\" or \"the review independence is proven\" is out of bounds.",
+          "basis": "the sandbox allowlist (no io/os) + the settlement.evolution contract"
         },
         {
           "id": "evolution.no-new-carrier",
           "modality": "must-not",
-          "text": "不得为进化流程新增第二登记入口、外部检查脚本或宿主改动：唯一登记动作是 `settlement.evolution`；载体仍只允许 AGENTS.md 与 Mod 资源（`src/**` 与 `data/*.json`）。只读查询可以拿来核对声明，但不得成为约束载体。",
-          "basis": "AGENTS.md §一·7"
+          "text": "Never add a second registration entry point, an external checker script or a host change for the evolution flow: the only registration action is `settlement.evolution`, and the only allowed carriers remain AGENTS.md and the Mod resources (`src/**` and `data/*.json`). Read-only queries may be used to check a declaration but may never become the carrier of a constraint.",
+          "basis": "AGENTS.md §1.7"
         }
-      ],
-      "notes": "每轮 done 前都必须登记。登记面是三层：`config.set review.evolution.*` 写运行期预登记 `settings.review.evolution.*`（含 summary）；`settlement.evolution` 写本轮回合 `settlement.evolution.{artifact,summary,candidates,classes}`；`review.note` 仅将这四键单源归档到 `review.evolution.*` 后写 lesson/score/ending。coordinate.submit 重入 review 与 verify.submit=false 打回会清空本轮 settlement 四键，但保留 settings 预登记；`agent.summary.evolution` 回显 review 归档四键。本仓的验证命令见 gates 章，骨架同步用 `scripts/sync-seed-mod.sh`。"
+      ]
     }
   ]
 }

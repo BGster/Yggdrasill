@@ -8,6 +8,7 @@ local M = {}
 local config = require("src.config")
 local flow = require("src.flow")
 local gates = require("src.gates")
+local hooks = require("src.hooks")
 local choice = require("src.handlers.choice")
 local render_mod = require("src.render")
 local reqs = require("src.requirements")
@@ -88,6 +89,11 @@ function M.install(deps)
       artifacts = req_artifacts(index) ~= "" and req_artifacts(index) or TEXTS.beats.req_gate_no_artifacts,
       gates = tostring(gate_total()),
     }))
+    -- 唯一后继自动推进走响应式：plan 批准 = ready，开发槽位已打开——打标后由 render() 入口的
+    -- hooks.flush_effects 在产出 choice 之前同步完成单需求派活（省一回合）。
+    if kind == "plan" then
+      hooks.mark_auto_dispatch(index)
+    end
     render()
   end)
   ygg.on("gate.reject", function(payload)
