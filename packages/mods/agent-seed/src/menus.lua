@@ -8,6 +8,7 @@ local M = {}
 local config = require("src.config")
 local gates = require("src.gates")
 local guide = require("src.guide")
+local hooks = require("src.hooks")
 local props = require("src.proposals")
 local reqs = require("src.requirements")
 local util = require("src.util")
@@ -31,9 +32,18 @@ local trim =
   util.trim
 
 -- settlement.evolution 载荷读预登记面（零候选由 format_settlement_evolution 补中性默认值）。
+-- 局末两项清理也折进同一事务（可选段 sessions= / todo=）：未登记时补默认段，
+-- 让 review 阶段一步做完三项登记（省回合），独立动作 settlement.sessions|todo 仍可用。
 local function settlement_evolution_payload()
   local artifact, summary, candidates, classes = wire.evolution_settings()
-  return wire.format_settlement_evolution(artifact, summary, candidates, classes)
+  local payload = wire.format_settlement_evolution(artifact, summary, candidates, classes)
+  if text_of("settlement.sessions.destination", "") == "" then
+    payload = payload .. "|" .. TEXTS.beats.settlement_sessions_segment
+  end
+  if config.num("settlement.todo.remaining", -1) ~= 0 then
+    payload = payload .. "|" .. TEXTS.beats.settlement_todo_segment
+  end
+  return payload
 end
 
 -- 「本轮进化登记过了吗」：只看本轮回合 settlement 四键里的 summary，不看预登记面。
@@ -212,15 +222,34 @@ local function append_all(items, extra)
 end
 
 local function dispatch_candidates()
-  local out = {}
-  for i = 1, req_count() do
-    -- 待验收提案在 5 态下不再是一个状态，所以「等验收期间不重派」必须在这里显式排除
-    -- （旧版靠 analysis_review / plan_review / dev_review 三个状态天然不可派）。
-    if req_job_stage(i) ~= nil and req_job(i) == "" and not req_has_pending(i) then
-      if req_job_stage(i) ~= "development" or req_dev_ready(i) then
-        out[#out + 1] = i
+  -- 响应式记忆化（useMemo）：依赖签名就是本函数用到的四个谓词——需求数、逐需求的
+  -- job 阶段 / 当前 job / 待验收提案 / 开发就绪；完全由 KV 派生，读档后签名变化即重算。
+  local cached = hooks.useMemo("menus.dispatch_candidates", function()
+    local out = {}
+    for i = 1, req_count() do
+      -- 待验收提案在 5 态下不再是一个状态，所以「等验收期间不重派」必须在这里显式排除
+      -- （旧版靠 analysis_review / plan_review / dev_review 三个状态天然不可派）。
+      if req_job_stage(i) ~= nil and req_job(i) == "" and not req_has_pending(i) then
+        if req_job_stage(i) ~= "development" or req_dev_ready(i) then
+          out[#out + 1] = i
+        end
       end
     end
+    return out
+  end, function()
+    local deps_sig = { req_count() }
+    for i = 1, req_count() do
+      deps_sig[#deps_sig + 1] = tostring(req_job_stage(i))
+      deps_sig[#deps_sig + 1] = req_job(i)
+      deps_sig[#deps_sig + 1] = req_has_pending(i) and "1" or "0"
+      deps_sig[#deps_sig + 1] = req_dev_ready(i) and "1" or "0"
+    end
+    return deps_sig
+  end)
+  -- 返回拷贝：调用方可以改写自己的候选表（如 `rN` 载荷收窄），不得污染记忆化结果。
+  local out = {}
+  for i = 1, #cached do
+    out[i] = cached[i]
   end
   return out
 end

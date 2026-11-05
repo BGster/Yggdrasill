@@ -18,6 +18,9 @@ local stage =
 local contains, cut, fill, join, split, trim =
   util.contains, util.cut, util.fill, util.join, util.split, util.trim
 
+-- 前向声明：`proposal.submit` 的末段 `exec=` 复用执行者值的形状校验（实现在 §E2 登记面）。
+local parse_executor_value, parse_exec_segment
+
 local function probe_payload_ok(payload)
   if payload == nil then
     return true
@@ -30,6 +33,36 @@ local function probe_payload_ok(payload)
     return raw == "" or raw == "0" or raw == "full"
   end
   return false
+end
+
+-- `requirement.dispatch` 的载荷：`""` / `"0"` = 按就绪序派活；`"rN"` = 只派这一条；
+-- `"full"` 保留为合法 no-op（派活从来只按就绪序，没有「更多输出」这回事）。
+local function parse_dispatch(payload)
+  if payload == nil then
+    return nil, nil
+  end
+  local raw = payload
+  if type(payload) == "number" then
+    if payload == 0 then
+      return nil, nil
+    end
+    raw = tostring(payload)
+  elseif type(payload) ~= "string" then
+    raw = tostring(payload)
+  else
+    raw = trim(payload)
+  end
+  if raw == "" or raw == "0" or raw == "full" then
+    return nil, nil
+  end
+  local target = raw:match("^r%d+$")
+  if target == nil then
+    return nil, fill(TEXTS.beats.probe_rejected, {
+      got = tostring(payload),
+      usage = TEXTS.beats.req_dispatch_usage,
+    })
+  end
+  return target, nil
 end
 
 local function valid_ext(ext)
@@ -145,6 +178,24 @@ local function parse_proposal(payload)
     return nil, fill(TEXTS.beats.bad_payload, { action = "proposal.submit" })
   end
   local parts = split(trim(payload), "|")
+  -- `exec=` 只认末段：宿主对 <7 段的载荷会补段重排，放在中间会被静默挪到 artifacts 位。
+  for i = 1, #parts - 1 do
+    if trim(parts[i]):match("^exec=") ~= nil then
+      return nil, TEXTS.beats.req_prop_exec_misplaced
+    end
+  end
+  local exec_id, exec_reason = nil, nil
+  if #parts > 0 and trim(parts[#parts]):match("^exec=") ~= nil then
+    local id, reason, exec_problem = parse_exec_segment(trim(parts[#parts]))
+    if exec_problem ~= nil then
+      return nil, exec_problem
+    end
+    if id == "" then
+      return nil, TEXTS.beats.executor_bad_id
+    end
+    exec_id, exec_reason = id, reason
+    parts[#parts] = nil
+  end
   if #parts < 4 then
     return nil, TEXTS.beats.req_prop_usage
   end
@@ -162,6 +213,8 @@ local function parse_proposal(payload)
     artifacts = trim(parts[5] or ""),
     changes = trim(parts[6] or ""),
     ext = trim(parts[7] or ""),
+    exec = exec_id,
+    exec_reason = exec_reason,
   }, nil
 end
 
@@ -434,9 +487,92 @@ local function format_settlement_evolution(artifact, summary, candidates, classe
   return join(parts, "|")
 end
 
--- `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`。
--- 本函数只解析载荷形状（{artifact, summary, segments}），跨字段完整性交 normalize_evolution；
--- c / cls 缺段才回落 settings。显式空段、ev=、重复段与未知段都在这里拒绝，未知段点名违规片段。
+-- ============================================================================
+-- §局末两项清理（subagent 会话 / 主会话 Todo）的形状单一事实源
+--
+-- 两个入口共用同一套校验：独立动作 `settlement.sessions|todo` 与
+-- `settlement.evolution` 的可选段（`sessions=` / `todo=`，`/` 分隔，外层是 `|`）。
+-- 自声明：Mod 读不到会话与 Todo API，这里只校「登记断言」的形状。
+-- ============================================================================
+local TODO_VERIFIED_MAX = 120
+
+local function sessions_shape_ok(moved, remaining, destination)
+  if moved == nil or remaining == nil then
+    return false
+  end
+  return moved >= 0 and remaining == 0 and destination ~= ""
+end
+
+local function todo_shape_ok(remaining, verified_by)
+  if remaining == nil then
+    return false
+  end
+  return remaining == 0 and verified_by ~= "" and #verified_by <= TODO_VERIFIED_MAX
+end
+
+-- 独立动作的载荷：`moved|remaining|destination`（`|` 分隔，恰三段）。
+local function parse_sessions_payload(payload)
+  if type(payload) ~= "string" then
+    return nil, TEXTS.beats.settlement_sessions_usage
+  end
+  local parts = split(trim(payload), "|")
+  if #parts ~= 3 then
+    return nil, TEXTS.beats.settlement_sessions_usage
+  end
+  local moved = tonumber(trim(parts[1]))
+  local remaining = tonumber(trim(parts[2]))
+  local destination = trim(parts[3])
+  if not sessions_shape_ok(moved, remaining, destination) then
+    return nil, TEXTS.beats.settlement_sessions_usage
+  end
+  return { moved = math.floor(moved), remaining = 0, destination = destination }, nil
+end
+
+-- 独立动作的载荷：`remaining|verified_by`（`|` 分隔，恰两段）。
+local function parse_todo_payload(payload)
+  if type(payload) ~= "string" then
+    return nil, TEXTS.beats.settlement_todo_usage
+  end
+  local parts = split(trim(payload), "|")
+  if #parts ~= 2 then
+    return nil, TEXTS.beats.settlement_todo_usage
+  end
+  local remaining = tonumber(trim(parts[1]))
+  local verified_by = trim(parts[2])
+  if not todo_shape_ok(remaining, verified_by) then
+    return nil, TEXTS.beats.settlement_todo_usage
+  end
+  return { remaining = 0, verified_by = verified_by }, nil
+end
+
+-- 可选段的载荷：`moved/remaining/destination`（只切前两刀，destination 里的 `/` 原样保留）。
+local function parse_sessions_segment(value)
+  local moved_text, rest = cut(trim(value or ""), "/")
+  local remaining_text, destination = cut(trim(rest or ""), "/")
+  local moved = tonumber(trim(moved_text))
+  local remaining = tonumber(trim(remaining_text))
+  local text = trim(destination or "")
+  if not sessions_shape_ok(moved, remaining, text) then
+    return nil, TEXTS.beats.settlement_sessions_segment_bad
+  end
+  return { moved = math.floor(moved), remaining = 0, destination = text }, nil
+end
+
+-- 可选段的载荷：`remaining/verified_by`（只切第一刀，verified_by 里的 `/` 原样保留）。
+local function parse_todo_segment(value)
+  local remaining_text, verified_by = cut(trim(value or ""), "/")
+  local remaining = tonumber(trim(remaining_text))
+  local text = trim(verified_by or "")
+  if not todo_shape_ok(remaining, text) then
+    return nil, TEXTS.beats.settlement_todo_segment_bad
+  end
+  return { remaining = 0, verified_by = text }, nil
+end
+
+-- `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]
+--          [|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`。
+-- 本函数只解析载荷形状（{artifact, summary, segments, sessions, todo}），跨字段完整性交
+-- normalize_evolution；c / cls 缺段才回落 settings。显式空段、ev=、重复段与未知段都在这里拒绝。
 local function parse_settlement_evolution(payload)
   if type(payload) ~= "string" then
     return nil, fill(TEXTS.beats.bad_payload, { action = "settlement.evolution" })
@@ -451,12 +587,13 @@ local function parse_settlement_evolution(payload)
     return nil, TEXTS.beats.settlement_evolution_need_summary
   end
   local segments = {}
+  local sessions, todo = nil, nil
   for i = 3, #parts do
     local segment = trim(parts[i])
     local key, value = cut(segment, "=")
     key = trim(key or "")
     value = trim(value or "")
-    if key ~= "c" and key ~= "cls" then
+    if key ~= "c" and key ~= "cls" and key ~= "sessions" and key ~= "todo" then
       return nil, fill(TEXTS.beats.settlement_evolution_bad_segment, { segment = segment })
     end
     if segments[key] ~= nil then
@@ -465,12 +602,29 @@ local function parse_settlement_evolution(payload)
     if value == "" then
       if key == "c" then
         return nil, TEXTS.beats.review_evolution_bad_candidates
+      elseif key == "cls" then
+        return nil, TEXTS.beats.review_evolution_bad_classes
+      elseif key == "sessions" then
+        return nil, TEXTS.beats.settlement_sessions_segment_bad
       end
-      return nil, TEXTS.beats.review_evolution_bad_classes
+      return nil, TEXTS.beats.settlement_todo_segment_bad
     end
     segments[key] = value
+    if key == "sessions" then
+      local parsed, segment_problem = parse_sessions_segment(value)
+      if parsed == nil then
+        return nil, segment_problem
+      end
+      sessions = parsed
+    elseif key == "todo" then
+      local parsed, segment_problem = parse_todo_segment(value)
+      if parsed == nil then
+        return nil, segment_problem
+      end
+      todo = parsed
+    end
   end
-  return { artifact = artifact, summary = summary, segments = segments }, nil
+  return { artifact = artifact, summary = summary, segments = segments, sessions = sessions, todo = todo }, nil
 end
 
 -- 菜单构造 review.note 载荷：`lesson|score` 两段，进化声明不从这里走。
@@ -530,19 +684,32 @@ local function parse_executor_key(key)
   return key:match("^executor%.(r%d+)%.([a-z_]+)$")
 end
 
--- 值形：`<id>` 或 `<id>|<原因>`；`""` = 显式解绑。
-local function parse_executor_value(value)
+-- 值形：`<id>` 或 `<id>|<原因>`（也接受 `<id>:<原因>`，供 `proposal.submit` 的末段使用）；
+-- `""` = 显式解绑。
+parse_executor_value = function(value)
   local raw = trim(value or "")
   if raw == "" then
     return "", "", nil
   end
   local id, reason = cut(raw, "|")
+  if reason == nil then
+    id, reason = cut(raw, ":")
+  end
   id = trim(id or "")
   reason = trim(reason or "")
   if id == "" or #id > 64 or id:find("%s") ~= nil then
     return nil, nil, TEXTS.beats.executor_bad_id
   end
   return id, reason, nil
+end
+
+-- `proposal.submit` 末段 `exec=<id>[:<原因>]`：登记并入提案提交（同事务），不自成回合。
+parse_exec_segment = function(segment)
+  local key, value = cut(trim(segment or ""), "=")
+  if trim(key or "") ~= "exec" then
+    return nil, nil, TEXTS.beats.executor_bad_id
+  end
+  return parse_executor_value(value)
 end
 
 local function format_executor(id, reason)
@@ -567,6 +734,7 @@ M.EXECUTOR_STAGES = EXECUTOR_STAGES
 M.executor_id_of = executor_id_of
 M.executor_stage_ok = executor_stage_ok
 M.format_executor = format_executor
+M.parse_exec_segment = parse_exec_segment
 M.parse_executor_key = parse_executor_key
 M.parse_executor_value = parse_executor_value
 M.parse_goal_auth = parse_goal_auth
@@ -581,7 +749,13 @@ M.normalize_evolution = normalize_evolution
 M.parse_candidates = parse_candidates
 M.parse_classes = parse_classes
 M.parse_review_note = parse_review_note
+M.parse_sessions_payload = parse_sessions_payload
+M.parse_sessions_segment = parse_sessions_segment
 M.parse_settlement_evolution = parse_settlement_evolution
+M.parse_todo_payload = parse_todo_payload
+M.parse_todo_segment = parse_todo_segment
+M.sessions_shape_ok = sessions_shape_ok
+M.todo_shape_ok = todo_shape_ok
 
 M.RESOLVE_MODES = RESOLVE_MODES
 M.inbox_mark = inbox_mark
@@ -589,6 +763,7 @@ M.inbox_replay = inbox_replay
 M.parse_amend = parse_amend
 M.parse_conflict = parse_conflict
 M.parse_deps = parse_deps
+M.parse_dispatch = parse_dispatch
 M.parse_intake = parse_intake
 M.parse_merge = parse_merge
 M.parse_proposal = parse_proposal

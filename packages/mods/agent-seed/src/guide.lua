@@ -37,9 +37,9 @@ local function guide_section(st)
 end
 
 local MODALITY_MARK = {
-  ["must"] = "［必须］",
-  ["must-not"] = "［禁止］",
-  ["should"] = "［应当］",
+  ["must"] = "[MUST] ",
+  ["must-not"] = "[MUST NOT] ",
+  ["should"] = "[SHOULD] ",
 }
 
 local function narrate_section(section)
@@ -75,7 +75,7 @@ local function narrate_guide(id)
   if section == nil then
     ygg.narrate(fill(TEXTS.beats.guide_unknown, {
       id = tostring(id),
-      ids = join(SECTION_IDS, "、"),
+      ids = join(SECTION_IDS, ", "),
     }))
     return
   end

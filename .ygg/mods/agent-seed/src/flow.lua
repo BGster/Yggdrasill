@@ -67,8 +67,15 @@ local function allowed_list(current)
       names[#names + 1] = items[i].action
     end
   end
-  return join(names, "、")
+  return join(names, ", ")
 end
+
+-- ============================================================================
+-- §唯一后继自动推进的落点已改为响应式：见 `src/hooks.lua`（useEffect + flush_effects）。
+-- 本模块只负责转场与拒绝的出口；状态驱动的连锁反应不再写在各 handler 末尾——
+-- 否则「已产生 choice 的 handler 里再 emit」会被内核丢弃（transition.rs 排空规则）。
+-- ============================================================================
+
 
 local function refuse(template, action, detail)
   local current = stage()

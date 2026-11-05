@@ -6,7 +6,9 @@
 local M = {}
 
 local config = require("src.config")
+local executor = require("src.executor")
 local flow = require("src.flow")
+local hooks = require("src.hooks")
 local choice = require("src.handlers.choice")
 local props = require("src.proposals")
 local render_mod = require("src.render")
@@ -28,23 +30,25 @@ local render =
   render_mod.receipt
 local R_ANALYZING, R_DEVELOPING, R_DRAFT, R_PLANNING, STAGE, req_advance_after_accept, req_gate, req_id, req_index_of, req_key, req_phase_name, req_plan_flag, req_plan_ok, req_push_history, req_release, req_rev, req_status, req_sync_conflicts, stage =
   reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DRAFT, reqs.R_PLANNING, reqs.STAGE, reqs.req_advance_after_accept, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_plan_flag, reqs.req_plan_ok, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
-local cut, fill, trim =
-  util.cut, util.fill, util.trim
+local cut, contains, fill, trim =
+  util.cut, util.contains, util.fill, util.trim
 local parse_proposal =
   wire.parse_proposal
 
 -- 阶段槽位（5 态）：旧的 working / review 两态已合并成同一个存储态，
 -- 槽位只判「这个阶段现在能不能收提案」；「重定基 vs 被占用」由 pending 提案表判。
+-- 数组形：draft 直接派 plan 之后，`analysis` 降级为兼容槽位（legacy analyzing 行，以及
+-- planning 态里仍按旧剧本提上来的分析提案）——它不再是派活路径产生的阶段。
 local WORKING_STATUS = {
-  analysis = R_ANALYZING,
-  plan = R_PLANNING,
-  development = R_DEVELOPING,
+  analysis = { R_ANALYZING, R_PLANNING },
+  plan = { R_PLANNING },
+  development = { R_DEVELOPING },
 }
 
 -- 返回 (ok, reason)：reason ∈ "status" / "gate" / "plan_on" / "plan_off"（ok 时为 nil）。
 -- reason 必须区分开：把「计划未批准」报成「阶段与状态不匹配」会把排错人引到错方向。
 local function submit_slot_ok(index, stage_name)
-  if req_status(index) ~= WORKING_STATUS[stage_name] then
+  if not contains(WORKING_STATUS[stage_name], req_status(index)) then
     return false, "status"
   end
   -- 门禁待批期间不得再收提案（plan 门禁落在 planning、accept 门禁落在 developing）。
@@ -149,6 +153,19 @@ function M.install(deps)
         prop = prop_id(blocking),
       }))
     end
+    -- 执行者登记并入提案提交（省一回合）：校验失败则整体不生效（提案不落库）。
+    if spec.exec ~= nil then
+      local problem = executor.bind(
+        "executor." .. spec.req .. "." .. spec.stage,
+        wire.format_executor(spec.exec, spec.exec_reason)
+      )
+      if problem ~= nil then
+        if problem.kind == "blocked" then
+          return refuse(TEXTS.beats.req_wait_rejected, "proposal.submit", problem.detail)
+        end
+        return reject_payload("proposal.submit", problem.detail)
+      end
+    end
     -- 重定基：旧提案已作废（stale / 被拒），清掉需求的 stale 标记（本次提案重新起算）。
     ygg.kv.set(req_key(index, "stale"), false)
     local summarize = spec.summary
@@ -208,6 +225,11 @@ function M.install(deps)
       change = change_note,
       pending = tostring(prop_pending_total()),
     }))
+    -- 唯一后继自动推进走响应式：分析验收后 plan 槽必然打开，打标后由 render() 入口的
+    -- hooks.flush_effects 在产出 choice 之前同步收敛（不能在这里 emit/render 两次）。
+    if stage_name == "analysis" then
+      hooks.mark_auto_dispatch(index)
+    end
     render()
   end)
   ygg.on("proposal.reject", function(payload)

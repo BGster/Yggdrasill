@@ -1,24 +1,32 @@
-//! agent-seed 语义门禁：需求级状态机（5 存储态 + `plan_ok` 派生展示名）与双层节点图的
-//! **可判定**断言（AGENTS.md §一·9 的行为验收面）。
+//! agent-seed semantics gate: **decidable** assertions for the requirement-level state machine
+//! (5 stored states + `plan_ok`-derived display names), the turn-cut conventions, and the
+//! two-layer node map (the behavioural acceptance surface required by AGENTS.md §1.9).
 //!
-//! 为什么需要这一层：`playtest` 的全 1 走查只证明 happy path 能到【结局——它对
-//! `gate.reject` / `requirement.amend` / `proposal.reject` 这些**分叉**一条都不走。
-//! 上一轮的三处缺陷（accept 打回丢 `plan_ok`、map 流水线缺验收跳、旁路方向反）
-//! 全都在 happy path 之外，全 1 门禁对它们恒绿。本文件把这些分叉写成断言：
+//! Why this layer exists: the all-1 `playtest` walk only proves the happy path reaches
+//! `[ENDING` — it never takes a **branch** such as `gate.reject` / `requirement.amend` /
+//! `proposal.reject` / a stale gate, and the turn-cut mechanics (inline `exec=`, the
+//! `draft -> planning` merge, the reactive auto-dispatch effect, the settlement merge) are
+//! likewise invisible to it. This file turns those into assertions:
 //!
-//! - 状态断言读 **`save` 回执的 `kv.entries`**（`req.*` 是状态机事实，不是散文）；
-//! - 展示断言读 **`requirement.list` 的派生展示名**（`[ready]` / `[plan_gate]` / …）；
-//! - 图层断言读 **`map.show` 的图窗口**（操作视图 vs 设计视图两套契约）；
-//! - 人类动作一律走 **guide 的 `ygg.choice_selected`**（票据只在这里盖章，§8）。
+//! - state assertions read **`kv.entries` of the `save` receipt** (`req.*` is machine state,
+//!   not prose);
+//! - display assertions read the **derived display name** from `requirement.list`
+//!   (`[ready]` / `[plan_gate]` / …);
+//! - map assertions read the **map window** from `map.show` (operation view vs design view);
+//! - every human action goes through **guide's `ygg.choice_selected`** (the ticket is only
+//!   stamped there, §8).
 //!
-//! 边界（与 AGENTS.md §一·7 同口径，别在这里加出口）：
-//! - 只用公开装载面（`ModBundle` / `KernelFacade` / dispatch / save-load），不改 host CLI、
-//!   不改生产代码、不引入旁路脚本；
-//! - **不读写任何 run 目录**：legacy 兼容用**内存 save fixture**（`save` 回执里就地删键再
-//!   `restore`），不碰 `autosave.json` / `events.jsonl`；
-//! - legacy 用例只证明「当前 reducer 能读缺键的旧存档」，不构造历史版本引擎、不伪造事件日志。
+//! Boundaries (same stance as AGENTS.md §1.7 — do not add exits here):
+//! - only the public load surface (`ModBundle` / `KernelFacade` / dispatch / save-load):
+//!   no host CLI changes, no production-code changes, no side-channel scripts;
+//! - **no run directory is read or written**: legacy compatibility uses an **in-memory save
+//!   fixture** (drop a key inside the `save` receipt, then `restore`), never `autosave.json`
+//!   or `events.jsonl`;
+//! - the legacy case only proves "the current reducer can read a save with a missing key";
+//!   it does not build a historical engine or forge an event log.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde_json::{json, Value as Json};
 
@@ -26,118 +34,120 @@ use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 
-// ───────────────────────── 定位 ─────────────────────────
+// ───────────────────────── locating ─────────────────────────
 
-/// 仓库根（`CARGO_MANIFEST_DIR` = `crates/ygg-sandbox`，两级上行到仓库根）。
+/// Repository root (`CARGO_MANIFEST_DIR` is `crates/ygg-sandbox`; two levels up).
 fn repo_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// 本项目实际装载的实例（`data/scenes.json` 与 `data/playbook.json` 是本项目的现场面）。
+/// The instance this project actually loads (`data/scenes.json` and `data/playbook.json`
+/// are this project's field surface).
 fn project_mod_dir() -> PathBuf {
     repo_dir().join(".ygg/mods/agent-seed")
 }
 
-/// 对外分发的种子模板（骨架逐字节一致；`data/` 两侧各自维护）。
+/// The seed template that ships to users (skeleton is byte-identical; `data/` differs).
 fn seed_mod_dir() -> PathBuf {
     repo_dir().join("packages/mods/agent-seed")
 }
 
-// ───────────────────────── 驱动面 ─────────────────────────
+// ───────────────────────── drive surface ─────────────────────────
 
-/// 一局的最小驱动面：装载 + 派发 + 读档。
+/// The minimal drive surface of one run: load + dispatch + read the save.
 ///
-/// `bundle` 留着手是为了 legacy 用例能按同一份装载参数重建内核（`ModBundle::restore`
-/// 与 `kernel()` 同分派，见 modload.rs 文档）。
+/// `bundle` is kept so the legacy case can rebuild a kernel from the same load parameters
+/// (`ModBundle::restore` dispatches the same way as `kernel()`, see modload.rs).
 struct Game {
     bundle: ModBundle,
     kernel: KernelFacade,
 }
 
 impl Game {
-    /// 装载并在 `event.start` 上开局（与宿主走同一条装载面）。
+    /// Load and start on `event.start` (the same load surface the host uses).
     fn open(dir: &Path) -> Self {
-        let bundle =
-            ModBundle::load(dir).unwrap_or_else(|err| panic!("装载 {} 失败：{err}", dir.display()));
-        let kernel = bundle.kernel().expect("内核构造");
+        let bundle = ModBundle::load(dir)
+            .unwrap_or_else(|err| panic!("failed to load {}: {err}", dir.display()));
+        let kernel = bundle.kernel().expect("kernel construction");
         let mut game = Self { bundle, kernel };
         game.narrate("event.start", "0");
         game
     }
 
-    /// 派发并断言信封 `ok`（域错误信封一律算测试失败）。
+    /// Dispatch and assert the envelope `ok` (a domain-error envelope always fails the test).
     #[track_caller]
     fn reply(&mut self, event: &str, payload: &str) -> Json {
         let reply: Json = serde_json::from_str(&self.kernel.dispatch(event, payload))
-            .unwrap_or_else(|err| panic!("{event} 的回执不是 JSON：{err}"));
-        assert_eq!(reply["ok"], json!(true), "{event} 派发失败：{reply}");
+            .unwrap_or_else(|err| panic!("the {event} reply is not JSON: {err}"));
+        assert_eq!(reply["ok"], json!(true), "{event} dispatch failed: {reply}");
         reply
     }
 
-    /// 派发 + 取叙事行。
+    /// Dispatch and take the narrative lines.
     #[track_caller]
     fn narrate(&mut self, event: &str, payload: &str) -> Vec<String> {
         let reply = self.reply(event, payload);
         reply["narrative"]
             .as_array()
-            .unwrap_or_else(|| panic!("{event} 的 narrative 不是数组：{reply}"))
+            .unwrap_or_else(|| panic!("the {event} narrative is not an array: {reply}"))
             .iter()
             .map(|line| {
                 line.as_str()
-                    .unwrap_or_else(|| panic!("叙事行不是字符串：{line:?}"))
+                    .unwrap_or_else(|| panic!("a narrative line is not a string: {line:?}"))
                     .to_owned()
             })
             .collect()
     }
 
-    /// `save` 回执里的存档对象（状态断言的事实面 = `kv.entries`）。
+    /// The save object from the `save` receipt (state assertions read `kv.entries`).
     #[track_caller]
     fn save(&mut self) -> Json {
         self.reply("save", "0")["save"].clone()
     }
 
-    /// 存档里的一个 KV（缺键 → `Null`；legacy 用例正是要观测「键不在」）。
+    /// One KV in the save (missing key → `Null`; the legacy case observes exactly that).
     #[track_caller]
     fn kv(&mut self, key: &str) -> Json {
         self.save()["kv"]["entries"][key].clone()
     }
 
-    /// 断言 KV 取值（`Null` 即断言该键缺席）。
+    /// Assert a KV value (`Null` asserts the key is absent).
     #[track_caller]
     fn assert_kv(&mut self, key: &str, want: Json) {
         let got = self.kv(key);
-        assert_eq!(got, want, "KV `{key}` 期望 {want}，实际 {got}");
+        assert_eq!(got, want, "KV `{key}` expected {want}, got {got}");
     }
 
-    /// 当前待决选择的选项文本（`state` 是只读诊断面，不推进状态）。
+    /// The option texts of the pending choice (`state` is a read-only diagnostic surface).
     #[track_caller]
     fn options(&mut self) -> Vec<String> {
         let reply = self.reply("state", "0");
         reply["pendingChoice"]["options"]
             .as_array()
-            .unwrap_or_else(|| panic!("没有待决选择：{reply}"))
+            .unwrap_or_else(|| panic!("no pending choice: {reply}"))
             .iter()
             .map(|item| {
                 item.as_str()
-                    .unwrap_or_else(|| panic!("选项不是字符串：{item:?}"))
+                    .unwrap_or_else(|| panic!("an option is not a string: {item:?}"))
                     .to_owned()
             })
             .collect()
     }
 
-    /// guide 路由：按选项文本前缀点菜单（人类动作的**唯一**合法入口，见 AGENTS.md §8）。
+    /// guide routing: click a menu entry by option-text prefix (the **only** legal entry for
+    /// human actions, see AGENTS.md §8).
     #[track_caller]
     fn click(&mut self, prefix: &str) -> Json {
         let options = self.options();
         let index = options
             .iter()
             .position(|text| text.starts_with(prefix))
-            .unwrap_or_else(|| panic!("菜单里没有以 `{prefix}` 开头的项：{options:?}"));
+            .unwrap_or_else(|| panic!("no menu entry starts with `{prefix}`: {options:?}"));
         let payload = (index + 1).to_string();
         self.reply("ygg.choice_selected", &payload)
     }
 
-    /// 派生展示名：`requirement.list` 的 `[ready]` 那一格——「展示成什么」的断言面。
+    /// Derived display name: the `[ready]` slot of `requirement.list` — the display surface.
     #[track_caller]
     fn phase(&mut self, id: &str) -> String {
         let needle = format!(" {id} [");
@@ -145,59 +155,108 @@ impl Game {
         let row = lines
             .iter()
             .find(|line| line.contains(&needle))
-            .unwrap_or_else(|| panic!("需求列表里没有 {id}：{lines:#?}"));
-        let open = row.find('[').expect("展示名缺左括号");
-        let close = row.find(']').expect("展示名缺右括号");
+            .unwrap_or_else(|| panic!("no {id} in the requirement list: {lines:#?}"));
+        let open = row
+            .find('[')
+            .expect("display name lacks an opening bracket");
+        let close = row.find(']').expect("display name lacks a closing bracket");
         row[open + 1..close].to_owned()
+    }
+
+    /// The requirement panel line (counts per display name) — the surface the `useMemo`
+    /// derived tally feeds.
+    #[track_caller]
+    fn panel(&mut self) -> String {
+        self.narrate("requirement.list", "0")
+            .into_iter()
+            .find(|line| line.starts_with("[REQ GRAPH]"))
+            .expect("requirement.list must start with the graph header")
     }
 }
 
-/// Rust 字符串 → JSON 字符串载荷（`dispatch` 的 payload 必须是合法 JSON 标量）。
+/// Rust string → JSON string payload (a dispatch payload must be valid JSON).
 fn text(payload: &str) -> String {
-    serde_json::to_string(payload).expect("序列化字符串载荷")
+    serde_json::to_string(payload).expect("serialize the string payload")
 }
 
-/// 拒绝判定：拒绝文案的前缀由 `pack.json` 的 `rejectionPrefixes` 声明。
-fn refused(lines: &[String], needle: &str) -> bool {
-    lines.iter().any(|line| {
-        ["【动作被拒】", "【载荷被拒】", "【需求待办】"]
+/// Rejection prefixes come from `pack.json` (`agent.rejectionPrefixes`) — the single source,
+/// never a copy-pasted literal (a past drift taught that lesson).
+fn rejection_prefixes() -> &'static Vec<String> {
+    static PREFIXES: OnceLock<Vec<String>> = OnceLock::new();
+    PREFIXES.get_or_init(|| {
+        let path = project_mod_dir().join("pack.json");
+        let raw = std::fs::read_to_string(&path).expect("read pack.json");
+        let pack: Json = serde_json::from_str(&raw).expect("parse pack.json");
+        pack["agent"]["rejectionPrefixes"]
+            .as_array()
+            .expect("agent.rejectionPrefixes must be an array")
             .iter()
-            .any(|prefix| line.starts_with(prefix))
-            && line.contains(needle)
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("a rejection prefix must be a string")
+                    .to_owned()
+            })
+            .collect()
     })
 }
 
-/// 断言「被拒且点名了该动作/原因」。
+/// Rejection judgement: the narrative line starts with one of the declared prefixes.
+fn refused(lines: &[String], needle: &str) -> bool {
+    let prefixes = rejection_prefixes();
+    lines
+        .iter()
+        .any(|line| prefixes.iter().any(|prefix| line.starts_with(prefix)) && line.contains(needle))
+}
+
+/// Assert "refused and named that action/reason".
 #[track_caller]
 fn assert_refused(lines: &[String], needle: &str) {
     assert!(
         refused(lines, needle),
-        "期望一条点名 `{needle}` 的拒绝文案，实际：{lines:#?}"
+        "expected a rejection that names `{needle}`, got: {lines:#?}"
     );
 }
 
-// ───────────────────────── 驱动脚本 ─────────────────────────
+// ───────────────────────── drive scripts ─────────────────────────
 
-/// 开局 → coordinate → 一条需求 → 分析 job 起跑（非人类动作走直派，不必盖章）。
+/// Start → coordinate → one requirement → the plan job is running
+/// (non-human actions are dispatched directly, no ticket needed).
+///
+/// `draft` now dispatches **plan** directly (analysis and plan are merged): the stored state
+/// moves to `planning` in the same dispatch.
 fn start_requirement(game: &mut Game) {
-    game.narrate("task.intake", &text("语义门禁局|合成任务的描述"));
+    game.narrate(
+        "task.intake",
+        &text("semantics gate|synthetic task description"),
+    );
     game.narrate(
         "requirement.add",
-        &text("合成需求|合成需求的描述|semantics-r1"),
+        &text("synthetic requirement|synthetic description|semantics-r1"),
     );
     game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.job", json!("analysis"));
+    game.assert_kv("req.1.status", json!("planning"));
+    game.assert_kv("req.1.job", json!("plan"));
 }
 
-/// 提交一条 `r1` 的提案：`req|rev|stage|summary|artifacts|changes|ext`（changes 留空）。
+/// Submit an `r1` proposal: `req|rev|stage|summary|artifacts|changes|ext` (changes empty).
 fn submit(game: &mut Game, rev: u32, stage: &str, ext: &str) {
     let payload = text(&format!(
-        "r1|{rev}|{stage}|{stage} 提案摘要|artifacts/{stage}.md||{ext}"
+        "r1|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}"
     ));
     game.narrate("proposal.submit", &payload);
 }
 
-/// 驱动到 **plan 门禁待批**：分析提案验收 → 派 plan → plan 提案验收。
+/// Submit an `r1` proposal with the trailing `exec=` segment (agent ledger + proposal in one
+/// transaction, i.e. no extra turn).
+fn submit_with_exec(game: &mut Game, rev: u32, stage: &str, ext: &str, exec: &str) {
+    let payload = text(&format!(
+        "r1|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}|exec={exec}"
+    ));
+    game.narrate("proposal.submit", &payload);
+}
+
+/// Drive to **plan gate pending**: plan proposal → accept → `gate=plan`.
 fn drive_to_plan_gate() -> Game {
     drive_to_plan_gate_in(&project_mod_dir())
 }
@@ -205,54 +264,78 @@ fn drive_to_plan_gate() -> Game {
 fn drive_to_plan_gate_in(dir: &Path) -> Game {
     let mut game = Game::open(dir);
     start_requirement(&mut game);
-    submit(&mut game, 1, "analysis", "semantics-p1");
-    game.click("proposal.accept —— ");
-    game.assert_kv("req.1.status", json!("planning"));
-    game.narrate("requirement.dispatch", "0");
-    submit(&mut game, 1, "plan", "semantics-p2");
-    game.click("proposal.accept —— ");
+    submit_with_exec(&mut game, 1, "plan", "semantics-p1", "agent-1");
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    game.click("proposal.accept — ");
     game.assert_kv("req.1.gate", json!("plan"));
     game
 }
 
-/// 从 plan 门禁继续到 **accept 门禁待批**：批准 plan → 派开发 → 交付提案验收。
+/// From the plan gate to **accept gate pending**: approve plan (the reactive effect
+/// auto-dispatches development in the same turn) → deliver → accept.
 fn drive_to_accept(mut game: Game) -> Game {
-    game.click("gate.approve —— ");
+    game.click("gate.approve — ");
     game.assert_kv("req.1.plan_ok", json!(true));
-    game.narrate("requirement.dispatch", "0");
+    // Reactive auto-dispatch: no separate `requirement.dispatch` turn any more.
     game.assert_kv("req.1.job", json!("development"));
-    submit(&mut game, 1, "development", "semantics-p3");
-    game.click("proposal.accept —— ");
+    game.assert_kv("req.1.lane", json!(1));
+    submit_with_exec(&mut game, 1, "development", "semantics-p2", "agent-1");
+    game.click("proposal.accept — ");
     game.assert_kv("req.1.gate", json!("accept"));
     game
 }
 
-/// 驱动到 **开发中 + 待验收的开发提案**（`accept` 门禁尚未落）：批准 plan → 派开发 → 交付提案。
+/// Drive to **developing + a pending development proposal** (no `accept` gate yet):
+/// approve plan → deliver.
 ///
-/// 注意：门禁待批期间不再收提案（`submit_slot_ok` 的 gate 守卫），所以「开发提案被拒」
-/// 只能发生在验收之前——不接受 `drive_to_accept` 之后再补提案的写法。
+/// Note: while a gate is pending no new proposal is accepted (`submit_slot_ok`'s gate
+/// guard), so "development proposal rejected" can only happen before acceptance — do not
+/// append a proposal after `drive_to_accept`.
 fn drive_to_dev_pending(ext: &str) -> Game {
     let mut game = drive_to_plan_gate();
-    game.click("gate.approve —— ");
-    game.narrate("requirement.dispatch", "0");
+    game.click("gate.approve — ");
     game.assert_kv("req.1.status", json!("developing"));
     game.assert_kv("req.1.gate", json!(""));
-    submit(&mut game, 1, "development", ext);
+    submit_with_exec(&mut game, 1, "development", ext, "agent-1");
     game
 }
 
-// ───────────────────────── ⑦ 全 1 走查（两侧 Mod）─────────────────────────
+/// Complete the single requirement, close the coordinate stage, and record all-green
+/// evidence — the `review` stage is then ready for the settlement tasks.
+fn drive_to_review() -> Game {
+    let mut game = drive_to_accept(drive_to_plan_gate());
+    game.click("gate.approve — ");
+    game.assert_kv("req.1.status", json!("done"));
+    let closed = game.click("coordinate.submit — ");
+    assert!(
+        closed["narrative"]
+            .to_string()
+            .contains("[COORDINATION DONE]"),
+        "coordinate.submit must close the coordinate stage: {closed}"
+    );
+    let verified = game.click("verify.submit all_green=true — ");
+    let verified_lines = verified["narrative"].to_string();
+    assert!(
+        verified_lines.contains("[GATES GREEN]"),
+        "verify.submit all_green=true must record evidence: {verified}"
+    );
+    game.assert_kv("verify.passed", json!(true));
+    game
+}
 
-/// ⑦ 两侧 Mod 的全 1 走查都必须到【结局，且 `warnings` / `errors` 为空。
+// ───────────────────────── ⑦ all-1 walk (both mods) ─────────────────────────
+
+/// ⑦ The all-1 walk of both mods must reach `[ENDING` with empty `warnings` / `errors`.
 ///
-/// 这是**补充**而不是替代：全 1 只覆盖 happy path，语义分叉由 ①–⑥ 覆盖。
+/// This is a **supplement**, never a replacement: all-1 only covers the happy path, while
+/// the semantic branches are covered by the numbered cases below.
 #[test]
 fn playtest_reaches_ending_on_both_mods() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
         let report = playtest(&dir, &PlaytestOptions::default());
         assert!(
             report.ok,
-            "{} 全 1 走查失败：reached={:?} errors={:?}",
+            "{} all-1 walk failed: reached={:?} errors={:?}",
             dir.display(),
             report.reached,
             report.errors
@@ -260,28 +343,60 @@ fn playtest_reaches_ending_on_both_mods() {
         assert_eq!(
             report.reached,
             Some(Reached::Ending),
-            "{} 应走到【结局",
+            "{} must reach [ENDING",
             dir.display()
         );
         assert!(
             report.warnings.is_empty(),
-            "{} 不应有警告：{:?}",
+            "{} must not warn: {:?}",
             dir.display(),
             report.warnings
         );
         assert!(
             report.errors.is_empty(),
-            "{} 不应有错误：{:?}",
+            "{} must not error: {:?}",
             dir.display(),
             report.errors
+        );
+        // The settlement merge only pays off if the whole review stage collapses: start,
+        // intake, coordinate.submit, verify, evolution (with sessions= + todo=), review.note.
+        assert!(
+            report.steps <= 8,
+            "{} needed {} steps — the review stage must settle in one evolution turn",
+            dir.display(),
+            report.steps
         );
     }
 }
 
-// ───────────────────────── ① accept 门禁正常打回 ─────────────────────────
+// ───────────────────────── stage merge ─────────────────────────
 
-/// ① `accept` 门禁**未 amend** 打回：`plan_ok` 沿用 true → 存储态回 planning，
-/// 展示名仍是 `ready`，下一次派活派的是 **development**（不是 plan）。
+/// `draft` dispatches **plan** (analysis + plan merged) while the legacy `analysis` slot
+/// stays compatible: an analysis proposal is still accepted on a `planning` row.
+#[test]
+fn draft_dispatch_lands_in_planning_and_keeps_the_analysis_slot_compatible() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+    assert_eq!(game.phase("r1"), "planning");
+
+    // Legacy shape: an analysis proposal on a planning row must still be accepted
+    // (the compat slot), and it must not open a gate.
+    submit(&mut game, 1, "analysis", "semantics-legacy-analysis");
+    assert_eq!(game.phase("r1"), "analysis_review");
+    game.click("proposal.accept — ");
+    game.assert_kv("req.1.status", json!("planning"));
+    game.assert_kv("req.1.gate", json!(""));
+
+    // After the compat round the row is still dispatchable for the real plan stage.
+    game.narrate("requirement.dispatch", "0");
+    game.assert_kv("req.1.job", json!("plan"));
+}
+
+// ───────────────────────── ① accept gate reject (not amended) ─────────────────────────
+
+/// ① `accept` gate rejected **without** an amend: `plan_ok` keeps its value → the stored
+/// state goes back to planning, the display name is still `ready`, and the next dispatch
+/// hands out **development** (not plan).
 #[test]
 fn accept_gate_reject_keeps_plan_ok_and_redispatches_development() {
     let mut game = drive_to_accept(drive_to_plan_gate());
@@ -289,14 +404,15 @@ fn accept_gate_reject_keeps_plan_ok_and_redispatches_development() {
     game.assert_kv("req.1.status", json!("developing"));
     game.assert_kv("req.1.gate_rev", json!(1));
 
-    // guide 门禁：通过类动作没有菜单票据时一律拒绝，且主状态不动（§8/§9）。
+    // guide gate: a pass-type action without a menu ticket is always refused and the
+    // primary state does not move (§8/§9).
     let direct = game.narrate("gate.approve", &text("r1"));
     assert_refused(&direct, "gate.approve");
     game.assert_kv("req.1.status", json!("developing"));
     game.assert_kv("req.1.gate", json!("accept"));
 
-    // 正常打回（打回类不在闸内，直派/点菜单等价；这里仍走菜单，保持单一入口）。
-    game.click("gate.reject —— ");
+    // Normal reject (rejects are outside the gate, but the menu keeps a single entry).
+    game.click("gate.reject — ");
     game.assert_kv("req.1.status", json!("planning"));
     game.assert_kv("req.1.gate", json!(""));
     game.assert_kv("req.1.plan_ok", json!(true));
@@ -307,36 +423,52 @@ fn accept_gate_reject_keeps_plan_ok_and_redispatches_development() {
     game.assert_kv("req.1.job", json!("development"));
 }
 
-// ───────────────────────── ② accept 门禁上 amend → stale ─────────────────────────
+/// Approving the `accept` gate closes the requirement **and releases the lane** in the same
+/// turn (the lane was already freed by `proposal.accept`; this asserts the observable end).
+#[test]
+fn accept_gate_approval_closes_the_requirement_and_releases_the_lane() {
+    let mut game = drive_to_accept(drive_to_plan_gate());
+    game.click("gate.approve — ");
+    game.assert_kv("req.1.status", json!("done"));
+    game.assert_kv("req.1.job", json!(""));
+    game.assert_kv("req.1.lane", json!(0));
+    // No successor is derived from `accept -> done`: the freed job slot is the main agent's
+    // decision, so no new job may appear on its own.
+    game.assert_kv("req.1.job", json!(""));
+    game.assert_kv("req.1.status", json!("done"));
+}
 
-/// ② `accept` 门禁待批期间 amend：`rev+1` 且 `plan_ok` 作废 → 旧批准判 stale
-/// （拒绝且状态不变）→ 打回停在 planning（不重派 plan 之外的事）→ 派活回 plan。
+// ───────────────────────── ② accept gate + amend → stale ─────────────────────────
+
+/// ② Amend while the `accept` gate is pending: `rev+1` and `plan_ok` is invalidated → the old
+/// approval is stale (refused, state unchanged) → the reject path stops in planning.
 #[test]
 fn accept_gate_amend_invalidates_plan_and_stales_the_pending_gate() {
     let mut game = drive_to_accept(drive_to_plan_gate());
     assert_eq!(game.phase("r1"), "accept");
 
-    game.narrate("requirement.amend", &text("r1|改过的标题"));
+    game.narrate("requirement.amend", &text("r1|amended title"));
     game.assert_kv("req.1.rev", json!(2));
     game.assert_kv("req.1.plan_ok", json!(false));
-    // 门禁本身没被摘（打回/批准才摘），但绑定的是旧 rev。
+    // The gate itself is not taken down (only reject/approve do that) but it is bound to
+    // the old rev.
     game.assert_kv("req.1.gate", json!("accept"));
     game.assert_kv("req.1.gate_rev", json!(1));
 
-    // 旧批准不得生效：stale 拒绝，状态与门禁原样。
-    let stale = game.click("gate.approve —— ");
+    // The old approval must not take effect: stale rejection, state and gate untouched.
+    let stale = game.click("gate.approve — ");
     let stale_lines: Vec<String> = stale["narrative"]
         .as_array()
         .expect("narrative")
         .iter()
-        .map(|line| line.as_str().expect("叙事行").to_owned())
+        .map(|line| line.as_str().expect("narrative line").to_owned())
         .collect();
     assert_refused(&stale_lines, "stale");
     game.assert_kv("req.1.status", json!("developing"));
     game.assert_kv("req.1.gate", json!("accept"));
     game.assert_kv("req.1.gate_rev", json!(1));
 
-    game.click("gate.reject —— ");
+    game.click("gate.reject — ");
     game.assert_kv("req.1.status", json!("planning"));
     game.assert_kv("req.1.gate", json!(""));
     game.assert_kv("req.1.plan_ok", json!(false));
@@ -346,15 +478,16 @@ fn accept_gate_amend_invalidates_plan_and_stales_the_pending_gate() {
     game.assert_kv("req.1.job", json!("plan"));
 }
 
-// ───────────────────────── ③ plan 门禁打回 ─────────────────────────
+// ───────────────────────── ③ plan gate reject ─────────────────────────
 
-/// ③ `plan` 门禁打回：`plan_ok` 置假 → planning → 下一次派活仍是 **plan**。
+/// ③ `plan` gate rejected: `plan_ok` is set false → planning → the next dispatch is still
+/// **plan**.
 #[test]
 fn plan_gate_reject_requires_a_new_plan() {
     let mut game = drive_to_plan_gate();
     assert_eq!(game.phase("r1"), "plan_gate");
 
-    game.click("gate.reject —— ");
+    game.click("gate.reject — ");
     game.assert_kv("req.1.status", json!("planning"));
     game.assert_kv("req.1.gate", json!(""));
     game.assert_kv("req.1.plan_ok", json!(false));
@@ -365,16 +498,62 @@ fn plan_gate_reject_requires_a_new_plan() {
     game.assert_kv("req.1.job", json!("plan"));
 }
 
-// ───────────────────────── ④ dev 提案打回 ─────────────────────────
+// ───────────────────────── reactive auto-dispatch (hooks) ─────────────────────────
 
-/// ④ 开发阶段 `proposal.reject`（**未到 accept 门禁**）：
-/// - 未 amend：`plan_ok` 原值保留 → 回 planning 但展示 `ready`，再派活是 development；
-/// - amend 过：`plan_ok` 已被 rev 作废 → 停在 planning，再派活是 plan。
+/// Approving the `plan` gate makes the row `ready`; the declared `useEffect` auto-dispatches
+/// **development for that requirement only** before the receipt is rendered (one turn saved),
+/// and the memoized requirement panel reflects the new state (no stale `useMemo`).
+#[test]
+fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
+    let mut game = drive_to_plan_gate();
+    assert_eq!(game.phase("r1"), "plan_gate");
+    let before = game.panel();
+    assert!(
+        before.contains("ready 0"),
+        "before approval nothing is ready: {before}"
+    );
+
+    let reply = game.click("gate.approve — ");
+    let narrative: Vec<String> = reply["narrative"]
+        .as_array()
+        .expect("narrative")
+        .iter()
+        .map(|line| line.as_str().expect("narrative line").to_owned())
+        .collect();
+    assert!(
+        narrative
+            .iter()
+            .any(|line| line.starts_with("[AUTO-DISPATCH]")),
+        "the auto-dispatch effect must narrate its own line: {narrative:#?}"
+    );
+
+    // Same turn: the development job and its lane already exist.
+    game.assert_kv("req.1.status", json!("developing"));
+    game.assert_kv("req.1.job", json!("development"));
+    game.assert_kv("req.1.lane", json!(1));
+    assert_eq!(game.phase("r1"), "developing");
+
+    // Memoized derived tally must be invalidated by the state change.
+    let after = game.panel();
+    assert_ne!(before, after, "the panel must not stay memoized stale");
+    assert!(
+        after.contains("developing 1"),
+        "the panel must show the auto-dispatched requirement: {after}"
+    );
+}
+
+// ───────────────────────── ④ development proposal reject ─────────────────────────
+
+/// ④ Development `proposal.reject` (**before** the accept gate):
+/// - not amended: `plan_ok` keeps its value → planning but displayed `ready`, next dispatch
+///   is development;
+/// - amended: `plan_ok` was invalidated by the rev bump → stops in planning, next dispatch
+///   is plan.
 #[test]
 fn dev_proposal_reject_keeps_plan_ok_unless_amended() {
-    // 未 amend 的路径。
-    let mut normal = drive_to_dev_pending("semantics-p4");
-    normal.narrate("proposal.reject", &text("r1|产物不全"));
+    // Path without an amend.
+    let mut normal = drive_to_dev_pending("semantics-p3");
+    normal.narrate("proposal.reject", &text("r1|incomplete artifacts"));
     normal.assert_kv("req.1.status", json!("planning"));
     normal.assert_kv("req.1.plan_ok", json!(true));
     assert_eq!(normal.phase("r1"), "ready");
@@ -382,12 +561,12 @@ fn dev_proposal_reject_keeps_plan_ok_unless_amended() {
     normal.assert_kv("req.1.status", json!("developing"));
     normal.assert_kv("req.1.job", json!("development"));
 
-    // amend 过的路径：提案先挂着，amend 把 rev 作废（plan_ok=false），再打回。
-    let mut amended = drive_to_dev_pending("semantics-p5");
-    amended.narrate("requirement.amend", &text("r1|补一条验收要求"));
+    // Amended path: the proposal is pending, the amend invalidates the rev, then reject.
+    let mut amended = drive_to_dev_pending("semantics-p4");
+    amended.narrate("requirement.amend", &text("r1|add an acceptance criterion"));
     amended.assert_kv("req.1.rev", json!(2));
     amended.assert_kv("req.1.plan_ok", json!(false));
-    amended.narrate("proposal.reject", &text("r1|按新 rev 重做"));
+    amended.narrate("proposal.reject", &text("r1|redo on the new rev"));
     amended.assert_kv("req.1.status", json!("planning"));
     amended.assert_kv("req.1.plan_ok", json!(false));
     assert_eq!(amended.phase("r1"), "planning");
@@ -395,42 +574,159 @@ fn dev_proposal_reject_keeps_plan_ok_unless_amended() {
     amended.assert_kv("req.1.job", json!("plan"));
 }
 
-// ───────────────────────── ⑤ legacy 缺键存档 ─────────────────────────
+// ───────────────────────── inline executor ledger (`exec=`) ─────────────────────────
 
-/// ⑤ legacy 兼容：本模型之前的在途行**没有** `req.N.plan_ok` 这个键。
+/// `proposal.submit` binds the executor in the same transaction, refuses an `exec=` that is
+/// not the last segment, and requires a reason for a cross-stage handoff (given here with the
+/// `:` form so it survives the outer `|` split).
+#[test]
+fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    // Misplaced exec= (not the last segment) → payload rejection, no proposal is created.
+    let misplaced = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|summary|artifacts/plan.md|exec=agent-1||semantics-bad"),
+    );
+    assert_refused(&misplaced, "exec=");
+    game.assert_kv("prop.1.req", Json::Null);
+    game.assert_kv("settings.executor.r1.plan", Json::Null);
+    // The job slot is untouched: nothing was consumed.
+    game.assert_kv("req.1.job", json!("plan"));
+
+    // Inline binding works and the proposal lands in the same transaction.
+    submit_with_exec(&mut game, 1, "plan", "semantics-p1", "agent-1");
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    game.assert_kv("prop.1.stage", json!("plan"));
+
+    // Cross-stage handoff without a reason → precondition rejection, no proposal.
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    let no_reason = game.narrate(
+        "proposal.submit",
+        &text("r1|1|development|summary|artifacts/development.md||semantics-p2|exec=agent-2"),
+    );
+    assert_refused(&no_reason, "reason");
+    game.assert_kv("settings.executor.r1.development", Json::Null);
+    // The auto-dispatched job slot is still held (the refused submit released nothing).
+    game.assert_kv("req.1.job", json!("development"));
+
+    // Same handoff with the `:` separator (the outer payload splits on `|`).
+    submit_with_exec(
+        &mut game,
+        1,
+        "development",
+        "semantics-p3",
+        "agent-2:cross-stage handoff",
+    );
+    game.assert_kv(
+        "settings.executor.r1.development",
+        json!("agent-2|cross-stage handoff"),
+    );
+}
+
+// ───────────────────────── settlement merge ─────────────────────────
+
+/// One `settlement.evolution` turn settles the evolution record **and** the two end-of-run
+/// cleanups (`sessions=` / `todo=`), so `review.note` can close the run right after it. The
+/// standalone actions stay usable for step-by-step settlement.
+#[test]
+fn settlement_evolution_settles_sessions_and_todo_in_one_turn() {
+    let mut game = drive_to_review();
+
+    // Standalone actions remain compatible (shape-checked, remaining must be 0).
+    game.narrate("settlement.todo", &text("0|standalone re-check"));
+    game.assert_kv("settlement.todo.remaining", json!(0));
+    game.assert_kv("settlement.todo.verified_by", json!("standalone re-check"));
+
+    // One evolution turn carries the cleanups: `sessions=` is the missing piece now.
+    let payload = text(
+        "|candidates screened against the evolution chapter|c=0/0|\
+sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
+    );
+    game.narrate("settlement.evolution", &payload);
+    game.assert_kv(
+        "settlement.sessions.destination",
+        json!("~/.pi/agent/sessions-trash/semantics"),
+    );
+    game.assert_kv("settlement.sessions.moved", json!(1));
+    game.assert_kv("settlement.sessions.remaining", json!(0));
+    game.assert_kv("settlement.todo.remaining", json!(0));
+    game.assert_kv(
+        "settlement.todo.verified_by",
+        json!("re-checked the todo list"),
+    );
+    assert_eq!(
+        game.kv("settlement.evolution.summary"),
+        json!("candidates screened against the evolution chapter")
+    );
+
+    // A malformed optional segment is refused (shape gate), state unchanged.
+    let bad = game.narrate(
+        "settlement.evolution",
+        &text("|summary|c=0/0|sessions=1/3/nowhere"),
+    );
+    assert_refused(&bad, "sessions=");
+    game.assert_kv("settlement.sessions.moved", json!(1));
+
+    // `review.note` now closes the run (all three settlement tasks are registered).
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[ENDING"),
+        "review.note must close the run: {closed}"
+    );
+    game.assert_kv("ending", json!("done"));
+    game.assert_kv("review.evolution.candidates", json!("0/0"));
+    game.assert_kv(
+        "review.evolution.summary",
+        json!("candidates screened against the evolution chapter"),
+    );
+}
+
+// ───────────────────────── ⑤ legacy save without the key ─────────────────────────
+
+/// ⑤ Legacy compatibility: in-flight rows from before this model have **no**
+/// `req.N.plan_ok` key.
 ///
-/// 用内存 save fixture 造出这种存档（`save` 回执里删键），再走 `restore` 读档：
-/// - 缺键时展示与判定都不得把在途的 developing 行当成「计划未批准」；
-/// - `gate.reject` 打回时按**当前状态**（developing）推断为已过 plan 门禁 → 展示 `ready`，
-///   并把推断结果**显式写回**（此后不再依赖推断）。
+/// Build such a save in memory (drop the key inside the `save` receipt) and `restore` it:
+/// - a missing key must not make an in-flight developing row look like "plan not approved";
+/// - `gate.reject` then infers "the plan gate already passed" from the **current state**
+///   (developing) → displays `ready` and writes the inferred value back explicitly.
 ///
-/// 只证「当前 reducer 兼容缺键」：不伪造历史引擎、不读写任何 autosave / events 文件。
+/// This only proves "the current reducer reads a save with a missing key": no historical
+/// engine is forged and no autosave / events file is touched.
 #[test]
 fn legacy_save_without_plan_flag_infers_then_writes_it_back() {
     let mut game = drive_to_accept(drive_to_plan_gate());
     let mut save = game.save();
     let entries = save["kv"]["entries"]
         .as_object_mut()
-        .expect("kv.entries 必须是对象");
+        .expect("kv.entries must be an object");
     assert_eq!(
         entries.remove("req.1.plan_ok"),
         Some(json!(true)),
-        "样例起点应当带显式 plan_ok=true"
+        "the sample start must carry an explicit plan_ok=true"
     );
     assert!(!entries.contains_key("req.1.plan_ok"));
 
-    let bytes = serde_json::to_vec(&save).expect("存档序列化");
+    let bytes = serde_json::to_vec(&save).expect("serialize the save");
     let mut legacy = Game {
         bundle: game.bundle.clone(),
-        kernel: game.bundle.restore(&bytes).expect("缺键存档必须可装载"),
+        kernel: game
+            .bundle
+            .restore(&bytes)
+            .expect("a save with a missing key must load"),
     };
-    // 读档后键仍缺席（reducer 不凭空补写），但展示不受影响。
+    // After loading the key is still absent (the reducer does not invent it), but the
+    // display surface is unaffected.
     legacy.assert_kv("req.1.plan_ok", Json::Null);
     assert_eq!(legacy.phase("r1"), "accept");
 
-    legacy.click("gate.reject —— ");
+    legacy.click("gate.reject — ");
     legacy.assert_kv("req.1.status", json!("planning"));
-    legacy.assert_kv("req.1.plan_ok", json!(true)); // 推断结果已显式落库
+    legacy.assert_kv("req.1.plan_ok", json!(true)); // the inferred value is now stored
     assert_eq!(legacy.phase("r1"), "ready");
 
     legacy.narrate("requirement.dispatch", "0");
@@ -438,106 +734,114 @@ fn legacy_save_without_plan_flag_infers_then_writes_it_back() {
     legacy.assert_kv("req.1.job", json!("development"));
 }
 
-// ───────────────────────── ⑥ 双层节点图两套契约 ─────────────────────────
+// ───────────────────────── ⑥ two-layer map contracts ─────────────────────────
 
-/// 取 `map.show` 回执里的**图窗口**：从图头行到图脚行（不含同一条回执里的其他渲染行）。
+/// Take the **map window** from the `map.show` receipt: from the map head line to the map
+/// foot line (ignoring the other rendered lines in the same receipt).
 #[track_caller]
 fn map_window(lines: &[String], head: &str, foot: &str) -> Vec<String> {
     let start = lines
         .iter()
         .position(|line| line.starts_with(head))
-        .unwrap_or_else(|| panic!("缺图头 `{head}`：{lines:#?}"));
+        .unwrap_or_else(|| panic!("missing map head `{head}`: {lines:#?}"));
     let end = lines
         .iter()
         .position(|line| line.starts_with(foot))
-        .unwrap_or_else(|| panic!("缺图脚 `{foot}`：{lines:#?}"));
-    assert!(start < end, "图头必须早于图脚：{lines:#?}");
+        .unwrap_or_else(|| panic!("missing map foot `{foot}`: {lines:#?}"));
+    assert!(
+        start < end,
+        "the map head must precede the foot: {lines:#?}"
+    );
     lines[start..=end].to_vec()
 }
 
-/// 把一行图拆成「左列（前件/当前节点）｜动作区」与「右列（目标/结果）」。
+/// Split a map row into "left column (precondition/current node) | action area" and
+/// "right column (target/result)".
 #[track_caller]
 fn split_row(row: &str) -> (&str, &str) {
     row.split_once("──▶ ")
-        .unwrap_or_else(|| panic!("图行缺 `──▶` 分隔：{row}"))
+        .unwrap_or_else(|| panic!("map row lacks the `──▶` separator: {row}"))
 }
 
-/// 左列里的方括号标签（`[planning]` / `[draft/analyzing/planning]`）。
+/// A bracketed label in the left column (`[planning]` / `[draft/ready conflict pair]`).
 #[track_caller]
 fn row_label(left: &str) -> &str {
     let open = left
         .find('[')
-        .unwrap_or_else(|| panic!("图行左列缺标签：{left}"));
+        .unwrap_or_else(|| panic!("map row left column lacks a label: {left}"));
     let close = left[open..]
         .find(']')
-        .unwrap_or_else(|| panic!("图行左列标签未闭合：{left}"))
+        .unwrap_or_else(|| panic!("map row left column label is not closed: {left}"))
         + open;
     &left[open..=close]
 }
 
-/// 操作视图（`map.show`，默认）：只承诺「可选择」，条件缺失时明说「条件未展示」。
+/// Operation view (`map.show`, default): it only promises "selectable" and says
+/// "condition not shown" when the condition is unknown.
 ///
-/// 反例是上一轮的两处措辞退化：把「可以选择」写成「可执行」（渲染层看不见 choice 侧
-/// 的真实前置）、把「条件未展示」写成「无额外条件」（替候选构造担保）。
+/// The counter-examples are the two wording regressions from an earlier round: writing
+/// "executable" for "selectable" (the render layer cannot see the choice-side precondition)
+/// and "no extra condition" for "condition not shown" (that would vouch for the candidate).
 #[track_caller]
 fn assert_map_local(lines: &[String]) {
-    let window = map_window(lines, "【当前节点】", "（完整设计图");
+    let window = map_window(lines, "[CURRENT NODE]", "(full design map");
     let joined = window.join("\n");
     assert!(
-        joined.contains("可选择"),
-        "操作视图每条出边都必须标「可选择」：\n{joined}"
+        joined.contains("selectable"),
+        "every operation-view edge must say `selectable`:\n{joined}"
     );
     assert!(
-        joined.contains("条件未展示"),
-        "缺 `when` 时必须说「条件未展示」：\n{joined}"
+        joined.contains("condition not shown"),
+        "a missing `when` must read `condition not shown`:\n{joined}"
     );
     assert!(
-        !joined.contains("可执行"),
-        "操作视图不得承诺「可执行」（渲染层没有 choice 侧前置）：\n{joined}"
+        !joined.contains("executable"),
+        "the operation view must not promise `executable` (no choice-side precondition):\n{joined}"
     );
     assert!(
-        !joined.contains("无额外条件"),
-        "操作视图不得替候选构造担保「无额外条件」：\n{joined}"
+        !joined.contains("no extra condition"),
+        "the operation view must not vouch for `no extra condition`:\n{joined}"
     );
 }
 
-/// 设计视图（`map.show full`）：
-/// - 需求级流水线的 `planning` / `developing` 两跳都必须显式带 `proposal.accept`
-///   （旧版缺这一跳，读起来像「提案直接进门禁」）；
-/// - 旁路左列是**可变前件**、右列才是**结果终态**（旧版左右是反的）。
+/// Design view (`map.show full`):
+/// - both requirement-level hops (`planning` / `developing`) must show `proposal.accept`
+///   between the proposal and the gate;
+/// - the bypass left column is a **mutable precondition**, the right column is the
+///   **resulting terminal state**.
 #[track_caller]
 fn assert_map_full(lines: &[String]) {
-    let window = map_window(lines, "【双层节点图】", "常驻动作");
+    let window = map_window(lines, "[MAP]", "always-on actions");
 
-    // 两跳：中间那跳 proposal.accept 不得丢。
+    // Two hops: the middle `proposal.accept` hop must not be lost.
     let hop = "proposal → proposal.accept → gate.approve";
     let hop_rows: Vec<&String> = window.iter().filter(|row| row.contains(hop)).collect();
     assert_eq!(
         hop_rows.len(),
         2,
-        "流水线必须有 planning / developing 两跳带 proposal.accept：{window:#?}"
+        "the pipeline must show proposal.accept on both the planning and the developing hop: {window:#?}"
     );
     let planning = hop_rows
         .iter()
         .find(|row| row_label(split_row(row).0) == "[planning]")
-        .unwrap_or_else(|| panic!("缺 `[planning]` 那一跳：{window:#?}"));
+        .unwrap_or_else(|| panic!("missing the `[planning]` hop: {window:#?}"));
     assert!(
         split_row(planning)
             .1
             .trim_start()
             .starts_with("[planning·plan_ok]"),
-        "`[planning]` 的下一跳必须是 `[planning·plan_ok]`（批了才能 develop）：{planning}"
+        "`[planning]` must lead to `[planning·plan_ok]` (approved first, then develop): {planning}"
     );
     let developing = hop_rows
         .iter()
         .find(|row| row_label(split_row(row).0) == "[developing]")
-        .unwrap_or_else(|| panic!("缺 `[developing]` 那一跳：{window:#?}"));
+        .unwrap_or_else(|| panic!("missing the `[developing]` hop: {window:#?}"));
     assert!(
         split_row(developing).1.trim_start().starts_with("[done]"),
-        "`[developing]` 的下一跳必须是 `[done]`：{developing}"
+        "`[developing]` must lead to `[done]`: {developing}"
     );
 
-    // 旁路方向：前件 → 结果终态（不是「终态还能再拆一次」）。
+    // Bypass direction: precondition → resulting terminal state.
     const BYPASS_ACTIONS: [&str; 3] = [
         "requirement.split",
         "requirement.merge",
@@ -554,44 +858,44 @@ fn assert_map_full(lines: &[String]) {
     assert_eq!(
         bypass_rows.len(),
         BYPASS_ACTIONS.len(),
-        "旁路必须恰好三条：{window:#?}"
+        "there must be exactly three bypass rows: {window:#?}"
     );
     for row in bypass_rows {
         let (left, right) = split_row(row);
         let label = row_label(left);
         assert!(
             PRECONDITIONS.iter().any(|state| label.contains(state)),
-            "旁路左列必须点名前件（不是状态终态）：{row}"
+            "the bypass left column must name a precondition (not a terminal state): {row}"
         );
         for terminal in TERMINALS {
             assert!(
                 !label.contains(terminal),
-                "旁路左列不得是终态 `{terminal}`（方向反了）：{row}"
+                "the bypass left column must not be the terminal `{terminal}` (direction reversed): {row}"
             );
         }
         let target = right.trim_start();
         assert!(
             TERMINAL_TARGETS.iter().any(|end| target.starts_with(end)),
-            "旁路右列必须是结果终态：{row}"
+            "the bypass right column must be the resulting terminal state: {row}"
         );
     }
 }
 
-/// ⑥ 两套图层契约（两侧 Mod 各跑一遍：`map.show` 的文案属 scenes 资源，会独立漂移）。
+/// ⑥ Both map contracts (both mods: the `map.show` wording lives in the scenes resource and
+/// can drift on either side).
 #[test]
 fn map_views_keep_operation_and_design_contracts() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
         let mut game = Game::open(&dir);
         assert_map_local(&game.narrate("map.show", "0"));
 
-        // planning 处境的设计视图。
+        // Design view in the planning situation.
         let mut game = drive_to_plan_gate_in(&dir);
         assert_eq!(game.phase("r1"), "plan_gate");
         assert_map_full(&game.narrate("map.show", &text("full")));
 
-        // developing 处境的设计视图（同一局继续走，两跳都在同一张图上）。
-        game.click("gate.approve —— ");
-        game.narrate("requirement.dispatch", "0");
+        // Design view in the developing situation (both hops on the same map).
+        game.click("gate.approve — ");
         assert_eq!(game.phase("r1"), "developing");
         assert_map_full(&game.narrate("map.show", &text("full")));
     }

@@ -37,6 +37,23 @@ local probe_payload_ok =
 
 
 
+-- 局末两项清理的落库（独立动作与 settlement.evolution 可选段共用）：写 KV + 叙事，不 render。
+local function apply_sessions(moved, remaining, destination)
+  ygg.kv.set("settlement.sessions.moved", moved)
+  ygg.kv.set("settlement.sessions.remaining", remaining)
+  ygg.kv.set("settlement.sessions.destination", destination)
+  ygg.narrate(fill(TEXTS.beats.settlement_sessions_ok, {
+    moved = tostring(moved),
+    destination = destination,
+  }))
+end
+
+local function apply_todo(remaining, verified_by)
+  ygg.kv.set("settlement.todo.remaining", remaining)
+  ygg.kv.set("settlement.todo.verified_by", verified_by)
+  ygg.narrate(fill(TEXTS.beats.settlement_todo_ok, { verified_by = verified_by }))
+end
+
 function M.install(deps)
   TEXTS = deps.texts
   ygg.on("coordinate.submit", function(payload)
@@ -163,6 +180,17 @@ function M.install(deps)
       candidates = candidates,
       classes = classes_text ~= "" and classes_text or TEXTS.beats.evolution_classes_none,
     }))
+    -- 同一事务里把局末两项清理也登记完（可选段）：省两个回合，且不复活独立动作的旧文法。
+    if registration.sessions ~= nil then
+      apply_sessions(
+        registration.sessions.moved,
+        registration.sessions.remaining,
+        registration.sessions.destination
+      )
+    end
+    if registration.todo ~= nil then
+      apply_todo(registration.todo.remaining, registration.todo.verified_by)
+    end
     render()
   end)
   -- 局末两项清理：subagent 会话与主会话 Todo。Mod 读不到会话与 Todo API，真实清理由主会话做。
@@ -171,24 +199,11 @@ function M.install(deps)
     if current ~= STAGE.review then
       return reject("settlement.sessions", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
     end
-    if type(payload) ~= "string" then
-      return reject_payload("settlement.sessions", TEXTS.beats.settlement_sessions_usage)
+    local sessions, sessions_problem = wire.parse_sessions_payload(payload)
+    if sessions == nil then
+      return reject_payload("settlement.sessions", sessions_problem)
     end
-    local parts = split(trim(payload), "|")
-    local moved = tonumber(trim(parts[1] or ""))
-    local remaining = tonumber(trim(parts[2] or ""))
-    local destination = trim(parts[3] or "")
-    if #parts ~= 3 or moved == nil or remaining == nil
-      or moved < 0 or remaining ~= 0 or destination == "" then
-      return reject_payload("settlement.sessions", TEXTS.beats.settlement_sessions_usage)
-    end
-    ygg.kv.set("settlement.sessions.moved", math.floor(moved))
-    ygg.kv.set("settlement.sessions.remaining", 0)
-    ygg.kv.set("settlement.sessions.destination", destination)
-    ygg.narrate(fill(TEXTS.beats.settlement_sessions_ok, {
-      moved = tostring(math.floor(moved)),
-      destination = destination,
-    }))
+    apply_sessions(sessions.moved, sessions.remaining, sessions.destination)
     render()
   end)
   ygg.on("settlement.todo", function(payload)
@@ -198,19 +213,11 @@ function M.install(deps)
     end
     -- 载荷 "remaining|verified_by"：恰好两段；remaining 必须恰为 0；verified_by 非空。
     -- Lua 沙箱没有 Todo API：这里只记「主会话复核到 0 项」这条断言，不声称清理条数。
-    if type(payload) ~= "string" then
-      return reject_payload("settlement.todo", TEXTS.beats.settlement_todo_usage)
+    local todo, todo_problem = wire.parse_todo_payload(payload)
+    if todo == nil then
+      return reject_payload("settlement.todo", todo_problem)
     end
-    local parts = split(trim(payload), "|")
-    local remaining = tonumber(trim(parts[1] or ""))
-    local verified_by = trim(parts[2] or "")
-    if #parts ~= 2 or remaining == nil or remaining ~= 0
-      or verified_by == "" or #verified_by > 120 then
-      return reject_payload("settlement.todo", TEXTS.beats.settlement_todo_usage)
-    end
-    ygg.kv.set("settlement.todo.remaining", 0)
-    ygg.kv.set("settlement.todo.verified_by", verified_by)
-    ygg.narrate(fill(TEXTS.beats.settlement_todo_ok, { verified_by = verified_by }))
+    apply_todo(todo.remaining, todo.verified_by)
     render()
   end)
   ygg.on("review.note", function(payload)

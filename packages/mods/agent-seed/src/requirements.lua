@@ -226,6 +226,11 @@ local function req_phase_name(index)
     if req_gate(index) == "plan" then
       return PHASE.plan_gate
     end
+    -- 兼容槽位：planning 态下仍然可以收 legacy 的 analysis 提案（门禁与 plan_ok 都未落），
+    -- 它得先在面板上显示成「待验收分析」而不是「规划中」。
+    if req_has_pending(index, "analysis") then
+      return PHASE.analysis_review
+    end
     if req_plan_ok(index) then
       return PHASE.ready
     end
@@ -418,7 +423,9 @@ end
 local function req_job_stage(index)
   local status = req_status(index)
   if status == R_DRAFT then
-    return "analysis"
+    -- analysis + plan 已合并：draft 直接派 plan（存储态同时推进到 planning）。
+    -- `analyzing` 降级为兼容槽位（legacy 存档 / 显式 analysis 提案），不再由派活路径产生。
+    return "plan"
   end
   if status == R_PLANNING then
     if req_gate(index) ~= "" then

@@ -8,6 +8,7 @@ local M = {}
 local config = require("src.config")
 local gates = require("src.gates")
 local guide = require("src.guide")
+local hooks = require("src.hooks")
 local lanes = require("src.lanes")
 local menus = require("src.menus")
 local props = require("src.proposals")
@@ -30,22 +31,46 @@ local CONFIG_UI, MENU, menu, option_texts =
   menus.CONFIG_UI, menus.MENU, menus.menu, menus.option_texts
 local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status =
   props.P_PENDING, props.prop_count, props.prop_id, props.prop_key, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
-local PHASE, R_ANALYZING, R_DEVELOPING, R_DONE, R_DRAFT, R_DROPPED, R_MERGED, R_PLANNING, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_rev, req_stale, req_status, req_tally, req_title, stage =
-  reqs.PHASE, reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DONE, reqs.R_DRAFT, reqs.R_DROPPED, reqs.R_MERGED, reqs.R_PLANNING, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
+local PHASE, R_MERGED, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase_name, req_rev, req_stale, req_status, req_tally, req_title, stage =
+  reqs.PHASE, reqs.R_MERGED, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase_name, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
 local fill, join, spaces, trim =
   util.fill, util.join, util.spaces, util.trim
 
+-- 面板汇总走响应式记忆化（useMemo）：依赖签名 = 逐需求的派生展示名 + 待验收提案数 +
+-- 需求总数（均由 KV 状态派生，读档/重启后签名一变即重算，不靠内存推断）。
+local function panel_tally()
+  return hooks.useMemo("render.panel_tally", function()
+    return {
+      draft = req_tally(PHASE.draft),
+      analyzing = req_tally(PHASE.analyzing) + req_tally(PHASE.analysis_review),
+      planning = req_tally(PHASE.planning) + req_tally(PHASE.plan_review),
+      gate = gate_total(),
+      ready = req_tally(PHASE.ready),
+      developing = req_tally(PHASE.developing) + req_tally(PHASE.dev_review),
+      done = req_tally(PHASE.done),
+      total = req_count(),
+    }
+  end, function()
+    local deps_sig = { req_count(), gate_total(), prop_pending_total() }
+    for i = 1, req_count() do
+      deps_sig[#deps_sig + 1] = req_phase_name(i)
+    end
+    return deps_sig
+  end)
+end
+
 local function req_panel_text()
+  local tally = panel_tally()
   local parts = {}
   parts[#parts + 1] = fill(TEXTS.beats.req_panel_counts, {
-    draft = tostring(req_tally(PHASE.draft)),
-    analyzing = tostring(req_tally(PHASE.analyzing) + req_tally(PHASE.analysis_review)),
-    planning = tostring(req_tally(PHASE.planning) + req_tally(PHASE.plan_review)),
-    gate = tostring(gate_total()),
-    ready = tostring(req_tally(PHASE.ready)),
-    developing = tostring(req_tally(PHASE.developing) + req_tally(PHASE.dev_review)),
-    done = tostring(req_tally(PHASE.done)),
-    total = tostring(req_count()),
+    draft = tostring(tally.draft),
+    analyzing = tostring(tally.analyzing),
+    planning = tostring(tally.planning),
+    gate = tostring(tally.gate),
+    ready = tostring(tally.ready),
+    developing = tostring(tally.developing),
+    done = tostring(tally.done),
+    total = tostring(tally.total),
   })
   parts[#parts + 1] = fill(TEXTS.beats.req_panel_jobs, {
     jobs = tostring(job_total()),
@@ -53,7 +78,7 @@ local function req_panel_text()
     pending = tostring(prop_pending_total()),
     conflicts = tostring(req_conflict_total()),
   })
-  return join(parts, "｜")
+  return join(parts, " | ")
 end
 
 -- 字形表以 PHASE（派生展示名）为键：存储只有 5 态，展示仍有 14 个旧名。
@@ -188,14 +213,9 @@ local MAP_EDGES = {
 
 -- 需求级流水线（设计视图）= 5 个存储态；每行中列是「态内的三跳」（提案 → 验收 → 门禁）。
 -- 上一轮这里漏了中间那跳 proposal.accept，读起来像「提案直接进门禁」，方向是反的。
+-- analysis + plan 已合并：draft 派活直接进 planning（prop 仍走「提案 → 验收」两跳）。
 local PIPELINE = {
-  { node = "[draft]", action = "requirement.dispatch", target = "[analyzing]", note = "map_note_job" },
-  {
-    node = "[analyzing]",
-    action = "proposal → proposal.accept",
-    target = "[planning]",
-    note = "map_note_accept",
-  },
+  { node = "[draft]", action = "requirement.dispatch", target = "[planning]", note = "map_note_job" },
   {
     node = "[planning]",
     action = "proposal → proposal.accept → gate.approve",
@@ -234,7 +254,7 @@ local PIPELINE_BYPASS = {
     note = "map_note_merge",
   },
   {
-    node = "[draft/ready 冲突对]",
+    node = "[draft/ready conflict pair]",
     action = "requirement.resolve keep_first",
     target = "[dropped]",
     note = "map_note_dropped",
@@ -422,7 +442,7 @@ end
 local function evolution_receipt()
   local current = mode()
   local paths = CONFIG.evolution and CONFIG.evolution.allow_paths
-  local paths_text = type(paths) == "table" and join(paths, "、") or TEXTS.beats.paths_none
+  local paths_text = type(paths) == "table" and join(paths, ", ") or TEXTS.beats.paths_none
   if current == "auto" then
     return fill(TEXTS.beats.evolution_auto, { paths = paths_text, cap = tostring(max_per_run()) })
   elseif current == "suggest" then
@@ -494,7 +514,17 @@ RENDER[STAGE.done] = function()
   end
 end
 
+local flushing = false
+
 local function render()
+  -- 响应式收敛（唯一入口）：所有 useEffect（唯一后继自动推进）必须在产出 choice **之前**
+  -- 同步跑完——已产生 choice 的 handler 里再 emit 会被内核静默丢弃（transition.rs 排空规则）。
+  -- 重入守卫：effect 自身不 render，这层只防未来新增 effect 误调。
+  if not flushing then
+    flushing = true
+    hooks.flush_effects()
+    flushing = false
+  end
   local current = stage()
   -- 二级页不跨阶段存活：阶段一变就清空（子页是当前处境的入口，不是全局抽屉）。
   if CONFIG_UI.page() ~= "" and CONFIG_UI.page_stage() ~= current then

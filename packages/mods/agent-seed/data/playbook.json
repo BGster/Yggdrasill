@@ -1,435 +1,432 @@
 {
   "schemaVersion": 1,
-  "title": "Agent Harness 通用现场手册（种子）",
-  "summary": "冷启动种子模板的现场规则：凭据纪律、Subagent 派发、证据优先、输出口径、harness 机制。新项目复制本 Mod 后只改自己的项目章节与配置，这五章可原样沿用；游玩指南见使用方的根文档。",
+  "title": "Agent Harness generic field manual (seed)",
+  "summary": "Field rules of the cold-start seed template: credential discipline, subagent dispatch, evidence first, output conventions, harness mechanics. After copying this Mod a new project only edits its own project chapters and config; these five chapters can be reused as they are, and the play guide lives in the consumer's root document.",
   "source": {
     "document": "seed template",
     "revision": "2026-11-01",
-    "note": "本资源是**种子模板**而非某个仓库的规则投影：五章全部为通用元工作流纪律，不含任何具体仓库的目录结构、端口、远端地址、部署通道或门禁命令。使用方复制本 Mod 后，另在自己的 Mod 里编写项目章节（仓库形态 / 分支与泳道 / 集成与部署 / 门禁命令 / 指针 / 硬约束），两者通过 section id 取用、互不覆盖。evolution 章（2026-11-01 增补）是通用元工作流纪律：局末进化建议的候选筛选与复核方法。harness 章只描述 harness 机制本身（两层状态机 / 动作协议 / 异步入口 / 结算 / 改 Mod 三件套 / host 契约），是「怎么用这套 harness」而不是「本仓库怎么规定」。"
+    "note": "This resource is a **seed template**, not the rule projection of one repository: the five chapters are all generic meta-workflow discipline and contain no repository-specific directory structure, ports, remote URLs, deployment channels or gate commands. After copying this Mod the consumer writes its own project chapters in its own Mod (repository shape / branches and lanes / integration and deployment / gate commands / pointers / hard constraints); the two are fetched by section id and never overwrite each other. The evolution chapter (added 2026-11-01) is generic meta-workflow discipline: how to screen and review end-of-run evolution candidates. The harness chapter describes the harness mechanism itself (the two-layer state machine / action protocol / async entry / settlement / the Mod-change trio / the host contract) — it says how to use this harness, not how this repository legislates."
   },
   "sections": [
     {
       "id": "credentials",
       "order": 1,
-      "title": "一、凭据纪律",
-      "summary": "最高优先级、不可协商：凭据不进仓库、不进对话产物、不进任何入库面；只出现键名，示例数据一律自造合成。",
-      "source": "通用基线（种子模板）",
+      "title": "1. Credential discipline",
+      "summary": "Highest priority, non-negotiable: credentials never enter the repository, a conversation artifact or any committed surface; only key names appear, and every example is synthetic.",
+      "source": "generic baseline (seed template)",
       "priority": "critical",
       "rules": [
         {
           "id": "credentials.no-secret-in-repo",
           "modality": "must-not",
-          "text": "禁止把任何凭据、密钥、令牌写入仓库——包括代码、文档、commit message 与 Mod 示例数据。",
-          "basis": "种子模板基线"
+          "text": "Never write a credential, key or token into the repository — including code, documentation, commit messages and Mod example data.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "credentials.no-secret-in-artifacts",
           "modality": "must-not",
-          "text": "禁止把凭据写入任何对话产物：汇报、报告、issue/PR 描述、回贴的日志片段。",
-          "basis": "种子模板基线"
+          "text": "Never write a credential into any conversation artifact: reports, summaries, issue/PR descriptions, pasted log excerpts.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "credentials.no-secret-in-committed-resources",
           "modality": "must-not",
-          "text": "任何敏感信息不得写入入库资源——入库面明确包含：静态配置、`data/playbook.json` 规则资源、经验/成长（演进）Mod 及其产出、其他随仓库提交的 Mod 资源与文档。",
-          "basis": "种子模板基线"
+          "text": "No sensitive information may enter a committed resource — the committed surface explicitly includes: static configuration, the `data/playbook.json` rule resource, the experience/growth (evolution) Mod and its output, and every other Mod resource or document committed with the repository.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "credentials.settings-not-a-secret-vault",
           "modality": "must",
-          "text": "运行期动态 KV `settings.*` 不是存放敏感值的例外：静态默认与动态覆盖一律只存非敏感的行为开关、数值与说明文本。",
-          "basis": "种子模板基线（两层配置：动态覆盖 > 静态默认）"
+          "text": "The runtime KV family `settings.*` is no exception for sensitive values: the static defaults and the dynamic overrides only ever hold non-sensitive behavior switches, numbers and explanatory text.",
+          "basis": "seed-template baseline (two-layer config: dynamic override > static default)"
         },
         {
           "id": "credentials.env-file",
           "modality": "must",
-          "text": "本地凭据一律走 `.env` / `.env.local`（均 gitignore，权限 600）；`.env.example` 只放键名不放值。",
-          "basis": "种子模板基线"
+          "text": "Local credentials always go through `.env` / `.env.local` (both git-ignored, mode 600); `.env.example` carries key names only, never values.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "credentials.keys-only",
           "modality": "must",
-          "text": "汇报、文档、commit message、Mod 资源与叙事文本中只出现键名，不出现值——包括局末复盘与走查报告。",
-          "basis": "种子模板基线"
+          "text": "Reports, documentation, commit messages, Mod resources and narrative text show key names only, never values — including the closing review and any walk report.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "credentials.audit-by-key-name",
           "modality": "must",
-          "text": "核查环境变量面时只读「键名 + 长度」，绝不把原始输出整段摊开或喂给会持久化的工具。",
-          "basis": "种子模板基线（凭据泄露事故的处置纪律）"
+          "text": "When auditing the environment-variable surface, read key names plus lengths only; never spread the raw output open or feed it into a tool that persists it.",
+          "basis": "seed-template baseline (handling discipline after a credential leak)"
         },
         {
           "id": "credentials.synthetic-data",
           "modality": "must",
-          "text": "示例与测试数据一律自造合成数据，不引入任何真实个人数据或真实业务指标。",
-          "basis": "种子模板基线"
+          "text": "Examples and test data are always synthetic; never introduce real personal data or real business metrics.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "credentials.breach-disclosure",
           "modality": "must",
-          "text": "违规后如实列出暴露了什么（具体文件 + 内容位置 + 实际返回内容），不淡化、不辩解；随后停止相关操作，等待用户指示。",
-          "basis": "种子模板基线"
+          "text": "After a violation, list honestly what was exposed (the specific file, the content location and the actual returned content), without downplaying or arguing; then stop the affected operations and wait for the user.",
+          "basis": "seed-template baseline"
         }
-      ],
-      "notes": "受管凭据面的常见枚举（非穷尽）：LLM API key、模型与 thinking 参数、平台服务数据库连接串与对象存储 AK/SK、任何第三方服务的 token。入库面与配置面同构：静态默认配置文件、`settings.*` 动态覆盖、规则资源（playbook）与演进产物——四处都只承载非敏感内容。"
+      ]
     },
     {
       "id": "dispatch",
       "order": 2,
-      "title": "二、Subagent 派发纪律",
-      "summary": "后台派发不阻塞主会话；派发参数从本地 env 读、只用于派发；一个工作区同时只承载一个任务；执行方不做收口。",
-      "source": "通用基线（种子模板）",
+      "title": "2. Subagent dispatch discipline",
+      "summary": "Background dispatch never blocks the main session; dispatch parameters come from local env and are used for dispatch only; one workspace carries one task at a time; the executor never closes a run.",
+      "source": "generic baseline (seed template)",
       "priority": "standard",
       "rules": [
         {
           "id": "dispatch.executor-ledger",
           "modality": "must",
-          "text": "派发之后必须登记执行者（**自声明账本**，不是身份认证）：`config.set executor.<rN>.<stage>=<agent_id>`，stage ∈ analysis / plan / development；同一个 subagent 连续负责三段时逐阶段登记同一个 id。同一 (req,stage) 换成不同 id **必须**写原因（`=<new_id>|<原因>`）；**跨阶段换人**（plan 与 analysis 的 id 不同、或无 plan 时与 analysis 不同）同样必须写原因，不得以「首次绑定该 stage」静默覆盖断链。换人成功写 `id|原因` 并往 `req.<i>.hist` 追加一条（沿用滚动上限，不另建 history/handoff 键）；首次干净绑定不写 hist。账本不带 rev：`amend` 不改绑定，`split` / `merge` 不继承。`proposal.submit` 不做硬校验——未登记只在 `requirement.list` 显示「未登记」，不阻断外部提案与同 ext 重放。",
-          "basis": "用户决策 2026-11-01（E2 裁决：复用 config.set、不绑 rev、不做提交硬门禁、跨阶段换人必给原因）"
+          "text": "After dispatching you must register the executor (a **self-declared ledger**, not identity proof): `config.set executor.<rN>.<stage>=<agent_id>`, stage ∈ analysis / plan / development; when one subagent covers all three stages, register the same id stage by stage. Replacing the executor for the same (req, stage) with a different id **requires** a reason (`=<new_id>|<reason>`); a **cross-stage handoff** (a plan id different from the analysis one, or — with no plan — different from the analysis one) equally requires a reason and may never be silently overwritten as a \"first binding for that stage\". A successful handoff writes `id|reason` and appends one entry to `req.<i>.hist` (reusing the rolling cap; no separate history/handoff key); a clean first binding writes no history. The ledger carries no rev: `amend` does not change the binding and `split` / `merge` do not inherit it. `proposal.submit` performs no hard check — an unregistered executor only shows as \"unregistered\" in `requirement.list` and never blocks external proposals or same-ext replays.",
+          "basis": "user decision 2026-11-01 (E2 ruling: reuse config.set, bind no rev, no hard submit gate, a cross-stage handoff must give a reason)"
         },
         {
           "id": "dispatch.background-only",
           "modality": "must",
-          "text": "创建 subagent 执行任务一律后台运行，主会话不原地等待——派发期间继续推进其他泳道、核验或规划，收到完成通知后再核验合流。",
-          "basis": "种子模板基线"
+          "text": "Every subagent task runs in the background; the main session never waits in place — keep advancing other lanes, verifications or planning while it runs, and verify and merge once the completion notice arrives.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "dispatch.sync-wait-exception",
           "modality": "should",
-          "text": "仅当后续动作严格依赖其结果且无任何可并行推进的工作时，才允许同步等待，并优先把该时间用于其他泳道。",
-          "basis": "种子模板基线"
+          "text": "Synchronous waiting is allowed only when the next action strictly depends on the result and nothing else can progress in parallel; even then, spend the waiting time on other lanes first.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "dispatch.params-from-env-local",
           "modality": "must",
-          "text": "派发参数从本地 `.env` / `.env.local` 读（如 `YGG_SUBAGENT_MODEL` / `YGG_SUBAGENT_THINKING`），只用于派发选项；未设置时不显式传参，用 harness 默认。",
-          "basis": "种子模板基线"
+          "text": "Dispatch parameters come from local `.env` / `.env.local` (such as `YGG_SUBAGENT_MODEL` / `YGG_SUBAGENT_THINKING`) and are used for dispatch options only; when unset, pass nothing explicitly and use the harness default.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "dispatch.params-not-disclosed",
           "modality": "must-not",
-          "text": "这类参数值不打印、不写文档、不进 commit、不进任何汇报。",
-          "basis": "种子模板基线（凭据纪律的派发面）"
+          "text": "Such parameter values are never printed, written into documentation, committed, or put into any report.",
+          "basis": "seed-template baseline (the dispatch surface of credential discipline)"
         },
         {
           "id": "dispatch.worktree-clean-before-dispatch",
           "modality": "must",
-          "text": "派发前要求目标工作区干净（挂牌文件等本地标记除外）；脏树先收敛再派，否则执行方无法判断哪些改动属于自己。",
-          "basis": "种子模板基线"
+          "text": "Require the target workspace to be clean before dispatching (local markers such as the plaque file excepted); settle a dirty tree first, otherwise the executor cannot tell which changes are its own.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "dispatch.lane-serial",
           "modality": "must",
-          "text": "同一工作区同一时刻只承载一个任务（泳道串行）；不同工作区可并行。派发前必检该工作区是否已被占用。",
-          "basis": "种子模板基线"
+          "text": "One workspace carries exactly one task at any moment (lane serialization); different workspaces may run in parallel. Always check whether the workspace is already occupied before dispatching.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "dispatch.executor-scope",
           "modality": "must-not",
-          "text": "执行方（subagent）只做自己那一段实现 + 自检交付；集成、合并、部署一律由主 Agent 串行执行，不派给执行方。",
-          "basis": "种子模板基线（收口单点）"
+          "text": "The executor (subagent) only implements its own stage and delivers after self-check; integration, merging and deployment are always executed serially by the main agent and never delegated to an executor.",
+          "basis": "seed-template baseline (single closeout point)"
         }
       ]
     },
     {
       "id": "evidence",
       "order": 3,
-      "title": "三、证据优先",
-      "summary": "结论只能来自命令输出与退出码、产物文件、或读到的源码原文；不确定就说不确定。",
-      "source": "通用基线（种子模板）",
+      "title": "3. Evidence first",
+      "summary": "A conclusion may come only from command output and its exit code, from an artifact file, or from the source text you actually read; when unsure, say you are unsure.",
+      "source": "generic baseline (seed template)",
       "priority": "standard",
       "rules": [
         {
           "id": "evidence.command-and-exit-code",
           "modality": "must",
-          "text": "用命令输出与退出码作证；贴结论时同一段里给出实际命令与它的退出码。",
-          "basis": "种子模板基线"
+          "text": "Prove a point with command output and its exit code; when pasting a conclusion, give the actual command and its exit code in the same block.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "evidence.artifacts",
           "modality": "must",
-          "text": "用产物文件的存在性与内容作证（存在性 + 关键内容，不只说「已生成」）。",
-          "basis": "种子模板基线"
+          "text": "Prove a point with an artifact's existence and content (existence plus the key content, not merely \"it was generated\").",
+          "basis": "seed-template baseline"
         },
         {
           "id": "evidence.source-lines",
           "modality": "must",
-          "text": "引用源码时给出 `文件:行号`，不给「我记得某处」。",
-          "basis": "种子模板基线"
+          "text": "When quoting source code, give `file:line`, never \"I remember it somewhere\".",
+          "basis": "seed-template baseline"
         },
         {
           "id": "evidence.no-impression",
           "modality": "must-not",
-          "text": "不得凭印象断言；不写「我已完成」这类无证据的完成语。",
-          "basis": "种子模板基线"
+          "text": "Never assert from impression; never write evidence-free completion phrases such as \"I have finished\".",
+          "basis": "seed-template baseline"
         },
         {
           "id": "evidence.uncertainty-declared",
           "modality": "must",
-          "text": "不确定就说不确定，并给出「下一步怎么验证」。",
-          "basis": "种子模板基线"
+          "text": "When unsure, say you are unsure and state how it will be verified next.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "evidence.uncovered-declaration",
           "modality": "must",
-          "text": "未接通的检查项须在汇报里显式声明「未覆盖」，不得默认通过或省略不提。",
-          "basis": "种子模板基线"
+          "text": "A check that is not wired up must be declared \"not covered\" in the report; it never passes by default or is left unmentioned.",
+          "basis": "seed-template baseline"
         }
       ]
     },
     {
       "id": "output",
       "order": 4,
-      "title": "四、语言与输出",
-      "summary": "中文对话、英文标识；先结论后依据；改前先读；机械改写先打印再落盘并回读校验。",
-      "source": "通用基线（种子模板）",
+      "title": "4. Language and output",
+      "summary": "Chinese conversation, English identifiers; conclusion before evidence; read before editing; print a mechanical rewrite before writing it and read it back afterwards.",
+      "source": "generic baseline (seed template)",
       "priority": "standard",
       "rules": [
         {
           "id": "output.language-split",
           "modality": "must",
-          "text": "与用户对话用中文；代码、标识符、路径、命令保持原样英文。",
-          "basis": "种子模板基线"
+          "text": "Talk to the user in Chinese; keep code, identifiers, paths and commands in their original English.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "output.conclusion-first",
           "modality": "must",
-          "text": "报错/结论先给结论，再给依据。",
-          "basis": "种子模板基线"
+          "text": "For an error or a conclusion, state the conclusion first and the evidence after it.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "output.read-before-edit",
           "modality": "must",
-          "text": "改文件前先读；改多个文件时逐个说明改了什么、为什么。",
-          "basis": "种子模板基线"
+          "text": "Read a file before editing it; when editing several files, explain file by file what changed and why.",
+          "basis": "seed-template baseline"
         },
         {
           "id": "output.mechanical-rewrite-roundtrip",
           "modality": "must",
-          "text": "大段机械改写（尤其 Markdown 树形结构与表格）先打印结果再写盘，写盘后立即回读校验。",
-          "basis": "种子模板基线"
+          "text": "For a large mechanical rewrite (especially Markdown tree structures and tables) print the result first, then write it, then immediately read it back to verify.",
+          "basis": "seed-template baseline"
         }
       ]
     },
     {
       "id": "harness",
       "order": 5,
-      "title": "五、Agent Harness 机制",
-      "summary": "两层状态机 + 两个强制门禁 + 动作协议 + 异步入口 + 结算口径 + 改 Mod 三件套 + host 契约：这一章只说「机器怎么转」，项目自己的规则另立章节。",
-      "source": "通用 harness 机制（种子模板）",
+      "title": "5. Agent Harness mechanics",
+      "summary": "Two-layer state machine + two mandatory gates + action protocol + async entry + settlement criteria + the Mod-change trio + the host contract: this chapter only says how the machine turns; a project's own rules go in its own chapters.",
+      "source": "generic harness mechanics (seed template)",
       "priority": "standard",
       "rules": [
         {
           "id": "harness.goal-authorization",
           "modality": "must",
-          "text": "goal 授权是 **run 级自声明记录**：`config.set goal.authorization=<单行说明>` 写 `settings.goal.authorization`（trim 后 ≤200、无换行；空值 = 显式清除）。只有**运行期进入 goal** 的局（`settings.play.mode=goal`）在 `review.note` 收口前校验，缺记录则旁白阻断、不写 `ending`、不推进；静态 `data/config.json` 预设 goal 视为仓库所有者常设配置，**不在校验范围**（否则全 1 冒烟会断）。切回 guide 不校验；resume 保留记录。该记录只证明「登记过一句话」，不证明用户说过——不得据此声称身份认证，也不进 `agent.summary`。",
-          "basis": "用户决策 2026-11-01（E2 裁决：收口校验仅限运行期 goal；静态默认不阻断）"
+          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before `review.note` closes: a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the all-1 smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
+          "basis": "user decision 2026-11-01 (E2 ruling: the closing check covers runtime goal only; a static default does not block)"
         },
         {
           "id": "harness.two-layer-state-machine",
           "modality": "must",
-          "text": "认清两层状态机：**协调器**（intake → coordinate → review → done）只做派活、串行验收提案、过门禁、最终复盘，**不承载开发本身**；**需求级流水线**每条需求一条（存储 5 态：draft → analyzing → planning → developing → done；plan 门禁批准后置 `plan_ok`（即旧 ready），split / merged / dropped 是旁路终态；展示名仍按 analysis_review / plan_review / plan_gate / dev_review / accept 区分，另有 blocked / stale 标记）。",
-          "basis": "harness 机制"
+          "text": "Know the two layers: the **coordinator** (intake → coordinate → review → done) only dispatches, accepts proposals serially, passes the gates and closes with the final review — it never carries development itself; the **requirement pipeline** has one row per requirement (5 stored states: draft → planning → developing → done, with `analyzing` kept only as a compatibility state; approving the plan gate sets `plan_ok`, the former `ready`, and split / merged / dropped are bypass terminals; display names still distinguish analysis_review / plan_review / plan_gate / ready / dev_review / accept, plus the blocked / stale markers). Dispatch merges analysis into plan: `draft --dispatch--> planning` stores `planning` in the same dispatch.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.mandatory-gates",
           "modality": "must",
-          "text": "两个强制主 Agent 门禁不可跳过：plan 提案验收后的 **plan 门禁**（`req.gate=plan`，批准才置 `plan_ok` 进开发）；开发交付后 **accept 门禁**（`req.gate=accept`，批准才 done）。门禁待批期间该需求不能派活、不收新提案、不能被跳过，自动推进同样各走一次 `gate.approve`。",
-          "basis": "harness 机制"
+          "text": "The two mandatory main-agent gates cannot be skipped: the **plan gate** after a plan proposal is accepted (`req.gate=plan`, only approval sets `plan_ok` and opens development), and the **accept gate** after delivery (`req.gate=accept`, only approval leads to done). While a gate is pending the requirement cannot be dispatched, accepts no new proposal and cannot be skipped, and automatic advancement still runs one `gate.approve` per gate.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.gate-bound-to-rev",
           "modality": "must",
-          "text": "门禁绑定 revision：`gate_rev == req.rev` 才可批；待批期间该需求被 amend 即判 stale，旧批准不得覆盖新决定。",
-          "basis": "harness 机制"
+          "text": "A gate is bound to a revision: only `gate_rev == req.rev` may be approved; amending the requirement while the gate is pending makes it stale, and an old approval must never override a newer decision.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.accept-is-not-approval",
           "modality": "must",
-          "text": "`accept` 是**执行方自检并交付**，不等于主 Agent 已验收——`gate.approve` 才是核验；accept_gate 要求 **artifacts 非空**，不接受只有 summary 的完成自称。",
-          "basis": "harness 机制"
+          "text": "`accept` means the **executor self-checked and delivered**; it does not mean the main agent verified — only `gate.approve` does. The accept gate requires **non-empty `artifacts`**; a summary-only completion claim is not accepted.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.action-protocol",
           "modality": "must",
-          "text": "动作经事件派发、载荷是以竖线（`|`）分隔的字符串；`settlement.evolution` 用 `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`，`review.note` 只用 `lesson|score`。回执里的 `pendingChoice` 就是**当前允许的动作集**（协议约束，不是提示词约束）——只在其中选，不臆造动作。",
-          "basis": "harness 机制"
+          "text": "Actions are dispatched as events whose payload is a pipe-separated string; `settlement.evolution` uses `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`, and `review.note` uses only `lesson|score`. The `pendingChoice` in a receipt **is the currently allowed action set** (a protocol constraint, not prompt wording) — choose only from it and never invent an action.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.goal-mode-decider",
           "modality": "must",
-          "text": "推进的每一步都由**你（Agent）**判断，不交给脚本、也不默认「总选首项」：`pendingChoice` 给出的是当前允许的动作集，不是一个待执行的队列——该驳回的验收要驳回、该停等的门禁要停等。首项按设计是主前进动作，但不保证在该步正确。",
-          "basis": "决策权在 Agent，不在脚本"
+          "text": "Every advancing step is judged by **you (the agent)**, never handed to a script and never defaulted to \"always pick the first item\": `pendingChoice` is the allowed action set, not a queue to execute — an acceptance that should be rejected must be rejected, a gate that should wait must wait. By design the first item is the main forward action, but it is not guaranteed to be correct at that step.",
+          "basis": "the decision belongs to the agent, not to a script"
         },
         {
           "id": "harness.rejection-is-not-success",
           "modality": "must",
-          "text": "被拒的派发不是成功：越阶 →「动作被拒」、载荷不合法 →「载荷被拒」、前置不满足 →「需求待办」、人类动作门禁拦住单发直派 → 同样是「动作被拒」。四者都原地重渲染、主状态不变，宿主据叙事前缀判为未生效。",
-          "basis": "harness 机制（`rejectionPrefixes`）"
+          "text": "A refused dispatch is not a success: out of stage → `[REJECTED:ACTION]`, invalid payload → `[REJECTED:PAYLOAD]`, unmet precondition → `[BLOCKED:TODO]`, and a human action dispatched single-shot → `[REJECTED:ACTION]` again. All four re-render in place with the primary state unchanged, and the host reads the narrative prefix to decide \"no effect\".",
+          "basis": "harness mechanics (`rejectionPrefixes`)"
         },
         {
           "id": "harness.subagent-proposes",
           "modality": "must",
-          "text": "执行方只**建议**：`proposal.submit` 的 `changes`（split / merge / amend / conflict）是拟议变更，`proposal.accept` 时才落地；执行方不得直接改共享状态。",
-          "basis": "harness 机制"
+          "text": "The executor only **suggests**: the `changes` of a `proposal.submit` (split / merge / amend / conflict) are proposed changes that land only at `proposal.accept`; an executor may never mutate shared state directly.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.serial-acceptance",
           "modality": "must",
-          "text": "验收一次只处理一条需求（串行，按 requirement_id canonical 序取）；多条需求可同时在分析 / 规划 / 开发，但验收不并行。",
-          "basis": "harness 机制"
+          "text": "Acceptance handles exactly one requirement at a time (serially, in requirement-id canonical order); several requirements may be in analysis / planning / development at once, but acceptance is never parallel.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.stale-rebase",
           "modality": "must",
-          "text": "验收时 rev 不匹配 → 提案与需求同置 stale（可读拒绝）；恢复路径是提交**同阶段、当前 rev** 的新提案——仅当该需求没有待验收提案时接受，仍有正常待验收提案时先 accept / reject。",
-          "basis": "harness 机制"
+          "text": "At acceptance a revision mismatch marks both the proposal and the requirement stale (a readable refusal); the recovery path is a new proposal for the **same stage at the current rev** — accepted only when the requirement has no other pending proposal, otherwise accept / reject the pending one first.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.async-inbox",
           "modality": "must",
-          "text": "另一进程随时可经 **inbox**（JSONL，只追加）投递需求与提案；写命令与收口之间是协议级互斥（先登记写者，收口期切 closing、等在途写者归零再最后一次 drain，随后 finalized）。closing / finalized 阶段的写命令一律非零拒绝，不得重试绕过。",
-          "basis": "harness 机制（跨进程协调）"
+          "text": "Another process may deliver requirements and proposals at any time through the **inbox** (JSONL, append-only); writes and the closeout are protected by protocol-level mutual exclusion (a writer registers first, the closeout switches to closing, waits for in-flight writers to reach zero, runs one last drain and then becomes finalized). A write command during closing / finalized is refused with a non-zero exit and must never be retried to bypass it.",
+          "basis": "harness mechanics (cross-process coordination)"
         },
         {
           "id": "harness.inbox-idempotent",
           "modality": "must",
-          "text": "inbox 消费幂等靠 `external_id`（重放走「重放」叙事前缀）；cursor 只在 dispatch 成功且存档落盘后前移，所以崩溃重放不会重复生效。",
-          "basis": "harness 机制"
+          "text": "Inbox consumption is idempotent through `external_id` (replays carry the replay narrative prefix); the cursor only advances after a successful dispatch plus a saved snapshot, so a crash replay never takes effect twice.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.inbox-bad-line-skip",
           "modality": "must",
-          "text": "未声明的 kind 是坏行：跳过并前移 cursor（否则永久阻塞队列），不静默重试、不整批回滚。",
-          "basis": "harness 机制"
+          "text": "An undeclared kind is a malformed line: skip it and advance the cursor (otherwise the queue blocks forever); never retry silently and never roll the whole batch back.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.settlement-criteria",
           "modality": "must",
-          "text": "结算 `ok` = 事件日志非空 ∧ 无失败步 ∧ 出现结局叙事行 ∧ inbox 无未消费行；退出码与 `ok` 同值。结局后投递不会静默成功——只能开新局，所以收口前必须先消化 inbox。",
-          "basis": "harness 机制（`settlement` 四开关）"
+          "text": "`settle`'s `ok` = the event log is non-empty ∧ no failed step ∧ an ending narrative line appeared ∧ the inbox has no unconsumed line; the exit code mirrors `ok`. Delivering after the ending never silently succeeds — it needs a new run, so the inbox must be drained before closing.",
+          "basis": "harness mechanics (the four `settlement` switches)"
         },
         {
           "id": "harness.progress-views",
           "modality": "must",
-          "text": "看进度用只读视图（需求图 / 双层图 / 现场规则），不凭记忆推断阶段；派活与验收前先读一遍当前回执里的 `pendingChoice`。",
-          "basis": "harness 机制"
+          "text": "Use the read-only views to inspect progress (requirement graph / two-layer map / field rules) instead of inferring the stage from memory; read the current receipt's `pendingChoice` before dispatching or accepting.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.runs-artifacts",
           "modality": "must",
-          "text": "每局产物落 run 目录（自动存档 / 事件日志 / 运行元数据 / 结算报告 / inbox 与其 cursor / 跨进程协调文件）；自动存档可直接作 `load` 载荷，事件日志每派发一行。run 目录与可执行产物不入库。",
-          "basis": "harness 机制"
+          "text": "Each run's artifacts live in its run directory (automatic save / event log / run metadata / settlement report / inbox and its cursor / cross-process coordination files); the automatic save can be fed to `load` directly, and the event log holds one line per dispatch. Run directories and executables are never committed.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.manifest-is-content-addressed",
           "modality": "must",
-          "text": "打包清单是**内容寻址**（sha256 + byteLength）：改了 `data/` 或 `schemas/` 不重算打包，装载会以内容哈希不符拒绝——不是提示，是拒绝。",
-          "basis": "harness 机制"
+          "text": "The pack manifest is **content-addressed** (sha256 + byteLength): editing `data/` or `schemas/` without recomputing the pack makes loading fail with a content-hash mismatch — that is a refusal, not a warning.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.kv-prefix-owner",
           "modality": "must",
-          "text": "多文件 Mod 的 KV 前缀按归属划分，一个前缀只有一个写方：内核 / 标准库前缀（`fsm.*`）由 `ygg.fsm` 独占写、Mod 只读；配置覆盖前缀（`settings.*`）只由配置写入动作写；其余业务前缀由各自模块独占。跨模块写同一前缀 = 隐式耦合，要共享就经模块返回值导出。这是文档约定，装载期不做前缀校验。",
-          "basis": "harness 机制（多文件 Mod）"
+          "text": "In a multi-file Mod the KV prefixes are partitioned by ownership and each prefix has exactly one writer: the kernel / stdlib prefix (`fsm.*`) is written only by `ygg.fsm` and read-only for the Mod, the config-override prefix (`settings.*`) is written only by the config write action, and every other business prefix is owned by its own module. Two modules writing one prefix is implicit coupling — share through a module's return value. This is a documentation convention; loading performs no prefix validation.",
+          "basis": "harness mechanics (multi-file Mod)"
         },
         {
           "id": "harness.module-error-locates",
           "modality": "must-not",
-          "text": "禁止把多文件 Mod「拼回单文件再报错」：模块 chunk 名必须带真实文件与行号，装载阶段自判的拒绝必须带调用点（`文件:行号: 原因`）与 require 链，静态检查必须逐模块独立 parse（模块的 `local` 本就不跨 chunk）。行号对不上真实文件的诊断按缺陷处理。",
-          "basis": "harness 机制（多文件 Mod）"
+          "text": "Never \"glue a multi-file Mod back into one file and then report errors\": a module chunk name must carry the real file and line number, a refusal the loader decides itself must carry the call site (`file:line: reason`) and the require chain, and static checks must parse each module independently (a module's `local` never spans chunks). A diagnostic whose line number does not match the real file is a defect.",
+          "basis": "harness mechanics (multi-file Mod)"
         },
         {
           "id": "harness.module-pure-export",
           "modality": "must",
-          "text": "多文件 Mod 的模块 chunk 只做纯导出（定义函数与常量），不做任何有副作用的事：注册 / 写状态 / 输出全部集中在入口。模块把注册面做成函数（`function M.install(deps)`），由入口显式按序调用；模块顶层碰 `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / `ygg.entity` 的写类成员 / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative[\"goto\"]` 即被拒（静态检查与运行期影子表共用同一份清单），顶层只允许纯读（`ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity` 的读类成员）；入口 chunk 不受此约束（它就是装配清单）。理由：handler 的派发序 = `ygg.on` 的注册序——让模块自己注册，等于让「文件怎么拆 / 先 require 谁」决定运行时行为，拆文件或调 require 顺序就改派发序，重构不保行为。`require` 因此在任何时机都可用（含 handler 内懒加载纯库），但懒加载不放宽边界：懒加载到的模块顶层照样只能纯导出。细则见 Mod 作者指南的「多文件 Mod」副作用边界小节。",
-          "basis": "harness 机制（多文件 Mod）"
+          "text": "A multi-file Mod's module chunk performs pure exports only (function and constant definitions) and nothing with side effects: registration / state writes / output all live in the entry. A module exposes registration as a function (`function M.install(deps)`) that the entry calls explicitly in order; touching `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / the write members of `ygg.entity` / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative[\"goto\"]` at a module's top level is refused (the static check and the runtime shadow table share one list); at the top level only pure reads are allowed (`ygg.data` / `ygg.ticks` / `ygg.kv.get` / the read members of `ygg.entity`); the entry chunk is exempt (it is the assembly manifest). Why: a handler's dispatch order equals the `ygg.on` registration order — letting a module register itself means \"how the files are split / who is required first\" decides runtime behavior, so splitting a file or reordering a `require` would change the dispatch order and refactoring would not preserve behavior. `require` is therefore usable at any time (including lazy-loading a pure library inside a handler), but lazy loading never relaxes the boundary: a lazily loaded module's top level is still pure exports. For the details see the Mod authoring guide, section \"multi-file Mod\", subsection on the side-effect boundary.",
+          "basis": "harness mechanics (multi-file Mod)"
         },
         {
           "id": "harness.mod-change-triple",
           "modality": "must",
-          "text": "改完 Mod 必须跑完三件套：① 重算打包清单 ② Lua 静态检查（应 0 error / 0 warning）③ 冒烟走查（必须到达结局）。缺一不算改完。",
-          "basis": "harness 机制"
+          "text": "After changing a Mod you must finish the trio: ① recompute the pack manifest ② run the Lua static check (0 errors / 0 warnings) ③ run the smoke walk (it must reach the ending). Missing one means the change is not done.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.host-contract",
           "modality": "must",
-          "text": "宿主不含任何默认值：事件名、摘要键名、拒绝与重放叙事前缀、入口默认载荷、inbox 路由与结算口径、自动推进阈值，全部由 Mod 的 `pack.json` 与静态配置声明；缺段 / 字段缺失 / 类型不符 / 非正整数 → **装载期失败**（fail closed），不猜意图。",
-          "basis": "harness 机制（host 契约四段）"
+          "text": "The host carries no defaults: event names, the summary key, the rejection and replay narrative prefixes, the entry default payload, the inbox routes and settlement criteria, and the automatic-advancement thresholds are all declared by the Mod's `pack.json` and static config; a missing section, a missing field, a wrong type or a non-positive integer **fails loading** (fail closed) instead of guessing intent.",
+          "basis": "harness mechanics (the four host-contract sections)"
         },
         {
           "id": "harness.no-private-kv-in-host",
           "modality": "must-not",
-          "text": "宿主只读 Mod 自报的结构化摘要（回执 `meta.<metaKey>`），不读任何 Mod 私有 KV（需求 / 提案 / 阶段 / 结局键）；摘要面是瞬态回执，不入存档、不入状态哈希。",
-          "basis": "harness 机制"
+          "text": "The host reads only the structured summary the Mod reports (the receipt's `meta.<metaKey>`) and no Mod-private KV (requirement / proposal / stage / ending keys); the summary surface is a transient receipt and never enters the save or the state hash.",
+          "basis": "harness mechanics"
         },
         {
           "id": "harness.hot-reload",
           "modality": "should",
-          "text": "单发模式每次新进程按磁盘现状装载资源，改资源不必重启本局；回执标明来源为 resume 即说明改动已生效。",
-          "basis": "harness 机制"
+          "text": "Single-shot mode loads resources from disk in every new process, so a resource change does not need a run restart; a receipt whose source says resume proves the change is in effect.",
+          "basis": "harness mechanics"
         }
-      ],
-      "notes": "本章只写 harness 机制，刻意不含任何具体仓库的目录结构、端口、远端地址、部署通道与门禁命令——那些属于使用方自己的项目章节。新项目接入顺序：复制种子 Mod → 填项目章节与静态配置 → 跑打包 / 静态检查 / 冒烟。"
+      ]
     },
     {
       "id": "evolution",
       "order": 6,
-      "title": "六、进化建议方法（候选筛选 · 复核 · 场景化）",
-      "summary": "局末建议进 backlog 前过四道关：长期性优先、已有未用查根因、逐项独立复核、场景先于技术；verify 全绿后用独立 settlement.evolution 登记 summary 与候选声明，review.note 只单源归档——状态机只校验声明形状，不证明建议质量。",
-      "source": "seed template（通用元工作流纪律，与具体仓库无关）",
+      "title": "6. How to propose an evolution (candidate screening · review · scenario first)",
+      "summary": "An end-of-run suggestion passes four gates before it may enter the backlog: long-term priority, a root cause for an unused existing capability, an independent review per item, and scenario before technique; after verify is green, `settlement.evolution` registers the summary and the candidate declaration, and `review.note` only archives it single-source — the state machine checks the declaration's shape, never the quality of the suggestion.",
+      "source": "seed template (generic meta-workflow discipline, independent of any repository)",
       "priority": "standard",
       "rules": [
         {
           "id": "evolution.long-term-screen",
           "modality": "must",
-          "text": "进 backlog 的建议默认必须是跨任务重复出现的流程机制：判据是「换一条需求/换一个仓库还会再遇到吗」+「它改变下一局哪个动作」。单次任务的执行约束、临时工具或一次性探针的口径、以及已在当次解决的问题默认不进。",
-          "basis": "用户决策 2026-11-01（game-1101-1 结算复核 E1）"
+          "text": "A suggestion entering the backlog must by default be a process mechanism that recurs across tasks: the criteria are \"would this come up again with another requirement / another repository?\" plus \"which action of the next run would it change?\". Execution constraints of a single task, conventions of a temporary tool or a one-off probe, and anything already solved in that same task do not enter by default.",
+          "basis": "user decision 2026-11-01 (game-1101-1 settlement review E1)"
         },
         {
           "id": "evolution.classes",
           "modality": "must",
-          "text": "每条候选必须归入六类之一并计数：`long_term` 长期机制 / `unused` 已有未用 / `one_off` 单次约束 / `temp_tool` 临时工具 / `redundant` 冗余待退役 / `no_scene` 确无场景。只有 long_term、unused、redundant 三类可以进入 backlog；另三类只能作为「不采纳」记录并写明理由。",
-          "basis": "用户决策 2026-11-01（E1 六类）"
+          "text": "Every candidate must be classified into exactly one of six classes and counted: `long_term` (long-term mechanism) / `unused` (existing but unused) / `one_off` (single-task constraint) / `temp_tool` (temporary tool) / `redundant` (redundant, to retire) / `no_scene` (genuinely no scenario). Only long_term, unused and redundant may enter the backlog; the other three are recorded as \"not adopted\" with a stated reason.",
+          "basis": "user decision 2026-11-01 (E1, six classes)"
         },
         {
           "id": "evolution.unused-root-cause",
           "modality": "must",
-          "text": "「已有能力未被调用」不得直接撤下，也不得直接当成能力缺失：必须落到六类根因之一并给出定位证据——调用链缺失或入口不可达 / 可发现性差 / 调用成本或契约不适配 / 执行者知道但选择不用 / 确无使用场景 / 能力已冗余应退役。",
-          "basis": "用户决策 2026-11-01（E1 根因表）"
+          "text": "\"An existing capability is never called\" may neither be removed outright nor treated as a missing capability: it must be assigned one of six root causes with locating evidence — the call chain is missing or the entry is unreachable / discoverability is poor / the call cost or contract does not fit / the executor knows about it but chooses not to use it / there genuinely is no scenario / the capability is redundant and should be retired.",
+          "basis": "user decision 2026-11-01 (E1, root-cause table)"
         },
         {
           "id": "evolution.review-artifact",
           "modality": "must",
-          "text": "每条被筛选的候选（保留与不保留都算）都要在复核 artifact 里留结论，含四要素：① 文件与行号；② 可原样执行的命令与实际输出（不是「已生成」）；③ 语义依据（该行为符合还是违背当前契约）；④ 根因分类与复核结论（确认存在 / 证据不足 / 不成立 / 仅当次 / 暂缓）。",
-          "basis": "evidence 章三要素 + 用户决策 2026-11-01（E1 §4）"
+          "text": "Every screened candidate (kept or not) leaves a conclusion in the review artifact with four elements: ① the file and line number; ② a command that can be run as written plus its actual output (not \"it was generated\"); ③ the semantic basis (does that behavior match or violate the current contract); ④ the root-cause class and the review conclusion (confirmed / insufficient evidence / does not hold / one-off / deferred).",
+          "basis": "the three elements of the evidence chapter + user decision 2026-11-01 (E1 §4)"
         },
         {
           "id": "evolution.scenario-first",
           "modality": "must",
-          "text": "叙述顺序固定：正在解决什么实际问题 → 当前流程哪一步不满足 → 代码与复现证据 → 根因 → 长期收益 → 改造面与验证方式。文件路径与技术细节只作支撑，不得代替问题叙述；用户不该为看懂收益而追问。",
-          "basis": "用户决策 2026-11-01（E1 §5）"
+          "text": "The narrative order is fixed: which real problem is being solved → which step of the current process is unsatisfied → the code and reproduction evidence → the root cause → the long-term benefit → the change surface and how it is verified. File paths and technical detail only support it and may never replace the problem statement; the user should never have to ask in order to understand the benefit.",
+          "basis": "user decision 2026-11-01 (E1 §5)"
         },
         {
           "id": "evolution.record-shape",
           "modality": "must",
-          "text": "verify.submit=true 后用 `settlement.evolution` 登记：`artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]`。summary 去空白后必填；artifact 可空，但 **screened > 0 时必须是 artifacts/<file>.md 且 cls 必填**；六类计数和 = screened，保留类之和 = kept；**c=0/0 允许 artifact 为空**。c/cls 缺省依次回落 settings.review.evolution.* 与 0/0/空分类。guide 可先 `config.set review.evolution.artifact|summary|candidates|classes=<值>` 预登记（逐键校形状，跨字段完整性只在 settlement.evolution 校），菜单据此构造载荷；未预登记时用中性 summary + c=0/0。随后 review.note 只收 `lesson|score`，并把 settlement 四键单源归档到 review.evolution.*。",
-          "basis": "settlement.evolution / review.note / config.set 契约（本 Mod）"
+          "text": "After `verify.submit=true`, register with `settlement.evolution`: `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`. The summary is required after trimming; the artifact may be empty, but **when `screened > 0` it must be `artifacts/<file>.md` and `cls` is required**; the six class counts sum to `screened` and the kept classes sum to `kept`; **c=0/0 allows an empty artifact**. Missing c/cls fall back in order to `settings.review.evolution.*` and then to 0/0 with no classes. Under guide you may pre-register with `config.set review.evolution.artifact|summary|candidates|classes=<value>` (shape checked per key, cross-field completeness only at `settlement.evolution`), and the menu builds the payload from it; with no pre-registration it uses the neutral summary plus c=0/0. The optional `sessions=` / `todo=` segments settle the two end-of-run cleanups in the same transaction. `review.note` afterwards accepts only `lesson|score` and archives the four settlement keys single-source into `review.evolution.*`.",
+          "basis": "the settlement.evolution / review.note / config.set contracts (this Mod)"
         },
         {
           "id": "evolution.declare-not-prove",
           "modality": "must-not",
-          "text": "不得把登记当成证明：状态机只校验 summary 非空、路径形状、计数与分类自洽，读不到 artifact（沙箱无文件系统），也不知道复核是否真的由独立 subagent 执行。任何「已证明建议质量 / 已证明复核独立」的说法都是越界。",
-          "basis": "沙箱白名单（无 io/os）+ settlement.evolution 契约"
+          "text": "Never present a registration as proof: the state machine only checks that the summary is non-empty, the path shape, and that the counts and classes are self-consistent — it cannot read the artifact (the sandbox has no filesystem) and does not know whether the review was really performed by an independent subagent. Any claim such as \"the suggestion quality is proven\" or \"the review independence is proven\" is out of bounds.",
+          "basis": "the sandbox allowlist (no io/os) + the settlement.evolution contract"
         },
         {
           "id": "evolution.no-new-carrier",
           "modality": "must-not",
-          "text": "不得为进化流程新增第二登记入口、外部检查脚本或宿主改动：唯一登记动作是 `settlement.evolution`；载体仍只允许 AGENTS.md 与 Mod 资源（`src/**` 与 `data/*.json`）。只读查询可以拿来核对声明，但不得成为约束载体。",
-          "basis": "AGENTS.md §一·7"
+          "text": "Never add a second registration entry point, an external checker script or a host change for the evolution flow: the only registration action is `settlement.evolution`, and the only allowed carriers remain AGENTS.md and the Mod resources (`src/**` and `data/*.json`). Read-only queries may be used to check a declaration but may never become the carrier of a constraint.",
+          "basis": "AGENTS.md §1.7"
         }
-      ],
-      "notes": "每轮 done 前都必须登记。登记面是三层：`config.set review.evolution.*` 写运行期预登记 `settings.review.evolution.*`（含 summary）；`settlement.evolution` 写本轮回合 `settlement.evolution.{artifact,summary,candidates,classes}`；`review.note` 仅将这四键单源归档到 `review.evolution.*` 后写 lesson/score/ending。coordinate.submit 重入 review 与 verify.submit=false 打回会清空本轮 settlement 四键，但保留 settings 预登记；`agent.summary.evolution` 回显 review 归档四键。使用方接入时不需要改这一章，只需在自己的项目章节里补「本仓哪里放复核 artifact」。"
+      ]
     }
   ]
 }
