@@ -1712,8 +1712,14 @@ fn artifact_probe_and_vfs_keep_one_ledger() {
         .expect("the ledger records a byte count");
     assert_eq!(bytes as usize, "# notes\n".len() + sha.len());
     if disk {
+        let vfs_sha = game
+            .kv("artifact.artifacts/notes.md.sha256")
+            .as_str()
+            .expect("vfs.write records the sha256 computed by ygg.fs.write")
+            .to_owned();
+        assert_eq!(vfs_sha.len(), 64, "sha256 must be 64 hex chars: {vfs_sha}");
         assert!(
-            joined.contains(&sha[..12]),
+            joined.contains(&vfs_sha[..12]),
             "the digest is narrated: {joined}"
         );
     }
