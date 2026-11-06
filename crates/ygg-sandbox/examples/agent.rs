@@ -3950,27 +3950,49 @@ fn archive_sessions_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, St
             ARCHIVE_FLAGS,
         );
     }
-    // **不猜默认值**：会话目录布局因 harness 而异，猜错会搬错文件。
-    let sessions_dir = flags.get("--sessions-dir").map(PathBuf::from).or_else(|| {
+    // 优先级：显式 `--sessions-dir` > `YGG_SESSIONS_DIR` > 当前工作区的 Pi 会话目录
+    // `$HOME/.pi/agent/sessions/--<cwd_slug>--`（搭配 `$HOME/.pi/agent/sessions-trash/<batch>`）。
+    let explicit_dir = flags.get("--sessions-dir").map(PathBuf::from).or_else(|| {
         std::env::var("YGG_SESSIONS_DIR")
             .ok()
             .filter(|dir| !dir.trim().is_empty())
             .map(PathBuf::from)
     });
-    let Some(sessions_dir) = sessions_dir else {
-        builtin_usage_error(
-            OP,
-            "需要 --sessions-dir（或环境变量 YGG_SESSIONS_DIR）——本 op 没有默认目录",
-            ARCHIVE_FLAGS,
-        );
+    let (sessions_dir, default_trash_root) = match explicit_dir {
+        Some(dir) => {
+            let trash_root = dir.parent().unwrap_or_else(|| Path::new(".")).join("trash");
+            (dir, trash_root)
+        }
+        None => {
+            let home = std::env::var("HOME")
+                .ok()
+                .filter(|h| !h.trim().is_empty())
+                .map(PathBuf::from);
+            let cwd = std::env::current_dir().ok();
+            match (home, cwd) {
+                (Some(home), Some(cwd)) => {
+                    let slug = cwd
+                        .to_string_lossy()
+                        .trim_start_matches('/')
+                        .replace('/', "-");
+                    let pi_agent = home.join(".pi").join("agent");
+                    (
+                        pi_agent.join("sessions").join(format!("--{slug}--")),
+                        pi_agent.join("sessions-trash"),
+                    )
+                }
+                _ => builtin_usage_error(
+                    OP,
+                    "需要 --sessions-dir（或环境变量 YGG_SESSIONS_DIR / HOME）",
+                    ARCHIVE_FLAGS,
+                ),
+            }
+        }
     };
-    let trash = flags.get("--trash").map(PathBuf::from).unwrap_or_else(|| {
-        sessions_dir
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("trash")
-            .join(&batch)
-    });
+    let trash = flags
+        .get("--trash")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_trash_root.join(&batch));
     let outcome = sweep_sessions(&sessions_dir, &trash, &parent)
         .map_err(|err| OpFailure::detail("sweep", err))?;
     let dest = fs::canonicalize(&trash)
