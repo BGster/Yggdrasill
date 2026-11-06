@@ -465,3 +465,144 @@ fn backend_names_round_trip() {
     assert!(Backend::parse("sqlite3").is_none(), "只认精确取值");
     assert!(Backend::parse("JSON").is_none(), "大小写不宽容");
 }
+
+// ============================================================================
+// §制品面的跨后端一致性（语义等价，不比较存储形态）
+// ============================================================================
+
+/// 同一写入序列在两个后端得到**逐字节相同**的 `path|bytes|sha256` 序列。
+///
+/// 这是 `ygg.fs.list` 确定性的锤子：回执字节随后端变就是漂移。
+/// `updated_at` **不**入比较——sqlite 存宿主 `Tick`、JSON 无 sidecar 只能回
+/// mtime（`ArtifactMeta::updated_at` 已声明这条差异），而 `ygg.fs.list` 的
+/// 回执本来就只有 path / bytes / sha256。
+#[test]
+fn backends_agree_on_artifact_meta() {
+    fn write_all(store: &mut dyn RunStore) -> Vec<String> {
+        let puts = [
+            ("artifacts/z.md", b"last".to_vec()),
+            ("artifacts/a.md", b"first".to_vec()),
+            ("artifacts/notes/m.md", b"\xe4\xb8\xad\xe6\x96\x87".to_vec()),
+        ];
+        for (path, content) in &puts {
+            let meta = store.artifact_put(path, content, TICK).expect("写入制品");
+            assert_eq!(meta.sha256.len(), 64, "小写十六进制 64 字符");
+        }
+        // 渲染成「可比较的字符串向量」，避开结构体类型本身。
+        store
+            .artifact_list()
+            .expect("列表")
+            .into_iter()
+            .map(|m| format!("{}|{}|{}", m.path, m.bytes, m.sha256))
+            .collect()
+    }
+
+    let json_dir = temp_dir("artifact-json");
+    let mut json_store = JsonFileStore::open(&json_dir).expect("打开 JSON 后端");
+    let from_json = write_all(&mut json_store);
+    assert_eq!(from_json.len(), 3);
+
+    #[cfg(feature = "sqlite")]
+    {
+        let sqlite_dir = temp_dir("artifact-sqlite");
+        let mut sqlite_store =
+            open(Backend::Sqlite, &sqlite_dir, TICK).expect("打开 sqlite 后端（feature 已开）");
+        let from_sqlite = write_all(sqlite_store.as_mut());
+        assert_eq!(
+            from_json, from_sqlite,
+            "两后端的 path/bytes/sha256 必须逐字段相等（含顺序）"
+        );
+        // sqlite 的 `updated_at` 可重放：就是写入那次 `Tick.secs`。
+        assert!(
+            sqlite_store
+                .artifact_list()
+                .expect("列表")
+                .iter()
+                .all(|m| m.updated_at == TICK.secs),
+            "sqlite 的 updated_at 必须回宿主 Tick（不得取时钟）"
+        );
+    }
+}
+
+/// reset 之后两后端的**当前代**都空，旧件仍可取回（sqlite = 旧代可查；
+/// JSON = `artifacts.reset.*` 目录）。
+#[test]
+fn backends_agree_on_artifact_reset_semantics() {
+    fn put_then_reset(store: &mut dyn RunStore) -> usize {
+        store
+            .artifact_put("artifacts/keep.md", b"evidence", TICK)
+            .expect("写入制品");
+        store
+            .reset(b"{\"initial\":true}", "explicit-new-game", TICK)
+            .expect("重置");
+        assert!(
+            store
+                .artifact_get("artifacts/keep.md")
+                .expect("读当前代")
+                .is_none(),
+            "当前代必须看不到旧制品"
+        );
+        store.artifact_list().expect("列表").len()
+    }
+
+    let json_dir = temp_dir("artifact-reset-json");
+    let mut json_store = JsonFileStore::open(&json_dir).expect("打开 JSON 后端");
+    assert_eq!(put_then_reset(&mut json_store), 0);
+    // JSON 侧的归档载体是目录（证据不丢）。
+    let archived = fs::read_dir(&json_dir)
+        .expect("读 run 目录")
+        .flatten()
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("artifacts.reset.")
+        });
+    assert!(archived, "JSON 后端必须把旧代制品归档成 artifacts.reset.*");
+
+    #[cfg(feature = "sqlite")]
+    {
+        let sqlite_dir = temp_dir("artifact-reset-sqlite");
+        let mut sqlite_store = open(Backend::Sqlite, &sqlite_dir, TICK).expect("打开 sqlite 后端");
+        // 推一代需要旧代有步（端口既有语义：空代重置不归档）。
+        sqlite_store
+            .commit_step(draft("step", "0", true, Some(b"{}")))
+            .expect("提交一步");
+        assert_eq!(put_then_reset(sqlite_store.as_mut()), 0);
+    }
+}
+
+/// 门在两个后端完全同规则：同一批坏路径两边都报 `Invalid`。
+#[test]
+fn backends_agree_on_artifact_path_gate() {
+    let bad = [
+        "artifacts/",
+        "artifacts//x",
+        "artifacts/../x",
+        "artifact/x",
+        "/artifacts/x",
+        "artifacts/a b.md",
+        "",
+    ];
+    let mut json_store = JsonFileStore::open(&temp_dir("gate-json")).expect("打开 JSON 后端");
+    for path in bad {
+        assert!(
+            json_store.artifact_put(path, b"x", TICK).is_err(),
+            "JSON 后端必须拒绍 `{path}`"
+        );
+        assert!(json_store.artifact_get(path).is_err(), "读面同样拒绍");
+    }
+
+    #[cfg(feature = "sqlite")]
+    {
+        let mut sqlite_store =
+            open(Backend::Sqlite, &temp_dir("gate-sqlite"), TICK).expect("打开 sqlite 后端");
+        for path in bad {
+            assert!(
+                sqlite_store.artifact_put(path, b"x", TICK).is_err(),
+                "sqlite 后端必须拒绍 `{path}`"
+            );
+            assert!(sqlite_store.artifact_get(path).is_err(), "读面同样拒绍");
+        }
+    }
+}
