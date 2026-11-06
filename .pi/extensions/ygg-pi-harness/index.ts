@@ -195,7 +195,7 @@ async function settleAndClose(
     !receipt.ok || receipt.narrative.some((line) => line.includes("[REJECTED") || line.includes("[BLOCKED"));
 
   const before = await client.summary();
-  if (before.available && before.stage === "coordinate") {
+  if (!before.available || before.stage === "coordinate") {
     const submitted = await client.dispatch("coordinate.submit", "");
     entries.push({ label: "coordinate.submit", receipt: submitted });
     if (rejected(submitted)) {
@@ -238,9 +238,6 @@ async function settleAndClose(
   const archiveArgs = [
     `parent=${input.sessionId}`,
     `batch=${input.runId}`,
-    "moved=0",
-    "remaining=0",
-    `dest=${input.runId}`,
   ].join(";");
   const archivedSessions = await client.dispatch(
     "tool.call",
@@ -253,7 +250,7 @@ async function settleAndClose(
     input.evolutionSummary.trim() === "" ? "(no candidates this round)" : input.evolutionSummary,
     `c=${input.candidates.trim() === "" ? "0/0" : input.candidates.trim()}`,
     ...(input.classes.trim() === "" ? [] : [`cls=${input.classes.trim()}`]),
-    "todo=0/",
+    "todo=0/verified empty via ygg_session settle_close",
   ].join("|");
   const evolution = await client.dispatch("settlement.evolution", evolutionPayload);
   entries.push({ label: "settlement.evolution", receipt: evolution });

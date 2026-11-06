@@ -337,8 +337,10 @@ export function extractSummary(
   if (receipt === null) {
     return unknownSummary("回执不是对象");
   }
-  if (asRecord(receipt.summary) !== null) {
-    return parseSummary(receipt.summary, metaKey);
+  const topSummary = asRecord(receipt.summary);
+  if (topSummary !== null) {
+    const innerSummary = asRecord(topSummary.summary);
+    return parseSummary(innerSummary ?? topSummary, metaKey);
   }
   const meta = asRecord(receipt.meta);
   if (meta !== null && asRecord(meta[metaKey]) !== null) {
@@ -543,7 +545,20 @@ export class YggDaemon {
       return { ok: false, artifacts: [], error: receipt.error ?? "vfs_list 失败" };
     }
     const raw = (receipt.raw ?? {}).artifacts;
-    const artifacts = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
+    const artifacts = Array.isArray(raw)
+      ? raw
+          .map((item) => {
+            if (typeof item === "string") return item;
+            const rec = asRecord(item);
+            if (rec === null || typeof rec.path !== "string") return "";
+            const bytes = asNumber(rec.bytes, -1);
+            const sha = asString(rec.sha256);
+            return bytes >= 0 && sha !== ""
+              ? `${rec.path} (${bytes} B, sha256=${sha.slice(0, 12)})`
+              : rec.path;
+          })
+          .filter((v) => v !== "")
+      : [];
     return { ok: true, artifacts };
   }
 
@@ -559,6 +574,9 @@ export class YggDaemon {
   /** 单条请求（对外唯一入口；内部串行 + 一次重启重试）。 */
   async request(op: string, params: Record<string, unknown> = {}): Promise<StepReceipt> {
     const task = this.chain.then(async () => {
+      if (!this.started) {
+        await this.start();
+      }
       if (this.modeValue === "cli") {
         return this.requestCli(op, params);
       }
