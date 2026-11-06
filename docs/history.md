@@ -227,3 +227,59 @@ node --experimental-strip-types --test .pi/extensions/ygg-pi-harness/harness.tes
   相邻，会把并行改动的冲突面人为放大；`src/tools.lua` 用分区标题保持可读。
 - **不动 `render.lua`**：`agent.summary` 已经在读 `verify.passed`，机证复用同一个键即可。
 - **不把 `[LANE PROBE FAILED]` 接进 `gate_problem()`**（理由见上）。
+
+## r1-harness · 检查点交接 + 自动压缩续跑，subagent `create + resume` 全生命周期
+
+**分支** `feature/context-handoff-and-resume`（base `37d9958`）。目标有两个，都围绕同一件事：
+**别让一条长跑的本局因为「压掉上下文」或「subagent 走了」而丢掉现场**。
+
+1. **上下文压力 → 检查点交接 → 压缩 → 自动续跑**（`compaction.ts` 新增，`index.ts` 接线）。
+2. **subagent 的真身份**：`Agent` 工具给出的 `agent_id` 写进 `exec=` 账本，下一次重派 /
+   跨阶段 / 失败的场合都 `resume` 同一个 subagent，而不是重新叙述一遍 brief。
+
+### 为什么这样落
+
+1. **「不知道用量」不等于「压力低」也不等于「该刹车」**：只用 `getContextUsage()` 判断时，
+   刚压完是 `null`、模型不报 `contextWindow` 也是常事。取不到数字就按 `normal` 处理——
+   刹车的副作用（整局停在半路）比「晚一点再压」大得多；反过来，数字可信时一律按水位办。
+2. **只在稳定节点上压缩**（`isStableCheckpoint`）：门禁上 / 干净阶段边界 / 冲突边界。作业在飞
+   又没有门的时候压缩，会把手上那波 subagent 的结果压成一段叙述；落在门上压缩，压完的局面
+   是「谁的提案停在哪个门」，可以直接复核。硬刹车（≥75%）是唯一例外：此时**一个 subagent 都
+   没起**，压掉不会有任何在飞结果。
+3. **硬刹车先交接、软刹车先落地**：都是「先把本波收干净再压」，区别是硬刹车连 claim 都不做
+   （不建 worktree），软刹车让本波跑完、`proposal.accept` 完再写交接单。
+4. **压缩一定先落 VFS**：`session_before_compact` 里写 `artifacts/handoff-latest.md`，任何来源的
+   压缩（`/compact`、阈值、溢出恢复）都覆盖到。写失败**安静吞掉**——把压缩拦下来比丢一份交接单更糟。
+5. **自己触发的压缩走 `customInstructions`，外部压缩走消息注入**：`ctx.compact()` 会先 `abort()`
+   当前回合，所以自己压完必须用 `triggerTurn: true` 把局面重新送进模型（工具返回值大概率到不了）；
+   而人敲的 `/compact` 之后停在原地是预期行为，只注入状态块、`triggerTurn: false`。
+6. **`resume` 的三条来源各自有据**：`job.executor`（gate 打回后同阶段重派，rev+1）→ 续原执行者；
+   `job.planExecutor` + `resumePlanAgent`（plan → development）→ 续方案执行者；都没有 → 新起一个。
+   猜一个 id 去 resume 只会变成「新起一个」，还把 `exec=` 账本写脏。
+7. **自愈只补一次，且只在知道续谁时补**：流断开一次（`ok=false` + `agentId`）、脏工作树一次
+   （探针 `commits=0` / `clean=0` + `agentId`，提示词逐字要求 `git add` + `git commit`，随后复跑探针）。
+   探针真值读不到（`known=false`）就什么都不做——重试风暴比脏树更难查。
+
+### 宿主侧的一个实情（决定了探针真值怎么读）
+
+Mod 的 `lane.<k>.probe.*` 不在 `agent.summary` 的暴露面里，宿主的 `summary` op 只回 drain 的
+计数（`{applied, skipped, remaining}`）而不回折叠叙事。所以探针真值有两个来源，按顺序取：
+回执叙事里的 `commits=` / `clean=`（`parseLaneProbeNarrative`），读不到再退回**本地只读 git**
+（`status --porcelain` / `rev-list --count`）。后者只用来决定「要不要催一次 commit」，
+**不进门禁、不进结算**——门禁与结算永远只看 Mod 的账本。
+
+### 留下的可判定口子
+
+- `node --experimental-strip-types --test .pi/extensions/ygg-pi-harness/harness.test.ts` → **75/75**
+  （原 37 + 新 38）。
+- 四条变异探针（改回旧语义后必须变红）：`resolveResumeId` 恒 `""` → 3 条红；`laneProbeNeedsCommit`
+  恒 `false` → 脏树自愈红；删掉硬刹车 → 硬刹车用例红；`exec=` 硬编码 `actorId` → create 用例红。
+- `AGENTS.md` §3 表格补 `compaction.ts`，§3.1 把水位 / 稳定节点 / 交接单 / 压缩钩子 / 子代理生命
+  周期写成一张可判定的表，并把「不变的红线」补两条（不半路压缩、不 resume 猜出来的 id）。
+
+### 刻意没做的事
+
+- **不改 Mod**（`src/**` / `data/*.json` / `schemas/*`）：本泳道只动扩展；`executor` /
+  `planExecutor` 按「宿主给了就读、没给就落空串」解析，旧 Mod 零改动照常工作。
+- **不替 Mod 记账**：本地 git 探测只是决策输入，不写任何 KV、不冒充 `git.lane_probe` 的证据。
+- **不做「压缩后自动过门禁」**：门禁是人的决定，压缩只负责把局面摆回来。

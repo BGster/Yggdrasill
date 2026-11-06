@@ -37,21 +37,43 @@ import {
 } from "./daemon.ts";
 import { checkToolCallFirewall, checkBatchEntrypoint, checkPathText } from "./firewall.ts";
 import {
+  actorForLedger,
   artifactPathFor,
   branchNameFor,
   buildLaneProbeArgs,
   buildProposalSubmitPayload,
   buildSubagentBrief,
   buildWorktreeClaimArgs,
+  COMMIT_NUDGE_TEXT,
+  extractAgentId,
+  laneProbeNeedsCommit,
   orchestrateActiveJobs,
+  parseLaneProbeNarrative,
   pickFreeLane,
+  readLaneProbeFromGit,
   requirementNumber,
+  resolveResumeId,
+  resumeReason,
   sanitizeSegment,
   slugify,
+  UNKNOWN_LANE_PROBE,
   worktreePathFor,
   type OrchestratorDaemon,
   type SubagentRequest,
 } from "./orchestrator.ts";
+import {
+  buildCompactInstructions,
+  buildHandoffMarkdown,
+  buildResumeMessage,
+  evaluateContextPressure,
+  formatPercent,
+  HANDOFF_ARTIFACT_PATH,
+  HANDOFF_RESUME_CUSTOM_TYPE,
+  isStableCheckpoint,
+  stableCheckpointReason,
+  writeHandoffToVfs,
+  type HandoffWrite,
+} from "./compaction.ts";
 
 // ───────────────────────────── ① 数据红线 ─────────────────────────────
 
@@ -224,7 +246,11 @@ function jobRow(overrides: Partial<SummaryJob> = {}): SummaryJob {
   };
 }
 
-function summaryWith(jobs: SummaryJob[], gates: { id: string; gate: string; rev: number; title: string }[] = []): RunSummary {
+function summaryWith(
+  jobs: SummaryJob[],
+  gates: { id: string; gate: string; rev: number; title: string }[] = [],
+  overrides: Partial<RunSummary> = {},
+): RunSummary {
   return {
     available: true,
     stage: "coordinate",
@@ -237,6 +263,7 @@ function summaryWith(jobs: SummaryJob[], gates: { id: string; gate: string; rev:
     conflicts: [],
     jobs,
     gates,
+    ...overrides,
   };
 }
 
@@ -802,5 +829,591 @@ describe("worktree claim 之后 subagent 才能拿到隔离目录", () => {
   });
 });
 
+// ───────────────────────────── ④ 上下文压力 / 稳定节点 / 交接单 ─────────────────────────────
+
+describe("evaluateContextPressure", () => {
+  it("水位以下 → normal：既不刹车也不交接", () => {
+    const pressure = evaluateContextPressure({ usedTokens: 64_000, contextWindow: 128_000 });
+    assert.equal(pressure.level, "normal");
+    assert.equal(pressure.ratio, 0.5);
+    assert.equal(pressure.shouldBrakeSubagents, false);
+    assert.equal(pressure.shouldHandoffAndCompact, false);
+    assert.equal(formatPercent(pressure.ratio), "50.0%");
+  });
+
+  it(">=60% 软刹车，>=75% 硬刹车（边界含等号）", () => {
+    const soft = evaluateContextPressure({ usedTokens: 76_800, contextWindow: 128_000 });
+    assert.equal(soft.level, "soft_brake");
+    assert.equal(soft.shouldBrakeSubagents, true);
+    assert.equal(soft.shouldHandoffAndCompact, true);
+
+    const hard = evaluateContextPressure({ usedTokens: 96_000, contextWindow: 128_000 });
+    assert.equal(hard.level, "hard_brake");
+
+    // 溢出（> 100%）也是硬刹车，ratio 如实 > 1
+    const over = evaluateContextPressure({ usedTokens: 200_000, contextWindow: 128_000 });
+    assert.equal(over.level, "hard_brake");
+    assert.equal(over.ratio > 1, true);
+  });
+
+  it("用量未知（null / undefined / NaN）按「不知道」处理：不刹车", () => {
+    for (const usedTokens of [null, undefined, Number.NaN, 0, -1]) {
+      const pressure = evaluateContextPressure({ usedTokens, contextWindow: 128_000 });
+      assert.equal(pressure.level, "normal", `usedTokens=${String(usedTokens)} 不该刹车`);
+      assert.equal(pressure.usedTokens, 0);
+      assert.equal(pressure.shouldBrakeSubagents, false);
+    }
+  });
+
+  it("窗口非法退回默认 128000；hard < soft 时抬到 soft（保持单调）", () => {
+    const fallback = evaluateContextPressure({ usedTokens: 96_000, contextWindow: 0 });
+    assert.equal(fallback.contextWindow, 128_000);
+    assert.equal(fallback.level, "hard_brake");
+
+    const clamped = evaluateContextPressure({
+      usedTokens: 108_800, // 0.85
+      contextWindow: 128_000,
+      softWatermark: 0.8,
+      hardWatermark: 0.5,
+    });
+    assert.equal(clamped.level, "hard_brake", "hard 被抬到 0.8，0.85 仍是硬刹车");
+
+    const custom = evaluateContextPressure({
+      usedTokens: 108_800,
+      contextWindow: 128_000,
+      softWatermark: 0.9,
+      hardWatermark: 0.95,
+    });
+    assert.equal(custom.level, "normal", "自定义水位生效");
+  });
+});
+
+describe("isStableCheckpoint", () => {
+  it("门禁上 / 空闲边界 / 冲突边界都是稳定节点", () => {
+    const atGate = summaryWith([jobRow({ id: "r1", stage: "plan" })], [
+      { id: "r1", gate: "plan", rev: 1, title: "方案" },
+    ]);
+    assert.equal(isStableCheckpoint(atGate), true);
+    assert.match(stableCheckpointReason(atGate), /停在待审门上/);
+
+    const idle = summaryWith([]);
+    assert.equal(isStableCheckpoint(idle), true);
+    assert.match(stableCheckpointReason(idle), /干净阶段边界/);
+
+    const conflicted = summaryWith(
+      [jobRow({ id: "r2", stage: "development" })],
+      [],
+      { conflicts: [{ id: "r2", peer: "r3", note: "同文件 feature/x.ts" }] },
+    );
+    assert.equal(isStableCheckpoint(conflicted), true);
+    assert.match(stableCheckpointReason(conflicted), /冲突边界/);
+  });
+
+  it("工具在飞 / 作业在飞且无门 → 不是稳定节点", () => {
+    const pending = summaryWith([], [], { pendingTools: 2 });
+    assert.equal(isStableCheckpoint(pending), false);
+    assert.match(stableCheckpointReason(pending), /工具仍在飞/);
+
+    const inflight = summaryWith([jobRow({ id: "r2", stage: "development", lane: 2 })]);
+    assert.equal(isStableCheckpoint(inflight), false);
+    assert.match(stableCheckpointReason(inflight), /作业在飞且没有门禁/);
+  });
+
+  it("摘要不可用 → 不是稳定节点（不猜）", () => {
+    const unknown = unknownSummary("没有 meta.summary");
+    assert.equal(isStableCheckpoint(unknown), false);
+    assert.match(stableCheckpointReason(unknown), /摘要不可用/);
+  });
+});
+
+describe("buildHandoffMarkdown", () => {
+  const summary = summaryWith(
+    [
+      jobRow({
+        id: "r2",
+        rev: 2,
+        stage: "development",
+        status: "developing",
+        phase: "developing",
+        lane: 2,
+        branch: "feature/r2-x",
+        base: "abc1234",
+        title: "接泳道",
+        executor: "agent-7",
+        planExecutor: "agent-3",
+      }),
+    ],
+    [{ id: "r1", gate: "plan", rev: 2, title: "方案一" }],
+  );
+  const markdown = buildHandoffMarkdown({
+    runId: "demo",
+    summary,
+    pressure: evaluateContextPressure({ usedTokens: 96_000, contextWindow: 128_000 }),
+    artifacts: ["artifacts/r1-plan.md", "artifacts/r2-development.md"],
+    reason: "soft_brake",
+    now: new Date("2026-01-02T03:04:05.000Z"),
+  });
+
+  it("带上 run / 阶段 / 用量 / 时间 / 触发原因", () => {
+    assert.match(markdown, /run：`demo`/);
+    assert.match(markdown, /阶段：`coordinate`/);
+    assert.match(markdown, /96000 \/ 128000 \(75\.0%\)/);
+    assert.match(markdown, /水位 hard_brake/);
+    assert.match(markdown, /2026-01-02T03:04:05\.000Z/);
+    assert.match(markdown, /触发：soft_brake/);
+    assert.match(markdown, /jobs=1 · gates=1 · conflicts=0/);
+  });
+
+  it("作业表带 exec 账本（executor / planExecutor）与泳道信息", () => {
+    assert.match(
+      markdown,
+      /\| r2 \| development \| developing \| 2 \| 2 \| feature\/r2-x \| abc1234 \| agent-7 \| agent-3 \| 接泳道 \|/,
+    );
+  });
+
+  it("门禁表与 VFS 制品列表逐条列出", () => {
+    assert.match(markdown, /\| r1 \| plan \| 2 \| 方案一 \|/);
+    assert.match(markdown, /artifacts\/r1-plan\.md/);
+    assert.match(markdown, /artifacts\/r2-development\.md/);
+    assert.equal(markdown.includes(HANDOFF_ARTIFACT_PATH), true);
+  });
+
+  it("下一步是精确到命令的：先门禁再派活", () => {
+    assert.match(markdown, /vfs_read/);
+    assert.match(markdown, /approve_gate/);
+    assert.match(markdown, /ygg_run_lanes\(\{ runId: "demo" \}\)/);
+    assert.match(markdown, /不要重复派活/);
+  });
+
+  it("标题里的竖线被转义（表格不被撑破）", () => {
+    const piped = buildHandoffMarkdown({
+      runId: "demo",
+      summary: summaryWith([jobRow({ id: "r1", stage: "plan", title: "方案 | 甲" })]),
+    });
+    assert.equal(piped.includes("方案 \\| 甲"), true);
+  });
+
+  it("摘要不可用：明说表格是空的，并给 map.show 的下一步", () => {
+    const unknown = buildHandoffMarkdown({
+      runId: "demo",
+      summary: unknownSummary("宿主没给 meta.summary"),
+    });
+    assert.match(unknown, /摘要不可用：宿主没给 meta\.summary/);
+    assert.match(unknown, /先 `step map\.show` 重新取一次现场/);
+    assert.match(unknown, /event: "map\.show"/);
+  });
+
+  it("review 阶段的下一步是 settle_close", () => {
+    const review = buildHandoffMarkdown({
+      runId: "demo",
+      summary: summaryWith([], [], { stage: "review" }),
+    });
+    assert.match(review, /settle_close/);
+  });
+});
+
+describe("writeHandoffToVfs", () => {
+  it("写进固定路径 artifacts/handoff-latest.md（内容 = 同一份 markdown）", async () => {
+    const written: { path: string; content: string }[] = [];
+    const daemon = {
+      vfsPut: async (artifactPath: string, content: string) => {
+        written.push({ path: artifactPath, content });
+        return { ok: true, bytes: content.length, sha256: "a".repeat(64) };
+      },
+    };
+    const write = await writeHandoffToVfs(daemon, { runId: "demo", summary: summaryWith([]) });
+    assert.equal(write.ok, true);
+    assert.equal(write.path, "artifacts/handoff-latest.md");
+    assert.equal(written.length, 1);
+    assert.equal(written[0].path, HANDOFF_ARTIFACT_PATH);
+    assert.equal(written[0].content, write.markdown);
+    assert.equal(write.sha256?.length, 64);
+  });
+
+  it("vfsPut 被拒 → ok=false 且如实带回原因（不自称写过）", async () => {
+    const daemon = { vfsPut: async () => ({ ok: false, error: "路径形状非法" }) };
+    const write = await writeHandoffToVfs(daemon, { runId: "demo", summary: summaryWith([]) });
+    assert.equal(write.ok, false);
+    assert.equal(write.error, "路径形状非法");
+    assert.equal(write.markdown.length > 0, true, "即使写失败也要有正文可续跑");
+  });
+});
+
+describe("压缩后的续跑消息", () => {
+  it("续跑消息自带 run / 交接单 / 下一步（压完只剩它）", () => {
+    const summary = summaryWith([]);
+    const markdown = buildHandoffMarkdown({ runId: "demo", summary });
+    const message = buildResumeMessage("demo", summary, markdown);
+    assert.equal(HANDOFF_RESUME_CUSTOM_TYPE, "ygg-handoff-resume");
+    assert.match(message, /上下文已在检查点压缩/);
+    assert.equal(message.includes(markdown.trim()), true);
+    assert.match(message, /下一步（从这里接）/);
+    assert.match(message, /门禁（approve \/ reject）是人的决定/);
+  });
+
+  it("我们自己触发的压缩：指令要求摘要逐字保留状态块", () => {
+    const markdown = buildHandoffMarkdown({ runId: "demo", summary: summaryWith([]) });
+    const instructions = buildCompactInstructions("demo", markdown);
+    assert.match(instructions, /检查点压缩/);
+    assert.match(instructions, /必须原样保留/);
+    assert.equal(instructions.includes(markdown.trim()), true);
+    assert.match(instructions, /===== 必须原样保留的状态块（开始） =====/);
+  });
+});
+
+// ───────────────────────────── ⑤ subagent create + resume 生命周期 ─────────────────────────────
+
+describe("extractAgentId", () => {
+  it("优先读 details 里的结构化 id", () => {
+    assert.equal(extractAgentId("随便一段话", { agentId: "agent-7" }), "agent-7");
+    assert.equal(extractAgentId("", { agent_id: "agent-8" }), "agent-8");
+    assert.equal(extractAgentId("", { id: "agent-9" }), "agent-9");
+  });
+
+  it("退回正文里的 `Agent ID:`（后台运行的写法）", () => {
+    const text = "Agent started in background.\nAgent ID: agent-abc_1\nUse get_subagent_result…";
+    assert.equal(extractAgentId(text), "agent-abc_1");
+  });
+
+  it("都没有 → undefined（不猜 id）", () => {
+    assert.equal(extractAgentId("报告正文", { status: "completed" }), undefined);
+    assert.equal(extractAgentId("", null), undefined);
+  });
+});
+
+describe("resolveResumeId（续谁）", () => {  it("job.executor 非空 → 同阶段重派续原执行者", () => {
+    const job = jobRow({ id: "r3", stage: "plan", rev: 2, executor: "agent-42" });
+    assert.equal(resolveResumeId(job), "agent-42");
+    assert.match(resumeReason(job, false), /同阶段重派/);
+  });
+
+  it("plan → development 显式允许时续方案执行者", () => {
+    const job = jobRow({ id: "r4", stage: "development", planExecutor: "agent-plan" });
+    assert.equal(resolveResumeId(job, { resumePlanAgent: true }), "agent-plan");
+    assert.equal(resolveResumeId(job, { resumePlanAgent: false }), "", "没开开关就新起一个");
+    assert.match(resumeReason(job, true), /跨阶段续跑/);
+  });
+
+  it("没登记 → 空串（新起一个 subagent）", () => {
+    assert.equal(resolveResumeId(jobRow()), "");
+    assert.match(resumeReason(jobRow(), false), /新起一个/);
+  });
+});
+
+describe("actorForLedger（exec= 段的 id）", () => {
+  it("正常 id 直接用；空白 / 空串 / 超长一律退回默认执行者", () => {
+    assert.equal(actorForLedger("agent-7", "pi-ygg-harness"), "agent-7");
+    assert.equal(actorForLedger(" agent-7 ", "pi-ygg-harness"), "agent-7");
+    assert.equal(actorForLedger("agent 7", "pi-ygg-harness"), "pi-ygg-harness", "空白会被 Mod 拒掉整条提案");
+    assert.equal(actorForLedger("", "pi-ygg-harness"), "pi-ygg-harness");
+    assert.equal(actorForLedger(undefined, "pi-ygg-harness"), "pi-ygg-harness");
+    assert.equal(actorForLedger("a".repeat(65), "pi-ygg-harness"), "pi-ygg-harness");
+  });
+});
+
+describe("parseLaneProbeNarrative / laneProbeNeedsCommit", () => {
+  it("读 commits / clean，取最后一次出现的值", () => {
+    const verdict = parseLaneProbeNarrative([
+      "[LANE PROBE] lane-2 commits=3 clean=1 head=abc files=src/a.ts",
+      "[LANE PROBE FAILED] lane-2 commits=0 clean=0",
+    ]);
+    assert.deepEqual(verdict, { known: true, commits: 0, clean: false });
+    assert.equal(laneProbeNeedsCommit(verdict), true);
+  });
+
+  it("读不到 → known=false，不触发自愈", () => {
+    const verdict = parseLaneProbeNarrative(["[TOOL] git.lane_probe"]);
+    assert.equal(verdict.known, false);
+    assert.equal(laneProbeNeedsCommit(verdict), false);
+    assert.equal(laneProbeNeedsCommit(UNKNOWN_LANE_PROBE), false);
+  });
+
+  it("commits=0 或 clean=0 任一为真都算「没提交」", () => {
+    assert.equal(laneProbeNeedsCommit({ known: true, commits: 0, clean: true }), true);
+    assert.equal(laneProbeNeedsCommit({ known: true, commits: 2, clean: false }), true);
+    assert.equal(laneProbeNeedsCommit({ known: true, commits: 2, clean: true }), false);
+    assert.equal(laneProbeNeedsCommit({ known: true, commits: null, clean: null }), false);
+  });
+
+  it("本地 git 探测读不到工作树 → unknown（宁可不报）", () => {
+    assert.deepEqual(readLaneProbeFromGit(null, "abc"), UNKNOWN_LANE_PROBE);
+    assert.deepEqual(
+      readLaneProbeFromGit(path.join(os.tmpdir(), "definitely-not-a-worktree-ygg"), "abc"),
+      UNKNOWN_LANE_PROBE,
+    );
+  });
+});
+
+describe("orchestrateActiveJobs：subagent create + resume", () => {
+  it("create：没登记执行者就不带 resume，并把真实 agentId 记进 exec= 段", async () => {
+    const daemon = new MockDaemon([jobRow({ id: "r2", stage: "development", lane: 2, branch: "feature/r2-x" })]);
+    const seen: SubagentRequest[] = [];
+    await orchestrateActiveJobs(
+      daemon,
+      async (request) => {
+        seen.push(request);
+        return { text: "实现完成", ok: true, agentId: "agent-77" };
+      },
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        readArtifact: () => null,
+        readLaneProbe: () => UNKNOWN_LANE_PROBE,
+      },
+    );
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].resume, undefined, "没登记执行者时是新起一个");
+    const submit = daemon.calls.find((call) => call.event === "proposal.submit");
+    const segments = String(submit?.payload ?? "").split("|");
+    assert.equal(segments[7].startsWith("exec=agent-77:"), true, "账本要写真实 subagent id");
+  });
+
+  it("gate 打回后同阶段重派 → 自动 resume job.executor", async () => {
+    const daemon = new MockDaemon([jobRow({ id: "r3", stage: "plan", rev: 2, executor: "agent-42" })]);
+    const seen: SubagentRequest[] = [];
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (request) => {
+        seen.push(request);
+        return { text: "修好重提", ok: true, agentId: "agent-42" };
+      },
+      { cwd: "/tmp/repo", repoDir: "/tmp/repo", readArtifact: () => null },
+    );
+    assert.equal(seen[0].resume, "agent-42");
+    assert.equal(
+      result.narrative.some((line) => line.includes("[RESUME] r3 plan") && line.includes("agent-42")),
+      true,
+      "续跑这件事要留在回执里",
+    );
+  });
+
+  it("plan → development 只在开 resumePlanAgent 时续跑", async () => {
+    const job = jobRow({
+      id: "r4",
+      stage: "development",
+      lane: 1,
+      branch: "feature/r4-x",
+      planExecutor: "agent-plan",
+    });
+    const times: (string | undefined)[] = [];
+    const run = async (resumePlanAgent: boolean) => {
+      const daemon = new MockDaemon([{ ...job }]);
+      await orchestrateActiveJobs(
+        daemon,
+        async (request) => {
+          times.push(request.resume);
+          return { text: "实现完成", ok: true, agentId: "agent-new" };
+        },
+        {
+          cwd: "/tmp/repo",
+          repoDir: "/tmp/repo",
+          readArtifact: () => null,
+          readLaneProbe: () => UNKNOWN_LANE_PROBE,
+          resumePlanAgent,
+        },
+      );
+    };
+    await run(true);
+    await run(false);
+    assert.deepEqual(times, ["agent-plan", undefined]);
+  });
+
+  it("流断开（ok=false）→ 用 agentId 自愈续跑一次，报告取重试结果", async () => {
+    const daemon = new MockDaemon([jobRow({ id: "r5", stage: "plan" })]);
+    const seen: SubagentRequest[] = [];
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (request) => {
+        seen.push(request);
+        if (seen.length === 1) {
+          return { text: "部分输出", ok: false, error: "stream 断开", agentId: "agent-9" };
+        }
+        return { text: "重试后完整方案", ok: true, agentId: "agent-9" };
+      },
+      { cwd: "/tmp/repo", repoDir: "/tmp/repo", readArtifact: () => null },
+    );
+    assert.equal(seen.length, 2);
+    assert.equal(seen[1].resume, "agent-9");
+    assert.match(result.jobs[0].report, /重试后完整方案/);
+    assert.equal(
+      result.narrative.some((line) => line.includes("[SELF-HEAL] r5") && line.includes("agent-9")),
+      true,
+    );
+  });
+
+  it("失败且不知道续谁 → 不重试（不猜 id）", async () => {
+    const daemon = new MockDaemon([jobRow({ id: "r6", stage: "plan" })]);
+    const seen: SubagentRequest[] = [];
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (request) => {
+        seen.push(request);
+        return { text: "", ok: false, error: "崩了" };
+      },
+      { cwd: "/tmp/repo", repoDir: "/tmp/repo", readArtifact: () => null },
+    );
+    assert.equal(seen.length, 1);
+    assert.equal(result.jobs[0].error, "崩了");
+  });
+
+  it("探针报 commits=0 → 续跑同一 subagent 补提交，然后复跑探针", async () => {
+    const job = jobRow({
+      id: "r7",
+      stage: "development",
+      lane: 3,
+      branch: "feature/r7-x",
+      status: "developing",
+      phase: "developing",
+    });
+    const daemon = new MockDaemon([job]);
+    const seen: SubagentRequest[] = [];
+    let reads = 0;
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (request) => {
+        seen.push(request);
+        return request.resume === undefined
+          ? { text: "实现完成", ok: true, agentId: "agent-5" }
+          : { text: "已 git add + commit", ok: true, agentId: "agent-5" };
+      },
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        readArtifact: () => null,
+        readLaneProbe: () => {
+          reads += 1;
+          return reads === 1
+            ? { known: true, commits: 0, clean: true }
+            : { known: true, commits: 1, clean: true };
+        },
+      },
+    );
+
+    assert.equal(seen.length, 2, "第二次是自愈续跑");
+    assert.equal(seen[1].resume, "agent-5");
+    assert.equal(seen[1].prompt, COMMIT_NUDGE_TEXT);
+    const probes = daemon.claimCalls().filter((call) => call.startsWith("git.lane_probe|"));
+    assert.equal(probes.length, 2, "补提交后要复跑探针");
+    assert.equal(
+      result.narrative.some((line) => line.includes("已续跑要求补提交")),
+      true,
+    );
+    assert.equal(
+      result.narrative.some((line) => line.includes("补提交后 commits=1")),
+      true,
+    );
+    const archived = daemon.vfs.filter((entry) => entry.path === "artifacts/r7-development.md").pop();
+    assert.match(archived?.content ?? "", /自愈补提交/);
+  });
+
+  it("探针真值未知 → 不催提交（也没有 agentId 时更不该动）", async () => {
+    const daemon = new MockDaemon([
+      jobRow({ id: "r8", stage: "development", lane: 4, branch: "feature/r8-x" }),
+    ]);
+    let spawned = 0;
+    await orchestrateActiveJobs(
+      daemon,
+      async () => {
+        spawned += 1;
+        return { text: "实现完成", ok: true, agentId: "agent-8" };
+      },
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        readArtifact: () => null,
+        readLaneProbe: () => UNKNOWN_LANE_PROBE,
+      },
+    );
+    assert.equal(spawned, 1);
+    assert.equal(
+      daemon.claimCalls().filter((call) => call.startsWith("git.lane_probe|")).length,
+      1,
+    );
+  });
+});
+
+describe("上下文压力刹车（编排层）", () => {
+  it("硬刹车：一个 subagent 都不派、不建 worktree，先写交接单进 VFS", async () => {
+    const daemon = new MockDaemon([jobRow({ id: "r2", stage: "development" })]);
+    let spawned = 0;
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async () => {
+        spawned += 1;
+        return { text: "不该跑", ok: true };
+      },
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        runId: "demo",
+        readArtifact: () => null,
+        checkContextPressure: () =>
+          evaluateContextPressure({ usedTokens: 100_000, contextWindow: 128_000 }),
+      },
+    );
+    assert.equal(spawned, 0, "硬刹车一个都不派");
+    assert.equal(daemon.claimCalls().length, 0, "硬刹车不建 worktree");
+    assert.equal(result.contextBraked, true);
+    assert.equal(result.jobs.length, 0);
+    assert.equal(daemon.vfs.length, 1);
+    assert.equal(daemon.vfs[0].path, HANDOFF_ARTIFACT_PATH);
+    assert.match(daemon.vfs[0].content, /hard_brake/);
+    assert.match(daemon.vfs[0].content, /run：`demo`/);
+    assert.equal(result.handoff?.ok, true);
+    assert.equal(
+      result.narrative.some((line) => line.includes("[HANDOFF]")),
+      true,
+    );
+  });
+
+  it("软刹车：本波照跑并落在门上，落地后再写交接单（不在半路压）", async () => {
+    const daemon = new MockDaemon([jobRow({ id: "r2", stage: "plan" })]);
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async () => ({ text: "方案正文", ok: true, agentId: "agent-1" }),
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        runId: "demo",
+        readArtifact: () => null,
+        checkContextPressure: () =>
+          evaluateContextPressure({ usedTokens: 83_200, contextWindow: 128_000 }),
+      },
+    );
+    assert.equal(result.jobs.length, 1, "软刹车这一波要跑完");
+    assert.equal(
+      daemon.calls.some((call) => call.event === "proposal.accept"),
+      true,
+      "要落在门上才算稳定节点",
+    );
+    assert.equal(result.contextBraked, true);
+    const handoff = daemon.vfs.find((entry) => entry.path === HANDOFF_ARTIFACT_PATH);
+    assert.notEqual(handoff, undefined);
+    assert.match(handoff?.content ?? "", /soft_brake/);
+  });
+
+  it("没接压力探针 → 不刹车、不写交接单", async () => {
+    const daemon = new MockDaemon([jobRow({ id: "r2", stage: "plan" })]);
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async () => ({ text: "方案正文", ok: true }),
+      { cwd: "/tmp/repo", repoDir: "/tmp/repo", readArtifact: () => null },
+    );
+    assert.equal(result.contextBraked, false);
+    assert.equal(result.handoff, undefined);
+    assert.equal(
+      daemon.vfs.some((entry) => entry.path === HANDOFF_ARTIFACT_PATH),
+      false,
+    );
+  });
+});
+
 // 让 tsc/编辑器知道这些类型确实被用到（运行时无副作用）。
-export type _Types = [RunSummary, StepReceipt, SummaryJob, SubagentRequest, OrchestratorDaemon];
+export type _Types = [
+  RunSummary,
+  StepReceipt,
+  SummaryJob,
+  SubagentRequest,
+  OrchestratorDaemon,
+  HandoffWrite,
+];

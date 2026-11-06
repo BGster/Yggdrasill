@@ -399,8 +399,9 @@ machine, it only speaks to it through `daemon.dispatch` → `ygg.on(...)` handle
 | --- | --- |
 | `firewall.ts` | `tool_call` gate: the data red line (`*.xlsx` / `*.xls` / `*.csv`, `/Volumes/WenshuSpace/**`) and the batch-entrypoint prohibition (`--events`, shell `for/while … do … ygg-agent`, `xargs ygg-agent`). Pure [`checkToolCallFirewall`](.pi/extensions/ygg-pi-harness/firewall.ts), directly unit-tested. |
 | `daemon.ts` | Persistent `ygg-agent --daemon` client: line JSON-RPC, id matching, serialized request queue, 30s timeout, respawn after an unexpected exit, and a **single-shot CLI fallback** when the host predates `--daemon` (the summary then reports `available=false` instead of guessing jobs/gates). |
-| `orchestrator.ts` | Lane lifecycle for active jobs: [`buildSubagentBrief`](.pi/extensions/ygg-pi-harness/orchestrator.ts) builds a self-contained brief; [`orchestrateActiveJobs`](.pi/extensions/ygg-pi-harness/orchestrator.ts) claims the worktree, runs subagents concurrently, archives into the run VFS, probes the lane, submits and accepts the proposal — landing the requirement at `plan_gate` / `accept_gate`. |
-| `index.ts` | Wiring: session lifecycle hooks, the `tool_call` firewall, `/ygg status` and `/ygg stop`, the tools `ygg_session` / `ygg_run_lanes`, and the footer status line. |
+| `orchestrator.ts` | Lane lifecycle for active jobs: [`buildSubagentBrief`](.pi/extensions/ygg-pi-harness/orchestrator.ts) builds a self-contained brief; [`orchestrateActiveJobs`](.pi/extensions/ygg-pi-harness/orchestrator.ts) claims the worktree, runs subagents concurrently, archives into the run VFS, probes the lane, submits and accepts the proposal — landing the requirement at `plan_gate` / `accept_gate`. It also owns the **subagent create + resume** lifecycle (real `agent_id` written into `exec=`, `resume` on a gate reject / `plan → development`, one self-heal on a stream error and one on a dirty lane probe) and the **context brake** (hard = spawn nothing and hand off first, soft = land the wave, then hand off). |
+| `compaction.ts` | Context pressure monitor + stable-node predicate + structured handoff. [`evaluateContextPressure`](.pi/extensions/ygg-pi-harness/compaction.ts) (soft 0.60 / hard 0.75; unknown token counts never brake), [`isStableCheckpoint`](.pi/extensions/ygg-pi-harness/compaction.ts) (`available` ∧ no pending tools ∧ (gate ∨ no jobs ∨ conflict)), [`buildHandoffMarkdown`](.pi/extensions/ygg-pi-harness/compaction.ts) → `artifacts/handoff-latest.md` through [`writeHandoffToVfs`](.pi/extensions/ygg-pi-harness/compaction.ts), plus the resume-message and compact-instruction builders. No npm deps and erasable TypeScript only, so `node --experimental-strip-types` loads it directly. |
+| `index.ts` | Wiring: session lifecycle hooks, the `tool_call` firewall, `/ygg status` and `/ygg stop`, the tools `ygg_session` (`kickoff` / `step` / gate / `vfs_*` / `handoff_compact` / `settle_close`) and `ygg_run_lanes`, the compaction hooks (`session_before_compact` / `session_compact` / `session_compact_failed`), and the footer status line. |
 
 What the extension deliberately does **not** do:
 
@@ -410,6 +411,25 @@ What the extension deliberately does **not** do:
   receipt as if it had passed: rejections are surfaced verbatim.
 - **It never truncates a receipt.** Every `narrative` line reaches the conversation, and
   `pendingChoice` is handed over raw.
+- **It never compacts mid-flight.** `maybeHandoffAndCompact` requires a stable node
+  (`isStableCheckpoint`) unless the caller forces it (`handoff_compact`, or a brake the orchestrator
+  already took); compacting while a wave is in the air would fold that wave into prose instead of
+  landing it on a gate.
+- **It never resumes a guessed id.** `extractAgentId` returns `undefined` rather than synthesising
+  one, and `runSubagent` only retries when it knows who to resume — a fabricated id would silently
+  become a fresh agent with no memory of the rejected proposal.
+
+### 3.1 Context pressure, checkpoint handoff and auto-resume
+
+| Piece | Rule |
+| --- | --- |
+| Watermarks | `ratio >= 0.60` → `soft_brake`, `>= 0.75` → `hard_brake` (both inclusive, both override via `evaluateContextPressure` args). Unknown usage (`null` / `NaN` / non-positive) → `normal`: “I don't know” is not grounds for a destructive action. |
+| Stable node | `available` ∧ `pendingTools === 0` ∧ (a pending gate ∨ no running job ∨ an unresolved conflict). Running jobs with no gate and no conflict is *no* stable node — that is exactly the half-way point where compaction loses subagent output. |
+| Handoff artifact | `artifacts/handoff-latest.md`, rewritten at every checkpoint: run id, stage, `used / window (xx.x%)`, timestamp, jobs table (including the `executor` / `planExecutor` ledger columns), pending gates, unresolved conflicts, VFS artifacts, and the exact `ygg_session` / `ygg_run_lanes` call to run next. |
+| Self-triggered compaction | `ctx.compact({ customInstructions })` with the state block marked “keep verbatim”; `onComplete` sends a `ygg-handoff-resume` custom message with `triggerTurn: true`. The tool call that triggered it is usually aborted (compact aborts the turn), so that message has to carry the whole position. |
+| External compaction (`/compact`, threshold, overflow) | `session_before_compact` writes the artifact first (survives even if the summary is bad), and `session_compact` re-injects the same state block with `triggerTurn: false` — an external `/compact` must not spontaneously start a new turn. |
+| Subagent lifecycle | `resume = job.executor` (gate reject → same stage, `rev+1`); `resume = job.planExecutor` only when `resumePlanAgent` is on and the stage is `development`; retry once on `ok === false` (stream drop) and once when the lane probe reports `commits=0` / `clean=0` (the subagent forgot to commit; the nudge prompt is `COMMIT_NUDGE_TEXT` and the probe is re-run afterwards). |
+| Ledger honesty | `proposal.submit`'s `exec=` segment carries the returned `agent_id` (falling back to `opts.actorId`), so the next re-dispatch has somebody to resume. An unreadable probe verdict never triggers a retry. |
 
 Verification (no external dependencies, so it runs in any checkout):
 
@@ -422,3 +442,17 @@ The suite covers both sides of every firewall rule (blocked **and** allowed), br
 whole orchestration chain (claim before dispatch, concurrency, `vfs_put`, probe, proposal payload
 positions, landing at the right gate), and the daemon line protocol (id matching, serialization,
 fallback, and `.env` exposing only `YGG_SUBAGENT_MODEL` / `YGG_SUBAGENT_THINKING`).
+
+It also covers the checkpoint path: the watermarks (normal / soft at exactly 60% / hard at exactly
+75% / overflow / unknown tokens / non-positive window / inverted custom watermarks), the stable-node
+predicate (gate, idle boundary and conflict → true; pending tools, mid-flight jobs and an unavailable
+summary → false), the handoff document (usage line, `executor` / `planExecutor` columns, `|`
+escaping, the empty-summary warning, the exact next-step commands) and its single `vfsPut` at
+`artifacts/handoff-latest.md`, the resume message and compact instructions, `extractAgentId`
+(`details` first, `Agent ID:` text fallback, never invented), `resolveResumeId` (gate reject /
+`plan → development` / fresh spawn), the three self-heal paths (stream error → one resume, dirty
+probe → nudge commit → re-probe → re-archive, unknown verdict → no retry), the real `agent_id` in the
+`exec=` segment, and both brake levels at the orchestration layer (hard spawns nothing and claims no
+worktree; soft lands the wave and only then writes the handoff). Four mutation probes confirm the
+assertions bite: forcing `resolveResumeId` to `""`, `laneProbeNeedsCommit` to `false`, dropping the
+hard brake, or hard-coding `actorId` in `exec=` each turns exactly the matching cases red.
