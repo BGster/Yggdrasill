@@ -13,6 +13,7 @@ local choice = require("src.handlers.choice")
 local props = require("src.proposals")
 local render_mod = require("src.render")
 local reqs = require("src.requirements")
+local tools = require("src.tools")
 local util = require("src.util")
 local wire = require("src.wire")
 
@@ -175,6 +176,11 @@ function M.install(deps)
       summarize = TEXTS.beats.req_prop_no_summary
     end
     local prop_index = prop_append(index, spec.rev, spec.stage, summarize, spec.artifacts, spec.ext, spec.changes)
+    -- 同步核验（0ms，受 `tuning.artifact_capacity` 与 `MAX_ARTIFACT_CHECKS` 限）：
+    -- 宿主没装 `ygg.fs` 时整体 no-op；命中则同步落 `artifact.*` 并叙事（不 render，本 handler 末尾统一 render）。
+    if spec.artifacts ~= "" then
+      tools.verify_artifacts(spec.artifacts)
+    end
     -- 状态不变（5 态下「等验收」由 pending 提案表表达）；只释放 job 槽位。
     ygg.kv.set(req_key(index, "job"), "")
     ygg.narrate(fill(TEXTS.beats.req_prop_ok, {

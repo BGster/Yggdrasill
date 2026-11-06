@@ -1221,11 +1221,12 @@ fn tool_declarations_stay_consistent_across_both_mods() {
             json!("cli"),
             "{id}: this round only declares cli tools"
         );
-        assert_eq!(
-            spec["readOnly"],
-            json!(true),
-            "{id}: only read-only tools are declared"
-        );
+        // `readOnly` is a declared fact, not a policy: the active subsystem needs two writer
+        // tools (`git.worktree_claim` / `harness.archive_sessions`), and a writer may never
+        // detach (host contract: `inlineWaitMs > 0` when `readOnly == false`).
+        let read_only = spec["readOnly"]
+            .as_bool()
+            .unwrap_or_else(|| panic!("{id}: readOnly must be a boolean"));
         assert_eq!(
             spec["resultEvent"],
             json!("tool.result"),
@@ -1238,8 +1239,8 @@ fn tool_declarations_stay_consistent_across_both_mods() {
             .as_u64()
             .unwrap_or_else(|| panic!("{id}: inlineWaitMs must be an unsigned integer"));
         assert!(
-            inline > 0,
-            "{id}: a read-only tool must have a positive inline wait"
+            read_only || inline > 0,
+            "{id}: a writer tool (`readOnly: false`) may not detach - inlineWaitMs must be positive"
         );
         assert!(
             timeout >= inline,
@@ -1272,9 +1273,31 @@ fn tool_declarations_stay_consistent_across_both_mods() {
             let arg = arg
                 .as_str()
                 .unwrap_or_else(|| panic!("{id}: args items must be strings"));
+            // Placeholders are legal **only** in the `{{name}}` shape (a bare, lowercase
+            // identifier). A credential arrives through `$ENV{VAR}` host-side, never inline.
             assert!(
-                !arg.contains("{{") && !arg.contains("$ENV{"),
-                "{id}: `{arg}` uses a placeholder this Mod never fills (no runtime arguments)"
+                !arg.contains("$ENV{"),
+                "{id}: `{arg}` must not read the process environment inline"
+            );
+            for (at, _) in arg.match_indices("{{") {
+                let rest = &arg[at + 2..];
+                let end = rest
+                    .find("}}")
+                    .unwrap_or_else(|| panic!("{id}: `{arg}` has an unclosed `{{`"));
+                let name = &rest[..end];
+                let legal = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                    && !name.starts_with(|c: char| c.is_ascii_digit());
+                assert!(
+                    legal,
+                    "{id}: `{{{{{name}}}}}` must name a lowercase identifier (the Mod fills `lane` / `req` / `branch` / `base` / `path` / `mode` / `parent` / `batch`)"
+                );
+            }
+            assert!(
+                arg.matches("{{").count() == arg.matches("}}").count(),
+                "{id}: `{arg}` has an unbalanced placeholder"
             );
         }
     }
@@ -1404,4 +1427,490 @@ fn tool_declarations_stay_consistent_across_both_mods() {
             json!({"flag": "tool-result", "shape": "payload"})
         );
     }
+}
+
+// ───────────────────────── A · active subsystem (r2) ─────────────────────────
+
+/// One full tool round trip: register the request, then settle it. Machine actions carry no
+/// menu ticket (§8), and the call id is explicit so every assertion can name it.
+fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
+    game.narrate("tool.call", &text(call));
+    narrative_lines(&game.reply("tool.result", &text(result)))
+}
+
+/// Every `TEXTS.<group>.<name>` reference in the Mod source (static keys only: the dynamic
+/// `TEXTS.beats[expr]` form is skipped). One side suffices as input — the skeleton is
+/// byte-identical on both, and the caller re-checks the keys against **both** scene files.
+fn text_references(dir: &Path) -> Vec<(String, String)> {
+    fn walk(path: &Path, out: &mut Vec<PathBuf>) {
+        if path.is_file() {
+            out.push(path.to_owned());
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            walk(&entry.path(), out);
+        }
+    }
+
+    let mut files = Vec::new();
+    walk(&dir.join("mod.lua"), &mut files);
+    walk(&dir.join("src"), &mut files);
+
+    let mut refs = Vec::new();
+    for file in files {
+        let Ok(source) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let mut rest = source.as_str();
+        while let Some(at) = rest.find("TEXTS.") {
+            rest = &rest[at + "TEXTS.".len()..];
+            let group_end = rest
+                .find(|c: char| !(c.is_ascii_lowercase() || c == '_'))
+                .unwrap_or(rest.len());
+            let group = &rest[..group_end];
+            if !matches!(group, "beats" | "prompts" | "options" | "endings") {
+                continue;
+            }
+            let Some(tail) = rest[group_end..].strip_prefix('.') else {
+                continue;
+            };
+            let name_end = tail
+                .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+                .unwrap_or(tail.len());
+            let name = &tail[..name_end];
+            if !name.is_empty() {
+                refs.push((group.to_owned(), name.to_owned()));
+            }
+        }
+    }
+    refs
+}
+
+/// A1 `git.worktree_claim` folds into the **same** lane ledger as `lane.claim` (same function,
+/// same keys, `since` tick included), and `git.worktree_release` frees it by lane number.
+///
+/// Mutation: replace `LANES.bind(..)` with a direct `lane.<k>.branch` write (dropping
+/// `req.<i>.lane` / `since`) → the `lane.2.since` and `req.1.lane` assertions go red.
+#[test]
+fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("subsystem gate|synthetic task description"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("synthetic requirement|synthetic description|subsys-r1"),
+    );
+
+    let claimed = tool_round(
+        &mut game,
+        "git.worktree_claim|lane=2;req=r1;branch=feat-a|t1",
+        "t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feat-a;base=abc1234;clean=1;path=/tmp/wt2",
+    );
+    assert_eq!(
+        count_lines(&claimed, "[WORKTREE CLAIMED]"),
+        1,
+        "{claimed:#?}"
+    );
+    game.assert_kv("lane.2.req", json!("r1"));
+    game.assert_kv("lane.2.branch", json!("feat-a"));
+    game.assert_kv("lane.2.base", json!("abc1234"));
+    game.assert_kv("lane.2.clean", json!("1"));
+    game.assert_kv("lane.2.since", json!(1));
+    game.assert_kv("req.1.lane", json!(2));
+    game.assert_kv("tool.reacted.t1", json!(true));
+    // The ledger is a read surface too: the design map prints the ledger row.
+    assert!(
+        game.narrate("map.show", &text("full"))
+            .join("\n")
+            .contains("lane-2 ← r1"),
+        "map.show full must show the claimed lane"
+    );
+
+    // A fresh external_id re-applies the result (idempotency key only) but the latch keeps the
+    // domain fold one-shot: no second `[WORKTREE CLAIMED]`.
+    let replayed = narrative_lines(&game.reply(
+        "tool.result",
+        &text("t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feat-a;base=abc1234;clean=1;path=/tmp/wt2|ext-1"),
+    ));
+    assert_eq!(
+        count_lines(&replayed, "[WORKTREE CLAIMED]"),
+        0,
+        "{replayed:#?}"
+    );
+
+    // Release: the tool carries the lane number, not the requirement index.
+    let released = tool_round(
+        &mut game,
+        "git.worktree_release|lane=2|t2",
+        "t2|git.worktree_release|ok|0|lane=2;released=1",
+    );
+    assert_eq!(
+        count_lines(&released, "[WORKTREE RELEASED]"),
+        1,
+        "{released:#?}"
+    );
+    game.assert_kv("lane.2.req", json!(""));
+    game.assert_kv("req.1.lane", json!(0));
+}
+
+/// A2 `git.lane_probe` records the truth, the conflict radar raises a **blocking** conflict on a
+/// file overlap, a failed probe is only a warning, and `requirement.resolve` clears all four keys.
+///
+/// Mutation: replace `req_do_conflict(.., "radar")` with `ygg.kv.set(req_key(..., "conflict"), true)`
+/// → `req.conflicts` and every `conflict_note` assertion go red (the count reads text, not a bool).
+#[test]
+fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("subsystem gate|synthetic task description"),
+    );
+    game.narrate("requirement.add", &text("left half|description|subsys-a"));
+    game.narrate("requirement.add", &text("right half|description|subsys-b"));
+    game.narrate("lane.claim", &text("1|r1|||1"));
+    game.narrate("lane.claim", &text("2|r2|||1"));
+
+    // ① the probe lands in KV, no overlap yet.
+    tool_round(
+        &mut game,
+        "git.lane_probe|lane=1;base=abc;branch=feat-a|t1",
+        "t1|git.lane_probe|ok|0|lane=1;branch=feat-a;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
+    );
+    game.assert_kv("lane.1.probe.commits", json!(2));
+    game.assert_kv("lane.1.probe.clean", json!("1"));
+    game.assert_kv("lane.1.probe.head", json!("1111111"));
+    game.assert_kv("lane.1.probe.files", json!("src/a.lua,src/b.lua"));
+    game.assert_kv("lane.1.probe.call", json!("t1"));
+    game.assert_kv("req.1.conflict", json!(""));
+
+    // ② a shared file raises one conflict through the very same writer as the human path.
+    let radar = tool_round(
+        &mut game,
+        "git.lane_probe|lane=2;base=abc;branch=feat-b|t2",
+        "t2|git.lane_probe|ok|0|lane=2;branch=feat-b;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
+    );
+    assert_eq!(count_lines(&radar, "[CONFLICT RADAR]"), 1, "{radar:#?}");
+    game.assert_kv("req.1.conflict", json!("overlapping file: src/b.lua"));
+    game.assert_kv("req.1.conflict_peer", json!("r2"));
+    game.assert_kv("req.1.conflict_note", json!("overlapping file: src/b.lua"));
+    game.assert_kv("req.1.conflict_source", json!("radar"));
+    game.assert_kv("req.2.conflict_peer", json!("r1"));
+    game.assert_kv("req.conflicts", json!(2));
+    assert_eq!(game.phase("r1"), "blocked");
+    assert_eq!(game.phase("r2"), "blocked");
+
+    // The radar rides the very counter `gates.gate_problem()` reads, so it is a hard block with
+    // no extra wiring; the summary is the read surface the host seals.
+    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    let conflicts = summary["conflicts"].as_array().expect("summary.conflicts");
+    assert_eq!(conflicts.len(), 2, "{summary}");
+    assert_eq!(conflicts[0]["peer"], json!("r2"));
+    assert_eq!(conflicts[0]["note"], json!("overlapping file: src/b.lua"));
+
+    // ③ a failed probe (commits=0) is a warning, never a block: no new conflict, state stays.
+    let failed = tool_round(
+        &mut game,
+        "git.lane_probe|lane=2;base=abc;branch=feat-b|t3",
+        "t3|git.lane_probe|ok|0|lane=2;branch=feat-b;base=abc;head=2222222;commits=0;clean=1;files=",
+    );
+    assert_eq!(
+        count_lines(&failed, "[LANE PROBE FAILED]"),
+        1,
+        "{failed:#?}"
+    );
+    game.assert_kv("req.conflicts", json!(2));
+    game.assert_kv("lane.2.probe.commits", json!(0));
+
+    // ④ `requirement.resolve` is the only way out: all four keys go back to empty.
+    game.narrate("requirement.resolve", &text("r1,r2|keep_both|re-checked"));
+    game.assert_kv("req.conflicts", json!(0));
+    game.assert_kv("req.1.conflict", json!(""));
+    game.assert_kv("req.1.conflict_peer", json!(""));
+    game.assert_kv("req.1.conflict_note", json!(""));
+    game.assert_kv("req.1.conflict_source", json!(""));
+    game.assert_kv("req.2.conflict_source", json!(""));
+    assert_eq!(game.phase("r1"), "draft");
+}
+
+/// A3 `fs.artifact_probe` and `vfs.write` feed **one** bounded ledger (`record_artifact` is the
+/// single writer), and the VFS path shape is refused before anything is recorded.
+///
+/// Mutation: drop the `artifact.count` bound in `record_artifact` → the second/third probes
+/// still record, so `artifact.count` no longer matches the number of distinct paths.
+#[test]
+fn artifact_probe_and_vfs_keep_one_ledger() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("subsystem gate|synthetic task description"),
+    );
+    let sha = "a".repeat(64);
+
+    // ① a readable artifact lands in the ledger.
+    let verified = tool_round(
+        &mut game,
+        "fs.artifact_probe|path=artifacts/plan.md|t1",
+        &format!("t1|fs.artifact_probe|ok|0|path=artifacts/plan.md;exists=1;bytes=42;sha256={sha}"),
+    );
+    assert_eq!(
+        count_lines(&verified, "[ARTIFACT VERIFIED]"),
+        1,
+        "{verified:#?}"
+    );
+    game.assert_kv("artifact.artifacts/plan.md.bytes", json!(42));
+    game.assert_kv("artifact.artifacts/plan.md.sha256", json!(sha));
+    game.assert_kv("artifact.artifacts/plan.md.source", json!("probe"));
+    game.assert_kv("artifact.count", json!(1));
+    game.assert_kv("artifact.seq.1", json!("artifacts/plan.md"));
+
+    // ② an empty file is not evidence.
+    let empty = tool_round(
+        &mut game,
+        "fs.artifact_probe|path=artifacts/empty.md|t2",
+        "t2|fs.artifact_probe|ok|0|path=artifacts/empty.md;exists=1;bytes=0;sha256=",
+    );
+    assert_eq!(count_lines(&empty, "[ARTIFACT EMPTY]"), 1, "{empty:#?}");
+    game.assert_kv("artifact.artifacts/empty.md.bytes", json!(null));
+    game.assert_kv("artifact.count", json!(1));
+
+    // ③ a path outside `artifacts/*.md` never reaches the ledger (fail-closed).
+    let escaped = tool_round(
+        &mut game,
+        "fs.artifact_probe|path=artifacts/../x.md|t3",
+        "t3|fs.artifact_probe|ok|0|path=artifacts/../x.md;exists=1;bytes=5;sha256=ffff",
+    );
+    assert_eq!(
+        count_lines(&escaped, "[ARTIFACT PATH REFUSED]"),
+        1,
+        "{escaped:#?}"
+    );
+    game.assert_kv("artifact.count", json!(1));
+
+    // ④ `vfs.write` always keeps the ledger, whether or not the host exposes `ygg.fs` — the
+    //    narration is the only thing that differs, so both branches are asserted as a pair.
+    let written = game.narrate(
+        "vfs.write",
+        &text(&format!("artifacts/notes.md|# notes\n{sha}")),
+    );
+    let joined = written.join("\n");
+    let disk = joined.contains("[VFS WRITTEN]");
+    let ledger_only = joined.contains("[VFS LEDGER ONLY]");
+    assert!(
+        disk ^ ledger_only,
+        "vfs.write must report exactly one outcome: {joined}"
+    );
+    game.assert_kv("artifact.artifacts/notes.md.source", json!("vfs"));
+    game.assert_kv("artifact.count", json!(2));
+    let bytes = game
+        .kv("artifact.artifacts/notes.md.bytes")
+        .as_u64()
+        .expect("the ledger records a byte count");
+    assert_eq!(bytes as usize, "# notes\n".len() + sha.len());
+    if disk {
+        assert!(
+            joined.contains(&sha[..12]),
+            "the digest is narrated: {joined}"
+        );
+    }
+
+    // ⑤ the path shape is unconditional: a traversal is refused and nothing is recorded.
+    let refused_path = game.narrate("vfs.write", &text("artifacts/../../etc/passwd|x"));
+    assert_refused(&refused_path, "VFS PATH");
+    game.assert_kv("artifact.artifacts/../../etc/passwd.bytes", json!(null));
+    game.assert_kv("artifact.count", json!(2));
+
+    // ⑥ re-writing the same path only refreshes the row (no duplicate slot).
+    game.narrate("vfs.write", &text("artifacts/notes.md|# notes"));
+    game.assert_kv("artifact.count", json!(2));
+    game.assert_kv("artifact.artifacts/notes.md.bytes", json!(7));
+}
+
+/// A4 `gate.verify_suite` writes green evidence only in `review`, only when the payload says
+/// `passed=1`, and only when the same gate precondition holds.
+///
+/// Mutation: delete the `stage() ~= STAGE.review` guard → the coordinate-stage assertion (no
+/// green written before `coordinate.submit`) goes red.
+#[test]
+fn verify_suite_result_records_green_evidence_only_in_review() {
+    let mut game = drive_to_accept(drive_to_plan_gate());
+    game.click("gate.approve — ");
+
+    // ① wrong stage: refused, no green.
+    let early = tool_round(
+        &mut game,
+        "gate.verify_suite|mode=all|t1",
+        "t1|gate.verify_suite|ok|0|passed=1;summary=52 suites green",
+    );
+    assert_eq!(
+        count_lines(&early, "[VERIFY SUITE BLOCKED]"),
+        1,
+        "{early:#?}"
+    );
+    game.assert_kv("verify.passed", json!(null));
+
+    game.click("coordinate.submit — ");
+    game.assert_kv("verify.passed", json!(false));
+
+    // ② honest failure: narrate it, never write green.
+    let failed = tool_round(
+        &mut game,
+        "gate.verify_suite|mode=all|t2",
+        "t2|gate.verify_suite|ok|0|passed=0;summary=3 failures",
+    );
+    assert_eq!(
+        count_lines(&failed, "[VERIFY SUITE FAILED]"),
+        1,
+        "{failed:#?}"
+    );
+    game.assert_kv("verify.passed", json!(false));
+
+    // ③ green: the same KV as the human path, plus the provenance key.
+    let passed = tool_round(
+        &mut game,
+        "gate.verify_suite|mode=all|t3",
+        "t3|gate.verify_suite|ok|0|passed=1;summary=52 suites green",
+    );
+    assert_eq!(
+        count_lines(&passed, "[VERIFY SUITE PASSED]"),
+        1,
+        "{passed:#?}"
+    );
+    game.assert_kv("verify.passed", json!(true));
+    game.assert_kv("verify.report", json!("52 suites green"));
+    game.assert_kv("verify.source", json!("tool:gate.verify_suite"));
+
+    // ④ the host settlement surface reads the same key.
+    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    assert_eq!(
+        summary["verifyPassed"],
+        json!(true),
+        "the summary must see the machine evidence: {summary}"
+    );
+}
+
+/// A5 `harness.archive_sessions` registers the settlement evidence only when `remaining=0`, and
+/// the run can then close without a separate `settlement.sessions` turn.
+///
+/// Mutation: drop the `settlement.sessions.destination` write from the reactor → `review.note` is
+/// stopped by `gates.settlement_problem()` and the `[ENDING` assertion goes red.
+#[test]
+fn archive_sessions_result_unblocks_the_settlement() {
+    let mut game = drive_to_accept(drive_to_plan_gate());
+    game.click("gate.approve — ");
+    game.click("coordinate.submit — ");
+
+    // ① leftovers are not evidence.
+    let bad = tool_round(
+        &mut game,
+        "harness.archive_sessions|parent=x;batch=y|t1",
+        "t1|harness.archive_sessions|ok|0|moved=1;remaining=2;dest=/tmp/trash",
+    );
+    assert_eq!(
+        count_lines(&bad, "[SESSIONS ARCHIVE REFUSED]"),
+        1,
+        "{bad:#?}"
+    );
+    game.assert_kv("settlement.sessions.destination", json!(""));
+
+    // ② a clean sweep registers all four keys.
+    let ok = tool_round(
+        &mut game,
+        "harness.archive_sessions|parent=x;batch=y|t2",
+        "t2|harness.archive_sessions|ok|0|moved=3;remaining=0;dest=/tmp/trash/r2",
+    );
+    assert_eq!(count_lines(&ok, "[SESSIONS ARCHIVED]"), 1, "{ok:#?}");
+    game.assert_kv("settlement.sessions.moved", json!(3));
+    game.assert_kv("settlement.sessions.remaining", json!(0));
+    game.assert_kv("settlement.sessions.destination", json!("/tmp/trash/r2"));
+    game.assert_kv(
+        "settlement.sessions.source",
+        json!("tool:harness.archive_sessions"),
+    );
+
+    // ③ the closing chain no longer needs a `settlement.sessions` turn.
+    game.click("verify.submit all_green=true — ");
+    game.narrate("settlement.evolution", &text("|screened|c=0/0"));
+    game.narrate("settlement.todo", &text("0|main session cleared"));
+    let closed = game.click("review.note — ");
+    assert!(
+        closed["narrative"].to_string().contains("[ENDING"),
+        "review.note must close the run: {closed}"
+    );
+}
+
+/// A6 The declaration surface of the active subsystem on **both** sides: the six built-in tools,
+/// their `allowedTools` entries, a usable `artifact_capacity`, and — the structural half — every
+/// `TEXTS.<group>.<name>` the source references exists in both scene files.
+///
+/// Mutation: delete one beat from one side's `data/scenes.json` (or rename it in the source) →
+/// this test names the missing key instead of letting the run render a raw `{{placeholder}}`.
+#[test]
+fn subsystem_declarations_and_beat_references_stay_complete() {
+    let project = project_mod_dir();
+    let seed = seed_mod_dir();
+    let subsystem_tools = [
+        "git.worktree_claim",
+        "git.worktree_release",
+        "git.lane_probe",
+        "fs.artifact_probe",
+        "gate.verify_suite",
+        "harness.archive_sessions",
+    ];
+
+    for dir in [&project, &seed] {
+        let pack = read_json(&dir.join("pack.json"));
+        let config = read_json(&dir.join("data/config.json"));
+        let scenes = read_json(&dir.join("data/scenes.json"));
+        let tools = pack["tools"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{}: pack.json tools must be an object", dir.display()));
+        let allowed = config["allowedTools"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{}: allowedTools must be an array", dir.display()));
+        let allowed: Vec<&str> = allowed.iter().filter_map(|item| item.as_str()).collect();
+        for id in subsystem_tools {
+            assert!(
+                tools.contains_key(id),
+                "{}: pack.json tools is missing `{id}`",
+                dir.display()
+            );
+            assert!(
+                allowed.contains(&id),
+                "{}: allowedTools is missing `{id}` (the host refuses the call at request time)",
+                dir.display()
+            );
+            assert_eq!(
+                tools[id]["program"],
+                json!("ygg-agent"),
+                "{id}: the built-in tools are served by the host binary itself"
+            );
+        }
+        for (group, name) in text_references(&project) {
+            assert!(
+                scenes[group.as_str()][name.as_str()].as_str().is_some(),
+                "{}: data/scenes.json `{group}.{name}` is referenced by the source but missing \
+                 (the run would narrate a raw `{{{{placeholder}}}}`)",
+                dir.display()
+            );
+        }
+        let cap = scenes["tuning"]["artifact_capacity"].as_u64().unwrap_or(0);
+        assert!(
+            cap >= 1,
+            "{}: tuning.artifact_capacity must be at least 1 (the ledger is bounded)",
+            dir.display()
+        );
+    }
+
+    // The reference scan itself must be productive (a broken scanner proves nothing).
+    let refs = text_references(&project);
+    assert!(
+        refs.len() > 200,
+        "the scene-text scanner found only {} references",
+        refs.len()
+    );
 }

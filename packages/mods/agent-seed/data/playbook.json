@@ -439,8 +439,8 @@
         {
           "id": "tools.never-io-in-mod",
           "modality": "must-not",
-          "text": "The Mod never performs IO: no process, no network, no filesystem. It only publishes requests (`meta.tool_calls`) and applies results (`tool.result`).",
-          "basis": "the sandbox allowlist (no io/os/print) + `ygg.data` is a read-only surface"
+          "text": "The Mod never performs IO on its own: no process, no network, no direct filesystem call. It publishes requests (`meta.tool_calls`), applies results (`tool.result`), and the only file surface it may touch is the host-mediated `ygg.fs` VFS (run-relative, path-jailed): `vfs.write` and the artifact probe. Reading, listing or spawning anything stays host-side.",
+          "basis": "the sandbox allowlist (no io/os/print) + `ygg.fs` is the only host-mediated file surface"
         },
         {
           "id": "tools.allowlist-fail-closed",
@@ -457,7 +457,7 @@
         {
           "id": "tools.receipt-effect-bounded",
           "modality": "must-not",
-          "text": "The tools receipt effect may only latch `tool.notified.<call_id>` and narrate one line; it must never render, choose, or touch requirement / proposal / gate / lane / stage state.",
+          "text": "The `tools.receipt` effect (`receipt_effect`) may only latch `tool.notified.<call_id>` and narrate one line; it must never render, choose, or touch requirement / proposal / gate / lane / stage state. Domain folding belongs to the separate `tools.reactive` effect (`tools.reactive-effect-scope`).",
           "basis": "AGENTS.md §9.1 + src/tools.lua `receipt_effect()`"
         },
         {
@@ -465,6 +465,36 @@
           "modality": "must",
           "text": "Never inline a credential in a tool declaration or a request: `$ENV{VAR}` placeholders are resolved host-side from the process environment, `<mod_dir>/.env.local` and `<mod_dir>/.env`, and the resolved value never enters a payload, a receipt or a notice — error text names the variable only.",
           "basis": "the credentials red line + the host `$ENV{}` resolution order"
+        },
+        {
+          "id": "tools.reactive-effect-scope",
+          "modality": "must",
+          "text": "`tools.reactive` folds a settled `tool.result` (status `ok`, code `0`, no `tool.reacted.<call_id>` latch yet) into domain state: it may write `lane.*`, `req.<i>.conflict*`, `artifact.*`, `verify.{passed,report,source}` and `settlement.sessions.*`, and must never render, choose, change the stage, change proposal / gate state, or call `flow.refuse` (a rejection line would be counted by the host as a failed step). An unknown tool id takes no latch and produces no effect.",
+          "basis": "src/tools.lua `reactive_deps()` / `reactive_effect()` + `REACTORS`"
+        },
+        {
+          "id": "tools.wire-kv-output",
+          "modality": "must",
+          "text": "A built-in tool's stdout is a flat `k=v;` map: a value must never contain `;` or `|` (the host side escapes them to `,` / `/`), and `files` is a comma-separated list. A result truncated by `tuning.tool_output_max` must never feed a set comparison - `lane_probe` reads `tool.<call_id>.truncated` and skips the conflict radar when it is true.",
+          "basis": "src/tools.lua `output_pairs()` / `parse_result()` + `tool.<call_id>.truncated`"
+        },
+        {
+          "id": "subsystems.machine-evidence-parity",
+          "modality": "must",
+          "text": "Machine evidence (`gate.verify_suite`, `harness.archive_sessions`) writes the same KV as human evidence (`verify.submit`, `settlement.sessions`): same level, not stronger. It only proves \"the suite ran and this output was read\", so `verify.source` / `settlement.sessions.source` must keep the provenance and a report may never claim machine evidence outranks a self-declaration.",
+          "basis": "src/tools.lua `react_verify_suite()` / `react_archive_sessions()` + `gates.settlement_problem()`"
+        },
+        {
+          "id": "subsystems.probe-is-warning",
+          "modality": "must-not",
+          "text": "`[LANE PROBE FAILED]` (`commits=0` or `clean=0`) is a warning surface: narrate it and keep `lane.<k>.probe.*` queryable, but never wire it into `gates.gate_problem()` - that would deadlock `coordinate.submit` / `review.note` on one dirty tree with no action to undo the probe. The only hard evidence threshold is the accept gate's non-empty `artifacts`.",
+          "basis": "src/tools.lua `react_probe()` + `src/gates.lua gate_problem()`"
+        },
+        {
+          "id": "subsystems.radar-blocks",
+          "modality": "must",
+          "text": "A conflict raised by the conflict radar must go through `proposal.req_do_conflict` (the very same function as the human `requirement.conflict`), so it automatically lands in `req_conflict_total` and blocks both dispatch and closing. Only `requirement.resolve` clears it.",
+          "basis": "src/tools.lua `radar_raise()` + `src/proposals.lua req_do_conflict()`"
         }
       ]
     }

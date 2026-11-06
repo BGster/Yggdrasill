@@ -325,6 +325,10 @@ function M.install(deps)
     ygg.kv.set(req_key(second, "conflict"), "")
     ygg.kv.set(req_key(first, "conflict_peer"), "")
     ygg.kv.set(req_key(second, "conflict_peer"), "")
+    ygg.kv.set(req_key(first, "conflict_note"), "")
+    ygg.kv.set(req_key(second, "conflict_note"), "")
+    ygg.kv.set(req_key(first, "conflict_source"), "")
+    ygg.kv.set(req_key(second, "conflict_source"), "")
     local effect
     if mode == "keep_first" then
       ygg.kv.set(req_key(second, "status"), R_DROPPED)

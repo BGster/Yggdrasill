@@ -1,21 +1,33 @@
--- src/tools.lua —— 工具桥的 KV 面与回执面（`tool.*` 唯一写方）+ 两个事件 handler + 一条回执 effect。
+-- src/tools.lua —— 工具桥的 KV 面与回执面（`tool.*` 唯一写方）+ 三个事件 handler + 两条 effect。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；资源由入口 install(deps) 注入，
 -- 注册面全部在 register() 内（与 src/render.lua 同构：render 也是 src/ 下的纯模块）。
 --
 -- 模型：`tool.call` 只**登记**请求（`tool.<id>.*` 行 + `meta.tool_calls` 队列），真正执行在宿主；
--- 结果以普通事件 `tool.result` 回来。Mod 永不做 IO（无 process / 网络 / 文件系统）。
+-- 结果以普通事件 `tool.result` 回来。Mod 永不做 IO（无 process / 网络 / 文件系统）；唯一文件面是
+-- 宿主中介的 `ygg.fs` VFS（`vfs.write` + artifact 核验），缺席时整体降级为「只记账本」。
 --
 -- 反向禁止：`src/render.lua` 不得 require 本模块（立刻成环）——摘要字段走 KV 读 `tool.pending`。
 --
 -- 本模块写的 KV 前缀：
 --   tool.count / tool.pending / tool.last / tool.seq.* / tool.<id>.* / tool.notified.*
+-- 响应式子系统（本模块的响应式分区；与既有写方共存，逐键登记）：
+--   tool.reacted.*（本模块唯一）
+--   lane.<k>.{req,branch,base,since,clean}（= `lane.claim` 的等价写面，共用 src.lanes 的 LANES.bind）
+--   lane.<k>.probe.*（本模块唯一）
+--   req.<i>.conflict{,_peer,_note,_source}（经 src/proposals.req_do_conflict 这唯一函数写）
+--   artifact.*（本模块唯一；`record_artifact` 是唯一写点）
+--   verify.passed / verify.report / verify.source（src/handlers/review.lua 写 verify.last / verify.failures）
+--   settlement.sessions.*（src/handlers/review.lua 的 apply_sessions 是另一条写路径）
 
 local M = {}
 
 local config = require("src.config")
 local flow = require("src.flow")
+local gates = require("src.gates")
 local hooks = require("src.hooks")
+local lanes = require("src.lanes")
+local props = require("src.proposals")
 local render_mod = require("src.render")
 local reqs = require("src.requirements")
 local util = require("src.util")
@@ -23,18 +35,24 @@ local wire = require("src.wire")
 
 local TEXTS
 
-local effective =
-  config.effective
+local effective, num, text_of =
+  config.effective, config.num, config.text_of
 local reject, reject_payload =
   flow.reject, flow.reject_payload
+local gate_problem =
+  gates.gate_problem
+local LANES =
+  lanes.LANES
+local req_do_conflict =
+  props.req_do_conflict
 local render =
   render_mod.receipt
-local STAGE, stage =
-  reqs.STAGE, reqs.stage
+local STAGE, job_capacity, req_closed, req_conflict, req_id, req_index_of, req_lane, req_status, req_sync_conflicts, stage =
+  reqs.STAGE, reqs.job_capacity, reqs.req_closed, reqs.req_conflict, reqs.req_id, reqs.req_index_of, reqs.req_lane, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
 local contains, cut, fill, join, split, trim =
   util.contains, util.cut, util.fill, util.join, util.split, util.trim
-local strip_ext, valid_ext =
-  wire.strip_ext, wire.valid_ext
+local artifact_path_ok, strip_ext, valid_ext =
+  wire.artifact_path_ok, wire.strip_ext, wire.valid_ext
 
 -- 形状常量（不是可调项）：可调项只有 TEXTS.tuning 的 tool_capacity / tool_output_max。
 local MAX_CALL_ID = 32
@@ -46,6 +64,15 @@ local MAX_TOOL_ID = 64
 local CALL_ID_RE = "^[a-z][a-z0-9_%-]*$"
 local TOOL_ID_RE = "^[a-z][a-z0-9_%-]*%.[a-z][a-z0-9_%-]*$"
 local ARG_KEY_RE = "^[a-z][a-z0-9_]*$"
+
+-- 响应式子系统的形状常量（不是可调项）：可调项只有 TEXTS.tuning 的 artifact_capacity。
+local MAX_ARTIFACT_PATH = 128        -- 与 wire.evolution_path_ok 的上界同源
+local MAX_VFS_CONTENT = 65536        -- `vfs.write` 的内容上限（64 KiB）
+local MAX_ARTIFACT_CHECKS = 4        -- 一次 `proposal.submit` 最多同步核验几条
+local MAX_RADAR_FILES = 32           -- 一次雷达最多比几个文件（防 O(n·m) 爆炸）
+local SHA_DISPLAY = 12               -- 叙事里显示 sha256 的前多少位
+local VERIFY_TOOL_SOURCE = "tool:gate.verify_suite"
+local SESSIONS_TOOL_SOURCE = "tool:harness.archive_sessions"
 
 -- `tool.<保留字>.*` 与计数键同名会撞车（`tool.count` 既是计数前缀又是行前缀）。
 local RESERVED = { count = true, pending = true, last = true, notified = true }
@@ -312,7 +339,11 @@ local function parse_result(payload)
   end
   output = output:gsub("[\r\n]", " / ")
   local limit = output_max()
+  -- `truncated` 是**显式判据**（不是字符串嗅探）：超限输出会追加含数字的截断提示，
+  -- 反应器靠这个布尔值决定「不得用这份 output 做集合比对」（宁可漏报不可误报）。
+  local truncated = false
   if #output > limit then
+    truncated = true
     local dropped = #output - (limit - 3)
     output = output:sub(1, limit - 3) .. "..." .. fill(TEXTS.beats.tool_output_truncated, { dropped = tostring(dropped) })
   end
@@ -333,6 +364,7 @@ local function parse_result(payload)
     code = code,
     output = output,
     ext = trim(ext or ""),
+    truncated = truncated,
   }, nil
 end
 
@@ -420,6 +452,7 @@ local function request(tool_id, args_text, call_id, ext)
   ygg.kv.set("tool." .. chosen .. ".output", "")
   ygg.kv.set("tool." .. chosen .. ".ext", tostring(ext or ""))
   ygg.kv.set("tool." .. chosen .. ".res_ext", "")
+  ygg.kv.set("tool." .. chosen .. ".truncated", false)
   ygg.kv.set("tool.pending", pending_count() + 1)
   return chosen, nil
 end
@@ -454,6 +487,7 @@ local function apply_result(rec)
   ygg.kv.set("tool." .. call_id .. ".status", rec.status)
   ygg.kv.set("tool." .. call_id .. ".code", rec.code)
   ygg.kv.set("tool." .. call_id .. ".output", rec.output)
+  ygg.kv.set("tool." .. call_id .. ".truncated", rec.truncated == true)
   if rec.ext ~= "" then
     ygg.kv.set("tool." .. call_id .. ".res_ext", rec.ext)
   end
@@ -492,6 +526,398 @@ local function flush_meta()
     end
   end
   ygg.meta("tool_calls", list)
+end
+
+-- ───────────────────────────── 响应式后置效应（主动子系统） ─────────────────────────────
+--
+-- 触发口径：`tool.result` 落库为 ok + code 0 时，把 `output`（`k=v;k=v` 平坦映射）折叠成
+-- 领域状态。6 个反应器共用一次闩锁 `tool.reacted.<call_id>`（与 `tool.notified.<id>` 分开：
+-- 一个说「已说过 [TOOL SETTLED]」，一个说「已把结果折叠进领域状态」）。
+-- 纪律（hooks.lua 头注释）：只写 KV + narrate；绝不 render() / ygg.choice / flow.refuse。
+-- 拒绝行会带 rejection 前缀而被宿主记成失败步——探针失败是**事实报告**，不是 Mod 拒绝。
+
+-- `k=v;k=v` → `{ k = v }`。半截段（无 `=`）静默丢弃：截断的输出只会留下不完整的尾段。
+local function output_pairs(text)
+  local out = {}
+  if type(text) ~= "string" or text == "" then
+    return out
+  end
+  local segments = split(text, ";")
+  for i = 1, #segments do
+    local key, value = cut(segments[i], "=")
+    if value ~= nil then
+      local name = trim(key)
+      if name ~= "" then
+        out[name] = trim(value)
+      end
+    end
+  end
+  return out
+end
+
+-- 整数字段（nil = 缺失 / 非整数）：误报类判据只能用「缺失」表达，不能默认成 0。
+local function whole_at(map, name)
+  return whole(map[name])
+end
+
+local function short_sha(text)
+  local raw = trim(text)
+  if raw == "" then
+    return TEXTS.beats.lane_field_none
+  end
+  if #raw <= SHA_DISPLAY then
+    return raw
+  end
+  return raw:sub(1, SHA_DISPLAY)
+end
+
+local function artifact_capacity()
+  local value = TEXTS.tuning.artifact_capacity
+  if type(value) == "number" and value > 0 then
+    return math.floor(value)
+  end
+  return 64
+end
+
+-- `artifact.*` 的唯一写方（路径形状由调用方先校）：同一个 path 重写只更新值，不增计数。
+-- 满额 → 叙事 `[ARTIFACT LEDGER FULL]` 且不写（fail-soft：账本满不得炸回合）。
+local function record_artifact(path, bytes, sha, source)
+  if type(path) ~= "string" then
+    return false
+  end
+  local key = trim(path)
+  if key == "" then
+    return false
+  end
+  local total = num("artifact.count", 0)
+  if type(ygg.kv.get("artifact." .. key .. ".bytes")) ~= "number" then
+    local limit = artifact_capacity()
+    if total >= limit then
+      ygg.narrate(fill(TEXTS.beats.artifact_ledger_full, {
+        path = key,
+        cap = tostring(limit),
+      }))
+      return false
+    end
+    total = total + 1
+    ygg.kv.set("artifact.count", total)
+    ygg.kv.set("artifact.seq." .. tostring(total), key)
+  end
+  ygg.kv.set("artifact." .. key .. ".bytes", bytes)
+  ygg.kv.set("artifact." .. key .. ".sha256", sha or "")
+  ygg.kv.set("artifact." .. key .. ".source", source or "")
+  return true
+end
+
+-- 跳泳道冲突雷达：两条泳道的探针文件列表有交集 → 走 req_do_conflict（与人类路径同一函数），
+-- 因此自动进 req_conflict_total → 阻塞派活与收口。一次探针最多抬一条冲突（防一条探针刷屏）。
+local function radar_raise(k, files_text)
+  local mine = split(trim(files_text), ",")
+  for i = 1, #mine do
+    mine[i] = trim(mine[i])
+  end
+  if #mine == 0 or #mine > MAX_RADAR_FILES then
+    return false
+  end
+  local self_id = LANES.req_of(k)
+  local self_index = req_index_of(self_id)
+  if self_index == nil or req_closed(self_index) then
+    return false
+  end
+  for other = 1, job_capacity() do
+    if other ~= k then
+      local peer_id = LANES.req_of(other)
+      local peer_index = req_index_of(peer_id)
+      if peer_id ~= "" and peer_id ~= self_id and peer_index ~= nil
+        and not req_closed(peer_index)
+        and req_conflict(self_index) == "" and req_conflict(peer_index) == "" then
+        local theirs = split(text_of(LANES.key(other, "probe.files"), ""), ",")
+        for i = 1, #theirs do
+          theirs[i] = trim(theirs[i])
+        end
+        local hit = nil
+        for i = 1, #mine do
+          if mine[i] ~= "" and contains(theirs, mine[i]) then
+            hit = mine[i]
+            break
+          end
+        end
+        if hit ~= nil then
+          local note = fill(TEXTS.beats.conflict_radar_note, { file = hit })
+          req_do_conflict(self_index, peer_index, note, "radar")
+          req_sync_conflicts()
+          ygg.narrate(fill(TEXTS.beats.conflict_radar, {
+            first = self_id,
+            k = tostring(k),
+            second = peer_id,
+            other = tostring(other),
+            file = hit,
+          }))
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+-- 反应器逐个规格（`tool_id -> function(pairs, call_id) -> changed`）。
+-- 原因文案复用既有 beat（`lane_*` / `req_unknown`），不新增第二套措辞。
+local REACTORS = {}
+
+REACTORS["git.worktree_claim"] = function(pairs)
+  local k = whole_at(pairs, "lane")
+  local index = req_index_of(pairs.req)
+  local reason = nil
+  if k == nil or k < 1 or k > job_capacity() then
+    reason = fill(TEXTS.beats.lane_bad_k, { k = tostring(pairs.lane or "?"), max = tostring(job_capacity()) })
+  elseif index == nil then
+    reason = fill(TEXTS.beats.req_unknown, { id = tostring(pairs.req or "") })
+  elseif req_closed(index) then
+    reason = fill(TEXTS.beats.lane_claim_closed, { id = req_id(index), status = req_status(index) })
+  elseif pairs.clean ~= "1" then
+    reason = fill(TEXTS.beats.lane_claim_dirty, { k = tostring(k) })
+  elseif LANES.req_of(k) ~= "" and LANES.req_of(k) ~= req_id(index) then
+    reason = fill(TEXTS.beats.lane_claim_occupied, { k = tostring(k), id = LANES.req_of(k) })
+  elseif req_lane(index) > 0 and req_lane(index) ~= k then
+    reason = fill(TEXTS.beats.lane_claim_bound, { id = req_id(index), k = tostring(req_lane(index)) })
+  end
+  if reason ~= nil then
+    ygg.narrate(fill(TEXTS.beats.worktree_claim_refused, {
+      k = tostring(pairs.lane or "?"),
+      reason = reason,
+    }))
+    return false
+  end
+  -- 与 `lane.claim` 同函数同键（含 `since` 的 tick 分配与 `req.<i>.lane` 回写）。
+  LANES.bind(k, index, pairs.branch or "", pairs.base or "", "1")
+  ygg.narrate(fill(TEXTS.beats.worktree_claimed, {
+    k = tostring(k),
+    req = req_id(index),
+    branch = LANES.text_or(pairs.branch, TEXTS.beats.lane_field_none),
+    base = LANES.text_or(pairs.base, TEXTS.beats.lane_field_none),
+  }))
+  return true
+end
+
+REACTORS["git.worktree_release"] = function(pairs)
+  local k = whole_at(pairs, "lane")
+  if k == nil or k < 1 or k > job_capacity() then
+    ygg.narrate(fill(TEXTS.beats.worktree_release_refused, {
+      reason = fill(TEXTS.beats.lane_bad_k, { k = tostring(pairs.lane or "?"), max = tostring(job_capacity()) }),
+    }))
+    return false
+  end
+  if pairs.released ~= "1" then
+    return false
+  end
+  if LANES.req_of(k) == "" then
+    ygg.narrate(fill(TEXTS.beats.worktree_release_idle, { k = tostring(k) }))
+    return false
+  end
+  -- **不能**写 `LANES.release(k)`：那个函数的入参是 req index，传 k 会释放错需求或空转。
+  LANES.release_lane(k)
+  ygg.narrate(fill(TEXTS.beats.worktree_released, { k = tostring(k) }))
+  return true
+end
+
+REACTORS["git.lane_probe"] = function(pairs, call_id)
+  local k = whole_at(pairs, "lane")
+  if k == nil or k < 1 or k > job_capacity() then
+    ygg.narrate(fill(TEXTS.beats.lane_probe_bad_lane, {
+      lane = tostring(pairs.lane or "?"),
+      max = tostring(job_capacity()),
+    }))
+    return false
+  end
+  local commits = whole_at(pairs, "commits")
+  local clean = pairs.clean or ""
+  ygg.kv.set(LANES.key(k, "probe.commits"), commits or -1)
+  ygg.kv.set(LANES.key(k, "probe.clean"), clean)
+  ygg.kv.set(LANES.key(k, "probe.head"), pairs.head or "")
+  ygg.kv.set(LANES.key(k, "probe.files"), pairs.files or "")
+  ygg.kv.set(LANES.key(k, "probe.call"), call_id)
+  if commits == nil or commits == 0 or clean ~= "1" then
+    ygg.narrate(fill(TEXTS.beats.lane_probe_failed, {
+      k = tostring(k),
+      commits = tostring(commits or -1),
+      clean = (clean ~= "" and clean) or TEXTS.beats.lane_field_none,
+    }))
+  else
+    ygg.narrate(fill(TEXTS.beats.lane_probe_recorded, {
+      k = tostring(k),
+      commits = tostring(commits),
+      clean = clean,
+      head = short_sha(pairs.head),
+      files = (pairs.files ~= nil and pairs.files ~= "") and pairs.files or TEXTS.beats.lane_field_none,
+    }))
+  end
+  if ygg.kv.get("tool." .. call_id .. ".truncated") == true then
+    ygg.narrate(fill(TEXTS.beats.lane_probe_truncated, { call_id = call_id }))
+    return true
+  end
+  radar_raise(k, pairs.files or "")
+  return true
+end
+
+REACTORS["fs.artifact_probe"] = function(pairs)
+  local path = trim(pairs.path or "")
+  if pairs.exists ~= "1" then
+    ygg.narrate(fill(TEXTS.beats.artifact_missing, { path = path }))
+    return false
+  end
+  local bytes = whole_at(pairs, "bytes")
+  if bytes == nil or bytes <= 0 then
+    ygg.narrate(fill(TEXTS.beats.artifact_empty, { path = path }))
+    return false
+  end
+  if not artifact_path_ok(path) then
+    ygg.narrate(fill(TEXTS.beats.artifact_path_rejected, { path = path, max = tostring(MAX_ARTIFACT_PATH) }))
+    return false
+  end
+  if not record_artifact(path, bytes, pairs.sha256 or "", "probe") then
+    return false
+  end
+  ygg.narrate(fill(TEXTS.beats.artifact_verified, {
+    path = path,
+    bytes = tostring(bytes),
+    sha = short_sha(pairs.sha256),
+  }))
+  return true
+end
+
+REACTORS["gate.verify_suite"] = function(pairs)
+  local summary = trim(pairs.summary or "")
+  if stage() ~= STAGE.review then
+    ygg.narrate(fill(TEXTS.beats.verify_suite_blocked, {
+      reason = fill(TEXTS.beats.stage_expected, { expected = STAGE.review }),
+    }))
+    return false
+  end
+  if pairs.passed ~= "1" then
+    ygg.narrate(fill(TEXTS.beats.verify_suite_failed, {
+      summary = (summary ~= "" and summary) or TEXTS.beats.default_gate_report,
+    }))
+    return false
+  end
+  -- 与 `verify.submit all_green=true` 同一前件：机证不是「绕过门禁」的边。
+  local blocked = gate_problem()
+  if blocked ~= nil then
+    ygg.narrate(fill(TEXTS.beats.verify_suite_blocked, { reason = blocked }))
+    return false
+  end
+  ygg.kv.set("verify.passed", true)
+  ygg.kv.set("verify.report", summary)
+  -- 溯源键：机证与人证同级不等强，报告里不得声称机证更强。
+  ygg.kv.set("verify.source", VERIFY_TOOL_SOURCE)
+  ygg.narrate(fill(TEXTS.beats.verify_suite_passed, {
+    summary = (summary ~= "" and summary) or TEXTS.beats.verify_green_record,
+  }))
+  return true
+end
+
+REACTORS["harness.archive_sessions"] = function(pairs)
+  local dest = trim(pairs.dest or "")
+  if stage() ~= STAGE.review then
+    ygg.narrate(fill(TEXTS.beats.sessions_archive_refused, {
+      remaining = (pairs.remaining ~= nil and pairs.remaining ~= "") and pairs.remaining or "?",
+      dest = TEXTS.beats.lane_field_none,
+    }))
+    return false
+  end
+  if pairs.remaining ~= "0" or dest == "" then
+    ygg.narrate(fill(TEXTS.beats.sessions_archive_refused, {
+      remaining = (pairs.remaining ~= nil and pairs.remaining ~= "") and pairs.remaining or "?",
+      dest = (dest ~= "" and dest) or TEXTS.beats.lane_field_none,
+    }))
+    return false
+  end
+  local moved = whole_at(pairs, "moved") or 0
+  ygg.kv.set("settlement.sessions.moved", moved)
+  ygg.kv.set("settlement.sessions.remaining", 0)
+  ygg.kv.set("settlement.sessions.destination", dest)
+  ygg.kv.set("settlement.sessions.source", SESSIONS_TOOL_SOURCE)
+  ygg.narrate(fill(TEXTS.beats.sessions_archived, { moved = tostring(moved), dest = dest }))
+  return true
+end
+
+local function reactive_tool_ids()
+  local ids = {}
+  for id in next, REACTORS do
+    ids[#ids + 1] = id
+  end
+  return ids
+end
+
+-- 依赖全是 KV 派生标量：装载 / 读档 / 重启后签名一致；不认识的 tool id 不占闩锁、不产生 deps。
+local function reactive_deps()
+  local last = ygg.kv.get("tool.last")
+  if type(last) ~= "string" or last == "" then
+    return nil
+  end
+  if status_of(last) ~= "ok" or code_of(last) ~= 0 then
+    return nil
+  end
+  if ygg.kv.get("tool.reacted." .. last) == true then
+    return nil
+  end
+  local tool = tool_of(last)
+  if REACTORS[tool] == nil then
+    return nil
+  end
+  return { last, tool }
+end
+
+-- 闩锁先落：反应器中途 return false 也不重入（一次性语义）。
+local function reactive_effect()
+  local last = ygg.kv.get("tool.last")
+  if type(last) ~= "string" or last == "" then
+    return false
+  end
+  local tool = tool_of(last)
+  local reactor = REACTORS[tool]
+  if reactor == nil then
+    return false
+  end
+  ygg.kv.set("tool.reacted." .. last, true)
+  local pairs_out = output_pairs(output_of(last))
+  if next(pairs_out) == nil then
+    ygg.narrate(fill(TEXTS.beats.reactive_malformed, { call_id = last, tool_id = tool }))
+    return false
+  end
+  if reactor(pairs_out, last) == true then
+    return true
+  end
+  return false
+end
+
+-- `proposal.submit` 与 `vfs.write` 共用的同步核验（0ms；`ygg.fs` 缺席则整体 no-op，返回 0）。
+local function verify_artifacts(paths_text)
+  local fs = ygg.fs
+  if type(fs) ~= "table" or type(fs.stat) ~= "function" then
+    return 0
+  end
+  local seen, count = 0, 0
+  local list = split(trim(paths_text or ""), ",")
+  for i = 1, #list do
+    local path = trim(list[i])
+    if path ~= "" and artifact_path_ok(path) and seen < MAX_ARTIFACT_CHECKS then
+      seen = seen + 1
+      local ok, stat = pcall(fs.stat, path)
+      if ok and type(stat) == "table" and stat.exists == true then
+        local bytes = whole(stat.bytes) or 0
+        if bytes > 0 and record_artifact(path, bytes, tostring(stat.sha256 or ""), "probe") then
+          ygg.narrate(fill(TEXTS.beats.artifact_verified, {
+            path = path,
+            bytes = tostring(bytes),
+            sha = short_sha(stat.sha256),
+          }))
+          count = count + 1
+        end
+      end
+    end
+  end
+  return count
 end
 
 -- ───────────────────────────── 回执 effect（只推进闩锁 + 一行叙事） ─────────────────────────────
@@ -598,25 +1024,85 @@ function M.register()
     flush_meta()
     render()
   end)
+  -- 机器动作（外部派发）：把 artifact 写盘委托给宿主 VFS（Mod 自身不做 IO）。
+  -- 载荷 `artifacts/<name>.md|<content>`（首个 `|` 之前是路径，其后全部是内容）。
+  -- 无论宿主是否提供 `ygg.fs`，都落 `artifact.*` 账本——否则同一份代码在「宿主管线」与
+  -- 「无 ygg.fs 的宿主」下言行不一致；区别只在叙事行（`[VFS WRITTEN]` vs `[VFS LEDGER ONLY]`）。
+  ygg.on("vfs.write", function(payload)
+    if stage() == STAGE.done then
+      return reject("vfs.write", TEXTS.beats.tool_after_done)
+    end
+    if type(payload) ~= "string" then
+      return reject_payload("vfs.write", fill(TEXTS.beats.bad_payload, { action = "vfs.write" }))
+    end
+    local path, content = cut(payload, "|")
+    path = trim(path or "")
+    content = content or ""
+    if path == "" or content == "" or #content > MAX_VFS_CONTENT then
+      return reject_payload("vfs.write", fill(TEXTS.beats.vfs_usage, { max = tostring(MAX_VFS_CONTENT) }))
+    end
+    if not artifact_path_ok(path) then
+      return reject_payload("vfs.write", fill(TEXTS.beats.vfs_path_rejected, {
+        path = path,
+        max = tostring(MAX_ARTIFACT_PATH),
+      }))
+    end
+    local fs = ygg.fs
+    local bytes, sha, wrote = #content, "", false
+    if type(fs) == "table" and type(fs.write) == "function" then
+      local ok, result = pcall(fs.write, path, content)
+      if not ok or type(result) ~= "table" then
+        return refuse(TEXTS.beats.req_wait_rejected, "vfs.write", fill(TEXTS.beats.vfs_write_failed, {
+          path = path,
+          reason = TEXTS.beats.rejected_default,
+        }))
+      end
+      bytes = whole(result.bytes) or bytes
+      sha = tostring(result.sha256 or "")
+      wrote = true
+    end
+    record_artifact(path, bytes, sha, "vfs")
+    if wrote then
+      ygg.narrate(fill(TEXTS.beats.vfs_written, {
+        path = path,
+        bytes = tostring(bytes),
+        sha = short_sha(sha),
+      }))
+    else
+      ygg.narrate(fill(TEXTS.beats.vfs_ledger_only, { path = path, bytes = tostring(bytes) }))
+    end
+    render()
+  end)
+  -- 两条 effect 同处 render() 入口的同一个 flush_effects：回执行先说，领域折叠紧随其后。
   hooks.useEffect("tools.receipt", receipt_deps, receipt_effect)
+  hooks.useEffect("tools.reactive", reactive_deps, reactive_effect)
 end
 
 M.CALL_ID_RE = CALL_ID_RE
+M.MAX_ARTIFACT_PATH = MAX_ARTIFACT_PATH
 M.MAX_CALL_ID = MAX_CALL_ID
+M.MAX_VFS_CONTENT = MAX_VFS_CONTENT
 M.TOOL_ID_RE = TOOL_ID_RE
 M.allowed = allowed
 M.allowed_text = allowed_text
 M.apply_result = apply_result
 M.args_table = args_table
+M.artifact_path_ok = artifact_path_ok
 M.call_id_at = call_id_at
 M.code_of = code_of
 M.flush_meta = flush_meta
 M.output_of = output_of
+M.output_pairs = output_pairs
 M.parse_args = parse_args
 M.parse_call = parse_call
 M.parse_result = parse_result
 M.pending_count = pending_count
+M.reactive_deps = reactive_deps
+M.reactive_effect = reactive_effect
+M.reactive_tool_ids = reactive_tool_ids
+M.record_artifact = record_artifact
 M.request = request
 M.status_of = status_of
+M.verify_artifacts = verify_artifacts
 
 return M

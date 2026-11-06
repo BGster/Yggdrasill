@@ -335,7 +335,34 @@
     "tool_result_mismatch": "call `{{call_id}}` does not accept this result: expected {{expected}}, got {{got}}.",
     "tool_bad_status": "status `{{status}}` must be `ok` or `err`.",
     "tool_bad_code": "code `{{code}}` must be an integer (use `-1` when the tool never ran).",
-    "tool_output_truncated": "…[truncated {{dropped}} chars]"
+    "tool_output_truncated": "…[truncated {{dropped}} chars]",
+    "worktree_claimed": "[WORKTREE CLAIMED] lane-{{k}} <- {{req}} | branch {{branch}} | base {{base}} | clean=1",
+    "worktree_claim_refused": "[WORKTREE CLAIM REFUSED] lane-{{k}}: {{reason}} | the lane ledger was not touched",
+    "worktree_released": "[WORKTREE RELEASED] lane-{{k}} -> free",
+    "worktree_release_idle": "[WORKTREE RELEASED] lane-{{k}} -> free (it was already idle)",
+    "worktree_release_refused": "[WORKTREE RELEASE REFUSED] {{reason}} | the lane ledger was not touched",
+    "lane_probe_recorded": "[LANE PROBE] lane-{{k}}: commits={{commits}} clean={{clean}} head={{head}} files={{files}}",
+    "lane_probe_failed": "[LANE PROBE FAILED] lane-{{k}}: commits={{commits}} clean={{clean}}",
+    "lane_probe_truncated": "[LANE PROBE TRUNCATED] {{call_id}}: the file list was cut at the host output cap - the conflict radar is skipped for this probe",
+    "lane_probe_bad_lane": "[LANE PROBE REJECTED] lane={{lane}}: out of range 1..{{max}} | nothing was recorded",
+    "conflict_radar": "[CONFLICT RADAR] {{first}} (lane-{{k}}) and {{second}} (lane-{{other}}) both modified {{file}}",
+    "conflict_radar_note": "overlapping file: {{file}}",
+    "artifact_verified": "[ARTIFACT VERIFIED] {{path}} ({{bytes}} B, sha256 {{sha}})",
+    "artifact_missing": "[ARTIFACT MISSING] {{path}} (exists=0)",
+    "artifact_empty": "[ARTIFACT EMPTY] {{path}} (bytes=0) | nothing was recorded",
+    "artifact_ledger_full": "[ARTIFACT LEDGER FULL] {{path}} was not recorded (cap {{cap}})",
+    "vfs_usage": "usage: `vfs.write` takes `artifacts/<name>.md|<content>` (path must be artifacts/*.md, content 1..{{max}} bytes)",
+    "vfs_path_rejected": "[VFS PATH REFUSED] {{path}}: only artifacts/<name>.md is writable (no `..`, no whitespace, at most {{max}} bytes)",
+    "vfs_write_failed": "[VFS WRITE FAILED] {{path}}: {{reason}}",
+    "vfs_written": "[VFS WRITTEN] {{path}} ({{bytes}} B, sha256 {{sha}})",
+    "vfs_ledger_only": "[VFS LEDGER ONLY] {{path}} ({{bytes}} B): this host exposes no `ygg.fs`, so nothing reached the disk - the artifact ledger records the Mod-side assertion only",
+    "verify_suite_passed": "[VERIFY SUITE PASSED] {{summary}}",
+    "verify_suite_failed": "[VERIFY SUITE FAILED] {{summary}}",
+    "verify_suite_blocked": "[VERIFY SUITE BLOCKED] {{reason}}",
+    "sessions_archived": "[SESSIONS ARCHIVED] moved {{moved}} -> {{dest}}",
+    "sessions_archive_refused": "[SESSIONS ARCHIVE REFUSED] remaining={{remaining}} dest={{dest}} | nothing was recorded",
+    "reactive_malformed": "[PROBE MALFORMED] {{call_id}} ({{tool_id}}): the output is not a `k=v;...` map - nothing was applied",
+    "artifact_path_rejected": "[ARTIFACT PATH REFUSED] {{path}}: the ledger only accepts artifacts/<name>.md (no `..`, no whitespace, at most {{max}} bytes) | nothing was recorded"
   },
   "tuning": {
     "min_slices": 1,
@@ -344,6 +371,7 @@
     "req_capacity": 32,
     "job_capacity": 4,
     "tool_capacity": 64,
-    "tool_output_max": 1024
+    "tool_output_max": 4096,
+    "artifact_capacity": 64
   }
 }
