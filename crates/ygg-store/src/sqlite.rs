@@ -22,7 +22,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::Value as Json;
 
 use crate::{
-    Backend, Committed, ResetInfo, RunStore, StepDraft, StepLog, StepRecord, StoreError, Tick,
+    ArtifactMeta, ArtifactRecord, Backend, Committed, ResetInfo, RunStore, StepDraft, StepLog,
+    StepRecord, StoreError, Tick,
 };
 
 /// 库文件名（建库 / 后端探测与混用检测的识别点）。
@@ -79,6 +80,15 @@ CREATE TABLE IF NOT EXISTS inbox_cursor (
   consumed   INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS artifact (
+  generation INTEGER NOT NULL REFERENCES generation(generation),
+  path       TEXT    NOT NULL,
+  sha256     TEXT    NOT NULL,
+  bytes      INTEGER NOT NULL,
+  content    BLOB    NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (generation, path)
+) WITHOUT ROWID;
 ";
 
 /// sqlite 后端。
@@ -399,6 +409,95 @@ impl RunStore for SqliteStore {
         // 刻意 no-op：`-wal` / `-shm` / `-journal` 是库的活文件，「清理」= 破坏事务。
         Vec::new()
     }
+
+    fn artifact_put(
+        &mut self,
+        path: &str,
+        content: &[u8],
+        tick: Tick,
+    ) -> Result<ArtifactMeta, StoreError> {
+        crate::validate_artifact_path(path)?;
+        crate::validate_artifact_content(content)?;
+        let sha256 = crate::sha256_hex(content);
+        let bytes = content.len();
+        self.conn
+            .execute(
+                "INSERT INTO artifact(generation, path, sha256, bytes, content, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+                 ON CONFLICT(generation, path) DO UPDATE SET \
+                   sha256 = excluded.sha256, bytes = excluded.bytes, \
+                   content = excluded.content, updated_at = excluded.updated_at",
+                params![
+                    self.generation,
+                    path,
+                    sha256,
+                    bytes as i64,
+                    content,
+                    tick.secs as i64
+                ],
+            )
+            .map_err(|err| db_error(&self.db_path, "写入制品", err))?;
+        Ok(ArtifactMeta {
+            path: path.to_owned(),
+            bytes,
+            sha256,
+            updated_at: tick.secs,
+        })
+    }
+
+    fn artifact_get(&self, path: &str) -> Result<Option<ArtifactRecord>, StoreError> {
+        crate::validate_artifact_path(path)?;
+        self.conn
+            .query_row(
+                "SELECT sha256, bytes, content, updated_at FROM artifact \
+                 WHERE generation = ?1 AND path = ?2",
+                params![self.generation, path],
+                |row| {
+                    let sha256: String = row.get(0)?;
+                    let bytes: i64 = row.get(1)?;
+                    let content: Vec<u8> = row.get(2)?;
+                    let updated_at: i64 = row.get(3)?;
+                    Ok(ArtifactRecord {
+                        meta: ArtifactMeta {
+                            path: path.to_owned(),
+                            bytes: bytes.max(0) as usize,
+                            sha256,
+                            updated_at: updated_at.max(0) as u64,
+                        },
+                        content,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|err| db_error(&self.db_path, "读取制品", err))
+    }
+
+    fn artifact_list(&self) -> Result<Vec<ArtifactMeta>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT path, bytes, sha256, updated_at FROM artifact \
+                 WHERE generation = ?1 ORDER BY path",
+            )
+            .map_err(|err| db_error(&self.db_path, "准备制品查询", err))?;
+        let rows = stmt
+            .query_map(params![self.generation], |row| {
+                let path: String = row.get(0)?;
+                let bytes: i64 = row.get(1)?;
+                Ok(ArtifactMeta {
+                    path,
+                    bytes: bytes.max(0) as usize,
+                    sha256: row.get(2)?,
+                    updated_at: row.get::<_, i64>(3)?.max(0) as u64,
+                })
+            })
+            .map_err(|err| db_error(&self.db_path, "读取制品列表", err))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|err| db_error(&self.db_path, "读取制品列表", err))?);
+        }
+        Ok(out)
+    }
 }
 
 // ============================================================================
@@ -692,5 +791,147 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM generation", [], |row| row.get(0))
             .expect("统计代");
         assert_eq!(generations, 1, "重开不得重复建 0 代");
+    }
+
+    // ---- 制品面（`generation` 作用域 + 内容寻址）----
+
+    /// put → get → list：内容字节保真、且列表按 `path` 升序（与 JSON 后端同序，
+    /// `ygg.fs.list` 的确定性锤子在这里）。
+    #[test]
+    fn artifact_roundtrip_put_get_list() {
+        let dir = case_dir("artifact-roundtrip");
+        let mut store = SqliteStore::open(&dir, TICK).expect("打开库");
+        let bodies = [
+            ("artifacts/b.md", b"second".to_vec()),
+            ("artifacts/a.md", b"first".to_vec()),
+            ("artifacts/notes/z.md", b"\xe4\xb8\xad\xe6\x96\x87".to_vec()),
+        ];
+        for (path, content) in &bodies {
+            let meta = store.artifact_put(path, content, TICK).expect("写入制品");
+            assert_eq!(meta.path, *path);
+            assert_eq!(meta.bytes, content.len());
+            assert_eq!(meta.sha256, crate::sha256_hex(content));
+            assert_eq!(meta.updated_at, TICK.secs);
+        }
+
+        let got = store
+            .artifact_get("artifacts/a.md")
+            .expect("读制品")
+            .expect("存在");
+        assert_eq!(got.content, b"first".to_vec());
+        assert_eq!(got.meta.bytes, 5);
+
+        let list = store.artifact_list().expect("列表");
+        assert_eq!(
+            list.iter().map(|m| m.path.as_str()).collect::<Vec<_>>(),
+            vec!["artifacts/a.md", "artifacts/b.md", "artifacts/notes/z.md"],
+            "列表必须按 path 升序"
+        );
+        // 缺失是 `Ok(None)`，不是错误。
+        assert!(store
+            .artifact_get("artifacts/missing.md")
+            .expect("读缺失")
+            .is_none());
+    }
+
+    /// 覆盖：同路径新内容 → `bytes` / `sha256` 变，但仍然是**一条**。
+    #[test]
+    fn artifact_put_overwrites_and_reshapes_sha() {
+        let dir = case_dir("artifact-overwrite");
+        let mut store = SqliteStore::open(&dir, TICK).expect("打开库");
+        let first = store
+            .artifact_put("artifacts/x.md", b"one", TICK)
+            .expect("首次写");
+        let second = store
+            .artifact_put("artifacts/x.md", b"two-two", TICK)
+            .expect("覆盖写");
+        assert_ne!(first.sha256, second.sha256, "内容变了摘要必须变");
+        assert_eq!(second.bytes, 7);
+        let list = store.artifact_list().expect("列表");
+        assert_eq!(list.len(), 1, "覆盖不得产生第二条");
+        assert_eq!(list[0].bytes, 7);
+    }
+
+    /// 同内容重写：摘要稳定（`sha2` 确定性），列表不变。
+    #[test]
+    fn artifact_put_keeps_same_meta_when_content_identical() {
+        let dir = case_dir("artifact-identical");
+        let mut store = SqliteStore::open(&dir, TICK).expect("打开库");
+        let later = Tick {
+            secs: TICK.secs + 60,
+            nanos: 0,
+        };
+        let first = store
+            .artifact_put("artifacts/same.md", b"payload", TICK)
+            .expect("首次写");
+        let again = store
+            .artifact_put("artifacts/same.md", b"payload", later)
+            .expect("重写");
+        assert_eq!(first.sha256, again.sha256, "同内容摘要必须稳定");
+        assert_eq!(first.bytes, again.bytes);
+        assert_eq!(again.updated_at, later.secs, "只有时间戳该变");
+    }
+
+    /// reset 推一代 ⇒ 制品自然归档：当前代看不到旧件，但**旧代仍在库里可查**。
+    #[test]
+    fn artifact_reset_archives_previous_generation() {
+        let dir = case_dir("artifact-reset");
+        let mut store = SqliteStore::open(&dir, TICK).expect("打开库");
+        store
+            .commit_step(draft(Some(b"{\"revision\":0}"), true))
+            .expect("提交一步（reset 需要旧代有步）");
+        store
+            .artifact_put("artifacts/keep.md", b"evidence", TICK)
+            .expect("写入制品");
+        let info = store
+            .reset(b"{\"initial\":true}", "explicit-new-game", TICK)
+            .expect("重置");
+        assert_eq!(info.archive.as_deref(), Some("generation=1"));
+
+        // 当前代：制品面为空。
+        assert!(store
+            .artifact_get("artifacts/keep.md")
+            .expect("读当前代")
+            .is_none());
+        assert!(store.artifact_list().expect("列表").is_empty());
+
+        // 旧代仍可查（归档 = 不删证据）。
+        let (old_sha, old_bytes): (String, Vec<u8>) = store
+            .conn
+            .query_row(
+                "SELECT sha256, content FROM artifact WHERE generation = 0 AND path = ?1",
+                params!["artifacts/keep.md"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("旧代制品必须还在库中做证据");
+        assert_eq!(old_sha, crate::sha256_hex(b"evidence"));
+        assert_eq!(old_bytes, b"evidence".to_vec());
+
+        // 新代重新写同一路径：与旧代**共存**（不撞主键，不覆写历史）。
+        store
+            .artifact_put("artifacts/keep.md", b"new", TICK)
+            .expect("新代写入");
+        let total: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |row| row.get(0))
+            .expect("统计制品");
+        assert_eq!(total, 2, "两代各一条");
+    }
+
+    /// 门在端口内：不合法路径 / 超限内容都不能碰库（零写入）。
+    #[test]
+    fn artifact_put_rejects_before_writing() {
+        let dir = case_dir("artifact-gate");
+        let mut store = SqliteStore::open(&dir, TICK).expect("打开库");
+        let err = store
+            .artifact_put("artifact/x.md", b"x", TICK)
+            .expect_err("坏前缀必须被拒");
+        assert!(matches!(err, StoreError::Invalid { .. }), "{err}");
+        let over = vec![0u8; crate::ARTIFACT_CONTENT_MAX_BYTES + 1];
+        let err = store
+            .artifact_put("artifacts/big.md", &over, TICK)
+            .expect_err("超限内容必须被拒");
+        assert!(matches!(err, StoreError::Invalid { .. }), "{err}");
+        assert!(store.artifact_list().expect("列表").is_empty(), "零写入");
     }
 }

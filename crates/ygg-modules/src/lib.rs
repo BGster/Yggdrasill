@@ -68,7 +68,7 @@ pub const MODULE_EXTENSION: &str = ".lua";
 ///
 /// 新不变量：**模块 chunk 的顶层是纯导出面**——只允许 `local` / 函数定义 /
 /// `require` 其它纯模块 / 纯读。任何**注册进内核**（`ygg.on` / `fsm.define` /
-/// `narrative.node`）、**写宿主状态**（`kv.set` / `entity.*` 写类）或
+/// `narrative.node`）、**写宿主状态**（`kv.set` / `entity.*` 写类 / `fs.write`）或
 /// **产生输出**（`narrate` / `emit` / `choice` / `meta` / `narrative.goto`）的
 /// 调用都必须发生在函数体内，由入口显式装配调用。
 ///
@@ -108,6 +108,9 @@ pub mod effects {
         ("entity", "set_attribute"),
         ("entity", "add_tag"),
         ("entity", "remove_tag"),
+        // 写宿主状态（与 `kv.set` 同类：一次调用就产生跨事件的副作用）；
+        // `fs.read` / `fs.stat` / `fs.list` 是纯读，不列（见下面 PURE_READ 表）。
+        ("fs", "write"),
         ("fsm", "define"),
         ("narrative", "node"),
         ("narrative", "goto"),
@@ -128,6 +131,12 @@ pub mod effects {
         ("kv", "get"),
         ("entity", "has_tag"),
         ("entity", "get_attribute"),
+        // `ygg.fs` 的读面（这三条不列进 `banned()` 也已是放行态；列在这里是为了
+        // 让 `YGG-MOD-EFFECT` 的报错能点名「这些在顶层是合法的」，免得作者把
+        // 合法写法当成违规自己改掉）。`fs.write` 不在其中——它列进了禁止面。
+        ("fs", "read"),
+        ("fs", "stat"),
+        ("fs", "list"),
     ];
 
     /// 禁止面判定（**唯一查询面**，内核影子表与 lint 共用）。

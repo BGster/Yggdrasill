@@ -694,6 +694,7 @@ pub struct ToolSpec {
     /// 工具类别。
     pub kind: ToolKind,
     /// `cli`：可执行文件名（裸名或相对路径；**不得**绝对路径 / 含 `..` / 是 shell）。
+    /// 唯一例外是自指占位 [`SELF_PROGRAM`]（`@self` = 本宿主可执行文件）。
     pub program: Option<String>,
     /// `cli`：参数模板（可空数组；支持 `{{key}}` 与 `$ENV{VAR}`）。
     pub args: Vec<String>,
@@ -1126,9 +1127,23 @@ fn tool_positive_uint(spec: &Json, id: &str, field: &str, max: u64) -> Result<u6
     Ok(value)
 }
 
+/// 自指占位：`@self` = 本宿主可执行文件（`std::env::current_exe()`）。
+///
+/// 用它是为了让 `pack.json` 的 `tools` 段可移植——内置子命令（`--builtin-tool`）
+/// 不必再让每个部署方自己写 shell wrapper，也不必把宿主路径写死进静态配置。
+///
+/// `@` 只在这一处合法：其余位置由 [`tool_program`] 的字符集规则拒绍。
+pub const SELF_PROGRAM: &str = "@self";
+
 /// `cli.program`：裸名或相对路径，无 shell、无绝对路径、无 `..` 路径段。
 fn tool_program(spec: &Json, id: &str) -> Result<String, String> {
     let program = tool_text(spec, id, "program")?;
+    // **自指占位先于一切形状判定**：`@` 不在下面的字符集里（`[A-Za-z0-9._/-]`），
+    // 所以 `@self` 只在这一处合法，其余位置（`@SELF` / `@self/x` / `x@self` /
+    // `@self..`）仍然被后面的规则拒掉。
+    if program == SELF_PROGRAM {
+        return Ok(program);
+    }
     if !program
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-'))
@@ -1709,6 +1724,33 @@ mod tool_contract_tests {
                 .and_then(|spec| spec.program.as_deref()),
             Some("./scripts/probe.sh")
         );
+    }
+
+    /// `@self`：**只此一处**合法（内置子命令的可移植入口），其余 `@` 形态照旧被拒。
+    #[test]
+    fn cli_accepts_self_program_and_rejects_look_alikes() {
+        let mut spec = cli_spec();
+        spec["program"] = json!(SELF_PROGRAM);
+        let registry = parse_one(spec).expect("`@self` 必须放行（否则内置子命令不可携带）");
+        assert_eq!(
+            registry
+                .get("probe")
+                .and_then(|spec| spec.program.as_deref()),
+            Some(SELF_PROGRAM)
+        );
+
+        // 长像的都不行：`@` 不在常规字符集里，只有精确的 `@self` 走特例。
+        for program in ["@SELF", "@self/x", "x@self", "@self..", "@", "@self."] {
+            let mut spec = cli_spec();
+            spec["program"] = json!(program);
+            let error = parse_one(spec).expect_err(&format!("`{program}` 必须被拒"));
+            assert!(error.contains("program"), "{error}");
+        }
+
+        // 裸名 `ygg-agent` 本来就是合法形态（`execute_cli` 会把它解析到 current_exe）。
+        let mut spec = cli_spec();
+        spec["program"] = json!("ygg-agent");
+        assert!(parse_one(spec).is_ok());
     }
 
     #[test]

@@ -79,7 +79,7 @@ use ygg_core::snapshot::{canonical_snapshot, SnapshotError};
 use ygg_core::transition::{run_transition, TransitionError};
 
 use crate::fuel::{self, HookFuelMeter};
-use crate::host_api::{self, HostApi, HostHandles};
+use crate::host_api::{self, HostApi, HostHandles, VfsStore};
 use crate::inject::{self, DeterminismHandle};
 use crate::modules::{ModuleError, ModuleSet};
 use crate::resources::{ResourceError, ResourceTable};
@@ -198,6 +198,8 @@ struct KernelParts {
     registry: HandlerRegistry,
     entities: Rc<RefCell<EntityStore>>,
     kv: Rc<RefCell<KvStore>>,
+    /// `ygg.fs` 的内存态 VFS（`host_api::install` 自建，这里只接管同一个 `Rc`）。
+    vfs: Rc<RefCell<VfsStore>>,
 }
 
 /// 装载序单一管线（S10 锁定序 + S11 资源步 + r1 模块表；`new` /
@@ -225,7 +227,7 @@ fn build_kernel(
     // ④ canonical store 先建：host 桥句柄与驱动共享同一 Rc（统一 store）。
     let entities = Rc::new(RefCell::new(EntityStore::new()));
     let kv = Rc::new(RefCell::new(KvStore::new()));
-    // ⑤ host API：装载期 ygg 完整面（on/emit/narrate/choice/kv/entity）。
+    // ⑤ host API：装载期 ygg 完整面（on/emit/narrate/choice/kv/entity/fs）。
     let host = host_api::install(
         &lua,
         HostHandles {
@@ -234,6 +236,9 @@ fn build_kernel(
         },
     )
     .map_err(KernelError::Sandbox)?;
+    // ⑤'' VFS：`install` 自建、与 Lua 阴面同一个 `Rc`。驱动必须拿它才能做
+    //       dispatch 级 savepoint（失败步里 `ygg.fs.write` 过的文件不得漏到盘上）。
+    let vfs = host.vfs_handle();
     // ⑤' S11 资源步：ygg.data 只读数据面（host 之后、stdlib 之前、
     // Mod chunk 之前——Mod 顶层即可读资源）。
     if let Some(table) = resources {
@@ -269,6 +274,7 @@ fn build_kernel(
         registry,
         entities,
         kv,
+        vfs,
     })
 }
 
@@ -293,6 +299,12 @@ pub struct KernelFacade {
     entities: Rc<RefCell<EntityStore>>,
     /// canonical 持久 KV（同上）。
     kv: Rc<RefCell<KvStore>>,
+    /// `ygg.fs` 的内存态 VFS（与 host 桥共享 = 同一份内容面）。
+    ///
+    /// **不进 canonical 存档**：`SaveFile` / `ENGINE_VERSION` /
+    /// `canonical_state_bytes` 零改动。VFS 是宿主侧的旁路面（落 `RunStore`
+    /// 的制品面，开局由宿主回灌），它的代可以独立于事件代（reset 归档）。
+    vfs: Rc<RefCell<VfsStore>>,
     /// 只读资源表（S11：构建后不可变；数据面非状态——不入 canonical
     /// store/存档/状态哈希，经 host 桥闭包间接消费，驱动不直接读面）。
     resources: Rc<ResourceTable>,
@@ -416,6 +428,7 @@ impl KernelFacade {
             registry: parts.registry,
             entities: parts.entities,
             kv: parts.kv,
+            vfs: parts.vfs,
             resources,
             mod_source: mod_source.to_owned(),
             pending_choice: None,
@@ -534,6 +547,11 @@ impl KernelFacade {
             "engineVersion": ENGINE_VERSION,
             "revision": self.entities.borrow().revision(),
             "kvRevision": self.kv.borrow().revision(),
+            // 加性诊断键（同 `kvRevision` 的性质，不是状态）：VFS 的写代数与
+            // 件数。`state` 信封的消费方（`agent.rs::print_state` / 测试）都按
+            // 键取值，没有严格键集比较，所以加键不破线格式。
+            "vfsRevision": self.vfs.borrow().revision(),
+            "vfsFiles": self.vfs.borrow().len(),
             "snapshotBytes": snapshot_bytes.len(),
             "pendingChoice": self.pending_choice.as_ref().map(choice_to_json),
         })
@@ -603,6 +621,10 @@ impl KernelFacade {
         //    `Ref`/`RefMut`，不跨越 `run_transition` 存活。
         let mut baseline = self.entities.borrow().clone();
         let kv_baseline = self.kv.borrow().clone();
+        // VFS 与 kv 同法：基线是 canonical 的**副本**，不是换出（换出会让转换期的
+        // `ygg.fs.read` 读到空表）；`VfsStore` 自身 `Clone`，`dirty` 集也随基线
+        // 克隆，所以失败 dispatch 里 `ygg.fs.write` 过的路径不会漏进下一次 flush。
+        let vfs_baseline = self.vfs.borrow().clone();
         let outcome = run_transition(
             &mut baseline,
             &mut self.registry,
@@ -629,6 +651,9 @@ impl KernelFacade {
             Err(err) => {
                 *self.entities.borrow_mut() = baseline;
                 *self.kv.borrow_mut() = kv_baseline;
+                // 必须落在错误分支内、且先于该分支的返回：失败步的文件不能
+                // 出现在 `ygg.fs.list` 里，否则 Mod 会拿半个状态上的产物做判定。
+                *self.vfs.borrow_mut() = vfs_baseline;
                 return map_transition_error(err);
             }
         };
@@ -675,6 +700,58 @@ impl KernelFacade {
     /// 只读资源表（S11 诊断面；资源不可变，无写面外溢）。
     pub fn resources(&self) -> &ResourceTable {
         &self.resources
+    }
+
+    // ---- `ygg.fs` 的宿主机侧面（预载 / 落盘水位 / 诊断）----
+
+    /// 预载一件 VFS 文件（宿主开局从 `RunStore::artifact_get` 回灌）。
+    /// **不置 dirty / 不动 revision**：它不产生新的落盘需求。
+    pub fn vfs_load(&mut self, path: &str, content: &[u8], sha256: &str) {
+        self.vfs.borrow_mut().load(path, content, sha256);
+    }
+
+    /// 宿主侧写 VFS（`--artifact-put` 预载 / 宿主直接落地）。返回摘要。
+    ///
+    /// 与 Lua 写面**同一道门**：错误串已是可读原因。
+    pub fn vfs_put(&mut self, path: &str, content: &[u8]) -> Result<String, String> {
+        self.vfs
+            .borrow_mut()
+            .put(path, content)
+            .map(|file| file.sha256)
+    }
+
+    /// 全量条目（`BTreeMap` 序）——诊断面与「强制重刷」面。
+    pub fn vfs_entries(&self) -> Vec<(String, Vec<u8>, String)> {
+        self.vfs
+            .borrow()
+            .entries()
+            .map(|(path, file)| (path.to_owned(), file.bytes.clone(), file.sha256.clone()))
+            .collect()
+    }
+
+    /// 取走未落盘条目（排空 dirty）。宿主 flush 成功后调用。
+    pub fn vfs_take_dirty(&mut self) -> Vec<(String, Vec<u8>, String)> {
+        self.vfs
+            .borrow_mut()
+            .take_dirty()
+            .into_iter()
+            .map(|(path, file)| (path, file.bytes, file.sha256))
+            .collect()
+    }
+
+    /// 把一批路径重新标脏（落盘中途失败后的回填：内容寻址让重试只重写相同字节）。
+    pub fn vfs_requeue_dirty(&mut self, paths: &[String]) {
+        self.vfs.borrow_mut().requeue_dirty(paths);
+    }
+
+    /// VFS 写代数（每次成功 `put` +1）。
+    pub fn vfs_revision(&self) -> u64 {
+        self.vfs.borrow().revision()
+    }
+
+    /// VFS 当前件数。
+    pub fn vfs_len(&self) -> usize {
+        self.vfs.borrow().len()
     }
 }
 
@@ -1125,5 +1202,260 @@ end)
             save["save"]["entities"]["entities"]["1"]["attributes"]["hp"],
             json!(6)
         );
+    }
+
+    // ---- Part B：`ygg.fs` 确定性 VFS（写 / 读 / stat / list + savepoint 回滚）----
+
+    /// VFS 全集 Mod：四个事件分别打写 / 读 / stat / list 面，叙事即断言载体。
+    ///
+    /// 沙箱裁掉了 `string` / `table` / `math`（`BASE_WHITELIST` 只留 base 纯计算子集），
+    /// 所以这里只能用 `#` / `..` / `tostring` / `type`——别顺手写 `string.len`。
+    const VFS_MOD: &str = r#"
+ygg.on("event.write", function()
+  local b = ygg.fs.write("artifacts/b.md", "second")
+  local a = ygg.fs.write("artifacts/a.md", "first")
+  local sb, sa = b.sha256, a.sha256
+  ygg.narrate("w=" .. b.path .. ":" .. tostring(b.bytes) .. ":" .. tostring(#sb))
+  ygg.narrate("w=" .. a.path .. ":" .. tostring(a.bytes) .. ":" .. tostring(#sa))
+end)
+ygg.on("event.read", function()
+  ygg.narrate("hit=" .. tostring(ygg.fs.read("artifacts/a.md")))
+  ygg.narrate("miss=" .. tostring(ygg.fs.read("artifacts/none.md")))
+  ygg.narrate("misstype=" .. type(ygg.fs.read("artifacts/none.md")))
+end)
+ygg.on("event.stat", function()
+  local hit = ygg.fs.stat("artifacts/a.md")
+  local miss = ygg.fs.stat("artifacts/none.md")
+  local hs, ms = hit.sha256, miss.sha256
+  ygg.narrate("hit=" .. tostring(hit.exists) .. ":" .. tostring(hit.bytes)
+    .. ":" .. tostring(#hs))
+  ygg.narrate("miss=" .. tostring(miss.exists) .. ":" .. tostring(miss.bytes)
+    .. ":" .. tostring(#ms) .. ":" .. type(miss))
+end)
+ygg.on("event.list", function()
+  local rows = ygg.fs.list()
+  local acc = ""
+  for i = 1, #rows do
+    local sha = rows[i].sha256
+    if i > 1 then acc = acc .. "," end
+    acc = acc .. rows[i].path .. "@" .. tostring(rows[i].bytes) .. ":" .. tostring(#sha)
+  end
+  ygg.narrate("list=" .. tostring(#rows) .. ":" .. acc)
+end)
+"#;
+
+    #[test]
+    fn fs_write_read_stat_list_roundtrip() {
+        let mut kernel = KernelFacade::new(VFS_MOD).expect("kernel construction");
+        let written = reply(&kernel.dispatch("event.write", "0"));
+        assert_eq!(written["ok"], Json::Bool(true), "envelope={written}");
+        // write 回执：path / bytes / sha256（64 字符）——长度在叙事里断言。
+        assert_eq!(
+            written["narrative"],
+            json!(["w=artifacts/b.md:6:64", "w=artifacts/a.md:5:64"])
+        );
+
+        // read：命中回原文，miss 回 nil（不 throw）。
+        let read = reply(&kernel.dispatch("event.read", "0"));
+        assert_eq!(
+            read["narrative"],
+            json!(["hit=first", "miss=nil", "misstype=nil"])
+        );
+
+        // stat：**恒回表**（miss 也是表，字段齐全）。
+        let stat = reply(&kernel.dispatch("event.stat", "0"));
+        assert_eq!(
+            stat["narrative"],
+            json!(["hit=true:5:64", "miss=false:0:0:table"])
+        );
+
+        // list：稠密数组（`#rows` 可数），按 path 升序。
+        let list = reply(&kernel.dispatch("event.list", "0"));
+        assert_eq!(
+            list["narrative"],
+            json!(["list=2:artifacts/a.md@5:64,artifacts/b.md@6:64"])
+        );
+    }
+
+    /// 同序列两次 → 同字节（确定性锤子：`BTreeMap` 序 + `sha2` 确定性）。
+    #[test]
+    fn fs_list_is_deterministic_across_repeated_dispatch() {
+        let mut first = KernelFacade::new(VFS_MOD).expect("kernel construction");
+        let mut second = KernelFacade::new(VFS_MOD).expect("kernel construction");
+        for kernel in [&mut first, &mut second] {
+            reply(&kernel.dispatch("event.write", "0"));
+            reply(&kernel.dispatch("event.list", "0"));
+        }
+        let a = reply(&first.dispatch("event.list", "0"));
+        let b = reply(&second.dispatch("event.list", "0"));
+        assert_eq!(a["narrative"], b["narrative"], "list 回执必须同字节");
+        assert_eq!(first.vfs_entries(), second.vfs_entries());
+        assert_eq!(first.vfs_revision(), second.vfs_revision());
+    }
+
+    /// 成功派发：写入留在 VFS 且入 dirty 水位；排空后二次排空为空。
+    #[test]
+    fn successful_dispatch_keeps_vfs_and_marks_dirty() {
+        let mut kernel = KernelFacade::new(VFS_MOD).expect("kernel construction");
+        reply(&kernel.dispatch("event.write", "0"));
+        assert_eq!(kernel.vfs_len(), 2);
+        assert_eq!(kernel.vfs_revision(), 2, "两次成功 put 各 +1");
+
+        let dirty = kernel.vfs_take_dirty();
+        assert_eq!(
+            dirty.iter().map(|(p, _, _)| p.as_str()).collect::<Vec<_>>(),
+            vec!["artifacts/a.md", "artifacts/b.md"],
+            "dirty 必须按 BTreeMap 序排空"
+        );
+        assert_eq!(dirty[0].1, b"first".to_vec(), "带出的是内容字节");
+        assert!(kernel.vfs_take_dirty().is_empty(), "排空后不得重复上报");
+        assert_eq!(kernel.vfs_len(), 2, "排空 dirty 不删文件");
+    }
+
+    /// **savepoint 回滚的 VFS 面**：失败步里写的文件必须一起回滚，且不得入
+    /// dirty（否则一次失败会在下一轮把半个状态落盘）。
+    #[test]
+    fn failed_dispatch_rolls_back_vfs() {
+        const HALF_WRITE_MOD: &str = r#"
+ygg.on("event.ok", function()
+  ygg.fs.write("artifacts/clean.md", "keep")
+end)
+ygg.on("event.bad", function()
+  ygg.fs.write("artifacts/dirty.md", "leak")
+  error("boom")
+end)
+"#;
+        let mut kernel = KernelFacade::new(HALF_WRITE_MOD).expect("kernel construction");
+        // 先提交一个非空基线（否则「回滚到基线」与「清空」不可区分）。
+        let ok = reply(&kernel.dispatch("event.ok", "0"));
+        assert_eq!(ok["ok"], Json::Bool(true));
+        let _ = kernel.vfs_take_dirty(); // 排空基线写入，只观察失败步的增量
+        let baseline_revision = kernel.vfs_revision();
+
+        assert_eq!(
+            reply_code(&kernel.dispatch("event.bad", "0")),
+            code::VALIDATION
+        );
+        // 文件面：失败步写的键不在表里，基线件还在。
+        assert_eq!(kernel.vfs_len(), 1, "失败步的文件不得留下");
+        assert_eq!(
+            kernel
+                .vfs_entries()
+                .iter()
+                .map(|(path, _, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["artifacts/clean.md"]
+        );
+        // 水位面：dirty 与 revision 一起回滚。
+        assert!(
+            kernel.vfs_take_dirty().is_empty(),
+            "失败步不得留下待落盘条目"
+        );
+        assert_eq!(
+            kernel.vfs_revision(),
+            baseline_revision,
+            "revision 随基线回滚"
+        );
+    }
+
+    /// 路径 / 内容门在 Lua 调用点 fail-fast（`ygg.fs.write` 当场报错，
+    /// 不进 `files`、不动 revision）——与 `ygg_store` 的端口门同规则。
+    #[test]
+    fn fs_write_path_gate_rejects_at_the_call_site() {
+        let mut kernel = KernelFacade::new(IDLE_MOD).expect("kernel construction");
+        for bad in [
+            "artifact/x.md",
+            "artifacts/",
+            "artifacts//x",
+            "artifacts/../x",
+            "/artifacts/x",
+            "artifacts/a b.md",
+            "artifacts/a|b.md",
+            "artifacts/a@b.md",
+        ] {
+            let err = kernel
+                .vfs_put(bad, b"x")
+                .expect_err(&format!("`{bad}` 必须被拒"));
+            assert!(err.contains("ygg.fs.write 拒绝："), "必须点名写面：{err}");
+        }
+        // 内容上限（256 KiB）：恰好上限放行，多一字节即拒。
+        let exactly = vec![0u8; 256 * 1024];
+        assert!(kernel.vfs_put("artifacts/max.md", &exactly).is_ok());
+        let over = vec![0u8; 256 * 1024 + 1];
+        assert!(kernel.vfs_put("artifacts/over.md", &over).is_err());
+        // 被拒的写不留下任何痕迹（revision 只记成功的两次）。
+        assert_eq!(kernel.vfs_len(), 1);
+        assert_eq!(kernel.vfs_revision(), 1);
+    }
+
+    /// 宿主预载：`vfs_load` **不**入 dirty、**不**动 revision（不是本会话的写）。
+    #[test]
+    fn vfs_load_does_not_dirty_or_bump_revision() {
+        let mut kernel = KernelFacade::new(IDLE_MOD).expect("kernel construction");
+        kernel.vfs_load("artifacts/pre.md", b"preset", "deadbeef");
+        assert_eq!(kernel.vfs_len(), 1);
+        assert_eq!(kernel.vfs_revision(), 0, "预载不得当成本次写入");
+        assert!(kernel.vfs_take_dirty().is_empty(), "预载不得入 dirty");
+        // 预载件参与 list / 诊断面。
+        assert_eq!(
+            kernel.vfs_entries()[0],
+            (
+                "artifacts/pre.md".to_owned(),
+                b"preset".to_vec(),
+                "deadbeef".to_owned()
+            )
+        );
+    }
+
+    /// 多文件 Mod 支持面：`ModuleSet` 由 `(规范名, 源码)` 构造——名字是点分
+    /// 规范名（`src.writer`），不是路径（`src/writer.lua` 由 `path_of` 派生）。
+    /// 下面两个用例共用。
+    fn module_set(pairs: &[(&str, &str)]) -> ModuleSet {
+        ModuleSet::from_pairs(
+            pairs
+                .iter()
+                .map(|(name, code)| ((*name).to_owned(), code.as_bytes().to_vec())),
+        )
+        .expect("登记模块")
+    }
+
+    /// **模块顶层禁令**：`ygg.fs.write` 与 `ygg.kv.set` 同类（写宿主状态），
+    /// 模块 chunk 顶层就被影子表拒绍，报错带调用点与合法写法。
+    #[test]
+    fn fs_write_is_banned_at_module_top_level() {
+        let modules = module_set(&[("src.writer", "ygg.fs.write(\"artifacts/x.md\", \"y\")\n")]);
+        let err = match KernelFacade::with_modules("require(\"src.writer\")", modules) {
+            Ok(_) => panic!("模块顶层写 ygg.fs.write 必须被拒"),
+            Err(err) => err,
+        };
+        let text = err.to_string();
+        for fragment in ["ygg.fs.write", "src/writer.lua", "模块顶层"] {
+            assert!(
+                text.contains(fragment),
+                "错误文本缺少「{fragment}」：{text}"
+            );
+        }
+    }
+
+    /// 纯读面（`fs.read` / `fs.stat` / `fs.list`）在模块顶层**合法**——
+    /// 禁令只压写面，否则「模块顶层读一下自己上次的产物」这种正当用法会被误杀。
+    #[test]
+    fn fs_reads_are_allowed_at_module_top_level() {
+        let modules = module_set(&[(
+            "src.reader",
+            "local v = ygg.fs.read(\"artifacts/x.md\")\n\
+             local s = ygg.fs.stat(\"artifacts/x.md\")\n\
+             return { n = #ygg.fs.list(), nil_read = (v == nil), exists = s.exists }\n",
+        )]);
+        let mut kernel = KernelFacade::with_modules(
+            "local r = require(\"src.reader\")\n\
+             ygg.on(\"event.peek\", function()\n\
+               ygg.narrate(\"n=\" .. tostring(r.n) .. \" nil=\" .. tostring(r.nil_read) .. \" exists=\" .. tostring(r.exists))\n\
+             end)",
+            modules,
+        )
+        .expect("纯读面必须放行");
+        let out = reply(&kernel.dispatch("event.peek", "0"));
+        assert_eq!(out["narrative"], json!(["n=0 nil=true exists=false"]));
     }
 }

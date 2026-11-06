@@ -12,8 +12,14 @@ description = "Yggdrasill run 目录的持久化端口（RunStore trait + JSON �
 #   默认 feature 为空 ⇒ 不开 sqlite 的构建路径完全不编 C 代码。
 # - **不引入 serde**：restore/record 的字段映射手写在序列化点，避免为端口加一层
 #   derive 依赖（线格式必须逐字节可控，derive 的字段序不是契约）。
+# - `sha2`（0.10）：**制品内容寻址的摘要面**。选它而不是在端口内手写 SHA-256，
+#   是因为 `ygg-schema`（`validate.rs::sha256_hex`）与 `ygg-sandbox`（`hash.rs`）
+#   已经各有一份编码口径，端口再抄第三份就是三份漂移面。该 crate 无 build
+#   script、无 C 代码，且 `Cargo.lock` 里已存在（无新增供应链面），也不会把
+#   `serde` 的 `preserve_order` 拉进来（CI 守卫检查这一点）。
 [dependencies]
 serde_json = "1"
+sha2 = "0.10"
 
 [dependencies.rusqlite]
 version = "0.32"
