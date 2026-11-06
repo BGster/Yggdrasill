@@ -70,7 +70,7 @@ local function valid_ext(ext)
     return false
   end
   local raw = trim(ext)
-  if raw == "" or #raw > 64 then
+  if raw == "" or #raw > 128 then
     return false
   end
   return raw:find("%s") == nil

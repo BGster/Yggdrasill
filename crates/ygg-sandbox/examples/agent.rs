@@ -4448,7 +4448,8 @@ fn new_external_id(run_id: &str, line_index: usize) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("inbox-{run_id}-{line_index}-{nanos}-{}", std::process::id())
+    let prefix: String = run_id.chars().take(24).collect();
+    format!("inbox-{prefix}-{line_index}-{nanos}-{}", std::process::id())
 }
 
 // ============================================================================

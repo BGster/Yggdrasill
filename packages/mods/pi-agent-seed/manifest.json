@@ -116,9 +116,9 @@
       "sha256": "79cc86d03760e4af0faaab66a6ce5c619609f890808b61e185c21aece5555e00"
     },
     {
-      "byteLength": 25894,
+      "byteLength": 25895,
       "path": "src/wire.lua",
-      "sha256": "19803f16595eb2ac0ed1988ef58106c97416cc59516db0268e9b625e8af27eb6"
+      "sha256": "d399157cfd44b596a810959f28200effa2a0a42503cc84529163f3f021b28dfe"
     }
   ],
   "entries": [
