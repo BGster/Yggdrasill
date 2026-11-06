@@ -494,3 +494,42 @@ cargo run --example playtest -- .ygg/mods/pi-agent-seed
 # 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
 cargo run --example pack -- .ygg/mods/pi-agent-seed
 ```
+
+## 十三、上层扩展：`.pi/extensions/ygg-pi-harness`
+
+本仓库自带一个 pi 扩展，把「人肉敲一串 `--event` 记位次」升级成会话面。它是**上层**，不是替身：
+所有状态推进仍然走 `daemon.dispatch` → Mod 的 `ygg.on(...)` handler，扩展里没有第二套状态机。
+
+| 文件 | 职责 |
+| --- | --- |
+| `firewall.ts` | `tool_call` 闸门：数据红线（`*.xlsx` / `*.xls` / `*.csv`、`/Volumes/WenshuSpace/**`）+ 批量入口禁令（`--events` / shell 循环 / `xargs`）。纯函数 [`checkToolCallFirewall`](./.pi/extensions/ygg-pi-harness/firewall.ts)。 |
+| `daemon.ts` | `ygg-agent --daemon` 常驻客户端：行式 JSON-RPC、按 `id` 配对、请求串行化、30s 超时、意外退出重启；宿主不支持 `--daemon` 时**降级单发**（摘要标 `available=false`，不猜 jobs/gates）。 |
+| `orchestrator.ts` | 活跃作业（`plan` / `development`）的泳道生命周期：[`buildSubagentBrief`](./.pi/extensions/ygg-pi-harness/orchestrator.ts) 生成自洽 brief；[`orchestrateActiveJobs`](./.pi/extensions/ygg-pi-harness/orchestrator.ts) 依次做「claim worktree → 并发派 subagent → `vfs_put` 归档 → `git.lane_probe` → `proposal.submit` → `proposal.accept`」，把人送到 `plan_gate` / `accept_gate` 门口。 |
+| `index.ts` | 装配：`session_start` / `session_shutdown`、`tool_call` 闸门、`/ygg status\|stop`、两个工具 `ygg_session` / `ygg_run_lanes`、页脚三段式状态行（runId / stage / jobs 与 gates 计数）。 |
+| `harness.test.ts` | 37 条行为测试（含一个用 `process.execPath` 起假 daemon 的行协议集成测试）。 |
+
+**`ygg_session` 的动作与它们对应的事件**（位次由扩展拼好，模型不必记）：
+
+| action | 派发的事件 / 载荷 |
+| --- | --- |
+| `kickoff` | `config.set goal.authorization=…` → `config.set play.mode=goal` → `task.intake "<标题|描述>"` → 逐条 `requirement.add` → `requirement.dispatch ""` |
+| `step` | 任意 `{ event, payload }`（菜单选择必须是 **JSON 数字**） |
+| `approve_gate` / `reject_gate` | `gate.approve "rN|<note>"` / `gate.reject "rN|<feedback>"` |
+| `vfs_write` / `vfs_read` / `vfs_list` | 本局 VFS 制品面（不推进状态） |
+| `settle_close` | `coordinate.submit ""`（若还在 coordinate）→ `verify.submit "true"` → `vfs_put artifacts/evolution-review.md` → `tool.call harness.archive_sessions` → `settlement.evolution "…|c=<kept>/<screened>[|cls=…]|todo=0/"` → `review.note "<lesson>|<score>"` → `settle` |
+
+**刻意留在扩展之外**的两件事：
+
+1. **`gate.approve` / `gate.reject` 的判定**：`ygg_run_lanes` 只把提案推到 `plan_gate` / `accept_gate`，
+   绝不代批——门禁的意义是「有人看过」，扩展只负责把现场（回执整段 + gates 列表）摆到桌面上。
+2. **冲突与待决选择**：`summary.conflicts` 非空时不做任何自动推进（那是用户门禁）。
+
+**验证**（无外部依赖）：
+
+```bash
+node --experimental-strip-types --test .pi/extensions/ygg-pi-harness/harness.test.ts
+```
+
+覆盖面：红线与批量入口的**该拦 / 不该拦**两侧、brief 自洽性（工作区边界 / 需求正文逐行保留 / 验证门禁 /
+返回格式）、编排链（先 claim 再派活、并发、`vfs_put`、探针、提案位次、落 `plan_gate` / `accept_gate`）、
+daemon 行协议（id 配对、串行化、降级、`.env` 只暴露 `YGG_SUBAGENT_MODEL` / `YGG_SUBAGENT_THINKING` 两项）。

@@ -388,3 +388,37 @@ order (no step may be skipped):
    step / an ending line exists / the inbox was consumed).
 4. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
    before ending this run; never carry a finished run's tasks into the next one.
+
+## 3. Upper layer: the pi extension `.pi/extensions/ygg-pi-harness`
+
+The CLI above is the host contract; typing its `--event` sequences by hand is not the intended
+interface. `.pi/extensions/ygg-pi-harness` is the **upper level**: it never replaces the state
+machine, it only speaks to it through `daemon.dispatch` → `ygg.on(...)` handlers.
+
+| File | Job |
+| --- | --- |
+| `firewall.ts` | `tool_call` gate: the data red line (`*.xlsx` / `*.xls` / `*.csv`, `/Volumes/WenshuSpace/**`) and the batch-entrypoint prohibition (`--events`, shell `for/while … do … ygg-agent`, `xargs ygg-agent`). Pure [`checkToolCallFirewall`](.pi/extensions/ygg-pi-harness/firewall.ts), directly unit-tested. |
+| `daemon.ts` | Persistent `ygg-agent --daemon` client: line JSON-RPC, id matching, serialized request queue, 30s timeout, respawn after an unexpected exit, and a **single-shot CLI fallback** when the host predates `--daemon` (the summary then reports `available=false` instead of guessing jobs/gates). |
+| `orchestrator.ts` | Lane lifecycle for active jobs: [`buildSubagentBrief`](.pi/extensions/ygg-pi-harness/orchestrator.ts) builds a self-contained brief; [`orchestrateActiveJobs`](.pi/extensions/ygg-pi-harness/orchestrator.ts) claims the worktree, runs subagents concurrently, archives into the run VFS, probes the lane, submits and accepts the proposal — landing the requirement at `plan_gate` / `accept_gate`. |
+| `index.ts` | Wiring: session lifecycle hooks, the `tool_call` firewall, `/ygg status` and `/ygg stop`, the tools `ygg_session` / `ygg_run_lanes`, and the footer status line. |
+
+What the extension deliberately does **not** do:
+
+- **It never approves a gate.** `ygg_run_lanes` stops at `plan_gate` / `accept_gate`; approving is the
+  one thing only the coordinator does. An auto-approved gate is the same as no gate.
+- **It never advances past a conflict** (`summary.conflicts` non-empty) and never retries a refused
+  receipt as if it had passed: rejections are surfaced verbatim.
+- **It never truncates a receipt.** Every `narrative` line reaches the conversation, and
+  `pendingChoice` is handed over raw.
+
+Verification (no external dependencies, so it runs in any checkout):
+
+```bash
+node --experimental-strip-types --test .pi/extensions/ygg-pi-harness/harness.test.ts
+```
+
+The suite covers both sides of every firewall rule (blocked **and** allowed), brief self-containment
+(workspace boundary / requirement text kept line by line / verification gates / return format), the
+whole orchestration chain (claim before dispatch, concurrency, `vfs_put`, probe, proposal payload
+positions, landing at the right gate), and the daemon line protocol (id matching, serialization,
+fallback, and `.env` exposing only `YGG_SUBAGENT_MODEL` / `YGG_SUBAGENT_THINKING`).

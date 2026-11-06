@@ -2,6 +2,64 @@
 
 > 只记「为什么这样落」与「留下了什么可判定的口子」；实现细节看代码与各 crate 头注。
 
+## r-pi-harness · 上层扩展 `.pi/extensions/ygg-pi-harness`（CLI 之上的会话面）
+
+**分支** `feature/pi-extension-harness`（base `6cc7fc4`）。目标：把「人肉照 README 位次敲一串
+`--event`」升级成**两个工具**，同时把三条靠自觉的纪律变成**物理闸门**——数据红线、批量入口禁令、
+「回执整段呈现」。
+
+### 落成的四件事
+
+1. **闸门（`firewall.ts`）**：`tool_call` 上的纯函数 `checkToolCallFirewall(tool, input)`。
+   规则 1 拦 `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 触碰 `/Volumes/WenshuSpace/**` 或任何
+   `*.xlsx`/`*.xls`/`*.csv`（`/tmp` 合成数据除外，判据是**动作**不是「读没读内容」）；
+   规则 2 拦 `bash` 里的 `ygg-agent --events`、`for/while … do … ygg-agent … done`、`xargs ygg-agent`。
+   只扫**路径语义**的入参键（`write.content` 里出现 `.csv` 不误伤），`grep.pattern` 是正则不扫、
+   `find.pattern` 是 glob 要扫。
+2. **常驻客户端（`daemon.ts`）**：`ygg-agent --daemon` 的行式 JSON-RPC（按 `id` 配对、请求串行化、
+   30s 超时、意外退出重启）。宿主没有 `--daemon` 时**降级单发**并把摘要标成 `available=false`：
+   单发回执本来就没有 `meta.summary`，宁可报「不知道」也不猜 jobs/gates。
+3. **泳道编排（`orchestrator.ts`）**：`summary.jobs` 里每个 `plan`/`development` 作业走
+   「分配泳道 → `git.worktree_claim`（**先建 worktree 再起 subagent**）→ 并发派 subagent →
+   报告/落盘制品 `vfs_put` → `git.lane_probe`（含跨泳道文件冲突雷达）→ `proposal.submit` →
+   `proposal.accept`」，把人送到 `plan_gate`/`accept_gate` 门口。brief 由纯函数
+   `buildSubagentBrief` 生成（工作区边界 / 需求正文逐行 / 验证门禁 / 返回格式 / 红线）。
+4. **装配（`index.ts`）**：`session_start`/`session_shutdown`、`tool_call` 闸门、`/ygg status|stop`、
+   工具 `ygg_session`（kickoff / step / approve_gate / reject_gate / vfs_* / settle_close）与
+   `ygg_run_lanes`，页脚三段式状态行。`settle_close` 把 `coordinate.submit → verify.submit →
+   进化复盘入 VFS → harness.archive_sessions → settlement.evolution → review.note → settle`
+   串成一次调用，且**被拒就停**（不把「被拒」洗成「已收口」）。
+
+### 留下的可判定口子（下次可以据此复查）
+
+| 口子 | 判定方式 |
+| --- | --- |
+| 红线拦得住（目录 / 三种数据扩展名 / bash 里的路径与 `--flag=/path`） | `harness.test.ts`「firewall: 数据红线」用例 |
+| 红线不误伤（代码文件 / `/tmp` 合成数据 / `write.content` 里的 `.csv` 字面量） | 同文件「放行 /tmp」与「只扫路径语义的入参」用例 |
+| 批量入口拦得住（`--events` / `for` 循环 / `while` 循环 / `xargs`），单发 `--event` 放行 | 「firewall: 批量入口」用例 |
+| brief 自洽（worktree 边界 / 需求正文逐行 / 门禁命令 / plan 只读） | 「buildSubagentBrief」两条用例 |
+| 先 claim 再派活、并发、`vfs_put`、探针、提案位次、落对门 | 「orchestrateActiveJobs」四条用例 |
+| 摘要不可用时不推进（不猜 jobs/gates） | 「摘要不可用时不猜」用例 |
+| daemon 行协议（id 配对 / 串行化 / 起不来就降级） | 「YggDaemon: 行协议」三条用例（假 daemon = `process.execPath` + 临时脚本） |
+| `.env` 只暴露两项 | 「daemon: .env 只暴露两项」用例 |
+
+跑法（无外部依赖）：
+
+```bash
+node --experimental-strip-types --test .pi/extensions/ygg-pi-harness/harness.test.ts
+```
+
+### 刻意没做的事（避免被误当成「漏了」）
+
+- **不代批 gate**：`ygg_run_lanes` 停在门口，`gate.approve`/`gate.reject` 仍是协调者（人）的决定。
+  自动批等于没有门禁，这条写进了 `AGENTS.md` §3 与两份 Mod README。
+- **不在扩展里放第二套状态机**：所有推进都走 `daemon.dispatch` → Mod handler；扩展不写
+  `.ygg/runs/**`，也不解释 `pendingChoice`（原样交给用户）。
+- **不改 `crates/**` 与 Mod 的 `src/**`**：并行泳道 `r1` 在改宿主与 Mod（`--daemon`、`summary.jobs`），
+  本泳道只落上层扩展 + 文档，文件集 100% 不相交。
+- **不伪造摘要**：单发降级下 `summary.available=false`，`orchestrateActiveJobs` 直接返回降级原因，
+  不会因为拿不到 `jobs` 就假装「没有作业」。
+
 ## r-rename · Seed Mod 更名 `agent-seed` → `pi-agent-seed`（历史局不动）
 
 **分支** `feature/pi-agent-seed-rename`（base `bac2a40`）。目标：把两侧 Mod 目录

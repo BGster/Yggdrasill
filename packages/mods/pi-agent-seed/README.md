@@ -402,3 +402,28 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 
 把这条能力引入新项目时，只需两件事：`pack.json` 的 `tools` 段声明工具（`allowedTools` 同步），
 以及 `data/scenes.json` 补齐 `src/` 引用的 beat 名（`agent_seed_semantics` 的声明完整性用例会逐条比对）。
+
+### 七之三、上层扩展（项目侧 `.pi/extensions/ygg-pi-harness`）
+
+骨架包本身**不含**扩展：`packages/mods/pi-agent-seed` 是五件套模板（`pack.json` / `manifest.json` /
+`mod.lua` / `schemas/` / `data/` + `src/`），扩展属于**装载它的项目**，随项目仓库走。项目实例
+`.ygg/mods/pi-agent-seed` 的 README「十三」章记录了本仓库这一份的装配；这里只写**契约**：
+
+Mod 对上层扩展的承诺（扩展可以依赖的，恰好只有这些）：
+
+- 状态推进只有一条路：`daemon.dispatch(op="dispatch", event, payload)` → `ygg.on(event)` handler。
+  扩展不需要（也不应该）读写 `.ygg/runs/**`。
+- 只读处境只有一个面：`agent.summary` 的 `meta.summary`（`stage` / `ending` / `verifyPassed` /
+  `nextEndsRun` / `pendingProposals` / `requirementCount` / `conflicts` / `pendingTools`，以及 add-on 的
+  `jobs` / `gates` 与 `evolution` 四键）。**缺字段时必须取保守值**（不猜 jobs / gates）。
+- 工具桥只认 `tool.call` 的 `<tool_id>|<k=v;…>`：扩展不直接执行工具，它只声明请求；执行在宿主，
+  结果以 `tool.result` 回投，再由 `REACTORS` 折叠成领域状态。
+- 人类动作门禁（`play.mode=guide`）对扩展**同样生效**：`proposal.accept` / `gate.approve` /
+  `coordinate.submit` / `verify.submit` / `review.note` 直派会被 `[REJECTED:ACTION]` 拒。
+  扩展要推进就把 `play.mode=goal`（`config.set`，允许直派且有 handover 叙事）显式登记后再走。
+
+Mod 对扩展的要求（越权即错）：
+
+- **不得**把 `gate.approve` 当成流水线的一步：门禁是「有人看过」的物理证据，自动批等于没有门禁。
+- **不得**批量刷事件：`--events` / shell 循环 / `xargs` 属于永久禁令，扩展里的 `firewall.ts` 就拦这条。
+- 回执 `narrative` **整段**呈现（禁止解析式截断）；`pendingChoice` 原样交给用户。
