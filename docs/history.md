@@ -2,6 +2,47 @@
 
 > 只记「为什么这样落」与「留下了什么可判定的口子」；实现细节看代码与各 crate 头注。
 
+## r-rename · Seed Mod 更名 `agent-seed` → `pi-agent-seed`（历史局不动）
+
+**分支** `feature/pi-agent-seed-rename`（base `bac2a40`）。目标：把两侧 Mod 目录
+（叶子模板 `packages/mods/pi-agent-seed`、项目实例 `.ygg/mods/pi-agent-seed`）改到
+带宿主前缀的名字上，**同时保证 `.ygg/runs/**` 里的历史局原样可续**——不需要手工迁移任何 `run.json`。
+
+### 落成的三件事
+
+1. **目录更名**：`git mv` 两侧 Mod 目录（骨架面 / 实例面按原分层一起搬）；
+   脚本、CI 骨架守卫、宿主帮助文案、测试定位、文档命令路径同步到新名。
+   测试目标名 `agent_seed_semantics` **不变**：它在 AGENTS.md 与 playbook 里是被引用的判据命令，
+   改名是断链不是整理。
+2. **解析期兼容别名**：`examples/agent.rs` 的 `resolve_mod_dir` 在「请求路径不存在 +
+   形状是 `…/mods/agent-seed` + 同父目录下 `pi-agent-seed` 存在」三条同时成立时，
+   翻译到新名（`legacy_seed_alias` / `with_legacy_seed_alias`）。只换最后两段、只发生在内存里，
+   `--mod` 与 `run.json` 走同一条翻译；磁盘面只在**该局续局并保存**时按宿主原本的
+   持久化逻辑落成新名（不是迁移脚本改盘）。
+3. **三处同源代码**：`schemas/agent-config.json` 三份（两份 Mod + `packages/schema/`）
+   逐字节一致（改名只落在 `description` 文本上），再用 `sync-seed-mod.sh --from project`
+   重算两侧 `manifest.json`。
+
+### 留下的可判定口子（下次可以据此复查）
+
+| 口子 | 判定方式 |
+| --- | --- |
+| 历史 `run.json` 不改也能解析到新目录 | `mod_dir_alias_tests::legacy_run_json_resolves_to_the_renamed_mod_dir`（`cargo test --example agent -p ygg-sandbox`） |
+| 相对路径字面量映射（`.ygg/mods/agent-seed` → `.ygg/mods/pi-agent-seed`） | `mod_dir_alias_tests::legacy_relative_path_maps_to_the_renamed_sibling` |
+| `--mod` 与 `run.json` 同一条翻译 | `mod_dir_alias_tests::the_mod_flag_takes_the_same_translation` |
+| 别名不越界（只认 `mods/agent-seed`） | `mod_dir_alias_tests::mapping_is_narrow_on_purpose` |
+| 旧目录还在磁盘 → 不被抢改 | `mod_dir_alias_tests::an_existing_legacy_dir_is_never_rewritten` |
+| 两侧都不存在 → 原样返回（不猜默认值） | `mod_dir_alias_tests::missing_both_sides_keeps_the_requested_path` |
+| 新目录名能被真装载 | `cargo test -p ygg-sandbox --test agent_seed_semantics`（两侧 pack 装载） |
+| 骨架逐字节一致 | CI 骨架守卫（`diff -ru` `mod.lua` / `src/` / `schemas/`） |
+
+### 刻意没做的事（避免被误当成「漏了」）
+
+- **不改测试目标名** `agent_seed_semantics`：AGENTS.md / playbook / history 都按这个名字写判据。
+- **不做历史 `run.json` 批量重写**：盘上改历史局等于毁证据，兼容面收敛在解析期一处。
+- **不保留旧名目录（连软链也没有）**：留一条旧路径就多一套能装出**不同签名**的同名 Mod，
+  兼容面只允许存在一个可判定入口。
+
 ## r-evo · 新局默认 sqlite（旧局不动）
 
 **分支** `feature/default-sqlite`（base `9446858`）。目标：让「强崩溃承诺」成为默认

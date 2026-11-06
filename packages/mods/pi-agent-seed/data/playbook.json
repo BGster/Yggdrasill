@@ -433,7 +433,7 @@
       "order": 7,
       "title": "7. External tools (two-layer allowlist)",
       "summary": "A tool call is a request, never a side effect: the Mod publishes a pending queue in meta.tool_calls, the host executes, and the result comes back as an ordinary tool.result event.",
-      "source": "the agent-seed host contract (`pack.json` tools + `data/config.json` allowedTools)",
+      "source": "the pi-agent-seed host contract (`pack.json` tools + `data/config.json` allowedTools)",
       "priority": "standard",
       "rules": [
         {
