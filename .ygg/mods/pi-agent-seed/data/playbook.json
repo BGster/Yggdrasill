@@ -367,7 +367,7 @@
         {
           "id": "gates.mod-semantics-matrix",
           "modality": "must",
-          "text": "Changing `.ygg/mods/agent-seed/src/**` (state machine / gates / render layer), `mod.lua`, or the map wording in `.ygg/mods/agent-seed/data/scenes.json` adds `cargo test -p ygg-sandbox --test agent_seed_semantics` to the gate list on top of lint and the all-1 playtest: the case list = stage merge plus the compatibility `analysis` slot / accept-gate reject / accept-gate approval releasing the lane / accept-gate amend → stale / plan-gate reject / reactive auto-dispatch in the same turn (with `useMemo` invalidation) / development proposal reject (not amended and amended) / inline `exec=` (misplaced, missing reason, `:` form) / settlement merge with `sessions=` + `todo=` and a refused malformed segment / legacy save without `plan_ok` / the operation and design map wording on both packs / the all-1 walk of both packs / the six active-subsystem cases (`worktree_claim` + release, lane probe + conflict radar blocking `coordinate.submit`, artifact probe + `vfs.write` ledger, `gate.verify_suite` green evidence, `harness.archive_sessions` settlement, declaration completeness). The all-1 playtest only covers the happy path — it never takes a branch (`gate.reject` / `requirement.amend` / `proposal.reject`) and cannot see the turn-cut mechanics at all; a temporary probe under `/tmp` may only supplement this test and never replace it; every uncovered scenario must be declared item by item in the report. Three-question criterion: ① the blocked action is \"change the Mod source or the map wording, run only lint plus all-1, and call it accepted\"; ② the visible symptom of a violation is that branch semantics and map wording regress while every gate stays green, so the defect only shows in a real run; ③ confirm it next time with that command (24/24) plus one mutation probe (put the old semantics back → the test must go red) to prove the assertions are not vacuous.",
+          "text": "Changing `.ygg/mods/pi-agent-seed/src/**` (state machine / gates / render layer), `mod.lua`, or the map wording in `.ygg/mods/pi-agent-seed/data/scenes.json` adds `cargo test -p ygg-sandbox --test agent_seed_semantics` to the gate list on top of lint and the all-1 playtest: the case list = stage merge plus the compatibility `analysis` slot / accept-gate reject / accept-gate approval releasing the lane / accept-gate amend → stale / plan-gate reject / reactive auto-dispatch in the same turn (with `useMemo` invalidation) / development proposal reject (not amended and amended) / inline `exec=` (misplaced, missing reason, `:` form) / settlement merge with `sessions=` + `todo=` and a refused malformed segment / legacy save without `plan_ok` / the operation and design map wording on both packs / the all-1 walk of both packs / the six active-subsystem cases (`worktree_claim` + release, lane probe + conflict radar blocking `coordinate.submit`, artifact probe + `vfs.write` ledger, `gate.verify_suite` green evidence, `harness.archive_sessions` settlement, declaration completeness). The all-1 playtest only covers the happy path — it never takes a branch (`gate.reject` / `requirement.amend` / `proposal.reject`) and cannot see the turn-cut mechanics at all; a temporary probe under `/tmp` may only supplement this test and never replace it; every uncovered scenario must be declared item by item in the report. Three-question criterion: ① the blocked action is \"change the Mod source or the map wording, run only lint plus all-1, and call it accepted\"; ② the visible symptom of a violation is that branch semantics and map wording regress while every gate stays green, so the defect only shows in a real run; ③ confirm it next time with that command (24/24) plus one mutation probe (put the old semantics back → the test must go red) to prove the assertions are not vacuous.",
           "basis": "AGENTS.md §1.9 (behavioural acceptance); crates/ygg-sandbox/tests/agent_seed_semantics.rs"
         },
         {
@@ -655,7 +655,7 @@
         {
           "id": "harness.start-command",
           "modality": "must",
-          "text": "Cold start of a run: `.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
+          "text": "Cold start of a run: `.ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
@@ -955,19 +955,19 @@
         {
           "id": "harness.pack",
           "modality": "must",
-          "text": "After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/agent-seed`.",
+          "text": "After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/pi-agent-seed`.",
           "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.lint",
           "modality": "must",
-          "text": "Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.",
+          "text": "Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/pi-agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/pi-agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.",
           "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.playtest",
           "modality": "must",
-          "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
+          "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/pi-agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
           "basis": "AGENTS.md §1.9 (behavioural acceptance); gates.mod-semantics-matrix"
         },
         {
@@ -1009,7 +1009,7 @@
         {
           "id": "harness.two-mods-layering",
           "modality": "must",
-          "text": "The two Mods are a division of labor (not the same file): the skeleton surface (`mod.lua` + `schemas/`) is byte-identical and kept in sync by `scripts/sync-seed-mod.sh` (CI has a skeleton guard); the instance surface `data/` is maintained on each side — `packages/mods/agent-seed` is the distributable seed template (5 generic chapters, zero project rules) and `.ygg/mods/agent-seed` is this project's instance (14 chapters, this one included).",
+          "text": "The two Mods are a division of labor (not the same file): the skeleton surface (`mod.lua` + `schemas/`) is byte-identical and kept in sync by `scripts/sync-seed-mod.sh` (CI has a skeleton guard); the instance surface `data/` is maintained on each side — `packages/mods/pi-agent-seed` is the distributable seed template (5 generic chapters, zero project rules) and `.ygg/mods/pi-agent-seed` is this project's instance (14 chapters, this one included).",
           "basis": "AGENTS.md §8 (pre-migration)"
         },
         {

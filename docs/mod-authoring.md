@@ -165,8 +165,8 @@ packages/mods/<你的mod>/
 
 | 位置 | 角色 |
 | --- | --- |
-| `packages/mods/agent-seed/` | **种子模板**：通用元工作流，对外分发；`data/playbook.json` 只装通用纪律 |
-| `.ygg/mods/agent-seed/` | **本项目实例**：`data/` 装本仓库自己的规则与配置 |
+| `packages/mods/pi-agent-seed/` | **种子模板**：通用元工作流，对外分发；`data/playbook.json` 只装通用纪律 |
+| `.ygg/mods/pi-agent-seed/` | **本项目实例**：`data/` 装本仓库自己的规则与配置 |
 
 - **骨架面**（`mod.lua` + `src/**/*.lua` + `schemas/`，以及 `pack.json` 的 `code` 段）必须逐字节一致——
   「同一套 harness」不允许有两种机制行为，也不允许两份 `code.modules` 声明不同的模块集合。
@@ -178,7 +178,12 @@ packages/mods/<你的mod>/
   CI 也不校验。
 - 拿模板开新项目：复制到目标仓 `.ygg/mods/` → 填 `data/playbook.json` 的项目章节 →
   改 `data/config.json` → 跑 `pack` / `ygg-lint` / `playtest` 三件套。步骤见
-  `packages/mods/agent-seed/README.md`。
+  `packages/mods/pi-agent-seed/README.md`。
+
+> **目录改名过**（`agent-seed` → `pi-agent-seed`，2026）：`.ygg/runs/**/run.json` 里记的历史路径
+> 不需要手工迁移——宿主在解析期做一次翻译（`examples/agent.rs` 的 `legacy_seed_alias`：
+> 请求路径不存在 + 形状是 `…/mods/agent-seed` + 同父目录下新名存在 → 用新名；`--mod` 与
+> `run.json` 走同一条翻译）。边界由 `mod_dir_alias_tests` 钉住，磁盘上的历史 `run.json` 不改。
 
 ### 生成 manifest
 
@@ -489,7 +494,7 @@ handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序
 3. **前缀不是对外 API**：它是同一 Mod 内部的约定；宿主不读 Mod 私有 KV（只读回执
    `meta.<metaKey>` 摘要面）。
 
-现状前缀分布（以 agent-seed 为实例，全部为真实写入点）：
+现状前缀分布（以 pi-agent-seed 为实例，全部为真实写入点）：
 
 | 前缀 | 键形 | 写方 |
 | --- | --- | --- |
@@ -553,7 +558,7 @@ handler 调用内（每次 handler 调用前清空缓冲、调用后按追加序
 通用 Mod 工具（`cargo run --example agent`、`--example playtest`）**不含任何 Mod 语义字面量与
 回退默认值**（事件名 / 叙事前缀 / 摘要键名 / 入口载荷 / inbox 字段名与幂等标记均属于契约）：
 它们从被装载的 Mod 自己的 `pack.json` 读契约。这两段对这两个工具是**必填**（缺失即报错退出 /
-`ok=false` 报告），写法见 `.ygg/mods/agent-seed/README.md` 的「零、host 契约」章节：
+`ok=false` 报告），写法见 `.ygg/mods/pi-agent-seed/README.md` 的「零、host 契约」章节：
 
 ```json
 {
@@ -719,7 +724,7 @@ end
 ## 10. 验收表（宿主 / Mod 迁移，两份）
 
 多文件 Mod 能力分两段：**宿主面**（解析 / 装载 / 打包 / 热载 / 静态检查 + 契约测试）
-已交付；**Mod 迁移**（把 agent-seed 这种大单文件 Mod 真的拆成 `src/*.lua`）是后续
+已交付；**Mod 迁移**（把 pi-agent-seed 这种大单文件 Mod 真的拆成 `src/*.lua`）是后续
 独立迭代，**不在本次范围**。两张表分开是因为验收主体不同：前者验「机制成立」，
 后者验「某一份 Mod 拆得对不对」。
 
@@ -732,16 +737,16 @@ end
 | 唯一装载口 `modload.rs` + `ygg-lint --pack` | `load_mod` 全仓单点（走查与实跑同一份装载语义）；lint 逐模块独立 parse（不拼接）+ AST 依赖图 + 与装载器同一份 `LoadStack` + 副作用面（`YGG-MOD-EFFECT`）；错误面 MISSING / NAME / UNDECLARED / UNUSED / CYCLE / LIMIT / EFFECT，有 error 退出码 1 | `cargo test -p ygg-sandbox --test modload_bundle`、`cargo run -p ygg-lint -- --pack crates/ygg-sandbox/tests/fixtures/multi-script` |
 | 测试面：fixture（三层依赖 + 重复 require + `return nil`）+ 正/负/生命周期 | 每条拒绝路径断言错误文本的**关键片段**（模块路径 / 行号 / 完整链条 / 上限常量），不用 `is_err()` 糊过去；读档重建缓存、模块内状态归零、handler 不重复注册；128 模块整包装载 < 2s；重复装载注册序逐项相等 | `cargo test -p ygg-sandbox --test modules_e2e --test modules_negative --test modules_lifecycle` |
 
-单文件零迁移的证据面（每次合并都跑）：`.ygg/mods/agent-seed` 与 `packages/mods/agent-seed`
+单文件零迁移的证据面（每次合并都跑）：`.ygg/mods/pi-agent-seed` 与 `packages/mods/pi-agent-seed`
 两侧 `playtest` 都到结局、【结局 叙事行出现、`ygg-lint` 0 error。
 
 ### 10.2 Mod 迁移验收（后续独立迭代，不在本次范围）
 
-把 agent-seed 从单文件拆成 `src/*.lua` 时，按这张表验：
+把 pi-agent-seed 从单文件拆成 `src/*.lua` 时，按这张表验：
 
 | 判据 | 口径 |
 | --- | --- |
-| 骨架面两侧逐字节一致 | `scripts/sync-seed-mod.sh` 后 `diff -q .ygg/mods/agent-seed/mod.lua packages/mods/agent-seed/mod.lua` 无输出；`schemas/` 同法（CI 有骨架守卫） |
+| 骨架面两侧逐字节一致 | `scripts/sync-seed-mod.sh` 后 `diff -q .ygg/mods/pi-agent-seed/mod.lua packages/mods/pi-agent-seed/mod.lua` 无输出；`schemas/` 同法（CI 有骨架守卫） |
 | 整包静态检查干净 | `cargo run -p ygg-lint -- --pack <两侧目录>` 均 0 error 0 warning，且无 `YGG-MOD-UNUSED`（每个登记模块从入口可达） |
 | 上限内 | 模块数 ≤ 128、装载深度 ≤ 64、模块源码合计 ≤ 1 MiB |
 | **派发序不变** | handler 派发序与拆分前逐项一致——派发序**只来自入口**：模块纯导出，`ygg.on` 由入口按原注册序显式调用（`M.install(deps)` / `M.register()`）；`require` 序与 `pack.json` 的 `modules` 声明序都不参与定序 |

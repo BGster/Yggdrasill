@@ -1,4 +1,4 @@
-# agent-seed · 种子模板（双层状态机 + 提案验收的通用元工作流）
+# pi-agent-seed · 种子模板（双层状态机 + 提案验收的通用元工作流）
 
 **这是对外分发的种子模板，不是某个仓库的实例。** 它把「一次完整的 Agent 工作」配置成一个可游玩的
 Mod：协调器派活 / 验收，每条需求各自跑 analyze → plan → 门禁 → develop → 交付 → 门禁。目标形态见
@@ -27,8 +27,8 @@ Mod：协调器派活 / 验收，每条需求各自跑 analyze → plan → 门�
 **仓库内的两份 Mod 不是同一份东西**：
 
 ```text
-packages/mods/agent-seed/   种子模板（本目录）——通用，对外分发
-.ygg/mods/agent-seed/       本项目实例     ——playbook / config 装的是本仓库自己的规则
+packages/mods/pi-agent-seed/   种子模板（本目录）——通用，对外分发
+.ygg/mods/pi-agent-seed/       本项目实例     ——playbook / config 装的是本仓库自己的规则
 ```
 
 - **骨架面逐字节一致**（`mod.lua` + `src/**` + `schemas/`，以及 `pack.json` 的 `code` 段），
@@ -44,7 +44,7 @@ packages/mods/agent-seed/   种子模板（本目录）——通用，对外分�
 
 ```bash
 mkdir -p <目标仓>/.ygg/mods
-cp -R packages/mods/agent-seed <目标仓>/.ygg/mods/agent-seed
+cp -R packages/mods/pi-agent-seed <目标仓>/.ygg/mods/pi-agent-seed
 ```
 
 把 `.ygg/bin/`（CLI 可执行）与 `.ygg/runs/`（本局产物）加进 `.gitignore`，`.ygg/mods/` 入库。
@@ -83,7 +83,7 @@ cp -R packages/mods/agent-seed <目标仓>/.ygg/mods/agent-seed
 ### 4. 跑三件套（缺一不算接入完成）
 
 ```bash
-mod=.ygg/mods/agent-seed
+mod=.ygg/mods/pi-agent-seed
 cargo run --example pack -- "$mod"              # ① 重算 manifest（内容寻址）
 cargo run -p ygg-lint -- "$mod/mod.lua"         # ② 静态检查：应 0 error / 0 warning
 cargo run --example playtest -- "$mod"          # ③ 冒烟：必须 "ok": true + "reached": "ending"

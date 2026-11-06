@@ -1,6 +1,10 @@
 #!/bin/sh
 # 同步 seed Mod 与项目 Mod 的**骨架文件**（`mod.lua` + `src/**` + `schemas/`）。
 #
+# 两侧目录（`pi-agent-seed`，2026 更名；旧名 `agent-seed` 的存档由宿主 `--resume` 兼容兜底）：
+#   种子模板  packages/mods/pi-agent-seed
+#   本项目实例 .ygg/mods/pi-agent-seed
+#
 # 分层约定（两个 Mod 同处一个仓库，但不是同一份东西）：
 #
 #   骨架面（机制，必须逐字节一致）   mod.lua / src/**/*.lua / schemas/*  —— 本脚本同步的对象
@@ -31,7 +35,7 @@
 set -eu
 
 usage() {
-    sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 from="seed"
@@ -69,8 +73,8 @@ done
 unset CDPATH
 script_dir=$(dirname "$0")
 root=$(cd "$script_dir/.." && pwd)
-seed_dir="packages/mods/agent-seed"
-project_dir=".ygg/mods/agent-seed"
+seed_dir="packages/mods/pi-agent-seed"
+project_dir=".ygg/mods/pi-agent-seed"
 
 case "$from" in
     seed)

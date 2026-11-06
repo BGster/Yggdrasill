@@ -53,7 +53,7 @@ ygg.fsm.define("stage", { initial = "intake", events = { "stage.advance" } })
 ## 1. 动手前：摸清耦合面（三条命令）
 
 ```bash
-MOD=.ygg/mods/agent-seed
+MOD=.ygg/mods/pi-agent-seed
 
 # ① 全局函数（`x = function(...)` 而非 `local function`）——它们跨分区被调用，是真正的耦合点
 rg -n '^[a-z_]+ = function\(' $MOD/mod.lua
@@ -161,7 +161,7 @@ return M
 
 ```bash
 # 看清这两个全局函数被谁调用（决定改动面）
-rg -c '\breq_release\(|\breq_satisfied\(' .ygg/mods/agent-seed/mod.lua
+rg -c '\breq_release\(|\breq_satisfied\(' .ygg/mods/pi-agent-seed/mod.lua
 ```
 
 ---
@@ -285,7 +285,7 @@ function M.allowed(target, expected) ... end
 **方法**：拆前跑一次基准局，拆后跑同样输入，比对叙事序列。
 
 ```bash
-MOD=.ygg/mods/agent-seed
+MOD=.ygg/mods/pi-agent-seed
 BIN=.ygg/bin/ygg-agent
 
 # 拆前：录基线（把每一步的叙事与 pendingChoice 存下来）
@@ -341,7 +341,7 @@ PY
 任一阶段出问题：
 
 ```bash
-git checkout -- .ygg/mods/agent-seed   # 丢掉本阶段改动
+git checkout -- .ygg/mods/pi-agent-seed   # 丢掉本阶段改动
 ```
 
 **不要**试图靠「删掉 `code` 段」回退——代码已经拆到 `src/` 了，入口还在 `require`，删声明只会让 `require` 全部失败。真正的回退是 `git revert` 那个阶段提交。
@@ -379,7 +379,7 @@ git checkout -- .ygg/mods/agent-seed   # 丢掉本阶段改动
 
 ---
 
-## 附二：Yggdrasill agent-seed 的拆分映射表（3630 行 → 21 模块）
+## 附二：Yggdrasill pi-agent-seed 的拆分映射表（3630 行 → 21 模块）
 
 双层结构（种子模板 + 项目实例）的实例：两侧骨架逐字节一致，`data/` 各自维护。
 

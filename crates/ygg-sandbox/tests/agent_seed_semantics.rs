@@ -1,4 +1,4 @@
-//! agent-seed semantics gate: **decidable** assertions for the requirement-level state machine
+//! pi-agent-seed semantics gate: **decidable** assertions for the requirement-level state machine
 //! (5 stored states + `plan_ok`-derived display names), the turn-cut conventions, and the
 //! two-layer node map (the behavioural acceptance surface required by AGENTS.md §1.9).
 //!
@@ -44,12 +44,12 @@ fn repo_dir() -> PathBuf {
 /// The instance this project actually loads (`data/scenes.json` and `data/playbook.json`
 /// are this project's field surface).
 fn project_mod_dir() -> PathBuf {
-    repo_dir().join(".ygg/mods/agent-seed")
+    repo_dir().join(".ygg/mods/pi-agent-seed")
 }
 
 /// The seed template that ships to users (skeleton is byte-identical; `data/` differs).
 fn seed_mod_dir() -> PathBuf {
-    repo_dir().join("packages/mods/agent-seed")
+    repo_dir().join("packages/mods/pi-agent-seed")
 }
 
 // ───────────────────────── drive surface ─────────────────────────
