@@ -167,6 +167,91 @@
       "maxOutputBytes": 1024,
       "readOnly": true,
       "resultEvent": "tool.result"
+    },
+    "git.worktree_claim": {
+      "kind": "cli",
+      "program": "ygg-agent",
+      "args": [
+        "--builtin-tool",
+        "worktree-claim",
+        "--lane",
+        "{{lane}}",
+        "--req",
+        "{{req}}",
+        "--branch",
+        "{{branch}}"
+      ],
+      "timeoutMs": 15000,
+      "inlineWaitMs": 5000,
+      "maxOutputBytes": 1024,
+      "readOnly": false,
+      "resultEvent": "tool.result"
+    },
+    "git.worktree_release": {
+      "kind": "cli",
+      "program": "ygg-agent",
+      "args": ["--builtin-tool", "worktree-release", "--lane", "{{lane}}"],
+      "timeoutMs": 15000,
+      "inlineWaitMs": 5000,
+      "maxOutputBytes": 512,
+      "readOnly": false,
+      "resultEvent": "tool.result"
+    },
+    "git.lane_probe": {
+      "kind": "cli",
+      "program": "ygg-agent",
+      "args": [
+        "--builtin-tool",
+        "lane-probe",
+        "--lane",
+        "{{lane}}",
+        "--base",
+        "{{base}}",
+        "--branch",
+        "{{branch}}"
+      ],
+      "timeoutMs": 10000,
+      "inlineWaitMs": 3000,
+      "maxOutputBytes": 2048,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
+    "fs.artifact_probe": {
+      "kind": "cli",
+      "program": "ygg-agent",
+      "args": ["--builtin-tool", "artifact-probe", "--path", "{{path}}"],
+      "timeoutMs": 5000,
+      "inlineWaitMs": 2000,
+      "maxOutputBytes": 512,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
+    "gate.verify_suite": {
+      "kind": "cli",
+      "program": "ygg-agent",
+      "args": ["--builtin-tool", "verify-suite", "--mode", "{{mode}}"],
+      "timeoutMs": 600000,
+      "inlineWaitMs": 0,
+      "maxOutputBytes": 4096,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
+    "harness.archive_sessions": {
+      "kind": "cli",
+      "program": "ygg-agent",
+      "args": [
+        "--builtin-tool",
+        "archive-sessions",
+        "--parent",
+        "{{parent}}",
+        "--batch",
+        "{{batch}}"
+      ],
+      "timeoutMs": 15000,
+      "inlineWaitMs": 5000,
+      "maxOutputBytes": 1024,
+      "readOnly": false,
+      "resultEvent": "tool.result"
     }
   },
   "code": {

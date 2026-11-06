@@ -22,8 +22,8 @@ local LANES =
   lanes.LANES
 local render =
   render_mod.receipt
-local STAGE, job_capacity, req_closed, req_id, req_index_of, req_key, req_lane, req_status, req_title, stage =
-  reqs.STAGE, reqs.job_capacity, reqs.req_closed, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_lane, reqs.req_status, reqs.req_title, reqs.stage
+local STAGE, job_capacity, req_closed, req_id, req_index_of, req_lane, req_status, req_title, stage =
+  reqs.STAGE, reqs.job_capacity, reqs.req_closed, reqs.req_id, reqs.req_index_of, reqs.req_lane, reqs.req_status, reqs.req_title, reqs.stage
 local fill, split, trim =
   util.fill, util.split, util.trim
 
@@ -127,16 +127,7 @@ function M.install(deps)
     if problem ~= nil then
       return reject_payload("lane.release", problem)
     end
-    local holder = LANES.req_of(k)
-    LANES.clear(k)
-    local freed = TEXTS.beats.lane_release_idle
-    local index = req_index_of(holder)
-    if index ~= nil and req_lane(index) == k then
-      ygg.kv.set(req_key(index, "lane"), 0)
-      freed = req_id(index)
-    elseif holder ~= "" then
-      freed = holder
-    end
+    local freed = LANES.release_lane(k)
     ygg.narrate(fill(TEXTS.beats.lane_released, { k = tostring(k), id = freed }))
     render()
   end)

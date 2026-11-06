@@ -151,6 +151,11 @@ local function req_conflict_peer(index)
   return text_of(req_key(index, "conflict_peer"), "")
 end
 
+-- 冲突的来源（"human" / "radar"；空 = 无冲突或旧存档）。纯记录面：不参与任何判定。
+local function req_conflict_source(index)
+  return text_of(req_key(index, "conflict_source"), "")
+end
+
 local function req_needs_amend(index)
   return ygg.kv.get(req_key(index, "needs_amend")) == true
 end
@@ -481,6 +486,8 @@ local function req_append(title, description, ext, deps, origin)
   ygg.kv.set(req_key(index, "hist"), "")
   ygg.kv.set(req_key(index, "conflict"), "")
   ygg.kv.set(req_key(index, "conflict_peer"), "")
+  ygg.kv.set(req_key(index, "conflict_note"), "")
+  ygg.kv.set(req_key(index, "conflict_source"), "")
   ygg.kv.set(req_key(index, "needs_amend"), false)
   ygg.kv.set(req_key(index, "stale"), false)
   ygg.kv.set(req_key(index, "gate"), "")
@@ -623,6 +630,7 @@ M.req_capacity = req_capacity
 M.req_closed = req_closed
 M.req_conflict = req_conflict
 M.req_conflict_peer = req_conflict_peer
+M.req_conflict_source = req_conflict_source
 M.req_conflict_total = req_conflict_total
 M.req_count = req_count
 M.req_deps = req_deps

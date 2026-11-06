@@ -376,5 +376,29 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 - **凭据红线**：`pack.json` 的 `args` / `headers` 可写 `$ENV{VAR}`，宿主按
   `进程环境 > <mod_dir>/.env.local > <mod_dir>/.env` 解析；解析后的值**绝不**进载荷、回执或 notice
   （报错只出现变量名）。Mod 资源、配置与报告只出现**键名**，`.env*` 必须在 `.gitignore` 里。
-- **可调项**：`tuning.tool_capacity`（生命周期上限，缺省 64）、`tuning.tool_output_max`（缺省 1024，
-  必须 ≥ `pack.json` 里最大的 `maxOutputBytes`）。
+- **可调项**：`tuning.tool_capacity`（生命周期上限，缺省 64）、`tuning.tool_output_max`（缺省 4096，
+  必须 ≥ `pack.json` 里最大的 `maxOutputBytes`）、`tuning.artifact_capacity`（artifact 账本上限，缺省 64）。
+
+### 七之二、响应式后置效应（可选能力：`tools.reactive`）
+
+`tool.result` 落库为 `ok` + `code 0` 时，第二条 effect（`hooks.useEffect("tools.reactive")`）把 `output`
+（`k=v;k=v` 平坦映射）**折叠成领域状态**；回执行（`tools.receipt`）仍只说「结果到了」。两条同处一次
+`flush_effects`（同回合、产出 choice 之前），卿锁 `tool.reacted.<call_id>` 保证一生只折叠一次。
+
+通用形状，与本实例无关：
+
+- **注册面**：`REACTORS[tool_id] = function(pairs, call_id) -> changed`。不认识的 tool id **不占卿锁、不产生 deps**。
+  新增一个反应器只改一个表项，不动 effect 本体。
+- **可写面**：`lane.<k>.*`（与 `lane.claim` 共用 `LANES`）、`req.<i>.conflict{,_peer,_note,_source}`（必须经
+  `props.req_do_conflict`，它是冲突的唯一写方）、`artifact.*`（必须经 `record_artifact`，它是账本的唯一写点）、
+  `verify.{passed,report,source}`、`settlement.sessions.*`。
+- **禁写面**：不 `render()`、不 `ygg.choice`、不改 stage、不改 proposal / gate 状态、不调 `flow.refuse`。
+  拒绝行会被宿主记成失败步——「探针失败」是事实报告，所以走纯叙事；写盘类动作才走事件 handler + `reject_payload`。
+- **截断判据**：`parse_result` 把 `truncated` 作为**布尔字段**返回，并落 `tool.<call_id>.truncated`；
+  任何集合比对（如文件交集）必须先看它，宁可漏报不可误报。
+- **VFS 面**：Mod 仍不做 IO。写盘一律委托 `ygg.fs`（若宿主提供），调用前先用路径形状守门（`artifacts/*.md`，
+  无 `..`、无空白、≤128 B）；宿主没提供 `ygg.fs` 时**不假装写过**（叙事 `[VFS LEDGER ONLY]`），
+  但账本照记，所以 KV 与叙事在两种宿主下都言行一致。
+
+把这条能力引入新项目时，只需两件事：`pack.json` 的 `tools` 段声明工具（`allowedTools` 同步），
+以及 `data/scenes.json` 补齐 `src/` 引用的 beat 名（`agent_seed_semantics` 的声明完整性用例会逐条比对）。

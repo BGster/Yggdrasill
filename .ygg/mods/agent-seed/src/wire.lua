@@ -340,6 +340,9 @@ local function evolution_path_ok(path)
   return true
 end
 
+-- artifact 路径形状 = 同一个判据（`artifacts/<name>.md`，≤128 B，无 `..`，无空白）。
+-- `vfs.write`、`fs.artifact_probe` 与 `proposal.submit` 的同步核验共用这一处事实源，不复制正则。
+
 local function whole_number(value)
   local parsed = tonumber(value)
   if parsed == nil or parsed ~= math.floor(parsed) then
@@ -739,6 +742,7 @@ M.parse_executor_key = parse_executor_key
 M.parse_executor_value = parse_executor_value
 M.parse_goal_auth = parse_goal_auth
 M.EVOLUTION_KEPT = EVOLUTION_KEPT
+M.artifact_path_ok = evolution_path_ok
 M.evolution_path_ok = evolution_path_ok
 M.evolution_settings = evolution_settings
 M.format_classes = format_classes

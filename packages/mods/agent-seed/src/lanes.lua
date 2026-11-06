@@ -74,6 +74,25 @@ function LANES.release(index)
   ygg.kv.set(req_key(index, "lane"), 0)
 end
 
+-- 按**泳道号**释放（入参是 k，不是 req index）——反应器与 `lane.release` 共用这一处写方。
+-- 返回上一持有人 id 文本；空泳道返回 `lane_release_idle`（叙事取值与内联实现逐字相同）。
+function LANES.release_lane(k)
+  local holder = LANES.req_of(k)
+  local index = nil
+  if holder ~= "" then
+    index = req_index_of(holder)
+  end
+  LANES.clear(k)
+  if index ~= nil and req_lane(index) == k then
+    ygg.kv.set(req_key(index, "lane"), 0)
+    return req_id(index)
+  end
+  if holder ~= "" then
+    return holder
+  end
+  return TEXTS.beats.lane_release_idle
+end
+
 function LANES.free()
   for k = 1, job_capacity() do
     if LANES.req_of(k) == "" then

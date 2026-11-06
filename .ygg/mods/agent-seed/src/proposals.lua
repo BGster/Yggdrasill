@@ -167,17 +167,28 @@ local function req_do_merge(sources, title, description)
     ygg.kv.set(req_key(index, "into"), req_id(target))
     ygg.kv.set(req_key(index, "conflict"), "")
     ygg.kv.set(req_key(index, "conflict_peer"), "")
+    ygg.kv.set(req_key(index, "conflict_note"), "")
+    ygg.kv.set(req_key(index, "conflict_source"), "")
     ygg.kv.set(req_key(index, "job"), "")
     req_push_history(index, fill(TEXTS.beats.req_merge_hist, { id = req_id(target) }))
   end
   return target, next_title, dep_order
 end
 
-local function req_do_conflict(first, second, note)
-  ygg.kv.set(req_key(first, "conflict"), note)
+local function req_do_conflict(first, second, note, source)
+  -- 冲突的唯一写方（人类 `requirement.conflict` 与反应器的跨泳道雷达共用）：
+  -- `conflict` 是**注释文本**（`req_conflict_total` 的计数口径是 `~= ""`，不是 bool），
+  -- `conflict_peer` 是对端 id；`conflict_note` / `conflict_source` 是纯记录键（"human" / "radar"）。
+  local text = (note ~= nil and note ~= "") and note or TEXTS.beats.req_conflict_default
+  local origin = (source ~= nil and source ~= "") and source or "human"
+  ygg.kv.set(req_key(first, "conflict"), text)
   ygg.kv.set(req_key(first, "conflict_peer"), req_id(second))
-  ygg.kv.set(req_key(second, "conflict"), note)
+  ygg.kv.set(req_key(first, "conflict_note"), text)
+  ygg.kv.set(req_key(first, "conflict_source"), origin)
+  ygg.kv.set(req_key(second, "conflict"), text)
   ygg.kv.set(req_key(second, "conflict_peer"), req_id(first))
+  ygg.kv.set(req_key(second, "conflict_note"), text)
+  ygg.kv.set(req_key(second, "conflict_source"), origin)
   req_push_history(first, TEXTS.beats.req_conflict_hist)
   req_push_history(second, TEXTS.beats.req_conflict_hist)
 end

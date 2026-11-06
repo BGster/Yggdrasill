@@ -26,5 +26,14 @@
     "requireEnding": true,
     "requireInboxConsumed": true
   },
-  "allowedTools": ["git.head_short", "git.status"]
+  "allowedTools": [
+    "git.head_short",
+    "git.status",
+    "git.worktree_claim",
+    "git.worktree_release",
+    "git.lane_probe",
+    "fs.artifact_probe",
+    "gate.verify_suite",
+    "harness.archive_sessions"
+  ]
 }

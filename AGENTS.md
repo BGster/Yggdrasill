@@ -223,21 +223,25 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 Changing `.ygg/mods/agent-seed/src/**` (state machine, gates, render layer, tool bridge),
 `.ygg/mods/agent-seed/mod.lua` or the map wording in `data/scenes.json` requires, besides lint and
 the all-1 playtest:
-`cargo test -p ygg-sandbox --test agent_seed_semantics` (18 cases: stage merge + `analysis` compat,
+`cargo test -p ygg-sandbox --test agent_seed_semantics` (24 cases: stage merge + `analysis` compat,
 accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
 reject, reactive auto-dispatch in the same turn (plus `useMemo` invalidation), development proposal
 reject (not amended / amended), inline `exec=` (misplaced / no reason / `:` form), settlement merge
 with `sessions=` + `todo=` and a refused malformed segment, legacy save without `plan_ok`, the
-operation/design map contracts on both packs, and the tool bridge: request snapshot + KV rows,
-result plus same-turn receipt, replay idempotence, payload/allowlist shape checks, and declaration
-parity across both packs). The all-1 playtest only covers the happy path (it
+operation/design map contracts on both packs, the tool bridge (request snapshot + KV rows, result
+plus same-turn receipt, replay idempotence, payload/allowlist shape checks, declaration parity
+across both packs), and the active subsystem (`git.worktree_claim` binding the lane ledger +
+`git.worktree_release` freeing it, `git.lane_probe` recording the truth + the conflict radar
+blocking through `req.<i>.conflict` until `requirement.resolve`, `fs.artifact_probe` + `vfs.write`
+sharing one bounded ledger, `gate.verify_suite` green evidence only in `review`, `harness.archive_sessions`
+unblocking the settlement, declaration completeness). The all-1 playtest only covers the happy path (it
 never takes `gate.reject` / `requirement.amend` / `proposal.reject`, and it cannot see the turn-cut
 mechanics at all); temporary probes under `/tmp` may supplement it but never replace it, and any
 scenario not covered must be declared case by case. Three-question criterion (see 7): ① which action
 does it block? ("change the Mod source or the map wording, run lint plus all-1, and call it
 accepted"); ② what does a violation look like? (branch semantics and map wording silently regress
 while every gate stays green; the defect only shows in a real run); ③ how do you confirm it next
-time? (that command, 18/18, plus a mutation probe — put the old semantics back and the test must go
+time? (that command, 24/24, plus a mutation probe — put the old semantics back and the test must go
 red — to prove the assertions are not vacuous).
 
 The tool bridge is a **contract**, not an internal detail: the `tool.call` / `tool.result` payload
@@ -285,6 +289,40 @@ after touching the kernel or the host and call the gate green"); ② what does a
 example batch); ③ how do you confirm it next time? (compare the two counts:
 `cargo test --workspace | grep -c '^test result'` and
 `cargo test --example agent -p ygg-sandbox | grep -c '^test result'`).
+
+#### 9.2c The active subsystem folds tool results, it never fakes a decision
+
+A settled `tool.result` (`status ok`, `code 0`) is folded into domain state by a **second** effect,
+`hooks.useEffect("tools.reactive")`, registered right after `tools.receipt`. The two share one
+`flush_effects` (so the fold happens in the same turn, before the single choice is produced) but not
+one scope: `receipt_effect` says "the result arrived" and may only latch `tool.notified.<call_id>` +
+narrate one line, while the reactors own the domain keys. Three boundaries are non-negotiable and
+pinned by `data/playbook.json` (`tools.reactive-effect-scope`, `subsystems.probe-is-warning`,
+`subsystems.machine-evidence-parity`) plus the `agent_seed_semantics` subsystem cases:
+
+1. **A reactor writes KV and narrates — nothing else.** No `render()`, no `ygg.choice`, no stage
+   change, no proposal / gate state, and never `flow.refuse`: a rejection line carries a
+   `rejectionPrefixes` marker and the host counts it as a **failed step**, so a refused probe would
+   look like a Mod refusal instead of the fact it is. `vfs.write` is a real event handler (so
+   `reject_payload` is legal there) precisely because it is not a reactor.
+2. **A failed probe is a warning, never a gate.** `[LANE PROBE FAILED]` (`commits=0` or `clean=0`)
+   only narrates and leaves `lane.<k>.probe.*` queryable; wiring it into `gates.gate_problem()`
+   would let one dirty tree deadlock `coordinate.submit` / `review.note` forever (there is no
+   "undo the probe" action). The conflict radar is the exception: it rides `req.<i>.conflict` via
+   `props.req_do_conflict` (the same function as the human `requirement.conflict`), so it enters
+   `req_conflict_total` and blocks dispatch/closing with no extra wiring, and only
+   `requirement.resolve` clears it.
+3. **Machine evidence is same-level, not stronger.** `gate.verify_suite` / `harness.archive_sessions`
+   write the very KV that `verify.submit` / `settlement.sessions` write, saving one turn; the
+   provenance keys `verify.source` / `settlement.sessions.source` must survive, and no report may
+   claim the machine path outranks a self-declaration. Both only record `passed=1` / `remaining=0`
+   and only in `review`, on the same precondition as the human path (`gate_problem() == nil`).
+
+Set-of-files comparisons must respect the host cap: `parse_result` returns `truncated` and writes
+`tool.<call_id>.truncated`, so the radar skips a truncated probe (a cut list can only cause a false
+negative, and a false positive would fabricate a conflict). `vfs.write` never claims a disk write it
+could not perform: without `ygg.fs` it records the same ledger row and narrates `[VFS LEDGER ONLY]`,
+so the KV and the narration agree on both host shapes.
 
 ## 2. Cold start
 

@@ -433,9 +433,12 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
   不改状态、不减计数、不重出 `[TOOL SETTLED]`。一个 call 只有一个终态（换状态是冲突，不静默覆盖）。
 - **KV 面**（`src/tools.lua` 是唯一写方）：`tool.count`（生命周期计数）/ `tool.pending`（未终态计数，
   摘要字段 `pendingTools` 读它）/ `tool.last` / `tool.seq.<i>`（分配序索引，`flush_meta` 的遍历面）/ 
-  `tool.<id>.{id,tool,args,status,code,output,ext,res_ext}` / `tool.notified.<id>`（回执闩锁）。
+  `tool.<id>.{id,tool,args,status,code,output,ext,res_ext,truncated}` / `tool.notified.<id>`（回执闩锁）/
+  `tool.reacted.<id>`（响应式闩锁）。响应式子系统另写 `lane.*` / `req.<i>.conflict*` / `artifact.*` /
+  `verify.{passed,report,source}` / `settlement.sessions.*`（见 §十一；逐键登记在 `src/tools.lua` 头注释）。
 - **回执 effect**：`hooks.useEffect("tools.receipt")` 只置闩锁 + 一行叙事，不 render、不 choose、不改业务状态；
-  因此 `[TOOL SETTLED]` 一定与 `[TOOL RESULT]` 在**同一回合**、且一生只有一次。
+  因此 `[TOOL SETTLED]` 一定与 `[TOOL RESULT]` 在**同一回合**、且一生只有一次。**领域折叠在另一条 effect**
+  （`tools.reactive`，见 §十一）：两条 effect 同处一次 `flush_effects`，但边界不混。
 - **两个场景**（宿主侧）：`inlineWaitMs > 0` 且结果及时到位 = **场景 1：同进程内就地回投**（用户可见：
   一步之内看到结果）；`inlineWaitMs = 0` 或超时 = **场景 2：脱体 worker + `--tool-result` inbox 回写**，
   回投走 `tool_result` 这条路由，Mod 侧看到的事件形状**完全相同**。
@@ -443,7 +446,41 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
   `进程环境 > <mod_dir>/.env.local > <mod_dir>/.env` 解析；解析后的值**绝不**进载荷、回执或 notice
   （报错只出现变量名）。Mod 资源、配置与报告只出现**键名**。
 
-## 十一、走查
+## 十一、响应式后置效应与主动子系统
+
+`tool.result` 落库为 `ok` + `code 0` 时，`hooks.useEffect("tools.reactive")` 把 `output`（`k=v;k=v` 平坦映射）
+折叠成领域状态。它与 `tools.receipt` 同处 `render()` 入口的**同一个 `flush_effects`**（同回合、产出 choice 之前），
+但职责严格分层：回执行只说「结果到了」，反应器才改领域 KV。闩锁 `tool.reacted.<call_id>` 保证一生只折叠一次
+（重投结果不会第二次抬泳道、第二次抬冲突）。
+
+| 能力 | 触发面 | 写的 KV | 读 / 判 |
+| --- | --- | --- | --- |
+| `git.worktree_claim` | `tool.result` | `lane.<k>.{req,branch,base,since,clean}` + `req.<i>.lane`（走 `LANES.bind`，与 `lane.claim` **同函数同键**） | `clean=1` / 泳道空闲 / 需求未绑定 / 未终态，任一不满足 → `[WORKTREE CLAIM REFUSED]` 且账本不动 |
+| `git.worktree_release` | `tool.result` | 清 `lane.<k>.*` + `req.<i>.lane`（走 `LANES.release_lane(k)`） | 入参是**泳道号**（`LANES.release` 收的是 req index，别混）；`released≠1` 不动作 |
+| `git.lane_probe` | `tool.result` | `lane.<k>.probe.{commits,clean,head,files,call}`；有交集时经 `req_do_conflict(...,"radar")` 抬 `req.<i>.conflict*` | `commits=0` / `clean≠1` → `[LANE PROBE FAILED]`（**警告面**，不阻塞收口）；输出被截断 → 跳过雷达 |
+| `fs.artifact_probe` | `tool.result` | `artifact.<path>.{bytes,sha256,source}` + `artifact.count` / `artifact.seq.<n>` | `exists≠1` / `bytes=0` / 路径不合形状 → 不落库 |
+| `gate.verify_suite` | `tool.result` | `verify.passed` / `verify.report` / `verify.source` | 只在 `review` 阶段、只在 `passed=1`、且 `gate_problem()==nil` 时写绿 |
+| `harness.archive_sessions` | `tool.result` | `settlement.sessions.{moved,remaining,destination,source}` | 只在 `review`、只在 `remaining=0` 且 `dest≠""` 时登记 |
+| `vfs.write` | 事件 handler | `artifact.<path>.{bytes,sha256,source="vfs"}` | 载荷 = 路径 + 竖线 + 内容（首个竖线前是路径，其后全部是内容；内容可含竖线） |
+
+**三条硬边界**（`data/playbook.json` 的 `tools.reactive-effect-scope` / `subsystems.probe-is-warning` /
+`subsystems.machine-evidence-parity`）：
+
+1. **反应器只写 KV + 叙事**，绝不 `render()` / `ygg.choice` / `flow.refuse`——拒绝行会被宿主记成失败步，
+   而「探针失败」是事实报告，不是 Mod 拒绝。
+2. **探针失败不接门禁**：`[LANE PROBE FAILED]` 只叙事 + 留 `lane.<k>.probe.*` 可查；接进 `gate_problem()` 会让
+   一次脏树探针把收口永久卡死（没有「撤销探针」的动作）。**冲突雷达例外**：它走 `req.<i>.conflict`，因此
+   自动进 `req_conflict_total` → 阻塞派活与收口，解除只走 `requirement.resolve`。
+3. **机证与人证同级不等强**：`gate.verify_suite` / `harness.archive_sessions` 写的是与 `verify.submit` /
+   `settlement.sessions` **同一批 KV**，只省一个回合；`verify.source` / `settlement.sessions.source` 保留溯源，
+   汇报时不得声称机证比自声明更强。
+
+**`vfs.write` 与 `ygg.fs`**：Mod 仍不做 IO，写盘一律委托宿主中介的 `ygg.fs`（run 相对 + 路径狱）。宿主没装
+`ygg.fs` 时**不假装写过**：账本照样记（同一条 `record_artifact`），叙事改成 `[VFS LEDGER ONLY]`，
+所以「KV 与叙事」在两种宿主下都言行一致。`artifacts/../x.md`、含空白、超过 128 B、非 `artifacts/*.md`
+一律在调 `ygg.fs` **之前**拒绝。
+
+## 十二、走查
 
 ```bash
 # 默认全 1 贪心：intake → coordinate.submit → verify → settlement.evolution → review.note → 【结局

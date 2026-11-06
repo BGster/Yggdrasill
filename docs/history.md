@@ -88,3 +88,43 @@
   `missing_const_for_thread_local`）——非本轮引入，但本轮拥有该文件的改动面，
   `cargo clippy --workspace --all-targets -D warnings` 是验收命令之一，故一并修掉。
 - `u4` 单测跟随函数下沉改为断言 `JsonFileStore::next_seq`（口径不变：seq = 非空行数）。
+
+## r2 · Mod 主动子系统（响应式折叠 + 真值探针）
+
+**分支** `feature/mod-active-subsystem`（base `324522a`）。目标：让 `tool.result` 不只是「一条回执」，
+而是把 6 个内建工具（`git.worktree_claim` / `git.worktree_release` / `git.lane_probe` /
+`fs.artifact_probe` / `gate.verify_suite` / `harness.archive_sessions`）的输出**折叠进领域状态**，
+并把「探针失败 / 机证 / 冲突雷达」三条边界写成可判定的规则。
+
+### 为什么这样落
+
+1. **独立 effect，而不是塞进 `receipt_effect`**：`tools.receipt` 的既有纪律是「只置闩锁 + 一行叙事，
+   绝不碰 req/prop/gate/lane/stage」。把领域写面塞进去等于把那条规则作废；新增 `tools.reactive`
+   两条同处一次 `flush_effects`（同回合、产出 choice 之前），职责不混，旧规则也一字不改。
+2. **`req.<i>.conflict` 写注释文本，不写 bool**：`req_conflict_total()` 的读面是 `text_of`，写
+   `true` 会让计数器恒为 0（雷达彻底失效）。复用「`conflict` = 注释文本」的既有语义，另加两个纯
+   记录键 `conflict_note` / `conflict_source`；写点唯一，仍是 `props.req_do_conflict`。
+3. **`LANES.release_lane(k)` 而不是 `LANES.release(index)`**：后者收的是 req index，传泳道号会释放
+   错需求。新增一个按泳道号释放的函数，`lane.release` 也改成调它——单点写方，叙事逐字不变。
+4. **截断用显式布尔，不靠字符串嗅探**：截断提示里带数字，嗅探必然脆弱；`parse_result` 返回
+   `truncated` 并落 `tool.<call_id>.truncated`，雷达读到 true 就跳过比对（宁可漏报不可误报）。
+5. **探针失败不接门禁**：接进去会让一次脏树探针把 `coordinate.submit` / `review.note` 永久卡死
+   （没有「撤销探针」的动作）。雷达反而是硬阻塞——它走 `req.<i>.conflict`，天然进 `gate_problem()`。
+6. **`vfs.write` 说话算数**：宿主没装 `ygg.fs` 时**不假装写过**（叙事 `[VFS LEDGER ONLY]`），
+   但账本照记同一条 `record_artifact`，于是「KV 与叙事」在两种宿主下都一致。
+
+### 留下的可判定口子
+
+- `cargo test -p ygg-sandbox --test agent_seed_semantics` → **24/24**（新增 A1..A6 六条，每条都写清
+  「变异后哪条断言变红」）。
+- playbook 新增 5 条规则（`tools.reactive-effect-scope` / `tools.wire-kv-output` /
+  `subsystems.machine-evidence-parity` / `subsystems.probe-is-warning` / `subsystems.radar-blocks`），
+  并改掉 `gates.mod-semantics-matrix` 里过期的用例数（12 → 24）。
+- `AGENTS.md` §9.2 用例数与 §9.2c 新增的「三条边界」判据。
+
+### 刻意没做的事
+
+- **不新增 `src/reactive.lua`**：新模块要改 `pack.json code.modules`，而 `tools` 段与该段在文件里
+  相邻，会把并行改动的冲突面人为放大；`src/tools.lua` 用分区标题保持可读。
+- **不动 `render.lua`**：`agent.summary` 已经在读 `verify.passed`，机证复用同一个键即可。
+- **不把 `[LANE PROBE FAILED]` 接进 `gate_problem()`**（理由见上）。
