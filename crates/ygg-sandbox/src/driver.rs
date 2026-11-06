@@ -739,6 +739,11 @@ impl KernelFacade {
             .collect()
     }
 
+    /// 把一批路径重新标脏（落盘中途失败后的回填：内容寻址让重试只重写相同字节）。
+    pub fn vfs_requeue_dirty(&mut self, paths: &[String]) {
+        self.vfs.borrow_mut().requeue_dirty(paths);
+    }
+
     /// VFS 写代数（每次成功 `put` +1）。
     pub fn vfs_revision(&self) -> u64 {
         self.vfs.borrow().revision()

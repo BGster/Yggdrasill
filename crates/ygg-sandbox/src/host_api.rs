@@ -205,6 +205,18 @@ impl VfsStore {
         out
     }
 
+    /// 把一批路径**重新标脏**（落盘中途失败后的回填）。
+    ///
+    /// 不动 `revision`、不动内容：没有新的写入发生，只是「这几件还没落盘」。
+    /// 内容寻址让重试只重写相同字节，不会产生第二件制品。
+    pub fn requeue_dirty(&mut self, paths: &[String]) {
+        for path in paths {
+            if self.files.contains_key(path) {
+                self.dirty.insert(path.clone());
+            }
+        }
+    }
+
     /// `ygg.fs.list()` 的回执形状（路径 / 字节数 / 摘要，`BTreeMap` 序）。
     pub fn snapshot(&self) -> Vec<(String, usize, String)> {
         self.files

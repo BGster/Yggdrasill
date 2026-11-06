@@ -158,6 +158,14 @@ const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 决策命令轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
 const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
+/// `cli.program` 的**自指别名**：`ygg-agent` 与 [`SELF_PROGRAM`]（`@self`）等价。
+///
+/// 两个名字都解析到 `current_exe()`（见 `execute_cli`）——内置子命令因此不依赖
+/// `$PATH`：`pack.json` 是静态文件，写不了绝对路径；写裸名又不保证能调到。
+///
+/// [`SELF_PROGRAM`]: ygg_sandbox::host_contract::SELF_PROGRAM
+const SELF_ALIAS: &str = "ygg-agent";
+
 // 产物文件名里，「存档」与「inbox」两个仍被宿主直接引用（`--settle` 的错误文案、
 // 未开局时的回执）；其余文件名（`events.jsonl` / `inbox.cursor` / `run.sqlite`）
 // 已完全归后端所有，宿主不再拼字符串——否则改后端时会出现「宿主拼的名字」与
@@ -197,9 +205,16 @@ const WAIT_TOOLS_HEARTBEAT: Duration = Duration::from_secs(1);
 
 fn main() {
     let args = parse_args();
-    let code = if let Some(call_id) = &args.run_tool_worker {
+    let code = if args.builtin_tool.is_some() {
+        // 内置工具模式：不读 Mod、不推进状态、不需要 run 目录（见 `run_builtin_tool`）。
+        run_builtin_tool(&args)
+    } else if let Some(call_id) = &args.run_tool_worker {
         // 内部模式（不在 usage 里列出）：一次工具调用的执行体。
         run_tool_worker(&args, call_id)
+    } else if let Some(spec) = &args.artifact_put {
+        run_artifact_put(&args, spec)
+    } else if let Some(path) = &args.artifact_get {
+        run_artifact_get(&args, path)
     } else if args.wait_tools {
         run_wait_tools(&args)
     } else if args.inbox.is_some() {
@@ -255,6 +270,65 @@ struct Args {
     tool_timeout_ms: Option<u64>,
     /// 内部模式：工具 worker（`--run-tool-worker <call_id>`）。不对外宣传、不在 usage 里列出。
     run_tool_worker: Option<String>,
+    /// `--artifact-put <artifacts/名>=<源文件>`：读源文件写进本局后端制品面。
+    artifact_put: Option<String>,
+    /// `--artifact-get <artifacts/名>`：把制品原文直出 stdout（缺失 = 退出 1）。
+    artifact_get: Option<String>,
+    /// `--builtin-tool <op>`：内置工具子命令（见 [`BuiltinTool`]）。
+    /// 它的其它旗标（`--lane` / `--path` / …）由 `run_builtin_tool` 二次解析。
+    builtin_tool: Option<BuiltinTool>,
+}
+
+/// `--builtin-tool` 的操作枚举（解析即校验；未知值 = 用法错误，拼出全部合法值）。
+///
+/// 这六个子命令是**可移植的内置工具**：`pack.json` 里写 `"program": "@self"`
+/// 即可调用（`@self` = 本宿主可执行文件），部署方不必自己写 shell wrapper。
+/// 输出契约见 `run_builtin_tool` 的文档（单行 `k=v;k=v`，失败 = stdout 空 + 退出 1）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuiltinTool {
+    WorktreeClaim,
+    WorktreeRelease,
+    LaneProbe,
+    ArtifactProbe,
+    VerifySuite,
+    ArchiveSessions,
+}
+
+impl BuiltinTool {
+    /// 全部取值（用法提示 / 错误文案共用一份，避免各处硬编码）。
+    const NAMES: &'static [&'static str] = &[
+        "worktree-claim",
+        "worktree-release",
+        "lane-probe",
+        "artifact-probe",
+        "verify-suite",
+        "archive-sessions",
+    ];
+
+    /// `--builtin-tool` 的取值解析（未知 = `None`，由调用方拼出合法表）。
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "worktree-claim" => Some(Self::WorktreeClaim),
+            "worktree-release" => Some(Self::WorktreeRelease),
+            "lane-probe" => Some(Self::LaneProbe),
+            "artifact-probe" => Some(Self::ArtifactProbe),
+            "verify-suite" => Some(Self::VerifySuite),
+            "archive-sessions" => Some(Self::ArchiveSessions),
+            _ => None,
+        }
+    }
+
+    /// 回写用法提示时用的名字（与 [`BuiltinTool::parse`] 同源）。
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::WorktreeClaim => "worktree-claim",
+            Self::WorktreeRelease => "worktree-release",
+            Self::LaneProbe => "lane-probe",
+            Self::ArtifactProbe => "artifact-probe",
+            Self::VerifySuite => "verify-suite",
+            Self::ArchiveSessions => "archive-sessions",
+        }
+    }
 }
 
 fn parse_args() -> Args {
@@ -272,6 +346,9 @@ fn parse_args() -> Args {
     let mut wait_tools = false;
     let mut tool_timeout_ms: Option<u64> = None;
     let mut run_tool_worker: Option<String> = None;
+    let mut artifact_put: Option<String> = None;
+    let mut artifact_get: Option<String> = None;
+    let mut builtin_tool: Option<BuiltinTool> = None;
 
     // 写 inbox 的七个参数共享同一套「只能给一个」的校验。
     fn set_inbox(inbox: &mut Option<InboxWrite>, flag: &'static str, value: String) {
@@ -341,9 +418,69 @@ fn parse_args() -> Args {
             "--run-tool-worker" => {
                 run_tool_worker = Some(next_value(&mut iter, "--run-tool-worker"))
             }
+            "--artifact-put" => artifact_put = Some(next_value(&mut iter, "--artifact-put")),
+            "--artifact-get" => artifact_get = Some(next_value(&mut iter, "--artifact-get")),
+            "--builtin-tool" => {
+                let text = next_value(&mut iter, "--builtin-tool");
+                builtin_tool = Some(BuiltinTool::parse(&text).unwrap_or_else(|| {
+                    usage_error(&format!(
+                        "未知的 --builtin-tool 取值 `{text}`（只接受 {}）",
+                        BuiltinTool::NAMES.join(" / ")
+                    ))
+                }));
+                // 该子命令自带的旗标（--lane / --req / --branch / --base / --root /
+                // --repo / --run-dir / --path / --mode / --parent / --batch /
+                // --sessions-dir / --trash）由 `run_builtin_tool` 二次解析：全局
+                // 解析器只负责**不拒绍**它们（见下面 catch-all 分支）。
+            }
             "-h" | "--help" => usage(0),
-            other => usage_error(&format!("未知参数 `{other}`")),
+            other => {
+                // 内置工具模式下，未识别的旗标留给 `run_builtin_tool` 的 op 级
+                // 白名单——那里知道「这个 op 该有哪些旗标」，报错才能点名 op。
+                if builtin_tool.is_none() {
+                    usage_error(&format!("未知参数 `{other}`"));
+                }
+            }
         }
+    }
+
+    // `--builtin-tool` 最先裁决：它既不需要 `--run-id` 也不需要 `--mod`
+    //（内置工具只操作 worktree / 制品 / 会话目录），且不与任何其它模式共存。
+    if builtin_tool.is_some() {
+        if settle
+            || event.is_some()
+            || wait_tools
+            || inbox.is_some()
+            || run_tool_worker.is_some()
+            || artifact_put.is_some()
+            || artifact_get.is_some()
+            || resume
+            || watch
+            || store.is_some()
+        {
+            usage_error(
+                "--builtin-tool 不能与其它模式（--event / --settle / --resume / --watch / --store / inbox / 制品旗标）同时使用",
+            );
+        }
+        return Args {
+            mod_dir,
+            run_id: run_id.unwrap_or_default(),
+            runs_root,
+            resume,
+            settle,
+            watch,
+            event,
+            payload,
+            drive,
+            inbox,
+            store,
+            wait_tools,
+            tool_timeout_ms,
+            run_tool_worker,
+            artifact_put,
+            artifact_get,
+            builtin_tool,
+        };
     }
 
     let Some(run_id) = run_id else {
@@ -351,6 +488,18 @@ fn parse_args() -> Args {
     };
     if !is_valid_run_id(&run_id) {
         usage_error("--run-id 只允许字母数字与 `-` `_` `.`（不得含路径分隔符）");
+    }
+    // 制品旗标是**独立的单发模式**：不推进状态、不读 Mod 契约，只碰本局制品面。
+    let artifact_mode = artifact_put.is_some() || artifact_get.is_some();
+    if artifact_put.is_some() && artifact_get.is_some() {
+        usage_error("--artifact-put 与 --artifact-get 不能同时使用");
+    }
+    if artifact_mode
+        && (settle || event.is_some() || wait_tools || inbox.is_some() || run_tool_worker.is_some())
+    {
+        usage_error(
+            "--artifact-put / --artifact-get 只操作本局制品面，不能与 --event / --settle / --wait-tools / inbox 操作同时使用",
+        );
     }
     if settle && event.is_some() {
         usage_error("--settle 与 --event 不能同时使用");
@@ -370,8 +519,15 @@ fn parse_args() -> Args {
         if write.value.trim().is_empty() {
             usage_error(&format!("--{} 需要非空载荷", write.flag));
         }
-    } else if !settle && !wait_tools && run_tool_worker.is_none() && mod_dir.is_none() {
-        usage_error("缺少 --mod <mod目录>（仅 --settle / inbox 操作 / --wait-tools 可省略）");
+    } else if !settle
+        && !wait_tools
+        && run_tool_worker.is_none()
+        && !artifact_mode
+        && mod_dir.is_none()
+    {
+        usage_error(
+            "缺少 --mod <mod目录>（仅 --settle / inbox 操作 / --wait-tools / 制品旗标 可省略）",
+        );
     }
     if let Some(name) = &event {
         if name.trim().is_empty() {
@@ -394,6 +550,9 @@ fn parse_args() -> Args {
         wait_tools,
         tool_timeout_ms,
         run_tool_worker,
+        artifact_put,
+        artifact_get,
+        builtin_tool,
     }
 }
 
@@ -455,6 +614,12 @@ fn usage(code: i32) -> ! {
   --wait-tools       等本局在飞工具全部落地（结果由脱体 worker 写 inbox）后消费一次
                      inbox 并打印回执；**不重置本局、不推进状态**（只观察）
   --tool-timeout <ms> --wait-tools 的总等待上限（缺省 120000）
+  --artifact-put <artifacts/名>=<源文件>
+                     把源文件写进本局后端的制品面（内容寻址，≤256 KiB），
+                     stdout 打印 {\"ok\":true,\"path\":…,\"bytes\":…,\"sha256\":…}
+                     （不新造 run：本局必须已存在；不推进状态）
+  --artifact-get <artifacts/名>
+                     把制品原文直出 stdout（**不补换行**；缺失 = 退出 1，stdout 保持空）
   --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）
   --store <后端>     存储后端断言：sqlite（默认，<run 目录>/run.sqlite）|
                      json（兼容后端，autosave.json + events.jsonl）。run.json 的
@@ -473,6 +638,22 @@ host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字
                         drive{maxSteps,stallLimit,stepsPerRequirement}（正整数）
   缺段 / 缺字段 / 类型不符 / 非正整数 → 装载期失败（点名缺失字段 + 应有形状 +
   文档定位：.ygg/mods/agent-seed/README.md 的「host 契约」章节）。
+
+内置工具（`--builtin-tool <op>`；不读 Mod、不推进状态；stdout 单行
+`key=value;key=value`，失败 = stdout 空 + stderr 一行 + 退出 1；用法错 = 退出 2）：
+  worktree-claim    --lane <k> --req <rN> --branch <b> [--root <d>] [--repo <d>]
+                    → lane=..;req=..;branch=..;base=..;clean=1;path=..
+  worktree-release  --lane <k> [--root <d>] [--repo <d>]        → lane=..;released=1
+  lane-probe        --lane <k> --base <sha> --branch <b> [--root <d>] [--repo <d>]
+                    → lane=..;branch=..;base=..;head=..;commits=..;clean=..;files=..
+  artifact-probe    --path <artifacts/名> [--run-dir <d>]
+                    → path=..;exists=<1|0>;bytes=..;sha256=..（**恒退出 0**：exists=0 是合法答案）
+  verify-suite      [--mode fast|full] [--repo <d>]             → passed=1;summary=<n>/<m>
+  archive-sessions  --parent <id> --batch <名> [--sessions-dir <d>] [--trash <d>]
+                    → moved=..;remaining=..;dest=..（remaining>0 = 退出 1）
+  pack.json 里写 \"program\": \"@self\"（或 \"ygg-agent\"）即可调用——两者都解析到本可执行文件，
+  因此不依赖 $PATH。本局路径用 $ENV{YGG_RUN_DIR} / $ENV{YGG_RUN_ID} / $ENV{YGG_RUNS_ROOT}
+  / $ENV{YGG_MOD_DIR} 引用（宿主注入 worker 环境；.env / .env.local 不得覆写）。
 
 自动推进的失控防护：基础步数 + 每条需求额外步数 + 连续无进展判停；阈值读
   <mod>/data/config.json 的 drive 段（必填）。
@@ -1019,6 +1200,10 @@ impl Session {
                 Err(reset_error) => return Err(reset_error),
             }
         }
+        // 制品面回灌（VFS 侧）：**必须在 reset / 读档之后**——新代从空 VFS 起步，
+        // 而「这一代盘上有哪些制品」只有宿主知道（VFS 不在存档信封里，见
+        // `preload_artifacts` 的文档）。
+        session.preload_artifacts()?;
         // seq 不再有进程内计数器：每步在持久化临界区内 count_events 重算（P0-3 / B1），
         // 缓存即回到「多进程各自基线」的原点。
         // 续局成功且 mod 自上次派发起变过：新包已生效（状态无损），回执标记。
@@ -1204,8 +1389,55 @@ impl Session {
         Ok(save.to_string().into_bytes())
     }
 
+    /// 从本局后端的制品面回灌 VFS（开局 / 读档后调用）。
+    ///
+    /// **VFS 不在存档信封里**：`SaveFile` / `ENGINE_VERSION` /
+    /// `canonical_state_bytes` 零改动，所以「读档要回到哪一代的制品」不能靠存档
+    /// 字节携带——宿主是**唯一**的重新水化者（`cmd_load` 的路径本身不碰 VFS）。
+    ///
+    /// 回灌**不**置 dirty、**不**动 revision（见 `KernelFacade::vfs_load`）：它不是
+    /// 本次会话产生的写入。
+    fn preload_artifacts(&mut self) -> Result<(), String> {
+        let entries = self.store.artifact_list().map_err(|err| err.to_string())?;
+        for meta in entries {
+            match self.store.artifact_get(&meta.path) {
+                Ok(Some(record)) => {
+                    self.kernel
+                        .vfs_load(&record.meta.path, &record.content, &record.meta.sha256)
+                }
+                // 列表与读之间被另一进程归档掉：跳过（下一轮 list 会自愈）。
+                Ok(None) => {}
+                Err(err) => return Err(format!("预载制品失败：{err}")),
+            }
+        }
+        Ok(())
+    }
+
+    /// 把 VFS 的未落盘条目写进本局后端的制品面（每成功步 / `s` 命令）。
+    ///
+    /// **fail-closed 且幂等**：中途失败时把「失败那条与尚未尝试的条目」一起
+    /// 回填成 dirty（不碰 revision），下一轮重试只会重写相同字节——内容寻址让
+    /// 重试不可能产生第二件制品，也不会把半个状态留在盘上。
+    fn flush_artifacts(&mut self) -> Result<(), String> {
+        let pending = self.kernel.vfs_take_dirty();
+        for (index, (path, bytes, _sha256)) in pending.iter().enumerate() {
+            if let Err(err) = self.store.artifact_put(path, bytes, clock()) {
+                let requeue: Vec<String> = pending[index..]
+                    .iter()
+                    .map(|(path, _, _)| path.clone())
+                    .collect();
+                self.kernel.vfs_requeue_dirty(&requeue);
+                return Err(format!("制品落盘失败：{err}"));
+            }
+        }
+        Ok(())
+    }
+
     /// 现态存档 → 端口（每成功步自动调用；`s` 命令亦复用）。
     fn save_now(&mut self) -> Result<(), String> {
+        // 制品先行（幂等），存档在后：`set_save` 一旦写成功就宣称「这步已落地」，
+        // 制品不得落在它之后（否则回执说落地、证据却缺了一件）。
+        self.flush_artifacts()?;
         let save = self.current_save()?;
         // 本函数只在持久化临界区内被调用（dispatch_event / `s` 命令）。
         self.store
@@ -1226,6 +1458,8 @@ impl Session {
         if envelope["ok"] != Json::Bool(true) {
             return Err(format!("读档失败：{}", error_text(&envelope)));
         }
+        // `l` 命令 / 续局：状态回滚了，制品面也要回到同一代（VFS 不在存档字节里）。
+        self.preload_artifacts()?;
         self.summary_cache = None;
         Ok(())
     }
@@ -1485,6 +1719,12 @@ impl Session {
             } else {
                 None
             };
+            // 制品落盘（仅成功步）：VFS 的内容寻址让重试幂等，所以放在存档之前。
+            // 失败步**不**进这里——内核已把 VFS（含 dirty）回滚到基线，此时写盘
+            // 会把被回滚过的文件的旧副本落下来。
+            if ok {
+                session.flush_artifacts()?;
+            }
             let committed = session
                 .store
                 .commit_step(StepDraft {
@@ -2320,6 +2560,16 @@ fn spawn_tool_worker(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // 宿主注入的本局路径：`pack.json` 是静态文件、不能内插宿主路径，所以内置
+    // 工具（`--builtin-tool artifact-probe` 等）用 `$ENV{YGG_RUN_DIR}` 这类模板
+    // 引用。`EnvTable::lookup` 先查 `process`（`std::env::vars()`）再查
+    // `.env.local` / `.env`，所以这里注入的值**不会**被 Mod 目录里的 `.env` 覆写；
+    // 子进程也自然继承（worker → 工具 child）。
+    command
+        .env("YGG_RUN_DIR", runs_root.join(run_id))
+        .env("YGG_RUN_ID", run_id)
+        .env("YGG_RUNS_ROOT", runs_root)
+        .env("YGG_MOD_DIR", mod_dir);
     command
         .spawn()
         .map(|_child| ())
@@ -2403,7 +2653,25 @@ fn execute_cli(call: &PendingCall, env: &EnvTable, scratch: &Path) -> ToolOutcom
             call.max_output_bytes,
         );
     };
-    let mut command = Command::new(&program);
+    // `@self` / `ygg-agent` → 本可执行文件。两个名字都解析到 `current_exe()`：
+    // 内置子命令不能依赖 `$PATH`（部署方可能根本没把 `ygg-agent` 装进 PATH，
+    // 而 `pack.json` 是静态文件、不能内插绝对路径）。
+    let executable = if program == ygg_sandbox::host_contract::SELF_PROGRAM || program == SELF_ALIAS
+    {
+        match std::env::current_exe() {
+            Ok(path) => path.display().to_string(),
+            Err(err) => {
+                return ToolOutcome::error(
+                    "127",
+                    format!("工具 `{}` 的 @self 解析失败：{err}", call.tool),
+                    call.max_output_bytes,
+                )
+            }
+        }
+    } else {
+        program.clone()
+    };
+    let mut command = Command::new(&executable);
     for template in &call.args {
         match substitute(template, &call.placeholders, env) {
             Ok(value) => {
@@ -2839,6 +3107,945 @@ fn open_store(backend: Backend, run_dir: &Path) -> Result<Box<dyn RunStore>, Str
 /// 宿主时钟（端口不取时铜——时间戳一律由这里给）。
 fn clock() -> Tick {
     Tick::at(now_secs(), now_nanos())
+}
+
+/// 本局目录是否已经存在（有 `run.json` 或任一后端产物）。
+///
+/// 制品旗标**不新造 run**：`ygg_store::resolve` 对空目录会落默认后端产物（= 半个局），
+/// 所以“目录里还没东西”就是可读拒绝，而不是静默建一个空局。
+fn run_dir_exists(run_dir: &Path) -> bool {
+    run_dir.join(META_FILE).exists()
+        || ygg_store::detect(run_dir).any()
+        || run_dir.join(ygg_store::SQLITE_FILE_NAME).exists()
+}
+
+/// `--artifact-put` 的核心（可测）：读源文件 → 写本局后端制品面 → 回执 JSON。
+///
+/// 路径与大小门在**端口内**（`ygg_store::validate_artifact_path`），宿主不重写
+/// 一份；`bytes` / `sha256` 也由端口给，宿主不现算（否则又是两份口径）。
+fn artifact_put_receipt(args: &Args, spec: &str) -> Result<Json, String> {
+    let (path, source) = spec.split_once('=').ok_or_else(|| {
+        format!("--artifact-put 需要 `artifacts/<名>=<源文件路径>` 形态（当前是 `{spec}`）")
+    })?;
+    let path = path.trim();
+    let source = source.trim();
+    if path.is_empty() || source.is_empty() {
+        return Err(format!(
+            "--artifact-put 的路径与源文件路径都不能为空（当前是 `{spec}`）"
+        ));
+    }
+    let run_dir = args.runs_root.join(&args.run_id);
+    if !run_dir_exists(&run_dir) {
+        return Err(format!(
+            "本局目录 {} 不存在（或还没有任何后端产物）——制品旗标不新造 run，\
+             请先用 --event / --resume 开局",
+            run_dir.display()
+        ));
+    }
+    let content = fs::read(source).map_err(|err| format!("读取源文件 {source} 失败：{err}"))?;
+    let mut store = open_store_resolved(&run_dir, args.store)?;
+    let meta = store
+        .artifact_put(path, &content, clock())
+        .map_err(|err| err.to_string())?;
+    Ok(json!({
+        "ok": true,
+        "path": meta.path,
+        "bytes": meta.bytes,
+        "sha256": meta.sha256,
+    }))
+}
+
+/// `--artifact-get` 的核心（可测）：制品原文（缺失 = `Err`，stdout 由调用方保证为空）。
+fn artifact_get_bytes(args: &Args, path: &str) -> Result<Vec<u8>, String> {
+    let path = path.trim();
+    let run_dir = args.runs_root.join(&args.run_id);
+    if !run_dir_exists(&run_dir) {
+        return Err(format!(
+            "本局目录 {} 不存在（或还没有任何后端产物）",
+            run_dir.display()
+        ));
+    }
+    let store = open_store_resolved(&run_dir, args.store)?;
+    match store.artifact_get(path) {
+        Ok(Some(record)) => Ok(record.content),
+        Ok(None) => Err(format!(
+            "制品 `{path}` 不存在（本局 {}，后端 {}）",
+            run_dir.display(),
+            store.backend()
+        )),
+        Err(err) => Err(format!("读制品失败：{err}")),
+    }
+}
+
+/// `--artifact-put` 的 CLI 外壳：stdout 只放回执 JSON。
+fn run_artifact_put(args: &Args, spec: &str) -> i32 {
+    // 形态错误 = 用法错误（退出 2）；其余 = 运行期失败（退出 1 + 回执）。
+    if !spec.contains('=') {
+        eprintln!(
+            "error: --artifact-put 需要 `artifacts/<名>=<源文件路径>` 形态（当前是 `{spec}`）"
+        );
+        return 2;
+    }
+    match artifact_put_receipt(args, spec) {
+        Ok(receipt) => {
+            println!("{receipt}");
+            0
+        }
+        Err(message) => {
+            println!(
+                "{}",
+                json!({"ok": false, "error": {"code": "ARTIFACT", "message": message}})
+            );
+            1
+        }
+    }
+}
+
+/// `--artifact-get` 的 CLI 外壳：制品原文直出 stdout（**不补换行**，字节保真）。
+///
+/// 缺失 / 打开失败 → stderr 可读错误 + 退出 1（stdout 保持空）——这样
+/// `$(agent --artifact-get …)` 拿到的要么是完整原文、要么是空串，不会混。
+fn run_artifact_get(args: &Args, path: &str) -> i32 {
+    match artifact_get_bytes(args, path) {
+        Ok(bytes) => {
+            // 不用 `println!`：它会补一个调用方没要的换行，也会弄坏二进制相近的内容。
+            let mut stdout = std::io::stdout();
+            match stdout.write_all(&bytes).and_then(|()| stdout.flush()) {
+                Ok(()) => 0,
+                Err(err) => {
+                    eprintln!("error: 写 stdout 失败：{err}");
+                    1
+                }
+            }
+        }
+        Err(message) => {
+            eprintln!("error: {message}");
+            1
+        }
+    }
+}
+
+// ============================================================================
+// §内置工具（`--builtin-tool <op>`）
+//
+// 六个子命令的**共同合约**（改动前先读）：
+//
+// 1. **stdout = 恰好一行**，且只在成功时输出。格式 `k=v;k=v;…`：`;` 分隔字段，
+//    `,` 分隔列表项。**绝不**出现 `|`（那是外层 `tool.result` 段的分隔符，
+//    `host_contract.rs` 的 wire 契约）、不出现换行、不出现 NUL。
+// 2. **失败 ⇒ stdout 全空 + stderr 一行人读错误 + 退出 1**。这条是承重的：
+//    `execute_cli` 只在 stdout 为空时回落读 stderr，所以「stdout 空」才是失败
+//    在 `tool.result` 里可见的前提。
+// 3. 每个落进输出的值都过 [`wire_sanitize`]（git 路径**可以**带逗号，所以
+//    清洗是必需的，不是美化）。列表先排序再 join：同输入同字节。
+// 4. 用法错误（未知旗标 / 缺必需旗标 / 坏数字）→ 退出 **2** 并列出该 op 的旗标。
+// 5. 打印的路径一律先 `fs::canonicalize`：`path=<wt>` 是绝对且可复现的。
+//
+// 这些子命令**不读 Mod、不推进状态**：它们只操作 worktree / 制品面 / 会话目录。
+// 在 `pack.json` 里写 `"program": "@self"` 即可调用（`@self` = 本可执行文件）。
+// ============================================================================
+
+/// op 级旗标集合（`--builtin-tool` 之后那批）。
+///
+/// `parse_args` 只负责**不拒绍**它们；真正的白名单在这里——只有这一处知道
+/// 「这个 op 该有哪些旗标」，报错才能点名 op。
+struct OpFlags {
+    values: Vec<(String, String)>,
+}
+
+/// 全局旗标里「带值」的那批（重扫 argv 时跳过它们的值）。
+const GLOBAL_VALUE_FLAGS: &[&str] = &[
+    "--mod",
+    "--run-id",
+    "--runs-root",
+    "--store",
+    "--event",
+    "--payload",
+    "--drive",
+    "--tool-timeout",
+    "--run-tool-worker",
+    "--artifact-put",
+    "--artifact-get",
+];
+
+/// 全局旗标里「裸旗标」的那批。
+const GLOBAL_BARE_FLAGS: &[&str] = &[
+    "--builtin-tool",
+    "--resume",
+    "--settle",
+    "--watch",
+    "--wait-tools",
+];
+
+impl OpFlags {
+    /// 重扫 `argv`，只收 `allowed` 里的旗标；其余必须是已知全局旗标，否则
+    /// 退出 2（点名 op 与合法旗标表）。
+    fn parse(op: &str, allowed: &[&str]) -> Self {
+        let mut values: Vec<(String, String)> = Vec::new();
+        let mut iter = std::env::args().skip(1);
+        while let Some(argument) = iter.next() {
+            let name = argument.as_str();
+            if allowed.contains(&name) {
+                match iter.next() {
+                    Some(value) => values.push((name.to_owned(), value)),
+                    None => builtin_usage_error(op, &format!("`{name}` 缺少取值"), allowed),
+                }
+            } else if GLOBAL_VALUE_FLAGS.contains(&name) {
+                // 全局旗标的值不属本 op，丢掉。
+                let _ = iter.next();
+            } else if GLOBAL_BARE_FLAGS.contains(&name) {
+                // 裸旗标无值。
+            } else if name.starts_with('-') {
+                builtin_usage_error(op, &format!("未知旗标 `{name}`"), allowed);
+            }
+            // 其余位置参数（非旗标）一律忽略：它们只能来自全局位置面。
+        }
+        Self { values }
+    }
+
+    fn get(&self, name: &str) -> Option<&str> {
+        self.values
+            .iter()
+            .rev()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    fn require(&self, op: &str, name: &str, allowed: &[&str]) -> String {
+        match self.get(name) {
+            Some(value) if !value.trim().is_empty() => value.to_owned(),
+            _ => builtin_usage_error(op, &format!("缺少必填旗标 `{name}`"), allowed),
+        }
+    }
+}
+
+/// 用法错误：退出 2 并列出该 op 的合法旗标表（**不**打印全局 usage：那会把
+/// 一行定位信息埋在十几行通用帮助里）。
+fn builtin_usage_error(op: &str, message: &str, allowed: &[&str]) -> ! {
+    eprintln!("error: --builtin-tool {op}: {message}");
+    eprintln!("合法旗标：{}", allowed.join(" "));
+    exit(2)
+}
+
+/// wire 安全的字段值：`;` / `,` / `|` / 换行 / NUL 一律换成 `_`。
+///
+/// git 路径**可以**合法地包含逗号与空格（以及任意非 NUL 字节），所以不清洗
+/// 就会把外层 `tool.result` 的字段边界撕碎。
+fn wire_sanitize(text: &str) -> String {
+    text.chars()
+        .map(|ch| match ch {
+            ';' | ',' | '|' | '\n' | '\r' | '\0' => '_',
+            other => other,
+        })
+        .collect()
+}
+
+/// 失败行：`op=<name>;error=<slug>;detail=<sanitized>`（stdout 保持空）。
+fn builtin_fail(op: &str, slug: &str, detail: &str) -> i32 {
+    eprintln!(
+        "op={};error={};detail={}",
+        wire_sanitize(op),
+        wire_sanitize(slug),
+        wire_sanitize(detail)
+    );
+    1
+}
+
+/// 捕获 `git -C <repo> …` 的标准输出（非零退出 = `Err`，带 git 自己的 stderr）。
+fn git_capture(repo: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|err| format!("执行 git {} 失败：{err}", args.join(" ")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let tail = stderr.trim();
+        return Err(format!(
+            "git {} 失败：{}",
+            args.join(" "),
+            if tail.is_empty() {
+                "非零退出"
+            } else {
+                tail
+            }
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// 同 [`git_capture`] 但只要布尔结局（`rev-parse --verify` 这类探针）。
+fn git_ok(repo: &Path, args: &[&str]) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// 必须恰好一行（`rev-parse HEAD` 这类）。
+fn git_one(repo: &Path, args: &[&str]) -> Result<String, String> {
+    let text = git_capture(repo, args)?;
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    match lines.as_slice() {
+        [line] => Ok((*line).to_owned()),
+        _ => Err(format!(
+            "git {} 的输出不是恰好一行（{} 行）",
+            args.join(" "),
+            lines.len()
+        )),
+    }
+}
+
+/// 逐行 trim（空行丢弃）。
+fn git_lines(repo: &Path, args: &[&str]) -> Result<Vec<String>, String> {
+    Ok(git_capture(repo, args)?
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// 目标仓库根（`--repo` 或 CWD 的 toplevel）。
+fn repo_root(explicit: Option<&str>) -> Result<PathBuf, String> {
+    let start = match explicit {
+        Some(dir) => PathBuf::from(dir),
+        None => std::env::current_dir().map_err(|err| format!("取 CWD 失败：{err}"))?,
+    };
+    let text = git_one(&start, &["rev-parse", "--show-toplevel"])?;
+    Ok(PathBuf::from(text))
+}
+
+/// 仓库名（worktree 目录名的前缀；取不到就用 `repo` 兵底）。
+fn repo_label(repo: &Path) -> String {
+    repo.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "repo".to_owned())
+}
+
+/// worktree 根目录：`--root` > `$YGG_WORKTREE_ROOT` > `<temp>/ygg-worktrees`。
+///
+/// **不**猜 home 相对布局（`~/tmp/worktrees/<repo>` 是**项目**约定，不是通用
+/// 默认值）；`pack.json` 是静态文件，部署方要自定义就传 `--root`。
+fn worktree_root(explicit: Option<&str>) -> PathBuf {
+    if let Some(dir) = explicit {
+        return PathBuf::from(dir);
+    }
+    if let Ok(dir) = std::env::var("YGG_WORKTREE_ROOT") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    std::env::temp_dir().join("ygg-worktrees")
+}
+
+/// lane 号：`1..=64`（每车道一个 worktree，编号是给人和脚本看的稳定键）。
+fn lane_number(op: &str, text: &str, allowed: &[&str]) -> u8 {
+    match text.trim().parse::<u8>() {
+        Ok(value) if (1..=64).contains(&value) => value,
+        _ => builtin_usage_error(
+            op,
+            &format!("--lane 需要 1..=64 的整数（当前是 `{text}`）"),
+            allowed,
+        ),
+    }
+}
+
+/// 分支名：`[A-Za-z0-9._/-]`，无 `..`、不以 `/` 开头。
+fn validate_branch(op: &str, branch: &str, allowed: &[&str]) -> String {
+    let ok = !branch.is_empty()
+        && !branch.starts_with('/')
+        && !branch.contains("..")
+        && branch
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '/' | '-'));
+    if !ok {
+        builtin_usage_error(
+            op,
+            &format!(
+                "--branch `{branch}` 不合法（只允许 `[A-Za-z0-9._/-]`，不得含 `..` 或以 `/` 开头）"
+            ),
+            allowed,
+        );
+    }
+    branch.to_owned()
+}
+
+/// lane 的 worktree 路径（claim / release / probe 三处**同源**，否则 release 会
+/// 找错目录）。
+fn lane_worktree_path(root: &Path, repo: &Path, lane: u8) -> PathBuf {
+    root.join(format!("{}-lane-{lane}", repo_label(repo)))
+}
+
+/// 把字段拼成**一行** wire 文本（纯函数：格式断言直接测它）。
+///
+/// 键序 = 传入序（调用方按位解析，别重排）；值逐个过 [`wire_sanitize`]。
+fn wire_line(fields: &[(&str, String)]) -> String {
+    fields
+        .iter()
+        .map(|(key, value)| format!("{key}={}", wire_sanitize(value)))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// 输出一行并返回退出码（成功路径的唯一出口；失败不走这里）。
+fn builtin_line(fields: &[(&str, String)]) -> i32 {
+    println!("{}", wire_line(fields));
+    0
+}
+
+/// 失败形状：能成型为 `k=v;k=v` 行的直接给行，其余由 [`run_op`] 拼通用形状。
+#[derive(Debug)]
+enum OpFailure {
+    /// 已经成型的一行（`lane=<k>;error=lane-busy;on=…;head=…` 这类带定位的现场）。
+    Line(String),
+    /// 通用失败：`op=<name>;error=<slug>;detail=<sanitized>`。
+    Detail { slug: &'static str, detail: String },
+    /// 已经自己在 stderr 上把话说完了（如 `verify-suite` 的 gate 尾部）：
+    /// wrapper 不再补一行，只保持 stdout 空 + 退出 1。
+    Reported,
+}
+
+impl OpFailure {
+    fn detail(slug: &'static str, detail: impl std::fmt::Display) -> Self {
+        Self::Detail {
+            slug,
+            detail: detail.to_string(),
+        }
+    }
+}
+
+/// 成功 → 打一行并退出 0；失败 → **stdout 保持空**、stderr 一行、退出 1。
+fn run_op(op: &str, result: Result<Vec<(&'static str, String)>, OpFailure>) -> i32 {
+    match result {
+        Ok(fields) => builtin_line(&fields),
+        Err(OpFailure::Line(line)) => {
+            eprintln!("{line}");
+            1
+        }
+        Err(OpFailure::Detail { slug, detail }) => builtin_fail(op, slug, &detail),
+        Err(OpFailure::Reported) => 1,
+    }
+}
+
+/// 内置工具入口（六个 op 的分发；argv 在 [`OpFlags`] 里二次解析）。
+fn run_builtin_tool(args: &Args) -> i32 {
+    let Some(tool) = args.builtin_tool else {
+        // main 只在 `is_some()` 时进来；防御性兜底不走 usage（那是 2 号退出）。
+        return builtin_fail("builtin", "no-op", "缺少 --builtin-tool 取值");
+    };
+    match tool {
+        BuiltinTool::WorktreeClaim => run_op(tool.as_str(), claim_fields()),
+        BuiltinTool::WorktreeRelease => run_op(tool.as_str(), release_fields()),
+        BuiltinTool::LaneProbe => run_op(tool.as_str(), lane_probe_fields()),
+        BuiltinTool::ArtifactProbe => run_op(tool.as_str(), artifact_probe_fields()),
+        BuiltinTool::VerifySuite => run_op(tool.as_str(), verify_suite_fields()),
+        BuiltinTool::ArchiveSessions => run_op(tool.as_str(), archive_sessions_fields()),
+    }
+}
+
+// ---- worktree-claim ----
+
+const CLAIM_FLAGS: &[&str] = &["--lane", "--req", "--branch", "--root", "--repo"];
+
+fn claim_fields() -> Result<Vec<(&'static str, String)>, OpFailure> {
+    claim_fields_with(&OpFlags::parse("worktree-claim", CLAIM_FLAGS))
+}
+
+/// [`claim_fields`] 的注入面（测试直接给旗标，不读进程 argv）。
+fn claim_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpFailure> {
+    const OP: &str = "worktree-claim";
+    let lane = lane_number(OP, &flags.require(OP, "--lane", CLAIM_FLAGS), CLAIM_FLAGS);
+    let req = flags.require(OP, "--req", CLAIM_FLAGS);
+    let branch = validate_branch(OP, &flags.require(OP, "--branch", CLAIM_FLAGS), CLAIM_FLAGS);
+    // `req` 形态：`r<数字>`（Issue 里泳道的稳定标识）。
+    let req_ok =
+        req.len() > 1 && req.starts_with('r') && req[1..].chars().all(|ch| ch.is_ascii_digit());
+    if !req_ok {
+        builtin_usage_error(
+            OP,
+            &format!("--req 需要 `r<数字>` 形态（当前是 `{req}`）"),
+            CLAIM_FLAGS,
+        );
+    }
+
+    let repo = repo_root(flags.get("--repo")).map_err(|err| OpFailure::detail("repo", err))?;
+    let base =
+        git_one(&repo, &["rev-parse", "HEAD"]).map_err(|err| OpFailure::detail("repo", err))?;
+    let wt = lane_worktree_path(&worktree_root(flags.get("--root")), &repo, lane);
+
+    // ① 已注册且干净、且就在 `branch` @ `base` 上 → 复用（幂等：重跑 claim 不是错）。
+    if wt.is_dir() {
+        // 比**规范路径**：git 报的是 `realpath` 后的路径（macOS 上 `/var` →
+        // `/private/var`），拿调用方给的原始拼接串比会恒不等，于是白白多建一次。
+        let want = fs::canonicalize(&wt).unwrap_or_else(|_| wt.clone());
+        let registered = git_lines(&repo, &["worktree", "list", "--porcelain"])
+            .map(|lines| {
+                lines.iter().any(|line| {
+                    line.strip_prefix("worktree ")
+                        .map(|path| {
+                            let got = PathBuf::from(path);
+                            fs::canonicalize(&got).unwrap_or(got) == want
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        if registered {
+            let on = git_one(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]);
+            let head = git_one(&wt, &["rev-parse", "HEAD"]);
+            let clean = git_lines(&wt, &["status", "--porcelain"])
+                .map(|lines| lines.is_empty())
+                .unwrap_or(false);
+            if on.as_deref() == Ok(branch.as_str()) && head.as_deref() == Ok(base.as_str()) && clean
+            {
+                return Ok(claim_output(lane, &req, &branch, &base, &wt));
+            }
+            // 不一致 → **绝不**踩掉在飞的泳道：报现场，让人处理。
+            return Err(OpFailure::Line(format!(
+                "lane={lane};error=lane-busy;on={};head={}",
+                wire_sanitize(&on.unwrap_or_else(|err| format!("<{err}>"))),
+                wire_sanitize(&head.unwrap_or_else(|err| format!("<{err}>")))
+            )));
+        }
+    }
+
+    // ② 新建：分支已存在就挂上去，否则从 `base` 开一条。
+    if let Some(parent) = wt.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| OpFailure::detail("mkdir", format!("{}：{err}", parent.display())))?;
+    }
+    let wt_text = wt.display().to_string();
+    let branch_ref = format!("refs/heads/{branch}");
+    let created = if git_ok(&repo, &["rev-parse", "--verify", "--quiet", &branch_ref]) {
+        git_capture(&repo, &["worktree", "add", &wt_text, &branch])
+    } else {
+        git_capture(&repo, &["worktree", "add", "-b", &branch, &wt_text, &base])
+    };
+    created.map_err(|err| OpFailure::detail("worktree-add", err))?;
+
+    // ③ 新 worktree 必须干净：脏 = 基线本身脏，**报告，不修**。
+    let status = git_lines(&wt, &["status", "--porcelain"])
+        .map_err(|err| OpFailure::detail("status", err))?;
+    if !status.is_empty() {
+        return Err(OpFailure::Line(format!(
+            "lane={lane};req={req};branch={branch};clean=0;path={}",
+            wire_sanitize(&wt.display().to_string())
+        )));
+    }
+    Ok(claim_output(lane, &req, &branch, &base, &wt))
+}
+
+/// 成功行（**键序固定**：调用方按位解析，别重排）。
+fn claim_output(
+    lane: u8,
+    req: &str,
+    branch: &str,
+    base: &str,
+    wt: &Path,
+) -> Vec<(&'static str, String)> {
+    let path = fs::canonicalize(wt)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| wt.display().to_string());
+    vec![
+        ("lane", lane.to_string()),
+        ("req", req.to_owned()),
+        ("branch", branch.to_owned()),
+        ("base", base.to_owned()),
+        ("clean", "1".to_owned()),
+        ("path", path),
+    ]
+}
+
+// ---- worktree-release ----
+
+const RELEASE_FLAGS: &[&str] = &["--lane", "--root", "--repo"];
+
+fn release_fields() -> Result<Vec<(&'static str, String)>, OpFailure> {
+    release_fields_with(&OpFlags::parse("worktree-release", RELEASE_FLAGS))
+}
+
+/// [`release_fields`] 的注入面（测试直接给旗标，不读进程 argv）。
+fn release_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpFailure> {
+    const OP: &str = "worktree-release";
+    let lane = lane_number(
+        OP,
+        &flags.require(OP, "--lane", RELEASE_FLAGS),
+        RELEASE_FLAGS,
+    );
+    let repo = repo_root(flags.get("--repo")).map_err(|err| OpFailure::detail("repo", err))?;
+    let wt = lane_worktree_path(&worktree_root(flags.get("--root")), &repo, lane);
+    if wt.is_dir() {
+        let wt_text = wt.display().to_string();
+        git_capture(&repo, &["worktree", "remove", "--force", &wt_text])
+            .map_err(|err| OpFailure::detail("worktree-remove", err))?;
+    }
+    // prune 输出为空是正常的（不能走 `git_one`）。
+    let _ = git_capture(&repo, &["worktree", "prune"]);
+    // 分支**留着**：未合并的泳道分支是证据（归档不删，与制品同一姿态）。
+    Ok(vec![
+        ("lane", lane.to_string()),
+        ("released", "1".to_owned()),
+    ])
+}
+
+// ---- lane-probe ----
+
+const PROBE_FLAGS: &[&str] = &["--lane", "--base", "--branch", "--root", "--repo"];
+
+fn lane_probe_fields() -> Result<Vec<(&'static str, String)>, OpFailure> {
+    lane_probe_fields_with(&OpFlags::parse("lane-probe", PROBE_FLAGS))
+}
+
+/// [`lane_probe_fields`] 的注入面（测试直接给旗标，不读进程 argv）。
+fn lane_probe_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpFailure> {
+    const OP: &str = "lane-probe";
+    let lane = lane_number(OP, &flags.require(OP, "--lane", PROBE_FLAGS), PROBE_FLAGS);
+    // `base` 原样回显（短 sha 保持短）：调用方要能对上自己的台账。
+    let base = flags.require(OP, "--base", PROBE_FLAGS);
+    let branch = validate_branch(OP, &flags.require(OP, "--branch", PROBE_FLAGS), PROBE_FLAGS);
+    let repo = repo_root(flags.get("--repo")).map_err(|err| OpFailure::detail("repo", err))?;
+    let spec = format!("{base}..{branch}");
+    let commits = git_one(&repo, &["rev-list", "--count", &spec])
+        .map_err(|err| OpFailure::detail("rev-list", err))?;
+    let head = git_one(&repo, &["rev-parse", &branch])
+        .map_err(|err| OpFailure::detail("rev-parse", err))?;
+    // 干净度在**泳道 worktree**（若已在）里测：车道自己的未提交改动不在仓库根。
+    let lane_wt = lane_worktree_path(&worktree_root(flags.get("--root")), &repo, lane);
+    let tree = if lane_wt.is_dir() {
+        lane_wt
+    } else {
+        repo.clone()
+    };
+    let clean = git_lines(&tree, &["status", "--porcelain"])
+        .map(|lines| u8::from(lines.is_empty()))
+        .map_err(|err| OpFailure::detail("status", err))?;
+    let mut files = git_lines(&repo, &["diff", "--name-only", &spec])
+        .map_err(|err| OpFailure::detail("diff", err))?;
+    files.sort();
+    Ok(vec![
+        ("lane", lane.to_string()),
+        ("branch", branch),
+        ("base", base),
+        ("head", head),
+        ("commits", commits),
+        ("clean", clean.to_string()),
+        ("files", files.join(",")),
+    ])
+}
+
+// ---- artifact-probe ----
+
+const ARTIFACT_PROBE_FLAGS: &[&str] = &["--path", "--run-dir"];
+
+/// `artifact-probe`：本局某件制品在不在、多大、什么摘要。
+///
+/// **永远退出 0**（只要读取路径本身没崩）：这是个**探针**，`exists=0` 是 Mod
+/// 必须能读到的合法答案（它据此分支）。别把它「修」成缺失即退出 1。
+fn artifact_probe_fields() -> Result<Vec<(&'static str, String)>, OpFailure> {
+    artifact_probe_fields_with(&OpFlags::parse("artifact-probe", ARTIFACT_PROBE_FLAGS))
+}
+
+/// [`artifact_probe_fields`] 的注入面（测试直接给旗标，不读进程 argv）。
+fn artifact_probe_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpFailure> {
+    const OP: &str = "artifact-probe";
+    let path = flags.require(OP, "--path", ARTIFACT_PROBE_FLAGS);
+    if let Err(err) = ygg_store::validate_artifact_path(&path) {
+        // 调用方 bug（不是 miss）：违法的路径不能当成「不存在」。
+        return Err(OpFailure::detail("path", err));
+    }
+    let run_dir = flags.get("--run-dir").map(PathBuf::from).or_else(|| {
+        std::env::var("YGG_RUN_DIR")
+            .ok()
+            .filter(|dir| !dir.trim().is_empty())
+            .map(PathBuf::from)
+    });
+    let Some(run_dir) = run_dir else {
+        builtin_usage_error(
+            OP,
+            "需要 --run-dir（或环境变量 YGG_RUN_DIR）",
+            ARTIFACT_PROBE_FLAGS,
+        );
+    };
+    match probe_artifact(&run_dir, &path).map_err(|err| OpFailure::detail("read", err))? {
+        Some(record) => Ok(vec![
+            ("path", record.meta.path),
+            ("exists", "1".to_owned()),
+            ("bytes", record.meta.bytes.to_string()),
+            ("sha256", record.meta.sha256),
+        ]),
+        None => Ok(vec![
+            ("path", path),
+            ("exists", "0".to_owned()),
+            ("bytes", "0".to_owned()),
+            ("sha256", String::new()),
+        ]),
+    }
+}
+
+/// 读一件制品（已存在的局走端口；不存在的局走纯文件面——**不建库**）。
+fn probe_artifact(run_dir: &Path, path: &str) -> Result<Option<ygg_store::ArtifactRecord>, String> {
+    if !run_dir_exists(run_dir) {
+        return Ok(read_artifact_file(run_dir, path));
+    }
+    match open_store_resolved(run_dir, None) {
+        Ok(store) => store.artifact_get(path).map_err(|err| err.to_string()),
+        // 端口打不开（混代 / 坏库）：回落文件面，而不是把探针变成失败。
+        Err(_) => Ok(read_artifact_file(run_dir, path)),
+    }
+}
+
+/// 纯文件面读制品（JSON 后端布局；不存在 = `None`）。
+fn read_artifact_file(run_dir: &Path, path: &str) -> Option<ygg_store::ArtifactRecord> {
+    let content = fs::read(run_dir.join(path)).ok()?;
+    Some(ygg_store::ArtifactRecord {
+        meta: ygg_store::ArtifactMeta {
+            path: path.to_owned(),
+            bytes: content.len(),
+            // 宿主不自己拼一份 SHA-256：用端口暴露的唯一实现（同编码口径）。
+            sha256: ygg_store::sha256_hex(&content),
+            updated_at: 0,
+        },
+        content,
+    })
+}
+
+// ---- verify-suite ----
+
+const VERIFY_FLAGS: &[&str] = &["--mode", "--repo"];
+
+/// 门禁三件套（`AGENTS.md` §一·「门禁三件套」）——顺序即失败顺序。
+fn verify_gates(mode: &str) -> Vec<(&'static str, Vec<&'static str>)> {
+    if mode == "fast" {
+        vec![(
+            "cargo check --workspace --all-targets",
+            vec!["check", "--workspace", "--all-targets"],
+        )]
+    } else {
+        vec![
+            ("cargo test --workspace", vec!["test", "--workspace"]),
+            (
+                "cargo test --example agent -p ygg-sandbox",
+                vec!["test", "--example", "agent", "-p", "ygg-sandbox"],
+            ),
+            (
+                "cargo test -p ygg-sandbox --test agent_seed_semantics",
+                vec![
+                    "test",
+                    "-p",
+                    "ygg-sandbox",
+                    "--test",
+                    "agent_seed_semantics",
+                ],
+            ),
+        ]
+    }
+}
+
+fn verify_suite_fields() -> Result<Vec<(&'static str, String)>, OpFailure> {
+    verify_suite_fields_with(&OpFlags::parse("verify-suite", VERIFY_FLAGS))
+}
+
+/// [`verify_suite_fields`] 的注入面（测试直接给旗标，不读进程 argv）。
+fn verify_suite_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpFailure> {
+    const OP: &str = "verify-suite";
+    let mode = flags.get("--mode").unwrap_or("full").trim().to_owned();
+    if mode != "fast" && mode != "full" {
+        builtin_usage_error(
+            OP,
+            &format!("--mode 只接受 fast / full（当前是 `{mode}`）"),
+            VERIFY_FLAGS,
+        );
+    }
+    // 递归守卫：被 `cargo test` 牵着跑时不要再去抢构建锁。
+    if std::env::var("YGG_VERIFY_SUITE").as_deref() == Ok("1") && std::env::var("CARGO").is_ok() {
+        return Err(OpFailure::detail(
+            "recursion",
+            "YGG_VERIFY_SUITE=1 且处在 cargo 环境里，拒绝递归验证",
+        ));
+    }
+    let repo = repo_root(flags.get("--repo")).map_err(|err| OpFailure::detail("repo", err))?;
+    let gates = verify_gates(&mode);
+    let total = gates.len();
+    for (index, (label, cargo_args)) in gates.iter().enumerate() {
+        // `output()` 内部并发排空两个管道——不会因为管道塞满而死锁。
+        let outcome = Command::new("cargo")
+            .args(cargo_args)
+            .current_dir(&repo)
+            .stdin(Stdio::null())
+            .output();
+        match outcome {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                // 失败：stdout 保持空，stderr = 一行 header + 末 20 行 sanitized。
+                eprintln!("gate={};{label}", index + 1);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let lines: Vec<&str> = stderr.lines().collect();
+                let start = lines.len().saturating_sub(20);
+                for line in &lines[start..] {
+                    eprintln!("{}", wire_sanitize(line));
+                }
+                return Err(OpFailure::Reported);
+            }
+            Err(err) => return Err(OpFailure::detail("spawn", format!("{label}：{err}"))),
+        }
+    }
+    // summary 数的是**门数**不是用例数（用例数逐工具链变，会让 wire 抖动）。
+    Ok(vec![
+        ("passed", "1".to_owned()),
+        ("summary", format!("{total}/{total}")),
+    ])
+}
+
+// ---- archive-sessions ----
+
+const ARCHIVE_FLAGS: &[&str] = &["--parent", "--batch", "--sessions-dir", "--trash"];
+
+/// 标识符白名单（`[A-Za-z0-9._-]`，不含 `..`）。
+fn archive_ident_ok(text: &str, max: usize) -> bool {
+    !text.is_empty()
+        && text.len() <= max
+        && !text.contains("..")
+        && text
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+}
+
+/// `archive-sessions`：把提到了某个 parent 会话的 `.jsonl` 转录档搬进 trash。
+///
+/// **数据红线**（项目 `AGENTS.md` §0 硬约束）：本 op 只碰 agent 会话转录，
+/// **绝不能**打开 `*.xlsx` / `*.xls` / `*.csv` 之类业务数据。实现上由两件事
+/// 兜底：① 只按扩展名 `.jsonl` 入选；② 文件内容**从不回显**（匹配是布尔值）。
+fn archive_sessions_fields() -> Result<Vec<(&'static str, String)>, OpFailure> {
+    archive_sessions_fields_with(&OpFlags::parse("archive-sessions", ARCHIVE_FLAGS))
+}
+
+/// [`archive_sessions_fields`] 的注入面（测试直接给旗标，不读进程 argv）。
+fn archive_sessions_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpFailure> {
+    const OP: &str = "archive-sessions";
+    let parent = flags.require(OP, "--parent", ARCHIVE_FLAGS);
+    let batch = flags.require(OP, "--batch", ARCHIVE_FLAGS);
+    if !archive_ident_ok(&parent, 128) {
+        builtin_usage_error(
+            OP,
+            "--parent 只允许 `[A-Za-z0-9._-]`（1..=128 字节，不含 `..`）",
+            ARCHIVE_FLAGS,
+        );
+    }
+    if !archive_ident_ok(&batch, 64) {
+        builtin_usage_error(
+            OP,
+            "--batch 只允许 `[A-Za-z0-9._-]`（1..=64 字节，不含 `..`）",
+            ARCHIVE_FLAGS,
+        );
+    }
+    // **不猜默认值**：会话目录布局因 harness 而异，猜错会搬错文件。
+    let sessions_dir = flags.get("--sessions-dir").map(PathBuf::from).or_else(|| {
+        std::env::var("YGG_SESSIONS_DIR")
+            .ok()
+            .filter(|dir| !dir.trim().is_empty())
+            .map(PathBuf::from)
+    });
+    let Some(sessions_dir) = sessions_dir else {
+        builtin_usage_error(
+            OP,
+            "需要 --sessions-dir（或环境变量 YGG_SESSIONS_DIR）——本 op 没有默认目录",
+            ARCHIVE_FLAGS,
+        );
+    };
+    let trash = flags.get("--trash").map(PathBuf::from).unwrap_or_else(|| {
+        sessions_dir
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("trash")
+            .join(&batch)
+    });
+    let outcome = sweep_sessions(&sessions_dir, &trash, &parent)
+        .map_err(|err| OpFailure::detail("sweep", err))?;
+    let dest = fs::canonicalize(&trash)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| trash.display().to_string());
+    if outcome.remaining > 0 {
+        for failure in &outcome.failures {
+            eprintln!("archive={}", wire_sanitize(failure));
+        }
+        // 清扫不全：行已打（调用方看得见进度），但退出码是失败。
+        return Err(OpFailure::Detail {
+            slug: "incomplete",
+            detail: format!(
+                "moved={};remaining={};dest={}",
+                outcome.moved,
+                outcome.remaining,
+                wire_sanitize(&dest)
+            ),
+        });
+    }
+    Ok(vec![
+        ("moved", outcome.moved.to_string()),
+        ("remaining", outcome.remaining.to_string()),
+        ("dest", dest),
+    ])
+}
+
+/// 一次清扫的结果（`remaining > 0` = 清扫不全）。
+struct SweepOutcome {
+    moved: usize,
+    remaining: usize,
+    failures: Vec<String>,
+}
+
+/// 逐件扫 `sessions_dir` 下提到了 `parent` 的 `.jsonl`，rename 进 `trash`，
+/// 然后重扫数剩下的。**匹配是布尔值：文件内容永不出现在输出里。**
+fn sweep_sessions(sessions_dir: &Path, trash: &Path, parent: &str) -> Result<SweepOutcome, String> {
+    fs::create_dir_all(trash).map_err(|err| format!("创建 {} 失败：{err}", trash.display()))?;
+    let matches = |path: &Path, name: &str| -> bool {
+        if !name.ends_with(".jsonl") || name.contains(parent) {
+            return false;
+        }
+        fs::read_to_string(path)
+            .map(|contents| contents.contains(parent))
+            .unwrap_or(false)
+    };
+
+    let mut moved = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    if let Ok(entries) = fs::read_dir(sessions_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !matches(&entry.path(), &name) {
+                continue;
+            }
+            match fs::rename(entry.path(), trash.join(&name)) {
+                Ok(()) => moved += 1,
+                Err(err) => failures.push(format!("{name}：{err}")),
+            }
+        }
+    }
+    let mut remaining = 0usize;
+    if let Ok(entries) = fs::read_dir(sessions_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if matches(&entry.path(), &name) {
+                remaining += 1;
+            }
+        }
+    }
+    Ok(SweepOutcome {
+        moved,
+        remaining,
+        failures,
+    })
 }
 
 /// 重置原因（写进后端的归档台账；只用于审计，不参与判定）。
@@ -5549,6 +6756,9 @@ mod multiscript_hot_reload_tests {
             wait_tools: false,
             tool_timeout_ms: None,
             run_tool_worker: None,
+            artifact_put: None,
+            artifact_get: None,
+            builtin_tool: None,
         }
     }
 
@@ -5982,6 +7192,9 @@ end)
             wait_tools: false,
             tool_timeout_ms: None,
             run_tool_worker: None,
+            artifact_put: None,
+            artifact_get: None,
+            builtin_tool: None,
         }
     }
 
@@ -6935,6 +8148,9 @@ end)
             wait_tools: false,
             tool_timeout_ms: None,
             run_tool_worker: None,
+            artifact_put: None,
+            artifact_get: None,
+            builtin_tool: None,
         }
     }
 
@@ -7519,5 +8735,574 @@ end)
         write_tool_mod(&mod_dir, &["probe.echo", "probe.detach"]);
         assert!(Session::open(&tool_args(&mod_dir, &runs_root, "gate")).is_ok());
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+// ============================================================================
+// §r1 单测：制品 CLI（--artifact-put / --artifact-get）+ VFS 持久化 + 内置工具
+//
+// 断言口径：**能直接比字节的地方就比字节**。内置工具的输出契约是「一行
+// `k=v;k=v`」，所以这里断言 [`wire_line`] 的结果（它就是 `println!` 的那一行），
+// 而不是去抓 stdout——抓 stdout 要么引入依赖，要么测一个自己搭的假管道。
+// ============================================================================
+
+#[cfg(test)]
+mod vfs_host_tests {
+    use super::*;
+
+    fn case_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-r1-vfs-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    /// 最小合成 Mod：一个会写 VFS 的 handler + 一个写一半就报错的 handler。
+    fn write_vfs_mod(dir: &Path) {
+        fs::create_dir_all(dir.join("data")).expect("建 data 目录");
+        fs::write(
+            dir.join("pack.json"),
+            r#"{
+  "schemaVersion": 1,
+  "entries": [],
+  "schemaFiles": [],
+  "agent": {
+    "entryEvent": "event.start",
+    "choiceEvent": "ygg.choice_selected",
+    "summaryEvent": "agent.summary",
+    "endingPrefix": "【结局",
+    "metaKey": "summary",
+    "rejectionPrefixes": ["【拒绝】"],
+    "replayPrefix": "【重放】",
+    "defaultPayload": "0"
+  },
+  "inboxRoutes": {
+    "externalIdField": "external_id",
+    "payloadField": "payload",
+    "extMarker": "@ext=",
+    "add": {
+      "action": "inbox.add",
+      "fields": ["title", "external_id"],
+      "write": {"flag": "requirement", "shape": "named"}
+    }
+  }
+}"#,
+        )
+        .expect("写 pack.json");
+        fs::write(
+            dir.join("manifest.json"),
+            r#"{"schemaVersion": 1, "entries": [], "code": []}"#,
+        )
+        .expect("写 manifest.json");
+        fs::write(
+            dir.join("mod.lua"),
+            r#"ygg.on("event.start", function()
+  ygg.narrate("开局")
+  ygg.choice("下一步？", { "推进" })
+end)
+ygg.on("event.write", function()
+  local out = ygg.fs.write("artifacts/note.md", "第一版")
+  ygg.narrate("w=" .. out.path)
+end)
+ygg.on("event.boom", function()
+  ygg.fs.write("artifacts/dirty.md", "leak")
+  error("boom")
+end)
+ygg.on("agent.summary", function()
+  ygg.meta("summary", { open = true })
+  ygg.narrate("摘要就绪")
+end)
+"#,
+        )
+        .expect("写 mod.lua");
+        fs::write(
+            dir.join("data/config.json"),
+            r#"{
+  "drive": {"maxSteps": 50, "stallLimit": 5, "stepsPerRequirement": 20},
+  "settlement": {
+    "requireEvents": true,
+    "requireNoFailedSteps": true,
+    "requireEnding": true,
+    "requireInboxConsumed": true
+  }
+}"#,
+        )
+        .expect("写 config.json");
+    }
+
+    fn vfs_args(mod_dir: Option<&Path>, runs_root: &Path, run_id: &str, resume: bool) -> Args {
+        Args {
+            mod_dir: mod_dir.map(Path::to_path_buf),
+            run_id: run_id.to_owned(),
+            runs_root: runs_root.to_path_buf(),
+            resume,
+            settle: false,
+            watch: false,
+            event: None,
+            payload: None,
+            drive: Drive::None,
+            inbox: None,
+            store: Some(ygg_store::Backend::Json),
+            wait_tools: false,
+            tool_timeout_ms: None,
+            run_tool_worker: None,
+            artifact_put: None,
+            artifact_get: None,
+            builtin_tool: None,
+        }
+    }
+
+    /// 一个「已经有后端产物」的局目录（制品 CLI 不新造 run，所以必须先有产物）。
+    fn seeded_run(args: &Args) -> PathBuf {
+        let run_dir = args.runs_root.join(&args.run_id);
+        fs::create_dir_all(&run_dir).expect("建 run 目录");
+        fs::write(run_dir.join(AUTOSAVE_FILE), b"{}").expect("写 autosave");
+        run_dir
+    }
+
+    // ---- `--artifact-put` / `--artifact-get` 的核心 ----
+
+    #[test]
+    fn artifact_put_then_get_roundtrips_bytes() {
+        let dir = case_dir("put-get");
+        let args = vfs_args(None, &dir.join("runs"), "pg", false);
+        let run_dir = seeded_run(&args);
+        let body = "内容没有尾随换行";
+        let source = dir.join("source.md");
+        fs::write(&source, body).expect("写源文件");
+
+        let receipt =
+            artifact_put_receipt(&args, &format!("artifacts/note.md={}", source.display()))
+                .expect("写入必须成功");
+        // 回执形状：ok / path / bytes / sha256（**由端口给**，宿主不现算）。
+        assert_eq!(receipt["ok"], json!(true));
+        assert_eq!(receipt["path"], json!("artifacts/note.md"));
+        assert_eq!(receipt["bytes"], json!(body.len()));
+        assert_eq!(
+            receipt["sha256"].as_str().expect("sha256").len(),
+            64,
+            "小写十六进制 64 字符"
+        );
+        // 字节保真：读回来与源文件**逐字节**相等（不补换行）。
+        let bytes = artifact_get_bytes(&args, "artifacts/note.md").expect("读回必须成功");
+        assert_eq!(bytes, body.as_bytes());
+        // 真的落在后端的制品面里（不是只回执成功）。
+        assert!(run_dir.join("artifacts/note.md").is_file());
+    }
+
+    #[test]
+    fn artifact_get_missing_is_err() {
+        let dir = case_dir("get-missing");
+        let args = vfs_args(None, &dir.join("runs"), "gm", false);
+        seeded_run(&args);
+        let message = artifact_get_bytes(&args, "artifacts/none.md").expect_err("缺失必须报错");
+        assert!(message.contains("不存在"), "{message}");
+    }
+
+    #[test]
+    fn artifact_put_rejects_bad_path_and_oversize() {
+        let dir = case_dir("put-gate");
+        let args = vfs_args(None, &dir.join("runs"), "gate", false);
+        seeded_run(&args);
+        let source = dir.join("s.md");
+        fs::write(&source, "x").expect("写源文件");
+        let spec = |path: &str| format!("{path}={}", source.display());
+
+        // 路径门在端口内：宿主不重写第二份规则。
+        let message = artifact_put_receipt(&args, &spec("artifacts/../escape.md"))
+            .expect_err("穿越路径必须被拒");
+        assert!(message.contains("制品路径"), "{message}");
+        let message =
+            artifact_put_receipt(&args, &spec("artifact/x.md")).expect_err("坏前缀必须被拒");
+        assert!(message.contains("制品路径"), "{message}");
+
+        // 内容上限：256 KiB + 1 字节。
+        let big = dir.join("big.md");
+        fs::write(&big, vec![b'a'; 256 * 1024 + 1]).expect("写大文件");
+        let message = artifact_put_receipt(&args, &format!("artifacts/big.md={}", big.display()))
+            .expect_err("超限必须被拒");
+        assert!(message.contains("制品内容"), "{message}");
+        // 零写入。
+        assert!(!args.runs_root.join("gate").join("artifacts").exists());
+    }
+
+    #[test]
+    fn artifact_put_requires_an_existing_run() {
+        let dir = case_dir("put-newrun");
+        let args = vfs_args(None, &dir.join("runs"), "no-such-run", false);
+        let source = dir.join("s.md");
+        fs::write(&source, "x").expect("写源文件");
+        let message = artifact_put_receipt(&args, &format!("artifacts/a.md={}", source.display()))
+            .expect_err("不存在的局必须被拒");
+        assert!(message.contains("不存在"), "{message}");
+        // **不新造 run**：连目录都不该被建出来。
+        assert!(!args.runs_root.join("no-such-run").exists());
+    }
+
+    // ---- Session 的 VFS 持久化（写 → 落盘 → 续局回灌）----
+
+    #[test]
+    fn session_vfs_survives_resume() {
+        let dir = case_dir("resume");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_vfs_mod(&mod_dir);
+        let artifact_path = runs_root.join("rv").join("artifacts/note.md");
+
+        {
+            let mut session = Session::open(&vfs_args(Some(&mod_dir), &runs_root, "rv", false))
+                .expect("新局开局");
+            assert_eq!(session.kernel.vfs_len(), 0, "新局从空 VFS 起步");
+            let receipt = session.dispatch_event("event.write", "0");
+            assert_eq!(receipt["ok"], json!(true), "{receipt}");
+            assert_eq!(session.kernel.vfs_len(), 1);
+            // 成功步 → 制品**当场**落盘（不是等收口）。
+            assert_eq!(
+                fs::read(&artifact_path).expect("制品必须在盘上"),
+                "第一版".as_bytes()
+            );
+        }
+
+        // 续局：VFS 不在存档字节里，只能是宿主从制品面回灌。
+        let mut resumed =
+            Session::open(&vfs_args(Some(&mod_dir), &runs_root, "rv", true)).expect("续局");
+        assert_eq!(resumed.kernel.vfs_len(), 1, "续局必须把制品回灌进 VFS");
+        assert!(
+            resumed.kernel.vfs_take_dirty().is_empty(),
+            "预载不是本次写入，不得标脏"
+        );
+        // 回灌的内容与摘要是盘上那份（不是空壳）。
+        let entries = resumed.kernel.vfs_entries();
+        assert_eq!(entries[0].0, "artifacts/note.md");
+        assert_eq!(entries[0].1, "第一版".as_bytes());
+        assert_eq!(entries[0].2, ygg_store::sha256_hex("第一版".as_bytes()));
+    }
+
+    #[test]
+    fn failed_dispatch_never_reaches_the_artifact_store() {
+        let dir = case_dir("rollback");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_vfs_mod(&mod_dir);
+        let mut session =
+            Session::open(&vfs_args(Some(&mod_dir), &runs_root, "rb", false)).expect("新局开局");
+        let receipt = session.dispatch_event("event.boom", "0");
+        assert_eq!(receipt["ok"], json!(false), "{receipt}");
+        // 内核回滚 + 宿主不 flush ⇒ 盘上不该有失败步写的文件。
+        assert_eq!(session.kernel.vfs_len(), 0, "失败步的文件必须回滚");
+        assert!(
+            !runs_root.join("rb").join("artifacts/dirty.md").exists(),
+            "失败步不得落盘"
+        );
+    }
+
+    // ---- wire 契约 ----
+
+    #[test]
+    fn wire_line_is_single_line_and_sanitized() {
+        let line = wire_line(&[("a", "x;y,z|w\nv\r\0".to_owned()), ("b", String::new())]);
+        assert_eq!(line, "a=x_y_z_w_v__;b=");
+        for forbidden in ['|', '\n', '\r', '\0'] {
+            assert!(
+                !line.contains(forbidden),
+                "wire 行不得含 {forbidden:?}：{line}"
+            );
+        }
+        // **空值字段仍然在**（调用方按位解析，缺字段与空字段含义不同）。
+        assert!(line.ends_with(";b="));
+    }
+
+    // ---- 内置工具（六个 --builtin-tool op）----
+
+    fn op_flags(pairs: &[(&str, &str)]) -> OpFlags {
+        OpFlags {
+            values: pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        }
+    }
+
+    /// 一个有一次提交的真 git 仓库（worktree 三个 op 的现场）。
+    fn git_fixture(dir: &Path) -> PathBuf {
+        let repo = dir.join("repo");
+        fs::create_dir_all(&repo).expect("建仓库");
+        let run = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "user.email=r1@example.com",
+                    "-c",
+                    "user.name=r1",
+                    "-c",
+                    "init.defaultBranch=main",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .output()
+                .expect("执行 git");
+            assert!(
+                output.status.success(),
+                "git {args:?} 失败：{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        };
+        run(&["init", "-q"]);
+        fs::write(repo.join("a.txt"), "a").expect("写文件");
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "init"]);
+        repo
+    }
+
+    fn lane_wt(root: &Path, repo: &Path, lane: u8) -> PathBuf {
+        root.join(format!("{}-lane-{lane}", repo_label(repo)))
+    }
+
+    #[test]
+    fn worktree_claim_is_idempotent_and_reports_the_documented_keys() {
+        let dir = case_dir("claim");
+        let repo = git_fixture(&dir);
+        let root = dir.join("wts");
+        let (root_s, repo_s) = (root.display().to_string(), repo.display().to_string());
+        let flags = op_flags(&[
+            ("--lane", "1"),
+            ("--req", "r1"),
+            ("--branch", "lane/b1"),
+            ("--root", &root_s),
+            ("--repo", &repo_s),
+        ]);
+        let fields = claim_fields_with(&flags).expect("认领必须成功");
+        // **键序是契约**：调用方按位解析。
+        assert_eq!(
+            fields.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+            vec!["lane", "req", "branch", "base", "clean", "path"]
+        );
+        let line = wire_line(&fields);
+        assert!(
+            line.starts_with("lane=1;req=r1;branch=lane/b1;base="),
+            "{line}"
+        );
+        assert!(line.contains(";clean=1;path="), "{line}");
+
+        let wt = lane_wt(&root, &repo, 1);
+        assert!(wt.is_dir(), "worktree 必须被建出来");
+        assert!(wt.join("a.txt").is_file());
+        // 幂等：重跑拿到的行**逐字节相同**（含 base / path）。
+        let again = claim_fields_with(&flags).expect("重跑必须成功");
+        assert_eq!(wire_line(&again), line);
+    }
+
+    #[test]
+    fn worktree_claim_refuses_to_clobber_a_dirty_lane() {
+        let dir = case_dir("claim-busy");
+        let repo = git_fixture(&dir);
+        let root = dir.join("wts");
+        let (root_s, repo_s) = (root.display().to_string(), repo.display().to_string());
+        let flags = op_flags(&[
+            ("--lane", "2"),
+            ("--req", "r2"),
+            ("--branch", "lane/b2"),
+            ("--root", &root_s),
+            ("--repo", &repo_s),
+        ]);
+        claim_fields_with(&flags).expect("首次认领");
+        // 弄脏泳道：此刻重跑不能「重置」它（在飞的工作会被抹掉）。
+        fs::write(lane_wt(&root, &repo, 2).join("wip.txt"), "wip").expect("写 wip");
+        match claim_fields_with(&flags) {
+            Err(OpFailure::Line(line)) => {
+                assert!(line.contains("error=lane-busy"), "{line}");
+                assert!(line.starts_with("lane=2;"), "{line}");
+            }
+            _ => panic!("脏泳道必须被拒（不得踩掉在飞工作）"),
+        }
+        assert!(
+            lane_wt(&root, &repo, 2).join("wip.txt").is_file(),
+            "wip 不得被删"
+        );
+    }
+
+    #[test]
+    fn worktree_release_is_idempotent_and_keeps_the_branch() {
+        let dir = case_dir("release");
+        let repo = git_fixture(&dir);
+        let root = dir.join("wts");
+        let (root_s, repo_s) = (root.display().to_string(), repo.display().to_string());
+        let claim = op_flags(&[
+            ("--lane", "3"),
+            ("--req", "r3"),
+            ("--branch", "lane/b3"),
+            ("--root", &root_s),
+            ("--repo", &repo_s),
+        ]);
+        claim_fields_with(&claim).expect("认领");
+        let release = op_flags(&[("--lane", "3"), ("--root", &root_s), ("--repo", &repo_s)]);
+
+        let fields = release_fields_with(&release).expect("释放");
+        assert_eq!(wire_line(&fields), "lane=3;released=1");
+        assert!(!lane_wt(&root, &repo, 3).exists(), "worktree 必须被移除");
+        // 分支**不能**删：未合并的泳道分支是证据。
+        assert!(
+            git_ok(
+                &repo,
+                &["rev-parse", "--verify", "--quiet", "refs/heads/lane/b3"]
+            ),
+            "release 不得删分支"
+        );
+        // 幂等：第二次释放也必须是成功（目录已经不在了）。
+        let again = release_fields_with(&release).expect("重跑释放");
+        assert_eq!(wire_line(&again), "lane=3;released=1");
+    }
+
+    #[test]
+    fn lane_probe_reports_distance_and_is_clean_after_claim() {
+        let dir = case_dir("lane-probe");
+        let repo = git_fixture(&dir);
+        let root = dir.join("wts");
+        let (root_s, repo_s) = (root.display().to_string(), repo.display().to_string());
+        let base = git_one(&repo, &["rev-parse", "HEAD"]).expect("读 HEAD");
+        let claim = op_flags(&[
+            ("--lane", "4"),
+            ("--req", "r4"),
+            ("--branch", "lane/b4"),
+            ("--root", &root_s),
+            ("--repo", &repo_s),
+        ]);
+        claim_fields_with(&claim).expect("认领");
+
+        let probe = op_flags(&[
+            ("--lane", "4"),
+            ("--base", &base),
+            ("--branch", "lane/b4"),
+            ("--root", &root_s),
+            ("--repo", &repo_s),
+        ]);
+        let fields = lane_probe_fields_with(&probe).expect("探测");
+        assert_eq!(
+            fields.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+            vec!["lane", "branch", "base", "head", "commits", "clean", "files"]
+        );
+        let line = wire_line(&fields);
+        // base 原样回显（短 sha 保持短）；commits=0（刚认领，还没往前走）。
+        assert!(
+            line.starts_with(&format!("lane=4;branch=lane/b4;base={base};head=")),
+            "{line}"
+        );
+        assert!(line.contains(";commits=0;clean=1;files="), "{line}");
+    }
+
+    #[test]
+    fn lane_probe_fails_closed_on_an_unknown_branch() {
+        let dir = case_dir("lane-probe-bad");
+        let repo = git_fixture(&dir);
+        let repo_s = repo.display().to_string();
+        let base = git_one(&repo, &["rev-parse", "HEAD"]).expect("读 HEAD");
+        let probe = op_flags(&[
+            ("--lane", "5"),
+            ("--base", &base),
+            ("--branch", "lane/nope"),
+            ("--repo", &repo_s),
+        ]);
+        match lane_probe_fields_with(&probe) {
+            Err(OpFailure::Detail { slug, detail }) => {
+                assert_eq!(slug, "rev-list", "错误必须点名哪一步失败：{detail}");
+            }
+            _ => panic!("未知分支必须失败（不得静默报 commits=0）"),
+        }
+    }
+
+    #[test]
+    fn artifact_probe_answers_exists_zero_instead_of_failing() {
+        let dir = case_dir("artifact-probe");
+        let args = vfs_args(None, &dir.join("runs"), "ap", false);
+        let run_dir = seeded_run(&args);
+        let run_dir_s = run_dir.display().to_string();
+
+        // ① 缺失：**正常答案**，不是错误。
+        let missing = artifact_probe_fields_with(&op_flags(&[
+            ("--path", "artifacts/none.md"),
+            ("--run-dir", &run_dir_s),
+        ]))
+        .expect("缺失必须是正常回执");
+        assert_eq!(
+            wire_line(&missing),
+            "path=artifacts/none.md;exists=0;bytes=0;sha256="
+        );
+
+        // ② 存在：bytes / sha256 来自端口（不是宿主自己拼的）。
+        fs::create_dir_all(run_dir.join("artifacts")).expect("建制品目录");
+        fs::write(run_dir.join("artifacts/none.md"), b"hi").expect("写制品");
+        let hit = artifact_probe_fields_with(&op_flags(&[
+            ("--path", "artifacts/none.md"),
+            ("--run-dir", &run_dir_s),
+        ]))
+        .expect("存在的制品");
+        assert_eq!(
+            wire_line(&hit),
+            format!(
+                "path=artifacts/none.md;exists=1;bytes=2;sha256={}",
+                ygg_store::sha256_hex(b"hi")
+            )
+        );
+
+        // ③ 非法路径 = 调用方 bug，不能当成「不存在」。
+        match artifact_probe_fields_with(&op_flags(&[
+            ("--path", "artifact/bad.md"),
+            ("--run-dir", &run_dir_s),
+        ])) {
+            Err(OpFailure::Detail { slug, .. }) => assert_eq!(slug, "path"),
+            _ => panic!("非法路径必须报错（不得伪装成 exists=0）"),
+        }
+    }
+
+    #[test]
+    fn archive_sessions_moves_only_matching_jsonl() {
+        let dir = case_dir("archive");
+        let sessions = dir.join("sessions");
+        fs::create_dir_all(&sessions).expect("建会话目录");
+        fs::write(sessions.join("a.jsonl"), "{\"parent\":\"p1\"}\n").expect("写 a");
+        fs::write(sessions.join("b.jsonl"), "{\"x\":1}\n").expect("写 b");
+        // parent 自己的转录档：名字里就有 parent → 不搬。
+        fs::write(sessions.join("p1.jsonl"), "{\"parent\":\"p1\"}\n").expect("写 p1");
+        // 非 `.jsonl`：永不入选（数据红线：本 op 只碰会话转录）。
+        fs::write(sessions.join("notes.txt"), "p1").expect("写 txt");
+
+        let trash = dir.join("trash");
+        let outcome = sweep_sessions(&sessions, &trash, "p1").expect("清扫");
+        assert_eq!(outcome.moved, 1, "只有 a.jsonl 该被搬走");
+        assert_eq!(outcome.remaining, 0, "重扫必须为空（清扫完成）");
+        assert!(trash.join("a.jsonl").exists());
+        assert!(!sessions.join("a.jsonl").exists());
+        assert!(sessions.join("b.jsonl").exists(), "不匹配的不得被动");
+        assert!(
+            sessions.join("p1.jsonl").exists(),
+            "parent 自己的转录档不得搬"
+        );
+        assert!(sessions.join("notes.txt").exists(), "非 .jsonl 永不入选");
+    }
+
+    #[test]
+    fn verify_gates_match_the_documented_suite() {
+        // `fast` = 一个 `cargo check`；`full` = AGENTS.md 的门禁三件套（顺序固定）。
+        assert_eq!(verify_gates("fast").len(), 1);
+        assert_eq!(verify_gates("fast")[0].1[0], "check");
+        let full = verify_gates("full");
+        assert_eq!(
+            full.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+            vec![
+                "cargo test --workspace",
+                "cargo test --example agent -p ygg-sandbox",
+                "cargo test -p ygg-sandbox --test agent_seed_semantics",
+            ]
+        );
+    }
+
+    /// `@self` 别名：`ygg-agent` 与 `@self` 都解析到本可执行文件（同一分支）。
+    #[test]
+    fn self_alias_matches_the_contract_placeholder() {
+        assert_eq!(SELF_ALIAS, "ygg-agent");
+        assert_eq!(ygg_sandbox::host_contract::SELF_PROGRAM, "@self");
+        assert_ne!(SELF_ALIAS, ygg_sandbox::host_contract::SELF_PROGRAM);
     }
 }
