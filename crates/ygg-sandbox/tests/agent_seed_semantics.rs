@@ -1637,6 +1637,123 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     assert_eq!(game.phase("r1"), "draft");
 }
 
+/// A2b `agent.summary` carries two **structured** detail lists next to the scalar counts:
+/// `jobs` (every requirement occupying an analysis / plan / development slot) and `gates`
+/// (every requirement sitting on a plan / accept gate). A scheduler reads them instead of
+/// scraping narrative, so the keys must be exactly the documented set — and they must derive
+/// from the same KV facts the scalar fields do (including the lane ledger's own
+/// branch / base bytes).
+///
+/// Mutation: route `jobs` / `gates` through `summary_int` (a count) → the `as_array()`
+/// unwraps below go red; drop the `SUMMARY_JOB_STAGES` filter in favour of `req_job(i) ~= ""`
+/// and the `done` / gate-released rows keep stale job entries, so `jobs.is_empty()` reds.
+#[test]
+fn summary_exposes_structured_jobs_and_gates() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("subsystem gate|synthetic task description"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("synthetic requirement|synthetic description|semantics-r1"),
+    );
+    // Pre-claim a lane **with** branch/base: `jobs[].branch` / `jobs[].base` must be the lane
+    // ledger's own bytes, not something reconstructed from the requirement row.
+    game.narrate("lane.claim", &text("1|r1|feat-jobs|abc1234|1"));
+    game.narrate("requirement.dispatch", "0");
+    game.assert_kv("req.1.job", json!("plan"));
+
+    let summary = |game: &mut Game| {
+        let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+        assert!(
+            summary.is_object(),
+            "agent.summary must publish meta.summary: {summary}"
+        );
+        summary
+    };
+
+    // ① a plan job in flight → one `jobs` row, no gate yet.
+    let fields = summary(&mut game);
+    let jobs = fields["jobs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("summary.jobs must be an array: {fields}"));
+    assert_eq!(jobs.len(), 1, "{fields}");
+    let job = &jobs[0];
+    assert_eq!(job["id"], json!("r1"), "{fields}");
+    assert_eq!(job["rev"], json!(1), "{fields}");
+    assert_eq!(job["stage"], json!("plan"), "{fields}");
+    assert_eq!(job["status"], json!("planning"), "{fields}");
+    assert_eq!(job["phase"], json!("planning"), "{fields}");
+    assert_eq!(job["lane"], json!(1), "{fields}");
+    assert_eq!(job["branch"], json!("feat-jobs"), "{fields}");
+    assert_eq!(job["base"], json!("abc1234"), "{fields}");
+    assert_eq!(job["title"], json!("synthetic requirement"), "{fields}");
+    assert_eq!(
+        job["description"],
+        json!("synthetic description"),
+        "{fields}"
+    );
+    let gates = fields["gates"]
+        .as_array()
+        .unwrap_or_else(|| panic!("summary.gates must be an array: {fields}"));
+    assert!(gates.is_empty(), "no gate is pending yet: {fields}");
+
+    // ② accept the plan proposal → the gate row appears and the job slot is released.
+    submit_with_exec(&mut game, 1, "plan", "semantics-j1", "agent-1");
+    game.click("proposal.accept — ");
+    game.assert_kv("req.1.gate", json!("plan"));
+    let fields = summary(&mut game);
+    let gates = fields["gates"]
+        .as_array()
+        .unwrap_or_else(|| panic!("summary.gates must be an array: {fields}"));
+    assert_eq!(gates.len(), 1, "{fields}");
+    assert_eq!(gates[0]["id"], json!("r1"), "{fields}");
+    assert_eq!(gates[0]["gate"], json!("plan"), "{fields}");
+    assert_eq!(gates[0]["rev"], json!(1), "{fields}");
+    assert_eq!(
+        gates[0]["title"],
+        json!("synthetic requirement"),
+        "{fields}"
+    );
+    let jobs = fields["jobs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("summary.jobs must be an array: {fields}"));
+    assert!(
+        jobs.is_empty(),
+        "the job slot is released while a gate is pending: {fields}"
+    );
+
+    // ③ approve the plan → development is auto-dispatched on the **pre-claimed** lane, so the
+    //    branch/base recorded at claim time survive into the new job row.
+    game.click("gate.approve — ");
+    game.assert_kv("req.1.job", json!("development"));
+    let fields = summary(&mut game);
+    let jobs = fields["jobs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("summary.jobs must be an array: {fields}"));
+    assert_eq!(jobs.len(), 1, "{fields}");
+    assert_eq!(jobs[0]["stage"], json!("development"), "{fields}");
+    assert_eq!(jobs[0]["status"], json!("developing"), "{fields}");
+    assert_eq!(jobs[0]["phase"], json!("developing"), "{fields}");
+    assert_eq!(jobs[0]["lane"], json!(1), "{fields}");
+    assert_eq!(
+        jobs[0]["branch"],
+        json!(""),
+        "`proposal.accept` (plan) releases the lane ledger, so the auto-dispatched job \
+         rebinds a bare lane — the pre-claim branch is gone: {fields}"
+    );
+    assert_eq!(
+        jobs[0]["base"],
+        json!(""),
+        "the lane ledger was released with the plan job slot: {fields}"
+    );
+    let gates = fields["gates"]
+        .as_array()
+        .unwrap_or_else(|| panic!("summary.gates must be an array: {fields}"));
+    assert!(gates.is_empty(), "the gate is resolved: {fields}");
+}
+
 /// A3 `fs.artifact_probe` and `vfs.write` feed **one** bounded ledger (`record_artifact` is the
 /// single writer), and the VFS path shape is refused before anything is recorded.
 ///

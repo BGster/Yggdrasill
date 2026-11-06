@@ -222,6 +222,8 @@ fn main() {
         run_artifact_get(&args, path)
     } else if args.wait_tools {
         run_wait_tools(&args)
+    } else if args.daemon {
+        run_daemon(&args)
     } else if args.inbox.is_some() {
         run_inbox_append(&args)
     } else if args.settle {
@@ -282,6 +284,9 @@ struct Args {
     /// `--builtin-tool <op>`：内置工具子命令（见 [`BuiltinTool`]）。
     /// 它的其它旗标（`--lane` / `--path` / …）由 `run_builtin_tool` 二次解析。
     builtin_tool: Option<BuiltinTool>,
+    /// `--daemon`：常驻守护模式（stdin 逐行读 JSON 请求，stdout 逐行回 JSON）。
+    /// 与所有「一次性动作」旗标互斥：它的整个生命周期都活在同一个 `Session` 上。
+    daemon: bool,
 }
 
 /// `--builtin-tool` 的操作枚举（解析即校验；未知值 = 用法错误，拼出全部合法值）。
@@ -354,6 +359,7 @@ fn parse_args() -> Args {
     let mut artifact_put: Option<String> = None;
     let mut artifact_get: Option<String> = None;
     let mut builtin_tool: Option<BuiltinTool> = None;
+    let mut daemon = false;
 
     // 写 inbox 的七个参数共享同一套「只能给一个」的校验。
     fn set_inbox(inbox: &mut Option<InboxWrite>, flag: &'static str, value: String) {
@@ -425,6 +431,7 @@ fn parse_args() -> Args {
             }
             "--artifact-put" => artifact_put = Some(next_value(&mut iter, "--artifact-put")),
             "--artifact-get" => artifact_get = Some(next_value(&mut iter, "--artifact-get")),
+            "--daemon" => daemon = true,
             "--builtin-tool" => {
                 let text = next_value(&mut iter, "--builtin-tool");
                 builtin_tool = Some(BuiltinTool::parse(&text).unwrap_or_else(|| {
@@ -459,6 +466,7 @@ fn parse_args() -> Args {
             || run_tool_worker.is_some()
             || artifact_put.is_some()
             || artifact_get.is_some()
+            || daemon
             || resume
             || watch
             || store.is_some()
@@ -485,6 +493,7 @@ fn parse_args() -> Args {
             artifact_put,
             artifact_get,
             builtin_tool,
+            daemon,
         };
     }
 
@@ -493,6 +502,22 @@ fn parse_args() -> Args {
     };
     if !is_valid_run_id(&run_id) {
         usage_error("--run-id 只允许字母数字与 `-` `_` `.`（不得含路径分隔符）");
+    }
+    // 守护模式是**常驻**模式：整个生命周期跑同一个 `Session`，所以任何
+    // 「单发即退出」的旗标都没有意义（叠加只会让调用方误以为会发生）。
+    if daemon
+        && (settle
+            || event.is_some()
+            || wait_tools
+            || inbox.is_some()
+            || run_tool_worker.is_some()
+            || artifact_put.is_some()
+            || artifact_get.is_some()
+            || watch)
+    {
+        usage_error(
+            "--daemon 不能与 --event / --settle / --wait-tools / --watch / inbox 写命令 / 制品旗标 / --run-tool-worker 同时使用",
+        );
     }
     // 制品旗标是**独立的单发模式**：不推进状态、不读 Mod 契约，只碰本局制品面。
     let artifact_mode = artifact_put.is_some() || artifact_get.is_some();
@@ -526,12 +551,13 @@ fn parse_args() -> Args {
         }
     } else if !settle
         && !wait_tools
+        && !daemon
         && run_tool_worker.is_none()
         && !artifact_mode
         && mod_dir.is_none()
     {
         usage_error(
-            "缺少 --mod <mod目录>（仅 --settle / inbox 操作 / --wait-tools / 制品旗标 可省略）",
+            "缺少 --mod <mod目录>（仅 --settle / --daemon / inbox 操作 / --wait-tools / 制品旗标 可省略）",
         );
     }
     if let Some(name) = &event {
@@ -558,6 +584,7 @@ fn parse_args() -> Args {
         artifact_put,
         artifact_get,
         builtin_tool,
+        daemon,
     }
 }
 
@@ -589,6 +616,8 @@ fn usage(code: i32) -> ! {
   agent --run-id <标识> --settle                                局末结算
   agent --run-id <标识> [--runs-root <目录>] --requirement '标题|描述'
                                                                 异步补需求（只追本局后端的 inbox）
+  agent --run-id <标识> --daemon [--mod <mod目录>]
+                                                                常驻守护模式（JSON-RPC over stdio）
 
 选项:
   --mod <目录>       Mod 目录（五件套：pack.json / manifest.json / mod.lua /
@@ -625,7 +654,12 @@ fn usage(code: i32) -> ! {
                      （不新造 run：本局必须已存在；不推进状态）
   --artifact-get <artifacts/名>
                      把制品原文直出 stdout（**不补换行**；缺失 = 退出 1，stdout 保持空）
-  --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）
+   --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）
+  --daemon           常驻守护模式：stdin 逐行读 JSON 请求
+                     （dispatch/summary/state/vfs_put/vfs_get/vfs_list/settle/ping/shutdown），
+                     stdout 逐行回 JSON。请求可带 \"id\" 字段（原样回显）；stdout 只有协议面，
+                     人读输出一律走 stderr。局已存在时自动续局（无需 --resume），
+                     `settle` 与独立 --settle 同一实现并终结本局
   --store <后端>     存储后端断言：sqlite（默认，<run 目录>/run.sqlite）|
                      json（兼容后端，autosave.json + events.jsonl）。run.json 的
                      \"store\" 字段是权威：与 --store 不一致即拒绝开局（零写入）；
@@ -1494,6 +1528,30 @@ impl Session {
         };
         self.summary_cache = Some(summary.clone());
         summary
+    }
+
+    /// 只读摘要查询（守护模式的 `summary` / `dispatch` 共用）：现派发契约的
+    /// `summaryEvent`，把回执的 `meta.<metaKey>` 与 `pendingChoice` 一起交回。
+    ///
+    /// 关键点：它**不**经 `dispatch_event`——不落 `RunStore` 步、不推进 seq / 存档，
+    /// 所以可以在两个请求之间任意次调用而不污染事件日志。
+    fn query_summary_json(&mut self) -> Json {
+        let summary_event = self.contract.summary_event.clone();
+        let payload = self.contract.default_payload.clone();
+        let meta_key = self.contract.meta_key.clone();
+        let envelope = parse_envelope(&self.kernel.dispatch(&summary_event, &payload));
+        let ok = envelope["ok"] == Json::Bool(true);
+        // 回执缓存同步刷新：下一次 `summary()`（驱动报）不必再派发一次。
+        self.summary_cache = Some(if ok {
+            Summary::from_receipt(&envelope, &meta_key)
+        } else {
+            Summary::unknown()
+        });
+        json!({
+            "ok": ok,
+            "summary": envelope["meta"][&meta_key].clone(),
+            "pendingChoice": envelope["pendingChoice"].clone(),
+        })
     }
 
     /// inbox 已消费行数（cursor 文件缺失 / 损坏 = 0：重放由 Mod 侧幂等去重兵底）。
@@ -4769,6 +4827,316 @@ fn wait_tools_failure(message: &str) -> i32 {
     1
 }
 
+// ============================================================================
+// §守护模式（`--daemon`）—— 常驻进程 + 逐行 JSON-RPC over stdio
+//
+// 为什么要有它：调度端每一步都要「派发 → 读摘要 → 看门禁」三次往返。单发模式
+// 每次都重新装载 Mod + 读档，局一大就慢到不可用。守护模式把 `Session` 开一次，
+// 之后每条请求只在内存里跑（热载 / inbox 消费仍按原语义每次派发前现查）。
+//
+// 协议（一行一个 JSON 对象）：
+//   请求  {"id": <任意>, "op": "<动作>", ...}
+//   应答  {"ok": true|false, "op": "<动作>", "id": <原样回显>, ...}
+// `id` 可选；出现即原样回显（stdout 是单通道，调用方凭它配对）。
+//
+// **stdout 只有协议面**：任何 handler 里都不得 `println!`，人读文本一律 stderr。
+//
+// 动作表：
+//   ping      探活（runId + 存储后端）
+//   state     诊断信封（`state` 事件的只读回执，不推进状态）
+//   summary   只读摘要（现派发 `summaryEvent`，**不**落 RunStore 步）
+//   dispatch  派发一个事件（先热载 + 消费 inbox），回执附带最新 `summary`
+//   vfs_put   写制品（端口与内核 `ygg.fs` 同时可见）
+//   vfs_get   读制品原文     vfs_list  列制品
+//   settle    结算（与独立 `--settle` 同一实现，会终结本局）
+//   shutdown  退出守护进程
+// ============================================================================
+
+/// 写一行应答并 flush。
+///
+/// flush 是**承重**的：调用方在另一个进程里阻塞等这一行，攒缓冲就是互相死锁。
+fn write_reply(out: &mut impl Write, reply: &Json) -> io::Result<()> {
+    writeln!(out, "{reply}")?;
+    out.flush()
+}
+
+/// 守护模式主循环：开局一次，之后逐行读请求、逐行回应答。
+///
+/// `--mod` 只为**新局**必需：已有本局时按 `run.json` 记录的 mod 路径解析（与
+/// `--settle` / `--wait-tools` 同一条 `resolve_mod_dir`）。
+fn run_daemon(args: &Args) -> i32 {
+    let run_dir = args.runs_root.join(&args.run_id);
+    let mod_dir = match resolve_mod_dir(args, &run_dir) {
+        Ok(dir) => dir,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return 1;
+        }
+    };
+    // 已有后端产物 = 续局：重启守护进程不该把在跑的局清掉。只有「目录里没有任何
+    // 后端产物且没给 --resume」才按新局开局（与单发模式的 `--resume` 语义对齐）。
+    let resume = args.resume || ygg_store::detect(&run_dir).any();
+    let open_args = Args {
+        mod_dir: Some(mod_dir),
+        resume,
+        ..args.clone()
+    };
+    let mut session = match Session::open(&open_args) {
+        Ok(session) => session,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return 1;
+        }
+    };
+
+    let stdin = io::stdin();
+    let mut out = io::stdout();
+    for line in stdin.lock().lines() {
+        let line = match line {
+            Ok(line) => line,
+            Err(err) => {
+                eprintln!("error: 读 stdin 失败：{err}");
+                return 1;
+            }
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // 坏 JSON 不退出：回一条错误应答让调用方自己决定（一行坏请求不该打死整局）。
+        let request: Json = match serde_json::from_str(trimmed) {
+            Ok(value) => value,
+            Err(err) => {
+                let reply = json!({
+                    "ok": false,
+                    "error": {
+                        "code": "BAD_REQUEST",
+                        "message": format!("请求行不是合法 JSON：{err}"),
+                    },
+                });
+                if write_reply(&mut out, &reply).is_err() {
+                    return 1;
+                }
+                continue;
+            }
+        };
+        let (reply, quit) = handle_daemon_request(&mut session, &open_args, &request);
+        if write_reply(&mut out, &reply).is_err() {
+            return 1;
+        }
+        if quit {
+            break;
+        }
+    }
+    0
+}
+
+/// 错误应答（`op` 原样回填，便于调用方在单通道上配对）。
+fn daemon_error(op: &str, message: &str) -> Json {
+    json!({
+        "ok": false,
+        "op": op,
+        "error": { "code": "DAEMON", "message": message },
+    })
+}
+
+/// 一条守护请求的**完整**处理（纯内存 + 端口）：可单测，永不碰 stdout。
+///
+/// 返回 `(应答, 是否应退出)`：`shutdown` 是唯一把第二项置 true 的动作。
+fn handle_daemon_request(session: &mut Session, args: &Args, req: &Json) -> (Json, bool) {
+    let op = req["op"].as_str().unwrap_or("");
+    let mut quit = false;
+    let mut reply = match op {
+        "ping" => json!({
+            "ok": true,
+            "op": "ping",
+            "runId": session.run_id.clone(),
+            "store": session.store.backend().as_str(),
+        }),
+        "state" => {
+            let mut receipt = state_receipt(session, "state", Vec::new());
+            receipt["op"] = json!("state");
+            receipt
+        }
+        "summary" => {
+            session.maybe_reload();
+            let drain = session.drain_inbox();
+            let mut reply = session.query_summary_json();
+            reply["op"] = json!("summary");
+            if drain.touched() {
+                reply["inbox"] = drain.to_json();
+            }
+            reply
+        }
+        "dispatch" => daemon_dispatch(session, req),
+        "vfs_put" => daemon_vfs_put(session, req),
+        "vfs_get" => daemon_vfs_get(session, req),
+        "vfs_list" => daemon_vfs_list(session),
+        "settle" => daemon_settle(args),
+        "shutdown" => {
+            quit = true;
+            json!({"ok": true, "op": "shutdown"})
+        }
+        other => daemon_error(
+            other,
+            &format!(
+                "未知的 op `{other}`（只接受 ping / state / summary / dispatch / vfs_put / vfs_get / vfs_list / settle / shutdown）"
+            ),
+        ),
+    };
+    // `id` 只在请求给了的时候回填（不给就不凭空造一个，调用方靠 op 也能配对）。
+    if let Some(id) = req.get("id") {
+        reply["id"] = id.clone();
+    }
+    (reply, quit)
+}
+
+/// `dispatch`：热载 → 消费 inbox → 派发一个事件 → 附上最新 `summary`。
+///
+/// 一次往返同时给出两类信息（步回执 ⊆ 摘要）：调度端不必再发一条 `summary`，
+/// 也就不会看到「派发之后、摘要之前」的中间态。
+fn daemon_dispatch(session: &mut Session, req: &Json) -> Json {
+    let Some(event) = req["event"].as_str() else {
+        return daemon_error("dispatch", "`dispatch` 需要 event 字段（事件名）");
+    };
+    if event.trim().is_empty() {
+        return daemon_error("dispatch", "`dispatch` 的 event 不能为空");
+    }
+    let payload = match req.get("payload") {
+        None | Some(Json::Null) => session.contract.default_payload.clone(),
+        // 字符串 = **字符串载荷**（要 JSON 引号包起来才是合法标量）；数字 / 布尔
+        // 原样序列化。数组 / 对象不是合法标量（与 `--payload` 同一口径），拒绝。
+        Some(Json::String(text)) => serde_json::to_string(text).unwrap_or_default(),
+        Some(Json::Number(_)) | Some(Json::Bool(_)) => req["payload"].to_string(),
+        Some(other) => {
+            return daemon_error(
+                "dispatch",
+                &format!(
+                    "`dispatch` 的 payload 必须是 JSON 标量（当前是 {}）",
+                    json_type_name(other)
+                ),
+            )
+        }
+    };
+    // 与单发模式同序：先现查 Mod（热载），再把 inbox 存量排干净，最后派发本次事件。
+    session.maybe_reload();
+    let drain = session.drain_inbox();
+    let mut receipt = session.dispatch_event(event, &payload);
+    if drain.touched() {
+        receipt["inbox"] = drain.to_json();
+    }
+    receipt["summary"] = session.query_summary_json();
+    receipt["op"] = json!("dispatch");
+    receipt
+}
+
+/// `vfs_put`：写制品到本局后端，并**同时**灌进内核的 `ygg.fs`。
+///
+/// 只落盘不灌 VFS 会让同一局里的 `fs.stat` 报「不存在」——单发模式下这个窗口只
+/// 有几毫秒（下次开局即一致），守护进程会把它拉到整个局的长度。
+fn daemon_vfs_put(session: &mut Session, req: &Json) -> Json {
+    let Some(path) = req["path"].as_str() else {
+        return daemon_error("vfs_put", "`vfs_put` 需要 path 字段（artifacts/<名>）");
+    };
+    let Some(content) = req["content"].as_str() else {
+        return daemon_error("vfs_put", "`vfs_put` 需要 content 字段（UTF-8 文本）");
+    };
+    // 两道门都在端口内（宿主不重写一份）：路径形状 + 内容大小。
+    if let Err(err) = ygg_store::validate_artifact_path(path) {
+        return daemon_error("vfs_put", &err.to_string());
+    }
+    if let Err(err) = ygg_store::validate_artifact_content(content.as_bytes()) {
+        return daemon_error("vfs_put", &err.to_string());
+    }
+    let bytes = content.as_bytes();
+    let meta = session.with_run_lock(|session| {
+        session
+            .store
+            .artifact_put(path, bytes, clock())
+            .map_err(|err| err.to_string())
+    });
+    let meta = match meta {
+        Ok(meta) => meta,
+        Err(message) => return daemon_error("vfs_put", &message),
+    };
+    session.kernel.vfs_load(path, bytes, &meta.sha256);
+    json!({
+        "ok": true,
+        "op": "vfs_put",
+        "path": meta.path,
+        "bytes": meta.bytes,
+        "sha256": meta.sha256,
+    })
+}
+
+/// `vfs_get`：制品原文（缺失 = 带 message 的失败应答，不是 panic）。
+fn daemon_vfs_get(session: &mut Session, req: &Json) -> Json {
+    let Some(path) = req["path"].as_str() else {
+        return daemon_error("vfs_get", "`vfs_get` 需要 path 字段（artifacts/<名>）");
+    };
+    if let Err(err) = ygg_store::validate_artifact_path(path) {
+        return daemon_error("vfs_get", &err.to_string());
+    }
+    match session.store.artifact_get(path) {
+        Ok(Some(record)) => json!({
+            "ok": true,
+            "op": "vfs_get",
+            "path": record.meta.path,
+            "bytes": record.meta.bytes,
+            "sha256": record.meta.sha256,
+            "content": String::from_utf8_lossy(&record.content).into_owned(),
+        }),
+        Ok(None) => daemon_error(
+            "vfs_get",
+            &format!(
+                "制品 `{path}` 不存在（本局 {}，后端 {}）",
+                session.run_dir.display(),
+                session.store.backend()
+            ),
+        ),
+        Err(err) => daemon_error("vfs_get", &format!("读制品失败：{err}")),
+    }
+}
+
+/// `vfs_list`：本局制品清单（升序；与 `ygg.fs.list` 同一份端口事实）。
+fn daemon_vfs_list(session: &mut Session) -> Json {
+    match session.store.artifact_list() {
+        Ok(items) => json!({
+            "ok": true,
+            "op": "vfs_list",
+            "artifacts": items
+                .iter()
+                .map(|meta| json!({
+                    "path": meta.path,
+                    "bytes": meta.bytes,
+                    "sha256": meta.sha256,
+                }))
+                .collect::<Vec<_>>(),
+        }),
+        Err(err) => daemon_error("vfs_list", &format!("列制品失败：{err}")),
+    }
+}
+
+/// `settle`：**唯一实现**是 `settle_report`（独立 `--settle` 走同一条路）。
+///
+/// `human=false` 是必须的：结算的人读摘要是 `println!`，在守护模式里会撕裂
+/// stdout 的协议面。
+fn daemon_settle(args: &Args) -> Json {
+    let (code, report) = settle_report(args, false, false);
+    match report {
+        Some(report) => json!({
+            "ok": report["ok"] == Json::Bool(true),
+            "op": "settle",
+            "exit": code,
+            "settlement": report,
+        }),
+        None => daemon_error(
+            "settle",
+            "结算在写出报告之前失败（本局不可结算；原因见 stderr）",
+        ),
+    }
+}
+
 /// `--requirement`：只往本局后端的 inbox 追加一条，不读不写 autosave 后退出。
 ///
 /// 这是「新需求随时能进」的真实异步入口：本局在另一个进程里跑时，这里只做一次
@@ -5377,6 +5745,7 @@ mod mod_dir_alias_tests {
             artifact_put: None,
             artifact_get: None,
             builtin_tool: None,
+            daemon: false,
         }
     }
 
@@ -6476,6 +6845,17 @@ fn load_settlement_policy(run_dir: &Path, args: &Args) -> Result<SettlementPolic
 }
 
 fn run_settle(args: &Args, auto: bool) -> i32 {
+    settle_report(args, auto, true).0
+}
+
+/// 结算本体（**唯一**实现：独立 `--settle` 与守护模式的 `settle` 动作共用）。
+///
+/// 返回 `(退出码, 报告)`：报告为 `None` = 结算在写出报告之前就失败（原因已进
+/// stderr）；`Some` = 报告已落 `settlement.json`，直接交给调用方复用。
+///
+/// `human=false` 时**不**打印人读摘要——守护模式的 stdout 是 JSON-RPC 协议面，
+/// 人读文本会撕裂协议流。
+fn settle_report(args: &Args, auto: bool, human: bool) -> (i32, Option<Json>) {
     let run_dir = args.runs_root.join(&args.run_id);
     // 结算也必须走端口：sqlite 局没有 autosave.json / events.jsonl 可读
     // （照旧读文件 = 把已收口的局报成「无存档」）。
@@ -6483,7 +6863,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
         Ok(store) => store,
         Err(message) => {
             eprintln!("error: {message}");
-            return 1;
+            return (1, None);
         }
     };
 
@@ -6495,27 +6875,30 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
         Ok(ClosingEntry::AlreadyFinalized) => {
             let existing = run_dir.join(SETTLEMENT_FILE);
             if let Some(report) = read_json(&existing) {
-                println!(
-                    "本局已 finalized（{}），settlement ok = {}——不重写；需新局请换 --run-id",
-                    existing.display(),
-                    report["ok"]
-                );
-                return if report["ok"] == Json::Bool(true) {
+                if human {
+                    println!(
+                        "本局已 finalized（{}），settlement ok = {}——不重写；需新局请换 --run-id",
+                        existing.display(),
+                        report["ok"]
+                    );
+                }
+                let code = if report["ok"] == Json::Bool(true) {
                     0
                 } else {
                     1
                 };
+                return (code, Some(report));
             }
             eprintln!(
                 "error: 本局已 finalized 但找不到 settlement.json（{}）",
                 existing.display()
             );
-            return 1;
+            return (1, None);
         }
         Ok(_) => {}
         Err(message) => {
             eprintln!("error: {message}");
-            return 1;
+            return (1, None);
         }
     }
     // 进入 closing 后不再有新写入者；此处只需核对存量未消费行。
@@ -6533,7 +6916,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
                 if !auto {
                     leave_closing(&run_dir);
                 }
-                return 1;
+                return (1, None);
             }
         },
         Ok(None) => {
@@ -6544,14 +6927,14 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
             if !auto {
                 leave_closing(&run_dir);
             }
-            return 1;
+            return (1, None);
         }
         Err(err) => {
             eprintln!("error: {err}（先跑一局再结算）");
             if !auto {
                 leave_closing(&run_dir);
             }
-            return 1;
+            return (1, None);
         }
     };
     let save: Json = match serde_json::from_str(&save_text) {
@@ -6561,7 +6944,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
             if !auto {
                 leave_closing(&run_dir);
             }
-            return 1;
+            return (1, None);
         }
     };
 
@@ -6573,7 +6956,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
             if !auto {
                 leave_closing(&run_dir);
             }
-            return 1;
+            return (1, None);
         }
     };
     let records = log.records;
@@ -6634,7 +7017,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
             if !auto {
                 leave_closing(&run_dir);
             }
-            return 1;
+            return (1, None);
         }
     };
     let pending_inbox = unconsumed_inbox_lines(store.as_ref()).max(pending_before);
@@ -6714,9 +7097,11 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
         if !auto {
             leave_closing(&run_dir);
         }
-        return 1;
+        return (1, None);
     }
-    print_settlement(&report, &settlement_path, ending_line.as_deref(), failed);
+    if human {
+        print_settlement(&report, &settlement_path, ending_line.as_deref(), failed);
+    }
     if !ok {
         // 未能给绿：已到结局的自动结算就 finalize（后续写入必须开新局）；
         // 独立 --settle 则退回 running，让 resume 先把存量行消费完。
@@ -6725,7 +7110,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
         } else {
             leave_closing(&run_dir);
         }
-        return 1;
+        return (1, Some(report));
     }
     // ⑦ closing 保护下的交叉校验：进入 closing 后不应再出现新行，
     //    但保留一次现读作为兵底检查（万一有绕过协议的写入）。
@@ -6749,14 +7134,14 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
             eprintln!("error: {message}");
         }
         finalize_run(&run_dir);
-        return 1;
+        return (1, Some(report));
     }
     // 真正的「已定稿」：之后所有写命令一律非零拒绝（需开新局）。
     finalize_run(&run_dir);
     if auto {
         closing_heartbeat(&run_dir);
     }
-    0
+    (0, Some(report))
 }
 
 /// 结算报告的 `mod` 标签：run.json 元信息优先（最贴近本局实际装载），
@@ -7007,6 +7392,7 @@ mod multiscript_hot_reload_tests {
             artifact_put: None,
             artifact_get: None,
             builtin_tool: None,
+            daemon: false,
         }
     }
 
@@ -7443,6 +7829,7 @@ end)
             artifact_put: None,
             artifact_get: None,
             builtin_tool: None,
+            daemon: false,
         }
     }
 
@@ -8399,6 +8786,7 @@ end)
             artifact_put: None,
             artifact_get: None,
             builtin_tool: None,
+            daemon: false,
         }
     }
 
@@ -9097,6 +9485,7 @@ end)
             artifact_put: None,
             artifact_get: None,
             builtin_tool: None,
+            daemon: false,
         }
     }
 
@@ -9552,5 +9941,389 @@ end)
         assert_eq!(SELF_ALIAS, "ygg-agent");
         assert_eq!(ygg_sandbox::host_contract::SELF_PROGRAM, "@self");
         assert_ne!(SELF_ALIAS, ygg_sandbox::host_contract::SELF_PROGRAM);
+    }
+}
+
+// ============================================================================
+// §r2 单测：守护模式（`--daemon`）的 JSON-RPC 面
+//
+// 断言口径：**只测纯内存的 `handle_daemon_request`**。它的契约就是「不碰
+// stdout」（stdout 是守护进程的协议面），stdin 循环与 flush 由 `run_daemon`
+// 的十几行承担：去抓管道只能得到「自己搭的假管道」的结论，且与 `--daemon`
+// 的进程生命周期绑死。
+//
+// `summary` 里的 `jobs` / `gates` 是本模块**自造**的载荷：宿主只负责原样透传
+// （形状由 Mod 声明），所以这里断言的是通道，不是 Mod 的业务语义——后者在
+// `agent_seed_semantics` 的 `summary_exposes_structured_jobs_and_gates` 里。
+// ============================================================================
+
+#[cfg(test)]
+mod daemon_rpc_tests {
+    use super::*;
+
+    fn case_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-daemon-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    /// 最小合成 Mod：一个累加 kv 的 handler、一个**读** `ygg.fs.stat` 的 handler，
+    /// 以及一个把 `jobs` / `gates` 写进 `meta.summary` 的只读摘要动作。
+    ///
+    /// 沙箱裁掉了 `string` / `table` / `math`：只能用 `#` / `..` / `tostring` / `type`。
+    fn write_daemon_mod(dir: &Path) {
+        fs::create_dir_all(dir.join("data")).expect("建 data 目录");
+        fs::write(
+            dir.join("pack.json"),
+            r#"{
+  "schemaVersion": 1,
+  "entries": [],
+  "schemaFiles": [],
+  "agent": {
+    "entryEvent": "event.start",
+    "choiceEvent": "ygg.choice_selected",
+    "summaryEvent": "agent.summary",
+    "endingPrefix": "【结局",
+    "metaKey": "summary",
+    "rejectionPrefixes": ["【拒绝】"],
+    "replayPrefix": "【重放】",
+    "defaultPayload": "0"
+  },
+  "inboxRoutes": {
+    "externalIdField": "external_id",
+    "payloadField": "payload",
+    "extMarker": "@ext=",
+    "add": {
+      "action": "inbox.add",
+      "fields": ["title", "external_id"],
+      "write": {"flag": "requirement", "shape": "named"}
+    }
+  }
+}"#,
+        )
+        .expect("写 pack.json");
+        fs::write(
+            dir.join("manifest.json"),
+            r#"{"schemaVersion": 1, "entries": [], "code": []}"#,
+        )
+        .expect("写 manifest.json");
+        fs::write(
+            dir.join("mod.lua"),
+            r#"ygg.on("event.start", function()
+  ygg.narrate("开局")
+end)
+ygg.on("event.tick", function(payload)
+  ygg.kv.set("ticks", (ygg.kv.get("ticks") or 0) + 1)
+  ygg.narrate("tick=" .. tostring(ygg.kv.get("ticks")) .. " payload=" .. tostring(payload))
+end)
+ygg.on("event.probe_vfs", function()
+  local hit = ygg.fs.stat("artifacts/note.md")
+  local sha = hit.sha256
+  ygg.narrate("vfs=" .. tostring(hit.exists) .. ":" .. tostring(hit.bytes) .. ":" .. tostring(#sha))
+end)
+ygg.on("agent.summary", function()
+  ygg.meta("summary", {
+    stage = "coordinate",
+    jobs = {
+      { id = "r1", rev = 3, stage = "development", lane = 1, branch = "feat-x", base = "abc1234", title = "切片一", description = "描述一" },
+    },
+    gates = {
+      { id = "r2", gate = "plan", rev = 2, title = "切片二" },
+    },
+  })
+  ygg.narrate("摘要就绪")
+end)
+"#,
+        )
+        .expect("写 mod.lua");
+        fs::write(
+            dir.join("data/config.json"),
+            r#"{
+  "drive": {"maxSteps": 50, "stallLimit": 5, "stepsPerRequirement": 20},
+  "settlement": {
+    "requireEvents": true,
+    "requireNoFailedSteps": true,
+    "requireEnding": true,
+    "requireInboxConsumed": true
+  }
+}"#,
+        )
+        .expect("写 config.json");
+    }
+
+    fn daemon_args(mod_dir: &Path, runs_root: &Path, run_id: &str) -> Args {
+        Args {
+            mod_dir: Some(mod_dir.to_path_buf()),
+            run_id: run_id.to_owned(),
+            runs_root: runs_root.to_path_buf(),
+            resume: false,
+            settle: false,
+            watch: false,
+            event: None,
+            payload: None,
+            drive: Drive::None,
+            inbox: None,
+            store: Some(ygg_store::Backend::Json),
+            wait_tools: false,
+            tool_timeout_ms: None,
+            run_tool_worker: None,
+            artifact_put: None,
+            artifact_get: None,
+            builtin_tool: None,
+            daemon: true,
+        }
+    }
+
+    /// 发一条请求并断言「不退出」（只有 `shutdown` 能把第二项置 true）。
+    #[track_caller]
+    fn call(session: &mut Session, args: &Args, req: Json) -> Json {
+        let (reply, quit) = handle_daemon_request(session, args, &req);
+        assert!(!quit, "只有 shutdown 能让守护进程退出：{reply}");
+        assert!(reply.is_object(), "应答恒为 JSON 对象：{reply}");
+        reply
+    }
+
+    fn narrative_text(reply: &Json) -> String {
+        reply["narrative"].to_string()
+    }
+
+    #[test]
+    fn rpc_covers_ping_dispatch_vfs_summary_and_shutdown() {
+        let dir = case_dir("rpc");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_daemon_mod(&mod_dir);
+        let args = daemon_args(&mod_dir, &runs_root, "d1");
+        let mut session = Session::open(&args).expect("守护模式开局");
+
+        // ① ping：runId 与存储后端都取自真实装载面（不是硬编码）。
+        let ping = call(&mut session, &args, json!({"op": "ping", "id": 7}));
+        assert_eq!(ping["ok"], json!(true), "{ping}");
+        assert_eq!(ping["op"], json!("ping"));
+        assert_eq!(ping["runId"], json!("d1"));
+        assert_eq!(ping["store"], json!("json"));
+        assert_eq!(
+            ping["id"],
+            json!(7),
+            "id 必须原样回显（单通道配对）：{ping}"
+        );
+
+        // ② dispatch：字符串载荷要**包成 JSON 标量**再下发（裸串不是合法载荷）。
+        let first = call(
+            &mut session,
+            &args,
+            json!({"op": "dispatch", "event": "event.tick", "payload": "abc"}),
+        );
+        assert_eq!(first["ok"], json!(true), "{first}");
+        assert_eq!(first["op"], json!("dispatch"));
+        assert_eq!(first["event"], json!("event.tick"));
+        let lines = narrative_text(&first);
+        assert!(lines.contains("tick=1"), "{first}");
+        assert!(
+            lines.contains("payload=abc"),
+            "载荷必须是字符串 abc：{first}"
+        );
+
+        // dispatch 的回执自带最新摘要：调度端不必再发一条 `summary`（也就不会
+        // 看到「派发之后、摘要之前」的中间态）。
+        let summary = &first["summary"];
+        assert_eq!(summary["ok"], json!(true), "{first}");
+        let jobs = summary["summary"]["jobs"].as_array().expect("summary.jobs");
+        assert_eq!(jobs.len(), 1, "{first}");
+        assert_eq!(jobs[0]["id"], json!("r1"));
+        assert_eq!(jobs[0]["stage"], json!("development"));
+        assert_eq!(jobs[0]["lane"], json!(1));
+        assert_eq!(jobs[0]["branch"], json!("feat-x"));
+        assert_eq!(jobs[0]["base"], json!("abc1234"));
+        assert_eq!(jobs[0]["title"], json!("切片一"));
+        assert_eq!(jobs[0]["description"], json!("描述一"));
+        let gates = summary["summary"]["gates"]
+            .as_array()
+            .expect("summary.gates");
+        assert_eq!(gates.len(), 1, "{first}");
+        assert_eq!(gates[0]["gate"], json!("plan"));
+        assert_eq!(gates[0]["rev"], json!(2));
+        assert_eq!(gates[0]["title"], json!("切片二"));
+
+        // ③ vfs_put：端口与内核 `ygg.fs` 必须**同时**可见。
+        let body = "第一版";
+        let sha = ygg_store::sha256_hex(body.as_bytes());
+        let put = call(
+            &mut session,
+            &args,
+            json!({"op": "vfs_put", "path": "artifacts/note.md", "content": body}),
+        );
+        assert_eq!(put["ok"], json!(true), "{put}");
+        assert_eq!(put["path"], json!("artifacts/note.md"));
+        assert_eq!(put["bytes"], json!(body.len()));
+        assert_eq!(put["sha256"], json!(sha));
+        assert_eq!(
+            fs::read(runs_root.join("d1/artifacts/note.md")).expect("制品必须落盘"),
+            body.as_bytes(),
+            "vfs_put 必须写进本局后端"
+        );
+        // 同一局内的 `ygg.fs.stat` 立即可见（只落盘不灌 VFS 会让这里报 exists=false）。
+        let probe = call(
+            &mut session,
+            &args,
+            json!({"op": "dispatch", "event": "event.probe_vfs"}),
+        );
+        let probe_lines = narrative_text(&probe);
+        assert!(
+            probe_lines.contains(&format!("vfs=true:{}:64", body.len())),
+            "vfs_put 之后内核必须立刻看得见（exists=true / bytes / 64 位 sha）：{probe}"
+        );
+
+        // ④ vfs_get / vfs_list：读面与端口同一份事实。
+        let got = call(
+            &mut session,
+            &args,
+            json!({"op": "vfs_get", "path": "artifacts/note.md"}),
+        );
+        assert_eq!(got["ok"], json!(true), "{got}");
+        assert_eq!(got["content"], json!(body));
+        assert_eq!(got["sha256"], json!(sha));
+        let missing = call(
+            &mut session,
+            &args,
+            json!({"op": "vfs_get", "path": "artifacts/none.md"}),
+        );
+        assert_eq!(missing["ok"], json!(false), "缺失必须是失败应答：{missing}");
+        assert!(
+            missing["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("不存在"),
+            "{missing}"
+        );
+        let list = call(&mut session, &args, json!({"op": "vfs_list"}));
+        let artifacts = list["artifacts"].as_array().expect("artifacts");
+        assert_eq!(artifacts.len(), 1, "{list}");
+        assert_eq!(artifacts[0]["path"], json!("artifacts/note.md"));
+        assert_eq!(artifacts[0]["sha256"], json!(sha));
+
+        // ⑤ summary 是**只读**面：不落 RunStore 步（否则守护进程每探一次就把日志写胖）。
+        let before = session.store.steps().expect("读事件日志").records.len();
+        let summary = call(&mut session, &args, json!({"op": "summary", "id": "s1"}));
+        let after = session.store.steps().expect("读事件日志").records.len();
+        assert_eq!(after, before, "summary 不得往事件日志加步");
+        assert_eq!(summary["ok"], json!(true), "{summary}");
+        assert_eq!(summary["op"], json!("summary"));
+        assert_eq!(summary["id"], json!("s1"));
+        assert!(summary["summary"]["jobs"].is_array(), "{summary}");
+
+        // ⑥ shutdown：唯一把 should_quit 置 true 的动作。
+        let (bye, quit) = handle_daemon_request(&mut session, &args, &json!({"op": "shutdown"}));
+        assert_eq!(bye["ok"], json!(true), "{bye}");
+        assert!(quit, "shutdown 必须要求退出循环");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rpc_refuses_unknown_ops_and_non_scalar_payloads() {
+        let dir = case_dir("refuse");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_daemon_mod(&mod_dir);
+        let args = daemon_args(&mod_dir, &runs_root, "d2");
+        let mut session = Session::open(&args).expect("守护模式开局");
+
+        let unknown = call(&mut session, &args, json!({"op": "nope"}));
+        assert_eq!(unknown["ok"], json!(false), "{unknown}");
+        assert!(
+            unknown["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("未知的 op"),
+            "{unknown}"
+        );
+
+        // 数组 / 对象不是合法载荷（与 `--payload` 同一口径：必须是 JSON 标量）。
+        let array = call(
+            &mut session,
+            &args,
+            json!({"op": "dispatch", "event": "event.tick", "payload": [1, 2]}),
+        );
+        assert_eq!(array["ok"], json!(false), "{array}");
+        assert!(
+            array["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("JSON 标量"),
+            "{array}"
+        );
+
+        // 缺 event / 空 event：明确拒绝，而不是拿入口载荷去措。
+        let no_event = call(&mut session, &args, json!({"op": "dispatch"}));
+        assert_eq!(no_event["ok"], json!(false), "{no_event}");
+        let blank = call(
+            &mut session,
+            &args,
+            json!({"op": "dispatch", "event": "  "}),
+        );
+        assert_eq!(blank["ok"], json!(false), "{blank}");
+
+        // 缺数字载荷 = 用契约的 defaultPayload（这里 "0"），不是错误。
+        let defaulted = call(
+            &mut session,
+            &args,
+            json!({"op": "dispatch", "event": "event.tick"}),
+        );
+        assert_eq!(defaulted["ok"], json!(true), "{defaulted}");
+        assert!(
+            narrative_text(&defaulted).contains("payload=0"),
+            "{defaulted}"
+        );
+
+        // 制品路径形状由端口裁决（宿主不重写一份）——穿越必须被拒。
+        let escaped = call(
+            &mut session,
+            &args,
+            json!({"op": "vfs_put", "path": "../escape.md", "content": "x"}),
+        );
+        assert_eq!(escaped["ok"], json!(false), "{escaped}");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn daemon_resumes_an_existing_run_instead_of_resetting_it() {
+        let dir = case_dir("resume");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_daemon_mod(&mod_dir);
+
+        // 第一段：新局跑一步（ticks=1），然后丢弃进程内状态。
+        {
+            let args = daemon_args(&mod_dir, &runs_root, "d3");
+            let mut session = Session::open(&args).expect("新局开局");
+            let step = call(
+                &mut session,
+                &args,
+                json!({"op": "dispatch", "event": "event.tick"}),
+            );
+            assert!(narrative_text(&step).contains("tick=1"), "{step}");
+        }
+
+        // 第二段：重启守护进程。目录里已有后端产物 → 自动续局（不重置），
+        // 所以 ticks 从 1 累到 2 而不是从头开始。
+        //
+        // `resume` 这一行就是 `run_daemon` 的判定式（「已有后端产物即续局」）：
+        // 它在 CLI 入口，不在 `handle_daemon_request` 里，所以单测只能复刻它。
+        let reopen = Args {
+            resume: ygg_store::detect(&runs_root.join("d3")).any(),
+            ..daemon_args(&mod_dir, &runs_root, "d3")
+        };
+        let mut resumed = Session::open(&reopen).expect("续局（重启守护进程不得清局）");
+        let step = call(
+            &mut resumed,
+            &reopen,
+            json!({"op": "dispatch", "event": "event.tick"}),
+        );
+        assert!(
+            narrative_text(&step).contains("tick=2"),
+            "重启必须续局（ticks 从 1 累到 2）：{step}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

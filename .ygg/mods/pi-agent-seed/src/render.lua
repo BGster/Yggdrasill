@@ -31,8 +31,8 @@ local CONFIG_UI, MENU, menu, option_texts =
   menus.CONFIG_UI, menus.MENU, menus.menu, menus.option_texts
 local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status =
   props.P_PENDING, props.prop_count, props.prop_id, props.prop_key, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
-local PHASE, R_MERGED, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase_name, req_rev, req_stale, req_status, req_tally, req_title, stage =
-  reqs.PHASE, reqs.R_MERGED, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase_name, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
+local PHASE, R_MERGED, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_gate, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase_name, req_rev, req_stale, req_status, req_tally, req_title, stage =
+  reqs.PHASE, reqs.R_MERGED, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase_name, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
 local fill, join, spaces, trim =
   util.fill, util.join, util.spaces, util.trim
 
@@ -580,6 +580,48 @@ local function summary_awaiting()
   return nil
 end
 
+-- 在跑作业的结构化明细（analysis / plan / development 三阶段各占一条）。
+-- 只读 KV 派生的展示面：与 summary_awaiting 同源（后者只返回第一条），
+-- 这里返回全量，供守护模式的调度端一次性取到 id / rev / lane / branch / base / 标题 / 描述。
+local function summary_jobs()
+  local out = {}
+  for i = 1, req_count() do
+    if SUMMARY_JOB_STAGES[req_job(i)] == true then
+      local lane = req_lane(i)
+      out[#out + 1] = {
+        id = req_id(i),
+        rev = summary_int(req_rev(i)),
+        stage = req_job(i),
+        status = req_status(i),
+        phase = req_phase_name(i),
+        lane = summary_int(lane),
+        branch = lane > 0 and text_of("lane." .. tostring(lane) .. ".branch", "") or "",
+        base = lane > 0 and text_of("lane." .. tostring(lane) .. ".base", "") or "",
+        title = req_title(i),
+        description = text_of(req_key(i, "description"), ""),
+      }
+    end
+  end
+  return out
+end
+
+-- 待运行门禁的结构化明细（plan / accept 两类）——同上，展示面只读 KV。
+local function summary_gates()
+  local out = {}
+  for i = 1, req_count() do
+    local gate = req_gate(i)
+    if gate ~= "" then
+      out[#out + 1] = {
+        id = req_id(i),
+        gate = gate,
+        rev = summary_int(req_rev(i)),
+        title = req_title(i),
+      }
+    end
+  end
+  return out
+end
+
 local function summary_next_ends_run()
   -- 只看阶段菜单（MENU 本体）：二级页打开时 pendingChoice 是子页（首项 config.set），
   -- 不能因此把自己报成「不结局」——收口判定不能被展示层带偏。
@@ -603,6 +645,9 @@ local function summary_fields()
     pendingProposals = summary_int(prop_pending_total()),
     requirementCount = summary_int(req_count()),
     conflicts = summary_conflicts(),
+    -- 结构化作业 / 门禁明细：空表在宿主侧序列化为 `[]`（不是 null），调度端无需区分缺失与空。
+    jobs = summary_jobs(),
+    gates = summary_gates(),
     -- 工具桥的在飞计数（只读 KV：`src/render.lua` 不得 require("src.tools")，那会立刻成环）。
     pendingTools = summary_int(ygg.kv.get("tool.pending")),
     -- 进化声明（只声称「声明了什么」）：宿主与只读查询可直接核对，不涉及内容质量。
@@ -686,7 +731,9 @@ M.stage_prompt = stage_prompt
 M.summary_awaiting = summary_awaiting
 M.summary_conflicts = summary_conflicts
 M.summary_fields = summary_fields
+M.summary_gates = summary_gates
 M.summary_int = summary_int
+M.summary_jobs = summary_jobs
 M.summary_next_ends_run = summary_next_ends_run
 
 return M
