@@ -79,7 +79,7 @@ use ygg_core::snapshot::{canonical_snapshot, SnapshotError};
 use ygg_core::transition::{run_transition, TransitionError};
 
 use crate::fuel::{self, HookFuelMeter};
-use crate::host_api::{self, HostApi, HostHandles, VfsStore};
+use crate::host_api::{self, HostApi, HostHandles, HostToolRunner, VfsStore};
 use crate::inject::{self, DeterminismHandle};
 use crate::modules::{ModuleError, ModuleSet};
 use crate::resources::{ResourceError, ResourceTable};
@@ -752,6 +752,11 @@ impl KernelFacade {
     /// VFS 当前件数。
     pub fn vfs_len(&self) -> usize {
         self.vfs.borrow().len()
+    }
+
+    /// 挂载或卸载宿主侧同步工具执行器（供 `ygg.tool.call` 同步调用）。
+    pub fn set_tool_runner(&mut self, runner: Option<Box<dyn HostToolRunner>>) {
+        self.host.set_tool_runner(runner);
     }
 }
 

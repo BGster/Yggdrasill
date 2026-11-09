@@ -111,10 +111,14 @@ pub mod effects {
         // 写宿主状态（与 `kv.set` 同类：一次调用就产生跨事件的副作用）；
         // `fs.read` / `fs.stat` / `fs.list` 是纯读，不列（见下面 PURE_READ 表）。
         ("fs", "write"),
+        ("tool", "call"),
         ("fsm", "define"),
         ("narrative", "node"),
         ("narrative", "goto"),
     ];
+
+    /// `BANNED_TABLE_MEMBERS` 的同义导出（兼容嵌套调用命名）。
+    pub const BANNED_NESTED_CALLS: &[(&str, &str)] = BANNED_TABLE_MEMBERS;
 
     /// 纯读面——显式列出，作为「这些是**允许**的」的依据（lint 与文档用）。
     ///
@@ -536,5 +540,19 @@ impl ModuleSet {
     /// 已登记规范名（名字序；诊断面）。
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.by_name.keys().map(String::as_str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effects;
+
+    #[test]
+    fn tool_call_is_banned_at_module_top_level() {
+        assert!(effects::BANNED_NESTED_CALLS.contains(&("tool", "call")));
+        assert_eq!(
+            effects::banned(&["tool", "call"]).as_deref(),
+            Some("tool.call")
+        );
     }
 }

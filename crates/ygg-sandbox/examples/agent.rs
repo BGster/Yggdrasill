@@ -124,6 +124,7 @@
 //! `kv` 面摘出结局 / 评分 / 经验（缺失即 `null`），并附完整 kv 与规模面。
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
@@ -138,6 +139,7 @@ use ygg_sandbox::host_contract::{
     SettlementPolicy, ToolAccess, ToolKind, ToolRegistry, ToolSpec, WriteShape, CONTRACT_DOC,
 };
 use ygg_sandbox::modload::ModBundle;
+use ygg_sandbox::HostToolRunner;
 // 持久化端口（`crates/ygg-store`）：状态事实（存档 / 事件日志 / inbox / 位移 /
 // 重置）全部经它读写。**锁、run.json、settlement.json、coordination.* 仍留在
 // 宿主**——那是跨进程共识与报告面，两后端必须完全一致。
@@ -1125,6 +1127,8 @@ struct Session {
     summary_cache: Option<Summary>,
     /// 是否由 `--resume` 成功续局（交互模式据此决定回显而非推进）。
     resumed: bool,
+    /// `--harness` 适配器覆盖（供进程内内置工具 `archive-sessions` 读取）。
+    harness: Option<String>,
 }
 
 /// 单段 drain 的「过慢」阈值（plan-r5 §2.6 临界区时长守护：观测不阻断）。
@@ -1217,7 +1221,9 @@ impl Session {
             reload: None,
             summary_cache: None,
             resumed: false,
+            harness: args.harness.clone(),
         };
+        session.mount_tool_runner();
 
         // 残留 tmp 清理（W3 配套）：持锁 + 10s mtime 窗口，不误删活进程的 tmp。
         // 先把「后端事实」落盘再动状态：`run.json.store` 必须早于第一次写入
@@ -1575,11 +1581,28 @@ impl Session {
         } else {
             Summary::unknown()
         });
+        let summary_val = envelope["meta"][&meta_key].clone();
+        let harness_actions = extract_harness_actions(&summary_val);
         json!({
             "ok": ok,
-            "summary": envelope["meta"][&meta_key].clone(),
+            "summary": summary_val,
             "pendingChoice": envelope["pendingChoice"].clone(),
+            "harnessActions": harness_actions,
         })
+    }
+
+    /// 挂载进程内同步工具执行器（两层白名单 + 六个内置工具直调）。
+    fn mount_tool_runner(&mut self) {
+        let runner = InProcessToolRunner {
+            tools: self.tools.clone(),
+            tool_access: self.tool_access.clone(),
+            mod_dir: self.mod_dir.clone(),
+            run_dir: self.run_dir.clone(),
+            runs_root: self.runs_root.clone(),
+            run_id: self.run_id.clone(),
+            harness: self.harness.clone(),
+        };
+        self.kernel.set_tool_runner(Some(Box::new(runner)));
     }
 
     /// inbox 已消费行数（cursor 文件缺失 / 损坏 = 0：重放由 Mod 侧幂等去重兵底）。
@@ -1761,6 +1784,7 @@ impl Session {
                 self.settlement = settlement;
                 self.tools = tools;
                 self.tool_access = tool_access;
+                self.mount_tool_runner();
                 self.summary_cache = None;
                 self.reload = Some(Reload {
                     reloaded: true,
@@ -1921,6 +1945,10 @@ impl Session {
         // 它不进叙事、不进存档，只作为回执的独立字段给调用方用）。
         if envelope.get("meta").is_some() {
             receipt["meta"] = envelope["meta"].clone();
+        }
+        let harness_actions = envelope_harness_actions(envelope, &self.contract.meta_key);
+        if !harness_actions.is_empty() {
+            receipt["harnessActions"] = json!(harness_actions);
         }
 
         // 警告面：内核 D1 warnings + 宿主侧 notices（热载 / 存档 / 重置）。
@@ -2630,41 +2658,254 @@ fn claim_tool_result(run_dir: &Path, call_id: &str) -> bool {
     }
 }
 
-/// 启动脱体 worker（`current_exe --run-tool-worker <call_id>`；**不 wait**）。
-fn spawn_tool_worker(
-    mod_dir: &Path,
-    runs_root: &Path,
-    run_id: &str,
-    call_id: &str,
-) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|err| format!("取 current_exe 失败：{err}"))?;
-    let mut command = Command::new(exe);
-    command
-        .arg("--run-tool-worker")
-        .arg(call_id)
-        .arg("--run-id")
-        .arg(run_id)
-        .arg("--runs-root")
-        .arg(runs_root)
-        .arg("--mod")
-        .arg(mod_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    // 宿主注入的本局路径：`pack.json` 是静态文件、不能内插宿主路径，所以内置
-    // 工具（`--builtin-tool artifact-probe` 等）用 `$ENV{YGG_RUN_DIR}` 这类模板
-    // 引用。`EnvTable::lookup` 先查 `process`（`std::env::vars()`）再查
-    // `.env.local` / `.env`，所以这里注入的值**不会**被 Mod 目录里的 `.env` 覆写；
-    // 子进程也自然继承（worker → 工具 child）。
-    command
-        .env("YGG_RUN_DIR", runs_root.join(run_id))
-        .env("YGG_RUN_ID", run_id)
-        .env("YGG_RUNS_ROOT", runs_root)
-        .env("YGG_MOD_DIR", mod_dir);
-    command
-        .spawn()
-        .map(|_child| ())
-        .map_err(|err| format!("启动工具 worker 失败：{err}"))
+/// 从 `summary` 对象提取 `jobs[].subagentAction` 列表。
+fn extract_harness_actions(summary: &Json) -> Vec<Json> {
+    summary["jobs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|job| {
+            let action = job.get("subagentAction")?;
+            action.is_object().then(|| action.clone())
+        })
+        .collect()
+}
+
+/// 从回执信封提取 `harnessActions`（优先 `meta.harness_actions`，其次 `meta.<metaKey>.jobs[].subagentAction`）。
+fn envelope_harness_actions(envelope: &Json, meta_key: &str) -> Vec<Json> {
+    if let Some(items) = envelope["meta"]["harness_actions"].as_array() {
+        let out: Vec<Json> = items
+            .iter()
+            .filter(|item| item.is_object())
+            .cloned()
+            .collect();
+        if !out.is_empty() {
+            return out;
+        }
+    }
+    extract_harness_actions(&envelope["meta"][meta_key])
+}
+
+/// 渲染通用 CLI 模式下的 `[HARNESS ACTION]` 摘要行。
+fn format_harness_action_lines(receipt: &Json) -> Vec<String> {
+    let mut lines = Vec::new();
+    for action in receipt["harnessActions"].as_array().into_iter().flatten() {
+        let kind = action["action"].as_str().unwrap_or("subagent.spawn");
+        let req_id = action["reqId"].as_str().unwrap_or("?");
+        let stage = action["stage"].as_str().unwrap_or("?");
+        let rev = action["rev"].as_u64().unwrap_or(1);
+        let lane = action["lane"].as_u64().unwrap_or(0);
+        let wt = action["worktreePath"].as_str().unwrap_or("");
+        let artifact = action["artifactPath"].as_str().unwrap_or("");
+        let wt_display = if wt.is_empty() { "." } else { wt };
+        lines.push(format!(
+            "[HARNESS ACTION] {kind} {req_id} (rev {rev}, stage={stage}, lane={lane}, worktree={wt_display}, artifact={artifact})"
+        ));
+    }
+    lines
+}
+
+/// 进程内同步工具执行器（挂载到 `KernelFacade`，实现 `ygg.tool.call` 同步桥）。
+///
+/// 强制校验两层白名单：Layer 1（`pack.json` 的 `tools`）与 Layer 2（`data/config.json` 的 `allowedTools`）。
+/// 六个内置工具直接在当前进程内调用 `*_fields_with`，不派生子进程；外部工具走 `execute_tool`。
+struct InProcessToolRunner {
+    tools: ToolRegistry,
+    tool_access: ToolAccess,
+    mod_dir: PathBuf,
+    run_dir: PathBuf,
+    runs_root: PathBuf,
+    run_id: String,
+    harness: Option<String>,
+}
+
+impl InProcessToolRunner {
+    fn parse_kv_output(raw: &str) -> BTreeMap<String, String> {
+        let mut map = BTreeMap::new();
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return map;
+        }
+        let mut any_pair = false;
+        for segment in trimmed.split(';') {
+            if let Some((k, v)) = segment.split_once('=') {
+                let key = k.trim();
+                if !key.is_empty() {
+                    map.insert(key.to_owned(), v.trim().to_owned());
+                    any_pair = true;
+                }
+            }
+        }
+        if !any_pair {
+            map.insert("output".to_owned(), trimmed.to_owned());
+        }
+        map
+    }
+
+    fn fields_to_map(fields: Vec<(&'static str, String)>) -> BTreeMap<String, String> {
+        let mut map = BTreeMap::new();
+        for (k, v) in fields {
+            map.insert(k.to_owned(), wire_sanitize(&v));
+        }
+        map
+    }
+
+    fn op_failure_to_err(op: &str, fail: OpFailure) -> String {
+        match fail {
+            OpFailure::Line(line) => line,
+            OpFailure::Detail { slug, detail } => {
+                format!(
+                    "op={};error={};detail={}",
+                    wire_sanitize(op),
+                    wire_sanitize(slug),
+                    wire_sanitize(&detail)
+                )
+            }
+            OpFailure::Reported => format!("op={};error=reported", wire_sanitize(op)),
+        }
+    }
+
+    fn try_run_builtin(
+        &self,
+        expanded_args: &[String],
+    ) -> Option<Result<BTreeMap<String, String>, String>> {
+        if expanded_args.len() < 2 || expanded_args[0] != "--builtin-tool" {
+            return None;
+        }
+        let tool = BuiltinTool::parse(&expanded_args[1])?;
+        let mut values: Vec<(String, String)> = Vec::new();
+        let mut idx = 2;
+        while idx < expanded_args.len() {
+            let key = &expanded_args[idx];
+            if key.starts_with("--") && idx + 1 < expanded_args.len() {
+                values.push((key.clone(), expanded_args[idx + 1].clone()));
+                idx += 2;
+            } else {
+                idx += 1;
+            }
+        }
+        if tool == BuiltinTool::ArtifactProbe && !values.iter().any(|(k, _)| k == "--run-dir") {
+            values.push(("--run-dir".to_owned(), self.run_dir.display().to_string()));
+        }
+        let flags = OpFlags { values };
+        let op_name = tool.as_str();
+        let outcome = match tool {
+            BuiltinTool::WorktreeClaim => {
+                if flags.get("--lane").is_none()
+                    || flags.get("--req").is_none()
+                    || flags.get("--branch").is_none()
+                {
+                    return Some(Err("missing required worktree-claim flags".to_owned()));
+                }
+                claim_fields_with(&flags)
+            }
+            BuiltinTool::WorktreeRelease => {
+                if flags.get("--lane").is_none() {
+                    return Some(Err("missing required worktree-release --lane".to_owned()));
+                }
+                release_fields_with(&flags)
+            }
+            BuiltinTool::LaneProbe => {
+                if flags.get("--lane").is_none()
+                    || flags.get("--base").is_none()
+                    || flags.get("--branch").is_none()
+                {
+                    return Some(Err("missing required lane-probe flags".to_owned()));
+                }
+                lane_probe_fields_with(&flags)
+            }
+            BuiltinTool::ArtifactProbe => {
+                if flags.get("--path").is_none() {
+                    return Some(Err("missing required artifact-probe --path".to_owned()));
+                }
+                artifact_probe_fields_with(&flags)
+            }
+            BuiltinTool::VerifySuite => verify_suite_fields_with(&flags),
+            BuiltinTool::ArchiveSessions => {
+                if flags.get("--parent").is_none() || flags.get("--batch").is_none() {
+                    return Some(Err("missing required archive-sessions flags".to_owned()));
+                }
+                let inputs = ArchiveInputs {
+                    harness: self.harness.clone(),
+                    mod_dir: Some(self.mod_dir.clone()),
+                    sessions_dir: std::env::var("YGG_SESSIONS_DIR")
+                        .ok()
+                        .filter(|v| !v.trim().is_empty())
+                        .map(PathBuf::from),
+                    home: home_dir(),
+                    cwd: std::env::current_dir().ok(),
+                    env_harness: std::env::var("YGG_HARNESS")
+                        .ok()
+                        .filter(|v| !v.trim().is_empty()),
+                };
+                archive_sessions_fields_with(&flags, &inputs)
+            }
+        };
+        Some(
+            outcome
+                .map(Self::fields_to_map)
+                .map_err(|fail| Self::op_failure_to_err(op_name, fail)),
+        )
+    }
+}
+
+impl HostToolRunner for InProcessToolRunner {
+    fn call(
+        &mut self,
+        tool_id: &str,
+        args: &BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>, String> {
+        let Some(spec) = self.tools.get(tool_id).cloned() else {
+            return Err(format!("工具 `{tool_id}` 未在 pack.json 的 `tools` 段声明"));
+        };
+        if !self.tool_access.allows(&spec.id) {
+            return Err(format!("工具 `{}` 未被本局 `allowedTools` 放行", spec.id));
+        }
+        let mut env = load_env_table(Some(&self.mod_dir));
+        env.process
+            .push(("YGG_RUN_DIR".to_owned(), self.run_dir.display().to_string()));
+        env.process.push((
+            "YGG_RUNS_ROOT".to_owned(),
+            self.runs_root.display().to_string(),
+        ));
+        env.process
+            .push(("YGG_RUN_ID".to_owned(), self.run_id.clone()));
+        env.process
+            .push(("YGG_MOD_DIR".to_owned(), self.mod_dir.display().to_string()));
+        let arg_pairs: Vec<(String, String)> =
+            args.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        validate_expansion(&spec, &arg_pairs, &env)?;
+
+        if spec.kind == ToolKind::Cli {
+            let is_self = spec.program.as_deref() == Some(ygg_sandbox::host_contract::SELF_PROGRAM)
+                || spec.program.as_deref() == Some(SELF_ALIAS);
+            if is_self {
+                let mut expanded = Vec::with_capacity(spec.args.len());
+                for tpl in &spec.args {
+                    expanded.push(substitute(tpl, &arg_pairs, &env)?);
+                }
+                if let Some(res) = self.try_run_builtin(&expanded) {
+                    return res;
+                }
+            }
+        }
+
+        let request = ToolRequest {
+            id: format!("sync-{}", now_ms()),
+            tool: spec.id.clone(),
+            args: arg_pairs,
+        };
+        let call =
+            PendingCall::from_spec(&spec, &request, now_ms() + u128::from(spec.timeout_ms), 1);
+        let scratch = tool_results_dir(&self.run_dir);
+        let _ = fs::create_dir_all(&scratch);
+        let outcome = execute_tool(&call, &env, &scratch);
+        if outcome.status == "ok" {
+            Ok(Self::parse_kv_output(&outcome.output))
+        } else {
+            Err(outcome.output)
+        }
+    }
 }
 
 /// 子进程结局（`TimedOut` = 已被 kill 并回收）。
@@ -3050,19 +3291,18 @@ impl Session {
                     continue;
                 }
             }
-            if let Err(message) =
-                spawn_tool_worker(&self.mod_dir, &self.runs_root, &self.run_id, &call.call_id)
-            {
-                self.notices.push(format!(
-                    "工具 `{}` 的脱体 worker 无法启动：{message}（结果留在 {PENDING_TOOLS_FILE}，可 --tool-result 补票）",
-                    spec.id
-                ));
-                // 启动失败 = 立刻产出一条错误结果（不覆盖已存在的结果文件）。
-                if read_tool_result(&self.run_dir, &call.call_id).is_none() {
-                    let outcome = ToolOutcome::error("127", message, call.max_output_bytes);
-                    let external_id = new_external_id(&self.run_id, 0);
-                    let result = ToolResult::from_outcome(&call, &outcome, &external_id);
-                    let _ = write_tool_result(&self.run_dir, &result);
+            // 实时转换期不派生后台脱体 OS 子进程：inlineWaitMs > 0 时同进程同步执行并就地回投，
+            // inlineWaitMs == 0 时仅登记在飞模板（供 `--wait-tools` / `--tool-result` 使用）。
+            if spec.inline_wait_ms > 0 {
+                let scratch = tool_results_dir(&self.run_dir);
+                let _ = fs::create_dir_all(&scratch);
+                let outcome = execute_tool(&call, &env, &scratch);
+                let external_id = new_external_id(&self.run_id, 0);
+                let result = ToolResult::from_outcome(&call, &outcome, &external_id);
+                let _ = write_tool_result(&self.run_dir, &result);
+                if let Some(run) = self.settle_tool_call(&spec, &call) {
+                    runs.push(run);
+                    continue;
                 }
             }
             match self.settle_tool_call(&spec, &call) {
@@ -4754,6 +4994,12 @@ fn run_single(args: &Args) -> i32 {
     let drain = session.drain_inbox();
 
     let mut receipt = session.dispatch_event(&event, &payload);
+    if receipt["ok"] == Json::Bool(true) && receipt.get("harnessActions").is_none() {
+        let actions = envelope_harness_actions(&receipt, &session.contract.meta_key);
+        if !actions.is_empty() {
+            receipt["harnessActions"] = json!(actions);
+        }
+    }
     if drain.touched() {
         receipt["inbox"] = drain.to_json();
     }
@@ -4767,6 +5013,16 @@ fn run_single(args: &Args) -> i32 {
     if let Some(warnings) = receipt["warnings"].as_array() {
         for warning in warnings.iter().filter_map(|value| value.as_str()) {
             eprintln!("[警告] {warning}");
+        }
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let env_adapter = std::env::var("YGG_HARNESS")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| harness_config_adapter(Some(&session.mod_dir)));
+    if resolve_harness_adapter(args.harness.as_deref(), env_adapter.as_deref(), &cwd) == "generic" {
+        for line in format_harness_action_lines(&receipt) {
+            eprintln!("{line}");
         }
     }
     println!("{receipt}");
@@ -5246,7 +5502,11 @@ fn daemon_dispatch(session: &mut Session, req: &Json) -> Json {
     if drain.touched() {
         receipt["inbox"] = drain.to_json();
     }
-    receipt["summary"] = session.query_summary_json();
+    let summary_json = session.query_summary_json();
+    if let Some(actions) = summary_json.get("harnessActions") {
+        receipt["harnessActions"] = actions.clone();
+    }
+    receipt["summary"] = summary_json;
     receipt["op"] = json!("dispatch");
     receipt
 }
@@ -7160,6 +7420,9 @@ fn print_receipt(receipt: &Json, fresh: bool) {
             .flatten()
             .filter_map(|value| value.as_str())
         {
+            println!("  {line}");
+        }
+        for line in format_harness_action_lines(receipt) {
             println!("  {line}");
         }
     }

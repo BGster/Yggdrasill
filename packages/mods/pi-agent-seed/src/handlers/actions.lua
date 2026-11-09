@@ -13,6 +13,7 @@ local menus = require("src.menus")
 local props = require("src.proposals")
 local render_mod = require("src.render")
 local reqs = require("src.requirements")
+local tools = require("src.tools")
 local util = require("src.util")
 local wire = require("src.wire")
 
@@ -77,6 +78,9 @@ local function dispatch_one(index)
     ygg.kv.set(req_key(index, "status"), R_DEVELOPING)
     if claimed == 0 then
       LANES.bind(lane, index)
+    end
+    if lane > 0 then
+      tools.auto_claim_worktree(lane, index)
     end
   end
   return true, stage_name, lane

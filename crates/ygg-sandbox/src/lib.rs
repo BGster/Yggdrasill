@@ -28,3 +28,5 @@ pub mod playtest;
 pub mod resources;
 pub mod sandbox;
 pub mod stdlib;
+
+pub use host_api::HostToolRunner;

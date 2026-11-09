@@ -11,6 +11,7 @@ local gates = require("src.gates")
 local choice = require("src.handlers.choice")
 local render_mod = require("src.render")
 local reqs = require("src.requirements")
+local tools = require("src.tools")
 local util = require("src.util")
 local wire = require("src.wire")
 
@@ -187,6 +188,8 @@ function M.install(deps)
         registration.sessions.remaining,
         registration.sessions.destination
       )
+    elseif tostring(ygg.kv.get("settlement.sessions.remaining") or "") ~= "0" then
+      tools.auto_archive_sessions()
     end
     if registration.todo ~= nil then
       apply_todo(registration.todo.remaining, registration.todo.verified_by)
@@ -238,6 +241,9 @@ function M.install(deps)
       ygg.narrate(TEXTS.beats.req_gate_verify)
       render()
       return
+    end
+    if tostring(ygg.kv.get("settlement.sessions.remaining") or "") ~= "0" then
+      tools.auto_archive_sessions()
     end
     -- 三项结算任务未登记（或 remaining ≠ 0）就不允许收口。
     local settlement = settlement_problem()

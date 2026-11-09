@@ -47,6 +47,7 @@ function LANES.clear(k)
   ygg.kv.set(LANES.key(k, "base"), "")
   ygg.kv.set(LANES.key(k, "since"), 0)
   ygg.kv.set(LANES.key(k, "clean"), "")
+  ygg.kv.set(LANES.key(k, "path"), "")
 end
 
 function LANES.bind(k, index, branch, base, clean)
@@ -56,6 +57,7 @@ function LANES.bind(k, index, branch, base, clean)
   ygg.kv.set(LANES.key(k, "since"), LANES.tick())
   ygg.kv.set(LANES.key(k, "clean"), clean or "")
   ygg.kv.set(req_key(index, "lane"), k)
+  ygg.kv.set(req_key(index, "last_lane"), k)
 end
 
 function LANES.bound(index)
