@@ -323,7 +323,7 @@ export function nextStepInstructions(runId: string, summary: RunSummary): string
   let index = 2;
   if (!summary.available) {
     lines.push(
-      `${index}. 摘要不可用——先看当前菜单再决定：\`ygg_session({ action: "step", runId: "${run}", event: "map.show" })\``,
+      `${index}. 摘要不可用——先看当前菜单再决定：\`ygg_session({ action: "dispatch", runId: "${run}", event: "map.show" })\``,
     );
     index += 1;
   }
@@ -354,14 +354,14 @@ export function nextStepInstructions(runId: string, summary: RunSummary): string
     index += 1;
   } else if (summary.stage === "coordinate" && summary.jobs.length === 0 && summary.gates.length === 0) {
     lines.push(
-      `${index}. 停在 \`coordinate\` 且无在跑作业：\`ygg_session({ action: "step", runId: "${run}", event: "coordinate.submit" })\`` +
+      `${index}. 停在 \`coordinate\` 且无在跑作业：\`ygg_session({ action: "dispatch", runId: "${run}", event: "coordinate.submit" })\`` +
         `（未满足收口前置条件时会回一条拒绝，照它补齐）。`,
     );
     index += 1;
   }
   if (summary.conflicts.length > 0) {
     lines.push(
-      `${index}. 冲突未解，先 \`ygg_session({ action: "step", runId: "${run}", event: "requirement.resolve", payload: "${summary.conflicts[0]?.id ?? "r1"}|<处理说明>" })\`。`,
+      `${index}. 冲突未解，先 \`ygg_session({ action: "dispatch", runId: "${run}", event: "requirement.resolve", payload: "${summary.conflicts[0]?.id ?? "r1"}|<处理说明>" })\`。`,
     );
     index += 1;
   }

@@ -37,7 +37,17 @@ import {
 
 // ───────────────────────────── 注入面 ─────────────────────────────
 
-/** subagent 执行结果（`text` = 它的报告正文；`ok=false` 时带 `error`）。 */
+/**
+ * subagent 执行结果（`text` = 它的报告正文；`ok=false` 时带 `error`）。
+ *
+ * 跨 harness 适配器契约（P0-1）：`agentId` 是本接口与具体主机 subagent 工具之间的
+ * **唯一续跑凭据**。`index.ts` 里的 `executeSubagent` 用 Pi Coding Agent 的
+ * `Agent` 工具（`description` / `prompt` / `subagent_type` / `run_in_background` /
+ * `resume`）并从返回的 `details.agentId` / 正文 `Agent ID:` 里挖出它；换到其它 harness
+ * （Claude Code / Codex / Cursor / DSH）时，适配器必须**产出同样的 `agentId` 语义**：
+ * 挖得到就填、挖不到就**省略**（`extractAgentId` 返回 `undefined`），宁可每次新起也不
+ * 许猜一个 id 去 `resume`（猜错 = 静默把「续跑」变成「新起」并丢掉 `exec=` 账本）。
+ */
 export interface SubagentResult {
   text: string;
   ok?: boolean;
@@ -185,6 +195,21 @@ const DEFAULT_LANE_WAIT_MS = 20_000;
 const DEFAULT_ACTOR_ID = "pi-ygg-harness";
 const DEFAULT_VERIFICATION = ["cargo test --workspace"];
 const DEFAULT_MAX_SELF_HEAL_RETRIES = 1;
+/**
+ * 不可续跑的占位执行者 ID 黑名单（**单一来源**）。
+ *
+ * 这串常量与 Mod 侧 `.ygg/mods/pi-agent-seed/src/render.lua` 的
+ * `is_resumable_agent_id`（`unregistered` / `pi-ygg-harness` / `main` / `default`）
+ * 必须保持逐字一致：任何一侧漏加一个新占位符（如未来的 `pi-dsh-harness`）都会造成
+ * 「Mod 报 `resumeAgentId` 而扩展拒收、或反之」的静默跨阶段续跑失效。
+ * 一致性由 `harness.test.ts` 的 parity 用例钉住（单侧加占位符 → 测试红）。
+ */
+export const RESERVED_AGENT_IDS = new Set<string>([
+  "unregistered",
+  "pi-ygg-harness",
+  "main",
+  "default",
+]);
 /** 脏工作树的自愈提示：**逐字**指定要做的事，别让 subagent 自己猜。 */
 export const COMMIT_NUDGE_TEXT =
   "git.lane_probe reported uncommitted changes or 0 commits ahead of base. " +
@@ -366,9 +391,13 @@ export function extractAgentId(text: string, details?: unknown): string | undefi
 /**
  * 判断候选 agent ID 是否是可传给 `Agent(resume=...)` 的**真实** subagent 会话 ID。
  *
- * 同步或兜底路径写进账本的占位值（`"unregistered"` / `"pi-ygg-harness"` / `"main"` /
- * 调用方自定义的 `fallbackActorId`）并不是可续跑的 subagent 会话，若直接传给 `resume`
+ * 同步或兜底路径写进账本的占位值（见 {@link RESERVED_AGENT_IDS}：
+ * `"unregistered"` / `"pi-ygg-harness"` / `"main"` / `"default"`，以及调用方自定义的
+ * `fallbackActorId`）并不是可续跑的 subagent 会话，若直接传给 `resume`
  * 会导致 `Agent not found: "pi-ygg-harness"`。
+ *
+ * 注意：黑名单是「双份维护」的准硬编码（Mod `render.lua` 一份、这里一份），
+ * 单一来源的收敛见 {@link RESERVED_AGENT_IDS} 上的说明与 parity 测试。
  */
 export function isResumableAgentId(
   id: string | undefined,
@@ -378,12 +407,7 @@ export function isResumableAgentId(
     return false;
   }
   const trimmed = id.trim();
-  if (
-    trimmed === "" ||
-    trimmed === "unregistered" ||
-    trimmed === DEFAULT_ACTOR_ID ||
-    trimmed === "main"
-  ) {
+  if (trimmed === "" || RESERVED_AGENT_IDS.has(trimmed)) {
     return false;
   }
   if (fallbackActorId !== undefined && trimmed === fallbackActorId.trim()) {

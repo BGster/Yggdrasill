@@ -755,20 +755,23 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // ④ 会话面：kickoff / step / gate / vfs / settle_close。
+  // ④ 会话面：kickoff / dispatch（旧名 step）/ gate / vfs / settle_close。
   pi.registerTool({
     name: "ygg_session",
     label: "Ygg Session",
     description:
       "驱动 Yggdrasill 会话（`.ygg/mods/pi-agent-seed`）：开局、单步派发、过门禁、读写本局 VFS、收口结算。" +
-      "所有回执的 narrative 会整段返回（不截断）。",
+      "所有回执的 narrative 会整段返回（不截断）。" +
+      "`action` 是唯一路由参数：其中 `dispatch`（旧名 `step`，仍兼容）是**透传任意底层事件的逃生舱**，" +
+      "其余 8 个 action（kickoff / approve_gate / reject_gate / vfs_* / handoff_compact / settle_close）" +
+      "是封装好载荷位次的语义化入口——两者不是平级冗余，而是「专用入口 + 通用兜底」的两层结构。",
     promptSnippet:
-      "Drive one Yggdrasill run: kickoff (goal mode + intake + requirements), step (dispatch any event), " +
-      "approve_gate / reject_gate (plan_gate / accept_gate), vfs_write / vfs_read / vfs_list, " +
+      "Drive one Yggdrasill run: kickoff (goal mode + intake + requirements), dispatch (dispatch any event; " +
+      "legacy alias `step`), approve_gate / reject_gate (plan_gate / accept_gate), vfs_write / vfs_read / vfs_list, " +
       "handoff_compact (checkpoint handoff + compaction + auto-resume), settle_close.",
     promptGuidelines: [
       "Use ygg_session kickoff when the user asks to start a Yggdrasill run; pass runId, title, description, goalAuth and requirements.",
-      "Use ygg_session step to dispatch exactly one event and read the full receipt; never batch events in a shell loop.",
+      "Use ygg_session dispatch to dispatch exactly one event and read the full receipt; never batch events in a shell loop. `dispatch` is the escape hatch for events without a dedicated action (guide.show / map.show / config.set / requirement.resolve / tool.call).",
       "Use ygg_session approve_gate only after reading the receipt that raised the gate — approving is a human/coordinator decision.",
       "Use ygg_session handoff_compact when the context is getting long: it writes artifacts/handoff-latest.md, compacts, and resumes the run automatically.",
       "Use ygg_session settle_close when every requirement is done and the run is in review; it archives the evolution review and settles.",
@@ -776,6 +779,7 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({
       action: StringEnum([
         "kickoff",
+        "dispatch",
         "step",
         "approve_gate",
         "reject_gate",
@@ -803,10 +807,10 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
           { description: "kickoff：要逐条 requirement.add 的需求" },
         ),
       ),
-      event: Type.Optional(Type.String({ description: "step：要派发的事件名（如 requirement.dispatch）" })),
+      event: Type.Optional(Type.String({ description: "dispatch：要派发的事件名（如 requirement.dispatch）" })),
       payload: Type.Optional(
         Type.Union([Type.String(), Type.Number()], {
-          description: "step：事件载荷（字符串或 JSON 数字；菜单选择必须是数字）",
+          description: "dispatch：事件载荷（字符串或 JSON 数字；菜单选择必须是数字）",
         }),
       ),
       reqId: Type.Optional(Type.String({ description: "approve_gate / reject_gate：需求 id（rN）" })),
@@ -836,7 +840,7 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
         return { content: [{ type: "text", text }], details: { receipt, summary: lastSummary } };
       }
 
-      if (params.action === "step") {
+      if (params.action === "dispatch" || params.action === "step") {
         const runId = requireRunId(params.runId);
         const client = await clientFor(ctx, runId);
         const event = requireString(params.event, "event");

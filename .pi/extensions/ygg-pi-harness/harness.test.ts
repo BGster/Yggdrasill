@@ -61,6 +61,7 @@ import {
   pickFreeLane,
   readLaneProbeFromGit,
   requirementNumber,
+  RESERVED_AGENT_IDS,
   resolveResumeId,
   resumeReason,
   sanitizeSegment,
@@ -1222,6 +1223,22 @@ describe("extractAgentId", () => {
   });
 });
 
+describe("RESERVED_AGENT_IDS：占位黑名单单一来源（parity）", () => {
+  it("扩展侧黑名单与 Mod 侧 render.lua is_resumable_agent_id 逐字一致", () => {
+    // 单一来源（P1-1）：这串常量必须与 `.ygg/mods/pi-agent-seed/src/render.lua`
+    // `is_resumable_agent_id` 里的字面量（unregistered / pi-ygg-harness / main / default）
+    // 保持一致。单侧加占位符（如未来的 `pi-dsh-harness`）→ 本用例红。
+    const modSideReserved = ["unregistered", "pi-ygg-harness", "main", "default"];
+    assert.deepEqual([...RESERVED_AGENT_IDS].sort(), [...modSideReserved].sort());
+    // 每个成员都必须被 isResumableAgentId 拒收（集合与实际守卫行为对齐，不空转）。
+    for (const id of modSideReserved) {
+      assert.equal(isResumableAgentId(id), false, `占位 ID ${id} 必须不可续跑`);
+    }
+    // mutation probe：一个真实 ID 不能被误拒。
+    assert.equal(isResumableAgentId("agent-real-7"), true);
+  });
+});
+
 describe("resolveResumeId（续谁）", () => {  it("job.executor 非空 → 同阶段重派续原执行者", () => {
     const job = jobRow({ id: "r3", stage: "plan", rev: 2, executor: "agent-42" });
     assert.equal(resolveResumeId(job), "agent-42");
@@ -1745,13 +1762,14 @@ describe("thin execution shell over core subagentAction & inline tools", () => {
     );
   });
 
-  it("isResumableAgentId 与 resolveResumeId 拒绝占位执行者（pi-ygg-harness / unregistered / main / 自定义 actorId），绝不把占位名传给 executeSubagent", async () => {
+  it("isResumableAgentId 与 resolveResumeId 拒绝占位执行者（pi-ygg-harness / unregistered / main / default / 自定义 actorId），绝不把占位名传给 executeSubagent", async () => {
     assert.equal(isResumableAgentId(undefined), false);
     assert.equal(isResumableAgentId(""), false);
     assert.equal(isResumableAgentId("   "), false);
     assert.equal(isResumableAgentId("unregistered"), false);
     assert.equal(isResumableAgentId("pi-ygg-harness"), false);
     assert.equal(isResumableAgentId("main"), false);
+    assert.equal(isResumableAgentId("default"), false);
     assert.equal(isResumableAgentId("custom-actor", "custom-actor"), false);
     assert.equal(isResumableAgentId("agent-real-42", "custom-actor"), true);
 
