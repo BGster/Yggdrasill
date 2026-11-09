@@ -424,6 +424,10 @@ async function settleAndClose(
   // 会话归档（本轮 Pi 会话 → 本局目录）。args 同时给父/批次与结算三元组：
   // 宿主的多余键不会被反应器读取，而两种命名（r1 daemon 的 parent/batch 与
   // 当前 Mod 反应器的 moved/remaining/dest）都覆盖到。
+  // 若 Core 的 `settlement.evolution` 已经通过同步 `ygg.tool.call` 内联结算
+  // `harness.archive_sessions`，这里即使前置 `tool.call` 未落库或已跑过，
+  // 下面的 `sessions=` 段也会幂等兜底，确保 `review.note` 不因缺会话登记被拦。
+  const archiveDest = `.ygg/runs/${input.runId}/sessions`;
   const archiveArgs = [
     `parent=${input.sessionId}`,
     `batch=${input.runId}`,
@@ -433,12 +437,16 @@ async function settleAndClose(
     `harness.archive_sessions|${archiveArgs}`,
   );
   entries.push({ label: "tool.call harness.archive_sessions", receipt: archivedSessions });
+  const archiveSettledByTool = archivedSessions.narrative.some((line) =>
+    line.includes("[SESSIONS SETTLED]") || line.includes("[TOOL SETTLED] harness.archive_sessions"),
+  );
 
   const evolutionPayload = [
     artifact,
     input.evolutionSummary.trim() === "" ? "(no candidates this round)" : input.evolutionSummary,
     `c=${input.candidates.trim() === "" ? "0/0" : input.candidates.trim()}`,
     ...(input.classes.trim() === "" ? [] : [`cls=${input.classes.trim()}`]),
+    ...(archiveSettledByTool ? [] : [`sessions=0/0/${archiveDest}`]),
     "todo=0/verified empty via ygg_session settle_close",
   ].join("|");
   const evolution = await client.dispatch("settlement.evolution", evolutionPayload);
@@ -624,8 +632,10 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
           `jobs: ${summary.jobs.length} · gates: ${summary.gates.length} · pending proposals: ${summary.pendingProposals}`,
         ];
         for (const job of summary.jobs) {
+          const wt = job.worktreePath !== undefined ? ` wt=${job.worktreePath}` : "";
+          const act = job.subagentAction !== undefined ? ` action=${job.subagentAction.action}` : "";
           lines.push(
-            `  - ${job.id} ${job.stage} rev${job.rev} lane=${job.lane} ${job.branch === "" ? "-" : job.branch}`,
+            `  - ${job.id} ${job.stage} rev${job.rev} lane=${job.lane} ${job.branch === "" ? "-" : job.branch}${wt}${act}`,
           );
         }
         for (const gate of summary.gates) {

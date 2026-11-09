@@ -24,6 +24,27 @@ import * as readline from "node:readline";
 
 // ───────────────────────────── 摘要（Mod 自报的结构化形状） ─────────────────────────────
 
+/** Core `subagentAction` descriptor emitted by the Mod for an active job. */
+export interface YggSubagentAction {
+  action: "subagent.spawn" | "subagent.resume";
+  reqId: string;
+  rev: number;
+  stage: string;
+  lane: number;
+  resumeAgentId?: string;
+  worktreePath?: string;
+  artifactPath?: string;
+  brief?: string;
+  deltaPrompt?: string;
+  fullFallbackBrief?: string;
+  submitCommand?: string;
+}
+
+/** Generic harness action emitted by Core (`subagent.spawn` / `subagent.resume` or extensible). */
+export type YggHarnessAction =
+  | YggSubagentAction
+  | ({ action: string } & Record<string, unknown>);
+
 /** 摘要里的作业行（`summary.jobs`）。旧 Mod 不给这个键 → 空数组。 */
 export interface SummaryJob {
   id: string;
@@ -43,7 +64,13 @@ export interface SummaryJob {
   executor?: string;
   /** `plan` 阶段的执行者 id（跨阶段续跑：plan → development 用同一个 subagent）。 */
   planExecutor?: string;
+  /** Core 已同步 claim 并绑定好的 worktree 绝对路径（非空时编排层跳过二次 claim）。 */
+  worktreePath?: string;
+  /** Core 为该作业预先生成的 subagent 派发指令（含 brief / deltaPrompt / resumeAgentId）。 */
+  subagentAction?: YggSubagentAction;
 }
+
+export type YggActiveJob = SummaryJob;
 
 /** 摘要里待审的门（`summary.gates`）。 */
 export interface SummaryGate {
@@ -72,6 +99,8 @@ export interface RunSummary {
   conflicts: SummaryConflict[];
   jobs: SummaryJob[];
   gates: SummaryGate[];
+  /** Core 产出的结构化宿主动作列表（缺省时由 `jobs[].subagentAction` 合成）。 */
+  harnessActions?: YggHarnessAction[];
   /** 降级原因（`available=false` 时说明为什么拿不到摘要）。 */
   degraded?: string;
   /** 原始摘要对象（诊断用；不做二次解释）。 */
@@ -87,10 +116,14 @@ export interface StepReceipt {
   pendingChoice: unknown;
   tools: unknown[];
   summary?: RunSummary;
+  /** 本步产出的结构化宿主动作列表（取自顶层 `harnessActions` 或 `summary.harnessActions`）。 */
+  harnessActions?: YggHarnessAction[];
   raw: Record<string, unknown>;
   /** 传输层/宿主层错误（`ok=false` 时给一句话）。 */
   error?: string;
 }
+
+export type YggReceipt = StepReceipt;
 
 export interface DaemonOptions {
   /** 会话工作目录（`.ygg/bin/ygg-agent` 与 `.env` 相对它解析）。 */
@@ -221,6 +254,81 @@ function asBool(value: unknown): boolean {
   return value === true;
 }
 
+function parseSubagentAction(
+  value: unknown,
+  fallback?: { id?: string; rev?: number; stage?: string; lane?: number },
+): YggSubagentAction | undefined {
+  const row = asRecord(value);
+  if (row === null) {
+    return undefined;
+  }
+  const action = asString(row.action);
+  if (action !== "subagent.spawn" && action !== "subagent.resume") {
+    return undefined;
+  }
+  const reqId = asString(row.reqId, asString(row.id, fallback?.id ?? ""));
+  const out: YggSubagentAction = {
+    action,
+    reqId,
+    rev: asNumber(row.rev, fallback?.rev ?? 1),
+    stage: asString(row.stage, fallback?.stage ?? ""),
+    lane: asNumber(row.lane, fallback?.lane ?? 0),
+  };
+  const resumeAgentId = asString(row.resumeAgentId).trim();
+  if (resumeAgentId !== "") {
+    out.resumeAgentId = resumeAgentId;
+  }
+  const worktreePath = asString(row.worktreePath).trim();
+  if (worktreePath !== "") {
+    out.worktreePath = worktreePath;
+  }
+  const artifactPath = asString(row.artifactPath).trim();
+  if (artifactPath !== "") {
+    out.artifactPath = artifactPath;
+  }
+  const brief = asString(row.brief);
+  if (brief !== "") {
+    out.brief = brief;
+  }
+  const deltaPrompt = asString(row.deltaPrompt);
+  if (deltaPrompt !== "") {
+    out.deltaPrompt = deltaPrompt;
+  }
+  const fullFallbackBrief = asString(row.fullFallbackBrief);
+  if (fullFallbackBrief !== "") {
+    out.fullFallbackBrief = fullFallbackBrief;
+  }
+  const submitCommand = asString(row.submitCommand).trim();
+  if (submitCommand !== "") {
+    out.submitCommand = submitCommand;
+  }
+  return out;
+}
+
+function parseHarnessActions(value: unknown, jobs: SummaryJob[] = []): YggHarnessAction[] {
+  if (Array.isArray(value)) {
+    const out: YggHarnessAction[] = [];
+    for (const item of value) {
+      const subagent = parseSubagentAction(item);
+      if (subagent !== undefined) {
+        out.push(subagent);
+        continue;
+      }
+      const row = asRecord(item);
+      if (row !== null) {
+        const action = asString(row.action).trim();
+        if (action !== "") {
+          out.push({ ...row, action });
+        }
+      }
+    }
+    return out;
+  }
+  return jobs
+    .map((job) => job.subagentAction)
+    .filter((action): action is YggSubagentAction => action !== undefined);
+}
+
 function parseJobs(value: unknown): SummaryJob[] {
   if (!Array.isArray(value)) {
     return [];
@@ -235,13 +343,18 @@ function parseJobs(value: unknown): SummaryJob[] {
     if (id === "") {
       continue;
     }
-    out.push({
+    const rev = asNumber(row.rev, 1);
+    const stage = asString(row.stage);
+    const lane = asNumber(row.lane, 0);
+    const subagentAction = parseSubagentAction(row.subagentAction, { id, rev, stage, lane });
+    const worktreePath = asString(row.worktreePath).trim() || subagentAction?.worktreePath || "";
+    const job: SummaryJob = {
       id,
-      rev: asNumber(row.rev, 1),
-      stage: asString(row.stage),
+      rev,
+      stage,
       status: asString(row.status),
       phase: asString(row.phase, asString(row.status)),
-      lane: asNumber(row.lane, 0),
+      lane,
       branch: asString(row.branch),
       base: asString(row.base),
       title: asString(row.title, id),
@@ -250,7 +363,14 @@ function parseJobs(value: unknown): SummaryJob[] {
       // 编排层只判空串，不需要在两处分别处理两种「没有」。
       executor: asString(row.executor),
       planExecutor: asString(row.planExecutor),
-    });
+    };
+    if (worktreePath !== "") {
+      job.worktreePath = worktreePath;
+    }
+    if (subagentAction !== undefined) {
+      job.subagentAction = subagentAction;
+    }
+    out.push(job);
   }
   return out;
 }
@@ -320,6 +440,7 @@ export function parseSummary(value: unknown, metaKey = "summary"): RunSummary {
   }
   const jobs = parseJobs(row.jobs);
   const gates = parseGates(row.gates);
+  const harnessActions = parseHarnessActions(row.harnessActions, jobs);
   const hasStage = typeof row.stage === "string" && row.stage !== "";
   return {
     available: true,
@@ -333,6 +454,7 @@ export function parseSummary(value: unknown, metaKey = "summary"): RunSummary {
     conflicts: parseConflicts(row.conflicts),
     jobs,
     gates,
+    harnessActions,
     raw: row,
     ...(hasStage
       ? {}
@@ -392,8 +514,18 @@ export function toStepReceipt(
   if (summary.available) {
     receipt.summary = summary;
   }
+  const meta = asRecord(row.meta);
+  const rawActions = row.harnessActions ?? meta?.harnessActions;
+  if (Array.isArray(rawActions)) {
+    receipt.harnessActions = parseHarnessActions(rawActions, summary.available ? summary.jobs : []);
+  } else if (summary.available && summary.harnessActions !== undefined) {
+    receipt.harnessActions = summary.harnessActions;
+  }
   return receipt;
 }
+
+/** Alias for {@link toStepReceipt} — normalizes raw daemon / CLI receipt JSON into {@link StepReceipt}. */
+export const normalizeReceipt = toStepReceipt;
 
 /** 收据 → 给人看的文本（回执整段呈现：每一行 narrative 都保留）。 */
 export function formatReceipt(label: string, receipt: StepReceipt): string {

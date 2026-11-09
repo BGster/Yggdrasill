@@ -113,6 +113,18 @@ export interface OrchestrateOptions {
   checkContextPressure?: () => ContextPressureView | null | undefined;
   /** plan → development 跨阶段续跑（默认关：并行泳道里让原方案执行者接着干是显式选择）。 */
   resumePlanAgent?: boolean;
+  /**
+   * 优先消费 Core 产出的 `job.subagentAction.brief` / `deltaPrompt`（默认 `true`）。
+   * 显式传 `false` 或调用方传了自定义 `verification` / `verificationCommands` 时退回本地拼装或按需补齐门禁尾注。
+   */
+  preferCoreBrief?: boolean;
+  /** 子代理 brief 里的验证门禁（`verification` 的同义别名，兼容调用方直传）。 */
+  verificationCommands?: string[];
+  /**
+   * 跳过 `proposal.submit` 前显式的 `tool.call git.lane_probe` 往返（默认 `false`）。
+   * 设为 `true` 时交由 Core 在 `proposal.submit` 内同步执行 `ygg.tool.call("git.lane_probe", ...)`。
+   */
+  useInlineLaneProbe?: boolean;
   /** 每个作业的自愈重试上限（默认 1：流断开一次、脏工作树一次，再多就是真 bug）。 */
   maxSelfHealRetries?: number;
   /**
@@ -234,8 +246,12 @@ export function worktreePathFor(worktreeRoot: string, repoDir: string, lane: num
   return path.join(worktreeRoot, `${label}-lane-${lane}`);
 }
 
-/** 制品路径：`artifacts/<rN>-<stage>.md`（形状固定，便于人肉核对）。 */
+/** 制品路径：优先取 `job.subagentAction.artifactPath`，缺省退回 `artifacts/<rN>-<stage>.md`。 */
 export function artifactPathFor(job: SummaryJob, prefix = DEFAULT_ARTIFACT_PREFIX): string {
+  const corePath = (job.subagentAction?.artifactPath ?? "").trim();
+  if (corePath !== "") {
+    return corePath;
+  }
   return `${prefix}/${job.id}-${job.stage}.md`;
 }
 
@@ -364,6 +380,10 @@ export function resolveResumeId(
       return planExecutor;
     }
   }
+  const coreResume = (job.subagentAction?.resumeAgentId ?? "").trim();
+  if (coreResume !== "") {
+    return coreResume;
+  }
   return "";
 }
 
@@ -388,6 +408,9 @@ export function resumeReason(job: SummaryJob, resumePlanAgent: boolean): string 
   }
   if (resumePlanAgent && job.stage === "development" && (job.planExecutor ?? "").trim() !== "") {
     return "plan → development 跨阶段续跑";
+  }
+  if ((job.subagentAction?.resumeAgentId ?? "").trim() !== "") {
+    return `Core subagentAction 指定续跑（rev ${job.rev}）`;
   }
   return "新起一个 subagent";
 }
@@ -608,6 +631,87 @@ export function buildSubagentBrief(
   return lines.join("\n");
 }
 
+/**
+ * 续跑既有 subagent 时的增量提示（纯函数，可单测）：只交代新阶段/新修订的增量要求与门禁。
+ */
+export function buildResumeDeltaPrompt(
+  job: SummaryJob,
+  worktreePath: string | null,
+  artifactPath: string,
+  cwd: string,
+  options: {
+    verification?: string[];
+    lane?: number;
+    branch?: string;
+    base?: string;
+  } = {},
+): string {
+  const stage = job.stage === "" ? "plan" : job.stage;
+  const verification =
+    options.verification !== undefined && options.verification.length > 0
+      ? options.verification
+      : DEFAULT_VERIFICATION;
+  const workspace = worktreePath ?? cwd;
+  const lines: string[] = [
+    `# 需求 ${job.id} · ${stage} 阶段续跑增量指令（rev ${job.rev > 0 ? job.rev : 1}）`,
+    "",
+    `- 作用域根：\`${workspace}\``,
+    ...(options.lane !== undefined && options.lane > 0 ? [`- 泳道：lane-${options.lane}`] : []),
+    ...(options.branch !== undefined && options.branch !== "" ? [`- 分支：\`${options.branch}\``] : []),
+    ...(options.base !== undefined && options.base !== "" ? [`- 基线 commit：\`${options.base}\``] : []),
+    `- 标题：${job.title === "" ? job.id : job.title}`,
+    `- 描述：${job.description.trim() === "" ? "(同上)" : job.description}`,
+    `- 制品路径：\`${artifactPath}\``,
+    "",
+    ...buildBriefFooter(artifactPath, verification),
+  ];
+  return lines.join("\n");
+}
+
+function buildBriefFooter(artifactPath: string, verification: readonly string[]): string[] {
+  const lines: string[] = ["## 验证门禁（必须真跑，贴输出摘要）"];
+  for (const command of verification) {
+    lines.push(`- \`${command}\``);
+  }
+  lines.push("- 门禁失败时不要声称完成：报告里写清失败命令、首行错误、你已排除的方向。");
+  lines.push("");
+  lines.push("## 返回格式（协调者按这个形状归档）");
+  lines.push("1. **做了什么**：文件路径 + 符号级改动清单（`path:line` 形式优先）。");
+  lines.push("2. **验证结果**：每条门禁命令 + 结论（passed / failed + 摘要）；没跑就说没跑。");
+  lines.push("3. **风险与遗留**：未覆盖的场景、你知道但没修的问题。");
+  lines.push(`4. **制品**：正文或 \`${artifactPath}\` 的内容（协调者会把它写进本局 VFS）。`);
+  lines.push("");
+  lines.push("报告里禁止使用竖线 `|` 作为分隔符（它会被当成提案载荷的分段符）。");
+  return lines;
+}
+
+/**
+ * 若 Core 产出的 `brief` / `deltaPrompt` 尚未包含验证门禁或返回格式尾注，按需补齐，
+ * 保证 [`parseSubagentOutput`] 与制品归档在薄壳模式下同样稳健。
+ */
+export function ensureBriefVerificationAndFooter(
+  corePrompt: string,
+  artifactPath: string,
+  verification: readonly string[],
+): string {
+  const trimmed = corePrompt.trim();
+  const missingCommands = verification.filter((cmd) => cmd.trim() !== "" && !trimmed.includes(cmd));
+  const hasFooter = trimmed.includes(artifactPath) && (trimmed.includes("返回格式") || trimmed.includes("Return Format"));
+  if (missingCommands.length === 0 && hasFooter) {
+    return corePrompt;
+  }
+  return [trimmed, "", ...buildBriefFooter(artifactPath, verification)].join("\n");
+}
+
+/** 解析 subagent 输出为提案一行摘要与完整报告正文。 */
+export function parseSubagentOutput(text: string): { summary: string; report: string } {
+  const report = String(text ?? "").trim();
+  return {
+    summary: firstLine(report),
+    report,
+  };
+}
+
 // ───────────────────────────── 编排主流程 ─────────────────────────────
 
 interface PreparedJob {
@@ -633,6 +737,29 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function initialLaneFor(job: SummaryJob): number {
+  if (job.lane > 0) {
+    return job.lane;
+  }
+  const actionLane = job.subagentAction?.lane ?? 0;
+  return actionLane > 0 ? actionLane : 0;
+}
+
+function selectCoreSubagentPrompt(
+  job: SummaryJob,
+  isResume: boolean,
+  preferCoreBrief: boolean,
+): string {
+  if (!preferCoreBrief || job.subagentAction === undefined) {
+    return "";
+  }
+  const action = job.subagentAction;
+  if (isResume) {
+    return (action.deltaPrompt ?? action.brief ?? action.fullFallbackBrief ?? "").trim();
+  }
+  return (action.brief ?? action.fullFallbackBrief ?? action.deltaPrompt ?? "").trim();
 }
 
 /** 读 `git rev-parse HEAD`（只有同步 IO；测试注入 `resolveBase` 即可绕过）。 */
@@ -680,11 +807,17 @@ export async function orchestrateActiveJobs(
     artifactPrefix = DEFAULT_ARTIFACT_PREFIX,
     lanePollMs = DEFAULT_LANE_POLL_MS,
     laneWaitMs = DEFAULT_LANE_WAIT_MS,
-    verification = DEFAULT_VERIFICATION,
     runId = "",
     maxSelfHealRetries = DEFAULT_MAX_SELF_HEAL_RETRIES,
     logger,
   } = opts;
+  const customVerification = opts.verificationCommands ?? opts.verification;
+  const verification =
+    customVerification !== undefined && customVerification.length > 0
+      ? customVerification
+      : DEFAULT_VERIFICATION;
+  const preferCoreBrief = opts.preferCoreBrief !== false;
+  const useInlineLaneProbe = opts.useInlineLaneProbe === true;
 
   const pressure = opts.checkContextPressure?.() ?? null;
   const readProbe = opts.readLaneProbe ?? defaultReadLaneProbe;
@@ -757,40 +890,67 @@ export async function orchestrateActiveJobs(
   for (const job of active) {
     const expectedGate = job.stage === "development" ? "accept" : "plan";
     const receipts: { label: string; receipt: StepReceipt }[] = [];
-    let lane = job.lane > 0 ? job.lane : 0;
+    let lane = initialLaneFor(job);
     let branch = job.branch;
     let base = job.base;
     let claimed = false;
+    let worktreePath: string | null = null;
 
-    const needsClaim = job.stage === "development" && (lane === 0 || branch === "");
-    if (needsClaim) {
-      const free = pickFreeLane(ledger, maxLanes, job.id);
-      lane = free ?? 1;
-      branch = branchNameFor(job);
-      base = base !== "" ? base : String(await resolveBase(job));
-      const args = buildWorktreeClaimArgs({ lane, req: job.id, branch, base });
-      logWith(logger, `[lane] ${job.id} → lane-${lane} (${branch})`);
-      const claim = await daemon.dispatch("tool.call", `git.worktree_claim|${args}`);
-      receipts.push({ label: `tool.call git.worktree_claim (${job.id})`, receipt: claim });
-      // 宿主的工具结果走 inbox：再查一次摘要（顺带 drain），确认泳道已绑。
-      claimed = await waitForLaneBound(daemon, job.id, lane, { pollMs: lanePollMs, waitMs: laneWaitMs });
-      if (!claimed) {
-        logWith(logger, `[lane] ${job.id} 泳道绑定未在超时内确认（继续推进，回执里有现场）`);
+    if (job.stage === "development") {
+      const preclaimedWorktree = (job.worktreePath ?? job.subagentAction?.worktreePath ?? "").trim();
+      if (preclaimedWorktree !== "") {
+        // Core 在 requirement.dispatch / gate.approve 期间已同步调用 git.worktree_claim 绑好 worktree：零往返直接复用。
+        worktreePath = preclaimedWorktree;
+        claimed = true;
+        if (lane === 0) {
+          const match = /-lane-(\d+)$/.exec(preclaimedWorktree);
+          const fallbackLane = pickFreeLane(ledger, maxLanes, job.id) ?? 1;
+          lane = match !== null ? Number(match[1]) : fallbackLane;
+        }
+        if (branch === "") {
+          branch = branchNameFor(job);
+        }
+        base = base !== "" ? base : String(await resolveBase(job));
+        ledger.push({ ...job, lane, branch, base, worktreePath });
+      } else if (lane === 0 || branch === "") {
+        const free = pickFreeLane(ledger, maxLanes, job.id);
+        lane = free ?? 1;
+        branch = branchNameFor(job);
+        base = base !== "" ? base : String(await resolveBase(job));
+        const args = buildWorktreeClaimArgs({ lane, req: job.id, branch, base });
+        logWith(logger, `[lane] ${job.id} → lane-${lane} (${branch})`);
+        const claim = await daemon.dispatch("tool.call", `git.worktree_claim|${args}`);
+        receipts.push({ label: `tool.call git.worktree_claim (${job.id})`, receipt: claim });
+        // 宿主的工具结果走 inbox：再查一次摘要（顺带 drain），确认泳道已绑。
+        claimed = await waitForLaneBound(daemon, job.id, lane, { pollMs: lanePollMs, waitMs: laneWaitMs });
+        if (!claimed) {
+          logWith(logger, `[lane] ${job.id} 泳道绑定未在超时内确认（继续推进，回执里有现场）`);
+        }
+        worktreePath = lane > 0 ? worktreePathFor(worktreeRoot, repoDir, lane) : null;
+        ledger.push({ ...job, lane, branch, base });
+      } else {
+        base = base !== "" ? base : String(await resolveBase(job));
+        worktreePath = lane > 0 ? worktreePathFor(worktreeRoot, repoDir, lane) : null;
       }
-      ledger.push({ ...job, lane, branch, base });
     } else if (lane > 0) {
       base = base !== "" ? base : String(await resolveBase(job));
+      worktreePath = worktreePathFor(worktreeRoot, repoDir, lane);
     }
 
-    const worktreePath = lane > 0 ? worktreePathFor(worktreeRoot, repoDir, lane) : null;
     const artifactPath = artifactPathFor(job, artifactPrefix);
-    const brief = buildSubagentBrief(job, worktreePath, artifactPath, cwd, {
-      verification,
-      lane,
-      branch,
-      base,
-      actorId,
-    });
+    const resumeId = resolveResumeId(job, { resumePlanAgent });
+    const isResume = resumeId !== "" || job.subagentAction?.action === "subagent.resume";
+    const corePrompt = selectCoreSubagentPrompt(job, isResume, preferCoreBrief);
+    const brief =
+      corePrompt !== ""
+        ? ensureBriefVerificationAndFooter(corePrompt, artifactPath, verification)
+        : buildSubagentBrief(job, worktreePath, artifactPath, cwd, {
+            verification,
+            lane,
+            branch,
+            base,
+            actorId,
+          });
     prepared.push({
       job,
       lane,
@@ -895,7 +1055,7 @@ export async function orchestrateActiveJobs(
       receipt: archiveReceipt,
     });
 
-    if (item.job.stage === "development" && item.lane > 0) {
+    if (item.job.stage === "development" && item.lane > 0 && !useInlineLaneProbe) {
       const probeArgs = buildLaneProbeArgs({ lane: item.lane, base: item.base, branch: item.branch });
       let probeReceipt = await daemon.dispatch("tool.call", `git.lane_probe|${probeArgs}`);
       receipts.push({
@@ -974,10 +1134,11 @@ export async function orchestrateActiveJobs(
 
     // 执行者账本写**真实** subagent id（不是扩展自己的名字）：下一次 re-dispatch
     // 的 `resume` 就靠它；Mod 的 `settings.executor.<rN>.<stage>` 也靠它可核对。
+    const parsedOutput = parseSubagentOutput(report);
     const submitActor = actorForLedger(output.agentId, actorId);
     const submitPayload = buildProposalSubmitPayload({
       job: item.job,
-      summary: `auto ${item.job.stage}: ${firstLine(report)}`,
+      summary: `auto ${item.job.stage}: ${parsedOutput.summary}`,
       artifactPath: item.artifactPath,
       actorId: submitActor,
     });
