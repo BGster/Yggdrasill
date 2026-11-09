@@ -66,6 +66,10 @@ export interface SummaryJob {
   planExecutor?: string;
   /** Core 已同步 claim 并绑定好的 worktree 绝对路径（非空时编排层跳过二次 claim）。 */
   worktreePath?: string;
+  /** Core 自报的实时进度字段（worktree / subagent / probe）。 */
+  worktreeStatus?: string;
+  subagentStatus?: string;
+  probeStatus?: string;
   /** Core 为该作业预先生成的 subagent 派发指令（含 brief / deltaPrompt / resumeAgentId）。 */
   subagentAction?: YggSubagentAction;
 }
@@ -135,6 +139,8 @@ export interface DaemonOptions {
   runsRoot?: string;
   /** 可执行文件（默认 `<cwd>/.ygg/bin/ygg-agent`）。 */
   agentBin?: string;
+  /** 可执行文件路径别名（同 `agentBin`，供二进制热更新指纹追踪读取）。 */
+  binPath?: string;
   /** 覆盖 spawn 的可执行文件（测试用 `process.execPath`）。 */
   spawnBin?: string;
   /** 覆盖 spawn 的前置参数（测试用 `["-e", script]`）。 */
@@ -348,6 +354,9 @@ function parseJobs(value: unknown): SummaryJob[] {
     const lane = asNumber(row.lane, 0);
     const subagentAction = parseSubagentAction(row.subagentAction, { id, rev, stage, lane });
     const worktreePath = asString(row.worktreePath).trim() || subagentAction?.worktreePath || "";
+    const worktreeStatus = asString(row.worktreeStatus).trim();
+    const subagentStatus = asString(row.subagentStatus).trim();
+    const probeStatus = asString(row.probeStatus).trim();
     const job: SummaryJob = {
       id,
       rev,
@@ -366,6 +375,15 @@ function parseJobs(value: unknown): SummaryJob[] {
     };
     if (worktreePath !== "") {
       job.worktreePath = worktreePath;
+    }
+    if (worktreeStatus !== "") {
+      job.worktreeStatus = worktreeStatus;
+    }
+    if (subagentStatus !== "") {
+      job.subagentStatus = subagentStatus;
+    }
+    if (probeStatus !== "") {
+      job.probeStatus = probeStatus;
     }
     if (subagentAction !== undefined) {
       job.subagentAction = subagentAction;
@@ -580,6 +598,8 @@ export class YggDaemon {
   private started = false;
   private closed = false;
   private modeValue: DaemonMode = "daemon";
+  /** 已启动 daemon 二进制的磁盘指纹（`dev:ino:mtimeMs:size`）；文件不存在时为 `null`。 */
+  private spawnedBinSig: string | null = null;
   /** daemon 的**非回执行**（日志 / 崩溃尾音），诊断用。 */
   readonly noise: string[] = [];
   /** 最近一次降级原因（`mode === "cli"` 时说明为何不走 daemon）。 */
@@ -587,15 +607,21 @@ export class YggDaemon {
 
   constructor(options: DaemonOptions) {
     const cwd = options.cwd;
+    const binPath = options.binPath ?? options.agentBin ?? path.join(cwd, ".ygg", "bin", "ygg-agent");
     this.opts = {
       ...options,
       cwd,
       modDir: options.modDir ?? path.join(cwd, DEFAULT_MOD_DIR),
       runsRoot: options.runsRoot ?? path.join(cwd, DEFAULT_RUNS_ROOT),
-      agentBin: options.agentBin ?? path.join(cwd, ".ygg", "bin", "ygg-agent"),
+      agentBin: binPath,
+      binPath,
       requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
       cliTimeoutMs: options.cliTimeoutMs ?? DEFAULT_CLI_TIMEOUT_MS,
     };
+  }
+
+  get proc(): ChildProcessWithoutNullStreams | null {
+    return this.child;
   }
 
   get runId(): string {
@@ -733,6 +759,10 @@ export class YggDaemon {
       if (this.modeValue === "cli") {
         return this.requestCli(op, params);
       }
+      if (this.child !== null && this.hasBinaryChanged()) {
+        await this.stopProcess();
+        this.spawnDaemon();
+      }
       try {
         return await this.requestDaemon(op, params);
       } catch (error) {
@@ -814,7 +844,8 @@ export class YggDaemon {
       throw new Error("daemon 已关闭");
     }
     this.killChild();
-    const bin = this.opts.spawnBin ?? this.opts.agentBin;
+    const bin = this.opts.spawnBin ?? this.opts.binPath;
+    this.spawnedBinSig = this.readBinSig();
     const args = [
       ...(this.opts.spawnArgs ?? []),
       "--daemon",
@@ -839,6 +870,14 @@ export class YggDaemon {
       }
     });
     child.on("exit", (code, signal) => {
+      if (this.child !== child) {
+        try {
+          reader.close();
+        } catch {
+          // ignore
+        }
+        return;
+      }
       this.child = null;
       reader.close();
       this.reader = null;
@@ -885,6 +924,58 @@ export class YggDaemon {
     clearTimeout(pending.timer);
     this.pending.delete(id);
     pending.resolve(row);
+  }
+
+  private readBinSig(): string | null {
+    try {
+      const stat = fs.statSync(this.opts.binPath);
+      return `${stat.dev}:${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      return null;
+    }
+  }
+
+  private hasBinaryChanged(): boolean {
+    const currentSig = this.readBinSig();
+    if (currentSig === null) {
+      return false;
+    }
+    return currentSig !== this.spawnedBinSig;
+  }
+
+  private async stopProcess(): Promise<void> {
+    const child = this.child;
+    if (child === null) {
+      this.killChild();
+      return;
+    }
+    const exitPromise =
+      child.exitCode !== null || child.signalCode !== null
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              try {
+                child.kill("SIGKILL");
+              } catch {
+                // ignore
+              }
+              resolve();
+            }, 500);
+            child.once("exit", () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          });
+    try {
+      if (child.stdin !== null && !child.stdin.destroyed) {
+        child.stdin.write(`${JSON.stringify({ id: ++this.seq, op: "shutdown" })}\n`);
+        child.stdin.end();
+      }
+    } catch {
+      // ignore
+    }
+    this.killChild();
+    await exitPromise;
   }
 
   private killChild(): void {

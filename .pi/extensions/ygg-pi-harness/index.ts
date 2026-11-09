@@ -45,6 +45,7 @@ import {
 import { checkToolCallFirewall } from "./firewall.ts";
 import {
   extractAgentId,
+  isResumableAgentId,
   orchestrateActiveJobs,
   type ExecuteSubagent,
   type OrchestrationResult,
@@ -484,13 +485,34 @@ function formatOrchestration(result: OrchestrationResult): string {
   if (result.degraded !== undefined && result.jobs.length === 0) {
     lines.push(`[ygg_run_lanes] ${result.degraded}`);
   }
+  const summaryJobs = new Map((result.summary?.jobs ?? []).map((j) => [j.id, j] as const));
   for (const job of result.jobs) {
+    const sj = summaryJobs.get(job.id);
+    const wtStatus =
+      job.worktreeStatus ??
+      sj?.worktreeStatus ??
+      (job.worktreePath !== null && job.worktreePath !== ""
+        ? job.worktreePath
+        : job.stage === "development"
+          ? "待创建"
+          : "主工作区(只读)");
+    const subStatus =
+      job.subagentStatus ??
+      sj?.subagentStatus ??
+      (isResumableAgentId(job.agentId)
+        ? `已派发 ${job.agentId}`
+        : sj !== undefined && isResumableAgentId(sj.executor)
+          ? `已派发 ${sj.executor}`
+          : "待派发");
+    const probeStatus = job.probeStatus ?? sj?.probeStatus;
     lines.push(
       `### ${job.id} · ${job.stage} → ${job.expectedGate} gate` +
         ` | lane ${job.lane > 0 ? job.lane : "-"} | ${job.branch === "" ? "-" : job.branch}`,
     );
-    if (job.worktreePath !== null) {
-      lines.push(`worktree: ${job.worktreePath}`);
+    lines.push(`worktree: ${wtStatus}`);
+    lines.push(`subagent: ${subStatus}`);
+    if (probeStatus !== undefined && probeStatus !== "") {
+      lines.push(`probe: ${probeStatus}`);
     }
     lines.push(`artifact: ${job.artifactPath} (${job.archived.ok ? "archived" : "REFUSED"})`);
     if (job.error !== undefined) {
@@ -632,10 +654,24 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
           `jobs: ${summary.jobs.length} · gates: ${summary.gates.length} · pending proposals: ${summary.pendingProposals}`,
         ];
         for (const job of summary.jobs) {
-          const wt = job.worktreePath !== undefined ? ` wt=${job.worktreePath}` : "";
-          const act = job.subagentAction !== undefined ? ` action=${job.subagentAction.action}` : "";
+          const wtStatus =
+            job.worktreeStatus ??
+            (job.worktreePath !== undefined && job.worktreePath !== ""
+              ? job.worktreePath
+              : job.stage === "development"
+                ? "待创建"
+                : "主工作区(只读)");
+          const subStatus =
+            job.subagentStatus ??
+            (isResumableAgentId(job.executor) ? `已派发 ${job.executor}` : "待派发");
+          const probe =
+            job.probeStatus !== undefined && job.probeStatus !== ""
+              ? ` | probe=${job.probeStatus}`
+              : "";
+          const act = job.subagentAction !== undefined ? ` | action=${job.subagentAction.action}` : "";
           lines.push(
-            `  - ${job.id} ${job.stage} rev${job.rev} lane=${job.lane} ${job.branch === "" ? "-" : job.branch}${wt}${act}`,
+            `  - ${job.id} ${job.stage} rev${job.rev} lane=${job.lane} ${job.branch === "" ? "-" : job.branch}` +
+              ` | worktree=${wtStatus} | subagent=${subStatus}${probe}${act}`,
           );
         }
         for (const gate of summary.gates) {
@@ -885,7 +921,7 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
         }
         // 续跑既有 subagent：它带着上一轮的全部记忆（被打回的原因 / 方案细节），
         // 比重新给一个自洽 brief 更准——brief 再全也只是背景，不是它自己的现场。
-        if (request.resume !== undefined && request.resume !== "") {
+        if (isResumableAgentId(request.resume)) {
           args.resume = request.resume;
         }
         const outcome = await ctx.executeTool("Agent", args, {
