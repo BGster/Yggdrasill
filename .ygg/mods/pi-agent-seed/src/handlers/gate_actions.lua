@@ -12,6 +12,7 @@ local hooks = require("src.hooks")
 local choice = require("src.handlers.choice")
 local render_mod = require("src.render")
 local reqs = require("src.requirements")
+local tools = require("src.tools")
 local util = require("src.util")
 
 local TEXTS
@@ -26,8 +27,8 @@ local HUMAN =
   choice.HUMAN
 local render =
   render_mod.receipt
-local R_DONE, R_PLANNING, STAGE, req_id, req_index_of, req_key, req_phase_name, req_plan_ok, req_push_history, req_release, req_rev, req_sync_conflicts, stage =
-  reqs.R_DONE, reqs.R_PLANNING, reqs.STAGE, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_plan_ok, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_sync_conflicts, reqs.stage
+local R_DONE, R_PLANNING, STAGE, req_id, req_index_of, req_key, req_lane, req_phase_name, req_plan_ok, req_push_history, req_release, req_rev, req_sync_conflicts, stage =
+  reqs.R_DONE, reqs.R_PLANNING, reqs.STAGE, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_lane, reqs.req_phase_name, reqs.req_plan_ok, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_sync_conflicts, reqs.stage
 local cut, fill, trim =
   util.cut, util.fill, util.trim
 
@@ -77,6 +78,15 @@ function M.install(deps)
     ygg.kv.set(req_key(index, "gate"), "")
     if kind == "plan" then
       ygg.kv.set(req_key(index, "plan_ok"), true)
+    else
+      local lane_idx = req_lane(index)
+      if lane_idx <= 0 then
+        lane_idx = num(req_key(index, "last_lane"), 0)
+      end
+      if lane_idx > 0 then
+        tools.auto_release_worktree(lane_idx)
+        ygg.kv.set(req_key(index, "last_lane"), 0)
+      end
     end
     req_release(index)
     req_push_history(index, fill(TEXTS.beats.req_gate_hist, { kind = kind }))

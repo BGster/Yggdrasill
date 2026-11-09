@@ -78,10 +78,37 @@ const META_KEY_MAX_BYTES: usize = 64;
 /// `ygg.meta` 值嵌套深度上限（含顶层表：1 层）。超限可读报错而非爆栈。
 const META_MAX_DEPTH: usize = 8;
 
+/// `ygg.tool.call` 的工具 ID 字节上限。
+const TOOL_ID_MAX_BYTES: usize = 64;
+
+/// 宿主侧同步工具执行器注入面（Mod 的 `ygg.tool.call(tool_id, args_table)` 桥接）。
+pub trait HostToolRunner {
+    fn call(
+        &mut self,
+        tool_id: &str,
+        args: &BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>, String>;
+}
+
+/// 宿主相位：`ygg.tool.call` 仅允许在转换期（`Phase::Transition`）调用。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    Loading,
+    Idle,
+    Transition,
+}
+
 /// 宿主侧状态句柄（S9 测试 / S10 驱动的注入面）。
 pub struct HostHandles {
     pub kv: Rc<RefCell<KvStore>>,
     pub entities: Rc<RefCell<EntityStore>>,
+}
+
+impl HostHandles {
+    /// 构造句柄（供需要同时挂载或替换工具执行器的宿主使用）。
+    pub fn new(kv: Rc<RefCell<KvStore>>, entities: Rc<RefCell<EntityStore>>) -> Self {
+        Self { kv, entities }
+    }
 }
 
 /// 单条待回放的 host 调用（D-S9-2 收集面的载体，按追加序回放）。
@@ -285,6 +312,10 @@ pub struct HostState {
     /// 与 `stdlib` 都构造它），加字段会破外部构造点；VFS 是 `install` 自建的
     /// 内部状态，经 `HostApi::vfs_handle()` 交给驱动。
     vfs: Rc<RefCell<VfsStore>>,
+    /// 宿主侧同步工具执行器（未挂载时 `None`，`ygg.tool.call` 返回 `unmounted = true`）。
+    tool_runner: Rc<RefCell<Option<Box<dyn HostToolRunner>>>>,
+    /// 当前执行相位（装载期 `Loading`，封口后待机 `Idle`，handler 执行期间 `Transition`）。
+    phase: Phase,
     sealed: bool,
     sentinel: String,
     /// 本次 handler 调用中，`ygg.choice` 之前已入缓冲的 `Emit` 条目数
@@ -321,12 +352,28 @@ impl LuaHandler {
 
 impl EventHandler for LuaHandler {
     fn handle(&mut self, event: &Event, sink: &mut dyn NarrationSink) -> Result<(), HandlerError> {
-        // ① 清空调用缓冲与 choice 前置计数（上一 handler 的余量不跨 handler 泄漏）。
-        {
+        // ① 清空调用缓冲与 choice 前置计数（上一 handler 的余量不跨 handler 泄漏），进入 Transition 相位。
+        let prev_phase = {
             let mut state = self.state.borrow_mut();
             state.calls.clear();
             state.pre_choice_emits = 0;
+            let prev = state.phase;
+            state.phase = Phase::Transition;
+            prev
+        };
+        struct PhaseReset {
+            state: Rc<RefCell<HostState>>,
+            prev: Phase,
         }
+        impl Drop for PhaseReset {
+            fn drop(&mut self) {
+                self.state.borrow_mut().phase = self.prev;
+            }
+        }
+        let _phase_guard = PhaseReset {
+            state: Rc::clone(&self.state),
+            prev: prev_phase,
+        };
         // ② core Value → mlua Value，装载期存下的函数以 payload 为唯一实参。
         let payload = value_to_lua(&self.lua, event.payload()).map_err(|e| {
             HandlerError(format!(
@@ -476,6 +523,8 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         // VFS 的内存态：`install` 自建（不属注入面），驱通过
         // [`HostApi::vfs_handle`] 拿到同一个 `Rc` 后接入 savepoint 回滚。
         vfs: Rc::new(RefCell::new(VfsStore::default())),
+        tool_runner: Rc::new(RefCell::new(None)),
+        phase: Phase::Loading,
         sealed: false,
         // per-kernel sentinel：内核种子派生（splitmix64 四轮），Mod 面不可预测
         //（S9 审计代决：伪造首行只会成为普通错误浮出，不会被哨兵吞掉）。
@@ -667,6 +716,63 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
 
     ygg.raw_set("fs", fs_table)?;
 
+    // ---- ygg.tool.*（同步宿主工具桥：装载期由影子表禁止，转换期按挂载态执行或回退）----
+    let tool_table = lua.create_table()?;
+    let tool_call = Rc::clone(&state);
+    tool_table.raw_set(
+        "call",
+        lua.create_function(
+            move |lua, (tool_id, args_val): (String, Option<LuaValue>)| -> Result<Table, Error> {
+                let trimmed = tool_id.trim();
+                if trimmed.is_empty() || trimmed.len() > TOOL_ID_MAX_BYTES {
+                    return Err(Error::runtime(format!(
+                        "ygg.tool.call tool_id must be 1..={TOOL_ID_MAX_BYTES} bytes, got `{tool_id}`"
+                    )));
+                }
+                let args = tool_args_from_lua(args_val.as_ref())?;
+                let (phase, runner_rc) = {
+                    let s = tool_call.borrow();
+                    (s.phase, Rc::clone(&s.tool_runner))
+                };
+                if phase != Phase::Transition {
+                    return Err(Error::runtime(format!(
+                        "ygg.tool.call is only allowed during transition phase (current phase: {phase:?})"
+                    )));
+                }
+                let mut runner_slot = runner_rc.borrow_mut();
+                let out = lua.create_table()?;
+                match runner_slot.as_mut() {
+                    None => {
+                        out.raw_set("ok", false)?;
+                        out.raw_set("unmounted", true)?;
+                        out.raw_set("code", -1)?;
+                        out.raw_set("error", "no host tool runner mounted")?;
+                    }
+                    Some(runner) => match runner.call(trimmed, &args) {
+                        Ok(data_map) => {
+                            let data_table = lua.create_table()?;
+                            for (k, v) in data_map {
+                                data_table.raw_set(k, v)?;
+                            }
+                            out.raw_set("ok", true)?;
+                            out.raw_set("unmounted", false)?;
+                            out.raw_set("code", 0)?;
+                            out.raw_set("data", data_table)?;
+                        }
+                        Err(err_msg) => {
+                            out.raw_set("ok", false)?;
+                            out.raw_set("unmounted", false)?;
+                            out.raw_set("code", 1)?;
+                            out.raw_set("error", err_msg)?;
+                        }
+                    },
+                }
+                Ok(out)
+            },
+        )?,
+    )?;
+    ygg.raw_set("tool", tool_table)?;
+
     // ---- ygg.kv.*（即席状态写：core 把关方法，门拒绝为可读 mlua 错误；
     //      句柄经 HostState.handles 现取现用，字段即真实读取面）----
     let kv_table = lua.create_table()?;
@@ -783,6 +889,57 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         lua: lua.clone(),
         state,
     })
+}
+
+/// `ygg.tool.call` 的可选参数表 → `BTreeMap<String, String>`（标量转字符串）。
+fn tool_args_from_lua(value: Option<&LuaValue>) -> Result<BTreeMap<String, String>, Error> {
+    let mut out = BTreeMap::new();
+    let Some(val) = value else {
+        return Ok(out);
+    };
+    let table = match val {
+        LuaValue::Nil => return Ok(out),
+        LuaValue::Table(t) => t,
+        other => {
+            return Err(Error::runtime(format!(
+                "ygg.tool.call args must be a table or nil, got {}",
+                lua_type_name(other)
+            )))
+        }
+    };
+    for pair in table.pairs::<LuaValue, LuaValue>() {
+        let (k, v) = pair?;
+        let key = match &k {
+            LuaValue::String(s) => s.to_str()?.to_owned(),
+            LuaValue::Integer(i) => i.to_string(),
+            other => {
+                return Err(Error::runtime(format!(
+                    "ygg.tool.call args key must be a string, got {}",
+                    lua_type_name(other)
+                )))
+            }
+        };
+        let val_str = match &v {
+            LuaValue::String(s) => s.to_str()?.to_owned(),
+            LuaValue::Integer(i) => i.to_string(),
+            LuaValue::Number(n) => {
+                if !n.is_finite() {
+                    return Err(Error::runtime("ygg.tool.call args value must be finite"));
+                }
+                n.to_string()
+            }
+            LuaValue::Boolean(b) => b.to_string(),
+            LuaValue::Nil => continue,
+            other => {
+                return Err(Error::runtime(format!(
+                    "ygg.tool.call args[`{key}`] must be a scalar, got {}",
+                    lua_type_name(other)
+                )))
+            }
+        };
+        out.insert(key, val_str);
+    }
+    Ok(out)
 }
 
 /// `has_tag` 的 store 层读取（store 无 has_tag 时经 Entity 只读面；miss = false）。
@@ -932,6 +1089,7 @@ impl HostApi {
                 return Err(Error::runtime("host api is already sealed"));
             }
             s.sealed = true;
+            s.phase = Phase::Idle;
         }
         let ygg: Table = lua.globals().raw_get("ygg")?;
         let stub = lua.create_function(|_, _: (String, Function)| -> Result<(), Error> {
@@ -992,6 +1150,16 @@ impl HostApi {
     /// Lua 侧下一次 `ygg.fs.read` 就读到回滚后的状态。
     pub fn vfs_handle(&self) -> Rc<RefCell<VfsStore>> {
         Rc::clone(&self.state.borrow().vfs)
+    }
+
+    /// 挂载或卸载宿主侧同步工具执行器。
+    pub fn set_tool_runner(&self, runner: Option<Box<dyn HostToolRunner>>) {
+        *self.state.borrow().tool_runner.borrow_mut() = runner;
+    }
+
+    /// 取同步工具执行器句柄（驱动层共享）。
+    pub fn tool_runner_handle(&self) -> Rc<RefCell<Option<Box<dyn HostToolRunner>>>> {
+        Rc::clone(&self.state.borrow().tool_runner)
     }
 }
 
@@ -1187,6 +1355,135 @@ mod tests {
                 .map(|(path, _)| path.as_str())
                 .collect::<Vec<_>>(),
             vec!["artifacts/a.md"]
+        );
+    }
+
+    struct MockRunner;
+    impl HostToolRunner for MockRunner {
+        fn call(
+            &mut self,
+            tool_id: &str,
+            args: &BTreeMap<String, String>,
+        ) -> Result<BTreeMap<String, String>, String> {
+            if tool_id == "mock.fail" {
+                return Err("boom".to_owned());
+            }
+            let mut out = BTreeMap::new();
+            out.insert("tool".to_owned(), tool_id.to_owned());
+            if let Some(v) = args.get("k") {
+                out.insert("echo".to_owned(), v.clone());
+            }
+            Ok(out)
+        }
+    }
+
+    #[test]
+    fn ygg_tool_call_respects_phase_and_runner_mount_state() {
+        let sandbox = crate::sandbox::Sandbox::new().expect("sandbox");
+        let lua = sandbox.lua().clone();
+        let handles = HostHandles {
+            kv: Rc::new(RefCell::new(KvStore::new())),
+            entities: Rc::new(RefCell::new(EntityStore::new())),
+        };
+        let host = install(&lua, handles).expect("install host");
+        // Loading 相位下直接调用 ygg.tool.call 必须被拒。
+        let loading_err = lua
+            .load(r#"ygg.tool.call("mock.ok", { k = "v" })"#)
+            .exec()
+            .expect_err("loading phase must reject ygg.tool.call");
+        assert!(
+            loading_err.to_string().contains("transition phase"),
+            "{loading_err}"
+        );
+
+        lua.load(
+            r#"
+            ygg.on("test.call", function(tool_id)
+                local res = ygg.tool.call(tool_id, { k = "val", n = 42, b = true })
+                ygg.kv.set("ok", res.ok == true)
+                ygg.kv.set("unmounted", res.unmounted == true)
+                ygg.kv.set("code", res.code or -99)
+                if res.data then
+                    ygg.kv.set("echo", res.data.echo or "")
+                end
+                if res.error then
+                    ygg.kv.set("err", res.error)
+                end
+            end)
+        "#,
+        )
+        .exec()
+        .expect("register handler");
+        host.seal(&lua).expect("seal");
+        let mut registry = HandlerRegistry::new();
+        host.register_into(&mut registry, "mod");
+        let mut entities = EntityStore::new();
+        let mut fuel = crate::fuel::install(&lua, 10_000).expect("fuel");
+
+        // 1) 未挂载：返回 unmounted = true, ok = false, code = -1
+        ygg_core::transition::run_transition(
+            &mut entities,
+            &mut registry,
+            &mut fuel,
+            Event::external("test.call", Value::Str("mock.ok".to_owned())).expect("event"),
+        )
+        .expect("unmounted transition");
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("unmounted"),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("ok"),
+            Some(&Value::Bool(false))
+        );
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("code"),
+            Some(&Value::Int(-1))
+        );
+
+        // 2) 挂载后成功调用：ok = true, unmounted = false, code = 0, data 映射回传
+        host.set_tool_runner(Some(Box::new(MockRunner)));
+        fuel.reset(10_000);
+        ygg_core::transition::run_transition(
+            &mut entities,
+            &mut registry,
+            &mut fuel,
+            Event::external("test.call", Value::Str("mock.ok".to_owned())).expect("event"),
+        )
+        .expect("mounted ok transition");
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("unmounted"),
+            Some(&Value::Bool(false))
+        );
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("ok"),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("echo"),
+            Some(&Value::Str("val".to_owned()))
+        );
+
+        // 3) 挂载后返回 Err：ok = false, unmounted = false, code = 1, error 回传
+        fuel.reset(10_000);
+        ygg_core::transition::run_transition(
+            &mut entities,
+            &mut registry,
+            &mut fuel,
+            Event::external("test.call", Value::Str("mock.fail".to_owned())).expect("event"),
+        )
+        .expect("mounted err transition");
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("ok"),
+            Some(&Value::Bool(false))
+        );
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("code"),
+            Some(&Value::Int(1))
+        );
+        assert_eq!(
+            host.state.borrow().handles.kv.borrow().get("err"),
+            Some(&Value::Str("boom".to_owned()))
         );
     }
 }

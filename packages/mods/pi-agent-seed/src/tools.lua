@@ -691,6 +691,10 @@ REACTORS["git.worktree_claim"] = function(pairs)
   end
   -- 与 `lane.claim` 同函数同键（含 `since` 的 tick 分配与 `req.<i>.lane` 回写）。
   LANES.bind(k, index, pairs.branch or "", pairs.base or "", "1")
+  local wt_path = trim(pairs.path or "")
+  if wt_path ~= "" then
+    ygg.kv.set(LANES.key(k, "path"), wt_path)
+  end
   ygg.narrate(fill(TEXTS.beats.worktree_claimed, {
     k = tostring(k),
     req = req_id(index),
@@ -711,6 +715,7 @@ REACTORS["git.worktree_release"] = function(pairs)
   if pairs.released ~= "1" then
     return false
   end
+  ygg.kv.set(LANES.key(k, "path"), "")
   if LANES.req_of(k) == "" then
     ygg.narrate(fill(TEXTS.beats.worktree_release_idle, { k = tostring(k) }))
     return false
@@ -954,47 +959,308 @@ local function receipt_effect()
   return true
 end
 
+-- ───────────────────────────── 同步工具调用（挂载 HostToolRunner 时单回合收口） ─────────────────────────────
+
+local function settled_count()
+  local value = whole(ygg.kv.get("tool.settled_count"))
+  if value == nil or value < 0 then
+    return 0
+  end
+  return value
+end
+
+local function serialize_data_map(data)
+  if type(data) ~= "table" then
+    return "", {}
+  end
+  local keys = {}
+  local map = {}
+  for k, v in next, data do
+    local key = trim(tostring(k))
+    if key ~= "" then
+      keys[#keys + 1] = key
+      map[key] = trim(tostring(v or ""))
+    end
+  end
+  for i = 2, #keys do
+    local cur = keys[i]
+    local j = i - 1
+    while j >= 1 and keys[j] > cur do
+      keys[j + 1] = keys[j]
+      j = j - 1
+    end
+    keys[j + 1] = cur
+  end
+  if #keys == 1 and keys[1] == "output" then
+    local raw = map["output"] or ""
+    local parsed = output_pairs(raw)
+    for k, v in next, parsed do
+      map[k] = v
+    end
+    return raw, map
+  end
+  local parts = {}
+  for i = 1, #keys do
+    local k = keys[i]
+    parts[#parts + 1] = k .. "=" .. map[k]
+  end
+  return join(parts, ";"), map
+end
+
+local function allocate_call_id(call_id, total, limit)
+  local chosen = trim(call_id or "")
+  if chosen ~= "" then
+    return chosen
+  end
+  for step = 1, limit do
+    local candidate = "t" .. tostring(total + step)
+    if not exists_of(candidate) then
+      return candidate
+    end
+  end
+  return ""
+end
+
+local function try_sync_call(tool_id, args_map, raw_args_text, call_id, ext)
+  if type(ygg.tool) ~= "table" or type(ygg.tool.call) ~= "function" then
+    return nil
+  end
+  local total = count_of()
+  local limit = cap()
+  if total >= limit then
+    return nil
+  end
+  local chosen = allocate_call_id(call_id, total, limit)
+  if chosen == "" then
+    return nil
+  end
+  local ok_call, res = pcall(ygg.tool.call, tool_id, args_map or {})
+  if not ok_call or type(res) ~= "table" or res.unmounted == true then
+    return nil
+  end
+  local is_ok = res.ok == true
+  local status = is_ok and "ok" or "error"
+  local code_str = is_ok and "0" or "1"
+  local output_raw, pairs_map = "", {}
+  if is_ok and type(res.data) == "table" then
+    output_raw, pairs_map = serialize_data_map(res.data)
+  else
+    output_raw = tostring(res.error or "")
+  end
+  output_raw = output_raw:gsub("[\r\n]", " / ")
+  local out_limit = output_max()
+  local truncated = false
+  if #output_raw > out_limit then
+    truncated = true
+    local dropped = #output_raw - (out_limit - 3)
+    output_raw = output_raw:sub(1, out_limit - 3) .. "..." .. fill(TEXTS.beats.tool_output_truncated, { dropped = tostring(dropped) })
+  end
+  local index = total + 1
+  ygg.kv.set("tool.count", index)
+  ygg.kv.set("tool.seq." .. tostring(index), chosen)
+  ygg.kv.set("tool." .. chosen .. ".id", chosen)
+  ygg.kv.set("tool." .. chosen .. ".tool", tool_id)
+  ygg.kv.set("tool." .. chosen .. ".args", raw_args_text or "")
+  ygg.kv.set("tool." .. chosen .. ".status", status)
+  ygg.kv.set("tool." .. chosen .. ".code", code_str)
+  ygg.kv.set("tool." .. chosen .. ".output", output_raw)
+  ygg.kv.set("tool." .. chosen .. ".ext", tostring(ext or ""))
+  ygg.kv.set("tool." .. chosen .. ".res_ext", "")
+  ygg.kv.set("tool." .. chosen .. ".truncated", truncated)
+  ygg.kv.set("tool." .. chosen .. ".notified", "1")
+  ygg.kv.set("tool." .. chosen .. ".reacted", "1")
+  ygg.kv.set("tool.notified." .. chosen, true)
+  ygg.kv.set("tool.reacted." .. chosen, true)
+  ygg.kv.set("tool.last", chosen)
+  ygg.kv.set("tool.settled_count", settled_count() + 1)
+
+  ygg.narrate(fill(TEXTS.beats.tool_settled, {
+    call_id = chosen,
+    status = status,
+    code = code_str,
+  }))
+  if is_ok and type(res.data) == "table" then
+    local reactor = REACTORS[tool_id]
+    if reactor ~= nil then
+      reactor(pairs_map, chosen)
+    end
+  end
+  return chosen
+end
+
+local function auto_claim_worktree(lane, req_index)
+  if not contains(allowed(), "git.worktree_claim") then
+    return nil
+  end
+  local k = whole(lane)
+  if k == nil or k <= 0 or req_index == nil then
+    return nil
+  end
+  local id = req_id(req_index)
+  local branch = "feature/" .. id
+  local args_map = {
+    lane = tostring(k),
+    req = id,
+    branch = branch,
+  }
+  local raw_args = "lane=" .. tostring(k) .. ";req=" .. id .. ";branch=" .. branch
+  return try_sync_call("git.worktree_claim", args_map, raw_args, "", "")
+end
+
+local function auto_probe_lane(lane)
+  if not contains(allowed(), "git.lane_probe") then
+    return nil
+  end
+  local k = whole(lane)
+  if k == nil or k <= 0 then
+    return nil
+  end
+  local base = text_of(LANES.key(k, "base"), "HEAD")
+  if base == "" then
+    base = "HEAD"
+  end
+  local branch = text_of(LANES.key(k, "branch"), "")
+  if branch == "" then
+    local holder = LANES.req_of(k)
+    if holder ~= "" then
+      branch = "feature/" .. holder
+    end
+  end
+  local args_map = {
+    lane = tostring(k),
+    base = base,
+    branch = branch,
+  }
+  local raw_args = "lane=" .. tostring(k) .. ";base=" .. base .. ";branch=" .. branch
+  return try_sync_call("git.lane_probe", args_map, raw_args, "", "")
+end
+
+local function auto_release_worktree(lane)
+  if not contains(allowed(), "git.worktree_release") then
+    return nil
+  end
+  local k = whole(lane)
+  if k == nil or k <= 0 then
+    return nil
+  end
+  local args_map = {
+    lane = tostring(k),
+  }
+  local raw_args = "lane=" .. tostring(k)
+  return try_sync_call("git.worktree_release", args_map, raw_args, "", "")
+end
+
+local function auto_archive_sessions()
+  if not contains(allowed(), "harness.archive_sessions") then
+    return nil
+  end
+  if tostring(ygg.kv.get("settlement.sessions.remaining") or "") == "0" then
+    return nil
+  end
+  local batch = text_of("run.id", "default")
+  if batch == "" then
+    batch = "default"
+  end
+  local parent = text_of("run.parent", batch)
+  if parent == "" then
+    parent = batch
+  end
+  local args_map = {
+    parent = parent,
+    batch = batch,
+  }
+  local raw_args = "parent=" .. parent .. ";batch=" .. batch
+  return try_sync_call("harness.archive_sessions", args_map, raw_args, "", "")
+end
+
 -- ───────────────────────────── 装配面 ─────────────────────────────
 
 function M.install(deps)
   TEXTS = deps.texts
 end
 
-function M.register()
-  -- 机器动作（外部派发），不是人类里程碑动作：不进菜单、不占票据（AGENTS.md §8）。
-  ygg.on("tool.call", function(payload)
-    if stage() == STAGE.done then
-      return reject("tool.call", TEXTS.beats.tool_after_done)
-    end
-    local body, marked_ext = strip_ext(payload)
-    local tool_id, args_text, call_id, problem = parse_call(body)
-    if problem ~= nil then
-      return reject_payload("tool.call", problem)
-    end
-    local ext = trim(marked_ext or "")
-    if ext ~= "" and not valid_ext(ext) then
-      return reject_payload("tool.call", fill(TEXTS.beats.bad_payload, { action = "tool.call" }))
-    end
-    local replayed = by_ext(ext)
-    if replayed ~= nil then
-      ygg.narrate(fill(TEXTS.beats.tool_replayed, { call_id = replayed, ext = ext }))
-      render()
-      return
-    end
-    local chosen, request_problem = request(tool_id, args_text, call_id, ext)
-    if chosen == nil then
-      return reject_payload("tool.call", request_problem)
-    end
-    local stored = ygg.kv.get("tool." .. chosen .. ".args")
-    ygg.narrate(fill(TEXTS.beats.tool_requested, {
-      call_id = chosen,
-      tool_id = tool_id,
-      args = (type(stored) == "string" and stored ~= "" and stored) or "-",
-      pending = tostring(pending_count()),
+local function handle_call(payload)
+  if stage() == STAGE.done then
+    return reject("tool.call", TEXTS.beats.tool_after_done)
+  end
+  local body, marked_ext = strip_ext(payload)
+  local tool_id, args_text, call_id, problem = parse_call(body)
+  if problem ~= nil then
+    return reject_payload("tool.call", problem)
+  end
+  local ext = trim(marked_ext or "")
+  if ext ~= "" and not valid_ext(ext) then
+    return reject_payload("tool.call", fill(TEXTS.beats.bad_payload, { action = "tool.call" }))
+  end
+  local replayed = by_ext(ext)
+  if replayed ~= nil then
+    ygg.narrate(fill(TEXTS.beats.tool_replayed, { call_id = replayed, ext = ext }))
+    render()
+    return
+  end
+  -- 挂载同步执行前先过与 request() 相同的校验门（未放行/坏形状/重复 id/超容一律先拒绝）。
+  if not contains(allowed(), tool_id) then
+    return reject_payload("tool.call", fill(TEXTS.beats.tool_not_allowed, {
+      tool_id = tostring(tool_id),
+      allowed = allowed_text(),
     }))
+  end
+  if #tool_id > MAX_TOOL_ID or tool_id:match(TOOL_ID_RE) == nil then
+    return reject_payload("tool.call", fill(TEXTS.beats.tool_bad_tool_id, { tool_id = tostring(tool_id) }))
+  end
+  local pairs_out, args_problem = parse_args(args_text)
+  if pairs_out == nil then
+    return reject_payload("tool.call", fill(TEXTS.beats.tool_bad_args, { args = tostring(args_text), problem = args_problem }))
+  end
+  local chosen_check = trim(call_id or "")
+  local total = count_of()
+  local limit = cap()
+  if chosen_check ~= "" then
+    if #chosen_check > MAX_CALL_ID or chosen_check:match(CALL_ID_RE) == nil or RESERVED[chosen_check] == true then
+      return reject_payload("tool.call", fill(TEXTS.beats.tool_bad_call_id, {
+        call_id = chosen_check,
+        max = tostring(MAX_CALL_ID),
+      }))
+    end
+    if exists_of(chosen_check) then
+      return reject_payload("tool.call", fill(TEXTS.beats.tool_call_dup, {
+        call_id = chosen_check,
+        status = status_of(chosen_check),
+      }))
+    end
+  end
+  if total >= limit then
+    return reject_payload("tool.call", fill(TEXTS.beats.tool_capacity, { cap = tostring(limit) }))
+  end
+  local args_map = {}
+  for i = 1, #pairs_out do
+    args_map[pairs_out[i].k] = pairs_out[i].v
+  end
+  local norm_args = args_text_of(pairs_out)
+  local synced = try_sync_call(tool_id, args_map, norm_args, call_id, ext)
+  if synced ~= nil then
     flush_meta()
     render()
-  end)
+    return
+  end
+  local chosen, request_problem = request(tool_id, args_text, call_id, ext)
+  if chosen == nil then
+    return reject_payload("tool.call", request_problem)
+  end
+  local stored = ygg.kv.get("tool." .. chosen .. ".args")
+  ygg.narrate(fill(TEXTS.beats.tool_requested, {
+    call_id = chosen,
+    tool_id = tool_id,
+    args = (type(stored) == "string" and stored ~= "" and stored) or "-",
+    pending = tostring(pending_count()),
+  }))
+  flush_meta()
+  render()
+end
+
+function M.register()
+  -- 机器动作（外部派发），不是人类里程碑动作：不进菜单、不占票据（AGENTS.md §8）。
+  ygg.on("tool.call", handle_call)
   ygg.on("tool.result", function(payload)
     if stage() == STAGE.done then
       return reject("tool.result", TEXTS.beats.tool_after_done)
@@ -1088,9 +1354,15 @@ M.allowed_text = allowed_text
 M.apply_result = apply_result
 M.args_table = args_table
 M.artifact_path_ok = artifact_path_ok
+M.auto_archive_sessions = auto_archive_sessions
+M.auto_claim_worktree = auto_claim_worktree
+M.auto_probe_lane = auto_probe_lane
+M.auto_release_worktree = auto_release_worktree
 M.call_id_at = call_id_at
 M.code_of = code_of
 M.flush_meta = flush_meta
+M.flush_outbox = flush_meta
+M.handle_call = handle_call
 M.output_of = output_of
 M.output_pairs = output_pairs
 M.parse_args = parse_args
@@ -1100,9 +1372,13 @@ M.pending_count = pending_count
 M.reactive_deps = reactive_deps
 M.reactive_effect = reactive_effect
 M.reactive_tool_ids = reactive_tool_ids
+M.receipt_deps = receipt_deps
+M.receipt_effect = receipt_effect
 M.record_artifact = record_artifact
 M.request = request
+M.settled_count = settled_count
 M.status_of = status_of
+M.try_sync_call = try_sync_call
 M.verify_artifacts = verify_artifacts
 
 return M

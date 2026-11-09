@@ -33,6 +33,7 @@ use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
+use ygg_sandbox::HostToolRunner;
 
 // ───────────────────────── locating ─────────────────────────
 
@@ -2103,5 +2104,235 @@ fn subsystem_declarations_and_beat_references_stay_complete() {
         refs.len() > 200,
         "the scene-text scanner found only {} references",
         refs.len()
+    );
+}
+
+struct SyncRitualRunner;
+
+impl HostToolRunner for SyncRitualRunner {
+    fn call(
+        &mut self,
+        tool_id: &str,
+        args: &std::collections::BTreeMap<String, String>,
+    ) -> Result<std::collections::BTreeMap<String, String>, String> {
+        let mut out = std::collections::BTreeMap::new();
+        match tool_id {
+            "git.worktree_claim" => {
+                let lane = args.get("lane").cloned().unwrap_or_else(|| "1".to_owned());
+                let req = args.get("req").cloned().unwrap_or_else(|| "r1".to_owned());
+                let branch = args
+                    .get("branch")
+                    .cloned()
+                    .unwrap_or_else(|| format!("feature/{req}"));
+                out.insert("lane".to_owned(), lane.clone());
+                out.insert("req".to_owned(), req);
+                out.insert("branch".to_owned(), branch);
+                out.insert("base".to_owned(), "2e24c45".to_owned());
+                out.insert("clean".to_owned(), "1".to_owned());
+                out.insert("path".to_owned(), format!("/tmp/ygg-wt-lane-{lane}"));
+                Ok(out)
+            }
+            "git.lane_probe" => {
+                let lane = args.get("lane").cloned().unwrap_or_else(|| "1".to_owned());
+                let base = args
+                    .get("base")
+                    .cloned()
+                    .unwrap_or_else(|| "2e24c45".to_owned());
+                let branch = args
+                    .get("branch")
+                    .cloned()
+                    .unwrap_or_else(|| "feature/r1".to_owned());
+                out.insert("lane".to_owned(), lane);
+                out.insert("base".to_owned(), base);
+                out.insert("branch".to_owned(), branch);
+                out.insert("head".to_owned(), "deadbeef1234".to_owned());
+                out.insert("commits".to_owned(), "2".to_owned());
+                out.insert("clean".to_owned(), "1".to_owned());
+                out.insert(
+                    "files".to_owned(),
+                    "src/tools.lua,src/render.lua".to_owned(),
+                );
+                Ok(out)
+            }
+            "git.worktree_release" => {
+                let lane = args.get("lane").cloned().unwrap_or_else(|| "1".to_owned());
+                out.insert("lane".to_owned(), lane);
+                out.insert("released".to_owned(), "1".to_owned());
+                Ok(out)
+            }
+            "harness.archive_sessions" => {
+                let batch = args
+                    .get("batch")
+                    .cloned()
+                    .unwrap_or_else(|| "default".to_owned());
+                out.insert("moved".to_owned(), "2".to_owned());
+                out.insert("remaining".to_owned(), "0".to_owned());
+                out.insert("dest".to_owned(), format!("/tmp/sessions-trash/{batch}"));
+                Ok(out)
+            }
+            other => Err(format!("unexpected tool_id: {other}")),
+        }
+    }
+}
+
+/// A7 Synchronous `ygg.tool.call` mounted on `KernelFacade` settles all 4 inline engineering
+/// rituals (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`, and
+/// `harness.archive_sessions`) in **1 single turn each** without `tool.result` callbacks, and
+/// `summary.jobs[0].subagentAction` exposes `action`, `brief`, `worktreePath`, `artifactPath`,
+/// and `submitCommand`.
+#[test]
+fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
+    let mut game = Game::open(&project_mod_dir());
+    game.kernel
+        .set_tool_runner(Some(Box::new(SyncRitualRunner)));
+
+    game.narrate(
+        "task.intake",
+        &text("sync bridge|verify 1-turn inline rituals and subagentAction"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("sync tool bridge|implement synchronous ygg.tool.call|sync-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+
+    // 0) During plan stage, summary.jobs[0].subagentAction is `subagent.spawn`.
+    let plan_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    let plan_jobs = plan_summary["jobs"].as_array().expect("summary.jobs array");
+    assert_eq!(plan_jobs.len(), 1);
+    let plan_action = &plan_jobs[0]["subagentAction"];
+    assert_eq!(plan_action["action"], json!("subagent.spawn"));
+    assert_eq!(plan_action["reqId"], json!("r1"));
+    assert_eq!(plan_action["stage"], json!("plan"));
+    assert_eq!(plan_action["artifactPath"], json!("artifacts/r1-plan.md"));
+    assert!(plan_action["brief"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Requirement r1"));
+    assert!(plan_action["submitCommand"]
+        .as_str()
+        .unwrap_or("")
+        .contains("proposal.submit"));
+
+    // Submit plan proposal with inline executor registration (`exec=agent-plan`).
+    game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|plan ready|artifacts/r1-plan.md||exec=agent-plan"),
+    );
+    game.click("proposal.accept — ");
+
+    // 1) Approving plan_gate triggers auto_dispatch -> auto_claim_worktree in the SAME turn!
+    let approved_plan = game.click("gate.approve — ");
+    let approved_plan_lines = narrative_lines(&approved_plan);
+    assert_eq!(
+        count_lines(&approved_plan_lines, "[TOOL SETTLED]"),
+        1,
+        "{approved_plan_lines:#?}"
+    );
+    assert_eq!(
+        count_lines(&approved_plan_lines, "[WORKTREE CLAIMED]"),
+        1,
+        "{approved_plan_lines:#?}"
+    );
+    game.assert_kv("lane.1.req", json!("r1"));
+    game.assert_kv("lane.1.branch", json!("feature/r1"));
+    game.assert_kv("lane.1.base", json!("2e24c45"));
+    game.assert_kv("lane.1.path", json!("/tmp/ygg-wt-lane-1"));
+    game.assert_kv("tool.settled_count", json!(1));
+    game.assert_kv("tool.pending", json!(null));
+
+    // Check summary.jobs[0].subagentAction in development stage:
+    // Because planExecutor is `agent-plan`, action is `subagent.resume` and worktreePath is populated!
+    let dev_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    let dev_jobs = dev_summary["jobs"].as_array().expect("summary.jobs array");
+    assert_eq!(dev_jobs.len(), 1);
+    assert_eq!(dev_jobs[0]["worktreePath"], json!("/tmp/ygg-wt-lane-1"));
+    let dev_action = &dev_jobs[0]["subagentAction"];
+    assert_eq!(dev_action["action"], json!("subagent.resume"));
+    assert_eq!(dev_action["resumeAgentId"], json!("agent-plan"));
+    assert_eq!(dev_action["worktreePath"], json!("/tmp/ygg-wt-lane-1"));
+    assert_eq!(
+        dev_action["artifactPath"],
+        json!("artifacts/r1-development.md")
+    );
+    assert!(dev_action["brief"]
+        .as_str()
+        .unwrap_or("")
+        .contains("/tmp/ygg-wt-lane-1"));
+    assert!(dev_action["submitCommand"]
+        .as_str()
+        .unwrap_or("")
+        .contains("r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>"));
+
+    // 2) Submitting development proposal triggers auto_probe_lane in the SAME turn!
+    let dev_prop_lines = game.narrate(
+        "proposal.submit",
+        &text(
+            "r1|1|development|dev done|artifacts/r1-development.md|src/tools.lua|exec=agent-plan",
+        ),
+    );
+    assert_eq!(
+        count_lines(&dev_prop_lines, "[TOOL SETTLED]"),
+        1,
+        "{dev_prop_lines:#?}"
+    );
+    assert_eq!(
+        count_lines(&dev_prop_lines, "[LANE PROBE]"),
+        1,
+        "{dev_prop_lines:#?}"
+    );
+    game.assert_kv("lane.1.probe.commits", json!(2));
+    game.assert_kv("lane.1.probe.clean", json!("1"));
+    game.assert_kv("lane.1.probe.head", json!("deadbeef1234"));
+    game.assert_kv("tool.settled_count", json!(2));
+
+    game.click("proposal.accept — ");
+
+    // 3) Approving accept gate triggers auto_release_worktree in the SAME turn!
+    let approved_accept = game.click("gate.approve — ");
+    let approved_accept_lines = narrative_lines(&approved_accept);
+    assert_eq!(
+        count_lines(&approved_accept_lines, "[TOOL SETTLED]"),
+        1,
+        "{approved_accept_lines:#?}"
+    );
+    assert_eq!(
+        count_lines(&approved_accept_lines, "[WORKTREE RELEASED]"),
+        1,
+        "{approved_accept_lines:#?}"
+    );
+    game.assert_kv("lane.1.path", json!(""));
+    game.assert_kv("lane.1.req", json!(""));
+    game.assert_kv("tool.settled_count", json!(3));
+
+    // 4) Entering review and registering settlement.evolution triggers auto_archive_sessions in 1 turn!
+    game.click("coordinate.submit — ");
+    game.click("verify.submit all_green=true — ");
+    let evo_lines = game.narrate(
+        "settlement.evolution",
+        &text("|screened|c=0/0|todo=0/verified"),
+    );
+    assert_eq!(
+        count_lines(&evo_lines, "[TOOL SETTLED]"),
+        1,
+        "{evo_lines:#?}"
+    );
+    assert_eq!(
+        count_lines(&evo_lines, "[SESSIONS ARCHIVED]"),
+        1,
+        "{evo_lines:#?}"
+    );
+    game.assert_kv("settlement.sessions.remaining", json!(0));
+    game.assert_kv("settlement.sessions.moved", json!(2));
+    game.assert_kv(
+        "settlement.sessions.destination",
+        json!("/tmp/sessions-trash/default"),
+    );
+    game.assert_kv("tool.settled_count", json!(4));
+
+    let closed = game.click("review.note — ");
+    assert!(
+        closed["narrative"].to_string().contains("[ENDING"),
+        "review.note must close the run after inline session archiving: {closed}"
     );
 }

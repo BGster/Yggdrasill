@@ -29,8 +29,8 @@ local P_ACCEPTED, P_PENDING, P_REJECTED, P_STALE, apply_changes, prop_append, pr
   props.P_ACCEPTED, props.P_PENDING, props.P_REJECTED, props.P_STALE, props.apply_changes, props.prop_append, props.prop_by_ext, props.prop_count, props.prop_id, props.prop_key, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
 local render =
   render_mod.receipt
-local R_ANALYZING, R_DEVELOPING, R_DRAFT, R_PLANNING, STAGE, req_advance_after_accept, req_gate, req_id, req_index_of, req_key, req_phase_name, req_plan_flag, req_push_history, req_release, req_rev, req_status, req_sync_conflicts, stage =
-  reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DRAFT, reqs.R_PLANNING, reqs.STAGE, reqs.req_advance_after_accept, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase_name, reqs.req_plan_flag, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
+local R_ANALYZING, R_DEVELOPING, R_DRAFT, R_PLANNING, STAGE, req_advance_after_accept, req_gate, req_id, req_index_of, req_key, req_lane, req_phase_name, req_plan_flag, req_push_history, req_release, req_rev, req_status, req_sync_conflicts, stage =
+  reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DRAFT, reqs.R_PLANNING, reqs.STAGE, reqs.req_advance_after_accept, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_lane, reqs.req_phase_name, reqs.req_plan_flag, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
 local cut, contains, fill, trim =
   util.cut, util.contains, util.fill, util.trim
 local parse_proposal =
@@ -171,6 +171,12 @@ function M.install(deps)
     end
     -- 重定基：旧提案已作废（stale / 被拒），清掉需求的 stale 标记（本次提案重新起算）。
     ygg.kv.set(req_key(index, "stale"), false)
+    if spec.stage == "development" then
+      local lane_idx = req_lane(index)
+      if lane_idx > 0 then
+        tools.auto_probe_lane(lane_idx)
+      end
+    end
     local summarize = spec.summary
     if summarize == "" then
       summarize = TEXTS.beats.req_prop_no_summary

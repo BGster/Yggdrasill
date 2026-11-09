@@ -515,6 +515,7 @@ RENDER[STAGE.done] = function()
 end
 
 local flushing = false
+local summary_jobs
 
 local function render()
   -- 响应式收敛（唯一入口）：所有 useEffect（唯一后继自动推进）必须在产出 choice **之前**
@@ -524,6 +525,18 @@ local function render()
     flushing = true
     hooks.flush_effects()
     flushing = false
+  end
+  local jobs_now = summary_jobs()
+  if #jobs_now > 0 then
+    local actions_now = {}
+    for i = 1, #jobs_now do
+      if jobs_now[i].subagentAction ~= nil then
+        actions_now[#actions_now + 1] = jobs_now[i].subagentAction
+      end
+    end
+    if #actions_now > 0 then
+      ygg.meta("harness_actions", actions_now)
+    end
   end
   local current = stage()
   -- 二级页不跨阶段存活：阶段一变就清空（子页是当前处境的入口，不是全局抽屉）。
@@ -586,26 +599,72 @@ end
 -- 以及**账本里绑定的执行者**：`executor` = 当前阶段的 agent id，`planExecutor` = plan 阶段的
 -- agent id（未绑定 = ""）。两者都剥掉 `|<原因>` 后缀——调度端只认 id，不解析原因；
 -- 本字段只是自声明账本的镜像，不构成身份凭据。
-local function summary_jobs()
+summary_jobs = function()
   local out = {}
   for i = 1, req_count() do
     local job = req_job(i)
     if SUMMARY_JOB_STAGES[job] == true then
       local lane = req_lane(i)
       local id = req_id(i)
+      local rev = summary_int(req_rev(i))
+      local branch = lane > 0 and text_of("lane." .. tostring(lane) .. ".branch", "") or ""
+      local base = lane > 0 and text_of("lane." .. tostring(lane) .. ".base", "") or ""
+      local worktree_path = lane > 0 and text_of("lane." .. tostring(lane) .. ".path", "") or ""
+      local exec_id = wire.executor_id_of(executor_raw(id, job))
+      local plan_exec_id = wire.executor_id_of(executor_raw(id, "plan"))
+      local resume_id = ""
+      if exec_id ~= "" then
+        resume_id = exec_id
+      elseif job == "development" and plan_exec_id ~= "" then
+        resume_id = plan_exec_id
+      end
+      local title = req_title(i)
+      local desc = text_of(req_key(i, "description"), "")
+      local artifact_path = "artifacts/" .. id .. "-" .. job .. ".md"
+      local submit_command = ".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"" .. id .. "|" .. tostring(rev) .. "|" .. job .. "|<summary>|" .. artifact_path .. "||exec=<agent_id>\"'"
+      local brief = "Requirement " .. id .. " (rev " .. tostring(rev) .. ", stage=" .. job .. "): " .. title
+        .. "\nDescription: " .. desc
+        .. "\nWorktree: " .. (worktree_path ~= "" and worktree_path or ".")
+        .. " (branch=" .. (branch ~= "" and branch or "-") .. ", base=" .. (base ~= "" and base or "-") .. ")"
+        .. "\nArtifact: " .. artifact_path
+        .. "\nSubmit: " .. submit_command
+      local delta_prompt = ""
+      if resume_id ~= "" then
+        delta_prompt = "Resume " .. id .. " (rev " .. tostring(rev) .. ") for stage `" .. job .. "` in worktree `" .. (worktree_path ~= "" and worktree_path or ".") .. "`; write `" .. artifact_path .. "` and submit."
+      end
+      local full_fallback_brief = brief
+      if resume_id ~= "" then
+        full_fallback_brief = brief .. "\nResume context: prior executor `" .. resume_id .. "`."
+      end
+      local subagent_action = {
+        action = (resume_id ~= "") and "subagent.resume" or "subagent.spawn",
+        reqId = id,
+        rev = rev,
+        stage = job,
+        lane = summary_int(lane),
+        resumeAgentId = resume_id,
+        worktreePath = worktree_path,
+        artifactPath = artifact_path,
+        brief = brief,
+        deltaPrompt = delta_prompt,
+        fullFallbackBrief = full_fallback_brief,
+        submitCommand = submit_command,
+      }
       out[#out + 1] = {
         id = id,
-        rev = summary_int(req_rev(i)),
+        rev = rev,
         stage = job,
         status = req_status(i),
         phase = req_phase_name(i),
         lane = summary_int(lane),
-        branch = lane > 0 and text_of("lane." .. tostring(lane) .. ".branch", "") or "",
-        base = lane > 0 and text_of("lane." .. tostring(lane) .. ".base", "") or "",
-        executor = wire.executor_id_of(executor_raw(id, job)),
-        planExecutor = wire.executor_id_of(executor_raw(id, "plan")),
-        title = req_title(i),
-        description = text_of(req_key(i, "description"), ""),
+        branch = branch,
+        base = base,
+        worktreePath = worktree_path,
+        executor = exec_id,
+        planExecutor = plan_exec_id,
+        title = title,
+        description = desc,
+        subagentAction = subagent_action,
       }
     end
   end
