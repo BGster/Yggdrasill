@@ -53,6 +53,7 @@ import {
   COMMIT_NUDGE_TEXT,
   ensureBriefVerificationAndFooter,
   extractAgentId,
+  isResumableAgentId,
   laneProbeNeedsCommit,
   orchestrateActiveJobs,
   parseLaneProbeNarrative,
@@ -233,6 +234,30 @@ describe("buildSubagentBrief", () => {
     assert.match(brief, /只读/);
     assert.match(brief, /不写实现代码/);
     assert.match(brief, /cargo test --workspace/, "缺省验证门禁要落进 brief");
+  });
+
+  it("buildSubagentBrief 与 ensureBriefVerificationAndFooter 包含必读文档 docs/CONTEXT.md 与 docs/DESIGN.md", () => {
+    const brief = buildSubagentBrief(
+      developmentJob,
+      "/tmp/ygg-worktrees/repo-lane-2",
+      "artifacts/r2-development.md",
+      "/tmp/repo",
+      { lane: 2, branch: "feature/r2-x", base: "abc123" },
+    );
+    assert.match(brief, /### 必读领域与架构文档（Mandatory References）/);
+    assert.match(brief, /docs\/CONTEXT\.md/);
+    assert.match(brief, /docs\/DESIGN\.md/);
+
+    const augmented = ensureBriefVerificationAndFooter(
+      "# Core Brief\nMinimal instructions.",
+      "artifacts/r2-development.md",
+      ["cargo test --workspace"],
+      { worktreePath: "/tmp/ygg-worktrees/repo-lane-2", cwd: "/tmp/repo" },
+    );
+    assert.match(augmented, /\/tmp\/ygg-worktrees\/repo-lane-2/);
+    assert.match(augmented, /### 必读领域与架构文档（Mandatory References）/);
+    assert.match(augmented, /docs\/CONTEXT\.md/);
+    assert.match(augmented, /docs\/DESIGN\.md/);
   });
 });
 
@@ -733,6 +758,62 @@ rl.on("line", (line) => {
     assert.equal(summary.available, false);
     assert.match(summary.degraded ?? "", /单发降级/);
     await broken.closeAll();
+  });
+
+  it("磁盘上二进制文件的 mtimeMs / size 变化时在下一次请求前自动重启 daemon 子进程", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "ygg-hotreload-test-"));
+    dirs.push(dir);
+    const script = path.join(dir, "fake-daemon-pid.cjs");
+    const binFile = path.join(dir, "fake-ygg-agent.bin");
+    writeFileSync(binFile, "v1-binary-bytes", "utf8");
+    writeFileSync(
+      script,
+      `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+function reply(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.op === "ping") { reply({ id: msg.id, ok: true, op: "ping", pid: process.pid }); return; }
+  if (msg.op === "shutdown") { reply({ id: msg.id, ok: true, op: "shutdown" }); process.exit(0); }
+  if (msg.op === "dispatch") {
+    reply({ id: msg.id, ok: true, op: "dispatch", narrative: ["pid=" + process.pid], pendingChoice: null, tools: [] });
+    return;
+  }
+  reply({ id: msg.id, ok: true });
+});
+`,
+      "utf8",
+    );
+    const daemon = new YggDaemon({
+      cwd: dir,
+      runId: "hotreload-run",
+      runsRoot: path.join(dir, ".ygg", "runs"),
+      modDir: path.join(dir, ".ygg", "mods", "pi-agent-seed"),
+      agentBin: binFile,
+      spawnBin: process.execPath,
+      spawnArgs: [script],
+      requestTimeoutMs: 5_000,
+    });
+    try {
+      await daemon.start();
+      const first = await daemon.dispatch("step.one");
+      const firstPid = first.narrative[0];
+      assert.match(firstPid, /^pid=\d+$/);
+
+      // 未改二进制：复用同一个 daemon 进程（PID 不变）
+      const same = await daemon.dispatch("step.two");
+      assert.equal(same.narrative[0], firstPid);
+
+      // 覆盖二进制（改变 size 与 mtimeMs）：下一次请求自动重启子进程（PID 变化）
+      writeFileSync(binFile, "v2-binary-bytes-rebuilt-longer-payload", "utf8");
+      const afterReload = await daemon.dispatch("step.three");
+      const secondPid = afterReload.narrative[0];
+      assert.match(secondPid, /^pid=\d+$/);
+      assert.notEqual(secondPid, firstPid, "二进制变更后应自动 respawn 新的子进程");
+    } finally {
+      await daemon.closeAll();
+    }
   });
 });
 
@@ -1610,6 +1691,96 @@ describe("thin execution shell over core subagentAction & inline tools", () => {
       daemon.calls.some((call) => call.event === "proposal.submit"),
       true,
     );
+  });
+
+  it("isResumableAgentId 与 resolveResumeId 拒绝占位执行者（pi-ygg-harness / unregistered / main / 自定义 actorId），绝不把占位名传给 executeSubagent", async () => {
+    assert.equal(isResumableAgentId(undefined), false);
+    assert.equal(isResumableAgentId(""), false);
+    assert.equal(isResumableAgentId("   "), false);
+    assert.equal(isResumableAgentId("unregistered"), false);
+    assert.equal(isResumableAgentId("pi-ygg-harness"), false);
+    assert.equal(isResumableAgentId("main"), false);
+    assert.equal(isResumableAgentId("custom-actor", "custom-actor"), false);
+    assert.equal(isResumableAgentId("agent-real-42", "custom-actor"), true);
+
+    const placeholderJob = jobRow({
+      id: "r2",
+      stage: "development",
+      rev: 2,
+      lane: 2,
+      branch: "feature/r2-dev",
+      base: "e768d4a",
+      worktreePath: "/tmp/ygg-worktrees/repo-lane-2",
+      executor: "pi-ygg-harness",
+      planExecutor: "unregistered",
+      subagentAction: {
+        action: "subagent.resume",
+        reqId: "r2",
+        rev: 2,
+        stage: "development",
+        lane: 2,
+        resumeAgentId: "pi-ygg-harness",
+        worktreePath: "/tmp/ygg-worktrees/repo-lane-2",
+      },
+    });
+    assert.equal(resolveResumeId(placeholderJob, { resumePlanAgent: true }), "");
+    assert.equal(
+      resolveResumeId(
+        jobRow({ id: "r2", stage: "development", executor: "custom-actor" }),
+        { actorId: "custom-actor" },
+      ),
+      "",
+    );
+    assert.match(resumeReason(placeholderJob, true), /新起一个/);
+
+    const daemon = new MockDaemon([placeholderJob]);
+    const seen: SubagentRequest[] = [];
+    await orchestrateActiveJobs(
+      daemon,
+      async (req) => {
+        seen.push(req);
+        return { text: "fresh spawn succeeded", ok: true, agentId: "agent-fresh-99" };
+      },
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        resumePlanAgent: true,
+        readArtifact: () => null,
+        readLaneProbe: () => UNKNOWN_LANE_PROBE,
+      },
+    );
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].resume, undefined, "占位执行者 ID 绝不能作为 resume 传给 executeSubagent");
+  });
+
+  it("parseSummary 解析 SummaryJob 上的 worktreeStatus、subagentStatus 与 probeStatus", () => {
+    const summary = parseSummary({
+      stage: "coordinate",
+      jobs: [
+        {
+          id: "r2",
+          rev: 1,
+          stage: "development",
+          status: "developing",
+          phase: "developing",
+          lane: 2,
+          branch: "feature/r2",
+          base: "e768d4a",
+          title: "Live status",
+          description: "Test live status fields",
+          worktreePath: "/tmp/ygg-worktrees/repo-lane-2",
+          worktreeStatus: "已绑定 /tmp/ygg-worktrees/repo-lane-2",
+          subagentStatus: "已派发 agent-42",
+          probeStatus: "commits=1 clean=1",
+        },
+      ],
+      gates: [],
+    });
+    assert.equal(summary.available, true);
+    assert.equal(summary.jobs.length, 1);
+    assert.equal(summary.jobs[0].worktreeStatus, "已绑定 /tmp/ygg-worktrees/repo-lane-2");
+    assert.equal(summary.jobs[0].subagentStatus, "已派发 agent-42");
+    assert.equal(summary.jobs[0].probeStatus, "commits=1 clean=1");
   });
 });
 

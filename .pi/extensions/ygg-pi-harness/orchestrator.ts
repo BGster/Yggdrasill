@@ -153,6 +153,12 @@ export interface OrchestrationJobResult {
   receipts: { label: string; receipt: StepReceipt }[];
   /** 作业结束时应到的门（plan → `plan`，development → `accept`）。 */
   expectedGate: string;
+  /** 本次实际执行/续跑的 subagent ID（若可识别）。 */
+  agentId?: string;
+  /** worktree / subagent / probe 进度摘要。 */
+  worktreeStatus?: string;
+  subagentStatus?: string;
+  probeStatus?: string;
   error?: string;
 }
 
@@ -358,30 +364,61 @@ export function extractAgentId(text: string, details?: unknown): string | undefi
 }
 
 /**
+ * 判断候选 agent ID 是否是可传给 `Agent(resume=...)` 的**真实** subagent 会话 ID。
+ *
+ * 同步或兜底路径写进账本的占位值（`"unregistered"` / `"pi-ygg-harness"` / `"main"` /
+ * 调用方自定义的 `fallbackActorId`）并不是可续跑的 subagent 会话，若直接传给 `resume`
+ * 会导致 `Agent not found: "pi-ygg-harness"`。
+ */
+export function isResumableAgentId(
+  id: string | undefined,
+  fallbackActorId?: string,
+): boolean {
+  if (!id) {
+    return false;
+  }
+  const trimmed = id.trim();
+  if (
+    trimmed === "" ||
+    trimmed === "unregistered" ||
+    trimmed === DEFAULT_ACTOR_ID ||
+    trimmed === "main"
+  ) {
+    return false;
+  }
+  if (fallbackActorId !== undefined && trimmed === fallbackActorId.trim()) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * 该不该 `resume` 一个既有 subagent，答案是「续谁」。
  *
- * - `job.executor` 非空 → 同一阶段重派（`gate.reject` 后 rev+1）：续原执行者，
- *   它记得上一次为什么被打回；
+ * - `job.executor` 非空且通过 {@link isResumableAgentId} → 同一阶段重派（`gate.reject` 后 rev+1）：
+ *   续原执行者，它记得上一次为什么被打回；
  * - 否则 `plan` → `development` 时显式允许（`resumePlanAgent`）且 `planExecutor`
- *   在账上 → 续方案执行者（方案是它写的，实现时不必重新推导）。
- * - 否则 `""`（新起一个）。
+ *   为真实可续跑 ID → 续方案执行者（方案是它写的，实现时不必重新推导）；
+ * - 否则若 `job.subagentAction?.resumeAgentId` 为真实可续跑 ID → 续该执行者；
+ * - 否则 `""`（新起一个，绝不把 `"pi-ygg-harness"` 等兜底名传给 `resume`）。
  */
 export function resolveResumeId(
   job: SummaryJob,
-  options: { resumePlanAgent?: boolean } = {},
+  options: { resumePlanAgent?: boolean; actorId?: string } = {},
 ): string {
+  const actorId = options.actorId;
   const executor = (job.executor ?? "").trim();
-  if (executor !== "") {
+  if (isResumableAgentId(executor, actorId)) {
     return executor;
   }
   if (options.resumePlanAgent === true && job.stage === "development") {
     const planExecutor = (job.planExecutor ?? "").trim();
-    if (planExecutor !== "") {
+    if (isResumableAgentId(planExecutor, actorId)) {
       return planExecutor;
     }
   }
   const coreResume = (job.subagentAction?.resumeAgentId ?? "").trim();
-  if (coreResume !== "") {
+  if (isResumableAgentId(coreResume, actorId)) {
     return coreResume;
   }
   return "";
@@ -401,15 +438,23 @@ export function actorForLedger(agentId: string | undefined, fallback: string): s
 }
 
 /** 续跑理由（写进回执；「为什么续」比「续了」更有诊断价值）。 */
-export function resumeReason(job: SummaryJob, resumePlanAgent: boolean): string {
+export function resumeReason(
+  job: SummaryJob,
+  resumePlanAgent: boolean,
+  actorId?: string,
+): string {
   const executor = (job.executor ?? "").trim();
-  if (executor !== "") {
+  if (isResumableAgentId(executor, actorId)) {
     return `同阶段重派（rev ${job.rev}），续原执行者`;
   }
-  if (resumePlanAgent && job.stage === "development" && (job.planExecutor ?? "").trim() !== "") {
+  if (
+    resumePlanAgent &&
+    job.stage === "development" &&
+    isResumableAgentId(job.planExecutor, actorId)
+  ) {
     return "plan → development 跨阶段续跑";
   }
-  if ((job.subagentAction?.resumeAgentId ?? "").trim() !== "") {
+  if (isResumableAgentId(job.subagentAction?.resumeAgentId, actorId)) {
     return `Core subagentAction 指定续跑（rev ${job.rev}）`;
   }
   return "新起一个 subagent";
@@ -610,6 +655,8 @@ export function buildSubagentBrief(
   lines.push("3. 不得改写既有测试断言来「让它通过」；不得删别人的代码来消错。");
   lines.push("4. 不得操作 git 历史（no rebase / no force-push / no branch -D），不碰 `main` / `master`。");
   lines.push("");
+  lines.push(...buildMandatoryReferencesSection(workspace));
+  lines.push("");
   lines.push("## 4. 本阶段要求");
   for (const rule of STAGE_RULES[stage] ?? STAGE_RULES.plan) {
     lines.push(`- ${rule}`);
@@ -668,6 +715,16 @@ export function buildResumeDeltaPrompt(
   return lines.join("\n");
 }
 
+function buildMandatoryReferencesSection(workspace: string): string[] {
+  const contextDoc = workspace !== "" ? path.join(workspace, "docs/CONTEXT.md") : "docs/CONTEXT.md";
+  const designDoc = workspace !== "" ? path.join(workspace, "docs/DESIGN.md") : "docs/DESIGN.md";
+  return [
+    "### 必读领域与架构文档（Mandatory References）",
+    `- 提案或写代码前必须先读 \`docs/CONTEXT.md\`（领域知识、核心概念与不变量，路径：\`${contextDoc}\`）。`,
+    `- 提案或写代码前必须先读 \`docs/DESIGN.md\`（架构设计、模块边界与接口契约，路径：\`${designDoc}\`）。`,
+  ];
+}
+
 function buildBriefFooter(artifactPath: string, verification: readonly string[]): string[] {
   const lines: string[] = ["## 验证门禁（必须真跑，贴输出摘要）"];
   for (const command of verification) {
@@ -686,21 +743,37 @@ function buildBriefFooter(artifactPath: string, verification: readonly string[])
 }
 
 /**
- * 若 Core 产出的 `brief` / `deltaPrompt` 尚未包含验证门禁或返回格式尾注，按需补齐，
+ * 若 Core 产出的 `brief` / `deltaPrompt` 尚未包含工作区边界、必读文档、验证门禁或返回格式尾注，按需补齐，
  * 保证 [`parseSubagentOutput`] 与制品归档在薄壳模式下同样稳健。
  */
 export function ensureBriefVerificationAndFooter(
   corePrompt: string,
   artifactPath: string,
   verification: readonly string[],
+  options: { worktreePath?: string | null; cwd?: string } = {},
 ): string {
   const trimmed = corePrompt.trim();
+  const worktreePath = (options.worktreePath ?? "").trim();
+  const workspace = worktreePath !== "" ? worktreePath : (options.cwd ?? "").trim();
+  const missingWorktree = worktreePath !== "" && !trimmed.includes(worktreePath);
+  const missingRefs =
+    !trimmed.includes("docs/CONTEXT.md") || !trimmed.includes("docs/DESIGN.md");
   const missingCommands = verification.filter((cmd) => cmd.trim() !== "" && !trimmed.includes(cmd));
   const hasFooter = trimmed.includes(artifactPath) && (trimmed.includes("返回格式") || trimmed.includes("Return Format"));
-  if (missingCommands.length === 0 && hasFooter) {
+  if (!missingWorktree && !missingRefs && missingCommands.length === 0 && hasFooter) {
     return corePrompt;
   }
-  return [trimmed, "", ...buildBriefFooter(artifactPath, verification)].join("\n");
+  const sections: string[] = [trimmed];
+  if (missingWorktree) {
+    sections.push("", "## 工作区（硬边界）", `- **只在这个目录里工作**：\`${worktreePath}\``);
+  }
+  if (missingRefs) {
+    sections.push("", ...buildMandatoryReferencesSection(workspace));
+  }
+  if (missingCommands.length > 0 || !hasFooter) {
+    sections.push("", ...buildBriefFooter(artifactPath, verification));
+  }
+  return sections.join("\n");
 }
 
 /** 解析 subagent 输出为提案一行摘要与完整报告正文。 */
@@ -938,12 +1011,15 @@ export async function orchestrateActiveJobs(
     }
 
     const artifactPath = artifactPathFor(job, artifactPrefix);
-    const resumeId = resolveResumeId(job, { resumePlanAgent });
-    const isResume = resumeId !== "" || job.subagentAction?.action === "subagent.resume";
+    const resumeId = resolveResumeId(job, { resumePlanAgent, actorId });
+    const isResume = resumeId !== "";
     const corePrompt = selectCoreSubagentPrompt(job, isResume, preferCoreBrief);
     const brief =
       corePrompt !== ""
-        ? ensureBriefVerificationAndFooter(corePrompt, artifactPath, verification)
+        ? ensureBriefVerificationAndFooter(corePrompt, artifactPath, verification, {
+            worktreePath,
+            cwd,
+          })
         : buildSubagentBrief(job, worktreePath, artifactPath, cwd, {
             verification,
             lane,
@@ -976,15 +1052,21 @@ export async function orchestrateActiveJobs(
         ...(opts.model === undefined ? {} : { model: opts.model }),
         ...(opts.thinking === undefined ? {} : { thinking: opts.thinking }),
       };
-      const resumeId = resolveResumeId(item.job, { resumePlanAgent });
+      const resumeId = resolveResumeId(item.job, { resumePlanAgent, actorId });
       if (resumeId !== "") {
         request.resume = resumeId;
       }
+      logWith(
+        logger,
+        `[subagent] ${item.job.id} ${item.job.stage} → ${
+          resumeId !== "" ? `续跑 ${resumeId}` : "新派发"
+        }` + (item.worktreePath !== null ? ` (worktree=${item.worktreePath})` : ""),
+      );
       const attempt = await runSubagent(executeSubagent, request, maxSelfHealRetries);
       const notes: string[] = [];
       if (resumeId !== "") {
         notes.push(
-          `[RESUME] ${item.job.id} ${item.job.stage}：${resumeReason(item.job, resumePlanAgent)}` +
+          `[RESUME] ${item.job.id} ${item.job.stage}：${resumeReason(item.job, resumePlanAgent, actorId)}` +
             `（resume=${resumeId}）`,
         );
       }
@@ -1079,8 +1161,7 @@ export async function orchestrateActiveJobs(
       // `commits=0` / `clean=0`；续跑**同一个** subagent 要求补提交，再复跑探针。
       if (
         laneProbeNeedsCommit(verdict) &&
-        output.agentId !== undefined &&
-        output.agentId !== "" &&
+        isResumableAgentId(output.agentId, actorId) &&
         selfHealBudget > 0
       ) {
         selfHealBudget -= 1;
@@ -1157,6 +1238,19 @@ export async function orchestrateActiveJobs(
       }
     }
 
+    const wtStatus =
+      item.job.worktreeStatus ??
+      (item.worktreePath !== null && item.worktreePath !== ""
+        ? item.worktreePath
+        : item.job.stage === "development"
+          ? "待创建"
+          : "主工作区(只读)");
+    const usedAgentId = isResumableAgentId(output.agentId, actorId)
+      ? output.agentId
+      : resolveResumeId(item.job, { resumePlanAgent, actorId }) || undefined;
+    const subStatus =
+      item.job.subagentStatus ??
+      (usedAgentId !== undefined ? `已派发 ${usedAgentId}` : "待派发");
     const jobResult: OrchestrationJobResult = {
       id: item.job.id,
       stage: item.job.stage,
@@ -1171,6 +1265,10 @@ export async function orchestrateActiveJobs(
       archived,
       receipts,
       expectedGate: item.expectedGate,
+      ...(usedAgentId !== undefined ? { agentId: usedAgentId } : {}),
+      worktreeStatus: wtStatus,
+      subagentStatus: subStatus,
+      ...(item.job.probeStatus !== undefined ? { probeStatus: item.job.probeStatus } : {}),
     };
     if (error !== undefined) {
       jobResult.error = error;
@@ -1294,7 +1392,7 @@ async function runSubagent(
   let retries = 0;
   while (attempt.ok === false && retries < Math.max(0, Math.trunc(limit))) {
     const resume = attempt.agentId ?? request.resume;
-    if (resume === undefined || resume === "") {
+    if (!isResumableAgentId(resume)) {
       break;
     }
     retries += 1;
