@@ -1,148 +1,166 @@
-# Yggdrasill · Domain Context, Vision, Decisions & Core Principles (`docs/CONTEXT.md`)
+# Yggdrasill · 领域语境、愿景、决策与核心原则（`docs/CONTEXT.md`）
 
-> **Positioning**: `docs/CONTEXT.md` is the canonical **Domain Knowledge, Vision, Principles, and Architectural Decision Ledger** of the Yggdrasill repository. Together with [`docs/DESIGN.md`](DESIGN.md) (which specifies Product Form, System Behavior, and Interface Contracts), these two living documents replace all legacy fragmented documentation under `docs/`. Every planning (`plan`) and implementation (`development`) task must consult `docs/CONTEXT.md` and `docs/DESIGN.md` before proposing or modifying code, and any architectural or contract change must update them in the same iteration before final `review` settlement.
-
----
-
-## 1. Product Vision & Dual Identity
-
-Yggdrasill is designed around a unified thesis: **a deterministic, data-driven rule kernel where Lua scripts and schema-validated JSON resources define playable worlds, and AI acts as both content creator and autonomous player**.
-
-This architecture serves two complementary product identities on the exact same kernel:
-
-### 1.1 Game & Interactive Fiction Platform ("Minecraft + AI Modder")
-- **Core Value**: A pure functional state transition engine `(state, event) -> state'` capable of powering text adventures first and scaling into full tactical/narrative RPGs without rewriting the kernel (text adventure = RPG minus combat/map/growth subsystems).
-- **Infinite Content Supply**: Traditional UGC platforms are bottlenecked by human modding effort. Yggdrasill pairs a small, orthogonal Mod contract (Lua 5.4 logic + JSON Schema data) with an AI generation and verification pipeline (`ygg-lint` + `playtest`) so a natural-language premise can be compiled into an immediately playable Mod.
-- **Write Once, Run Everywhere**: Built in Rust with zero rendering or platform I/O dependencies, the same kernel compiles to WebAssembly (`ygg-wasm` for browsers), links natively into Godot (`gdext`), and runs natively on authoritative servers (for multiplayer lockstep replay or WeChat Mini-Game client-server architectures).
-
-### 1.2 Agent Workflow Harness ("Workflow as a Game, Harness as the Kernel")
-- **Core Value**: Software engineering multi-agent coordination is modeled as a playable Mod (`pi-agent-seed`). Instead of relying on fragile static prompt instructions that decay over long context windows, the Agent interacts with the workflow state machine step-by-step via event envelopes.
-- **Situational Affordances**: Every dispatch returns a full narrative receipt describing the current state, active lanes, pending proposals, and an explicit `pendingChoice` action whitelist. Protocol constraints replace prompt-only discipline.
-- **Two-Layer Coordination**: A main Coordinator Agent decomposes requirements, dispatches parallel Executor Subagents into isolated persistent Git worktree lanes, serially reviews proposals, passes two mandatory human/coordinator gates (`plan_gate` and `accept_gate`), and settles each run with structured roguelike self-evolution review.
+> **定位**：`docs/CONTEXT.md` 是 Yggdrasill 仓库的**领域知识、愿景、原则与架构决策台账（Architectural Decision Ledger）**权威文档。它与 [`docs/DESIGN.md`](DESIGN.md)（负责规定产品形态、系统行为与接口契约）共同取代了 `docs/` 下所有遗留的碎片化文档。每一次规划（`plan`）与实现（`development`）任务，都必须在提议或修改代码之前先查阅 `docs/CONTEXT.md` 与 `docs/DESIGN.md`；任何架构或契约变更都必须在同一次迭代中同步更新这两份文档，之后才能进入最终 `review` 结算。
 
 ---
 
-## 2. Core Domain Vocabulary
+## 术语速览（Glossary）
 
-| Term | Domain Definition |
+高频术语的中英对照速览，完整定义见 [§2 核心领域词汇](#2-核心领域词汇)：
+
+| 术语 | 中文释义 |
 | --- | --- |
-| **Run** | A single isolated execution instance identified by `run_id` under `.ygg/runs/<run_id>/`, persisted in a single SQLite database (`run.sqlite`) containing the event log, state snapshots, inbox queue, and virtual filesystem artifacts. |
-| **Coordinator Stage (`stage`)** | The macro lifecycle of a Run: `intake` (task injection & requirement filing) $\to$ `coordinate` (dispatching lanes, accepting proposals, passing gates) $\to$ `review` (verification suite, evolution screening, session/todo cleanup) $\to$ `done` (terminal settled state). |
-| **Requirement (`r1..rN`)** | A unit of delivery tracked by the state machine. Stored as 5 canonical states (`draft`, `planning`, `developing`, `done`, plus terminal bypass states `split` / `merged` / `dropped`) and projected into fine-grained display phases (`draft`, `planning`, `plan_review`, `plan_gate`, `ready`, `developing`, `dev_review`, `accept`, `done`, `blocked`) via `plan_ok`, `job`, `gate`, and `conflict` attributes. |
-| **Persistent Lane Pool (`lane-1..4`)** | A bounded pool of up to 4 reusable Git worktrees (`~/tmp/worktrees/<repo>-lane-<k>`). Claiming a lane resets its branch to `HEAD` without deleting untracked build caches (`target/`, `node_modules/`), and releasing a lane parks it on a detached `HEAD` so branches are never locked. |
-| **Proposal (`p1..pM`)** | An immutable delivery submission (`proposal.submit`) produced by an Executor Subagent for a specific `(req_id, rev, stage)` tuple, referencing an in-archive VFS artifact (`artifacts/<req>-<stage>.md`) and binding the executor identity (`exec=<agent_id>`). Proposals do not mutate requirement state until the Coordinator serially runs `proposal.accept` or `proposal.reject`. |
-| **Mandatory Gates (`plan_gate`, `accept_gate`)** | Two non-skippable quality checkpoints per requirement. `plan_gate` approves a technical plan (`planning` $\to$ `ready`) and reactively auto-dispatches development. `accept_gate` requires non-empty artifact evidence (`artifacts`) and matching revision (`gate_rev == req.rev`) before marking a requirement `done` and releasing its lane. |
-| **Executor Ledger (`executor.<rN>.<stage>`)** | A self-declared audit trail recording which subagent ID executed each stage (`analysis`, `plan`, `development`) of a requirement. Cross-stage handoffs or same-stage replacements to a different executor ID require an explicit reason (`<new_id>\|<reason>`). Placeholder IDs (`pi-ygg-harness`, `main`, `default`, `unregistered`) are filtered out of resume decisions. |
-| **In-Archive VFS (`artifacts/*`)** | A virtual filesystem table (`vfs_files`) inside `run.sqlite` exposed to the Lua sandbox via `ygg.fs.*` and to external tools via `vfs.write` / JSON-RPC `vfs_put`. Stores plans, development reports, evolution reviews, and compaction handoffs with SHA-256 integrity. |
-| **Synchronous Tool Bridge (`ygg.tool.call`)** | An opt-in host capability allowing the Mod to invoke allowlisted deterministic host rituals (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`, `fs.artifact_probe`, `gate.verify_suite`, `harness.archive_sessions`) synchronously within the same dispatch turn, eliminating multi-turn async callback round-trips. |
-| **HarnessAction (`subagentAction`)** | A structured machine-readable directive emitted by the Mod inside `summary.jobs[i].subagentAction` (`subagent.spawn` or `subagent.resume`), carrying the rendered `brief`, `deltaPrompt`, `fullFallbackBrief`, `worktreePath`, `artifactPath`, and `submitCommand` so any upper-layer harness adapter can execute lanes without re-implementing workflow logic. |
-| **Stable Checkpoint** | A quiescent run state (`available == true` $\land$ `pendingTools == 0` $\land$ (`gates > 0` $\lor$ `jobs == 0` $\lor$ `conflicts > 0`)) where context compaction and structured handoff (`artifacts/handoff-latest.md`) can occur safely without losing mid-flight subagent output. |
+| `Run` | 运行实例 |
+| `stage`（Coordinator Stage） | 协调者宏观阶段（`intake` → `coordinate` → `review` → `done`） |
+| `Requirement`（`r1..rN`） | 需求（交付单元） |
+| `Lane`（Persistent Lane Pool） | 持久化泳道工作树池 |
+| `Proposal`（`p1..pM`） | 提案（不可变交付提交） |
+| `Gate`（`plan_gate` / `accept_gate`） | 强制门禁 |
+| `Executor Ledger` | 执行者台账 |
+| `HarnessAction`（`subagentAction`） | 治理引擎动作指令 |
+| `Stable Checkpoint` | 稳定检查点 |
 
 ---
 
-## 3. Ten Architectural & Operational Principles
+## 1. 产品愿景与双重身份
 
-1. **P1 · Pure Functional Transition & Transactional Savepoint (`(state, event) -> state'`)**
-   - Every dispatch is an all-or-nothing atomic transition. If a Lua handler errors or exhausts its instruction fuel, all mutations to the entity table and KV store during that dispatch are rolled back completely. In SQLite persistence mode, the event log row and state snapshot are committed in a single database transaction.
-2. **P2 · Zero Hardcoding — Data & Contract Driven (`D11/D15`)**
-   - Business rules, state transitions, narrative templates, and prompt beats belong in Mod scripts (`src/*.lua`) and JSON resources (`data/*.json`), never hardcoded in Rust host code or TypeScript extension code. All prompt templates, subagent briefs, and narrative lines live in `data/scenes.json`.
-3. **P3 · Contract-Driven Generic Host**
-   - The Rust host (`ygg-agent`) and kernel (`ygg-sandbox`) know nothing about specific Mod event names, stage names, or narrative prefixes. Everything is declared in `pack.json` (`agent`, `inboxRoutes`, `tools`, `code`) and `data/config.json` (`drive`, `settlement`, `allowedTools`). Missing or malformed contract fields fail closed at load time with zero fallback defaults.
-4. **P4 · Less is More — One Canonical Path per Mechanism**
-   - Every capability has a single canonical mechanism. Redundant validation blocks, duplicate Mod copies, or overlapping multi-turn async ceremonies are consolidated into single-source helpers and 1-turn inline rituals.
-5. **P5 · Single Source of Truth**
-   - ** schemas**: `packages/schema/schemas/` is the sole authority for JSON Schemas (shared by Rust and TypeScript).
-   - **Mod**: `.ygg/mods/pi-agent-seed` is the single physical Mod directory; `packages/mods/pi-agent-seed` is a relative symlink (`../../.ygg/mods/pi-agent-seed`).
-   - **Run State**: `<run-dir>/run.sqlite` is the single storage file for new runs.
-   - **Documentation**: `docs/CONTEXT.md` and `docs/DESIGN.md` are the only two architectural/design documents under `docs/`.
-6. **P6 · Module Top-Level Purity (`YGG-MOD-EFFECT`)**
-   - In a multi-file Mod, `mod.lua` is the sole assembly entry point. Supporting modules (`src/*.lua`) must only export pure functions and constants at top level; calling side-effectful host APIs (`ygg.on`, `ygg.emit`, `ygg.narrate`, `ygg.choice`, `ygg.kv.set`, `ygg.entity.*`, `ygg.fsm.define`) at module top level is rejected both statically (`ygg-lint`) and at load time (`ygg-sandbox`). This guarantees handler registration order (and therefore dispatch order) is explicitly controlled by `mod.lua`, never by `require` order.
-7. **P7 · Reactive Convergent Effects Before Choice**
-   - Once `ygg.choice` is called, the kernel terminates the current transition and drops any remaining queued internal events. Therefore, all reactive side effects (`hooks.useEffect`, such as `auto_dispatch`, `tools.receipt`, and `tools.reactive`) must flush and converge (`MAX_PASSES = 4`) at the top of `render()` *before* `ygg.choice` is emitted.
-8. **P8 · Opt-In Capability Degradation (Wasm Purity vs Local Host Power)**
-   - The Lua sandbox defaults to strict isolation (no I/O, no clock, deterministic PRNG, instruction fuel cap) so Mods run identically in browser Wasm. Local host capabilities (`ygg.fs` VFS and `ygg.tool.call` synchronous tool runner) are injected via optional host traits; when unmounted, the Mod degrades gracefully without breaking state semantics.
-9. **P9 · Persistent Lane Workspaces Preserving Build Caches**
-   - Parallel subagent lanes reuse persistent worktree directories (`<repo>-lane-1..4`) across requirements and runs. Claiming a lane resets tracked files to `HEAD` while preserving untracked build directories (`target/`, `node_modules/`), avoiding cold-compile penalties while maintaining branch isolation.
-10. **P10 · Data Red Line & Explicit Per-Run Goal Authorization**
-    - **Data Red Line**: Reading, listing, stat-ing, or copying real business data (`*.xlsx`, `*.xls`, `*.csv`, or classified mounts such as `/Volumes/WenshuSpace/**`) is strictly prohibited at both the prompt level and the extension `tool_call` firewall.
-    - **Decision Ownership**: `guide` mode is the default (milestone actions require a human menu index via `ygg.choice_selected`). Switching to `goal` mode at runtime transfers dispatch authority to the main agent, requires a per-run `config.set goal.authorization=<note>` record before `review.note` can close the run, and warns immediately (`[GOAL AUTH PENDING]`) if entered before authorization is registered.
+Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动的规则内核，其中 Lua 脚本与经 Schema 校验的 JSON 资源定义可玩世界，而 AI 同时扮演内容创作者与自主玩家**。
+
+这一架构在完全相同的内核上服务两种互补的产品身份：
+
+### 1.1 游戏与互动小说平台（"Minecraft + AI Modder"）
+- **核心价值**：一个纯函数式状态迁移引擎 `(state, event) -> state'`，既能先驱动文字冒险，也能在无需重写内核的前提下扩展为完整的战术/叙事 RPG（文字冒险 = RPG 减去战斗/地图/成长子系统）。
+- **无限内容供给**：传统 UGC 平台受限于人类 modding 工作量。Yggdrasill 将一个小而正交的 Mod 契约（Lua 5.4 逻辑 + JSON Schema 数据）与 AI 生成与校验流水线（`ygg-lint` + `playtest`）配对，使自然语言前提可被编译为立即可玩的 Mod。
+- **一次编写、处处运行**：内核用 Rust 构建，零渲染、零平台 I/O 依赖；同一内核可编译为 WebAssembly（`ygg-wasm`，用于浏览器）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（用于多人 lockstep 回放或微信小游戏客户端-服务器架构）。
+
+### 1.2 Agent 工作流治理平台（"工作流即游戏，治理内核即引擎"）
+- **核心价值**：软件工程多智能体协调被建模为一个可玩的 Mod（`pi-agent-seed`）。Agent 不再依赖会随长上下文窗口衰减的脆弱静态提示指令，而是通过事件信封（event envelope）逐步与工作流状态机交互。
+- **情境化可供性（Situational Affordances）**：每一次 dispatch 都返回一份完整叙述回执，描述当前状态、活动泳道、待决提案，以及显式的 `pendingChoice` 动作白名单。协议约束取代了纯提示式的纪律。
+- **两层协调**：一个主协调者 Agent 分解需求、将并行的执行者子代理派发进隔离的持久化 Git worktree 泳道、串行审查提案、通过两个强制的人/协调者门禁（`plan_gate` 与 `accept_gate`），并以结构化的 roguelike 式自进化审查结算每一次运行。
 
 ---
 
-## 4. Monorepo Module Topology & Dependency Whitelist
+## 2. 核心领域词汇
+
+| 术语 | 领域定义 |
+| --- | --- |
+| **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。 |
+| **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期：`intake`（任务注入与需求立案）$\to$ `coordinate`（派发泳道、接受提案、通过门禁）$\to$ `review`（验证套件、演进筛选、会话/todo 清理）$\to$ `done`（终态结算状态）。 |
+| **Requirement（`r1..rN`，需求）** | 由状态机跟踪的一个交付单元。以 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split` / `merged` / `dropped`）存储，并通过 `plan_ok`、`job`、`gate`、`conflict` 属性投影为细粒度展示阶段（`draft`、`planning`、`plan_review`、`plan_gate`、`ready`、`developing`、`dev_review`、`accept`、`done`、`blocked`）。 |
+| **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。 |
+| **Proposal（`p1..pM`，提案）** | 由执行者子代理针对特定 `(req_id, rev, stage)` 元组产出的不可变交付提交（`proposal.submit`），引用一个已归档的 VFS 产物（`artifacts/<req>-<stage>.md`）并绑定执行者身份（`exec=<agent_id>`）。提案在协调者串行执行 `proposal.accept` 或 `proposal.reject` 之前不会改变需求状态。 |
+| **Mandatory Gates（`plan_gate`、`accept_gate`，强制门禁）** | 每个需求的两个不可跳过的质量检查点。`plan_gate` 批准技术方案（`planning` $\to$ `ready`）并响应式地自动派发开发。`accept_gate` 要求非空产物证据（`artifacts`）与匹配的修订号（`gate_rev == req.rev`），之后才将需求标记为 `done` 并释放其泳道。 |
+| **Executor Ledger（`executor.<rN>.<stage>`，执行者台账）** | 一条自声明的审计轨迹，记录哪个子代理 ID 执行了某个需求的某个阶段（`analysis`、`plan`、`development`）。跨阶段交接或同一阶段更换为不同执行者 ID 需要显式理由（`<new_id>\|<reason>`）。占位 ID（`pi-ygg-harness`、`main`、`default`、`unregistered`）在恢复决策中被过滤掉。 |
+| **In-Archive VFS（`artifacts/*`，归档内虚拟文件系统）** | `run.sqlite` 内的一张虚拟文件系统表（`vfs_files`），通过 `ygg.fs.*` 暴露给 Lua 沙箱，通过 `vfs.write` / JSON-RPC `vfs_put` 暴露给外部工具。存储方案、开发报告、演进审查与压缩交接，带 SHA-256 完整性。 |
+| **Synchronous Tool Bridge（`ygg.tool.call`，同步工具桥）** | 一个可选加入的宿主能力，允许 Mod 在同一次 dispatch 回合内同步调用白名单内的确定性宿主仪式（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`、`harness.archive_sessions`），消除多回合异步回调往返。 |
+| **HarnessAction（`subagentAction`，治理引擎动作指令）** | Mod 在 `summary.jobs[i].subagentAction` 内发出的一条结构化机器可读指令（`subagent.spawn` 或 `subagent.resume`），携带渲染后的 `brief`、`deltaPrompt`、`fullFallbackBrief`、`worktreePath`、`artifactPath` 与 `submitCommand`，使任何上层治理引擎适配器都能执行泳道而无需重新实现工作流逻辑。 |
+| **Stable Checkpoint（稳定检查点）** | 一个静止的运行状态（`available == true` $\land$ `pendingTools == 0` $\land$（`gates > 0` $\lor$ `jobs == 0` $\lor$ `conflicts > 0`）），在此状态下上下文压缩与结构化交接（`artifacts/handoff-latest.md`）可以安全发生而不丢失在途子代理输出。 |
+
+---
+
+## 3. 十大架构与运营原则
+
+1. **P1 · 纯函数式迁移与事务性存档点（`(state, event) -> state'`）**
+   - 每一次 dispatch 都是一次全有或全无的原子迁移。若某个 Lua 处理器出错或耗尽指令燃料，该次 dispatch 期间对实体表与 KV 存储的全部修改都会被完全回滚。在 SQLite 持久化模式下，事件日志行与状态快照在单个数据库事务中提交。
+2. **P2 · 零硬编码 — 数据与契约驱动（`D11/D15`）**
+   - 业务规则、状态迁移、叙述模板与提示节拍都归属于 Mod 脚本（`src/*.lua`）与 JSON 资源（`data/*.json`），绝不硬编码在 Rust 宿主代码或 TypeScript 扩展代码中。所有提示模板、子代理 brief 与叙述行都存放在 `data/scenes.json`。
+3. **P3 · 契约驱动的通用宿主**
+   - Rust 宿主（`ygg-agent`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
+4. **P4 · 少即是多 — 每个机制一条规范路径**
+   - 每个能力都有唯一的规范机制。冗余的校验块、重复的 Mod 副本、或重叠的多回合异步仪式，都被合并为单源辅助函数与 1 回合内联仪式。
+5. **P5 · 单一事实来源（Single Source of Truth）**
+   - **Schema**：`packages/schema/schemas/` 是 JSON Schema 的唯一权威（由 Rust 与 TypeScript 共享）。
+   - **Mod**：`.ygg/mods/pi-agent-seed` 是唯一的物理 Mod 目录；`packages/mods/pi-agent-seed` 是指向其的相对符号链接（`../../.ygg/mods/pi-agent-seed`）。
+   - **运行状态**：`<run-dir>/run.sqlite` 是新运行的单一存储文件。
+   - **文档**：`docs/CONTEXT.md` 与 `docs/DESIGN.md` 是 `docs/` 下仅有的两份架构/设计文档。
+6. **P6 · 模块顶层纯度（`YGG-MOD-EFFECT`）**
+   - 在多文件 Mod 中，`mod.lua` 是唯一的装配入口。支撑模块（`src/*.lua`）在顶层只能导出纯函数与常量；在模块顶层调用有副作用的宿主 API（`ygg.on`、`ygg.emit`、`ygg.narrate`、`ygg.choice`、`ygg.kv.set`、`ygg.entity.*`、`ygg.fsm.define`）会在静态阶段（`ygg-lint`）与加载阶段（`ygg-sandbox`）被双重拒绝。这保证了处理器注册顺序（进而 dispatch 顺序）由 `mod.lua` 显式控制，而从不取决于 `require` 顺序。
+7. **P7 · 响应式收敛效应先于选择（Choice）**
+   - 一旦调用 `ygg.choice`，内核就终止当前迁移并丢弃任何仍排队的内置事件。因此，所有响应式副作用（`hooks.useEffect`，如 `auto_dispatch`、`tools.receipt`、`tools.reactive`）必须在 `render()` 顶部、在发出 `ygg.choice` 之前先冲刷并收敛（`MAX_PASSES = 4`）。
+8. **P8 · 可选加入的能力降级（Wasm 纯度 vs 本地宿主能力）**
+   - Lua 沙箱默认严格隔离（无 I/O、无时钟、确定性 PRNG、指令燃料上限），使 Mod 在浏览器 Wasm 中运行结果完全一致。本地宿主能力（`ygg.fs` VFS 与 `ygg.tool.call` 同步工具运行器）通过可选的宿主 trait 注入；当未挂载时，Mod 优雅降级而不破坏状态语义。
+9. **P9 · 保留构建缓存的持久化泳道工作区**
+   - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（`<repo>-lane-1..4`）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
+10. **P10 · 数据红线与显式的每运行目标授权**
+    - **数据红线**：读取、列出、stat、或复制真实业务数据（`*.xlsx`、`*.xls`、`*.csv`，或诸如 `/Volumes/WenshuSpace/**` 的涉密挂载）在提示层与扩展 `tool_call` 防火墙层都被严格禁止。
+    - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在 `review.note` 能关闭运行之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。
+
+---
+
+## 4. Monorepo 模块拓扑与依赖白名单
 
 ```text
 Yggdrasill/
 ├── crates/
-│   ├── ygg-core/        # Pure deterministic kernel: Entity table, Event bus, Transition driver (Zero internal deps; serde/serde_json/thiserror only)
-│   ├── ygg-modules/     # Pure multi-file Lua module path resolution & side-effect ban list (Zero deps leaf crate)
-│   ├── ygg-schema/      # Manifest SHA-256 content addressing & JSON Schema validation (Depends only on ygg-core)
-│   ├── ygg-store/       # Run persistence port: SQLite default (run.sqlite + VFS) & legacy JSON backend (Dev-dep of ygg-sandbox examples only)
-│   ├── ygg-sandbox/     # Deterministic Lua 5.4 VM (mlua), Host API whitelist, ygg stdlib, ModBundle loader, ygg-agent host CLI
-│   ├── ygg-lint/        # Static AST linter (full_moon): YGG-R1/R2/R3, YGG-MOD-EFFECT, YGG-PARSE (Depends only on ygg-modules, zero kernel/VM deps)
-│   └── ygg-wasm/        # Browser WebAssembly bindings (wasm-bindgen thin shell over ygg-core + ygg-sandbox)
+│   ├── ygg-core/        # 纯确定性内核：实体表、事件总线、迁移驱动器（零内部依赖；仅 serde/serde_json/thiserror）
+│   ├── ygg-modules/     # 纯多文件 Lua 模块路径解析与副作用禁用清单（零依赖叶 crate）
+│   ├── ygg-schema/      # Manifest SHA-256 内容寻址与 JSON Schema 校验（仅依赖 ygg-core）
+│   ├── ygg-store/       # 运行持久化端口：SQLite 默认（run.sqlite + VFS）与遗留 JSON 后端（仅作为 ygg-sandbox 示例的 dev 依赖）
+│   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、ygg-agent 宿主 CLI
+│   ├── ygg-lint/        # 静态 AST 检查器（full_moon）：YGG-R1/R2/R3、YGG-MOD-EFFECT、YGG-PARSE（仅依赖 ygg-modules，零内核/VM 依赖）
+│   └── ygg-wasm/        # 浏览器 WebAssembly 绑定（wasm-bindgen 薄壳，位于 ygg-core + ygg-sandbox 之上）
 ├── packages/
-│   ├── schema/          # Single source of truth for JSON Schemas (manifest, pack, story, agent-config)
+│   ├── schema/          # JSON Schema 单一事实来源（manifest、pack、story、agent-config）
 │   ├── mods/
-│   │   ├── pi-agent-seed -> ../../.ygg/mods/pi-agent-seed   # Symlink to canonical workflow Mod
-│   │   └── test-adventure/                                  # Reference playable text adventure Mod
-│   ├── client-web/      # React + TypeScript browser player
-│   └── pipeline/        # TypeScript AI Mod generation & verification loop
+│   │   ├── pi-agent-seed -> ../../.ygg/mods/pi-agent-seed   # 指向规范工作流 Mod 的符号链接
+│   │   └── test-adventure/                                  # 参考可玩文字冒险 Mod
+│   ├── client-web/      # React + TypeScript 浏览器播放器
+│   └── pipeline/        # TypeScript AI Mod 生成与校验循环
 ├── clients/
-│   └── godot/           # Godot 4 native gdext client (M2.5)
+│   └── godot/           # Godot 4 原生 gdext 客户端（M2.5）
 ├── .ygg/
-│   └── mods/pi-agent-seed/   # Canonical multi-file Agent Harness Mod (mod.lua, src/*.lua, data/*.json, schemas/)
+│   └── mods/pi-agent-seed/   # 规范多文件 Agent 治理 Mod（mod.lua、src/*.lua、data/*.json、schemas/）
 ├── .pi/
-│   └── extensions/ygg-pi-harness/   # Pi Coding Agent Tier-1 extension adapter (firewall, daemon RPC client, orchestrator, compaction)
+│   └── extensions/ygg-pi-harness/   # Pi Coding Agent Tier-1 扩展适配器（防火墙、daemon RPC 客户端、编排器、压缩）
 └── docs/
-    ├── CONTEXT.md       # Domain knowledge, vision, principles & architectural decisions ledger (this file)
-    └── DESIGN.md        # System architecture, state machine semantics & interface contracts
+    ├── CONTEXT.md       # 领域知识、愿景、原则与架构决策台账（本文件）
+    └── DESIGN.md        # 系统架构、状态机语义与接口契约
 ```
 
-### Hard Dependency Invariants
-- `ygg-core` may only depend on `serde`, `serde_json`, and `thiserror`. No VM, no schema validator, no I/O, and no platform APIs may ever enter `ygg-core`.
-- `ygg-modules` is a zero-dependency leaf crate shared by `ygg-sandbox` and `ygg-lint`.
-- `ygg-lint` must never depend on `ygg-core`, `ygg-schema`, or `ygg-sandbox` (keeping static AST linting fast and free of `mlua` compilation).
-- `ygg-store` (and `rusqlite`) is linked only by the native host CLI (`crates/ygg-sandbox/examples/agent.rs` via `[dev-dependencies]`), ensuring `ygg-wasm` and `ygg-lint` dependency trees stay 100% free of SQLite and filesystem dependencies.
+### 硬性依赖不变量
+- `ygg-core` 只能依赖 `serde`、`serde_json` 与 `thiserror`。任何 VM、Schema 校验器、I/O 或平台 API 都不得进入 `ygg-core`。
+- `ygg-modules` 是被 `ygg-sandbox` 与 `ygg-lint` 共享的零依赖叶 crate。
+- `ygg-lint` 绝不依赖 `ygg-core`、`ygg-schema` 或 `ygg-sandbox`（保证静态 AST 检查快速且免去 `mlua` 编译）。
+- `ygg-store`（及 `rusqlite`）只被原生宿主 CLI（`crates/ygg-sandbox/examples/agent.rs`，经 `[dev-dependencies]`）链接，确保 `ygg-wasm` 与 `ygg-lint` 的依赖树 100% 不含 SQLite 与文件系统依赖。
 
 ---
 
-## 5. Key Architectural Decisions Ledger (`D1–D20` & `M-Agent` Evolution)
+## 5. 关键架构决策台账（`D1–D20` 与 `M-Agent` 演进）
 
-> Any new project-wide architectural decision or revision to an existing decision must be recorded in this table in the same commit that implements it.
+> 任何新的项目级架构决策，或对既有决策的修订，都必须在实现它的同一次提交中记录到本表。
 
-### 5.1 Core Engine & Platform Decisions (`D1–D20`)
+### 5.1 核心引擎与平台决策（`D1–D20`）
 
-| ID | Decision Area | Ruling & Rationale | Status |
+| ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
-| **D1** | Initial Runtime Target | **Web-first**: pure browser playability via `ygg-wasm`, strict separation between presentation and logic; WeChat Mini-Game and Godot as subsequent targets. | Confirmed |
-| **D3** | Kernel Specification | **Full RPG-grade rule kernel from Day 1** (entities, attributes, tags, event bus, FSM, conditions in Lua) so text adventures evolve into RPGs by adding content/subsystems rather than rewriting the kernel. | Confirmed |
-| **D4** | First Milestone Strategy | **Engine + handwritten reference Mod (`test-adventure`) first**, followed by the AI generation pipeline (`M1`) once kernel semantics are proven. | Confirmed |
-| **D6** | Game Engine Integration | **Godot native linking (`gdext`)** scheduled for M2.5 (links Rust library natively without Wasm overhead); presentation/logic separation preserved. | Scheduled (Spike GO) |
-| **D7** | Kernel Language | **Single Rust implementation**: compiles to browser Wasm (`ygg-wasm`), links natively into Godot (`gdext`), and runs natively on authoritative servers (`ygg-agent` / Axum). Guarantees deterministic replay without GC jitter. | Confirmed |
-| **D8** | Web Presentation Stack | **React + TypeScript** (`packages/client-web`) for text-centric narrative UI and mature AI tooling ecosystem. | Confirmed |
-| **D9** | Platform Services (M2+) | **Rust + Axum** sharing `ygg-schema` validation logic directly with the kernel. | Planned |
-| **D10** | Content Pipeline Stack | **TypeScript** (`packages/pipeline`) for I/O-bound LLM orchestration, structured output parsing, and retry loops. | Confirmed |
-| **D11** | Mod Contract | **Lua script as the sole executable interface**: narrative flow, effects, and conditions are written in Lua; static content lives in JSON resource files loaded via `ygg.data(...)`. Replaces earlier declarative JSON condition/dialogue-tree drafts. | Confirmed |
-| **D12** | Crate Boundaries | **`crates/ygg-sandbox`** encapsulates `mlua`, the host API whitelist, and the embedded `ygg` Lua stdlib; `crates/ygg-lint` provides standalone AST static analysis. | Confirmed |
-| **D13** | Sandbox Security Boundary | **Zero I/O, zero network, zero clock, instruction fuel cap, memory cap (`16 MiB`), API whitelist (`safe_stdlib`), and deterministic seeded PRNG**. Content review reduces to JSON Schema validation + `ygg-lint` + `playtest`. | Confirmed |
-| **D14** | Persistent State Authority | **Persistent state lives exclusively in Rust (`ygg.kv` / `ygg.entity`)**. Lua local/global variables are ephemeral within a single dispatch; `ygg-lint` (`YGG-R2`) flags unpersisted entity handles. | Confirmed |
-| **D15** | External Data & Schema Single Source | **Resource JSON files + single-source JSON Schemas in `packages/schema/schemas/`**, validated identically by Rust (`jsonschema`) and TypeScript (`ajv`). | Confirmed |
-| **D16** | Lua Dialect | **Standard Lua 5.4** (via vendored `mlua`) with instruction-count hook fuel, hardened stdlib (`os`/`io`/`debug`/`package`/`dofile`/`loadfile` removed, `require` replaced by pure sandbox loader), and deterministic `luai_makeseed`. | Confirmed |
-| **D17** | Concurrency & Sharding Model | **Single-instance synchronous FIFO deterministic kernel + host-side sharding**: each `KernelFacade` is strictly single-threaded FIFO; horizontal scale uses isolated `KernelFacade` shards communicating only via canonical tick-boundary message channels. Verified at 10k entities sub-millisecond dispatch (`probe_determinism`). | Confirmed / Reserved |
-| **D18** | LLM Provider Abstraction | **Dual-protocol adapter (`openai-chat` default + `anthropic-messages` fallback)** configured strictly via git-ignored `.env` keys (`YGG_LLM_*`). | Confirmed |
-| **D19** | Playtest Verification Contract | **Machine-readable 8-key JSON report** from `playtest` (greedy option-1 walk, custom `--choices`, `--max-steps`), classifying outcomes into `ending` / `choice` / `limit` / `deadend` via Mod-declared `agent.endingPrefix`. | Confirmed |
-| **D20** | Resource Template Single Source | **`scene-texts.json` and `agent-config.json` schemas live canonically in `packages/schema/schemas/`**; LLMs populate data instances and never invent schema definitions. | Confirmed |
+| **D1** | 初始运行时目标 | **Web 优先**：通过 `ygg-wasm` 实现纯浏览器可玩，表现与逻辑严格分离；微信小游戏与 Godot 作为后续目标。 | 已确认 |
+| **D3** | 内核规格 | **从第 1 天起即为完整 RPG 级规则内核**（实体、属性、标签、事件总线、FSM、Lua 条件），使文字冒险通过增加内容/子系统演进为 RPG，而非重写内核。 | 已确认 |
+| **D4** | 首个里程碑策略 | **先引擎 + 手写参考 Mod（`test-adventure`）**，待内核语义得到证明后再接 AI 生成流水线（`M1`）。 | 已确认 |
+| **D6** | 游戏引擎集成 | **Godot 原生链接（`gdext`）** 排期于 M2.5（原生链接 Rust 库，无 Wasm 开销）；保持表现/逻辑分离。 | 已排期（Spike GO） |
+| **D7** | 内核语言 | **单一 Rust 实现**：编译为浏览器 Wasm（`ygg-wasm`）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（`ygg-agent` / Axum）。保证无 GC 抖动的确定性回放。 | 已确认 |
+| **D8** | Web 表现技术栈 | **React + TypeScript**（`packages/client-web`），用于以文本为中心的叙事 UI 与成熟的 AI 工具生态。 | 已确认 |
+| **D9** | 平台服务（M2+） | **Rust + Axum**，与内核直接共享 `ygg-schema` 校验逻辑。 | 已计划 |
+| **D10** | 内容流水线技术栈 | **TypeScript**（`packages/pipeline`），用于 I/O 密集的 LLM 编排、结构化输出解析与重试循环。 | 已确认 |
+| **D11** | Mod 契约 | **Lua 脚本作为唯一可执行接口**：叙事流、效果与条件以 Lua 编写；静态内容存放于 JSON 资源文件，经 `ygg.data(...)` 加载。取代更早的声明式 JSON 条件/对话树草案。 | 已确认 |
+| **D12** | Crate 边界 | **`crates/ygg-sandbox`** 封装 `mlua`、宿主 API 白名单与内嵌的 `ygg` Lua 标准库；`crates/ygg-lint` 提供独立的 AST 静态分析。 | 已确认 |
+| **D13** | 沙箱安全边界 | **零 I/O、零网络、零时钟、指令燃料上限、内存上限（`16 MiB`）、API 白名单（`safe_stdlib`）与确定性种子 PRNG**。内容审查简化为 JSON Schema 校验 + `ygg-lint` + `playtest`。 | 已确认 |
+| **D14** | 持久化状态权威 | **持久化状态仅存在于 Rust（`ygg.kv` / `ygg.entity`）**。Lua 局部/全局变量在单次 dispatch 内是临时的；`ygg-lint`（`YGG-R2`）标记未持久化的实体句柄。 | 已确认 |
+| **D15** | 外部数据与 Schema 单一来源 | **资源 JSON 文件 + `packages/schema/schemas/` 中的单一来源 JSON Schema**，由 Rust（`jsonschema`）与 TypeScript（`ajv`）做完全一致的校验。 | 已确认 |
+| **D16** | Lua 方言 | **标准 Lua 5.4**（经内置 `mlua`），带指令计数钩子燃料、加固的标准库（移除 `os`/`io`/`debug`/`package`/`dofile`/`loadfile`，`require` 替换为纯沙箱加载器），以及确定性的 `luai_makeseed`。 | 已确认 |
+| **D17** | 并发与分片模型 | **单实例同步 FIFO 确定性内核 + 宿主侧分片**：每个 `KernelFacade` 严格单线程 FIFO；水平扩展使用相互隔离的 `KernelFacade` 分片，仅通过规范的 tick 边界消息通道通信。已在 1 万实体上验证亚毫秒 dispatch（`probe_determinism`）。 | 已确认 / 保留 |
+| **D18** | LLM 提供方抽象 | **双协议适配器（`openai-chat` 默认 + `anthropic-messages` 回退）**，严格通过 git-ignored 的 `.env` 键（`YGG_LLM_*`）配置。 | 已确认 |
+| **D19** | 试玩验证契约 | `playtest` 产出的**机器可读 8 键 JSON 报告**（贪心 option-1 遍历、自定义 `--choices`、`--max-steps`），通过 Mod 声明的 `agent.endingPrefix` 将结局归类为 `ending` / `choice` / `limit` / `deadend`。 | 已确认 |
+| **D20** | 资源模板单一来源 | **`scene-texts.json` 与 `agent-config.json` 的 Schema 规范地存放于 `packages/schema/schemas/`**；LLM 填充数据实例，绝不自创 Schema 定义。 | 已确认 |
 
-### 5.2 Agent Harness (`M-Agent`) Architectural Decisions
+### 5.2 Agent 治理（`M-Agent`）架构决策
 
-| ID | Decision Area | Ruling & Rationale | Status |
+| ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
-| **D-MA1** | Workflow-as-Mod Architecture | Coordinate software engineering tasks through `.ygg/mods/pi-agent-seed` (`intake -> coordinate -> review -> done` + per-requirement `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`). All artifacts require a preceding state-machine event. | Confirmed |
-| **D-MA2** | Multi-File Mod Purity (`YGG-MOD-EFFECT`) | `pack.json` `code.{entry, modules[]}` enumerates all Lua modules explicitly. Only `mod.lua` may register handlers or mutate state at top level; `src/*.lua` modules export pure functions (`M.install(deps)`) and carry real `@src/<file>.lua:line` diagnostics. | Confirmed |
-| **D-MA3** | Single-File SQLite Run Store & VFS | New runs default to `<run-dir>/run.sqlite` (`ygg-store`), atomically committing `events`, `snapshots`, `inbox`, `kv_projection`, and `vfs_files` (`artifacts/*`). Existing JSON runs (`autosave.json` + `events.jsonl`) remain auto-detected without implicit migration. | Confirmed |
-| **D-MA4** | Reactive Hooks & Turn-Cut Compression | `src/hooks.lua` (`useMemo`, `useEffect`, `flush_effects`) runs before `render()` emits `ygg.choice`. Enables 3 turn-cut rules: ① `draft -> planning` stage merge, ② inline `exec=<agent_id>` registration on `proposal.submit`, and ③ reactive `auto_dispatch` after `gate.approve(plan)`. | Confirmed |
-| **D-MA5** | Synchronous Tool Bridge (`ygg.tool.call`) | When `HostToolRunner` is mounted by `ygg-agent`, allowlisted tools (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`, `fs.artifact_probe`, `gate.verify_suite`, `harness.archive_sessions`) execute inline in 1 turn and fold results into KV immediately, while preserving async `tool.call`/`tool.result` fallback for unmounted hosts. | Confirmed |
-| **D-MA6** | Persistent Lane Worktree Pool | `worktree-claim` manages a persistent pool `<repo-parent>/worktrees/<repo>-lane-1..4`, resetting branches via `git checkout -B <branch> HEAD` (preserving untracked build caches like `target/`) and parking released lanes on `--detach HEAD` instead of deleting directories. | Confirmed |
-| **D-MA7** | Universal Harness Adapter (`subagentAction`) | The Mod computes `summary.jobs[i].subagentAction` (`subagent.spawn` / `subagent.resume`) with rendered briefs (`data/scenes.json` templates) and live `worktreeStatus` / `subagentStatus` / `probeStatus`, allowing `.pi/extensions/ygg-pi-harness` (or Claude Code / Codex / Cursor adapters) to act as a thin execution shell. | Confirmed |
-| **D-MA8** | Living Documentation Consolidation | Consolidate all architectural, domain, and contract documentation into `docs/CONTEXT.md` (Domain & Decisions) and `docs/DESIGN.md` (System Behavior & Interface Contracts), enforced by mandatory read references in subagent briefs and sync checks at final review. | Confirmed |
+| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/pi-agent-seed` 协调软件工程任务（`intake -> coordinate -> review -> done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`）。所有产物都要求先有状态机事件。 | 已确认 |
+| **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/*.lua` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
+| **D-MA3** | 单文件 SQLite 运行存储与 VFS | 新运行默认使用 `<run-dir>/run.sqlite`（`ygg-store`），原子提交 `events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）。既有的 JSON 运行（`autosave.json` + `events.jsonl`）保持自动检测，不隐式迁移。 | 已确认 |
+| **D-MA4** | 响应式钩子与省回合压缩 | `src/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |
+| **D-MA5** | 同步工具桥（`ygg.tool.call`） | 当 `ygg-agent` 挂载 `HostToolRunner` 时，白名单工具（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`、`harness.archive_sessions`）在 1 回合内联执行并立即把结果折叠进 KV，同时为未挂载宿主保留异步 `tool.call`/`tool.result` 回退。 | 已确认 |
+| **D-MA6** | 持久化泳道工作树池 | `worktree-claim` 管理持久化池 `<repo-parent>/worktrees/<repo>-lane-1..4`，通过 `git checkout -B <branch> HEAD` 重置分支（保留如 `target/` 的未跟踪构建缓存），并将释放的泳道停放在 `--detach HEAD` 上而非删除目录。 | 已确认 |
+| **D-MA7** | 通用治理引擎适配器（`subagentAction`） | Mod 计算 `summary.jobs[i].subagentAction`（`subagent.spawn` / `subagent.resume`），携带渲染后的 brief（`data/scenes.json` 模板）与实时的 `worktreeStatus` / `subagentStatus` / `probeStatus`，使 `.pi/extensions/ygg-pi-harness`（或 Claude Code / Codex / Cursor 适配器）能充当薄执行壳。 | 已确认 |
+| **D-MA8** | 活文档整合 | 将所有架构、领域与契约文档整合进 `docs/CONTEXT.md`（领域与决策）与 `docs/DESIGN.md`（系统行为与接口契约），通过子代理 brief 中的强制必读引用与最终审查时的同步检查来执行。 | 已确认 |
