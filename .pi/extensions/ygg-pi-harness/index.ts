@@ -37,6 +37,7 @@ import {
   formatPercent,
   HANDOFF_RESUME_CUSTOM_TYPE,
   isStableCheckpoint,
+  parsePositiveIntEnv,
   stableCheckpointReason,
   writeHandoffToVfs,
   type ContextPressure,
@@ -58,8 +59,18 @@ const DEFAULT_RUNS_ROOT = ".ygg/runs";
 
 /** 每个 runId 一个常驻客户端；`activeRunId` 是页脚展示的那一个。 */
 const daemons = new Map<string, YggDaemon>();
+/** 并发启动锁：同一 runId 正在 `start()` 时复用同一个 Promise，防并发重复拉起。 */
+const daemonsInflight = new Map<string, Promise<YggDaemon>>();
 let activeRunId = "";
 let lastSummary: RunSummary | null = null;
+
+/** 仅供单测重置进程内缓存。 */
+export function resetClientsForTest(): void {
+  daemons.clear();
+  daemonsInflight.clear();
+  activeRunId = "";
+  lastSummary = null;
+}
 /**
  * 本次压缩是谁发起的：`"self"` = `maybeHandoffAndCompact`（压完自己续跑），
  * `null` = 外部（`/compact` / 阈值 / 溢出恢复，压完只把状态块带回上下文）。
@@ -92,34 +103,62 @@ function setStatus(ctx: ExtensionContext, summary: RunSummary | null): void {
 }
 
 /** 取（或建）一个 runId 的客户端；`start()` 负责 `--daemon` 探测与降级。 */
-async function clientFor(
+export async function clientFor(
   ctx: ExtensionContext,
   runId: string,
-  overrides: { modDir?: string; runsRoot?: string } = {},
+  overrides: {
+    modDir?: string;
+    runsRoot?: string;
+    createDaemon?: (opts: {
+      cwd: string;
+      runId: string;
+      modDir: string;
+      runsRoot: string;
+      agentBin: string;
+    }) => YggDaemon;
+  } = {},
 ): Promise<YggDaemon> {
   const cwd = ctx.cwd;
-  let client = daemons.get(runId);
-  if (client === undefined) {
-    client = new YggDaemon({
+  const key = runId;
+  activeRunId = runId;
+  const existing = daemons.get(key);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const inflight = daemonsInflight.get(key);
+  if (inflight !== undefined) {
+    return await inflight;
+  }
+  const promise = (async () => {
+    const opts = {
       cwd,
       runId,
       modDir: overrides.modDir ?? path.join(cwd, DEFAULT_MOD_DIR),
       runsRoot: overrides.runsRoot ?? path.join(cwd, DEFAULT_RUNS_ROOT),
       agentBin: agentBinPath(cwd),
-    });
-    daemons.set(runId, client);
-  }
-  activeRunId = runId;
-  if (!client.alive) {
+    };
+    const client =
+      overrides.createDaemon !== undefined ? overrides.createDaemon(opts) : new YggDaemon(opts);
     await client.start();
+    daemons.set(key, client);
     if (client.mode === "cli") {
-      ctx.ui.notify(
-        `ygg-agent 不支持 --daemon，已降级为单发模式：${client.degradedReason}`,
-        "warning",
-      );
+      try {
+        ctx.ui.notify(
+          `ygg-agent 不支持 --daemon，已降级为单发模式：${client.degradedReason}`,
+          "warning",
+        );
+      } catch {
+        // 非 UI 模式忽略通知异常。
+      }
     }
+    return client;
+  })();
+  daemonsInflight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    daemonsInflight.delete(key);
   }
-  return client;
 }
 
 /** 把一串回执合并成一段可贴的文本（每段 narrative 全行保留）。 */
@@ -139,15 +178,27 @@ function activeClient(): YggDaemon | undefined {
   return activeRunId === "" ? undefined : daemons.get(activeRunId);
 }
 
+export function resolveEffectiveWindowCapFromEnv(
+  cwd: string,
+  processEnv: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  const fileVal = readEnvFiles(cwd).get("YGG_CONTEXT_WINDOW");
+  return parsePositiveIntEnv(fileVal) ?? parsePositiveIntEnv(processEnv.YGG_CONTEXT_WINDOW);
+}
+
 /**
  * 压力探针：`getContextUsage()` 的 `tokens` 在刚压完时是 `null`，模型也可能没报
  * `contextWindow`；两者不确定时按「不知道」处理（=`normal`，不刹车）。
+ * 若 `.env.local` / `.env` 或 `process.env` 设置了正整数 `YGG_CONTEXT_WINDOW`，
+ * 则作为 `effectiveWindowCap` 传入（否则使用默认 200k 有效上限）。
  */
 function contextPressure(ctx: ExtensionContext): ContextPressure {
   const usage = ctx.getContextUsage();
+  const effectiveWindowCap = resolveEffectiveWindowCapFromEnv(ctx.cwd);
   return evaluateContextPressure({
     usedTokens: usage?.tokens ?? null,
     contextWindow: usage?.contextWindow ?? ctx.model?.contextWindow ?? null,
+    ...(effectiveWindowCap !== undefined ? { effectiveWindowCap } : {}),
   });
 }
 
@@ -301,7 +352,7 @@ function wireField(text: string): string {
   return String(text ?? "").replaceAll("|", "/");
 }
 
-interface KickoffInput {
+export interface KickoffInput {
   runId: string;
   title: string;
   description: string;
@@ -309,16 +360,21 @@ interface KickoffInput {
   requirements: { title: string; description: string }[];
 }
 
+export interface KickoffClient {
+  dispatch(event: string, payload?: string | number): Promise<StepReceipt>;
+  summary(): Promise<RunSummary>;
+}
+
 /**
- * 开局：起 daemon → 登记 goal 授权 → 切 goal → `task.intake` → 逐条
- * `requirement.add` → `requirement.dispatch`。
+ * 开局：起 daemon →（若提供非空 `goalAuth`：登记 goal 授权 → 切 goal；留空则保持
+ * Mod 默认 `guide` 模式）→ `task.intake` → 逐条 `requirement.add` → `requirement.dispatch`。
  *
  * 顺序是有意的：`goal.authorization` 先于 `play.mode=goal`（goal 局收口时
  * `review.note` 会校这条记录），两者都先于 `task.intake`。
  */
-async function kickoffSession(
+export async function kickoffSession(
   ctx: ExtensionContext,
-  client: YggDaemon,
+  client: KickoffClient,
   input: KickoffInput,
 ): Promise<string> {
   const entries: { label: string; receipt: StepReceipt }[] = [];
@@ -326,9 +382,9 @@ async function kickoffSession(
   if (input.goalAuth.trim() !== "") {
     const auth = await client.dispatch("config.set", `goal.authorization=${input.goalAuth.trim()}`);
     entries.push({ label: "config.set goal.authorization", receipt: auth });
+    const mode = await client.dispatch("config.set", "play.mode=goal");
+    entries.push({ label: "config.set play.mode=goal", receipt: mode });
   }
-  const mode = await client.dispatch("config.set", "play.mode=goal");
-  entries.push({ label: "config.set play.mode=goal", receipt: mode });
 
   const intake = await client.dispatch(
     "task.intake",
@@ -563,6 +619,7 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
       await client.closeAll();
     }
     daemons.clear();
+    daemonsInflight.clear();
     activeRunId = "";
     lastSummary = null;
     compactionOrigin = null;
@@ -687,6 +744,7 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
           stopped.push(runId);
         }
         daemons.clear();
+        daemonsInflight.clear();
         activeRunId = "";
         lastSummary = null;
         ctx.ui.setStatus(STATUS_KEY, undefined);
@@ -731,7 +789,10 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
       title: Type.Optional(Type.String({ description: "kickoff：本局标题（task.intake 的第一段）" })),
       description: Type.Optional(Type.String({ description: "kickoff：本局描述（task.intake 的第二段）" })),
       goalAuth: Type.Optional(
-        Type.String({ description: "kickoff：goal 授权的一句话说明（写入 config.set goal.authorization）" }),
+        Type.String({
+          description:
+            "kickoff：仅当用户当次明确授权 goal 模式时填写授权说明（非空时切入 goal 模式；留空则保持默认 guide 模式）",
+        }),
       ),
       requirements: Type.Optional(
         Type.Array(
