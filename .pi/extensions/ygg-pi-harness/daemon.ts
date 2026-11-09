@@ -118,6 +118,15 @@ export interface StepReceipt {
   event?: string;
   narrative: string[];
   pendingChoice: unknown;
+  /**
+   * `meta.tool_calls` 的结构化转写：一个稠密数组 `[{id, tool, args?}]`。
+   *
+   * 跨 harness 编码契约（P0-2）：`args` 在**空时省略**（Lua 的空表只能序列化为 `[]`，
+   * Mod 选择省略而非保留空数组）。因此任何消费方都必须把「缺 `args`」与「`args = []`」
+   * 当作**同一语义**处理——用 `(item.args ?? [])` 而非 `item.args`，否则空 args 会
+   * mismatch / NPE。这是一条只写在文档里的隐式跨层契约，改它要连 `pack.json`
+   * `inboxRoutes.tool_result.fields` 与宿主解析器一起改（见 AGENTS.md §9.2）。
+   */
   tools: unknown[];
   summary?: RunSummary;
   /** 本步产出的结构化宿主动作列表（取自顶层 `harnessActions` 或 `summary.harnessActions`）。 */
