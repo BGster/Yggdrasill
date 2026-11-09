@@ -20,6 +20,9 @@
   "gates": {
     "require_all_green": true
   },
+  "harness": {
+    "adapter": "auto"
+  },
   "settlement": {
     "requireEvents": true,
     "requireNoFailedSteps": true,

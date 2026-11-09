@@ -287,6 +287,11 @@ struct Args {
     /// `--daemon`：常驻守护模式（stdin 逐行读 JSON 请求，stdout 逐行回 JSON）。
     /// 与所有「一次性动作」旗标互斥：它的整个生命周期都活在同一个 `Session` 上。
     daemon: bool,
+    /// `--harness <auto|pi|claude-code|codex|generic>`：harness 适配器（**可选**）。
+    /// `None` = 未指定 → `YGG_HARNESS` > `data/config.json` 的 `harness.adapter` > auto
+    /// （解析见 [`resolve_harness_adapter`]）。它只影响「默认归档哪个会话库」，
+    /// 不改变本局的任何状态机判定。
+    harness: Option<String>,
 }
 
 /// `--builtin-tool` 的操作枚举（解析即校验；未知值 = 用法错误，拼出全部合法值）。
@@ -360,6 +365,7 @@ fn parse_args() -> Args {
     let mut artifact_get: Option<String> = None;
     let mut builtin_tool: Option<BuiltinTool> = None;
     let mut daemon = false;
+    let mut harness: Option<String> = None;
 
     // 写 inbox 的七个参数共享同一套「只能给一个」的校验。
     fn set_inbox(inbox: &mut Option<InboxWrite>, flag: &'static str, value: String) {
@@ -432,6 +438,19 @@ fn parse_args() -> Args {
             "--artifact-put" => artifact_put = Some(next_value(&mut iter, "--artifact-put")),
             "--artifact-get" => artifact_get = Some(next_value(&mut iter, "--artifact-get")),
             "--daemon" => daemon = true,
+            "--harness" => {
+                let text = next_value(&mut iter, "--harness");
+                let trimmed = text.trim();
+                if !HARNESS_ADAPTERS.contains(&trimmed) {
+                    usage_error(&format!(
+                        "未知的 --harness 取值 `{text}`（只接受 {}）",
+                        HARNESS_ADAPTERS.join(" / ")
+                    ));
+                }
+                // 只有 **非 auto** 才落成显式值：auto 与「未指定」同义（都走现场探测），
+                // 保留 auto 也能工作，但省掉一层无谓的字符串比。
+                harness = Some(trimmed.to_owned());
+            }
             "--builtin-tool" => {
                 let text = next_value(&mut iter, "--builtin-tool");
                 builtin_tool = Some(BuiltinTool::parse(&text).unwrap_or_else(|| {
@@ -494,6 +513,7 @@ fn parse_args() -> Args {
             artifact_get,
             builtin_tool,
             daemon,
+            harness,
         };
     }
 
@@ -585,6 +605,7 @@ fn parse_args() -> Args {
         artifact_get,
         builtin_tool,
         daemon,
+        harness,
     }
 }
 
@@ -660,6 +681,10 @@ fn usage(code: i32) -> ! {
                      stdout 逐行回 JSON。请求可带 \"id\" 字段（原样回显）；stdout 只有协议面，
                      人读输出一律走 stderr。局已存在时自动续局（无需 --resume），
                      `settle` 与独立 --settle 同一实现并终结本局
+  --harness <h>      harness 适配器：auto（缺省，按现场探测）/ pi / claude-code / codex / generic。
+                     解析顺序 = --harness > 环境变量 YGG_HARNESS > <mod>/data/config.json 的
+                     harness.adapter > auto；只决定 `--builtin-tool archive-sessions` 默认归档哪个
+                     会话库（generic 没有会话库：记 moved=0;remaining=0），不改变任何状态判定
   --store <后端>     存储后端断言：sqlite（默认，<run 目录>/run.sqlite）|
                      json（兼容后端，autosave.json + events.jsonl）。run.json 的
                      \"store\" 字段是权威：与 --store 不一致即拒绝开局（零写入）；
@@ -690,6 +715,9 @@ host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字
   verify-suite      [--mode fast|full] [--repo <d>]             → passed=1;summary=<n>/<m>
   archive-sessions  --parent <id> --batch <名> [--sessions-dir <d>] [--trash <d>]
                     → moved=..;remaining=..;dest=..（remaining>0 = 退出 1）
+                    缺 --sessions-dir / YGG_SESSIONS_DIR 时按 `--harness` 适配器推导会话库：
+                    pi=$HOME/.pi/agent/sessions/--<cwd_slug>--；claude-code=$HOME/.claude/projects/-<slug>；
+                    codex=$HOME/.codex/sessions；目录不存在 = 0/0（dest=<适配器>:empty:<batch>）
   pack.json 里写 \"program\": \"@self\"（或 \"ygg-agent\"）即可调用——两者都解析到本可执行文件，
   因此不依赖 $PATH。本局路径用 $ENV{YGG_RUN_DIR} / $ENV{YGG_RUN_ID} / $ENV{YGG_RUNS_ROOT}
   / $ENV{YGG_MOD_DIR} 引用（宿主注入 worker 环境；.env / .env.local 不得覆写）。
@@ -3325,6 +3353,7 @@ const GLOBAL_VALUE_FLAGS: &[&str] = &[
     "--event",
     "--payload",
     "--drive",
+    "--harness",
     "--tool-timeout",
     "--run-tool-worker",
     "--artifact-put",
@@ -3614,7 +3643,7 @@ fn run_builtin_tool(args: &Args) -> i32 {
         BuiltinTool::LaneProbe => run_op(tool.as_str(), lane_probe_fields()),
         BuiltinTool::ArtifactProbe => run_op(tool.as_str(), artifact_probe_fields()),
         BuiltinTool::VerifySuite => run_op(tool.as_str(), verify_suite_fields()),
-        BuiltinTool::ArchiveSessions => run_op(tool.as_str(), archive_sessions_fields()),
+        BuiltinTool::ArchiveSessions => run_op(tool.as_str(), archive_sessions_fields(args)),
     }
 }
 
@@ -3990,12 +4019,197 @@ fn archive_ident_ok(text: &str, max: usize) -> bool {
 /// **数据红线**（项目 `AGENTS.md` §0 硬约束）：本 op 只碰 agent 会话转录，
 /// **绝不能**打开 `*.xlsx` / `*.xls` / `*.csv` 之类业务数据。实现上由两件事
 /// 兜底：① 只按扩展名 `.jsonl` 入选；② 文件内容**从不回显**（匹配是布尔值）。
-fn archive_sessions_fields() -> Result<Vec<(&'static str, String)>, OpFailure> {
-    archive_sessions_fields_with(&OpFlags::parse("archive-sessions", ARCHIVE_FLAGS))
+fn archive_sessions_fields(args: &Args) -> Result<Vec<(&'static str, String)>, OpFailure> {
+    archive_sessions_fields_with(
+        &OpFlags::parse("archive-sessions", ARCHIVE_FLAGS),
+        &ArchiveInputs::from_process(args),
+    )
 }
 
-/// [`archive_sessions_fields`] 的注入面（测试直接给旗标，不读进程 argv）。
-fn archive_sessions_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpFailure> {
+/// harness 适配器的全部取值（`--harness` / `YGG_HARNESS` / `harness.adapter` 同一份）。
+const HARNESS_ADAPTERS: &[&str] = &["auto", "pi", "claude-code", "codex", "generic"];
+
+/// `auto` 探测的**输入面**（纯值：单测注入，不读进程环境）。
+struct HarnessProbe {
+    pi_session_id: bool,
+    claude_code: bool,
+    codex_home: bool,
+}
+
+/// 工作区路径 → 会话库路径段（`/Users/x/Repo` → `Users-x-Repo`）。
+///
+/// pi 的 `--<slug>--` 与 Claude Code 的 `-<slug>` 用的是**同一个** slug 口径（都是
+/// cwd 去掉前导 `/` 后把 `/` 换成 `-`，差别只在两边的包裹字符）。
+fn cwd_slug(cwd: &Path) -> String {
+    cwd.to_string_lossy()
+        .trim_start_matches('/')
+        .replace('/', "-")
+}
+
+/// `auto` 的现场探测（纯函数：probe / home / cwd 全可注入，不读进程环境）。
+///
+/// 顺序即优先级：**Pi 的痕迹最强**（会话环境变量 / 工作区的 `.pi` / 该工作区自己的
+/// 会话目录），其次 Claude Code，其次 Codex；都没有 = `generic`——
+/// `generic` **没有会话库**，归档记 `moved=0;remaining=0`，这不是失败。
+fn detect_harness(probe: &HarnessProbe, home: Option<&Path>, cwd: &Path) -> &'static str {
+    let pi_sessions = home.map(|home| {
+        home.join(".pi")
+            .join("agent")
+            .join("sessions")
+            .join(format!("--{}--", cwd_slug(cwd)))
+    });
+    if probe.pi_session_id || cwd.join(".pi").exists() || pi_sessions.is_some_and(|d| d.is_dir()) {
+        return "pi";
+    }
+    if probe.claude_code || cwd.join(".claude").exists() {
+        return "claude-code";
+    }
+    if probe.codex_home {
+        return "codex";
+    }
+    "generic"
+}
+
+/// 三层解析的**唯一收敛点**：`explicit`（`--harness`）> `env_adapter`
+/// （`YGG_HARNESS`，其次 `data/config.json` 的 `harness.adapter`）> 现场探测。
+///
+/// 返回值恒为 [`HARNESS_ADAPTERS`] 里的一个**非 auto** 值——调用方拿到就能直接查表。
+/// 未知取值（`--harness` 已在解析期点名校验，这里只剩程序化调用）→ 当 auto 处理。
+fn resolve_harness_adapter(
+    explicit: Option<&str>,
+    env_adapter: Option<&str>,
+    cwd: &Path,
+) -> &'static str {
+    let requested = [explicit, env_adapter]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .unwrap_or("auto");
+    match requested {
+        "pi" => "pi",
+        "claude-code" => "claude-code",
+        "codex" => "codex",
+        "generic" => "generic",
+        _ => detect_from_process(cwd),
+    }
+}
+
+/// `auto` 的**进程探测**（环境变量 + `$HOME`；纯函数 [`detect_harness`] 的取值层）。
+fn detect_from_process(cwd: &Path) -> &'static str {
+    let probe = HarnessProbe {
+        pi_session_id: std::env::var_os("PI_SESSION_ID").is_some(),
+        claude_code: std::env::var_os("CLAUDE_CODE").is_some(),
+        codex_home: std::env::var_os("CODEX_HOME").is_some(),
+    };
+    let home = home_dir();
+    detect_harness(&probe, home.as_deref(), cwd)
+}
+
+/// `$HOME`（空 / 非 UTF-8 一律视为缺席：会话库是**推导面**，不是契约面）。
+fn home_dir() -> Option<PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .filter(|home| !home.trim().is_empty())
+        .map(PathBuf::from)
+}
+
+/// 每个适配器自己的会话库落点 `(sessions 目录, trash 根)`。
+///
+/// `generic`（以及任何未知适配器）→ `None`：它没有会话库，归档只能记 0/0 台账。
+fn harness_session_dirs(adapter: &str, home: &Path, slug: &str) -> Option<(PathBuf, PathBuf)> {
+    match adapter {
+        "pi" => Some((
+            home.join(".pi")
+                .join("agent")
+                .join("sessions")
+                .join(format!("--{slug}--")),
+            home.join(".pi").join("agent").join("sessions-trash"),
+        )),
+        "claude-code" => Some((
+            home.join(".claude")
+                .join("projects")
+                .join(format!("-{slug}")),
+            home.join(".claude").join("sessions-trash"),
+        )),
+        "codex" => Some((
+            home.join(".codex").join("sessions"),
+            home.join(".codex").join("sessions-trash"),
+        )),
+        _ => None,
+    }
+}
+
+/// `data/config.json` 的 `harness.adapter`（路径由 `pack.json` 声明；缺段 / 非串 / 空 →
+/// `None`）。这一层只是**静态默认**：本 Mod 的 `agent-config.json` 已把取值限定在
+/// [`HARNESS_ADAPTERS`]，所以这里不再重复校验枚举。
+fn harness_config_adapter(mod_dir: Option<&Path>) -> Option<String> {
+    let dir = mod_dir?;
+    let config = read_json(&dir.join(agent_config_path(dir)))?;
+    let adapter = config["harness"]["adapter"].as_str()?.trim();
+    (!adapter.is_empty()).then(|| adapter.to_owned())
+}
+
+/// `archive-sessions` 的**输入面**：进程环境与旗标的唯一注入点（单测不碰 env）。
+///
+/// Mod dir 决定「`harness.adapter` 这一层能否读到」：`--mod` 优先，其次宿主给 worker
+/// 注入的 `$ENV{YGG_MOD_DIR}`（工具桥的常规路径）；两者都缺 = 该层不表态。
+struct ArchiveInputs {
+    harness: Option<String>,
+    mod_dir: Option<PathBuf>,
+    sessions_dir: Option<PathBuf>,
+    home: Option<PathBuf>,
+    cwd: Option<PathBuf>,
+    env_harness: Option<String>,
+}
+
+impl ArchiveInputs {
+    fn from_process(args: &Args) -> Self {
+        let env = |key: &str| {
+            std::env::var(key)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        };
+        Self {
+            harness: args.harness.clone(),
+            mod_dir: args
+                .mod_dir
+                .clone()
+                .or_else(|| env("YGG_MOD_DIR").map(PathBuf::from)),
+            sessions_dir: env("YGG_SESSIONS_DIR").map(PathBuf::from),
+            home: env("HOME").map(PathBuf::from),
+            cwd: std::env::current_dir().ok(),
+            env_harness: env("YGG_HARNESS"),
+        }
+    }
+
+    /// 本局生效的适配器：`--harness` > `YGG_HARNESS` > `harness.adapter` > auto。
+    fn adapter(&self) -> &'static str {
+        let config = harness_config_adapter(self.mod_dir.as_deref());
+        let declared = self
+            .env_harness
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .or(config.as_deref());
+        let cwd = self.cwd.clone().unwrap_or_else(|| PathBuf::from("."));
+        resolve_harness_adapter(self.harness.as_deref(), declared, &cwd)
+    }
+}
+
+/// 成功回执的三段（`moved=..;remaining=..;dest=..`；顺序稳定便于比对）。
+fn archive_outcome(moved: usize, remaining: usize, dest: String) -> Vec<(&'static str, String)> {
+    vec![
+        ("moved", moved.to_string()),
+        ("remaining", remaining.to_string()),
+        ("dest", dest),
+    ]
+}
+
+/// [`archive_sessions_fields`] 的注入面（测试直接给旗标 + 输入面，不读进程 argv / env）。
+fn archive_sessions_fields_with(
+    flags: &OpFlags,
+    inputs: &ArchiveInputs,
+) -> Result<Vec<(&'static str, String)>, OpFailure> {
     const OP: &str = "archive-sessions";
     let parent = flags.require(OP, "--parent", ARCHIVE_FLAGS);
     let batch = flags.require(OP, "--batch", ARCHIVE_FLAGS);
@@ -4013,43 +4227,46 @@ fn archive_sessions_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, St
             ARCHIVE_FLAGS,
         );
     }
-    // 优先级：显式 `--sessions-dir` > `YGG_SESSIONS_DIR` > 当前工作区的 Pi 会话目录
-    // `$HOME/.pi/agent/sessions/--<cwd_slug>--`（搭配 `$HOME/.pi/agent/sessions-trash/<batch>`）。
-    let explicit_dir = flags.get("--sessions-dir").map(PathBuf::from).or_else(|| {
-        std::env::var("YGG_SESSIONS_DIR")
-            .ok()
-            .filter(|dir| !dir.trim().is_empty())
-            .map(PathBuf::from)
-    });
+    // 优先级：显式 `--sessions-dir` > `YGG_SESSIONS_DIR` > **适配器推导的会话库落点**。
+    // 前两层是调用方点名的目录，口径固定（缺目录 = 扫 0 件，不报错、不改写）；
+    // 第三层按 harness 适配器推导：目录不存在 = 记 `<适配器>:empty:<batch>`，
+    // `generic` 根本没有会话库 = 记 `generic:no-session-store:<batch>`——两者都是
+    // **合法答案**（换 harness 本来就收不出东西），不能让收口卡在归档上。
+    let explicit_dir = flags
+        .get("--sessions-dir")
+        .map(PathBuf::from)
+        .or_else(|| inputs.sessions_dir.clone());
     let (sessions_dir, default_trash_root) = match explicit_dir {
         Some(dir) => {
             let trash_root = dir.parent().unwrap_or_else(|| Path::new(".")).join("trash");
             (dir, trash_root)
         }
         None => {
-            let home = std::env::var("HOME")
-                .ok()
-                .filter(|h| !h.trim().is_empty())
-                .map(PathBuf::from);
-            let cwd = std::env::current_dir().ok();
-            match (home, cwd) {
-                (Some(home), Some(cwd)) => {
-                    let slug = cwd
-                        .to_string_lossy()
-                        .trim_start_matches('/')
-                        .replace('/', "-");
-                    let pi_agent = home.join(".pi").join("agent");
-                    (
-                        pi_agent.join("sessions").join(format!("--{slug}--")),
-                        pi_agent.join("sessions-trash"),
-                    )
+            let adapter = inputs.adapter();
+            let cwd = inputs.cwd.clone().unwrap_or_else(|| PathBuf::from("."));
+            let dirs = inputs
+                .home
+                .as_deref()
+                .and_then(|home| harness_session_dirs(adapter, home, &cwd_slug(&cwd)));
+            let Some((dir, trash_root)) = dirs else {
+                // 适配器没有会话库（generic）= 合法答案；有库但推不出来（缺 HOME）= 用法错误。
+                if adapter == "generic" {
+                    return Ok(archive_outcome(
+                        0,
+                        0,
+                        format!("{adapter}:no-session-store:{batch}"),
+                    ));
                 }
-                _ => builtin_usage_error(
+                builtin_usage_error(
                     OP,
                     "需要 --sessions-dir（或环境变量 YGG_SESSIONS_DIR / HOME）",
                     ARCHIVE_FLAGS,
-                ),
+                );
+            };
+            if !dir.is_dir() {
+                return Ok(archive_outcome(0, 0, format!("{adapter}:empty:{batch}")));
             }
+            (dir, trash_root)
         }
     };
     let trash = flags
@@ -4076,11 +4293,7 @@ fn archive_sessions_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, St
             ),
         });
     }
-    Ok(vec![
-        ("moved", outcome.moved.to_string()),
-        ("remaining", outcome.remaining.to_string()),
-        ("dest", dest),
-    ])
+    Ok(archive_outcome(outcome.moved, outcome.remaining, dest))
 }
 
 /// 一次清扫的结果（`remaining > 0` = 清扫不全）。
@@ -4567,30 +4780,38 @@ fn run_single(args: &Args) -> i32 {
 /// Seed Mod 的现名与旧名（2026 更名：`agent-seed` → `pi-agent-seed`）。
 ///
 /// 旧名不是「另一个 Mod」：它是同一个 Mod 的历史目录名，`.ygg/runs/**/run.json` 里
-/// 记录的 `"mod": ".ygg/mods/agent-seed"` 必须继续能续局（见 `legacy_seed_alias`）。
+/// 记录的 `"mod": ".ygg/mods/agent-seed"` 必须继续能续局；反过来，通用 harness
+/// 按旧名调用时也要能命中现名目录。两个方向都由 `legacy_seed_alias` 翻译（双向）。
 const SEED_MOD_NAME: &str = "pi-agent-seed";
 const LEGACY_SEED_MOD_NAME: &str = "agent-seed";
 
-/// 更名兼容：`…/mods/agent-seed` → `…/mods/pi-agent-seed`（**只换最后两段**）。
+/// 更名兼容的**双向**别名：`…/mods/agent-seed` ↔ `…/mods/pi-agent-seed`（**只换最后两段**）。
 ///
-/// 前缀原样保留，所以相对路径（`.ygg/mods/agent-seed`）与绝对路径都适用；
-/// 父目录必须叫 `mods`，避免把任意同名目录（如 `/tmp/agent-seed` 探针）误改。
-/// 只做**路径映射**，不碰磁盘——存在性由调用方判（`resolve_mod_dir`）。
+/// 为什么双向：同一个 Mod 同时活在两套 harness 的调用习惯里——通用 harness 按旧名
+/// `--mod .ygg/mods/agent-seed` 走（历史习惯 / 它们的脚手架模板），Pi 这边按新名
+/// `--mod .ygg/mods/pi-agent-seed` 走；磁盘上只能有**一个**目录，所以两个方向都得能解析。
+/// 前缀原样保留，因此相对路径（`.ygg/mods/agent-seed`）与绝对路径都适用；父目录必须叫
+/// `mods`，避免把任意同名目录（如 `/tmp/agent-seed` 探针）误改。
+/// 只做**路径映射**，不碰磁盘——存在性由调用方判（[`with_legacy_seed_alias`]）。
 fn legacy_seed_alias(path: &Path) -> Option<PathBuf> {
-    if path.file_name().and_then(|name| name.to_str())? != LEGACY_SEED_MOD_NAME {
-        return None;
-    }
+    let name = path.file_name().and_then(|name| name.to_str())?;
+    let target = match name {
+        LEGACY_SEED_MOD_NAME => SEED_MOD_NAME,
+        SEED_MOD_NAME => LEGACY_SEED_MOD_NAME,
+        _ => return None,
+    };
     let parent = path.parent()?;
     if parent.file_name().and_then(|name| name.to_str())? != "mods" {
         return None;
     }
-    Some(parent.join(SEED_MOD_NAME))
+    Some(parent.join(target))
 }
 
-/// 旧名目录已不在磁盘、同父目录下新名存在 → 用新名（其余情况一律原样返回）。
+/// 请求的目录不存在、同父目录下的**另一个名字**存在 → 用那个（其余情况一律原样返回）。
 ///
 /// 这是**兼容兜底**，不是默认值：`--mod` 仍必填、`run.json` 仍必读，
-/// 只是历史局记录的旧路径被翻译到改名后的同一目录，历史 run 无需手工迁移。
+/// 只是两套 harness 两种目录名被翻译到磁盘上真实存在的那个同一目录，
+/// 历史 run 与通用 harness 调用方都无需手工迁移。
 fn with_legacy_seed_alias(requested: PathBuf) -> PathBuf {
     if requested.exists() {
         return requested;
@@ -5707,6 +5928,290 @@ mod contract_tests {
 }
 
 #[cfg(test)]
+/// harness 适配器（`--harness` / `YGG_HARNESS` / `harness.adapter` / auto）的判定面。
+///
+/// 为何要有这个模块：会话库的默认落点从「只认 Pi」变成「按适配器推导」后，三个非 Pi
+/// 分支（claude-code / codex / generic）都没有运行期证据——`generic` 尤其**不能失败**
+/// （它根本没有会话库，收不出东西不是错误）。这里用**纯函数 + 注入的输入面**钉住每个
+/// 分支：不读进程环境、不碰真会话目录，也只建临时目录。
+mod harness_adapter_tests {
+    use super::{
+        archive_sessions_fields_with, cwd_slug, detect_harness, harness_session_dirs,
+        resolve_harness_adapter, ArchiveInputs, HarnessProbe, OpFlags, Path, PathBuf,
+    };
+    use std::fs;
+
+    /// 独占临时根（每个用例一个；先清干净，避免上次残留改变结论）。
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-harness-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("建临时根");
+        dir
+    }
+
+    /// 探测输入面的简写（三个环境变量各自在不在）。
+    fn probe(pi: bool, claude: bool, codex: bool) -> HarnessProbe {
+        HarnessProbe {
+            pi_session_id: pi,
+            claude_code: claude,
+            codex_home: codex,
+        }
+    }
+
+    /// op 级旗标的直连面（`OpFlags::parse` 读进程 argv，单测不能走）。
+    fn flags(pairs: &[(&str, &str)]) -> OpFlags {
+        OpFlags {
+            values: pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        }
+    }
+
+    /// 只有 cwd 不同的归档输入面（会话目录 / HOME / 适配器全部显式注入）。
+    fn inputs(harness: &str, root: &Path) -> ArchiveInputs {
+        ArchiveInputs {
+            harness: Some(harness.to_owned()),
+            mod_dir: None,
+            sessions_dir: None,
+            home: Some(root.join("home")),
+            cwd: Some(root.join("work")),
+            env_harness: None,
+        }
+    }
+
+    fn outcome(out: &[(&'static str, String)]) -> (String, String, String) {
+        (out[0].1.clone(), out[1].1.clone(), out[2].1.clone())
+    }
+
+    /// 显式 `--harness` 压过环境变量；环境变量压过「未表态」。
+    #[test]
+    fn explicit_adapter_wins_over_the_env_layer() {
+        let cwd = temp_root("explicit");
+        for adapter in ["pi", "claude-code", "codex", "generic"] {
+            assert_eq!(
+                resolve_harness_adapter(Some(adapter), Some("codex"), &cwd),
+                adapter,
+                "--harness {adapter} 必须压过 YGG_HARNESS"
+            );
+        }
+        // 没有显式值时才轮到第二层（这里用确定值验，auto 分支走 detect_harness 的用例）。
+        assert_eq!(
+            resolve_harness_adapter(None, Some("claude-code"), &cwd),
+            "claude-code"
+        );
+        let _ = fs::remove_dir_all(&cwd);
+    }
+
+    /// `auto` 的优先级：Pi > Claude Code > Codex > generic；现场痕迹也能叫起适配器。
+    #[test]
+    fn auto_detection_prefers_pi_then_claude_then_codex() {
+        let root = temp_root("detect");
+        let work = root.join("work");
+        fs::create_dir_all(&work).expect("建 cwd");
+        let home = root.join("home");
+
+        assert_eq!(
+            detect_harness(&probe(true, true, true), Some(&home), &work),
+            "pi"
+        );
+        assert_eq!(
+            detect_harness(&probe(false, true, true), Some(&home), &work),
+            "claude-code"
+        );
+        assert_eq!(
+            detect_harness(&probe(false, false, true), Some(&home), &work),
+            "codex"
+        );
+        assert_eq!(
+            detect_harness(&probe(false, false, false), Some(&home), &work),
+            "generic"
+        );
+
+        // 工作区的 `.pi` / `.claude` 目录同样是证据（不靠环境变量）。
+        fs::create_dir_all(work.join(".pi")).expect("建 .pi");
+        assert_eq!(
+            detect_harness(&probe(false, true, false), Some(&home), &work),
+            "pi",
+            "`.pi` 现场压过 CLAUDE_CODE"
+        );
+        let _ = fs::remove_dir_all(work.join(".pi"));
+        fs::create_dir_all(work.join(".claude")).expect("建 .claude");
+        assert_eq!(
+            detect_harness(&probe(false, false, false), Some(&home), &work),
+            "claude-code"
+        );
+        let _ = fs::remove_dir_all(work.join(".claude"));
+
+        // `$HOME/.pi/agent/sessions/--<cwd_slug>--` 存在 → Pi（历史会话就摆在那里）。
+        fs::create_dir_all(
+            home.join(".pi")
+                .join("agent")
+                .join("sessions")
+                .join(format!("--{}--", cwd_slug(&work))),
+        )
+        .expect("建 pi 会话库");
+        assert_eq!(
+            detect_harness(&probe(false, false, false), Some(&home), &work),
+            "pi"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 每个适配器的会话库落点（`generic` 没有会话库）。
+    #[test]
+    fn session_store_paths_are_per_adapter() {
+        let home = Path::new("/home/x");
+        assert_eq!(
+            harness_session_dirs("pi", home, "a-b"),
+            Some((
+                PathBuf::from("/home/x/.pi/agent/sessions/--a-b--"),
+                PathBuf::from("/home/x/.pi/agent/sessions-trash")
+            ))
+        );
+        assert_eq!(
+            harness_session_dirs("claude-code", home, "a-b"),
+            Some((
+                PathBuf::from("/home/x/.claude/projects/-a-b"),
+                PathBuf::from("/home/x/.claude/sessions-trash")
+            ))
+        );
+        assert_eq!(
+            harness_session_dirs("codex", home, "a-b"),
+            Some((
+                PathBuf::from("/home/x/.codex/sessions"),
+                PathBuf::from("/home/x/.codex/sessions-trash")
+            ))
+        );
+        assert_eq!(harness_session_dirs("generic", home, "a-b"), None);
+        assert_eq!(cwd_slug(Path::new("/Users/x/Repo")), "Users-x-Repo");
+    }
+
+    /// `generic` 没有会话库：记一笔 0/0 台账，**不建任何目录**、不报错。
+    ///
+    /// 连带钉住一个边界：即使 `$HOME` 也缺席（容器里很常见），`generic` 仍然成功——
+    /// 它连会话库都不需要，不能让收口卡在一个「推导不出来的路径」上。
+    #[test]
+    fn generic_adapter_records_a_zero_ledger() {
+        let root = temp_root("generic");
+        let flags = flags(&[("--parent", "p1"), ("--batch", "b1")]);
+        let out = archive_sessions_fields_with(&flags, &inputs("generic", &root))
+            .expect("generic 必须成功（收不出东西不是错误）");
+        assert_eq!(
+            outcome(&out),
+            (
+                "0".to_owned(),
+                "0".to_owned(),
+                "generic:no-session-store:b1".to_owned()
+            )
+        );
+        assert!(
+            !root.join("home").exists(),
+            "generic 不得顺手建出会话库/trash 目录"
+        );
+        // `$HOME` 缺席也是同一个答案（generic 不靠任何目录）。
+        let mut homeless = inputs("generic", &root);
+        homeless.home = None;
+        let out = archive_sessions_fields_with(&flags, &homeless).expect("generic 不需要 HOME");
+        assert_eq!(
+            outcome(&out),
+            (
+                "0".to_owned(),
+                "0".to_owned(),
+                "generic:no-session-store:b1".to_owned()
+            )
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 适配器目录不存在（首次归档）：记 `<适配器>:empty:<batch>`，不失败。
+    #[test]
+    fn a_missing_adapter_dir_is_an_empty_ledger() {
+        let root = temp_root("empty");
+        fs::create_dir_all(root.join("home")).expect("建 HOME");
+        for adapter in ["pi", "claude-code", "codex"] {
+            let out = archive_sessions_fields_with(
+                &flags(&[("--parent", "p1"), ("--batch", "b1")]),
+                &inputs(adapter, &root),
+            )
+            .expect("缺目录必须成功");
+            assert_eq!(
+                outcome(&out),
+                (
+                    "0".to_owned(),
+                    "0".to_owned(),
+                    format!("{adapter}:empty:b1")
+                ),
+                "{adapter} 的会话库不存在时只能记 0/0"
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `pi` 分支真的能搬：命中转录进 `<sessions-trash>/<batch>`，不匹配的原样不动。
+    #[test]
+    fn pi_adapter_sweeps_the_matching_transcript() {
+        let root = temp_root("pi-sweep");
+        let work = root.join("work");
+        let home = root.join("home");
+        let sessions = home
+            .join(".pi")
+            .join("agent")
+            .join("sessions")
+            .join(format!("--{}--", cwd_slug(&work)));
+        fs::create_dir_all(&sessions).expect("建会话库");
+        fs::write(sessions.join("s1.jsonl"), "head\nparent-777\ntail\n").expect("写命中档");
+        fs::write(sessions.join("s2.jsonl"), "nothing here\n").expect("写其它档");
+
+        let out = archive_sessions_fields_with(
+            &flags(&[("--parent", "parent-777"), ("--batch", "b9")]),
+            &inputs("pi", &root),
+        )
+        .expect("扫描成功");
+        let (moved, remaining, dest) = outcome(&out);
+        assert_eq!((moved.as_str(), remaining.as_str()), ("1", "0"));
+        let trash = home
+            .join(".pi")
+            .join("agent")
+            .join("sessions-trash")
+            .join("b9");
+        assert_eq!(
+            dest,
+            fs::canonicalize(&trash)
+                .expect("trash 必已建")
+                .display()
+                .to_string()
+        );
+        assert!(trash.join("s1.jsonl").is_file(), "命中的档必须搬进 trash");
+        assert!(!sessions.join("s1.jsonl").exists());
+        assert!(sessions.join("s2.jsonl").is_file(), "不匹配的档不得被动");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 显式 `--sessions-dir` 永远照旧（即使适配器是 `generic`，也不走台账捷径）。
+    #[test]
+    fn an_explicit_sessions_dir_ignores_the_adapter() {
+        let root = temp_root("explicit-dir");
+        let dir = root.join("sessions");
+        fs::create_dir_all(&dir).expect("建显式目录");
+        fs::write(dir.join("s1.jsonl"), "parent-777\n").expect("写命中档");
+        let mut inputs = inputs("generic", &root);
+        inputs.sessions_dir = Some(dir.clone());
+        inputs.home = None;
+        let out = archive_sessions_fields_with(
+            &flags(&[("--parent", "parent-777"), ("--batch", "b1")]),
+            &inputs,
+        )
+        .expect("显式目录不受适配器影响");
+        let (moved, remaining, _dest) = outcome(&out);
+        assert_eq!((moved.as_str(), remaining.as_str()), ("1", "0"));
+        // 显式目录的 trash 根仍按老口径推导：`<dir 的父目录>/trash/<batch>`。
+        assert!(root.join("trash").join("b1").join("s1.jsonl").is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
 /// 更名兼容（`agent-seed` → `pi-agent-seed`）的判定面：历史 run 不改 `run.json` 也能续。
 ///
 /// 为何要有这个模块：两侧 Mod 目录在 2026 改名，但 `.ygg/runs/**/run.json` 里记的是
@@ -5746,6 +6251,7 @@ mod mod_dir_alias_tests {
             artifact_get: None,
             builtin_tool: None,
             daemon: false,
+            harness: None,
         }
     }
 
@@ -5807,16 +6313,16 @@ mod mod_dir_alias_tests {
         );
     }
 
-    /// 映射故意很窄：只有 `mods/agent-seed` 这个精确形状才翻译。
+    /// 映射故意很窄：只有 `mods/<seed 名>` 这个精确形状才翻译（两个方向都是）。
     #[test]
     fn mapping_is_narrow_on_purpose() {
         for untouched in [
             "agent-seed",              // 没有 `mods/` 父段
             "/tmp/agent-seed",         // 父段不叫 mods（/tmp/agent-seed 常是临时探针目录）
-            ".ygg/mods/pi-agent-seed", // 已经是新名
             ".ygg/mods/agent-seed-v2", // 只是前缀撞名
             ".ygg/mods/agent-seeds",
-            ".ygg/agent-seed", // 父段不是 mods
+            ".ygg/mods/pi-agent-seed-v2", // 反向也只是前缀撞名
+            ".ygg/agent-seed",            // 父段不是 mods
         ] {
             assert_eq!(
                 legacy_seed_alias(Path::new(untouched)),
@@ -5824,6 +6330,31 @@ mod mod_dir_alias_tests {
                 "{untouched} 不该被翻译"
             );
         }
+    }
+
+    /// 别名是**双向**的：新名 → 旧名，且磁盘上只有旧名目录时 `resolve_mod_dir` 落到它。
+    ///
+    /// 为何要双向：同一个 Mod 同时被两套 harness 用两种目录名调用——通用 harness 写
+    /// `--mod .ygg/mods/agent-seed`，Pi 侧写 `--mod .ygg/mods/pi-agent-seed`；磁盘上只有
+    /// 一个目录，所以请求缺席的那个名字时必须翻译到存在的那个。
+    #[test]
+    fn the_new_name_maps_back_when_only_the_old_dir_exists() {
+        assert_eq!(
+            legacy_seed_alias(Path::new(".ygg/mods/pi-agent-seed")),
+            Some(PathBuf::from(".ygg/mods/agent-seed"))
+        );
+        let root = temp_root("keep-new");
+        let legacy = root.join("mods/agent-seed");
+        fs::create_dir_all(&legacy).expect("建旧名目录");
+        fs::write(legacy.join("pack.json"), "{}").expect("放一个标记文件");
+        let requested = root.join("mods/pi-agent-seed");
+        assert!(!requested.exists(), "前提：请求的新名目录不存在");
+        assert_eq!(
+            resolve_mod_dir(&args(Some(requested)), &root.join("runs/r1"))
+                .expect("新名缺席时必须翻译到旧名"),
+            legacy
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// 旧目录还在磁盘上（未迁移的检出）→ 原样用旧的，不抢改成新的。
@@ -7393,6 +7924,7 @@ mod multiscript_hot_reload_tests {
             artifact_get: None,
             builtin_tool: None,
             daemon: false,
+            harness: None,
         }
     }
 
@@ -7830,6 +8362,7 @@ end)
             artifact_get: None,
             builtin_tool: None,
             daemon: false,
+            harness: None,
         }
     }
 
@@ -8787,6 +9320,7 @@ end)
             artifact_get: None,
             builtin_tool: None,
             daemon: false,
+            harness: None,
         }
     }
 
@@ -9486,6 +10020,7 @@ end)
             artifact_get: None,
             builtin_tool: None,
             daemon: false,
+            harness: None,
         }
     }
 
@@ -10072,6 +10607,7 @@ end)
             artifact_get: None,
             builtin_tool: None,
             daemon: true,
+            harness: None,
         }
     }
 

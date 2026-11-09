@@ -96,9 +96,9 @@
       "sha256": "035bdb47998ef47e503f7a37a9ca6f705a8b1ec81a035c134b5d487ffd78fe9d"
     },
     {
-      "byteLength": 25958,
+      "byteLength": 26423,
       "path": "src/render.lua",
-      "sha256": "a8b9bdda3cee159f755c38e05e3f13391b2a8c2abdbb822bacf903c283af409d"
+      "sha256": "b30e320b6de12d38bc0d657cfcede1c3ecd8f5fc56a7feae7d59c3e5488fb8c8"
     },
     {
       "byteLength": 18674,
@@ -131,12 +131,12 @@
       "sha256": "940a138803a317b8f925df378f7b30b12f950244697bca6491b75a0f50a03788"
     },
     {
-      "byteLength": 712,
+      "byteLength": 754,
       "id": "ygg:agent/config",
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "66807a05321e392024092a54293c94fc222d41e86e7e3d6febd5fdfd9b3f307a"
+      "sha256": "36f8344adfe99a059078d3d3076b53742ad80f34220790939a84676a12dab0d3"
     },
     {
       "byteLength": 87961,

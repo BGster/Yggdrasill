@@ -1688,6 +1688,10 @@ fn summary_exposes_structured_jobs_and_gates() {
     assert_eq!(job["lane"], json!(1), "{fields}");
     assert_eq!(job["branch"], json!("feat-jobs"), "{fields}");
     assert_eq!(job["base"], json!("abc1234"), "{fields}");
+    // The executor ledger is mirrored onto every job row: unbound = the empty string
+    // (never `null`), so a scheduler can read it without a null check.
+    assert_eq!(job["executor"], json!(""), "{fields}");
+    assert_eq!(job["planExecutor"], json!(""), "{fields}");
     assert_eq!(job["title"], json!("synthetic requirement"), "{fields}");
     assert_eq!(
         job["description"],
@@ -1737,6 +1741,18 @@ fn summary_exposes_structured_jobs_and_gates() {
     assert_eq!(jobs[0]["status"], json!("developing"), "{fields}");
     assert_eq!(jobs[0]["phase"], json!("developing"), "{fields}");
     assert_eq!(jobs[0]["lane"], json!(1), "{fields}");
+    // ② bound the **plan** executor (`agent-1`): the development row has no executor of its
+    // own yet, but `planExecutor` still carries the plan-stage id.
+    assert_eq!(
+        jobs[0]["executor"],
+        json!(""),
+        "development is not bound yet: {fields}"
+    );
+    assert_eq!(
+        jobs[0]["planExecutor"],
+        json!("agent-1"),
+        "the plan-stage executor rides along the development row: {fields}"
+    );
     assert_eq!(
         jobs[0]["branch"],
         json!(""),
@@ -1752,6 +1768,58 @@ fn summary_exposes_structured_jobs_and_gates() {
         .as_array()
         .unwrap_or_else(|| panic!("summary.gates must be an array: {fields}"));
     assert!(gates.is_empty(), "the gate is resolved: {fields}");
+}
+
+/// Summary jobs mirror the **bound executor ledger**: `executor` (current stage) and
+/// `planExecutor` (the plan stage) are the clean agent id — the `|<reason>` suffix that
+/// `config.set` / `exec=` store next to the id is stripped before it reaches the wire.
+///
+/// Mutation: drop the `wire.executor_id_of` strip in `summary_jobs` → `planExecutor`
+/// becomes `agent-2|handoff` and the last assertion goes red.
+#[test]
+fn summary_jobs_strip_the_executor_reason_suffix() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("subsystem gate|synthetic task description"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("synthetic requirement|synthetic description|semantics-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    let jobs = |game: &mut Game| {
+        let fields = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+        fields["jobs"]
+            .as_array()
+            .unwrap_or_else(|| panic!("summary.jobs must be an array: {fields}"))
+            .clone()
+    };
+
+    // ① nothing is bound yet → two empty strings (never `null`).
+    let rows = jobs(&mut game);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["executor"], json!(""), "{rows:?}");
+    assert_eq!(rows[0]["planExecutor"], json!(""), "{rows:?}");
+
+    // ② an inline `exec=agent-2:handoff` binds the plan stage **with a reason**.
+    submit_with_exec(&mut game, 1, "plan", "semantics-exec", "agent-2:handoff");
+    game.assert_kv("settings.executor.r1.plan", json!("agent-2|handoff"));
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.assert_kv("req.1.job", json!("development"));
+
+    // ③ the development row reports the clean ids: its own stage is unbound, the plan stage
+    //    keeps `agent-2` **without** the `|handoff` suffix.
+    let rows = jobs(&mut game);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["stage"], json!("development"), "{rows:?}");
+    assert_eq!(rows[0]["executor"], json!(""), "{rows:?}");
+    assert_eq!(
+        rows[0]["planExecutor"],
+        json!("agent-2"),
+        "the reason suffix must not leak into the wire: {rows:?}"
+    );
 }
 
 /// A3 `fs.artifact_probe` and `vfs.write` feed **one** bounded ledger (`record_artifact` is the

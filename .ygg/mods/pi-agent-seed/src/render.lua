@@ -582,21 +582,28 @@ end
 
 -- 在跑作业的结构化明细（analysis / plan / development 三阶段各占一条）。
 -- 只读 KV 派生的展示面：与 summary_awaiting 同源（后者只返回第一条），
--- 这里返回全量，供守护模式的调度端一次性取到 id / rev / lane / branch / base / 标题 / 描述。
+-- 这里返回全量，供守护模式的调度端一次性取到 id / rev / lane / branch / base / 标题 / 描述，
+-- 以及**账本里绑定的执行者**：`executor` = 当前阶段的 agent id，`planExecutor` = plan 阶段的
+-- agent id（未绑定 = ""）。两者都剥掉 `|<原因>` 后缀——调度端只认 id，不解析原因；
+-- 本字段只是自声明账本的镜像，不构成身份凭据。
 local function summary_jobs()
   local out = {}
   for i = 1, req_count() do
-    if SUMMARY_JOB_STAGES[req_job(i)] == true then
+    local job = req_job(i)
+    if SUMMARY_JOB_STAGES[job] == true then
       local lane = req_lane(i)
+      local id = req_id(i)
       out[#out + 1] = {
-        id = req_id(i),
+        id = id,
         rev = summary_int(req_rev(i)),
-        stage = req_job(i),
+        stage = job,
         status = req_status(i),
         phase = req_phase_name(i),
         lane = summary_int(lane),
         branch = lane > 0 and text_of("lane." .. tostring(lane) .. ".branch", "") or "",
         base = lane > 0 and text_of("lane." .. tostring(lane) .. ".base", "") or "",
+        executor = wire.executor_id_of(executor_raw(id, job)),
+        planExecutor = wire.executor_id_of(executor_raw(id, "plan")),
         title = req_title(i),
         description = text_of(req_key(i, "description"), ""),
       }
