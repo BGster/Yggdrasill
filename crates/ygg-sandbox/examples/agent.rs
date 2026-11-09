@@ -4191,6 +4191,19 @@ fn verify_gates(mode: &str) -> Vec<(&'static str, Vec<&'static str>)> {
     }
 }
 
+fn parse_custom_verify_commands(raw: &str) -> Vec<(String, String, Vec<String>)> {
+    raw.split(';')
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .filter_map(|segment| {
+            let mut parts = segment.split_whitespace();
+            let program = parts.next()?.to_owned();
+            let args: Vec<String> = parts.map(ToOwned::to_owned).collect();
+            Some((segment.to_owned(), program, args))
+        })
+        .collect()
+}
+
 fn verify_suite_fields() -> Result<Vec<(&'static str, String)>, OpFailure> {
     verify_suite_fields_with(&OpFlags::parse("verify-suite", VERIFY_FLAGS))
 }
@@ -4214,12 +4227,29 @@ fn verify_suite_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String
         ));
     }
     let repo = repo_root(flags.get("--repo")).map_err(|err| OpFailure::detail("repo", err))?;
-    let gates = verify_gates(&mode);
-    let total = gates.len();
-    for (index, (label, cargo_args)) in gates.iter().enumerate() {
+    let custom = std::env::var("YGG_VERIFY_COMMANDS")
+        .ok()
+        .map(|raw| parse_custom_verify_commands(&raw))
+        .unwrap_or_default();
+    let commands: Vec<(String, String, Vec<String>)> = if !custom.is_empty() {
+        custom
+    } else {
+        verify_gates(&mode)
+            .into_iter()
+            .map(|(label, args)| {
+                (
+                    label.to_owned(),
+                    "cargo".to_owned(),
+                    args.into_iter().map(ToOwned::to_owned).collect(),
+                )
+            })
+            .collect()
+    };
+    let total = commands.len();
+    for (index, (label, program, cmd_args)) in commands.iter().enumerate() {
         // `output()` 内部并发排空两个管道——不会因为管道塞满而死锁。
-        let outcome = Command::new("cargo")
-            .args(cargo_args)
+        let outcome = Command::new(program)
+            .args(cmd_args)
             .current_dir(&repo)
             .stdin(Stdio::null())
             .output();
@@ -10793,6 +10823,18 @@ end)
                 "cargo test -p ygg-sandbox --test agent_seed_semantics",
             ]
         );
+    }
+
+    #[test]
+    fn parse_custom_verify_commands_splits_semicolon_separated_commands() {
+        let parsed = parse_custom_verify_commands(" npm test -- --run ; pytest -q ; ");
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].0, "npm test -- --run");
+        assert_eq!(parsed[0].1, "npm");
+        assert_eq!(parsed[0].2, vec!["test", "--", "--run"]);
+        assert_eq!(parsed[1].0, "pytest -q");
+        assert_eq!(parsed[1].1, "pytest");
+        assert_eq!(parsed[1].2, vec!["-q"]);
     }
 
     /// `@self` 别名：`ygg-agent` 与 `@self` 都解析到本可执行文件（同一分支）。

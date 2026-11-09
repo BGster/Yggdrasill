@@ -2427,4 +2427,22 @@ fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
         probed_jobs[0]["subagentAction"]["resumeAgentId"],
         json!("agent-dev-uuid-1")
     );
+
+    // Switching to `play.mode=goal` before `goal.authorization` is registered emits `[GOAL AUTH PENDING]`.
+    let goal_without_auth = game.narrate("config.set", &text("play.mode=goal"));
+    assert_eq!(
+        count_lines(&goal_without_auth, "[GOAL AUTH PENDING]"),
+        1,
+        "{goal_without_auth:#?}"
+    );
+    game.narrate(
+        "config.set",
+        &text("goal.authorization=authorized for test"),
+    );
+    let goal_with_auth = game.narrate("config.set", &text("play.mode=goal"));
+    assert_eq!(
+        count_lines(&goal_with_auth, "[GOAL AUTH PENDING]"),
+        0,
+        "{goal_with_auth:#?}"
+    );
 }

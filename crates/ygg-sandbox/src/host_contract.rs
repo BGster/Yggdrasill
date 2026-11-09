@@ -15,7 +15,7 @@
 //! **无默认值纪律**：所有段都是必填，缺失 / 字段缺失 / 类型不符 / 非正数一律
 //! 返回可读错误（带缺失字段名 + 应有形状 + 文档定位），由调用方 fail-closed
 //! （报错退出或 `ok=false` 报告）——宿主**不**提供任何回退默认值。旧 Mod 因此
-//! 必须在升级时补齐这四段（见 `docs/mod-authoring.md` 与
+//! 必须在升级时补齐这四段（见 `docs/DESIGN.md` 与
 //! `.ygg/mods/pi-agent-seed/README.md` 的「host 契约」章节）。
 //!
 //! # 两层工具白名单（`tools` / `allowedTools`，两者都可选）
@@ -46,8 +46,8 @@
 //! | 错误前缀口径 | 装载器自判的拒绝带**调用点**（`src/a.lua:3: <原因>`）；模块 chunk 自身的错误按 Lua 原生错误链浮出（每层 `path:line:` + traceback）——两类同形，都带真实文件与行号，禁止「拼回单文件再报错」 | [`crate::modules`] |
 //!
 //! 与四段 host 契约的差别：`code` 段可以整段缺失（缺 = 单文件 Mod，行为逐字节
-//! 不变）；存在则**全量校验**，不允许半声明。边界细节见 `docs/mod-authoring.md`
-//! §5「多文件 Mod」的「require 语义」与「副作用边界」两节。
+//! 不变）；存在则**全量校验**，不允许半声明。边界细节见 `docs/DESIGN.md`
+//! §3.2「Mod 包与多文件纯度契约」。
 //!
 //! 绑定特定 Mod 的应用（`examples/adventure.rs`、`clients/godot`、
 //! `packages/client-web`…）不属本模块的消费方：它们各自服务固定 Mod，文件头

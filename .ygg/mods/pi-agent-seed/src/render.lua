@@ -704,21 +704,42 @@ summary_jobs = function()
       local title = req_title(i)
       local desc = text_of(req_key(i, "description"), "")
       local artifact_path = "artifacts/" .. id .. "-" .. job .. ".md"
-      local submit_command = ".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"" .. id .. "|" .. tostring(rev) .. "|" .. job .. "|<summary>|" .. artifact_path .. "||exec=<agent_id>\"'"
-      local brief = "Requirement " .. id .. " (rev " .. tostring(rev) .. ", stage=" .. job .. "): " .. title
-        .. "\nDescription: " .. desc
-        .. "\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing."
-        .. "\nWorktree: " .. (worktree_path ~= "" and worktree_path or ".")
-        .. " (branch=" .. (branch ~= "" and branch or "-") .. ", base=" .. (base ~= "" and base or "-") .. ")"
-        .. "\nArtifact: " .. artifact_path
-        .. "\nSubmit: " .. submit_command
+      local wt_display = worktree_path ~= "" and worktree_path or "."
+      local branch_display = branch ~= "" and branch or "-"
+      local base_display = base ~= "" and base or "-"
+      local submit_command = fill(TEXTS.beats.subagent_submit_cmd, {
+        id = id,
+        rev = tostring(rev),
+        stage = job,
+        artifact = artifact_path,
+      })
+      local brief = fill(TEXTS.beats.subagent_brief, {
+        id = id,
+        rev = tostring(rev),
+        stage = job,
+        title = title,
+        desc = desc,
+        worktree = wt_display,
+        branch = branch_display,
+        base = base_display,
+        artifact = artifact_path,
+        submit = submit_command,
+      })
       local delta_prompt = ""
       if resume_id ~= "" then
-        delta_prompt = "Resume " .. id .. " (rev " .. tostring(rev) .. ") for stage `" .. job .. "` in worktree `" .. (worktree_path ~= "" and worktree_path or ".") .. "`; write `" .. artifact_path .. "` and submit."
+        delta_prompt = fill(TEXTS.beats.subagent_delta, {
+          id = id,
+          rev = tostring(rev),
+          stage = job,
+          worktree = wt_display,
+          artifact = artifact_path,
+        })
       end
       local full_fallback_brief = brief
       if resume_id ~= "" then
-        full_fallback_brief = brief .. "\nResume context: prior executor `" .. resume_id .. "`."
+        full_fallback_brief = brief .. fill(TEXTS.beats.subagent_fallback_note, {
+          resume_id = resume_id,
+        })
       end
       local subagent_action = {
         action = (resume_id ~= "") and "subagent.resume" or "subagent.spawn",

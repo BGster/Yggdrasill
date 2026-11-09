@@ -107,7 +107,7 @@ shasum -a 256 data/scenes.json   # 取哈希与字节数，回填 manifest.json
 
 ## 参考
 
-- [Mod 作者指南](../../../docs/mod-authoring.md)——以上全部踩坑的正式文档化
+- [系统设计与 Mod 契约](../../../docs/DESIGN.md)——以上全部踩坑的正式文档化
   （句柄模式 / choice 终结语义 / fsm 语义 / payload 规则 / pack 工具 /
   存读档语义 / choice_selected 域校验）；
 - [lua-stubs](../../../lua-stubs/README.md)——`ygg` 全局 LuaLS 类型 stub
