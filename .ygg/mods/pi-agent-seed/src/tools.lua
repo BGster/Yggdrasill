@@ -389,22 +389,22 @@ local function by_ext(ext)
   return nil
 end
 
-local function request(tool_id, args_text, call_id, ext)
+local function validate_call_request(tool_id, args_text, call_id)
   -- ① allowlist 先于形状：未放行的工具连「形状对不对」都不该告诉调用方。
   if not contains(allowed(), tool_id) then
-    return nil, fill(TEXTS.beats.tool_not_allowed, {
+    return nil, nil, nil, nil, fill(TEXTS.beats.tool_not_allowed, {
       tool_id = tostring(tool_id),
       allowed = allowed_text(),
     })
   end
   -- ② tool_id 形状（放行表自带形状校验，这里是纵深防御）。
   if #tool_id > MAX_TOOL_ID or tool_id:match(TOOL_ID_RE) == nil then
-    return nil, fill(TEXTS.beats.tool_bad_tool_id, { tool_id = tostring(tool_id) })
+    return nil, nil, nil, nil, fill(TEXTS.beats.tool_bad_tool_id, { tool_id = tostring(tool_id) })
   end
   -- ③ 参数。
   local pairs_out, problem = parse_args(args_text)
   if pairs_out == nil then
-    return nil, fill(TEXTS.beats.tool_bad_args, { args = tostring(args_text), problem = problem })
+    return nil, nil, nil, nil, fill(TEXTS.beats.tool_bad_args, { args = tostring(args_text), problem = problem })
   end
   -- ④ call_id。
   local chosen = trim(call_id or "")
@@ -412,13 +412,13 @@ local function request(tool_id, args_text, call_id, ext)
   local limit = cap()
   if chosen ~= "" then
     if #chosen > MAX_CALL_ID or chosen:match(CALL_ID_RE) == nil or RESERVED[chosen] == true then
-      return nil, fill(TEXTS.beats.tool_bad_call_id, {
+      return nil, nil, nil, nil, fill(TEXTS.beats.tool_bad_call_id, {
         call_id = chosen,
         max = tostring(MAX_CALL_ID),
       })
     end
     if exists_of(chosen) then
-      return nil, fill(TEXTS.beats.tool_call_dup, {
+      return nil, nil, nil, nil, fill(TEXTS.beats.tool_call_dup, {
         call_id = chosen,
         status = status_of(chosen),
       })
@@ -433,12 +433,20 @@ local function request(tool_id, args_text, call_id, ext)
       end
     end
     if chosen == "" then
-      return nil, fill(TEXTS.beats.tool_capacity, { cap = tostring(limit) })
+      return nil, nil, nil, nil, fill(TEXTS.beats.tool_capacity, { cap = tostring(limit) })
     end
   end
   -- ⑤ 容量（生命周期计数上界）。
   if total >= limit then
-    return nil, fill(TEXTS.beats.tool_capacity, { cap = tostring(limit) })
+    return nil, nil, nil, nil, fill(TEXTS.beats.tool_capacity, { cap = tostring(limit) })
+  end
+  return chosen, pairs_out, total, limit, nil
+end
+
+local function request(tool_id, args_text, call_id, ext)
+  local chosen, pairs_out, total, _, problem = validate_call_request(tool_id, args_text, call_id)
+  if chosen == nil then
+    return nil, problem
   end
   -- ⑥ 落盘（顺序固定，便于崩溃排查）。
   local index = total + 1
@@ -1198,46 +1206,17 @@ local function handle_call(payload)
     render()
     return
   end
-  -- 挂载同步执行前先过与 request() 相同的校验门（未放行/坏形状/重复 id/超容一律先拒绝）。
-  if not contains(allowed(), tool_id) then
-    return reject_payload("tool.call", fill(TEXTS.beats.tool_not_allowed, {
-      tool_id = tostring(tool_id),
-      allowed = allowed_text(),
-    }))
-  end
-  if #tool_id > MAX_TOOL_ID or tool_id:match(TOOL_ID_RE) == nil then
-    return reject_payload("tool.call", fill(TEXTS.beats.tool_bad_tool_id, { tool_id = tostring(tool_id) }))
-  end
-  local pairs_out, args_problem = parse_args(args_text)
-  if pairs_out == nil then
-    return reject_payload("tool.call", fill(TEXTS.beats.tool_bad_args, { args = tostring(args_text), problem = args_problem }))
-  end
-  local chosen_check = trim(call_id or "")
-  local total = count_of()
-  local limit = cap()
-  if chosen_check ~= "" then
-    if #chosen_check > MAX_CALL_ID or chosen_check:match(CALL_ID_RE) == nil or RESERVED[chosen_check] == true then
-      return reject_payload("tool.call", fill(TEXTS.beats.tool_bad_call_id, {
-        call_id = chosen_check,
-        max = tostring(MAX_CALL_ID),
-      }))
-    end
-    if exists_of(chosen_check) then
-      return reject_payload("tool.call", fill(TEXTS.beats.tool_call_dup, {
-        call_id = chosen_check,
-        status = status_of(chosen_check),
-      }))
-    end
-  end
-  if total >= limit then
-    return reject_payload("tool.call", fill(TEXTS.beats.tool_capacity, { cap = tostring(limit) }))
+  -- 挂载同步执行前先过与 request() 同源的 validate_call_request 校验门（未放行/坏形状/重复 id/超容一律先拒绝）。
+  local validated_id, pairs_out, _, _, req_problem = validate_call_request(tool_id, args_text, call_id)
+  if validated_id == nil then
+    return reject_payload("tool.call", req_problem)
   end
   local args_map = {}
   for i = 1, #pairs_out do
     args_map[pairs_out[i].k] = pairs_out[i].v
   end
   local norm_args = args_text_of(pairs_out)
-  local synced = try_sync_call(tool_id, args_map, norm_args, call_id, ext)
+  local synced = try_sync_call(tool_id, args_map, norm_args, validated_id, ext)
   if synced ~= nil then
     flush_meta()
     render()
@@ -1379,6 +1358,7 @@ M.request = request
 M.settled_count = settled_count
 M.status_of = status_of
 M.try_sync_call = try_sync_call
+M.validate_call_request = validate_call_request
 M.verify_artifacts = verify_artifacts
 
 return M

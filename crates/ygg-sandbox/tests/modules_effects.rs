@@ -97,11 +97,8 @@ fn a_module_that_registers_at_the_top_level_is_rejected_with_file_and_line() {
         text.contains("派发序") && text.contains("重构就不再安全"),
         "报错必须解释原因：{text}"
     );
-    // 指向作者手册的多文件章节（§5 多文件 Mod）。
-    assert!(
-        text.contains("docs/mod-authoring.md"),
-        "报错必须指向文档：{text}"
-    );
+    // 指向设计契约的多文件 Mod 章节（docs/DESIGN.md §3.2）。
+    assert!(text.contains("docs/DESIGN.md"), "报错必须指向文档：{text}");
 }
 
 #[test]

@@ -25,7 +25,7 @@
 //!    （D17 串行确定性内核决策的实证锚）：10k 实体下单事件 dispatch 与
 //!    全量 save 的墙钟成本，取多次运行最小值；断言为宽松 sanity 界
 //!    （防 O(N)/转换成本在快照/实体结构改动时悄然恶化一个数量级以上），
-//!    实测数据经 println! 落入测试输出作为决策记录（vision.md D17 引用）。
+//!    实测数据经 println! 落入测试输出作为决策记录（docs/CONTEXT.md D17 引用）。
 //!
 //! **引擎版本与 golden 哈希的关系（探针口径声明）**：canonical 快照字节含
 //! `schema_version / revision / next_entity_id / entities`，**不含
@@ -343,12 +343,12 @@ end)
 
 #[test]
 fn probe_scale_cost_baseline_documents_shard_decision() {
-    // D17（vision.md 决策表）规模实证锚：串行确定性内核在叙事规模下的
+    // D17（docs/CONTEXT.md 决策表）规模实证锚：串行确定性内核在叙事规模下的
     // 单事件/存档成本量级。**口径声明**：本探针量的是成本基线（perf 记
     // 录），不是确定性；计时不确定性可接受（数据取多次运行最小值）；断
     // 言为宽松 sanity 界——只在成本悄然恶化一个数量级以上时翻红（例如
     // snapshot-out 被改成更贵的形态、实体结构引入意外深拷贝），不承担
-    // 精确性能回归职责；实测数据以 println! 落入测试输出为准（vision.md
+    // 精确性能回归职责；实测数据以 println! 落入测试输出为准（docs/CONTEXT.md
     // D17 / Design History 引用本输出）。
     const TARGET_ENTITIES: u32 = 10_000;
     const ADD_ROUNDS: u32 = TARGET_ENTITIES / 100;

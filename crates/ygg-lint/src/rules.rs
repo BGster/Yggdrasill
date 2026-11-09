@@ -1,7 +1,7 @@
 //! 首批规则（FR-8）：R1 choice 前 emit / R2 local 存实体句柄 / R3 goto 点
 //! 形态（预扫包装）+ parse-error 诊断。
 //!
-//! 判定口径（docs/mod-authoring.md §1/§2 + test-adventure README 清单 1/4/8）：
+//! 判定口径（docs/DESIGN.md §3.1/§3.2 + test-adventure README 清单 1/4/8）：
 //! - **R1** handler = 顶层 `ygg.narrative.node("…", function() … end)` 与
 //!   `ygg.on("…", function() … end)` 注册的匿名函数体（嵌套闭包计入同一
 //!   handler——源序文本近似）。体内 `ygg.emit` 先于首个 `ygg.choice` →

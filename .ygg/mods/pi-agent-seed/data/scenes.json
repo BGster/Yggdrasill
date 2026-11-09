@@ -279,6 +279,7 @@
     "review_evolution_need_artifact": "with candidates (screened > 0) the first segment of settlement.evolution must be `artifacts/<file>.md` — every screened candidate needs a review record, not only the kept ones.",
     "review_evolution_need_classes": "with candidates (screened > 0) you must provide per-class root-cause counts: cls=<kind>:<n>,... (the six classes sum to screened, the kept classes sum to kept).",
     "goal_auth_registered": "[GOAL AUTH REGISTERED] {{auth}} (self-declared, not identity proof; the closing check applies only to runs that entered goal at runtime)",
+    "goal_auth_pending": "[GOAL AUTH PENDING] entered goal mode without goal.authorization; register config.set goal.authorization=<note> before review.note",
     "goal_auth_cleared": "[GOAL AUTH CLEARED] a runtime goal run must register it again before closing.",
     "goal_auth_bad": "goal authorization must be a single line (non-empty after trim, <= 200 chars, no newline).",
     "goal_auth_required": "this run entered goal at runtime: register the run-level authorization before closing with `config.set goal.authorization=<authorization note>` (self-declared; a static goal preset in data/config.json is out of scope).",
@@ -361,6 +362,10 @@
     "verify_suite_blocked": "[VERIFY SUITE BLOCKED] {{reason}}",
     "sessions_archived": "[SESSIONS ARCHIVED] moved {{moved}} -> {{dest}}",
     "sessions_archive_refused": "[SESSIONS ARCHIVE REFUSED] remaining={{remaining}} dest={{dest}} | nothing was recorded",
+    "subagent_submit_cmd": ".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"{{id}}|{{rev}}|{{stage}}|<summary>|{{artifact}}||exec=<agent_id>\"'",
+    "subagent_brief": "Requirement {{id}} (rev {{rev}}, stage={{stage}}): {{title}}\nDescription: {{desc}}\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.\nWorktree: {{worktree}} (branch={{branch}}, base={{base}})\nArtifact: {{artifact}}\nSubmit: {{submit}}",
+    "subagent_delta": "Resume {{id}} (rev {{rev}}) for stage `{{stage}}` in worktree `{{worktree}}`; write `{{artifact}}` and submit.",
+    "subagent_fallback_note": "\nResume context: prior executor `{{resume_id}}`.",
     "reactive_malformed": "[PROBE MALFORMED] {{call_id}} ({{tool_id}}): the output is not a `k=v;...` map - nothing was applied",
     "artifact_path_rejected": "[ARTIFACT PATH REFUSED] {{path}}: the ledger only accepts artifacts/<name>.md (no `..`, no whitespace, at most {{max}} bytes) | nothing was recorded"
   },

@@ -336,7 +336,7 @@ mod binding {
              2) 入口 require 该模块并调用 M.install(deps)\n  \
              原因：handler 的注册序就是派发序。让模块自己注册，等于让「文件怎么拆」决定「运行时行为」，\n  \
              重构就不再安全。模块纯了以后，require 才能在 handler 里按需调用。\n  \
-             见 docs/mod-authoring.md §5 多文件 Mod",
+             见 docs/DESIGN.md §3.2 多文件 Mod 契约",
             site = call_site(lua),
             entry = crate::modload::MOD_SOURCE_FILE,
         )

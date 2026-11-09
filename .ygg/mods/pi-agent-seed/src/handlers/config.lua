@@ -16,8 +16,8 @@ local wire = require("src.wire")
 
 local TEXTS
 
-local MODES, PLAY_MODES, effective =
-  config.MODES, config.PLAY_MODES, config.effective
+local MODES, PLAY_MODES, effective, goal_authorization =
+  config.MODES, config.PLAY_MODES, config.effective, config.goal_authorization
 local refuse, reject, reject_payload =
   flow.refuse, flow.reject, flow.reject_payload
 local CONFIG_UI =
@@ -69,6 +69,9 @@ function M.install(deps)
         ygg.kv.set("settings.play.mode", value)
         if value == "goal" then
           ygg.narrate(TEXTS.beats.handover_goal)
+          if goal_authorization() == "" then
+            ygg.narrate(TEXTS.beats.goal_auth_pending)
+          end
         else
           ygg.narrate(TEXTS.beats.handover_guide)
         end
