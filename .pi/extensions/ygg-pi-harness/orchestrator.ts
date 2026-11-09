@@ -25,7 +25,15 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import type { RunSummary, StepReceipt, SummaryGate, SummaryJob } from "./daemon.ts";
+import {
+  formatPercent,
+  writeHandoffToVfs,
+  type ContextPressureView,
+  type HandoffInput,
+  type HandoffWrite,
+} from "./compaction.ts";
 
 // ───────────────────────────── 注入面 ─────────────────────────────
 
@@ -34,6 +42,8 @@ export interface SubagentResult {
   text: string;
   ok?: boolean;
   error?: string;
+  /** Agent 工具给出的**真实** agent id（有它才能「续跑同一个 subagent」）。 */
+  agentId?: string;
 }
 
 export interface SubagentRequest {
@@ -43,6 +53,8 @@ export interface SubagentRequest {
   prompt: string;
   model?: string;
   thinking?: string;
+  /** 续跑既有 subagent（对上 `Agent` 工具的 `resume` 参数）；`""` / 缺省 = 新起一个。 */
+  resume?: string;
 }
 
 export type ExecuteSubagent = (request: SubagentRequest) => Promise<SubagentResult>;
@@ -58,6 +70,13 @@ export interface OrchestratorDaemon {
     artifactPath: string,
     content: string,
   ): Promise<{ ok: boolean; bytes?: number; sha256?: string; error?: string }>;
+  /** 本局已有制品（交接单的「VFS 制品」一节用；缺省 = 不列）。 */
+  vfsList?(): Promise<{ ok: boolean; artifacts: string[]; error?: string }>;
+  /**
+   * drain 一次 inbox 并把这一步的回执交回（`summary` op 会顺带 drain）。
+   * 探针的折叠叙事若出现在 drain 里，[`parseLaneProbeNarrative`] 就能读到它。
+   */
+  drain?(): Promise<StepReceipt>;
 }
 
 export interface OrchestrateOptions {
@@ -84,6 +103,23 @@ export interface OrchestrateOptions {
   readArtifact?: (absPath: string) => string | null;
   /** 子代理 brief 里的验证门禁（默认 `cargo test --workspace`）。 */
   verification?: string[];
+  /** 本局标识（交接单抬头 / 下一步命令都要它）。 */
+  runId?: string;
+  /**
+   * 上下文压力探针（`index.ts` 传 `() => evaluateContextPressure({...})`）。
+   * 看到 `hard_brake` → **一个字节都不派**，先交接；看到 `soft_brake` → 本波照跑，
+   * 落地（提案 accept 完 → 停在门上）之后写交接单交给上层压缩。
+   */
+  checkContextPressure?: () => ContextPressureView | null | undefined;
+  /** plan → development 跨阶段续跑（默认关：并行泳道里让原方案执行者接着干是显式选择）。 */
+  resumePlanAgent?: boolean;
+  /** 每个作业的自愈重试上限（默认 1：流断开一次、脏工作树一次，再多就是真 bug）。 */
+  maxSelfHealRetries?: number;
+  /**
+   * 读泳道探针真值（默认：先解析回执叙事里的 `commits=` / `clean=`，读不到再退回
+   * 本地 git 只读探测）。读不到真值时**不自愈**——宁可不动，也不刷重试。
+   */
+  readLaneProbe?: (context: LaneProbeContext) => LaneProbeVerdict | Promise<LaneProbeVerdict>;
   logger?: (line: string) => void;
 }
 
@@ -114,6 +150,12 @@ export interface OrchestrationResult {
   /** 所有回执的 narrative 行（按作业序、步序展开，**整段**保留）。 */
   narrative: string[];
   summary: RunSummary | null;
+  /** 本次编排是否因上下文压力刹车（`true` = 上层应接手写交接单 + 压缩 + 续跑）。 */
+  contextBraked: boolean;
+  /** 本次看到的上下文压力（`null` = 没接探针）。 */
+  pressure?: ContextPressureView | null;
+  /** 已写进 VFS 的交接单（`artifacts/handoff-latest.md`）。 */
+  handoff?: HandoffWrite;
   /** 无法编排时的原因（摘要不可用 / 无活跃作业以外的问题）。 */
   degraded?: string;
 }
@@ -124,6 +166,11 @@ const DEFAULT_LANE_POLL_MS = 200;
 const DEFAULT_LANE_WAIT_MS = 20_000;
 const DEFAULT_ACTOR_ID = "pi-ygg-harness";
 const DEFAULT_VERIFICATION = ["cargo test --workspace"];
+const DEFAULT_MAX_SELF_HEAL_RETRIES = 1;
+/** 脏工作树的自愈提示：**逐字**指定要做的事，别让 subagent 自己猜。 */
+export const COMMIT_NUDGE_TEXT =
+  "git.lane_probe reported uncommitted changes or 0 commits ahead of base. " +
+  "Please git add and git commit your changes in the worktree now.";
 const ACTIVE_STAGES = new Set(["plan", "development"]);
 
 // ───────────────────────────── 纯函数：命名与载荷 ─────────────────────────────
@@ -269,6 +316,188 @@ export function buildProposalSubmitPayload(input: {
     external,
     `exec=${actor}:${reason}`,
   ].join("|");
+}
+
+// ───────────────────────────── 纯函数：subagent 身份 ─────────────────────────────
+
+/**
+ * 从 `Agent` 工具的返回里取出**真实** agent id。
+ *
+ * 两条路：结果 `details` 里的 `agentId` / `agent_id` / `id`（结构化，优先），
+ * 或正文里的 `Agent ID: <id>`（后台运行时的固定写法）。取不到就返回 `undefined`——
+ * 拿一个猜出来的 id 去 `resume` 只会把「续跑」变成「新起一个」并丢掉 `exec=` 账本。
+ */
+export function extractAgentId(text: string, details?: unknown): string | undefined {
+  if (details !== null && typeof details === "object") {
+    const record = details as Record<string, unknown>;
+    for (const key of ["agentId", "agent_id", "id"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim() !== "") {
+        return value.trim();
+      }
+    }
+  }
+  const match = /Agent ID:\s*([A-Za-z0-9_-]+)/.exec(String(text ?? ""));
+  return match === null ? undefined : match[1];
+}
+
+/**
+ * 该不该 `resume` 一个既有 subagent，答案是「续谁」。
+ *
+ * - `job.executor` 非空 → 同一阶段重派（`gate.reject` 后 rev+1）：续原执行者，
+ *   它记得上一次为什么被打回；
+ * - 否则 `plan` → `development` 时显式允许（`resumePlanAgent`）且 `planExecutor`
+ *   在账上 → 续方案执行者（方案是它写的，实现时不必重新推导）。
+ * - 否则 `""`（新起一个）。
+ */
+export function resolveResumeId(
+  job: SummaryJob,
+  options: { resumePlanAgent?: boolean } = {},
+): string {
+  const executor = (job.executor ?? "").trim();
+  if (executor !== "") {
+    return executor;
+  }
+  if (options.resumePlanAgent === true && job.stage === "development") {
+    const planExecutor = (job.planExecutor ?? "").trim();
+    if (planExecutor !== "") {
+      return planExecutor;
+    }
+  }
+  return "";
+}
+
+/**
+ * `exec=` 段能用的 id：Mod 的 `parse_executor_value` 会在 `id` 含空白或超 64 字节时
+ * **拒掉整条提案**，所以带空白的 id 一律退回默认执行者（宁可少一条账本，
+ * 也不能让一条好提案因为一个怪 id 被拒）。`resume` 仍然用原值（它要精确匹配）。
+ */
+export function actorForLedger(agentId: string | undefined, fallback: string): string {
+  const candidate = (agentId ?? "").trim();
+  if (candidate === "" || /\s/.test(candidate) || candidate.length > 64) {
+    return fallback;
+  }
+  return candidate;
+}
+
+/** 续跑理由（写进回执；「为什么续」比「续了」更有诊断价值）。 */
+export function resumeReason(job: SummaryJob, resumePlanAgent: boolean): string {
+  const executor = (job.executor ?? "").trim();
+  if (executor !== "") {
+    return `同阶段重派（rev ${job.rev}），续原执行者`;
+  }
+  if (resumePlanAgent && job.stage === "development" && (job.planExecutor ?? "").trim() !== "") {
+    return "plan → development 跨阶段续跑";
+  }
+  return "新起一个 subagent";
+}
+
+// ───────────────────────────── 纯函数：泳道探针真值 ─────────────────────────────
+
+/** 泳道探针的真值（`known=false` = 没读到，**不得**据此自愈）。 */
+export interface LaneProbeVerdict {
+  known: boolean;
+  commits: number | null;
+  clean: boolean | null;
+}
+
+export const UNKNOWN_LANE_PROBE: LaneProbeVerdict = { known: false, commits: null, clean: null };
+
+export interface LaneProbeContext {
+  job: SummaryJob;
+  lane: number;
+  branch: string;
+  base: string;
+  worktreePath: string | null;
+  /** `tool.call git.lane_probe` 的回执。 */
+  probeReceipt: StepReceipt;
+  /** 探针之后那次 drain 的回执（Mod 的折叠叙事若在，就在这里）。 */
+  drainReceipt: StepReceipt | null;
+}
+
+/**
+ * 从叙事里读探针真值（`commits=<n>` / `clean=0|1`）。
+ *
+ * 取**最后**一次出现的值：同一回合里重跑探针时，后面的才是现在的局面。
+ * 两条都读不到 → `known=false`（调用方必须当「不知道」处理）。
+ */
+export function parseLaneProbeNarrative(lines: readonly string[]): LaneProbeVerdict {
+  let commits: number | null = null;
+  let clean: boolean | null = null;
+  for (const line of lines) {
+    const text = String(line ?? "");
+    const commitsMatch = /commits=(-?\d+)/.exec(text);
+    if (commitsMatch !== null) {
+      const parsed = Number(commitsMatch[1]);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        commits = Math.trunc(parsed);
+      }
+    }
+    const cleanMatch = /clean=(0|1|true|false)/.exec(text);
+    if (cleanMatch !== null) {
+      clean = cleanMatch[1] === "1" || cleanMatch[1] === "true";
+    }
+  }
+  return { known: commits !== null || clean !== null, commits, clean };
+}
+
+/** 探针说「没提交」：0 个提交或工作树不干净（两者都要人复核，都不阻塞门禁）。 */
+export function laneProbeNeedsCommit(verdict: LaneProbeVerdict): boolean {
+  if (!verdict.known) {
+    return false;
+  }
+  return verdict.commits === 0 || verdict.clean === false;
+}
+
+/**
+ * 本地只读 git 探测（决策输入，**不是**证据）。
+ *
+ * 实情：Mod 的 `lane.<k>.probe.*` 不在 `summary` 的暴露面里，宿主的 `summary` op
+ * 也不回 drain 叙事，所以「探针真值」只能从两条路来：回执叙事（若宿主回）
+ * 或直接问工作树。后者只读（`status --porcelain` / `rev-list --count`），
+ * 用来决定「要不要催一次 git commit」；门禁与结算永远只看 Mod 的账本。
+ */
+export function readLaneProbeFromGit(worktreePath: string | null, base: string): LaneProbeVerdict {
+  if (worktreePath === null || worktreePath === "") {
+    return UNKNOWN_LANE_PROBE;
+  }
+  try {
+    if (!fs.existsSync(worktreePath)) {
+      return UNKNOWN_LANE_PROBE;
+    }
+    const run = (args: string[]) =>
+      spawnSync("git", ["-C", worktreePath, ...args], { encoding: "utf8", timeout: 5000 });
+    const status = run(["status", "--porcelain"]);
+    if (status.error !== undefined || status.status !== 0) {
+      return UNKNOWN_LANE_PROBE;
+    }
+    const clean = String(status.stdout ?? "").trim() === "";
+    let commits: number | null = null;
+    if (base !== "") {
+      const count = run(["rev-list", "--count", `${base}..HEAD`]);
+      if (count.error === undefined && count.status === 0) {
+        const parsed = Number(String(count.stdout ?? "").trim());
+        if (Number.isFinite(parsed)) {
+          commits = Math.trunc(parsed);
+        }
+      }
+    }
+    return { known: true, commits, clean };
+  } catch {
+    return UNKNOWN_LANE_PROBE;
+  }
+}
+
+/** 默认探针读者：叙事优先（Mod 的账本），读不到再退回本地 git。 */
+function defaultReadLaneProbe(context: LaneProbeContext): LaneProbeVerdict {
+  const fromNarrative = parseLaneProbeNarrative([
+    ...(context.probeReceipt.narrative ?? []),
+    ...(context.drainReceipt?.narrative ?? []),
+  ]);
+  if (fromNarrative.known) {
+    return fromNarrative;
+  }
+  return readLaneProbeFromGit(context.worktreePath, context.base);
 }
 
 // ───────────────────────────── 纯函数：brief ─────────────────────────────
@@ -452,17 +681,54 @@ export async function orchestrateActiveJobs(
     lanePollMs = DEFAULT_LANE_POLL_MS,
     laneWaitMs = DEFAULT_LANE_WAIT_MS,
     verification = DEFAULT_VERIFICATION,
+    runId = "",
+    maxSelfHealRetries = DEFAULT_MAX_SELF_HEAL_RETRIES,
     logger,
   } = opts;
 
+  const pressure = opts.checkContextPressure?.() ?? null;
+  const readProbe = opts.readLaneProbe ?? defaultReadLaneProbe;
+  const resumePlanAgent = opts.resumePlanAgent === true;
   const summary = await daemon.summary();
+  const artifacts = await listArtifactPaths(daemon);
+
+  /** 交接单入参（runId / 压力 / 制品列表三处都一样，集中一次以免漂移）。 */
+  const handoffInput = (input: { summary: RunSummary; reason: string }): HandoffInput => {
+    const out: HandoffInput = { runId, summary: input.summary, pressure, reason: input.reason };
+    if (artifacts !== undefined) {
+      out.artifacts = artifacts;
+    }
+    return out;
+  };
+
   if (!summary.available) {
     return {
       jobs: [],
       gates: [],
       narrative: [],
       summary,
+      contextBraked: false,
+      pressure,
       degraded: summary.degraded ?? "摘要不可用（宿主没有给出 `meta.summary`）",
+    };
+  }
+
+  // ── 硬刹车（已到硬水位）──
+  // 一个字节都不派：先把「现在的局面」写成交接单，然后交给上层压缩 + 续跑。
+  // 安全前提：此刻**没有在飞的 subagent**（本函数自己一个都还没起）。
+  if (pressure !== null && pressure.level === "hard_brake" && pressure.shouldBrakeSubagents) {
+    const handoff = await writeHandoffToVfs(
+      daemon,
+      handoffInput({ summary, reason: "hard_brake（已到硬水位，未起新一波 subagent）" }),
+    );
+    return {
+      jobs: [],
+      gates: summary.gates,
+      narrative: [handoffNarrative(handoff)],
+      summary,
+      contextBraked: true,
+      handoff,
+      pressure,
     };
   }
 
@@ -473,6 +739,8 @@ export async function orchestrateActiveJobs(
       gates: summary.gates,
       narrative: [],
       summary,
+      contextBraked: false,
+      pressure,
       degraded: "没有处于 plan / development 的作业",
     };
   }
@@ -538,33 +806,42 @@ export async function orchestrateActiveJobs(
   }
 
   // ── ① 派活：独立作业并发（subagent 之间无共享状态） ──
-  const outcomes = await Promise.all(
+  // 每个作业先算「续谁」：同阶段重派续原执行者（它记得上次为什么被打回），
+  // plan → development 显式允许时续方案执行者；拿不到 id 就新起一个。
+  const outputs = await Promise.all(
     prepared.map(async (item) => {
-      try {
-        const request: SubagentRequest = {
-          description: `${item.job.id} ${item.job.stage}`,
-          prompt: item.brief,
-        };
-        if (opts.model !== undefined) {
-          request.model = opts.model;
-        }
-        if (opts.thinking !== undefined) {
-          request.thinking = opts.thinking;
-        }
-        const result = await executeSubagent(request);
-        const ok = result.ok !== false;
-        return {
-          item,
-          report: result.text ?? "",
-          error: ok ? undefined : (result.error ?? "subagent 报告失败"),
-        };
-      } catch (error) {
-        return {
-          item,
-          report: "",
-          error: error instanceof Error ? error.message : String(error),
-        };
+      const request: SubagentRequest = {
+        description: `${item.job.id} ${item.job.stage}`,
+        prompt: item.brief,
+        ...(opts.model === undefined ? {} : { model: opts.model }),
+        ...(opts.thinking === undefined ? {} : { thinking: opts.thinking }),
+      };
+      const resumeId = resolveResumeId(item.job, { resumePlanAgent });
+      if (resumeId !== "") {
+        request.resume = resumeId;
       }
+      const attempt = await runSubagent(executeSubagent, request, maxSelfHealRetries);
+      const notes: string[] = [];
+      if (resumeId !== "") {
+        notes.push(
+          `[RESUME] ${item.job.id} ${item.job.stage}：${resumeReason(item.job, resumePlanAgent)}` +
+            `（resume=${resumeId}）`,
+        );
+      }
+      if (attempt.retries > 0) {
+        const used = attempt.agentId ?? resumeId;
+        notes.push(
+          `[SELF-HEAL] ${item.job.id} subagent 报告失败，已自动续跑 ${attempt.retries} 次` +
+            `（resume=${used === "" ? "?" : used}）`,
+        );
+      }
+      return {
+        item,
+        agentId: attempt.agentId,
+        report: attempt.text ?? "",
+        error: attempt.error,
+        notes,
+      };
     }),
   );
 
@@ -572,11 +849,16 @@ export async function orchestrateActiveJobs(
   const jobs: OrchestrationJobResult[] = [];
   const narrative: string[] = [];
 
-  for (const outcome of outcomes) {
-    const { item } = outcome;
+  for (const output of outputs) {
+    const { item } = output;
     const receipts = item.receipts;
-    let report = outcome.report.trim();
-    let error = outcome.error;
+    let report = output.report.trim();
+    let error = output.error;
+    // 自愈预算按作业计：流断开一次、脏工作树一次，再多就是真 bug（不刷重试）。
+    let selfHealBudget = maxSelfHealRetries;
+    for (const note of output.notes) {
+      receipts.push({ label: `dispatch note (${item.job.id})`, receipt: noteReceipt(note) });
+    }
 
     // 制品优先：subagent 按 brief 写了落盘制品就用它（内容比聊天报告更完整）。
     const artifactOnDisk =
@@ -592,7 +874,7 @@ export async function orchestrateActiveJobs(
       error = error ?? "subagent 未返回正文";
     }
 
-    const archived = await daemon.vfsPut(item.artifactPath, report);
+    let archived = await daemon.vfsPut(item.artifactPath, report);
     const archiveReceipt: StepReceipt = {
       ok: archived.ok,
       narrative: archived.ok
@@ -614,22 +896,90 @@ export async function orchestrateActiveJobs(
     });
 
     if (item.job.stage === "development" && item.lane > 0) {
-      const probe = buildLaneProbeArgs({ lane: item.lane, base: item.base, branch: item.branch });
-      const probeReceipt = await daemon.dispatch("tool.call", `git.lane_probe|${probe}`);
+      const probeArgs = buildLaneProbeArgs({ lane: item.lane, base: item.base, branch: item.branch });
+      let probeReceipt = await daemon.dispatch("tool.call", `git.lane_probe|${probeArgs}`);
       receipts.push({
         label: `tool.call git.lane_probe (${item.job.id} lane-${item.lane})`,
         receipt: probeReceipt,
       });
       // 探针是**警告面**（commits=0 / clean=0 不阻塞门禁），但要 drain 一次让
-      // 冲突雷达与 `lane.<k>.probe.*` 落库。
-      await daemon.summary();
+      // 冲突雷达与 `lane.<k>.probe.*` 落库；drain 回执里若带折叠叙事，探针真值
+      // 从那里读，读不到再退回本地 git 只读探测（读不到就什么都不做）。
+      let drainReceipt = await drainInbox(daemon);
+      let verdict = await readProbe({
+        job: item.job,
+        lane: item.lane,
+        branch: item.branch,
+        base: item.base,
+        worktreePath: item.worktreePath,
+        probeReceipt,
+        drainReceipt,
+      });
+      // 脏工作树自愈（只一次）：subagent 忘了 `git commit` 时探针会报
+      // `commits=0` / `clean=0`；续跑**同一个** subagent 要求补提交，再复跑探针。
+      if (
+        laneProbeNeedsCommit(verdict) &&
+        output.agentId !== undefined &&
+        output.agentId !== "" &&
+        selfHealBudget > 0
+      ) {
+        selfHealBudget -= 1;
+        const nudge = await safeExecute(executeSubagent, {
+          description: `${item.job.id} ${item.job.stage} (补提交)`,
+          prompt: COMMIT_NUDGE_TEXT,
+          ...(opts.model === undefined ? {} : { model: opts.model }),
+          ...(opts.thinking === undefined ? {} : { thinking: opts.thinking }),
+          resume: output.agentId,
+        });
+        receipts.push({
+          label: `self-heal commit (${item.job.id})`,
+          receipt: noteReceipt(
+            `[SELF-HEAL] ${item.job.id} 探针报 commits=${verdict.commits ?? "?"} ` +
+              `clean=${verdict.clean === null ? "?" : verdict.clean ? "1" : "0"}：` +
+              `${nudge.ok === false ? "续跑失败" : "已续跑要求补提交"}（resume=${output.agentId}）`,
+          ),
+        });
+        if (nudge.ok !== false && nudge.text.trim() !== "") {
+          report = `${report}\n\n## 自愈补提交\n\n${nudge.text.trim()}`;
+          const reArchived = await daemon.vfsPut(item.artifactPath, report);
+          if (reArchived.ok) {
+            archived = reArchived;
+          }
+        }
+        probeReceipt = await daemon.dispatch("tool.call", `git.lane_probe|${probeArgs}`);
+        receipts.push({
+          label: `tool.call git.lane_probe retry (${item.job.id} lane-${item.lane})`,
+          receipt: probeReceipt,
+        });
+        drainReceipt = await drainInbox(daemon);
+        const afterVerdict = await readProbe({
+          job: item.job,
+          lane: item.lane,
+          branch: item.branch,
+          base: item.base,
+          worktreePath: item.worktreePath,
+          probeReceipt,
+          drainReceipt,
+        });
+        receipts.push({
+          label: `lane probe verdict (${item.job.id})`,
+          receipt: noteReceipt(
+            `[LANE PROBE] ${item.job.id} 补提交后 commits=${afterVerdict.commits ?? "?"} ` +
+              `clean=${afterVerdict.clean === null ? "?" : afterVerdict.clean ? "1" : "0"}`,
+          ),
+        });
+        verdict = afterVerdict;
+      }
     }
 
+    // 执行者账本写**真实** subagent id（不是扩展自己的名字）：下一次 re-dispatch
+    // 的 `resume` 就靠它；Mod 的 `settings.executor.<rN>.<stage>` 也靠它可核对。
+    const submitActor = actorForLedger(output.agentId, actorId);
     const submitPayload = buildProposalSubmitPayload({
       job: item.job,
       summary: `auto ${item.job.stage}: ${firstLine(report)}`,
       artifactPath: item.artifactPath,
-      actorId,
+      actorId: submitActor,
     });
     const submit = await daemon.dispatch("proposal.submit", submitPayload);
     receipts.push({ label: `proposal.submit (${item.job.id})`, receipt: submit });
@@ -671,12 +1021,135 @@ export async function orchestrateActiveJobs(
   const touched = new Set(jobs.map((job) => job.id));
   const gates = (after.available ? after.gates : []).filter((gate) => touched.has(gate.id));
 
-  return {
+  // ── 软刹车：本波已经落地（提案 accept 完 → 停在 plan_gate / accept_gate 这个
+  // **稳定节点**），现在把局面写成交接单，交给上层压缩 + 续跑。硬刹车在函数开头
+  // 已经交接过一次，这里不重复写（同一波压两次只会白烧 token）。
+  let handoff: HandoffWrite | undefined;
+  if (pressure !== null && pressure.shouldBrakeSubagents && pressure.level !== "hard_brake") {
+    const landed = after.available ? after : summary;
+    handoff = await writeHandoffToVfs(
+      daemon,
+      handoffInput({
+        summary: landed,
+        reason: `soft_brake（${formatPercent(pressure.ratio)}）本波已落地`,
+      }),
+    );
+    narrative.push(handoffNarrative(handoff));
+  }
+
+  const result: OrchestrationResult = {
     jobs,
     gates,
     narrative,
     summary: after.available ? after : summary,
+    contextBraked: handoff !== undefined,
+    pressure,
   };
+  if (handoff !== undefined) {
+    result.handoff = handoff;
+  }
+  return result;
+}
+
+/** 一行回执（自愈/续跑这类「说明性」事件用；不走 daemon，但同构）。 */
+function noteReceipt(line: string): StepReceipt {
+  return { ok: true, narrative: [line], pendingChoice: null, tools: [], raw: {} };
+}
+
+/** 交接单的叙事行（成功报字节数 + sha 前缀，失败原样贴原因）。 */
+function handoffNarrative(write: HandoffWrite): string {
+  if (!write.ok) {
+    return `[HANDOFF REFUSED] ${write.path}：${write.error ?? "未知原因"}`;
+  }
+  return (
+    `[HANDOFF] ${write.path} ← ${write.bytes !== undefined ? write.bytes : write.markdown.length} bytes` +
+    (write.sha256 !== undefined ? ` sha256=${write.sha256.slice(0, 12)}` : "")
+  );
+}
+
+/** 本局制品列表（拿不到就返回 `undefined`，交接单会自己补上自己那一条）。 */
+async function listArtifactPaths(daemon: OrchestratorDaemon): Promise<string[] | undefined> {
+  const lister = daemon.vfsList;
+  if (lister === undefined) {
+    return undefined;
+  }
+  try {
+    const listed = await lister.call(daemon);
+    return listed.ok ? listed.artifacts : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** drain 一次（探针折叠叙事若在，就在这一次里）；daemon 不提供 → `null`。 */
+async function drainInbox(daemon: OrchestratorDaemon): Promise<StepReceipt | null> {
+  if (daemon.drain !== undefined) {
+    try {
+      return await daemon.drain();
+    } catch {
+      return null;
+    }
+  }
+  await daemon.summary();
+  return null;
+}
+
+/** 调一次 subagent；抛错也归一成 `ok=false`（调用方只判一个形状）。 */
+async function safeExecute(
+  executeSubagent: ExecuteSubagent,
+  request: SubagentRequest,
+): Promise<SubagentResult> {
+  try {
+    const result = await executeSubagent(request);
+    const out: SubagentResult = { text: result.text ?? "", ok: result.ok !== false };
+    if (result.agentId !== undefined && result.agentId !== "") {
+      out.agentId = result.agentId;
+    }
+    if (out.ok === false) {
+      out.error = result.error ?? "subagent 报告失败";
+      out.text = result.text ?? "";
+    }
+    return out;
+  } catch (error) {
+    return {
+      text: "",
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * 带自愈的派活：失败一次就 `resume` 同一个 subagent 重试（`limit` 次）。
+ * 续跑的前提是**知道续谁**（`agentId` 或调用方已给的 `resume`）；两者都没有时
+ * 不重试——写一个猜出来的 id 等于新起一个，会把「自愈」变成「无痕重跑」。
+ */
+async function runSubagent(
+  executeSubagent: ExecuteSubagent,
+  request: SubagentRequest,
+  limit: number,
+): Promise<{ text: string; agentId?: string; error?: string; retries: number }> {
+  let attempt = await safeExecute(executeSubagent, request);
+  let retries = 0;
+  while (attempt.ok === false && retries < Math.max(0, Math.trunc(limit))) {
+    const resume = attempt.agentId ?? request.resume;
+    if (resume === undefined || resume === "") {
+      break;
+    }
+    retries += 1;
+    attempt = await safeExecute(executeSubagent, { ...request, resume });
+  }
+  const out: { text: string; agentId?: string; error?: string; retries: number } = {
+    text: attempt.text ?? "",
+    retries,
+  };
+  if (attempt.agentId !== undefined && attempt.agentId !== "") {
+    out.agentId = attempt.agentId;
+  }
+  if (attempt.ok === false) {
+    out.error = attempt.error ?? "subagent 报告失败";
+  }
+  return out;
 }
 
 function firstLine(text: string): string {

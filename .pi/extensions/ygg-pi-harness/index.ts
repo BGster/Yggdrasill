@@ -29,11 +29,26 @@ import {
   type StepReceipt,
   type SubagentSettings,
 } from "./daemon.ts";
+import {
+  buildCompactInstructions,
+  buildHandoffMarkdown,
+  buildResumeMessage,
+  evaluateContextPressure,
+  formatPercent,
+  HANDOFF_RESUME_CUSTOM_TYPE,
+  isStableCheckpoint,
+  stableCheckpointReason,
+  writeHandoffToVfs,
+  type ContextPressure,
+  type HandoffWrite,
+} from "./compaction.ts";
 import { checkToolCallFirewall } from "./firewall.ts";
 import {
+  extractAgentId,
   orchestrateActiveJobs,
   type ExecuteSubagent,
   type OrchestrationResult,
+  type SubagentResult,
 } from "./orchestrator.ts";
 
 const STATUS_KEY = "ygg-harness";
@@ -44,6 +59,12 @@ const DEFAULT_RUNS_ROOT = ".ygg/runs";
 const daemons = new Map<string, YggDaemon>();
 let activeRunId = "";
 let lastSummary: RunSummary | null = null;
+/**
+ * 本次压缩是谁发起的：`"self"` = `maybeHandoffAndCompact`（压完自己续跑），
+ * `null` = 外部（`/compact` / 阈值 / 溢出恢复，压完只把状态块带回上下文）。
+ * 不用它区分的话，一次压缩会被补两条相同的续跑消息。
+ */
+let compactionOrigin: "self" | null = null;
 
 // ───────────────────────────── 小工具 ─────────────────────────────
 
@@ -112,7 +133,172 @@ function payloadText(payload: string | number | undefined): string {
   return typeof payload === "number" ? String(payload) : JSON.stringify(payload);
 }
 
+/** 当前活跃 run 的客户端（没有活跃局时 `undefined`）。 */
+function activeClient(): YggDaemon | undefined {
+  return activeRunId === "" ? undefined : daemons.get(activeRunId);
+}
+
+/**
+ * 压力探针：`getContextUsage()` 的 `tokens` 在刚压完时是 `null`，模型也可能没报
+ * `contextWindow`；两者不确定时按「不知道」处理（=`normal`，不刹车）。
+ */
+function contextPressure(ctx: ExtensionContext): ContextPressure {
+  const usage = ctx.getContextUsage();
+  return evaluateContextPressure({
+    usedTokens: usage?.tokens ?? null,
+    contextWindow: usage?.contextWindow ?? ctx.model?.contextWindow ?? null,
+  });
+}
+
+/** 交接单入参（`vfsList` 失败不阻断：交接单会自己补上自己那条）。 */
+async function handoffFor(client: YggDaemon, summary: RunSummary, pressure: ContextPressure, reason: string) {
+  const listed = await client.vfsList();
+  return writeHandoffToVfs(client, {
+    runId: client.runId,
+    summary,
+    pressure,
+    reason,
+    ...(listed.ok ? { artifacts: listed.artifacts } : {}),
+  });
+}
+
+/**
+ * 任何来源的压缩**之前**先把局面落到 VFS（`artifacts/handoff-latest.md`）。
+ *
+ * 压缩之后上下文里只剩摘要，交接单是唯一还能被重新读到的「事实快照」。写失败只
+ * 安静吞掉：把压缩拦下来（或抛错）比丢一份交接单更糟。
+ */
+async function ensureHandoffArtifact(ctx: ExtensionContext, reason: string): Promise<void> {
+  const client = activeClient();
+  if (client === undefined) {
+    return;
+  }
+  try {
+    const summary = await client.summary();
+    if (!summary.available) {
+      return;
+    }
+    await handoffFor(client, summary, contextPressure(ctx), `compaction(${reason})`);
+  } catch {
+    // 见函数头注：压缩本体不能被交接单的写失败拖住。
+  }
+}
+
+interface HandoffOptions {
+  /** 写进交接单的触发原因。 */
+  note?: string;
+  /** 显式触发（`handoff_compact` / 上层已经决定刹车）：不看水位与稳定节点。 */
+  force?: boolean;
+  /** 上层（`orchestrateActiveJobs`）已经写过的交接单：复用，不重写。 */
+  write?: HandoffWrite;
+}
+
+/**
+ * 检查点交接：判压力 + 判稳定节点 → 写交接单 → 压缩 → **自动续跑**。
+ *
+ * 为什么要「稳定节点」这个条件：在作业在飞（没有门也没有冲突）时压缩，会把手中
+ * 的 subagent 结果压成一段叙述；落在门上/边界上时压缩，压完的局面是可以直接复核
+ * 的（谁的提案停在哪个门）。所以不稳定就不压，等这一波落地。
+ */
+async function maybeHandoffAndCompact(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  client: YggDaemon,
+  options: HandoffOptions = {},
+): Promise<string> {
+  const summary = await client.summary();
+  if (!summary.available) {
+    return `[handoff] 摘要不可用（${summary.degraded ?? "未知原因"}）：拒绝盲压缩。`;
+  }
+
+  const pressure = contextPressure(ctx);
+  const stable = isStableCheckpoint(summary);
+  const hard = pressure.level === "hard_brake";
+  const lines: string[] = [
+    `[handoff] 上下文 ${pressure.usedTokens} / ${pressure.contextWindow}` +
+      ` (${formatPercent(pressure.ratio)}) · 水位 ${pressure.level}`,
+    `[handoff] 稳定节点：${stable ? "是" : "否"}（${stableCheckpointReason(summary)}）`,
+  ];
+
+  const force = options.force === true;
+  if (!force && !(pressure.shouldHandoffAndCompact && (stable || hard))) {
+    lines.push(
+      pressure.shouldHandoffAndCompact
+        ? "[handoff] 未压缩：还没落在稳定节点上（等这一波落地再来）。"
+        : "[handoff] 未压缩：水位未到（< 软水位）。",
+    );
+    return lines.join("\n");
+  }
+
+  const write =
+    options.write !== undefined && options.write.ok
+      ? options.write
+      : await handoffFor(
+          client,
+          summary,
+          pressure,
+          options.note ?? (force ? "manual（显式 handoff_compact）" : pressure.level),
+        );
+  lines.push(
+    write.ok
+      ? `[handoff] 已写入 VFS：${write.path}（${write.bytes ?? write.markdown.length} bytes）`
+      : `[handoff] 写入失败：${write.error ?? "未知原因"}（仍按同一份内容续跑，但不声称进过 VFS）`,
+  );
+
+  const markdown = write.markdown;
+  compactionOrigin = "self";
+  ctx.compact({
+    customInstructions: buildCompactInstructions(client.runId, markdown),
+    onComplete: (result) => {
+      compactionOrigin = null;
+      // 压缩会 abort 当前回合：这次工具调用的输出大概率到不了模型，所以**续跑
+      // 消息必须自带全部局面**（交接单 + 下一步命令），并且主动开一个新回合。
+      void pi
+        .sendMessage(
+          {
+            customType: HANDOFF_RESUME_CUSTOM_TYPE,
+            content: buildResumeMessage(client.runId, summary, markdown),
+            display: true,
+            details: {
+              runId: client.runId,
+              handoff: write.path,
+              tokensBefore: result.tokensBefore,
+            },
+          },
+          { triggerTurn: true },
+        )
+        .catch((error: unknown) => {
+          ctx.ui.notify(
+            `ygg: 压缩完成但续跑消息没送达：${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+        });
+    },
+    onError: (error) => {
+      compactionOrigin = null;
+      ctx.ui.notify(
+        `ygg: 压缩失败（局面已在 ${write.path}）：${error.message}`,
+        "error",
+      );
+    },
+  });
+  lines.push(
+    `[handoff] 已请求压缩：摘要会原样保留状态块，压完自动续跑` +
+      `（customType=${HANDOFF_RESUME_CUSTOM_TYPE}）。`,
+  );
+  return lines.join("\n");
+}
+
 // ───────────────────────────── kickoff ─────────────────────────────
+
+/**
+ * 载荷字段清洗：`|` 是 `task.intake` / `requirement.add` 的**段分隔符**。
+ * 需求描述里写一个 `|`（表格、管道命令）就会把后面的正文挤成额外段——不报错，
+ * 但需求会被静默截断。所以入口处先把它换成 `/`（可读且无语义损失）。
+ */
+function wireField(text: string): string {
+  return String(text ?? "").replaceAll("|", "/");
+}
 
 interface KickoffInput {
   runId: string;
@@ -143,13 +329,16 @@ async function kickoffSession(
   const mode = await client.dispatch("config.set", "play.mode=goal");
   entries.push({ label: "config.set play.mode=goal", receipt: mode });
 
-  const intake = await client.dispatch("task.intake", `${input.title}|${input.description}`);
+  const intake = await client.dispatch(
+    "task.intake",
+    `${wireField(input.title)}|${wireField(input.description)}`,
+  );
   entries.push({ label: "task.intake", receipt: intake });
 
   for (const requirement of input.requirements) {
     const added = await client.dispatch(
       "requirement.add",
-      `${requirement.title}|${requirement.description}`,
+      `${wireField(requirement.title)}|${wireField(requirement.description)}`,
     );
     entries.push({ label: `requirement.add「${requirement.title}」`, receipt: added });
   }
@@ -346,6 +535,57 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
     daemons.clear();
     activeRunId = "";
     lastSummary = null;
+    compactionOrigin = null;
+  });
+
+  // ①' 上下文压缩的三个钩子（任何来源的压缩都不让运行状态丢）。
+  //
+  //   session_before_compact：先把局面落到 VFS（压完只剩摘要，交接单是唯一可重读的事实快照）；
+  //   session_compact：非自己发起的压缩 → 把状态块**带回上下文**（不触发新回合）；
+  //   session_compact_failed：清掉「自己发起」的标记，否则下一次外部压缩会误以为已续跑。
+  pi.on("session_before_compact", async (event, ctx) => {
+    await ensureHandoffArtifact(ctx, event.reason);
+    return undefined;
+  });
+
+  pi.on("session_compact", async (event, ctx) => {
+    if (compactionOrigin === "self") {
+      // 自己发起的那次由 `ctx.compact({ onComplete })` 负责续跑，这里不再补一条。
+      compactionOrigin = null;
+      return;
+    }
+    const client = activeClient();
+    if (client === undefined) {
+      return;
+    }
+    try {
+      const summary = await client.summary();
+      if (!summary.available) {
+        return;
+      }
+      const pressure = contextPressure(ctx);
+      const write = await handoffFor(client, summary, pressure, `compaction(${event.reason})`);
+      await pi.sendMessage(
+        {
+          customType: HANDOFF_RESUME_CUSTOM_TYPE,
+          content: buildResumeMessage(client.runId, summary, write.markdown),
+          display: true,
+          details: { runId: client.runId, handoff: write.path, reason: event.reason },
+        },
+        // 外部压缩（`/compact`）之后停在原地是预期行为：只把状态块放进上下文，
+        // 不替用户开新回合。
+        { triggerTurn: false },
+      );
+    } catch (error) {
+      ctx.ui.notify(
+        `ygg: 压缩后没能把状态块带回上下文：${error instanceof Error ? error.message : String(error)}`,
+        "warning",
+      );
+    }
+  });
+
+  pi.on("session_compact_failed", async () => {
+    compactionOrigin = null;
   });
 
   // ② 物理红线 + 批量入口禁令（拦动作，不靠自觉）。
@@ -420,11 +660,13 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
       "所有回执的 narrative 会整段返回（不截断）。",
     promptSnippet:
       "Drive one Yggdrasill run: kickoff (goal mode + intake + requirements), step (dispatch any event), " +
-      "approve_gate / reject_gate (plan_gate / accept_gate), vfs_write / vfs_read / vfs_list, settle_close.",
+      "approve_gate / reject_gate (plan_gate / accept_gate), vfs_write / vfs_read / vfs_list, " +
+      "handoff_compact (checkpoint handoff + compaction + auto-resume), settle_close.",
     promptGuidelines: [
       "Use ygg_session kickoff when the user asks to start a Yggdrasill run; pass runId, title, description, goalAuth and requirements.",
       "Use ygg_session step to dispatch exactly one event and read the full receipt; never batch events in a shell loop.",
       "Use ygg_session approve_gate only after reading the receipt that raised the gate — approving is a human/coordinator decision.",
+      "Use ygg_session handoff_compact when the context is getting long: it writes artifacts/handoff-latest.md, compacts, and resumes the run automatically.",
       "Use ygg_session settle_close when every requirement is done and the run is in review; it archives the evolution review and settles.",
     ],
     parameters: Type.Object({
@@ -436,6 +678,7 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
         "vfs_write",
         "vfs_read",
         "vfs_list",
+        "handoff_compact",
         "settle_close",
       ] as const, { description: "要执行的会话动作" }),
       runId: Type.Optional(Type.String({ description: "本局标识（同一 runId 复用同一个守护进程）" })),
@@ -497,11 +740,26 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
           lastSummary = (await client.summary()) ?? lastSummary;
         }
         setStatus(ctx, lastSummary);
+        // 稳定节点 + 水位到了 → 自动写交接单 + 压缩 + 续跑（否则什么也不做）。
+        const handoff = await maybeHandoffAndCompact(pi, ctx, client);
         const text = [
           formatReceipt(`${event} ${payloadText(params.payload)}`, receipt),
           statusLine(runId, lastSummary),
+          handoff,
         ].join("\n\n");
         return { content: [{ type: "text", text }], details: { receipt, summary: lastSummary } };
+      }
+
+      if (params.action === "handoff_compact") {
+        const runId = requireRunId(params.runId ?? (activeRunId === "" ? undefined : activeRunId));
+        const client = await clientFor(ctx, runId);
+        const text = await maybeHandoffAndCompact(pi, ctx, client, {
+          force: true,
+          ...(params.note === undefined ? {} : { note: params.note }),
+        });
+        lastSummary = (await client.summary()) ?? lastSummary;
+        setStatus(ctx, lastSummary);
+        return { content: [{ type: "text", text }], details: { summary: lastSummary } };
       }
 
       if (params.action === "vfs_write" || params.action === "vfs_read" || params.action === "vfs_list") {
@@ -615,16 +873,28 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
         if (request.thinking !== undefined) {
           args.thinking = request.thinking;
         }
+        // 续跑既有 subagent：它带着上一轮的全部记忆（被打回的原因 / 方案细节），
+        // 比重新给一个自洽 brief 更准——brief 再全也只是背景，不是它自己的现场。
+        if (request.resume !== undefined && request.resume !== "") {
+          args.resume = request.resume;
+        }
         const outcome = await ctx.executeTool("Agent", args, {
           ...(signal !== undefined ? { signal } : {}),
         });
         const text = outcome.result.content
           .map((part) => (part.type === "text" ? part.text : ""))
           .join("\n");
+        // 真实 agent id：先看结构化 `details`，再退回正文里的 `Agent ID: <id>`。
+        // 失败时也照取——它就是「自愈续跑」要的那个 id。
+        const agentId = extractAgentId(text, outcome.result.details);
+        const result: SubagentResult = { text, ok: !outcome.isError };
         if (outcome.isError) {
-          return { text, ok: false, error: "Agent 工具返回错误" };
+          result.error = "Agent 工具返回错误";
         }
-        return { text, ok: true };
+        if (agentId !== undefined) {
+          result.agentId = agentId;
+        }
+        return result;
       };
 
       onUpdate?.({
@@ -634,10 +904,13 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
 
       const result = await orchestrateActiveJobs(client, executeSubagent, {
         cwd: ctx.cwd,
+        runId,
         ...(model !== undefined ? { model } : {}),
         ...(thinking !== undefined ? { thinking } : {}),
         ...(params.verification !== undefined ? { verification: params.verification } : {}),
         ...(typeof params.maxLanes === "number" ? { maxLanes: params.maxLanes } : {}),
+        // 压力探针：本波落地（或硬刹车）后由下面一次交接 + 压缩 + 续跑接手。
+        checkContextPressure: () => contextPressure(ctx),
         logger: (line) => {
           onUpdate?.({ content: [{ type: "text", text: line }], details: {} });
         },
@@ -645,7 +918,19 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
 
       lastSummary = result.summary ?? lastSummary;
       setStatus(ctx, lastSummary);
-      const text = formatOrchestration(result);
+      const sections = [formatOrchestration(result)];
+      if (result.contextBraked) {
+        // 编排层已经刹车（硬：一个字都没派；软：本波已落在门上）并写好了交接单，
+        // 这里只负责压缩 + 续跑——不再重写一份交接单。
+        sections.push(
+          await maybeHandoffAndCompact(pi, ctx, client, {
+            force: true,
+            note: "context brake（编排层已刹车）",
+            ...(result.handoff !== undefined ? { write: result.handoff } : {}),
+          }),
+        );
+      }
+      const text = sections.join("\n\n");
       return { content: [{ type: "text", text }], details: { result } };
     },
   });

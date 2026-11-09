@@ -36,6 +36,13 @@ export interface SummaryJob {
   base: string;
   title: string;
   description: string;
+  /**
+   * 本阶段执行者 id（Mod 的 `settings.executor.<rN>.<stage>` 账本）。
+   * 旧 Mod 不给这个键 → `""`（解析时补齐，编排据此决定「续跑原 subagent」）。
+   */
+  executor?: string;
+  /** `plan` 阶段的执行者 id（跨阶段续跑：plan → development 用同一个 subagent）。 */
+  planExecutor?: string;
 }
 
 /** 摘要里待审的门（`summary.gates`）。 */
@@ -239,6 +246,10 @@ function parseJobs(value: unknown): SummaryJob[] {
       base: asString(row.base),
       title: asString(row.title, id),
       description: asString(row.description),
+      // 执行者账本：Mod 没给这个键时落 `""`（与「没登记」同义），而不是 `undefined`——
+      // 编排层只判空串，不需要在两处分别处理两种「没有」。
+      executor: asString(row.executor),
+      planExecutor: asString(row.planExecutor),
     });
   }
   return out;
@@ -499,6 +510,16 @@ export class YggDaemon {
       return receipt.summary;
     }
     return unknownSummary(receipt.error ?? "summary 回执缺失");
+  }
+
+  /**
+   * 排空一次 inbox 并把回执交回（`summary` op 内部会 drain）。
+   *
+   * 与 {@link summary} 的区别只在「要不要叙事」：工具结果（如 `git.lane_probe`）
+   * 的折叠行会在 drain 里产生，走 `summary` 拿不到，走这里能拿到。
+   */
+  async drain(): Promise<StepReceipt> {
+    return this.request("summary", {});
   }
 
   /** 派发一个事件（payload 可以是字符串 / 数字 / 缺省）。 */
