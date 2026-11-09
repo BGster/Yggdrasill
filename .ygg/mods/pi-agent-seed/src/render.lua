@@ -100,6 +100,80 @@ local R_MARK = {
   blocked = "⚠",
 }
 
+local function is_resumable_agent_id(id)
+  if type(id) ~= "string" then
+    return false
+  end
+  local clean = trim(id)
+  if clean == "" or clean == "unregistered" or clean == "pi-ygg-harness" or clean == "main" or clean == "default" then
+    return false
+  end
+  return true
+end
+
+local function pending_prop_index_of(index)
+  for i = 1, prop_count() do
+    if prop_status(i) == P_PENDING and prop_req(i) == index then
+      return i
+    end
+  end
+  return nil
+end
+
+local function req_live_status(index)
+  local id = req_id(index)
+  local lane = req_lane(index)
+  local job = req_job(index)
+  local phase = req_phase_name(index)
+  local branch = lane > 0 and text_of("lane." .. tostring(lane) .. ".branch", "") or ""
+  local worktree_path = lane > 0 and text_of("lane." .. tostring(lane) .. ".path", "") or ""
+  local lane_req = lane > 0 and text_of("lane." .. tostring(lane) .. ".req", "") or ""
+
+  local worktree_status = "n/a"
+  if job == "development" or phase == PHASE.developing or phase == PHASE.dev_review or phase == PHASE.accept then
+    if lane > 0 and lane_req == id then
+      local br = branch ~= "" and branch or ("feature/" .. id)
+      if worktree_path ~= "" then
+        worktree_status = "ready:" .. worktree_path .. "@" .. br
+      else
+        worktree_status = "bound:lane-" .. tostring(lane) .. "@" .. br
+      end
+    end
+  elseif phase == PHASE.ready then
+    worktree_status = "pending"
+  end
+
+  local prop_idx = pending_prop_index_of(index)
+  local active_stage = job
+  if active_stage == "" and prop_idx ~= nil then
+    active_stage = prop_stage(prop_idx)
+  end
+  local exec_id = active_stage ~= "" and wire.executor_id_of(executor_raw(id, active_stage)) or ""
+
+  local subagent_status = "idle"
+  if prop_idx ~= nil then
+    subagent_status = "delivered:p" .. tostring(prop_idx) .. (exec_id ~= "" and ("(" .. exec_id .. ")") or "")
+  elseif job ~= "" then
+    if exec_id ~= "" and exec_id ~= "unregistered" then
+      subagent_status = "dispatched:" .. exec_id
+    else
+      subagent_status = "pending"
+    end
+  end
+
+  local probe_head = lane > 0 and text_of("lane." .. tostring(lane) .. ".probe.head", "") or ""
+  local probe_status = "n/a"
+  if lane > 0 and probe_head ~= "" then
+    local probe_commits = tostring(ygg.kv.get("lane." .. tostring(lane) .. ".probe.commits") or "0")
+    local probe_clean = text_of("lane." .. tostring(lane) .. ".probe.clean", "0")
+    probe_status = "verified:commits=" .. probe_commits .. ",clean=" .. probe_clean
+  elseif job == "development" then
+    probe_status = "pending"
+  end
+
+  return worktree_status, subagent_status, probe_status
+end
+
 local function req_trace(index)
   local parts = {}
   local deps = req_deps(index)
@@ -140,6 +214,10 @@ local function req_trace(index)
   end
   if wire.executor_stage_ok(job) and exec_ids[job] == nil then
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_exec_missing, { stage = job })
+  end
+  if not reqs.req_closed(index) then
+    local wt_status, sub_status = req_live_status(index)
+    parts[#parts + 1] = "(wt=" .. wt_status .. ")(subagent=" .. sub_status .. ")"
   end
   if req_rev(index) > 1 then
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_rev, { rev = tostring(req_rev(index)) })
@@ -195,6 +273,10 @@ local function narrate_req_list()
     end
   end
   ygg.narrate(TEXTS.beats.req_list_legend)
+end
+
+local function req_graph_lines()
+  narrate_req_list()
 end
 
 local MAP_NODES = { STAGE.intake, STAGE.coordinate, STAGE.review, STAGE.done }
@@ -613,17 +695,19 @@ summary_jobs = function()
       local exec_id = wire.executor_id_of(executor_raw(id, job))
       local plan_exec_id = wire.executor_id_of(executor_raw(id, "plan"))
       local resume_id = ""
-      if exec_id ~= "" then
+      if is_resumable_agent_id(exec_id) then
         resume_id = exec_id
-      elseif job == "development" and plan_exec_id ~= "" then
+      elseif job == "development" and is_resumable_agent_id(plan_exec_id) then
         resume_id = plan_exec_id
       end
+      local worktree_status, subagent_status, probe_status = req_live_status(i)
       local title = req_title(i)
       local desc = text_of(req_key(i, "description"), "")
       local artifact_path = "artifacts/" .. id .. "-" .. job .. ".md"
       local submit_command = ".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"" .. id .. "|" .. tostring(rev) .. "|" .. job .. "|<summary>|" .. artifact_path .. "||exec=<agent_id>\"'"
       local brief = "Requirement " .. id .. " (rev " .. tostring(rev) .. ", stage=" .. job .. "): " .. title
         .. "\nDescription: " .. desc
+        .. "\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing."
         .. "\nWorktree: " .. (worktree_path ~= "" and worktree_path or ".")
         .. " (branch=" .. (branch ~= "" and branch or "-") .. ", base=" .. (base ~= "" and base or "-") .. ")"
         .. "\nArtifact: " .. artifact_path
@@ -660,6 +744,9 @@ summary_jobs = function()
         branch = branch,
         base = base,
         worktreePath = worktree_path,
+        worktreeStatus = worktree_status,
+        subagentStatus = subagent_status,
+        probeStatus = probe_status,
         executor = exec_id,
         planExecutor = plan_exec_id,
         title = title,
@@ -783,6 +870,7 @@ M.RENDER = RENDER
 M.R_MARK = R_MARK
 M.SUMMARY_JOB_STAGES = SUMMARY_JOB_STAGES
 M.evolution_receipt = evolution_receipt
+M.is_resumable_agent_id = is_resumable_agent_id
 M.narrate_map = narrate_map
 M.narrate_play_mode = narrate_play_mode
 M.narrate_req_list = narrate_req_list
@@ -791,6 +879,8 @@ M.out_edges = out_edges
 M.pad = pad
 M.prompt_vars = prompt_vars
 M.receipt = render
+M.req_graph_lines = req_graph_lines
+M.req_live_status = req_live_status
 M.req_panel_text = req_panel_text
 M.req_trace = req_trace
 M.stage_prompt = stage_prompt

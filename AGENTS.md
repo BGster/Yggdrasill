@@ -333,7 +333,7 @@ contract-driven and fail-closed):
 ```bash
 YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"                  # repository root (or any checkout)
 (cd "$YGGDRASILL_ROOT" && cargo build --release --example agent)
-mkdir -p .ygg/bin && cp "$YGGDRASILL_ROOT/target/release/examples/agent" .ygg/bin/ygg-agent
+mkdir -p .ygg/bin && rm -f .ygg/bin/ygg-agent && cp "$YGGDRASILL_ROOT/target/release/examples/agent" .ygg/bin/ygg-agent
 ```
 
 The default build enables `store-sqlite` (`crates/ygg-sandbox/Cargo.toml` sets
@@ -346,6 +346,24 @@ explicit fallback for new runs, and `run.json`'s `"store"` field is authoritativ
 When the host and the Mod version do not match, loading fails immediately (the error names the
 missing field and the shape it expected) and never degrades silently; `.ygg/bin/*` and `.ygg/runs/*`
 are git-ignored, `.ygg/mods/` is committed.
+
+### Persistent lane worktree pool, single-source Mod symlink, and living documentation closed loop
+
+- **Persistent lane worktree pool (`$HOME/tmp/worktrees/<repo>-lane-<k>`)**: `worktree-claim`
+  defaults to `$HOME/tmp/worktrees` (overridable via `--root` or `$YGG_WORKTREE_ROOT`). When
+  `<lane_dir>` already exists (`reused=1`), it is reused in-place (`git checkout --force -B <branch>
+  <head>`, `git reset --hard <head>`, `git clean -fd` **without `-x`**); `worktree-release` parks the
+  worktree (`parked=1`, `git checkout --force --detach HEAD` + `git clean -fd` **without `-x`**) so
+  `<branch>` is unlocked for main-checkout merge/delete while gitignored caches (`target/`,
+  `node_modules/`) stay warm across requirements and runs.
+- **Single-source Mod symlink (`packages/mods/pi-agent-seed` -> `../../.ygg/mods/pi-agent-seed`)**:
+  `.ygg/mods/pi-agent-seed` is the single source of truth; `./scripts/sync-seed-mod.sh` recalculates
+  its `manifest.json` and verifies the relative symlink (`./scripts/sync-seed-mod.sh --check`).
+- **`docs/CONTEXT.md` + `docs/DESIGN.md` closed loop**: every `plan` and `development` subagent brief
+  mandates reading `docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md`
+  (three-layer architecture, lane lifecycle, and `harnessActions[]` contracts) before proposing or
+  editing; during `review` settlement (`settlement.evolution`), both documents must be checked and
+  updated whenever domain concepts or architectural contracts changed.
 
 ### Start
 ```bash
