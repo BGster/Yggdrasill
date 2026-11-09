@@ -24,6 +24,7 @@ import { after, describe, it } from "node:test";
 import {
   describeEnvKeys,
   formatReceipt,
+  normalizeReceipt,
   parseEnvFile,
   parseSummary,
   statusLine,
@@ -34,6 +35,10 @@ import {
   type RunSummary,
   type StepReceipt,
   type SummaryJob,
+  type YggActiveJob,
+  type YggHarnessAction,
+  type YggReceipt,
+  type YggSubagentAction,
 } from "./daemon.ts";
 import { checkToolCallFirewall, checkBatchEntrypoint, checkPathText } from "./firewall.ts";
 import {
@@ -42,13 +47,16 @@ import {
   branchNameFor,
   buildLaneProbeArgs,
   buildProposalSubmitPayload,
+  buildResumeDeltaPrompt,
   buildSubagentBrief,
   buildWorktreeClaimArgs,
   COMMIT_NUDGE_TEXT,
+  ensureBriefVerificationAndFooter,
   extractAgentId,
   laneProbeNeedsCommit,
   orchestrateActiveJobs,
   parseLaneProbeNarrative,
+  parseSubagentOutput,
   pickFreeLane,
   readLaneProbeFromGit,
   requirementNumber,
@@ -1408,11 +1416,212 @@ describe("上下文压力刹车（编排层）", () => {
   });
 });
 
+describe("thin execution shell over core subagentAction & inline tools", () => {
+  it("parseSummary / normalizeReceipt 解析 job.worktreePath、job.subagentAction 与 receipt.harnessActions", () => {
+    const rawSummary = {
+      stage: "coordinate",
+      jobs: [
+        {
+          id: "r2",
+          rev: 1,
+          stage: "development",
+          status: "developing",
+          phase: "developing",
+          lane: 2,
+          branch: "feature/r2-thin",
+          base: "2e24c45",
+          title: "Thin shell",
+          description: "Consume subagentAction",
+          worktreePath: "/tmp/ygg-worktrees/repo-lane-2",
+          subagentAction: {
+            action: "subagent.spawn",
+            reqId: "r2",
+            rev: 1,
+            stage: "development",
+            lane: 2,
+            worktreePath: "/tmp/ygg-worktrees/repo-lane-2",
+            artifactPath: "artifacts/r2-custom-dev.md",
+            brief: "# Core Brief for r2\nImplement thin shell.",
+            submitCommand: "proposal.submit",
+          },
+        },
+      ],
+      gates: [],
+    };
+    const summary = parseSummary(rawSummary);
+    assert.equal(summary.available, true);
+    assert.equal(summary.jobs.length, 1);
+    assert.equal(summary.jobs[0].worktreePath, "/tmp/ygg-worktrees/repo-lane-2");
+    assert.equal(summary.jobs[0].subagentAction?.action, "subagent.spawn");
+    assert.equal(summary.jobs[0].subagentAction?.reqId, "r2");
+    assert.equal(summary.jobs[0].subagentAction?.artifactPath, "artifacts/r2-custom-dev.md");
+    assert.equal(summary.harnessActions?.length, 1);
+    assert.equal(summary.harnessActions?.[0].action, "subagent.spawn");
+
+    const receipt = normalizeReceipt({
+      ok: true,
+      narrative: ["[DISPATCH] r2"],
+      summary: rawSummary,
+    });
+    assert.equal(receipt.harnessActions?.length, 1);
+    assert.equal(receipt.harnessActions?.[0].action, "subagent.spawn");
+  });
+
+  it("orchestrateActiveJobs：Core 已填好 job.worktreePath 或 subagentAction.worktreePath 时跳过 tool.call git.worktree_claim", async () => {
+    const job = jobRow({
+      id: "r2",
+      stage: "development",
+      lane: 1,
+      branch: "feature/r2-thin",
+      base: "2e24c45",
+      worktreePath: "/tmp/ygg-worktrees/preclaimed-lane-1",
+      subagentAction: {
+        action: "subagent.spawn",
+        reqId: "r2",
+        rev: 1,
+        stage: "development",
+        lane: 1,
+        worktreePath: "/tmp/ygg-worktrees/preclaimed-lane-1",
+        brief: "# Core Preclaimed Brief",
+      },
+    });
+    const daemon = new MockDaemon([job]);
+    const seen: SubagentRequest[] = [];
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (req) => {
+        seen.push(req);
+        return { text: "thin shell done", ok: true, agentId: "agent-thin-1" };
+      },
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        readArtifact: () => null,
+        readLaneProbe: () => UNKNOWN_LANE_PROBE,
+      },
+    );
+    const claimCalls = daemon
+      .claimCalls()
+      .filter((payload) => payload.startsWith("git.worktree_claim|"));
+    assert.equal(claimCalls.length, 0, "Core 已绑好 worktree 时不得再发 git.worktree_claim");
+    assert.equal(result.jobs[0].worktreePath, "/tmp/ygg-worktrees/preclaimed-lane-1");
+    assert.equal(seen.length, 1);
+  });
+
+  it("orchestrateActiveJobs：消费 subagentAction.brief / deltaPrompt / resumeAgentId / artifactPath", async () => {
+    const spawnJob = jobRow({
+      id: "r1",
+      stage: "plan",
+      rev: 1,
+      subagentAction: {
+        action: "subagent.spawn",
+        reqId: "r1",
+        rev: 1,
+        stage: "plan",
+        lane: 0,
+        artifactPath: "artifacts/r1-core-plan.md",
+        brief: "# Core Spawn Brief\nUse core plan prompt.",
+      },
+    });
+    const resumeJob = jobRow({
+      id: "r2",
+      stage: "development",
+      rev: 2,
+      lane: 2,
+      branch: "feature/r2-dev",
+      base: "2e24c45",
+      worktreePath: "/tmp/ygg-worktrees/repo-lane-2",
+      subagentAction: {
+        action: "subagent.resume",
+        reqId: "r2",
+        rev: 2,
+        stage: "development",
+        lane: 2,
+        resumeAgentId: "agent-core-resume-9",
+        worktreePath: "/tmp/ygg-worktrees/repo-lane-2",
+        artifactPath: "artifacts/r2-core-dev.md",
+        deltaPrompt: "# Core Delta Prompt\nAddress gate rejection notes.",
+      },
+    });
+    const daemon = new MockDaemon([spawnJob, resumeJob]);
+    const byDesc = new Map<string, SubagentRequest>();
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (req) => {
+        byDesc.set(req.description, req);
+        return { text: `# Done ${req.description}\nAll green`, ok: true, agentId: req.resume ?? "agent-spawn-1" };
+      },
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        verificationCommands: ["node --test harness.test.ts"],
+        readArtifact: () => null,
+        readLaneProbe: () => UNKNOWN_LANE_PROBE,
+      },
+    );
+
+    const r1Req = byDesc.get("r1 plan");
+    const r2Req = byDesc.get("r2 development");
+    assert.equal(r1Req?.resume, undefined);
+    assert.match(r1Req?.prompt ?? "", /# Core Spawn Brief/);
+    assert.match(r1Req?.prompt ?? "", /node --test harness\.test\.ts/);
+    assert.equal(r2Req?.resume, "agent-core-resume-9");
+    assert.match(r2Req?.prompt ?? "", /# Core Delta Prompt/);
+    assert.match(r2Req?.prompt ?? "", /artifacts\/r2-core-dev\.md/);
+    assert.deepEqual(
+      result.jobs.map((j) => j.artifactPath).sort(),
+      ["artifacts/r1-core-plan.md", "artifacts/r2-core-dev.md"],
+    );
+    assert.equal(
+      parseSubagentOutput( ensureBriefVerificationAndFooter("# Title\nBody", "artifacts/x.md", ["cargo test"]) ).summary,
+      "Title",
+    );
+    assert.match(
+      buildResumeDeltaPrompt(resumeJob, "/tmp/ygg-worktrees/repo-lane-2", "artifacts/r2-core-dev.md", "/tmp/repo"),
+      /续跑增量指令/,
+    );
+  });
+
+  it("orchestrateActiveJobs：useInlineLaneProbe=true 时跳过 proposal.submit 前的显式 tool.call git.lane_probe", async () => {
+    const job = jobRow({
+      id: "r2",
+      stage: "development",
+      lane: 1,
+      branch: "feature/r2-inline-probe",
+      base: "2e24c45",
+      worktreePath: "/tmp/ygg-worktrees/repo-lane-1",
+    });
+    const daemon = new MockDaemon([job]);
+    await orchestrateActiveJobs(
+      daemon,
+      async () => ({ text: "implemented with inline probe", ok: true, agentId: "agent-inline" }),
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        useInlineLaneProbe: true,
+        readArtifact: () => null,
+      },
+    );
+    const probeCalls = daemon
+      .claimCalls()
+      .filter((payload) => payload.startsWith("git.lane_probe|"));
+    assert.equal(probeCalls.length, 0, "useInlineLaneProbe=true 时不发显式 git.lane_probe");
+    assert.equal(
+      daemon.calls.some((call) => call.event === "proposal.submit"),
+      true,
+    );
+  });
+});
+
 // 让 tsc/编辑器知道这些类型确实被用到（运行时无副作用）。
 export type _Types = [
   RunSummary,
   StepReceipt,
   SummaryJob,
+  YggActiveJob,
+  YggSubagentAction,
+  YggHarnessAction,
+  YggReceipt,
   SubagentRequest,
   OrchestratorDaemon,
   HandoffWrite,
