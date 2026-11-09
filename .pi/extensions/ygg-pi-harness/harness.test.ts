@@ -74,11 +74,13 @@ import {
   buildCompactInstructions,
   buildHandoffMarkdown,
   buildResumeMessage,
+  DEFAULT_EFFECTIVE_WINDOW_CAP,
   evaluateContextPressure,
   formatPercent,
   HANDOFF_ARTIFACT_PATH,
   HANDOFF_RESUME_CUSTOM_TYPE,
   isStableCheckpoint,
+  parsePositiveIntEnv,
   stableCheckpointReason,
   writeHandoffToVfs,
   type HandoffWrite,
@@ -975,6 +977,56 @@ describe("evaluateContextPressure", () => {
     });
     assert.equal(custom.level, "normal", "自定义水位生效");
   });
+
+  it("1M 模型窗口默认按 DEFAULT_EFFECTIVE_WINDOW_CAP (200_000) 封顶计算水位，支持自定义 effectiveWindowCap", () => {
+    assert.equal(DEFAULT_EFFECTIVE_WINDOW_CAP, 200_000);
+
+    // 1M 窗口下用掉 120k：按 200k 封顶即 60.0% → soft_brake（若不封顶只有 12.0% 会漏刹）
+    const softAt120k = evaluateContextPressure({
+      usedTokens: 120_000,
+      contextWindow: 1_000_000,
+    });
+    assert.equal(softAt120k.contextWindow, 200_000);
+    assert.equal(softAt120k.ratio, 0.6);
+    assert.equal(softAt120k.level, "soft_brake");
+    assert.equal(softAt120k.shouldBrakeSubagents, true);
+
+    // 1M 窗口下用掉 150k：按 200k 封顶即 75.0% → hard_brake
+    const hardAt150k = evaluateContextPressure({
+      usedTokens: 150_000,
+      contextWindow: 1_000_000,
+    });
+    assert.equal(hardAt150k.contextWindow, 200_000);
+    assert.equal(hardAt150k.ratio, 0.75);
+    assert.equal(hardAt150k.level, "hard_brake");
+
+    // 自定义 effectiveWindowCap（如 YGG_CONTEXT_WINDOW=300000）覆盖默认 200k 上限
+    const customCap = evaluateContextPressure({
+      usedTokens: 150_000,
+      contextWindow: 1_000_000,
+      effectiveWindowCap: 300_000,
+    });
+    assert.equal(customCap.contextWindow, 300_000);
+    assert.equal(customCap.ratio, 0.5);
+    assert.equal(customCap.level, "normal");
+
+    // 显式传 null 或 <= 0 则不封顶，保留原始 contextWindow
+    const uncapped = evaluateContextPressure({
+      usedTokens: 150_000,
+      contextWindow: 1_000_000,
+      effectiveWindowCap: null,
+    });
+    assert.equal(uncapped.contextWindow, 1_000_000);
+    assert.equal(uncapped.ratio, 0.15);
+    assert.equal(uncapped.level, "normal");
+
+    assert.equal(parsePositiveIntEnv("200000"), 200_000);
+    assert.equal(parsePositiveIntEnv("  250000 "), 250_000);
+    assert.equal(parsePositiveIntEnv(""), undefined);
+    assert.equal(parsePositiveIntEnv("0"), undefined);
+    assert.equal(parsePositiveIntEnv("-100"), undefined);
+    assert.equal(parsePositiveIntEnv("abc"), undefined);
+  });
 });
 
 describe("isStableCheckpoint", () => {
@@ -1781,6 +1833,158 @@ describe("thin execution shell over core subagentAction & inline tools", () => {
     assert.equal(summary.jobs[0].worktreeStatus, "已绑定 /tmp/ygg-worktrees/repo-lane-2");
     assert.equal(summary.jobs[0].subagentStatus, "已派发 agent-42");
     assert.equal(summary.jobs[0].probeStatus, "commits=1 clean=1");
+  });
+});
+
+// ───────────────────────────── ⑤ index.ts：kickoff 默认 guide 与 clientFor 并发锁 ─────────────────────────────
+
+async function loadIndexExports() {
+  const { registerHooks } = await import("node:module");
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (
+        specifier === "@earendil-works/pi-coding-agent" ||
+        specifier === "@earendil-works/pi-ai" ||
+        specifier === "typebox"
+      ) {
+        return {
+          url:
+            "data:text/javascript," +
+            encodeURIComponent(`
+              export const isToolCallEventType = () => false;
+              export const StringEnum = (values, opts) => ({ type: "string", enum: values, ...opts });
+              export const Type = {
+                Object: (props, opts) => ({ type: "object", properties: props, ...opts }),
+                Optional: (schema) => ({ ...schema, optional: true }),
+                String: (opts) => ({ type: "string", ...opts }),
+                Number: (opts) => ({ type: "number", ...opts }),
+                Array: (item, opts) => ({ type: "array", items: item, ...opts }),
+                Union: (anyOf, opts) => ({ anyOf, ...opts }),
+              };
+            `),
+          shortCircuit: true,
+        };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+  return await import("./index.ts");
+}
+
+describe("index.ts: kickoff 模式选择与 clientFor 并发启动锁", () => {
+  it("kickoff：goalAuth 为空时不派发 goal.authorization 与 play.mode=goal（保持默认 guide 模式）；非空时才一并派发", async () => {
+    const { kickoffSession } = await loadIndexExports();
+    const fakeCtx = {
+      cwd: "/tmp/repo",
+      ui: { setStatus() {}, notify() {} },
+    } as never;
+
+    const guideDispatches: [string, string | number | undefined][] = [];
+    const guideClient = {
+      async dispatch(event: string, payload?: string | number): Promise<StepReceipt> {
+        guideDispatches.push([event, payload]);
+        return { ok: true, narrative: [`[OK] ${event}`], pendingChoice: null, tools: [], raw: {} };
+      },
+      async summary(): Promise<RunSummary> {
+        return summaryWith([]);
+      },
+    };
+
+    await kickoffSession(fakeCtx, guideClient, {
+      runId: "run-guide",
+      title: "Guide Run",
+      description: "Stay in default guide mode",
+      goalAuth: "   ",
+      requirements: [{ title: "r1", description: "desc" }],
+    });
+    assert.deepEqual(
+      guideDispatches.map(([event]) => event),
+      ["task.intake", "requirement.add", "requirement.dispatch"],
+      "goalAuth 为空时不得硬编码切入 play.mode=goal",
+    );
+
+    const goalDispatches: [string, string | number | undefined][] = [];
+    const goalClient = {
+      async dispatch(event: string, payload?: string | number): Promise<StepReceipt> {
+        goalDispatches.push([event, payload]);
+        return { ok: true, narrative: [`[OK] ${event}`], pendingChoice: null, tools: [], raw: {} };
+      },
+      async summary(): Promise<RunSummary> {
+        return summaryWith([]);
+      },
+    };
+
+    await kickoffSession(fakeCtx, goalClient, {
+      runId: "run-goal",
+      title: "Goal Run",
+      description: "User authorized goal mode",
+      goalAuth: "user explicitly authorized goal mode",
+      requirements: [{ title: "r1", description: "desc" }],
+    });
+    assert.deepEqual(goalDispatches, [
+      ["config.set", "goal.authorization=user explicitly authorized goal mode"],
+      ["config.set", "play.mode=goal"],
+      ["task.intake", "Goal Run|User authorized goal mode"],
+      ["requirement.add", "r1|desc"],
+      ["requirement.dispatch", ""],
+    ]);
+  });
+
+  it("clientFor：同一 runId 并发调用复用 daemonsInflight Promise，只创建并 start 一次", async () => {
+    const { clientFor, resetClientsForTest, resolveEffectiveWindowCapFromEnv } = await loadIndexExports();
+    resetClientsForTest();
+
+    let createdCount = 0;
+    let startCount = 0;
+    const fakeCtx = {
+      cwd: "/tmp/repo",
+      ui: { setStatus() {}, notify() {} },
+    } as never;
+
+    const makeFakeDaemon = () => {
+      createdCount += 1;
+      const instance = {
+        mode: "daemon" as const,
+        degradedReason: "",
+        async start() {
+          startCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          return "daemon" as const;
+        },
+        async closeAll() {},
+      };
+      return instance as unknown as YggDaemon;
+    };
+
+    const [c1, c2, c3] = await Promise.all([
+      clientFor(fakeCtx, "run-race", { createDaemon: makeFakeDaemon }),
+      clientFor(fakeCtx, "run-race", { createDaemon: makeFakeDaemon }),
+      clientFor(fakeCtx, "run-race", { createDaemon: makeFakeDaemon }),
+    ]);
+
+    assert.equal(createdCount, 1, "并发调用同一 runId 只应构造一个 YggDaemon");
+    assert.equal(startCount, 1, "并发调用同一 runId 只应调用一次 start()");
+    assert.equal(c1, c2);
+    assert.equal(c2, c3);
+
+    // .env.local / process.env 的 YGG_CONTEXT_WINDOW 解析验证
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), "ygg-ctx-win-"));
+    try {
+      assert.equal(resolveEffectiveWindowCapFromEnv(tmpDir, {}), undefined);
+      assert.equal(
+        resolveEffectiveWindowCapFromEnv(tmpDir, { YGG_CONTEXT_WINDOW: "180000" }),
+        180_000,
+      );
+      writeFileSync(path.join(tmpDir, ".env.local"), "YGG_CONTEXT_WINDOW=220000\n", "utf8");
+      assert.equal(
+        resolveEffectiveWindowCapFromEnv(tmpDir, { YGG_CONTEXT_WINDOW: "180000" }),
+        220_000,
+        ".env.local 优先于 process.env",
+      );
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+      resetClientsForTest();
+    }
   });
 });
 

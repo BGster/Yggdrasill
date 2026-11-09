@@ -28,6 +28,12 @@ import type { RunSummary } from "./daemon.ts";
 
 /** 默认中位上下文窗口（宿主没报 `contextWindow` 时的保守假想值）。 */
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
+/**
+ * 默认有效上下文窗口上限：模型元数据常报 1M（`1_000_000`），但网关/压缩水位
+ * 的实际可用上限通常在 200k 左右；若按 1M 作分母，60%/75% 刹车点会被推迟到
+ * 600k/750k 而彻底失效。
+ */
+export const DEFAULT_EFFECTIVE_WINDOW_CAP = 200_000;
 /** 软刹车水位：到这就不起新一波 subagent，等本波落地再交接。 */
 export const DEFAULT_SOFT_WATERMARK = 0.6;
 /** 硬刹车水位：到这立刻停手，交接 + 压缩 + 续跑。 */
@@ -40,6 +46,11 @@ export interface ContextPressureInput {
   usedTokens?: number | null;
   /** 上下文窗口（`ctx.model.contextWindow` / `ContextUsage.contextWindow`）。 */
   contextWindow?: number | null;
+  /**
+   * 有效上下文窗口上限（缺省 `DEFAULT_EFFECTIVE_WINDOW_CAP = 200_000`；
+   * 显式传 `null` 或 `<= 0` 则不封顶，直接用 `rawWindow`）。
+   */
+  effectiveWindowCap?: number | null;
   /** 软刹车水位（默认 0.60）。 */
   softWatermark?: number;
   /** 硬刹车水位（默认 0.75）。 */
@@ -81,6 +92,14 @@ function watermark(value: number | undefined, fallback: number): number {
   return number === null ? fallback : number;
 }
 
+export function parsePositiveIntEnv(raw: string | undefined | null): number | undefined {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return undefined;
+  }
+  const parsed = Number(raw.trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 /**
  * 上下文压力判定（纯函数）。
  *
@@ -89,7 +108,12 @@ function watermark(value: number | undefined, fallback: number): number {
  * （`0` / 负数 / `NaN`）退回默认值，`hard < soft` 时把 hard 抬到 soft（保持单调）。
  */
 export function evaluateContextPressure(input: ContextPressureInput = {}): ContextPressure {
-  const contextWindow = finitePositive(input.contextWindow) ?? DEFAULT_CONTEXT_WINDOW;
+  const rawWindow = finitePositive(input.contextWindow) ?? DEFAULT_CONTEXT_WINDOW;
+  const cap =
+    input.effectiveWindowCap === undefined
+      ? DEFAULT_EFFECTIVE_WINDOW_CAP
+      : finitePositive(input.effectiveWindowCap);
+  const contextWindow = cap !== null && rawWindow > cap ? cap : rawWindow;
   const soft = watermark(input.softWatermark, DEFAULT_SOFT_WATERMARK);
   const hard = Math.max(watermark(input.hardWatermark, DEFAULT_HARD_WATERMARK), soft);
   const known = finitePositive(input.usedTokens);
