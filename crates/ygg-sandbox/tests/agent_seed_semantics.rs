@@ -2200,15 +2200,20 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     let plan_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     let plan_jobs = plan_summary["jobs"].as_array().expect("summary.jobs array");
     assert_eq!(plan_jobs.len(), 1);
+    assert_eq!(plan_jobs[0]["worktreeStatus"], json!("n/a"));
+    assert_eq!(plan_jobs[0]["subagentStatus"], json!("pending"));
+    assert_eq!(plan_jobs[0]["probeStatus"], json!("n/a"));
     let plan_action = &plan_jobs[0]["subagentAction"];
     assert_eq!(plan_action["action"], json!("subagent.spawn"));
     assert_eq!(plan_action["reqId"], json!("r1"));
     assert_eq!(plan_action["stage"], json!("plan"));
     assert_eq!(plan_action["artifactPath"], json!("artifacts/r1-plan.md"));
-    assert!(plan_action["brief"]
-        .as_str()
-        .unwrap_or("")
-        .contains("Requirement r1"));
+    let plan_brief = plan_action["brief"].as_str().unwrap_or("");
+    assert!(plan_brief.contains("Requirement r1"));
+    assert!(
+        plan_brief.contains("docs/CONTEXT.md") && plan_brief.contains("docs/DESIGN.md"),
+        "brief must include mandatory living docs references: {plan_brief}"
+    );
     assert!(plan_action["submitCommand"]
         .as_str()
         .unwrap_or("")
@@ -2218,6 +2223,11 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     game.narrate(
         "proposal.submit",
         &text("r1|1|plan|plan ready|artifacts/r1-plan.md||exec=agent-plan"),
+    );
+    let list_with_prop = game.narrate("requirement.list", "0").join("\n");
+    assert!(
+        list_with_prop.contains("(wt=n/a)(subagent=delivered:p1(agent-plan))"),
+        "requirement.list must show delivered proposal status: {list_with_prop}"
     );
     game.click("proposal.accept — ");
 
@@ -2247,6 +2257,17 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     let dev_jobs = dev_summary["jobs"].as_array().expect("summary.jobs array");
     assert_eq!(dev_jobs.len(), 1);
     assert_eq!(dev_jobs[0]["worktreePath"], json!("/tmp/ygg-wt-lane-1"));
+    assert_eq!(
+        dev_jobs[0]["worktreeStatus"],
+        json!("ready:/tmp/ygg-wt-lane-1@feature/r1")
+    );
+    assert_eq!(dev_jobs[0]["subagentStatus"], json!("pending"));
+    assert_eq!(dev_jobs[0]["probeStatus"], json!("pending"));
+    let dev_list = game.narrate("requirement.list", "0").join("\n");
+    assert!(
+        dev_list.contains("(wt=ready:/tmp/ygg-wt-lane-1@feature/r1)(subagent=pending)"),
+        "requirement.list must show live worktreeStatus and subagentStatus: {dev_list}"
+    );
     let dev_action = &dev_jobs[0]["subagentAction"];
     assert_eq!(dev_action["action"], json!("subagent.resume"));
     assert_eq!(dev_action["resumeAgentId"], json!("agent-plan"));
@@ -2255,10 +2276,12 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
         dev_action["artifactPath"],
         json!("artifacts/r1-development.md")
     );
-    assert!(dev_action["brief"]
-        .as_str()
-        .unwrap_or("")
-        .contains("/tmp/ygg-wt-lane-1"));
+    let dev_brief = dev_action["brief"].as_str().unwrap_or("");
+    assert!(dev_brief.contains("/tmp/ygg-wt-lane-1"));
+    assert!(
+        dev_brief.contains("docs/CONTEXT.md") && dev_brief.contains("docs/DESIGN.md"),
+        "development brief must include mandatory living docs references: {dev_brief}"
+    );
     assert!(dev_action["submitCommand"]
         .as_str()
         .unwrap_or("")
@@ -2334,5 +2357,74 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     assert!(
         closed["narrative"].to_string().contains("[ENDING"),
         "review.note must close the run after inline session archiving: {closed}"
+    );
+}
+
+/// A8 Placeholder actor IDs (`"pi-ygg-harness"`, `"unregistered"`, `"main"`) recorded in the
+/// executor ledger must NOT trigger a false `subagent.resume`; `subagentAction.action` stays
+/// `"subagent.spawn"` with `resumeAgentId = ""`, while `probeStatus` reflects `verified:commits=...,clean=...`
+/// once a lane probe has settled.
+#[test]
+fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
+    let mut game = Game::open(&project_mod_dir());
+    game.kernel
+        .set_tool_runner(Some(Box::new(SyncRitualRunner)));
+
+    game.narrate(
+        "task.intake",
+        &text("guard test|verify is_resumable_agent_id and probeStatus"),
+    );
+    game.narrate("requirement.add", &text("guard req|verify resume guard|r1"));
+    game.narrate("requirement.dispatch", "0");
+
+    // Submit plan proposal using the fallback actor ID `pi-ygg-harness`.
+    game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|plan by fallback actor|artifacts/r1-plan.md||exec=pi-ygg-harness"),
+    );
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+
+    // Even though `planExecutor` is `"pi-ygg-harness"`, `is_resumable_agent_id` rejects it,
+    // so development stage requests `subagent.spawn` with `resumeAgentId == ""`.
+    let dev_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    let dev_jobs = dev_summary["jobs"].as_array().expect("summary.jobs array");
+    assert_eq!(dev_jobs.len(), 1);
+    assert_eq!(dev_jobs[0]["planExecutor"], json!("pi-ygg-harness"));
+    assert_eq!(
+        dev_jobs[0]["subagentAction"]["action"],
+        json!("subagent.spawn")
+    );
+    assert_eq!(dev_jobs[0]["subagentAction"]["resumeAgentId"], json!(""));
+
+    // Register a real executor for development and populate probe results to verify `dispatched:<id>` + `verified:...`.
+    game.narrate(
+        "config.set",
+        &text("executor.r1.development=agent-dev-uuid-1|assigned"),
+    );
+    tool_round(
+        &mut game,
+        "git.lane_probe|lane=1;base=2e24c45;branch=feature/r1|tp1",
+        "tp1|git.lane_probe|ok|0|lane=1;branch=feature/r1;base=2e24c45;head=deadbeef1234;commits=2;clean=1;files=src/render.lua",
+    );
+    let probed_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    let probed_jobs = probed_summary["jobs"]
+        .as_array()
+        .expect("summary.jobs array");
+    assert_eq!(
+        probed_jobs[0]["subagentStatus"],
+        json!("dispatched:agent-dev-uuid-1")
+    );
+    assert_eq!(
+        probed_jobs[0]["probeStatus"],
+        json!("verified:commits=2,clean=1")
+    );
+    assert_eq!(
+        probed_jobs[0]["subagentAction"]["action"],
+        json!("subagent.resume")
+    );
+    assert_eq!(
+        probed_jobs[0]["subagentAction"]["resumeAgentId"],
+        json!("agent-dev-uuid-1")
     );
 }

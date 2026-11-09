@@ -1,48 +1,32 @@
 #!/bin/sh
-# 同步 seed Mod 与项目 Mod 的**骨架文件**（`mod.lua` + `src/**` + `schemas/`）。
+# 单一事实源 Mod 校验与 manifest 重算脚本。
 #
-# 两侧目录（`pi-agent-seed`，2026 更名；旧名 `agent-seed` 的存档由宿主 `--resume` 兼容兜底）：
-#   种子模板  packages/mods/pi-agent-seed
-#   本项目实例 .ygg/mods/pi-agent-seed
-#
-# 分层约定（两个 Mod 同处一个仓库，但不是同一份东西）：
-#
-#   骨架面（机制，必须逐字节一致）   mod.lua / src/**/*.lua / schemas/*  —— 本脚本同步的对象
-#   实例面（各项目自己的数据）       data/*                              —— 本脚本**不碰**
-#   声明面（同构但取值随实例）       pack.json 的 code 段是骨架，agent / inboxRoutes 是实例
-#
-# - `data/playbook.json` 是「本项目的现场规则」，种子版是「通用元工作流纪律」，
-#   两者内容必然不同，任何同步都会毁掉其中一侧。
-# - `data/config.json` / `data/scenes.json` 同理按项目实例各自维护。
-# - `pack.json` 的 `agent`（事件名 / 前缀集 / 重放前缀）与 `inboxRoutes` 必须与该侧
-#   `data/scenes.json` 的实际用词一致，所以本脚本不覆盖它们；但 `code` 段（entry + modules）
-#   属骨架，两侧必须一致，脚本会检查并在不一致时报错退出。
-#
-# 同步后自动重算**两侧**的 `manifest.json`（内容寻址：sha256 + byteLength，
-# 少算一侧就会以「内容哈希不符」拒绝装载）。`code.modules` 的每个路径都在哈希面里。
+# 目录关系（2026 单源化）：
+#   单一事实源  .ygg/mods/pi-agent-seed
+#   兼容入口    packages/mods/pi-agent-seed -> ../../.ygg/mods/pi-agent-seed（相对软链）
 #
 # 用法：
-#   scripts/sync-seed-mod.sh                  # 默认 seed → project（模板推送到项目）
-#   scripts/sync-seed-mod.sh --from project   # 反向（项目回灌到模板，改完机制要回流）
-#   scripts/sync-seed-mod.sh --no-pack        # 只同步文件，不重算 manifest
-#
-# 幂等：内容已一致时不写文件；重复跑不产生新的 diff。
-#
-# 依赖：POSIX sh（无第三方包、无绝对路径假设；重算 manifest 需要 cargo；
-#       `code` 段一致性检查需要 python3，缺失时跳过并提示，CI 会兜底）。
-# 一致性由 CI 兜底（`.github/workflows/check.yml` 的骨架校验步），不一致即失败。
+#   scripts/sync-seed-mod.sh                  # 重算 .ygg/mods/pi-agent-seed/manifest.json 并校验软链
+#   scripts/sync-seed-mod.sh --check          # 只读校验（软链目标 + manifest.json 与内容哈希一致）
+#   scripts/sync-seed-mod.sh --from project   # 兼容旧参数
+#   scripts/sync-seed-mod.sh --no-pack        # 只校验软链/目录，不重算 manifest
 
 set -eu
 
 usage() {
-    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
 }
 
-from="seed"
+from="project"
 run_pack="yes"
+check_only="no"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --check)
+            check_only="yes"
+            shift
+            ;;
         --from)
             if [ "$#" -lt 2 ]; then
                 echo "用法错误：--from 需要参数（seed | project）" >&2
@@ -70,159 +54,88 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-unset CDPATH
-script_dir=$(dirname "$0")
-root=$(cd "$script_dir/.." && pwd)
-seed_dir="packages/mods/pi-agent-seed"
-project_dir=".ygg/mods/pi-agent-seed"
-
 case "$from" in
-    seed)
-        src="$seed_dir"
-        dst="$project_dir"
-        ;;
-    project)
-        src="$project_dir"
-        dst="$seed_dir"
-        ;;
+    seed|project) ;;
     *)
         echo "用法错误：--from 只接受 seed | project（收到 ${from}）" >&2
         exit 2
         ;;
 esac
 
+unset CDPATH
+script_dir=$(dirname "$0")
+root=$(cd "$script_dir/.." && pwd)
+seed_dir="packages/mods/pi-agent-seed"
+project_dir=".ygg/mods/pi-agent-seed"
+expected_target="../../.ygg/mods/pi-agent-seed"
+
 cd "$root"
 
-for dir in "$src" "$dst"; do
-    if [ ! -d "$dir" ]; then
-        echo "错误：找不到 Mod 目录 $dir" >&2
+if [ ! -d "$project_dir" ]; then
+    echo "错误：找不到单一事实源 Mod 目录 $project_dir" >&2
+    exit 1
+fi
+
+for req in "$project_dir/mod.lua" "$project_dir/pack.json"; do
+    if [ ! -f "$req" ]; then
+        echo "错误：Mod 缺少必需文件 $req" >&2
         exit 1
     fi
 done
 
-if [ ! -f "$src/mod.lua" ]; then
-    echo "错误：源 Mod 缺少 mod.lua（${src}）" >&2
-    exit 1
-fi
-if [ ! -d "$src/schemas" ]; then
-    echo "错误：源 Mod 缺少 schemas/（${src}）" >&2
-    exit 1
-fi
-if [ ! -d "$src/src" ]; then
-    echo "错误：源 Mod 缺少 src/（${src}）——多文件骨架至少要有 src/ 目录" >&2
+if [ ! -d "$project_dir/src" ] || [ ! -d "$project_dir/schemas" ]; then
+    echo "错误：Mod 缺少 src/ 或 schemas/ 目录（$project_dir）" >&2
     exit 1
 fi
 
-changed=0
-
-copy_file() {
-    # copy_file <源> <目标> <展示用路径>
-    if [ -f "$2" ] && cmp -s "$1" "$2"; then
-        return 0
-    fi
-    cp "$1" "$2"
-    echo "更新  $3"
-    changed=1
-}
-
-# ---- 骨架：mod.lua ---------------------------------------------------------
-copy_file "$src/mod.lua" "$dst/mod.lua" "$dst/mod.lua"
-
-# ---- 骨架：src/（递归镜像，双向都按源的集合收敛）--------------------------
-# 显式两段展开而不是 `find | while`：POSIX sh 的管道左侧是子进程，改不了 changed。
-mkdir -p "$dst/src/handlers"
-
-for f in "$src"/src/*.lua; do
-    [ -e "$f" ] || continue
-    name=$(basename "$f")
-    copy_file "$f" "$dst/src/$name" "$dst/src/$name"
-done
-
-for f in "$src"/src/handlers/*.lua; do
-    [ -e "$f" ] || continue
-    name=$(basename "$f")
-    copy_file "$f" "$dst/src/handlers/$name" "$dst/src/handlers/$name"
-done
-
-# 删除收敛：源侧不存在的模块，目标侧删除（否则目标多出的模块会以 UNUSED 被 lint 拒）
-for f in "$dst"/src/*.lua; do
-    [ -e "$f" ] || continue
-    name=$(basename "$f")
-    if [ ! -e "$src/src/$name" ]; then
-        rm -f "$f"
-        echo "删除  $dst/src/$name（源侧已不存在）"
-        changed=1
-    fi
-done
-
-for f in "$dst"/src/handlers/*.lua; do
-    [ -e "$f" ] || continue
-    name=$(basename "$f")
-    if [ ! -e "$src/src/handlers/$name" ]; then
-        rm -f "$f"
-        echo "删除  $dst/src/handlers/$name（源侧已不存在）"
-        changed=1
-    fi
-done
-
-# ---- 骨架：schemas/（镜像，双向都按源的集合收敛）--------------------------
-mkdir -p "$dst/schemas"
-
-for f in "$src"/schemas/*.json; do
-    [ -e "$f" ] || continue
-    name=$(basename "$f")
-    copy_file "$f" "$dst/schemas/$name" "$dst/schemas/$name"
-done
-
-for f in "$dst"/schemas/*.json; do
-    [ -e "$f" ] || continue
-    name=$(basename "$f")
-    if [ ! -e "$src/schemas/$name" ]; then
-        rm -f "$f"
-        echo "删除  ${dst}/schemas/${name}（源侧已不存在）"
-        changed=1
-    fi
-done
-
-if [ "$changed" -eq 0 ]; then
-    echo "骨架已一致：${src} → ${dst}（mod.lua + src/ + schemas/），未写任何文件"
-fi
-
-# ---- 骨架：pack.json 的 code 段必须两侧一致 --------------------------------
-# code 段是「哪些模块属于同一个 harness」的声明；两份 Mod 必须同构，否则同步出去的是
-# 两份不同的机制。agent / inboxRoutes 属实例面（前缀集随各侧 scenes），不在此检查。
-code_of() {
-    python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8"))["code"], sort_keys=True))' "$1"
-}
-
-if command -v python3 >/dev/null 2>&1; then
-    src_code=$(code_of "$src/pack.json")
-    dst_code=$(code_of "$dst/pack.json")
-    if [ "$src_code" != "$dst_code" ]; then
-        echo "错误：两侧 pack.json 的 code 段不一致——mod.lua 与 src/ 必须一起同步" >&2
-        echo "      源：$src/pack.json" >&2
-        echo "      目标：$dst/pack.json" >&2
+# 校验 packages/mods/pi-agent-seed 软链
+if [ -L "$seed_dir" ]; then
+    actual_target=$(readlink "$seed_dir")
+    if [ "$actual_target" != "$expected_target" ]; then
+        echo "错误：$seed_dir 软链目标不符（期望 $expected_target，实际 $actual_target）" >&2
         exit 1
     fi
 else
-    echo "提示：无 python3，跳过 pack.json 的 code 段一致性检查（CI 会查）"
+    echo "错误：$seed_dir 应当是指向 $expected_target 的相对软链" >&2
+    exit 1
 fi
 
-# ---- 重算两侧 manifest ----------------------------------------------------
+# 校验 schemas 与 packages/schema/schemas 单一事实源一致
+for f in "$project_dir"/schemas/*.json; do
+    [ -e "$f" ] || continue
+    name=$(basename "$f")
+    if [ -f "packages/schema/schemas/$name" ] && ! cmp -s "packages/schema/schemas/$name" "$f"; then
+        echo "错误：$f 与 packages/schema/schemas/$name 不一致" >&2
+        exit 1
+    fi
+done
+
 if [ "$run_pack" = "no" ]; then
-    echo "跳过 manifest 重算（--no-pack）；改过骨架文件时请自行重算两侧"
+    echo "完成：单源软链 $seed_dir -> $expected_target 已核验（--no-pack 跳过 manifest）"
     exit 0
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
-    echo "错误：找不到 cargo，无法重算 manifest" >&2
-    echo "     装 Rust 工具链后重跑，或本轮用 --no-pack 只同步文件" >&2
+    echo "错误：找不到 cargo，无法计算或校验 manifest" >&2
     exit 1
 fi
 
-for dir in "$seed_dir" "$project_dir"; do
-    echo "pack  $dir"
-    cargo run --quiet --example pack -- "$dir" >/dev/null
-done
+if [ "$check_only" = "yes" ]; then
+    tmp_manifest=$(mktemp "${TMPDIR:-/tmp}/ygg-manifest.XXXXXX")
+    trap 'rm -f "$tmp_manifest"' EXIT INT TERM
+    cp "$project_dir/manifest.json" "$tmp_manifest"
+    cargo run --quiet --example pack -- "$project_dir" >/dev/null
+    if ! cmp -s "$tmp_manifest" "$project_dir/manifest.json"; then
+        cp "$tmp_manifest" "$project_dir/manifest.json"
+        echo "错误：$project_dir/manifest.json 与当前文件内容不一致——请运行 ./scripts/sync-seed-mod.sh" >&2
+        exit 1
+    fi
+    rm -f "$tmp_manifest"
+    trap - EXIT INT TERM
+    echo "完成：单源软链 $seed_dir -> $expected_target 与 $project_dir/manifest.json 校验通过"
+    exit 0
+fi
 
-echo "完成：骨架同步 ${src} → ${dst}，两侧 manifest 已重算"
+echo "pack  $project_dir"
+cargo run --quiet --example pack -- "$project_dir" >/dev/null
+echo "完成：单源软链 $seed_dir -> $expected_target 已核验，$project_dir/manifest.json 已重算"

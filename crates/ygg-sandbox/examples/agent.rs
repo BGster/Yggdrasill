@@ -3708,19 +3708,6 @@ fn git_capture(repo: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// 同 [`git_capture`] 但只要布尔结局（`rev-parse --verify` 这类探针）。
-fn git_ok(repo: &Path, args: &[&str]) -> bool {
-    Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
 /// 必须恰好一行（`rev-parse HEAD` 这类）。
 fn git_one(repo: &Path, args: &[&str]) -> Result<String, String> {
     let text = git_capture(repo, args)?;
@@ -3766,18 +3753,28 @@ fn repo_label(repo: &Path) -> String {
         .unwrap_or_else(|| "repo".to_owned())
 }
 
-/// worktree 根目录：`--root` > `$YGG_WORKTREE_ROOT` > `<temp>/ygg-worktrees`。
-///
-/// **不**猜 home 相对布局（`~/tmp/worktrees/<repo>` 是**项目**约定，不是通用
-/// 默认值）；`pack.json` 是静态文件，部署方要自定义就传 `--root`。
+/// worktree 根目录：`--root` > `$YGG_WORKTREE_ROOT` > `$HOME/tmp/worktrees` > `<temp>/ygg-worktrees`。
 fn worktree_root(explicit: Option<&str>) -> PathBuf {
-    if let Some(dir) = explicit {
+    worktree_root_for(
+        explicit,
+        std::env::var("YGG_WORKTREE_ROOT").ok().as_deref(),
+        home_dir().as_deref(),
+    )
+}
+
+fn worktree_root_for(
+    explicit: Option<&str>,
+    env_root: Option<&str>,
+    home: Option<&Path>,
+) -> PathBuf {
+    if let Some(dir) = explicit.map(str::trim).filter(|dir| !dir.is_empty()) {
         return PathBuf::from(dir);
     }
-    if let Ok(dir) = std::env::var("YGG_WORKTREE_ROOT") {
-        if !dir.trim().is_empty() {
-            return PathBuf::from(dir);
-        }
+    if let Some(dir) = env_root.map(str::trim).filter(|dir| !dir.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    if let Some(home) = home {
+        return home.join("tmp").join("worktrees");
     }
     std::env::temp_dir().join("ygg-worktrees")
 }
@@ -3917,55 +3914,49 @@ fn claim_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpF
         git_one(&repo, &["rev-parse", "HEAD"]).map_err(|err| OpFailure::detail("repo", err))?;
     let wt = lane_worktree_path(&worktree_root(flags.get("--root")), &repo, lane);
 
-    // ① 已注册且干净、且就在 `branch` @ `base` 上 → 复用（幂等：重跑 claim 不是错）。
-    if wt.is_dir() {
-        // 比**规范路径**：git 报的是 `realpath` 后的路径（macOS 上 `/var` →
-        // `/private/var`），拿调用方给的原始拼接串比会恒不等，于是白白多建一次。
-        let want = fs::canonicalize(&wt).unwrap_or_else(|_| wt.clone());
-        let registered = git_lines(&repo, &["worktree", "list", "--porcelain"])
-            .map(|lines| {
-                lines.iter().any(|line| {
-                    line.strip_prefix("worktree ")
-                        .map(|path| {
-                            let got = PathBuf::from(path);
-                            fs::canonicalize(&got).unwrap_or(got) == want
-                        })
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-        if registered {
-            let on = git_one(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]);
-            let head = git_one(&wt, &["rev-parse", "HEAD"]);
-            let clean = git_lines(&wt, &["status", "--porcelain"])
-                .map(|lines| lines.is_empty())
-                .unwrap_or(false);
-            if on.as_deref() == Ok(branch.as_str()) && head.as_deref() == Ok(base.as_str()) && clean
-            {
-                return Ok(claim_output(lane, &req, &branch, &base, &wt));
+    // ⓪ 若 `<branch>` 已被其他 worktree 检出（例如 gate reject 后需求重派到另一条泳道），
+    // 先将那个 worktree 切为 `--detach HEAD` 释放分支锁。
+    let want = fs::canonicalize(&wt).unwrap_or_else(|_| wt.clone());
+    let branch_ref = format!("refs/heads/{branch}");
+    if let Ok(lines) = git_lines(&repo, &["worktree", "list", "--porcelain"]) {
+        let mut current_wt: Option<PathBuf> = None;
+        for line in &lines {
+            if let Some(path) = line.strip_prefix("worktree ") {
+                current_wt = Some(PathBuf::from(path));
+            } else if let Some(b) = line.strip_prefix("branch ") {
+                if b == branch_ref {
+                    if let Some(ref other_wt) = current_wt {
+                        let got = fs::canonicalize(other_wt).unwrap_or_else(|_| other_wt.clone());
+                        if got != want && other_wt.is_dir() {
+                            let _ = git_capture(other_wt, &["checkout", "--detach", "HEAD"]);
+                        }
+                    }
+                }
             }
-            // 不一致 → **绝不**踩掉在飞的泳道：报现场，让人处理。
-            return Err(OpFailure::Line(format!(
-                "lane={lane};error=lane-busy;on={};head={}",
-                wire_sanitize(&on.unwrap_or_else(|err| format!("<{err}>"))),
-                wire_sanitize(&head.unwrap_or_else(|err| format!("<{err}>")))
-            )));
         }
     }
 
-    // ② 新建：分支已存在就挂上去，否则从 `base` 开一条。
+    // ① 若泳道目录与 `.git` 已存在（持久化泳道池）：原位复用（`reused=1`），
+    // `clean -fd` 不带 `-x`，保留 `target/`、`node_modules/` 等 gitignored 构建缓存。
+    if wt.is_dir() && wt.join(".git").exists() {
+        git_capture(&wt, &["checkout", "--force", "-B", &branch, &base])
+            .map_err(|err| OpFailure::detail("worktree-checkout", err))?;
+        git_capture(&wt, &["reset", "--hard", &base])
+            .map_err(|err| OpFailure::detail("worktree-reset", err))?;
+        git_capture(&wt, &["clean", "-fd"])
+            .map_err(|err| OpFailure::detail("worktree-clean", err))?;
+        return Ok(claim_output(lane, &req, &branch, &base, true, &wt));
+    }
+
+    // ② 新建（`reused=0`）：先 prune 清理可能残留的陈旧注册，再用 `-B` 挂载分支。
     if let Some(parent) = wt.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| OpFailure::detail("mkdir", format!("{}：{err}", parent.display())))?;
     }
+    let _ = git_capture(&repo, &["worktree", "prune"]);
     let wt_text = wt.display().to_string();
-    let branch_ref = format!("refs/heads/{branch}");
-    let created = if git_ok(&repo, &["rev-parse", "--verify", "--quiet", &branch_ref]) {
-        git_capture(&repo, &["worktree", "add", &wt_text, &branch])
-    } else {
-        git_capture(&repo, &["worktree", "add", "-b", &branch, &wt_text, &base])
-    };
-    created.map_err(|err| OpFailure::detail("worktree-add", err))?;
+    git_capture(&repo, &["worktree", "add", "-B", &branch, &wt_text, &base])
+        .map_err(|err| OpFailure::detail("worktree-add", err))?;
 
     // ③ 新 worktree 必须干净：脏 = 基线本身脏，**报告，不修**。
     let status = git_lines(&wt, &["status", "--porcelain"])
@@ -3976,7 +3967,7 @@ fn claim_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, OpF
             wire_sanitize(&wt.display().to_string())
         )));
     }
-    Ok(claim_output(lane, &req, &branch, &base, &wt))
+    Ok(claim_output(lane, &req, &branch, &base, false, &wt))
 }
 
 /// 成功行（**键序固定**：调用方按位解析，别重排）。
@@ -3985,6 +3976,7 @@ fn claim_output(
     req: &str,
     branch: &str,
     base: &str,
+    reused: bool,
     wt: &Path,
 ) -> Vec<(&'static str, String)> {
     let path = fs::canonicalize(wt)
@@ -3996,6 +3988,7 @@ fn claim_output(
         ("branch", branch.to_owned()),
         ("base", base.to_owned()),
         ("clean", "1".to_owned()),
+        ("reused", if reused { "1" } else { "0" }.to_owned()),
         ("path", path),
     ]
 }
@@ -4018,17 +4011,30 @@ fn release_fields_with(flags: &OpFlags) -> Result<Vec<(&'static str, String)>, O
     );
     let repo = repo_root(flags.get("--repo")).map_err(|err| OpFailure::detail("repo", err))?;
     let wt = lane_worktree_path(&worktree_root(flags.get("--root")), &repo, lane);
-    if wt.is_dir() {
-        let wt_text = wt.display().to_string();
-        git_capture(&repo, &["worktree", "remove", "--force", &wt_text])
-            .map_err(|err| OpFailure::detail("worktree-remove", err))?;
+    if wt.is_dir() && wt.join(".git").exists() {
+        git_capture(&wt, &["checkout", "--force", "--detach", "HEAD"])
+            .map_err(|err| OpFailure::detail("worktree-detach", err))?;
+        git_capture(&wt, &["reset", "--hard", "HEAD"])
+            .map_err(|err| OpFailure::detail("worktree-reset", err))?;
+        git_capture(&wt, &["clean", "-fd"])
+            .map_err(|err| OpFailure::detail("worktree-clean", err))?;
+        let path = fs::canonicalize(&wt)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| wt.display().to_string());
+        return Ok(vec![
+            ("lane", lane.to_string()),
+            ("released", "1".to_owned()),
+            ("parked", "1".to_owned()),
+            ("path", path),
+        ]);
     }
-    // prune 输出为空是正常的（不能走 `git_one`）。
+    // 目录不存在：prune 清理可能残留的注册。
     let _ = git_capture(&repo, &["worktree", "prune"]);
-    // 分支**留着**：未合并的泳道分支是证据（归档不删，与制品同一姿态）。
     Ok(vec![
         ("lane", lane.to_string()),
         ("released", "1".to_owned()),
+        ("parked", "0".to_owned()),
+        ("path", wt.display().to_string()),
     ])
 }
 
@@ -10496,7 +10502,32 @@ end)
     }
 
     #[test]
-    fn worktree_claim_is_idempotent_and_reports_the_documented_keys() {
+    fn worktree_root_for_respects_precedence_and_defaults_to_home_tmp_worktrees() {
+        let home = PathBuf::from("/Users/tester");
+        assert_eq!(
+            worktree_root_for(Some("/custom/wts"), Some("/env/wts"), Some(&home)),
+            PathBuf::from("/custom/wts")
+        );
+        assert_eq!(
+            worktree_root_for(None, Some("/env/wts"), Some(&home)),
+            PathBuf::from("/env/wts")
+        );
+        assert_eq!(
+            worktree_root_for(None, Some("   "), Some(&home)),
+            PathBuf::from("/Users/tester/tmp/worktrees")
+        );
+        assert_eq!(
+            worktree_root_for(None, None, Some(&home)),
+            PathBuf::from("/Users/tester/tmp/worktrees")
+        );
+        assert_eq!(
+            worktree_root_for(None, None, None),
+            std::env::temp_dir().join("ygg-worktrees")
+        );
+    }
+
+    #[test]
+    fn builtin_worktree_claim_and_release_roundtrip() {
         let dir = case_dir("claim");
         let repo = git_fixture(&dir);
         let root = dir.join("wts");
@@ -10508,86 +10539,117 @@ end)
             ("--root", &root_s),
             ("--repo", &repo_s),
         ]);
-        let fields = claim_fields_with(&flags).expect("认领必须成功");
-        // **键序是契约**：调用方按位解析。
+        let fields = claim_fields_with(&flags).expect("首次认领必须成功");
         assert_eq!(
             fields.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
-            vec!["lane", "req", "branch", "base", "clean", "path"]
+            vec!["lane", "req", "branch", "base", "clean", "reused", "path"]
         );
         let line = wire_line(&fields);
         assert!(
             line.starts_with("lane=1;req=r1;branch=lane/b1;base="),
             "{line}"
         );
-        assert!(line.contains(";clean=1;path="), "{line}");
+        assert!(line.contains(";clean=1;reused=0;path="), "{line}");
 
         let wt = lane_wt(&root, &repo, 1);
         assert!(wt.is_dir(), "worktree 必须被建出来");
         assert!(wt.join("a.txt").is_file());
-        // 幂等：重跑拿到的行**逐字节相同**（含 base / path）。
-        let again = claim_fields_with(&flags).expect("重跑必须成功");
-        assert_eq!(wire_line(&again), line);
-    }
 
-    #[test]
-    fn worktree_claim_refuses_to_clobber_a_dirty_lane() {
-        let dir = case_dir("claim-busy");
-        let repo = git_fixture(&dir);
-        let root = dir.join("wts");
-        let (root_s, repo_s) = (root.display().to_string(), repo.display().to_string());
-        let flags = op_flags(&[
-            ("--lane", "2"),
+        // 写入 `.git/info/exclude` 忽略 `target/`，并在泳道内放入构建缓存 `target/cache.bin` 与未跟踪脏文件 `wip.txt`。
+        let exclude = repo.join(".git/info/exclude");
+        fs::write(&exclude, "target/\n").expect("写 exclude");
+        fs::create_dir_all(wt.join("target")).expect("建 target");
+        fs::write(wt.join("target/cache.bin"), "warm-cache").expect("写构建缓存");
+        fs::write(wt.join("wip.txt"), "untracked-scratch").expect("写未跟踪临时文件");
+
+        // 释放（停泊）：目录仍在、HEAD 处于 detached（允许删除原分支 `lane/b1`）、`wip.txt` 被清而 `target/cache.bin` 保留。
+        let release = op_flags(&[("--lane", "1"), ("--root", &root_s), ("--repo", &repo_s)]);
+        let rel_fields = release_fields_with(&release).expect("释放（停泊）必须成功");
+        let rel_line = wire_line(&rel_fields);
+        assert!(
+            rel_line.starts_with("lane=1;released=1;parked=1;path="),
+            "{rel_line}"
+        );
+        assert!(wt.is_dir(), "停泊后 worktree 目录必须保留");
+        assert!(
+            !wt.join("wip.txt").exists(),
+            "未跟踪非忽略文件必须在停泊时清理"
+        );
+        assert_eq!(
+            fs::read_to_string(wt.join("target/cache.bin")).expect("读构建缓存"),
+            "warm-cache",
+            "gitignored 构建缓存必须在停泊后保留"
+        );
+        // 因为 HEAD 已 detach，主检出可以安全删除已合并的分支 `lane/b1`。
+        git_capture(&repo, &["branch", "-D", "lane/b1"]).expect("停泊后原分支应当可删");
+
+        // 再次认领同一泳道给新需求 `r2`：`reused=1` 且 `target/cache.bin` 依旧温热。
+        let flags_r2 = op_flags(&[
+            ("--lane", "1"),
             ("--req", "r2"),
             ("--branch", "lane/b2"),
             ("--root", &root_s),
             ("--repo", &repo_s),
         ]);
-        claim_fields_with(&flags).expect("首次认领");
-        // 弄脏泳道：此刻重跑不能「重置」它（在飞的工作会被抹掉）。
-        fs::write(lane_wt(&root, &repo, 2).join("wip.txt"), "wip").expect("写 wip");
-        match claim_fields_with(&flags) {
-            Err(OpFailure::Line(line)) => {
-                assert!(line.contains("error=lane-busy"), "{line}");
-                assert!(line.starts_with("lane=2;"), "{line}");
-            }
-            _ => panic!("脏泳道必须被拒（不得踩掉在飞工作）"),
-        }
+        let again = claim_fields_with(&flags_r2).expect("二次认领必须成功");
+        let again_line = wire_line(&again);
         assert!(
-            lane_wt(&root, &repo, 2).join("wip.txt").is_file(),
-            "wip 不得被删"
+            again_line.starts_with("lane=1;req=r2;branch=lane/b2;base="),
+            "{again_line}"
+        );
+        assert!(
+            again_line.contains(";clean=1;reused=1;path="),
+            "{again_line}"
+        );
+        assert_eq!(
+            fs::read_to_string(wt.join("target/cache.bin")).expect("复用后读构建缓存"),
+            "warm-cache"
         );
     }
 
     #[test]
-    fn worktree_release_is_idempotent_and_keeps_the_branch() {
+    fn worktree_claim_detaches_branch_if_held_by_another_lane_and_reuses_in_place() {
+        let dir = case_dir("claim-reassigned");
+        let repo = git_fixture(&dir);
+        let root = dir.join("wts");
+        let (root_s, repo_s) = (root.display().to_string(), repo.display().to_string());
+        let lane1 = op_flags(&[
+            ("--lane", "1"),
+            ("--req", "r1"),
+            ("--branch", "feature/r1"),
+            ("--root", &root_s),
+            ("--repo", &repo_s),
+        ]);
+        claim_fields_with(&lane1).expect("车道 1 首次认领");
+
+        // 若 r1 重派到车道 2（同分支 `feature/r1`），车道 1 自动 detach 释放分支锁，车道 2 顺利挂载。
+        let lane2 = op_flags(&[
+            ("--lane", "2"),
+            ("--req", "r1"),
+            ("--branch", "feature/r1"),
+            ("--root", &root_s),
+            ("--repo", &repo_s),
+        ]);
+        let fields = claim_fields_with(&lane2).expect("跨车道重派认领必须成功");
+        let line = wire_line(&fields);
+        assert!(line.contains("lane=2;req=r1;branch=feature/r1;"), "{line}");
+        assert!(line.contains(";clean=1;reused=0;path="), "{line}");
+    }
+
+    #[test]
+    fn worktree_release_is_idempotent_when_lane_dir_is_absent() {
         let dir = case_dir("release");
         let repo = git_fixture(&dir);
         let root = dir.join("wts");
         let (root_s, repo_s) = (root.display().to_string(), repo.display().to_string());
-        let claim = op_flags(&[
-            ("--lane", "3"),
-            ("--req", "r3"),
-            ("--branch", "lane/b3"),
-            ("--root", &root_s),
-            ("--repo", &repo_s),
-        ]);
-        claim_fields_with(&claim).expect("认领");
         let release = op_flags(&[("--lane", "3"), ("--root", &root_s), ("--repo", &repo_s)]);
 
-        let fields = release_fields_with(&release).expect("释放");
-        assert_eq!(wire_line(&fields), "lane=3;released=1");
-        assert!(!lane_wt(&root, &repo, 3).exists(), "worktree 必须被移除");
-        // 分支**不能**删：未合并的泳道分支是证据。
+        let fields = release_fields_with(&release).expect("未创建的车道释放也必须成功");
+        let line = wire_line(&fields);
         assert!(
-            git_ok(
-                &repo,
-                &["rev-parse", "--verify", "--quiet", "refs/heads/lane/b3"]
-            ),
-            "release 不得删分支"
+            line.starts_with("lane=3;released=1;parked=0;path="),
+            "{line}"
         );
-        // 幂等：第二次释放也必须是成功（目录已经不在了）。
-        let again = release_fields_with(&release).expect("重跑释放");
-        assert_eq!(wire_line(&again), "lane=3;released=1");
     }
 
     #[test]

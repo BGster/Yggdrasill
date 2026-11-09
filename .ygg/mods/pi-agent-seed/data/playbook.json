@@ -1071,6 +1071,12 @@
           "modality": "must",
           "text": "The payload of `ygg.choice_selected` must be a **JSON number** (`--payload '1'`); sending it as a string (`--payload '\"1\"'`) is rejected by the kernel domain as VALIDATION \"option does not exist\". Every other action's payload is a string. Menu selection is the **only** passing channel for the human-action gate — dispatching `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` directly through `--event` is always refused (the receipt's first line is `[REJECTED:ACTION]`).",
           "basis": "guide.show harness"
+        },
+        {
+          "id": "harness.living-docs-closed-loop",
+          "modality": "must",
+          "text": "`docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.",
+          "basis": "AGENTS.md §1.7 + docs/{CONTEXT,DESIGN}.md closed loop"
         }
       ]
     },
@@ -1129,6 +1135,12 @@
           "modality": "must-not",
           "text": "Never add a second registration entry point, an external checker script or a host change for the evolution flow: the only registration action is `settlement.evolution`, and the only allowed carriers remain AGENTS.md and the Mod resources (`src/**` and `data/*.json`). Read-only queries may be used to check a declaration but may never become the carrier of a constraint.",
           "basis": "AGENTS.md §1.7"
+        },
+        {
+          "id": "evolution.living-docs-sync",
+          "modality": "must",
+          "text": "Whenever a run evolves domain concepts, state-machine rules, persistent lane semantics, or architectural contracts, `docs/CONTEXT.md` and `docs/DESIGN.md` must be reviewed and updated before `settlement.evolution` and `review.note` close the run.",
+          "basis": "AGENTS.md §2 + docs/{CONTEXT,DESIGN}.md closed loop"
         }
       ]
     },
