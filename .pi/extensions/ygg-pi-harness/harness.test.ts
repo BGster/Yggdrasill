@@ -45,15 +45,21 @@ import {
   actorForLedger,
   artifactPathFor,
   branchNameFor,
+  briefArtifactPathFor,
   buildLaneProbeArgs,
   buildProposalSubmitPayload,
   buildResumeDeltaPrompt,
   buildSubagentBrief,
+  buildSubmitLine,
   buildWorktreeClaimArgs,
+  checkSubagentActionConsumption,
   COMMIT_NUDGE_TEXT,
+  DELTA_ASSESSABLE,
   ensureBriefVerificationAndFooter,
+  ensureResumeHandoverSection,
   extractAgentId,
   isResumableAgentId,
+  MANDATORY_REFERENCES_ANCHOR,
   laneProbeNeedsCommit,
   orchestrateActiveJobs,
   parseLaneProbeNarrative,
@@ -62,15 +68,23 @@ import {
   readLaneProbeFromGit,
   requirementNumber,
   RESERVED_AGENT_IDS,
+  RESUME_HANDOVER_HEADING,
   resolveResumeId,
   resumeReason,
   sanitizeSegment,
+  selectCoreSubagentPrompt,
   slugify,
   UNKNOWN_LANE_PROBE,
   worktreePathFor,
+  type AdapterContractPolicy,
   type OrchestratorDaemon,
   type SubagentRequest,
 } from "./orchestrator.ts";
+import {
+  analyzeArchiveVerdict,
+  archiveSessionsSegment,
+  archiveVerdictNarrative,
+} from "./archive.ts";
 import {
   buildCompactInstructions,
   buildHandoffMarkdown,
@@ -402,10 +416,19 @@ describe("orchestrateActiveJobs", () => {
     assert.match(seen[0].prompt, /repo-lane-1/);
     assert.equal(maxInflight, 1);
 
-    // ② 制品入 VFS
-    assert.equal(daemon.vfs.length, 1);
-    assert.equal(daemon.vfs[0].path, "artifacts/r2-development.md");
-    assert.match(daemon.vfs[0].content, /cargo test --workspace: ok/);
+    // ② VFS：先落 brief（C3，无 Agent 工具时的 fallback 承接），再归档制品
+    const briefWrites = daemon.vfs.filter((entry) => entry.path.endsWith("-brief.md"));
+    const artifactWrites = daemon.vfs.filter((entry) => !entry.path.endsWith("-brief.md"));
+    assert.equal(briefWrites.length, 1, "每个作业都要落一份 brief");
+    assert.equal(briefWrites[0].path, "artifacts/r2-development-brief.md");
+    assert.equal(
+      briefWrites[0].content,
+      seen[0].prompt,
+      "落盘的 brief 必须与真正发给 subagent 的 prompt 逐字节相同",
+    );
+    assert.equal(artifactWrites.length, 1);
+    assert.equal(artifactWrites[0].path, "artifacts/r2-development.md");
+    assert.match(artifactWrites[0].content, /cargo test --workspace: ok/);
 
     // ③ 探针 → 提案 → accept
     const probes = claims.filter((call) => call.startsWith("git.lane_probe|"));
@@ -483,7 +506,13 @@ describe("orchestrateActiveJobs", () => {
     assert.equal(result.jobs.every((job) => job.expectedGate === "plan"), true);
     assert.deepEqual(
       daemon.vfs.map((entry) => entry.path).sort(),
-      ["artifacts/r1-plan.md", "artifacts/r2-plan.md"],
+      [
+        "artifacts/r1-plan-brief.md",
+        "artifacts/r1-plan.md",
+        "artifacts/r2-plan-brief.md",
+        "artifacts/r2-plan.md",
+      ],
+      "每个作业两件：brief（C3 承接）+ 制品",
     );
   });
 
@@ -498,7 +527,8 @@ describe("orchestrateActiveJobs", () => {
         readArtifact: (absPath) => (absPath.endsWith("r3-plan.md") ? "# 落盘版方案" : null),
       },
     );
-    assert.equal(daemon.vfs[0].content, "# 落盘版方案");
+    const archived = daemon.vfs.find((entry) => entry.path === "artifacts/r3-plan.md");
+    assert.equal(archived?.content, "# 落盘版方案");
   });
 
   it("subagent 失败不阻断其他作业，错误进回执", async () => {
@@ -519,8 +549,12 @@ describe("orchestrateActiveJobs", () => {
     assert.equal(result.jobs.length, 2);
     const failed = result.jobs.find((job) => job.id === "r1");
     assert.equal(failed?.error, "subagent 崩了");
-    assert.equal(daemon.vfs.length, 2, "失败的作业也要归档一条（写明失败原因）");
-    assert.match(daemon.vfs.find((entry) => entry.path.includes("r1"))?.content ?? "", /崩了/);
+    const archiveWrites = daemon.vfs.filter((entry) => !entry.path.endsWith("-brief.md"));
+    assert.equal(archiveWrites.length, 2, "失败的作业也要归档一条（写明失败原因）");
+    assert.match(
+      archiveWrites.find((entry) => entry.path.includes("r1"))?.content ?? "",
+      /崩了/,
+    );
   });
 
   it("摘要不可用时不猜：返回降级原因且不动状态", async () => {
@@ -2003,6 +2037,465 @@ describe("index.ts: kickoff 模式选择与 clientFor 并发启动锁", () => {
       rmSync(tmpDir, { recursive: true, force: true });
       resetClientsForTest();
     }
+  });
+});
+
+// ───────────────────────────── (a) brief 消费义务：C1 / C2 / C5 ─────────────────────────────
+
+/** `scenes.json` 的 `subagent_brief` 模板填充结果（**逐字**取样子集，两条锚线在其中）。 */
+function coreBriefFromScenes(id = "r1", stage = "plan"): string {
+  return [
+    `Requirement ${id} (rev 1, stage=${stage}): 落地契约`,
+    "Description: 落地 brief 消费义务",
+    "Mandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.",
+    "Worktree: /tmp/repo (branch=feature/r1, base=abc123)",
+    "Artifact: artifacts/r1-plan.md",
+    `Submit: .ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --resume --event proposal.submit --payload '"${id}|1|${stage}|<summary>|artifacts/${id}-plan.md||exec=<agent_id>"'`,
+  ].join("\n");
+}
+
+function spawnAction(overrides: Partial<YggSubagentAction> = {}): YggSubagentAction {
+  return {
+    action: "subagent.spawn",
+    reqId: "r1",
+    rev: 1,
+    stage: "plan",
+    lane: 0,
+    artifactPath: "artifacts/r1-plan.md",
+    brief: coreBriefFromScenes(),
+    ...overrides,
+  };
+}
+
+describe("checkSubagentActionConsumption（C1 brief 消费义务）", () => {
+  it("正例：scenes.json 的真实 brief + 续跑承接段 → 零违规", () => {
+    const prompt = ensureResumeHandoverSection(coreBriefFromScenes(), {
+      basis: "subagentAction.brief",
+      priorExecutor: "",
+      outstanding: [],
+      artifacts: [],
+    });
+    assert.deepEqual(checkSubagentActionConsumption(spawnAction(), prompt), []);
+    // 锚线确实在它该在的位置（行首，独立成行）
+    assert.equal(
+      prompt.split(/\r?\n/).some((line) => line.startsWith(MANDATORY_REFERENCES_ANCHOR)),
+      true,
+    );
+    assert.match(prompt, /^Submit:\s*\S/m);
+  });
+
+  it("反例：删掉 Mandatory references 行 → 恰好一条 brief-missing-mandatory-references", () => {
+    const prompt = ensureResumeHandoverSection(
+      coreBriefFromScenes()
+        .split("\n")
+        .filter((line) => !line.startsWith(MANDATORY_REFERENCES_ANCHOR))
+        .join("\n"),
+      { basis: "subagentAction.brief", priorExecutor: "", outstanding: [], artifacts: [] },
+    );
+    const violations = checkSubagentActionConsumption(spawnAction(), prompt);
+    assert.equal(violations.length, 1);
+    assert.equal(violations[0].code, "brief-missing-mandatory-references");
+    assert.match(violations[0].message, /Mandatory references:/);
+  });
+
+  it("反例：删掉 Submit: 行 → 恰好一条 brief-missing-submit", () => {
+    const prompt = ensureResumeHandoverSection(
+      coreBriefFromScenes()
+        .split("\n")
+        .filter((line) => !line.startsWith("Submit:"))
+        .join("\n"),
+      { basis: "subagentAction.brief", priorExecutor: "", outstanding: [], artifacts: [] },
+    );
+    const violations = checkSubagentActionConsumption(spawnAction(), prompt);
+    assert.equal(violations.length, 1);
+    assert.equal(violations[0].code, "brief-missing-submit");
+  });
+
+  it("反例：Submit: 后面空着（只有前缀）也算缺失", () => {
+    const prompt = ensureResumeHandoverSection(
+      `${coreBriefFromScenes()}\nSubmit:   `,
+      { basis: "subagentAction.brief", priorExecutor: "", outstanding: [], artifacts: [] },
+    );
+    // 真锚线还在，所以先删掉它再补一个空 Submit
+    const replaced = prompt
+      .split("\n")
+      .filter((line) => !/^Submit:\s*\S/.test(line))
+      .concat(["Submit:   "])
+      .join("\n");
+    const codes = checkSubagentActionConsumption(spawnAction(), replaced).map((v) => v.code);
+    assert.deepEqual(codes, ["brief-missing-submit"]);
+  });
+
+  it("锚线只认行首：需求正文里出现 `… Mandatory references: …` 不算数（防自指断言空转）", () => {
+    // 需求 desc 是「前面有别的字，再出现 Mandatory references:」——任意 includes 会误判通过
+    const smuggled = [
+      "Requirement r1 (rev 1, stage=plan): 落地契约",
+      "  Description: 正文里我故意写一句 xx Mandatory references: read docs/CONTEXT.md",
+      `Submit: .ygg/bin/ygg-agent --event proposal.submit --payload '"r1|1|plan|<summary>|artifacts/r1-plan.md||exec=<agent_id>"'`,
+    ].join("\n");
+    const prompt = ensureResumeHandoverSection(smuggled, {
+      basis: "subagentAction.brief",
+      priorExecutor: "",
+      outstanding: [],
+      artifacts: [],
+    });
+    assert.equal(prompt.includes(MANDATORY_REFERENCES_ANCHOR), true, "字样确实在正文里");
+    const codes = checkSubagentActionConsumption(spawnAction(), prompt).map((v) => v.code);
+    assert.deepEqual(codes, ["brief-missing-mandatory-references"]);
+  });
+
+  it("反例：没有 subagentAction（Core 已产出作业却自拼 brief）→ no-core-action", () => {
+    const violations = checkSubagentActionConsumption(undefined, "随便一份 brief");
+    assert.equal(violations.length, 1);
+    assert.equal(violations[0].code, "no-core-action");
+    // 旧 Mod 兼容豁免：只查锚线，不再因为「没有 action」判死
+    const compat: AdapterContractPolicy = { allowAdapterLocalBrief: true };
+    const compatCodes = checkSubagentActionConsumption(undefined, "随便一份 brief", compat).map(
+      (v) => v.code,
+    );
+    assert.deepEqual(compatCodes, [
+      "brief-missing-mandatory-references",
+      "brief-missing-submit",
+      "brief-missing-resume-handover",
+    ]);
+  });
+
+  it("C5：每份 brief 都必须带 `## 续跑承接（Resume Handover）`，缺了就是违规", () => {
+    const codes = checkSubagentActionConsumption(spawnAction(), coreBriefFromScenes()).map(
+      (v) => v.code,
+    );
+    assert.deepEqual(codes, ["brief-missing-resume-handover"]);
+  });
+
+  it("ensureResumeHandoverSection 幂等，并写全 basis / 前任执行者 / 未落地 / 硬约束 / 已归档制品", () => {
+    const once = ensureResumeHandoverSection("# Brief", {
+      basis: "subagentAction.deltaPrompt",
+      priorExecutor: "agent-plan-7",
+      outstanding: ["门禁 cargo test --workspace 未全绿"],
+      artifacts: ["artifacts/r1-plan.md"],
+    });
+    assert.equal(once.includes(RESUME_HANDOVER_HEADING), true);
+    assert.match(once, /- basis: subagentAction\.deltaPrompt/);
+    assert.match(once, /- prior executor: agent-plan-7/);
+    assert.match(once, /门禁 cargo test --workspace 未全绿/);
+    assert.match(once, /不操作 git 历史/);
+    assert.match(once, /artifacts\/r1-plan\.md/);
+    // 幂等：再来一次原样返回（不会套两层）
+    assert.equal(
+      ensureResumeHandoverSection(once, {
+        basis: "x",
+        priorExecutor: "y",
+        outstanding: [],
+        artifacts: [],
+      }),
+      once,
+    );
+    // 没有前任时如实写「本次为新起」，不编一个 id
+    assert.match(
+      ensureResumeHandoverSection("# B", {
+        basis: "adapter-local",
+        priorExecutor: "",
+        outstanding: [],
+        artifacts: [],
+      }),
+      /- prior executor: \(none — 本次为新起\)/,
+    );
+  });
+
+  it("C2：deltaPrompt 口径 fail-closed —— 当前模板不可判定 → delta-unassessable；标 assessable 后放行", () => {
+    assert.equal(DELTA_ASSESSABLE.assessable, false, "口径必须先钉死为 false（缺锚线）");
+    const delta = "Resume r1 (rev 1) for stage `plan` in worktree `/tmp/repo`; write `artifacts/r1-plan.md` and submit.";
+    const action = spawnAction({ action: "subagent.resume", deltaPrompt: delta });
+    const codes = checkSubagentActionConsumption(action, delta).map((v) => v.code);
+    assert.equal(codes.includes("delta-unassessable"), true);
+    // 把同一段文本标成可判定后，只剩真实的锚线缺失（这里全缺）
+    const assessable = checkSubagentActionConsumption(action, delta, { deltaAssessable: true }).map(
+      (v) => v.code,
+    );
+    assert.equal(assessable.includes("delta-unassessable"), false);
+    assert.deepEqual(assessable, [
+      "brief-missing-mandatory-references",
+      "brief-missing-submit",
+      "brief-missing-resume-handover",
+    ]);
+  });
+
+  it("selectCoreSubagentPrompt：delta 不可判定时**退回 brief** 并说明为什么退（不是静默丢锚线）", () => {
+    const action = spawnAction({
+      action: "subagent.resume",
+      deltaPrompt: "Resume r1 (rev 2) for stage `plan` ...",
+      brief: coreBriefFromScenes(),
+    });
+    const job = jobRow({ subagentAction: action });
+    const selected = selectCoreSubagentPrompt(job, true, true);
+    assert.equal(selected.basis, "subagentAction.brief");
+    assert.match(selected.prompt, /Mandatory references:/);
+    assert.match(selected.fallbackNote, /deltaPrompt 缺少可判定锚线，已退回 brief/);
+    // 口径放开后才真的用 delta
+    const loosened = selectCoreSubagentPrompt(job, true, true, { deltaAssessable: true });
+    assert.equal(loosened.basis, "subagentAction.deltaPrompt");
+    assert.equal(loosened.fallbackNote, "");
+    // 没有 action → 本地拼装（basis 明确写 adapter-local）
+    assert.equal(selectCoreSubagentPrompt(jobRow(), false, true).basis, "adapter-local");
+  });
+
+  it("本地拼装路径也满足两条锚线（旧 Mod 兼容路径不会自己违反契约）", () => {
+    const local = buildSubagentBrief(jobRow(), null, "artifacts/r1-plan.md", "/tmp/repo");
+    assert.equal(
+      local.split(/\r?\n/).some((line) => line.startsWith(MANDATORY_REFERENCES_ANCHOR)),
+      true,
+    );
+    assert.match(local, /^Submit:\s*\S/m);
+    assert.match(buildSubmitLine(jobRow(), "artifacts/r1-plan.md"), /proposal\.submit/);
+    // 补尾注的工具也不会破坏锚线
+    const augmented = ensureBriefVerificationAndFooter("# Core", "artifacts/r1-plan.md", ["cargo test"], {
+      job: jobRow(),
+    });
+    assert.match(augmented, /^Mandatory references:\s*\S/m);
+    assert.match(augmented, /^Submit:\s*\S/m);
+  });
+});
+
+describe("orchestrateActiveJobs：brief 落盘义务（C3，无 Agent 工具的 fallback）", () => {
+  it("briefArtifactPathFor 是 artifacts/<rN>-<stage>-brief.md", () => {
+    assert.equal(briefArtifactPathFor(jobRow({ id: "r1", stage: "plan" })), "artifacts/r1-plan-brief.md");
+    assert.equal(
+      briefArtifactPathFor(jobRow({ id: "r7", stage: "development" })),
+      "artifacts/r7-development-brief.md",
+    );
+  });
+
+  it("没有人能读会话 id 的环境：brief 必须落盘，且与 executeSubagent 收到的 prompt 逐字节相同", async () => {
+    const job = jobRow({ id: "r1", stage: "plan", subagentAction: spawnAction() });
+    const daemon = new MockDaemon([job]);
+    const seen: SubagentRequest[] = [];
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (request) => {
+        seen.push(request);
+        // 模拟「没有 Agent 工具」的 harness：拿不到 agentId
+        return { text: "# 方案完成", ok: true };
+      },
+      { cwd: "/tmp/repo", repoDir: "/tmp/repo", readArtifact: () => null },
+    );
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].resume, undefined, "没有可续的 id 时不猜");
+    const briefs = daemon.vfs.filter((entry) => entry.path === "artifacts/r1-plan-brief.md");
+    assert.equal(briefs.length, 1, "无 Agent 工具时必须落一份 brief 承接上下文");
+    assert.equal(briefs[0].content, seen[0].prompt, "落盘内容必须与真正派发的 prompt 逐字节相同");
+    // 落盘发生在派活之前：VFS 里 brief 的写入序早于制品
+    assert.equal(daemon.vfs[0].path, "artifacts/r1-plan-brief.md");
+    // 回执里有 [BRIEF] 行 + 一行 byte/sha
+    assert.equal(
+      result.narrative.some((line) => line.includes("[BRIEF] artifacts/r1-plan-brief.md")),
+      true,
+    );
+    assert.equal(
+      result.narrative.some((line) => line.includes("(basis=subagentAction.brief)")),
+      true,
+      "回执要说清这一次读的是 Core 的哪一段",
+    );
+    // 落盘的那一份自己也要满足契约（含续跑承接段）
+    assert.equal(briefs[0].content.includes(RESUME_HANDOVER_HEADING), true);
+    assert.equal(result.degraded, undefined, "正常路径不该被标记降级");
+  });
+
+  it("Core brief 缺锚线时，adapter 先补齐再派活（补齐路径生效，闸门看到的是补齐后的字节）", async () => {
+    const broken = coreBriefFromScenes()
+      .split("\n")
+      .filter((line) => !line.startsWith(MANDATORY_REFERENCES_ANCHOR))
+      .join("\n");
+    const job = jobRow({ id: "r1", stage: "plan", subagentAction: spawnAction({ brief: broken }) });
+    const daemon = new MockDaemon([job]);
+    const seen: SubagentRequest[] = [];
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (request) => {
+        seen.push(request);
+        return { text: "# 方案完成", ok: true };
+      },
+      { cwd: "/tmp/repo", repoDir: "/tmp/repo", readArtifact: () => null },
+    );
+    assert.equal(seen.length, 1, "缺的那一行可以被补齐，所以能派活（不是整次失败）");
+    assert.match(seen[0].prompt, /^Mandatory references:\s*\S/m, "补齐后的 prompt 带锚线");
+    // 落盘的 brief 就是补齐后的那一份（审计面看到的就是子代理看到的）
+    assert.equal(
+      daemon.vfs.find((entry) => entry.path === "artifacts/r1-plan-brief.md")?.content,
+      seen[0].prompt,
+    );
+    assert.equal(result.degraded, undefined);
+  });
+
+  it("契约闸门是**派活前**的最后一道：违规的 prompt 立刻被拒（绕不过去）", () => {
+    // 诚实说明：adapter 的补齐逻辑让「正常路径」总能产出合规 brief，所以
+    // 「编排层因违规而不 spawn」这条分支在今天的输入下不可达——它防的是
+    // 「有人删掉补齐逻辑」或「brief 由别处生成不带锚线」这两种回归。
+    // 因此这里直接咬住闸门本身（纯函数），并断言它的返回值就是「不许派发」的信号。
+    const bad = "Requirement r1 (rev 1, stage=plan): 什么锚线都没有";
+    const violations = checkSubagentActionConsumption(spawnAction(), bad);
+    assert.deepEqual(
+      violations.map((v) => v.code),
+      [
+        "brief-missing-mandatory-references",
+        "brief-missing-submit",
+        "brief-missing-resume-handover",
+      ],
+    );
+    // 一条违规都不许漏：只要非空，编排层就把它当作「不 spawn」
+    assert.notEqual(violations.length, 0);
+  });
+
+  it("delta 不可判定 → 退回 brief 再派发，回执写 [ADAPTER NOTE] 说明原因", async () => {
+    const action = spawnAction({
+      action: "subagent.resume",
+      resumeAgentId: "agent-plan-9",
+      deltaPrompt: "Resume r1 (rev 2) for stage `plan` in worktree `/tmp/repo`; write `artifacts/r1-plan.md` and submit.",
+    });
+    const job = jobRow({
+      id: "r1",
+      stage: "plan",
+      executor: "agent-plan-9",
+      subagentAction: action,
+    });
+    const daemon = new MockDaemon([job]);
+    const seen: SubagentRequest[] = [];
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async (request) => {
+        seen.push(request);
+        return { text: "# 方案 v2", ok: true, agentId: "agent-plan-9" };
+      },
+      { cwd: "/tmp/repo", repoDir: "/tmp/repo", readArtifact: () => null },
+    );
+    assert.equal(seen.length, 1);
+    assert.match(seen[0].prompt, /Mandatory references:/, "退回到 brief 才带锚线");
+    assert.equal(
+      result.narrative.some((line) => line.includes("deltaPrompt 缺少可判定锚线，已退回 brief")),
+      true,
+    );
+  });
+
+  it("preferCoreBrief=false 是**显式降级**：回执有 [ADAPTER NOTE]、degraded 非空，但仍要满足锚线", async () => {
+    const job = jobRow({ id: "r1", stage: "plan", subagentAction: spawnAction() });
+    const daemon = new MockDaemon([job]);
+    const result = await orchestrateActiveJobs(
+      daemon,
+      async () => ({ text: "# 方案", ok: true }),
+      {
+        cwd: "/tmp/repo",
+        repoDir: "/tmp/repo",
+        readArtifact: () => null,
+        preferCoreBrief: false,
+      },
+    );
+    assert.notEqual(result.degraded, undefined);
+    assert.match(result.degraded ?? "", /preferCoreBrief=false/);
+    assert.equal(
+      result.narrative.some((line) => line.includes("preferCoreBrief=false")),
+      true,
+      "降级必须在回执里说出来，不能静默",
+    );
+    // 本地拼装路径也带锚线，所以这里能起来
+    const seen = daemon.vfs.find((entry) => entry.path === "artifacts/r1-plan-brief.md");
+    assert.match(seen?.content ?? "", /^Submit:\s*\S/m);
+  });
+});
+
+// ───────────────────────────── (b②-1) 归档结论三态 ─────────────────────────────
+
+describe("analyzeArchiveVerdict（归档结论必须三态可区分，不得「没查到就填 0」）", () => {
+  const HOME = "/Users/someone";
+
+  it("① 查过且查空：remaining=0 且 dest 落在本局声明的库根下 → swept", () => {
+    const verdict = analyzeArchiveVerdict([
+      `[TOOL] harness.archive_sessions moved=1;remaining=0;dest=${HOME}/.pi/agent/sessions-trash/demo`,
+    ], { destRoot: `${HOME}/.pi/agent/sessions-trash` });
+    assert.deepEqual(verdict, {
+      kind: "swept",
+      moved: 1,
+      dest: `${HOME}/.pi/agent/sessions-trash/demo`,
+    });
+    assert.equal(archiveSessionsSegment(verdict), null, "swept 时让 Mod 的机证接管，不写 sessions= 段");
+    assert.match(archiveVerdictNarrative(verdict), /^\[SESSIONS SWEPT\] moved=1 remaining=0 dest=/);
+  });
+
+  it("② 没有库可查：dest=generic:no-session-store:<batch> → no-store（不是失败，也不是证据）", () => {
+    const verdict = analyzeArchiveVerdict([
+      "[TOOL] harness.archive_sessions moved=0;remaining=0;dest=generic:no-session-store:demo-run",
+    ]);
+    assert.deepEqual(verdict, { kind: "no-store", batch: "demo-run" });
+    assert.equal(archiveSessionsSegment(verdict), "sessions=0/0/unsettled:no-store");
+    assert.match(archiveVerdictNarrative(verdict), /没有会话库可查/);
+  });
+
+  it("③ 查不了：外域 dest（DSH 局里 dest=~/.pi/...）→ unavailable:foreign-store，绝不判 swept", () => {
+    // 这正是 dsh-zh-docs 那次的形态：ok=true、remaining=0，但归档的是 Pi 的库
+    const verdict = analyzeArchiveVerdict([
+      `[TOOL] harness.archive_sessions moved=1;remaining=0;dest=${HOME}/.pi/agent/sessions-trash/default`,
+    ]);
+    assert.equal(verdict.kind, "unavailable");
+    assert.match((verdict as { reason: string }).reason, /foreign-store/);
+    const segment = archiveSessionsSegment(verdict);
+    assert.equal(segment, "sessions=0/0/unsettled:unavailable");
+    assert.equal(
+      segment?.includes(`${HOME}/.pi`),
+      false,
+      "台账里不许再出现一个冒充真实目录的 Pi 路径",
+    );
+  });
+
+  it("③ 查不了：工具明确失败 / builtin_usage_error → unavailable（不是 settled）", () => {
+    const failed = analyzeArchiveVerdict(["[TOOL FAILED] harness.archive_sessions: builtin_usage_error: HOME 未设置"]);
+    assert.equal(failed.kind, "unavailable");
+    assert.match(archiveVerdictNarrative(failed), /builtin_usage_error/);
+  });
+
+  it("④ 没查成：remaining>0 / 空叙事 / 三元组不全 → unsettled（宁可说没查，不谎报查空了）", () => {
+    const remaining = analyzeArchiveVerdict([
+      `[TOOL] harness.archive_sessions moved=0;remaining=2;dest=${HOME}/.pi/agent/sessions-trash/x`,
+    ], { destRoot: `${HOME}/.pi/agent/sessions-trash` });
+    assert.equal(remaining.kind, "unsettled");
+    assert.match((remaining as { reason: string }).reason, /remaining=2/);
+
+    const empty = analyzeArchiveVerdict([]);
+    assert.equal(empty.kind, "unsettled");
+    assert.match((empty as { reason: string }).reason, /没有任何叙事行/);
+
+    const partial = analyzeArchiveVerdict(["moved=0"]);
+    assert.equal(partial.kind, "unsettled");
+  });
+
+  it("dest 不在声明的库根下（哪怕不是 Pi 家）也算 foreign-store", () => {
+    const verdict = analyzeArchiveVerdict(
+      [`[TOOL] harness.archive_sessions moved=0;remaining=0;dest=/tmp/elsewhere`],
+      { destRoot: `${HOME}/.pi/agent/sessions-trash` },
+    );
+    assert.equal(verdict.kind, "unavailable");
+    assert.match((verdict as { reason: string }).reason, /不在本局声明的会话库根/);
+  });
+
+  it("回归：旧实现「工具跑过就认为已 settle」会把 DSH 那次的假象当成成功", () => {
+    // 旧判据：narrative 含 `[TOOL SETTLED] harness.archive_sessions` → 不写 sessions= 段。
+    // 新判据：只看三元组，`dest` 未被本局 adapter 认领就必须是 unavailable。
+    const narrative = [
+      `[TOOL] harness.archive_sessions moved=1;remaining=0;dest=${HOME}/.pi/agent/sessions-trash/default`,
+      "[TOOL SETTLED] harness.archive_sessions",
+    ];
+    const verdict = analyzeArchiveVerdict(narrative);
+    assert.equal(verdict.kind, "unavailable");
+    assert.equal(archiveSessionsSegment(verdict), "sessions=0/0/unsettled:unavailable");
+  });
+});
+
+describe("buildHandoffMarkdown：(c) 下一步必须补 continuation 提示", () => {
+  it("交接单点名「先读 brief 与制品再续」，并指到续跑承接段", () => {
+    const markdown = buildHandoffMarkdown({
+      runId: "demo",
+      summary: summaryWith([jobRow({ id: "r1", stage: "plan" })]),
+    });
+    assert.match(markdown, /continuation/);
+    assert.match(markdown, /artifacts\/<rN>-<stage>-brief\.md/);
+    assert.match(markdown, /Resume Handover/);
   });
 });
 

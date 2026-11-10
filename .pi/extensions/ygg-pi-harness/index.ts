@@ -45,6 +45,17 @@ import {
 } from "./compaction.ts";
 import { checkToolCallFirewall } from "./firewall.ts";
 import {
+  analyzeArchiveVerdict,
+  archiveSessionsSegment,
+  archiveVerdictNarrative,
+} from "./archive.ts";
+export {
+  analyzeArchiveVerdict,
+  archiveSessionsSegment,
+  archiveVerdictNarrative,
+  type ArchiveVerdict,
+} from "./archive.ts";
+import {
   extractAgentId,
   isResumableAgentId,
   orchestrateActiveJobs,
@@ -481,10 +492,10 @@ async function settleAndClose(
   // 会话归档（本轮 Pi 会话 → 本局目录）。args 同时给父/批次与结算三元组：
   // 宿主的多余键不会被反应器读取，而两种命名（r1 daemon 的 parent/batch 与
   // 当前 Mod 反应器的 moved/remaining/dest）都覆盖到。
-  // 若 Core 的 `settlement.evolution` 已经通过同步 `ygg.tool.call` 内联结算
-  // `harness.archive_sessions`，这里即使前置 `tool.call` 未落库或已跑过，
-  // 下面的 `sessions=` 段也会幂等兜底，确保 `review.note` 不因缺会话登记被拦。
-  const archiveDest = `.ygg/runs/${input.runId}/sessions`;
+  //
+  // **不再编造 0/0**：结论先分三态（见 [`analyzeArchiveVerdict`]）。工具的 `ok` 不是
+  // 证据——`generic` 适配器也回 `ok`，而它的 `dest=generic:no-session-store:<batch>`
+  // 只能说明「没有库可查」。所以要按**叙事里的三元组**判，而不是按「工具跑过」判。
   const archiveArgs = [
     `parent=${input.sessionId}`,
     `batch=${input.runId}`,
@@ -494,16 +505,59 @@ async function settleAndClose(
     `harness.archive_sessions|${archiveArgs}`,
   );
   entries.push({ label: "tool.call harness.archive_sessions", receipt: archivedSessions });
-  const archiveSettledByTool = archivedSessions.narrative.some((line) =>
-    line.includes("[SESSIONS SETTLED]") || line.includes("[TOOL SETTLED] harness.archive_sessions"),
-  );
+  const archiveVerdict = analyzeArchiveVerdict(archivedSessions.narrative ?? []);
+  entries.push({
+    label: "archive verdict",
+    receipt: {
+      ok: archiveVerdict.kind === "swept",
+      narrative: [archiveVerdictNarrative(archiveVerdict)],
+      pendingChoice: null,
+      tools: [],
+      raw: { ...archiveVerdict },
+    },
+  });
+  // 非证据态留一份诊断制品（由本次 dispatch 携带，不违反「无事件不落盘」）。
+  if (archiveVerdict.kind !== "swept") {
+    const diagnostic = [
+      "# 会话归档结论（非证据）",
+      "",
+      `- run：\`${input.runId}\``,
+      `- sessionId：\`${input.sessionId}\``,
+      `- verdict：\`${archiveVerdict.kind}\``,
+      `- ${archiveVerdictNarrative(archiveVerdict)}`,
+      "",
+      "## 这意味着什么",
+      "",
+      "本次**没有**可核对的本局会话库落点（harness 未认领 / 未查成 / 没有库）。",
+      "台账写 `unsettled:<kind>` 是为了让 `review.note` 不被卡死，同时**自证**：",
+      "这不是「查空了」，而是「没有库可查 / 没查成」。",
+      "",
+      "## 回执原文（整段保留）",
+      "",
+      ...(archivedSessions.narrative ?? []).map((line) => `    ${line}`),
+    ].join("\n");
+    const diagWrite = await client.vfsPut("artifacts/sessions-settlement.md", diagnostic);
+    entries.push({
+      label: "vfs_put artifacts/sessions-settlement.md",
+      receipt: {
+        ok: diagWrite.ok,
+        narrative: diagWrite.ok
+          ? [`[VFS] artifacts/sessions-settlement.md ← ${diagnostic.length} bytes`]
+          : [`[VFS REFUSED] artifacts/sessions-settlement.md：${diagWrite.error ?? "未知原因"}`],
+        pendingChoice: null,
+        tools: [],
+        raw: { ...diagWrite },
+      },
+    });
+  }
 
+  const sessionsSegment = archiveSessionsSegment(archiveVerdict);
   const evolutionPayload = [
     artifact,
     input.evolutionSummary.trim() === "" ? "(no candidates this round)" : input.evolutionSummary,
     `c=${input.candidates.trim() === "" ? "0/0" : input.candidates.trim()}`,
     ...(input.classes.trim() === "" ? [] : [`cls=${input.classes.trim()}`]),
-    ...(archiveSettledByTool ? [] : [`sessions=0/0/${archiveDest}`]),
+    ...(sessionsSegment === null ? [] : [sessionsSegment]),
     "todo=0/verified empty via ygg_session settle_close",
   ].join("|");
   const evolution = await client.dispatch("settlement.evolution", evolutionPayload);
@@ -573,8 +627,7 @@ function formatOrchestration(result: OrchestrationResult): string {
     lines.push(`artifact: ${job.artifactPath} (${job.archived.ok ? "archived" : "REFUSED"})`);
     if (job.error !== undefined) {
       lines.push(`error: ${job.error}`);
-    }
-  }
+    }  }
   if (result.narrative.length > 0) {
     lines.push("");
     lines.push("--- receipts ---");
