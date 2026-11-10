@@ -399,7 +399,7 @@ export function buildHandoffMarkdown(input: HandoffInput): string {
     lines.push("");
     lines.push(
       `> ⚠ 摘要不可用：${summary.degraded ?? "未知原因"}。下面的表格是**空**的，不代表没有作业——` +
-        "先 `step map.show` 重新取一次现场。",
+        "先 `ygg_session({ action: \"dispatch\", event: \"map.show\" })` 重新取一次现场。",
     );
   }
   lines.push("");

@@ -1141,7 +1141,8 @@ describe("buildHandoffMarkdown", () => {
       summary: unknownSummary("宿主没给 meta.summary"),
     });
     assert.match(unknown, /摘要不可用：宿主没给 meta\.summary/);
-    assert.match(unknown, /先 `step map\.show` 重新取一次现场/);
+    assert.match(unknown, /先 `ygg_session\(\{ action: "dispatch", event: "map\.show" \}\)` 重新取一次现场/);
+    assert.doesNotMatch(unknown, /`step /, "交接单不得再用已退场的 `step` 别名给出下一步");
     assert.match(unknown, /event: "map\.show"/);
   });
 
@@ -2019,3 +2020,94 @@ export type _Types = [
   OrchestratorDaemon,
   HandoffWrite,
 ];
+
+// ─────────────────── ⑤ dispatch 不触发压缩（DESIGN §3.4 回归钉子）───────────────────
+
+describe("index.ts: dispatch 只报告上下文水位，绝不触发压缩", () => {
+  /** 水位拉满（>`hard_brake` 的 0.75 且远超软水位）的 ctx：旧实现会在这里真的压缩。 */
+  function pressureCtx() {
+    const compactCalls: unknown[] = [];
+    const ctx = {
+      cwd: "/tmp/repo",
+      ui: { setStatus() {}, notify() {} },
+      getContextUsage: () => ({ tokens: 195_000, contextWindow: 200_000 }),
+      compact: (options: unknown) => {
+        compactCalls.push(options);
+      },
+    } as never;
+    return { ctx, compactCalls };
+  }
+
+  function dispatchClient() {
+    const dispatched: [string, string | number | undefined][] = [];
+    const client = {
+      runId: "run-dispatch",
+      async dispatch(event: string, payload?: string | number): Promise<StepReceipt> {
+        dispatched.push([event, payload]);
+        return {
+          ok: true,
+          // 回执必须是「整段可见」的证据：两行都必须出现在返回文本里。
+          narrative: ["[MAP] coordinate -> planning", "[CHOICE] 1. dispatch  2. pause"],
+          pendingChoice: null,
+          tools: [],
+          raw: {},
+        };
+      },
+      async summary(): Promise<RunSummary> {
+        // 稳定节点（无作业、无门、无冲突）：旧实现会「稳定 + 水位到了 → 压缩」。
+        return summaryWith([]);
+      },
+      async vfsList() {
+        return { ok: true, artifacts: [] };
+      },
+    };
+    return { client, dispatched };
+  }
+
+  it("水位 >= 硬刹车且落在稳定节点时，dispatch 仍不调用 ctx.compact，并整段回贴 narrative", async () => {
+    const { dispatchSessionEvent } = await loadIndexExports();
+    const { ctx, compactCalls } = pressureCtx();
+    const { client, dispatched } = dispatchClient();
+    // `pi` 只有 `sendMessage` 会被压缩路径用到；它若被调用说明压缩发生了。
+    const sent: unknown[] = [];
+    const pi = {
+      async sendMessage(message: unknown) {
+        sent.push(message);
+      },
+    } as never;
+
+    const result = await dispatchSessionEvent(
+      pi,
+      ctx,
+      client as never,
+      "run-dispatch",
+      "map.show",
+      "",
+    );
+
+    assert.deepEqual(dispatched, [["map.show", ""]], "dispatch 只派发一次、payload 原样透传");
+    assert.equal(compactCalls.length, 0, "dispatch 分支绝不能触发 ctx.compact（DESIGN §3.4）");
+    assert.equal(sent.length, 0, "不压缩就不会有自动续跑消息");
+    const text = result.content[0]!.text;
+    assert.match(text, /\[MAP\] coordinate -> planning/, "回执第一行必须到达调用方");
+    assert.match(text, /\[CHOICE\] 1\. dispatch {2}2\. pause/, "回执必须整段可见，不截断");
+    assert.match(text, /水位 hard_brake/, "仍然报告水位");
+    assert.match(text, /dispatch` 只报告水位、不触发压缩/, "必须点名「需要时显式调 handoff_compact」");
+    assert.match(text, /handoff_compact/, "报告行必须给出显式入口");
+  });
+
+  it("dispatch 的 reportOnly 报告不声称写入过 VFS 交接单", async () => {
+    const { dispatchSessionEvent } = await loadIndexExports();
+    const { ctx } = pressureCtx();
+    const { client } = dispatchClient();
+    const pi = { async sendMessage() {} } as never;
+
+    const result = await dispatchSessionEvent(pi, ctx, client as never, "run-dispatch", "map.show", "");
+    assert.doesNotMatch(
+      result.content[0]!.text,
+      /已写入 VFS/,
+      "reportOnly 不写交接单，所以不得出现「已写入 VFS」",
+    );
+  });
+});
+

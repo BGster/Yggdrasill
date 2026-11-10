@@ -419,7 +419,7 @@ machine, it only speaks to it through `daemon.dispatch` → `ygg.on(...)` handle
 | `daemon.ts` | Persistent `ygg-agent --daemon` client: line JSON-RPC, id matching, serialized request queue, 30s timeout, respawn after an unexpected exit, and a **single-shot CLI fallback** when the host predates `--daemon` (the summary then reports `available=false` instead of guessing jobs/gates). |
 | `orchestrator.ts` | Lane lifecycle for active jobs: [`buildSubagentBrief`](.pi/extensions/ygg-pi-harness/orchestrator.ts) builds a self-contained brief; [`orchestrateActiveJobs`](.pi/extensions/ygg-pi-harness/orchestrator.ts) claims the worktree, runs subagents concurrently, archives into the run VFS, probes the lane, submits and accepts the proposal — landing the requirement at `plan_gate` / `accept_gate`. It also owns the **subagent create + resume** lifecycle (real `agent_id` written into `exec=`, `resume` on a gate reject / `plan → development`, one self-heal on a stream error and one on a dirty lane probe) and the **context brake** (hard = spawn nothing and hand off first, soft = land the wave, then hand off). |
 | `compaction.ts` | Context pressure monitor + stable-node predicate + structured handoff. [`evaluateContextPressure`](.pi/extensions/ygg-pi-harness/compaction.ts) (soft 0.60 / hard 0.75; unknown token counts never brake), [`isStableCheckpoint`](.pi/extensions/ygg-pi-harness/compaction.ts) (`available` ∧ no pending tools ∧ (gate ∨ no jobs ∨ conflict)), [`buildHandoffMarkdown`](.pi/extensions/ygg-pi-harness/compaction.ts) → `artifacts/handoff-latest.md` through [`writeHandoffToVfs`](.pi/extensions/ygg-pi-harness/compaction.ts), plus the resume-message and compact-instruction builders. No npm deps and erasable TypeScript only, so `node --experimental-strip-types` loads it directly. |
-| `index.ts` | Wiring: session lifecycle hooks, the `tool_call` firewall, `/ygg status` and `/ygg stop`, the tools `ygg_session` (`kickoff` / `step` / gate / `vfs_*` / `handoff_compact` / `settle_close`) and `ygg_run_lanes`, the compaction hooks (`session_before_compact` / `session_compact` / `session_compact_failed`), and the footer status line. |
+| `index.ts` | Wiring: session lifecycle hooks, the `tool_call` firewall, `/ygg status` and `/ygg stop`, the tools `ygg_session` (`kickoff` / `dispatch` / gate / `vfs_*` / `handoff_compact` / `settle_close`) and `ygg_run_lanes`, the compaction hooks (`session_before_compact` / `session_compact` / `session_compact_failed`), and the footer status line. |
 
 What the extension deliberately does **not** do:
 
@@ -433,6 +433,11 @@ What the extension deliberately does **not** do:
   (`isStableCheckpoint`) unless the caller forces it (`handoff_compact`, or a brake the orchestrator
   already took); compacting while a wave is in the air would fold that wave into prose instead of
   landing it on a gate.
+- **`dispatch` never compacts.** Its contract is "one dispatch = one turn = one complete receipt", and
+  `ctx.compact()` aborts the turn, so the receipt would not reach the model. The `dispatch` branch
+  runs `maybeHandoffAndCompact` in `reportOnly` mode (watermark and stable-node facts only) and points
+  at `handoff_compact`. Compaction has exactly two explicit entries: `action=handoff_compact` (forced)
+  and the `ygg_run_lanes` orchestration brake. See `docs/DESIGN.md` §3.4.
 - **It never resumes a guessed id.** `extractAgentId` returns `undefined` rather than synthesising
   one, and `runSubagent` only retries when it knows who to resume — a fabricated id would silently
   become a fresh agent with no memory of the rejected proposal.
