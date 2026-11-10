@@ -368,6 +368,16 @@ export function nextStepInstructions(runId: string, summary: RunSummary): string
   lines.push(
     `${index}. 不要重复派活：` + "`ygg_run_lanes` 已经是幂等的（同一泳道同一分支），但已完成的需求不必再跑一遍。",
   );
+  index += 1;
+  // (c) resume 等价承接：换 harness / 换上下文窗口后没有会话 id 可续，
+  // 唯一能跨 resume 传递的就是制品。所以下一步必须点名「先读哪一份制品再续」。
+  lines.push(
+    `${index}. **换 harness / 换上下文窗口时的续跑承接（continuation）**：本次没有可精确 \`resume\` 的` +
+      ` 会话 id 时，不要凭记忆重跑——先读 \`artifacts/handoff-latest.md\`（本文）与每个作业的` +
+      ` \`artifacts/<rN>-<stage>-brief.md\`（上一位执行者**实际收到**的 prompt，逐字节落盘）、` +
+      ` 再读 \`artifacts/<rN>-<stage>.md\`（它的产出），然后才 \`ygg_run_lanes\`。` +
+      ` 每一份 brief 末尾都有 \`## 续跑承接（Resume Handover）\`，写明 basis / 前任执行者 / 未落地清单 / 硬约束 / 已归档制品。`,
+  );
   return lines;
 }
 

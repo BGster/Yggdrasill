@@ -47,6 +47,41 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 | **Tier 2 · CLI / Hook 运行器** | Claude Code、Codex CLI、Cursor | 子进程调用或原生任务工具，消费 `subagentAction.brief` 与 `submitCommand` | 在稳定检查点由 Hook 触发的 `handoff_compact` | `ygg-agent --daemon` 或单次 `--resume --event` CLI |
 | **Tier 3 · 提示委派** | 通用 LLM 聊天 / 自定义 Agent 循环 | 协调者把 `subagentAction.brief` 复制进子代理上下文并转达 `proposal.submit` | 经 `vfs.write` 手动检查点交接 | 单次 CLI 回执（`narrative` + `pendingChoice`） |
 
+### 1.2 Adapter 一致性契约（任何 harness 都必须满足的五条义务）
+
+三层架构的薄弱点在第 2 层：`subagentAction` 只是 `meta.summary` 里的**数据**，dispatcher 完全由 adapter 自行实现。于是「Mod 产出的 brief 被消费」曾只写成注释约定，离开 Pi 的 `Agent` 工具后就静默丢失。本节把这件事变成**可断言的义务**，全部落在 `.pi/extensions/ygg-pi-harness/`（与 Pi API 无关，可移植到任何 harness），每条都有纯函数、失败信号与可跑的命令。
+
+| # | 义务 | 纯函数 / 位置 | 违反时的可见症状 |
+| --- | --- | --- | --- |
+| **C1** | 派发给 subagent 的 prompt 必须含 `Mandatory references:` 与 `Submit:` 两条**行首锚线** | `checkSubagentActionConsumption`（`orchestrator.ts`） | 回执 `[ADAPTER CONTRACT] <rN> <stage>: …`，**不 spawn**，结果进 `degraded` |
+| **C2** | `deltaPrompt` 若被单独使用，必须可判定；不可判定时**不得消费**（fail-closed） | 同 C1，策略表 `DELTA_ASSESSABLE` | `delta-unassessable`；adapter 退回 `brief` 并写 `[ADAPTER NOTE]` |
+| **C3** | 任何一次派发都必须把**实际使用的 prompt 逐字节**落进 `artifacts/<rN>-<stage>-brief.md` | `briefArtifactPathFor` + `writeBriefArtifact` | `[BRIEF REFUSED] <path>：<原因>` 进回执，并计入 `degraded` |
+| **C4** | 归档结论必须是「查过且查空」或「没有库可查」，**不得**以「工具跑过」充当 `0/0` | `analyzeArchiveVerdict`（`archive.ts`） | 见下文 §1.2.1 三态表；非证据态写 `sessions=0/0/unsettled:<kind>` |
+| **C5** | 每一份 brief 都以 `## 续跑承接（Resume Handover）` 段收尾 | `ensureResumeHandoverSection` | `brief-missing-resume-handover`；无 `agentId` 时 `resume` 无法等价 |
+
+**锚线为什么必须是「行首前缀」而不是 `includes`**：`job.description` 是多行需求正文，正文里完全可能出现 `Mandatory references: …` 这几个字。用任意 `includes` 判定会被一句话绕过——那是自指类断言的经典空转（`harness.test.ts` 有一个用例专门喂这种输入）。`Submit:` 额外要求**后续非空**（`^Submit:\s*\S`），这样「有这条命令」与「命令不是空的」被同时钉住。
+
+**两条路必须同形状**：Core 的 `subagent_brief` 模板（`data/scenes.json`）带这两行；adapter **本地拼装**的 brief 也必须带。否则「旧 Mod 兼容路径」会自己违反 C1——`harness.test.ts` 的 `本地拼装路径也满足两条锚线` 用例咬住这一点。
+
+**`preferCoreBrief` 不是绕过开关**：`preferCoreBrief: false` 是**显式的旧 Mod 兼容降级**，不是静默默认——此时回执写 `[ADAPTER NOTE]` 且 `OrchestrationResult.degraded` 非空，让上层看见；而 Core 明明给了 `subagentAction` 却被关掉**不构成** `no-core-action` 的豁免理由（那正是本契约要消灭的路径）。
+
+**`resume` 的等价物是制品，不是这一段**：`## 续跑承接（Resume Handover）` 记录 `basis` / 前任执行者 / 未落地清单 / 硬约束 / 已归档制品，作用是让**下一个执行者**（可能是另一个 harness、另一个上下文窗口）知道上一任为什么停在门外。它本身**不是** `resume` 的等价物——等价物是 `artifacts/<rN>-<stage>.md` 加上门禁证据。`artifacts/handoff-latest.md` 的下一步会显式点名这条 `continuation` 路径。
+
+#### 1.2.1 未知 harness 下 `archive-sessions` 的行为边界
+
+会话库落点被硬编码在宿主（`agent.rs` 的 `harness_session_dirs` 只认 `pi` / `claude-code` / `codex`），`auto` 探测在含 `.pi/` 的仓库里必然判成 `pi`。因此**不知道落点时唯一诚实的做法是改判结论，而不是猜落点**。归档结论只允许以下四种，且必须可区分：
+
+| 结论 | 宿主输出 | 是否算证据 | Mod 侧 `settlement.sessions` |
+| --- | --- | --- | --- |
+| ① `swept` | `moved=N;remaining=0;dest=<本局声明的库根下>` | ✅ 是 | adapter 不写 `sessions=` 段，由 Mod 的 `[SESSIONS SETTLED]` 机证接管 |
+| ② `no-store` | `dest=generic:no-session-store:<batch>` | ❌ **不是** | `sessions=0/0/unsettled:no-store`（可收口，但台账自证「没有库」） |
+| ③ `unavailable` | 非零退出 / `builtin_usage_error` / **外域 `dest`** | ❌ 不是 | `sessions=0/0/unsettled:unavailable` |
+| ④ `unsettled` | 工具没回可判定结果（空叙事 / `remaining>0` / 三元组不全） | ❌ 不是 | `sessions=0/0/unsettled:unsettled` |
+
+**禁止第五种**：`dest` 非空但**没有任何 harness 认领**（典型形态：在 DeepSeek Harness 局里出现 `dest=~/.pi/agent/sessions-trash/<batch>`）。那条路径确实存在，但它归档的不是本局会话——把它写成「查空了」就是谎报。识别完全在扩展侧，不需要新契约：`dest` 的 trash 根必须落在**本局声明的 adapter** 对应的根下（`archive.ts` 的 `FOREIGN_SESSION_ROOTS` + 可选的 `destRoot`）。默认判据是「宁可说没查，不谎报查空了」。
+
+> **给宿主维护者的一句话**：要让 `archive-sessions` 真正覆盖未知 harness，需要在 `agent.rs` 增加第五个适配器及其会话库约定。本仓库把 `crates/ygg-sandbox/examples/agent.rs` 当红线，所以这里只保证**不谎报**，不自行修改宿主。
+
 ---
 
 ## 2. 工作流状态机与行为语义

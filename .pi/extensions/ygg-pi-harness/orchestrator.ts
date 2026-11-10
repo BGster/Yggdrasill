@@ -26,7 +26,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
-import type { RunSummary, StepReceipt, SummaryGate, SummaryJob } from "./daemon.ts";
+import type {
+  RunSummary,
+  StepReceipt,
+  SummaryGate,
+  SummaryJob,
+  YggSubagentAction,
+} from "./daemon.ts";
 import {
   formatPercent,
   writeHandoffToVfs,
@@ -125,9 +131,22 @@ export interface OrchestrateOptions {
   resumePlanAgent?: boolean;
   /**
    * 优先消费 Core 产出的 `job.subagentAction.brief` / `deltaPrompt`（默认 `true`）。
-   * 显式传 `false` 或调用方传了自定义 `verification` / `verificationCommands` 时退回本地拼装或按需补齐门禁尾注。
+   *
+   * `true`（默认）：读 Core 的 brief，adapter 只补缺（工作区边界 / 门禁尾注 / 契约锚线）。
+   * `false`：**显式的旧 Mod 兼容降级**，不是静默默认——此时本次 brief 由 adapter 本地
+   * 拼装、Core 的 `subagentAction.brief` **未被消费**，回执会写 `[ADAPTER NOTE]` 且
+   * `OrchestrationResult.degraded` 非空，让上层看见。
+   *
+   * ⚠ 设为 `false` 不能用来「绕过契约」：本地拼装路径同样要满足 C1 的两条锚线
+   * （`Mandatory references:` / `Submit:`），否则会被派活前的闸门拒绝。
    */
   preferCoreBrief?: boolean;
+  /**
+   * 契约策略覆盖（默认取 {@link DELTA_ASSESSABLE} 与「要求续跑承接段」）。
+   * 这是一条给**口径升级**与测试用的缝：把 `deltaAssessable` 改 `true` 前，
+   * 必须先给 Mod 的 `subagent_delta` 模板补齐锚线，否则放开是空转。
+   */
+  adapterContract?: AdapterContractPolicy;
   /** 子代理 brief 里的验证门禁（`verification` 的同义别名，兼容调用方直传）。 */
   verificationCommands?: string[];
   /**
@@ -681,6 +700,13 @@ export function buildSubagentBrief(
   lines.push("");
   lines.push(...buildMandatoryReferencesSection(workspace));
   lines.push("");
+  // 契约锚线（逐字，行首）：与 Mod `data/scenes.json` 的 `subagent_brief` 模板同形。
+  // `checkSubagentActionConsumption` 只认行首前缀，所以本地拼装路径**必须**产出这两行，
+  // 否则「旧 Mod 兼容路径」会自己违反 C1（见 docs/DESIGN.md §1.2）。
+  lines.push(
+    "Mandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.",
+  );
+  lines.push("");
   lines.push("## 4. 本阶段要求");
   for (const rule of STAGE_RULES[stage] ?? STAGE_RULES.plan) {
     lines.push(`- ${rule}`);
@@ -691,6 +717,10 @@ export function buildSubagentBrief(
     lines.push(`- \`${command}\``);
   }
   lines.push("- 门禁失败时不要声称完成：报告里写清失败命令、首行错误、你已排除的方向。");
+  lines.push("");
+  // 契约锚线（逐字，行首）：本地拼装路径必须与 Core 模板产出**同形状**的 brief，
+  // 否则 C1 会把它自己判死（见 docs/DESIGN.md §1.2）。
+  lines.push(buildSubmitLine(job, artifactPath));
   lines.push("");
   lines.push("## 6. 返回格式（协调者按这个形状归档）");
   lines.push("1. **做了什么**：文件路径 + 符号级改动清单（`path:line` 形式优先）。");
@@ -734,7 +764,7 @@ export function buildResumeDeltaPrompt(
     `- 描述：${job.description.trim() === "" ? "(同上)" : job.description}`,
     `- 制品路径：\`${artifactPath}\``,
     "",
-    ...buildBriefFooter(artifactPath, verification),
+    ...buildBriefFooter(artifactPath, verification, job),
   ];
   return lines.join("\n");
 }
@@ -749,8 +779,37 @@ function buildMandatoryReferencesSection(workspace: string): string[] {
   ];
 }
 
-function buildBriefFooter(artifactPath: string, verification: readonly string[]): string[] {
-  const lines: string[] = ["## 验证门禁（必须真跑，贴输出摘要）"];
+/**
+ * 本地拼装的「提交行」：`proposal.submit` 的载荷形状（位次固定，见
+ * [`buildProposalSubmitPayload`]）。
+ *
+ * 这一行的存在意义是**契约同形**：Mod 的 `subagent_brief` 模板带 `Submit: {{submit}}`，
+ * 而 adapter 本地拼装的 brief 也必须带 `Submit: …`，否则
+ * [`checkSubagentActionConsumption`] 会把「旧 Mod 兼容路径」判成违规——
+ * 两条路产出同形状的 brief 才是这一轮真正想要的东西。
+ */
+export function buildSubmitLine(job: SummaryJob, artifactPath: string): string {
+  const rev = job.rev > 0 ? job.rev : 1;
+  const stage = job.stage === "" ? "plan" : job.stage;
+  const exec = "exec=<agent_id>";
+  return (
+    `Submit: \`.ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --runs-root .ygg/runs ` +
+    `--resume --event proposal.submit --payload '"${job.id}|${rev}|${stage}|<summary>|` +
+    `${artifactPath}||${exec}"'\``
+  );
+}
+
+function buildBriefFooter(
+  artifactPath: string,
+  verification: readonly string[],
+  job?: SummaryJob,
+): string[] {
+  const lines: string[] = [];
+  if (job !== undefined) {
+    lines.push(buildSubmitLine(job, artifactPath));
+    lines.push("");
+  }
+  lines.push("## 验证门禁（必须真跑，贴输出摘要）");
   for (const command of verification) {
     lines.push(`- \`${command}\``);
   }
@@ -769,12 +828,23 @@ function buildBriefFooter(artifactPath: string, verification: readonly string[])
 /**
  * 若 Core 产出的 `brief` / `deltaPrompt` 尚未包含工作区边界、必读文档、验证门禁或返回格式尾注，按需补齐，
  * 保证 [`parseSubagentOutput`] 与制品归档在薄壳模式下同样稳健。
+ *
+ * 同时也补齐**契约锚线**（`Mandatory references:` 行与 `Submit:` 行，见
+ * [`checkSubagentActionConsumption`]）：Core 的 brief 模板本来就带这两行，但旧版
+ * Mod 或自定义 brief 可能没有，而「缺锚线」在派活前是硬拒绝——补在这里比让
+ * 整次派活失败更合理（补齐的是**缺的那一行**，不是替它编整份 brief）。
+ *
+ * @param job 给了就补 `Submit:` 行（载荷要用 `job.id` / `rev` / `stage`）
  */
 export function ensureBriefVerificationAndFooter(
   corePrompt: string,
   artifactPath: string,
   verification: readonly string[],
-  options: { worktreePath?: string | null; cwd?: string } = {},
+  options: {
+    worktreePath?: string | null;
+    cwd?: string;
+    job?: SummaryJob;
+  } = {},
 ): string {
   const trimmed = corePrompt.trim();
   const worktreePath = (options.worktreePath ?? "").trim();
@@ -782,9 +852,18 @@ export function ensureBriefVerificationAndFooter(
   const missingWorktree = worktreePath !== "" && !trimmed.includes(worktreePath);
   const missingRefs =
     !trimmed.includes("docs/CONTEXT.md") || !trimmed.includes("docs/DESIGN.md");
+  const missingAnchor = !hasLineStartAnchor(trimmed, MANDATORY_REFERENCES_ANCHOR);
+  const missingSubmit = options.job !== undefined && !hasSubmitAnchor(trimmed);
   const missingCommands = verification.filter((cmd) => cmd.trim() !== "" && !trimmed.includes(cmd));
   const hasFooter = trimmed.includes(artifactPath) && (trimmed.includes("返回格式") || trimmed.includes("Return Format"));
-  if (!missingWorktree && !missingRefs && missingCommands.length === 0 && hasFooter) {
+  if (
+    !missingWorktree &&
+    !missingRefs &&
+    !missingAnchor &&
+    !missingSubmit &&
+    missingCommands.length === 0 &&
+    hasFooter
+  ) {
     return corePrompt;
   }
   const sections: string[] = [trimmed];
@@ -794,8 +873,18 @@ export function ensureBriefVerificationAndFooter(
   if (missingRefs) {
     sections.push("", ...buildMandatoryReferencesSection(workspace));
   }
+  if (missingAnchor) {
+    // 逐字锚线与 Mod 的 `subagent_brief` 模板同形（行首、独立成行）。
+    sections.push(
+      "",
+      "Mandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.",
+    );
+  }
+  if (missingSubmit && options.job !== undefined) {
+    sections.push("", buildSubmitLine(options.job, artifactPath));
+  }
   if (missingCommands.length > 0 || !hasFooter) {
-    sections.push("", ...buildBriefFooter(artifactPath, verification));
+    sections.push("", ...buildBriefFooter(artifactPath, verification, options.job));
   }
   return sections.join("\n");
 }
@@ -809,6 +898,303 @@ export function parseSubagentOutput(text: string): { summary: string; report: st
   };
 }
 
+// ───────────────────────────── 纯函数：adapter 一致性契约（C1–C5） ─────────────────────────────
+
+/**
+ * 契约锚线 ①：`Mandatory references:` —— **行首前缀**命中。
+ *
+ * 为什么是行首而不是 `includes`：`job.description` 是多行需求正文，正文里完全可能
+ * 出现同样的字样。用任意 `includes` 判定会被一句话绕过（自指类断言的经典空转），
+ * 所以锚线只认「自己占一行、且以它开头」。
+ */
+export const MANDATORY_REFERENCES_ANCHOR = "Mandatory references:";
+
+/** 契约锚线 ②：`Submit:` —— 行首前缀命中 **且后面有非空内容**。 */
+const SUBMIT_ANCHOR = /^Submit:\s*\S/;
+
+/** 契约锚线 ③：续跑承接段标题（(c) 的等价制品义务）。 */
+export const RESUME_HANDOVER_HEADING = "## 续跑承接（Resume Handover）";
+
+export interface AdapterContractViolation {
+  code:
+    | "brief-missing-mandatory-references"
+    | "brief-missing-submit"
+    | "brief-missing-resume-handover"
+    | "delta-unassessable"
+    | "no-core-action";
+  /** 一条人读句子，原样进回执（`[ADAPTER CONTRACT] …`）。 */
+  message: string;
+}
+
+/**
+ * deltaPrompt 的判定口径策略表（**先钉死口径，否则断言是空的**）。
+ *
+ * 当前 `data/scenes.json` 的 `subagent_delta` 模板是
+ * `Resume {{id}} (rev {{rev}}) for stage ... ; write {{artifact}} and submit.`，
+ * 它**不含**任何可判定锚线。于是「deltaPrompt 是否满足 C1」的答案完全取决于一条
+ * 没写下来的口径——这是最危险的假阳性来源。
+ *
+ * 本轮选择 **fail-closed 而不猜**：`assessable: false` 的 delta 不得单独作为 prompt，
+ * adapter 必须退回 `brief`。等 Mod 侧给 `subagent_delta` 补上锚线后，
+ * 把这里改成 `true` 即可放开（那一处改动同时由 Mod 侧的 brief 断言盯住）。
+ */
+export const DELTA_ASSESSABLE: { assessable: boolean; reason: string } = {
+  assessable: false,
+  reason: "subagent_delta 模板不含可判定锚线（Mandatory references / Submit:）",
+};
+
+/** 契约策略的可选覆盖（测试与未来的口径升级共用一条缝，不改调用点）。 */
+export interface AdapterContractPolicy {
+  /** deltaPrompt 是否可单独判定为合格的 prompt（默认取 {@link DELTA_ASSESSABLE}）。 */
+  deltaAssessable?: boolean;
+  /** 是否要求 `## 续跑承接（Resume Handover）` 段（默认 `true`）。 */
+  requireResumeHandover?: boolean;
+  /**
+   * 允许「Core 没有 `subagentAction`、adapter 本地拼 brief」这条**旧 Mod 兼容**路径
+   * （默认 `false` = `no-core-action` 违规）。
+   *
+   * 为什么默认禁止：Core 已经产出作业时 adapter 自拼 brief 正是 (a) 的原始症状。
+   * 旧 Mod（没有 `subagentAction`）需要它，但此时**锚线仍然要满足**，且调用方必须
+   * 在 `degraded` 里写明「本地拼装」，不能静默。
+   */
+  allowAdapterLocalBrief?: boolean;
+}
+
+/** 行首前缀命中（忽略行首空白，但**不允许**出现在行中间）。 */
+function hasLineStartAnchor(text: string, anchor: string): boolean {
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    if (line.trimStart().startsWith(anchor)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasSubmitAnchor(text: string): boolean {
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    if (SUBMIT_ANCHOR.test(line.trimStart())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * C1 / C2 / C5：**brief 不是背景材料，是可断言的派发载荷**。
+ *
+ * 派活前（`orchestrateActiveJobs` 的「检查 → 落盘 → spawn」三段的第一段）调它：
+ * 返回非空即**不得 spawn**，回执写 `[ADAPTER CONTRACT] …`，结果进 `degraded`。
+ *
+ * 判定顺序与「为什么这样排」：
+ * 1. `action === undefined` → `no-core-action`：Core 已经产出作业时 adapter **不得**
+ *    自行拼 brief（这正是 (a) 的原始症状：brief 在 `summary` 里明明可见，却没人消费）。
+ *    调用方可以显式豁免（`policy.allowAdapterLocalBrief`，用于**旧 Mod 兼容**路径），
+ *    豁免时降级信号走 `degraded`，而不是静默。
+ * 2. 存在 delta 且策略判其不可判定、而 prompt 恰好就是那份 delta → `delta-unassessable`。
+ * 3. 两条锚线（`Mandatory references:` / `Submit:`）与续跑承接段逐条检查。
+ *
+ * @param action   Core 产出的 `job.subagentAction`（旧 Mod 没有 → `undefined`）
+ * @param prompt   实际要发给 subagent 的 prompt（**逐字**，含 adapter 补齐的尾注）
+ */
+export function checkSubagentActionConsumption(
+  action: YggSubagentAction | undefined,
+  prompt: string,
+  policy: AdapterContractPolicy = {},
+): AdapterContractViolation[] {
+  const violations: AdapterContractViolation[] = [];
+  const text = String(prompt ?? "");
+  if (action === undefined) {
+    if (policy.allowAdapterLocalBrief !== true) {
+      violations.push({
+        code: "no-core-action",
+        message:
+          "Core 没有产出 subagentAction，但 adapter 仍要派活：brief 由适配器本地拼装，" +
+          "Core 的派发载荷未被消费",
+      });
+      return violations;
+    }
+    // 旧 Mod 兼容豁免：锚线仍然要满足（否则本地拼装路径会自己违反契约）。
+    pushAnchorViolations(violations, text, policy);
+    return violations;
+  }
+
+  const delta = String(action.deltaPrompt ?? "").trim();
+  const deltaAssessable = policy.deltaAssessable ?? DELTA_ASSESSABLE.assessable;
+  if (delta !== "" && !deltaAssessable && sameText(text, delta)) {
+    violations.push({
+      code: "delta-unassessable",
+      message:
+        `deltaPrompt 不可单独判定（${DELTA_ASSESSABLE.reason}）：` +
+        "adapter 必须退回 brief / fullFallbackBrief",
+    });
+  }
+  pushAnchorViolations(violations, text, policy);
+  return violations;
+}
+
+/** 三条锚线（`Mandatory references:` / `Submit:` / 续跑承接段）逐条判定。 */
+function pushAnchorViolations(
+  violations: AdapterContractViolation[],
+  text: string,
+  policy: AdapterContractPolicy,
+): void {
+  if (!hasLineStartAnchor(text, MANDATORY_REFERENCES_ANCHOR)) {
+    violations.push({
+      code: "brief-missing-mandatory-references",
+      message:
+        `brief 缺少行首锚线「${MANDATORY_REFERENCES_ANCHOR}」——` +
+        "子代理不会被告知先读 docs/CONTEXT.md 与 docs/DESIGN.md",
+    });
+  }
+  if (!hasSubmitAnchor(text)) {
+    violations.push({
+      code: "brief-missing-submit",
+      message: "brief 缺少「Submit: <命令>」行（或该行为空）——子代理不知道该提交什么",
+    });
+  }
+  if (policy.requireResumeHandover !== false && !text.includes(RESUME_HANDOVER_HEADING)) {
+    violations.push({
+      code: "brief-missing-resume-handover",
+      message: `brief 缺少「${RESUME_HANDOVER_HEADING}」段——无 resume 时没有等价承接`,
+    });
+  }
+}
+
+/** 逐字比较（去掉首尾空白后完全相同）。 */
+function sameText(left: string, right: string): boolean {
+  return left.trim() === right.trim();
+}
+
+/** 续跑承接段的上下文（每一行都是**可从作业状态派生的事实**，不写主观叙述）。 */
+export interface ResumeHandoverContext {
+  /** 本次 prompt 的依据：Core 的哪一段，或 adapter 本地拼装。 */
+  basis: string;
+  /** 前任执行者（`""` → 本次为新起）。 */
+  priorExecutor: string;
+  /** 未落地清单（生产建议只用「本次 brief 里声明的门禁未全绿」这类可核对事实）。 */
+  outstanding: readonly string[];
+  /** 已归档制品（VFS 里已存在的 `artifacts/<rN>-<stage>.md`）。 */
+  artifacts: readonly string[];
+}
+
+/**
+ * C5：给 brief 收尾补 `## 续跑承接（Resume Handover）` 段（**幂等**：已存在原样返回）。
+ *
+ * 有什么用：换 harness / 换上下文窗口后，下一个执行者**没有会话 id 可续**，
+ * 唯一能跨 resume 传递的就是这份制品。这一段把「我们没法 resume」变成 subagent
+ * 可见的输入，而不是留成 adapter 心里的隐痛。
+ *
+ * **诚实说明**：这一段本身**不是** `resume` 的等价物（等价物是制品 + 门禁证据）。
+ */
+export function ensureResumeHandoverSection(
+  prompt: string,
+  context: ResumeHandoverContext,
+): string {
+  const text = String(prompt ?? "");
+  if (text.includes(RESUME_HANDOVER_HEADING)) {
+    return text;
+  }
+  const prior = context.priorExecutor.trim() === "" ? "(none — 本次为新起)" : context.priorExecutor.trim();
+  const outstanding =
+    context.outstanding.filter((line) => line.trim() !== "").length === 0
+      ? ["(无：本次 brief 里声明的门禁在上一任已全绿)"]
+      : context.outstanding.filter((line) => line.trim() !== "");
+  const artifacts =
+    context.artifacts.filter((line) => line.trim() !== "").length === 0
+      ? ["(本局 VFS 暂无本作业制品)"]
+      : context.artifacts.filter((line) => line.trim() !== "");
+  const lines: string[] = [
+    "",
+    RESUME_HANDOVER_HEADING,
+    `- basis: ${context.basis.trim() === "" ? "adapter-local" : context.basis.trim()}`,
+    `- prior executor: ${prior}`,
+    "- 未落地清单:",
+    ...outstanding.map((line) => `  - ${line}`),
+    "- 硬约束: 不读真实数据（`*.xlsx` / `*.xls` / `*.csv`、涉密挂载）；不操作 git 历史；" +
+      "制品写 `artifacts/<rN>-<stage>.md`",
+    "- 已归档制品:",
+    ...artifacts.map((line) => `  - ${line}`),
+  ];
+  return `${text.replace(/\s+$/, "")}\n${lines.join("\n")}\n`;
+}
+
+/**
+ * C3：实际使用的 prompt 落进 VFS 的路径 —— `artifacts/<rN>-<stage>-brief.md`。
+ *
+ * 无条件落盘（不区分 harness）：把义务写成条件分支，等于给未来的 harness
+ * 留一个「我不知道自己算哪种」的空档。落盘换来的是**审计面**——任何一局都能
+ * 事后核对「子代理到底收到了什么」。
+ */
+export function briefArtifactPathFor(
+  job: SummaryJob,
+  prefix = DEFAULT_ARTIFACT_PREFIX,
+): string {
+  const stage = job.stage === "" ? "plan" : job.stage;
+  return `${prefix}/${job.id}-${stage}-brief.md`;
+}
+
+/**
+ * 一份 brief 的「依据」（写进 `[BRIEF]` 回执与续跑承接段）：
+ * 让回执能说清「这一次到底读了 Core 的哪一段」。
+ */
+export function briefBasis(
+  action: YggSubagentAction | undefined,
+  isResume: boolean,
+  usedCore: boolean,
+): string {
+  if (!usedCore || action === undefined) {
+    return "adapter-local";
+  }
+  if (isResume) {
+    return action.deltaPrompt !== undefined && action.deltaPrompt.trim() !== ""
+      ? "subagentAction.deltaPrompt"
+      : "subagentAction.brief";
+  }
+  return "subagentAction.brief";
+}
+
+/**
+ * 选 Core 的哪一段作为 prompt（**带依据**，供回执说明「为什么退」）。
+ *
+ * 与旧实现的差别：delta 不可判定时**显式退回 brief** 并给出退回理由，
+ * 而不是把一份判不出合格的 delta 当成 prompt（那正是 DSH 实战里静默丢掉
+ * `Mandatory references` 的路径）。
+ */
+export function selectCoreSubagentPrompt(
+  job: SummaryJob,
+  isResume: boolean,
+  preferCoreBrief: boolean,
+  policy: AdapterContractPolicy = {},
+): { prompt: string; basis: string; fallbackNote: string } {
+  if (!preferCoreBrief || job.subagentAction === undefined) {
+    return { prompt: "", basis: "adapter-local", fallbackNote: "" };
+  }
+  const action = job.subagentAction;
+  const deltaAssessable = policy.deltaAssessable ?? DELTA_ASSESSABLE.assessable;
+  if (isResume && deltaAssessable) {
+    const delta = (action.deltaPrompt ?? "").trim();
+    if (delta !== "") {
+      return { prompt: delta, basis: "subagentAction.deltaPrompt", fallbackNote: "" };
+    }
+  }
+  const brief = (action.brief ?? action.fullFallbackBrief ?? "").trim();
+  if (brief !== "") {
+    const fellBack = isResume && (action.deltaPrompt ?? "").trim() !== "";
+    return {
+      prompt: brief,
+      basis: "subagentAction.brief",
+      fallbackNote: fellBack
+        ? "[ADAPTER NOTE] deltaPrompt 缺少可判定锚线，已退回 brief"
+        : "",
+    };
+  }
+  const delta = (action.deltaPrompt ?? "").trim();
+  if (delta !== "") {
+    return { prompt: delta, basis: "subagentAction.deltaPrompt", fallbackNote: "" };
+  }
+  return { prompt: "", basis: "adapter-local", fallbackNote: "" };
+}
+
 // ───────────────────────────── 编排主流程 ─────────────────────────────
 
 interface PreparedJob {
@@ -819,9 +1205,85 @@ interface PreparedJob {
   worktreePath: string | null;
   artifactPath: string;
   brief: string;
+  /** 本次 brief 读的是 Core 的哪一段（`adapter-local` = 本地拼装）。 */
+  briefBasis: string;
   expectedGate: string;
   receipts: { label: string; receipt: StepReceipt }[];
   claimed: boolean;
+  /** 契约闸门命中项（非空 → 本作业**不得 spawn**）。 */
+  violations: AdapterContractViolation[];
+  /** 派活前就要贴进回执的说明行（delta 退回 brief / preferCoreBrief=false …）。 */
+  notes: string[];
+}
+
+/** 一次 brief 落盘的结果（叙事行进回执，`ok=false` 不影响派活但必须可见）。 */
+export interface BriefWrite {
+  jobId: string;
+  path: string;
+  ok: boolean;
+  bytes: number;
+  sha256?: string;
+  narrative: string[];
+}
+
+/**
+ * C3：把**实际使用的 prompt** 原样写进 `artifacts/<rN>-<stage>-brief.md`。
+ *
+ * 内容**不 trim、不追加、不改换行**——这样 `sha256` 就是「子代理收到的字节」的指纹，
+ * 事后能核对「子代理到底收到了什么」。失败只降级（`[BRIEF REFUSED]`），不阻断派活。
+ */
+async function writeBriefArtifact(
+  daemon: OrchestratorDaemon,
+  item: PreparedJob,
+  artifactPrefix: string,
+): Promise<BriefWrite> {
+  const briefPath = briefArtifactPathFor(item.job, artifactPrefix);
+  const content = item.brief;
+  let written: { ok: boolean; bytes?: number; sha256?: string; error?: string };
+  try {
+    written = await daemon.vfsPut(briefPath, content);
+  } catch (error) {
+    written = { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  if (!written.ok) {
+    return {
+      jobId: item.job.id,
+      path: briefPath,
+      ok: false,
+      bytes: 0,
+      narrative: [`[BRIEF REFUSED] ${briefPath}：${written.error ?? "未知原因"}`],
+    };
+  }
+  const out: BriefWrite = {
+    jobId: item.job.id,
+    path: briefPath,
+    ok: true,
+    bytes: written.bytes ?? content.length,
+    narrative: [
+      `[BRIEF] ${briefPath} ← ${written.bytes ?? content.length} bytes` +
+        (written.sha256 !== undefined ? ` sha256=${written.sha256.slice(0, 12)}` : "") +
+        ` (basis=${item.briefBasis})`,
+    ],
+  };
+  if (written.sha256 !== undefined) {
+    out.sha256 = written.sha256;
+  }
+  return out;
+}
+
+/** 续跑承接段里的「已归档制品」提示：只报**本局 VFS 里确实存在**的路径。 */
+function preparedArtifactHints(
+  artifacts: readonly string[] | undefined,
+  job: SummaryJob,
+  artifactPath: string,
+): string[] {
+  const stage = job.stage === "" ? "plan" : job.stage;
+  const briefPath = `${DEFAULT_ARTIFACT_PREFIX}/${job.id}-${stage}-brief.md`;
+  const hints = [artifactPath, briefPath].filter(
+    (candidate) => artifacts === undefined || artifacts.length === 0 ||
+      artifacts.some((entry) => entry.startsWith(candidate)),
+  );
+  return hints;
 }
 
 function logWith(logger: ((line: string) => void) | undefined, line: string): void {
@@ -842,21 +1304,6 @@ function initialLaneFor(job: SummaryJob): number {
   }
   const actionLane = job.subagentAction?.lane ?? 0;
   return actionLane > 0 ? actionLane : 0;
-}
-
-function selectCoreSubagentPrompt(
-  job: SummaryJob,
-  isResume: boolean,
-  preferCoreBrief: boolean,
-): string {
-  if (!preferCoreBrief || job.subagentAction === undefined) {
-    return "";
-  }
-  const action = job.subagentAction;
-  if (isResume) {
-    return (action.deltaPrompt ?? action.brief ?? action.fullFallbackBrief ?? "").trim();
-  }
-  return (action.brief ?? action.fullFallbackBrief ?? action.deltaPrompt ?? "").trim();
 }
 
 /** 读 `git rev-parse HEAD`（只有同步 IO；测试注入 `resolveBase` 即可绕过）。 */
@@ -914,6 +1361,17 @@ export async function orchestrateActiveJobs(
       ? customVerification
       : DEFAULT_VERIFICATION;
   const preferCoreBrief = opts.preferCoreBrief !== false;
+  /**
+   * 契约策略：默认「Core 没有 subagentAction 就是违规」。
+   *
+   * 唯一的豁免是**旧 Mod 兼容**——豁免**按作业**判定（该作业行确实没有
+   * `subagentAction` 时才允许本地拼 brief），并且必须留痕：`degraded` 里写明这一次
+   * brief 是本地拼的。
+   *
+   * 注意 `preferCoreBrief: false` **不是**豁免理由：Core 明明给了 `subagentAction`
+   * 却被关掉，那正是 (a) 原样复活的路径，让它 spawn 等于把契约变回注释。
+   */
+  const contractPolicy: AdapterContractPolicy = { ...(opts.adapterContract ?? {}) };
   const useInlineLaneProbe = opts.useInlineLaneProbe === true;
 
   const pressure = opts.checkContextPressure?.() ?? null;
@@ -1037,12 +1495,14 @@ export async function orchestrateActiveJobs(
     const artifactPath = artifactPathFor(job, artifactPrefix);
     const resumeId = resolveResumeId(job, { resumePlanAgent, actorId });
     const isResume = resumeId !== "";
-    const corePrompt = selectCoreSubagentPrompt(job, isResume, preferCoreBrief);
-    const brief =
+    const selected = selectCoreSubagentPrompt(job, isResume, preferCoreBrief, contractPolicy);
+    const corePrompt = selected.prompt;
+    const built =
       corePrompt !== ""
         ? ensureBriefVerificationAndFooter(corePrompt, artifactPath, verification, {
             worktreePath,
             cwd,
+            job,
           })
         : buildSubagentBrief(job, worktreePath, artifactPath, cwd, {
             verification,
@@ -1051,6 +1511,40 @@ export async function orchestrateActiveJobs(
             base,
             actorId,
           });
+    // C5：每一份 brief 都以续跑承接段收尾（无 resume 时这是唯一的跨窗口承接）。
+    const brief = ensureResumeHandoverSection(built, {
+      basis: selected.basis,
+      priorExecutor: resumeId,
+      outstanding: [
+        `本次 brief 声明的门禁尚未在本回执里复述为全绿：${verification.join(" / ")}`,
+        `制品 \`${artifactPath}\` 需由本任写出；已有内容视为上一任的产出，先读再改`,
+      ],
+      artifacts: preparedArtifactHints(artifacts, job, artifactPath),
+    });
+    // C1 / C2：派活前的契约闸门（空 = 通过；非空 = 本作业**不得 spawn**）。
+    // 旧 Mod 兼容（该作业行确实没有 `subagentAction`）时豁免 `no-core-action`，
+    // 但三条锚线照样查——本地拼装路径也必须产出同形状的 brief。
+    const jobPolicy: AdapterContractPolicy =
+      job.subagentAction === undefined
+        ? { ...contractPolicy, allowAdapterLocalBrief: true }
+        : contractPolicy;
+    const violations = checkSubagentActionConsumption(job.subagentAction, brief, jobPolicy);
+    const notes: string[] = [];
+    if (job.subagentAction === undefined) {
+      notes.push(
+        "[ADAPTER NOTE] 本作业行没有 subagentAction（旧 Mod）：brief 由适配器本地拼装，" +
+          "已补齐 Mandatory references / Submit: 两条锚线与续跑承接段",
+      );
+    }
+    if (selected.fallbackNote !== "") {
+      notes.push(`${selected.fallbackNote}（${job.id} ${job.stage}）`);
+    }
+    if (preferCoreBrief === false) {
+      notes.push(
+        "[ADAPTER NOTE] preferCoreBrief=false：本次 brief 由适配器本地拼装，" +
+          "Core 的 subagentAction.brief 未被消费（显式降级，不是默认路径）",
+      );
+    }
     prepared.push({
       job,
       lane,
@@ -1059,17 +1553,60 @@ export async function orchestrateActiveJobs(
       worktreePath,
       artifactPath,
       brief,
+      briefBasis: selected.basis,
       expectedGate,
       receipts,
       claimed,
+      violations,
+      notes,
     });
   }
 
   // ── ① 派活：独立作业并发（subagent 之间无共享状态） ──
   // 每个作业先算「续谁」：同阶段重派续原执行者（它记得上次为什么被打回），
   // plan → development 显式允许时续方案执行者；拿不到 id 就新起一个。
+  //
+  // 三段事务（语义是「先检查、再落盘、再 spawn」，避免派了活才发现载荷不合契约）：
+  //   ①a 契约闸门：违规 → 不 spawn，回执 `[ADAPTER CONTRACT] …`，结果进 degraded；
+  //   ①b brief 落盘：**任何** harness 都把实际 prompt 原样写进 `artifacts/<rN>-<stage>-brief.md`
+  //      （无 Agent 工具的环境就靠它承接上下文；有 Agent 工具时它是审计面）；
+  //   ①c spawn：只有 a 通过、b 成功（或明确降级）的作业才真的派出去。
+  const briefWrites: BriefWrite[] = [];
+  for (const item of prepared) {
+    for (const note of item.notes) {
+      item.receipts.push({
+        label: `dispatch note (${item.job.id})`,
+        receipt: noteReceipt(note),
+      });
+    }
+    if (item.violations.length > 0) {
+      for (const violation of item.violations) {
+        item.receipts.push({
+          label: `adapter contract (${item.job.id})`,
+          receipt: noteReceipt(`[ADAPTER CONTRACT] ${item.job.id} ${item.job.stage}: ${violation.message}`),
+        });
+      }
+      continue;
+    }
+    const write = await writeBriefArtifact(daemon, item, artifactPrefix);
+    briefWrites.push(write);
+    item.receipts.push({
+      label: `vfs_put ${write.path} (${item.job.id} brief)`,
+      receipt: noteReceipt(write.narrative),
+    });
+  }
+
+  const blocked = new Set(prepared.filter((item) => item.violations.length > 0).map((item) => item.job.id));
+  const briefRefused = new Set(briefWrites.filter((write) => !write.ok).map((write) => write.jobId));
+  const dispatchable = prepared.filter((item) => !blocked.has(item.job.id));
+
   const outputs = await Promise.all(
-    prepared.map(async (item) => {
+    dispatchable.map(async (item) => {
+      // 契约闸门拦下的作业根本不进这一层；brief 落盘失败**不阻断派活**（prompt 还在
+      // 内存里，能派出去），但结论必须可见——见 writeBriefArtifact 的叙事。
+      if (briefRefused.has(item.job.id)) {
+        logWith(logger, `[brief] ${item.job.id} 落盘失败，仍按内存里那一份 prompt 派活`);
+      }
       const request: SubagentRequest = {
         description: `${item.job.id} ${item.job.stage}`,
         prompt: item.brief,
@@ -1115,6 +1652,35 @@ export async function orchestrateActiveJobs(
   const jobs: OrchestrationJobResult[] = [];
   const narrative: string[] = [];
 
+  // 契约闸门拦下的作业：**没有 spawn、没有提案**，但要在结果里如实出现
+  // （一行 `error` + 完整回执），否则上层只看到「少了一个作业」而不知道原因。
+  for (const item of prepared.filter((row) => row.violations.length > 0)) {
+    for (const entry of item.receipts) {
+      for (const line of entry.receipt.narrative) {
+        narrative.push(`[${item.job.id}] ${line}`);
+      }
+    }
+    jobs.push({
+      id: item.job.id,
+      stage: item.job.stage,
+      rev: item.job.rev,
+      lane: item.lane,
+      branch: item.branch,
+      base: item.base,
+      worktreePath: item.worktreePath,
+      artifactPath: item.artifactPath,
+      brief: item.brief,
+      report: "",
+      archived: { ok: false, error: "adapter contract violation" },
+      receipts: item.receipts,
+      expectedGate: item.expectedGate,
+      error:
+        `ADAPTER CONTRACT：brief 不满足派发义务（` +
+        item.violations.map((violation) => violation.code).join(", ") +
+        "），未派发 subagent",
+    });
+  }
+
   for (const output of outputs) {
     const { item } = output;
     const receipts = item.receipts;
@@ -1126,7 +1692,6 @@ export async function orchestrateActiveJobs(
       receipts.push({ label: `dispatch note (${item.job.id})`, receipt: noteReceipt(note) });
     }
 
-    // 制品优先：subagent 按 brief 写了落盘制品就用它（内容比聊天报告更完整）。
     const artifactOnDisk =
       item.worktreePath === null
         ? path.join(cwd, item.artifactPath)
@@ -1320,6 +1885,22 @@ export async function orchestrateActiveJobs(
     narrative.push(handoffNarrative(handoff));
   }
 
+  // 降级说明（**每一条都要让上层看见**）：契约拦截 / brief 落盘失败 / preferCoreBrief=false。
+  // `degraded` 是 `OrchestrationResult` 上唯一的「本次不完美」通道，`formatOrchestration`
+  // 首行就打印它——不写在这里的失败等于没人知道。
+  const degradeNotes: string[] = [];
+  if (blocked.size > 0) {
+    degradeNotes.push(
+      `[ADAPTER CONTRACT] ${[...blocked].join(", ")}：brief 不满足派发义务，未派发 subagent`,
+    );
+  }
+  if (briefRefused.size > 0) {
+    degradeNotes.push(`[BRIEF REFUSED] ${[...briefRefused].join(", ")}：brief 未能落进 VFS`);
+  }
+  if (preferCoreBrief === false) {
+    degradeNotes.push("preferCoreBrief=false（未消费 Core brief，本次 brief 由适配器本地拼装）");
+  }
+
   const result: OrchestrationResult = {
     jobs,
     gates,
@@ -1331,12 +1912,21 @@ export async function orchestrateActiveJobs(
   if (handoff !== undefined) {
     result.handoff = handoff;
   }
+  if (degradeNotes.length > 0) {
+    result.degraded = degradeNotes.join("；");
+  }
   return result;
 }
 
-/** 一行回执（自愈/续跑这类「说明性」事件用；不走 daemon，但同构）。 */
-function noteReceipt(line: string): StepReceipt {
-  return { ok: true, narrative: [line], pendingChoice: null, tools: [], raw: {} };
+/** 一行（或多行）回执（自愈/续跑这类「说明性」事件用；不走 daemon，但同构）。 */
+function noteReceipt(line: string | readonly string[]): StepReceipt {
+  return {
+    ok: true,
+    narrative: typeof line === "string" ? [line] : [...line],
+    pendingChoice: null,
+    tools: [],
+    raw: {},
+  };
 }
 
 /** 交接单的叙事行（成功报字节数 + sha 前缀，失败原样贴原因）。 */
