@@ -513,7 +513,7 @@ cargo run --example pack -- .ygg/mods/pi-agent-seed
 | action | 派发的事件 / 载荷 |
 | --- | --- |
 | `kickoff` | `config.set goal.authorization=…` → `config.set play.mode=goal` → `task.intake "<标题|描述>"` → 逐条 `requirement.add` → `requirement.dispatch ""` |
-| `step` | 任意 `{ event, payload }`（菜单选择必须是 **JSON 数字**） |
+| `dispatch` | 任意 `{ event, payload }`（菜单选择必须是 **JSON 数字**）；只报告上下文水位、**不**触发压缩 |
 | `approve_gate` / `reject_gate` | `gate.approve "rN|<note>"` / `gate.reject "rN|<feedback>"` |
 | `vfs_write` / `vfs_read` / `vfs_list` | 本局 VFS 制品面（不推进状态） |
 | `settle_close` | `coordinate.submit ""`（若还在 coordinate）→ `verify.submit "true"` → `vfs_put artifacts/evolution-review.md` → `tool.call harness.archive_sessions` → `settlement.evolution "…|c=<kept>/<screened>[|cls=…]|todo=0/"` → `review.note "<lesson>|<score>"` → `settle` |
