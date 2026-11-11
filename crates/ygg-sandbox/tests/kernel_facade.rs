@@ -44,10 +44,13 @@ end)
 "#;
 
 /// 死循环 Mod：VM 指令计量面耗尽（燃料杀循环负例经 facade 信封）。
+/// `event.start` 无操作注册：燃料耗尽后的恢复步用（fail-closed 后未注册名
+/// 不再有成功信封）。
 const LOOP_MOD: &str = r#"
 ygg.on("event.loop", function()
   while true do end
 end)
+ygg.on("event.start", function() end)
 "#;
 
 /// 沙箱拒绝 Mod：handler 内 require（白名单拒绝桩，可读 "sandbox denied"）。
@@ -58,11 +61,13 @@ end)
 "#;
 
 /// 事件日志 Mod：handler 发派生事件——日志面只记外部事件。
+/// 派生名 `evt.derived` 无操作注册（fail-closed：派生面同样要求注册）。
 const LOG_MOD: &str = r#"
 ygg.on("event.log", function()
   ygg.emit("evt.derived", 1)
   ygg.narrate("logged")
 end)
+ygg.on("evt.derived", function() end)
 "#;
 
 /// 叙事流 Mod：node 声明 + goto 路由（stdlib narrative 全链路）。
@@ -115,12 +120,15 @@ end)
 
 /// D1 反例 Mod：handler 先 emit 再 choice——派生事件被语义丢弃，
 /// 信封应携带 warnings 警告（含事件名与丢弃条数）。
+/// `ygg.choice_selected` 无操作注册：respond 步所需（同 GATE_MOD 先例——
+/// 用了 choice 的 Mod 自己注册 respond 事件；fail-closed 后静默成功不再存在）。
 const CHOICE_DROPS_MOD: &str = r#"
 ygg.on("event.go", function()
   ygg.emit("chapter.advance", "to_road")
   ygg.emit("chapter.advance", "to_cellar")
   ygg.choice("去哪儿？", { "地窖", "客房" })
 end)
+ygg.on("ygg.choice_selected", function() end)
 "#;
 
 /// D2 取证 Mod：host 回调拒绝（kv.set 非有限值）——mlua CallbackError

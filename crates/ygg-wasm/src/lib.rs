@@ -390,8 +390,11 @@ mod tests {
     #[test]
     fn constructor_empty_manifest_ignores_resource_args_and_dispatches() {
         // 空串 manifest = 无资源路径；资源参数占位被忽略（契约口径）。
+        // 派发面用已注册事件证明内核可用（fail-closed 后未注册名不再有
+        // 成功信封——那是对预检语义的断言，不属本测）。
+        const NOOP_MOD: &str = "ygg.on(\"event.any\", function() end)";
         let mut kernel = YggKernel::new(
-            IDLE_MOD.to_owned(),
+            NOOP_MOD.to_owned(),
             String::new(),
             "[]".to_owned(),
             "{}".to_owned(),

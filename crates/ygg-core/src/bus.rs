@@ -14,7 +14,9 @@
 //!   全程无哈希容器参与（D-B1「永不哈希容器」）；
 //! - 注册仅发生在 Mod 装载期（handler 集 = 装载的纯函数，回放日志缩小为
 //!   仅外部事件的前提）；运行期注册禁令的权威执行面在 S9/S10 host API
-//!   （D-B4 双保险的运行时侧），本 crate 不承载运行期拦截。
+//!   （D-B4 双保险的运行时侧），本 crate 不承载运行期拦截；
+//! - 派发面 fail-closed：未注册事件名一律 `Err`（「删除了的东西用了就报
+//!   错」），装载期注册是唯一入口，不存在静默空跑。
 
 use std::collections::BTreeMap;
 
@@ -142,18 +144,27 @@ impl HandlerRegistry {
     /// 按注册序驱动某事件的全部 handler（S4 转换驱动的触发面）。
     /// 任一 handler 出错即中止本事件派发并返回该错误（错误传播语义；
     /// 中断后 FIFO 余量是否继续排空由 S4 转换驱动裁定）。
+    ///
+    /// fail-closed：未注册事件名（空桶）不是静默空跑，而是返回带稳定
+    /// 前缀 `unregistered event` 的 [`HandlerError`]——外部未注册名由
+    /// 门面预检先行拒绝（零副作用），派生未注册名使整次转换失败回滚。
     pub fn handle_event(
         &mut self,
         event_name: &str,
         event: &Event,
         sink: &mut dyn NarrationSink,
     ) -> Result<(), HandlerError> {
-        if let Some(bucket) = self.buckets.get_mut(event_name) {
-            for reg in bucket.iter_mut() {
-                reg.handler.handle(event, sink)?;
+        match self.buckets.get_mut(event_name) {
+            Some(bucket) => {
+                for reg in bucket.iter_mut() {
+                    reg.handler.handle(event, sink)?;
+                }
+                Ok(())
             }
+            None => Err(HandlerError(format!(
+                "unregistered event `{event_name}`"
+            ))),
         }
-        Ok(())
     }
 
     /// 某事件的注册键序列（诊断/测试面：注册序可核对性）。
@@ -265,15 +276,23 @@ mod tests {
     }
 
     #[test]
-    fn handle_event_on_unknown_event_is_ok() {
-        // 未知事件：空桶直接 Ok（派发面与 keys() 诊断面一致）
+    fn handle_event_on_unknown_event_fails_closed() {
+        // 未知事件：空桶即 Err（派发面 fail-closed，消息带稳定前缀 + 事件名）
         let mut reg = HandlerRegistry::new();
         let log = Rc::new(RefCell::new(Vec::new()));
         reg.register("m", "evt.x", recorder("h1", &log));
         let mut sink = NullSink;
         let e = Event::external("evt.missing", Value::Int(1)).unwrap();
-        assert!(reg.handle_event("evt.missing", &e, &mut sink).is_ok());
-        assert!(log.borrow().is_empty());
+        let err = reg
+            .handle_event("evt.missing", &e, &mut sink)
+            .expect_err("未注册事件必须报错（fail-closed）");
+        assert!(
+            err.0.contains("unregistered event"),
+            "消息必须带稳定前缀：{}",
+            err.0
+        );
+        assert!(err.0.contains("evt.missing"), "消息必须点名事件：{}", err.0);
+        assert!(log.borrow().is_empty(), "未知事件不得触发任何 handler");
     }
 
     #[test]
