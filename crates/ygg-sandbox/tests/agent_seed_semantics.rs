@@ -2951,6 +2951,8 @@ fn auto_claim_requires_a_self_reported_branch_name() {
     assert!(dev_text.contains("(missing)"), "{dev_text}");
     game.assert_kv("tool.settled_count", json!(null));
     game.assert_kv("lane.1.probe.commits", json!(null));
->>>>>>> feature/5b8e-branch-naming
+}
+}
+}
 }
 }
