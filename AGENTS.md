@@ -72,7 +72,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
    changes**:
    - When a discipline was not followed and you want to "evolve yourself", the only legal landing
      spots are this file (written as a decidable criterion) and `.ygg/mods/pi-agent-seed/` (gate logic
-     in `src/flow.lua` and `src/handlers/*.lua`, prompts and scripts in `data/*.json`;
+     in `src/runtime/flow.lua` and `src/handlers/**`, prompts and scripts in `data/*.json`;
      `mod.lua` is assembly only and carries no business logic). Both may change together, but
      **no third carrier may be added**.
    - **Never write a checker script / wrapper / hook as a patch**: no "check-*.py", no
@@ -179,7 +179,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 
 - **Inline executor ledger**: `proposal.submit` takes an optional trailing segment
   `exec=<agent_id>[:<reason>]`. It registers the executor ledger through the same
-  `src/executor.lua` implementation as `config.set executor.*`, in the same transaction, before the
+  `src/domain/executor.lua` implementation as `config.set executor.*`, in the same transaction, before the
   proposal is stored; a failed registration refuses the payload **and creates no proposal**. `exec=`
   is only recognised as the **last** segment — anywhere else is refused
   (`req_prop_exec_misplaced`), because the host pads payloads shorter than the declared 7 fields and
@@ -189,7 +189,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   and stores `planning` in the same dispatch; there is no analysis turn in the default pipeline.
   `analyzing` survives only as a compatibility state (legacy saves, and an explicit `analysis`
   proposal accepted on a `planning` row), so `R_ANALYZING` and its readers stay — no migration code.
-- **Declared single-successor advancement, reactive and effect-without-render**: `src/hooks.lua`
+- **Declared single-successor advancement, reactive and effect-without-render**: `src/core/hooks.lua`
   provides `useMemo(key, compute, deps)` / `useEffect(name, deps_fn, effect_fn)` /
   `flush_effects()`. `render()` calls `hooks.flush_effects()` at its top under a reentrancy guard,
   **before** it emits the single `ygg.choice`; every `useEffect` therefore converges first. An effect
@@ -200,7 +200,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   external evidence (no file read, no human judgement, no session); ③ it is not a pass-type action
   protected by the human-action gate (gates and acceptance are **never** automatic); ④ the effect
   neither renders nor emits. Two effects exist today. The first is `auto_dispatch` in
-  `src/handlers/actions.lua`: a handler marks the requirement it just made ready
+  `src/handlers/intake/actions.lua`: a handler marks the requirement it just made ready
   (`hooks.mark_auto_dispatch(index)` after `proposal.accept(analysis)` or `gate.approve(plan)`), and
   the effect dispatches **that requirement only** when the turn has no pending proposal, no pending
   gate, no conflict and a free job slot. `requirement.add`'s `draft` row is never auto-dispatched.
@@ -211,7 +211,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   counts) — never an implicit Lua-memory diff — so a save/load or a process restart recomputes from
   the same facts and stays deterministic. `flush_effects()` runs at most `MAX_PASSES = 4` passes and
   **errors out** instead of looping forever; a non-converging effect is a defect, not a warning.
-- **Receipt effect (the second class)**: `hooks.useEffect("tools.receipt", …)` in `src/tools.lua`
+- **Receipt effect (the second class)**: `hooks.useEffect("tools.receipt", …)` in `src/runtime/tools.lua`
   only latches `tool.notified.<call_id>` and narrates one line once a `tool.result` has landed. It
   touches no `req.*` / `prop.*` / gate / lane / stage state, never renders and never chooses — the
   same ① ② ③ ④ rules as `auto_dispatch` apply. Its dependencies are KV-derived scalars and the
@@ -221,7 +221,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 #### 9.2 Behavioural acceptance (mandatory when touching Mod source or the scenes map)
 
 Changing `.ygg/mods/pi-agent-seed/src/**` (state machine, gates, render layer, tool bridge),
-`.ygg/mods/pi-agent-seed/mod.lua` or the map wording in `data/scenes.json` requires, besides lint and
+`.ygg/mods/pi-agent-seed/mod.lua` or the map wording in `data/texts/` requires, besides lint and
 the all-1 playtest:
 `cargo test -p ygg-sandbox --test agent_seed_semantics` (24 cases: stage merge + `analysis` compat,
 accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
@@ -297,7 +297,7 @@ A settled `tool.result` (`status ok`, `code 0`) is folded into domain state by a
 `flush_effects` (so the fold happens in the same turn, before the single choice is produced) but not
 one scope: `receipt_effect` says "the result arrived" and may only latch `tool.notified.<call_id>` +
 narrate one line, while the reactors own the domain keys. Three boundaries are non-negotiable and
-pinned by `data/playbook.json` (`tools.reactive-effect-scope`, `subsystems.probe-is-warning`,
+pinned by `data/playbook/` (`tools.reactive-effect-scope`, `subsystems.probe-is-warning`,
 `subsystems.machine-evidence-parity`) plus the `agent_seed_semantics` subsystem cases:
 
 1. **A reactor writes KV and narrates — nothing else.** No `render()`, no `ygg.choice`, no stage

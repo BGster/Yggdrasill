@@ -35,7 +35,7 @@
 
 | 位置 | 角色 |
 | --- | --- |
-| `packages/mods/pi-agent-seed/` | 对外分发的**种子模板**（`data/playbook.json` 只装通用纪律） |
+| `packages/mods/pi-agent-seed/` | 对外分发的**种子模板**（`data/playbook/` 只装通用纪律） |
 | `.ygg/mods/pi-agent-seed/` | **本项目实例**（`data/` 装本仓库自己的规则与配置） |
 
 分工：**骨架面**（`mod.lua` + `schemas/`）逐字节一致；**实例面**（`data/`）各自维护。

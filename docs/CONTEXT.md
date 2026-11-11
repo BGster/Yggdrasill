@@ -63,7 +63,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 1. **P1 · 纯函数式迁移与事务性存档点（`(state, event) -> state'`）**
    - 每一次 dispatch 都是一次全有或全无的原子迁移。若某个 Lua 处理器出错或耗尽指令燃料，该次 dispatch 期间对实体表与 KV 存储的全部修改都会被完全回滚。在 SQLite 持久化模式下，事件日志行与状态快照在单个数据库事务中提交。
 2. **P2 · 零硬编码 — 数据与契约驱动（`D11/D15`）**
-   - 业务规则、状态迁移、叙述模板与提示节拍都归属于 Mod 脚本（`src/*.lua`）与 JSON 资源（`data/*.json`），绝不硬编码在 Rust 宿主代码或 TypeScript 扩展代码中。所有提示模板、子代理 brief 与叙述行都存放在 `data/scenes.json`。
+   - 业务规则、状态迁移、叙述模板与提示节拍都归属于 Mod 脚本（`src/**`，按 core/domain/view/runtime/handlers 五层组织）与 JSON 资源（`data/*.json`），绝不硬编码在 Rust 宿主代码或 TypeScript 扩展代码中。所有提示模板、子代理 brief 与叙述行都存放在 `data/texts/` 片段（由 `mod.lua` 装配回 TEXTS）。
 3. **P3 · 契约驱动的通用宿主**
    - Rust 宿主（`ygg-agent`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
 4. **P4 · 少即是多 — 每个机制一条规范路径**
@@ -74,7 +74,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
    - **运行状态**：`<run-dir>/run.sqlite` 是新运行的单一存储文件。
    - **文档**：`docs/CONTEXT.md` 与 `docs/DESIGN.md` 是 `docs/` 下仅有的两份架构/设计文档。
 6. **P6 · 模块顶层纯度（`YGG-MOD-EFFECT`）**
-   - 在多文件 Mod 中，`mod.lua` 是唯一的装配入口。支撑模块（`src/*.lua`）在顶层只能导出纯函数与常量；在模块顶层调用有副作用的宿主 API（`ygg.on`、`ygg.emit`、`ygg.narrate`、`ygg.choice`、`ygg.kv.set`、`ygg.entity.*`、`ygg.fsm.define`）会在静态阶段（`ygg-lint`）与加载阶段（`ygg-sandbox`）被双重拒绝。这保证了处理器注册顺序（进而 dispatch 顺序）由 `mod.lua` 显式控制，而从不取决于 `require` 顺序。
+   - 在多文件 Mod 中，`mod.lua` 是唯一的装配入口。支撑模块（`src/**` 五层）在顶层只能导出纯函数与常量；在模块顶层调用有副作用的宿主 API（`ygg.on`、`ygg.emit`、`ygg.narrate`、`ygg.choice`、`ygg.kv.set`、`ygg.entity.*`、`ygg.fsm.define`）会在静态阶段（`ygg-lint`）与加载阶段（`ygg-sandbox`）被双重拒绝。这保证了处理器注册顺序（进而 dispatch 顺序）由 `mod.lua` 显式控制，而从不取决于 `require` 顺序。
 7. **P7 · 响应式收敛效应先于选择（Choice）**
    - 一旦调用 `ygg.choice`，内核就终止当前迁移并丢弃任何仍排队的内置事件。因此，所有响应式副作用（`hooks.useEffect`，如 `auto_dispatch`、`tools.receipt`、`tools.reactive`）必须在 `render()` 顶部、在发出 `ygg.choice` 之前先冲刷并收敛（`MAX_PASSES = 4`）。
 8. **P8 · 可选加入的能力降级（Wasm 纯度 vs 本地宿主能力）**
@@ -109,7 +109,7 @@ Yggdrasill/
 ├── clients/
 │   └── godot/           # Godot 4 原生 gdext 客户端（M2.5）
 ├── .ygg/
-│   └── mods/pi-agent-seed/   # 规范多文件 Agent 治理 Mod（mod.lua、src/*.lua、data/*.json、schemas/）
+│   └── mods/pi-agent-seed/   # 规范多文件 Agent 治理 Mod（mod.lua、src/** 五层、data/texts|playbook|config、schemas/）
 ├── .pi/
 │   └── extensions/ygg-pi-harness/   # Pi Coding Agent Tier-1 扩展适配器（防火墙、daemon RPC 客户端、编排器、压缩）
 └── docs/
@@ -157,11 +157,11 @@ Yggdrasill/
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
 | **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/pi-agent-seed` 协调软件工程任务（`intake -> coordinate -> review -> done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`）。所有产物都要求先有状态机事件。 | 已确认 |
-| **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/*.lua` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
+| **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/**` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
 | **D-MA3** | 单文件 SQLite 运行存储与 VFS | 新运行默认使用 `<run-dir>/run.sqlite`（`ygg-store`），原子提交 `events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）。既有的 JSON 运行（`autosave.json` + `events.jsonl`）保持自动检测，不隐式迁移。 | 已确认 |
-| **D-MA4** | 响应式钩子与省回合压缩 | `src/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |
+| **D-MA4** | 响应式钩子与省回合压缩 | `src/core/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |
 | **D-MA5** | 同步工具桥（`ygg.tool.call`） | 当 `ygg-agent` 挂载 `HostToolRunner` 时，白名单工具（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`、`harness.archive_sessions`）在 1 回合内联执行并立即把结果折叠进 KV，同时为未挂载宿主保留异步 `tool.call`/`tool.result` 回退。 | 已确认 |
 | **D-MA6** | 持久化泳道工作树池 | `worktree-claim` 管理持久化池 `<repo-parent>/worktrees/<repo>-lane-1..4`，通过 `git checkout -B <branch> HEAD` 重置分支（保留如 `target/` 的未跟踪构建缓存），并将释放的泳道停放在 `--detach HEAD` 上而非删除目录。 | 已确认 |
-| **D-MA7** | 通用治理引擎适配器（`subagentAction`） | Mod 计算 `summary.jobs[i].subagentAction`（`subagent.spawn` / `subagent.resume`），携带渲染后的 brief（`data/scenes.json` 模板）与实时的 `worktreeStatus` / `subagentStatus` / `probeStatus`，使 `.pi/extensions/ygg-pi-harness`（或 Claude Code / Codex / Cursor 适配器）能充当薄执行壳。 | 已确认 |
+| **D-MA7** | 通用治理引擎适配器（`subagentAction`） | Mod 计算 `summary.jobs[i].subagentAction`（`subagent.spawn` / `subagent.resume`），携带渲染后的 brief（`data/texts/` 模板片段）与实时的 `worktreeStatus` / `subagentStatus` / `probeStatus`，使 `.pi/extensions/ygg-pi-harness`（或 Claude Code / Codex / Cursor 适配器）能充当薄执行壳。 | 已确认 |
 | **D-MA8** | 活文档整合 | 将所有架构、领域与契约文档整合进 `docs/CONTEXT.md`（领域与决策）与 `docs/DESIGN.md`（系统行为与接口契约），通过子代理 brief 中的强制必读引用与最终审查时的同步检查来执行。 | 已确认 |
 | **D-MA9** | 动作面三层分层（`event` / `op` / `action`） | **取向：部分收敛（Partial Convergence）。** `event` 是状态推进的唯一货币（34 个），`op` 是状态之外的宿主端口（8 个），`action` 是适配器的语义入口（9 个，值域随 harness 可变）。**禁止把 `action` 理解为 `event` 的第二份清单**：9 个 `action` 里只有 `approve_gate` / `reject_gate` 与 `event` 重叠，且是**有意保留的位次正确性别名**（`reqId` 必填可防「批错需求」，判据为「能防止一类可命名的 payload 错位才配拥有别名」）；`vfs_write` 与 `event=vfs.write` **语义不等价**（事件路径有阶段守卫、64 KiB 上限、`artifact.*` 台账与 `[VFS LEDGER ONLY]` 降级，`op=vfs_put` 全都没有），故不得互替；`kickoff` / `settle_close` 是多步编排（顺序契约在适配器侧），`dispatch` 是唯一的事件直通口。零增量同义别名（原 `step`）**已从值域退场**，不做兼容残留。`dispatch` **不得附带压缩等回合后动作**：压缩只经 `action=handoff_compact` 与 `ygg_run_lanes` 编排层刹车两个显式入口。契约正文见 `docs/DESIGN.md` §3.4。 | 已确认 |
