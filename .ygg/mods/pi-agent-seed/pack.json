@@ -170,7 +170,7 @@
     },
     "git.worktree_claim": {
       "kind": "cli",
-      "program": "ygg-agent",
+      "program": "egg",
       "args": [
         "--builtin-tool",
         "worktree-claim",
@@ -189,7 +189,7 @@
     },
     "git.worktree_release": {
       "kind": "cli",
-      "program": "ygg-agent",
+      "program": "egg",
       "args": ["--builtin-tool", "worktree-release", "--lane", "{{lane}}"],
       "timeoutMs": 15000,
       "inlineWaitMs": 5000,
@@ -199,7 +199,7 @@
     },
     "git.lane_probe": {
       "kind": "cli",
-      "program": "ygg-agent",
+      "program": "egg",
       "args": [
         "--builtin-tool",
         "lane-probe",
@@ -218,7 +218,7 @@
     },
     "fs.artifact_probe": {
       "kind": "cli",
-      "program": "ygg-agent",
+      "program": "egg",
       "args": ["--builtin-tool", "artifact-probe", "--path", "{{path}}"],
       "timeoutMs": 5000,
       "inlineWaitMs": 2000,
@@ -228,7 +228,7 @@
     },
     "gate.verify_suite": {
       "kind": "cli",
-      "program": "ygg-agent",
+      "program": "egg",
       "args": ["--builtin-tool", "verify-suite", "--mode", "{{mode}}"],
       "timeoutMs": 600000,
       "inlineWaitMs": 0,
@@ -238,7 +238,7 @@
     },
     "harness.archive_sessions": {
       "kind": "cli",
-      "program": "ygg-agent",
+      "program": "egg",
       "args": [
         "--builtin-tool",
         "archive-sessions",

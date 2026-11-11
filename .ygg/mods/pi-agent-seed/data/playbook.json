@@ -655,7 +655,7 @@
         {
           "id": "harness.start-command",
           "modality": "must",
-          "text": "Cold start of a run: `.ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
+          "text": "Cold start of a run: `.ygg/bin/egg --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
@@ -1015,7 +1015,7 @@
         {
           "id": "harness.contract-required",
           "modality": "must",
-          "text": "The generic tooling (`crates/ygg-sandbox/examples/agent.rs`, `src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.",
+          "text": "The generic tooling (`crates/ygg-sandbox/examples/egg.rs`, `src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.",
           "basis": "AGENTS.md §9 (pre-migration)"
         },
         {

@@ -7,7 +7,7 @@ Mod 内部结构。
 
 ## 零、host 契约（**必填；宿主不含任何默认值**）
 
-宿主（`crates/ygg-sandbox/examples/agent.rs`、`src/playtest.rs`）不含任何事件名字面量与回退默认值：
+宿主（`crates/ygg-sandbox/examples/egg.rs`、`src/playtest.rs`）不含任何事件名字面量与回退默认值：
 事件名、inbox 路由、结算口径、推进阈值**全部**从本 Mod 的 `pack.json` 与 `data/config.json` 读。
 任何一段缺失 / 字段缺失 / 类型不符 / 非正整数 → **装载期失败**（非零退出或 `ok=false` 报告），
 错误文案会点名缺失字段并给回本节的定位。旧 Mod 升级 = 补齐下面四段。
@@ -283,7 +283,7 @@ Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
 
 ### 宿主读的摘要字段（`agent.summary` → `ygg.meta("summary", …)`）
 
-宿主（`crates/ygg-sandbox/examples/agent.rs`）对「何时收口 / 有无冲突 / 有无待验收提案 / 是否有 job
+宿主（`crates/ygg-sandbox/examples/egg.rs`）对「何时收口 / 有无冲突 / 有无待验收提案 / 是否有 job
 空等」的认知**只来自本 Mod 自报的结构化摘要**，不读任何 `req.*` / `prop.*` / `fsm.stage` / `ending` 私有键：
 
 ```lua
@@ -487,9 +487,9 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 cargo run --example playtest -- .ygg/mods/pi-agent-seed
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
-#   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
-#   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
-#   .ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id t --runs-root .ygg/runs --resume
+#   .ygg/bin/egg --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
+#   .ygg/bin/egg --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
+#   .ygg/bin/egg --mod .ygg/mods/pi-agent-seed --run-id t --runs-root .ygg/runs --resume
 
 # 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
 cargo run --example pack -- .ygg/mods/pi-agent-seed
@@ -503,7 +503,7 @@ cargo run --example pack -- .ygg/mods/pi-agent-seed
 | 文件 | 职责 |
 | --- | --- |
 | `firewall.ts` | `tool_call` 闸门：数据红线（`*.xlsx` / `*.xls` / `*.csv`、`/Volumes/WenshuSpace/**`）+ 批量入口禁令（`--events` / shell 循环 / `xargs`）。纯函数 [`checkToolCallFirewall`](./.pi/extensions/ygg-pi-harness/firewall.ts)。 |
-| `daemon.ts` | `ygg-agent --daemon` 常驻客户端：行式 JSON-RPC、按 `id` 配对、请求串行化、30s 超时、意外退出重启；宿主不支持 `--daemon` 时**降级单发**（摘要标 `available=false`，不猜 jobs/gates）。 |
+| `daemon.ts` | `egg --daemon` 常驻客户端：行式 JSON-RPC、按 `id` 配对、请求串行化、30s 超时、意外退出重启；宿主不支持 `--daemon` 时**降级单发**（摘要标 `available=false`，不猜 jobs/gates）。 |
 | `orchestrator.ts` | 活跃作业（`plan` / `development`）的泳道生命周期：[`buildSubagentBrief`](./.pi/extensions/ygg-pi-harness/orchestrator.ts) 生成自洽 brief；[`orchestrateActiveJobs`](./.pi/extensions/ygg-pi-harness/orchestrator.ts) 依次做「claim worktree → 并发派 subagent → `vfs_put` 归档 → `git.lane_probe` → `proposal.submit` → `proposal.accept`」，把人送到 `plan_gate` / `accept_gate` 门口。 |
 | `index.ts` | 装配：`session_start` / `session_shutdown`、`tool_call` 闸门、`/ygg status\|stop`、两个工具 `ygg_session` / `ygg_run_lanes`、页脚三段式状态行（runId / stage / jobs 与 gates 计数）。 |
 | `harness.test.ts` | 37 条行为测试（含一个用 `process.execPath` 起假 daemon 的行协议集成测试）。 |
