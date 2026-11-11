@@ -1030,6 +1030,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ygg-modules"
+version = "0.1.0"
+
+[[package]]
 name = "ygg-sandbox"
 version = "0.1.0"
 dependencies = [
@@ -1039,6 +1043,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "ygg-core",
+ "ygg-modules",
  "ygg-schema",
 ]
 

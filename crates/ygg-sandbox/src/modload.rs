@@ -4,7 +4,7 @@
 //!
 //! 在这之前，「把 `<mod目录>` 装成内核」有三份独立实现：`driver` 侧的
 //! `build_kernel`（组装序）、`playtest` 侧的 `read_mod_bundle`（读盘）、
-//! `examples/agent.rs` 的 `ModBundle`（读盘 + 热载重读）。前两者本应完全一致，
+//! `examples/egg.rs` 的 `ModBundle`（读盘 + 热载重读）。前两者本应完全一致，
 //! 实际差了一处**静默**：playtest 读盘时不看 `pack.json` 的 `code` 段，于是
 //! 多文件 Mod 在走查里被当成单文件跑——入口 `require("src.util")` 对空模块表
 //! 直接得到可读拒绝，或（入口自己有兜底时）跑到一半才炸。这类偏差的症状是
