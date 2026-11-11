@@ -1,0 +1,76 @@
+{
+  "sections": [
+    {
+      "id": "harness",
+      "order": 13,
+      "rules": [
+        {
+          "id": "harness.contract-required",
+          "modality": "must",
+          "text": "The generic tooling (`crates/ygg-sandbox/examples/agent.rs`, `src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.",
+          "basis": "AGENTS.md §9 (pre-migration)"
+        },
+        {
+          "id": "harness.contract-agent-seg",
+          "modality": "must",
+          "text": "The `agent` section of `pack.json` has eight fields: entryEvent / choiceEvent / summaryEvent / endingPrefix / metaKey / rejectionPrefixes (at least one) / replayPrefix / defaultPayload.",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+        },
+        {
+          "id": "harness.contract-inbox-seg",
+          "modality": "must",
+          "text": "The `inboxRoutes` section of `pack.json`: reserved keys externalIdField / payloadField / extMarker plus `<kind>` → `{action, fields[, write]}` (zero kinds is legal).",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+        },
+        {
+          "id": "harness.contract-settlement-seg",
+          "modality": "must",
+          "text": "The `settlement` section (in `<config.json>`): requireEvents / requireNoFailedSteps / requireEnding / requireInboxConsumed.",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+        },
+        {
+          "id": "harness.contract-drive-seg",
+          "modality": "must",
+          "text": "The `drive` section (in `<config.json>`): maxSteps / stallLimit / stepsPerRequirement (positive integers).",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+        },
+        {
+          "id": "harness.contract-config-path",
+          "modality": "must",
+          "text": "`<config.json>` is the path declared by the `ygg:agent/config` entry in `pack.json` (`data/config.json` for the seed Mod).",
+          "basis": "AGENTS.md §9 (pre-migration)"
+        },
+        {
+          "id": "harness.contract-upgrade",
+          "modality": "must",
+          "text": "Upgrading an old Mod means filling in the four sections (two in `pack.json`, two in `config.json`); `cargo run --example pack -- <mod dir>` validates their shape at pack time (only what is declared is validated).",
+          "basis": "AGENTS.md §9 (pre-migration)"
+        },
+        {
+          "id": "harness.host-vs-contract",
+          "modality": "must",
+          "text": "Ownership boundary: event names / ending prefix / summary key / rejection and replay prefixes / inbox fields and routes / settlement switches / advancement thresholds belong to the contract and must be declared by the Mod; what the host may keep as literals is the run-directory file names, the coordination phase names running / closing / finalized, the decision-command timeout (`DECIDE_TIMEOUT`) and poll interval (`DECIDE_POLL_INTERVAL`), the three `--drive` modes, the five-file set (`pack.json` / `manifest.json` / `mod.lua` / `schemas/` / `data/`), and the kernel seams (`save` / `load` / `state`, and the reserved `ygg.choice_selected` route). Criterion: would this literal change with another Mod? If yes, it belongs to the contract.",
+          "basis": "AGENTS.md §9 (ownership boundary, pre-migration)"
+        },
+        {
+          "id": "harness.literal-ownership",
+          "modality": "must-not",
+          "text": "Only applications bound to a specific Mod and the generator side may keep event-name / ending-prefix literals, and every such file declares \"bound\" or \"generator-side\" in its header: adventure.rs, clients/godot/rust/src/logic.rs, clients/godot/project/main.gd|session.gd, spike/godot/**, packages/client-web/src/{kernel,session,kernel-wasm}.ts and crates/ygg-wasm/smoke.mjs are bound to `packages/mods/test-adventure`; packages/pipeline/src/{prompt,types,pack}.ts and scripts-dev/mock-llm-stub.mjs are generator-side; the generic tooling of crates/ygg-sandbox|ygg-lint and the test fixtures under tests/ may not add literals, and `ygg.choice_selected` is the reserved event name checked by the kernel domain (the contract's `choiceEvent` must use it).",
+          "basis": "AGENTS.md §9 (literal-ownership table, pre-migration)"
+        },
+        {
+          "id": "harness.choice-payload-type",
+          "modality": "must",
+          "text": "The payload of `ygg.choice_selected` must be a **JSON number** (`--payload '1'`); sending it as a string (`--payload '\"1\"'`) is rejected by the kernel domain as VALIDATION \"option does not exist\". Every other action's payload is a string. Menu selection is the **only** passing channel for the human-action gate — dispatching `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` directly through `--event` is always refused (the receipt's first line is `[REJECTED:ACTION]`).",
+          "basis": "guide.show harness"
+        },
+        {
+          "id": "harness.living-docs-closed-loop",
+          "modality": "must",
+          "text": "`docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.",
+          "basis": "AGENTS.md §1.7 + docs/{CONTEXT,DESIGN}.md closed loop"
+        }
+      ]
+    }
+  ]
+}

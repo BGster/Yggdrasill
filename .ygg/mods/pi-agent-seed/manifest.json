@@ -187,12 +187,100 @@
       "sha256": "36f8344adfe99a059078d3d3076b53742ad80f34220790939a84676a12dab0d3"
     },
     {
-      "byteLength": 88808,
+      "byteLength": 1571,
       "id": "ygg:agent/playbook",
-      "kind": "agent-playbook",
-      "path": "data/playbook.json",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
-      "sha256": "1372709a670a4f2fa428ec8070bc4debb32d0269069a5ca1c363d42208fff583"
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/head.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "3adc097422c7c7ece2b30a6c9ba5911a91ef159436ac615d65d7a85c3050c009"
+    },
+    {
+      "byteLength": 11843,
+      "id": "ygg:agent/playbook/ch1-foundation",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch1-foundation.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "87392db46e6e02b487e972d685de66b65d19cbcdce4ee03bbaab9f36b8f9456e"
+    },
+    {
+      "byteLength": 11837,
+      "id": "ygg:agent/playbook/ch2-delivery",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch2-delivery.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "71caa07dc1ecac9352a97cce746c5048f9005bcae2f40cb17946787a959ed3c7"
+    },
+    {
+      "byteLength": 8729,
+      "id": "ygg:agent/playbook/ch3-evidence",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch3-evidence.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "525931f4b4c68f5697a4dc898351dbfba9b0169698c85eb370af3df5b64f9e3b"
+    },
+    {
+      "byteLength": 6919,
+      "id": "ygg:agent/playbook/ch4-harness-1-state-gates",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch4-harness-1-state-gates.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "948cf2424929e833f792285be65145de90458ffa8c5f24ce66ac37e0cb9fe6c3"
+    },
+    {
+      "byteLength": 9599,
+      "id": "ygg:agent/playbook/ch4-harness-2-drive-actions",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch4-harness-2-drive-actions.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "adc958430cd872506ca9466e45c9ec0f52344adaccbc379a00e9350288aa1b67"
+    },
+    {
+      "byteLength": 3905,
+      "id": "ygg:agent/playbook/ch4-harness-3-closeout-registries",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch4-harness-3-closeout-registries.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "381818979f444636c6f7f8d3844af9afa7724ac9cc071c9354c93a5cf9bda99a"
+    },
+    {
+      "byteLength": 5809,
+      "id": "ygg:agent/playbook/ch4-harness-4-inbox-coordination",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch4-harness-4-inbox-coordination.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "76af2263e35c09b94d61fa019eacb267762b6dd9d1e6bb804c71c0a85c4a694d"
+    },
+    {
+      "byteLength": 4159,
+      "id": "ygg:agent/playbook/ch4-harness-5-views-settlement",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch4-harness-5-views-settlement.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "eba4d517c725925a0f0c4af13216fac38a47687cdeccdf9b2c25c854e801ea64"
+    },
+    {
+      "byteLength": 6878,
+      "id": "ygg:agent/playbook/ch4-harness-6-mod-engineering",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch4-harness-6-mod-engineering.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "13bd2d3e6d8d5db2179e4e17d273c581b0df4513f2e4075279aa61067a2bfcbd"
+    },
+    {
+      "byteLength": 5813,
+      "id": "ygg:agent/playbook/ch4-harness-7-host-contract",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch4-harness-7-host-contract.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "8cc98dd2986f6ef433502255bcc393fdbfc6b21652286bf518cdfefa519f89af"
+    },
+    {
+      "byteLength": 12547,
+      "id": "ygg:agent/playbook/ch5-evolution-tools",
+      "kind": "agent-playbook-fragment",
+      "path": "data/playbook/ch5-evolution-tools.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+      "sha256": "d7343a56d66f99674bf45c444884c0952369a84f1f5e720f31aec65fb3a3e927"
     }
   ],
   "schemaVersion": 1

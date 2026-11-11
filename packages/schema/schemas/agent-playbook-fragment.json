@@ -1,11 +1,20 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://yggdrasill.dev/schemas/v1/agent-playbook.json",
-    "title": "Yggdrasill agent-playbook（AGENTS.md 规则资源化：按阶段呈现的现场手册）",
-    "description": "M-Agent 切片 s1 落地：把仓库根 AGENTS.md 的十条约定拆成**可装载、可按 section id 取用、可按阶段呈现**的规则资源。设计口径三条：① sections 是**有序数组**而非以 id 为键的对象——Lua table 的遍历序不稳定，数组 + order 字段才能保证同一份资源在任意宿主上叙事序一致（确定性立身承诺，D13/D14）；② 每条 rule 带稳定 id（点号命名空间，如 `gates.no-wasm-pack`），供叙事标注出处与后续跨 section 引用，id 全局唯一由作者纪律保证（JSON Schema 无法表达集合内唯一性）；③ 渲染面只消费 title / summary / priority / rules[].{modality,text,basis} / notes：schema 只收录渲染器真的会输出的字段，写了看不见的字段等于内容丢失（历史字段 layout / commands / pointers / applies_to 已退役）。资源只读：装载期快照进 local，handler 闭包消费，不入存档。",
+    "$id": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+    "title": "Yggdrasill agent-playbook 片段（文档头 XOR 章节集合：大 JSON 按域拆分的片段面）",
+    "description": "r6 落地的资源片段 schema：data/playbook.json 拆为 data/playbook/ 下 12 个片段（head 一片 + 章组四片 + harness 七域七片），由 mod.lua 顶层按文件名序（=order 序）装配回与整文件形状完全一致的 PLAYBOOK 表后再消费。oneOf 表达两种合法片段形状的 XOR：文档头片段（schemaVersion/title/summary/source 四字段齐备，不含 sections）与章节片段（含 sections 数组，不含文档头）——混装或两头皆缺在装载期即被拒（fail-closed）。整文档级保证（15 章不缺不重、章序=叙事序、harness 81 条规则序）不再由 schema 表达，改由拆分脚本断言、manifest 内容寻址与 playtest guide 路径连续守卫。section 的 required 相应放宽为 [id, order]（harness 续片段只携带 id/order/rules）；title/summary/source 等章元数据由「组首片段携带、续片段不含」的拆分纪律保证。$defs 逐字承自 agent-playbook.json。资源只读：装载期快照进 local，handler 闭包消费，不入存档。",
     "type": "object",
     "additionalProperties": false,
-    "required": ["schemaVersion", "title", "summary", "source", "sections"],
+    "oneOf": [
+        {
+            "description": "文档头片段（head.json）：手册元数据四字段齐备。",
+            "required": ["schemaVersion", "title", "summary", "source"]
+        },
+        {
+            "description": "章节片段：至少一章的有序规则集（相邻同 id 的 harness 续片段在装配时按序拼接 rules）。",
+            "required": ["sections"]
+        }
+    ],
     "properties": {
         "schemaVersion": {
             "description": "线格式版本（与 manifest.json 同口径；破坏性改动才递增）。",
@@ -87,10 +96,10 @@
             }
         },
         "section": {
-            "description": "一章规则：标题 + 摘要 + 原子规则集，可附带优先级、规则依据与章节备注。",
+            "description": "一章规则：标题 + 摘要 + 原子规则集，可附带优先级、规则依据与章节备注。片段化后 required 放宽为 [id, order]：harness 续片段只携带 id/order/rules，章元数据由组首片段携带。",
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "order", "title", "summary", "source", "rules"],
+            "required": ["id", "order"],
             "properties": {
                 "id": {
                     "description": "稳定 section id（小写下划线，如 `live_evidence`）：mod.lua 取章节的唯一键，也是阶段呈现的检索面。",

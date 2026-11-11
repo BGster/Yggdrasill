@@ -1,0 +1,192 @@
+{
+  "sections": [
+    {
+      "id": "live_evidence",
+      "order": 8,
+      "title": "6. Layered verification discipline",
+      "summary": "Green unit gates do not prove the game is playable: an iteration point needs a live-chain walk and a round needs a full playthrough; neither may be skipped.",
+      "source": "AGENTS.md §6",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "live.gates-do-not-prove-playable",
+          "modality": "must-not",
+          "text": "A passing unit gate is never evidence that \"the game is playable\" — a gate only proves that no existing assertion broke.",
+          "basis": "AGENTS.md §6"
+        },
+        {
+          "id": "live.iter.kernel-chain",
+          "modality": "must",
+          "text": "At the iteration-point level (before a feature branch merges), a kernel change must pass live-chain verification beyond the gates: the Rust unit tests plus one minimal playable scripted driver (load the sample Mod → advance several events → assert state).",
+          "basis": "AGENTS.md §6 (1)"
+        },
+        {
+          "id": "live.iter.ui-browser-walk",
+          "modality": "must",
+          "text": "A presentation-layer change requires a real browser walk-through with screenshots.",
+          "basis": "AGENTS.md §6 (1)"
+        },
+        {
+          "id": "live.round.full-playthrough",
+          "modality": "must",
+          "text": "At the round level, once a batch of iteration points is merged, play the example game through completely once (after M1 including the AI-generated content loop) and prove every acceptance point item by item.",
+          "basis": "AGENTS.md §6 (2)"
+        },
+        {
+          "id": "live.evidence-per-point",
+          "modality": "must",
+          "text": "Evidence first: a UI conclusion comes with a screenshot, an interface/kernel conclusion comes with command output and the exit code.",
+          "basis": "AGENTS.md §6 (2)"
+        }
+      ]
+    },
+    {
+      "id": "evidence",
+      "order": 9,
+      "title": "7. Evidence first",
+      "summary": "A conclusion may come only from command output and its exit code, from an artifact file, or from the source text you actually read; when unsure, say you are unsure.",
+      "source": "AGENTS.md §7",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "evidence.command-and-exit-code",
+          "modality": "must",
+          "text": "Prove a point with command output and its exit code.",
+          "basis": "AGENTS.md §7"
+        },
+        {
+          "id": "evidence.artifacts",
+          "modality": "must",
+          "text": "Prove a point with an artifact's existence and content (existence plus the key content, not merely \"it was generated\").",
+          "basis": "AGENTS.md §7"
+        },
+        {
+          "id": "evidence.source-lines",
+          "modality": "must",
+          "text": "When quoting source code, give `file:line`.",
+          "basis": "AGENTS.md §7"
+        },
+        {
+          "id": "evidence.no-impression",
+          "modality": "must-not",
+          "text": "Never assert from impression; never write evidence-free completion phrases such as \"I have finished\".",
+          "basis": "AGENTS.md §7"
+        },
+        {
+          "id": "evidence.uncertainty-declared",
+          "modality": "must",
+          "text": "When unsure, say you are unsure and state how it will be verified next.",
+          "basis": "AGENTS.md §7"
+        }
+      ]
+    },
+    {
+      "id": "output",
+      "order": 10,
+      "title": "8. Language and output",
+      "summary": "Chinese conversation, English identifiers; conclusion before evidence; read before editing; print a mechanical rewrite before writing it and read it back afterwards.",
+      "source": "AGENTS.md §8",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "output.language-split",
+          "modality": "must",
+          "text": "Talk to the user in Chinese; keep code, identifiers, paths and commands in their original English.",
+          "basis": "AGENTS.md §8"
+        },
+        {
+          "id": "output.conclusion-first",
+          "modality": "must",
+          "text": "For an error or a conclusion, state the conclusion first and the evidence after it.",
+          "basis": "AGENTS.md §8"
+        },
+        {
+          "id": "output.read-before-edit",
+          "modality": "must",
+          "text": "Read a file before editing it; when editing several files, explain file by file what changed and why.",
+          "basis": "AGENTS.md §8"
+        },
+        {
+          "id": "output.mechanical-rewrite-roundtrip",
+          "modality": "must",
+          "text": "For a large mechanical rewrite (especially Markdown tree structures and tables) print the result first, then write it, then immediately read it back to verify.",
+          "basis": "AGENTS.md §8"
+        }
+      ]
+    },
+    {
+      "id": "pointers",
+      "order": 11,
+      "title": "9. Where to look",
+      "summary": "Pointers only, never copied content — the referenced document owns the text, so a change is maintained in exactly one place.",
+      "source": "AGENTS.md §9",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "pointers.no-duplication",
+          "modality": "must-not",
+          "text": "This chapter (and every other pointer slot) holds pointers only and never copies the text of the document it points at.",
+          "basis": "AGENTS.md §9"
+        },
+        {
+          "id": "pointers.why-pointers",
+          "modality": "must",
+          "text": "The pointer table indexes \"known destinations\": locate the real text through this chapter before acting, and never paraphrase a referenced document from memory.",
+          "basis": "AGENTS.md §9 (why pointers only: the text is maintained in exactly one place)"
+        }
+      ]
+    },
+    {
+      "id": "hard_constraints",
+      "order": 12,
+      "title": "10. Hard constraints of this repository (what not to do)",
+      "summary": "Seven things not to do, each pointing at the chapter that carries the detail — an index-style summary of the hard core, not a second copy of the text.",
+      "source": "AGENTS.md §10",
+      "priority": "critical",
+      "rules": [
+        {
+          "id": "hard.no-credentials-in-repo",
+          "modality": "must-not",
+          "text": "Never write a credential into the repository (including the committed surface of game settings / playbook / experience-growth Mod and evolution output) — the source marks this as the one non-negotiable rule (details in the credentials chapter).",
+          "basis": "AGENTS.md §10 item 1"
+        },
+        {
+          "id": "hard.no-master-development",
+          "modality": "must-not",
+          "text": "Never develop directly on master; master accepts no-FF merges only (details in the branches chapter).",
+          "basis": "AGENTS.md §10 item 2"
+        },
+        {
+          "id": "hard.no-non-master-deploy",
+          "modality": "must-not",
+          "text": "Never deploy non-master content; report and obtain user approval before every deployment (details in the integration chapter).",
+          "basis": "AGENTS.md §10 item 3"
+        },
+        {
+          "id": "hard.no-core-impurity",
+          "modality": "must-not",
+          "text": "Never add a rendering/platform/IO dependency to `ygg-core`; if \"the kernel needs to touch the DOM or the network\" comes up, the layering is broken — take it back to the design layer (details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 4"
+        },
+        {
+          "id": "hard.no-dual-schema-write",
+          "modality": "must-not",
+          "text": "Never write a schema twice: change the resource format contract only in `packages/schema/`, both the Rust and the TS side are subordinate (D11/D15; details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 5"
+        },
+        {
+          "id": "hard.no-subagent-closeout",
+          "modality": "must-not",
+          "text": "Never let a subagent integrate, merge or deploy — the closeout is always executed serially by the main agent (details in the integration chapter).",
+          "basis": "AGENTS.md §10 item 6"
+        },
+        {
+          "id": "hard.decision-change-backfill",
+          "modality": "must",
+          "text": "A decision change must be written back into the `docs/CONTEXT.md` decision table; when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 7"
+        }
+      ]
+    }
+  ]
+}

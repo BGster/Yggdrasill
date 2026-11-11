@@ -1,0 +1,138 @@
+{
+  "sections": [
+    {
+      "id": "evolution",
+      "order": 14,
+      "title": "14. How to propose an evolution (candidate screening · review · scenario first)",
+      "summary": "An end-of-run suggestion passes four gates before it may enter the backlog: long-term priority, a root cause for an unused existing capability, an independent review per item, and scenario before technique; after verify is green, `settlement.evolution` registers the summary and the candidate declaration, and `review.note` only archives it single-source — the state machine checks the declaration's shape, never the quality of the suggestion.",
+      "source": "user decision 2026-11-01 (game-1101-1 settlement review E1)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "evolution.long-term-screen",
+          "modality": "must",
+          "text": "A suggestion entering the backlog must by default be a process mechanism that recurs across tasks: the criteria are \"would this come up again with another requirement / another repository?\" plus \"which action of the next run would it change?\". Execution constraints of a single task, conventions of a temporary tool or a one-off probe, and anything already solved in that same task do not enter by default.",
+          "basis": "user decision 2026-11-01 (game-1101-1 settlement review E1)"
+        },
+        {
+          "id": "evolution.classes",
+          "modality": "must",
+          "text": "Every candidate must be classified into exactly one of six classes and counted: `long_term` (long-term mechanism) / `unused` (existing but unused) / `one_off` (single-task constraint) / `temp_tool` (temporary tool) / `redundant` (redundant, to retire) / `no_scene` (genuinely no scenario). Only long_term, unused and redundant may enter the backlog; the other three are recorded as \"not adopted\" with a stated reason.",
+          "basis": "user decision 2026-11-01 (E1, six classes)"
+        },
+        {
+          "id": "evolution.unused-root-cause",
+          "modality": "must",
+          "text": "\"An existing capability is never called\" may neither be removed outright nor treated as a missing capability: it must be assigned one of six root causes with locating evidence — the call chain is missing or the entry is unreachable / discoverability is poor / the call cost or contract does not fit / the executor knows about it but chooses not to use it / there genuinely is no scenario / the capability is redundant and should be retired.",
+          "basis": "user decision 2026-11-01 (E1, root-cause table)"
+        },
+        {
+          "id": "evolution.review-artifact",
+          "modality": "must",
+          "text": "Every screened candidate (kept or not) leaves a conclusion in the review artifact with four elements: ① the file and line number; ② a command that can be run as written plus its actual output (not \"it was generated\"); ③ the semantic basis (does that behavior match or violate the current contract); ④ the root-cause class and the review conclusion (confirmed / insufficient evidence / does not hold / one-off / deferred).",
+          "basis": "the three elements of the evidence chapter + user decision 2026-11-01 (E1 §4)"
+        },
+        {
+          "id": "evolution.scenario-first",
+          "modality": "must",
+          "text": "The narrative order is fixed: which real problem is being solved → which step of the current process is unsatisfied → the code and reproduction evidence → the root cause → the long-term benefit → the change surface and how it is verified. File paths and technical detail only support it and may never replace the problem statement; the user should never have to ask in order to understand the benefit.",
+          "basis": "user decision 2026-11-01 (E1 §5)"
+        },
+        {
+          "id": "evolution.record-shape",
+          "modality": "must",
+          "text": "After `verify.submit=true`, register with `settlement.evolution`: `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`. The summary is required after trimming; the artifact may be empty, but **when `screened > 0` it must be `artifacts/<file>.md` and `cls` is required**; the six class counts sum to `screened` and the kept classes sum to `kept`; **c=0/0 allows an empty artifact**. Missing c/cls fall back in order to `settings.review.evolution.*` and then to 0/0 with no classes. Under guide you may pre-register with `config.set review.evolution.artifact|summary|candidates|classes=<value>` (shape checked per key, cross-field completeness only at `settlement.evolution`), and the menu builds the payload from it; with no pre-registration it uses the neutral summary plus c=0/0. The optional `sessions=` / `todo=` segments settle the two end-of-run cleanups in the same transaction. `review.note` afterwards accepts only `lesson|score` and archives the four settlement keys single-source into `review.evolution.*`.",
+          "basis": "the settlement.evolution / review.note / config.set contracts (this Mod)"
+        },
+        {
+          "id": "evolution.declare-not-prove",
+          "modality": "must-not",
+          "text": "Never present a registration as proof: the state machine only checks that the summary is non-empty, the path shape, and that the counts and classes are self-consistent — it cannot read the artifact (the sandbox has no filesystem) and does not know whether the review was really performed by an independent subagent. Any claim such as \"the suggestion quality is proven\" or \"the review independence is proven\" is out of bounds.",
+          "basis": "the sandbox allowlist (no io/os) + the settlement.evolution contract"
+        },
+        {
+          "id": "evolution.no-new-carrier",
+          "modality": "must-not",
+          "text": "Never add a second registration entry point, an external checker script or a host change for the evolution flow: the only registration action is `settlement.evolution`, and the only allowed carriers remain AGENTS.md and the Mod resources (`src/**` and `data/*.json`). Read-only queries may be used to check a declaration but may never become the carrier of a constraint.",
+          "basis": "AGENTS.md §1.7"
+        },
+        {
+          "id": "evolution.living-docs-sync",
+          "modality": "must",
+          "text": "Whenever a run evolves domain concepts, state-machine rules, persistent lane semantics, or architectural contracts, `docs/CONTEXT.md` and `docs/DESIGN.md` must be reviewed and updated before `settlement.evolution` and `review.note` close the run.",
+          "basis": "AGENTS.md §2 + docs/{CONTEXT,DESIGN}.md closed loop"
+        }
+      ]
+    },
+    {
+      "id": "tools",
+      "order": 15,
+      "title": "15. External tools (two-layer allowlist)",
+      "summary": "A tool call is a request, never a side effect: the Mod publishes a pending queue in meta.tool_calls, the host executes, and the result comes back as an ordinary tool.result event.",
+      "source": "AGENTS.md §9.1 receipt effect + §9.2 wire contract",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "tools.never-io-in-mod",
+          "modality": "must-not",
+          "text": "The Mod never performs IO on its own: no process, no network, no direct filesystem call. It publishes requests (`meta.tool_calls`), applies results (`tool.result`), and the only file surface it may touch is the host-mediated `ygg.fs` VFS (run-relative, path-jailed): `vfs.write` and the artifact probe. Reading, listing or spawning anything stays host-side.",
+          "basis": "the sandbox allowlist (no io/os/print) + `ygg.fs` is the only host-mediated file surface"
+        },
+        {
+          "id": "tools.allowlist-fail-closed",
+          "modality": "must",
+          "text": "A tool id that is not listed in `data/config.json` `allowedTools` is refused before any row is stored; a missing section allows nothing, and the refusal happens before the id shape is even judged.",
+          "basis": "src/runtime/tools.lua `allowed()` / `request()`"
+        },
+        {
+          "id": "tools.result-idempotent",
+          "modality": "must",
+          "text": "A `tool.result` carrying an `external_id` that was already applied is a replay: narrate `[REPLAY:TOOL]`, change no state and never subtract the pending count twice. A different terminal status for the same call is a conflict, not an overwrite.",
+          "basis": "src/runtime/tools.lua `apply_result()`"
+        },
+        {
+          "id": "tools.receipt-effect-bounded",
+          "modality": "must-not",
+          "text": "The `tools.receipt` effect (`receipt_effect`) may only latch `tool.notified.<call_id>` and narrate one line; it must never render, choose, or touch requirement / proposal / gate / lane / stage state. Domain folding belongs to the separate `tools.reactive` effect (`tools.reactive-effect-scope`).",
+          "basis": "AGENTS.md §9.1 + src/runtime/tools.lua `receipt_effect()`"
+        },
+        {
+          "id": "tools.no-inline-secrets",
+          "modality": "must",
+          "text": "Never inline a credential in a tool declaration or a request: `$ENV{VAR}` placeholders are resolved host-side from the process environment, `<mod_dir>/.env.local` and `<mod_dir>/.env`, and the resolved value never enters a payload, a receipt or a notice — error text names the variable only.",
+          "basis": "AGENTS.md (credentials chapter) + the host `$ENV{}` resolution order"
+        },
+        {
+          "id": "tools.reactive-effect-scope",
+          "modality": "must",
+          "text": "`tools.reactive` folds a settled `tool.result` (status `ok`, code `0`, no `tool.reacted.<call_id>` latch yet) into domain state: it may write `lane.*`, `req.<i>.conflict*`, `artifact.*`, `verify.{passed,report,source}` and `settlement.sessions.*`, and must never render, choose, change the stage, change proposal / gate state, or call `flow.refuse` (a rejection line would be counted by the host as a failed step). An unknown tool id takes no latch and produces no effect.",
+          "basis": "src/runtime/tools.lua `reactive_deps()` / `reactive_effect()` + `REACTORS`"
+        },
+        {
+          "id": "tools.wire-kv-output",
+          "modality": "must",
+          "text": "A built-in tool's stdout is a flat `k=v;` map: a value must never contain `;` or `|` (the host side escapes them to `,` / `/`), and `files` is a comma-separated list. A result truncated by `tuning.tool_output_max` must never feed a set comparison - `lane_probe` reads `tool.<call_id>.truncated` and skips the conflict radar when it is true.",
+          "basis": "src/runtime/tools.lua `output_pairs()` / `parse_result()` + `tool.<call_id>.truncated`"
+        },
+        {
+          "id": "subsystems.machine-evidence-parity",
+          "modality": "must",
+          "text": "Machine evidence (`gate.verify_suite`, `harness.archive_sessions`) writes the same KV as human evidence (`verify.submit`, `settlement.sessions`): same level, not stronger. It only proves \"the suite ran and this output was read\", so `verify.source` / `settlement.sessions.source` must keep the provenance and a report may never claim machine evidence outranks a self-declaration.",
+          "basis": "src/runtime/tools.lua `react_verify_suite()` / `react_archive_sessions()` + `gates.settlement_problem()`"
+        },
+        {
+          "id": "subsystems.probe-is-warning",
+          "modality": "must-not",
+          "text": "`[LANE PROBE FAILED]` (`commits=0` or `clean=0`) is a warning surface: narrate it and keep `lane.<k>.probe.*` queryable, but never wire it into `gates.gate_problem()` - that would deadlock `coordinate.submit` / `review.note` on one dirty tree with no action to undo the probe. The only hard evidence threshold is the accept gate's non-empty `artifacts`.",
+          "basis": "src/runtime/tools.lua `react_probe()` + `src/domain/gates.lua gate_problem()`"
+        },
+        {
+          "id": "subsystems.radar-blocks",
+          "modality": "must",
+          "text": "A conflict raised by the conflict radar must go through `proposal.req_do_conflict` (the very same function as the human `requirement.conflict`), so it automatically lands in `req_conflict_total` and blocks both dispatch and closing. Only `requirement.resolve` clears it.",
+          "basis": "src/runtime/tools.lua `radar_raise()` + `src/domain/proposals.lua req_do_conflict()`"
+        }
+      ]
+    }
+  ]
+}

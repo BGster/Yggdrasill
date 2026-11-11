@@ -19,7 +19,27 @@ for _, id in ipairs({ "flow", "requirements", "lanes", "map-guide", "settlement"
 end
 
 local CONFIG = ygg.data("ygg:agent/config")
-local PLAYBOOK = ygg.data("ygg:agent/playbook")
+local PLAYBOOK = ygg.data("ygg:agent/playbook")    -- head：schemaVersion/title/summary/source
+PLAYBOOK.sections = {}
+for _, id in ipairs({
+  "ch1-foundation", "ch2-delivery", "ch3-evidence",
+  "ch4-harness-1-state-gates", "ch4-harness-2-drive-actions",
+  "ch4-harness-3-closeout-registries", "ch4-harness-4-inbox-coordination",
+  "ch4-harness-5-views-settlement", "ch4-harness-6-mod-engineering",
+  "ch4-harness-7-host-contract", "ch5-evolution-tools",
+}) do
+  local fragment = ygg.data("ygg:agent/playbook/" .. id)
+  for _, section in ipairs(fragment.sections) do
+    local last = PLAYBOOK.sections[#PLAYBOOK.sections]
+    if last ~= nil and last.id == section.id then
+      for _, rule in ipairs(section.rules) do
+        last.rules[#last.rules + 1] = rule
+      end
+    else
+      PLAYBOOK.sections[#PLAYBOOK.sections + 1] = section
+    end
+  end
+end
 
 local util = require("src.util")
 local config = require("src.config")

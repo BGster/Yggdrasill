@@ -1,0 +1,224 @@
+{
+  "sections": [
+    {
+      "id": "credentials",
+      "order": 1,
+      "title": "1. Credentials and the data red line",
+      "summary": "Highest priority, non-negotiable: credentials never enter the repository or any conversation artifact; the committed surface (game settings / playbook / experience-growth Mod / evolution output) is equally off limits for sensitive values, and every example uses synthetic data.",
+      "source": "AGENTS.md §1",
+      "priority": "critical",
+      "rules": [
+        {
+          "id": "credentials.no-secret-in-repo",
+          "modality": "must-not",
+          "text": "Never write a credential, key or token into the repository — including code, documentation, commit messages and Mod example data.",
+          "basis": "AGENTS.md §1"
+        },
+        {
+          "id": "credentials.no-secret-in-artifacts",
+          "modality": "must-not",
+          "text": "Never write a credential into any conversation artifact: reports, summaries, issue/PR descriptions, pasted log excerpts.",
+          "basis": "AGENTS.md §1"
+        },
+        {
+          "id": "credentials.no-secret-in-committed-resources",
+          "modality": "must-not",
+          "text": "No sensitive information may enter a committed resource — the committed surface explicitly includes: game settings `data/config.json`, this playbook `data/playbook/`, the experience/growth (evolution) Mod and its output, and every other Mod resource or document committed with the repository.",
+          "basis": "user decision 2026-10-29 (s1 addition, not in the original AGENTS.md)"
+        },
+        {
+          "id": "credentials.settings-not-a-secret-vault",
+          "modality": "must",
+          "text": "The runtime KV family `settings.*` is no exception for sensitive values: the static defaults (`data/config.json`) and the dynamic overrides (`settings.*` written by `config.set`) only ever hold non-sensitive behavior switches, numbers and experience text (such as `evolution.mode` / `gates.require_all_green` / `evolution.max_per_run`).",
+          "basis": "docs/CONTEXT.md §5 (user decision added 2026-10-29)"
+        },
+        {
+          "id": "credentials.secret-values-local-only",
+          "modality": "must",
+          "text": "Sensitive values — LLM API keys, tokens, database/object-storage connection strings, subagent model parameters (`YGG_SUBAGENT_*`) — live only in the local `.env` / `.env.local` (both git-ignored) and in no other file.",
+          "basis": "user decision 2026-10-29 (s1 addition); AGENTS.md §1 rule 1, §3 dispatch discipline 2"
+        },
+        {
+          "id": "credentials.mod-and-report-keys-only",
+          "modality": "must",
+          "text": "Mod resources and reports may show key names only (such as `YGG_LLM_*`, `YGG_SUBAGENT_MODEL`), never values — including narrative text, `beats`/`prompts`, the closing review and any walk report.",
+          "basis": "user decision 2026-10-29 (s1 addition); AGENTS.md §1 rule 2"
+        },
+        {
+          "id": "credentials.evolution-output-not-exempt",
+          "modality": "must-not",
+          "text": "End-of-run evolution output (suggestion text, the review artifact, and any resource edit made from it) also counts as committed surface: never write a sensitive value into a Mod or a report as \"accumulated experience\".",
+          "basis": "user decision 2026-10-29 (s1 addition); `data/config.json` evolution.allow_paths"
+        },
+        {
+          "id": "credentials.env-file",
+          "modality": "must",
+          "text": "Local development credentials always go through `.env` / `.env.local` (both git-ignored, mode 600); `.env.example` carries key names only, never values.",
+          "basis": "AGENTS.md §1 rule 1"
+        },
+        {
+          "id": "credentials.keys-only",
+          "modality": "must",
+          "text": "Reports, documentation, commit messages and Mod example data show key names only, never values.",
+          "basis": "AGENTS.md §1 rule 2"
+        },
+        {
+          "id": "credentials.synthetic-data",
+          "modality": "must",
+          "text": "Examples and test data are always synthetic; never introduce real personal data.",
+          "basis": "AGENTS.md §1 rule 3"
+        },
+        {
+          "id": "credentials.breach-disclosure",
+          "modality": "must",
+          "text": "After a violation, list honestly what was exposed (the specific file plus the content location), without downplaying or arguing; then stop the affected operations and wait for the user.",
+          "basis": "AGENTS.md §1 rule 4"
+        }
+      ]
+    },
+    {
+      "id": "repository",
+      "order": 2,
+      "title": "2. Repository shape",
+      "summary": "A Rust five-crate workspace plus pnpm packages, a Godot client and the in-repo .ygg harness; three shape invariants: a single source for decisions, a single source for schemas, and a zero-dependency core.",
+      "source": "AGENTS.md §2",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "repository.vision-single-source",
+          "modality": "must",
+          "text": "The decision table in `docs/CONTEXT.md` is the single source of truth for project decisions; any new decision produced by a design discussion (D11+) must be written back into that table.",
+          "basis": "AGENTS.md §2 (constraint 1)"
+        },
+        {
+          "id": "repository.decision-conflict-is-defect",
+          "modality": "must-not",
+          "text": "An implementation that conflicts with the decision table is a defect: never let a decision drift silently on the grounds that \"the implementation is already done\".",
+          "basis": "AGENTS.md §2 (constraint 1)"
+        },
+        {
+          "id": "repository.schema-single-source",
+          "modality": "must",
+          "text": "Resource format contracts live only in `packages/schema/schemas/` (D15): the TS side (ajv) and the Rust side (jsonschema crate) read the same file, and neither side may keep an inline copy.",
+          "basis": "AGENTS.md §2 constraint 2; docs/CONTEXT.md D15/D20"
+        },
+        {
+          "id": "repository.schema-does-not-constrain-lua",
+          "modality": "must-not",
+          "text": "A schema constrains the resource file format, not Mod logic — the executable interface of a Mod is a Lua script (D11).",
+          "basis": "AGENTS.md §2 constraint 2"
+        },
+        {
+          "id": "repository.core-purity",
+          "modality": "must-not",
+          "text": "`crates/ygg-core` has a zero-dependency invariant: no internal module, no DOM/platform API, no rendering library; the allowlist is serde / serde_json / thiserror only.",
+          "basis": "AGENTS.md §2 constraint 3; docs/CONTEXT.md §3 & §4"
+        },
+        {
+          "id": "repository.vm-dependency-location",
+          "modality": "must",
+          "text": "VM dependencies such as mlua may appear only in `crates/ygg-sandbox` (D12).",
+          "basis": "AGENTS.md §2 constraint 3; docs/CONTEXT.md D12"
+        },
+        {
+          "id": "repository.dependency-direction",
+          "modality": "must",
+          "text": "Dependency direction is one-way: `ygg-sandbox` → `ygg-core` + `ygg-schema`; `ygg-wasm` → `ygg-sandbox`; `ygg-lint` has no ygg-* kernel dependency; `ygg-schema` and `ygg-core` have no code dependency edge.",
+          "basis": "docs/CONTEXT.md §4 (inter-module dependency constraints); the Cargo.toml header note of each crate"
+        }
+      ]
+    },
+    {
+      "id": "branches",
+      "order": 3,
+      "title": "3. Branch management",
+      "summary": "master is the only trunk and accepts merges only; all development happens on feature branches; every merge is no-FF.",
+      "source": "AGENTS.md §3 (branch model)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "branches.no-direct-master-work",
+          "modality": "must-not",
+          "text": "Never develop directly on master; master accepts merges only.",
+          "basis": "AGENTS.md §3 (branch model)"
+        },
+        {
+          "id": "branches.feature-naming",
+          "modality": "must",
+          "text": "All work (documentation included) happens on a feature branch named `feature/<topic>` or `docs/<topic>`.",
+          "basis": "AGENTS.md §3 (branch model)"
+        },
+        {
+          "id": "branches.no-ff-merge",
+          "modality": "must",
+          "text": "Every branch merge (feature → integration → trunk) uses `git merge --no-ff`; fast-forward is forbidden.",
+          "basis": "AGENTS.md §3 (no-FF invariant)"
+        },
+        {
+          "id": "branches.merge-node-is-rollback-anchor",
+          "modality": "must",
+          "text": "Keep the merge node so an iteration batch (such as `v<date>.<n>`) stays traceable in the history graph and can be rolled back as a whole — that is the purpose of no-FF, not a style preference.",
+          "basis": "AGENTS.md §3 (no-FF invariant)"
+        },
+        {
+          "id": "branches.integration-branch-reserved",
+          "modality": "should",
+          "text": "The integration branch `develop/yggdrasill` is reserved: enable it once there are many iterations and parallel lanes; before that, feature branches merge into master directly.",
+          "basis": "AGENTS.md §3 (branch model)"
+        },
+        {
+          "id": "branches.push-after-verify",
+          "modality": "must",
+          "text": "Push a feature branch to origin once its verification passes (for collaboration and backup).",
+          "basis": "AGENTS.md §3 (push discipline)"
+        },
+        {
+          "id": "branches.pr-and-merge-user-triggered",
+          "modality": "must-not",
+          "text": "Opening a PR and merging into master are triggered explicitly by the user; the agent never starts them on its own.",
+          "basis": "AGENTS.md §3 (push discipline)"
+        }
+      ]
+    },
+    {
+      "id": "lanes",
+      "order": 4,
+      "title": "3b. Lane worktrees",
+      "summary": "One worktree and one `.lane` plaque per lane; occupy means plaque up, close means plaque down, and a worktree is never shared.",
+      "source": "AGENTS.md §3 (lane worktrees)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "lanes.path-convention",
+          "modality": "must",
+          "text": "Lane worktrees use the conventional path `~/tmp/worktrees/yggdrasill-<n>` and sit detached at the `origin/master` head while idle.",
+          "basis": "AGENTS.md §3 (lane worktrees)"
+        },
+        {
+          "id": "lanes.plaque-file",
+          "modality": "must",
+          "text": "Every lane worktree keeps a `.lane` file at its root (never committed): `LANE_OCCUPIED=true|false` plus `LANE_TASK` / `LANE_BRANCH` / `LANE_SINCE`.",
+          "basis": "AGENTS.md §3 (plaque mechanism)"
+        },
+        {
+          "id": "lanes.check-before-dispatch",
+          "modality": "must",
+          "text": "Always read `.lane` before dispatching: `LANE_OCCUPIED=true` means pick another lane or wait for the release; a missing file counts as free but the plaque must then be created.",
+          "basis": "AGENTS.md §3 (plaque mechanism 1)"
+        },
+        {
+          "id": "lanes.occupy-and-release",
+          "modality": "must",
+          "text": "Occupying means plaque up; closing means plaque down — once the task is merged or abandoned, set `LANE_OCCUPIED` back to false and clear the task fields.",
+          "basis": "AGENTS.md §3 (plaque mechanism 2)"
+        },
+        {
+          "id": "lanes.no-sharing",
+          "modality": "must-not",
+          "text": "Two tasks may never share one worktree; before dispatching, `git status` must be clean (except `.lane`).",
+          "basis": "AGENTS.md §3 (plaque mechanism 3)"
+        }
+      ]
+    }
+  ]
+}

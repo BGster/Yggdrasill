@@ -42,7 +42,7 @@ fn repo_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// The instance this project actually loads (`data/texts/` fragments and `data/playbook.json`
+/// The instance this project actually loads (`data/texts/` and `data/playbook/` fragments
 /// are this project's field surface).
 fn project_mod_dir() -> PathBuf {
     repo_dir().join(".ygg/mods/pi-agent-seed")
