@@ -80,7 +80,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 **禁止第五种**：`dest` 非空但**没有任何 harness 认领**（典型形态：在 DeepSeek Harness 局里出现 `dest=~/.pi/agent/sessions-trash/<batch>`）。那条路径确实存在，但它归档的不是本局会话——把它写成「查空了」就是谎报。识别完全在扩展侧，不需要新契约：`dest` 的 trash 根必须落在**本局声明的 adapter** 对应的根下（`archive.ts` 的 `FOREIGN_SESSION_ROOTS` + 可选的 `destRoot`）。默认判据是「宁可说没查，不谎报查空了」。
 
-> **给宿主维护者的一句话**：要让 `archive-sessions` 真正覆盖未知 harness，需要在 `agent.rs` 增加第五个适配器及其会话库约定。本仓库把 `crates/ygg-sandbox/examples/agent.rs` 当红线，所以这里只保证**不谎报**，不自行修改宿主。
+> **给宿主维护者的一句话**：要让 `archive-sessions` 真正覆盖未知 harness，需要在 `agent.rs` 增加第五个适配器及其会话库约定。本仓库把 `crates/ygg-sandbox/examples/agent/main.rs` 当红线，所以这里只保证**不谎报**，不自行修改宿主。
 
 ---
 
@@ -211,7 +211,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 | 层 | 载体 | 值域 | 权威来源 | 职责边界 |
 | --- | --- | --- | --- | --- |
 | **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 34 个事件名（全集见本节末注，payload 位次见 §3.3） | Mod（`.ygg/mods/pi-agent-seed/src/**`、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
-| **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/agent.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
+| **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/agent/main.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
 | **L3 `action`** | `ygg_session` 工具的 `action` 参数（`StringEnum`） | `kickoff` / `dispatch` / `approve_gate` / `reject_gate` / `vfs_write` / `vfs_read` / `vfs_list` / `handoff_compact` / `settle_close`（9 个） | Layer 2 适配器（`.pi/extensions/ygg-pi-harness`） | **面向模型/人的语义入口**：它只决定「用哪个动词说出意图、由谁拼 payload」，**不决定状态**。值域随适配器可变，**不是**跨 harness 契约。 |
 
 一句话边界：**`event` 决定状态能不能变；`op` 决定旁路能力能不能用；`action` 只决定模型怎么用一句话说出它想干什么。** 因此 `action` 的值域永远可以变，`event` 与 `op` 的值域基本不能变——重叠发生在哪一层，就只在哪一层可能是冗余。
@@ -348,6 +348,101 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
   - `ratio >= 0.75` $\to$ `hard_brake`（不再派生新子代理；立即写交接并压缩）
 - **稳定检查点谓词**：仅当 `summary.available == true` $\land$ `pendingTools == 0` $\land$（`gates.length > 0` $\lor$ `jobs.length == 0` $\lor$ `conflicts.length > 0`）时才允许压缩，除非经 `handoff_compact` 显式强制。
 - **交接产物（`artifacts/handoff-latest.md`）**：在压缩前持久化进 `run.sqlite` VFS 并在压缩后重新注入，包含运行 ID、阶段、token 比例、任务表（含 `executor` / `planExecutor`）、待决门禁、未解决冲突、VFS 产物清单，以及精确的下一步 `ygg_session` / `ygg_run_lanes` 命令。
+
+---
+
+### 3.7 serve 观察面契约（只读观察台 + 两级列表 + mod 面板 iframe 托管）
+
+> r8 · rev2。`serve` 是继单发 `--event` / 交互 / `--daemon` 之后的**第四模式**（加性）。
+> 不改既有单发 CLI 与 daemon 的任何行为；面板默认只读，gate/accept 类人类门禁
+> （`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note`）
+> 在 serve 面上**不存在写路径**——路由表只登记 GET，非 GET 一律 `405`（物理不可绕过），
+> 人类门禁仍走 CLI 票据 / 适配器路径。
+
+#### 3.7.1 CLI 形态
+
+```text
+agent [--runs-root <目录>] serve [--port <1..65535>] [--panel-dir <目录>] [--poll-ms <ms>]
+```
+
+- `--runs-root` 缺省 `runs`；目录不存在 → 报错退出 1（fail-closed，不自动创建）。
+- `--port` 缺省 7800；恒绑定 **`127.0.0.1` 常量**（无旗标）；被占用 → 报错退出 1（不自动递增）。
+- `--poll-ms` 缺省 700，钳制 [200, 5000]（watcher 变更检测周期）。
+- `--panel-dir`：内置两级列表页的盘上覆盖（开发期改 HTML 刷新即生效；缺失文件 404）。
+- 与其它全部模式互斥（`usage_error`，退出 2）；`--run-id` / `--mod` / `--store` 不存在
+  （观察单位 = runs-root，不绑定单局、不装 Mod）。
+- 先起 serve 再开局**合法**（一级列表动态出现新局）；局收口后继续提供终局数据；
+  run 目录被外部删除 → 相关 API 404 + watcher 摘除，serve 不退出。
+
+#### 3.7.2 三级形态与宿主/mod 边界
+
+| 级 | 归属 | 内容 | 数据源 |
+| --- | --- | --- | --- |
+| 一级：正在运行的游戏 | egg 原生 | runs 枚举 | runs-root 扫描 + 存储探针 |
+| 二级：局内存档 | egg 原生 | 该 run 的存档列表 | `ygg_store::observe` 只读观察面 |
+| 三级：存档视图 | **mod 自行维护** | mod 自带 UI | 存档数据 API（裸数据） |
+
+宿主对第三级**仅托管静态文件 + 裸数据 API**，零解析零渲染任何 mod 领域语义（P11）。
+
+#### 3.7.3 API 契约总表（全部 GET；非 GET → 405；未知路径 → 404）
+
+| 路由 | 语义 | 响应形状（关键字段） |
+| --- | --- | --- |
+| `GET /` | 内置两级列表页 `index.html` | text/html |
+| `GET /assets/<name>` | 内置页静态资产（白名单 `app.js` / `style.css`） | 按扩展名映射 + nosniff |
+| `GET /api/runs` | **第一级**：runs 枚举 | `{version, generatedAt, runsRoot, truncated?, runs:[{runId, meta:<run.json 原样>, coord:<原样\|null>, backend, probe:{generation,latestId,latestCreatedAt,count}, panel:{available,url?,reason?}, metaError?}]}`（updated_at 降序；封顶 200） |
+| `GET /api/runs/<id>/saves?limit=` | **第二级**：存档列表 | `{runId, backend, generation, saves:[{id,generation,seq,createdAt,bytes,latest}], panel:{available,url?}}`（limit 缺省 50 封顶 200；JSON 局恒单行 `latest`——单档后端的物理事实） |
+| `GET /api/runs/<id>/saves/<sid>` | **存档数据 API**：原始快照字节 | `200 application/json` + `X-Ygg-Run/X-Ygg-Save-Id/X-Ygg-Generation/X-Ygg-Seq/X-Ygg-Created-At/X-Ygg-Bytes`；body = 存档原字节（零包装零重序）；`sid` ∈ `latest \| [0-9]+`（否则 400） |
+| `GET /api/runs/<id>/events?since=&limit=` | 事件日志分页（seq 升序） | `{runId, generation, latest, since, records:[{seq,event,payload,ok,timestamp,ending}]}`；`limit` 缺省 200 封顶 500；`payload` 原文透传（`actor=`/`actor_session=` 段随 r3 自动出现） |
+| `GET /api/runs/<id>/artifacts` | 当前代制品元信息 | `{artifacts:[{path,bytes,sha256,updatedAt}]}`（path 升序） |
+| `GET /api/runs/<id>/artifacts/<path..>` | 制品原文 | 原字节（`validate_artifact_path` 门复用；读侧封顶 1 MiB → 413） |
+| `GET /api/stream` | SSE 变更流 | `text/event-stream`（§3.7.5） |
+| `GET /panel/<run-id>/[rel]` | mod 面板托管 | 文件字节（§3.7.4；未声明/不可达 → 404 JSON 带 reason） |
+
+错误统一 `{"ok":false,"error":{"code":…,"message":…}}`；响应一律 `Cache-Control: no-store` +
+`X-Content-Type-Options: nosniff`。
+
+#### 3.7.4 pack.json `panel` 段契约（挂进 §3.2 的 pack.json 契约旁）
+
+- 声明：`"panel": { "entry": "panel/index.html" }`（**可选顶层段，v1 全部面 = 单字段 `entry`**；
+  未来字段只能向后兼容式增量）。语法门 = 不以 `/` 开头、不含 `..`、以 `.html` 结尾；
+  违规 → `panel.available=false` + 具体reason，**不是装载错误**（面板声明损坏不能炸 mod 装载）。
+- 兼容性：pack.json 解析是宽松 Value 读取，旧宿主忽略未知顶层段；旧 mod 无段 → serve 侧
+  `panel.available=false`（降级矩阵五态见实现测试）。面板文件**不进** `entries[]`（内核资源面）
+  也**不进** `watched_files`（签名/热载面）——改面板刷新浏览器即生效。
+- 托管：运行期现读 + 双守卫（`canonicalize` + 前缀校验，拦 `..` 穿越与 symlink 逃逸）。
+- **信任模型（诚实声明）**：mod 面板 JS 与内置页同源（127.0.0.1 同端口）执行，信任级别 = mod
+  本身（mod 代码本就持 daemon 工具执行权限）。serve 不消毒不沙箱；防护边界 = 路径双守卫 +
+  只读 + localhost 绑定 + nosniff。
+- **宿主不提供 SDK/桥**：mod UI 的取数契约 = 同源 `fetch('/api/runs/<id>/saves/<sid>')`（`X-Ygg-*`
+  头带元数据）+ `fetch('/api/runs/<id>/events?since=..')` + `new EventSource('/api/stream')`
+  （过滤 `frame.run === 本局` 后自行重取）。iframe 传参 = query（`?save=<sid>`，可收藏可刷新）。
+
+**内核存档信封（mod UI 作者依赖面）**：存档本体 = `{engine_version, entities, format_version,
+kv:{entries,revision}, pending_choice}`。mod 自己的状态在 `kv.entries`；`format_version` 判版本。
+`meta.summary`（`contract.summaryEvent` 派发面）是**内存态派生产、不持久化**——serve 不装载内核故
+不供；需要 profiles 的 mod UI 应从自己的存档状态取数（mod 自己写入 kv 的注册表副本）。
+
+#### 3.7.5 SSE 帧协议
+
+- 单一端点 `/api/stream`；watcher 是唯一变更源（轮询 runs-root：名单比对 + 每 run 的
+  run.json/coordination.json stat + `save_probe`）。检测到变更 → 全局 `version += 1` → 广播。
+- 帧：`event: change` + `data: {"version":<n>,"run":"<runId>"}`（根级变更 `"run":null`）。
+  **没有数据载荷**——客户端收帧后重取自己正在看的端点；每 poll 每 run 至多一帧（天然合流）。
+- 保活：`: ping` 每 15s；断线自动重连 + `onerror` 降级 2s 轮询（同一批 API）。无
+  `Last-Event-ID`（变更帧无连续性语义）。通知 ≤ 一个 poll 周期（最终一致通知，读恒为当下事实）。
+
+#### 3.7.6 安全边界与线程模型
+
+- 绑定 `127.0.0.1` 常量（单测断言字面量）；GET-only（非 GET → 405，请求体不读）；无凭据面；
+  解析健壮性（32 KiB 头上限 / 5s 超时 / 64 连接封顶超出 503 / 路径白名单 / query 数值钳制 /
+  run-id 语法门）；无 CORS 头；`/panel` 双守卫 + nosniff；观察面零写（`query_only` + 无 migrate +
+  先探测后连接，`observe_creates_nothing` / `observe_writes_nothing` 测试锁）。
+- **零内核**：serve 不装载 ModBundle/kernel/mlua、不构造 `Session`——数据面只剩文件 stat 与轻量
+  SQL（毫秒级），发布/订阅快照机制失去存在理由；mlua 非 Send 约束以「进程无 Lua」最强成立。
+  物理锁：`serve_source_has_no_write_path`（生产面源扫描禁写路径）。
+- 线程编排：主线程 accept（每连接一线程，封顶 64）；watcher 线程纯变更检测；SSE 每连接
+  `wait_timeout` 等广播。唯一共享可变状态 = `version` 广播对（Mutex + Condvar）。
 
 ---
 

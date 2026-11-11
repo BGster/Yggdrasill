@@ -95,8 +95,8 @@ Yggdrasill/
 │   ├── ygg-core/        # 纯确定性内核：实体表、事件总线、迁移驱动器（零内部依赖；仅 serde/serde_json/thiserror）
 │   ├── ygg-modules/     # 纯多文件 Lua 模块路径解析与副作用禁用清单（零依赖叶 crate）
 │   ├── ygg-schema/      # Manifest SHA-256 内容寻址与 JSON Schema 校验（仅依赖 ygg-core）
-│   ├── ygg-store/       # 运行持久化端口：SQLite 默认（run.sqlite + VFS）与遗留 JSON 后端（仅作为 ygg-sandbox 示例的 dev 依赖）
-│   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、ygg-agent 宿主 CLI
+│   ├── ygg-store/       # 运行持久化端口：SQLite 默认（run.sqlite + VFS）与遗留 JSON 后端（仅作为 ygg-sandbox 示例的 dev 依赖）；observe.rs = serve 只读观察面
+│   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、宿主 CLI（examples/agent/，含 serve.rs 只读观察台与 assets/panel 内置两级列表页）
 │   ├── ygg-lint/        # 静态 AST 检查器（full_moon）：YGG-R1/R2/R3、YGG-MOD-EFFECT、YGG-PARSE（仅依赖 ygg-modules，零内核/VM 依赖）
 │   └── ygg-wasm/        # 浏览器 WebAssembly 绑定（wasm-bindgen 薄壳，位于 ygg-core + ygg-sandbox 之上）
 ├── packages/
@@ -121,7 +121,7 @@ Yggdrasill/
 - `ygg-core` 只能依赖 `serde`、`serde_json` 与 `thiserror`。任何 VM、Schema 校验器、I/O 或平台 API 都不得进入 `ygg-core`。
 - `ygg-modules` 是被 `ygg-sandbox` 与 `ygg-lint` 共享的零依赖叶 crate。
 - `ygg-lint` 绝不依赖 `ygg-core`、`ygg-schema` 或 `ygg-sandbox`（保证静态 AST 检查快速且免去 `mlua` 编译）。
-- `ygg-store`（及 `rusqlite`）只被原生宿主 CLI（`crates/ygg-sandbox/examples/agent.rs`，经 `[dev-dependencies]`）链接，确保 `ygg-wasm` 与 `ygg-lint` 的依赖树 100% 不含 SQLite 与文件系统依赖。
+- `ygg-store`（及 `rusqlite`）只被原生宿主 CLI（`crates/ygg-sandbox/examples/agent/main.rs`，经 `[dev-dependencies]`）链接，确保 `ygg-wasm` 与 `ygg-lint` 的依赖树 100% 不含 SQLite 与文件系统依赖。
 
 ---
 
@@ -165,3 +165,5 @@ Yggdrasill/
 | **D-MA7** | 通用治理引擎适配器（`subagentAction`） | Mod 计算 `summary.jobs[i].subagentAction`（`subagent.spawn` / `subagent.resume`），携带渲染后的 brief（`data/scenes.json` 模板）与实时的 `worktreeStatus` / `subagentStatus` / `probeStatus`，使 `.pi/extensions/ygg-pi-harness`（或 Claude Code / Codex / Cursor 适配器）能充当薄执行壳。 | 已确认 |
 | **D-MA8** | 活文档整合 | 将所有架构、领域与契约文档整合进 `docs/CONTEXT.md`（领域与决策）与 `docs/DESIGN.md`（系统行为与接口契约），通过子代理 brief 中的强制必读引用与最终审查时的同步检查来执行。 | 已确认 |
 | **D-MA9** | 动作面三层分层（`event` / `op` / `action`） | **取向：部分收敛（Partial Convergence）。** `event` 是状态推进的唯一货币（34 个），`op` 是状态之外的宿主端口（8 个），`action` 是适配器的语义入口（9 个，值域随 harness 可变）。**禁止把 `action` 理解为 `event` 的第二份清单**：9 个 `action` 里只有 `approve_gate` / `reject_gate` 与 `event` 重叠，且是**有意保留的位次正确性别名**（`reqId` 必填可防「批错需求」，判据为「能防止一类可命名的 payload 错位才配拥有别名」）；`vfs_write` 与 `event=vfs.write` **语义不等价**（事件路径有阶段守卫、64 KiB 上限、`artifact.*` 台账与 `[VFS LEDGER ONLY]` 降级，`op=vfs_put` 全都没有），故不得互替；`kickoff` / `settle_close` 是多步编排（顺序契约在适配器侧），`dispatch` 是唯一的事件直通口。零增量同义别名（原 `step`）**已从值域退场**，不做兼容残留。`dispatch` **不得附带压缩等回合后动作**：压缩只经 `action=handoff_compact` 与 `ygg_run_lanes` 编排层刹车两个显式入口。契约正文见 `docs/DESIGN.md` §3.4。 | 已确认 |
+
+| **D-MA10** | serve 只读观察台（r8） | 第四宿主模式：`agent [--runs-root] serve [--port] [--panel-dir] [--poll-ms]`，恒绑 `127.0.0.1:7800`。**三级形态**：① runs 列表（egg 原生）② 局内存档列表（egg 原生，`ygg-store::observe` 只读面）③ 存档视图 = mod 自带 UI（iframe 托管，宿主零解析零渲染，P11）。**零内核**：serve 不装 ModBundle/kernel/mlua、不构造 Session，数据面即时读（文件 stat + 轻量 SQL）；watcher 是纯变更检测器 → `version` 自增 → SSE 通用变更帧 `{version,run}`（无数据载荷，客户端重取自己看的端点；`: ping` 15s 保活，断线降级 2s 轮询）。**裸数据透传**：run.json/coordination.json 原样、存档原字节 + `X-Ygg-*` 头、events `payload` 原文（actor 段随 r3 自动出现，宿主不另盖章）。**panel 段契约**：pack.json 可选顶层 `{"panel":{"entry":"panel/index.html"}}`（宽松解析双向兼容；语法门违规降级不炸装载；面板不进 entries/watched_files）；`/panel` 双守卫（canonicalize+前缀，拦穿越与 symlink 逃逸）。**门禁不在线上**：路由表只登记 GET，人类门禁（proposal.accept/gate.approve/coordinate.submit/verify.submit/review.note）在 serve 面无写路径，仍走 CLI 票据。契约正文见 `docs/DESIGN.md` §3.7。 | 已确认 |

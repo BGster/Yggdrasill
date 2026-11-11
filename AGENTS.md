@@ -14,6 +14,11 @@ directories (`ls` / `stat` / `find` / `du` / `wc` — row counts, column names a
 classified as the values). Verifications that need real data are run by the user, who pastes the
 output back; synthetic data generated under `/tmp` is unrestricted.
 
+0b. **serve is read-only**: the `serve` mode (r8) exposes exactly the GET-only HTTP
+    observation plane (`docs/DESIGN.md` §3.7). It must never gain a write endpoint — the
+    human gates (`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit`
+    / `review.note`) have **no online path** and are still ticketed through the CLI/daemon.
+    All state writes go exclusively through the single-shot CLI / interactive / daemon modes.
 1. **Every in-run artifact must be carried by an event first**: before writing a file, changing code
    or producing a deliverable with a command, an event must bring it into the state machine
    (`requirement.dispatch` → proposal → gate). **The verdict looks at events, not at where the bytes
@@ -56,7 +61,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      discipline is **immersive play first** — one real action per turn, read the full receipt, then
      decide.
      Three-question criterion (see 7): ① which action does it block? (any argument that a batch
-     entrypoint should be added to `crates/ygg-sandbox/examples/agent.rs` or wrapped by a script);
+     entrypoint should be added to `crates/ygg-sandbox/examples/agent/main.rs` or wrapped by a script);
      ② what does a violation look like? (a run whose events were produced without a receipt review,
      or a document that suggests `--events` / a batch loop); ③ how do you confirm it next time?
      (`grep -n '\-\-events' AGENTS.md README.md .ygg/mods/pi-agent-seed/README.md` finds nothing outside
@@ -80,7 +85,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      self-written checker that you will bypass in the same way. Scripts may only perform **read-only
      queries** (`requirement.list`, `map.show`, read-only statistics over `events.jsonl`) and **may
      not become the carrier of a constraint**.
-   - **Never patch the ygg-agent CLI source** (`crates/ygg-sandbox/examples/agent.rs` and the host
+   - **Never patch the ygg-agent CLI source** (`crates/ygg-sandbox/examples/agent/main.rs` and the host
      contract). The CLI is a non-negotiable host, not an implementation surface of this repository.
      If a capability gap genuinely must be solved in the host, describe the symptom and the
      reproduction and hand it to the user; never patch it yourself.
@@ -279,8 +284,8 @@ Changing `crates/**` (state machine, driver, host persistence surface) requires 
 missing one is a fake green:
 `cargo test --workspace` ∧ `cargo test --example agent -p ygg-sandbox` ∧
 `cargo test -p ygg-sandbox --test agent_seed_semantics`.
-The second one cannot be skipped: Cargo's `--workspace` **does not compile the example target's unit
-tests**, so the assertions inside `crates/ygg-sandbox/examples/agent.rs` (persistence atomicity,
+The second one cannot be skipped (the `agent` example target's name — and therefore the gate command — is unchanged by the r8 `examples/agent/` directory migration): Cargo's `--workspace` **does not compile the example target's unit
+tests**, so the assertions inside `crates/ygg-sandbox/examples/agent/main.rs` (persistence atomicity,
 reset semantics, hot reload, settlement policy) **never execute** when you only run the workspace,
 and the gate still prints `failed=0`.
 Three-question criterion (see 7): ① which action does it block? ("run only `cargo test --workspace`
@@ -327,7 +332,7 @@ so the KV and the narration agree on both host shapes.
 ## 2. Cold start
 
 ### Build and install
-The CLI has a single source: `crates/ygg-sandbox/examples/agent.rs` (the host itself,
+The CLI has a single source: `crates/ygg-sandbox/examples/agent/main.rs` (the host itself,
 contract-driven and fail-closed):
 
 ```bash
@@ -369,6 +374,14 @@ are git-ignored, `.ygg/mods/` is committed.
 ```bash
 .ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
 ```
+
+### Serve（只读观察台，r8）
+```bash
+cargo build --release --example agent -p ygg-sandbox                                   # 先构建
+.ygg/bin/ygg-agent --runs-root .ygg/runs serve                                          # 起服（默认 127.0.0.1:7800；Ctrl-C 停服）
+.ygg/bin/ygg-agent --runs-root .ygg/runs serve --port 7801 --poll-ms 300               # 换端口/加快变更检测
+# 面板：http://127.0.0.1:7800/（一级 runs 列表 → #/runs/<id> 二级存档列表 → mod 面板 iframe）
+# 契约与安全边界见 docs/DESIGN.md §3.7；serve 只读：gate/accept 类人类门禁不在线上，仍走 CLI 票据。
 
 ### Continue
 ```bash
