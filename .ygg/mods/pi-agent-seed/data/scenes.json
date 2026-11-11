@@ -3,21 +3,21 @@
     "prologue": "[BOOT · engine ready] the ygg world is loaded (engine {{engine}}), current stage {{stage}}, evolution preference {{mode}} (narration only — resources are never rewritten automatically). This is a two-layer agent meta-workflow: the coordinator dispatches and accepts; each requirement runs plan → gate → develop → accept → gate.",
     "intake": "[WAITING FOR TASK] current stage {{stage}}: submit the task description first. require_all_green = {{gates}}.",
     "coordinate": "[COORDINATING] task \"{{title}}\": {{description}} | {{count}} requirements ({{open}} open) | {{pending}} pending proposals. In this layer you do exactly three things: dispatch, accept proposals serially, pass the two mandatory gates; analyze / plan / develop of other requirements may run asynchronously in parallel.",
-    "review": "[FINAL REVIEW] task \"{{title}}\": {{count}} requirements ({{done}} done) | require_all_green {{gates}}. Closing is allowed only when every leaf requirement is done with no pending proposal and no unresolved conflict."
+    "review": "[BATCH SETTLEMENT REVIEW] task \"{{title}}\": {{count}} requirements ({{done}} done) | require_all_green {{gates}}. The batch boundary (coordinate.submit) is allowed only when every leaf requirement is done with no pending proposal and no unresolved conflict."
   },
   "endings": {
     "done": "[ENDING · run closed] task \"{{title}}\" — {{count}} requirements ({{done}} done), review score {{score}}/5, evolution candidates {{candidates}} (kept/screened). One-line lesson: {{lesson}}"
   },
   "prompts": {
     "intake": "Cold start: submit the task description, or adjust runtime config first?",
-    "coordinate": "Next step: accept a proposal, pass a gate, dispatch, or close into final review?",
-    "review": "Final review: how are the gates? Once green, screen evolution candidates against the evolution chapter, register settlement.evolution (it also settles sessions and todo in the same transaction), then review.note records the lesson and archives single-source to close the run."
+    "coordinate": "Next step: accept a proposal, pass a gate, dispatch, or submit the batch boundary (coordinate.submit) once the queue is drained?",
+    "review": "Batch settlement review: how are the gates? Once green, screen evolution candidates against the evolution chapter, register settlement.evolution (it also settles sessions and todo in the same transaction), then review.note settles the batch and returns to coordinate (the resident run continues; only an armed run.retire ends the run)."
   },
   "options": {
     "intake": "task.intake — inject the task description (payload \"title|description\")",
     "dispatch": "requirement.dispatch — dispatch by readiness order ({{count}} candidates, jobs {{jobs}}/{{cap}}, head {{id}})",
     "accept": "proposal.accept — accept pending proposal {{id}} ({{req}} / {{stage}}, {{pending}} pending)",
-    "coordinate_submit": "coordinate.submit — enter final review once every requirement is closed",
+    "coordinate_submit": "coordinate.submit — open the batch settlement review once every requirement is closed (batch boundary)",
     "verify_green": "verify.submit all_green=true — gates are green (record evidence, move to review)",
     "verify_fail": "verify.submit all_green=false — report the failure honestly (sent back to coordinate)",
     "settlement_evolution": "settlement.evolution — register the evolution review and settle sessions + todo in one transaction (payload \"artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]\")",
@@ -60,9 +60,9 @@
     "default_lesson": "split small first, parallelize next, accept on evidence",
     "default_gate_report": "gate failed (placeholder report)",
     "intake_ok": "[TASK ACCEPTED] task \"{{title}}\" — moving to coordinate.",
-    "coordinate_ok": "[COORDINATION DONE] all {{count}} requirements are closed; moving to final review.",
+    "coordinate_ok": "[COORDINATION DONE] all {{count}} requirements are closed; batch {{batch}} settlement review starts (batch boundary).",
     "coordinate_usage": "coordinate.submit []",
-    "verify_ok": "[GATES GREEN] {{count}} requirements closed; final review is now allowed.",
+    "verify_ok": "[GATES GREEN] {{count}} requirements closed; batch {{batch}} settlement may proceed.",
     "verify_fail": "[GATES FAILED] #{{failures}}: sent back to coordinate for rework.",
     "gate_bypass": "[GATES BYPASSED] failure #{{failures}}, but require_all_green is off → final review allowed.",
     "verify_green_record": "all green (recorded)",
@@ -367,7 +367,8 @@
     "subagent_delta": "Resume {{id}} (rev {{rev}}) for stage `{{stage}}` in worktree `{{worktree}}`; write `{{artifact}}` and submit.",
     "subagent_fallback_note": "\nResume context: prior executor `{{resume_id}}`.",
     "reactive_malformed": "[PROBE MALFORMED] {{call_id}} ({{tool_id}}): the output is not a `k=v;...` map - nothing was applied",
-    "artifact_path_rejected": "[ARTIFACT PATH REFUSED] {{path}}: the ledger only accepts artifacts/<name>.md (no `..`, no whitespace, at most {{max}} bytes) | nothing was recorded"
+    "artifact_path_rejected": "[ARTIFACT PATH REFUSED] {{path}}: the ledger only accepts artifacts/<name>.md (no `..`, no whitespace, at most {{max}} bytes) | nothing was recorded",
+    "review_batch_ok": "[BATCH {{batch}} SETTLED] score {{score}}/5 — {{lesson}}; evolution archived to the rolling slot; batch counter -> {{next}}; back to coordinate — the resident run waits for the next batch."
   },
   "tuning": {
     "min_slices": 1,

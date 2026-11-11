@@ -1,9 +1,9 @@
 {
   "code": [
     {
-      "byteLength": 3472,
+      "byteLength": 3879,
       "path": "src/config.lua",
-      "sha256": "9153e0a3a0fd319fad235cc068a0fe904b9793a3a41fb8104f68a361ef3c346e"
+      "sha256": "971f1c20812ea28e34183c22e4b336b49b072139725c5ebcb306ad1641fc168b"
     },
     {
       "byteLength": 3929,
@@ -66,9 +66,9 @@
       "sha256": "9f04fc0dad2e027343b6f5f36cb1852de465aa13b306d756b7d8049ed96a15a6"
     },
     {
-      "byteLength": 11920,
+      "byteLength": 13044,
       "path": "src/handlers/review.lua",
-      "sha256": "4fe61d06db9a4b07eaca5d54a82ee1370cb92fb2440b3ef59b8d8da0cc5e56c1"
+      "sha256": "bab1e62003070c0eccc8e36a8aafdc41ac3dc691555af7f5c92e16c78cf24f3f"
     },
     {
       "byteLength": 1602,
@@ -123,12 +123,12 @@
   ],
   "entries": [
     {
-      "byteLength": 40161,
+      "byteLength": 40607,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "afc1478a53fc74eb624d452fa11751e984cfb90db75b7e3516e9ea440c8ff66f"
+      "sha256": "243826ced7f861a2f756a068f648e55482d51f980d4fb555515e80ef061d0979"
     },
     {
       "byteLength": 754,
