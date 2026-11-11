@@ -1508,8 +1508,8 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
 
     let claimed = tool_round(
         &mut game,
-        "git.worktree_claim|lane=2;req=r1;branch=feat-a|t1",
-        "t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feat-a;base=abc1234;clean=1;path=/tmp/wt2",
+        "git.worktree_claim|lane=2;req=r1;branch=feature/b7c2-alpha-lane|t1",
+        "t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feature/b7c2-alpha-lane;base=abc1234;clean=1;path=/tmp/wt2",
     );
     assert_eq!(
         count_lines(&claimed, "[WORKTREE CLAIMED]"),
@@ -1517,7 +1517,7 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
         "{claimed:#?}"
     );
     game.assert_kv("lane.2.req", json!("r1"));
-    game.assert_kv("lane.2.branch", json!("feat-a"));
+    game.assert_kv("lane.2.branch", json!("feature/b7c2-alpha-lane"));
     game.assert_kv("lane.2.base", json!("abc1234"));
     game.assert_kv("lane.2.clean", json!("1"));
     game.assert_kv("lane.2.since", json!(1));
@@ -1528,7 +1528,7 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
     // domain fold one-shot: no second `[WORKTREE CLAIMED]`.
     let replayed = narrative_lines(&game.reply(
         "tool.result",
-        &text("t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feat-a;base=abc1234;clean=1;path=/tmp/wt2|ext-1"),
+        &text("t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feature/b7c2-alpha-lane;base=abc1234;clean=1;path=/tmp/wt2|ext-1"),
     ));
     assert_eq!(
         count_lines(&replayed, "[WORKTREE CLAIMED]"),
@@ -1571,8 +1571,8 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     // ① the probe lands in KV, no overlap yet.
     tool_round(
         &mut game,
-        "git.lane_probe|lane=1;base=abc;branch=feat-a|t1",
-        "t1|git.lane_probe|ok|0|lane=1;branch=feat-a;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
+        "git.lane_probe|lane=1;base=abc;branch=feature/b7c2-alpha-lane|t1",
+        "t1|git.lane_probe|ok|0|lane=1;branch=feature/b7c2-alpha-lane;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
     );
     game.assert_kv("lane.1.probe.commits", json!(2));
     game.assert_kv("lane.1.probe.clean", json!("1"));
@@ -1584,8 +1584,8 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     // ② a shared file raises one conflict through the very same writer as the human path.
     let radar = tool_round(
         &mut game,
-        "git.lane_probe|lane=2;base=abc;branch=feat-b|t2",
-        "t2|git.lane_probe|ok|0|lane=2;branch=feat-b;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
+        "git.lane_probe|lane=2;base=abc;branch=feature/d5e8-beta-probe|t2",
+        "t2|git.lane_probe|ok|0|lane=2;branch=feature/d5e8-beta-probe;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
     );
     assert_eq!(count_lines(&radar, "[CONFLICT RADAR]"), 1, "{radar:#?}");
     game.assert_kv("req.1.conflict", json!("overlapping file: src/b.lua"));
@@ -1608,8 +1608,8 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     // ③ a failed probe (commits=0) is a warning, never a block: no new conflict, state stays.
     let failed = tool_round(
         &mut game,
-        "git.lane_probe|lane=2;base=abc;branch=feat-b|t3",
-        "t3|git.lane_probe|ok|0|lane=2;branch=feat-b;base=abc;head=2222222;commits=0;clean=1;files=",
+        "git.lane_probe|lane=2;base=abc;branch=feature/d5e8-beta-probe|t3",
+        "t3|git.lane_probe|ok|0|lane=2;branch=feature/d5e8-beta-probe;base=abc;head=2222222;commits=0;clean=1;files=",
     );
     assert_eq!(
         count_lines(&failed, "[LANE PROBE FAILED]"),
@@ -1653,7 +1653,10 @@ fn summary_exposes_structured_jobs_and_gates() {
     );
     // Pre-claim a lane **with** branch/base: `jobs[].branch` / `jobs[].base` must be the lane
     // ledger's own bytes, not something reconstructed from the requirement row.
-    game.narrate("lane.claim", &text("1|r1|feat-jobs|abc1234|1"));
+    game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/c9d4-jobs-ledger|abc1234|1"),
+    );
     game.narrate("requirement.dispatch", "0");
     game.assert_kv("req.1.job", json!("plan"));
 
@@ -1679,7 +1682,7 @@ fn summary_exposes_structured_jobs_and_gates() {
     assert_eq!(job["status"], json!("planning"), "{fields}");
     assert_eq!(job["phase"], json!("planning"), "{fields}");
     assert_eq!(job["lane"], json!(1), "{fields}");
-    assert_eq!(job["branch"], json!("feat-jobs"), "{fields}");
+    assert_eq!(job["branch"], json!("feature/c9d4-jobs-ledger"), "{fields}");
     assert_eq!(job["base"], json!("abc1234"), "{fields}");
     // The executor ledger is mirrored onto every job row: unbound = the empty string
     // (never `null`), so a scheduler can read it without a null check.
@@ -2115,7 +2118,9 @@ impl HostToolRunner for SyncRitualRunner {
                 let branch = args
                     .get("branch")
                     .cloned()
-                    .unwrap_or_else(|| format!("feature/{req}"));
+                    // r2: the mod never issues a nameless claim any more; this default is
+                    // only a fallback and always a legal example name.
+                    .unwrap_or_else(|| "feature/a3f9-map-single-gone".to_owned());
                 out.insert("lane".to_owned(), lane.clone());
                 out.insert("req".to_owned(), req);
                 out.insert("branch".to_owned(), branch);
@@ -2133,7 +2138,7 @@ impl HostToolRunner for SyncRitualRunner {
                 let branch = args
                     .get("branch")
                     .cloned()
-                    .unwrap_or_else(|| "feature/r1".to_owned());
+                    .unwrap_or_else(|| "feature/a3f9-map-single-gone".to_owned());
                 out.insert("lane".to_owned(), lane);
                 out.insert("base".to_owned(), base);
                 out.insert("branch".to_owned(), branch);
@@ -2186,6 +2191,8 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
         "requirement.add",
         &text("sync tool bridge|implement synchronous ygg.tool.call|sync-r1"),
     );
+    // r2: the main agent pre-asserts a **legal** branch before dispatching — the auto mount
+    // consumes the ledger's own name (the stub default is only a fallback now).
     game.narrate("requirement.dispatch", "0");
 
     // 0) During plan stage, summary.jobs[0].subagentAction is `subagent.spawn`.
@@ -2223,6 +2230,14 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     );
     game.click("proposal.accept — ");
 
+    // r2: `proposal.accept` (plan) releases the lane ledger (req_release → LANES.release), so
+    // the main agent self-reports the branch HERE — after the accept, before the gate. The
+    // gate.approve(plan) auto mount then consumes this ledger name in the SAME turn.
+    game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/a3f9-map-single-gone|HEAD|1"),
+    );
+
     // 1) Approving plan_gate triggers auto_dispatch -> auto_claim_worktree in the SAME turn!
     let approved_plan = game.click("gate.approve — ");
     let approved_plan_lines = narrative_lines(&approved_plan);
@@ -2237,7 +2252,7 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
         "{approved_plan_lines:#?}"
     );
     game.assert_kv("lane.1.req", json!("r1"));
-    game.assert_kv("lane.1.branch", json!("feature/r1"));
+    game.assert_kv("lane.1.branch", json!("feature/a3f9-map-single-gone"));
     game.assert_kv("lane.1.base", json!("2e24c45"));
     game.assert_kv("lane.1.path", json!("/tmp/ygg-wt-lane-1"));
     game.assert_kv("tool.settled_count", json!(1));
@@ -2251,13 +2266,15 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     assert_eq!(dev_jobs[0]["worktreePath"], json!("/tmp/ygg-wt-lane-1"));
     assert_eq!(
         dev_jobs[0]["worktreeStatus"],
-        json!("ready:/tmp/ygg-wt-lane-1@feature/r1")
+        json!("ready:/tmp/ygg-wt-lane-1@feature/a3f9-map-single-gone")
     );
     assert_eq!(dev_jobs[0]["subagentStatus"], json!("pending"));
     assert_eq!(dev_jobs[0]["probeStatus"], json!("pending"));
     let dev_list = game.narrate("requirement.list", "0").join("\n");
     assert!(
-        dev_list.contains("(wt=ready:/tmp/ygg-wt-lane-1@feature/r1)(subagent=pending)"),
+        dev_list.contains(
+            "(wt=ready:/tmp/ygg-wt-lane-1@feature/a3f9-map-single-gone)(subagent=pending)"
+        ),
         "requirement.list must show live worktreeStatus and subagentStatus: {dev_list}"
     );
     let dev_action = &dev_jobs[0]["subagentAction"];
@@ -2396,8 +2413,8 @@ fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
     );
     tool_round(
         &mut game,
-        "git.lane_probe|lane=1;base=2e24c45;branch=feature/r1|tp1",
-        "tp1|git.lane_probe|ok|0|lane=1;branch=feature/r1;base=2e24c45;head=deadbeef1234;commits=2;clean=1;files=src/render.lua",
+        "git.lane_probe|lane=1;base=2e24c45;branch=feature/a3f9-map-single-gone|tp1",
+        "tp1|git.lane_probe|ok|0|lane=1;branch=feature/a3f9-map-single-gone;base=2e24c45;head=deadbeef1234;commits=2;clean=1;files=src/render.lua",
     );
     let probed_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     let probed_jobs = probed_summary["jobs"]
@@ -2439,6 +2456,7 @@ fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
     );
 }
 
+<<<<<<< HEAD
 // ───────────────────────── r13 · requirement.list pagination ─────────────────────────
 
 /// The requirement rows of a list receipt (`  <mark> rN [phase] title(trace)`):
@@ -2692,4 +2710,248 @@ fn big_state_walks_all_views_without_fuel_exhaustion_under_the_default_budget() 
     game.narrate("requirement.dispatch", "0");
     let map_full = game.narrate("map.show", &text("full"));
     assert!(!map_full.is_empty(), "map.show full must narrate");
+=======
+/// A9 Iteration-branch naming is a forced shape at BOTH entries: `lane.claim` refuses via
+/// flow.refuse (reject.count/last bookkeeping), `git.worktree_claim` refuses via the reactor
+/// narrative (ledger untouched, reject.* untouched). Empty branch stays legal at lane.claim
+/// ("not asserted yet"); the canonical example is `feature/a3f9-map-single-gone`.
+///
+/// Mutation: delete the `LANES.branch_problem` call in either entry → every negative case
+/// below goes red (the illegal name lands in the ledger / the mount succeeds).
+#[test]
+fn lane_branch_naming_is_enforced_at_both_entries() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("subsystem gate|synthetic task description"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("synthetic requirement|synthetic description|subsys-r1"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("second requirement|synthetic description|subsys-r2"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("third requirement|synthetic description|subsys-r3"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("fourth requirement|synthetic description|subsys-r4"),
+    );
+
+    // P1 — a canonical legal name claims the lane; the reject ledger stays untouched.
+    let claimed = game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/a3f9-map-single-gone|abc1234|1"),
+    );
+    assert_eq!(count_lines(&claimed, "[LANE CLAIMED]"), 1, "{claimed:#?}");
+    game.assert_kv("lane.1.branch", json!("feature/a3f9-map-single-gone"));
+    game.assert_kv("reject.count", json!(null));
+
+    // P2 — the 48-char upper bound passes (8 + 4 + 1 + 35 = 48).
+    let name48 = format!("feature/a3f9-{}", "a".repeat(35));
+    let claimed48 = game.narrate("lane.claim", &text(&format!("2|r2|{name48}|abc1234|1")));
+    assert_eq!(
+        count_lines(&claimed48, "[LANE CLAIMED]"),
+        1,
+        "{claimed48:#?}"
+    );
+    game.assert_kv("lane.2.branch", json!(name48.clone()));
+
+    // N1..N8 — every illegal shape refuses readably on a free lane (4|r4): the narrative
+    // carries the template and the canonical example, reject.count/last record the refusal,
+    // and the lane ledger row is never written.
+    let illegal = [
+        "feature/r1",
+        "feature/map-gone",
+        "feature/a3f9",
+        "feature/a3f9-deadbeef",
+        "Feature/A3f9-x",
+        // 49 chars: one past the upper bound.
+        &format!("feature/a3f9-{}", "a".repeat(36)),
+        "feature//a3f9-x",
+        "feature/a3f9-12345",
+    ];
+    for (n, branch) in illegal.iter().enumerate() {
+        let refused = game.narrate("lane.claim", &text(&format!("4|r4|{branch}||1")));
+        let joined = refused.join("\n");
+        assert!(
+            joined.contains("not a legal requirement-iteration branch"),
+            "case {n} ({branch}) must refuse readably: {joined}"
+        );
+        assert!(
+            joined.contains("feature/<4-char-id>-<semantic-topic>"),
+            "case {n} ({branch}) must carry the template: {joined}"
+        );
+        assert!(
+            joined.contains("feature/a3f9-map-single-gone"),
+            "case {n} ({branch}) must carry the canonical example: {joined}"
+        );
+        game.assert_kv("reject.count", json!((n + 1) as u64));
+        let last = game.kv("reject.last").as_str().unwrap_or("").to_owned();
+        assert!(
+            last.starts_with("lane.claim: "),
+            "reject.last must record the action: {last}"
+        );
+        assert!(
+            last.contains(branch),
+            "reject.last must carry the illegal name: {last}"
+        );
+        game.assert_kv("lane.4.req", json!(null));
+    }
+
+    // P3 — an empty branch stays legal at lane.claim ("not asserted yet") and leaves the
+    // reject ledger untouched.
+    let asserted = game.narrate("lane.claim", &text("3|r3|||1"));
+    assert_eq!(count_lines(&asserted, "[LANE CLAIMED]"), 1, "{asserted:#?}");
+    game.assert_kv("lane.3.branch", json!(""));
+    game.assert_kv("reject.count", json!(8));
+
+    // P4 — the worktree entry accepts the same legal name (same-holder rebind on lane 1).
+    let wt = tool_round(
+        &mut game,
+        "git.worktree_claim|lane=1;req=r1;branch=feature/a3f9-map-single-gone|tw1",
+        "tw1|git.worktree_claim|ok|0|lane=1;req=r1;branch=feature/a3f9-map-single-gone;base=abc1234;clean=1;path=/tmp/wt1",
+    );
+    assert_eq!(count_lines(&wt, "[WORKTREE CLAIMED]"), 1, "{wt:#?}");
+    game.assert_kv("lane.1.branch", json!("feature/a3f9-map-single-gone"));
+    game.assert_kv("lane.1.base", json!("abc1234"));
+    game.assert_kv("reject.count", json!(8));
+
+    // N9 — the worktree entry refuses an illegal name: narrative only, ledger untouched,
+    // reject.* untouched (reactors never flow.refuse — the hard boundary keeps its reverse
+    // assertion here).
+    let refused_wt = tool_round(
+        &mut game,
+        "git.worktree_claim|lane=4;req=r4;branch=feature/r1|tw9",
+        "tw9|git.worktree_claim|ok|0|lane=4;req=r4;branch=feature/r1;base=abc1234;clean=1;path=/tmp/wt4",
+    );
+    assert_eq!(
+        count_lines(&refused_wt, "[WORKTREE CLAIM REFUSED]"),
+        1,
+        "{refused_wt:#?}"
+    );
+    assert_eq!(
+        count_lines(&refused_wt, "[WORKTREE CLAIMED]"),
+        0,
+        "{refused_wt:#?}"
+    );
+    assert!(
+        refused_wt
+            .join("\n")
+            .contains("feature/<4-char-id>-<semantic-topic>"),
+        "{refused_wt:#?}"
+    );
+    game.assert_kv("lane.4.req", json!(null));
+    game.assert_kv("reject.count", json!(8));
+
+    // N10 — an empty branch at the mount layer is the "(missing)" refusal (the default
+    // generation is gone; the caller must self-report).
+    let missing_wt = tool_round(
+        &mut game,
+        "git.worktree_claim|lane=4;req=r4;branch=|tw10",
+        "tw10|git.worktree_claim|ok|0|lane=4;req=r4;branch=;base=abc1234;clean=1;path=/tmp/wt4",
+    );
+    assert_eq!(
+        count_lines(&missing_wt, "[WORKTREE CLAIM REFUSED]"),
+        1,
+        "{missing_wt:#?}"
+    );
+    assert!(
+        missing_wt.join("\n").contains("(missing)"),
+        "{missing_wt:#?}"
+    );
+    game.assert_kv("lane.4.req", json!(null));
+    game.assert_kv("reject.count", json!(8));
+}
+
+/// A10 auto_claim_worktree no longer fabricates `feature/<req>`: dispatch without a
+/// pre-asserted branch refuses readably and mounts nothing; auto_probe_lane likewise skips
+/// with a readable line; the display layer shows `-` instead of a fabricated name. The
+/// pre-asserted happy path is covered by A7 (restructured).
+///
+/// Mutation: restore `local branch = "feature/" .. id` in auto_claim_worktree → the
+/// `[TOOL SETTLED]`-absence / `[WORKTREE CLAIM REFUSED]` assertions go red; restore the
+/// `render.lua` `"feature/" .. id` fallback → the `bound:lane-1@-` assertion goes red.
+#[test]
+fn auto_claim_requires_a_self_reported_branch_name() {
+    let mut game = Game::open(&project_mod_dir());
+    game.kernel
+        .set_tool_runner(Some(Box::new(SyncRitualRunner)));
+
+    game.narrate(
+        "task.intake",
+        &text("sync bridge|auto mount needs a self-reported branch"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("branch self report|auto claim refuses an empty ledger branch|sync-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    game.assert_kv("req.1.job", json!("plan"));
+
+    game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|plan ready|artifacts/r1-plan.md||exec=agent-plan"),
+    );
+    game.click("proposal.accept — ");
+
+    // Approving plan_gate auto-dispatches development; with no pre-asserted branch the
+    // auto mount refuses READABLY and issues no host call at all.
+    let approved = game.click("gate.approve — ");
+    let lines = narrative_lines(&approved);
+    assert_eq!(
+        count_lines(&lines, "[WORKTREE CLAIM REFUSED]"),
+        1,
+        "{lines:#?}"
+    );
+    let refused_text = lines.join("\n");
+    assert!(
+        refused_text.contains("(missing)"),
+        "the refusal must name the missing branch readably: {refused_text}"
+    );
+    assert!(
+        refused_text.contains("feature/<4-char-id>-<semantic-topic>"),
+        "the refusal must carry the template: {refused_text}"
+    );
+    assert_eq!(count_lines(&lines, "[TOOL SETTLED]"), 0, "{lines:#?}");
+    assert_eq!(count_lines(&lines, "[WORKTREE CLAIMED]"), 0, "{lines:#?}");
+    game.assert_kv("tool.settled_count", json!(null));
+    // The development slot and its bare lane are still taken (the ledger row stays
+    // unasserted — the playable state is unchanged by the refusal).
+    game.assert_kv("req.1.job", json!("development"));
+    game.assert_kv("req.1.lane", json!(1));
+    game.assert_kv("lane.1.req", json!("r1"));
+    game.assert_kv("lane.1.branch", json!(""));
+
+    // The display layer no longer fabricates a name: the unasserted branch renders as `-`.
+    let dev_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    let dev_jobs = dev_summary["jobs"].as_array().expect("summary.jobs array");
+    assert_eq!(
+        dev_jobs[0]["worktreeStatus"],
+        json!("bound:lane-1@-"),
+        "an unasserted branch must render as `-`, not a fabricated name: {dev_summary}"
+    );
+
+    // Delivering development triggers auto_probe_lane in the same turn; with an empty
+    // ledger branch the probe skips with a readable line and no host call.
+    let dev_prop = game.narrate(
+        "proposal.submit",
+        &text(
+            "r1|1|development|dev done|artifacts/r1-development.md|src/tools.lua|exec=agent-plan",
+        ),
+    );
+    let dev_text = dev_prop.join("\n");
+    assert_eq!(count_lines(&dev_prop, "[LANE PROBE"), 0, "{dev_text}");
+    assert!(
+        dev_text.contains("not a legal requirement-iteration branch"),
+        "auto_probe_lane must skip with a readable line: {dev_text}"
+    );
+    assert!(dev_text.contains("(missing)"), "{dev_text}");
+    game.assert_kv("tool.settled_count", json!(null));
+    game.assert_kv("lane.1.probe.commits", json!(null));
+>>>>>>> feature/5b8e-branch-naming
 }

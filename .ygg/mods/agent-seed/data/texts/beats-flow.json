@@ -38,7 +38,7 @@
     "prologue_common": "shared by both modes: acceptance and both gates still take one real action and one validation each, never skipped; requirements can be added asynchronously (--requirement / --proposal).",
     "intake_common": "write \"title|description\" and submit; confirm with the index.",
     "coordinate_common": "accept proposals first (proposal.accept), then pass gates (gate.approve/reject), then dispatch (requirement.dispatch), finally coordinate.submit.",
-    "stage_prompt_missing": "(the prompt for this node is missing: check <node>_common in data/texts/)",
+    "stage_prompt_missing": "(the prompt for this node is missing: check <node>_common in data/scenes.json)",
     "evolution_auto": "evolution auto: preference marker only (cap {{cap}}, paths {{paths}}) — no auto-rewrite, no revision requests registered; suggestions still go through the separate settlement.evolution registration.",
     "evolution_none": "0/0",
     "evolution_artifact_none": "(empty)",

@@ -5,13 +5,13 @@
 
 local M = {}
 
-local config = require("src.config")
-local gates = require("src.gates")
-local hooks = require("src.hooks")
-local props = require("src.proposals")
-local reqs = require("src.requirements")
-local util = require("src.util")
-local wire = require("src.wire")
+local config = require("src.core.config")
+local gates = require("src.domain.gates")
+local hooks = require("src.core.hooks")
+local props = require("src.domain.proposals")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
+local wire = require("src.domain.wire")
 
 local TEXTS
 

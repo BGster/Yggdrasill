@@ -1,11 +1,7 @@
 {
   "beats": {
     "guide_human_blocked": "[REJECTED:ACTION] `{{action}}` is a pass-type action protected by the human-action gate (proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note): in guide mode only a human may pick it from the menu (reply with the index → ygg.choice_selected). Direct single-shot dispatch is always refused and the primary state is unchanged. Do this: hand the full pendingChoice text to the user and wait for the index; never press it on their behalf.",
-    "guide_head": "[PLAYBOOK] {{title}} — {{summary}} ({{count}} rules)",
-    "guide_rule": "  {{mark}}{{text}}",
-    "guide_tail": "(section {{id}}; {{total}} sections total — guide.show fetches any of them)",
-    "guide_unknown": "[GUIDE REJECTED] unknown section `{{id}}` (available: {{ids}})",
-    "guide_hint": "field rules · {{title}}: {{summary}} ({{count}} rules; run guide.show for the full text)",
+    "guide_hint": "field rules · {{title}}: {{summary}} ({{count}} rules; full text: data/playbook.json)",
     "map_head": "[MAP] coordinator >> [{{stage}}] << ← you are here | {{panel}}",
     "map_row": "{{mark}}{{node}} {{branch}}{{action}}──▶ {{target}}{{note}}",
     "map_row_leaf": "{{mark}}{{node}} {{branch}}{{text}}",
@@ -14,8 +10,6 @@
     "map_branch_first": "├─",
     "map_branch_last": "└─",
     "map_terminal": "(end of run · no out-edges)",
-    "map_usage": "map.show [\"\"|0|full]",
-    "map_rejected": "[MAP REJECTED] only an empty payload, \"0\" or \"full\" is accepted, got `{{got}}`.",
     "map_pipeline_head": "-- requirement pipeline (each requirement runs independently; jobs may run in parallel, gates and acceptance are serial) --",
     "map_pipeline_bypass_head": "-- bypass (outside the main pipeline) --",
     "map_note_split": "(the parent becomes terminal split; children fall back to draft)",
@@ -33,14 +27,11 @@
     "map_note_deliver": "(self-check and delivery ≠ acceptance)",
     "map_note_gate_accept": "(**mandatory gate**: approve only on artifacts / gate evidence; reject keeps plan_ok → ready, an amended one falls back to planning)",
     "map_note_lane": "(development lane; deps ready and no conflict)",
-    "map_foot": "always-on actions: config · guide.show · map.show · requirement.add · requirement.list · lane.claim / lane.release (split / merge / amend / conflict / resolve are explicit main-agent commands)",
+    "map_foot": "always-on actions: config · map.show · requirement.add · requirement.list · lane.claim / lane.release (split / merge / amend / conflict / resolve are explicit main-agent commands)",
     "map_edge_ready": "selectable",
     "map_edge_no_condition": "condition not shown",
     "map_local_head": "[CURRENT NODE] [{{stage}}] | {{panel}}",
     "map_local_edge": "  {{index}}. {{text}} → [{{target}}] ({{state}}; {{when}})",
-    "map_local_foot": "(full design map: map.show full; full rule text: guide.show <section id>)",
-    "guide_basis": "      basis: {{basis}}",
-    "guide_critical": "[RED LINE] {{title}} — this chapter is non-negotiable; stop on violation.",
-    "guide_notes": "  notes: {{notes}}"
+    "map_local_foot": "(operation view: current node + selectable edges; map.show takes no payload)"
   }
 }

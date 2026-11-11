@@ -676,6 +676,8 @@ local REACTORS = {}
 REACTORS["git.worktree_claim"] = function(pairs)
   local k = whole_at(pairs, "lane")
   local index = req_index_of(pairs.req)
+  local branch = trim(pairs.branch or "")
+  local branch_problem = LANES.branch_problem(branch)
   local reason = nil
   if k == nil or k < 1 or k > job_capacity() then
     reason = fill(TEXTS.beats.lane_bad_k, { k = tostring(pairs.lane or "?"), max = tostring(job_capacity()) })
@@ -685,6 +687,10 @@ REACTORS["git.worktree_claim"] = function(pairs)
     reason = fill(TEXTS.beats.lane_claim_closed, { id = req_id(index), status = req_status(index) })
   elseif pairs.clean ~= "1" then
     reason = fill(TEXTS.beats.lane_claim_dirty, { k = tostring(k) })
+  elseif branch == "" then
+    reason = fill(TEXTS.beats.lane_branch_invalid, { branch = "(missing)" })  -- 挂载层缺省拒绝（不再自动生成默认名）
+  elseif branch_problem ~= nil then
+    reason = branch_problem
   elseif LANES.req_of(k) ~= "" and LANES.req_of(k) ~= req_id(index) then
     reason = fill(TEXTS.beats.lane_claim_occupied, { k = tostring(k), id = LANES.req_of(k) })
   elseif req_lane(index) > 0 and req_lane(index) ~= k then
@@ -1105,7 +1111,17 @@ local function auto_claim_worktree(lane, req_index)
     return nil
   end
   local id = req_id(req_index)
-  local branch = "feature/" .. id
+  -- r2 rev2：默认分支名生成机制已删除——分支由主 Agent 预挂牌自报（账本 `lane.<k>.branch`），
+  -- 空 = 可读拒绝不发起宿主调用（宿主先执行、反应器后折叠，发空名调用会让宿主 git 报错，
+  -- 叙事不可读——必须在 mod 层拦）。
+  local branch = text_of(LANES.key(k, "branch"), "")
+  if branch == "" then
+    ygg.narrate(fill(TEXTS.beats.worktree_claim_refused, {
+      k = tostring(k),
+      reason = fill(TEXTS.beats.lane_branch_invalid, { branch = "(missing)" }),
+    }))
+    return nil
+  end
   local args_map = {
     lane = tostring(k),
     req = id,
@@ -1129,10 +1145,10 @@ local function auto_probe_lane(lane)
   end
   local branch = text_of(LANES.key(k, "branch"), "")
   if branch == "" then
-    local holder = LANES.req_of(k)
-    if holder ~= "" then
-      branch = "feature/" .. holder
-    end
+    -- r2 rev2：不再用 `feature/<holder>` 兑底虚构名字；账本分支空 = 可读提示并跳过探针
+    -- （探针是警告面，不阻塞——但也不该拿编造的分支名去探测）。
+    ygg.narrate(fill(TEXTS.beats.lane_branch_invalid, { branch = "(missing)" }))
+    return nil
   end
   local args_map = {
     lane = tostring(k),

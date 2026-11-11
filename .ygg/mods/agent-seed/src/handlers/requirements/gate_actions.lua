@@ -88,7 +88,14 @@ function M.install(deps)
         ygg.kv.set(req_key(index, "last_lane"), 0)
       end
     end
-    req_release(index)
+    -- 交付后释放：accept 门禁连泳道账本一起清（req_release）；plan 门禁只释放 job 槽——
+    -- plan 槽从不占泳道，此处的 lane 行只可能是主 Agent 在批门禁前的**显式预挂牌**
+    -- （r2 rev2：分支自报要活到同回合的 auto 挂载），若在此清掉，预挂牌水远活不过 plan 门禁。
+    if kind == "plan" then
+      ygg.kv.set(req_key(index, "job"), "")
+    else
+      req_release(index)
+    end
     req_push_history(index, fill(TEXTS.beats.req_gate_hist, { kind = kind }))
     req_sync_conflicts()
     ygg.narrate(fill(TEXTS.beats.req_gate_ok, {

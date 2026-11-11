@@ -5,10 +5,10 @@
 
 local M = {}
 
-local menus = require("src.menus")
-local render_mod = require("src.render")
-local reqs = require("src.requirements")
-local util = require("src.util")
+local menus = require("src.view.menus")
+local render_mod = require("src.view.render")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
 
 
 local narrate_map, render, stage_prompt, prompt_vars =

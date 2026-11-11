@@ -10721,23 +10721,26 @@ end)
         let lane1 = op_flags(&[
             ("--lane", "1"),
             ("--req", "r1"),
-            ("--branch", "feature/r1"),
+            ("--branch", "feature/a3f9-map-single-gone"),
             ("--root", &root_s),
             ("--repo", &repo_s),
         ]);
         claim_fields_with(&lane1).expect("车道 1 首次认领");
 
-        // 若 r1 重派到车道 2（同分支 `feature/r1`），车道 1 自动 detach 释放分支锁，车道 2 顺利挂载。
+        // 若 r1 重派到车道 2（同分支 `feature/a3f9-map-single-gone`），车道 1 自动 detach 释放分支锁，车道 2 顺利挂载。
         let lane2 = op_flags(&[
             ("--lane", "2"),
             ("--req", "r1"),
-            ("--branch", "feature/r1"),
+            ("--branch", "feature/a3f9-map-single-gone"),
             ("--root", &root_s),
             ("--repo", &repo_s),
         ]);
         let fields = claim_fields_with(&lane2).expect("跨车道重派认领必须成功");
         let line = wire_line(&fields);
-        assert!(line.contains("lane=2;req=r1;branch=feature/r1;"), "{line}");
+        assert!(
+            line.contains("lane=2;req=r1;branch=feature/a3f9-map-single-gone;"),
+            "{line}"
+        );
         assert!(line.contains(";clean=1;reused=0;path="), "{line}");
     }
 

@@ -5,7 +5,7 @@
 
 local M = {}
 
-local util = require("src.util")
+local util = require("src.core.util")
 
 local TEXTS
 local PLAYBOOK

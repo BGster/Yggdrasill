@@ -1,0 +1,1224 @@
+{
+  "schemaVersion": 1,
+  "title": "Yggdrasill main-agent field manual (AGENTS.md turned into a rule resource)",
+  "summary": "The field rules a main agent developing Yggdrasill must follow through planning, development, integration, merging and deployment: fetched per section, presented per stage. The rule text lives only in this resource; the play guide is the repository-root AGENTS.md.",
+  "source": {
+    "document": "AGENTS.md",
+    "revision": "2026-11-01",
+    "note": "Migrated item by item from the ten chapters of the repository-root AGENTS.md: every constraint was split into atomic rules (a compound sentence was divided at its decision points), the repository shape was updated to the current reality (a five-crate workspace / four `packages` packages / `clients/godot` / the in-repo `.ygg` harness), stale states (\"M0 in progress\", \"packages planned\", ...) were dropped, and no constraint absent from the original document was added. One exception (the user instruction of 2026-10-29, included in this slice): the four \"no sensitive information on the committed surface\" rules in the credentials chapter are additions, and their `basis` says \"user decision\" instead of quoting AGENTS.md. The evolution chapter (user decision E1 of 2026-11-01: how to screen and review end-of-run evolution candidates) is likewise an addition and not AGENTS.md text. **AGENTS.md was condensed into a pure play guide in s2** - the rule text lives only in this resource; an `AGENTS.md §X` in a `basis` refers to the pre-migration text (see the git history)."
+  },
+  "sections": [
+    {
+      "id": "credentials",
+      "order": 1,
+      "title": "1. Credentials and the data red line",
+      "summary": "Highest priority, non-negotiable: credentials never enter the repository or any conversation artifact; the committed surface (game settings / playbook / experience-growth Mod / evolution output) is equally off limits for sensitive values, and every example uses synthetic data.",
+      "source": "AGENTS.md §1",
+      "priority": "critical",
+      "rules": [
+        {
+          "id": "credentials.no-secret-in-repo",
+          "modality": "must-not",
+          "text": "Never write a credential, key or token into the repository — including code, documentation, commit messages and Mod example data.",
+          "basis": "AGENTS.md §1"
+        },
+        {
+          "id": "credentials.no-secret-in-artifacts",
+          "modality": "must-not",
+          "text": "Never write a credential into any conversation artifact: reports, summaries, issue/PR descriptions, pasted log excerpts.",
+          "basis": "AGENTS.md §1"
+        },
+        {
+          "id": "credentials.no-secret-in-committed-resources",
+          "modality": "must-not",
+          "text": "No sensitive information may enter a committed resource — the committed surface explicitly includes: game settings `data/config.json`, this playbook `data/playbook.json`, the experience/growth (evolution) Mod and its output, and every other Mod resource or document committed with the repository.",
+          "basis": "user decision 2026-10-29 (s1 addition, not in the original AGENTS.md)"
+        },
+        {
+          "id": "credentials.settings-not-a-secret-vault",
+          "modality": "must",
+          "text": "The runtime KV family `settings.*` is no exception for sensitive values: the static defaults (`data/config.json`) and the dynamic overrides (`settings.*` written by `config.set`) only ever hold non-sensitive behavior switches, numbers and experience text (such as `evolution.mode` / `gates.require_all_green` / `evolution.max_per_run`).",
+          "basis": "docs/CONTEXT.md §5 (user decision added 2026-10-29)"
+        },
+        {
+          "id": "credentials.secret-values-local-only",
+          "modality": "must",
+          "text": "Sensitive values — LLM API keys, tokens, database/object-storage connection strings, subagent model parameters (`YGG_SUBAGENT_*`) — live only in the local `.env` / `.env.local` (both git-ignored) and in no other file.",
+          "basis": "user decision 2026-10-29 (s1 addition); AGENTS.md §1 rule 1, §3 dispatch discipline 2"
+        },
+        {
+          "id": "credentials.mod-and-report-keys-only",
+          "modality": "must",
+          "text": "Mod resources and reports may show key names only (such as `YGG_LLM_*`, `YGG_SUBAGENT_MODEL`), never values — including narrative text, `beats`/`prompts`, the closing review and any walk report.",
+          "basis": "user decision 2026-10-29 (s1 addition); AGENTS.md §1 rule 2"
+        },
+        {
+          "id": "credentials.evolution-output-not-exempt",
+          "modality": "must-not",
+          "text": "End-of-run evolution output (suggestion text, the review artifact, and any resource edit made from it) also counts as committed surface: never write a sensitive value into a Mod or a report as \"accumulated experience\".",
+          "basis": "user decision 2026-10-29 (s1 addition); `data/config.json` evolution.allow_paths"
+        },
+        {
+          "id": "credentials.env-file",
+          "modality": "must",
+          "text": "Local development credentials always go through `.env` / `.env.local` (both git-ignored, mode 600); `.env.example` carries key names only, never values.",
+          "basis": "AGENTS.md §1 rule 1"
+        },
+        {
+          "id": "credentials.keys-only",
+          "modality": "must",
+          "text": "Reports, documentation, commit messages and Mod example data show key names only, never values.",
+          "basis": "AGENTS.md §1 rule 2"
+        },
+        {
+          "id": "credentials.synthetic-data",
+          "modality": "must",
+          "text": "Examples and test data are always synthetic; never introduce real personal data.",
+          "basis": "AGENTS.md §1 rule 3"
+        },
+        {
+          "id": "credentials.breach-disclosure",
+          "modality": "must",
+          "text": "After a violation, list honestly what was exposed (the specific file plus the content location), without downplaying or arguing; then stop the affected operations and wait for the user.",
+          "basis": "AGENTS.md §1 rule 4"
+        }
+      ]
+    },
+    {
+      "id": "repository",
+      "order": 2,
+      "title": "2. Repository shape",
+      "summary": "A Rust five-crate workspace plus pnpm packages, a Godot client and the in-repo .ygg harness; three shape invariants: a single source for decisions, a single source for schemas, and a zero-dependency core.",
+      "source": "AGENTS.md §2",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "repository.vision-single-source",
+          "modality": "must",
+          "text": "The decision table in `docs/CONTEXT.md` is the single source of truth for project decisions; any new decision produced by a design discussion (D11+) must be written back into that table.",
+          "basis": "AGENTS.md §2 (constraint 1)"
+        },
+        {
+          "id": "repository.decision-conflict-is-defect",
+          "modality": "must-not",
+          "text": "An implementation that conflicts with the decision table is a defect: never let a decision drift silently on the grounds that \"the implementation is already done\".",
+          "basis": "AGENTS.md §2 (constraint 1)"
+        },
+        {
+          "id": "repository.schema-single-source",
+          "modality": "must",
+          "text": "Resource format contracts live only in `packages/schema/schemas/` (D15): the TS side (ajv) and the Rust side (jsonschema crate) read the same file, and neither side may keep an inline copy.",
+          "basis": "AGENTS.md §2 constraint 2; docs/CONTEXT.md D15/D20"
+        },
+        {
+          "id": "repository.schema-does-not-constrain-lua",
+          "modality": "must-not",
+          "text": "A schema constrains the resource file format, not Mod logic — the executable interface of a Mod is a Lua script (D11).",
+          "basis": "AGENTS.md §2 constraint 2"
+        },
+        {
+          "id": "repository.core-purity",
+          "modality": "must-not",
+          "text": "`crates/ygg-core` has a zero-dependency invariant: no internal module, no DOM/platform API, no rendering library; the allowlist is serde / serde_json / thiserror only.",
+          "basis": "AGENTS.md §2 constraint 3; docs/CONTEXT.md §3 & §4"
+        },
+        {
+          "id": "repository.vm-dependency-location",
+          "modality": "must",
+          "text": "VM dependencies such as mlua may appear only in `crates/ygg-sandbox` (D12).",
+          "basis": "AGENTS.md §2 constraint 3; docs/CONTEXT.md D12"
+        },
+        {
+          "id": "repository.dependency-direction",
+          "modality": "must",
+          "text": "Dependency direction is one-way: `ygg-sandbox` → `ygg-core` + `ygg-schema`; `ygg-wasm` → `ygg-sandbox`; `ygg-lint` has no ygg-* kernel dependency; `ygg-schema` and `ygg-core` have no code dependency edge.",
+          "basis": "docs/CONTEXT.md §4 (inter-module dependency constraints); the Cargo.toml header note of each crate"
+        }
+      ]
+    },
+    {
+      "id": "branches",
+      "order": 3,
+      "title": "3. Branch management",
+      "summary": "master is the only trunk and accepts merges only; all development happens on feature branches; every merge is no-FF.",
+      "source": "AGENTS.md §3 (branch model)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "branches.no-direct-master-work",
+          "modality": "must-not",
+          "text": "Never develop directly on master; master accepts merges only.",
+          "basis": "AGENTS.md §3 (branch model)"
+        },
+        {
+          "id": "branches.feature-naming",
+          "modality": "must",
+          "text": "All work (documentation included) happens on a feature branch named `feature/<topic>` or `docs/<topic>`.",
+          "basis": "AGENTS.md §3 (branch model)"
+        },
+        {
+          "id": "branches.no-ff-merge",
+          "modality": "must",
+          "text": "Every branch merge (feature → integration → trunk) uses `git merge --no-ff`; fast-forward is forbidden.",
+          "basis": "AGENTS.md §3 (no-FF invariant)"
+        },
+        {
+          "id": "branches.merge-node-is-rollback-anchor",
+          "modality": "must",
+          "text": "Keep the merge node so an iteration batch (such as `v<date>.<n>`) stays traceable in the history graph and can be rolled back as a whole — that is the purpose of no-FF, not a style preference.",
+          "basis": "AGENTS.md §3 (no-FF invariant)"
+        },
+        {
+          "id": "branches.integration-branch-reserved",
+          "modality": "should",
+          "text": "The integration branch `develop/yggdrasill` is reserved: enable it once there are many iterations and parallel lanes; before that, feature branches merge into master directly.",
+          "basis": "AGENTS.md §3 (branch model)"
+        },
+        {
+          "id": "branches.push-after-verify",
+          "modality": "must",
+          "text": "Push a feature branch to origin once its verification passes (for collaboration and backup).",
+          "basis": "AGENTS.md §3 (push discipline)"
+        },
+        {
+          "id": "branches.pr-and-merge-user-triggered",
+          "modality": "must-not",
+          "text": "Opening a PR and merging into master are triggered explicitly by the user; the agent never starts them on its own.",
+          "basis": "AGENTS.md §3 (push discipline)"
+        }
+      ]
+    },
+    {
+      "id": "lanes",
+      "order": 4,
+      "title": "3b. Lane worktrees",
+      "summary": "One worktree and one `.lane` plaque per lane; occupy means plaque up, close means plaque down, and a worktree is never shared.",
+      "source": "AGENTS.md §3 (lane worktrees)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "lanes.path-convention",
+          "modality": "must",
+          "text": "Lane worktrees use the conventional path `~/tmp/worktrees/yggdrasill-<n>` and sit detached at the `origin/master` head while idle.",
+          "basis": "AGENTS.md §3 (lane worktrees)"
+        },
+        {
+          "id": "lanes.plaque-file",
+          "modality": "must",
+          "text": "Every lane worktree keeps a `.lane` file at its root (never committed): `LANE_OCCUPIED=true|false` plus `LANE_TASK` / `LANE_BRANCH` / `LANE_SINCE`.",
+          "basis": "AGENTS.md §3 (plaque mechanism)"
+        },
+        {
+          "id": "lanes.check-before-dispatch",
+          "modality": "must",
+          "text": "Always read `.lane` before dispatching: `LANE_OCCUPIED=true` means pick another lane or wait for the release; a missing file counts as free but the plaque must then be created.",
+          "basis": "AGENTS.md §3 (plaque mechanism 1)"
+        },
+        {
+          "id": "lanes.occupy-and-release",
+          "modality": "must",
+          "text": "Occupying means plaque up; closing means plaque down — once the task is merged or abandoned, set `LANE_OCCUPIED` back to false and clear the task fields.",
+          "basis": "AGENTS.md §3 (plaque mechanism 2)"
+        },
+        {
+          "id": "lanes.no-sharing",
+          "modality": "must-not",
+          "text": "Two tasks may never share one worktree; before dispatching, `git status` must be clean (except `.lane`).",
+          "basis": "AGENTS.md §3 (plaque mechanism 3)"
+        },
+        {
+          "id": "lanes.branch-naming",
+          "modality": "must",
+          "text": "A requirement iteration branch must be named `feature/<4-char-id>-<semantic-topic>` — exactly 4 lowercase letters/digits after `feature/`, then `-`, then a semantic topic with at least 3 consecutive letters (never purely numeric, never an 8-16 char hex-like hash; bare ids like `feature/r1` are not recognizable across runs), whole name at most 48 chars. Canonical example: `feature/a3f9-map-single-gone`. Both `lane.claim` and `git.worktree_claim` enforce this shape and refuse illegal names readably; an empty branch means \"not asserted yet\" and stays legal until a worktree is mounted.",
+          "basis": "AGENTS.md §3 (lane worktrees) · requirement r2 rev 1 (mod gate ruling)"
+        }
+      ]
+    },
+    {
+      "id": "dispatch",
+      "order": 5,
+      "title": "3c. Subagent dispatch discipline",
+      "summary": "Background dispatch never blocks the main session; the model and thinking level come from `.env.local`, are used as dispatch parameters only, and are never printed or committed.",
+      "source": "AGENTS.md §3 (subagent dispatch discipline)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "dispatch.executor-ledger",
+          "modality": "must",
+          "text": "After dispatching you must register the executor (a **self-declared ledger**, not identity proof): `config.set executor.<rN>.<stage>=<agent_id>`, stage ∈ analysis / plan / development; when one subagent covers all three stages, register the same id stage by stage. Replacing the executor for the same (req, stage) with a different id **requires** a reason (`=<new_id>|<reason>`); a **cross-stage handoff** (a plan id different from the analysis one, or — with no plan — different from the analysis one) equally requires a reason and may never be silently overwritten as a \"first binding for that stage\". A successful handoff writes `id|reason` and appends one entry to `req.<i>.hist` (reusing the rolling cap; no separate history/handoff key); a clean first binding writes no history. The ledger carries no rev: `amend` does not change the binding and `split` / `merge` do not inherit it. `proposal.submit` performs no hard check — an unregistered executor only shows as \"unregistered\" in `requirement.list` and never blocks external proposals or same-ext replays.",
+          "basis": "user decision 2026-11-01 (E2 ruling: reuse config.set, bind no rev, no hard submit gate, a cross-stage handoff must give a reason)"
+        },
+        {
+          "id": "dispatch.background-only",
+          "modality": "must",
+          "text": "Every subagent task runs in the background; the main session never waits in place — keep advancing other lanes, verifications or planning while it runs, and verify and merge once the completion notice arrives.",
+          "basis": "AGENTS.md §3 (dispatch discipline 1)"
+        },
+        {
+          "id": "dispatch.sync-wait-exception",
+          "modality": "should",
+          "text": "Synchronous waiting is allowed only when the next action strictly depends on the result and nothing else can progress in parallel; even then, spend the waiting time on other lanes first.",
+          "basis": "AGENTS.md §3 (dispatch discipline 1)"
+        },
+        {
+          "id": "dispatch.params-from-env-local",
+          "modality": "must",
+          "text": "Before dispatching, read the repository-root `.env.local` (git-ignored, never committed): `YGG_SUBAGENT_MODEL` (the subagent model, e.g. `sonnet` / `provider/model-id`) and `YGG_SUBAGENT_THINKING` (`off|minimal|low|medium|high|xhigh|max`); when unset, pass nothing explicitly and use the harness default.",
+          "basis": "AGENTS.md §3 (dispatch discipline 2)"
+        },
+        {
+          "id": "dispatch.params-not-disclosed",
+          "modality": "must-not",
+          "text": "These two values are dispatch parameters only — never printed, never written into documentation, never committed.",
+          "basis": "AGENTS.md §3 (dispatch discipline 2)"
+        }
+      ]
+    },
+    {
+      "id": "integration",
+      "order": 6,
+      "title": "4. Develop → integrate → merge → deploy",
+      "summary": "Three closing levels: the iteration point (feature branch) → the round (a releasable batch) → deployment; integration, merging and deployment are always done serially by the main agent.",
+      "source": "AGENTS.md §4",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "integration.serial-closeout",
+          "modality": "must",
+          "text": "Integration, merging and deployment are executed serially by the main agent (the main session); lane subagents only develop, pass their gates and push their feature branch.",
+          "basis": "AGENTS.md §4 (serial closeout)"
+        },
+        {
+          "id": "integration.iter.fetch",
+          "modality": "must",
+          "text": "First step of an iteration closeout: `git fetch origin`.",
+          "basis": "AGENTS.md §4 (1)"
+        },
+        {
+          "id": "integration.iter.rebase-on-trunk",
+          "modality": "must",
+          "text": "Check whether the trunk moved: if the histories diverged, align first with `git pull --ff-only`, then rebase the feature branch.",
+          "basis": "AGENTS.md §4 (1)"
+        },
+        {
+          "id": "integration.iter.gates-green-first",
+          "modality": "must",
+          "text": "All gates must be green (see the gates chapter) before a merge is requested — a merge may never be requested with a failing gate.",
+          "basis": "AGENTS.md §4 (1)"
+        },
+        {
+          "id": "integration.iter.merge-ritual",
+          "modality": "must",
+          "text": "The merge is triggered by the user, or executed by the main agent after the user approves it: in the main checkout run `git merge --no-ff <feature>`, then push master; deleting the remote feature branch is optional.",
+          "basis": "AGENTS.md §4 (1)"
+        },
+        {
+          "id": "integration.round.e2e-acceptance",
+          "modality": "must",
+          "text": "A round-level closeout first passes end-to-end acceptance: the example game completed end to end plus save/load verification; after M1 this adds the AI-generated → playable loop.",
+          "basis": "AGENTS.md §4 (2)"
+        },
+        {
+          "id": "integration.round.batch-tag",
+          "modality": "must",
+          "text": "Once acceptance passes, tag the batch `v<YYYY.MM.DD>.<n>` — the no-FF merge node is the rollback anchor.",
+          "basis": "AGENTS.md §4 (2)"
+        },
+        {
+          "id": "integration.round.changelog",
+          "modality": "should",
+          "text": "A batch closeout updates the CHANGELOG / report when one exists.",
+          "basis": "AGENTS.md §4 (2)"
+        },
+        {
+          "id": "integration.deploy.master-only",
+          "modality": "must-not",
+          "text": "Anything deployed through any channel must already be merged into master: a non-master ref is refused outright, with no exception switch.",
+          "basis": "AGENTS.md §4 (3)"
+        },
+        {
+          "id": "integration.deploy.requires-approval",
+          "modality": "must",
+          "text": "Deployment is a write operation: report it to the user and get approval before every deployment.",
+          "basis": "AGENTS.md §4 (3)"
+        }
+      ]
+    },
+    {
+      "id": "gates",
+      "order": 7,
+      "title": "5. Verification-command gates",
+      "summary": "The gate baseline is a snapshot: the acceptance standard is \"introduce no new failure\"; a module whose gate is not wired up must be declared uncovered explicitly.",
+      "source": "AGENTS.md §5",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "gates.baseline-snapshot",
+          "modality": "must",
+          "text": "The gate baseline is a snapshot that grows with each iteration, and the acceptance standard is \"introduce no new failure\" — historical debt does not have to be zero, but no new failure may appear.",
+          "basis": "AGENTS.md §5"
+        },
+        {
+          "id": "gates.core-purity-review",
+          "modality": "must",
+          "text": "The dependency list in `ygg-core`'s `Cargo.toml` is part of the review: a rendering, platform or IO dependency is a violation with no exception mechanism.",
+          "basis": "AGENTS.md §5 (kernel purity check)"
+        },
+        {
+          "id": "gates.uncovered-declaration",
+          "modality": "must",
+          "text": "A module whose gate is not wired up yet (no tests exist) must be declared \"gate not covered\" in the report; it never passes by default.",
+          "basis": "AGENTS.md §5"
+        },
+        {
+          "id": "gates.mod-semantics-matrix",
+          "modality": "must",
+          "text": "Changing `.ygg/mods/pi-agent-seed/src/**` (state machine / gates / render layer), `mod.lua`, or the map wording in `.ygg/mods/pi-agent-seed/data/scenes.json` adds `cargo test -p ygg-sandbox --test agent_seed_semantics` to the gate list on top of lint and the all-1 playtest: the case list = stage merge plus the compatibility `analysis` slot / accept-gate reject / accept-gate approval releasing the lane / accept-gate amend → stale / plan-gate reject / reactive auto-dispatch in the same turn (with `useMemo` invalidation) / development proposal reject (not amended and amended) / inline `exec=` (misplaced, missing reason, `:` form) / settlement merge with `sessions=` + `todo=` and a refused malformed segment / legacy save without `plan_ok` / the operation and design map wording on both packs / the all-1 walk of both packs / the six active-subsystem cases (`worktree_claim` + release, lane probe + conflict radar blocking `coordinate.submit`, artifact probe + `vfs.write` ledger, `gate.verify_suite` green evidence, `harness.archive_sessions` settlement, declaration completeness). The all-1 playtest only covers the happy path — it never takes a branch (`gate.reject` / `requirement.amend` / `proposal.reject`) and cannot see the turn-cut mechanics at all; a temporary probe under `/tmp` may only supplement this test and never replace it; every uncovered scenario must be declared item by item in the report. Three-question criterion: ① the blocked action is \"change the Mod source or the map wording, run only lint plus all-1, and call it accepted\"; ② the visible symptom of a violation is that branch semantics and map wording regress while every gate stays green, so the defect only shows in a real run; ③ confirm it next time with that command (24/24) plus one mutation probe (put the old semantics back → the test must go red) to prove the assertions are not vacuous.",
+          "basis": "AGENTS.md §1.9 (behavioural acceptance); crates/ygg-sandbox/tests/agent_seed_semantics.rs"
+        },
+        {
+          "id": "gates.no-wasm-pack",
+          "modality": "must-not",
+          "text": "Never build the wasm bindings with wasm-pack: the exception-handling module needs `wasm-bindgen --reference-types` and wasm-pack does not pass that flag through; the build chain is fixed to `scripts/build-wasm.sh` (cargo plus the wasm-bindgen CLI, two steps).",
+          "basis": "AGENTS.md §5 (wasm binding note); .cargo/config.toml header note"
+        },
+        {
+          "id": "gates.no-silent-baseline-edit",
+          "modality": "must-not",
+          "text": "When the FR-9 dual-run state hashes differ, never silently edit the fixture baseline — a mismatch is a determinism breach between platforms, and a baseline change requires an explicit decision plus a record.",
+          "basis": "AGENTS.md §5 (FR-9 note)"
+        },
+        {
+          "id": "gates.fr9-browser-lane-gap",
+          "modality": "must",
+          "text": "Before claiming full FR-9 compliance, add the wasm-bindgen-test browser lane (replay the same assertions in a real browser wasm instance) or take an explicit waiver decision; today the node lane covers native/wasm dual-run equivalence, and the browser lane does not exist.",
+          "basis": "AGENTS.md §5 (FR-9 residual-gap note)"
+        },
+        {
+          "id": "gates.contract-parity",
+          "modality": "must",
+          "text": "Contract parity criterion: the same Mod sample must produce identical results through ajv and through the jsonschema crate; the CI script does not exist yet, so until it lands that surface is declared \"gate not covered\".",
+          "basis": "AGENTS.md §5 (contract parity)"
+        }
+      ]
+    },
+    {
+      "id": "live_evidence",
+      "order": 8,
+      "title": "6. Layered verification discipline",
+      "summary": "Green unit gates do not prove the game is playable: an iteration point needs a live-chain walk and a round needs a full playthrough; neither may be skipped.",
+      "source": "AGENTS.md §6",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "live.gates-do-not-prove-playable",
+          "modality": "must-not",
+          "text": "A passing unit gate is never evidence that \"the game is playable\" — a gate only proves that no existing assertion broke.",
+          "basis": "AGENTS.md §6"
+        },
+        {
+          "id": "live.iter.kernel-chain",
+          "modality": "must",
+          "text": "At the iteration-point level (before a feature branch merges), a kernel change must pass live-chain verification beyond the gates: the Rust unit tests plus one minimal playable scripted driver (load the sample Mod → advance several events → assert state).",
+          "basis": "AGENTS.md §6 (1)"
+        },
+        {
+          "id": "live.iter.ui-browser-walk",
+          "modality": "must",
+          "text": "A presentation-layer change requires a real browser walk-through with screenshots.",
+          "basis": "AGENTS.md §6 (1)"
+        },
+        {
+          "id": "live.round.full-playthrough",
+          "modality": "must",
+          "text": "At the round level, once a batch of iteration points is merged, play the example game through completely once (after M1 including the AI-generated content loop) and prove every acceptance point item by item.",
+          "basis": "AGENTS.md §6 (2)"
+        },
+        {
+          "id": "live.evidence-per-point",
+          "modality": "must",
+          "text": "Evidence first: a UI conclusion comes with a screenshot, an interface/kernel conclusion comes with command output and the exit code.",
+          "basis": "AGENTS.md §6 (2)"
+        }
+      ]
+    },
+    {
+      "id": "evidence",
+      "order": 9,
+      "title": "7. Evidence first",
+      "summary": "A conclusion may come only from command output and its exit code, from an artifact file, or from the source text you actually read; when unsure, say you are unsure.",
+      "source": "AGENTS.md §7",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "evidence.command-and-exit-code",
+          "modality": "must",
+          "text": "Prove a point with command output and its exit code.",
+          "basis": "AGENTS.md §7"
+        },
+        {
+          "id": "evidence.artifacts",
+          "modality": "must",
+          "text": "Prove a point with an artifact's existence and content (existence plus the key content, not merely \"it was generated\").",
+          "basis": "AGENTS.md §7"
+        },
+        {
+          "id": "evidence.source-lines",
+          "modality": "must",
+          "text": "When quoting source code, give `file:line`.",
+          "basis": "AGENTS.md §7"
+        },
+        {
+          "id": "evidence.no-impression",
+          "modality": "must-not",
+          "text": "Never assert from impression; never write evidence-free completion phrases such as \"I have finished\".",
+          "basis": "AGENTS.md §7"
+        },
+        {
+          "id": "evidence.uncertainty-declared",
+          "modality": "must",
+          "text": "When unsure, say you are unsure and state how it will be verified next.",
+          "basis": "AGENTS.md §7"
+        }
+      ]
+    },
+    {
+      "id": "output",
+      "order": 10,
+      "title": "8. Language and output",
+      "summary": "Chinese conversation, English identifiers; conclusion before evidence; read before editing; print a mechanical rewrite before writing it and read it back afterwards.",
+      "source": "AGENTS.md §8",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "output.language-split",
+          "modality": "must",
+          "text": "Talk to the user in Chinese; keep code, identifiers, paths and commands in their original English.",
+          "basis": "AGENTS.md §8"
+        },
+        {
+          "id": "output.conclusion-first",
+          "modality": "must",
+          "text": "For an error or a conclusion, state the conclusion first and the evidence after it.",
+          "basis": "AGENTS.md §8"
+        },
+        {
+          "id": "output.read-before-edit",
+          "modality": "must",
+          "text": "Read a file before editing it; when editing several files, explain file by file what changed and why.",
+          "basis": "AGENTS.md §8"
+        },
+        {
+          "id": "output.mechanical-rewrite-roundtrip",
+          "modality": "must",
+          "text": "For a large mechanical rewrite (especially Markdown tree structures and tables) print the result first, then write it, then immediately read it back to verify.",
+          "basis": "AGENTS.md §8"
+        }
+      ]
+    },
+    {
+      "id": "pointers",
+      "order": 11,
+      "title": "9. Where to look",
+      "summary": "Pointers only, never copied content — the referenced document owns the text, so a change is maintained in exactly one place.",
+      "source": "AGENTS.md §9",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "pointers.no-duplication",
+          "modality": "must-not",
+          "text": "This chapter (and every other pointer slot) holds pointers only and never copies the text of the document it points at.",
+          "basis": "AGENTS.md §9"
+        },
+        {
+          "id": "pointers.why-pointers",
+          "modality": "must",
+          "text": "The pointer table indexes \"known destinations\": locate the real text through this chapter before acting, and never paraphrase a referenced document from memory.",
+          "basis": "AGENTS.md §9 (why pointers only: the text is maintained in exactly one place)"
+        }
+      ]
+    },
+    {
+      "id": "hard_constraints",
+      "order": 12,
+      "title": "10. Hard constraints of this repository (what not to do)",
+      "summary": "Seven things not to do, each pointing at the chapter that carries the detail — an index-style summary of the hard core, not a second copy of the text.",
+      "source": "AGENTS.md §10",
+      "priority": "critical",
+      "rules": [
+        {
+          "id": "hard.no-credentials-in-repo",
+          "modality": "must-not",
+          "text": "Never write a credential into the repository (including the committed surface of game settings / playbook / experience-growth Mod and evolution output) — the source marks this as the one non-negotiable rule (details in the credentials chapter).",
+          "basis": "AGENTS.md §10 item 1"
+        },
+        {
+          "id": "hard.no-master-development",
+          "modality": "must-not",
+          "text": "Never develop directly on master; master accepts no-FF merges only (details in the branches chapter).",
+          "basis": "AGENTS.md §10 item 2"
+        },
+        {
+          "id": "hard.no-non-master-deploy",
+          "modality": "must-not",
+          "text": "Never deploy non-master content; report and obtain user approval before every deployment (details in the integration chapter).",
+          "basis": "AGENTS.md §10 item 3"
+        },
+        {
+          "id": "hard.no-core-impurity",
+          "modality": "must-not",
+          "text": "Never add a rendering/platform/IO dependency to `ygg-core`; if \"the kernel needs to touch the DOM or the network\" comes up, the layering is broken — take it back to the design layer (details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 4"
+        },
+        {
+          "id": "hard.no-dual-schema-write",
+          "modality": "must-not",
+          "text": "Never write a schema twice: change the resource format contract only in `packages/schema/`, both the Rust and the TS side are subordinate (D11/D15; details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 5"
+        },
+        {
+          "id": "hard.no-subagent-closeout",
+          "modality": "must-not",
+          "text": "Never let a subagent integrate, merge or deploy — the closeout is always executed serially by the main agent (details in the integration chapter).",
+          "basis": "AGENTS.md §10 item 6"
+        },
+        {
+          "id": "hard.decision-change-backfill",
+          "modality": "must",
+          "text": "A decision change must be written back into the `docs/CONTEXT.md` decision table; when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
+          "basis": "AGENTS.md §10 item 7"
+        }
+      ]
+    },
+    {
+      "id": "harness",
+      "order": 13,
+      "title": "13. Agent Harness playbook (state machine · action protocol · async · artifacts · contracts)",
+      "summary": "Succeeds chapters 2/4/5/6/7/8/9 from before AGENTS.md was condensed: the two-layer state machine and its two mandatory gates, the action protocol and the three `--drive` modes, the async inbox and the cross-process closeout, progress views, run artifacts, the Mod-change trio, and the host contract. Mechanics are looked up on the spot (guide.show harness) and never restated in AGENTS.md.",
+      "source": "AGENTS.md §2/§4/§5/§6/§7/§8/§9 (text before the 2026-10-31 condensation)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "harness.goal-authorization",
+          "modality": "must",
+          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before `review.note` closes: a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the all-1 smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
+          "basis": "user decision 2026-11-01 (E2 ruling: the closing check covers runtime goal only; a static default does not block)"
+        },
+        {
+          "id": "harness.coordinator-chain",
+          "modality": "must",
+          "text": "The coordinator has a four-state chain: intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done; inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
+          "basis": "AGENTS.md §2 (pre-migration)"
+        },
+        {
+          "id": "harness.pipeline-states",
+          "modality": "must",
+          "text": "There is one requirement pipeline per requirement (`req.<i>.status`, 5 stored states): draft ──dispatch──▶ planning (job=plan) ──proposal → proposal.accept──▶ planning+gate=plan ──gate.approve(plan)──▶ planning+plan_ok ──dispatch (reactive auto-dispatch)──▶ developing (lane) ──proposal → proposal.accept──▶ developing+gate=accept ──gate.approve(accept)──▶ done. Display names are derived from status + job / pending proposal / gate / plan_ok (analysis_review / plan_review / plan_gate / ready / dev_review / accept) and are never stored. `analyzing` survives only as a compatibility state: legacy saves, and an explicit `analysis` proposal accepted on a planning row.",
+          "basis": "AGENTS.md §2 (pre-migration)"
+        },
+        {
+          "id": "harness.terminal-states",
+          "modality": "must",
+          "text": "There are also the traceable terminal states split / merged / dropped, plus the two marker states blocked (conflict) and stale (a proposal whose rev is outdated).",
+          "basis": "AGENTS.md §2 (pre-migration)"
+        },
+        {
+          "id": "harness.coordinator-scope",
+          "modality": "must",
+          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and close with the final review (verify.submit → settlement.evolution → review.note); it never carries development itself and may never bypass a gate.",
+          "basis": "AGENTS.md §2 (pre-migration)"
+        },
+        {
+          "id": "harness.requirement-granularity",
+          "modality": "must",
+          "text": "Requirement granularity: adjacent work with the same goal, the same subsystem, a small change, or that can share one plan and one acceptance evidence set belongs in the same requirement; create a new one only for an independent delivery + acceptance, a cross-repository or cross-lane change, or risk isolation. A new adjacent requirement must state in its description why it cannot be merged (no reason = treat as mergeable). Three-question criterion: ① the blocked action is filing through requirement.add / --requirement; ② the visible symptom of a violation is that the adjacent requirement is pointed out as \"just part of the previous one\" while its description has no cannot-merge reason; ③ confirm it next time by walking `requirement.list` and checking that every new requirement's description carries that reason.",
+          "basis": "user decision 2026-11-02 (r3 requirement-merge decision)"
+        },
+        {
+          "id": "harness.plan-gate",
+          "modality": "must",
+          "text": "The plan gate (`req.gate=plan`) fires after a plan proposal is accepted; approve → `plan_ok` is set (the former `ready`, the only state that may dispatch into development); reject → back to planning for rework; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
+          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+        },
+        {
+          "id": "harness.accept-gate",
+          "modality": "must",
+          "text": "The accept gate (`req.gate=accept`) fires after a development proposal is accepted (the executor delivered); approve → done; reject → the stored state returns to planning and `plan_ok` keeps its value (not amended → the former ready, back into the development queue; amended → `plan_ok` was already invalidated → it stops in planning and must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
+          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+        },
+        {
+          "id": "harness.accept-vs-gate",
+          "modality": "must",
+          "text": "accept means the executor self-checked and delivered; it does not mean the main agent has accepted. Only gate.approve is the verification.",
+          "basis": "AGENTS.md §2 (pre-migration)"
+        },
+        {
+          "id": "harness.gate-not-skippable",
+          "modality": "must-not",
+          "text": "A requirement sitting on the plan / accept gate (`req.gate ~= \"\"`) cannot be dispatched, accepts no new proposal and cannot be skipped; even automatic advancement (`--drive cmd:…`) runs one `gate.approve` per gate — only the index comes from the external decision command.",
+          "basis": "AGENTS.md §2 (pre-migration)"
+        },
+        {
+          "id": "harness.start-command",
+          "modality": "must",
+          "text": "Cold start of a run: `.ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
+          "basis": "AGENTS.md §3 (pre-migration)"
+        },
+        {
+          "id": "harness.drive-stdin",
+          "modality": "must",
+          "text": "`--drive stdin` (the default) reads stdin: every step, every proposal acceptance and every gate needs a human-typed index; `q` or end-of-input exits.",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
+        },
+        {
+          "id": "harness.drive-cmd",
+          "modality": "must",
+          "text": "`--drive cmd:<path>` does not read stdin: every pending choice goes to the decision command, and the run settles automatically at the ending; a `HUMAN` answer pauses safely (exit 0).",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
+        },
+        {
+          "id": "harness.drive-none",
+          "modality": "must",
+          "text": "`--drive none` prints the current receipt (including `pendingChoice`) and exits without advancing or reading stdin (exit 0).",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
+        },
+        {
+          "id": "harness.drive-conflict-pause",
+          "modality": "must",
+          "text": "`cmd:` must pause on a conflict: print both sides and the note, then exit 0 without choosing a path; after resolving it, rerun the command, or switch to `--drive stdin` and pick 1/2/3 (keep_both / keep_first / revise) from `pendingChoice`.",
+          "basis": "AGENTS.md §3 (pre-migration)"
+        },
+        {
+          "id": "harness.decide-protocol",
+          "modality": "must",
+          "text": "Decision-command protocol: stdin does not participate; the command receives the path of `decide-input.json` (the full current receipt) as its only argument, and stdout may contain exactly one line — `N` (1..=option count) or `HUMAN[:reason]`.",
+          "basis": "AGENTS.md §3 (pre-migration)"
+        },
+        {
+          "id": "harness.decide-fail-closed",
+          "modality": "must",
+          "text": "A 5-second timeout, a non-zero exit, an invalid output or an out-of-range index all fail closed (safe pause, state unchanged); `YGG_DECIDE_CMD` may temporarily override the decision-command path.",
+          "basis": "AGENTS.md §3 (pre-migration)"
+        },
+        {
+          "id": "harness.human-action-gate",
+          "modality": "must",
+          "text": "Human-action gate (effective when `play.mode=guide`): proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / `config.set play.mode` may only enter through `ygg.choice_selected`; a direct single-shot `--event` is refused with `[REJECTED:ACTION]` (the envelope stays `ok:true` and the primary state is unchanged). Rejects (gate.reject / proposal.reject) are not restricted — they are the correction channel. So there is exactly one way to accept on a human's behalf: `ygg.choice_selected` (typed by the human, or sent by the agent after reading the receipt).",
+          "basis": "AGENTS.md §3 (pre-migration)"
+        },
+        {
+          "id": "harness.no-placeholder-proposal",
+          "modality": "must-not",
+          "text": "Never fabricate content: when a job is running but there is no pending proposal, the host does not generate a placeholder proposal (a gate must be satisfied by a real delivery) — it prints a readable reason, pauses safely and exits 0, waiting for an external executor to submit and the command to be rerun.",
+          "basis": "AGENTS.md §3 (pre-migration)"
+        },
+        {
+          "id": "harness.drive-limits",
+          "modality": "must",
+          "text": "The runaway guard thresholds come from the Mod's `data/config.json` `drive` section (each field falls back when missing or invalid): the hard step cap is `maxSteps + stepsPerRequirement × requirement count` (fallback 64 + 16×n); a separate stop triggers after `stallLimit` consecutive steps with an unchanged `pendingChoice` (fallback 12).",
+          "basis": "AGENTS.md §3 (pre-migration)"
+        },
+        {
+          "id": "harness.play-mode-is-narrative",
+          "modality": "must",
+          "text": "`play.mode` is Mod narrative semantics, not something the host interprets: `config.set play.mode=<goal|guide>` only switches the Mod's prompts and narrative tone; advancement is driven by `--drive` alone — the host reads neither `play.mode` from `data/config.json` nor `settings.play.mode` from the save KV.",
+          "basis": "AGENTS.md §3 (pre-migration)"
+        },
+        {
+          "id": "harness.goal-mode-decider",
+          "modality": "must",
+          "text": "In goal mode the decider is **the agent itself**, not a script and not \"always pick 1\": under goal the Mod only changes the wording and the prompt tone, advancement still goes through `ygg.choice_selected`, and the agent judges every step from the narrative and the candidates — an acceptance that should be rejected must be rejected, a gate that should wait must wait, and mechanically taking the first item forges a conclusion. The repository ships no default decision script; by design the menu's first item is the main forward action, but it is **not guaranteed to be correct at that step**.",
+          "basis": "user instruction: the decision belongs to the agent, not to a script"
+        },
+        {
+          "id": "harness.payload-formats",
+          "modality": "must",
+          "text": "Action payloads are JSON strings whose fields are separated by `|`: task.intake `\"title|description\"`; requirement.add `\"title|description[|external_id[|depends_on]]\"`; requirement.dispatch `\"\"` / `\"0\"` (readiness order) / `\"rN\"` (that requirement only); proposal.submit `\"rN|rev|stage|summary|artifacts[|changes[|external_id[|exec=<agent_id>[:<reason>]]]]\"`; gate.approve `\"rN[|note]\"` / `\"\"`; gate.reject `\"rN|feedback\"` / `\"\"`; verify.submit `\"true\"` / `\"all_green=false;report=…\"`; settlement.evolution `\"artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]\"`; settlement.sessions `\"moved|remaining|destination\"`; settlement.todo `\"remaining|verified_by\"`; review.note `\"lesson|score(1-5)\"`. The shape printed in a rejection receipt is the correct format — copy it, never guess a segment position.",
+          "basis": "AGENTS.md §4 (action table, pre-migration)"
+        },
+        {
+          "id": "harness.dispatch-idempotent",
+          "modality": "must",
+          "text": "requirement.dispatch dispatches by readiness order (draft→plan / planning+plan_ok→development·lane; the legacy planning-without-plan→plan), with a job cap of 4; no candidate or a full slot set is a normal `[DISPATCH] 0 candidates` receipt (idempotent, never counted as a failed step).",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.proposal-changes",
+          "modality": "must",
+          "text": "A proposal's `changes` reads like `split=a,b` / `merge=r5` / `amend=title:description` / `conflict=r5:note`: a subagent only suggests, and the change lands at `proposal.accept`.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.serial-accept",
+          "modality": "must",
+          "text": "`proposal.accept` accepts exactly one proposal serially and names it with `pN` / `rN`; an empty payload takes the first in requirement-id canonical order — with more than one pending proposal you must name it, otherwise you verify the wrong requirement.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.reject-paths",
+          "modality": "must",
+          "text": "Reject paths: `proposal.reject` → analysis→draft / plan→planning / development→keeps `plan_ok` (not amended → ready, amended → planning); `gate.reject` always stores planning, the plan gate sets `plan_ok` false (a new plan is required) and the accept gate keeps the previous value (not amended → ready, amended → planning).",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.stale-rebase",
+          "modality": "must",
+          "text": "At acceptance, `rev ≠ req.<i>.rev` → the proposal becomes stale and the requirement gets the stale marker (a readable refusal; an old proposal must never override a newer decision). The recovery path is a new proposal for the same stage at the current rev — such a rebase proposal is accepted only when the requirement has no other pending proposal, and refused otherwise; once the rebase lands the stale marker clears automatically.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.rejection-prefixes",
+          "modality": "must",
+          "text": "An action outside its stage → `[REJECTED:ACTION]`; an invalid payload → `[REJECTED:PAYLOAD]`; an unmet precondition → `[BLOCKED:TODO]`; a human action dispatched single-shot → `[REJECTED:ACTION]`. All four re-render in place (the primary state is unchanged) and all four match `agent.rejectionPrefixes` in `pack.json` (the host reads that to decide \"no effect\" and does not record a failed step).",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.closeout-criteria",
+          "modality": "must",
+          "text": "The closeout criteria = `req_all_done()` (including successors of split/merged being all done) + 0 pending proposals + 0 running jobs + 0 conflicts.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.agent-summary",
+          "modality": "must",
+          "text": "The summary travels through the kernel's structured receipt channel `ygg.meta(\"summary\", {…})` and lands in the receipt envelope at `meta.summary` (stage / ending / verifyPassed / nextEndsRun / pendingProposals / requirementCount / conflicts / awaiting / evolution{artifact,summary,candidates,classes}); the host only reads that field, so writing the same content into the narrative cannot be misread; a payload of \"0\" is read-only.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.no-private-kv-reading",
+          "modality": "must-not",
+          "text": "The host never reads a Mod's private KV: with a Mod that has no `agent.summary`, the host reports \"unknown\" and pauses safely instead of falling back to `ending` / `fsm.stage` / `prop.*` / `req.*`.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.meta-not-persisted",
+          "modality": "must",
+          "text": "`meta` is a transient receipt surface: it never enters the save, the canonical snapshot or the state hash — the same event sequence yields the same `state_hash` whether or not `ygg.meta` is called.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.mutation-actions",
+          "modality": "must",
+          "text": "Direct mutation actions of the main agent: requirement.split \"parent|child title A|child title B[|…]\" (the parent becomes split, children inherit the deps, at least 2 children); requirement.merge \"source_id_1,source_id_2|merged title|merged description\" (sources become merged, the new requirement unions their deps); requirement.amend \"id|new title|new description|new deps\" (rev+1; amending a done requirement derives a new one, amending a developing one only updates its notes); requirement.conflict \"id1,id2|note\" (both become blocked; dispatch and closing skip them); requirement.resolve \"id1,id2|keep_both|keep_first|revise[|note]\".",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.lane-actions",
+          "modality": "must",
+          "text": "Lane ledger: `lane.claim \"lane|req_id|branch|base|clean\"` claims or backfills a lane (clean must be \"1\"; a dirty tree may not be claimed; the branch must match feature/<4-char-id>-<semantic-topic>, e.g. feature/a3f9-map-single-gone); `lane.release \"lane\"` releases it (idempotent).",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.config-subpage",
+          "modality": "must",
+          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates); it is a presentation layer only and never advances state. config.set / guide.show / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used by the closing check), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only).",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "harness.inbox-file",
+          "modality": "must",
+          "text": "The inbox is JSONL: `<runs-root>/<run-id>/inbox.jsonl`, one object per line `{external_id, kind, title, description, payload, created_at}` with kind ∈ add/amend/split/merge/conflict/resolve/proposal.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.inbox-commands",
+          "modality": "must",
+          "text": "Async command table: `--requirement 'title|description'` (add) / `--proposal 'rN|rev|stage|summary|artifacts[|changes]'` (proposal; the external_id is appended automatically as the 7th segment) / `--amend 'rN|new title|new description|deps'` (rev+1) / `--split 'rN|child A|child B'` / `--merge 'r2,r3|title|description'` / `--conflict 'r1,r2|note'` / `--resolve 'r1,r2|keep_both'`.",
+          "basis": "AGENTS.md §5 (command table, pre-migration)"
+        },
+        {
+          "id": "harness.inbox-no-mod",
+          "modality": "must",
+          "text": "The async commands only append to the inbox (`OpenOptions::append`); they never read or write the autosave, so `--mod` is not needed and they may run concurrently with a live run.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.inbox-drain",
+          "modality": "must",
+          "text": "Consumption points: before every automatic advancement under `cmd`, before every prompt under `stdin`, and before every single-shot dispatch — new lines are drained and dispatched by kind; a line that arrived while the run was live must never be missed.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.coordination-lock",
+          "modality": "must",
+          "text": "The cross-process protocol is protocol-level mutual exclusion (not \"read the file one more time\"): `coordination.lock` in the run directory (create_new exclusion, a stale lock is taken over after 2s by mtime) plus `coordination.json` `{phase, writers, owner_pid, heartbeat_at}` with phase ∈ running / closing / finalized.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.coordination-writer",
+          "modality": "must",
+          "text": "A write command registers first: phase=running → it counts as a writer until its line is on disk; phase=closing (heartbeat not expired) → the command itself fails non-zero (exit 3); phase=finalized → non-zero refusal (exit 3, a new run is required).",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.coordination-closing",
+          "modality": "must",
+          "text": "Before dispatching the final `review.note`, automatic advancement switches phase to closing, waits until the in-flight writers reach zero, and then does one last drain under the same protection: when a new requirement exists and is not done → lift closing and continue the loop (no ending); when nothing new arrived → finish `review.note` + settle under the same protection and set phase=finalized. So \"the write command succeeded but the run already crossed the last drain\" is impossible by protocol.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.coordination-recovery",
+          "modality": "must",
+          "text": "Stale lines and crash recovery: closing keeps itself alive with a heartbeat (expires after 10s); once expired, a write command or `--resume` declares it dead and returns the phase to running; the lock is taken over by mtime as well — neither can wedge forever after a process crash.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.settle-under-closing",
+          "modality": "must",
+          "text": "A standalone `--settle` also goes through closing: with unconsumed lines it returns `ok=false` and reverts to running (a resume can consume them); when already finalized it returns the old report idempotently and rewrites nothing.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.inbox-idempotent",
+          "modality": "must",
+          "text": "The cursor (`{consumed:N}` in `inbox.cursor`) only advances after a dispatch succeeded and its save is on disk; replay relies on `external_id`: add / proposal → the Mod checks per-entity ext duplicates (`[REPLAY:REQ]` / `[REPLAY:PROPOSAL]`); amend / split / merge / conflict / resolve → a trailing `@ext=` on the payload plus `inbox.last` de-duplication (`[REPLAY:ASYNC]`).",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.bad-line-skip",
+          "modality": "must",
+          "text": "A malformed line is skipped and the cursor advances past it (otherwise it would block forever).",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.settle-inbox-gate",
+          "modality": "must",
+          "text": "Hard settlement gate: if `--settle` finds an unconsumed line it returns `ok=false` and a non-zero exit (it re-checks after writing: a line that arrives during settlement invalidates the report) — so \"deliver after the ending\" can never silently succeed; a new run is required.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.inbox-timing",
+          "modality": "should",
+          "text": "Delivery after the process exited belongs to a new run: the inbox keeps the lines for the next run to consume, and settlement reports an error.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "harness.requirement-list",
+          "modality": "must",
+          "text": "requirement.list (\"\" / \"0\" / \"full\") is read-only: the requirement graph row by row (status + deps + rev + lane + job + conflict/stale traces), the pending-proposal list, the lane ledger and the legend.",
+          "basis": "AGENTS.md §6 (pre-migration)"
+        },
+        {
+          "id": "harness.map-show",
+          "modality": "must",
+          "text": "map.show prints the two-layer map: the coordinator's 4-state node graph + the requirement pipeline (including both gates) + the job / lane ledger; each lane row reads `lane-<k> ← <requirement> | branch | base | since #N | clean` (an unset field shows `-`).",
+          "basis": "AGENTS.md §6 (pre-migration)"
+        },
+        {
+          "id": "harness.pending-choice-order",
+          "modality": "must",
+          "text": "pendingChoice order: resolve conflict (if any) → main forward action (proposal.accept > gate.approve > requirement.dispatch > coordinate.submit) → guide.show → map.show → requirement.list → requirement.add → config (inside the sub-page: play.mode → evolution.mode → gates + back).",
+          "basis": "AGENTS.md §6 (pre-migration)"
+        },
+        {
+          "id": "harness.run-autosave",
+          "modality": "must",
+          "text": "`autosave.json` is the per-step automatic save (entity table + KV + pending choice) and can be fed to `load` directly.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "harness.run-events",
+          "modality": "must",
+          "text": "`events.jsonl` holds one line per dispatch: `{seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "harness.run-runjson",
+          "modality": "must",
+          "text": "`run.json` = `{run_id, mod, mod_signature, started_at, updated_at}`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "harness.run-settlement",
+          "modality": "must",
+          "text": "`settlement.json` is the end-of-run settlement and is written only by `--settle`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "harness.run-inbox",
+          "modality": "must",
+          "text": "`inbox.jsonl` is the async operation queue (append-only, consumed by the running side); `inbox.cursor` is the consumed line count (it only advances after a successful dispatch plus save).",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "harness.run-coordination",
+          "modality": "must",
+          "text": "`coordination.json` is the cross-process protocol `{phase, writers, owner_pid, heartbeat_at}` (running / closing / finalized); `coordination.lock` is the short critical-section mutex (create_new, taken over by mtime when stale, so a crash cannot wedge it).",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "harness.run-decide-input",
+          "modality": "must",
+          "text": "`decide-input.json` is the input of an external decision command: under `--drive cmd:` the full current receipt is written there before the command is invoked, on every pending choice.",
+          "basis": "AGENTS.md §3 / §7 (pre-migration)"
+        },
+        {
+          "id": "harness.settle-ok",
+          "modality": "must",
+          "text": "`settle`'s `ok` = the event log is non-empty ∧ no failed step ∧ an ending narrative line appeared ∧ the inbox has no unconsumed line (the switches come from the Mod contract's `settlement` section); the exit code mirrors `ok`; with unconsumed lines the report says \"N unconsumed inbox lines after the ending — a new run is required\" and `ok=false`.",
+          "basis": "AGENTS.md §7 (pre-migration)"
+        },
+        {
+          "id": "harness.pack",
+          "modality": "must",
+          "text": "After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/pi-agent-seed`.",
+          "basis": "AGENTS.md §8 (pre-migration)"
+        },
+        {
+          "id": "harness.lint",
+          "modality": "must",
+          "text": "Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/pi-agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/pi-agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.",
+          "basis": "AGENTS.md §8 (pre-migration)"
+        },
+        {
+          "id": "harness.playtest",
+          "modality": "must",
+          "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/pi-agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
+          "basis": "AGENTS.md §1.9 (behavioural acceptance); gates.mod-semantics-matrix"
+        },
+        {
+          "id": "harness.manifest-content-addressed",
+          "modality": "must",
+          "text": "The manifest is content-addressed (sha256 + byteLength): editing `data/*.json` without recomputing the pack makes loading fail with a content-hash mismatch.",
+          "basis": "AGENTS.md §8 (pre-migration)"
+        },
+        {
+          "id": "harness.multi-script-load",
+          "modality": "must",
+          "text": "A multi-file Mod is registered only in the `code` section of `pack.json`: `entry` is not registered as a module, `modules` enumerates every file explicitly (no glob), and a missing `code` section means a single-file Mod (no migration needed for existing Mods). `require` works both at load time and at runtime (inside a handler) — `host.seal` only seals `ygg.on`, so a pure library may be loaded lazily; the price is that a module's top level may be a pure export surface only (see `harness.module-pure-export`). After changing any module file you must rerun pack (content-addressed: a byte-count or hash mismatch fails loading).",
+          "basis": "docs/DESIGN.md §3.2 \"multi-file Mod\" (the r5 documentation surface; the same-named subsection expands each item)"
+        },
+        {
+          "id": "harness.module-pure-export",
+          "modality": "must",
+          "text": "A multi-file Mod's module chunk performs pure exports only (function and constant definitions) and does nothing with side effects: registration / state writes / output all live in the entry `mod.lua`. A module exposes registration as a function (`function M.install(deps)`) that the entry calls explicitly in order; touching `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / `ygg.entity.spawn` / `ygg.entity.set_attribute` / `ygg.entity.add_tag` / `ygg.entity.remove_tag` / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative[\"goto\"]` at a module's top level is refused (the static `YGG-MOD-EFFECT` rule and the runtime shadow table share the single list `ygg_modules::effects`); at the top level only pure reads are allowed (`ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity.has_tag` / `ygg.entity.get_attribute`); the entry chunk is exempt (it is the assembly manifest). Why: a handler's dispatch order equals the `ygg.on` registration order — letting a module register itself means \"how the files are split / who is required first\" decides runtime behavior, so splitting a file or reordering a `require` would change the dispatch order and refactoring would not preserve behavior. `require` is therefore usable at any time (including lazy-loading a pure library inside a handler), but lazy loading never relaxes the boundary: a lazily loaded module's top level is still pure exports. See `docs/DESIGN.md` §3.2 \"Mod Package & Multi-File Purity Contract\".",
+          "basis": "docs/DESIGN.md §3.2 \"multi-file Mod\", side-effect boundary (semantics tightened in r1/r2/r3; the single source for both lists is ygg_modules::effects)"
+        },
+        {
+          "id": "harness.kv-prefix-owner",
+          "modality": "must",
+          "text": "In a multi-file Mod the KV prefixes are partitioned by ownership and each prefix has exactly one writer (a documentation convention; loading does not validate it): `fsm.*` is written only by the stdlib `ygg.fsm` and read-only for the Mod; `settings.*` is written only by `config.set`; `req.*` = the requirement table, `prop.*` = the proposal table, `lane.*` = the lane ledger, `ui.*` = presentation only (never in the summary, never affecting dispatch), and `task.*` / `verify.*` / `review.*` / `inbox.*` plus the bare key `ending` each have their own single writer. Two modules writing one prefix is implicit coupling — share through a module's return value instead.",
+          "basis": "docs/DESIGN.md §3.2 \"KV prefix ownership\" (user decision: documentation convention only, no load-time validation surface)"
+        },
+        {
+          "id": "harness.module-error-locates",
+          "modality": "must-not",
+          "text": "Never \"glue a multi-file Mod back into one file and then report errors\": a module chunk name must carry the real file (`@src/util.lua`), a refusal the loader decides itself must carry the call site (`src/a.lua:3: <reason>`) and the require chain, and static checks must parse each module independently (a module's `local` never spans chunks, so gluing would invent a shared scope that does not exist at load time). A diagnostic whose line number does not match the real file is a defect.",
+          "basis": "docs/DESIGN.md §3.2 \"error location: real file + real line number\""
+        },
+        {
+          "id": "harness.hot-reload",
+          "modality": "must",
+          "text": "Hot reload: single-shot mode loads from disk in every new process; a `--resume` receipt with `hotReload.source=\"resume\"` proves the change is in effect.",
+          "basis": "AGENTS.md §8 (pre-migration)"
+        },
+        {
+          "id": "harness.two-mods-layering",
+          "modality": "must",
+          "text": "The two Mods are a division of labor (not the same file): the skeleton surface (`mod.lua` + `schemas/`) is byte-identical and kept in sync by `scripts/sync-seed-mod.sh` (CI has a skeleton guard); the instance surface `data/` is maintained on each side — `packages/mods/pi-agent-seed` is the distributable seed template (5 generic chapters, zero project rules) and `.ygg/mods/pi-agent-seed` is this project's instance (14 chapters, this one included).",
+          "basis": "AGENTS.md §8 (pre-migration)"
+        },
+        {
+          "id": "harness.contract-required",
+          "modality": "must",
+          "text": "The generic tooling (`crates/ygg-sandbox/examples/agent.rs`, `src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.",
+          "basis": "AGENTS.md §9 (pre-migration)"
+        },
+        {
+          "id": "harness.contract-agent-seg",
+          "modality": "must",
+          "text": "The `agent` section of `pack.json` has eight fields: entryEvent / choiceEvent / summaryEvent / endingPrefix / metaKey / rejectionPrefixes (at least one) / replayPrefix / defaultPayload.",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+        },
+        {
+          "id": "harness.contract-inbox-seg",
+          "modality": "must",
+          "text": "The `inboxRoutes` section of `pack.json`: reserved keys externalIdField / payloadField / extMarker plus `<kind>` → `{action, fields[, write]}` (zero kinds is legal).",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+        },
+        {
+          "id": "harness.contract-settlement-seg",
+          "modality": "must",
+          "text": "The `settlement` section (in `<config.json>`): requireEvents / requireNoFailedSteps / requireEnding / requireInboxConsumed.",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+        },
+        {
+          "id": "harness.contract-drive-seg",
+          "modality": "must",
+          "text": "The `drive` section (in `<config.json>`): maxSteps / stallLimit / stepsPerRequirement (positive integers).",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+        },
+        {
+          "id": "harness.contract-config-path",
+          "modality": "must",
+          "text": "`<config.json>` is the path declared by the `ygg:agent/config` entry in `pack.json` (`data/config.json` for the seed Mod).",
+          "basis": "AGENTS.md §9 (pre-migration)"
+        },
+        {
+          "id": "harness.contract-upgrade",
+          "modality": "must",
+          "text": "Upgrading an old Mod means filling in the four sections (two in `pack.json`, two in `config.json`); `cargo run --example pack -- <mod dir>` validates their shape at pack time (only what is declared is validated).",
+          "basis": "AGENTS.md §9 (pre-migration)"
+        },
+        {
+          "id": "harness.host-vs-contract",
+          "modality": "must",
+          "text": "Ownership boundary: event names / ending prefix / summary key / rejection and replay prefixes / inbox fields and routes / settlement switches / advancement thresholds belong to the contract and must be declared by the Mod; what the host may keep as literals is the run-directory file names, the coordination phase names running / closing / finalized, the decision-command timeout (`DECIDE_TIMEOUT`) and poll interval (`DECIDE_POLL_INTERVAL`), the three `--drive` modes, the five-file set (`pack.json` / `manifest.json` / `mod.lua` / `schemas/` / `data/`), and the kernel seams (`save` / `load` / `state`, and the reserved `ygg.choice_selected` route). Criterion: would this literal change with another Mod? If yes, it belongs to the contract.",
+          "basis": "AGENTS.md §9 (ownership boundary, pre-migration)"
+        },
+        {
+          "id": "harness.literal-ownership",
+          "modality": "must-not",
+          "text": "Only applications bound to a specific Mod and the generator side may keep event-name / ending-prefix literals, and every such file declares \"bound\" or \"generator-side\" in its header: adventure.rs, clients/godot/rust/src/logic.rs, clients/godot/project/main.gd|session.gd, spike/godot/**, packages/client-web/src/{kernel,session,kernel-wasm}.ts and crates/ygg-wasm/smoke.mjs are bound to `packages/mods/test-adventure`; packages/pipeline/src/{prompt,types,pack}.ts and scripts-dev/mock-llm-stub.mjs are generator-side; the generic tooling of crates/ygg-sandbox|ygg-lint and the test fixtures under tests/ may not add literals, and `ygg.choice_selected` is the reserved event name checked by the kernel domain (the contract's `choiceEvent` must use it).",
+          "basis": "AGENTS.md §9 (literal-ownership table, pre-migration)"
+        },
+        {
+          "id": "harness.choice-payload-type",
+          "modality": "must",
+          "text": "The payload of `ygg.choice_selected` must be a **JSON number** (`--payload '1'`); sending it as a string (`--payload '\"1\"'`) is rejected by the kernel domain as VALIDATION \"option does not exist\". Every other action's payload is a string. Menu selection is the **only** passing channel for the human-action gate — dispatching `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` directly through `--event` is always refused (the receipt's first line is `[REJECTED:ACTION]`).",
+          "basis": "guide.show harness"
+        },
+        {
+          "id": "harness.living-docs-closed-loop",
+          "modality": "must",
+          "text": "`docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.",
+          "basis": "AGENTS.md §1.7 + docs/{CONTEXT,DESIGN}.md closed loop"
+        }
+      ]
+    },
+    {
+      "id": "evolution",
+      "order": 14,
+      "title": "14. How to propose an evolution (candidate screening · review · scenario first)",
+      "summary": "An end-of-run suggestion passes four gates before it may enter the backlog: long-term priority, a root cause for an unused existing capability, an independent review per item, and scenario before technique; after verify is green, `settlement.evolution` registers the summary and the candidate declaration, and `review.note` only archives it single-source — the state machine checks the declaration's shape, never the quality of the suggestion.",
+      "source": "user decision 2026-11-01 (game-1101-1 settlement review E1)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "evolution.long-term-screen",
+          "modality": "must",
+          "text": "A suggestion entering the backlog must by default be a process mechanism that recurs across tasks: the criteria are \"would this come up again with another requirement / another repository?\" plus \"which action of the next run would it change?\". Execution constraints of a single task, conventions of a temporary tool or a one-off probe, and anything already solved in that same task do not enter by default.",
+          "basis": "user decision 2026-11-01 (game-1101-1 settlement review E1)"
+        },
+        {
+          "id": "evolution.classes",
+          "modality": "must",
+          "text": "Every candidate must be classified into exactly one of six classes and counted: `long_term` (long-term mechanism) / `unused` (existing but unused) / `one_off` (single-task constraint) / `temp_tool` (temporary tool) / `redundant` (redundant, to retire) / `no_scene` (genuinely no scenario). Only long_term, unused and redundant may enter the backlog; the other three are recorded as \"not adopted\" with a stated reason.",
+          "basis": "user decision 2026-11-01 (E1, six classes)"
+        },
+        {
+          "id": "evolution.unused-root-cause",
+          "modality": "must",
+          "text": "\"An existing capability is never called\" may neither be removed outright nor treated as a missing capability: it must be assigned one of six root causes with locating evidence — the call chain is missing or the entry is unreachable / discoverability is poor / the call cost or contract does not fit / the executor knows about it but chooses not to use it / there genuinely is no scenario / the capability is redundant and should be retired.",
+          "basis": "user decision 2026-11-01 (E1, root-cause table)"
+        },
+        {
+          "id": "evolution.review-artifact",
+          "modality": "must",
+          "text": "Every screened candidate (kept or not) leaves a conclusion in the review artifact with four elements: ① the file and line number; ② a command that can be run as written plus its actual output (not \"it was generated\"); ③ the semantic basis (does that behavior match or violate the current contract); ④ the root-cause class and the review conclusion (confirmed / insufficient evidence / does not hold / one-off / deferred).",
+          "basis": "the three elements of the evidence chapter + user decision 2026-11-01 (E1 §4)"
+        },
+        {
+          "id": "evolution.scenario-first",
+          "modality": "must",
+          "text": "The narrative order is fixed: which real problem is being solved → which step of the current process is unsatisfied → the code and reproduction evidence → the root cause → the long-term benefit → the change surface and how it is verified. File paths and technical detail only support it and may never replace the problem statement; the user should never have to ask in order to understand the benefit.",
+          "basis": "user decision 2026-11-01 (E1 §5)"
+        },
+        {
+          "id": "evolution.record-shape",
+          "modality": "must",
+          "text": "After `verify.submit=true`, register with `settlement.evolution`: `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`. The summary is required after trimming; the artifact may be empty, but **when `screened > 0` it must be `artifacts/<file>.md` and `cls` is required**; the six class counts sum to `screened` and the kept classes sum to `kept`; **c=0/0 allows an empty artifact**. Missing c/cls fall back in order to `settings.review.evolution.*` and then to 0/0 with no classes. Under guide you may pre-register with `config.set review.evolution.artifact|summary|candidates|classes=<value>` (shape checked per key, cross-field completeness only at `settlement.evolution`), and the menu builds the payload from it; with no pre-registration it uses the neutral summary plus c=0/0. The optional `sessions=` / `todo=` segments settle the two end-of-run cleanups in the same transaction. `review.note` afterwards accepts only `lesson|score` and archives the four settlement keys single-source into `review.evolution.*`.",
+          "basis": "the settlement.evolution / review.note / config.set contracts (this Mod)"
+        },
+        {
+          "id": "evolution.declare-not-prove",
+          "modality": "must-not",
+          "text": "Never present a registration as proof: the state machine only checks that the summary is non-empty, the path shape, and that the counts and classes are self-consistent — it cannot read the artifact (the sandbox has no filesystem) and does not know whether the review was really performed by an independent subagent. Any claim such as \"the suggestion quality is proven\" or \"the review independence is proven\" is out of bounds.",
+          "basis": "the sandbox allowlist (no io/os) + the settlement.evolution contract"
+        },
+        {
+          "id": "evolution.no-new-carrier",
+          "modality": "must-not",
+          "text": "Never add a second registration entry point, an external checker script or a host change for the evolution flow: the only registration action is `settlement.evolution`, and the only allowed carriers remain AGENTS.md and the Mod resources (`src/**` and `data/*.json`). Read-only queries may be used to check a declaration but may never become the carrier of a constraint.",
+          "basis": "AGENTS.md §1.7"
+        },
+        {
+          "id": "evolution.living-docs-sync",
+          "modality": "must",
+          "text": "Whenever a run evolves domain concepts, state-machine rules, persistent lane semantics, or architectural contracts, `docs/CONTEXT.md` and `docs/DESIGN.md` must be reviewed and updated before `settlement.evolution` and `review.note` close the run.",
+          "basis": "AGENTS.md §2 + docs/{CONTEXT,DESIGN}.md closed loop"
+        }
+      ]
+    },
+    {
+      "id": "tools",
+      "order": 15,
+      "title": "15. External tools (two-layer allowlist)",
+      "summary": "A tool call is a request, never a side effect: the Mod publishes a pending queue in meta.tool_calls, the host executes, and the result comes back as an ordinary tool.result event.",
+      "source": "AGENTS.md §9.1 receipt effect + §9.2 wire contract",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "tools.never-io-in-mod",
+          "modality": "must-not",
+          "text": "The Mod never performs IO on its own: no process, no network, no direct filesystem call. It publishes requests (`meta.tool_calls`), applies results (`tool.result`), and the only file surface it may touch is the host-mediated `ygg.fs` VFS (run-relative, path-jailed): `vfs.write` and the artifact probe. Reading, listing or spawning anything stays host-side.",
+          "basis": "the sandbox allowlist (no io/os/print) + `ygg.fs` is the only host-mediated file surface"
+        },
+        {
+          "id": "tools.allowlist-fail-closed",
+          "modality": "must",
+          "text": "A tool id that is not listed in `data/config.json` `allowedTools` is refused before any row is stored; a missing section allows nothing, and the refusal happens before the id shape is even judged.",
+          "basis": "src/tools.lua `allowed()` / `request()`"
+        },
+        {
+          "id": "tools.result-idempotent",
+          "modality": "must",
+          "text": "A `tool.result` carrying an `external_id` that was already applied is a replay: narrate `[REPLAY:TOOL]`, change no state and never subtract the pending count twice. A different terminal status for the same call is a conflict, not an overwrite.",
+          "basis": "src/tools.lua `apply_result()`"
+        },
+        {
+          "id": "tools.receipt-effect-bounded",
+          "modality": "must-not",
+          "text": "The `tools.receipt` effect (`receipt_effect`) may only latch `tool.notified.<call_id>` and narrate one line; it must never render, choose, or touch requirement / proposal / gate / lane / stage state. Domain folding belongs to the separate `tools.reactive` effect (`tools.reactive-effect-scope`).",
+          "basis": "AGENTS.md §9.1 + src/tools.lua `receipt_effect()`"
+        },
+        {
+          "id": "tools.no-inline-secrets",
+          "modality": "must",
+          "text": "Never inline a credential in a tool declaration or a request: `$ENV{VAR}` placeholders are resolved host-side from the process environment, `<mod_dir>/.env.local` and `<mod_dir>/.env`, and the resolved value never enters a payload, a receipt or a notice — error text names the variable only.",
+          "basis": "AGENTS.md (credentials chapter) + the host `$ENV{}` resolution order"
+        },
+        {
+          "id": "tools.reactive-effect-scope",
+          "modality": "must",
+          "text": "`tools.reactive` folds a settled `tool.result` (status `ok`, code `0`, no `tool.reacted.<call_id>` latch yet) into domain state: it may write `lane.*`, `req.<i>.conflict*`, `artifact.*`, `verify.{passed,report,source}` and `settlement.sessions.*`, and must never render, choose, change the stage, change proposal / gate state, or call `flow.refuse` (a rejection line would be counted by the host as a failed step). An unknown tool id takes no latch and produces no effect.",
+          "basis": "src/tools.lua `reactive_deps()` / `reactive_effect()` + `REACTORS`"
+        },
+        {
+          "id": "tools.wire-kv-output",
+          "modality": "must",
+          "text": "A built-in tool's stdout is a flat `k=v;` map: a value must never contain `;` or `|` (the host side escapes them to `,` / `/`), and `files` is a comma-separated list. A result truncated by `tuning.tool_output_max` must never feed a set comparison - `lane_probe` reads `tool.<call_id>.truncated` and skips the conflict radar when it is true.",
+          "basis": "src/tools.lua `output_pairs()` / `parse_result()` + `tool.<call_id>.truncated`"
+        },
+        {
+          "id": "subsystems.machine-evidence-parity",
+          "modality": "must",
+          "text": "Machine evidence (`gate.verify_suite`, `harness.archive_sessions`) writes the same KV as human evidence (`verify.submit`, `settlement.sessions`): same level, not stronger. It only proves \"the suite ran and this output was read\", so `verify.source` / `settlement.sessions.source` must keep the provenance and a report may never claim machine evidence outranks a self-declaration.",
+          "basis": "src/tools.lua `react_verify_suite()` / `react_archive_sessions()` + `gates.settlement_problem()`"
+        },
+        {
+          "id": "subsystems.probe-is-warning",
+          "modality": "must-not",
+          "text": "`[LANE PROBE FAILED]` (`commits=0` or `clean=0`) is a warning surface: narrate it and keep `lane.<k>.probe.*` queryable, but never wire it into `gates.gate_problem()` - that would deadlock `coordinate.submit` / `review.note` on one dirty tree with no action to undo the probe. The only hard evidence threshold is the accept gate's non-empty `artifacts`.",
+          "basis": "src/tools.lua `react_probe()` + `src/gates.lua gate_problem()`"
+        },
+        {
+          "id": "subsystems.radar-blocks",
+          "modality": "must",
+          "text": "A conflict raised by the conflict radar must go through `proposal.req_do_conflict` (the very same function as the human `requirement.conflict`), so it automatically lands in `req_conflict_total` and blocks both dispatch and closing. Only `requirement.resolve` clears it.",
+          "basis": "src/tools.lua `radar_raise()` + `src/proposals.lua req_do_conflict()`"
+        }
+      ]
+    }
+  ]
+}
