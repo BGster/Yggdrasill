@@ -51,7 +51,7 @@
 //!
 //! 绑定特定 Mod 的应用（`examples/adventure.rs`、`clients/godot`、
 //! `packages/client-web`…）不属本模块的消费方：它们各自服务固定 Mod，文件头
-//! 注明绑定对象即可（归属边界见 `guide.show harness` 的 `literal-ownership`）。
+//! 注明绑定对象即可（归属边界见 `data/playbook.json` harness 章节的 `literal-ownership`）。
 
 use std::fs;
 use std::path::Path;

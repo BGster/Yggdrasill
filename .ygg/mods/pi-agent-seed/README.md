@@ -253,7 +253,7 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 - 释放：执行方交付（进 `accept`）、门禁吊销、拆并 / 弃用都走同一处 → `LANES.release`
   （五键一起清，且只在账本确实记着它时才清，不误伤别人）。
 - `map.show` 的账本块逐条显示 `lane-<k> ← <需求>（阶段）｜分支｜base｜since #N｜clean`；
-  空字段显示 `—`（未断言的部分不假装知道）。
+  空字段显示 `—`（未断言的部分不假装知道）。（设计视图自 r1 rev3 退出 CLI，r8 serve 面板接管待议）
 - 相互声明冲突的需求不可能同时 `developing`（冲突标记让两者都不可调度）。
 - **内核仍单线程 dispatch + 单 autosave**：泳道只是宿主侧并行工作单元，结果一律经 inbox 回来，
   宿主按 `requirement_id` / `external_id` canonical 序合流。
@@ -398,7 +398,7 @@ config.set executor.<rN>.<stage>=            # 空值 = 显式解绑
 | `src/*.lua` | 骨架 | 12 个纯导出模块：util / config / requirements / lanes / proposals / gates / guide / menus / render / wire / tools / flow |
 | `src/handlers/*.lua` | 骨架 | 10 个注册模块：actions / lanes / proposals / review / requirement_ops / gate_actions / config / views / choice / lifecycle |
 | `data/scenes.json` | 实例 | 文本资源（scenes / endings / prompts / options / beats / tuning） |
-| `data/playbook.json` | 实例 | 现场规则资源（`guide.show` 按 section id 取用） |
+| `data/playbook.json` | 实例 | 现场规则资源（幕后规则书；无 CLI 章节取用面） |
 | `data/config.json` | 实例 | 静态配置默认值 |
 | `pack.json` / `manifest.json` | 骨架 + 生成物 | 打包声明（`code` 段属骨架，`agent`/`inboxRoutes` 属实例）与内容寻址清单 |
 | `schemas/*.json` | 骨架 | 资源 schema（与 `packages/schema/schemas/` 单源一致） |

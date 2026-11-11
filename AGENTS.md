@@ -3,8 +3,7 @@
 > This file carries exactly two things: the constraints you may not violate, and how to start /
 > continue / pause / settle a run. The mechanics (state machine / action protocol / async inbox /
 > progress views / run artifacts / Mod maintenance / host contract) live in
-> `.ygg/mods/pi-agent-seed/README.md` and the `harness` chapter of the playbook; fetch field rules by
-> chapter with `guide.show <section_id>`. `CLAUDE.md` is a symlink to this file.
+> `.ygg/mods/pi-agent-seed/README.md` and the `harness` chapter of `data/playbook.json`. `CLAUDE.md` is a symlink to this file.
 
 ## 1. Non-negotiable constraints
 
@@ -42,8 +41,8 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 3. **Render receipts in full; never parse-and-truncate**: no `narrative[0][:N]`, no "first line
    only", no line filtering with `startswith`, no stuffing a receipt into `grep` / `python` to read
    just a summary. Every dispatch prints **all narrative lines** into the conversation and hands the
-   raw `pendingChoice` to the user. If you need a rule, fetch the whole chapter with
-   `guide.show <section_id>` instead of trusting memory.
+   raw `pendingChoice` to the user. If you need a rule, read `data/playbook.json` instead of
+   trusting memory.
 4. **Single-shot dispatching is not compliance**: batching `--event` flags only hides state from the
    script guard; it does not replace the `requirement.dispatch` → proposal → gate chain. Never edit
    `autosave.json` / `events.jsonl` by hand. **Dispatching directly under `goal` mode is a legal
@@ -377,8 +376,7 @@ $A --resume --drive stdin                                     # interactive: the
 $A --resume --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
 $A --resume --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)
 $A --resume --drive none                                      # look at the situation, do not advance
-$A --resume --event guide.show --payload '"harness"'          # fetch a rule chapter by id (harness / credentials / gates …)
-$A --resume --event map.show                                  # current node + out-edges; add --payload '"full"' for the whole design map
+$A --resume --event map.show   # the complete view: current node + out-edges + stage briefing (payload ignored; the design map retired from the CLI)
 .ygg/bin/ygg-agent --run-id <run-name> --runs-root .ygg/runs --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
 ```
 
