@@ -367,7 +367,7 @@
         {
           "id": "gates.mod-semantics-matrix",
           "modality": "must",
-          "text": "Changing `.ygg/mods/pi-agent-seed/src/**` (state machine / gates / render layer), `mod.lua`, or the map wording in `.ygg/mods/pi-agent-seed/data/scenes.json` adds `cargo test -p ygg-sandbox --test agent_seed_semantics` to the gate list on top of lint and the all-1 playtest: the case list = stage merge plus the compatibility `analysis` slot / accept-gate reject / accept-gate approval releasing the lane / accept-gate amend → stale / plan-gate reject / reactive auto-dispatch in the same turn (with `useMemo` invalidation) / development proposal reject (not amended and amended) / inline `exec=` (misplaced, missing reason, `:` form) / settlement merge with `sessions=` + `todo=` and a refused malformed segment / legacy save without `plan_ok` / the operation and design map wording on both packs / the all-1 walk of both packs / the six active-subsystem cases (`worktree_claim` + release, lane probe + conflict radar blocking `coordinate.submit`, artifact probe + `vfs.write` ledger, `gate.verify_suite` green evidence, `harness.archive_sessions` settlement, declaration completeness). The all-1 playtest only covers the happy path — it never takes a branch (`gate.reject` / `requirement.amend` / `proposal.reject`) and cannot see the turn-cut mechanics at all; a temporary probe under `/tmp` may only supplement this test and never replace it; every uncovered scenario must be declared item by item in the report. Three-question criterion: ① the blocked action is \"change the Mod source or the map wording, run only lint plus all-1, and call it accepted\"; ② the visible symptom of a violation is that branch semantics and map wording regress while every gate stays green, so the defect only shows in a real run; ③ confirm it next time with that command (24/24) plus one mutation probe (put the old semantics back → the test must go red) to prove the assertions are not vacuous.",
+          "text": "Changing `.ygg/mods/pi-agent-seed/src/**` (state machine / gates / render layer), `mod.lua`, or the map wording in `.ygg/mods/pi-agent-seed/data/scenes.json` adds `cargo test -p ygg-sandbox --test agent_seed_semantics` to the gate list on top of lint and the all-1 playtest: the case list = stage merge plus the compatibility `analysis` slot / accept-gate reject / accept-gate approval releasing the lane / accept-gate amend → stale / plan-gate reject / reactive auto-dispatch in the same turn (with `useMemo` invalidation) / development proposal reject (not amended and amended) / inline `exec=` (misplaced, missing reason, `:` form) / settlement merge with `sessions=` + `todo=` and a refused malformed segment / legacy save without `plan_ok` / the operation-map wording (payload-independent single view) plus the guide.show deregistration (empty narrative, no menu entry) on both packs / the all-1 walk of both packs / the six active-subsystem cases (`worktree_claim` + release, lane probe + conflict radar blocking `coordinate.submit`, artifact probe + `vfs.write` ledger, `gate.verify_suite` green evidence, `harness.archive_sessions` settlement, declaration completeness). The all-1 playtest only covers the happy path — it never takes a branch (`gate.reject` / `requirement.amend` / `proposal.reject`) and cannot see the turn-cut mechanics at all; a temporary probe under `/tmp` may only supplement this test and never replace it; every uncovered scenario must be declared item by item in the report. Three-question criterion: ① the blocked action is \"change the Mod source or the map wording, run only lint plus all-1, and call it accepted\"; ② the visible symptom of a violation is that branch semantics and map wording regress while every gate stays green, so the defect only shows in a real run; ③ confirm it next time with that command (29/29) plus one mutation probe (put the old semantics back → the test must go red) to prove the assertions are not vacuous.",
           "basis": "AGENTS.md §1.9 (behavioural acceptance); crates/ygg-sandbox/tests/agent_seed_semantics.rs"
         },
         {
@@ -588,7 +588,7 @@
       "id": "harness",
       "order": 13,
       "title": "13. Agent Harness playbook (state machine · action protocol · async · artifacts · contracts)",
-      "summary": "Succeeds chapters 2/4/5/6/7/8/9 from before AGENTS.md was condensed: the two-layer state machine and its two mandatory gates, the action protocol and the three `--drive` modes, the async inbox and the cross-process closeout, progress views, run artifacts, the Mod-change trio, and the host contract. Mechanics are looked up on the spot (guide.show harness) and never restated in AGENTS.md.",
+      "summary": "Succeeds chapters 2/4/5/6/7/8/9 from before AGENTS.md was condensed: the two-layer state machine and its two mandatory gates, the action protocol and the three `--drive` modes, the async inbox and the cross-process closeout, progress views, run artifacts, the Mod-change trio, and the host contract. Mechanics are looked up on the spot (the `harness` chapter of `data/playbook.json`) and never restated in AGENTS.md.",
       "source": "AGENTS.md §2/§4/§5/§6/§7/§8/§9 (text before the 2026-10-31 condensation)",
       "priority": "standard",
       "rules": [
@@ -805,7 +805,7 @@
         {
           "id": "harness.config-subpage",
           "modality": "must",
-          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates); it is a presentation layer only and never advances state. config.set / guide.show / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used by the closing check), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only).",
+          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates); it is a presentation layer only and never advances state. config.set / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used by the closing check), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only).",
           "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
@@ -901,7 +901,7 @@
         {
           "id": "harness.pending-choice-order",
           "modality": "must",
-          "text": "pendingChoice order: resolve conflict (if any) → main forward action (proposal.accept > gate.approve > requirement.dispatch > coordinate.submit) → guide.show → map.show → requirement.list → requirement.add → config (inside the sub-page: play.mode → evolution.mode → gates + back).",
+          "text": "pendingChoice order: resolve conflict (if any) → main forward action (proposal.accept > gate.approve > requirement.dispatch > coordinate.submit) → map.show → requirement.list → requirement.add → config (inside the sub-page: play.mode → evolution.mode → gates + back).",
           "basis": "AGENTS.md §6 (pre-migration)"
         },
         {
@@ -1070,7 +1070,7 @@
           "id": "harness.choice-payload-type",
           "modality": "must",
           "text": "The payload of `ygg.choice_selected` must be a **JSON number** (`--payload '1'`); sending it as a string (`--payload '\"1\"'`) is rejected by the kernel domain as VALIDATION \"option does not exist\". Every other action's payload is a string. Menu selection is the **only** passing channel for the human-action gate — dispatching `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` directly through `--event` is always refused (the receipt's first line is `[REJECTED:ACTION]`).",
-          "basis": "guide.show harness"
+          "basis": "data/playbook.json harness chapter"
         },
         {
           "id": "harness.living-docs-closed-loop",
