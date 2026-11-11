@@ -96,7 +96,10 @@ pub struct EventPage {
 pub fn save_probe(run_dir: &Path, backend: Backend) -> Result<SaveProbe, StoreError> {
     match backend {
         Backend::Json => json_probe(run_dir),
+        #[cfg(feature = "sqlite")]
         Backend::Sqlite => sqlite_probe(run_dir),
+        #[cfg(not(feature = "sqlite"))]
+        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -110,7 +113,10 @@ pub fn save_list(
     let limit = clamp_save_limit(limit);
     match backend {
         Backend::Json => json_save_list(run_dir, limit),
+        #[cfg(feature = "sqlite")]
         Backend::Sqlite => sqlite_save_list(run_dir, limit),
+        #[cfg(not(feature = "sqlite"))]
+        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -123,7 +129,10 @@ pub fn save_get(
 ) -> Result<Option<(SaveMeta, Vec<u8>)>, StoreError> {
     match backend {
         Backend::Json => json_save_get(run_dir, id),
+        #[cfg(feature = "sqlite")]
         Backend::Sqlite => sqlite_save_get(run_dir, id),
+        #[cfg(not(feature = "sqlite"))]
+        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -138,7 +147,10 @@ pub fn event_page(
     let limit = limit.min(EVENT_PAGE_MAX_LIMIT);
     match backend {
         Backend::Json => json_event_page(run_dir, since, limit),
+        #[cfg(feature = "sqlite")]
         Backend::Sqlite => sqlite_event_page(run_dir, since, limit),
+        #[cfg(not(feature = "sqlite"))]
+        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -149,7 +161,10 @@ pub fn artifact_list_view(
 ) -> Result<Vec<ArtifactMeta>, StoreError> {
     match backend {
         Backend::Json => crate::json::JsonFileStore::open(run_dir)?.artifact_list(),
+        #[cfg(feature = "sqlite")]
         Backend::Sqlite => sqlite_artifact_list(run_dir),
+        #[cfg(not(feature = "sqlite"))]
+        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -161,7 +176,21 @@ pub fn artifact_get_view(
 ) -> Result<Option<ArtifactRecord>, StoreError> {
     match backend {
         Backend::Json => crate::json::JsonFileStore::open(run_dir)?.artifact_get(path),
+        #[cfg(feature = "sqlite")]
         Backend::Sqlite => sqlite_artifact_get(run_dir, path),
+        #[cfg(not(feature = "sqlite"))]
+        Backend::Sqlite => Err(unavailable_sqlite()),
+    }
+}
+
+/// `--no-default-features` 构建（无 sqlite）下，sqlite 观察面 fail-closed。
+#[cfg(not(feature = "sqlite"))]
+fn unavailable_sqlite() -> StoreError {
+    StoreError::Unavailable {
+        detail: "本构建未启用 sqlite 后端（sqlite 是编译期面：宿主 `cargo build \
+                 --example agent` 默认带上，`--no-default-features` 会关掉它；\
+                 ygg-store 自身需 `--features sqlite`）"
+            .to_owned(),
     }
 }
 
