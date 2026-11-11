@@ -374,9 +374,14 @@ contract-driven and fail-closed):
 
 ```bash
 YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"                  # repository root (or any checkout)
-(cd "$YGGDRASILL_ROOT" && cargo build --release --example egg)
-mkdir -p .ygg/bin && rm -f .ygg/bin/egg && cp "$YGGDRASILL_ROOT/target/release/examples/agent" .ygg/bin/egg
+"$YGGDRASILL_ROOT/scripts/install-egg.sh"                # build + install copy + global symlink (idempotent)
+# 手工等价：cargo build --release --example egg
+#           mkdir -p .ygg/bin && cp "$YGGDRASILL_ROOT/target/release/examples/egg" .ygg/bin/egg
+#           mkdir -p ~/.local/bin && ln -sfn "$YGGDRASILL_ROOT/.ygg/bin/egg" ~/.local/bin/egg
 ```
+
+全局命令 `egg` = `~/.local/bin/egg` →（链式软链）→ `<repo>/.ygg/bin/egg`（安装副本是
+唯一事实源；重建后重跑脚本即同步；回滚 = `rm ~/.local/bin/egg`，零系统残留，D21）。
 
 The default build enables `store-sqlite` (`crates/ygg-sandbox/Cargo.toml` sets
 `default = ["store-sqlite"]`), so new runs default to the SQLite backend (`<run-dir>/run.sqlite`).
@@ -412,13 +417,16 @@ are git-ignored, `.ygg/mods/` is committed.
 .ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
 ```
 
-### Serve（只读观察台，r8）
+### Serve（只读观察台，r9 全局唯一实例）
 ```bash
-cargo build --release --example egg -p ygg-sandbox                                   # 先构建
-.ygg/bin/egg --runs-root .ygg/runs serve                                          # 起服（默认 127.0.0.1:7800；Ctrl-C 停服）
-.ygg/bin/egg --runs-root .ygg/runs serve --port 7801 --poll-ms 300               # 换端口/加快变更检测
-# 面板：http://127.0.0.1:7800/（一级 runs 列表 → #/runs/<id> 二级存档列表 → mod 面板 iframe）
+scripts/install-egg.sh                                                             # 构建+安装（含全局 egg 软链）
+.ygg/bin/egg --runs-root .ygg/runs serve                                          # 起服/加入全局唯一实例（默认 127.0.0.1:7800；Ctrl-C 停服）
+egg serve                                                                          # 全局命令裸起：根集来自 ~/.config/ygg/serve.json（{"roots":["/abs/…"]}）
+.ygg/bin/egg serve --port 7801 --poll-ms 300                                     # --port = 显式逃生门（不进全局唯一语义）；--poll-ms 加快变更检测
+# 单实例语义：同端口已有自家实例 = 幂等复用退出 0（打印面板 URL）；根不被覆盖/旧版单根实例 = 退出 1。
+# 面板：http://127.0.0.1:7800/（一级 runs 列表带根标识 → #/runs/<id> 二级存档列表 → mod 面板 iframe）
 # 契约与安全边界见 docs/DESIGN.md §3.7；serve 只读：gate/accept 类人类门禁不在线上，仍走 CLI 票据。
+```
 
 ### Continue
 ```bash
