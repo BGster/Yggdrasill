@@ -16,18 +16,18 @@
 //!
 //! ```bash
 //! # ① 交互模式（人 / 脚本驱动）
-//! cargo run -p ygg-sandbox --example agent -- --mod packages/mods/test-adventure --run-id my-task
+//! cargo run -p ygg-sandbox --example egg -- --mod packages/mods/test-adventure --run-id my-task
 //!
 //! # ② 单发模式（Agent 脚本化调用：动作 → JSON 回执 → 退出）
-//! cargo run -p ygg-sandbox --example agent -- --mod <目录> --run-id my-task \
+//! cargo run -p ygg-sandbox --example egg -- --mod <目录> --run-id my-task \
 //!   --resume --event <Mod 的 choiceEvent> --payload '1'
 //!
 //! # ③ 局末结算（读本局后端的状态事实 → settlement.json；json 局 = autosave + events.jsonl）
-//! cargo run -p ygg-sandbox --example agent -- --run-id my-task --settle
+//! cargo run -p ygg-sandbox --example egg -- --run-id my-task --settle
 //!
 //! # ④ 异步补需求（只追本局后端的 inbox 后退出；不碰 autosave，故可在另一进程跑
 //! #    本局的同时安全调用）
-//! cargo run -p ygg-sandbox --example agent -- --run-id my-task --runs-root .ygg/runs \
+//! cargo run -p ygg-sandbox --example egg -- --run-id my-task --runs-root .ygg/runs \
 //!   --requirement '补一条门禁日志|把 verify 的失败原因写进 events.jsonl'
 //! ```
 //!
@@ -160,13 +160,16 @@ const DECIDE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 决策命令轮询间隔（std-only：spawn + try_wait + 超时 kill/wait）。
 const DECIDE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-/// `cli.program` 的**自指别名**：`ygg-agent` 与 [`SELF_PROGRAM`]（`@self`）等价。
+/// `cli.program` 的**自指别名**：`egg` 与 [`SELF_PROGRAM`]（`@self`）等价。
 ///
 /// 两个名字都解析到 `current_exe()`（见 `execute_cli`）——内置子命令因此不依赖
 /// `$PATH`：`pack.json` 是静态文件，写不了绝对路径；写裸名又不保证能调到。
 ///
+/// 边界：裸名 `egg` 从此被宿主本体占用，外部工具不得取名 `egg`，否则在
+/// `pack.json` 里声明同名 `program` 会撞到宿主而不是外部工具。
+///
 /// [`SELF_PROGRAM`]: ygg_sandbox::host_contract::SELF_PROGRAM
-const SELF_ALIAS: &str = "ygg-agent";
+const SELF_ALIAS: &str = "egg";
 
 // 产物文件名里，「存档」与「inbox」两个仍被宿主直接引用（`--settle` 的错误文案、
 // 未开局时的回执）；其余文件名（`events.jsonl` / `inbox.cursor` / `run.sqlite`）
@@ -632,14 +635,14 @@ fn is_valid_run_id(run_id: &str) -> bool {
 fn usage(code: i32) -> ! {
     let text = "\
 用法:
-  agent --mod <mod目录> --run-id <标识> [--resume] [--watch] [--drive <方式>]
+  egg --mod <mod目录> --run-id <标识> [--resume] [--watch] [--drive <方式>]
                                                                 交互模式
-  agent --mod <mod目录> --run-id <标识> --event <名称> [--payload <JSON>] [--resume]
+  egg --mod <mod目录> --run-id <标识> --event <名称> [--payload <JSON>] [--resume]
                                                                 单发模式（Agent 脚本化）
-  agent --run-id <标识> --settle                                局末结算
-  agent --run-id <标识> [--runs-root <目录>] --requirement '标题|描述'
+  egg --run-id <标识> --settle                                局末结算
+  egg --run-id <标识> [--runs-root <目录>] --requirement '标题|描述'
                                                                 异步补需求（只追本局后端的 inbox）
-  agent --run-id <标识> --daemon [--mod <mod目录>]
+  egg --run-id <标识> --daemon [--mod <mod目录>]
                                                                 常驻守护模式（JSON-RPC over stdio）
 
 选项:
@@ -720,7 +723,7 @@ host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字
                     缺 --sessions-dir / YGG_SESSIONS_DIR 时按 `--harness` 适配器推导会话库：
                     pi=$HOME/.pi/agent/sessions/--<cwd_slug>--；claude-code=$HOME/.claude/projects/-<slug>；
                     codex=$HOME/.codex/sessions；目录不存在 = 0/0（dest=<适配器>:empty:<batch>）
-  pack.json 里写 \"program\": \"@self\"（或 \"ygg-agent\"）即可调用——两者都解析到本可执行文件，
+  pack.json 里写 \"program\": \"@self\"（或 \"egg\"）即可调用——两者都解析到本可执行文件，
   因此不依赖 $PATH。本局路径用 $ENV{YGG_RUN_DIR} / $ENV{YGG_RUN_ID} / $ENV{YGG_RUNS_ROOT}
   / $ENV{YGG_MOD_DIR} 引用（宿主注入 worker 环境；.env / .env.local 不得覆写）。
 
@@ -2985,8 +2988,8 @@ fn execute_cli(call: &PendingCall, env: &EnvTable, scratch: &Path) -> ToolOutcom
             call.max_output_bytes,
         );
     };
-    // `@self` / `ygg-agent` → 本可执行文件。两个名字都解析到 `current_exe()`：
-    // 内置子命令不能依赖 `$PATH`（部署方可能根本没把 `ygg-agent` 装进 PATH，
+    // `@self` / `egg` → 本可执行文件。两个名字都解析到 `current_exe()`：
+    // 内置子命令不能依赖 `$PATH`（部署方可能根本没把 `egg` 装进 PATH，
     // 而 `pack.json` 是静态文件、不能内插绝对路径）。
     let executable = if program == ygg_sandbox::host_contract::SELF_PROGRAM || program == SELF_ALIAS
     {
@@ -4174,8 +4177,8 @@ fn verify_gates(mode: &str) -> Vec<(&'static str, Vec<&'static str>)> {
         vec![
             ("cargo test --workspace", vec!["test", "--workspace"]),
             (
-                "cargo test --example agent -p ygg-sandbox",
-                vec!["test", "--example", "agent", "-p", "ygg-sandbox"],
+                "cargo test --example egg -p ygg-sandbox",
+                vec!["test", "--example", "egg", "-p", "ygg-sandbox"],
             ),
             (
                 "cargo test -p ygg-sandbox --test agent_seed_semantics",
@@ -6589,7 +6592,7 @@ mod mod_dir_alias_tests {
 
     /// 字面量判据：历史 `run.json` 里的 `.ygg/mods/agent-seed` → `.ygg/mods/pi-agent-seed`。
     ///
-    /// 这里只比路径、不碰磁盘：`cargo test --example agent` 的 cwd 是 `crates/ygg-sandbox`，
+    /// 这里只比路径、不碰磁盘：`cargo test --example egg` 的 cwd 是 `crates/ygg-sandbox`，
     /// 直接对 `.ygg/...` 做 `exists()` 测到的是 crate 目录而不是仓库根——而宿主实际运行时的
     /// cwd 就是仓库根（`--mod` 与 `run.json` 里的相对路径都按它解释）。
     #[test]
@@ -8192,7 +8195,7 @@ mod multiscript_hot_reload_tests {
 
     /// fixture 的临时副本（每个用例独占目录）。
     fn fixture_copy(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ygg-agent-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("egg-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         copy_dir(&fixture_dir(), &dir);
         dir
@@ -10819,7 +10822,7 @@ end)
             full.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
             vec![
                 "cargo test --workspace",
-                "cargo test --example agent -p ygg-sandbox",
+                "cargo test --example egg -p ygg-sandbox",
                 "cargo test -p ygg-sandbox --test agent_seed_semantics",
             ]
         );
@@ -10837,10 +10840,10 @@ end)
         assert_eq!(parsed[1].2, vec!["-q"]);
     }
 
-    /// `@self` 别名：`ygg-agent` 与 `@self` 都解析到本可执行文件（同一分支）。
+    /// `@self` 别名：`egg` 与 `@self` 都解析到本可执行文件（同一分支）。
     #[test]
     fn self_alias_matches_the_contract_placeholder() {
-        assert_eq!(SELF_ALIAS, "ygg-agent");
+        assert_eq!(SELF_ALIAS, "egg");
         assert_eq!(ygg_sandbox::host_contract::SELF_PROGRAM, "@self");
         assert_ne!(SELF_ALIAS, ygg_sandbox::host_contract::SELF_PROGRAM);
     }
