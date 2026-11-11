@@ -104,6 +104,10 @@
 //! - `pendingChoice` 原样透传内核信封（动作白名单的现场呈现；`null` = 无待决
 //!   选择）；越权动作的 error 信封原样落 `error`（码 + 文案），并补一次 `state`
 //!   回填当前 `pendingChoice`，让 Agent 出错后仍能接着走；
+//! - 未注册事件名（fail-closed）：本 Mod registry 未注册的名字一律
+//!   `ok:false` + `error.code=VALIDATION` + 退出码 1，文案携带已注册全集
+//!   （字典序）供一次往返自纠；`ygg.*` 保留事件同样只认 registry（宿主不持
+//!   事件名白名单）；
 //! - 加性键：`warnings`（内核 D1 警告 + 宿主侧提示）、`hotReload`
 //!   （本次派发前的热载结果，形如 `{"reloaded":true,"source":"resume"}`）、
 //!   `ending`（本步叙事出现结局行）；
@@ -8547,8 +8551,8 @@ mod persistence_atomicity_tests {
 mod persistence_reset_semantics_tests {
     use super::{
         acquire_run_lock, begin_write, enter_closing, finalize_run, leave_closing,
-        run_lock_heartbeat, Args, ClosingEntry, Drive, ResetOutcome, Session, WriteGate,
-        AUTOSAVE_FILE, COORDINATION_LOCK, INBOX_FILE,
+        run_lock_heartbeat, run_single, Args, ClosingEntry, Drive, ResetOutcome, Session,
+        WriteGate, AUTOSAVE_FILE, COORDINATION_LOCK, INBOX_FILE,
     };
     use std::cell::Cell;
     use std::fs;
@@ -9481,6 +9485,70 @@ end)
             assert!(
                 !run_dir.join(product).exists(),
                 "回退构建不得静默落到某一后端（出现了 {product}）"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// T1（r11 fail-closed）：单发 `--event` 未注册事件 = 可读 VALIDATION 拒绝。
+    /// 三层断言：① `run_single` 返回 1（ok=false 的既有退出码映射）；
+    /// ② 审计行照写且 ok=false（与 payload 校验拒绝同形）；③ 回执形
+    /// ok:false + `error.code=VALIDATION` + 文案三要素（事件名 + 计数 +
+    /// 已注册全集字典序样本）。零产品代码：这是既有失败步链路的自然呈现。
+    #[test]
+    fn t1_single_shot_unknown_event_fails_closed_with_readable_validation() {
+        let dir = case_dir("t1");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+
+        // ① 单发路径本体：未注册事件 → 非零退出（run_single 的 ok 分支）。
+        let args = Args {
+            event: Some("event.nope".to_owned()),
+            ..probe_args(&mod_dir, &runs_root, "t1", false)
+        };
+        assert_eq!(run_single(&args), 1, "未知事件必须非零退出");
+
+        // ② 审计行 ok=false 照写（拒绝不落存档，但事件日志必须有行可查）。
+        let mut session = Session::open(&probe_args(&mod_dir, &runs_root, "t1", true))
+            .expect("失败步之后必须可续局（审计行已落、无存档写入）");
+        let records = session.store.steps().expect("读事件日志").records;
+        assert_eq!(records.len(), 1, "拒绝也必须落一行审计：{records:?}");
+        assert_eq!(records[0].event, "event.nope");
+        assert!(!records[0].ok, "审计行必须 ok=false：{records:?}");
+        drop(session);
+
+        // ③ 回执形（stdout 单行 JSON 的域内）：经 run_single 同一 dispatch_event
+        //    路径断言信封字段。write_probe_mod 注册 4 个事件 + stdlib 内置 1 个。
+        let mut session =
+            Session::open(&probe_args(&mod_dir, &runs_root, "t1b", false)).expect("新局开局");
+        let receipt = session.dispatch_event("event.nope", "0");
+        assert_eq!(receipt["ok"], serde_json::json!(false), "{receipt}");
+        assert_eq!(
+            receipt["error"]["code"],
+            serde_json::json!("VALIDATION"),
+            "{receipt}"
+        );
+        assert_eq!(receipt["narrative"], serde_json::json!([]), "{receipt}");
+        assert!(receipt.get("autosave").is_some(), "{receipt}");
+        let message = receipt["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.starts_with("未注册事件 `event.nope`："),
+            "文案要点名事件：{receipt}"
+        );
+        assert!(
+            message.contains("已注册 5 个事件"),
+            "文案要带计数：{receipt}"
+        );
+        for sample in [
+            "agent.summary",
+            "event.start",
+            "inbox.add",
+            "ygg.choice_selected",
+            "ygg.narrative.goto",
+        ] {
+            assert!(
+                message.contains(sample),
+                "文案要含已注册全集（字典序）样本 {sample}：{receipt}"
             );
         }
         let _ = fs::remove_dir_all(&dir);
@@ -11192,6 +11260,44 @@ end)
             json!({"op": "vfs_put", "path": "../escape.md", "content": "x"}),
         );
         assert_eq!(escaped["ok"], json!(false), "{escaped}");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// T4（r11 fail-closed）：daemon `op=dispatch` 派发未注册事件 = 同语义
+    /// 错误应答——`ok:false` + `error.code=VALIDATION`（文案含已注册全集）、
+    /// `op:"dispatch"` 与 `summary` 字段仍在（调度端形状不破，一次往返的
+    /// 契约不受错误步影响）。
+    #[test]
+    fn rpc_dispatch_unknown_event_returns_readable_dispatch_receipt() {
+        let dir = case_dir("t4");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_daemon_mod(&mod_dir);
+        let args = daemon_args(&mod_dir, &runs_root, "t4");
+        let mut session = Session::open(&args).expect("守护模式开局");
+
+        let reply = call(
+            &mut session,
+            &args,
+            json!({"op": "dispatch", "event": "event.nope", "id": 9}),
+        );
+        assert_eq!(reply["ok"], json!(false), "{reply}");
+        assert_eq!(reply["op"], json!("dispatch"), "op 原样回填：{reply}");
+        assert_eq!(reply["id"], json!(9), "{reply}");
+        assert_eq!(reply["error"]["code"], json!("VALIDATION"), "{reply}");
+        let message = reply["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.starts_with("未注册事件 `event.nope`："),
+            "文案要点名事件：{reply}"
+        );
+        assert!(
+            message.contains("已注册"),
+            "文案要带已注册全集（write_daemon_mod 注册 event.tick / event.probe_vfs）：{reply}"
+        );
+        assert!(message.contains("event.tick"), "{reply}");
+        // 调度端形状不破：summary 字段仍在（一次往返 = 步回执 ⊆ 摘要）。
+        assert!(reply.get("summary").is_some(), "{reply}");
+        assert_eq!(reply["summary"]["ok"], json!(true), "{reply}");
 
         let _ = fs::remove_dir_all(&dir);
     }

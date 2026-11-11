@@ -105,7 +105,8 @@ pub mod code {
     pub const FUEL_EXHAUSTED: &str = "FUEL_EXHAUSTED";
     /// 沙箱拒绝（模块装载拒绝、内存超限等沙箱结构面拒绝）。
     pub const SANDBOX_DENIED: &str = "SANDBOX_DENIED";
-    /// 校验拒绝（payload 非标量、事件构造失败、handler 报错、存档版本/内容不符）。
+    /// 校验拒绝（payload 非标量、事件构造失败、未注册事件、handler 报错、
+    /// 存档版本/内容不符）。
     pub const VALIDATION: &str = "VALIDATION";
     /// 资源包边界体积限（S11 激活：`KernelError::ResourceBudget` → 本码）。
     pub const KV_LIMIT: &str = "KV_LIMIT";
@@ -563,9 +564,29 @@ impl KernelFacade {
         json!({"ok": true, "log": self.external_log}).to_string()
     }
 
-    /// 事件转换路径（非保留名命令）：payload 解析（标量门）→ 外部事件
-    /// 构造 → 外部日志 → 燃料重置 → snapshot-out 转换 → 信封回包。
+    /// 事件转换路径（非保留名命令）：registry 预检（fail-closed）→ payload
+    /// 解析（标量门）→ 外部事件构造 → 外部日志 → 燃料重置 → snapshot-out
+    /// 转换 → 信封回包。
     fn cmd_event(&mut self, name: &str, payload_json: &str) -> String {
+        // ⓪⁻ registry 预检（fail-closed 门面侧）：未注册事件名在**一切副作用
+        //    之前**拒绝——不进外部日志（③）、不耗燃料（④）、不动状态基线（⑤）。
+        //    「事件不存在」先于「序号越界 / 载荷非法」（registry 是运行时唯一
+        //    事实，宿主不持事件名白名单：`ygg.*` 保留事件同走本预检，已注册者
+        //    天然通过）。先 `collect` 再判断：`event_names()` 借用 `&self.registry`，
+        //    收集完即释放，错误分支才能继续用 `self`。
+        //    文案三要素：事件名原样 + 已注册计数 + 全集（字典序）——Agent 一次
+        //    往返即可自纠（与 daemon unknown-op 全列合法 op 同先例）。
+        let names: Vec<&str> = self.registry.event_names().collect();
+        if !names.contains(&name) {
+            return error_envelope(
+                code::VALIDATION,
+                format!(
+                    "未注册事件 `{name}`：本 Mod 已注册 {} 个事件：{}",
+                    names.len(),
+                    names.join("、")
+                ),
+            );
+        }
         // ⓪ `ygg.choice_selected` 域内校验（A2）：待决选择存在时，序号
         //    必须是 1..=options_len 的整数——越界/非整数 = 可读 VALIDATION
         //    （玩家视角「选项不存在」，不进内核转换、不耗燃料、不改状态）。
@@ -777,7 +798,12 @@ fn map_transition_error(err: TransitionError) -> String {
             ),
         ),
         TransitionError::Handler(HandlerError(msg)) => {
-            if msg.contains("fuel exhausted") {
+            if msg.starts_with("unregistered event") {
+                // 未注册事件（bus fail-closed；外部名已被门面预检拦截，走到这里的
+                // 都是派生面：handler `ygg.emit` 了未注册名）→ VALIDATION。显式
+                // 分支钉住码面，不依赖末尾兜底；消息带 bus 稳定前缀 + 事件名。
+                error_envelope(code::VALIDATION, msg)
+            } else if msg.contains("fuel exhausted") {
                 error_envelope(code::FUEL_EXHAUSTED, msg)
             } else if msg.contains("sandbox denied") || msg.contains("memory error") {
                 error_envelope(code::SANDBOX_DENIED, msg)
@@ -876,23 +902,118 @@ mod tests {
         serde_json::from_str(reply).unwrap()
     }
 
-    /// 空转 Mod：无任何注册——事件无 handler，转换空跑即成功。
+    /// 空转 Mod：无任何 Mod 注册（仅 stdlib 内置注册 `ygg.narrative.goto`）
+    /// ——未注册名预检的最小环境。
     const IDLE_MOD: &str = "-- idle mod: no handlers";
+
+    /// 最小注册 Mod：一个无操作 handler——成功信封形态断言必须来自
+    /// **已注册**事件（fail-closed 后未注册名不再有成功信封）。
+    const NOOP_MOD: &str = r#"ygg.on("event.ok", function() end)"#;
 
     #[test]
     fn envelope_error_shape_uses_stable_codes() {
-        let mut kernel = KernelFacade::new(IDLE_MOD).expect("kernel construction");
-        // 非标量 payload → VALIDATION。
-        let reply = kernel.dispatch("event.x", r#"{"nested":{"deep":1}}"#);
+        let mut kernel = KernelFacade::new(NOOP_MOD).expect("kernel construction");
+        // 非标量 payload → VALIDATION（payload 标量门；事件已注册，走的是
+        // 门不是预检）。
+        let reply = kernel.dispatch("event.ok", r#"{"nested":{"deep":1}}"#);
         assert_eq!(reply_code(&reply), code::VALIDATION);
         // 保留命令名 + 非法存档 → VALIDATION。
         let reply = kernel.dispatch("load", "not json");
         assert_eq!(reply_code(&reply), code::VALIDATION);
-        // 成功信封无 error 字段。
+        // 未注册事件名 → VALIDATION（预检，零副作用；见下一用例）。
         let reply = kernel.dispatch("event.any", "0");
+        assert_eq!(reply_code(&reply), code::VALIDATION);
+        // 成功信封无 error 字段（已注册事件）。
+        let reply = kernel.dispatch("event.ok", "0");
         let parsed: Json = serde_json::from_str(&reply).unwrap();
         assert_eq!(parsed["ok"], Json::Bool(true));
         assert!(parsed.get("error").is_none());
+    }
+
+    // ---- 未注册事件 fail-closed（门面预检 T5 / 派生面拒+回滚 T6）----
+
+    /// T5：预检拒绝零副作用——不进外部日志（回放日志零污染）、不动状态
+    /// 基线（revision / kvRevision / pendingChoice 原样），且文案三要素
+    /// 齐全（事件名 + 计数 + 字典序全集）；拒绝后 registry 未受损，已注册
+    /// 事件照常可用。空注册表（IDLE_MOD）文案同构（「已注册 0 个事件：」）。
+    #[test]
+    fn precheck_rejects_unknown_event_with_zero_side_effects() {
+        let mut kernel = KernelFacade::new(SAVEPOINT_MOD).expect("kernel construction");
+        let rejected = kernel.dispatch("event.nope", "0");
+        assert_eq!(reply_code(&rejected), code::VALIDATION);
+        let parsed = reply(&rejected);
+        let message = parsed["error"]["message"].as_str().unwrap();
+        assert!(
+            message.contains("`event.nope`"),
+            "文案要点名事件：{message}"
+        );
+        assert!(
+            message.contains("已注册 4 个事件"),
+            "文案要带计数（3 个 Mod 注册 + 1 个 stdlib 内置）：{message}"
+        );
+        assert_eq!(
+            message,
+            "未注册事件 `event.nope`：本 Mod 已注册 4 个事件：event.bad、event.ok、event.spawn、ygg.narrative.goto",
+            "文案三要素（名字 + 计数 + 字典序全集）必须逐字节确定（含 stdlib 内置注册 ygg.narrative.goto）：{message}"
+        );
+        // 零副作用 ①：外部日志（回放依据）不得被污染。
+        let log = reply(&kernel.dispatch("log", ""));
+        assert_eq!(log["log"], json!([]), "预检拒绝不得进回放日志：{log}");
+        // 零副作用 ②：状态基线原样（revision / kvRevision 均 0，无待决选择）。
+        let state = reply(&kernel.dispatch("state", ""));
+        assert_eq!(state["revision"], Json::from(0));
+        assert_eq!(state["kvRevision"], Json::from(0));
+        assert!(state["pendingChoice"].is_null());
+        // 零副作用 ③：registry 未受损，已注册事件照常可用。
+        let ok = reply(&kernel.dispatch("event.ok", "0"));
+        assert_eq!(ok["ok"], Json::Bool(true), "预检不得损伤已注册面：{ok}");
+        // 空注册表边缘实际不可达：stdlib 恒注册 `ygg.narrative.goto`（内置面
+        // 也算成员）——文案如实反映运行时 registry，这正是「registry 是唯一
+        // 事实」的体现：不特判、不白名单、内置注册同样计入全集。
+        let mut idle = KernelFacade::new(IDLE_MOD).expect("kernel construction");
+        let idle_reply = idle.dispatch("event.any", "0");
+        assert_eq!(reply_code(&idle_reply), code::VALIDATION);
+        assert_eq!(
+            reply(&idle_reply)["error"]["message"],
+            json!("未注册事件 `event.any`：本 Mod 已注册 1 个事件：ygg.narrative.goto"),
+            "仅 stdlib 内置注册的空 Mod：文案如实反映 registry：{idle_reply}"
+        );
+    }
+
+    /// T6：派生面 fail-closed——handler `ygg.emit` 未注册名，整次转换失败
+    /// 回滚（bus Err → TransitionError::Handler → savepoint 还原），错误码
+    /// 显式分支钉在 VALIDATION，消息带 bus 稳定前缀 + 派生名。
+    #[test]
+    fn derived_unregistered_event_fails_and_rolls_back_the_transition() {
+        const DERIVED_MISS_MOD: &str = r#"
+ygg.on("event.ok", function()
+  ygg.kv.set("clean", "yes")
+end)
+ygg.on("event.mis.emit", function()
+  ygg.kv.set("dirty", "yes")
+  ygg.emit("event.never.registered", 0)
+end)
+"#;
+        let mut kernel = KernelFacade::new(DERIVED_MISS_MOD).expect("kernel construction");
+        // 先提交一个非空基线（否则「回滚」与「清空」不可区分）。
+        let ok = reply(&kernel.dispatch("event.ok", "0"));
+        assert_eq!(ok["ok"], Json::Bool(true));
+        let baseline_save = reply(&kernel.dispatch("save", ""))["save"].to_string();
+
+        let failed = reply(&kernel.dispatch("event.mis.emit", "0"));
+        assert_eq!(failed["ok"], Json::Bool(false), "{failed}");
+        assert_eq!(failed["error"]["code"], code::VALIDATION);
+        let message = failed["error"]["message"].as_str().unwrap();
+        assert!(
+            message.starts_with("unregistered event `event.never.registered`"),
+            "派生面消息带 bus 稳定前缀 + 派生名：{message}"
+        );
+        // 回滚：失败步的 kv 写（dirty）不得留下，基线字节逐字节保持。
+        assert_eq!(
+            reply(&kernel.dispatch("save", ""))["save"].to_string(),
+            baseline_save,
+            "派生未注册必须整转换回滚"
+        );
     }
 
     #[test]

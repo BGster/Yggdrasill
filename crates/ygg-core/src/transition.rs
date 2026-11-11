@@ -588,6 +588,11 @@ mod tests {
                 &log,
             ),
         );
+        // 派发面 fail-closed：派生名也必须注册（无操作 handler，仅让 FIFO
+        // 排空发生——本测的意图是「计数而非回放」，不是「未注册静默跳过」）。
+        reg.register("m", "evt.d1", scripted("h_d1", vec![], &log));
+        reg.register("m", "evt.d2", scripted("h_d2", vec![], &log));
+        reg.register("m", "evt.d3", scripted("h_d3", vec![], &log));
         let mut fuel = BudgetFuel::new(10);
         let result = run_transition(
             &mut store,

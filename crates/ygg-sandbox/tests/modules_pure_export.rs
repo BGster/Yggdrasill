@@ -279,14 +279,31 @@ fn the_entry_must_require_a_module_to_get_a_usable_handle() {
 
     // ⑤ 只 require 不 install：装载成功，但派发面是空的——注册**只**由入口那
     //    一行决定，模块装载不会顺手把自己的 handler 塞进去（纯导出的直接后果）。
+    //    fail-closed 后「空派发面」的可观测形态 = 未注册事件的可读拒绝
+    //    （VALIDATION + 点名事件 + 已注册全集），比静默空跑更直接。
     let mut idle = KernelFacade::with_modules(
         "local util = require(\"src.util\")\n",
         module_set(&[("src.util", UTIL)]),
     )
     .expect("只 require 必须能装载");
+    let probe = idle.dispatch("probe", "0");
+    let parsed: serde_json::Value = serde_json::from_str(&probe).expect("回执必须是 JSON");
+    assert_eq!(
+        parsed["ok"],
+        serde_json::json!(false),
+        "没调用 M.register() 就不该有 handler（模块顶层不注册任何东西）：{probe}"
+    );
+    assert_eq!(
+        parsed["error"]["code"],
+        serde_json::json!("VALIDATION"),
+        "{probe}"
+    );
     assert!(
-        narrate(&mut idle, "probe").is_empty(),
-        "没调用 M.register() 就不该有 handler（模块顶层不注册任何东西）"
+        parsed["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("未注册事件 `probe`"),
+        "空派发面必须可读拒绝：{probe}"
     );
 }
 
