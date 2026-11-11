@@ -1,12 +1,12 @@
--- src/requirements.lua —— 协调器阶段 + 需求图（`req.*`）：状态常量、访问器、写入、依赖校验、摘牌唯一出口。
+-- src/domain/requirements.lua —— 协调器阶段 + 需求图（`req.*`）：状态常量、访问器、写入、依赖校验、摘牌唯一出口。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`req.*`（唯一写方）。
 
 local M = {}
 
-local config = require("src.config")
-local util = require("src.util")
+local config = require("src.core.config")
+local util = require("src.core.util")
 
 local TEXTS
 local LANES

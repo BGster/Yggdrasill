@@ -1,18 +1,18 @@
--- src/handlers/config.lua —— 运行期配置写入与配置二级页开合：config.set|open|close。
+-- src/handlers/system/config.lua —— 运行期配置写入与配置二级页开合：config.set|open|close。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
 
 local M = {}
 
-local config = require("src.config")
-local executor = require("src.executor")
-local flow = require("src.flow")
-local menus = require("src.menus")
-local render_mod = require("src.render")
-local reqs = require("src.requirements")
-local util = require("src.util")
-local wire = require("src.wire")
+local config = require("src.core.config")
+local executor = require("src.domain.executor")
+local flow = require("src.runtime.flow")
+local menus = require("src.view.menus")
+local render_mod = require("src.view.render")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
+local wire = require("src.domain.wire")
 
 local TEXTS
 
@@ -31,7 +31,7 @@ local contains, cut, fill, join, to_bool, trim =
 local probe_payload_ok =
   wire.probe_payload_ok
 
--- 执行者账本的实现已抽到 `src/executor.lua`：与 `proposal.submit` 的末段 `exec=` 共用同一份
+-- 执行者账本的实现已抽到 `src/domain/executor.lua`：与 `proposal.submit` 的末段 `exec=` 共用同一份
 -- 校验与叙事（省回合：登记并入提案提交）。这里只把失败描述映射回 `config.set` 的拒绝口径。
 local function executor_set(key, value)
   local problem = executor.bind(key, value)

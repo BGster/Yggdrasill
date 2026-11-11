@@ -1,4 +1,4 @@
--- src/util.lua —— 纯函数工具（沙箱无 table 库）：fill / split / cut / trim / join / contains / to_bool / spaces。
+-- src/core/util.lua —— 纯函数工具（沙箱无 table 库）：fill / split / cut / trim / join / contains / to_bool / spaces。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（纯函数）。

@@ -1,11 +1,11 @@
--- src/guide.lua —— 现场规则章节索引与渲染（`data/playbook.json`；`guide.show <section_id>`）。
+-- src/view/guide.lua —— 现场规则章节索引与渲染（`data/playbook/`；`guide.show <section_id>`）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。
 
 local M = {}
 
-local util = require("src.util")
+local util = require("src.core.util")
 
 local TEXTS
 local PLAYBOOK

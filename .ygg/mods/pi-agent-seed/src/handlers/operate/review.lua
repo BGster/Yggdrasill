@@ -1,19 +1,19 @@
--- src/handlers/review.lua —— 协调与复盘：coordinate.submit / verify.submit / settlement.* / review.note。
+-- src/handlers/operate/review.lua —— 协调与复盘：coordinate.submit / verify.submit / settlement.* / review.note。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
 
 local M = {}
 
-local config = require("src.config")
-local flow = require("src.flow")
-local gates = require("src.gates")
-local choice = require("src.handlers.choice")
-local render_mod = require("src.render")
-local reqs = require("src.requirements")
-local tools = require("src.tools")
-local util = require("src.util")
-local wire = require("src.wire")
+local config = require("src.core.config")
+local flow = require("src.runtime.flow")
+local gates = require("src.domain.gates")
+local choice = require("src.handlers.operate.choice")
+local render_mod = require("src.view.render")
+local reqs = require("src.domain.requirements")
+local tools = require("src.runtime.tools")
+local util = require("src.core.util")
+local wire = require("src.domain.wire")
 
 local TEXTS
 

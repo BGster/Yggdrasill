@@ -1,13 +1,13 @@
--- src/lanes.lua —— 泳道账本 `lane.<k>.{req,branch,base,since,clean}` + job / 容量计数。
+-- src/domain/lanes.lua —— 泳道账本 `lane.<k>.{req,branch,base,since,clean}` + job / 容量计数。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`lane.*`（唯一写方）。
 
 local M = {}
 
-local config = require("src.config")
-local reqs = require("src.requirements")
-local util = require("src.util")
+local config = require("src.core.config")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
 
 local TEXTS
 

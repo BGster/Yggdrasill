@@ -1,13 +1,13 @@
--- src/wire.lua —— payload wire format 解析 + inbox 幂等键（`@ext=`）+ settlement.evolution 进化登记。
+-- src/domain/wire.lua —— payload wire format 解析 + inbox 幂等键（`@ext=`）+ settlement.evolution 进化登记。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。
 
 local M = {}
 
-local config = require("src.config")
-local reqs = require("src.requirements")
-local util = require("src.util")
+local config = require("src.core.config")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
 
 local TEXTS
 

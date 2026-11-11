@@ -1,14 +1,14 @@
--- src/handlers/lifecycle.lua —— 局的开场与渲染节点：event.start + node:render。
+-- src/handlers/intake/lifecycle.lua —— 局的开场与渲染节点：event.start + node:render。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
 
 local M = {}
 
-local config = require("src.config")
-local render_mod = require("src.render")
-local reqs = require("src.requirements")
-local util = require("src.util")
+local config = require("src.core.config")
+local render_mod = require("src.view.render")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
 
 local TEXTS
 

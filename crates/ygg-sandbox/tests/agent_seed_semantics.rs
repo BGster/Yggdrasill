@@ -1432,8 +1432,8 @@ fn tool_declarations_stay_consistent_across_both_mods() {
         .as_array()
         .expect("code.modules must be an array");
     assert!(
-        modules.iter().any(|item| item == "src/tools.lua"),
-        "src/tools.lua must be declared in code.modules: {modules:?}"
+        modules.iter().any(|item| item == "src/runtime/tools.lua"),
+        "src/runtime/tools.lua must be declared in code.modules: {modules:?}"
     );
     for pack in [&project_pack, &seed_pack] {
         let route = &pack["inboxRoutes"]["tool_result"];

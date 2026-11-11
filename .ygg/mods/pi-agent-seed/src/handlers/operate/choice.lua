@@ -1,16 +1,16 @@
--- src/handlers/choice.lua —— 选择路由 + 人类动作门禁（一次性票据与它的盖章/取证必须在同一模块）。
+-- src/handlers/operate/choice.lua —— 选择路由 + 人类动作门禁（一次性票据与它的盖章/取证必须在同一模块）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
 
 local M = {}
 
-local config = require("src.config")
-local flow = require("src.flow")
-local menus = require("src.menus")
-local render_mod = require("src.render")
-local reqs = require("src.requirements")
-local util = require("src.util")
+local config = require("src.core.config")
+local flow = require("src.runtime.flow")
+local menus = require("src.view.menus")
+local render_mod = require("src.view.render")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
 
 local TEXTS
 

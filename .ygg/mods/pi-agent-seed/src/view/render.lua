@@ -1,20 +1,20 @@
--- src/render.lua —— 回执渲染 + 双层图（local/full）+ 结构化摘要（`agent.summary` 的注册面）。
+-- src/view/render.lua —— 回执渲染 + 双层图（local/full）+ 结构化摘要（`agent.summary` 的注册面）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块写的 KV 前缀：`settlement.*`（仅 reset_settlement；其余只读）。
 
 local M = {}
 
-local config = require("src.config")
-local gates = require("src.gates")
-local guide = require("src.guide")
-local hooks = require("src.hooks")
-local lanes = require("src.lanes")
-local menus = require("src.menus")
-local props = require("src.proposals")
-local reqs = require("src.requirements")
-local util = require("src.util")
-local wire = require("src.wire")
+local config = require("src.core.config")
+local gates = require("src.domain.gates")
+local guide = require("src.view.guide")
+local hooks = require("src.core.hooks")
+local lanes = require("src.domain.lanes")
+local menus = require("src.view.menus")
+local props = require("src.domain.proposals")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
+local wire = require("src.domain.wire")
 
 local TEXTS
 local CONFIG
@@ -822,7 +822,7 @@ local function summary_fields()
     -- 结构化作业 / 门禁明细：空表在宿主侧序列化为 `[]`（不是 null），调度端无需区分缺失与空。
     jobs = summary_jobs(),
     gates = summary_gates(),
-    -- 工具桥的在飞计数（只读 KV：`src/render.lua` 不得 require("src.tools")，那会立刻成环）。
+    -- 工具桥的在飞计数（只读 KV：`src/view/render.lua` 不得 require("src.runtime.tools")，那会立刻成环）。
     pendingTools = summary_int(ygg.kv.get("tool.pending")),
     -- 进化声明（只声称「声明了什么」）：宿主与只读查询可直接核对，不涉及内容质量。
     evolution = {

@@ -1,16 +1,16 @@
--- src/handlers/views.lua —— 只读视图：guide.show / map.show。
+-- src/handlers/system/views.lua —— 只读视图：guide.show / map.show。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
 
 local M = {}
 
-local guide = require("src.guide")
-local menus = require("src.menus")
-local render_mod = require("src.render")
-local reqs = require("src.requirements")
-local util = require("src.util")
-local wire = require("src.wire")
+local guide = require("src.view.guide")
+local menus = require("src.view.menus")
+local render_mod = require("src.view.render")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
+local wire = require("src.domain.wire")
 
 local TEXTS
 

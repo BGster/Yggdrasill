@@ -1,4 +1,4 @@
--- src/flow.lua —— 转场与拒绝的唯二出口（`advance` / `refuse`）+ 状态机票据 + 拒绝留痕。
+-- src/runtime/flow.lua —— 转场与拒绝的唯二出口（`advance` / `refuse`）+ 状态机票据 + 拒绝留痕。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块写的 KV 前缀：`reject.*`（拒绝留痕，只读查询用）；
@@ -6,10 +6,10 @@
 
 local M = {}
 
-local menus = require("src.menus")
-local render_mod = require("src.render")
-local reqs = require("src.requirements")
-local util = require("src.util")
+local menus = require("src.view.menus")
+local render_mod = require("src.view.render")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
 
 local TEXTS
 
@@ -71,7 +71,7 @@ local function allowed_list(current)
 end
 
 -- ============================================================================
--- §唯一后继自动推进的落点已改为响应式：见 `src/hooks.lua`（useEffect + flush_effects）。
+-- §唯一后继自动推进的落点已改为响应式：见 `src/core/hooks.lua`（useEffect + flush_effects）。
 -- 本模块只负责转场与拒绝的出口；状态驱动的连锁反应不再写在各 handler 末尾——
 -- 否则「已产生 choice 的 handler 里再 emit」会被内核丢弃（transition.rs 排空规则）。
 -- ============================================================================

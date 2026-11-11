@@ -1,14 +1,14 @@
--- src/gates.lua —— 门禁与收口判据（只读选择器）：plan_gate / accept_gate / coordinate.submit 共用同一套。
+-- src/domain/gates.lua —— 门禁与收口判据（只读选择器）：plan_gate / accept_gate / coordinate.submit 共用同一套。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。
 
 local M = {}
 
-local config = require("src.config")
-local props = require("src.proposals")
-local reqs = require("src.requirements")
-local util = require("src.util")
+local config = require("src.core.config")
+local props = require("src.domain.proposals")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
 
 local TEXTS
 

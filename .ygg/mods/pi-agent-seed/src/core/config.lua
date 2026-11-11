@@ -1,11 +1,11 @@
--- src/config.lua —— 两层配置（动态覆盖 `settings.<path>` > 静态默认 `data/config.json`）+ 标量读取小工具。
+-- src/core/config.lua —— 两层配置（动态覆盖 `settings.<path>` > 静态默认 `data/config.json`）+ 标量读取小工具。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
--- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`settings.*` 只读（写方：src/handlers/config.lua）。
+-- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`settings.*` 只读（写方：src/handlers/system/config.lua）。
 
 local M = {}
 
-local util = require("src.util")
+local util = require("src.core.util")
 
 local TEXTS
 local CONFIG
@@ -110,7 +110,7 @@ local function task_desc()
   return text_of("task.description", TEXTS.beats.default_task_desc)
 end
 
--- E2 登记面读取（写入方：src/handlers/config.lua）。两者都是自声明，不是身份凭据。
+-- E2 登记面读取（写入方：src/handlers/system/config.lua）。两者都是自声明，不是身份凭据。
 local function goal_authorization()
   local value = effective("goal.authorization")
   if type(value) == "string" then

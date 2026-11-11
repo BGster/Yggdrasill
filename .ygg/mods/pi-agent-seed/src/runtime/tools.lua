@@ -1,13 +1,13 @@
--- src/tools.lua —— 工具桥的 KV 面与回执面（`tool.*` 唯一写方）+ 三个事件 handler + 两条 effect。
+-- src/runtime/tools.lua —— 工具桥的 KV 面与回执面（`tool.*` 唯一写方）+ 三个事件 handler + 两条 effect。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；资源由入口 install(deps) 注入，
--- 注册面全部在 register() 内（与 src/render.lua 同构：render 也是 src/ 下的纯模块）。
+-- 注册面全部在 register() 内（与 src/view/render.lua 同构：render 也是 src/ 下的纯模块）。
 --
 -- 模型：`tool.call` 只**登记**请求（`tool.<id>.*` 行 + `meta.tool_calls` 队列），真正执行在宿主；
 -- 结果以普通事件 `tool.result` 回来。Mod 永不做 IO（无 process / 网络 / 文件系统）；唯一文件面是
 -- 宿主中介的 `ygg.fs` VFS（`vfs.write` + artifact 核验），缺席时整体降级为「只记账本」。
 --
--- 反向禁止：`src/render.lua` 不得 require 本模块（立刻成环）——摘要字段走 KV 读 `tool.pending`。
+-- 反向禁止：`src/view/render.lua` 不得 require 本模块（立刻成环）——摘要字段走 KV 读 `tool.pending`。
 --
 -- 本模块写的 KV 前缀：
 --   tool.count / tool.pending / tool.last / tool.seq.* / tool.<id>.* / tool.notified.*
@@ -17,21 +17,21 @@
 --   lane.<k>.probe.*（本模块唯一）
 --   req.<i>.conflict{,_peer,_note,_source}（经 src/proposals.req_do_conflict 这唯一函数写）
 --   artifact.*（本模块唯一；`record_artifact` 是唯一写点）
---   verify.passed / verify.report / verify.source（src/handlers/review.lua 写 verify.last / verify.failures）
---   settlement.sessions.*（src/handlers/review.lua 的 apply_sessions 是另一条写路径）
+--   verify.passed / verify.report / verify.source（src/handlers/operate/review.lua 写 verify.last / verify.failures）
+--   settlement.sessions.*（src/handlers/operate/review.lua 的 apply_sessions 是另一条写路径）
 
 local M = {}
 
-local config = require("src.config")
-local flow = require("src.flow")
-local gates = require("src.gates")
-local hooks = require("src.hooks")
-local lanes = require("src.lanes")
-local props = require("src.proposals")
-local render_mod = require("src.render")
-local reqs = require("src.requirements")
-local util = require("src.util")
-local wire = require("src.wire")
+local config = require("src.core.config")
+local flow = require("src.runtime.flow")
+local gates = require("src.domain.gates")
+local hooks = require("src.core.hooks")
+local lanes = require("src.domain.lanes")
+local props = require("src.domain.proposals")
+local render_mod = require("src.view.render")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
+local wire = require("src.domain.wire")
 
 local TEXTS
 

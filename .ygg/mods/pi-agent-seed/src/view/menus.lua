@@ -1,18 +1,18 @@
--- src/menus.lua —— 阶段菜单 + 配置二级页（选项文本 ↔ 动作载荷的唯一来源；`ui.page` / `ui.page.stage`）。
+-- src/view/menus.lua —— 阶段菜单 + 配置二级页（选项文本 ↔ 动作载荷的唯一来源；`ui.page` / `ui.page.stage`）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`ui.*`（唯一写方）。
 
 local M = {}
 
-local config = require("src.config")
-local gates = require("src.gates")
-local guide = require("src.guide")
-local hooks = require("src.hooks")
-local props = require("src.proposals")
-local reqs = require("src.requirements")
-local util = require("src.util")
-local wire = require("src.wire")
+local config = require("src.core.config")
+local gates = require("src.domain.gates")
+local guide = require("src.view.guide")
+local hooks = require("src.core.hooks")
+local props = require("src.domain.proposals")
+local reqs = require("src.domain.requirements")
+local util = require("src.core.util")
+local wire = require("src.domain.wire")
 
 local TEXTS
 

@@ -1,4 +1,4 @@
--- src/hooks.lua —— 轻量响应式（类 React）：useMemo / useEffect / flush_effects。
+-- src/core/hooks.lua —— 轻量响应式（类 React）：useMemo / useEffect / flush_effects。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；无 install 依赖。
 --
@@ -11,7 +11,7 @@
 
 local M = {}
 
-local util = require("src.util")
+local util = require("src.core.util")
 
 local join =
   util.join
