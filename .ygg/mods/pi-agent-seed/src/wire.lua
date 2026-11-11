@@ -156,6 +156,37 @@ local function strip_ext(payload)
   return payload:sub(1, index - 1), trim(payload:sub(index + #marker))
 end
 
+-- ── 保留尾段链（r3 提交者身份）─────────────────────────────────────────────────────────
+-- 宿主是唯一盖章方：声明路由上宿主在载荷末尾注入 `|actor=<id>` / `|actor_session=<id>`；
+-- 调用方自带的同名段在宿主侧已被拒（ACTOR_FORGED），到达这里还带保留段 = 错位（旧宿主回滚面）。
+-- 固定相对顺序：…|exec=<id>[:<reason>]|actor=<actor>|actor_session=<session>（各自可独立缺席）。
+local TAIL_SEGMENTS = {
+  { name = "exec", rank = 1, beat = "req_prop_exec_misplaced" },
+  { name = "actor", rank = 2, beat = "req_prop_actor_misplaced" },
+  { name = "actor_session", rank = 3, beat = "req_prop_actor_session_misplaced" },
+}
+
+local function tail_segment_of(segment)
+  for _, item in ipairs(TAIL_SEGMENTS) do
+    -- `actor_session=x` 不匹配 `^actor=`（第 6 字节是 `_` 不是 `=`），三段可独立判定。
+    if segment:match("^" .. item.name .. "=") ~= nil then
+      return item
+    end
+  end
+  return nil
+end
+
+-- 身份段值形状（与宿主 validate 同规则）：非空、≤max、无空白、无引号/反斜杠
+--（`|` 不可能：段已按 `|` 切开）。非法 → 可读拒绝（防张冠李戴的“身份”进存档）。
+local function identity_segment_value(segment, max, bad_beat)
+  local value = trim(segment:match("^[^=]+=(.*)$") or "")
+  if value == "" or #value > max or value:find("%s") ~= nil
+    or value:find('["\\]') ~= nil then
+    return nil, TEXTS.beats[bad_beat]
+  end
+  return value, nil
+end
+
 local function inbox_replay(ext)
   if type(ext) ~= "string" or ext == "" then
     return false
@@ -178,23 +209,65 @@ local function parse_proposal(payload)
     return nil, fill(TEXTS.beats.bad_payload, { action = "proposal.submit" })
   end
   local parts = split(trim(payload), "|")
-  -- `exec=` 只认末段：宿主对 <7 段的载荷会补段重排，放在中间会被静默挪到 artifacts 位。
-  for i = 1, #parts - 1 do
-    if trim(parts[i]):match("^exec=") ~= nil then
-      return nil, TEXTS.beats.req_prop_exec_misplaced
+  -- 保留尾段只认**尾链固定相对序**（至多 3 段）：先从末尾连弹 → 校验相对序 →
+  -- 余下段再带保留前缀 = 错位（宿主对 <7 段的载荷会补段重排，中间段会被静默挪进别的槽位）。
+  -- 沙箱无 `table` 库：tail 按弹出序（载荷逆序）追加，校验/取值时反向遍历即得载荷原序。
+  local tail = {} -- { {name, segment, meta}, … }（弹出序 = 载荷逆序）
+  for _ = 1, 3 do
+    local last = #parts
+    if last == 0 then
+      break
+    end
+    local item = tail_segment_of(trim(parts[last]))
+    if item == nil then
+      break
+    end
+    tail[#tail + 1] = { name = item.name, segment = trim(parts[last]), meta = item }
+    parts[last] = nil
+  end
+  for i = 1, #parts do
+    local item = tail_segment_of(trim(parts[i]))
+    if item ~= nil then
+      return nil, TEXTS.beats[item.beat]
     end
   end
-  local exec_id, exec_reason = nil, nil
-  if #parts > 0 and trim(parts[#parts]):match("^exec=") ~= nil then
-    local id, reason, exec_problem = parse_exec_segment(trim(parts[#parts]))
-    if exec_problem ~= nil then
-      return nil, exec_problem
+  -- 相对序：弹出序是载荷逆序 → rank 必须严格递减；违规拒绝并点名错位段
+  --（如 …|actor_session=s|actor=a：actor_session 没有落在最后）。
+  local last_rank = nil
+  for i = 1, #tail do
+    local rank = tail[i].meta.rank
+    if last_rank ~= nil and rank >= last_rank then
+      return nil, TEXTS.beats[tail[i].meta.beat]
     end
-    if id == "" then
-      return nil, TEXTS.beats.executor_bad_id
+    last_rank = rank
+  end
+  -- 逐段取值（反向遍历 = 载荷原序）：exec= 复用执行者形状校验；actor/actor_session
+  -- 用身份形状（互不混用）。
+  local exec_id, exec_reason, host_actor, host_actor_session = nil, nil, nil, nil
+  for i = #tail, 1, -1 do
+    local item = tail[i]
+    if item.name == "exec" then
+      local id, reason, problem = parse_exec_segment(item.segment)
+      if problem ~= nil then
+        return nil, problem
+      end
+      if id == "" then
+        return nil, TEXTS.beats.executor_bad_id
+      end
+      exec_id, exec_reason = id, reason
+    elseif item.name == "actor" then
+      local value, problem = identity_segment_value(item.segment, 64, "executor_bad_actor")
+      if problem ~= nil then
+        return nil, problem
+      end
+      host_actor = value
+    else
+      local value, problem = identity_segment_value(item.segment, 128, "executor_bad_actor_session")
+      if problem ~= nil then
+        return nil, problem
+      end
+      host_actor_session = value
     end
-    exec_id, exec_reason = id, reason
-    parts[#parts] = nil
   end
   if #parts < 4 then
     return nil, TEXTS.beats.req_prop_usage
@@ -215,6 +288,8 @@ local function parse_proposal(payload)
     ext = trim(parts[7] or ""),
     exec = exec_id,
     exec_reason = exec_reason,
+    host_actor = host_actor,
+    host_actor_session = host_actor_session,
   }, nil
 end
 

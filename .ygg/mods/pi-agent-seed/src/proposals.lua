@@ -58,7 +58,17 @@ local function prop_stage(index)
   return text_of(prop_key(index, "stage"), "")
 end
 
-local function prop_append(req_index, rev, stage_name, summary, artifacts, ext, changes)
+-- 提交者身份章（宿主保留字段，r3）：wire 尾段 actor=/actor_session= 的落库值；
+-- 旧提案无此键 → ""（空 = 未验证，不参与判定）。
+local function prop_actor(index)
+  return text_of(prop_key(index, "actor"), "")
+end
+
+local function prop_actor_session(index)
+  return text_of(prop_key(index, "actor_session"), "")
+end
+
+local function prop_append(req_index, rev, stage_name, summary, artifacts, ext, changes, host_actor, host_actor_session)
   local index = prop_count() + 1
   ygg.kv.set("prop.count", index)
   ygg.kv.set(prop_key(index, "req"), req_index)
@@ -69,6 +79,8 @@ local function prop_append(req_index, rev, stage_name, summary, artifacts, ext, 
   ygg.kv.set(prop_key(index, "status"), P_PENDING)
   ygg.kv.set(prop_key(index, "ext"), ext or "")
   ygg.kv.set(prop_key(index, "changes"), changes or "")
+  ygg.kv.set(prop_key(index, "actor"), host_actor or "")
+  ygg.kv.set(prop_key(index, "actor_session"), host_actor_session or "")
   return index
 end
 
@@ -106,6 +118,40 @@ local function prop_by_ext(ext)
   end
   for i = 1, prop_count() do
     if ygg.kv.get(prop_key(i, "ext")) == ext then
+      return i
+    end
+  end
+  return nil
+end
+
+-- (req, stage) 的最新一条提案（任意状态）：互证判定与显示 join 都用它
+--（零存储耦合——账本、profile、宿主章三层用同一字符串相等贯通）。
+local function prop_latest_for(req_index, stage_name)
+  for i = prop_count(), 1, -1 do
+    if prop_stage(i) == stage_name and prop_req(i) == req_index then
+      return i
+    end
+  end
+  return nil
+end
+
+-- (req, stage) 最新提案的宿主 actor 章（nil = 无章，即 unverified）。
+local function prop_actor_for(req_index, stage_name)
+  local index = prop_latest_for(req_index, stage_name)
+  if index == nil then
+    return nil
+  end
+  local actor = prop_actor(index)
+  if actor == "" then
+    return nil
+  end
+  return actor
+end
+
+-- (req, stage) 的待验收提案（至多一条；返回最小 index，无则 nil）。
+local function prop_pending_for(req_index, stage_name)
+  for i = 1, prop_count() do
+    if prop_status(i) == P_PENDING and prop_req(i) == req_index and prop_stage(i) == stage_name then
       return i
     end
   end
@@ -258,11 +304,16 @@ M.P_REJECTED = P_REJECTED
 M.P_STALE = P_STALE
 M.apply_changes = apply_changes
 M.prop_append = prop_append
+M.prop_actor = prop_actor
+M.prop_actor_for = prop_actor_for
+M.prop_actor_session = prop_actor_session
 M.prop_by_ext = prop_by_ext
 M.prop_count = prop_count
 M.prop_id = prop_id
 M.prop_key = prop_key
+M.prop_latest_for = prop_latest_for
 M.prop_next = prop_next
+M.prop_pending_for = prop_pending_for
 M.prop_pending_total = prop_pending_total
 M.prop_req = prop_req
 M.prop_rev = prop_rev

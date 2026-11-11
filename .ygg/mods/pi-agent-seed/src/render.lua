@@ -174,6 +174,20 @@ local function req_live_status(index)
   return worktree_status, subagent_status, probe_status
 end
 
+-- 宿主通道三态后缀（r3，显示 join 不改权责）：(req, stage) 最新提案落库的宿主
+-- actor 章对照账本 id——相等 = [verified]；不等 = [mismatch:actor=…]（识别不拒绝）；
+-- 无章（旧提案 / config.set 直接登记 / 旧宿主回滚面）= [unverified]。
+local function prop_verdict(index, stage_name, exec_id)
+  local actor = props.prop_actor_for(index, stage_name)
+  if actor == nil then
+    return TEXTS.beats.req_trace_actor_unverified
+  end
+  if actor == exec_id then
+    return TEXTS.beats.req_trace_actor_verified
+  end
+  return fill(TEXTS.beats.req_trace_actor_mismatch, { actor = actor })
+end
+
 local function req_trace(index)
   local parts = {}
   local deps = req_deps(index)
@@ -199,6 +213,8 @@ local function req_trace(index)
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_job, { job = job })
   end
   -- E2 执行者账本（自声明）：已登记就列出来；当前 job 对应阶段未登记就明说。
+  -- r3：每项并列两组短注记——profile harness 短注记（声明面）+ 宿主通道三态
+  --（最新提案的宿主 actor 章对照账本 id）；session id 不进 trace（grep 链走事件行）。
   local exec_ids = {}
   local exec_list = {}
   for i = 1, #wire.EXECUTOR_STAGES do
@@ -206,7 +222,12 @@ local function req_trace(index)
     local agent = wire.executor_id_of(executor_raw(req_id(index), name))
     if agent ~= "" then
       exec_ids[name] = agent
-      exec_list[#exec_list + 1] = name .. "=" .. agent
+      local shown = agent
+      local harness = text_of("settings.profile." .. agent .. ".harness", "")
+      if harness ~= "" then
+        shown = shown .. fill(TEXTS.beats.req_trace_profile_tag, { harness = harness })
+      end
+      exec_list[#exec_list + 1] = name .. "=" .. shown .. prop_verdict(index, name, agent)
     end
   end
   if #exec_list > 0 then

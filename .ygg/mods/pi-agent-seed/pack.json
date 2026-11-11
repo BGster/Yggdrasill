@@ -126,6 +126,8 @@
         "changes",
         "external_id"
       ],
+      "actor": true,
+      "actor_session": true,
       "write": {
         "flag": "proposal",
         "shape": "payload"

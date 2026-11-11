@@ -56,9 +56,9 @@
       "sha256": "b2722bab36b04cf6f651ed5ed3557369fbba01f18c1dca3918cb0400922218bd"
     },
     {
-      "byteLength": 12212,
+      "byteLength": 13103,
       "path": "src/handlers/proposals.lua",
-      "sha256": "5592174ac188e0dcd1a2d9b43a195aa999bb61e7251603a3ddfa80ad035eb5c5"
+      "sha256": "f4b6223c312cfd881bfd96b1f3aa0a06f4dc772140d30d8f25e18a04cea3642a"
     },
     {
       "byteLength": 14372,
@@ -91,14 +91,14 @@
       "sha256": "e44077c1a290e0d04d94a4f901be434549534999fa41399274b7d8c098a4e440"
     },
     {
-      "byteLength": 8677,
+      "byteLength": 10427,
       "path": "src/proposals.lua",
-      "sha256": "035bdb47998ef47e503f7a37a9ca6f705a8b1ec81a035c134b5d487ffd78fe9d"
+      "sha256": "5058bf6c70776c7754478e7a554eb6152b2f898d95519fe8061384d3e89e2b55"
     },
     {
-      "byteLength": 32265,
+      "byteLength": 33399,
       "path": "src/render.lua",
-      "sha256": "9b39cc7037c6edbe1aef606e4d8d424aaa1b44335bd86c1f549809a3db1384fe"
+      "sha256": "2ded2ee9cd6d2bcb0e94464e22ae3d60a7f3547a92cd7e40ad6d15d2dbc3cf3a"
     },
     {
       "byteLength": 18674,
@@ -116,19 +116,19 @@
       "sha256": "79cc86d03760e4af0faaab66a6ce5c619609f890808b61e185c21aece5555e00"
     },
     {
-      "byteLength": 25895,
+      "byteLength": 29258,
       "path": "src/wire.lua",
-      "sha256": "d399157cfd44b596a810959f28200effa2a0a42503cc84529163f3f021b28dfe"
+      "sha256": "d3f6afaa8057b1e055458ab67292f3596f7c6d523d9f3eb3ba0aa0bfb9ef3143"
     }
   ],
   "entries": [
     {
-      "byteLength": 40161,
+      "byteLength": 42804,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "afc1478a53fc74eb624d452fa11751e984cfb90db75b7e3516e9ea440c8ff66f"
+      "sha256": "5f643b669c64a94861166b05ed77132106c301242b19dd12e731fd60efeab0c8"
     },
     {
       "byteLength": 754,

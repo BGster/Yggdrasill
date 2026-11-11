@@ -181,7 +181,25 @@ function M.install(deps)
     if summarize == "" then
       summarize = TEXTS.beats.req_prop_no_summary
     end
-    local prop_index = prop_append(index, spec.rev, spec.stage, summarize, spec.artifacts, spec.ext, spec.changes)
+    local prop_index = prop_append(index, spec.rev, spec.stage, summarize, spec.artifacts, spec.ext, spec.changes, spec.host_actor, spec.host_actor_session)
+    -- 提交者身份三态互证（r3）：wire 尾段 exec= 与宿主注入的 actor= 章比对。
+    -- 识别不拒绝：mismatch 只是记录 + 叙事（裁决权在人 / 门禁），不拦验收；
+    -- actor_session 是纯审计字段，不参与任何判定。
+    if spec.exec ~= nil then
+      if spec.host_actor ~= nil then
+        if spec.host_actor == spec.exec then
+          ygg.narrate(fill(TEXTS.beats.req_prop_actor_verified, { id = prop_id(prop_index), exec = spec.exec }))
+        else
+          ygg.narrate(fill(TEXTS.beats.req_prop_actor_mismatch, {
+            id = prop_id(prop_index),
+            exec = spec.exec,
+            actor = spec.host_actor,
+          }))
+        end
+      else
+        ygg.narrate(fill(TEXTS.beats.req_prop_actor_unverified, { id = prop_id(prop_index), exec = spec.exec }))
+      end
+    end
     -- 同步核验（0ms，受 `tuning.artifact_capacity` 与 `MAX_ARTIFACT_CHECKS` 限）：
     -- 宿主没装 `ygg.fs` 时整体 no-op；命中则同步落 `artifact.*` 并叙事（不 render，本 handler 末尾统一 render）。
     if spec.artifacts ~= "" then
