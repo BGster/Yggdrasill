@@ -370,6 +370,10 @@ are git-ignored, `.ygg/mods/` is committed.
 .ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
 ```
 
+> 单发回执缺省为人读文本；脚本 / CI 解析单发 stdout 必须加 `--raw`（单行 JSON
+> 机器契约，与历史缺省逐字节一致），或环境级 `export YGG_FORMAT=json` 一次性回滚。
+> daemon 消费方不受影响（协议面零改动）。
+
 ### Continue
 ```bash
 A=".ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs"

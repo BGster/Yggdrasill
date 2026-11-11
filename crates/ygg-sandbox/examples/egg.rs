@@ -94,7 +94,14 @@
 //! | `inbox.jsonl` | 异步需求队列（`--requirement` 只追加；运行侧消费） |
 //! | `inbox.cursor` | 已消费行数 `{"consumed": N}`（崩溃安全面：dispatch + 存档后才前移） |
 //!
-//! 单发回执契约（stdout 单行 JSON；Agent 的解析面）：
+//! 单发回执契约（`--raw` 输出 stdout 单行 JSON；机器契约）：
+//!
+//! 缺省（无旗标）单发 stdout 是**人读文本渲染**（版式不承诺稳定；脚本 / CI 解析
+//! stdout 必须加 `--raw`，或环境级 `export YGG_FORMAT=json` 一次性回滚旧行为）；
+//! `YGG_FORMAT=text|json` 提供环境级回退，解析链 = `--raw` > env > 缺省 text
+//! （非法值 fail-closed 退出 2）。`--settle` / inbox 写命令 / `--artifact-put|get` /
+//! `--wait-tools` / `--builtin-tool` / daemon 恒为 JSON，`--raw` 对其无效果。
+//! JSON 形态与退出码契约不变：
 //!
 //! ```json
 //! {"ok":true,"event":"<事件名>","narrative":["…"],"pendingChoice":{"prompt":"…","options":["…"]},
@@ -273,6 +280,11 @@ struct Args {
     event: Option<String>,
     /// `--payload` 的值；`None` = 用 Mod 契约的 `agent.defaultPayload`（宿主不猜）。
     payload: Option<String>,
+    /// 单发回执输出形态：缺省 = 人读文本；`--raw` = 单行 JSON 机器契约（与历史缺省
+    /// 逐字节一致）。解析链 = `--raw` > 环境变量 `YGG_FORMAT`（text|json）> 缺省 text
+    /// （解析见 [`resolve_output_format`]）。**仅 `--event` 单发路径生效**；其余模式
+    /// 接受但忽略，daemon 协议面不受影响。
+    output: OutputFormat,
     /// 交互模式推方式（`--drive`；缺省 stdin）。
     drive: Drive,
     /// 异步 inbox 操作（只往本局后端的 inbox 追加一条后退出，不读写 autosave）。
@@ -364,6 +376,7 @@ fn parse_args() -> Args {
     let mut watch = false;
     let mut event: Option<String> = None;
     let mut payload: Option<String> = None;
+    let mut raw = false;
     let mut drive = Drive::Stdin;
     let mut inbox: Option<InboxWrite> = None;
     let mut store: Option<Backend> = None;
@@ -405,6 +418,9 @@ fn parse_args() -> Args {
             }
             "--event" => event = Some(next_value(&mut iter, "--event")),
             "--payload" => payload = Some(next_value(&mut iter, "--payload")),
+            // 单发回执输出单行 JSON（机器契约）。布尔旗标（同 --resume / --watch 同型）；
+            // 环境回退 YGG_FORMAT 在循环后统一解析（含用法错误 fail-closed）。
+            "--raw" => raw = true,
             "--drive" => {
                 let text = next_value(&mut iter, "--drive");
                 drive = match parse_drive(&text) {
@@ -484,6 +500,12 @@ fn parse_args() -> Args {
         }
     }
 
+    // 单发回执输出形态解析链（循环后统一裁决；与 --builtin-tool 冲突检查同层）。
+    // 其余模式（--settle / inbox / --artifact / --wait-tools / daemon）接受但忽略；
+    // 非法 env 值 fail-closed 退出 2，不静默回退。
+    let output = resolve_output_format(raw, std::env::var("YGG_FORMAT").ok().as_deref())
+        .unwrap_or_else(|message| usage_error(&message));
+
     // `--builtin-tool` 最先裁决：它既不需要 `--run-id` 也不需要 `--mod`
     //（内置工具只操作 worktree / 制品 / 会话目录），且不与任何其它模式共存。
     if builtin_tool.is_some() {
@@ -512,6 +534,7 @@ fn parse_args() -> Args {
             watch,
             event,
             payload,
+            output,
             drive,
             inbox,
             store,
@@ -604,6 +627,7 @@ fn parse_args() -> Args {
         watch,
         event,
         payload,
+        output,
         drive,
         inbox,
         store,
@@ -659,8 +683,13 @@ fn usage(code: i32) -> ! {
   --runs-root <目录> runs 根目录（默认 ./runs）
   --resume           从本局后端的存档续局（json 局 = autosave.json；缺存档则按新局开局）
   --watch            交互模式下每步检查 mod 目录 mtime 变化并热载
-  --event <名称>     单发模式：派发一个事件后退出（stdout 单行 JSON 回执）
+  --event <名称>     单发模式：派发一个事件后退出（stdout 回执：缺省人读文本，
+                     --raw 输出单行 JSON 契约）
   --payload <JSON>   事件 payload（缺省 = Mod 契约的 agent.defaultPayload；必须 JSON 标量）
+  --raw              单发回执输出单行 JSON 信封（机器契约，与历史缺省逐字节一致）。
+                     仅 --event 单发路径生效；其余模式与 daemon 协议面不受影响
+                     （接受但忽略）。解析顺序 = --raw > 环境变量 YGG_FORMAT
+                     （text|json）> 缺省 text；非法 YGG_FORMAT 值 fail-closed 退出 2
   --drive <方式>     交互模式推方式（默认 stdin；宿主不替你做决策）：
                        stdin      读 stdin：数字=选择 / event <名称> [JSON] / s / l / i / config / q
                        cmd:<路径> 不读 stdin：每个待选动作交给决策命令（stdout 单行 `N` 或
@@ -799,6 +828,37 @@ fn parse_drive(text: &str) -> Result<Drive, String> {
                 "未知的 --drive 取值 `{text}`（只接受 stdin / cmd:<路径> / none）"
             )),
         },
+    }
+}
+
+/// 单发回执的输出形态（`--raw` 旗标 / `YGG_FORMAT` 环境回退；缺省人读文本）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputFormat {
+    /// 缺省：人读文本（版式不承诺稳定，脚本解析必须 `--raw`）。
+    Text,
+    /// 机器契约：stdout 单行 JSON 信封（与历史缺省逐字节一致）。
+    Raw,
+}
+
+/// 单发回执输出形态的解析链 = `--raw` > 环境变量 `YGG_FORMAT`（text|json）> 缺省 [`OutputFormat::Text`]。
+///
+/// - `raw = true` → [`OutputFormat::Raw`]（旗标恒压 env，无论 env 为何——与
+///   `--harness` > `YGG_HARNESS` 同一覆盖惯例）；
+/// - env `"text"` → [`OutputFormat::Text`]、`"json"` → [`OutputFormat::Raw`]（小写精确匹配；
+///   trim 后空串视同未设）；
+/// - 其它值 → `Err`（fail-closed：调用方 `usage_error` 退出 2，**不静默回退**；
+///   文案点名 `YGG_FORMAT` 与合法值）；
+/// - 全缺 → [`OutputFormat::Text`]（缺省）。
+fn resolve_output_format(raw: bool, env: Option<&str>) -> Result<OutputFormat, String> {
+    if raw {
+        return Ok(OutputFormat::Raw);
+    }
+    match env.map(str::trim) {
+        None | Some("") | Some("text") => Ok(OutputFormat::Text),
+        Some("json") => Ok(OutputFormat::Raw),
+        Some(other) => Err(format!(
+            "未知的 YGG_FORMAT 取值 `{other}`（只接受 text / json；text = 人读文本（缺省），json = 单行 JSON（等价 --raw））"
+        )),
     }
 }
 
@@ -5052,10 +5112,16 @@ fn run_single(args: &Args) -> i32 {
             drain.remaining
         );
     }
-    // stdout 只留回执行（Agent 的解析面）；警告另走 stderr 便于人读。
-    if let Some(warnings) = receipt["warnings"].as_array() {
-        for warning in warnings.iter().filter_map(|value| value.as_str()) {
-            eprintln!("[警告] {warning}");
+    // stderr 面（r5-plan §2.4 矩阵）：`drain.error` 是宿主运维错误，双模式都保留；
+    // 警告与 `[HARNESS ACTION]` 在缺省 text 模式已并入渲染体（跳过 stderr 重复行），
+    // 仅 Raw 模式（机器契约完整快照）照旧走 stderr。
+    let text_mode = args.output == OutputFormat::Text;
+    if !text_mode {
+        // Raw：stdout 只留回执行（Agent 的解析面）；警告另走 stderr 便于人读。
+        if let Some(warnings) = receipt["warnings"].as_array() {
+            for warning in warnings.iter().filter_map(|value| value.as_str()) {
+                eprintln!("[警告] {warning}");
+            }
         }
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -5063,12 +5129,18 @@ fn run_single(args: &Args) -> i32 {
         .ok()
         .filter(|v| !v.trim().is_empty())
         .or_else(|| harness_config_adapter(Some(&session.mod_dir)));
-    if resolve_harness_adapter(args.harness.as_deref(), env_adapter.as_deref(), &cwd) == "generic" {
+    if !text_mode
+        && resolve_harness_adapter(args.harness.as_deref(), env_adapter.as_deref(), &cwd)
+            == "generic"
+    {
         for line in format_harness_action_lines(&receipt) {
             eprintln!("{line}");
         }
     }
-    println!("{receipt}");
+    print!(
+        "{}",
+        render_receipt_output(&receipt, args.output, &session.contract.meta_key)
+    );
     if receipt["ok"] == Json::Bool(true) {
         0
     } else {
@@ -5827,8 +5899,11 @@ fn single_shot_error(args: &Args, event: &str, message: &str) -> i32 {
         "autosave": autosave,
         "error": {"code": "INTERNAL", "message": message},
     });
-    eprintln!("error: {message}");
-    println!("{receipt}");
+    if args.output == OutputFormat::Raw {
+        eprintln!("error: {message}");
+    }
+    // 装载失败无 session：meta_key 传 ""，状态行自然缺席（r5-plan §2.3 打印点 B）。
+    print!("{}", render_receipt_output(&receipt, args.output, ""));
     1
 }
 
@@ -6526,7 +6601,7 @@ mod harness_adapter_tests {
 /// 只发生在**解析期**（`resolve_mod_dir` → `with_legacy_seed_alias`），磁盘上的
 /// `run.json` 一个字节都不动。本模块不装内核、不派发、不读真 Mod：临时目录里建空目录当 Mod。
 mod mod_dir_alias_tests {
-    use super::{legacy_seed_alias, resolve_mod_dir, Args, Drive, Path, PathBuf};
+    use super::{legacy_seed_alias, resolve_mod_dir, Args, Drive, OutputFormat, Path, PathBuf};
     use std::fs;
 
     /// 独占临时根（每个用例一个；先清干净，避免上次残留改变 `exists()` 结论）。
@@ -6548,6 +6623,7 @@ mod mod_dir_alias_tests {
             watch: false,
             event: None,
             payload: None,
+            output: OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -7453,6 +7529,168 @@ fn dispatch_with_watch(session: &mut Session, args: &Args, name: &str, payload: 
     session.dispatch_event(name, payload)
 }
 
+/// 编号选择行的唯一出处（交互 [`print_choices`] 与单发文本渲染共享，防漂移）。
+///
+/// `pendingChoice` 是对象 → `? <prompt>` + `  <i>. <option>`（1-based，与交互
+/// 同一编号函数）；`null` / 缺失 → 空 vec（调用方决定占位文案）。
+fn format_choice_lines(receipt: &Json) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(choice) = receipt["pendingChoice"].as_object() {
+        if let Some(prompt) = choice["prompt"].as_str() {
+            lines.push(format!("? {prompt}"));
+        }
+        for (index, option) in choice["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            let text = option.as_str().unwrap_or("");
+            lines.push(format!("  {}. {text}", index + 1));
+        }
+    }
+    lines
+}
+
+/// 单发回执的人读文本渲染（缺省形态；**版式不承诺稳定，脚本解析必须 `--raw`**）。
+///
+/// 行序（r5-plan §2.2，对齐交互 `print_receipt` → `print_choices` 的既有顺序）：
+/// ①头行 ②narrative 两格缩进 ③失败 `✗` 行（仅 ok=false 且有 error）
+/// ④`[状态]` 行（仅摘要可用；`meta_key` 传 "" 跳过）⑤`[HARNESS ACTION]`
+/// ⑥`⚠` 警告 ⑦`⟳` 热载 ⑧`[inbox]` ⑨`[工具]` ⑩结局分隔线
+/// ⑪pendingChoice 编号块（null → 占位，不复用交互命令菜单）。
+/// 只读已知键、对未知加性键宽容（不渲染、不 panic）。
+fn render_receipt_text(receipt: &Json, meta_key: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    // ① 头行：`── <event> · <ok|失败> · seq <n> · revision <n> · 存档 <locator> ──`
+    //   字段缺失优雅省略（失败无 revision；装载失败回执无 seq/revision；event 空则省事件段）。
+    let mut header = String::from("── ");
+    let event = receipt["event"].as_str().unwrap_or("");
+    if !event.is_empty() {
+        header.push_str(event);
+        header.push_str(" · ");
+    }
+    header.push_str(if receipt["ok"] == Json::Bool(true) {
+        "ok"
+    } else {
+        "失败"
+    });
+    if let Some(seq) = receipt["seq"].as_u64() {
+        header.push_str(&format!(" · seq {seq}"));
+    }
+    if let Some(revision) = receipt["revision"].as_u64() {
+        header.push_str(&format!(" · revision {revision}"));
+    }
+    if let Some(autosave) = receipt["autosave"].as_str() {
+        if !autosave.is_empty() {
+            header.push_str(&format!(" · 存档 {autosave}"));
+        }
+    }
+    header.push_str(" ──");
+    lines.push(header);
+    // ② narrative 逐行原样，两格缩进（拒绝/重放前缀原样呈现，宿主不解释）。
+    for line in narrative_lines(receipt) {
+        lines.push(format!("  {line}"));
+    }
+    // ③ 失败醒目行：插在 narrative 之后、状态行之前。
+    if receipt["ok"] != Json::Bool(true) && receipt["error"].as_object().is_some() {
+        lines.push(format!("✗ {}", error_text(receipt)));
+    }
+    // ④ 状态行：仅 Mod 摘要可用时；装载失败路径 meta_key 传 "" 直接跳过。
+    if !meta_key.is_empty() {
+        let summary = Summary::from_receipt(receipt, meta_key);
+        if summary.available {
+            let mut status = format!(
+                "[状态] 阶段={} · 需求={} · 待验收提案={} · 冲突={}",
+                summary.stage,
+                summary.requirement_count,
+                summary.pending_proposals,
+                summary.conflicts.len()
+            );
+            if let Some(awaiting) = &summary.awaiting {
+                status.push_str(&format!(
+                    " · 等待 {}@{}",
+                    awaiting.req,
+                    if awaiting.stage.is_empty() {
+                        "?"
+                    } else {
+                        &awaiting.stage
+                    }
+                ));
+            }
+            if summary.verify_passed {
+                status.push_str(" · 门禁自检=过");
+            }
+            lines.push(status);
+        }
+    }
+    // ⑤-⑨ 附属行：presence 驱动（不经 generic 适配器门——那是 stderr 路由决策）。
+    for line in format_harness_action_lines(receipt) {
+        lines.push(line);
+    }
+    for warning in receipt["warnings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+    {
+        lines.push(format!("⚠ {warning}"));
+    }
+    if receipt["hotReload"]["reloaded"] == Json::Bool(true) {
+        lines.push(format!(
+            "⟳ mod 已热载（{}）：状态无损续局",
+            receipt["hotReload"]["source"].as_str().unwrap_or("?")
+        ));
+    }
+    if let Some(inbox) = receipt["inbox"].as_object() {
+        lines.push(format!(
+            "[inbox] 已消费 {} 条（重放 {} 条；剩 {} 行）",
+            inbox["applied"].as_u64().unwrap_or(0),
+            inbox["replayed"].as_u64().unwrap_or(0),
+            inbox["remaining"].as_u64().unwrap_or(0)
+        ));
+    }
+    for tool in receipt["tools"].as_array().into_iter().flatten() {
+        lines.push(format!(
+            "[工具] {} {} · {} · 结果经 {}",
+            tool["tool"].as_str().unwrap_or("?"),
+            tool["callId"].as_str().unwrap_or("?"),
+            tool["status"].as_str().unwrap_or("?"),
+            tool["resultEvent"].as_str().unwrap_or("?")
+        ));
+    }
+    // ⑩ 结局分隔线（与交互同符）。
+    if receipt["ending"] == Json::Bool(true) {
+        lines.push(String::new());
+        lines.push("———————————".to_owned());
+    }
+    // ⑪ pendingChoice 编号块：null → 占位（单发没有 s/l/i/config/q 交互命令）。
+    let choice_lines = format_choice_lines(receipt);
+    if choice_lines.is_empty() {
+        lines.push("（无待决选择）".to_owned());
+    } else {
+        lines.extend(choice_lines);
+    }
+    lines
+}
+
+/// 单发打印点的唯一出口：[`OutputFormat::Raw`] = 单行 JSON 信封（**机器契约**，
+/// 与历史缺省逐字节一致，含尾换行）；[`OutputFormat::Text`] = [`render_receipt_text`]
+/// 的人读版式。打印点统一 `print!`（换行已含在返回值里）。
+fn render_receipt_output(receipt: &Json, format: OutputFormat, meta_key: &str) -> String {
+    match format {
+        OutputFormat::Raw => format!("{receipt}\n"),
+        OutputFormat::Text => {
+            let mut out = String::new();
+            for line in render_receipt_text(receipt, meta_key) {
+                out.push_str(&line);
+                out.push('\n');
+            }
+            out
+        }
+    }
+}
+
 /// 打印一步回执（`fresh=false` 时只打印错误——存读档等不推进剧情）。
 /// 无模式分支：结局行本身由 Mod 的 narrative 提供，宿主只加一条通用分隔。
 fn print_receipt(receipt: &Json, fresh: bool) {
@@ -7498,18 +7736,10 @@ fn print_receipt(receipt: &Json, fresh: bool) {
 fn print_choices(receipt: &Json) {
     println!();
     match receipt["pendingChoice"].as_object() {
-        Some(choice) => {
-            if let Some(prompt) = choice["prompt"].as_str() {
-                println!("? {prompt}");
-            }
-            for (index, option) in choice["options"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .enumerate()
-            {
-                let text = option.as_str().unwrap_or("");
-                println!("  {}. {text}", index + 1);
+        // 编号唯一出处 = format_choice_lines（与单发文本渲染共享，防漂移）。
+        Some(_) => {
+            for line in format_choice_lines(receipt) {
+                println!("{line}");
             }
         }
         None => {
@@ -8178,7 +8408,9 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 // ============================================================================
 #[cfg(test)]
 mod multiscript_hot_reload_tests {
-    use super::{fs, mod_signature, watched_files, Args, Drive, Path, PathBuf, Session};
+    use super::{
+        fs, mod_signature, watched_files, Args, Drive, OutputFormat, Path, PathBuf, Session,
+    };
     use serde_json::Value as Json;
 
     /// 入库 fixture 的目录（`tests/fixtures/multi-script`；与 r4 的三个测试目标同一份）。
@@ -8224,6 +8456,7 @@ mod multiscript_hot_reload_tests {
             watch: false,
             event: None,
             payload: None,
+            output: OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -8662,6 +8895,7 @@ end)
             watch: false,
             event: None,
             payload: None,
+            output: OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -9684,6 +9918,7 @@ end)
             watch: false,
             event: None,
             payload: None,
+            output: OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -10384,6 +10619,7 @@ end)
             watch: false,
             event: None,
             payload: None,
+            output: OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -11042,6 +11278,7 @@ end)
             watch: false,
             event: None,
             payload: None,
+            output: OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -11344,5 +11581,337 @@ end)
         );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+// ============================================================================
+// §r5 单发回执文本渲染（缺省 text / --raw 唯一旗标）
+// ============================================================================
+
+#[cfg(test)]
+mod receipt_text_tests {
+    use super::*;
+
+    /// `build_receipt` 形状的 ok fixture（新局 task.intake，r5-plan §2.2 成功样例骨架）。
+    fn ok_receipt() -> Json {
+        json!({
+            "ok": true,
+            "event": "task.intake",
+            "narrative": [
+                "[TASK ACCEPTED] task 把宿主 CLI 回执渲染成自然语言 — moving to coordinate.",
+                "second narrative line",
+            ],
+            "pendingChoice": {
+                "prompt": "Next step: accept a proposal, pass a gate, dispatch, or close into final review?",
+                "options": [
+                    "requirement.dispatch — dispatch by readiness order (0 candidates, jobs 0/4, head —)",
+                    "requirement.add — register another requirement",
+                    "coordinate.submit — enter final review once every requirement is closed",
+                ],
+            },
+            "autosave": ".ygg/runs/cli-text-probe-01/run.sqlite#latest",
+            "seq": 0,
+            "revision": 2,
+            "meta": {
+                "summary": {
+                    "stage": "coordinate",
+                    "ending": false,
+                    "verifyPassed": false,
+                    "nextEndsRun": false,
+                    "pendingProposals": 0,
+                    "requirementCount": 0,
+                    "conflicts": [],
+                }
+            },
+        })
+    }
+
+    /// 越权拒绝 fixture（r5-plan §2.2 拒绝样例骨架：ok=false、无 revision、
+    /// pendingChoice 由 state 回填仍存在）。
+    fn failure_receipt() -> Json {
+        json!({
+            "ok": false,
+            "event": "gate.approve",
+            "narrative": ["[REJECTED:ACTION] `gate.approve` is not available in stage coordinate."],
+            "pendingChoice": {
+                "prompt": "Next step?",
+                "options": ["requirement.dispatch — dispatch by readiness order"],
+            },
+            "autosave": ".ygg/runs/cli-text-probe-01/run.sqlite#latest",
+            "seq": 12,
+            "error": {
+                "code": "REJECTED",
+                "message": "This action is only valid in stage `review`.",
+            },
+            "meta": {
+                "summary": {
+                    "stage": "coordinate",
+                    "ending": false,
+                    "verifyPassed": false,
+                    "nextEndsRun": false,
+                    "pendingProposals": 0,
+                    "requirementCount": 0,
+                    "conflicts": [],
+                }
+            },
+        })
+    }
+
+    fn rendered(receipt: &Json) -> Vec<String> {
+        render_receipt_text(receipt, "summary")
+    }
+
+    /// 用例 1：ok 回执渲染头行/narrative/编号块/状态行（含 1-based 编号与行序）。
+    #[test]
+    fn text_ok_receipt_renders_header_narrative_choices_status() {
+        let lines = rendered(&ok_receipt());
+        // 头行：event/seq/revision/存档齐备
+        assert_eq!(
+            lines[0],
+            "── task.intake · ok · seq 0 · revision 2 · 存档 .ygg/runs/cli-text-probe-01/run.sqlite#latest ──"
+        );
+        // narrative 原样逐行、两格缩进
+        assert_eq!(
+            lines[1],
+            "  [TASK ACCEPTED] task 把宿主 CLI 回执渲染成自然语言 — moving to coordinate."
+        );
+        assert_eq!(lines[2], "  second narrative line");
+        // 状态行在 narrative 之后
+        let status_at = lines
+            .iter()
+            .position(|line| line.starts_with("[状态]"))
+            .expect("状态行存在");
+        assert!(status_at > 2);
+        assert_eq!(
+            lines[status_at],
+            "[状态] 阶段=coordinate · 需求=0 · 待验收提案=0 · 冲突=0"
+        );
+        // pendingChoice：? prompt + 1-based 编号（与交互共享 format_choice_lines）
+        let prompt_at = lines
+            .iter()
+            .position(|line| line.starts_with("? "))
+            .expect("prompt 行存在");
+        assert!(status_at < prompt_at, "状态行在编号块之前");
+        assert!(lines[prompt_at + 1].starts_with("  1. requirement.dispatch"));
+        assert!(lines[prompt_at + 2].starts_with("  2. requirement.add"));
+        assert!(lines[prompt_at + 3].starts_with("  3. coordinate.submit"));
+        assert_eq!(prompt_at + 4, lines.len(), "编号块之后无多余行");
+    }
+
+    /// 用例 2：失败回执保留 narrative、加 `✗` 行（位于 narrative 之后、状态行之前），
+    /// 头行无 revision，pendingChoice 仍列出。
+    #[test]
+    fn text_failure_receipt_keeps_narrative_adds_error_line() {
+        let lines = rendered(&failure_receipt());
+        assert_eq!(
+            lines[0],
+            "── gate.approve · 失败 · seq 12 · 存档 .ygg/runs/cli-text-probe-01/run.sqlite#latest ──",
+            "头行无 revision 段"
+        );
+        assert!(!lines[0].contains("revision"));
+        // narrative 保留（拒绝前缀原样）
+        assert_eq!(
+            lines[1],
+            "  [REJECTED:ACTION] `gate.approve` is not available in stage coordinate."
+        );
+        // ✗ 行存在且位于 narrative 之后、[状态] 之前
+        let error_at = lines
+            .iter()
+            .position(|line| line.starts_with("✗ "))
+            .expect("✗ 行存在");
+        assert_eq!(
+            lines[error_at],
+            "✗ [REJECTED] This action is only valid in stage `review`."
+        );
+        assert!(error_at > 1, "✗ 行在 narrative 之后");
+        let status_at = lines.iter().position(|line| line.starts_with("[状态]"));
+        assert!(
+            status_at.is_some_and(|at| at > error_at),
+            "✗ 行在状态行之前"
+        );
+        // pendingChoice 仍列出（失败后 Agent 仍能接着走）
+        assert!(lines.iter().any(|line| line.starts_with("? ")));
+        assert!(lines.iter().any(|line| line.starts_with("  1. ")));
+    }
+
+    /// 用例 3：无 meta / 未知加性键（模拟 r3 actor 回显）→ 无状态行、不 panic、渲染完整。
+    #[test]
+    fn text_mode_tolerates_missing_summary_and_additive_keys() {
+        let mut receipt = ok_receipt();
+        receipt.as_object_mut().unwrap().remove("meta");
+        receipt["actor"] = json!({"actorId": "agent-1", "actorSession": "s-1"});
+        receipt["futureAdditiveKey"] = json!({"whatever": [1, 2, 3]});
+        let lines = rendered(&receipt);
+        assert!(
+            lines.iter().all(|line| !line.starts_with("[状态]")),
+            "无摘要时不得渲染状态行"
+        );
+        assert_eq!(
+            lines[0],
+            "── task.intake · ok · seq 0 · revision 2 · 存档 .ygg/runs/cli-text-probe-01/run.sqlite#latest ──"
+        );
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("second narrative line")));
+        assert!(lines.iter().any(|line| line.starts_with("? ")));
+        // 整体输出可用（不 panic 且含尾换行）
+        let out = render_receipt_output(&receipt, OutputFormat::Text, "summary");
+        assert!(out.ends_with('\n'));
+    }
+
+    /// 用例 4：结局分隔线只在 ending=true 时出现（空行 + 分隔线，紧邻且在编号块之前）。
+    #[test]
+    fn ending_separator_only_when_ending_true() {
+        let receipt = ok_receipt();
+        let lines = rendered(&receipt);
+        assert!(!lines.iter().any(|line| line == "———————————"));
+
+        let mut receipt = ok_receipt();
+        receipt["ending"] = json!(true);
+        let lines = rendered(&receipt);
+        let sep_at = lines
+            .iter()
+            .position(|line| line == "———————————")
+            .expect("分隔线存在");
+        assert_eq!(lines[sep_at - 1], "", "分隔线前是空行");
+        let prompt_at = lines
+            .iter()
+            .position(|line| line.starts_with("? "))
+            .expect("编号块存在");
+        assert!(sep_at < prompt_at, "分隔线在编号块之前");
+    }
+
+    /// 用例 5：附属行（⚠/⟳/[inbox]/[工具]/[HARNESS ACTION]）逐条渲染且按行序排列。
+    #[test]
+    fn auxiliary_lines_warnings_hotreload_inbox_tools_harness() {
+        let mut receipt = ok_receipt();
+        receipt["warnings"] = json!(["first warning", "second warning"]);
+        receipt["hotReload"] = json!({"reloaded": true, "source": "resume"});
+        receipt["inbox"] = json!({"applied": 2, "replayed": 1, "skipped": 0, "remaining": 3});
+        receipt["tools"] = json!([{
+            "callId": "run-0-0",
+            "tool": "git.worktree_claim",
+            "status": "ok",
+            "resultEvent": "tool.result",
+        }]);
+        receipt["harnessActions"] = json!([{
+            "action": "subagent.spawn",
+            "reqId": "r1",
+            "stage": "development",
+            "rev": 1,
+            "lane": 2,
+            "worktreePath": "/tmp/wt",
+            "artifactPath": "artifacts/r1-development.md",
+        }]);
+        let lines = rendered(&receipt);
+        let expected = [
+            "[HARNESS ACTION] subagent.spawn r1 (rev 1, stage=development, lane=2, worktree=/tmp/wt, artifact=artifacts/r1-development.md)",
+            "⚠ first warning",
+            "⚠ second warning",
+            "⟳ mod 已热载（resume）：状态无损续局",
+            "[inbox] 已消费 2 条（重放 1 条；剩 3 行）",
+            "[工具] git.worktree_claim run-0-0 · ok · 结果经 tool.result",
+        ];
+        for expected_line in expected {
+            assert!(
+                lines.iter().any(|line| line == expected_line),
+                "缺少附属行 `{expected_line}`；实际：{lines:?}"
+            );
+        }
+        // 行序：⑤ HARNESS < ⑥ ⚠ < ⑦ ⟳ < ⑧ [inbox] < ⑨ [工具]
+        let position_of = |prefix: &str| {
+            lines
+                .iter()
+                .position(|line| line.starts_with(prefix))
+                .unwrap_or_else(|| panic!("行 `{prefix}` 不存在"))
+        };
+        let order = [
+            position_of("[HARNESS ACTION]"),
+            position_of("⚠ first"),
+            position_of("⟳"),
+            position_of("[inbox]"),
+            position_of("[工具]"),
+        ];
+        let mut sorted = order;
+        sorted.sort_unstable();
+        assert_eq!(order, sorted, "附属行顺序：⑤⑥⑦⑧⑨");
+    }
+
+    /// 用例 6：pendingChoice=null → 占位行，不复用交互模式的命令菜单提示。
+    #[test]
+    fn null_choice_renders_placeholder_without_interactive_menu() {
+        let mut receipt = ok_receipt();
+        receipt["pendingChoice"] = Json::Null;
+        let lines = rendered(&receipt);
+        assert!(lines.contains(&"（无待决选择）".to_owned()));
+        assert!(
+            lines
+                .iter()
+                .all(|line| !line.contains("数字=选择") && !line.contains("s / l / i / config / q")),
+            "单发不得出现交互命令菜单提示"
+        );
+    }
+
+    /// 用例 7：`--raw` × `YGG_FORMAT` 优先级矩阵（r5-plan §4.1）。
+    #[test]
+    fn resolve_output_format_priority_matrix() {
+        // --raw 恒压 env（无论 env 为何）
+        assert_eq!(
+            resolve_output_format(true, Some("json")),
+            Ok(OutputFormat::Raw)
+        );
+        assert_eq!(
+            resolve_output_format(true, Some("text")),
+            Ok(OutputFormat::Raw)
+        );
+        assert_eq!(resolve_output_format(true, None), Ok(OutputFormat::Raw));
+        // 无旗标：env 决定
+        assert_eq!(
+            resolve_output_format(false, Some("json")),
+            Ok(OutputFormat::Raw)
+        );
+        assert_eq!(
+            resolve_output_format(false, Some("text")),
+            Ok(OutputFormat::Text)
+        );
+        // 全缺 → 缺省 Text
+        assert_eq!(resolve_output_format(false, None), Ok(OutputFormat::Text));
+        // trim 后空串视同未设
+        assert_eq!(
+            resolve_output_format(false, Some("  ")),
+            Ok(OutputFormat::Text)
+        );
+        // 非法值 fail-closed：Err 且文案点名 YGG_FORMAT 与合法值
+        let error = resolve_output_format(false, Some("bogus")).unwrap_err();
+        assert!(
+            error.contains("YGG_FORMAT"),
+            "文案须点名 YGG_FORMAT：{error}"
+        );
+        assert!(
+            error.contains("text") && error.contains("json"),
+            "文案须点名合法值：{error}"
+        );
+    }
+
+    /// 用例 8：Raw 分支字节等价钉（单行、含尾换行、非 pretty；机器契约回归钉）。
+    #[test]
+    fn raw_output_is_byte_identical_single_line() {
+        let receipt = ok_receipt();
+        let raw = render_receipt_output(&receipt, OutputFormat::Raw, "summary");
+        assert_eq!(
+            raw,
+            format!("{receipt}\n"),
+            "Raw 分支必须恒等 `format!(\"{{receipt}}\\n\")`"
+        );
+        assert_eq!(raw.matches('\n').count(), 1, "单行（非 pretty）");
+        assert!(raw.ends_with('\n'));
+        // meta_key 不影响 Raw 分支（机器契约与人读状态面无关）
+        assert_eq!(render_receipt_output(&receipt, OutputFormat::Raw, ""), raw);
+        // 失败信封同样钉住
+        let failure = failure_receipt();
+        assert_eq!(
+            render_receipt_output(&failure, OutputFormat::Raw, "summary"),
+            format!("{failure}\n")
+        );
     }
 }
