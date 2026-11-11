@@ -72,6 +72,8 @@ end)
 ygg.on("event.loop", function()
   while true do end
 end)
+-- 击杀后的恢复步派发 event.start（同 LOOP_MOD 先例：fail-closed 后未注册名会被拒）。
+ygg.on("event.start", function() end)
 "#;
 
 /// 沙箱拒绝 Mod：handler 内 require（白名单拒绝桩，可读 "sandbox denied"）。
