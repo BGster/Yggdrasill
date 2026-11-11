@@ -2923,7 +2923,7 @@ end)
     /// 探针串经拼接构造，以免测试源码自匹配。
     #[test]
     fn serve_source_has_no_write_path() {
-        const SOURCE: &str = include_str!("serve.rs");
+        const SOURCE: &str = include_str!("mod.rs");
         let production = SOURCE.split("mod serve_tests").next().unwrap_or(SOURCE);
         let forbidden = [
             format!("ygg_store::{}(", "open"),
