@@ -16,8 +16,8 @@ local wire = require("src.wire")
 
 local TEXTS
 
-local mode, next_mode, next_play_mode, play_mode, strict_gates, text_of =
-  config.mode, config.next_mode, config.next_play_mode, config.play_mode, config.strict_gates, config.text_of
+local mode, next_mode, next_play_mode, play_mode, run_retire_armed, strict_gates, text_of =
+  config.mode, config.next_mode, config.next_play_mode, config.play_mode, config.run_retire_armed, config.strict_gates, config.text_of
 local gate_kind, gate_next, gate_total =
   gates.gate_kind, gates.gate_next, gates.gate_total
 local guide_section =
@@ -52,6 +52,7 @@ local function settlement_registered()
 end
 
 -- review.note 载荷固定 `lesson|score` 两段；进化声明不从这里走（旧 ev/c/cls 段会被拒）。
+-- r9：未武装 = 批收口（回 coordinate）；run.retire 武装 = 终局退役（[ENDING · run retired]）。
 local function review_note_payload()
   return wire.format_review_note(TEXTS.beats.default_lesson, tostring(TEXTS.tuning.default_score))
 end
@@ -148,11 +149,23 @@ function CONFIG_UI.gates_item()
   }
 end
 
+-- r9 退役切换项（纯展示层入口，写仍走 config.set，值域 true / ""）：
+-- 武装后 review 菜单首项的 review.note 变终局变体（summary.nextEndsRun 免费翻转）。
+function CONFIG_UI.retire_item()
+  local armed = run_retire_armed()
+  return {
+    text = fill(TEXTS.options.config_retire, { state = armed and "armed" or "off", next = armed and '""' or "true" }),
+    action = "config.set",
+    payload = "run.retire=" .. (armed and '""' or "true"),
+  }
+end
+
 function CONFIG_UI.page_items()
   return {
     CONFIG_UI.play_item(),
     CONFIG_UI.evolution_item(),
     CONFIG_UI.gates_item(),
+    CONFIG_UI.retire_item(),
     CONFIG_UI.close_item(),
   }
 end
@@ -432,6 +445,7 @@ M.append_all = append_all
 M.dispatch_candidates = dispatch_candidates
 M.dispatch_item = dispatch_item
 M.gate_items = gate_items
+M.retire_item = CONFIG_UI.retire_item
 M.guide_item = guide_item
 M.map_item = map_item
 M.menu = menu

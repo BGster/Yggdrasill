@@ -374,6 +374,122 @@ fn resident_batch_cycle_reaches_coordinate_again() {
     }
 }
 
+/// ⑦ Baseline B — the armed retirement (the **only** path to a run-level ending).
+///
+/// Script (pinned): 1=task.intake · 1=coordinate.submit (batch boundary) · 1=verify green ·
+/// 1=settlement.evolution · 7=config.open (the config entry is the 7th item of the registered
+/// review menu) · 4=retire_item (`config.set run.retire=true`) · 5=close_item (back) ·
+/// 1=review.note (retiring close) → `[ENDING · run retired]`.
+#[test]
+fn resident_retire_reaches_ending() {
+    for dir in [project_mod_dir(), seed_mod_dir()] {
+        let options = PlaytestOptions {
+            choices: vec![1, 1, 1, 1, 7, 4, 5, 1],
+            ..Default::default()
+        };
+        let report = playtest(&dir, &options);
+        assert!(
+            report.ok,
+            "{} retirement walk failed: reached={:?} errors={:?}",
+            dir.display(),
+            report.reached,
+            report.errors
+        );
+        assert_eq!(
+            report.reached,
+            Some(Reached::Ending),
+            "{} must reach the retiring ending",
+            dir.display()
+        );
+        // The narrative sample only keeps the first lines of the walk, so the ending line's
+        // copy (`[ENDING · run retired]`) is pinned at Game level in
+        // `run_retire_value_domain_and_retiring_close` below.
+        assert!(
+            report.warnings.is_empty() && report.errors.is_empty(),
+            "{} must walk clean: {:?} / {:?}",
+            dir.display(),
+            report.warnings,
+            report.errors
+        );
+    }
+}
+
+/// ⑦ The retire value domain and the retiring close (the R2 two-direction lock):
+/// - unarmed (default): `review.note` is the first menu item but `nextEndsRun` stays **false**
+///   (a dumb pump keeps cycling batches, never pre-closes);
+/// - `run.retire` only accepts `true` / `""` (anything else is a payload rejection);
+/// - armed: `nextEndsRun` flips **true** (the host pre-closing protocol reuses for free), and
+///   the next `review.note` writes the retiring ending (`[ENDING · run retired]`) without
+///   touching `run.batch`.
+#[test]
+fn run_retire_value_domain_and_retiring_close() {
+    let mut game = drive_to_review();
+    // Register the settlement in one merged turn so `review.note` is the menu's first item.
+    game.narrate(
+        "settlement.evolution",
+        &text(
+            "|candidates screened against the evolution chapter|c=0/0|\
+             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
+        ),
+    );
+    let next_ends_run = |game: &mut Game| {
+        game.reply("agent.summary", "0")["meta"]["summary"]["nextEndsRun"]
+            .clone()
+    };
+    // Direction ① (unarmed): first item is review.note, but the run does not end.
+    assert_eq!(
+        next_ends_run(&mut game),
+        json!(false),
+        "unarmed: review.note first must NOT report nextEndsRun"
+    );
+
+    // Value domain: anything other than true / "" is refused and writes nothing.
+    let bad = game.narrate("config.set", &text("run.retire=false"));
+    assert_refused(&bad, "run.retire");
+    game.assert_kv("settings.run.retire", json!(null));
+
+    // Arm through the sub-page item (pure presentation entry, the write is still config.set).
+    game.click("config — ");
+    let sub_page = game.options();
+    assert!(
+        sub_page.len() == 5 && sub_page[3].starts_with("config.set — run.retire off → true"),
+        "the sub-page must offer run.retire as its 4th item: {sub_page:?}"
+    );
+    game.click("config.set — run.retire");
+    game.assert_kv("settings.run.retire", json!("true"));
+    // Direction ② (armed): the same review menu now reports the retiring close.
+    assert_eq!(
+        next_ends_run(&mut game),
+        json!(true),
+        "armed: review.note first must report nextEndsRun"
+    );
+    // The sub-page survives (only a play-mode switch leaves it).
+    assert_eq!(game.options().len(), 5, "still on the config sub-page");
+    game.click("back — ");
+
+    // The retiring close: archive + ending, and run.batch stays untouched.
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[ENDING · run retired]"),
+        "armed review.note must retire the run: {closed}"
+    );
+    game.assert_kv("ending", json!("done"));
+    // run.batch stays untouched (the key is never written: this run retired on its first
+    // settlement — the summary field still reads 1 by default).
+    game.assert_kv("run.batch", json!(null));
+    game.assert_kv("fsm.stage", json!("done"));
+    game.assert_kv(
+        "review.evolution.summary",
+        json!("candidates screened against the evolution chapter"),
+    );
+
+    // Clearing stays available after retirement (config.set is stage-less; done is read-only
+    // for requirements, not for the retire switch).
+    game.narrate("config.set", &text("run.retire="));
+    game.assert_kv("settings.run.retire", json!(""));
+}
+
 /// ⑦ The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
 /// an empty batch loops (coordinate.submit → verify → evolution → review.note → coordinate …)
 /// until the step limit — `ok=false, reached=limit` is the documented steady state, not a
