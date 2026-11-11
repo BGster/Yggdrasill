@@ -34,7 +34,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 - **一次编写、处处运行**：内核用 Rust 构建，零渲染、零平台 I/O 依赖；同一内核可编译为 WebAssembly（`ygg-wasm`，用于浏览器）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（用于多人 lockstep 回放或微信小游戏客户端-服务器架构）。
 
 ### 1.2 Agent 工作流治理平台（"工作流即游戏，治理内核即引擎"）
-- **核心价值**：软件工程多智能体协调被建模为一个可玩的 Mod（`pi-agent-seed`）。Agent 不再依赖会随长上下文窗口衰减的脆弱静态提示指令，而是通过事件信封（event envelope）逐步与工作流状态机交互。
+- **核心价值**：软件工程多智能体协调被建模为一个可玩的 Mod（`agent-seed`）。Agent 不再依赖会随长上下文窗口衰减的脆弱静态提示指令，而是通过事件信封（event envelope）逐步与工作流状态机交互。
 - **情境化可供性（Situational Affordances）**：每一次 dispatch 都返回一份完整叙述回执，描述当前状态、活动泳道、待决提案，以及显式的 `pendingChoice` 动作白名单。协议约束取代了纯提示式的纪律。
 - **两层协调**：一个主协调者 Agent 分解需求、将并行的执行者子代理派发进隔离的持久化 Git worktree 泳道、串行审查提案、通过两个强制的人/协调者门禁（`plan_gate` 与 `accept_gate`），并以结构化的 roguelike 式自进化审查结算每一次运行。
 
@@ -47,10 +47,11 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 | **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。 |
 | **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期：`intake`（任务注入与需求立案）$\to$ `coordinate`（派发泳道、接受提案、通过门禁）$\to$ `review`（验证套件、演进筛选、会话/todo 清理）$\to$ `done`（终态结算状态）。 |
 | **Requirement（`r1..rN`，需求）** | 由状态机跟踪的一个交付单元。以 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split` / `merged` / `dropped`）存储，并通过 `plan_ok`、`job`、`gate`、`conflict` 属性投影为细粒度展示阶段（`draft`、`planning`、`plan_review`、`plan_gate`、`ready`、`developing`、`dev_review`、`accept`、`done`、`blocked`）。 |
-| **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。 |
+| **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。泳道分支名执行强制形态 `feature/{4位uuid}-{语义词段}`（`lane.claim` 与 `git.worktree_claim` 两条入口同规则，非法名可读拒绝；默认名生成机制已删除）——契约细节见 DESIGN §2.4。 |
 | **Proposal（`p1..pM`，提案）** | 由执行者子代理针对特定 `(req_id, rev, stage)` 元组产出的不可变交付提交（`proposal.submit`），引用一个已归档的 VFS 产物（`artifacts/<req>-<stage>.md`）并绑定执行者身份（`exec=<agent_id>`）。提案在协调者串行执行 `proposal.accept` 或 `proposal.reject` 之前不会改变需求状态。 |
 | **Mandatory Gates（`plan_gate`、`accept_gate`，强制门禁）** | 每个需求的两个不可跳过的质量检查点。`plan_gate` 批准技术方案（`planning` $\to$ `ready`）并响应式地自动派发开发。`accept_gate` 要求非空产物证据（`artifacts`）与匹配的修订号（`gate_rev == req.rev`），之后才将需求标记为 `done` 并释放其泳道。 |
-| **Executor Ledger（`executor.<rN>.<stage>`，执行者台账）** | 一条自声明的审计轨迹，记录哪个子代理 ID 执行了某个需求的某个阶段（`analysis`、`plan`、`development`）。跨阶段交接或同一阶段更换为不同执行者 ID 需要显式理由（`<new_id>\|<reason>`）。占位 ID（`pi-ygg-harness`、`main`、`default`、`unregistered`）在恢复决策中被过滤掉。 |
+| **Executor Ledger（`executor.<rN>.<stage>`，执行者台账）** | 一条自声明的审计轨迹，记录哪个子代理 ID 执行了某个需求的某个阶段（`analysis`、`plan`、`development`）。跨阶段交接或同一阶段更换为不同执行者 ID 需要显式理由（`<new_id>\|<reason>`）。占位 ID（`pi-ygg-harness`、`main`、`default`、`unregistered`）在恢复决策中被过滤掉。r3 起，台账 id 与提案的宿主 `actor=` 章在 `requirement.list` trace 上做三态互证显示（`[verified]` / `[mismatch:actor=…]` / `[unverified]`，识别不拒绝）——账本仍是权责权威，互证只是显示 join。 |
+| **Profile Registry（`profile.<handle>.*`，身份注册表）** | 一张**自报身份卡**（self-reported registry，不是凭据）：`config.set profile.<handle>.<key>` 逐键注册的 `settings.profile.*` 平铺 KV（保留键 `harness` / `session_id` / `handle` / `role` / `assignments`，自由键 `^[a-z0-9_]{1,32}$`）。回答「这个句柄是谁」（harness / 原生 session id / 角色自报分工快照）；与执行者台账**互链不冗余**（渲染层按 `handle == executor id` 字符串 join，权责仍以账本为准）。投影：`map.show full` 的 `[PROFILES]` 行与 `agent.summary` 的 `profiles` 数组（≤8 张，handle 升序）。 |
 | **In-Archive VFS（`artifacts/*`，归档内虚拟文件系统）** | `run.sqlite` 内的一张虚拟文件系统表（`vfs_files`），通过 `ygg.fs.*` 暴露给 Lua 沙箱，通过 `vfs.write` / JSON-RPC `vfs_put` 暴露给外部工具。存储方案、开发报告、演进审查与压缩交接，带 SHA-256 完整性。 |
 | **Synchronous Tool Bridge（`ygg.tool.call`，同步工具桥）** | 一个可选加入的宿主能力，允许 Mod 在同一次 dispatch 回合内同步调用白名单内的确定性宿主仪式（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`、`harness.archive_sessions`），消除多回合异步回调往返。 |
 | **HarnessAction（`subagentAction`，治理引擎动作指令）** | Mod 在 `summary.jobs[i].subagentAction` 内发出的一条结构化机器可读指令（`subagent.spawn` 或 `subagent.resume`），携带渲染后的 `brief`、`deltaPrompt`、`fullFallbackBrief`、`worktreePath`、`artifactPath` 与 `submitCommand`，使任何上层治理引擎适配器都能执行泳道而无需重新实现工作流逻辑。 |
@@ -63,18 +64,18 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 1. **P1 · 纯函数式迁移与事务性存档点（`(state, event) -> state'`）**
    - 每一次 dispatch 都是一次全有或全无的原子迁移。若某个 Lua 处理器出错或耗尽指令燃料，该次 dispatch 期间对实体表与 KV 存储的全部修改都会被完全回滚。在 SQLite 持久化模式下，事件日志行与状态快照在单个数据库事务中提交。
 2. **P2 · 零硬编码 — 数据与契约驱动（`D11/D15`）**
-   - 业务规则、状态迁移、叙述模板与提示节拍都归属于 Mod 脚本（`src/*.lua`）与 JSON 资源（`data/*.json`），绝不硬编码在 Rust 宿主代码或 TypeScript 扩展代码中。所有提示模板、子代理 brief 与叙述行都存放在 `data/scenes.json`。
+   - 业务规则、状态迁移、叙述模板与提示节拍都归属于 Mod 脚本（`src/**`，按 core/domain/view/runtime/handlers 五层组织）与 JSON 资源（`data/*.json`），绝不硬编码在 Rust 宿主代码或 TypeScript 扩展代码中。所有提示模板、子代理 brief 与叙述行都存放在 `data/texts/` 片段（由 `mod.lua` 装配回 TEXTS）。
 3. **P3 · 契约驱动的通用宿主**
    - Rust 宿主（`ygg-agent`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
 4. **P4 · 少即是多 — 每个机制一条规范路径**
    - 每个能力都有唯一的规范机制。冗余的校验块、重复的 Mod 副本、或重叠的多回合异步仪式，都被合并为单源辅助函数与 1 回合内联仪式。
 5. **P5 · 单一事实来源（Single Source of Truth）**
    - **Schema**：`packages/schema/schemas/` 是 JSON Schema 的唯一权威（由 Rust 与 TypeScript 共享）。
-   - **Mod**：`.ygg/mods/pi-agent-seed` 是唯一的物理 Mod 目录；`packages/mods/pi-agent-seed` 是指向其的相对符号链接（`../../.ygg/mods/pi-agent-seed`）。
+   - **Mod**：`.ygg/mods/agent-seed` 是唯一的物理 Mod 目录；`packages/mods/agent-seed` 是指向其的相对符号链接（`../../.ygg/mods/agent-seed`）。
    - **运行状态**：`<run-dir>/run.sqlite` 是新运行的单一存储文件。
    - **文档**：`docs/CONTEXT.md` 与 `docs/DESIGN.md` 是 `docs/` 下仅有的两份架构/设计文档。
 6. **P6 · 模块顶层纯度（`YGG-MOD-EFFECT`）**
-   - 在多文件 Mod 中，`mod.lua` 是唯一的装配入口。支撑模块（`src/*.lua`）在顶层只能导出纯函数与常量；在模块顶层调用有副作用的宿主 API（`ygg.on`、`ygg.emit`、`ygg.narrate`、`ygg.choice`、`ygg.kv.set`、`ygg.entity.*`、`ygg.fsm.define`）会在静态阶段（`ygg-lint`）与加载阶段（`ygg-sandbox`）被双重拒绝。这保证了处理器注册顺序（进而 dispatch 顺序）由 `mod.lua` 显式控制，而从不取决于 `require` 顺序。
+   - 在多文件 Mod 中，`mod.lua` 是唯一的装配入口。支撑模块（`src/**` 五层）在顶层只能导出纯函数与常量；在模块顶层调用有副作用的宿主 API（`ygg.on`、`ygg.emit`、`ygg.narrate`、`ygg.choice`、`ygg.kv.set`、`ygg.entity.*`、`ygg.fsm.define`）会在静态阶段（`ygg-lint`）与加载阶段（`ygg-sandbox`）被双重拒绝。这保证了处理器注册顺序（进而 dispatch 顺序）由 `mod.lua` 显式控制，而从不取决于 `require` 顺序。
 7. **P7 · 响应式收敛效应先于选择（Choice）**
    - 一旦调用 `ygg.choice`，内核就终止当前迁移并丢弃任何仍排队的内置事件。因此，所有响应式副作用（`hooks.useEffect`，如 `auto_dispatch`、`tools.receipt`、`tools.reactive`）必须在 `render()` 顶部、在发出 `ygg.choice` 之前先冲刷并收敛（`MAX_PASSES = 4`）。
 8. **P8 · 可选加入的能力降级（Wasm 纯度 vs 本地宿主能力）**
@@ -102,14 +103,14 @@ Yggdrasill/
 ├── packages/
 │   ├── schema/          # JSON Schema 单一事实来源（manifest、pack、story、agent-config）
 │   ├── mods/
-│   │   ├── pi-agent-seed -> ../../.ygg/mods/pi-agent-seed   # 指向规范工作流 Mod 的符号链接
+│   │   ├── agent-seed -> ../../.ygg/mods/agent-seed         # 指向规范工作流 Mod 的符号链接
 │   │   └── test-adventure/                                  # 参考可玩文字冒险 Mod
 │   ├── client-web/      # React + TypeScript 浏览器播放器
 │   └── pipeline/        # TypeScript AI Mod 生成与校验循环
 ├── clients/
 │   └── godot/           # Godot 4 原生 gdext 客户端（M2.5）
 ├── .ygg/
-│   └── mods/pi-agent-seed/   # 规范多文件 Agent 治理 Mod（mod.lua、src/*.lua、data/*.json、schemas/）
+│   └── mods/agent-seed/      # 规范多文件 Agent 治理 Mod（mod.lua、src/** 五层、data/texts|playbook|config、schemas/）
 ├── .pi/
 │   └── extensions/ygg-pi-harness/   # Pi Coding Agent Tier-1 扩展适配器（防火墙、daemon RPC 客户端、编排器、压缩）
 └── docs/
@@ -156,7 +157,7 @@ Yggdrasill/
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
-| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/pi-agent-seed` 协调软件工程任务（`intake -> coordinate -> review -> done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`）。所有产物都要求先有状态机事件。 | 已确认 |
+| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/agent-seed` 协调软件工程任务（`intake -> coordinate -> review -> done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`）。所有产物都要求先有状态机事件。 | 已确认 |
 | **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/**` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
 | **D-MA3** | 单文件 SQLite 运行存储与 VFS | 新运行默认使用 `<run-dir>/run.sqlite`（`ygg-store`），原子提交 `events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）。既有的 JSON 运行（`autosave.json` + `events.jsonl`）保持自动检测，不隐式迁移。 | 已确认 |
 | **D-MA4** | 响应式钩子与省回合压缩 | `src/core/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |
