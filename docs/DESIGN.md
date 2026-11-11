@@ -1,6 +1,6 @@
 # Yggdrasill · 系统架构、行为语义与接口契约（`docs/DESIGN.md`）
 
-> **定位**：`docs/DESIGN.md` 规定 Yggdrasill 的**产品形态、系统行为、状态机语义与规范接口契约**。领域词汇、愿景、架构原则与决策台账（`D1–D20`、`D-MA1..8`）见 [`docs/CONTEXT.md`](CONTEXT.md)。为使本文档在实现重构下保持持久，其契约定义在边界层（**JSON Schema、CLI/JSON-RPC 线协议、Lua 沙箱宿主 API、事件 Payload、状态迁移表**），而非内部源码函数名或行号。
+> **定位**：`docs/DESIGN.md` 规定 Yggdrasill 的**产品形态、系统行为、状态机语义与规范接口契约**。领域词汇、愿景、架构原则与决策台账（`D1–D20` 与 `D-MA` 系列台账，上界随台账顺延不写死）见 [`docs/CONTEXT.md`](CONTEXT.md)。为使本文档在实现重构下保持持久，其契约定义在边界层（**JSON Schema、CLI/JSON-RPC 线协议、Lua 沙箱宿主 API、事件 Payload、状态迁移表**），而非内部源码函数名或行号。
 >
 > **术语速览**：领域术语的完整定义见 [CONTEXT §2 核心领域词汇](CONTEXT.md#2-核心领域词汇)，本文档不再重复维护。
 >
@@ -21,10 +21,10 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 │   Responsibilities: UI rendering, subagent process spawning/resuming,      │
 │   context window telemetry & compaction, data red-line firewall.           │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ Layer 1 · Playable Mod Package (.ygg/mods/pi-agent-seed, test-adventure)   │
-│   - Executable Logic: Entry manifest (mod.lua) + pure modules (src/*.lua)  │
-│   - Declarative Resources: data/scenes.json, data/config.json,             │
-│     data/playbook.json, pack.json, manifest.json                           │
+│ Layer 1 · Playable Mod Package (.ygg/mods/agent-seed, test-adventure)      │
+│   - Executable Logic: Entry manifest (mod.lua) + pure modules (src/**)     │
+│   - Declarative Resources: data/texts/*, data/config.json,                 │
+│     data/playbook/*, pack.json, manifest.json                              │
 │   Responsibilities: Two-layer state machine, gate predicates, reactive     │
 │   hooks, tool reactors, narrative receipts, and HarnessAction projection.  │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -39,13 +39,13 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 ### 1.1 跨治理引擎能力协商矩阵
 
-由于 Layer 1（`pi-agent-seed`）发出自包含的 `HarnessAction` 规格（`summary.jobs[i].subagentAction`），并经 Layer 0（`ygg.tool.call`）内联执行确定性仪式，任何编码 agent 宿主都能按其能力层级驱动 Yggdrasill：
+由于 Layer 1（`agent-seed`）发出自包含的 `HarnessAction` 规格（`summary.jobs[i].subagentAction`），并经 Layer 0（`ygg.tool.call`）内联执行确定性仪式，任何编码 agent 宿主都能按其能力层级驱动 Yggdrasill：
 
 | 层级 | 宿主环境 | 子代理执行与恢复 | 上下文遥测与压缩 | 集成机制 |
 | --- | --- | --- | --- | --- |
 | **Tier 1 · 原生扩展** | Pi Coding Agent（`ygg-pi-harness`） | 原生 `Agent({ resume })`，自动回退到 `fullFallbackBrief` | 实时 token 比例（`soft >= 60%`、`hard >= 75%`），自动 `artifacts/handoff-latest.md` + `compact()` | 持久化 `ygg-agent --daemon` stdio JSON-RPC 客户端 |
 | **Tier 2 · CLI / Hook 运行器** | Claude Code、Codex CLI、Cursor | 子进程调用或原生任务工具，消费 `subagentAction.brief` 与 `submitCommand` | 在稳定检查点由 Hook 触发的 `handoff_compact` | `ygg-agent --daemon` 或单次 `--resume --event` CLI |
-| **Tier 3 · 提示委派** | 通用 LLM 聊天 / 自定义 Agent 循环 | 协调者把 `subagentAction.brief` 复制进子代理上下文并转达 `proposal.submit` | 经 `vfs.write` 手动检查点交接 | 单次 CLI 回执（`narrative` + `pendingChoice`） |
+| **Tier 3 · 提示委派** | 通用 LLM 聊天 / 自定义 Agent 循环 | 协调者把 `subagentAction.brief` 复制进子代理上下文并转达 `proposal.submit` | 经 `vfs.write` 手动检查点交接 | 单次 CLI 回执（缺省人读文本；`--raw` 显式旗标输出单行 JSON 信封）（`narrative` + `pendingChoice`） |
 
 ### 1.2 Adapter 一致性契约（任何 harness 都必须满足的五条义务）
 
@@ -61,7 +61,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 **锚线为什么必须是「行首前缀」而不是 `includes`**：`job.description` 是多行需求正文，正文里完全可能出现 `Mandatory references: …` 这几个字。用任意 `includes` 判定会被一句话绕过——那是自指类断言的经典空转（`harness.test.ts` 有一个用例专门喂这种输入）。`Submit:` 额外要求**后续非空**（`^Submit:\s*\S`），这样「有这条命令」与「命令不是空的」被同时钉住。
 
-**两条路必须同形状**：Core 的 `subagent_brief` 模板（`data/scenes.json`）带这两行；adapter **本地拼装**的 brief 也必须带。否则「旧 Mod 兼容路径」会自己违反 C1——`harness.test.ts` 的 `本地拼装路径也满足两条锚线` 用例咬住这一点。
+**两条路必须同形状**：Core 的 `subagent_brief` 模板（`data/texts/` 片段装配的 TEXTS）带这两行；adapter **本地拼装**的 brief 也必须带。否则「旧 Mod 兼容路径」会自己违反 C1——`harness.test.ts` 的 `本地拼装路径也满足两条锚线` 用例咬住这一点。
 
 **`preferCoreBrief` 不是绕过开关**：`preferCoreBrief: false` 是**显式的旧 Mod 兼容降级**，不是静默默认——此时回执写 `[ADAPTER NOTE]` 且 `OrchestrationResult.degraded` 非空，让上层看见；而 Core 明明给了 `subagentAction` 却被关掉**不构成** `no-core-action` 的豁免理由（那正是本契约要消灭的路径）。
 
@@ -108,7 +108,7 @@ Coordinator 在 4 个阶段上支配整体运行生命周期：
 | `draft` | `draft` | `requirement.dispatch` | `planning`（`job="plan"`） | **阶段合并**：直接派发 `plan` 任务，无需单独的 `analysis` 回合。 |
 | `planning`（`job="plan"`） | `planning` | `proposal.submit`（`stage="plan"`） | `planning`（`job="plan"`，待决提案 `pK`） | 子代理交付方案产物（`artifacts/rN-plan.md`）并经尾随 `exec=<agent_id>` 绑定 `executor.rN.plan`。 |
 | `planning`（待决 `pK`） | `plan_review` | `proposal.accept` | `planning`（`job=""`，`gate="plan"`，`gate_rev=rev`） | 释放任务槽并升起强制 `plan_gate`。 |
-| `planning`（`gate="plan"`） | `plan_gate` | `gate.approve` | `planning`（`gate=""`，`plan_ok=true`）$\to$ **响应式自动派发** $\to$ `developing`（`job="development"`，`lane=k`） | 批准 `plan_gate` 置 `plan_ok=true`；当泳道槽空闲且无冲突/门禁阻塞时，响应式钩子立即认领 `lane-k` 并在**同一回合**派发 `development`。 |
+| `planning`（`gate="plan"`） | `plan_gate` | `gate.approve` | `planning`（`gate=""`，`plan_ok=true`）$\to$ **响应式自动派发** $\to$ `developing`（`job="development"`，`lane=k`） | 批准 `plan_gate` 置 `plan_ok=true`；当该需求自身无在跑任务、无自身待决提案、无自身冲突（门禁按需求局部化判据，r12：他需的事态不再阻塞本需派发）且全局开发槽空闲时，响应式钩子立即认领 `lane-k` 并在**同一回合**派发 `development`。 |
 | `planning`（`gate="plan"`） | `plan_gate` | `gate.reject` | `planning`（`gate=""`，`plan_ok=false`，`rev=rev+1`） | 使方案失效，`rev` 递增，并返回规划队列。 |
 | `developing`（`job="development"`，`lane=k`） | `developing` | `proposal.submit`（`stage="development"`） | `developing`（待决提案 `pM`，内联 `git.lane_probe`） | 绑定 `executor.rN.development`，同步探测 `lane-k`（`commits`、`clean`、`head`、`files`），并运行跨泳道冲突雷达。 |
 | `developing`（待决 `pM`） | `dev_review` | `proposal.accept` | `developing`（`job=""`，`gate="accept"`，`gate_rev=rev`） | 释放活动任务槽并升起强制 `accept_gate`（泳道在 `accept_gate` 通过前保持绑定）。 |
@@ -133,6 +133,8 @@ Coordinator 在 4 个阶段上支配整体运行生命周期：
 
 - **非破坏性认领（`worktree-claim`）**：分配 `<repo-parent>/worktrees/<repo>-lane-<k>`（$k \in 1..4$）。若 worktree 已存在且其已跟踪工作树是干净的，则运行 `git checkout -B <branch> HEAD`，使未跟踪构建缓存（`target/`、`node_modules/`）跨任务存活。
 - **非破坏性释放（`worktree-release`）**：验证 worktree 干净并运行 `git checkout --detach HEAD`，为 Coordinator 合并解锁 `feature/<req>` 而不删除目录。
+- **强制分支命名（`branch_problem`，r2）**：泳道分支必须满足 `feature/{4位uuid}-{语义词段}`——小写 4 位 uuid 段 + 语义词段（≥3 连续字母、非纯数字、8–16 位纯 hex 拒绝、总长 ≤48、前缀大小写敏感）。`lane.claim` 与 `git.worktree_claim` 两条入口同规则、拒绝通道不同：前者走 `flow.refuse` 可读拒绝（`reject.count/last` 留痕），后者走叙事拒绝（账本与 reject 台账不动）；自动认领不再生成默认名（未自报名 = 可读拒绝，展示层未断言分支显示 `-`）。
+- **执行者身份投影（r3）**：`requirement.list` trace 并列三态互证后缀（`[verified]` / `[mismatch:actor=…]` / `[unverified]`，判定只看 `exec=` vs 宿主 `actor=` 章）；`agent.summary.profiles` 数组（≤8 张，handle 升序）投影 profile 注册表（自报身份卡，与账本互链不冗余）。
 - **实时状态投影**：`requirement.list` 与 `summary.jobs[]` 中的每一行需求投影出三条从 KV 派生的实时状态字符串：
   - `worktreeStatus`：`"n/a"` | `"pending"` | `"ready:<path>@<branch>"` | `"bound:lane-<k>@<branch>"`
   - `subagentStatus`：`"idle"` | `"pending"` | `"dispatched:<agent_id>"` | `"delivered:p<N>(<agent_id>)"`
@@ -166,10 +168,10 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 1. **`pack.json`（编写与宿主契约声明）**：
    - `id`、`version`、`engineVersion`（semver 范围）、`seed`、`limits`（`maxFuelPerDispatch`、`maxCascadeDepth`、`maxMemoryBytes`）。
-   - `code`（可选）：`{ "entry": "mod.lua", "modules": ["src/util.lua", ...] }`。当存在时，`entry` 不得出现在 `modules` 中，且每个模块 chunk 顶层由 `ygg_modules::effects` 强制为纯。
-   - `entries`：将逻辑资源 ID（`config`、`scenes`、`playbook`）映射到 `{ path, schema }`。
-   - `agent`：8 个必填字段（`startEvent`、`summaryEvent`、`choiceEvent`、`endingPrefix`、`rejectionPrefixes`、`configEntry`、`guideEntry`、`guideEvent`）。
-   - `inboxRoutes`：声明 `idField`、`externalIdField`、`kindField`，以及每 kind 的 `{ event, fields[] }` 映射，用于异步 JSONL 收件箱摄入。
+   - `code`（可选）：`{ "entry": "mod.lua", "modules": ["src/core/util.lua", ...] }`。当存在时，`entry` 不得出现在 `modules` 中，且每个模块 chunk 顶层由 `ygg_modules::effects` 强制为纯。
+   - `entries`：声明式资源清单（数组，每项 `{ id, kind, schema, path }`），逻辑资源按域拆片声明：一个 `agent-config`（`data/config.json`）+ 若干 `scene-texts-fragment`（`data/texts/*.json`，由 `mod.lua` 装配回 TEXTS）+ 若干 `agent-playbook-fragment`（`data/playbook/*.json`）；片段数随内容演进，以 `pack.json` 为准。
+   - `agent`：8 个必填字段（`entryEvent`、`choiceEvent`、`summaryEvent`、`endingPrefix`、`metaKey`、`rejectionPrefixes`、`replayPrefix`、`defaultPayload`）。
+   - `inboxRoutes`：声明 `idField`、`externalIdField`、`kindField`，以及每 kind 的 `{ event, fields[] }` 映射，用于异步 JSONL 收件箱摄入；需要宿主注入提交者身份的动作可声明 `actor` / `actor_session` 布尔（r3，缺省 false = 功能关闭）。
    - `tools`（可选，**Layer 1 能力白名单**）：将 `<namespace>.<name>` 映射到 `{ kind: "cli" | "http", program, args[], timeoutMs, maxOutputBytes, readOnly, resultEvent }`。占位符用 `{{arg}}` 表示调用参数，用 `$ENV{VAR}` 表示宿主侧密钥解析。
 2. **`data/config.json`（运行时默认值与 Layer 2 发布白名单）**：
    - 依据 `packages/schema/schemas/agent-config.json` 校验。
@@ -179,7 +181,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 ### 3.3 事件 Payload 线协议契约
 
-派发到 `pi-agent-seed` 的所有事件使用管道分隔（`|`）的 UTF-8 字符串 payload（在支持处附带可选尾随 `@ext=<id>` 幂等键）：
+派发到 `agent-seed` 的所有事件使用管道分隔（`|`）的 UTF-8 字符串 payload（在支持处附带可选尾随 `@ext=<id>` 幂等键）：
 
 | 事件名 | 线协议 Payload 格式 | 契约与校验规则 |
 | --- | --- | --- |
@@ -187,7 +189,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 | `task.intake` | `"<title>\|<description>"` | 从 `intake -> coordinate` 迁移。 |
 | `requirement.add` | `"<title>\|<description>[\|<ext_id>[\|<dep1,dep2>]]"` | 在 `draft` 中添加 `rN`。校验 DAG 无环与 `ext_id` 幂等。 |
 | `requirement.dispatch` | `""` \| `"0"` \| `"rN"` | 派发就绪需求，最多达 `job_capacity`（4）。`draft` 行进入 `planning`；`ready`（`planning` + `plan_ok`）行认领泳道并进入 `developing`。 |
-| `proposal.submit` | `"<req_id>\|<rev>\|<stage>\|<summary>\|<artifacts>\|[<changes>]\|[<ext_id>][\|exec=<agent_id>[:<reason>]]"` | 提交针对 `analysis`、`plan` 或 `development` 的提案。`exec=` 必须是最后一段，并在同一事务中绑定执行者台账。 |
+| `proposal.submit` | `"<req_id>\|<rev>\|<stage>\|<summary>\|<artifacts>\|[<changes>]\|[<ext_id>][\|exec=<agent_id>[:<reason>]][\|actor=<actor_id>][\|actor_session=<session_id>]"` | 提交针对 `analysis`、`plan` 或 `development` 的提案。保留尾段链固定相对序 `exec → actor → actor_session`（各自可独立缺席）：`exec=` 必须在链中 `actor=` 之前并同事务绑定执行者台账；`actor=` / `actor_session=` 由**宿主注入**（声明路由 + `--actor` / `YGG_ACTOR` / daemon 请求字段），调用方自带同名段在宿主侧即被拒（`ACTOR_FORGED`），mod 侧错位段逐段点名拒绝；三态互证（verified / mismatch / unverified）识别不拒绝，`session` 是纯审计字段永不参与判定（见 §3.7）。 |
 | `proposal.accept` | `""` \| `"0"` \| `"pN"` \| `"rN"` | 接受头部（或指定的）待决提案。在 `guide` 模式下需要菜单票据。 |
 | `proposal.reject` | `"<pN_or_rN>[\|<reason>]"` | 拒绝待决提案并将需求返回其阶段队列。 |
 | `gate.approve` | `""` \| `"0"` \| `"rN[\|<note>]"` | 通过 `plan_gate`（$\to$ `ready` + 响应式自动派发）或 `accept_gate`（$\to$ `done` + 内联泳道释放）。要求 `gate_rev == req.rev`，且对 `accept_gate` 要求非空 `artifacts`。 |
@@ -201,7 +203,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 | `verify.submit` | `"all_green=<true\|false>[;report=<text>]"` | 在 `review` 中记录验证结果。 |
 | `settlement.evolution` | `"<artifact>\|<summary>[\|c=<kept>/<screened>[\|cls=<kind>:<n>,...]][\|sessions=<moved>/0/<dest>][\|todo=0/<verified_by>]"` | 在一个事务中注册演进筛选并结算会话/todo 清理。 |
 | `review.note` | `"<lesson>\|<score_1_to_5>"` | 将 `settlement.evolution.*` 归档进 `review.evolution.*` 并关闭运行（`[ENDING`）。 |
-| `config.set` | `"<key>=<value>"` | 更新运行时 `settings.<key>`（`play.mode`、`goal.authorization`、`executor.<rN>.<stage>`、`evolution.mode`、`gates.require_all_green`、`review.evolution.*`）。 |
+| `config.set` | `"<key>=<value>"` | 更新运行时 `settings.<key>`（`play.mode`、`goal.authorization`、`executor.<rN>.<stage>`、`profile.<handle>.<key>`（自报身份卡，逐键校验：保留键 `harness`/`session_id`/`handle`/`role`/`assignments`，自由键 `^[a-z0-9_]{1,32}$` 值≤256，空值=清除字段；见 §3.7）、`evolution.mode`、`gates.require_all_green`、`review.evolution.*`）。 |
 | `vfs.write` | `"artifacts/<name>.md\|<content>"` | 经 `ygg.fs.write` 将内容写入 `run.sqlite`（`vfs_files`），并在 `artifact.*` 中记录 SHA-256 + 字节长度。 |
 
 ### 3.4 三层动作面契约：`event` / `op` / `action`
@@ -210,7 +212,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 
 | 层 | 载体 | 值域 | 权威来源 | 职责边界 |
 | --- | --- | --- | --- | --- |
-| **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 34 个事件名（全集见本节末注，payload 位次见 §3.3） | Mod（`.ygg/mods/pi-agent-seed/src/**`、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
+| **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 33 个事件名（全集见本节末注，payload 位次见 §3.3；`guide.show` 已随 r1 注销） | Mod（`.ygg/mods/agent-seed/src/**`（core/domain/view/runtime/handlers 五层）、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
 | **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/agent.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
 | **L3 `action`** | `ygg_session` 工具的 `action` 参数（`StringEnum`） | `kickoff` / `dispatch` / `approve_gate` / `reject_gate` / `vfs_write` / `vfs_read` / `vfs_list` / `handoff_compact` / `settle_close`（9 个） | Layer 2 适配器（`.pi/extensions/ygg-pi-harness`） | **面向模型/人的语义入口**：它只决定「用哪个动词说出意图、由谁拼 payload」，**不决定状态**。值域随适配器可变，**不是**跨 harness 契约。 |
 
@@ -219,7 +221,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 #### 三条硬不变量
 
 1. **I1 · 推进唯一性**：任何 `action` 都**不得**绕过 `op=dispatch` → Mod handler 去改状态。适配器里没有第二套状态机，也没有第二份状态投影。
-2. **I2 · 状态不可写性**：适配器**绝不**直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`。`stage` 由 `ygg.fsm` 独占写；其余领域键只由 Mod handler 写（`ygg.kv.set` 的全部领域键都落在 `src/handlers/*.lua` 内）。
+2. **I2 · 状态不可写性**：适配器**绝不**直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`。`stage` 由 `ygg.fsm` 独占写；其余领域键只由 Mod handler 写（`ygg.kv.set` 的全部领域键都落在 `src/handlers/**` 内）。
 3. **I3 · 拒绝不可洗白**：Mod 的回执一旦带 `agent.rejectionPrefixes` 命中的行（`[REJECTED:*]` / `[BLOCKED:*]`），适配器必须**原样回贴**并停止该步的后续编排，绝不复述为成功，也绝不重试到看起来通过。
 
 #### `action` 面的四类落点（每个 `action` 必须可归入且只归入一类）
@@ -261,18 +263,20 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 结论：凡需要进入 `artifact.*` 台账、需要阶段守卫或 64 KiB 上限的制品，**必须**经 `event=vfs.write`；`op=vfs_put` 只用于「不参与台账」的宿主侧归档（例如交接单 `artifacts/handoff-latest.md` 与 `settle_close` 的进化复盘）。这两个名字长得像，但**不是**同一个原语的两种写法。
 
-#### 本节末注 · `event` 全集（34 个）
+#### 本节末注 · `event` 全集（33 个）
 
-`agent.summary`、`task.intake`、`requirement.add` / `requirement.list` / `requirement.dispatch` / `requirement.amend` / `requirement.split` / `requirement.merge` / `requirement.conflict` / `requirement.resolve`、`lane.claim` / `lane.release`、`proposal.submit` / `proposal.accept` / `proposal.reject`、`coordinate.submit`、`verify.submit`、`settlement.evolution` / `settlement.sessions` / `settlement.todo`、`review.note`、`gate.approve` / `gate.reject`、`config.set` / `config.open` / `config.close`、`guide.show`、`map.show`、`ygg.choice_selected`、`event.start`、`tool.call` / `tool.result`、`vfs.write`、`stage.advance`。
+`agent.summary`、`task.intake`、`requirement.add` / `requirement.list` / `requirement.dispatch` / `requirement.amend` / `requirement.split` / `requirement.merge` / `requirement.conflict` / `requirement.resolve`、`lane.claim` / `lane.release`、`proposal.submit` / `proposal.accept` / `proposal.reject`、`coordinate.submit`、`verify.submit`、`settlement.evolution` / `settlement.sessions` / `settlement.todo`、`review.note`、`gate.approve` / `gate.reject`、`config.set` / `config.open` / `config.close`、`map.show`、`ygg.choice_selected`、`event.start`、`tool.call` / `tool.result`、`vfs.write`、`stage.advance`。
 
-计数口径（可复核）：前 33 个由 Mod 直接调用 `ygg.on(...)` 注册；`stage.advance` 是第 34 个，它由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，**不在** `ygg.on` 的字面出现处。可执行复算：`grep -rn 'ygg\.on("' .ygg/mods/pi-agent-seed/ | sed 's/.*ygg\.on("\([^"]*\)".*/\1/' | sort -u` 得到 33 项，再加上 `mod.lua` 的 `ygg.fsm.define` 声明里那一项 `event = "stage.advance"`，合计 34。这 34 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 34 个之外还有别的状态转换」。
+计数口径（可复核）：前 32 个由 Mod 直接调用 `ygg.on(...)` 注册；`stage.advance` 是第 33 个，它由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，**不在** `ygg.on` 的字面出现处。可执行复算：`grep -rn 'ygg\.on("' .ygg/mods/agent-seed/ | sed 's/.*ygg\.on("\([^"]*\)".*/\1/' | sort -u` 得到 32 项，再加上 `mod.lua` 的 `ygg.fsm.define` 声明里那一项 `event = "stage.advance"`，合计 33。这 33 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 33 个之外还有别的状态转换」。运行期 registry = 这 33 个 + stdlib 内置注册面（`ygg.narrative.goto`，合计 34）；registry 之外的事件名（含拼错的名字与未注册的 `ygg.*`）派发一律 **fail-closed**——外部名在门面预检零副作用拒绝（可读 VALIDATION，文案带已注册全集），派生名（handler `ygg.emit`）使整次转换失败回滚。registry 是运行时唯一事实，宿主不持任何事件名白名单。
 
 ### 3.5 宿主 CLI 与 Daemon JSON-RPC 线协议契约
 
 > `op` 面的 8 个操作是状态推进之外的旁路端口；`op=vfs_put` 与 `event=vfs.write` 的语义差异（阶段守卫 / 内容上限 / 台账）见 §3.4。
 
 #### 单次 CLI 与内置工具参数（`ygg-agent`）
-- **运行执行**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] --event <event> [--payload <json>]`
+- **运行执行**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] [--raw] --event <event> [--payload <json>]`
+  - **回执渲染口径（r5）**：缺省为人读文本渲染；`--raw` = 单行 JSON 机器契约（与历史缺省逐字节一致）；解析链 `--raw` > `YGG_FORMAT`（text\|json）> 缺省 text；不改字段契约、退出码与 daemon 协议面。脚本 / CI 解析单发 stdout 必须加 `--raw`（或环境级 `export YGG_FORMAT=json`）。
+- **单发派发的未注册事件（fail-closed，r11）**：`--event <name>`（或省略时的 `entryEvent`）不在 Mod registry 内时，派发在**零副作用**下拒绝（不进回放日志、不耗燃料、不动状态基线）：回执 `ok:false` + `error.code=VALIDATION`，`message` 三要素（事件名原样 + 已注册计数 + 已注册全集字典序），退出码 1，审计行 `ok=false` 照写。`ygg.*` 保留事件同样只认 registry（宿主不持事件名白名单）；空/空白事件名仍走参数面（usage / DAEMON 层），与本语义分层。
 - **结算**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs --settle`
 - **内置宿主工具（`--builtin-tool <op>`）**：
   - `worktree-claim --lane <1..4> --req <rN> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;req=<rN>;branch=<br>;base=<sha>;clean=1;path=<wt_path>`
@@ -285,7 +289,8 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 #### Daemon 模式（`--daemon`）行分隔 JSON-RPC 协议
 每个请求是 `stdin` 上的一行 UTF-8 JSON；每个响应是 `stdout` 上的一行 UTF-8 JSON：
 - **请求**：`{ "id": <number|string>, "op": "<ping|summary|dispatch|vfs_put|vfs_get|vfs_list|settle|shutdown>", ...params }`
-- **响应**：`{ "id": <number|string>, "ok": true, "result": <object> }` 或 `{ "id": <number|string>, "ok": false, "error": "<message>" }`
+- **响应**：`{ "id": <number|string>, "ok": true, "result": <object> }` 或 `{ "id": <number|string>, "ok": false, "error": { "code": "<DAEMON|VALIDATION|…>", "message": "<text>" } }`（订正：`error` 是**对象形**，与实现一致；`dispatch` 的失败应答是步回执形——附 `op:"dispatch"` 与 `summary`，错误码随内核信封；`op` 面自身错误用 `DAEMON`）
+- **提交者身份（r3）**：`op=dispatch` 请求可带 `"actor"` / `"actor_session"` 字段（Agent 工具句柄 / 原生会话 id），仅在旗标（`--actor` / `--actor-session`）与环境变量（`YGG_ACTOR` / `YGG_ACTOR_SESSION`）都缺席时兑底（解析链见 §3.7）；形状非法 → 可读错误应答。派发回执恒回显 `actor` / `actor_session`（None → null，加性键）；inbox 写命令回执另回显 `opener`（仅携带身份时）。
 
 #### 结构化 Summary 与 `HarnessAction` Schema（`result.summary` 与 `result.receipt`）
 ```json
@@ -299,6 +304,9 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
   "pendingTools": 0,
   "conflicts": [],
   "gates": [],
+  "profiles": [
+    { "handle": "agent-1", "harness": "pi", "session_id": "01a1c961-…", "role": "plan-executor", "assignments": ["r1:plan", "r1:development"] }
+  ],
   "jobs": [
     {
       "id": "r1",
@@ -307,10 +315,10 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
       "status": "developing",
       "phase": "developing",
       "lane": 1,
-      "branch": "feature/r1",
+      "branch": "feature/a3f9-map-single-gone",
       "base": "7a40830",
       "worktreePath": "/Users/.../tmp/worktrees/Yggdrasill-lane-1",
-      "worktreeStatus": "ready:/Users/.../tmp/worktrees/Yggdrasill-lane-1@feature/r1",
+      "worktreeStatus": "ready:/Users/.../tmp/worktrees/Yggdrasill-lane-1@feature/a3f9-map-single-gone",
       "subagentStatus": "pending",
       "probeStatus": "pending",
       "executor": "",
@@ -329,7 +337,7 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
         "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.\n...",
         "deltaPrompt": "Resume r1 (rev 1) for stage `development` in worktree `...`; write `artifacts/r1-development.md` and submit.",
         "fullFallbackBrief": "Requirement r1 ...\nResume context: prior executor `agent-plan-1`.",
-        "submitCommand": ".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
+        "submitCommand": ".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
       }
     }
   ]
@@ -355,5 +363,5 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 `docs/CONTEXT.md` 与 `docs/DESIGN.md` 在每次运行中都作为闭环契约强制执行：
 
-1. **执行前注入**：Mod 的 `subagent_brief` 模板（`data/scenes.json`）与扩展的 brief 构建器（`buildSubagentBrief`）向每个 `plan` 与 `development` 子代理 brief 注入一条强制指令：*"在提议或编辑之前，先阅读 `docs/CONTEXT.md`（领域不变量）与 `docs/DESIGN.md`（架构与契约）。"*
+1. **执行前注入**：Mod 的 `subagent_brief` 模板（`data/texts/` 片段装配的 TEXTS）与扩展的 brief 构建器（`buildSubagentBrief`）向每个 `plan` 与 `development` 子代理 brief 注入一条强制指令：*"在提议或编辑之前，先阅读 `docs/CONTEXT.md`（领域不变量）与 `docs/DESIGN.md`（架构与契约）。"*
 2. **结算前同步**：每当某个需求修改了领域概念、架构决策（`D1+`）、模块边界、状态机迁移或线/API 契约，执行者都必须在同一特性分支中、在 `accept_gate` 与最终 `review` 结算之前更新 `docs/CONTEXT.md` 和/或 `docs/DESIGN.md`。
