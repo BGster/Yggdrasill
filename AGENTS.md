@@ -189,15 +189,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 
 - **Inline executor ledger**: `proposal.submit` takes an optional trailing segment
   `exec=<agent_id>[:<reason>]`. It registers the executor ledger through the same
-<<<<<<< HEAD
   `src/domain/executor.lua` implementation as `config.set executor.*`, in the same transaction, before the
-  proposal is stored; a failed registration refuses the payload **and creates no proposal**. `exec=`
-  is only recognised as the **last** segment — anywhere else is refused
-  (`req_prop_exec_misplaced`), because the host pads payloads shorter than the declared 7 fields and
-  would silently move it into the `artifacts` slot. Write the reason with `:` inside that segment
-  (`exec=agent2:handoff`), since the outer payload splits on `|`.
-=======
-  `src/executor.lua` implementation as `config.set executor.*`, in the same transaction, before the
   proposal is stored; a failed registration refuses the payload **and creates no proposal**. The
   reserved tail segments are a fixed relative order — `…|exec=<id>[:<reason>]|actor=<actor>|actor_session=<session>`
   (each independently omittable; at most three): `actor=` / `actor_session=` are **host-injected**
@@ -211,7 +203,6 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   `actor_session` is a pure audit field and never participates. **Opener fact**: the run's first
   identity-carrying *successful* write claims `run.json` `opener_actor` first-come-first-served,
   immutable (rejected/failed dispatches never claim; same-actor re-claims are no-ops).
->>>>>>> feature/c47d-identity-profile
 - **Stage merge (`draft -> planning`)**: `requirement.dispatch` on a `draft` row dispatches **plan**
   and stores `planning` in the same dispatch; there is no analysis turn in the default pipeline.
   `analyzing` survives only as a compatibility state (legacy saves, and an explicit `analysis`
