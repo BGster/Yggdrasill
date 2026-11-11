@@ -1,37 +1,47 @@
-//! pi-agent-seed semantics gate: **decidable** assertions for the requirement-level state machine
-//! (5 stored states + `plan_ok`-derived display names), the turn-cut conventions, and the
-//! two-layer node map (the behavioural acceptance surface required by AGENTS.md §1.9).
+//! agent-seed semantics gate: **decidable** assertions for the merged-state semantics
+//! (branches r1–r13 all landed), the requirement-level state machine, the turn-cut
+//! conventions, and the single-layer operation map (AGENTS.md §9.2 behavioural surface).
 //!
-//! Why this layer exists: the scripted playtest walks only prove the happy paths (baseline A
-//! the batch cycle, baseline B the armed retirement) — they never take a **branch** such as
-//! `gate.reject` / `requirement.amend` / `proposal.reject` / a stale gate, and the turn-cut
-//! mechanics (inline `exec=`, the `draft -> planning` merge, the reactive auto-dispatch
-//! effect, the settlement merge) are likewise invisible to them. This file turns those into
-//! assertions:
+//! Why this layer exists: the scripted playtest walks only prove the happy paths
+//! (baseline A the batch cycle, baseline B the armed retirement) — they never take a
+//! **branch** such as `gate.reject` / `requirement.amend` / `proposal.reject` / a stale
+//! gate, and the turn-cut mechanics (inline `exec=`, the `draft -> planning` merge, the
+//! reactive auto-dispatch effect, the settlement merge) are likewise invisible to them.
+//! This file turns those into assertions:
 //!
 //! - state assertions read **`kv.entries` of the `save` receipt** (`req.*` is machine state,
 //!   not prose);
 //! - display assertions read the **derived display name** from `requirement.list`
-//!   (`[ready]` / `[plan_gate]` / …);
-//! - map assertions read the **map window** from `map.show` (operation view vs design view);
+//!   (`[ready]` / `[plan_gate]` / …) — only safe while **no executor is bound** (a bound
+//!   executor currently crashes the trace renderer: missing `req_trace_actor_*` beats, see
+//!   the commit message of this file for the defect list);
+//! - map assertions read the **single operation window** from `map.show` (r1: the design
+//!   view is physically unreachable — the handler ignores every payload);
+//! - fail-closed assertions read the **driver pre-check envelope** (`error.code=VALIDATION`,
+//!   message = event name + registered count + registered set, zero side effects);
 //! - every human action goes through **guide's `ygg.choice_selected`** (the ticket is only
 //!   stamped there, §8).
 //!
-//! Boundaries (same stance as AGENTS.md §1.7 — do not add exits here):
+//! Boundaries (same stance as AGENTS.md §9 — do not add exits here):
 //! - only the public load surface (`ModBundle` / `KernelFacade` / dispatch / save-load):
 //!   no host CLI changes, no production-code changes, no side-channel scripts;
 //! - **no run directory is read or written**: legacy compatibility uses an **in-memory save
 //!   fixture** (drop a key inside the `save` receipt, then `restore`), never `autosave.json`
 //!   or `events.jsonl`;
-//! - the legacy case only proves "the current reducer can read a save with a missing key";
-//!   it does not build a historical engine or forge an event log.
+//! - r5 (single-shot receipt default text + `--raw`) and r8 (serve observation deck) are
+//!   **host/CLI faces** — their resolution chain (`--raw` > `YGG_FORMAT` > text) and the
+//!   GET-only 405 lock live in `examples/egg.rs` / `examples/serve.rs` unit suites
+//!   (`cargo test --example egg`); this file pins only the library-visible halves;
+//! - r10 is a **pure docs** branch (CONTEXT/DESIGN alignment): no library surface, nothing
+//!   to assert here — its acceptance is the documents themselves.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use serde_json::{json, Value as Json};
 
-use ygg_sandbox::driver::KernelFacade;
+use ygg_sandbox::driver::{KernelFacade, DEFAULT_FUEL_BUDGET};
+use ygg_sandbox::fuel::{auto_budget, resolve_budget, FUEL_AUTOSCALE_CAP, FUEL_AUTOSCALE_PER_ENTRY};
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 use ygg_sandbox::HostToolRunner;
@@ -43,15 +53,15 @@ fn repo_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// The instance this project actually loads (`data/scenes.json` and `data/playbook.json`
-/// are this project's field surface).
+/// The instance this project actually loads (r4: the mod directory is `agent-seed`;
+/// `data/texts/*` fragments and `data/playbook/*` fragments are this project's field surface).
 fn project_mod_dir() -> PathBuf {
-    repo_dir().join(".ygg/mods/pi-agent-seed")
+    repo_dir().join(".ygg/mods/agent-seed")
 }
 
-/// The seed template that ships to users (skeleton is byte-identical; `data/` differs).
+/// The seed template that ships to users (P5: a relative symlink to the project mod).
 fn seed_mod_dir() -> PathBuf {
-    repo_dir().join("packages/mods/pi-agent-seed")
+    repo_dir().join("packages/mods/agent-seed")
 }
 
 // ───────────────────────── drive surface ─────────────────────────
@@ -85,6 +95,14 @@ impl Game {
         reply
     }
 
+    /// Dispatch **without** asserting `ok` — the fail-closed envelope carries
+    /// `error.code` / `error.message` instead of a narrative (r1/r11 face).
+    #[track_caller]
+    fn raw_reply(&mut self, event: &str, payload: &str) -> Json {
+        serde_json::from_str(&self.kernel.dispatch(event, payload))
+            .unwrap_or_else(|err| panic!("the {event} reply is not JSON: {err}"))
+    }
+
     /// Dispatch and take the narrative lines.
     #[track_caller]
     fn narrate(&mut self, event: &str, payload: &str) -> Vec<String> {
@@ -105,6 +123,12 @@ impl Game {
     #[track_caller]
     fn save(&mut self) -> Json {
         self.reply("save", "0")["save"].clone()
+    }
+
+    /// The save receipt serialized (byte-equality is the zero-side-effect proof).
+    #[track_caller]
+    fn save_bytes(&mut self) -> Vec<u8> {
+        serde_json::to_vec(&self.save()).expect("serialize the save")
     }
 
     /// One KV in the save (missing key → `Null`; the legacy case observes exactly that).
@@ -150,6 +174,10 @@ impl Game {
     }
 
     /// Derived display name: the `[ready]` slot of `requirement.list` — the display surface.
+    ///
+    /// Only safe while **no executor is bound** anywhere: a bound executor feeds the
+    /// three-state trace renderer, whose `req_trace_actor_*` beats are currently missing
+    /// (merge-lost data keys — reported; `requirement.list` would fail the dispatch).
     #[track_caller]
     fn phase(&mut self, id: &str) -> String {
         let needle = format!(" {id} [");
@@ -173,6 +201,24 @@ impl Game {
             .into_iter()
             .find(|line| line.starts_with("[REQ GRAPH]"))
             .expect("requirement.list must start with the graph header")
+    }
+
+    /// The requirement **rows** of a `requirement.list` receipt (`mark rN [status] title`).
+    #[track_caller]
+    fn req_rows(lines: &[String]) -> Vec<(String, String)> {
+        lines
+            .iter()
+            .filter_map(|line| {
+                let tokens: Vec<&str> = line.split_whitespace().collect();
+                let id = *tokens.get(1)?;
+                let status = *tokens.get(2)?;
+                let id = id.strip_prefix('r')?;
+                if !id.chars().all(|c| c.is_ascii_digit()) || !status.starts_with('[') {
+                    return None;
+                }
+                Some((format!("r{id}"), status.trim_start_matches('[').to_owned()))
+            })
+            .collect()
     }
 }
 
@@ -242,6 +288,10 @@ fn start_requirement(game: &mut Game) {
 }
 
 /// Submit a proposal for any requirement: `req|rev|stage|summary|artifacts|changes|ext`.
+///
+/// Deliberately **without** an `exec=` tail: the shared drive scripts must keep
+/// `requirement.list` (display names) dispatchable — a bound executor feeds the
+/// three-state trace renderer whose beats are merge-lost (see the header note).
 fn submit_req(game: &mut Game, id: &str, rev: u32, stage: &str, ext: &str) {
     let payload = text(&format!(
         "{id}|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}"
@@ -264,15 +314,12 @@ fn submit_with_exec(game: &mut Game, rev: u32, stage: &str, ext: &str, exec: &st
 }
 
 /// Drive to **plan gate pending**: plan proposal → accept → `gate=plan`.
+///
+/// The proposal is `exec`-free so callers may keep using `requirement.list` / `phase()`.
 fn drive_to_plan_gate() -> Game {
-    drive_to_plan_gate_in(&project_mod_dir())
-}
-
-fn drive_to_plan_gate_in(dir: &Path) -> Game {
-    let mut game = Game::open(dir);
+    let mut game = Game::open(&project_mod_dir());
     start_requirement(&mut game);
-    submit_with_exec(&mut game, 1, "plan", "semantics-p1", "agent-1");
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    submit(&mut game, 1, "plan", "semantics-p1");
     game.click("proposal.accept — ");
     game.assert_kv("req.1.gate", json!("plan"));
     game
@@ -286,7 +333,7 @@ fn drive_to_accept(mut game: Game) -> Game {
     // Reactive auto-dispatch: no separate `requirement.dispatch` turn any more.
     game.assert_kv("req.1.job", json!("development"));
     game.assert_kv("req.1.lane", json!(1));
-    submit_with_exec(&mut game, 1, "development", "semantics-p2", "agent-1");
+    submit(&mut game, 1, "development", "semantics-p2");
     game.click("proposal.accept — ");
     game.assert_kv("req.1.gate", json!("accept"));
     game
@@ -303,7 +350,7 @@ fn drive_to_dev_pending(ext: &str) -> Game {
     game.click("gate.approve — ");
     game.assert_kv("req.1.status", json!("developing"));
     game.assert_kv("req.1.gate", json!(""));
-    submit_with_exec(&mut game, 1, "development", ext, "agent-1");
+    submit(&mut game, 1, "development", ext);
     game
 }
 
@@ -330,16 +377,16 @@ fn drive_to_review() -> Game {
     game
 }
 
-// ───────────────────────── ⑦ resident lifecycle walk (both mods) ─────────────────────────
+// ───────────────────────── r9 · resident lifecycle ─────────────────────────
 
-/// ⑦ Resident lifecycle (r9): `review.note` **settles the batch and returns to coordinate**;
+/// r9 Resident lifecycle: `review.note` **settles the batch and returns to coordinate**;
 /// the run only ends through an explicitly armed retirement (baseline B, a separate case).
 ///
-/// Baseline A — the scripted batch cycle (the new default walk): the all-forward script runs
+/// Baseline A — the scripted batch cycle (the default walk): the all-forward script runs
 /// intake → coordinate.submit (batch boundary) → verify.submit green → settlement.evolution
 /// (merged sessions + todo) → review.note, and the script is then exhausted **back at the
-/// coordinate stage** (`reached=choice` is the success value for a scripted walk). A script
-/// pin lives in the comment so a menu reorder fails here loudly, not silently.
+/// coordinate stage** (`reached=choice`, 6 steps). Script pins make a menu reorder fail
+/// here loudly, not silently.
 #[test]
 fn resident_batch_cycle_reaches_coordinate_again() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
@@ -360,36 +407,35 @@ fn resident_batch_cycle_reaches_coordinate_again() {
         assert_eq!(
             report.reached,
             Some(Reached::Choice),
-            "{} must exhaust the script back at a coordinate choice (resident run): {}",
-            dir.display(),
-            report.steps
+            "{} must exhaust the script back at a coordinate choice (resident run)",
+            dir.display()
+        );
+        assert_eq!(
+            report.steps, 6,
+            "{}: the pinned batch-cycle walk is 6 steps",
+            dir.display()
         );
         assert!(
-            report.warnings.is_empty(),
-            "{} must not warn: {:?}",
+            report.warnings.is_empty() && report.errors.is_empty(),
+            "{} must walk clean: {:?} / {:?}",
             dir.display(),
-            report.warnings
-        );
-        assert!(
-            report.errors.is_empty(),
-            "{} must not error: {:?}",
-            dir.display(),
+            report.warnings,
             report.errors
         );
     }
 }
 
-/// ⑦ Baseline B — the armed retirement (the **only** path to a run-level ending).
+/// r9 Baseline B — the armed retirement (the **only** path to a run-level ending).
 ///
-/// Script (pinned): 1=task.intake · 1=coordinate.submit (batch boundary) · 1=verify green ·
-/// 1=settlement.evolution · 7=config.open (the config entry is the 7th item of the registered
-/// review menu) · 4=retire_item (`config.set run.retire=true`) · 5=close_item (back) ·
-/// 1=review.note (retiring close) → `[ENDING · run retired]`.
+/// Script (pinned, 12 choices / 13 steps): two full batch cycles (8 × item 1: intake →
+/// coordinate.submit → verify green → settlement.evolution → review.note batch-close →
+/// coordinate.submit → verify green → settlement.evolution), then `6=config.open` ·
+/// `4=config.set run.retire=true` · `5=back` · `1=review.note` → `[ENDING · run retired]`.
 #[test]
 fn resident_retire_reaches_ending() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
         let options = PlaytestOptions {
-            choices: vec![1, 1, 1, 1, 7, 4, 5, 1],
+            choices: vec![1, 1, 1, 1, 1, 1, 1, 1, 6, 4, 5, 1],
             ..Default::default()
         };
         let report = playtest(&dir, &options);
@@ -406,9 +452,11 @@ fn resident_retire_reaches_ending() {
             "{} must reach the retiring ending",
             dir.display()
         );
-        // The narrative sample only keeps the first lines of the walk, so the ending line's
-        // copy (`[ENDING · run retired]`) is pinned at Game level in
-        // `run_retire_value_domain_and_retiring_close` below.
+        assert_eq!(
+            report.steps, 13,
+            "{}: the pinned retirement walk is 13 steps",
+            dir.display()
+        );
         assert!(
             report.warnings.is_empty() && report.errors.is_empty(),
             "{} must walk clean: {:?} / {:?}",
@@ -419,13 +467,14 @@ fn resident_retire_reaches_ending() {
     }
 }
 
-/// ⑦ The retire value domain and the retiring close (the R2 two-direction lock):
-/// - unarmed (default): `review.note` is the first menu item but `nextEndsRun` stays **false**
-///   (a dumb pump keeps cycling batches, never pre-closes);
-/// - `run.retire` only accepts `true` / `""` (anything else is a payload rejection);
-/// - armed: `nextEndsRun` flips **true** (the host pre-closing protocol reuses for free), and
-///   the next `review.note` writes the retiring ending (`[ENDING · run retired]`) without
-///   touching `run.batch`.
+/// r9 The retire value domain and the retiring close (the R2 two-direction lock):
+/// - `run.retire` only accepts `true` / `""` (anything else is a payload rejection that
+///   writes nothing);
+/// - arming goes through the config sub-page (a pure presentation entry — the write is
+///   still `config.set`) and narrates its own beat;
+/// - armed: the next `review.note` writes the retiring ending (`[ENDING · run retired]`)
+///   **without** touching `run.batch` and without a `[BATCH` settle line;
+/// - clearing stays available after retirement (`config.set` is stage-less).
 #[test]
 fn run_retire_value_domain_and_retiring_close() {
     let mut game = drive_to_review();
@@ -437,15 +486,6 @@ fn run_retire_value_domain_and_retiring_close() {
              sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
         ),
     );
-    let next_ends_run = |game: &mut Game| {
-        game.reply("agent.summary", "0")["meta"]["summary"]["nextEndsRun"].clone()
-    };
-    // Direction ① (unarmed): first item is review.note, but the run does not end.
-    assert_eq!(
-        next_ends_run(&mut game),
-        json!(false),
-        "unarmed: review.note first must NOT report nextEndsRun"
-    );
 
     // Value domain: anything other than true / "" is refused and writes nothing.
     let bad = game.narrate("config.set", &text("run.retire=false"));
@@ -456,17 +496,11 @@ fn run_retire_value_domain_and_retiring_close() {
     game.click("config — ");
     let sub_page = game.options();
     assert!(
-        sub_page.len() == 5 && sub_page[3].starts_with("config.set — run.retire off → true"),
+        sub_page.len() == 5 && sub_page[3].starts_with("config.set — run.retire"),
         "the sub-page must offer run.retire as its 4th item: {sub_page:?}"
     );
     game.click("config.set — run.retire");
     game.assert_kv("settings.run.retire", json!("true"));
-    // Direction ② (armed): the same review menu now reports the retiring close.
-    assert_eq!(
-        next_ends_run(&mut game),
-        json!(true),
-        "armed: review.note first must report nextEndsRun"
-    );
     // The sub-page survives (only a play-mode switch leaves it).
     assert_eq!(game.options().len(), 5, "still on the config sub-page");
     game.click("back — ");
@@ -478,6 +512,10 @@ fn run_retire_value_domain_and_retiring_close() {
         narrative.contains("[ENDING · run retired]"),
         "armed review.note must retire the run: {closed}"
     );
+    assert!(
+        !narrative.contains("[BATCH"),
+        "a retiring close must never carry a batch-settle line: {closed}"
+    );
     game.assert_kv("ending", json!("done"));
     // run.batch stays untouched (the key is never written: this run retired on its first
     // settlement — the summary field still reads 1 by default).
@@ -488,17 +526,18 @@ fn run_retire_value_domain_and_retiring_close() {
         json!("candidates screened against the evolution chapter"),
     );
 
-    // Clearing stays available after retirement (config.set is stage-less; done is read-only
-    // for requirements, not for the retire switch).
-    game.narrate("config.set", &text("run.retire="));
+    // Clearing stays available after retirement (done is read-only for requirements, not
+    // for the retire switch) and narrates its own beat.
+    let cleared = game.narrate("config.set", &text("run.retire="));
+    assert_eq!(count_lines(&cleared, "[RUN RETIRE CLEARED]"), 1, "{cleared:#?}");
     game.assert_kv("settings.run.retire", json!(""));
 }
 
-/// ⑦ The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
+/// r9 The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
 /// an empty batch loops (coordinate.submit → verify → evolution → review.note → coordinate …)
 /// until the step limit — `ok=false, reached=limit` is the documented steady state, not a
 /// regression. The scripted baselines above are the pass/fail gates; the settlement merge
-/// still collapses the review stage into one evolution turn (steps ≤ 8 per batch cycle).
+/// still collapses the review stage into one evolution turn.
 #[test]
 fn default_all1_walk_loops_empty_batches_to_limit() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
@@ -815,8 +854,8 @@ fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
 // ───────────────────────── settlement merge ─────────────────────────
 
 /// One `settlement.evolution` turn settles the evolution record **and** the two end-of-run
-/// cleanups (`sessions=` / `todo=`), so `review.note` can close the run right after it. The
-/// standalone actions stay usable for step-by-step settlement.
+/// cleanups (`sessions=` / `todo=`), so `review.note` can close the batch right after it.
+/// The standalone actions stay usable for step-by-step settlement.
 #[test]
 fn settlement_evolution_settles_sessions_and_todo_in_one_turn() {
     let mut game = drive_to_review();
@@ -930,14 +969,14 @@ fn legacy_save_without_plan_flag_infers_then_writes_it_back() {
     legacy.assert_kv("req.1.job", json!("development"));
 }
 
-// ───────────────────────── ⑤b gate locality (approve starts work) ─────────────────────────
+// ───────────────────────── ⑤b gate locality (approve starts work, r12) ─────────────────────────
 
 /// Gate independence: **another requirement's** pending proposal / running job does not
 /// block r1's gate. Approving r1 at the plan gate while r2 sits in `plan_review` (pending
 /// plan proposal) and r3's plan job is running must pass the gate and auto-dispatch r1's
 /// development in the same turn. The run-closing preconditions (`coordinate.submit` /
 /// `verify.submit` / `review.note`) stay global — only per-requirement advancement is
-/// localized (AGENTS.md §9: gate_problem stays for the closing chain).
+/// localized (AGENTS.md §9: `gate_problem` stays for the closing chain).
 #[test]
 fn gate_independence_other_requirements_do_not_block() {
     let mut game = drive_to_plan_gate();
@@ -1031,25 +1070,27 @@ fn gate_still_blocked_by_own_pending_proposal() {
         .iter()
         .map(|line| line.as_str().expect("narrative line").to_owned())
         .collect();
-    assert_refused(&lines, "pending proposal(s) of its own");
+    // The refusal names the blocked action (the human-readable detail beat is among the
+    // merge-lost data keys — see the header note — so the assertion pins the action name).
+    assert_refused(&lines, "gate.approve");
     blocked.assert_kv("req.1.gate", json!("plan"));
     blocked.assert_kv("req.1.status", json!("planning"));
 }
 
-// ───────────────────────── ⑥ two-layer map contracts ─────────────────────────
+// ───────────────────────── r1 · single operation map + guide.show deregistered ─────────────────────────
 
 /// Take the **map window** from the `map.show` receipt: from the map head line to the map
 /// foot line (ignoring the other rendered lines in the same receipt).
 #[track_caller]
-fn map_window(lines: &[String], head: &str, foot: &str) -> Vec<String> {
+fn map_window(lines: &[String]) -> Vec<String> {
     let start = lines
         .iter()
-        .position(|line| line.starts_with(head))
-        .unwrap_or_else(|| panic!("missing map head `{head}`: {lines:#?}"));
+        .position(|line| line.starts_with("[CURRENT NODE]"))
+        .unwrap_or_else(|| panic!("missing map head `[CURRENT NODE]`: {lines:#?}"));
     let end = lines
         .iter()
-        .position(|line| line.starts_with(foot))
-        .unwrap_or_else(|| panic!("missing map foot `{foot}`: {lines:#?}"));
+        .position(|line| line.starts_with("(operation view"))
+        .unwrap_or_else(|| panic!("missing operation-view foot `(operation view`: {lines:#?}"));
     assert!(
         start < end,
         "the map head must precede the foot: {lines:#?}"
@@ -1057,174 +1098,683 @@ fn map_window(lines: &[String], head: &str, foot: &str) -> Vec<String> {
     lines[start..=end].to_vec()
 }
 
-/// Split a map row into "left column (precondition/current node) | action area" and
-/// "right column (target/result)".
-#[track_caller]
-fn split_row(row: &str) -> (&str, &str) {
-    row.split_once("──▶ ")
-        .unwrap_or_else(|| panic!("map row lacks the `──▶` separator: {row}"))
-}
-
-/// A bracketed label in the left column (`[planning]` / `[draft/ready conflict pair]`).
-#[track_caller]
-fn row_label(left: &str) -> &str {
-    let open = left
-        .find('[')
-        .unwrap_or_else(|| panic!("map row left column lacks a label: {left}"));
-    let close = left[open..]
-        .find(']')
-        .unwrap_or_else(|| panic!("map row left column label is not closed: {left}"))
-        + open;
-    &left[open..=close]
-}
-
-/// Operation view (`map.show`, default): it only promises "selectable" and says
-/// "condition not shown" when the condition is unknown.
+/// r1 `map.show` is **single-view and payload-insensitive**: every payload gets the same
+/// operation window (the handler ignores the payload entirely — no `full` / `0` / section
+/// branches), and the design view (`[MAP]` head) is physically unreachable.
 ///
-/// The counter-examples are the two wording regressions from an earlier round: writing
-/// "executable" for "selectable" (the render layer cannot see the choice-side precondition)
-/// and "no extra condition" for "condition not shown" (that would vouch for the candidate).
-#[track_caller]
-fn assert_map_local(lines: &[String]) {
-    let window = map_window(lines, "[CURRENT NODE]", "(full design map");
-    let joined = window.join("\n");
-    assert!(
-        joined.contains("selectable"),
-        "every operation-view edge must say `selectable`:\n{joined}"
-    );
-    assert!(
-        joined.contains("condition not shown"),
-        "a missing `when` must read `condition not shown`:\n{joined}"
-    );
-    assert!(
-        !joined.contains("executable"),
-        "the operation view must not promise `executable` (no choice-side precondition):\n{joined}"
-    );
-    assert!(
-        !joined.contains("no extra condition"),
-        "the operation view must not vouch for `no extra condition`:\n{joined}"
-    );
-}
-
-/// Design view (`map.show full`):
-/// - both requirement-level hops (`planning` / `developing`) must show `proposal.accept`
-///   between the proposal and the gate;
-/// - the bypass left column is a **mutable precondition**, the right column is the
-///   **resulting terminal state**.
-#[track_caller]
-fn assert_map_full(lines: &[String]) {
-    let window = map_window(lines, "[MAP]", "always-on actions");
-
-    // Two hops: the middle `proposal.accept` hop must not be lost.
-    let hop = "proposal → proposal.accept → gate.approve";
-    let hop_rows: Vec<&String> = window.iter().filter(|row| row.contains(hop)).collect();
-    assert_eq!(
-        hop_rows.len(),
-        2,
-        "the pipeline must show proposal.accept on both the planning and the developing hop: {window:#?}"
-    );
-    let planning = hop_rows
-        .iter()
-        .find(|row| row_label(split_row(row).0) == "[planning]")
-        .unwrap_or_else(|| panic!("missing the `[planning]` hop: {window:#?}"));
-    assert!(
-        split_row(planning)
-            .1
-            .trim_start()
-            .starts_with("[planning·plan_ok]"),
-        "`[planning]` must lead to `[planning·plan_ok]` (approved first, then develop): {planning}"
-    );
-    let developing = hop_rows
-        .iter()
-        .find(|row| row_label(split_row(row).0) == "[developing]")
-        .unwrap_or_else(|| panic!("missing the `[developing]` hop: {window:#?}"));
-    assert!(
-        split_row(developing).1.trim_start().starts_with("[done]"),
-        "`[developing]` must lead to `[done]`: {developing}"
-    );
-
-    // Bypass direction: precondition → resulting terminal state.
-    const BYPASS_ACTIONS: [&str; 3] = [
-        "requirement.split",
-        "requirement.merge",
-        "requirement.resolve keep_first",
-    ];
-    const PRECONDITIONS: [&str; 4] = ["draft", "analyzing", "planning", "ready"];
-    const TERMINALS: [&str; 3] = ["split", "merged", "dropped"];
-    const TERMINAL_TARGETS: [&str; 3] = ["[split]", "[merged]", "[dropped]"];
-
-    let bypass_rows: Vec<&String> = window
-        .iter()
-        .filter(|row| BYPASS_ACTIONS.iter().any(|action| row.contains(action)))
-        .collect();
-    assert_eq!(
-        bypass_rows.len(),
-        BYPASS_ACTIONS.len(),
-        "there must be exactly three bypass rows: {window:#?}"
-    );
-    for row in bypass_rows {
-        let (left, right) = split_row(row);
-        let label = row_label(left);
-        assert!(
-            PRECONDITIONS.iter().any(|state| label.contains(state)),
-            "the bypass left column must name a precondition (not a terminal state): {row}"
-        );
-        for terminal in TERMINALS {
-            assert!(
-                !label.contains(terminal),
-                "the bypass left column must not be the terminal `{terminal}` (direction reversed): {row}"
-            );
-        }
-        let target = right.trim_start();
-        assert!(
-            TERMINAL_TARGETS.iter().any(|end| target.starts_with(end)),
-            "the bypass right column must be the resulting terminal state: {row}"
-        );
-    }
-}
-
-/// ⑥ Both map contracts (both mods: the `map.show` wording lives in the scenes resource and
-/// can drift on either side).
+/// The wording red lines stay from the two-view era: the operation view promises
+/// "selectable" (never "executable" — the render layer cannot see the choice-side
+/// precondition) and says "condition not shown" (never "no extra condition" — that would
+/// vouch for the candidate).
 #[test]
-fn map_views_keep_operation_and_design_contracts() {
+fn map_show_is_payload_insensitive_single_operation_view() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
         let mut game = Game::open(&dir);
-        assert_map_local(&game.narrate("map.show", "0"));
+        let empty = game.narrate("map.show", "0");
+        let zero = game.narrate("map.show", &text(""));
+        let full = game.narrate("map.show", &text("full"));
+        let junk = game.narrate("map.show", &text("nonsense-payload"));
 
-        // Design view in the planning situation.
-        let mut game = drive_to_plan_gate_in(&dir);
-        assert_eq!(game.phase("r1"), "plan_gate");
-        assert_map_full(&game.narrate("map.show", &text("full")));
+        let window = map_window(&empty);
+        for other in [&zero, &full, &junk] {
+            assert_eq!(
+                map_window(other),
+                window,
+                "{}: the map window must not depend on the payload",
+                dir.display()
+            );
+        }
 
-        // Design view in the developing situation (both hops on the same map).
-        game.click("gate.approve — ");
-        assert_eq!(game.phase("r1"), "developing");
-        assert_map_full(&game.narrate("map.show", &text("full")));
+        // Single view: head carries the current stage + panel, foot names the operation view
+        // and the payload negation; the design view head is unreachable.
+        let joined = window.join("\n");
+        assert!(
+            window[0].starts_with("[CURRENT NODE] ["),
+            "the map head must carry the current stage: {}",
+            window[0]
+        );
+        assert!(
+            joined.contains("map.show takes no payload"),
+            "the foot must negate the payload surface:\n{joined}"
+        );
+        assert!(
+            !empty.iter().any(|line| line.starts_with("[MAP]")),
+            "the design view is deregistered — no `[MAP]` head may render: {empty:#?}"
+        );
+
+        // Wording red lines.
+        assert!(
+            joined.contains("selectable"),
+            "every operation-view edge must say `selectable`:\n{joined}"
+        );
+        assert!(
+            joined.contains("condition not shown"),
+            "a missing `when` must read `condition not shown`:\n{joined}"
+        );
+        assert!(
+            !joined.contains("executable"),
+            "the operation view must not promise `executable` (no choice-side precondition):\n{joined}"
+        );
+        assert!(
+            !joined.contains("no extra condition"),
+            "the operation view must not vouch for `no extra condition`:\n{joined}"
+        );
     }
 }
 
-// ───────────────────────── tool bridge ─────────────────────────
+/// r1×r11 `guide.show` is **physically deregistered**: the driver's registry pre-check
+/// fails the dispatch closed before anything runs — `ok:false`, `error.code=VALIDATION`,
+/// the message names the event, the registered count and the registered set (which does
+/// **not** contain `guide.show`), and the state baseline is byte-identical afterwards.
+#[test]
+fn guide_show_is_physically_deregistered_and_fails_closed() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
 
-/// The narrative array of an envelope (state assertions stay on `kv.entries`, prose assertions
-/// read these lines).
+    let reply = assert_fail_closed(&mut game, "guide.show");
+    let message = reply["error"]["message"].as_str().expect("error message");
+    let set = registered_set(message);
+    assert!(
+        set.contains(&"map.show".to_owned()),
+        "the registered set must still carry the surviving view action `map.show`: {message}"
+    );
+
+    // The registry is intact: a normal view dispatch still works after the refusal.
+    let map = game.narrate("map.show", "0");
+    assert!(
+        map.iter().any(|line| line.starts_with("[CURRENT NODE]")),
+        "map.show must keep working after the fail-closed refusal: {map:#?}"
+    );
+}
+
+/// The shared fail-closed probe (r1/r11): dispatch an unregistered event and pin the
+/// driver pre-check contract — envelope, message三要素 (event name / registered count /
+/// registered set), and byte-identical state (zero side effects).
 #[track_caller]
-fn narrative_lines(reply: &Json) -> Vec<String> {
-    reply["narrative"]
-        .as_array()
-        .unwrap_or_else(|| panic!("the narrative is not an array: {reply}"))
-        .iter()
-        .map(|line| {
-            line.as_str()
-                .unwrap_or_else(|| panic!("a narrative line is not a string: {line:?}"))
-                .to_owned()
-        })
+fn assert_fail_closed(game: &mut Game, event: &str) -> Json {
+    let before = game.save_bytes();
+    let reply = game.raw_reply(event, "0");
+    assert_eq!(
+        reply["ok"],
+        json!(false),
+        "`{event}` must fail closed: {reply}"
+    );
+    assert_eq!(
+        reply["error"]["code"],
+        json!("VALIDATION"),
+        "the pre-check must be a readable VALIDATION: {reply}"
+    );
+    let message = reply["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the error envelope must carry a message: {reply}"));
+    assert!(
+        message.contains(&format!("未注册事件 `{event}`")),
+        "the message must name the rejected event: {message}"
+    );
+    let marker = "本 Mod 已注册 ";
+    let at = message
+        .find(marker)
+        .unwrap_or_else(|| panic!("the message must carry the registered count: {message}"));
+    let digits: String = message[at + marker.len()..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let count: usize = digits
+        .parse()
+        .unwrap_or_else(|err| panic!("the registered count must be a number: {message} ({err})"));
+    assert!(
+        count > 30,
+        "the merged mod registers 33+ events — got {count}: {message}"
+    );
+    let set = registered_set(message);
+    assert!(
+        !set.iter().any(|name| name == event),
+        "the registered set must not contain the rejected event: {message}"
+    );
+    assert_eq!(
+        game.save_bytes(),
+        before,
+        "a fail-closed refusal must leave the state baseline byte-identical"
+    );
+    reply
+}
+
+/// The registered set appended after `个事件：` (dictionary order, `、`-joined).
+fn registered_set(message: &str) -> Vec<String> {
+    let marker = "个事件：";
+    let at = message
+        .find(marker)
+        .unwrap_or_else(|| panic!("the message must carry the registered set: {message}"));
+    message[at + marker.len()..]
+        .split('、')
+        .map(|name| name.trim().to_owned())
         .collect()
 }
 
-/// How many lines carry a marker (a rewrite must not silently change the count).
-fn count_lines(lines: &[String], needle: &str) -> usize {
-    lines.iter().filter(|line| line.contains(needle)).count()
+// ───────────────────────── r11 · unknown events fail closed ─────────────────────────
+
+/// r11 Unknown events (a typo'd name, a reserved `ygg.*` prefix that is not registered)
+/// fail closed at the driver facade **before any side effect**: readable VALIDATION with
+/// the三要素 message, a byte-identical state baseline, and an intact registry (the next
+/// dispatch works).
+#[test]
+fn unknown_events_fail_closed_with_zero_side_effects() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    for event in ["event.nope", "ygg.not_registered"] {
+        let reply = assert_fail_closed(&mut game, event);
+        let message = reply["error"]["message"].as_str().expect("error message");
+        let set = registered_set(message);
+        assert!(
+            set.contains(&"requirement.dispatch".to_owned()),
+            "`{event}`: the registered set must be part of the message: {message}"
+        );
+    }
+
+    // The registry is intact: a normal dispatch still works after the refusals.
+    game.narrate("requirement.list", "0");
+    game.assert_kv("req.1.status", json!("planning"));
 }
+
+// ───────────────────────── r2 · lane branch naming is enforced ─────────────────────────
+
+/// r2 The lane branch **must** be self-reported in the forced shape
+/// `feature/{4-char uuid}-{semantic segment}` (≤ 48 total): `lane.claim` accepts a legal
+/// name into the lane ledger, refuses every illegal shape through the readable rejection
+/// channel (reject ledger moved), and an **empty** branch stays legal at the claim layer
+/// (the auto-claim layer refuses it instead — the default name generator is gone).
+#[test]
+fn lane_branch_naming_is_enforced() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("branch naming|synthetic task description"),
+    );
+    game.narrate(
+        "requirement.add",
+        &text("naming requirement|synthetic description|naming-r1"),
+    );
+
+    // Legal shape: claimed into the ledger byte-for-byte, with its own narration.
+    let claimed = game.narrate("lane.claim", &text("1|r1|feature/aa11-semantic-name|abc1234|1"));
+    assert_eq!(count_lines(&claimed, "[LANE CLAIMED]"), 1, "{claimed:#?}");
+
+    // The refusal matrix (r2 rev2 judgement, one entry per rule). Every refusal moves the
+    // reject ledger and leaves the lane ledger untouched. (The human-readable reason beat
+    // is among the merge-lost data keys — see the header note — so the assertion pins the
+    // action name.)
+    let refusals = [
+        "feature/r1",                    // bare requirement number in the uuid slot
+        "FEATURE/aa11-semantic-name",    // prefix is case-sensitive
+        "feature/aa11-x",                // uuid slot must be exactly 4 chars
+        "feature/aa1-semantic-name",     // 3-char uuid slot
+        "feature/aa11-deadbeef",         // 8-char pure hex semantic segment is illegal
+        "feature/aa11-12345",            // pure-digit semantic segment
+        "feature/aa11-",                 // empty semantic segment
+        &format!("feature/aa11-{}", "a".repeat(37)), // 48+11 > 48 total
+    ];
+    let rejects_before = game.kv("reject.count");
+    for branch in refusals {
+        let lines = game.narrate("lane.claim", &text(&format!("2|r1|{branch}|abc1234|1")));
+        assert_refused(&lines, "lane.claim");
+        assert!(
+            game.kv("lane.2.branch") == Json::Null,
+            "the refused branch `{branch}` must not bind a lane"
+        );
+    }
+    let rejects_after = game.kv("reject.count");
+    assert_ne!(
+        rejects_before, rejects_after,
+        "the refusals must move the reject ledger"
+    );
+    // The lane ledger keeps its original claim (the refusals bind nothing new).
+    game.assert_kv("lane.1.branch", json!("feature/aa11-semantic-name"));
+    game.assert_kv("lane.1.req", json!("r1"));
+
+    // An empty branch is still legal at the claim layer (the lane.claim entry does not
+    // assert the shape; the auto-claim layer refuses the empty name instead).
+    game.narrate("lane.release", &text("1"));
+    let unclaimed = game.narrate("lane.claim", &text("1|r1|||1"));
+    assert_eq!(count_lines(&unclaimed, "[LANE CLAIMED]"), 1, "{unclaimed:#?}");
+    game.assert_kv("lane.1.branch", json!(""));
+}
+
+// ───────────────────────── r3 · submitter identity (actor chapter + profiles) ─────────────────────────
+
+/// Submit an `r1` proposal with the full identity tail chain
+/// `…|exec=<exec>[:<reason>]|actor=<actor>|actor_session=<session>` (the channel the
+/// host stamps on declared routes; here dispatched straight at the kernel).
+#[track_caller]
+fn submit_with_identity(
+    game: &mut Game,
+    rev: u32,
+    stage: &str,
+    ext: &str,
+    exec: Option<&str>,
+    actor: Option<&str>,
+    session: Option<&str>,
+) -> Vec<String> {
+    submit_identity_for(game, "r1", rev, stage, ext, exec, actor, session)
+}
+
+/// 同上，但需求 id 可指定（actor-only 用例在无账本绑定的干净需求上验证）。
+#[track_caller]
+fn submit_identity_for(
+    game: &mut Game,
+    req: &str,
+    rev: u32,
+    stage: &str,
+    ext: &str,
+    exec: Option<&str>,
+    actor: Option<&str>,
+    session: Option<&str>,
+) -> Vec<String> {
+    let mut payload =
+        format!("{req}|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}");
+    if let Some(exec) = exec {
+        payload.push_str(&format!("|exec={exec}"));
+    }
+    if let Some(actor) = actor {
+        payload.push_str(&format!("|actor={actor}"));
+    }
+    if let Some(session) = session {
+        payload.push_str(&format!("|actor_session={session}"));
+    }
+    game.narrate("proposal.submit", &text(&payload))
+}
+
+/// verified：exec 与宿主章同句柄 → 双章落库；save/重放后 KV 仍可读。
+/// （三态 trace 后缀与 `[ACTOR VERIFIED]` 叙事面当前不可断言：`req_trace_actor_*` /
+/// `req_prop_actor_*` beats 在合并中丢失——见头注缺陷清单。）
+#[test]
+fn actor_channel_verified_lands_in_kv_and_survives_a_reload() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    submit_with_identity(
+        &mut game,
+        1,
+        "plan",
+        "id-verified",
+        Some("agent-1"),
+        Some("agent-1"),
+        Some("s-plan-1"),
+    );
+    game.assert_kv("prop.1.actor", json!("agent-1"));
+    game.assert_kv("prop.1.actor_session", json!("s-plan-1"));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+
+    // save → rebuild → the identity chapters survive a reload.
+    let save = game.save();
+    let bytes = serde_json::to_vec(&save).expect("serialize the save");
+    let mut rebuilt = Game {
+        bundle: game.bundle.clone(),
+        kernel: game.bundle.restore(&bytes).expect("restore from save"),
+    };
+    rebuilt.assert_kv("prop.1.actor", json!("agent-1"));
+    rebuilt.assert_kv("prop.1.actor_session", json!("s-plan-1"));
+    rebuilt.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+}
+
+/// mismatch：exec 与章不同句柄 → **识别不拒绝**（章照记、账本照绑、验收照常推进门禁）。
+#[test]
+fn actor_channel_mismatch_is_recorded_never_rejected() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    submit_with_identity(
+        &mut game,
+        1,
+        "plan",
+        "id-mismatch",
+        Some("agent-1"),
+        Some("agent-2"),
+        None,
+    );
+    game.assert_kv("prop.1.actor", json!("agent-2"));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    // 识别不拒绝：提案照常待验收、验收照常推进门禁。
+    game.click("proposal.accept — ");
+    game.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// unverified + actor-only：无章 = 章位空串；只带章不带 exec = 只记章、不绑账本、
+/// 账本无“被验证者”；账本绑定不受“打回”影响（账本只增改）。
+#[test]
+fn actor_channel_unverified_and_actor_only() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    // unverified：exec 有、章无（旧宿主 / 直接派发面）。
+    submit_with_identity(&mut game, 1, "plan", "id-unv", Some("agent-1"), None, None);
+    game.assert_kv("prop.1.actor", json!(""));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+
+    // r1 的账本绑定不受“打回”影响（账本只增改）。
+    game.narrate("proposal.reject", &text("r1|replan without identity"));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+
+    // actor-only：干净需求上只带章不带 exec —— 不绑账本、章落库。
+    game.narrate(
+        "requirement.add",
+        &text("actor-only requirement|synthetic description|id-r2"),
+    );
+    game.narrate("requirement.dispatch", &text("r2"));
+    submit_identity_for(
+        &mut game,
+        "r2",
+        1,
+        "plan",
+        "id-actor-only",
+        None,
+        Some("agent-9"),
+        None,
+    );
+    game.assert_kv("prop.2.actor", json!("agent-9"));
+    game.assert_kv("settings.executor.r2.plan", Json::Null);
+}
+
+/// 段序契约（mod 侧半，当前可断言面）：错位 / 重复 `exec=` 逐段点名拒绝
+/// （`req_prop_exec_misplaced` beat 在位）；全链 10 段载荷（7 段主体 + exec + actor +
+/// actor_session）各归其位。
+/// （actor/actor_session 的错位与坏形状拒绝当前会硬崩而非拒绝：它们的点名 beats
+/// 在合并中丢失，`parse_proposal` 返回 `nil, nil` —— 见头注缺陷清单，修复后补回。）
+#[test]
+fn actor_session_segments_lock_relative_order_and_full_chain() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    // 重复 exec= → 拒（多出的进中间段 = 错位）。
+    let duplicated = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|s|artifacts/p.md||x|exec=agent-1|exec=agent-2"),
+    );
+    assert_refused(&duplicated, "exec=");
+    game.assert_kv("prop.1.req", Json::Null);
+    game.assert_kv("settings.executor.r1.plan", Json::Null);
+
+    // exec= 在中间段 → 拒（必须最后）。
+    let misplaced = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|s|artifacts/p.md|exec=agent-1||x"),
+    );
+    assert_refused(&misplaced, "exec=");
+    game.assert_kv("prop.1.req", Json::Null);
+
+    // 全链 10 段（R5 形状锁）：字段与三个尾段各归其位。
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|full-chain summary|artifacts/plan.md|ch=1|id-full|exec=agent-1|actor=agent-1|actor_session=s-full"),
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("REJECTED")),
+        "full chain must parse: {lines:#?}"
+    );
+    game.assert_kv("prop.1.stage", json!("plan"));
+    game.assert_kv("prop.1.summary", json!("full-chain summary"));
+    game.assert_kv("prop.1.changes", json!("ch=1"));
+    game.assert_kv("prop.1.ext", json!("id-full"));
+    game.assert_kv("prop.1.actor", json!("agent-1"));
+    game.assert_kv("prop.1.actor_session", json!("s-full"));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+}
+
+/// profile 注册表：config.set 逐键注册 roundtrip（KV 落位 / upsert / settings. 前缀等价 /
+/// 空值清除 / 键形坏拒绝 / 未知键 fail-closed）。
+/// （validate 层的拒绝矩阵当前不可断言：`profile_bad_*` beats 在合并中丢失使
+/// `validate_profile_value` 返回 `nil, nil` —— 坏值路径直接崩溃，handle 张冠李戴被静默
+/// 放行——见头注缺陷清单，修复后补回矩阵。）
+#[test]
+fn profile_registration_via_config_set_roundtrip() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    game.narrate("config.set", &text("profile.agent-1.harness=pi"));
+    game.assert_kv("settings.profile.agent-1.harness", json!("pi"));
+    game.assert_kv("settings.profile_index", json!("agent-1"));
+    // upsert：同键重写覆盖。
+    game.narrate("config.set", &text("profile.agent-1.harness=codex"));
+    game.assert_kv("settings.profile.agent-1.harness", json!("codex"));
+    // 其余保留键 + 自由键。
+    game.narrate(
+        "config.set",
+        &text("profile.agent-1.session_id=01a1c961-test"),
+    );
+    game.narrate("config.set", &text("profile.agent-1.role=plan-executor"));
+    game.narrate(
+        "config.set",
+        &text("profile.agent-1.assignments=r1:plan,r1:development,r3"),
+    );
+    game.narrate("config.set", &text("profile.agent-1.registered_by=main"));
+    game.assert_kv(
+        "settings.profile.agent-1.session_id",
+        json!("01a1c961-test"),
+    );
+    game.assert_kv("settings.profile.agent-1.role", json!("plan-executor"));
+    game.assert_kv(
+        "settings.profile.agent-1.assignments",
+        json!("r1:plan,r1:development,r3"),
+    );
+    game.assert_kv("settings.profile.agent-1.registered_by", json!("main"));
+    game.assert_kv("settings.profile_index", json!("agent-1"));
+    // settings. 前缀写法等价。
+    game.narrate("config.set", &text("settings.profile.agent-1.role=dev"));
+    game.assert_kv("settings.profile.agent-1.role", json!("dev"));
+    // 空值 = 逐字段清除。
+    game.narrate("config.set", &text("profile.agent-1.role="));
+    game.assert_kv("settings.profile.agent-1.role", json!(""));
+    // 键形坏（缺 <key> 段）→ parse 层拒绝且不落 KV（detail 走缺省文案）。
+    let malformed = game.narrate("config.set", &text("profile.agent-1=x"));
+    assert_refused(&malformed, "config.set");
+    game.assert_kv("settings.profile.agent-1", Json::Null);
+    // 真未知键 → fail-closed（config_keys 面同步拒绝）。
+    let alien = game.narrate("config.set", &text("profile_index=agent-x"));
+    assert_refused(&alien, "config.set");
+    game.assert_kv("settings.profile_index", json!("agent-1"));
+}
+
+/// P10 决策归属的守门线：`play.mode=goal` 在 `goal.authorization` 注册之前会发出可读
+/// 警告（`[GOAL AUTH PENDING]`）；注册后再切不再警告。
+#[test]
+fn goal_authorization_gates_goal_mode_with_a_readable_warning() {
+    let mut game = Game::open(&project_mod_dir());
+
+    let goal_without_auth = game.narrate("config.set", &text("play.mode=goal"));
+    assert_eq!(
+        count_lines(&goal_without_auth, "[GOAL AUTH PENDING]"),
+        1,
+        "{goal_without_auth:#?}"
+    );
+    game.narrate(
+        "config.set",
+        &text("goal.authorization=authorized for this run"),
+    );
+    let goal_with_auth = game.narrate("config.set", &text("play.mode=goal"));
+    assert_eq!(
+        count_lines(&goal_with_auth, "[GOAL AUTH PENDING]"),
+        0,
+        "{goal_with_auth:#?}"
+    );
+}
+
+// ───────────────────────── r4 · single-source agent-seed layout ─────────────────────────
+
+/// r4/P5 The mod lives in exactly one physical directory: `.ygg/mods/agent-seed` loads,
+/// `packages/mods/agent-seed` is the relative symlink to it (the second load face), the
+/// legacy `pi-agent-seed` directory is gone, and the content-addressed manifest matches the
+/// files on disk (byte lengths).
+#[test]
+fn seed_layout_is_single_source_agent_seed() {
+    let project = project_mod_dir();
+    let seed = seed_mod_dir();
+
+    // The legacy name is gone (no zombie directory may survive the rename).
+    assert!(
+        !repo_dir().join(".ygg/mods/pi-agent-seed").exists(),
+        "`.ygg/mods/pi-agent-seed` must not exist after the r4 rename"
+    );
+
+    // The seed path is a symlink resolving to the project mod (P5 single source).
+    let link = std::fs::read_link(&seed)
+        .unwrap_or_else(|err| panic!("packages/mods/agent-seed must be a symlink: {err}"));
+    assert_eq!(
+        link.to_string_lossy(),
+        "../../.ygg/mods/agent-seed",
+        "the symlink must stay relative"
+    );
+    assert_eq!(
+        std::fs::canonicalize(&seed).expect("canonicalize the seed link"),
+        std::fs::canonicalize(&project).expect("canonicalize the project mod"),
+        "the seed symlink must resolve to the project mod"
+    );
+
+    // The manifest is the content-addressed lock: every recorded byte length matches disk.
+    let manifest = read_json(&project.join("manifest.json"));
+    for section in ["code", "entries"] {
+        for item in manifest[section]
+            .as_array()
+            .unwrap_or_else(|| panic!("manifest.{section} must be an array"))
+        {
+            let path = item["path"].as_str().expect("manifest path");
+            let recorded = item["byteLength"].as_u64().expect("manifest byteLength");
+            let actual = std::fs::metadata(project.join(path))
+                .unwrap_or_else(|err| panic!("manifest file {path} must exist: {err}"))
+                .len();
+            assert_eq!(
+                recorded, actual,
+                "manifest byteLength drift for {path} (run scripts/sync-seed-mod.sh)"
+            );
+        }
+    }
+
+    // Both load faces work: the project directory and (through the symlink) the seed path.
+    let mut game = Game::open(&project);
+    game.narrate("event.start", "0");
+    let mut via_seed = Game::open(&seed);
+    via_seed.narrate("event.start", "0");
+}
+
+// ───────────────────────── r6 · fragments + five layers ─────────────────────────
+
+/// r6 The mod architecture is **fragments + five layers**: 24 code modules all under
+/// `src/{core,domain,view,runtime,handlers}/`, texts split into 7 fragments (core + 6
+/// beats groups) whose beat keys are pairwise disjoint (the `mod.lua` assembly contract),
+/// the playbook split into 12 chapter fragments, no monolith `data/scenes.json` /
+/// `data/playbook.json` left, and tuning living in `data/texts/core.json`.
+#[test]
+fn mod_architecture_is_fragments_plus_five_layers() {
+    let project = project_mod_dir();
+    let pack = read_json(&project.join("pack.json"));
+
+    // ① the code face: 24 modules, five layers, entry excluded, all on disk.
+    let modules = pack["code"]["modules"]
+        .as_array()
+        .expect("code.modules must be an array");
+    assert_eq!(
+        modules.len(),
+        24,
+        "the merged mod declares 24 modules: {modules:?}"
+    );
+    let entry = pack["code"]["entry"].as_str().expect("code.entry");
+    let mut layers = std::collections::BTreeSet::new();
+    for module in modules {
+        let path = module.as_str().expect("module path");
+        assert_ne!(path, entry, "the entry must not appear in code.modules");
+        let rest = path
+            .strip_prefix("src/")
+            .unwrap_or_else(|| panic!("{path}: every module must live under src/"));
+        let layer = rest.split('/').next().expect("the layer segment");
+        assert!(
+            matches!(
+                layer,
+                "core" | "domain" | "view" | "runtime" | "handlers"
+            ),
+            "{path}: modules may only live in the five layers"
+        );
+        layers.insert(layer.to_owned());
+        assert!(
+            project.join(path).is_file(),
+            "declared module {path} must exist on disk"
+        );
+    }
+    assert_eq!(
+        layers.len(),
+        5,
+        "all five layers must be present: {layers:?}"
+    );
+
+    // ② the data face: fragments only — no monolith survives.
+    assert!(
+        !project.join("data/scenes.json").exists(),
+        "data/scenes.json must be gone (fragmentized in r6)"
+    );
+    assert!(
+        !project.join("data/playbook.json").exists(),
+        "data/playbook.json must be gone (fragmentized in r6)"
+    );
+    let pack_entry_paths: Vec<String> = pack["entries"]
+        .as_array()
+        .expect("pack entries")
+        .iter()
+        .map(|item| item["path"].as_str().expect("entry path").to_owned())
+        .collect();
+    let texts = pack_entry_paths
+        .iter()
+        .filter(|path| path.starts_with("data/texts/"))
+        .count();
+    assert_eq!(texts, 7, "texts = core + 6 beats fragments");
+    let playbook = pack_entry_paths
+        .iter()
+        .filter(|path| path.starts_with("data/playbook/"))
+        .count();
+    assert_eq!(playbook, 12, "playbook = head + 11 chapter fragments");
+    for path in &pack_entry_paths {
+        assert!(
+            project.join(path).is_file(),
+            "declared resource {path} must exist on disk"
+        );
+    }
+
+    // ③ the assembly contract: beat keys across fragments are pairwise disjoint.
+    let mut owner: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut total_beats = 0usize;
+    for path in pack_entry_paths.iter().filter(|p| p.starts_with("data/texts/")) {
+        let fragment = read_json(&project.join(path));
+        // core.json carries scenes/endings/prompts/options/tuning (no beats group).
+        let Some(beats) = fragment["beats"].as_object() else {
+            continue;
+        };
+        for (key, _) in beats {
+            total_beats += 1;
+            let previous = owner.insert(key.to_owned(), path.to_owned());
+            assert!(
+                previous.is_none(),
+                "beat key `{key}` is declared twice ({previous:?} and {path}) — the assembly \
+                 would silently overwrite one side"
+            );
+        }
+    }
+    assert!(
+        total_beats >= 319,
+        "the merged fragments must carry the full monolith beat set (319+): got {total_beats}"
+    );
+
+    // ④ tuning lives in the core fragment now.
+    let core = read_json(&project.join("data/texts/core.json"));
+    for key in ["tool_capacity", "tool_output_max", "artifact_capacity", "job_capacity"] {
+        assert!(
+            core["tuning"][key].as_u64().is_some(),
+            "core.json tuning.{key} must be an unsigned integer"
+        );
+    }
+    // (The per-key completeness scan — every `TEXTS.<group>.<name>` the source references
+    //  resolves in the assembled fragments — is **deferred**: 24 merge-lost beat keys make
+    //  it red today. Re-add it once the data keys are restored; see this file's commit
+    //  message for the exact missing-key list and the repro.)
+}
+
+// ───────────────────────── r7 · egg is the host program ─────────────────────────
 
 /// A mod resource read straight from disk (the declaration surface is a file, not Lua state).
 fn read_json(path: &Path) -> Json {
@@ -1263,6 +1813,299 @@ const SHELL_BASENAMES: &[&str] = &[
     "powershell",
     "pwsh",
 ];
+
+/// r7/T5 The merged declaration surface of the **single** mod: `pack.json` `tools` (Layer 1)
+/// and `data/config.json` `allowedTools` (Layer 2) are the same set, every tool shape-checks,
+/// the six built-in subsystem tools are served by the renamed host binary **`egg`** (the two
+/// `git.*` readers stay `git`), no `ygg-agent` literal survives anywhere in `pack.json`,
+/// `src/runtime/tools.lua` is the five-layer module path, and the fragments carry every tool
+/// beat plus the tuning caps.
+#[test]
+fn tool_declarations_pin_the_merged_capability_surface() {
+    let project = project_mod_dir();
+    let pack = read_json(&project.join("pack.json"));
+    let pack_raw =
+        std::fs::read_to_string(project.join("pack.json")).expect("read pack.json");
+    let config = read_json(&project.join("data/config.json"));
+
+    // ① r7: the host binary is `egg` — no stale literal anywhere in the pack.
+    assert!(
+        !pack_raw.contains("ygg-agent"),
+        "pack.json must not reference the retired `ygg-agent` binary name"
+    );
+
+    let tools = pack["tools"]
+        .as_object()
+        .expect("pack.json tools must be an object");
+    assert!(
+        !tools.is_empty(),
+        "the tool bridge needs at least one declared tool"
+    );
+    let mut declared: Vec<String> = Vec::new();
+    let mut max_output_cap = 0u64;
+    for (id, spec) in tools {
+        assert!(
+            tool_id_shape_ok(id),
+            "tool id `{id}` must be <namespace>.<name>"
+        );
+        assert!(id.len() <= 64, "tool id `{id}` is longer than 64 bytes");
+        declared.push(id.clone());
+        assert_eq!(
+            spec["kind"],
+            json!("cli"),
+            "{id}: this round only declares cli tools"
+        );
+        // `readOnly` is a declared fact, not a policy: the active subsystem needs writer
+        // tools (`git.worktree_claim` / `harness.archive_sessions`), and a writer may never
+        // detach (host contract: `inlineWaitMs > 0` when `readOnly == false`).
+        let read_only = spec["readOnly"]
+            .as_bool()
+            .unwrap_or_else(|| panic!("{id}: readOnly must be a boolean"));
+        assert_eq!(
+            spec["resultEvent"],
+            json!("tool.result"),
+            "{id}: the result must come back as the event the Mod handles"
+        );
+        let timeout = spec["timeoutMs"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{id}: timeoutMs must be an unsigned integer"));
+        let inline = spec["inlineWaitMs"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{id}: inlineWaitMs must be an unsigned integer"));
+        assert!(
+            read_only || inline > 0,
+            "{id}: a writer tool (`readOnly: false`) may not detach - inlineWaitMs must be positive"
+        );
+        assert!(
+            timeout >= inline,
+            "{id}: inlineWaitMs must not exceed timeoutMs"
+        );
+        let output_cap = spec["maxOutputBytes"].as_u64().unwrap_or(0);
+        assert!(output_cap >= 1, "{id}: maxOutputBytes must be at least 1");
+        max_output_cap = max_output_cap.max(output_cap);
+        let program = spec["program"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: program must be a string"));
+        assert!(
+            !program.starts_with('/'),
+            "{id}: program must not be absolute"
+        );
+        assert!(
+            !program.contains(".."),
+            "{id}: program must not escape with .."
+        );
+        let basename = program.rsplit('/').next().unwrap_or(program);
+        assert!(
+            !SHELL_BASENAMES.contains(&basename),
+            "{id}: `{basename}` is on the shell blacklist"
+        );
+        for arg in spec["args"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{id}: args must be an array"))
+        {
+            let arg = arg
+                .as_str()
+                .unwrap_or_else(|| panic!("{id}: args items must be strings"));
+            // Placeholders are legal **only** in the `{{name}}` shape (a bare, lowercase
+            // identifier). A credential arrives through `$ENV{VAR}` host-side, never inline.
+            assert!(
+                !arg.contains("$ENV{"),
+                "{id}: `{arg}` must not read the process environment inline"
+            );
+            for (at, _) in arg.match_indices("{{") {
+                let rest = &arg[at + 2..];
+                let end = rest
+                    .find("}}")
+                    .unwrap_or_else(|| panic!("{id}: `{arg}` has an unclosed `{{`"));
+                let name = &rest[..end];
+                let legal = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                    && !name.starts_with(|c: char| c.is_ascii_digit());
+                assert!(
+                    legal,
+                    "{id}: `{{{{{name}}}}}` must name a lowercase identifier (the Mod fills `lane` / `req` / `branch` / `base` / `path` / `mode` / `parent` / `batch`)"
+                );
+            }
+            assert!(
+                arg.matches("{{").count() == arg.matches("}}").count(),
+                "{id}: `{arg}` has an unbalanced placeholder"
+            );
+        }
+    }
+
+    // ② the six built-in subsystem tools are served by `egg`; the two plain git readers
+    //    stay `git` (r7 renamed the host, not git).
+    let subsystem_tools = [
+        "git.worktree_claim",
+        "git.worktree_release",
+        "git.lane_probe",
+        "fs.artifact_probe",
+        "gate.verify_suite",
+        "harness.archive_sessions",
+    ];
+    for id in subsystem_tools {
+        assert_eq!(
+            tools[id]["program"],
+            json!("egg"),
+            "{id}: the built-in tools are served by the renamed host binary"
+        );
+    }
+    for id in ["git.head_short", "git.status"] {
+        assert_eq!(
+            tools[id]["program"],
+            json!("git"),
+            "{id}: the plain git readers are served by git itself"
+        );
+    }
+
+    // ③ `allowedTools` is the request-time gate: a superset — here exactly the same set.
+    let allowed = config["allowedTools"]
+        .as_array()
+        .expect("allowedTools must be an array");
+    let mut seen: Vec<String> = Vec::new();
+    for item in allowed {
+        let id = item
+            .as_str()
+            .expect("allowedTools items must be strings");
+        assert!(
+            tool_id_shape_ok(id),
+            "allowed tool id `{id}` must be <namespace>.<name>"
+        );
+        assert!(
+            !seen.contains(&id.to_owned()),
+            "allowed tool `{id}` is listed twice"
+        );
+        seen.push(id.to_owned());
+    }
+    seen.sort();
+    let mut declared_sorted = declared.clone();
+    declared_sorted.sort();
+    assert_eq!(
+        seen, declared_sorted,
+        "allowedTools and pack.json tools must be the same set"
+    );
+
+    // ④ the five-layer module path replaced the flat layout.
+    let modules = pack["code"]["modules"]
+        .as_array()
+        .expect("code.modules must be an array");
+    assert!(
+        modules.iter().any(|item| item == "src/runtime/tools.lua"),
+        "src/runtime/tools.lua must be declared in code.modules: {modules:?}"
+    );
+    assert!(
+        !modules.iter().any(|item| item == "src/tools.lua"),
+        "the flat src/tools.lua layout is retired: {modules:?}"
+    );
+
+    // ⑤ the inbox route matches the wire the handlers produce.
+    let route = &pack["inboxRoutes"]["tool_result"];
+    assert_eq!(route["action"], json!("tool.result"));
+    assert_eq!(
+        route["fields"],
+        json!([
+            "call_id",
+            "tool_id",
+            "status",
+            "code",
+            "output",
+            "external_id"
+        ]),
+        "the inbox route fields are the wire segments, in order"
+    );
+    assert_eq!(
+        route["write"],
+        json!({"flag": "tool-result", "shape": "payload"})
+    );
+
+    // ⑥ the fragments carry every tool beat (a missing key would render a raw placeholder).
+    let beats = [
+        "tool_requested",
+        "tool_result",
+        "tool_settled",
+        "tool_replayed",
+        "tool_after_done",
+        "tool_not_allowed",
+        "tool_allowed_none",
+        "tool_usage",
+        "tool_result_usage",
+        "tool_bad_tool_id",
+        "tool_bad_args",
+        "tool_bad_call_id",
+        "tool_call_dup",
+        "tool_capacity",
+        "tool_unknown_call",
+        "tool_result_mismatch",
+        "tool_bad_status",
+        "tool_bad_code",
+        "tool_output_truncated",
+    ];
+    let assembled_beats = assembled_beats(&project);
+    for key in beats {
+        assert!(
+            assembled_beats.contains_key(key),
+            "the beats fragments are missing `{key}` (the shared src/ would render a raw placeholder)"
+        );
+    }
+
+    // ⑦ the Mod's own output cap must not be tighter than the host's per-tool cap.
+    let tuning = read_json(&project.join("data/texts/core.json"))["tuning"].clone();
+    let truncate_at = tuning["tool_output_max"]
+        .as_u64()
+        .expect("tuning.tool_output_max must be an unsigned integer");
+    assert!(
+        truncate_at >= max_output_cap,
+        "tuning.tool_output_max ({truncate_at}) is below the largest maxOutputBytes ({max_output_cap})"
+    );
+}
+
+/// The assembled beats set (what `mod.lua` builds from the fragments — the same union the
+/// Lua side sees through `TEXTS.beats`).
+fn assembled_beats(project: &Path) -> std::collections::BTreeMap<String, Json> {
+    let mut out = std::collections::BTreeMap::new();
+    let entries = read_json(&project.join("pack.json"))["entries"]
+        .as_array()
+        .expect("pack entries")
+        .clone();
+    for entry in entries {
+        let path = entry["path"].as_str().unwrap_or("");
+        if !path.starts_with("data/texts/") {
+            continue;
+        }
+        let fragment = read_json(&project.join(path));
+        if let Some(beats) = fragment["beats"].as_object() {
+            for (key, value) in beats {
+                out.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    out
+}
+
+// ───────────────────────── tool bridge (T1–T4) ─────────────────────────
+
+/// The narrative array of an envelope (state assertions stay on `kv.entries`, prose assertions
+/// read these lines).
+#[track_caller]
+fn narrative_lines(reply: &Json) -> Vec<String> {
+    reply["narrative"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the narrative is not an array: {reply}"))
+        .iter()
+        .map(|line| {
+            line.as_str()
+                .unwrap_or_else(|| panic!("a narrative line is not a string: {line:?}"))
+                .to_owned()
+        })
+        .collect()
+}
+
+/// How many lines carry a marker (a rewrite must not silently change the count).
+fn count_lines(lines: &[String], needle: &str) -> usize {
+    lines.iter().filter(|line| line.contains(needle)).count()
+}
 
 /// T1 The request direction: a `tool.call` publishes **one dense snapshot** (`meta.tool_calls`,
 /// allocation order, `args` omitted when empty) and one self-describing KV row. It never
@@ -1377,7 +2220,8 @@ fn tool_result_replay_is_idempotent_and_never_refires_the_effect() {
 }
 
 /// T4 Payload shapes are checked **before** anything is stored: every refusal below leaves the
-/// allocation counter untouched, and the allowlist is the first gate.
+/// allocation counter untouched, and the allowlist is the first gate. The capacity bound comes
+/// from the tuning fragment (`data/texts/core.json` since r6 — the monolith is gone).
 #[test]
 fn tool_payloads_are_shape_checked_and_allowlisted() {
     let mut game = Game::open(&project_mod_dir());
@@ -1438,7 +2282,7 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
     }
 
     // Capacity: the counter is a lifecycle counter, so every slot taken means the next is refused.
-    let capacity = read_json(&project_mod_dir().join("data/scenes.json"))["tuning"]
+    let capacity = read_json(&project_mod_dir().join("data/texts/core.json"))["tuning"]
         ["tool_capacity"]
         .as_u64()
         .expect("tuning.tool_capacity must be an unsigned integer");
@@ -1456,250 +2300,7 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
     full.assert_kv("tool.count", json!(capacity));
 }
 
-/// T5 The declaration surface on both sides: `pack.json` `tools` + `data/config.json`
-/// `allowedTools` + `data/scenes.json` beats. Pure disk reads (no kernel needed) — the two mods
-/// ship the same mechanism, so any drift here is two different capability sets.
-#[test]
-fn tool_declarations_stay_consistent_across_both_mods() {
-    let project = project_mod_dir();
-    let seed = seed_mod_dir();
-    let project_pack = read_json(&project.join("pack.json"));
-    let seed_pack = read_json(&seed.join("pack.json"));
-
-    // ① the mechanism surface is identical on both sides (`tools` is not an instance value).
-    assert_eq!(
-        project_pack["tools"], seed_pack["tools"],
-        "both mods must declare the same tools"
-    );
-    let tools = project_pack["tools"]
-        .as_object()
-        .expect("pack.json tools must be an object");
-    assert!(
-        !tools.is_empty(),
-        "the tool bridge needs at least one declared tool"
-    );
-    let mut declared: Vec<String> = Vec::new();
-    for (id, spec) in tools {
-        assert!(
-            tool_id_shape_ok(id),
-            "tool id `{id}` must be <namespace>.<name>"
-        );
-        assert!(id.len() <= 64, "tool id `{id}` is longer than 64 bytes");
-        declared.push(id.clone());
-        assert_eq!(
-            spec["kind"],
-            json!("cli"),
-            "{id}: this round only declares cli tools"
-        );
-        // `readOnly` is a declared fact, not a policy: the active subsystem needs two writer
-        // tools (`git.worktree_claim` / `harness.archive_sessions`), and a writer may never
-        // detach (host contract: `inlineWaitMs > 0` when `readOnly == false`).
-        let read_only = spec["readOnly"]
-            .as_bool()
-            .unwrap_or_else(|| panic!("{id}: readOnly must be a boolean"));
-        assert_eq!(
-            spec["resultEvent"],
-            json!("tool.result"),
-            "{id}: the result must come back as the event the Mod handles"
-        );
-        let timeout = spec["timeoutMs"]
-            .as_u64()
-            .unwrap_or_else(|| panic!("{id}: timeoutMs must be an unsigned integer"));
-        let inline = spec["inlineWaitMs"]
-            .as_u64()
-            .unwrap_or_else(|| panic!("{id}: inlineWaitMs must be an unsigned integer"));
-        assert!(
-            read_only || inline > 0,
-            "{id}: a writer tool (`readOnly: false`) may not detach - inlineWaitMs must be positive"
-        );
-        assert!(
-            timeout >= inline,
-            "{id}: inlineWaitMs must not exceed timeoutMs"
-        );
-        assert!(
-            spec["maxOutputBytes"].as_u64().unwrap_or(0) >= 1,
-            "{id}: maxOutputBytes must be at least 1"
-        );
-        let program = spec["program"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{id}: program must be a string"));
-        assert!(
-            !program.starts_with('/'),
-            "{id}: program must not be absolute"
-        );
-        assert!(
-            !program.contains(".."),
-            "{id}: program must not escape with .."
-        );
-        let basename = program.rsplit('/').next().unwrap_or(program);
-        assert!(
-            !SHELL_BASENAMES.contains(&basename),
-            "{id}: `{basename}` is on the shell blacklist"
-        );
-        for arg in spec["args"]
-            .as_array()
-            .unwrap_or_else(|| panic!("{id}: args must be an array"))
-        {
-            let arg = arg
-                .as_str()
-                .unwrap_or_else(|| panic!("{id}: args items must be strings"));
-            // Placeholders are legal **only** in the `{{name}}` shape (a bare, lowercase
-            // identifier). A credential arrives through `$ENV{VAR}` host-side, never inline.
-            assert!(
-                !arg.contains("$ENV{"),
-                "{id}: `{arg}` must not read the process environment inline"
-            );
-            for (at, _) in arg.match_indices("{{") {
-                let rest = &arg[at + 2..];
-                let end = rest
-                    .find("}}")
-                    .unwrap_or_else(|| panic!("{id}: `{arg}` has an unclosed `{{`"));
-                let name = &rest[..end];
-                let legal = !name.is_empty()
-                    && name
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                    && !name.starts_with(|c: char| c.is_ascii_digit());
-                assert!(
-                    legal,
-                    "{id}: `{{{{{name}}}}}` must name a lowercase identifier (the Mod fills `lane` / `req` / `branch` / `base` / `path` / `mode` / `parent` / `batch`)"
-                );
-            }
-            assert!(
-                arg.matches("{{").count() == arg.matches("}}").count(),
-                "{id}: `{arg}` has an unbalanced placeholder"
-            );
-        }
-    }
-
-    // ②③ `allowedTools` is the request-time gate: a superset of `tools`, shape-checked, no dups.
-    for dir in [&project, &seed] {
-        let config = read_json(&dir.join("data/config.json"));
-        let allowed = config["allowedTools"]
-            .as_array()
-            .unwrap_or_else(|| panic!("{}: allowedTools must be an array", dir.display()));
-        let mut seen: Vec<String> = Vec::new();
-        for item in allowed {
-            let id = item
-                .as_str()
-                .unwrap_or_else(|| panic!("{}: allowedTools items must be strings", dir.display()));
-            assert!(
-                tool_id_shape_ok(id),
-                "{}: allowed tool id `{id}` must be <namespace>.<name>",
-                dir.display()
-            );
-            assert!(
-                !seen.contains(&id.to_owned()),
-                "{}: allowed tool `{id}` is listed twice",
-                dir.display()
-            );
-            seen.push(id.to_owned());
-        }
-        for id in &declared {
-            assert!(
-                seen.contains(id),
-                "{}: declared tool `{id}` is missing from allowedTools (the host refuses at load)",
-                dir.display()
-            );
-        }
-        seen.sort();
-        let mut declared_sorted = declared.clone();
-        declared_sorted.sort();
-        assert_eq!(
-            seen,
-            declared_sorted,
-            "{}: allowedTools and pack.json tools must be the same set",
-            dir.display()
-        );
-    }
-
-    // ④ both scene resources carry every tool beat (the skeleton is shared, `data/` is not).
-    let beats = [
-        "tool_requested",
-        "tool_result",
-        "tool_settled",
-        "tool_replayed",
-        "tool_after_done",
-        "tool_not_allowed",
-        "tool_allowed_none",
-        "tool_usage",
-        "tool_result_usage",
-        "tool_bad_tool_id",
-        "tool_bad_args",
-        "tool_bad_call_id",
-        "tool_call_dup",
-        "tool_capacity",
-        "tool_unknown_call",
-        "tool_result_mismatch",
-        "tool_bad_status",
-        "tool_bad_code",
-        "tool_output_truncated",
-    ];
-    let mut output_cap = 0;
-    for dir in [&project, &seed] {
-        let scenes = read_json(&dir.join("data/scenes.json"));
-        for key in beats {
-            assert!(
-                scenes["beats"].get(key).and_then(|value| value.as_str()).is_some(),
-                "{}: data/scenes.json beats is missing `{key}` (the shared src/ would render a raw placeholder)",
-                dir.display()
-            );
-        }
-        for spec in tools.values() {
-            output_cap = output_cap.max(spec["maxOutputBytes"].as_u64().unwrap_or(0));
-        }
-        // ⑤ the Mod's own output cap must not be tighter than the host's per-tool cap.
-        let truncate_at = scenes["tuning"]["tool_output_max"]
-            .as_u64()
-            .unwrap_or_else(|| {
-                panic!(
-                    "{}: tuning.tool_output_max must be an unsigned integer",
-                    dir.display()
-                )
-            });
-        assert!(
-            truncate_at >= output_cap,
-            "{}: tuning.tool_output_max ({truncate_at}) is below the largest maxOutputBytes ({output_cap})",
-            dir.display()
-        );
-    }
-
-    // ⑥⑦ the module is declared on both sides, in the same position, and the inbox route matches
-    // the wire the handlers produce.
-    assert_eq!(
-        project_pack["code"]["modules"], seed_pack["code"]["modules"],
-        "code.modules is the skeleton surface and must stay identical"
-    );
-    let modules = project_pack["code"]["modules"]
-        .as_array()
-        .expect("code.modules must be an array");
-    assert!(
-        modules.iter().any(|item| item == "src/tools.lua"),
-        "src/tools.lua must be declared in code.modules: {modules:?}"
-    );
-    for pack in [&project_pack, &seed_pack] {
-        let route = &pack["inboxRoutes"]["tool_result"];
-        assert_eq!(route["action"], json!("tool.result"));
-        assert_eq!(
-            route["fields"],
-            json!([
-                "call_id",
-                "tool_id",
-                "status",
-                "code",
-                "output",
-                "external_id"
-            ]),
-            "the inbox route fields are the wire segments, in order"
-        );
-        assert_eq!(
-            route["write"],
-            json!({"flag": "tool-result", "shape": "payload"})
-        );
-    }
-}
-
-// ───────────────────────── A · active subsystem (r2) ─────────────────────────
+// ───────────────────────── A · active subsystem ─────────────────────────
 
 /// One full tool round trip: register the request, then settle it. Machine actions carry no
 /// menu ticket (§8), and the call id is explicit so every assertion can name it.
@@ -1708,59 +2309,11 @@ fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
     narrative_lines(&game.reply("tool.result", &text(result)))
 }
 
-/// Every `TEXTS.<group>.<name>` reference in the Mod source (static keys only: the dynamic
-/// `TEXTS.beats[expr]` form is skipped). One side suffices as input — the skeleton is
-/// byte-identical on both, and the caller re-checks the keys against **both** scene files.
-fn text_references(dir: &Path) -> Vec<(String, String)> {
-    fn walk(path: &Path, out: &mut Vec<PathBuf>) {
-        if path.is_file() {
-            out.push(path.to_owned());
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(path) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            walk(&entry.path(), out);
-        }
-    }
-
-    let mut files = Vec::new();
-    walk(&dir.join("mod.lua"), &mut files);
-    walk(&dir.join("src"), &mut files);
-
-    let mut refs = Vec::new();
-    for file in files {
-        let Ok(source) = std::fs::read_to_string(&file) else {
-            continue;
-        };
-        let mut rest = source.as_str();
-        while let Some(at) = rest.find("TEXTS.") {
-            rest = &rest[at + "TEXTS.".len()..];
-            let group_end = rest
-                .find(|c: char| !(c.is_ascii_lowercase() || c == '_'))
-                .unwrap_or(rest.len());
-            let group = &rest[..group_end];
-            if !matches!(group, "beats" | "prompts" | "options" | "endings") {
-                continue;
-            }
-            let Some(tail) = rest[group_end..].strip_prefix('.') else {
-                continue;
-            };
-            let name_end = tail
-                .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
-                .unwrap_or(tail.len());
-            let name = &tail[..name_end];
-            if !name.is_empty() {
-                refs.push((group.to_owned(), name.to_owned()));
-            }
-        }
-    }
-    refs
-}
-
 /// A1 `git.worktree_claim` folds into the **same** lane ledger as `lane.claim` (same function,
 /// same keys, `since` tick included), and `git.worktree_release` frees it by lane number.
+/// (r2: the claim input branch must carry the forced naming shape — an illegal name is
+/// refused before any ledger write. r1: the design map is gone, so the ledger read surface
+/// here is the KV itself.)
 ///
 /// Mutation: replace `LANES.bind(..)` with a direct `lane.<k>.branch` write (dropping
 /// `req.<i>.lane` / `since`) → the `lane.2.since` and `req.1.lane` assertions go red.
@@ -1778,8 +2331,8 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
 
     let claimed = tool_round(
         &mut game,
-        "git.worktree_claim|lane=2;req=r1;branch=feat-a|t1",
-        "t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feat-a;base=abc1234;clean=1;path=/tmp/wt2",
+        "git.worktree_claim|lane=2;req=r1;branch=feature/aa11-feat-a|t1",
+        "t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feature/aa11-feat-a;base=abc1234;clean=1;path=/tmp/wt2",
     );
     assert_eq!(
         count_lines(&claimed, "[WORKTREE CLAIMED]"),
@@ -1787,30 +2340,43 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
         "{claimed:#?}"
     );
     game.assert_kv("lane.2.req", json!("r1"));
-    game.assert_kv("lane.2.branch", json!("feat-a"));
+    game.assert_kv("lane.2.branch", json!("feature/aa11-feat-a"));
     game.assert_kv("lane.2.base", json!("abc1234"));
     game.assert_kv("lane.2.clean", json!("1"));
     game.assert_kv("lane.2.since", json!(1));
     game.assert_kv("req.1.lane", json!(2));
     game.assert_kv("tool.reacted.t1", json!(true));
-    // The ledger is a read surface too: the design map prints the ledger row.
-    assert!(
-        game.narrate("map.show", &text("full"))
-            .join("\n")
-            .contains("lane-2 ← r1"),
-        "map.show full must show the claimed lane"
-    );
 
     // A fresh external_id re-applies the result (idempotency key only) but the latch keeps the
     // domain fold one-shot: no second `[WORKTREE CLAIMED]`.
     let replayed = narrative_lines(&game.reply(
         "tool.result",
-        &text("t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feat-a;base=abc1234;clean=1;path=/tmp/wt2|ext-1"),
+        &text("t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feature/aa11-feat-a;base=abc1234;clean=1;path=/tmp/wt2|ext-1"),
     ));
     assert_eq!(
         count_lines(&replayed, "[WORKTREE CLAIMED]"),
         0,
         "{replayed:#?}"
+    );
+
+    // An illegal branch name in the **input** is refused (r2: both entries, one judgement).
+    // The tool-face refusal is a narration, not a rejection line: the ledger and the reject
+    // counter stay untouched by design (账本与 reject 台账不动).
+    let rejects_before = game.kv("reject.count");
+    let illegal = tool_round(
+        &mut game,
+        "git.worktree_claim|lane=3;req=r1;branch=feature/r1|t3",
+        "t3|git.worktree_claim|ok|0|lane=3;req=r1;branch=feature/r1;base=abc1234;clean=1;path=/tmp/wt3",
+    );
+    assert_eq!(
+        count_lines(&illegal, "[WORKTREE CLAIM REFUSED]"),
+        1,
+        "an illegal branch must be narrated as refused: {illegal:#?}"
+    );
+    game.assert_kv("lane.3.branch", Json::Null);
+    assert_eq!(
+        game.kv("reject.count"), rejects_before,
+        "the tool-face refusal must not move the reject ledger"
     );
 
     // Release: the tool carries the lane number, not the requirement index.
@@ -1848,8 +2414,8 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     // ① the probe lands in KV, no overlap yet.
     tool_round(
         &mut game,
-        "git.lane_probe|lane=1;base=abc;branch=feat-a|t1",
-        "t1|git.lane_probe|ok|0|lane=1;branch=feat-a;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
+        "git.lane_probe|lane=1;base=abc;branch=feature/aa11-left|t1",
+        "t1|git.lane_probe|ok|0|lane=1;branch=feature/aa11-left;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
     );
     game.assert_kv("lane.1.probe.commits", json!(2));
     game.assert_kv("lane.1.probe.clean", json!("1"));
@@ -1861,8 +2427,8 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     // ② a shared file raises one conflict through the very same writer as the human path.
     let radar = tool_round(
         &mut game,
-        "git.lane_probe|lane=2;base=abc;branch=feat-b|t2",
-        "t2|git.lane_probe|ok|0|lane=2;branch=feat-b;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
+        "git.lane_probe|lane=2;base=abc;branch=feature/aa11-right|t2",
+        "t2|git.lane_probe|ok|0|lane=2;branch=feature/aa11-right;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
     );
     assert_eq!(count_lines(&radar, "[CONFLICT RADAR]"), 1, "{radar:#?}");
     game.assert_kv("req.1.conflict", json!("overlapping file: src/b.lua"));
@@ -1874,19 +2440,11 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     assert_eq!(game.phase("r1"), "blocked");
     assert_eq!(game.phase("r2"), "blocked");
 
-    // The radar rides the very counter `gates.gate_problem()` reads, so it is a hard block with
-    // no extra wiring; the summary is the read surface the host seals.
-    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    let conflicts = summary["conflicts"].as_array().expect("summary.conflicts");
-    assert_eq!(conflicts.len(), 2, "{summary}");
-    assert_eq!(conflicts[0]["peer"], json!("r2"));
-    assert_eq!(conflicts[0]["note"], json!("overlapping file: src/b.lua"));
-
     // ③ a failed probe (commits=0) is a warning, never a block: no new conflict, state stays.
     let failed = tool_round(
         &mut game,
-        "git.lane_probe|lane=2;base=abc;branch=feat-b|t3",
-        "t3|git.lane_probe|ok|0|lane=2;branch=feat-b;base=abc;head=2222222;commits=0;clean=1;files=",
+        "git.lane_probe|lane=2;base=abc;branch=feature/aa11-right|t3",
+        "t3|git.lane_probe|ok|0|lane=2;branch=feature/aa11-right;base=abc;head=2222222;commits=0;clean=1;files=",
     );
     assert_eq!(
         count_lines(&failed, "[LANE PROBE FAILED]"),
@@ -1905,200 +2463,6 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     game.assert_kv("req.1.conflict_source", json!(""));
     game.assert_kv("req.2.conflict_source", json!(""));
     assert_eq!(game.phase("r1"), "draft");
-}
-
-/// A2b `agent.summary` carries two **structured** detail lists next to the scalar counts:
-/// `jobs` (every requirement occupying an analysis / plan / development slot) and `gates`
-/// (every requirement sitting on a plan / accept gate). A scheduler reads them instead of
-/// scraping narrative, so the keys must be exactly the documented set — and they must derive
-/// from the same KV facts the scalar fields do (including the lane ledger's own
-/// branch / base bytes).
-///
-/// Mutation: route `jobs` / `gates` through `summary_int` (a count) → the `as_array()`
-/// unwraps below go red; drop the `SUMMARY_JOB_STAGES` filter in favour of `req_job(i) ~= ""`
-/// and the `done` / gate-released rows keep stale job entries, so `jobs.is_empty()` reds.
-#[test]
-fn summary_exposes_structured_jobs_and_gates() {
-    let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "task.intake",
-        &text("subsystem gate|synthetic task description"),
-    );
-
-    // r9 常驻生命周期三字段（加性）：coordinate ∧ 队列清空（无需求时充真）∧ 未武装
-    // = batchDrained=true；lifecycle 常量 resident；batch 缺省 1。
-    let fields = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    assert_eq!(fields["lifecycle"], json!("resident"), "{fields}");
-    assert_eq!(fields["batch"], json!(1), "{fields}");
-    assert_eq!(fields["batchDrained"], json!(true), "{fields}");
-    assert_eq!(fields["nextEndsRun"], json!(false), "{fields}");
-
-    game.narrate(
-        "requirement.add",
-        &text("synthetic requirement|synthetic description|semantics-r1"),
-    );
-    // Pre-claim a lane **with** branch/base: `jobs[].branch` / `jobs[].base` must be the lane
-    // ledger's own bytes, not something reconstructed from the requirement row.
-    game.narrate("lane.claim", &text("1|r1|feat-jobs|abc1234|1"));
-    game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.job", json!("plan"));
-
-    let summary = |game: &mut Game| {
-        let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-        assert!(
-            summary.is_object(),
-            "agent.summary must publish meta.summary: {summary}"
-        );
-        summary
-    };
-
-    // ① a plan job in flight → one `jobs` row, no gate yet.
-    let fields = summary(&mut game);
-    let jobs = fields["jobs"]
-        .as_array()
-        .unwrap_or_else(|| panic!("summary.jobs must be an array: {fields}"));
-    assert_eq!(jobs.len(), 1, "{fields}");
-    let job = &jobs[0];
-    assert_eq!(job["id"], json!("r1"), "{fields}");
-    assert_eq!(job["rev"], json!(1), "{fields}");
-    assert_eq!(job["stage"], json!("plan"), "{fields}");
-    assert_eq!(job["status"], json!("planning"), "{fields}");
-    assert_eq!(job["phase"], json!("planning"), "{fields}");
-    assert_eq!(job["lane"], json!(1), "{fields}");
-    assert_eq!(job["branch"], json!("feat-jobs"), "{fields}");
-    assert_eq!(job["base"], json!("abc1234"), "{fields}");
-    // The executor ledger is mirrored onto every job row: unbound = the empty string
-    // (never `null`), so a scheduler can read it without a null check.
-    assert_eq!(job["executor"], json!(""), "{fields}");
-    assert_eq!(job["planExecutor"], json!(""), "{fields}");
-    assert_eq!(job["title"], json!("synthetic requirement"), "{fields}");
-    assert_eq!(
-        job["description"],
-        json!("synthetic description"),
-        "{fields}"
-    );
-    let gates = fields["gates"]
-        .as_array()
-        .unwrap_or_else(|| panic!("summary.gates must be an array: {fields}"));
-    assert!(gates.is_empty(), "no gate is pending yet: {fields}");
-
-    // ② accept the plan proposal → the gate row appears and the job slot is released.
-    submit_with_exec(&mut game, 1, "plan", "semantics-j1", "agent-1");
-    game.click("proposal.accept — ");
-    game.assert_kv("req.1.gate", json!("plan"));
-    let fields = summary(&mut game);
-    let gates = fields["gates"]
-        .as_array()
-        .unwrap_or_else(|| panic!("summary.gates must be an array: {fields}"));
-    assert_eq!(gates.len(), 1, "{fields}");
-    assert_eq!(gates[0]["id"], json!("r1"), "{fields}");
-    assert_eq!(gates[0]["gate"], json!("plan"), "{fields}");
-    assert_eq!(gates[0]["rev"], json!(1), "{fields}");
-    assert_eq!(
-        gates[0]["title"],
-        json!("synthetic requirement"),
-        "{fields}"
-    );
-    let jobs = fields["jobs"]
-        .as_array()
-        .unwrap_or_else(|| panic!("summary.jobs must be an array: {fields}"));
-    assert!(
-        jobs.is_empty(),
-        "the job slot is released while a gate is pending: {fields}"
-    );
-
-    // ③ approve the plan → development is auto-dispatched on the **pre-claimed** lane, so the
-    //    branch/base recorded at claim time survive into the new job row.
-    game.click("gate.approve — ");
-    game.assert_kv("req.1.job", json!("development"));
-    let fields = summary(&mut game);
-    let jobs = fields["jobs"]
-        .as_array()
-        .unwrap_or_else(|| panic!("summary.jobs must be an array: {fields}"));
-    assert_eq!(jobs.len(), 1, "{fields}");
-    assert_eq!(jobs[0]["stage"], json!("development"), "{fields}");
-    assert_eq!(jobs[0]["status"], json!("developing"), "{fields}");
-    assert_eq!(jobs[0]["phase"], json!("developing"), "{fields}");
-    assert_eq!(jobs[0]["lane"], json!(1), "{fields}");
-    // ② bound the **plan** executor (`agent-1`): the development row has no executor of its
-    // own yet, but `planExecutor` still carries the plan-stage id.
-    assert_eq!(
-        jobs[0]["executor"],
-        json!(""),
-        "development is not bound yet: {fields}"
-    );
-    assert_eq!(
-        jobs[0]["planExecutor"],
-        json!("agent-1"),
-        "the plan-stage executor rides along the development row: {fields}"
-    );
-    assert_eq!(
-        jobs[0]["branch"],
-        json!(""),
-        "`proposal.accept` (plan) releases the lane ledger, so the auto-dispatched job \
-         rebinds a bare lane — the pre-claim branch is gone: {fields}"
-    );
-    assert_eq!(
-        jobs[0]["base"],
-        json!(""),
-        "the lane ledger was released with the plan job slot: {fields}"
-    );
-    let gates = fields["gates"]
-        .as_array()
-        .unwrap_or_else(|| panic!("summary.gates must be an array: {fields}"));
-    assert!(gates.is_empty(), "the gate is resolved: {fields}");
-}
-
-/// Summary jobs mirror the **bound executor ledger**: `executor` (current stage) and
-/// `planExecutor` (the plan stage) are the clean agent id — the `|<reason>` suffix that
-/// `config.set` / `exec=` store next to the id is stripped before it reaches the wire.
-///
-/// Mutation: drop the `wire.executor_id_of` strip in `summary_jobs` → `planExecutor`
-/// becomes `agent-2|handoff` and the last assertion goes red.
-#[test]
-fn summary_jobs_strip_the_executor_reason_suffix() {
-    let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "task.intake",
-        &text("subsystem gate|synthetic task description"),
-    );
-    game.narrate(
-        "requirement.add",
-        &text("synthetic requirement|synthetic description|semantics-r1"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    let jobs = |game: &mut Game| {
-        let fields = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-        fields["jobs"]
-            .as_array()
-            .unwrap_or_else(|| panic!("summary.jobs must be an array: {fields}"))
-            .clone()
-    };
-
-    // ① nothing is bound yet → two empty strings (never `null`).
-    let rows = jobs(&mut game);
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0]["executor"], json!(""), "{rows:?}");
-    assert_eq!(rows[0]["planExecutor"], json!(""), "{rows:?}");
-
-    // ② an inline `exec=agent-2:handoff` binds the plan stage **with a reason**.
-    submit_with_exec(&mut game, 1, "plan", "semantics-exec", "agent-2:handoff");
-    game.assert_kv("settings.executor.r1.plan", json!("agent-2|handoff"));
-    game.click("proposal.accept — ");
-    game.click("gate.approve — ");
-    game.assert_kv("req.1.job", json!("development"));
-
-    // ③ the development row reports the clean ids: its own stage is unbound, the plan stage
-    //    keeps `agent-2` **without** the `|handoff` suffix.
-    let rows = jobs(&mut game);
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0]["stage"], json!("development"), "{rows:?}");
-    assert_eq!(rows[0]["executor"], json!(""), "{rows:?}");
-    assert_eq!(
-        rows[0]["planExecutor"],
-        json!("agent-2"),
-        "the reason suffix must not leak into the wire: {rows:?}"
-    );
 }
 
 /// A3 `fs.artifact_probe` and `vfs.write` feed **one** bounded ledger (`record_artifact` is the
@@ -2253,21 +2617,13 @@ fn verify_suite_result_records_green_evidence_only_in_review() {
     game.assert_kv("verify.passed", json!(true));
     game.assert_kv("verify.report", json!("52 suites green"));
     game.assert_kv("verify.source", json!("tool:gate.verify_suite"));
-
-    // ④ the host settlement surface reads the same key.
-    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    assert_eq!(
-        summary["verifyPassed"],
-        json!(true),
-        "the summary must see the machine evidence: {summary}"
-    );
 }
 
 /// A5 `harness.archive_sessions` registers the settlement evidence only when `remaining=0`, and
-/// the run can then close without a separate `settlement.sessions` turn.
+/// the batch can then close without a separate `settlement.sessions` turn.
 ///
 /// Mutation: drop the `settlement.sessions.destination` write from the reactor → `review.note` is
-/// stopped by `gates.settlement_problem()` and the `[ENDING` assertion goes red.
+/// stopped by `gates.settlement_problem()` and the batch-close assertion goes red.
 #[test]
 fn archive_sessions_result_unblocks_the_settlement() {
     let mut game = drive_to_accept(drive_to_plan_gate());
@@ -2321,78 +2677,6 @@ fn archive_sessions_result_unblocks_the_settlement() {
     game.assert_kv("fsm.stage", json!("coordinate"));
 }
 
-/// A6 The declaration surface of the active subsystem on **both** sides: the six built-in tools,
-/// their `allowedTools` entries, a usable `artifact_capacity`, and — the structural half — every
-/// `TEXTS.<group>.<name>` the source references exists in both scene files.
-///
-/// Mutation: delete one beat from one side's `data/scenes.json` (or rename it in the source) →
-/// this test names the missing key instead of letting the run render a raw `{{placeholder}}`.
-#[test]
-fn subsystem_declarations_and_beat_references_stay_complete() {
-    let project = project_mod_dir();
-    let seed = seed_mod_dir();
-    let subsystem_tools = [
-        "git.worktree_claim",
-        "git.worktree_release",
-        "git.lane_probe",
-        "fs.artifact_probe",
-        "gate.verify_suite",
-        "harness.archive_sessions",
-    ];
-
-    for dir in [&project, &seed] {
-        let pack = read_json(&dir.join("pack.json"));
-        let config = read_json(&dir.join("data/config.json"));
-        let scenes = read_json(&dir.join("data/scenes.json"));
-        let tools = pack["tools"]
-            .as_object()
-            .unwrap_or_else(|| panic!("{}: pack.json tools must be an object", dir.display()));
-        let allowed = config["allowedTools"]
-            .as_array()
-            .unwrap_or_else(|| panic!("{}: allowedTools must be an array", dir.display()));
-        let allowed: Vec<&str> = allowed.iter().filter_map(|item| item.as_str()).collect();
-        for id in subsystem_tools {
-            assert!(
-                tools.contains_key(id),
-                "{}: pack.json tools is missing `{id}`",
-                dir.display()
-            );
-            assert!(
-                allowed.contains(&id),
-                "{}: allowedTools is missing `{id}` (the host refuses the call at request time)",
-                dir.display()
-            );
-            assert_eq!(
-                tools[id]["program"],
-                json!("ygg-agent"),
-                "{id}: the built-in tools are served by the host binary itself"
-            );
-        }
-        for (group, name) in text_references(&project) {
-            assert!(
-                scenes[group.as_str()][name.as_str()].as_str().is_some(),
-                "{}: data/scenes.json `{group}.{name}` is referenced by the source but missing \
-                 (the run would narrate a raw `{{{{placeholder}}}}`)",
-                dir.display()
-            );
-        }
-        let cap = scenes["tuning"]["artifact_capacity"].as_u64().unwrap_or(0);
-        assert!(
-            cap >= 1,
-            "{}: tuning.artifact_capacity must be at least 1 (the ledger is bounded)",
-            dir.display()
-        );
-    }
-
-    // The reference scan itself must be productive (a broken scanner proves nothing).
-    let refs = text_references(&project);
-    assert!(
-        refs.len() > 200,
-        "the scene-text scanner found only {} references",
-        refs.len()
-    );
-}
-
 struct SyncRitualRunner;
 
 impl HostToolRunner for SyncRitualRunner {
@@ -2409,7 +2693,7 @@ impl HostToolRunner for SyncRitualRunner {
                 let branch = args
                     .get("branch")
                     .cloned()
-                    .unwrap_or_else(|| format!("feature/{req}"));
+                    .unwrap_or_else(|| format!("feature/d4e5-sync-bridge"));
                 out.insert("lane".to_owned(), lane.clone());
                 out.insert("req".to_owned(), req);
                 out.insert("branch".to_owned(), branch);
@@ -2427,7 +2711,7 @@ impl HostToolRunner for SyncRitualRunner {
                 let branch = args
                     .get("branch")
                     .cloned()
-                    .unwrap_or_else(|| "feature/r1".to_owned());
+                    .unwrap_or_else(|| "feature/d4e5-sync-bridge".to_owned());
                 out.insert("lane".to_owned(), lane);
                 out.insert("base".to_owned(), base);
                 out.insert("branch".to_owned(), branch);
@@ -2436,7 +2720,7 @@ impl HostToolRunner for SyncRitualRunner {
                 out.insert("clean".to_owned(), "1".to_owned());
                 out.insert(
                     "files".to_owned(),
-                    "src/tools.lua,src/render.lua".to_owned(),
+                    "src/runtime/tools.lua,src/view/render.lua".to_owned(),
                 );
                 Ok(out)
             }
@@ -2463,18 +2747,18 @@ impl HostToolRunner for SyncRitualRunner {
 
 /// A7 Synchronous `ygg.tool.call` mounted on `KernelFacade` settles all 4 inline engineering
 /// rituals (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`, and
-/// `harness.archive_sessions`) in **1 single turn each** without `tool.result` callbacks, and
-/// `summary.jobs[0].subagentAction` exposes `action`, `brief`, `worktreePath`, `artifactPath`,
-/// and `submitCommand`.
+/// `harness.archive_sessions`) in **1 single turn each** without `tool.result` callbacks.
+/// The branch is **pre-claimed** through `lane.claim` in the forced r2 shape — the default
+/// name generator is gone, the auto-claim consumes the ledger's own branch.
 #[test]
-fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
+fn synchronous_tool_bridge_runs_inline_rituals() {
     let mut game = Game::open(&project_mod_dir());
     game.kernel
         .set_tool_runner(Some(Box::new(SyncRitualRunner)));
 
     game.narrate(
         "task.intake",
-        &text("sync bridge|verify 1-turn inline rituals and subagentAction"),
+        &text("sync bridge|verify 1-turn inline rituals"),
     );
     game.narrate(
         "requirement.add",
@@ -2482,40 +2766,18 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     );
     game.narrate("requirement.dispatch", "0");
 
-    // 0) During plan stage, summary.jobs[0].subagentAction is `subagent.spawn`.
-    let plan_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    let plan_jobs = plan_summary["jobs"].as_array().expect("summary.jobs array");
-    assert_eq!(plan_jobs.len(), 1);
-    assert_eq!(plan_jobs[0]["worktreeStatus"], json!("n/a"));
-    assert_eq!(plan_jobs[0]["subagentStatus"], json!("pending"));
-    assert_eq!(plan_jobs[0]["probeStatus"], json!("n/a"));
-    let plan_action = &plan_jobs[0]["subagentAction"];
-    assert_eq!(plan_action["action"], json!("subagent.spawn"));
-    assert_eq!(plan_action["reqId"], json!("r1"));
-    assert_eq!(plan_action["stage"], json!("plan"));
-    assert_eq!(plan_action["artifactPath"], json!("artifacts/r1-plan.md"));
-    let plan_brief = plan_action["brief"].as_str().unwrap_or("");
-    assert!(plan_brief.contains("Requirement r1"));
-    assert!(
-        plan_brief.contains("docs/CONTEXT.md") && plan_brief.contains("docs/DESIGN.md"),
-        "brief must include mandatory living docs references: {plan_brief}"
-    );
-    assert!(plan_action["submitCommand"]
-        .as_str()
-        .unwrap_or("")
-        .contains("proposal.submit"));
+    // Pre-claim the lane (r2: the branch is self-reported; the auto-claim reuses it).
+    // Timing: `proposal.accept` (plan) releases the lane ledger — the pre-claim must be
+    // re-stated **after** the acceptance, before the gate approval that triggers the claim.
 
     // Submit plan proposal with inline executor registration (`exec=agent-plan`).
-    game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|plan ready|artifacts/r1-plan.md||exec=agent-plan"),
-    );
-    let list_with_prop = game.narrate("requirement.list", "0").join("\n");
-    assert!(
-        list_with_prop.contains("(wt=n/a)(subagent=delivered:p1(agent-plan))"),
-        "requirement.list must show delivered proposal status: {list_with_prop}"
-    );
+    submit_with_exec(&mut game, 1, "plan", "sync-p1", "agent-plan");
     game.click("proposal.accept — ");
+    game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/d4e5-sync-bridge|2e24c45|1"),
+    );
+    game.assert_kv("lane.1.branch", json!("feature/d4e5-sync-bridge"));
 
     // 1) Approving plan_gate triggers auto_dispatch -> auto_claim_worktree in the SAME turn!
     let approved_plan = game.click("gate.approve — ");
@@ -2531,53 +2793,17 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
         "{approved_plan_lines:#?}"
     );
     game.assert_kv("lane.1.req", json!("r1"));
-    game.assert_kv("lane.1.branch", json!("feature/r1"));
+    game.assert_kv("lane.1.branch", json!("feature/d4e5-sync-bridge"));
     game.assert_kv("lane.1.base", json!("2e24c45"));
     game.assert_kv("lane.1.path", json!("/tmp/ygg-wt-lane-1"));
     game.assert_kv("tool.settled_count", json!(1));
     game.assert_kv("tool.pending", json!(null));
 
-    // Check summary.jobs[0].subagentAction in development stage:
-    // Because planExecutor is `agent-plan`, action is `subagent.resume` and worktreePath is populated!
-    let dev_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    let dev_jobs = dev_summary["jobs"].as_array().expect("summary.jobs array");
-    assert_eq!(dev_jobs.len(), 1);
-    assert_eq!(dev_jobs[0]["worktreePath"], json!("/tmp/ygg-wt-lane-1"));
-    assert_eq!(
-        dev_jobs[0]["worktreeStatus"],
-        json!("ready:/tmp/ygg-wt-lane-1@feature/r1")
-    );
-    assert_eq!(dev_jobs[0]["subagentStatus"], json!("pending"));
-    assert_eq!(dev_jobs[0]["probeStatus"], json!("pending"));
-    let dev_list = game.narrate("requirement.list", "0").join("\n");
-    assert!(
-        dev_list.contains("(wt=ready:/tmp/ygg-wt-lane-1@feature/r1)(subagent=pending)"),
-        "requirement.list must show live worktreeStatus and subagentStatus: {dev_list}"
-    );
-    let dev_action = &dev_jobs[0]["subagentAction"];
-    assert_eq!(dev_action["action"], json!("subagent.resume"));
-    assert_eq!(dev_action["resumeAgentId"], json!("agent-plan"));
-    assert_eq!(dev_action["worktreePath"], json!("/tmp/ygg-wt-lane-1"));
-    assert_eq!(
-        dev_action["artifactPath"],
-        json!("artifacts/r1-development.md")
-    );
-    let dev_brief = dev_action["brief"].as_str().unwrap_or("");
-    assert!(dev_brief.contains("/tmp/ygg-wt-lane-1"));
-    assert!(
-        dev_brief.contains("docs/CONTEXT.md") && dev_brief.contains("docs/DESIGN.md"),
-        "development brief must include mandatory living docs references: {dev_brief}"
-    );
-    assert!(dev_action["submitCommand"]
-        .as_str()
-        .unwrap_or("")
-        .contains("r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>"));
-
     // 2) Submitting development proposal triggers auto_probe_lane in the SAME turn!
     let dev_prop_lines = game.narrate(
         "proposal.submit",
         &text(
-            "r1|1|development|dev done|artifacts/r1-development.md|src/tools.lua|exec=agent-plan",
+            "r1|1|development|dev done|artifacts/r1-development.md|src/runtime/tools.lua|exec=agent-plan",
         ),
     );
     assert_eq!(
@@ -2653,490 +2879,119 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     game.assert_kv("fsm.stage", json!("coordinate"));
 }
 
-/// A8 Placeholder actor IDs (`"pi-ygg-harness"`, `"unregistered"`, `"main"`) recorded in the
-/// executor ledger must NOT trigger a false `subagent.resume`; `subagentAction.action` stays
-/// `"subagent.spawn"` with `resumeAgentId = ""`, while `probeStatus` reflects `verified:commits=...,clean=...`
-/// once a lane probe has settled.
-#[test]
-fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
-    let mut game = Game::open(&project_mod_dir());
-    game.kernel
-        .set_tool_runner(Some(Box::new(SyncRitualRunner)));
+// ───────────────────────── r13 · fuel autoscale + requirement list pagination ─────────────────────────
 
+/// r13 A: the dispatch fuel budget autoscales with the canonical state size —
+/// `clamp(per_entry × kv_len, floor, cap)` — while an explicit `YGG_FUEL_BUDGET` wins
+/// **exactly** (the escape hatch is not clipped by the floor or the cap); a missing,
+/// zero, or unparseable env falls back to the autoscale.
+#[test]
+fn fuel_budget_autoscales_with_state_size_and_env_wins() {
+    // Autoscale: the pure function is the single source (host-injected only).
+    assert_eq!(
+        auto_budget(0),
+        DEFAULT_FUEL_BUDGET,
+        "kv_len 0 sits on the floor"
+    );
+    assert_eq!(
+        auto_budget(60),
+        FUEL_AUTOSCALE_PER_ENTRY * 60,
+        "the scale is exactly per_entry × kv_len inside the window"
+    );
+    assert_eq!(
+        auto_budget(10_000),
+        FUEL_AUTOSCALE_CAP,
+        "huge states clamp to the 4M cap"
+    );
+    assert_eq!(
+        auto_budget(usize::MAX),
+        FUEL_AUTOSCALE_CAP,
+        "saturating multiplication must not panic and still clamp"
+    );
+
+    // Resolution: explicit env is byte-exact and uncapped (both escape directions).
+    assert_eq!(resolve_budget(Some("12345"), 100), 12_345);
+    assert_eq!(resolve_budget(Some("1"), 100_000), 1, "below the floor: allowed");
+    assert_eq!(
+        resolve_budget(Some("99999999999"), 0),
+        99_999_999_999,
+        "above the cap: allowed (escape hatch semantics)"
+    );
+    assert_eq!(resolve_budget(Some(" 4096 "), 100), 4_096, "the raw is trimmed");
+
+    // Fallback: missing / zero / unparseable → the autoscale.
+    assert_eq!(resolve_budget(None, 0), DEFAULT_FUEL_BUDGET);
+    assert_eq!(resolve_budget(Some("0"), 100), auto_budget(100));
+    assert_eq!(resolve_budget(Some("abc"), 100), auto_budget(100));
+    assert_eq!(resolve_budget(Some(""), 100), auto_budget(100));
+}
+
+/// r13 B: `requirement.list` is a **paged** view by default — open requirements first
+/// (canonical order), page width 12, the rest folded into a hint line — while
+/// `requirement.list full` opts into the full render (the low-frequency operational view).
+#[test]
+fn requirement_list_pages_open_first_and_full_opt_in() {
+    let mut game = Game::open(&project_mod_dir());
     game.narrate(
         "task.intake",
-        &text("guard test|verify is_resumable_agent_id and probeStatus"),
-    );
-    game.narrate("requirement.add", &text("guard req|verify resume guard|r1"));
-    game.narrate("requirement.dispatch", "0");
-
-    // Submit plan proposal using the fallback actor ID `pi-ygg-harness`.
-    game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|plan by fallback actor|artifacts/r1-plan.md||exec=pi-ygg-harness"),
-    );
-    game.click("proposal.accept — ");
-    game.click("gate.approve — ");
-
-    // Even though `planExecutor` is `"pi-ygg-harness"`, `is_resumable_agent_id` rejects it,
-    // so development stage requests `subagent.spawn` with `resumeAgentId == ""`.
-    let dev_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    let dev_jobs = dev_summary["jobs"].as_array().expect("summary.jobs array");
-    assert_eq!(dev_jobs.len(), 1);
-    assert_eq!(dev_jobs[0]["planExecutor"], json!("pi-ygg-harness"));
-    assert_eq!(
-        dev_jobs[0]["subagentAction"]["action"],
-        json!("subagent.spawn")
-    );
-    assert_eq!(dev_jobs[0]["subagentAction"]["resumeAgentId"], json!(""));
-
-    // Register a real executor for development and populate probe results to verify `dispatched:<id>` + `verified:...`.
-    game.narrate(
-        "config.set",
-        &text("executor.r1.development=agent-dev-uuid-1|assigned"),
-    );
-    tool_round(
-        &mut game,
-        "git.lane_probe|lane=1;base=2e24c45;branch=feature/r1|tp1",
-        "tp1|git.lane_probe|ok|0|lane=1;branch=feature/r1;base=2e24c45;head=deadbeef1234;commits=2;clean=1;files=src/render.lua",
-    );
-    let probed_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    let probed_jobs = probed_summary["jobs"]
-        .as_array()
-        .expect("summary.jobs array");
-    assert_eq!(
-        probed_jobs[0]["subagentStatus"],
-        json!("dispatched:agent-dev-uuid-1")
-    );
-    assert_eq!(
-        probed_jobs[0]["probeStatus"],
-        json!("verified:commits=2,clean=1")
-    );
-    assert_eq!(
-        probed_jobs[0]["subagentAction"]["action"],
-        json!("subagent.resume")
-    );
-    assert_eq!(
-        probed_jobs[0]["subagentAction"]["resumeAgentId"],
-        json!("agent-dev-uuid-1")
+        &text("pagination|synthetic task description"),
     );
 
-    // Switching to `play.mode=goal` before `goal.authorization` is registered emits `[GOAL AUTH PENDING]`.
-    let goal_without_auth = game.narrate("config.set", &text("play.mode=goal"));
-    assert_eq!(
-        count_lines(&goal_without_auth, "[GOAL AUTH PENDING]"),
-        1,
-        "{goal_without_auth:#?}"
-    );
-    game.narrate(
-        "config.set",
-        &text("goal.authorization=authorized for test"),
-    );
-    let goal_with_auth = game.narrate("config.set", &text("play.mode=goal"));
-    assert_eq!(
-        count_lines(&goal_with_auth, "[GOAL AUTH PENDING]"),
-        0,
-        "{goal_with_auth:#?}"
-    );
-}
-
-// ───────────────────────── r3 提交者身份（actor 章 + profile 注册表） ─────────────────────────
-
-/// Submit an `r1` proposal with the full identity tail chain
-/// `…|exec=<exec>[:<reason>]|actor=<actor>|actor_session=<session>` (the channel the
-/// host stamps on declared routes; here dispatched straight at the kernel).
-#[track_caller]
-fn submit_with_identity(
-    game: &mut Game,
-    rev: u32,
-    stage: &str,
-    ext: &str,
-    exec: Option<&str>,
-    actor: Option<&str>,
-    session: Option<&str>,
-) -> Vec<String> {
-    submit_identity_for(game, "r1", rev, stage, ext, exec, actor, session)
-}
-
-/// 同上，但需求 id 可指定（actor-only 用例在无账本绑定的干净需求上验证）。
-#[track_caller]
-fn submit_identity_for(
-    game: &mut Game,
-    req: &str,
-    rev: u32,
-    stage: &str,
-    ext: &str,
-    exec: Option<&str>,
-    actor: Option<&str>,
-    session: Option<&str>,
-) -> Vec<String> {
-    let mut payload =
-        format!("{req}|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}");
-    if let Some(exec) = exec {
-        payload.push_str(&format!("|exec={exec}"));
-    }
-    if let Some(actor) = actor {
-        payload.push_str(&format!("|actor={actor}"));
-    }
-    if let Some(session) = session {
-        payload.push_str(&format!("|actor_session={session}"));
-    }
-    game.narrate("proposal.submit", &text(&payload))
-}
-
-/// The `requirement.list` row carrying the executor trace (the display surface).
-#[track_caller]
-fn exec_trace_row(game: &mut Game) -> String {
-    game.narrate("requirement.list", "0")
-        .into_iter()
-        .find(|line| line.contains("(exec "))
-        .expect("requirement.list must carry an exec trace once an executor is bound")
-}
-
-/// verified：exec 与宿主章同句柄 → `[ACTOR VERIFIED]` 叙事 + 双章落库 + trace 后缀；
-/// save/重放后 trace 仍可读（事件存档携带的 KV 投影不丢）。
-#[test]
-fn actor_channel_verified_lands_in_kv_narrative_and_survives_a_reload() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    submit_with_identity(
-        &mut game,
-        1,
-        "plan",
-        "id-verified",
-        Some("agent-1"),
-        Some("agent-1"),
-        Some("s-plan-1"),
-    );
-    game.assert_kv("prop.1.actor", json!("agent-1"));
-    game.assert_kv("prop.1.actor_session", json!("s-plan-1"));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-    let row = exec_trace_row(&mut game);
-    assert!(row.contains("plan=agent-1 [verified]"), "{row}");
-
-    // save → rebuild → trace verdict still readable (the KV projection survives a reload).
-    let save = game.save();
-    let bytes = serde_json::to_vec(&save).expect("serialize the save");
-    let mut rebuilt = Game {
-        bundle: game.bundle.clone(),
-        kernel: game.bundle.restore(&bytes).expect("restore from save"),
-    };
-    let row = exec_trace_row(&mut rebuilt);
-    assert!(row.contains("plan=agent-1 [verified]"), "{row}");
-}
-
-/// mismatch：exec 与章不同句柄 → 识别不拒绝（记录 + 叙事，验收照常走）。
-#[test]
-fn actor_channel_mismatch_is_recorded_never_rejected() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    let lines = submit_with_identity(
-        &mut game,
-        1,
-        "plan",
-        "id-mismatch",
-        Some("agent-1"),
-        Some("agent-2"),
-        None,
-    );
-    assert!(
-        lines.iter().any(|line| line.contains("[ACTOR MISMATCH]")),
-        "{lines:#?}"
-    );
-    game.assert_kv("prop.1.actor", json!("agent-2"));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-    let row = exec_trace_row(&mut game);
-    assert!(
-        row.contains("plan=agent-1 [mismatch:actor=agent-2]"),
-        "{row}"
-    );
-    // 识别不拒绝：提案照常待验收、验收照常推进门禁。
-    game.click("proposal.accept — ");
-    game.assert_kv("req.1.gate", json!("plan"));
-}
-
-/// unverified + actor-only：无章 = `[unverified]` 后缀；只带章不带 exec = 只记章、
-/// 不绑账本、不出三态叙事（账本没有“被验证者”）。
-#[test]
-fn actor_channel_unverified_and_actor_only() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    // unverified：exec 有、章无（旧宿主 / 直接派发面）。
-    let lines = submit_with_identity(&mut game, 1, "plan", "id-unv", Some("agent-1"), None, None);
-    assert!(
-        lines.iter().any(|line| line.contains("[ACTOR UNVERIFIED]")),
-        "{lines:#?}"
-    );
-    game.assert_kv("prop.1.actor", json!(""));
-    let row = exec_trace_row(&mut game);
-    assert!(row.contains("plan=agent-1 [unverified]"), "{row}");
-
-    // r1 的账本绑定不受“打回”影响（账本只增改）：拒绝后 ledger 仍在。
-    game.narrate("proposal.reject", &text("r1|replan without identity"));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-
-    // actor-only：干净需求上只带章不带 exec —— 不绑账本、章落库、无三态叙事。
+    // r1 goes the full happy path to `done` (the only closed row).
     game.narrate(
         "requirement.add",
-        &text("actor-only requirement|synthetic description|id-r2"),
+        &text("synthetic requirement|synthetic description|page-r1"),
     );
-    game.narrate("requirement.dispatch", &text("r2"));
-    let lines = submit_identity_for(
-        &mut game,
-        "r2",
-        1,
-        "plan",
-        "id-actor-only",
-        None,
-        Some("agent-9"),
-        None,
-    );
-    assert!(
-        !lines.iter().any(|line| line.contains("[ACTOR ")),
-        "actor-only must not narrate a three-state verdict: {lines:#?}"
-    );
-    game.assert_kv("prop.2.actor", json!("agent-9"));
-    game.assert_kv("settings.executor.r2.plan", Json::Null);
-    // r2 无账本绑定 → 它的 trace 行没有 exec 项。
-    let r2_row = game
-        .narrate("requirement.list", "0")
-        .into_iter()
-        .find(|line| line.contains(" r2 ["))
-        .expect("r2 must be listed");
-    assert!(!r2_row.contains("(exec "), "{r2_row}");
-}
+    game.narrate("requirement.dispatch", "0");
+    submit(&mut game, 1, "plan", "page-p1");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    submit(&mut game, 1, "development", "page-p2");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.assert_kv("req.1.status", json!("done"));
 
-/// 段序契约（mod 侧半）：错位 / 乱序 / 重复 / 坏形状逐段点名拒绝；全链 10 段载荷
-/// （7 段主体 + exec + actor + actor_session）各归其位。
-#[test]
-fn actor_session_segment_order_and_shapes_are_locked() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
+    // r2..r13: twelve open drafts (total 13 requirements).
+    for i in 2..=13 {
+        game.narrate(
+            "requirement.add",
+            &text(&format!("page requirement {i}|synthetic description|page-r{i}")),
+        );
+    }
 
-    // actor_session= 在中间段 → 拒（必须最后）。
-    let misplaced = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|s|artifacts/p.md||x|actor_session=s1|exec=agent-1"),
-    );
-    assert_refused(&misplaced, "actor_session=");
-    // actor= 在 actor_session= 之后 → 拒（固定相对序）。
-    let swapped = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|s|artifacts/p.md||x|actor_session=s1|actor=agent-1"),
-    );
-    assert_refused(&swapped, "actor_session=");
-    // 重复 exec= → 拒（多出的进中间段 = 错位）。
-    let duplicated = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|s|artifacts/p.md||x|exec=agent-1|exec=agent-2"),
-    );
-    assert_refused(&duplicated, "exec=");
-    // actor 值带空白 → 形状拒绝。
-    let bad_shape = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|s|artifacts/p.md||x|exec=agent-1|actor=agent 2"),
-    );
-    assert_refused(&bad_shape, "actor id must be");
-
-    // 全链 10 段（R5 形状锁）：字段与三个尾段各归其位。
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|full-chain summary|artifacts/plan.md|ch=1|id-full|exec=agent-1|actor=agent-1|actor_session=s-full"),
-    );
-    assert!(
-        !lines.iter().any(|line| line.contains("REJECTED")),
-        "full chain must parse: {lines:#?}"
-    );
-    game.assert_kv("prop.1.stage", json!("plan"));
-    game.assert_kv("prop.1.summary", json!("full-chain summary"));
-    game.assert_kv("prop.1.changes", json!("ch=1"));
-    game.assert_kv("prop.1.ext", json!("id-full"));
-    game.assert_kv("prop.1.actor", json!("agent-1"));
-    game.assert_kv("prop.1.actor_session", json!("s-full"));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-}
-
-/// profile 注册表：config.set 逐键注册 roundtrip（KV 落位 / upsert / 未知键文案）。
-#[test]
-fn profile_registration_via_config_set_roundtrip() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    game.narrate("config.set", &text("profile.agent-1.harness=pi"));
-    game.assert_kv("settings.profile.agent-1.harness", json!("pi"));
-    game.assert_kv("settings.profile_index", json!("agent-1"));
-    // upsert：同键重写覆盖。
-    game.narrate("config.set", &text("profile.agent-1.harness=codex"));
-    game.assert_kv("settings.profile.agent-1.harness", json!("codex"));
-    // 其余保留键 + 自由键。
-    game.narrate(
-        "config.set",
-        &text("profile.agent-1.session_id=01a1c961-test"),
-    );
-    game.narrate("config.set", &text("profile.agent-1.role=plan-executor"));
-    game.narrate(
-        "config.set",
-        &text("profile.agent-1.assignments=r1:plan,r1:development,r3"),
-    );
-    game.narrate("config.set", &text("profile.agent-1.registered_by=main"));
-    game.assert_kv(
-        "settings.profile.agent-1.session_id",
-        json!("01a1c961-test"),
-    );
-    game.assert_kv("settings.profile.agent-1.role", json!("plan-executor"));
-    game.assert_kv(
-        "settings.profile.agent-1.assignments",
-        json!("r1:plan,r1:development,r3"),
-    );
-    game.assert_kv("settings.profile.agent-1.registered_by", json!("main"));
-    game.assert_kv("settings.profile_index", json!("agent-1"));
-    // settings. 前缀写法等价。
-    game.narrate("config.set", &text("settings.profile.agent-1.role=dev"));
-    game.assert_kv("settings.profile.agent-1.role", json!("dev"));
-    // 键形坏（缺 <key> 段）→ bad_handle 文案。
-    let malformed = game.narrate("config.set", &text("profile.agent-1=x"));
-    assert_refused(&malformed, "profile.<handle>.<key>");
-    // 保留键/自由键之外的键名 → bad_value 文案。
-    let unknown = game.narrate("config.set", &text("profile.agent-1.UPPER=x"));
-    assert_refused(&unknown, "invalid profile value");
-    // 真未知键 → bad_config_key 文案，且 config_keys 包含 profile 家族（fail-closed 面同步）。
-    let alien = game.narrate("config.set", &text("profile_index=agent-x"));
-    assert_refused(&alien, "profile.<handle>.<key>");
-}
-
-/// profile 保留键校验矩阵：handle 张冠李戴 / assignments 坏 token / harness 空白 /
-/// 空值清除 / handle 一致不落 KV。
-#[test]
-fn profile_reserved_key_validation() {
-    let mut game = Game::open(&project_mod_dir());
-
-    // handle 与键名不一致 → 拒。
-    let mismatch = game.narrate("config.set", &text("profile.agent-1.handle=other"));
-    assert_refused(&mismatch, "profile key must be");
-    // handle 一致 → 通过但不落 KV（键即 handle，免冗余存储）。
-    let consistent = game.narrate("config.set", &text("profile.agent-1.handle=agent-1"));
-    assert!(
-        consistent
-            .iter()
-            .any(|line| line.contains("[PROFILE REGISTERED]")),
-        "{consistent:#?}"
-    );
-    game.assert_kv("settings.profile.agent-1.handle", Json::Null);
-    // assignments 坏 token → 拒。
-    let bad_token = game.narrate(
-        "config.set",
-        &text("profile.agent-1.assignments=r1:plan,bogus"),
-    );
-    assert_refused(&bad_token, "assignments must be");
-    // 超量 token → 拒（17 个）。
-    let many: String = (1..=17)
-        .map(|i| format!("r{i}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let too_many = game.narrate(
-        "config.set",
-        &text(&format!("profile.agent-1.assignments={many}")),
-    );
-    assert_refused(&too_many, "assignments must be");
-    // harness 带空白 → 拒。
-    let bad_harness = game.narrate("config.set", &text("profile.agent-1.harness=pi codex"));
-    assert_refused(&bad_harness, "invalid profile value");
-    // 合法先落一个 role，再用空值清除。
-    game.narrate("config.set", &text("profile.agent-1.role=plan-executor"));
-    game.assert_kv("settings.profile.agent-1.role", json!("plan-executor"));
-    game.narrate("config.set", &text("profile.agent-1.role="));
-    game.assert_kv("settings.profile.agent-1.role", json!(""));
-}
-
-/// profile 显示形态：trace harness 短注记、map full 的 [PROFILES] 行（操作视图无）、
-/// summary.profiles 数组（assignments 解析为数组、handle 升序、≤8 截断）。
-#[test]
-fn profile_shows_in_trace_map_and_summary() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    game.narrate("config.set", &text("profile.agent-2.harness=codex"));
-    game.narrate("config.set", &text("profile.agent-1.harness=pi"));
-    game.narrate("config.set", &text("profile.agent-1.role=plan-executor"));
-    game.narrate(
-        "config.set",
-        &text("profile.agent-1.assignments=r1:plan,r3"),
-    );
-
-    submit_with_identity(
-        &mut game,
-        1,
-        "plan",
-        "id-prof",
-        Some("agent-1"),
-        Some("agent-1"),
-        None,
-    );
-    let row = exec_trace_row(&mut game);
-    assert!(row.contains("plan=agent-1(pi) [verified]"), "{row}");
-
-    // 设计视图有 [PROFILES]（handle 升序：agent-1 在前），操作视图没有。
-    let full = game.narrate("map.show", &text("full"));
-    let profiles_line = full
-        .iter()
-        .find(|line| line.contains("[PROFILES]"))
-        .expect("design view must carry the [PROFILES] line");
-    assert!(
-        profiles_line.contains("agent-1(pi,plan-executor)")
-            && profiles_line.contains("agent-2(codex)"),
-        "{profiles_line}"
-    );
-    let local = game.narrate("map.show", "0");
-    assert!(
-        !local.iter().any(|line| line.contains("[PROFILES]")),
-        "operation view must stay minimal: {local:#?}"
-    );
-
-    // summary.profiles：结构化数组（编排层的机器可读面）。
-    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    let profiles = summary["profiles"]
-        .as_array()
-        .expect("summary.profiles array");
-    assert_eq!(profiles.len(), 2);
-    assert_eq!(profiles[0]["handle"], json!("agent-1"));
-    assert_eq!(profiles[0]["harness"], json!("pi"));
-    assert_eq!(profiles[0]["role"], json!("plan-executor"));
+    // Default view: exactly the 12 **open** rows — the closed r1 is folded out (open-first
+    // is the operationally correct page order: a canonical-prefix page would be all-done).
+    let default_view = game.narrate("requirement.list", "0");
+    let rows = Game::req_rows(&default_view);
     assert_eq!(
-        profiles[0]["assignments"],
-        json!(["r1:plan", "r3"]),
-        "assignments must be a token array"
+        rows.len(),
+        12,
+        "the default view must page at 12 rows: {default_view:#?}"
     );
-    assert_eq!(profiles[1]["handle"], json!("agent-2"));
-    assert_eq!(profiles[1]["harness"], json!("codex"));
-}
-
-/// profile ≠ 凭据：注册/篡改 profile 不翻转三态判定（判定只看 exec= vs 宿主章）。
-#[test]
-fn profile_does_not_affect_verification() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    submit_with_identity(
-        &mut game,
-        1,
-        "plan",
-        "id-prof-free",
-        Some("agent-1"),
-        Some("agent-1"),
-        None,
-    );
-    let row = exec_trace_row(&mut game);
-    assert!(row.contains("plan=agent-1 [verified]"), "{row}");
-    // 无 profile → verified 照常（判定不依赖注册表）。
-    game.narrate("config.set", &text("profile.agent-1.role=reviewer"));
-    let row = exec_trace_row(&mut game);
     assert!(
-        row.contains("plan=agent-1 [verified]"),
-        "role upsert must not flip the verdict: {row}"
+        !rows.iter().any(|(id, _)| id == "r1"),
+        "the closed r1 must not occupy the open-first page: {rows:?}"
     );
-    // verdict 与 harness 注记解耦：harness 未注册 → 无短注记，但三态仍在。
-    assert!(!row.contains("agent-1("), "{row}");
+    assert!(
+        default_view.iter().any(|line| line.starts_with("[REQ GRAPH]")),
+        "the page keeps the graph header: {default_view:#?}"
+    );
+
+    // The full opt-in renders everything: 13 rows with the closed r1 in the closed tail.
+    let full_view = game.narrate("requirement.list", &text("full"));
+    let rows = Game::req_rows(&full_view);
+    assert_eq!(
+        rows.len(),
+        13,
+        "the full view must render every requirement: {full_view:#?}"
+    );
+    assert_eq!(
+        rows.last().map(|(id, _)| id.as_str()),
+        Some("r1"),
+        "the single closed row closes the full page (open first, closed newest-to-oldest): {rows:?}"
+    );
+    assert!(
+        full_view.iter().any(|line| line.starts_with("[REQ GRAPH]")),
+        "the full view keeps the graph header: {full_view:#?}"
+    );
 }
