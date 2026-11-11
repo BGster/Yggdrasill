@@ -84,6 +84,8 @@ const INBOX_ROUTES_SHAPE: &str = r#"{
     "<kind>": {
       "action": "<内核动作名>",
       "fields": ["<段1>", "<段2>", "<幂等键字段名>"],
+      "actor": <可选 bool：宿主为该动作的载荷注入 `|actor=<提交者>` 段，并拦截调用方自带的同名段>,
+      "actor_session": <可选 bool：同上，注入 `|actor_session=<会话id>`（相对顺序固定在 actor 之后）>,
       "write": { "flag": "<宿主 CLI 旗标名>", "shape": "named|payload" }
     }
   }
@@ -282,7 +284,7 @@ pub struct InboxWriteBinding {
     pub shape: WriteShape,
 }
 
-/// 一条 inbox 路由：`kind` → 内核动作 + 段序 + 可选写命令绑定。
+/// 一条 inbox 路由：`kind` → 内核动作 + 段序 + 提交者身份声明 + 可选写命令绑定。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InboxRoute {
     /// 派发的内核动作名。
@@ -293,6 +295,12 @@ pub struct InboxRoute {
     /// 同名字段，缺失即空串占位（保持位置对齐）。记录里只有预成形载荷时
     /// 整个载荷原样透传。
     pub fields: Vec<String>,
+    /// 是否声明宿主身份段 `actor`：声明后宿主为该动作的载荷注入 `|actor=<提交者>`
+    /// 段，并把调用方自带的同名段判为伪造（ACTOR_FORGED，不派发不落盘）。
+    pub actor: bool,
+    /// 是否声明宿主身份段 `actor_session`：同 [`InboxRoute::actor`]，注入的是
+    /// `|actor_session=<会话id>`（不透明审计字段；相对顺序固定在 actor 之后）。
+    pub actor_session: bool,
     /// 宿主 CLI 写命令绑定；`None` = 该 kind 只能被外部写入（宿主不提供旗标）。
     pub write: Option<InboxWriteBinding>,
 }
@@ -406,6 +414,10 @@ impl InboxRoutes {
             None => None,
             Some(raw) => Some(Self::parse_write(kind, raw)?),
         };
+        // 身份段声明：可选布尔；**非 bool 一律 fail-closed**（缺省 = false，功能关闭，
+        // 旧 pack 前向兼容；写错类型比静默按 false 处理更诚实）。
+        let actor = Self::parse_route_bool(kind, spec, "actor")?;
+        let actor_session = Self::parse_route_bool(kind, spec, "actor_session")?;
         // 命名段形态必须至少有一个可写的段（除幂等键）：否则写出来的记录
         // 无法构成载荷（`payload_for` 会把它当坏行）。
         if matches!(
@@ -420,8 +432,22 @@ impl InboxRoutes {
         Ok(InboxRoute {
             action: action.to_owned(),
             fields,
+            actor,
+            actor_session,
             write,
         })
+    }
+
+    /// 单条路由的可选布尔读取（缺省 `false`；非 bool = fail-closed 可读错误）。
+    fn parse_route_bool(kind: &str, spec: &Json, key: &str) -> Result<bool, String> {
+        match spec.get(key) {
+            None => Ok(false),
+            Some(Json::Bool(value)) => Ok(*value),
+            Some(other) => Err(format!(
+                "pack.json 的 `inboxRoutes.{kind}.{key}` 必须是布尔（缺省 false；当前是 {}）。完整形状：\n{INBOX_ROUTES_SHAPE}\n{CONTRACT_DOC}",
+                json_kind(other)
+            )),
+        }
     }
 
     /// 写命令绑定解析（`flag` 非空 + `shape` ∈ {named, payload}）。
@@ -477,6 +503,18 @@ impl InboxRoutes {
             .iter()
             .find(|(declared, _)| declared == kind)
             .map(|(_, route)| route)
+    }
+
+    /// 按内核动作反查该动作的身份段声明：`(声明注入 actor, 声明注入 actor_session)`。
+    ///
+    /// 动作不在表内 / 两布尔都没声明 → `(false, false)`：宿主不注入也不拦截
+    /// （声明承重——**没声明的动作没有身份段**，这是旧 pack 前向兼容的根据）。
+    pub fn actor_flags_for(&self, action: &str) -> (bool, bool) {
+        self.routes
+            .iter()
+            .find(|(_, route)| route.action == action)
+            .map(|(_, route)| (route.actor, route.actor_session))
+            .unwrap_or((false, false))
     }
 
     /// 按宿主 CLI 旗标名找 kind + 路由（未声明 → `None` = 明确拒绝写）。
@@ -1940,5 +1978,87 @@ mod tool_contract_tests {
             .expect("重复项允许");
         assert!(access.allows("a"));
         assert_eq!(access.allowed().len(), 2);
+    }
+}
+
+// ============================================================================
+// §inbox 路由的身份段声明（`actor` / `actor_session` 两布尔）
+//
+// 声明承重：没声明的动作没有身份段（宿主不注入也不拦截）。这里只碰纯 JSON，
+// 不建 Mod 目录（运行期注入/拦截在 `examples/agent.rs` 的宿主通道用例里测）。
+// ============================================================================
+#[cfg(test)]
+mod inbox_route_actor_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 合成 `inboxRoutes` 段：三保留键 + 一条路由（可覆盖字段）。
+    fn routes_pack(route: Json) -> Json {
+        json!({
+            "inboxRoutes": {
+                "externalIdField": "external_id",
+                "payloadField": "payload",
+                "extMarker": "@ext=",
+                "proposal": route,
+            }
+        })
+    }
+
+    /// 一条不带身份布尔的基础路由（旧 pack 形态）。
+    fn legacy_route() -> Json {
+        json!({
+            "action": "proposal.submit",
+            "fields": ["req", "rev", "stage", "summary", "artifacts", "changes", "external_id"],
+            "write": {"flag": "proposal", "shape": "payload"},
+        })
+    }
+
+    #[test]
+    fn actor_bools_default_false_and_old_pack_is_unchanged() {
+        let routes = InboxRoutes::from_pack(&routes_pack(legacy_route())).expect("旧 pack 必须放行");
+        let route = routes.get("proposal").expect("按 kind 取路由");
+        assert!(!route.actor && !route.actor_session, "缺省 = false（功能关闭）");
+        // 反查：未声明布尔的动作 → (false, false)
+        assert_eq!(routes.actor_flags_for("proposal.submit"), (false, false));
+        // 反查：不在表内的动作 → (false, false)（宿主不注入也不拦截）
+        assert_eq!(routes.actor_flags_for("config.set"), (false, false));
+    }
+
+    #[test]
+    fn actor_bools_roundtrip_and_reverse_lookup() {
+        let mut route = legacy_route();
+        route["actor"] = json!(true);
+        route["actor_session"] = json!(true);
+        let routes = InboxRoutes::from_pack(&routes_pack(route)).expect("双布尔声明必须放行");
+        let parsed = routes.get("proposal").expect("按 kind 取路由");
+        assert!(parsed.actor && parsed.actor_session);
+        assert_eq!(routes.actor_flags_for("proposal.submit"), (true, true));
+    }
+
+    #[test]
+    fn actor_bools_are_independent() {
+        let mut route = legacy_route();
+        route["actor"] = json!(true);
+        let routes = InboxRoutes::from_pack(&routes_pack(route)).expect("单布尔声明必须放行");
+        assert_eq!(routes.actor_flags_for("proposal.submit"), (true, false));
+    }
+
+    #[test]
+    fn actor_bools_fail_closed_on_non_bool() {
+        for (key, bad) in [
+            ("actor", json!("true")),
+            ("actor", json!(1)),
+            ("actor_session", json!("yes")),
+            ("actor_session", json!(null)),
+        ] {
+            let mut route = legacy_route();
+            route[key] = bad.clone();
+            let error = InboxRoutes::from_pack(&routes_pack(route))
+                .expect_err(&format!("{key}={bad} 非 bool 必须被拒"));
+            assert!(error.contains(key), "错误必须点名字段：{error}");
+            assert!(error.contains("必须是布尔"), "{error}");
+            assert!(error.contains(INBOX_ROUTES_SHAPE), "{error}");
+            assert!(error.contains(CONTRACT_DOC), "{error}");
+        }
     }
 }
