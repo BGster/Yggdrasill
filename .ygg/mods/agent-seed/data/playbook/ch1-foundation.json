@@ -132,7 +132,7 @@
       "id": "branches",
       "order": 3,
       "title": "3. Branch management",
-      "summary": "master is the only trunk and accepts merges only; all development happens on feature branches; every merge is no-FF.",
+      "summary": "master accepts merges only; all development happens on feature branches that integrate through the standing `develop` branch (feature → develop → master); every merge is no-FF.",
       "source": "AGENTS.md §3 (branch model)",
       "priority": "standard",
       "rules": [
@@ -151,7 +151,7 @@
         {
           "id": "branches.no-ff-merge",
           "modality": "must",
-          "text": "Every branch merge (feature → integration → trunk) uses `git merge --no-ff`; fast-forward is forbidden.",
+          "text": "Every branch merge (feature → develop → master) uses `git merge --no-ff`; fast-forward is forbidden on every hop.",
           "basis": "AGENTS.md §3 (no-FF invariant)"
         },
         {
@@ -161,10 +161,10 @@
           "basis": "AGENTS.md §3 (no-FF invariant)"
         },
         {
-          "id": "branches.integration-branch-reserved",
-          "modality": "should",
-          "text": "The integration branch `develop/yggdrasill` is reserved: enable it once there are many iterations and parallel lanes; before that, feature branches merge into master directly.",
-          "basis": "AGENTS.md §3 (branch model)"
+          "id": "branches.integration-branch-standing",
+          "modality": "must",
+          "text": "`develop` is the standing integration branch (physical branch name; `origin/develop` exists): every requirement closeout rebases its feature branch onto `develop` and merges it into `develop` with `--no-ff`; `develop` joins `master` only at a round closeout, and no feature branch ever merges into `master` — the only edge into `master` is the round-level `develop` → `master` merge.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
           "id": "branches.push-after-verify",

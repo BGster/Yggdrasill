@@ -195,20 +195,20 @@
       "sha256": "3adc097422c7c7ece2b30a6c9ba5911a91ef159436ac615d65d7a85c3050c009"
     },
     {
-      "byteLength": 11847,
+      "byteLength": 12166,
       "id": "ygg:agent/playbook/ch1-foundation",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch1-foundation.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "37ca786d7152c3ff15e2c42198439608f8d382384e15c2020a8d4cd9f99cac86"
+      "sha256": "c2741c6ff3f37318c20371a77dc583436145d9a7cf3c082ce1f05c86b7ec9959"
     },
     {
-      "byteLength": 11913,
+      "byteLength": 16318,
       "id": "ygg:agent/playbook/ch2-delivery",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch2-delivery.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "2a31dd877d158407fe77f97b33e4a4579e5ac9e21b5a64098c77fde218255f7c"
+      "sha256": "7b06f1db0ae757287461bb69a9a50da08365787acdddcbc759e67a2e99df362f"
     },
     {
       "byteLength": 8729,

@@ -44,14 +44,14 @@
       "id": "integration",
       "order": 6,
       "title": "4. Develop → integrate → merge → deploy",
-      "summary": "Three closing levels: the iteration point (feature branch) → the round (a releasable batch) → deployment; integration, merging and deployment are always done serially by the main agent.",
+      "summary": "Three closing levels: the iteration point (feature → develop) → the round (develop → master, user-triggered) → deployment; integration, merging and deployment are always done serially by the main agent.",
       "source": "AGENTS.md §4",
       "priority": "standard",
       "rules": [
         {
           "id": "integration.serial-closeout",
           "modality": "must",
-          "text": "Integration, merging and deployment are executed serially by the main agent (the main session); lane subagents only develop, pass their gates and push their feature branch.",
+          "text": "Integration, merging and deployment are executed serially by the main agent (the main session); lane subagents only develop, pass their gates and push their feature branch — a subagent never merges into `develop`, never pushes `develop`, and never rebases another lane's branch.",
           "basis": "AGENTS.md §4 (serial closeout)"
         },
         {
@@ -61,28 +61,82 @@
           "basis": "AGENTS.md §4 (1)"
         },
         {
-          "id": "integration.iter.rebase-on-trunk",
+          "id": "integration.iter.gates-green-first",
           "modality": "must",
-          "text": "Check whether the trunk moved: if the histories diverged, align first with `git pull --ff-only`, then rebase the feature branch.",
+          "text": "All gates must be green on the feature branch itself before integration starts (see the gates chapter) — this admission check is purely branch-local evidence, and it never carries over: after the feature lands in `develop` the integrated state is tested again (`integration.iter.test-after-integrate`).",
           "basis": "AGENTS.md §4 (1)"
         },
         {
-          "id": "integration.iter.gates-green-first",
+          "id": "integration.iter.align-develop",
           "modality": "must",
-          "text": "All gates must be green (see the gates chapter) before a merge is requested — a merge may never be requested with a failing gate.",
-          "basis": "AGENTS.md §4 (1)"
+          "text": "Before rebasing, check that local `develop` and `origin/develop` have not diverged: if they have diverged, stop, analyse and report to the user instead of resolving it automatically; otherwise `git pull origin develop --ff-only`.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
+        },
+        {
+          "id": "integration.iter.rebase-on-develop",
+          "modality": "must",
+          "text": "Rebase the feature branch onto the local `develop` — this is the standing path for every requirement closeout, not an exception.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
+        },
+        {
+          "id": "integration.iter.conflict-cherry-pick",
+          "modality": "must",
+          "text": "When the rebase conflicts, stop the whole-branch rebase and replay commit by commit with `git cherry-pick`; land each conflict as its own standalone conflict-resolution commit so every step stays auditable.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
+        },
+        {
+          "id": "integration.iter.push-after-rebase",
+          "modality": "must",
+          "text": "After any history rewrite (rebase or cherry-pick replay), push with `git push --force-with-lease origin <feature>`; a bare push is forbidden.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
           "id": "integration.iter.merge-ritual",
           "modality": "must",
-          "text": "The merge is triggered by the user, or executed by the main agent after the user approves it: in the main checkout run `git merge --no-ff <feature>`, then push master; deleting the remote feature branch is optional.",
-          "basis": "AGENTS.md §4 (1)"
+          "text": "In the main checkout, merge the feature branch into `develop` using the local ref — `git merge --no-ff <feature>` — then push `develop`; deleting the remote feature branch stays optional.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
+        },
+        {
+          "id": "integration.iter.no-remote-feature-merge",
+          "modality": "must-not",
+          "text": "Never merge `origin/feature/*`: after a rebase the remote ref still points at the old head, so merging it fabricates duplicate same-content commits plus an orphaned merge node — merge only the local ref.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
+        },
+        {
+          "id": "integration.iter.test-after-integrate",
+          "modality": "must",
+          "text": "After a feature lands in `develop`, re-run the gates and E2E on the integrated state in the main checkout; the feature-branch admission green never carries over — an iteration point closes on integrated-state evidence.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
+        },
+        {
+          "id": "integration.iter.no-partial-closeout",
+          "modality": "must-not",
+          "text": "Pushing the feature branch alone is not a closeout: a requirement closes only after it is merged into `develop` and tested on the integrated state — `develop` must never lag behind completed features.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
           "id": "integration.round.e2e-acceptance",
           "modality": "must",
-          "text": "A round-level closeout first passes end-to-end acceptance: the example game completed end to end plus save/load verification; after M1 this adds the AI-generated → playable loop.",
+          "text": "A round-level closeout first passes end-to-end acceptance on the `develop` integrated state once every in-round feature has landed: the example game completed end to end plus save/load verification; after M1 this adds the AI-generated → playable loop — the precondition for merging into `master`.",
           "basis": "AGENTS.md §4 (2)"
+        },
+        {
+          "id": "integration.round.stages-separated",
+          "modality": "must-not",
+          "text": "Integration and the `master` merge are two separate stages and never execute as one: while any in-round feature has not landed in `develop` yet, merging into `master` is forbidden.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
+        },
+        {
+          "id": "integration.round.merge-ritual",
+          "modality": "must",
+          "text": "The `develop` → `master` merge is triggered by the user, or executed by the main agent after the user approves it: `git fetch origin`, then divergence-check `master` and `develop` separately and align each with `--ff-only`, then in the main checkout `git merge --no-ff develop`; rebasing `develop` is absolutely forbidden — the merge topology is the rollback history.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
+        },
+        {
+          "id": "integration.round.reset-develop",
+          "modality": "must",
+          "text": "Right after the merge, `git reset --hard master` on `develop` so `develop` equals `master` as the clean baseline for the next round; push both branches — for `develop` the reset makes it `git push --force-with-lease origin develop`.",
+          "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
           "id": "integration.round.batch-tag",
