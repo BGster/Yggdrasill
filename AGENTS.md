@@ -14,6 +14,11 @@ directories (`ls` / `stat` / `find` / `du` / `wc` — row counts, column names a
 classified as the values). Verifications that need real data are run by the user, who pastes the
 output back; synthetic data generated under `/tmp` is unrestricted.
 
+0b. **serve is read-only**: the `serve` mode (r8) exposes exactly the GET-only HTTP
+    observation plane (`docs/DESIGN.md` §3.7). It must never gain a write endpoint — the
+    human gates (`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit`
+    / `review.note`) have **no online path** and are still ticketed through the CLI/daemon.
+    All state writes go exclusively through the single-shot CLI / interactive / daemon modes.
 1. **Every in-run artifact must be carried by an event first**: before writing a file, changing code
    or producing a deliverable with a command, an event must bring it into the state machine
    (`requirement.dispatch` → proposal → gate). **The verdict looks at events, not at where the bytes
@@ -407,9 +412,13 @@ are git-ignored, `.ygg/mods/` is committed.
 .ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
 ```
 
-> 单发回执缺省为人读文本；脚本 / CI 解析单发 stdout 必须加 `--raw`（单行 JSON
-> 机器契约，与历史缺省逐字节一致），或环境级 `export YGG_FORMAT=json` 一次性回滚。
-> daemon 消费方不受影响（协议面零改动）。
+### Serve（只读观察台，r8）
+```bash
+cargo build --release --example egg -p ygg-sandbox                                   # 先构建
+.ygg/bin/egg --runs-root .ygg/runs serve                                          # 起服（默认 127.0.0.1:7800；Ctrl-C 停服）
+.ygg/bin/egg --runs-root .ygg/runs serve --port 7801 --poll-ms 300               # 换端口/加快变更检测
+# 面板：http://127.0.0.1:7800/（一级 runs 列表 → #/runs/<id> 二级存档列表 → mod 面板 iframe）
+# 契约与安全边界见 docs/DESIGN.md §3.7；serve 只读：gate/accept 类人类门禁不在线上，仍走 CLI 票据。
 
 ### Continue
 ```bash

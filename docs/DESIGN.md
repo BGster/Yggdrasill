@@ -80,7 +80,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 **禁止第五种**：`dest` 非空但**没有任何 harness 认领**（典型形态：在 DeepSeek Harness 局里出现 `dest=~/.pi/agent/sessions-trash/<batch>`）。那条路径确实存在，但它归档的不是本局会话——把它写成「查空了」就是谎报。识别完全在扩展侧，不需要新契约：`dest` 的 trash 根必须落在**本局声明的 adapter** 对应的根下（`archive.ts` 的 `FOREIGN_SESSION_ROOTS` + 可选的 `destRoot`）。默认判据是「宁可说没查，不谎报查空了」。
 
-> **给宿主维护者的一句话**：要让 `archive-sessions` 真正覆盖未知 harness，需要在 `agent.rs` 增加第五个适配器及其会话库约定。本仓库把 `crates/ygg-sandbox/examples/agent.rs` 当红线，所以这里只保证**不谎报**，不自行修改宿主。
+> **给宿主维护者的一句话**：要让 `archive-sessions` 真正覆盖未知 harness，需要在 `agent.rs` 增加第五个适配器及其会话库约定。本仓库把 `crates/ygg-sandbox/examples/agent/main.rs` 当红线，所以这里只保证**不谎报**，不自行修改宿主。
 
 ---
 
@@ -367,68 +367,100 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 ---
 
-### 3.7 提交者身份：双 id 命名空间、宿主章互证、profile 注册表、opener
+### 3.7 serve 观察面契约（只读观察台 + 两级列表 + mod 面板 iframe 托管）
 
-> 威胁模型边界（诚实声明）：同机进程模型下 `env` / 旗标 / profile 注册都可伪造。本机制 = 「双通道
-> 一致性可核对」——防误记、防张冠李戴、让冒用与未标注代理**可见可审计**；不做密码学、不引入 token；
-> `ACTOR_FORGED` 是**格式红线**（拒绝明显不是宿主盖章的身份段）而不是身份认证；profile 是自报
-> 身份卡（self-reported registry）不是凭据，篡改风险与 executor 账本同级，事后审计以事件日志为
-> 准绳（谁在何时写了什么 `config.set`）。
+> r8 · rev2。`serve` 是继单发 `--event` / 交互 / `--daemon` 之后的**第四模式**（加性）。
+> 不改既有单发 CLI 与 daemon 的任何行为；面板默认只读，gate/accept 类人类门禁
+> （`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note`）
+> 在 serve 面上**不存在写路径**——路由表只登记 GET，非 GET 一律 `405`（物理不可绕过），
+> 人类门禁仍走 CLI 票据 / 适配器路径。
 
-#### 双 id 命名空间（实证约束，不可混用）
+#### 3.7.1 CLI 形态
 
-| 命名空间 | 形态 | 用途 |
+```text
+agent [--runs-root <目录>] serve [--port <1..65535>] [--panel-dir <目录>] [--poll-ms <ms>]
+```
+
+- `--runs-root` 缺省 `runs`；目录不存在 → 报错退出 1（fail-closed，不自动创建）。
+- `--port` 缺省 7800；恒绑定 **`127.0.0.1` 常量**（无旗标）；被占用 → 报错退出 1（不自动递增）。
+- `--poll-ms` 缺省 700，钳制 [200, 5000]（watcher 变更检测周期）。
+- `--panel-dir`：内置两级列表页的盘上覆盖（开发期改 HTML 刷新即生效；缺失文件 404）。
+- 与其它全部模式互斥（`usage_error`，退出 2）；`--run-id` / `--mod` / `--store` 不存在
+  （观察单位 = runs-root，不绑定单局、不装 Mod）。
+- 先起 serve 再开局**合法**（一级列表动态出现新局）；局收口后继续提供终局数据；
+  run 目录被外部删除 → 相关 API 404 + watcher 摘除，serve 不退出。
+
+#### 3.7.2 三级形态与宿主/mod 边界
+
+| 级 | 归属 | 内容 | 数据源 |
+| --- | --- | --- | --- |
+| 一级：正在运行的游戏 | egg 原生 | runs 枚举 | runs-root 扫描 + 存储探针 |
+| 二级：局内存档 | egg 原生 | 该 run 的存档列表 | `ygg_store::observe` 只读观察面 |
+| 三级：存档视图 | **mod 自行维护** | mod 自带 UI | 存档数据 API（裸数据） |
+
+宿主对第三级**仅托管静态文件 + 裸数据 API**，零解析零渲染任何 mod 领域语义（P11）。
+
+#### 3.7.3 API 契约总表（全部 GET；非 GET → 405；未知路径 → 404）
+
+| 路由 | 语义 | 响应形状（关键字段） |
 | --- | --- | --- |
-| **Agent 工具句柄** | ≤64 字节、无空白、无 `\|`、无引号/反斜杠 | `exec=`、宿主 `actor=` 章、`YGG_ACTOR`、profile 主键、`subagentAction.resumeAgentId`——**同一空间**，互证与 join 全靠字符串相等 |
-| **原生 session id** | ≤128 字节、不透明（`PI_SESSION_ID` 命名空间） | 只作审计（事件行 `actor_session=` → 磁盘会话文件的 grep 链）；**永不参与判定、永不作 resume 寻址键**；不复用 `PI_SESSION_ID`（推断不如显式：审计字段必须由 spawn 侧 `YGG_ACTOR_SESSION` / `--actor-session` / daemon 请求字段明确背书） |
+| `GET /` | 内置两级列表页 `index.html` | text/html |
+| `GET /assets/<name>` | 内置页静态资产（白名单 `app.js` / `style.css`） | 按扩展名映射 + nosniff |
+| `GET /api/runs` | **第一级**：runs 枚举 | `{version, generatedAt, runsRoot, truncated?, runs:[{runId, meta:<run.json 原样>, coord:<原样\|null>, backend, probe:{generation,latestId,latestCreatedAt,count}, panel:{available,url?,reason?}, metaError?}]}`（updated_at 降序；封顶 200） |
+| `GET /api/runs/<id>/saves?limit=` | **第二级**：存档列表 | `{runId, backend, generation, saves:[{id,generation,seq,createdAt,bytes,latest}], panel:{available,url?}}`（limit 缺省 50 封顶 200；JSON 局恒单行 `latest`——单档后端的物理事实） |
+| `GET /api/runs/<id>/saves/<sid>` | **存档数据 API**：原始快照字节 | `200 application/json` + `X-Ygg-Run/X-Ygg-Save-Id/X-Ygg-Generation/X-Ygg-Seq/X-Ygg-Created-At/X-Ygg-Bytes`；body = 存档原字节（零包装零重序）；`sid` ∈ `latest \| [0-9]+`（否则 400） |
+| `GET /api/runs/<id>/events?since=&limit=` | 事件日志分页（seq 升序） | `{runId, generation, latest, since, records:[{seq,event,payload,ok,timestamp,ending}]}`；`limit` 缺省 200 封顶 500；`payload` 原文透传（`actor=`/`actor_session=` 段随 r3 自动出现） |
+| `GET /api/runs/<id>/artifacts` | 当前代制品元信息 | `{artifacts:[{path,bytes,sha256,updatedAt}]}`（path 升序） |
+| `GET /api/runs/<id>/artifacts/<path..>` | 制品原文 | 原字节（`validate_artifact_path` 门复用；读侧封顶 1 MiB → 413） |
+| `GET /api/stream` | SSE 变更流 | `text/event-stream`（§3.7.5） |
+| `GET /panel/<run-id>/[rel]` | mod 面板托管 | 文件字节（§3.7.4；未声明/不可达 → 404 JSON 带 reason） |
 
-#### 宿主通道与三态互证
+错误统一 `{"ok":false,"error":{"code":…,"message":…}}`；响应一律 `Cache-Control: no-store` +
+`X-Content-Type-Options: nosniff`。
 
-- **解析链（单发与 daemon 同序）**：`--actor` > `YGG_ACTOR` > daemon 请求字段 `actor` > None；
-  `--actor-session` > `YGG_ACTOR_SESSION` > daemon 请求字段 `actor_session` > None。两者独立解析、
-  独立缺席；形状校验在解析点，失败 = 用法错误。
-- **注入（声明承重）**：`inboxRoutes.<kind>` 声明 `"actor": true` / `"actor_session": true` 的路由，
-  宿主为该动作的载荷注入 `|actor=<id>` / `|actor_session=<id>`（JSON 字符串标量闭引号内，相对顺序
-  固定 `actor` 在前）；未声明的动作宿主不碰载荷（旧 pack 前向兼容）。调用方载荷自带保留段 =
-  `ACTOR_FORGED` 拒绝（不派发、不落盘、不占 seq）。
-- **三态互证（识别不拒绝）**：mod 在 `proposal.submit` 比对 `exec=` vs `actor=` 章——相等
-  `[ACTOR VERIFIED]`；不等 `[ACTOR MISMATCH]`（只记录 + 叙事，验收照常，裁决权在人 / 门禁）；
-  无章 `[ACTOR UNVERIFIED]`（旧宿主 / 直接派发）。落库 `prop.N.actor` / `prop.N.actor_session`；
-  trace 并列显示 `plan=agent-1(pi) [verified]`（harness 短注记来自 profile，三态来自宿主章）。
-  **判定只看 `exec=` vs `actor=`；profile 与 session 都不参与。**
-- **审计链**：账本（`settings.executor.rN.plan=agent-1`）→ grep 事件日志 `actor=agent-1` 的
-  `proposal.submit` 行 → 该行载荷含 `actor_session=01a1c9bb-…` → `ls ~/.pi/agent/sessions/**/01a1c9bb-*.jsonl`。
+#### 3.7.4 pack.json `panel` 段契约（挂进 §3.2 的 pack.json 契约旁）
 
-#### profile 注册表（纯 `config.set` KV 约定，不新增事件）
+- 声明：`"panel": { "entry": "panel/index.html" }`（**可选顶层段，v1 全部面 = 单字段 `entry`**；
+  未来字段只能向后兼容式增量）。语法门 = 不以 `/` 开头、不含 `..`、以 `.html` 结尾；
+  违规 → `panel.available=false` + 具体reason，**不是装载错误**（面板声明损坏不能炸 mod 装载）。
+- 兼容性：pack.json 解析是宽松 Value 读取，旧宿主忽略未知顶层段；旧 mod 无段 → serve 侧
+  `panel.available=false`（降级矩阵五态见实现测试）。面板文件**不进** `entries[]`（内核资源面）
+  也**不进** `watched_files`（签名/热载面）——改面板刷新浏览器即生效。
+- 托管：运行期现读 + 双守卫（`canonicalize` + 前缀校验，拦 `..` 穿越与 symlink 逃逸）。
+- **信任模型（诚实声明）**：mod 面板 JS 与内置页同源（127.0.0.1 同端口）执行，信任级别 = mod
+  本身（mod 代码本就持 daemon 工具执行权限）。serve 不消毒不沙箱；防护边界 = 路径双守卫 +
+  只读 + localhost 绑定 + nosniff。
+- **宿主不提供 SDK/桥**：mod UI 的取数契约 = 同源 `fetch('/api/runs/<id>/saves/<sid>')`（`X-Ygg-*`
+  头带元数据）+ `fetch('/api/runs/<id>/events?since=..')` + `new EventSource('/api/stream')`
+  （过滤 `frame.run === 本局` 后自行重取）。iframe 传参 = query（`?save=<sid>`，可收藏可刷新）。
 
-- **键形**：`config.set profile.<handle>.<key>`（`settings.` 前缀写法等价）→ `settings.profile.<handle>.<key>`
-  平铺 KV；`<handle>` 形状复用 executor id 规则（三层同形同值，字符串相等贯通）。
-- **保留键矩阵**：`harness`（≤32、无空白、无 `|`；不做枚举，推荐词表 `{pi, claude-code, codex, generic}`）、
-  `session_id`（≤128、不透明审计字段）、`handle`（冗余自报：必须与键名一致，一致后**不落 KV**）、
-  `role`（≤64 单行）、`assignments`（逗号分隔 `r<n>[:<stage>]` token，≤16 个、总长 ≤512）。
-  自由键 `^[a-z0-9_]{1,32}$`、值 ≤256 单行（如 `registered_by=main`）；**空值 = 清除该字段**
-  （不提供整卡删除，registry 只增改，收口随 run 终结）。
-- **为什么不新增事件**：profile 注册不推进任何状态（无守卫、无迁移、无门禁），给它事件名等于发明
-  「第二类不推进状态的事件」（违背 §3.4 L1 定义）；`config.set` 已是 `settings.*` 唯一规范写入面
-  （P4 单一机制），天然落事件行可审计、同键重写幂等、不占人类动作门禁。多键注册需 3-5 次直派，
-  半张卡按缺键降级（可接受——注册是一次性冷启动动作）。
-- **主 Agent 代注册 = fallback**：subagent 经 brief 内嵌指引自主注册；主 Agent 代写在数据面上与
-  自主注册无区别，可信度差异只体现在 `registered_by` 约定与事件日志。`config.set` 直派的派发回执
-  恒回显 resolved `actor`（加性键，不进事件行不进 wire），代写与自写在回执面可区分。
-- **与 executor 账本的关系（互链不冗余）**：账本回答「谁负责这条需求的这个阶段」（权责权威，换人
-  必须带原因）；profile 回答「这个句柄是谁」（身份索引 + 协调快照，自由 upsert 无原因要求）。渲染层
-  按 `handle == executor id` 字符串 join，零存储耦合；**assignments 是自报快照，权责仍以账本为准**。
+**内核存档信封（mod UI 作者依赖面）**：存档本体 = `{engine_version, entities, format_version,
+kv:{entries,revision}, pending_choice}`。mod 自己的状态在 `kv.entries`；`format_version` 判版本。
+`meta.summary`（`contract.summaryEvent` 派发面）是**内存态派生产、不持久化**——serve 不装载内核故
+不供；需要 profiles 的 mod UI 应从自己的存档状态取数（mod 自己写入 kv 的注册表副本）。
 
-#### opener 冷启动注册（宿主元信息面，Mod 不感知）
+#### 3.7.5 SSE 帧协议
 
-- `run.json` 可选字段 `"opener_actor": {"actor": "<id>", "session": "<id>|省略", "at": <unix_secs>}`：
-  本局**首条携带身份的成功写**先到先得、**不可变**（同 id 重复 claim 也是 no-op，连 `at` 都不刷新；
-  异 actor 竞争由 run 锁串行严格先到先得，后来者不报错不拒绝）。事后争议以事件日志为准绳。
-- **claim 触发点（仅成功写）**：inbox 写命令落行后 / worker 结果落行后 / `dispatch_event_as` 成功步
-  持久化临界区内——三处都要求携带身份；失败探针与被拒派发不认领（失败命令不配当开局者）。
-- `write_meta`（开局 / reset / 热载）原样保留既有值；旧局无字段 = 未认领，升级后首条带身份写命令
-  补认领（单调无害）。inbox 写命令回执回显 `opener`（仅携带身份时）；`writers`（coordination.json）
-  是在途互斥记账、`opener` 是持久事实标记，两者正交。
+- 单一端点 `/api/stream`；watcher 是唯一变更源（轮询 runs-root：名单比对 + 每 run 的
+  run.json/coordination.json stat + `save_probe`）。检测到变更 → 全局 `version += 1` → 广播。
+- 帧：`event: change` + `data: {"version":<n>,"run":"<runId>"}`（根级变更 `"run":null`）。
+  **没有数据载荷**——客户端收帧后重取自己正在看的端点；每 poll 每 run 至多一帧（天然合流）。
+- 保活：`: ping` 每 15s；断线自动重连 + `onerror` 降级 2s 轮询（同一批 API）。无
+  `Last-Event-ID`（变更帧无连续性语义）。通知 ≤ 一个 poll 周期（最终一致通知，读恒为当下事实）。
+
+#### 3.7.6 安全边界与线程模型
+
+- 绑定 `127.0.0.1` 常量（单测断言字面量）；GET-only（非 GET → 405，请求体不读）；无凭据面；
+  解析健壮性（32 KiB 头上限 / 5s 超时 / 64 连接封顶超出 503 / 路径白名单 / query 数值钳制 /
+  run-id 语法门）；无 CORS 头；`/panel` 双守卫 + nosniff；观察面零写（`query_only` + 无 migrate +
+  先探测后连接，`observe_creates_nothing` / `observe_writes_nothing` 测试锁）。
+- **零内核**：serve 不装载 ModBundle/kernel/mlua、不构造 `Session`——数据面只剩文件 stat 与轻量
+  SQL（毫秒级），发布/订阅快照机制失去存在理由；mlua 非 Send 约束以「进程无 Lua」最强成立。
+  物理锁：`serve_source_has_no_write_path`（生产面源扫描禁写路径）。
+- 线程编排：主线程 accept（每连接一线程，封顶 64）；watcher 线程纯变更检测；SSE 每连接
+  `wait_timeout` 等广播。唯一共享可变状态 = `version` 广播对（Mutex + Condvar）。
+
+---
 
 ## 4. 活文档闭环
 

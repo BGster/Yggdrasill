@@ -156,6 +156,10 @@ use ygg_sandbox::HostToolRunner;
 // 宿主**——那是跨进程共识与报告面，两后端必须完全一致。
 use ygg_store::{Backend, RunStore, StepDraft, Tick, AUTOSAVE_FILE, INBOX_FILE, SQLITE_FILE_NAME};
 
+/// serve 模式（常驻只读观察台，r8）：HTTP 面板 + 零写入观察面。
+/// 路由表只有结构名（runs/saves/events/artifacts/panel），无一个 mod 事件名（P2/P3）。
+mod serve;
+
 // ============================================================================
 // §常量 只有**不是契约**的东西：run 目录文件名、宿主自身的超时。
 //
@@ -238,6 +242,10 @@ fn main() {
         run_artifact_get(&args, path)
     } else if args.wait_tools {
         run_wait_tools(&args)
+    } else if args.serve {
+        // 常驻只读观察台（r8）：不构造 Session、不装 ModBundle/kernel/mlua，
+        // 只经 ygg_store::observe 与文件 stat 做只读访问。
+        serve::run_serve(&args)
     } else if args.daemon {
         run_daemon(&args)
     } else if args.inbox.is_some() {
@@ -320,6 +328,16 @@ struct Args {
     /// `--actor-session <id>`：提交者的原生会话 id（不透明审计字段，永不参与判定）。
     /// 解析链与 `--actor` 完全对称：旗标 > `YGG_ACTOR_SESSION` > daemon 请求字段。
     actor_session: Option<String>,
+    /// `serve`（子命令形态）：常驻只读观察台。观察单位 = runs-root（不绑定单局），
+    /// GET-only 零写入；与其它全部模式互斥（[`parse_args`] 的互斥矩阵）。
+    serve: bool,
+    /// `--port <1..65535>`：serve 监听端口（缺省 [`serve::DEFAULT_PORT`]；
+    /// 占用即失败退出 1，不自动递增——端口漂移会造成「两份不同事实」错觉）。
+    port: Option<u16>,
+    /// `--panel-dir <目录>`：内置两级列表页的盘上覆盖（开发期改 HTML 刷新即生效）。
+    panel_dir: Option<PathBuf>,
+    /// `--poll-ms <ms>`：watcher 变更检测周期（缺省 700，钟制 [200, 5000]）。
+    poll_ms: Option<u64>,
 }
 
 /// 提交者身份（宿主解析产物，随命令/请求一次性解析）。
@@ -526,6 +544,10 @@ fn parse_args() -> Args {
     let mut harness: Option<String> = None;
     let mut actor: Option<String> = None;
     let mut actor_session: Option<String> = None;
+    let mut serve = false;
+    let mut port: Option<u16> = None;
+    let mut panel_dir: Option<PathBuf> = None;
+    let mut poll_ms: Option<u64> = None;
 
     // 写 inbox 的七个参数共享同一套「只能给一个」的校验。
     fn set_inbox(inbox: &mut Option<InboxWrite>, flag: &'static str, value: String) {
@@ -643,6 +665,25 @@ fn parse_args() -> Args {
                 // --sessions-dir / --trash）由 `run_builtin_tool` 二次解析：全局
                 // 解析器只负责**不拒绍**它们（见下面 catch-all 分支）。
             }
+            // serve 子命令（无 `--` 前缀；与 `egg serve …` 同形）。
+            "serve" => serve = true,
+            "--port" => {
+                let text = next_value(&mut iter, "--port");
+                match text.trim().parse::<u16>() {
+                    Ok(value) if value > 0 => port = Some(value),
+                    _ => usage_error(&format!("--port 需要 1..=65535 的整数（当前是 `{text}`）")),
+                }
+            }
+            "--panel-dir" => panel_dir = Some(PathBuf::from(next_value(&mut iter, "--panel-dir"))),
+            "--poll-ms" => {
+                let text = next_value(&mut iter, "--poll-ms");
+                match text.trim().parse::<u64>() {
+                    Ok(value) => poll_ms = Some(value),
+                    _ => usage_error(&format!(
+                        "--poll-ms 需要毫秒数（当前是 `{text}`；合法范围 200..=5000，越界钟制）"
+                    )),
+                }
+            }
             "-h" | "--help" => usage(0),
             other => {
                 // 内置工具模式下，未识别的旗标留给 `run_builtin_tool` 的 op 级
@@ -674,9 +715,10 @@ fn parse_args() -> Args {
             || resume
             || watch
             || store.is_some()
+            || serve
         {
             usage_error(
-                "--builtin-tool 不能与其它模式（--event / --settle / --resume / --watch / --store / inbox / 制品旗标）同时使用",
+                "--builtin-tool 不能与其它模式（--event / --settle / --resume / --watch / --store / inbox / 制品旗标 / serve）同时使用",
             );
         }
         return Args {
@@ -702,6 +744,65 @@ fn parse_args() -> Args {
             harness,
             actor,
             actor_session,
+            serve,
+            port,
+            panel_dir,
+            poll_ms,
+        };
+    }
+
+    // serve 是常驻只读观察台：不推进状态、不写任何局、不装 Mod——一切
+    // 「单发 / 常驻 / 推进」旗标对它都没有意义（叠加只会让调用方误以为会发生）。
+    if serve {
+        let flags = ServeFlags {
+            settle,
+            event: event.is_some(),
+            wait_tools,
+            inbox: inbox.is_some(),
+            run_tool_worker: run_tool_worker.is_some(),
+            artifact_put: artifact_put.is_some(),
+            artifact_get: artifact_get.is_some(),
+            daemon,
+            resume,
+            watch,
+            store: store.is_some(),
+            payload: payload.is_some(),
+            harness: harness.is_some(),
+            tool_timeout: tool_timeout_ms.is_some(),
+            drive_is_stdin: drive == Drive::Stdin,
+            run_id: run_id.is_some(),
+            mod_dir: mod_dir.is_some(),
+        };
+        if let Some(message) = serve_usage_conflict(&flags) {
+            usage_error(&message);
+        }
+        return Args {
+            mod_dir: None,
+            run_id: String::new(),
+            runs_root,
+            resume: false,
+            settle: false,
+            watch: false,
+            event: None,
+            payload: None,
+            drive: Drive::Stdin,
+            inbox: None,
+            store: None,
+            wait_tools: false,
+            tool_timeout_ms: None,
+            run_tool_worker: None,
+            artifact_put: None,
+            artifact_get: None,
+            builtin_tool: None,
+            daemon: false,
+            harness: None,
+            actor: None,
+            actor_session: None,
+            output,
+            serve: true,
+            port,
+            panel_dir,
+            poll_ms,
         };
     }
 
@@ -797,6 +898,10 @@ fn parse_args() -> Args {
         harness,
         actor,
         actor_session,
+        serve,
+        port,
+        panel_dir,
+        poll_ms,
     }
 }
 
@@ -831,6 +936,8 @@ fn usage(code: i32) -> ! {
                                                                 异步补需求（只追本局后端的 inbox）
   egg --run-id <标识> --daemon [--mod <mod目录>]
                                                                 常驻守护模式（JSON-RPC over stdio）
+  agent [--runs-root <目录>] serve [--port <端口>] [--panel-dir <目录>] [--poll-ms <ms>]
+                                                                常驻只读观察台（HTTP 面板，默认 127.0.0.1:7800）
 
 选项:
   --mod <目录>       Mod 目录（五件套：pack.json / manifest.json / mod.lua /
@@ -895,6 +1002,16 @@ fn usage(code: i32) -> ! {
                      grep 链；永不参与判定、不做 resume 寻址键；≤128 字节、无空白、无 `|`）。
                      解析链与 --actor 对称：旗标 > YGG_ACTOR_SESSION > daemon 请求字段；
                      两者可独立携带，inbox 记录盖宿主保留键 actor/actor_session（None 不写键）
+serve 模式（只读观察台；GET-only 零写入，与其它全部模式互斥）:
+  --runs-root <目录> 观察目标 runs 根目录（默认 ./runs；不存在 = 报错退出 1，不自动创建）
+  --port <端口>      监听端口（默认 7800；恒绑定 127.0.0.1；被占用 = 报错退出 1，不自动递增）
+  --panel-dir <目录> 内置两级列表页的盘上覆盖（开发期改 HTML 刷新即生效；缺失文件 404）
+  --poll-ms <ms>     变更检测周期（默认 700ms，钟制 200..=5000；SSE 通知 ≤ 一个周期）
+  面板三级：① runs 列表（egg 原生）② 局内存档列表（egg 原生）③ mod 自带 UI
+  （iframe 托管，pack.json 可选顶层 panel 段声明 entry，如 panel/index.html；
+  egg 不解析不渲染任何 mod 领域语义，只供存档数据 API 裸数据）。
+  只观察既有局：先起 serve 再开局合法；gate/accept 类人类门禁在 serve 面上
+  **没有写路径**，仍走 CLI 票据 / 适配器路径。
   --store <后端>     存储后端断言：sqlite（默认，<run 目录>/run.sqlite）|
                      json（兼容后端，autosave.json + events.jsonl）。run.json 的
                      \"store\" 字段是权威：与 --store 不一致即拒绝开局（零写入）；
@@ -947,6 +1064,60 @@ host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字
         eprintln!("{text}");
     }
     exit(code);
+}
+
+/// serve 模式的互斥矩阵输入面（parse_args 局部旗标的投影；纯数据，可测）。
+#[derive(Default)]
+struct ServeFlags {
+    settle: bool,
+    event: bool,
+    wait_tools: bool,
+    inbox: bool,
+    run_tool_worker: bool,
+    artifact_put: bool,
+    artifact_get: bool,
+    daemon: bool,
+    resume: bool,
+    watch: bool,
+    store: bool,
+    payload: bool,
+    harness: bool,
+    tool_timeout: bool,
+    drive_is_stdin: bool,
+    run_id: bool,
+    mod_dir: bool,
+}
+
+/// serve 与其它模式/旗标的互斥判定（纯函数；命中即返回人读冲突文案）。
+/// serve 是常驻只读观察台：一切「单发/常驻/推进/写面」旗标都没有意义。
+fn serve_usage_conflict(flags: &ServeFlags) -> Option<String> {
+    if flags.settle
+        || flags.event
+        || flags.wait_tools
+        || flags.inbox
+        || flags.run_tool_worker
+        || flags.artifact_put
+        || flags.artifact_get
+        || flags.daemon
+        || flags.resume
+        || flags.watch
+        || flags.store
+        || flags.payload
+        || flags.harness
+        || flags.tool_timeout
+        || !flags.drive_is_stdin
+    {
+        return Some(
+            "serve（只读观察台）不能与任何推进/写面旗标（--event / --settle / --resume / --watch / --store / --payload / --drive / inbox 写命令 / 制品旗标 / --daemon / --wait-tools / --harness / --builtin-tool）同时使用"
+                .to_owned(),
+        );
+    }
+    if flags.run_id || flags.mod_dir {
+        return Some(
+            "serve 观察整个 runs-root（不绑定单局、不装 Mod）：不接受 --run-id / --mod".to_owned(),
+        );
+    }
+    None
 }
 
 fn usage_error(message: &str) -> ! {
@@ -7083,6 +7254,10 @@ mod mod_dir_alias_tests {
             harness: None,
             actor: None,
             actor_session: None,
+            serve: false,
+            port: None,
+            panel_dir: None,
+            poll_ms: None,
         }
     }
 
@@ -9026,6 +9201,10 @@ mod multiscript_hot_reload_tests {
             harness: None,
             actor: None,
             actor_session: None,
+            serve: false,
+            port: None,
+            panel_dir: None,
+            poll_ms: None,
         }
     }
 
@@ -9467,6 +9646,10 @@ end)
             harness: None,
             actor: None,
             actor_session: None,
+            serve: false,
+            port: None,
+            panel_dir: None,
+            poll_ms: None,
         }
     }
 
@@ -10492,6 +10675,10 @@ end)
             harness: None,
             actor: None,
             actor_session: None,
+            serve: false,
+            port: None,
+            panel_dir: None,
+            poll_ms: None,
         }
     }
 
@@ -11195,6 +11382,10 @@ end)
             harness: None,
             actor: None,
             actor_session: None,
+            serve: false,
+            port: None,
+            panel_dir: None,
+            poll_ms: None,
         }
     }
 
@@ -11856,6 +12047,10 @@ end)
             harness: None,
             actor: None,
             actor_session: None,
+            serve: false,
+            port: None,
+            panel_dir: None,
+            poll_ms: None,
         }
     }
 
