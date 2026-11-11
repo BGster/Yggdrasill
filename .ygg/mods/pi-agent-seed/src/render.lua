@@ -31,8 +31,8 @@ local CONFIG_UI, MENU, menu, option_texts =
   menus.CONFIG_UI, menus.MENU, menus.menu, menus.option_texts
 local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status =
   props.P_PENDING, props.prop_count, props.prop_id, props.prop_key, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
-local PHASE, R_MERGED, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_gate, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase_name, req_rev, req_stale, req_status, req_tally, req_title, stage =
-  reqs.PHASE, reqs.R_MERGED, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase_name, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
+local PHASE, R_MERGED, R_SPLIT, STAGE, job_capacity, job_total, req_closed, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_gate, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase_name, req_rev, req_stale, req_status, req_tally, req_title, stage =
+  reqs.PHASE, reqs.R_MERGED, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_closed, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase_name, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
 local fill, join, spaces, trim =
   util.fill, util.join, util.spaces, util.trim
 
@@ -236,40 +236,104 @@ local function req_trace(index)
   return join(parts, "")
 end
 
-local function narrate_req_list()
+-- r13 分页调参：默认页行数（与 req_capacity 同处 TEXTS.tuning；12 > 单批
+-- 操作域、显著小于渲染撞墙行数 —— §0.2 实测 kv_len≈292 时全量 list 在
+-- 100k 地板下必死）。
+local function req_list_page()
+  local value = TEXTS.tuning.req_list_page
+  if type(value) == "number" and value > 0 then
+    return value
+  end
+  return 12
+end
+
+-- 默认页行序（r13）：open 需求优先（canonical 序），不足页宽用最近闭环行
+-- （新→旧）补足。这是**展示序**，不改任何 KV/状态语义（行数据同源同值，
+-- 漏出行只付一次 req_closed 分类读）。长局 canonical 前缀恰是历史闭环需求
+-- （req.count 单调不减），字面前缀页会出现「整页 done、活跃需求全被略」
+-- 的反转 —— open 优先是操作语义下的正确页。
+local function req_page_order()
+  local open_rows, closed_rows = {}, {}
+  for i = 1, req_count() do
+    if req_closed(i) then
+      closed_rows[#closed_rows + 1] = i
+    else
+      open_rows[#open_rows + 1] = i
+    end
+  end
+  local ordered = {}
+  for k = 1, #open_rows do
+    ordered[#ordered + 1] = open_rows[k]
+  end
+  for k = #closed_rows, 1, -1 do
+    ordered[#ordered + 1] = closed_rows[k]
+  end
+  return ordered
+end
+
+-- `full`（`requirement.list full`，wire 已预留的 opt-in，今天由 no-op 转真）
+-- = 全量渲染（低频运维动作）；默认 = 分页视图：需求行与待验收提案行都截到
+-- 页宽 + 提示行（「其余 K 条略（共 M 条）」），渲染行数 O(M) → O(页宽常数)。
+local function narrate_req_list(full)
   ygg.narrate(fill(TEXTS.beats.req_list_head, {
     panel = req_panel_text(),
     stage = stage(),
     lanes = lane_text(),
   }))
-  if req_count() == 0 then
+  local total = req_count()
+  if total == 0 then
     ygg.narrate(TEXTS.beats.req_list_empty)
   else
-    for i = 1, req_count() do
-      local shown = req_display(i)
+    local ordered = req_page_order()
+    local page = full and total or req_list_page()
+    local shown = page < #ordered and page or #ordered
+    for k = 1, shown do
+      local i = ordered[k]
       ygg.narrate(fill(TEXTS.beats.req_list_row, {
-        mark = R_MARK[shown] or "?",
+        mark = R_MARK[req_display(i)] or "?",
         id = req_id(i),
-        status = shown,
+        status = req_display(i),
         title = req_title(i),
         trace = req_trace(i),
       }))
     end
+    local omitted = #ordered - shown
+    if omitted > 0 then
+      ygg.narrate(fill(TEXTS.beats.req_list_more, {
+        omitted = tostring(omitted),
+        total = tostring(total),
+      }))
+    end
   end
-  -- 待验收提案（canonical 序；主 Agent 一次只验一条）
+  -- 待验收提案（canonical 序；主 Agent 一次只验一条）—— 同页约束：pending
+  -- 行是第二成本源（每行带完整 summary 长文本），同样截到页宽 + 提示行。
   local pending = prop_pending_total()
   if pending > 0 then
     ygg.narrate(fill(TEXTS.beats.req_list_props, { count = tostring(pending) }))
+    local pending_rows = {}
     for i = 1, prop_count() do
       if prop_status(i) == P_PENDING then
-        ygg.narrate(fill(TEXTS.beats.req_prop_row, {
-          id = prop_id(i),
-          req = req_id(prop_req(i)),
-          rev = tostring(prop_rev(i)),
-          stage = prop_stage(i),
-          summary = text_of(prop_key(i, "summary"), ""),
-        }))
+        pending_rows[#pending_rows + 1] = i
       end
+    end
+    local page = full and #pending_rows or req_list_page()
+    local shown = page < #pending_rows and page or #pending_rows
+    for k = 1, shown do
+      local i = pending_rows[k]
+      ygg.narrate(fill(TEXTS.beats.req_prop_row, {
+        id = prop_id(i),
+        req = req_id(prop_req(i)),
+        rev = tostring(prop_rev(i)),
+        stage = prop_stage(i),
+        summary = text_of(prop_key(i, "summary"), ""),
+      }))
+    end
+    local omitted = #pending_rows - shown
+    if omitted > 0 then
+      ygg.narrate(fill(TEXTS.beats.req_list_props_more, {
+        omitted = tostring(omitted),
+        total = tostring(pending),
+      }))
     end
   end
   ygg.narrate(TEXTS.beats.req_list_legend)

@@ -161,6 +161,8 @@
     "req_list_row": "  {{mark}} {{id}} [{{status}}] {{title}}{{trace}}",
     "req_list_props": "{{count}} pending proposals (the main agent accepts serially, canonical order):",
     "req_prop_row": "  · {{id}} → {{req}} rev {{rev}} / {{stage}}: {{summary}}",
+    "req_list_more": "  … {{omitted}} more omitted ({{total}} total): requirement.list full shows the full list",
+    "req_list_props_more": "  … {{omitted}} more pending proposals omitted ({{total}} total): requirement.list full shows the full list",
     "req_list_legend": "legend: · draft / ◐ analyzing / ◑ analysis_review / ◇ planning / ◈ plan_review / ⊟ plan_gate / ○ ready / ▶ developing / ◀ dev_review / ⊞ accept (awaiting accept_gate) / ✓ done / ⑂ split / ⇄ merged / ⊘ dropped / ⚠ blocked",
     "req_trace_deps": "(deps {{ids}})",
     "req_trace_origin": "(derived from {{id}})",
@@ -375,6 +377,8 @@
     "default_score": 3,
     "req_capacity": 32,
     "job_capacity": 4,
+
+    "req_list_page": 12,
     "tool_capacity": 64,
     "tool_output_max": 4096,
     "artifact_capacity": 64
