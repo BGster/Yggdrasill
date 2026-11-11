@@ -122,8 +122,7 @@ pub fn auto_budget(kv_entries: usize) -> u64 {
 /// `fuel_budget()` 行为逐字节一致（auto(0) = 地板）。
 pub fn resolve_budget(env_raw: Option<&str>, kv_entries: usize) -> u64 {
     match env_raw
-        .map(|raw| raw.trim().parse::<u64>().ok())
-        .flatten()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
     {
         Some(explicit) => explicit,
@@ -384,12 +383,12 @@ mod tests {
         assert_eq!(auto_budget(0), 100_000);
         assert_eq!(auto_budget(1), 100_000);
         assert_eq!(auto_budget(50), 100_000); // 50×2000 = 100k，恰在地板上
-        // 线性段：斜率 = FUEL_AUTOSCALE_PER_ENTRY。
+                                              // 线性段：斜率 = FUEL_AUTOSCALE_PER_ENTRY。
         assert_eq!(auto_budget(51), 102_000);
         assert_eq!(auto_budget(292), 584_000); // r13 方案 §0.2 seq 39 标定点
         assert_eq!(auto_budget(411), 822_000); // seq 68 标定点
         assert_eq!(auto_budget(450), 900_000); // seq 79 标定点
-        // 硬顶：恰在顶点与远超顶点都钳在 cap（顶格后击杀仍有限）。
+                                               // 硬顶：恰在顶点与远超顶点都钳在 cap（顶格后击杀仍有限）。
         assert_eq!(auto_budget(2_000), FUEL_AUTOSCALE_CAP);
         assert_eq!(auto_budget(10_000), FUEL_AUTOSCALE_CAP);
         assert_eq!(auto_budget(usize::MAX), FUEL_AUTOSCALE_CAP);

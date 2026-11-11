@@ -331,7 +331,10 @@ fn autoscaled_budget_admits_the_scaled_workload_but_still_kills_loops() {
         .as_object()
         .map(|entries| entries.keys().filter(|k| k.starts_with("probe.")).count())
         .unwrap_or(0);
-    assert_eq!(probe_count_after, 1000, "kill must not disturb canonical state");
+    assert_eq!(
+        probe_count_after, 1000,
+        "kill must not disturb canonical state"
+    );
     let parsed = reply_ok(&kernel.dispatch("event.start", "0"));
     assert_eq!(parsed["event"], json!("event.start"));
 }
