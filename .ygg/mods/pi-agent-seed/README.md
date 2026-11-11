@@ -215,6 +215,17 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
   下一个直派。
 - `goal` 模式同样走 `ygg.choice_selected`，但是否派发由外部决策命令决定（`HUMAN:…` 即安全
   暂停），不会默认批准。**所以 `--drive cmd` 的决策脚本等于「人」**——它的判断力由脚本自负。
+- **`gate.approve` 可用性按需求局部化（批准即开工）**：rN 的门禁只被 rN 自身事态阻塞
+  （自身 pending 提案 / 自身在跑 job / 自身未解决冲突或 needs_amend，判据 `gate_problem_for`）；
+  **其它需求的待验收提案 / 在跑 job 不阻塞 rN 的门禁**。run 收口链（`coordinate.submit` /
+  `verify.submit` / `review.note`）与 `gate.verify_suite` 的 `gate_problem()` 全局屏障保持不动
+  （§一的收口硬门禁不变）；`gate.reject` 不加判据（纠错通道保持畅通）。
+- **菜单并存**：`MENU[coordinate]` 主前进项不再互斥藏匿——resolve 冲突项最前 →
+  `proposal.accept` 首位 → `gate.approve` / `gate.reject` 紧随 → `requirement.dispatch` /
+  `coordinate.submit` 兜底（后两项仅在无 accept 且无门禁时出现）。单需求下 accept 与 gate
+  结构上不同时出现（门禁只能由 accept 唯一 pending 提案升起），全 1 菜单首项序号不变。
+  批准 plan 门禁后同一回合响应式自动派发开发；该判据同步按需求局部化：marked rN 只看
+  自身事态 + 全局 job 槽位，跨需求事态不再丢「刚就绪」标记。
 
 ### 5.2 二级菜单页
 

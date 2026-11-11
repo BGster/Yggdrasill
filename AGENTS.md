@@ -223,9 +223,12 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 Changing `.ygg/mods/pi-agent-seed/src/**` (state machine, gates, render layer, tool bridge),
 `.ygg/mods/pi-agent-seed/mod.lua` or the map wording in `data/scenes.json` requires, besides lint and
 the all-1 playtest:
-`cargo test -p ygg-sandbox --test agent_seed_semantics` (24 cases: stage merge + `analysis` compat,
+`cargo test -p ygg-sandbox --test agent_seed_semantics` (30 cases: stage merge + `analysis` compat,
 accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
-reject, reactive auto-dispatch in the same turn (plus `useMemo` invalidation), development proposal
+reject, reactive auto-dispatch in the same turn (plus `useMemo` invalidation), gate independence
+(other requirements' pending proposals / running jobs do not block a gate approval — approve starts
+work, per-requirement `gate_problem_for`), a gate still blocked by its own pending proposal
+(approve refused, stored state unmoved), development proposal
 reject (not amended / amended), inline `exec=` (misplaced / no reason / `:` form), settlement merge
 with `sessions=` + `todo=` and a refused malformed segment, legacy save without `plan_ok`, the
 operation/design map contracts on both packs, the tool bridge (request snapshot + KV rows, result
