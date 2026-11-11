@@ -6,15 +6,12 @@
 local M = {}
 
 local config = require("src.config")
-local reqs = require("src.requirements")
 local util = require("src.util")
 
 local TEXTS
 
-local effective, mode, text_of =
-  config.effective, config.mode, config.text_of
-local stage =
-  reqs.stage
+local effective, text_of =
+  config.effective, config.text_of
 local contains, cut, fill, join, split, trim =
   util.contains, util.cut, util.fill, util.join, util.split, util.trim
 
@@ -217,7 +214,8 @@ local function parse_assignments(raw)
   for _, part in ipairs(split(trim(raw or ""), ",")) do
     local piece = trim(part)
     if piece ~= "" then
-      if piece:match("^r%d+(:[a-z_]+)?$") == nil then
+      -- Lua 模式不支持对捕获组加 `?` 量词（`?` 会变字面问号）：两种形态分别判定。
+      if piece:match("^r%d+$") == nil and piece:match("^r%d+:[a-z_]+$") == nil then
         return nil, TEXTS.beats.profile_bad_assignments
       end
       total = total + #piece + 1
@@ -259,7 +257,7 @@ local function validate_profile_value(handle, field, value)
     end
     return raw, nil
   elseif field == "role" then
-    if #raw > 64 or raw:find("[\\r\\n]") ~= nil then
+    if #raw > 64 or raw:find("[\r\n]") ~= nil then
       return nil, TEXTS.beats.profile_bad_value
     end
     return raw, nil
@@ -275,7 +273,7 @@ local function validate_profile_value(handle, field, value)
   if field:match("^[a-z0-9_]+$") == nil or #field > 32 then
     return nil, TEXTS.beats.profile_bad_value
   end
-  if #raw > 256 or raw:find("[\\r\\n]") ~= nil then
+  if #raw > 256 or raw:find("[\r\n]") ~= nil then
     return nil, TEXTS.beats.profile_bad_value
   end
   return raw, nil

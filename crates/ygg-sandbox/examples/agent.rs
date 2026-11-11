@@ -12042,6 +12042,18 @@ end)
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// 声明承重锁（r3 变异探针 4 的红面）：真 Mod 的 proposal 路由必须声明双布尔——
+    /// 删掉任一布尔，此测试与宿主注入路径一起变红（声明是注入/拦截的唯一依据）。
+    #[test]
+    fn project_pack_declares_actor_bools_on_the_proposal_route() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let routes = InboxRoutes::load(&repo.join(".ygg/mods/pi-agent-seed")).expect("读真 Mod 路由表");
+        assert_eq!(routes.actor_flags_for("proposal.submit"), (true, true));
+        // 其余动作不声明身份段（宿主不注入也不拦截）。
+        assert_eq!(routes.actor_flags_for("tool.result"), (false, false));
+        assert_eq!(routes.actor_flags_for("requirement.add"), (false, false));
+    }
+
     #[test]
     fn inbox_record_stamps_identity_and_claims_opener() {
         let dir = case_dir("inbox-stamp");
