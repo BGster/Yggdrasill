@@ -2472,3 +2472,258 @@ fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
         "{goal_with_auth:#?}"
     );
 }
+
+// ───────────────────────── r13 · requirement.list pagination ─────────────────────────
+
+/// The requirement rows of a list receipt (`  <mark> rN [phase] title(trace)`):
+/// the second space-separated token after the leading mark glyph is the `rN` id.
+/// Proposal rows (`  · pN → …`, id token starts with `p`) and the omission hint
+/// (`  … N more omitted …`, second token is a number) never match.
+fn req_row_ids(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|line| {
+            if !line.starts_with("  ") {
+                return None;
+            }
+            let token = line.trim_start().split(' ').nth(1)?;
+            let digits = token.strip_prefix('r')?;
+            if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            Some(token.to_owned())
+        })
+        .collect()
+}
+
+/// The pending-proposal rows of a list receipt (`  · pN → rM rev …`).
+fn prop_row_ids(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|line| {
+            if !line.starts_with("  ") {
+                return None;
+            }
+            let token = line.trim_start().split(' ').nth(1)?;
+            let digits = token.strip_prefix('p')?;
+            if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            Some(token.to_owned())
+        })
+        .collect()
+}
+
+/// Pile up `count` simultaneously-pending proposals (one per requirement): each
+/// round dispatches a batch of plan jobs, then per batch member submits a
+/// staging proposal, accepts it (frees the job slot, raises the plan gate) and
+/// rejects the gate (back to `planning` with no job — the submit slot only
+/// checks the stored status, so it is still submittable **without holding a
+/// job slot**), then leaves one permanent pending on the requirement. Job
+/// capacity (4) bounds the batch, never the total: pending proposals do not
+/// hold job slots once their gate has been rejected.
+fn pile_pending_proposals(game: &mut Game, count: usize) {
+    // Phase 1 — walk fresh requirements in targeted batches of ≤ job_capacity:
+    // per member, a **targeted** `requirement.dispatch rN` (the batch dispatch
+    // would re-pick already-processed planning rows first), then a staging
+    // proposal → accept → gate-reject. The guide ticket always takes the
+    // **head** pending / gate, so every accept/reject must see exactly one
+    // candidate in the whole run: staging proposals are consumed immediately
+    // and the permanent pendings are deferred to phase 2. After the cycle the
+    // member sits in `planning` with no job/gate/pending and an unchanged rev
+    // (gate.reject does not bump it) — still submittable **without a job slot**.
+    let mut submittable = Vec::new();
+    let mut next = 1;
+    while next <= count {
+        let last = (next + 3).min(count);
+        for i in next..=last {
+            game.narrate("requirement.dispatch", &text(&format!("r{i}")));
+            if game.kv(&format!("req.{i}.job")) != json!("plan") {
+                continue; // not dispatchable (unexpected) — skip, don't wedge
+            }
+            let id = format!("r{i}");
+            game.narrate(
+                "proposal.submit",
+                &text(&format!(
+                    "{id}|1|plan|staging summary {id}|artifacts/{id}-plan.md||staging-{id}"
+                )),
+            );
+            game.click("proposal.accept — ");
+            game.click("gate.reject — ");
+            submittable.push(i);
+        }
+        next += 4;
+    }
+    assert!(
+        submittable.len() >= count.min(4),
+        "piling produced nothing submittable"
+    );
+    // Phase 2 — one permanent pending per member (plain submit, no accept
+    // involved — proposal.submit never head-picks).
+    for &i in submittable.iter().take(count) {
+        let id = format!("r{i}");
+        let rev = game.kv(&format!("req.{i}.rev"));
+        game.narrate(
+            "proposal.submit",
+            &text(&format!(
+                "{id}|{}|plan|{}|artifacts/{id}-plan.md||piled-{id}",
+                rev,
+                "long pending summary for the pagination walkthrough; ".repeat(8)
+            )),
+        );
+    }
+}
+
+/// Mutation: drop the open-first ordering in `req_page_order` → the canonical
+/// prefix (r1, r2 — both merged/closed) would head the page and the first-row
+/// assert goes red; pad closed rows oldest-first → the r2/r1 tail order reds.
+#[test]
+fn requirement_list_orders_open_first_and_pads_recent_closed() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("pagination gate|open-first display order"),
+    );
+    for i in 1..=5 {
+        game.narrate(
+            "requirement.add",
+            &text(&format!("req {i}|description {i}|ext-{i}")),
+        );
+    }
+    // r1, r2 → merged into r6 (terminal/closed): the canonical prefix is now
+    // closed history — exactly the long-run shape a plain prefix page fails
+    // (the whole page would be done rows while every active row is omitted).
+    game.narrate("requirement.merge", &text("r1,r2|merged req|description"));
+    game.assert_kv("req.1.status", json!("merged"));
+    game.assert_kv("req.2.status", json!("merged"));
+
+    let lines = game.narrate("requirement.list", "0");
+    assert_eq!(
+        req_row_ids(&lines),
+        vec!["r3", "r4", "r5", "r6", "r2", "r1"],
+        "open rows first (canonical), then closed rows newest-first: {lines:#?}"
+    );
+    // M ≤ page width → no omission hint; the legend still closes the view.
+    assert!(
+        !lines.iter().any(|line| line.contains("more omitted")),
+        "{lines:#?}"
+    );
+    assert!(lines.iter().any(|line| line.starts_with("legend: ")));
+}
+
+#[test]
+fn requirement_list_truncates_to_the_page_and_opts_in_full() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("pagination gate|page width + full opt-in"),
+    );
+    for i in 1..=15 {
+        game.narrate(
+            "requirement.add",
+            &text(&format!("req {i}|description {i}|ext-{i}")),
+        );
+    }
+    let before = game.save();
+
+    // Default view: exactly `tuning.req_list_page` (12) rows + the hint line.
+    let lines = game.narrate("requirement.list", "0");
+    let ids = req_row_ids(&lines);
+    assert_eq!(ids.len(), 12, "default page width: {lines:#?}");
+    assert_eq!(ids.first(), Some(&"r1".to_string()));
+    let hint = lines
+        .iter()
+        .find(|line| line.contains("more omitted"))
+        .unwrap_or_else(|| panic!("the omission hint is missing: {lines:#?}"));
+    assert!(
+        hint.contains("3 more omitted") && hint.contains("15 total"),
+        "hint must carry K/M: {hint}"
+    );
+    assert!(hint.contains("requirement.list full"), "{hint}");
+
+    // `full` opt-in: every row, no hint.
+    let full = game.narrate("requirement.list", &text("full"));
+    let full_ids = req_row_ids(&full);
+    assert_eq!(full_ids.len(), 15, "full view shows all rows: {full:#?}");
+    assert_eq!(full_ids.last(), Some(&"r15".to_string()));
+    assert!(
+        !full.iter().any(|line| line.contains("more omitted")),
+        "{full:#?}"
+    );
+
+    // The list is a read-only view: state after both listings is identical.
+    assert_eq!(before, game.save(), "requirement.list must not touch state");
+}
+
+#[test]
+fn requirement_list_keeps_empty_state_and_payload_gate() {
+    let mut game = Game::open(&project_mod_dir());
+    game.narrate(
+        "task.intake",
+        &text("pagination gate|empty state + payload gate"),
+    );
+    // Empty run: same empty-state line, no hint line.
+    let lines = game.narrate("requirement.list", "0");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("no requirements yet")),
+        "{lines:#?}"
+    );
+    assert!(!lines.iter().any(|line| line.contains("more omitted")));
+    // The payload gate is unchanged: anything beyond empty/0/full is refused.
+    let refused = game.narrate("requirement.list", &text("bogus"));
+    assert_refused(&refused, "requirement.list");
+}
+
+/// r13 验收走查（大状态局 × 零 env）：15 条长描述需求 + 13 条长摘要 pending
+/// 提案把 kv_len 推到历史撞墙规模（§0.2：kv_len≈292 时全量 list 在 100k 地板
+/// 下必死）。默认 env 下三个视图全部 ok:true（燃料耗尽会直接翻红信封），
+/// 且默认页同时呈现需求段与提案段的截断 + 提示行（同页约束）。
+/// Mutation: remove the autoscale reset or the pagination → the full-row render
+/// at this kv_len crosses the floor budget and the receipt turns FUEL_EXHAUSTED.
+#[test]
+fn big_state_walks_all_views_without_fuel_exhaustion_under_the_default_budget() {
+    let mut game = Game::open(&project_mod_dir());
+    let long_desc = "long description for the big-state walkthrough; ".repeat(8);
+    game.narrate("task.intake", &text(&format!("big state gate|{long_desc}")));
+    for i in 1..=15 {
+        game.narrate(
+            "requirement.add",
+            &text(&format!("big req {i}|{long_desc}|big-{i}")),
+        );
+    }
+    // 13 pendings (one per requirement, r14/r15 stay dispatchable drafts).
+    pile_pending_proposals(&mut game, 13);
+
+    // Default view: paged in BOTH segments + both hint lines.
+    let lines = game.narrate("requirement.list", "0");
+    let ids = req_row_ids(&lines);
+    assert_eq!(ids.len(), 12, "requirement rows are paged: {lines:#?}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("3 more omitted") && line.contains("15 total")),
+        "{lines:#?}"
+    );
+    let prop_ids = prop_row_ids(&lines);
+    assert_eq!(prop_ids.len(), 12, "pending rows share the page width");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("1 more pending proposals omitted")
+                && line.contains("13 total")),
+        "{lines:#?}"
+    );
+
+    // full opt-in: all rows in both segments, no hints.
+    let full = game.narrate("requirement.list", &text("full"));
+    assert_eq!(req_row_ids(&full).len(), 15, "{full:#?}");
+    assert_eq!(prop_row_ids(&full).len(), 13);
+    assert!(!full.iter().any(|line| line.contains("more omitted")));
+
+    // The other heavy views stay usable (ok:true — a fuel death fails the envelope).
+    game.narrate("requirement.dispatch", "0");
+    let map_full = game.narrate("map.show", &text("full"));
+    assert!(!map_full.is_empty(), "map.show full must narrate");
+}

@@ -33,8 +33,8 @@ local narrate_req_list, render, req_panel_text =
   render_mod.narrate_req_list, render_mod.receipt, render_mod.req_panel_text
 local R_DEVELOPING, R_PLANNING, STAGE, job_capacity, job_total, req_append, req_capacity, req_conflict_total, req_count, req_deps_text, req_dev_blocked_text, req_dev_ready, req_display, req_id, req_index_of, req_job, req_job_stage, req_key, req_open_total, req_validate_deps, stage =
   reqs.R_DEVELOPING, reqs.R_PLANNING, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_append, reqs.req_capacity, reqs.req_conflict_total, reqs.req_count, reqs.req_deps_text, reqs.req_dev_blocked_text, reqs.req_dev_ready, reqs.req_display, reqs.req_id, reqs.req_index_of, reqs.req_job, reqs.req_job_stage, reqs.req_key, reqs.req_open_total, reqs.req_validate_deps, reqs.stage
-local contains, fill, join =
-  util.contains, util.fill, util.join
+local contains, fill, join, trim =
+  util.contains, util.fill, util.join, util.trim
 local parse_dispatch, parse_intake, parse_requirement, probe_payload_ok =
   wire.parse_dispatch, wire.parse_intake, wire.parse_requirement, wire.probe_payload_ok
 
@@ -209,7 +209,9 @@ function M.install(deps)
         usage = TEXTS.beats.req_list_usage,
       }))
     end
-    narrate_req_list()
+    -- r13：`full` 载荷由 no-op 转真（wire 契约已预留）：全量 opt-in。
+    -- 默认 = 分页视图（open 优先 + 页宽截断 + 提示行，见 render.narrate_req_list）。
+    narrate_req_list(trim(tostring(payload)) == "full")
     render()
   end)
   ygg.on("requirement.dispatch", function(payload)
