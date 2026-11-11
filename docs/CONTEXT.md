@@ -47,10 +47,11 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 | **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。 |
 | **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期：`intake`（任务注入与需求立案）$\to$ `coordinate`（派发泳道、接受提案、通过门禁）$\to$ `review`（验证套件、演进筛选、会话/todo 清理）$\to$ `done`（终态结算状态）。 |
 | **Requirement（`r1..rN`，需求）** | 由状态机跟踪的一个交付单元。以 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split` / `merged` / `dropped`）存储，并通过 `plan_ok`、`job`、`gate`、`conflict` 属性投影为细粒度展示阶段（`draft`、`planning`、`plan_review`、`plan_gate`、`ready`、`developing`、`dev_review`、`accept`、`done`、`blocked`）。 |
-| **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。 |
+| **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。泳道分支名执行强制形态 `feature/{4位uuid}-{语义词段}`（`lane.claim` 与 `git.worktree_claim` 两条入口同规则，非法名可读拒绝；默认名生成机制已删除）——契约细节见 DESIGN §2.4。 |
 | **Proposal（`p1..pM`，提案）** | 由执行者子代理针对特定 `(req_id, rev, stage)` 元组产出的不可变交付提交（`proposal.submit`），引用一个已归档的 VFS 产物（`artifacts/<req>-<stage>.md`）并绑定执行者身份（`exec=<agent_id>`）。提案在协调者串行执行 `proposal.accept` 或 `proposal.reject` 之前不会改变需求状态。 |
 | **Mandatory Gates（`plan_gate`、`accept_gate`，强制门禁）** | 每个需求的两个不可跳过的质量检查点。`plan_gate` 批准技术方案（`planning` $\to$ `ready`）并响应式地自动派发开发。`accept_gate` 要求非空产物证据（`artifacts`）与匹配的修订号（`gate_rev == req.rev`），之后才将需求标记为 `done` 并释放其泳道。 |
-| **Executor Ledger（`executor.<rN>.<stage>`，执行者台账）** | 一条自声明的审计轨迹，记录哪个子代理 ID 执行了某个需求的某个阶段（`analysis`、`plan`、`development`）。跨阶段交接或同一阶段更换为不同执行者 ID 需要显式理由（`<new_id>\|<reason>`）。占位 ID（`pi-ygg-harness`、`main`、`default`、`unregistered`）在恢复决策中被过滤掉。 |
+| **Executor Ledger（`executor.<rN>.<stage>`，执行者台账）** | 一条自声明的审计轨迹，记录哪个子代理 ID 执行了某个需求的某个阶段（`analysis`、`plan`、`development`）。跨阶段交接或同一阶段更换为不同执行者 ID 需要显式理由（`<new_id>\|<reason>`）。占位 ID（`pi-ygg-harness`、`main`、`default`、`unregistered`）在恢复决策中被过滤掉。r3 起，台账 id 与提案的宿主 `actor=` 章在 `requirement.list` trace 上做三态互证显示（`[verified]` / `[mismatch:actor=…]` / `[unverified]`，识别不拒绝）——账本仍是权责权威，互证只是显示 join。 |
+| **Profile Registry（`profile.<handle>.*`，身份注册表）** | 一张**自报身份卡**（self-reported registry，不是凭据）：`config.set profile.<handle>.<key>` 逐键注册的 `settings.profile.*` 平铺 KV（保留键 `harness` / `session_id` / `handle` / `role` / `assignments`，自由键 `^[a-z0-9_]{1,32}$`）。回答「这个句柄是谁」（harness / 原生 session id / 角色自报分工快照）；与执行者台账**互链不冗余**（渲染层按 `handle == executor id` 字符串 join，权责仍以账本为准）。投影：`map.show full` 的 `[PROFILES]` 行与 `agent.summary` 的 `profiles` 数组（≤8 张，handle 升序）。 |
 | **In-Archive VFS（`artifacts/*`，归档内虚拟文件系统）** | `run.sqlite` 内的一张虚拟文件系统表（`vfs_files`），通过 `ygg.fs.*` 暴露给 Lua 沙箱，通过 `vfs.write` / JSON-RPC `vfs_put` 暴露给外部工具。存储方案、开发报告、演进审查与压缩交接，带 SHA-256 完整性。 |
 | **Synchronous Tool Bridge（`ygg.tool.call`，同步工具桥）** | 一个可选加入的宿主能力，允许 Mod 在同一次 dispatch 回合内同步调用白名单内的确定性宿主仪式（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`、`harness.archive_sessions`），消除多回合异步回调往返。 |
 | **HarnessAction（`subagentAction`，治理引擎动作指令）** | Mod 在 `summary.jobs[i].subagentAction` 内发出的一条结构化机器可读指令（`subagent.spawn` 或 `subagent.resume`），携带渲染后的 `brief`、`deltaPrompt`、`fullFallbackBrief`、`worktreePath`、`artifactPath` 与 `submitCommand`，使任何上层治理引擎适配器都能执行泳道而无需重新实现工作流逻辑。 |
@@ -58,14 +59,14 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 
 ---
 
-## 3. 十大架构与运营原则
+## 3. 架构与运营原则（工程面 P 列表 + 游玩面 PLAY 节）
 
 1. **P1 · 纯函数式迁移与事务性存档点（`(state, event) -> state'`）**
    - 每一次 dispatch 都是一次全有或全无的原子迁移。若某个 Lua 处理器出错或耗尽指令燃料，该次 dispatch 期间对实体表与 KV 存储的全部修改都会被完全回滚。在 SQLite 持久化模式下，事件日志行与状态快照在单个数据库事务中提交。
 2. **P2 · 零硬编码 — 数据与契约驱动（`D11/D15`）**
    - 业务规则、状态迁移、叙述模板与提示节拍都归属于 Mod 脚本（`src/**`，按 core/domain/view/runtime/handlers 五层组织）与 JSON 资源（`data/*.json`），绝不硬编码在 Rust 宿主代码或 TypeScript 扩展代码中。所有提示模板、子代理 brief 与叙述行都存放在 `data/texts/` 片段（由 `mod.lua` 装配回 TEXTS）。
 3. **P3 · 契约驱动的通用宿主**
-   - Rust 宿主（`egg`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
+   - Rust 宿主（`ygg-agent`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
 4. **P4 · 少即是多 — 每个机制一条规范路径**
    - 每个能力都有唯一的规范机制。冗余的校验块、重复的 Mod 副本、或重叠的多回合异步仪式，都被合并为单源辅助函数与 1 回合内联仪式。
 5. **P5 · 单一事实来源（Single Source of Truth）**
@@ -84,6 +85,73 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 10. **P10 · 数据红线与显式的每运行目标授权**
     - **数据红线**：读取、列出、stat、或复制真实业务数据（`*.xlsx`、`*.xls`、`*.csv`，或诸如 `/Volumes/WenshuSpace/**` 的涉密挂载）在提示层与扩展 `tool_call` 防火墙层都被严格禁止。
     - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在 `review.note` 能关闭运行之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。
+11. **P11 · 宿主零语义（引擎/壳分界）**
+    - 宿主（内核与 CLI/服务壳）不持有、不解析任何 Mod 领域概念；跨 Mod 复用的只有通用机制
+      （存储、事件、路由、裸数据服务）。领域概念出现在宿主面即层次错位。
+    - 来源：r8（serve 面板两级化——需求/泳道/门禁是特定 mod 的概念，宿主解析即限制 mod 自由度）；
+      r6（新布局不硬编码为内核/CLI 硬约束）。
+    - 反例：内置面板渲染「需求图/泳道/提案队列」，或命令行出现 `--show-lanes` 类领域旗标——
+      宿主从此只为这一种 mod 服务。
+12. **P12 · 非兼容优先于兼容债**
+    - 升级不承诺旧数据可载；非兼容变更直接落地，旧数据以只读归档保留（历史可查不承诺可续）。
+      唯一义务是干净拒绝：装载失败必须可读报错并指明「开新局」。
+    - 来源：r9（三类兼容承诺表/迁移表/probe-first SOP 全删——「那本身就是技术债」）。
+    - 反例：为旧档维护迁移表、adopting 语义、版本栅栏提示文案——兼容层本身成为需要被维护的
+      第二份语义。
+13. **P13 · 删除即报错（fail-closed over silent no-op）**
+    - 语义退役必须从注册面物理移除；被移除的语义被再次使用时，得到可读报错而非静默成功——
+      静默 no-op 是「假活着」的技术债。
+    - 来源：r11（未知事件 VALIDATION 拒绝，含派生面 savepoint 回滚）；r1（guide.show 物理注销
+      而非墓碑）。
+    - 反例：注销的事件名被直派时返回 ok + 空叙事——调用方以为成功，回放日志被无意义名字污染。
+14. **P14 · 标识符 = 唯一性 + 人类意图，机器默认值机制是隐式契约**
+    - 长期存续的标识符必须同时满足机器唯一（uuid 段）与人类可辨（语义段）；宿主/框架不内置
+      「自动生成默认标识符」的机制——默认值是隐式契约，删不起也改不起。
+    - 来源：r2（`feature/{4位uuid}-{人读名}`；auto_claim 默认名机制删除）。
+    - 反例：`feature/r1` 式自动名——跨局重复、长期不可辨识；每新增一个默认值，就多一条
+      没人记得的隐式规则。
+
+### 3.5 游玩与交互设计原则（PLAY-1..PLAY-5）
+
+> 与 P1-P10 工程原则并列的第二原则命名空间：P 面约束引擎与治理系统的建造方式，
+> PLAY 面约束玩家可感知面的产品与交互形态。编号采用 PLAY 前缀子命名空间而非顺延
+> P11-P15——PLAY 不是工程原则的延续而是另一维度，同时不挤占未来工程原则编号。
+> 本节提炼自 2026-11-11 局（unify-map-and-agent-seed）用户裁决，来源需求号可溯。
+
+1. **PLAY1 · 沉浸式优先**
+   - 玩家面只呈现剧情与地图；规则书、设计机制等幕后构造不作可浏览内容暴露。
+   - 来源：r1 rev3 裁决（撤销 playbook 章节浏览——「幕后规则书」；guide.show 物理注销）。
+   - 反例：若 `map.show` 提供可选 `section_id` 用于浏览规则章节，玩家面即暴露幕后规则书——
+     这正是 rev2-2 被否决的方案。
+2. **PLAY2 · 命令极简**
+   - 一个命令一个语义；参数分支克制，能无参则无参。
+   - 来源：r1 rev3（`map.show` 零参数分支并以 payload 无关性断言钉死：
+     `narrative_lines(map.show, "") == narrative_lines(map.show, <任意payload>)`；
+     `full` 设计视图整体退役，操作视图即完整视图）。
+   - 反例：给 `map.show` 加「玩家图/设计全图」开关参数，即一个命令两种语义——
+     `full` 退役正是为消灭这种二义。
+3. **PLAY3 · 语义清零**
+   - 合并或退役一个语义，就从注册面、数据与文案中物理清除；不留别名、不留墓碑式兼容残留。
+   - 来源：r1 rev3（`guide.show` 从注册面完全移除：menus、叙事提示语、playbook 引用全部清零，
+     不做任何兑底；先例：D-MA9 的 `step` 零增量别名零残留退场）。
+   - 反例：`guide.show` 若仅隐藏菜单入口而保留 handler 与叙事 beat（墓碑形态），
+     直派旧命令仍可达旧语义——技术债原地复活。
+4. **PLAY4 · 人读输出**
+   - 面向人的回执渲染为自然语言文本，是**缺省形态**；机器契约走 `--raw` 显式旗标输出 JSON 信封（字节等价断言钉在 --raw 分支）。
+   - 来源：r5 v3（缺省 text；`--raw` 唯一旗标；`YGG_FORMAT` 环境回退 text|json）。
+   - 反例：若缺省仍是 JSON 单行，人类推进全程面对不可读输出（2026-11-11 局实测痛点）——人读缺省才是原则，机器面由显式旗标保护。
+
+5. **PLAY5 · 诚实威胁模型**
+   - 能力上限如实声明，不夸大保证范围。
+   - 来源：r3（身份互证如实声明为「防误记不防伪造、无 token」——同机进程模型下 env/flag
+     可伪造；方案价值是双通道一致性可核对，让冒用与未标注代理可见可核查）。
+   - 反例：若文档宣称 profile 注册 + actor 互证「防止身份伪造」，即越过 r3 如实声明的
+     边界——它防的是误记与张冠李戴，不是密码学意义上的伪造。
+
+> 交叉引用：PLAY2 是 P4（每机制一条规范路径）在命令面的投影；PLAY3 与 P2（零硬编码、
+> 契约驱动）共同闭环「单一规范语义」——建造面不留第二语义源，产品面退役即清除；
+> PLAY5 与 P10 数据红线同属「显式声明边界」家族；P11↔P2（零硬编码的宿主面投影）；
+> P13↔PLAY3（建造面单一语义与产品面退役清零互为表里）。
 
 ---
 
@@ -96,20 +164,20 @@ Yggdrasill/
 │   ├── ygg-modules/     # 纯多文件 Lua 模块路径解析与副作用禁用清单（零依赖叶 crate）
 │   ├── ygg-schema/      # Manifest SHA-256 内容寻址与 JSON Schema 校验（仅依赖 ygg-core）
 │   ├── ygg-store/       # 运行持久化端口：SQLite 默认（run.sqlite + VFS）与遗留 JSON 后端（仅作为 ygg-sandbox 示例的 dev 依赖）
-│   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、egg 宿主 CLI
+│   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、ygg-agent 宿主 CLI
 │   ├── ygg-lint/        # 静态 AST 检查器（full_moon）：YGG-R1/R2/R3、YGG-MOD-EFFECT、YGG-PARSE（仅依赖 ygg-modules，零内核/VM 依赖）
 │   └── ygg-wasm/        # 浏览器 WebAssembly 绑定（wasm-bindgen 薄壳，位于 ygg-core + ygg-sandbox 之上）
 ├── packages/
 │   ├── schema/          # JSON Schema 单一事实来源（manifest、pack、story、agent-config）
 │   ├── mods/
-│   │   ├── agent-seed -> ../../.ygg/mods/agent-seed   # 指向规范工作流 Mod 的符号链接
+│   │   ├── agent-seed -> ../../.ygg/mods/agent-seed         # 指向规范工作流 Mod 的符号链接
 │   │   └── test-adventure/                                  # 参考可玩文字冒险 Mod
 │   ├── client-web/      # React + TypeScript 浏览器播放器
 │   └── pipeline/        # TypeScript AI Mod 生成与校验循环
 ├── clients/
 │   └── godot/           # Godot 4 原生 gdext 客户端（M2.5）
 ├── .ygg/
-│   └── mods/agent-seed/   # 规范多文件 Agent 治理 Mod（mod.lua、src/** 五层、data/texts|playbook|config、schemas/）
+│   └── mods/agent-seed/      # 规范多文件 Agent 治理 Mod（mod.lua、src/** 五层、data/texts|playbook|config、schemas/）
 ├── .pi/
 │   └── extensions/ygg-pi-harness/   # Pi Coding Agent Tier-1 扩展适配器（防火墙、daemon RPC 客户端、编排器、压缩）
 └── docs/
@@ -121,7 +189,7 @@ Yggdrasill/
 - `ygg-core` 只能依赖 `serde`、`serde_json` 与 `thiserror`。任何 VM、Schema 校验器、I/O 或平台 API 都不得进入 `ygg-core`。
 - `ygg-modules` 是被 `ygg-sandbox` 与 `ygg-lint` 共享的零依赖叶 crate。
 - `ygg-lint` 绝不依赖 `ygg-core`、`ygg-schema` 或 `ygg-sandbox`（保证静态 AST 检查快速且免去 `mlua` 编译）。
-- `ygg-store`（及 `rusqlite`）只被原生宿主 CLI（`crates/ygg-sandbox/examples/egg.rs`，经 `[dev-dependencies]`）链接，确保 `ygg-wasm` 与 `ygg-lint` 的依赖树 100% 不含 SQLite 与文件系统依赖。
+- `ygg-store`（及 `rusqlite`）只被原生宿主 CLI（`crates/ygg-sandbox/examples/agent.rs`，经 `[dev-dependencies]`）链接，确保 `ygg-wasm` 与 `ygg-lint` 的依赖树 100% 不含 SQLite 与文件系统依赖。
 
 ---
 
@@ -137,7 +205,7 @@ Yggdrasill/
 | **D3** | 内核规格 | **从第 1 天起即为完整 RPG 级规则内核**（实体、属性、标签、事件总线、FSM、Lua 条件），使文字冒险通过增加内容/子系统演进为 RPG，而非重写内核。 | 已确认 |
 | **D4** | 首个里程碑策略 | **先引擎 + 手写参考 Mod（`test-adventure`）**，待内核语义得到证明后再接 AI 生成流水线（`M1`）。 | 已确认 |
 | **D6** | 游戏引擎集成 | **Godot 原生链接（`gdext`）** 排期于 M2.5（原生链接 Rust 库，无 Wasm 开销）；保持表现/逻辑分离。 | 已排期（Spike GO） |
-| **D7** | 内核语言 | **单一 Rust 实现**：编译为浏览器 Wasm（`ygg-wasm`）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（`egg` / Axum）。保证无 GC 抖动的确定性回放。 | 已确认 |
+| **D7** | 内核语言 | **单一 Rust 实现**：编译为浏览器 Wasm（`ygg-wasm`）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（`ygg-agent` / Axum）。保证无 GC 抖动的确定性回放。 | 已确认 |
 | **D8** | Web 表现技术栈 | **React + TypeScript**（`packages/client-web`），用于以文本为中心的叙事 UI 与成熟的 AI 工具生态。 | 已确认 |
 | **D9** | 平台服务（M2+） | **Rust + Axum**，与内核直接共享 `ygg-schema` 校验逻辑。 | 已计划 |
 | **D10** | 内容流水线技术栈 | **TypeScript**（`packages/pipeline`），用于 I/O 密集的 LLM 编排、结构化输出解析与重试循环。 | 已确认 |
@@ -164,4 +232,10 @@ Yggdrasill/
 | **D-MA6** | 持久化泳道工作树池 | `worktree-claim` 管理持久化池 `<repo-parent>/worktrees/<repo>-lane-1..4`，通过 `git checkout -B <branch> HEAD` 重置分支（保留如 `target/` 的未跟踪构建缓存），并将释放的泳道停放在 `--detach HEAD` 上而非删除目录。 | 已确认 |
 | **D-MA7** | 通用治理引擎适配器（`subagentAction`） | Mod 计算 `summary.jobs[i].subagentAction`（`subagent.spawn` / `subagent.resume`），携带渲染后的 brief（`data/texts/` 模板片段）与实时的 `worktreeStatus` / `subagentStatus` / `probeStatus`，使 `.pi/extensions/ygg-pi-harness`（或 Claude Code / Codex / Cursor 适配器）能充当薄执行壳。 | 已确认 |
 | **D-MA8** | 活文档整合 | 将所有架构、领域与契约文档整合进 `docs/CONTEXT.md`（领域与决策）与 `docs/DESIGN.md`（系统行为与接口契约），通过子代理 brief 中的强制必读引用与最终审查时的同步检查来执行。 | 已确认 |
-| **D-MA9** | 动作面三层分层（`event` / `op` / `action`） | **取向：部分收敛（Partial Convergence）。** `event` 是状态推进的唯一货币（34 个），`op` 是状态之外的宿主端口（8 个），`action` 是适配器的语义入口（9 个，值域随 harness 可变）。**禁止把 `action` 理解为 `event` 的第二份清单**：9 个 `action` 里只有 `approve_gate` / `reject_gate` 与 `event` 重叠，且是**有意保留的位次正确性别名**（`reqId` 必填可防「批错需求」，判据为「能防止一类可命名的 payload 错位才配拥有别名」）；`vfs_write` 与 `event=vfs.write` **语义不等价**（事件路径有阶段守卫、64 KiB 上限、`artifact.*` 台账与 `[VFS LEDGER ONLY]` 降级，`op=vfs_put` 全都没有），故不得互替；`kickoff` / `settle_close` 是多步编排（顺序契约在适配器侧），`dispatch` 是唯一的事件直通口。零增量同义别名（原 `step`）**已从值域退场**，不做兼容残留。`dispatch` **不得附带压缩等回合后动作**：压缩只经 `action=handoff_compact` 与 `ygg_run_lanes` 编排层刹车两个显式入口。契约正文见 `docs/DESIGN.md` §3.4。 | 已确认 |
+| **D-MA9** | 动作面三层分层（`event` / `op` / `action`） | **取向：部分收敛（Partial Convergence）。** `event` 是状态推进的唯一货币（全集计数不写死，口径与复算命令见 `docs/DESIGN.md` §3.4 末注；`guide.show` 已随 r1 物理注销），`op` 是状态之外的宿主端口（8 个），`action` 是适配器的语义入口（9 个，值域随 harness 可变）。**禁止把 `action` 理解为 `event` 的第二份清单**：9 个 `action` 里只有 `approve_gate` / `reject_gate` 与 `event` 重叠，且是**有意保留的位次正确性别名**（`reqId` 必填可防「批错需求」，判据为「能防止一类可命名的 payload 错位才配拥有别名」）；`vfs_write` 与 `event=vfs.write` **语义不等价**（事件路径有阶段守卫、64 KiB 上限、`artifact.*` 台账与 `[VFS LEDGER ONLY]` 降级，`op=vfs_put` 全都没有），故不得互替；`kickoff` / `settle_close` 是多步编排（顺序契约在适配器侧），`dispatch` 是唯一的事件直通口。零增量同义别名（原 `step`）**已从值域退场**，不做兼容残留。`dispatch` **不得附带压缩等回合后动作**：压缩只经 `action=handoff_compact` 与 `ygg_run_lanes` 编排层刹车两个显式入口。契约正文见 `docs/DESIGN.md` §3.4。 | 已确认 |
+| **D-MA10** | map/guide 语义收口（r1 rev3） | `map.show` 单一视图：操作视图即完整视图，payload 一律忽略（payload 无关性由语义测试钉死：任意两个 payload 的叙事逐行相同），设计视图整体退出 CLI。`guide.show` **物理注销**：注册面、菜单挂载、文案键、playbook 引用、孤儿代码零残留，不做墓碑兼容；直派旧名不再有静默假成功（内核对未注册事件 fail-closed，r11 起为可读 VALIDATION 拒绝）。删除即报错、零残留退场（P13）。 | 已确认 |
+| **D-MA11** | 迭代分支命名强制形态（r2） | 泳道分支必须满足 `feature/{4位uuid}-{语义词段}`：小写 4 位 uuid 段 + 语义词段（≥3 连续字母、非纯数字、8–16 位纯 hex 拒绝、总长 ≤48、前缀大小写敏感）。`lane.claim` 与 `git.worktree_claim` 两条入口同规则、拒绝通道不同（前者 `flow.refuse` 可读拒绝且 `reject.*` 留痕，后者叙事拒绝、账本与 reject 台账不动）；默认分支名生成机制整体删除，未自报名 = 可读拒绝——标识符 = 机器唯一 + 人类意图（P14）。 | 已确认 |
+| **D-MA12** | 提交者身份模型（r3：宿主章互证 + profile 注册 + opener） | **双通道一致性可核对，不是身份认证**。① 解析链 `--actor` > `YGG_ACTOR` > daemon 请求字段（`actor_session` 对称），宿主为声明路由注入 `\|actor=` / `\|actor_session=` wire 段，调用方自带保留段 = `ACTOR_FORGED` 拒绝（格式红线，不是密码学）；② mod 三态互证（`exec=` vs `actor=`：verified / mismatch / unverified，识别不拒绝，裁决权在人 / 门禁）；③ 双 id 命名空间不可混用（Agent 工具句柄 vs 原生 session id——后者只作审计，永不参与判定）；④ profile 注册 = 纯 `config.set` KV 约定不新增事件（不推进状态的事件违背 L1；`config.set` 天然落事件行可审计、幂等、不占门禁），自报卡与账本互链不冗余（权责看账本）；⑤ opener = run.json 首条带身份成功写先到先得不可变（失败步不认领）。诚实威胁模型：同机进程下 env/flag/profile 可伪造，本机制防误记与张冠李戴、让冒用可见可审计，不做密码学不引入 token。契约正文见 `docs/DESIGN.md` §3.7。 | 已确认 |
+| **D-MA13** | 种子 Mod 更名 `agent-seed`（r4） | 物理目录 `.ygg/mods/pi-agent-seed` → `.ygg/mods/agent-seed`，`packages/mods/agent-seed` 相对软链重建（单一事实源不变，见 P5）；宿主内置 legacy 别名（存在性优先）翻译旧路径，服务存量局续局——更名不承诺旧路径永续，只保证干净的翻译层与可读报错。 | 已确认 |
+| **D-MA14** | CLI 回执文本渲染（r5 v3） | 单发回执**缺省人读文本**（自然语言版式），`--raw` 为唯一机器旗标（输出单行 JSON 信封，与历史缺省逐字节一致）；解析链 `--raw` > `YGG_FORMAT`（text\|json）> 缺省 text，非法 env 值 fail-closed；字段契约、退出码与 daemon 协议面零改动。人读缺省是原则，机器面由显式旗标保护（PLAY4）。 | 已确认 |
+| **D-MA15** | Mod 片段化与 src 五层（r6） | 大 JSON 按域拆片：`data/texts/`（scene-texts-fragment 若干片，`mod.lua` 装配回 TEXTS）与 `data/playbook/`（agent-playbook-fragment 若干片），`pack.json` `entries` 数组逐片声明；`src/**` 重组为 core/domain/view/runtime/handlers 五层（24 模块纯移动）。宿主不感知 Mod 内部布局——拆分是 Mod 自由度，不是内核契约（P11）。 | 已确认 |
