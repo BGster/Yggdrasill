@@ -7,116 +7,116 @@
         {
           "id": "harness.start-command",
           "modality": "must",
-          "text": "Cold start of a run: `.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before `review.note` closes: a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the all-1 smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
+          "basis": "user decision 2026-11-01 (E2 ruling: the closing check covers runtime goal only; a static default does not block)"
         },
         {
           "id": "harness.drive-stdin",
           "modality": "must",
-          "text": "`--drive stdin` (the default) reads stdin: every step, every proposal acceptance and every gate needs a human-typed index; `q` or end-of-input exits.",
-          "basis": "AGENTS.md §3 (table, pre-migration)"
+          "text": "The coordinator has a four-state chain: intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done; inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.drive-cmd",
           "modality": "must",
-          "text": "`--drive cmd:<path>` does not read stdin: every pending choice goes to the decision command, and the run settles automatically at the ending; a `HUMAN` answer pauses safely (exit 0).",
-          "basis": "AGENTS.md §3 (table, pre-migration)"
+          "text": "There is one requirement pipeline per requirement (`req.<i>.status`, 5 stored states): draft ──dispatch──▶ planning (job=plan) ──proposal → proposal.accept──▶ planning+gate=plan ──gate.approve(plan)──▶ planning+plan_ok ──dispatch (reactive auto-dispatch)──▶ developing (lane) ──proposal → proposal.accept──▶ developing+gate=accept ──gate.approve(accept)──▶ done. Display names are derived from status + job / pending proposal / gate / plan_ok (analysis_review / plan_review / plan_gate / ready / dev_review / accept) and are never stored. `analyzing` survives only as a compatibility state: legacy saves, and an explicit `analysis` proposal accepted on a planning row.",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.drive-none",
           "modality": "must",
-          "text": "`--drive none` prints the current receipt (including `pendingChoice`) and exits without advancing or reading stdin (exit 0).",
-          "basis": "AGENTS.md §3 (table, pre-migration)"
+          "text": "There are also the traceable terminal states split / merged / dropped, plus the two marker states blocked (conflict) and stale (a proposal whose rev is outdated).",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.drive-conflict-pause",
           "modality": "must",
-          "text": "`cmd:` must pause on a conflict: print both sides and the note, then exit 0 without choosing a path; after resolving it, rerun the command, or switch to `--drive stdin` and pick 1/2/3 (keep_both / keep_first / revise) from `pendingChoice`.",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and close with the final review (verify.submit → settlement.evolution → review.note); it never carries development itself and may never bypass a gate.",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.decide-protocol",
           "modality": "must",
-          "text": "Decision-command protocol: stdin does not participate; the command receives the path of `decide-input.json` (the full current receipt) as its only argument, and stdout may contain exactly one line — `N` (1..=option count) or `HUMAN[:reason]`.",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "Requirement granularity: adjacent work with the same goal, the same subsystem, a small change, or that can share one plan and one acceptance evidence set belongs in the same requirement; create a new one only for an independent delivery + acceptance, a cross-repository or cross-lane change, or risk isolation. A new adjacent requirement must state in its description why it cannot be merged (no reason = treat as mergeable). Three-question criterion: ① the blocked action is filing through requirement.add / --requirement; ② the visible symptom of a violation is that the adjacent requirement is pointed out as \"just part of the previous one\" while its description has no cannot-merge reason; ③ confirm it next time by walking `requirement.list` and checking that every new requirement's description carries that reason.",
+          "basis": "user decision 2026-11-02 (r3 requirement-merge decision)"
         },
         {
           "id": "harness.decide-fail-closed",
           "modality": "must",
-          "text": "A 5-second timeout, a non-zero exit, an invalid output or an out-of-range index all fail closed (safe pause, state unchanged); `YGG_DECIDE_CMD` may temporarily override the decision-command path.",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "The plan gate (`req.gate=plan`) fires after a plan proposal is accepted; approve → `plan_ok` is set (the former `ready`, the only state that may dispatch into development); reject → back to planning for rework; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
+          "basis": "AGENTS.md §2 (gate table, pre-migration)"
         },
         {
           "id": "harness.human-action-gate",
           "modality": "must",
-          "text": "Human-action gate (effective when `play.mode=guide`): proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / `config.set play.mode` may only enter through `ygg.choice_selected`; a direct single-shot `--event` is refused with `[REJECTED:ACTION]` (the envelope stays `ok:true` and the primary state is unchanged). Rejects (gate.reject / proposal.reject) are not restricted — they are the correction channel. So there is exactly one way to accept on a human's behalf: `ygg.choice_selected` (typed by the human, or sent by the agent after reading the receipt).",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "The accept gate (`req.gate=accept`) fires after a development proposal is accepted (the executor delivered); approve → done; reject → the stored state returns to planning and `plan_ok` keeps its value (not amended → the former ready, back into the development queue; amended → `plan_ok` was already invalidated → it stops in planning and must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
+          "basis": "AGENTS.md §2 (gate table, pre-migration)"
         },
         {
           "id": "harness.no-placeholder-proposal",
           "modality": "must-not",
-          "text": "Never fabricate content: when a job is running but there is no pending proposal, the host does not generate a placeholder proposal (a gate must be satisfied by a real delivery) — it prints a readable reason, pauses safely and exits 0, waiting for an external executor to submit and the command to be rerun.",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "accept means the executor self-checked and delivered; it does not mean the main agent has accepted. Only gate.approve is the verification.",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.drive-limits",
           "modality": "must",
-          "text": "The runaway guard thresholds come from the Mod's `data/config.json` `drive` section (each field falls back when missing or invalid): the hard step cap is `maxSteps + stepsPerRequirement × requirement count` (fallback 64 + 16×n); a separate stop triggers after `stallLimit` consecutive steps with an unchanged `pendingChoice` (fallback 12).",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "A requirement sitting on the plan / accept gate (`req.gate ~= \"\"`) cannot be dispatched, accepts no new proposal and cannot be skipped; even automatic advancement (`--drive cmd:…`) runs one `gate.approve` per gate — only the index comes from the external decision command.",
+          "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
           "id": "harness.play-mode-is-narrative",
           "modality": "must",
-          "text": "`play.mode` is Mod narrative semantics, not something the host interprets: `config.set play.mode=<goal|guide>` only switches the Mod's prompts and narrative tone; advancement is driven by `--drive` alone — the host reads neither `play.mode` from `data/config.json` nor `settings.play.mode` from the save KV.",
+          "text": "Cold start of a run: `.ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.goal-mode-decider",
           "modality": "must",
-          "text": "In goal mode the decider is **the agent itself**, not a script and not \"always pick 1\": under goal the Mod only changes the wording and the prompt tone, advancement still goes through `ygg.choice_selected`, and the agent judges every step from the narrative and the candidates — an acceptance that should be rejected must be rejected, a gate that should wait must wait, and mechanically taking the first item forges a conclusion. The repository ships no default decision script; by design the menu's first item is the main forward action, but it is **not guaranteed to be correct at that step**.",
-          "basis": "user instruction: the decision belongs to the agent, not to a script"
+          "text": "`--drive stdin` (the default) reads stdin: every step, every proposal acceptance and every gate needs a human-typed index; `q` or end-of-input exits.",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
           "id": "harness.payload-formats",
           "modality": "must",
-          "text": "Action payloads are JSON strings whose fields are separated by `|`: task.intake `\"title|description\"`; requirement.add `\"title|description[|external_id[|depends_on]]\"`; requirement.dispatch `\"\"` / `\"0\"` (readiness order) / `\"rN\"` (that requirement only); proposal.submit `\"rN|rev|stage|summary|artifacts[|changes[|external_id[|exec=<agent_id>[:<reason>]]]]\"`; gate.approve `\"rN[|note]\"` / `\"\"`; gate.reject `\"rN|feedback\"` / `\"\"`; verify.submit `\"true\"` / `\"all_green=false;report=…\"`; settlement.evolution `\"artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]\"`; settlement.sessions `\"moved|remaining|destination\"`; settlement.todo `\"remaining|verified_by\"`; review.note `\"lesson|score(1-5)\"`. The shape printed in a rejection receipt is the correct format — copy it, never guess a segment position.",
-          "basis": "AGENTS.md §4 (action table, pre-migration)"
+          "text": "`--drive cmd:<path>` does not read stdin: every pending choice goes to the decision command, and the run settles automatically at the ending; a `HUMAN` answer pauses safely (exit 0).",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
           "id": "harness.dispatch-idempotent",
           "modality": "must",
-          "text": "requirement.dispatch dispatches by readiness order (draft→plan / planning+plan_ok→development·lane; the legacy planning-without-plan→plan), with a job cap of 4; no candidate or a full slot set is a normal `[DISPATCH] 0 candidates` receipt (idempotent, never counted as a failed step).",
-          "basis": "AGENTS.md §4 (pre-migration)"
+          "text": "`--drive none` prints the current receipt (including `pendingChoice`) and exits without advancing or reading stdin (exit 0).",
+          "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
           "id": "harness.proposal-changes",
           "modality": "must",
-          "text": "A proposal's `changes` reads like `split=a,b` / `merge=r5` / `amend=title:description` / `conflict=r5:note`: a subagent only suggests, and the change lands at `proposal.accept`.",
-          "basis": "AGENTS.md §4 (pre-migration)"
+          "text": "`cmd:` must pause on a conflict: print both sides and the note, then exit 0 without choosing a path; after resolving it, rerun the command, or switch to `--drive stdin` and pick 1/2/3 (keep_both / keep_first / revise) from `pendingChoice`.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.serial-accept",
           "modality": "must",
-          "text": "`proposal.accept` accepts exactly one proposal serially and names it with `pN` / `rN`; an empty payload takes the first in requirement-id canonical order — with more than one pending proposal you must name it, otherwise you verify the wrong requirement.",
-          "basis": "AGENTS.md §4 (pre-migration)"
+          "text": "Decision-command protocol: stdin does not participate; the command receives the path of `decide-input.json` (the full current receipt) as its only argument, and stdout may contain exactly one line — `N` (1..=option count) or `HUMAN[:reason]`.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.reject-paths",
           "modality": "must",
-          "text": "Reject paths: `proposal.reject` → analysis→draft / plan→planning / development→keeps `plan_ok` (not amended → ready, amended → planning); `gate.reject` always stores planning, the plan gate sets `plan_ok` false (a new plan is required) and the accept gate keeps the previous value (not amended → ready, amended → planning).",
-          "basis": "AGENTS.md §4 (pre-migration)"
+          "text": "A 5-second timeout, a non-zero exit, an invalid output or an out-of-range index all fail closed (safe pause, state unchanged); `YGG_DECIDE_CMD` may temporarily override the decision-command path.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.stale-rebase",
           "modality": "must",
-          "text": "At acceptance, `rev ≠ req.<i>.rev` → the proposal becomes stale and the requirement gets the stale marker (a readable refusal; an old proposal must never override a newer decision). The recovery path is a new proposal for the same stage at the current rev — such a rebase proposal is accepted only when the requirement has no other pending proposal, and refused otherwise; once the rebase lands the stale marker clears automatically.",
-          "basis": "AGENTS.md §4 (pre-migration)"
+          "text": "Human-action gate (effective when `play.mode=guide`): proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / `config.set play.mode` may only enter through `ygg.choice_selected`; a direct single-shot `--event` is refused with `[REJECTED:ACTION]` (the envelope stays `ok:true` and the primary state is unchanged). Rejects (gate.reject / proposal.reject) are not restricted — they are the correction channel. So there is exactly one way to accept on a human's behalf: `ygg.choice_selected` (typed by the human, or sent by the agent after reading the receipt).",
+          "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
           "id": "harness.rejection-prefixes",
           "modality": "must",
-          "text": "An action outside its stage → `[REJECTED:ACTION]`; an invalid payload → `[REJECTED:PAYLOAD]`; an unmet precondition → `[BLOCKED:TODO]`; a human action dispatched single-shot → `[REJECTED:ACTION]`. All four re-render in place (the primary state is unchanged) and all four match `agent.rejectionPrefixes` in `pack.json` (the host reads that to decide \"no effect\" and does not record a failed step).",
-          "basis": "AGENTS.md §4 (pre-migration)"
+          "text": "Never fabricate content: when a job is running but there is no pending proposal, the host does not generate a placeholder proposal (a gate must be satisfied by a real delivery) — it prints a readable reason, pauses safely and exits 0, waiting for an external executor to submit and the command to be rerun.",
+          "basis": "AGENTS.md §3 (pre-migration)"
         }
       ]
     }

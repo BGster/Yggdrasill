@@ -65,7 +65,7 @@ local choice = require("src.handlers.operate.choice")
 local lifecycle = require("src.handlers.intake.lifecycle")
 local tools = require("src.runtime.tools")
 
--- 注册序（35 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
+-- 注册序（34 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
 --   1     agent.summary（render.register）
 --   2-5   actions: task.intake / requirement.add / requirement.list / requirement.dispatch
 --   6-7   lanes: lane.claim / lane.release
@@ -74,11 +74,11 @@ local tools = require("src.runtime.tools")
 --   17-21 requirement_ops: split / merge / amend / conflict / resolve
 --   22-23 gate_actions: gate.approve / gate.reject
 --   24-26 config: config.set / open / close
---   27-28 views: guide.show / map.show
---   29    choice: ygg.choice_selected
---   30-31 lifecycle: event.start / node:render
---   32-34 tools: tool.call / tool.result / vfs.write
---   35    fsm.define（本文件末尾）
+--   27    views: map.show（完整视图 = 地图 + 当前剧情提示，payload 一律忽略）
+--   28    choice: ygg.choice_selected
+--   29-30 lifecycle: event.start / node:render
+--   31-33 tools: tool.call / tool.result / vfs.write
+--   34    fsm.define（本文件末尾）
 -- 两条 effect（hooks.useEffect("tools.receipt") 与 hooks.useEffect("tools.reactive")）由
 -- `tools.register()` 注册，与 `actions` 的 `auto_dispatch` 同性质：不是 handler，不占注册序号，
 -- 也不参与「同名事件多 handler」的排序。两者同处 render() 入口的同一个 flush_effects。

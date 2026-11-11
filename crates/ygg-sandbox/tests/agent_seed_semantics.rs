@@ -767,7 +767,7 @@ fn legacy_save_without_plan_flag_infers_then_writes_it_back() {
     legacy.assert_kv("req.1.job", json!("development"));
 }
 
-// ───────────────────────── ⑥ two-layer map contracts ─────────────────────────
+// ───────────────────────── ⑥ map view contracts ─────────────────────────
 
 /// Take the **map window** from the `map.show` receipt: from the map head line to the map
 /// foot line (ignoring the other rendered lines in the same receipt).
@@ -788,36 +788,15 @@ fn map_window(lines: &[String], head: &str, foot: &str) -> Vec<String> {
     lines[start..=end].to_vec()
 }
 
-/// Split a map row into "left column (precondition/current node) | action area" and
-/// "right column (target/result)".
-#[track_caller]
-fn split_row(row: &str) -> (&str, &str) {
-    row.split_once("──▶ ")
-        .unwrap_or_else(|| panic!("map row lacks the `──▶` separator: {row}"))
-}
-
-/// A bracketed label in the left column (`[planning]` / `[draft/ready conflict pair]`).
-#[track_caller]
-fn row_label(left: &str) -> &str {
-    let open = left
-        .find('[')
-        .unwrap_or_else(|| panic!("map row left column lacks a label: {left}"));
-    let close = left[open..]
-        .find(']')
-        .unwrap_or_else(|| panic!("map row left column label is not closed: {left}"))
-        + open;
-    &left[open..=close]
-}
-
-/// Operation view (`map.show`, default): it only promises "selectable" and says
-/// "condition not shown" when the condition is unknown.
+/// Operation view (`map.show`, the **single** view — any payload is ignored): it only
+/// promises "selectable" and says "condition not shown" when the condition is unknown.
 ///
 /// The counter-examples are the two wording regressions from an earlier round: writing
 /// "executable" for "selectable" (the render layer cannot see the choice-side precondition)
 /// and "no extra condition" for "condition not shown" (that would vouch for the candidate).
 #[track_caller]
 fn assert_map_local(lines: &[String]) {
-    let window = map_window(lines, "[CURRENT NODE]", "(full design map");
+    let window = map_window(lines, "[CURRENT NODE]", "(operation view");
     let joined = window.join("\n");
     assert!(
         joined.contains("selectable"),
@@ -837,100 +816,94 @@ fn assert_map_local(lines: &[String]) {
     );
 }
 
-/// Design view (`map.show full`):
-/// - both requirement-level hops (`planning` / `developing`) must show `proposal.accept`
-///   between the proposal and the gate;
-/// - the bypass left column is a **mutable precondition**, the right column is the
-///   **resulting terminal state**.
-#[track_caller]
-fn assert_map_full(lines: &[String]) {
-    let window = map_window(lines, "[MAP]", "always-on actions");
-
-    // Two hops: the middle `proposal.accept` hop must not be lost.
-    let hop = "proposal → proposal.accept → gate.approve";
-    let hop_rows: Vec<&String> = window.iter().filter(|row| row.contains(hop)).collect();
-    assert_eq!(
-        hop_rows.len(),
-        2,
-        "the pipeline must show proposal.accept on both the planning and the developing hop: {window:#?}"
-    );
-    let planning = hop_rows
-        .iter()
-        .find(|row| row_label(split_row(row).0) == "[planning]")
-        .unwrap_or_else(|| panic!("missing the `[planning]` hop: {window:#?}"));
-    assert!(
-        split_row(planning)
-            .1
-            .trim_start()
-            .starts_with("[planning·plan_ok]"),
-        "`[planning]` must lead to `[planning·plan_ok]` (approved first, then develop): {planning}"
-    );
-    let developing = hop_rows
-        .iter()
-        .find(|row| row_label(split_row(row).0) == "[developing]")
-        .unwrap_or_else(|| panic!("missing the `[developing]` hop: {window:#?}"));
-    assert!(
-        split_row(developing).1.trim_start().starts_with("[done]"),
-        "`[developing]` must lead to `[done]`: {developing}"
-    );
-
-    // Bypass direction: precondition → resulting terminal state.
-    const BYPASS_ACTIONS: [&str; 3] = [
-        "requirement.split",
-        "requirement.merge",
-        "requirement.resolve keep_first",
-    ];
-    const PRECONDITIONS: [&str; 4] = ["draft", "analyzing", "planning", "ready"];
-    const TERMINALS: [&str; 3] = ["split", "merged", "dropped"];
-    const TERMINAL_TARGETS: [&str; 3] = ["[split]", "[merged]", "[dropped]"];
-
-    let bypass_rows: Vec<&String> = window
-        .iter()
-        .filter(|row| BYPASS_ACTIONS.iter().any(|action| row.contains(action)))
-        .collect();
-    assert_eq!(
-        bypass_rows.len(),
-        BYPASS_ACTIONS.len(),
-        "there must be exactly three bypass rows: {window:#?}"
-    );
-    for row in bypass_rows {
-        let (left, right) = split_row(row);
-        let label = row_label(left);
-        assert!(
-            PRECONDITIONS.iter().any(|state| label.contains(state)),
-            "the bypass left column must name a precondition (not a terminal state): {row}"
-        );
-        for terminal in TERMINALS {
-            assert!(
-                !label.contains(terminal),
-                "the bypass left column must not be the terminal `{terminal}` (direction reversed): {row}"
-            );
-        }
-        let target = right.trim_start();
-        assert!(
-            TERMINAL_TARGETS.iter().any(|end| target.starts_with(end)),
-            "the bypass right column must be the resulting terminal state: {row}"
-        );
-    }
-}
-
-/// ⑥ Both map contracts (both mods: the `map.show` wording lives in the scenes resource and
-/// can drift on either side).
+/// ⑥ The operation-map contract (both mods: the `map.show` wording lives in the scenes
+/// resource and can drift on either side). One **single** view: any payload is ignored, so
+/// the former design view is retired from the CLI (r8 serve-panel takeover is a separate
+/// requirement; the render branch stays as its hand-over base).
 #[test]
-fn map_views_keep_operation_and_design_contracts() {
+fn map_view_keeps_operation_contract() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
         let mut game = Game::open(&dir);
         assert_map_local(&game.narrate("map.show", "0"));
 
-        // Design view in the planning situation.
-        let mut game = drive_to_plan_gate_in(&dir);
-        assert_eq!(game.phase("r1"), "plan_gate");
-        assert_map_full(&game.narrate("map.show", &text("full")));
+        // Payload-independence pin (no argument branch at all): "0" and "full" must render
+        // the byte-identical view — a surviving design-view branch would diverge here.
+        assert_eq!(
+            narrative_lines(&game.reply("map.show", "0")),
+            narrative_lines(&game.reply("map.show", &text("full"))),
+            "map.show must ignore every payload: one single view"
+        );
 
-        // Design view in the developing situation (both hops on the same map).
-        game.click("gate.approve — ");
-        assert_eq!(game.phase("r1"), "developing");
-        assert_map_full(&game.narrate("map.show", &text("full")));
+        // Menu surface: no guide item may come back (physical deregistration, r1 rev3).
+        let options = game.options();
+        assert!(
+            options
+                .iter()
+                .all(|option| !option.starts_with("guide.show — ")),
+            "guide.show must not appear in the pending choice: {options:?}"
+        );
+    }
+}
+
+/// ⑥ r1 rev3: `guide.show` is **physically deregistered** — no registration, no alias, no
+/// tombstone, no refusal. A direct dispatch falls through to the kernel default for an
+/// unknown event: envelope ok, empty narrative. Pinned here so a re-registration cannot
+/// sneak back in unnoticed.
+#[test]
+fn guide_show_is_deregistered() {
+    fn count_guide_show_literals(dir: &Path) -> usize {
+        fn walk(path: &Path, files: &mut Vec<PathBuf>) {
+            if path.is_file() {
+                files.push(path.to_owned());
+                return;
+            }
+            let Ok(entries) = std::fs::read_dir(path) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                walk(&entry.path(), files);
+            }
+        }
+        let mut files = Vec::new();
+        walk(&dir.join("mod.lua"), &mut files);
+        walk(&dir.join("src"), &mut files);
+        let mut hits = 0;
+        for file in files {
+            let Ok(source) = std::fs::read_to_string(&file) else {
+                continue;
+            };
+            let mut rest = source.as_str();
+            while let Some(at) = rest.find("guide.show") {
+                hits += 1;
+                rest = &rest[at + "guide.show".len()..];
+            }
+        }
+        hits
+    }
+
+    for dir in [project_mod_dir(), seed_mod_dir()] {
+        // Source surface: not a single `guide.show` literal in mod.lua or src/.
+        assert_eq!(
+            count_guide_show_literals(&dir),
+            0,
+            "no `guide.show` literal may survive in the mod source: {}",
+            dir.display()
+        );
+
+        let mut game = Game::open(&dir);
+
+        // State surface canary: the dispatch must not write anything (the key does not
+        // exist before and must still not exist after).
+        game.assert_kv("guide.show.canary", json!(null));
+
+        // Behaviour surface: the envelope is ok (reply asserts that) and the narrative is
+        // empty — exactly the kernel default for an unregistered event.
+        let lines = game.narrate("guide.show", "0");
+        assert!(
+            lines.is_empty(),
+            "guide.show must stay deregistered: the kernel answers an unknown event with an empty narrative, got {lines:?}"
+        );
+        game.assert_kv("guide.show.canary", json!(null));
     }
 }
 
@@ -1550,13 +1523,6 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
     game.assert_kv("lane.2.since", json!(1));
     game.assert_kv("req.1.lane", json!(2));
     game.assert_kv("tool.reacted.t1", json!(true));
-    // The ledger is a read surface too: the design map prints the ledger row.
-    assert!(
-        game.narrate("map.show", &text("full"))
-            .join("\n")
-            .contains("lane-2 ← r1"),
-        "map.show full must show the claimed lane"
-    );
 
     // A fresh external_id re-applies the result (idempotency key only) but the latch keeps the
     // domain fold one-shot: no second `[WORKTREE CLAIMED]`.

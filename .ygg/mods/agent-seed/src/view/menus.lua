@@ -1,18 +1,17 @@
--- src/view/menus.lua —— 阶段菜单 + 配置二级页（选项文本 ↔ 动作载荷的唯一来源；`ui.page` / `ui.page.stage`）。
+-- src/menus.lua —— 阶段菜单 + 配置二级页（选项文本 ↔ 动作载荷的唯一来源；`ui.page` / `ui.page.stage`）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`ui.*`（唯一写方）。
 
 local M = {}
 
-local config = require("src.core.config")
-local gates = require("src.domain.gates")
-local guide = require("src.view.guide")
-local hooks = require("src.core.hooks")
-local props = require("src.domain.proposals")
-local reqs = require("src.domain.requirements")
-local util = require("src.core.util")
-local wire = require("src.domain.wire")
+local config = require("src.config")
+local gates = require("src.gates")
+local hooks = require("src.hooks")
+local props = require("src.proposals")
+local reqs = require("src.requirements")
+local util = require("src.util")
+local wire = require("src.wire")
 
 local TEXTS
 
@@ -20,8 +19,6 @@ local mode, next_mode, next_play_mode, play_mode, strict_gates, text_of =
   config.mode, config.next_mode, config.next_play_mode, config.play_mode, config.strict_gates, config.text_of
 local gate_kind, gate_next, gate_total =
   gates.gate_kind, gates.gate_next, gates.gate_total
-local guide_section =
-  guide.guide_section
 local prop_id, prop_next, prop_pending_total, prop_req, prop_stage =
   props.prop_id, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_stage
 local STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_count, req_dev_ready, req_has_pending, req_id, req_job, req_job_stage, req_open_total, stage =
@@ -56,20 +53,12 @@ local function review_note_payload()
   return wire.format_review_note(TEXTS.beats.default_lesson, tostring(TEXTS.tuning.default_score))
 end
 
-local function guide_item(st)
-  local section = guide_section(st)
-  return {
-    text = fill(TEXTS.options.guide, { title = section.title, count = tostring(#section.rules) }),
-    action = "guide.show",
-    payload = section.id,
-  }
-end
-
 local function map_item(st)
   return {
     text = fill(TEXTS.options.map, { stage = st }),
     action = "map.show",
-    payload = "full",
+    -- rev1 r3：map.show 忽略一切 payload；菜单数据不说谎，故不再携带已死的 "full"。
+    payload = "",
   }
 end
 
@@ -319,7 +308,6 @@ MENU[STAGE.intake] = function()
     action = "task.intake",
     payload = TEXTS.beats.default_task_title .. "|" .. TEXTS.beats.default_task_desc,
   }
-  items[#items + 1] = guide_item(STAGE.intake)
   items[#items + 1] = map_item(STAGE.intake)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
@@ -346,7 +334,6 @@ MENU[STAGE.coordinate] = function()
       payload = "",
     }
   end
-  items[#items + 1] = guide_item(STAGE.coordinate)
   items[#items + 1] = map_item(STAGE.coordinate)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
@@ -413,7 +400,6 @@ MENU[STAGE.review] = function()
     action = "verify.submit",
     payload = "all_green=false;report=" .. TEXTS.beats.default_gate_report,
   }
-  items[#items + 1] = guide_item(STAGE.review)
   items[#items + 1] = map_item(STAGE.review)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
@@ -432,7 +418,6 @@ M.append_all = append_all
 M.dispatch_candidates = dispatch_candidates
 M.dispatch_item = dispatch_item
 M.gate_items = gate_items
-M.guide_item = guide_item
 M.map_item = map_item
 M.menu = menu
 M.option_texts = option_texts

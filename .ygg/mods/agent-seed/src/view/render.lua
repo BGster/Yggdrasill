@@ -451,7 +451,7 @@ local function out_edges(node)
 end
 
 -- 出边的目标阶段：`MAP_EDGES` 是唯一来源（不另建第二份边表）。
--- 不在表里的动作（guide.show / map.show / requirement.* / config.* / lane.*）= 不换阶段（自环）。
+-- 不在表里的动作（map.show / requirement.* / config.* / lane.*）= 不换阶段（自环）。
 -- 特例：review → coordinate 的打回边在表里记作 `verify.submit=false`，而菜单里的
 -- 失败项载荷是 `all_green=false;report=…`，所以要按载荷前缀补一次查找。
 local function to_stage(action, payload)
