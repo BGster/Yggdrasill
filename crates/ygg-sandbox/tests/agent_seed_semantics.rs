@@ -2456,7 +2456,6 @@ fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
     );
 }
 
-<<<<<<< HEAD
 // ───────────────────────── r13 · requirement.list pagination ─────────────────────────
 
 /// The requirement rows of a list receipt (`  <mark> rN [phase] title(trace)`):
@@ -2707,7 +2706,6 @@ fn big_state_walks_all_views_without_fuel_exhaustion_under_the_default_budget() 
     assert!(!full.iter().any(|line| line.contains("more omitted")));
 
     // The other heavy views stay usable (ok:true — a fuel death fails the envelope).
-    game.narrate("requirement.dispatch", "0");
     let map_full = game.narrate("map.show", &text("full"));
     assert!(!map_full.is_empty(), "map.show full must narrate");
 =======
@@ -2954,4 +2952,5 @@ fn auto_claim_requires_a_self_reported_branch_name() {
     game.assert_kv("tool.settled_count", json!(null));
     game.assert_kv("lane.1.probe.commits", json!(null));
 >>>>>>> feature/5b8e-branch-naming
+}
 }
