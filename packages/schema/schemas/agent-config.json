@@ -2,7 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://yggdrasill.dev/schemas/v1/agent-config.json",
     "title": "Yggdrasill agent-config（M-Agent 元工作流 Mod 的静态配置形）",
-    "description": "M-Agent 泳道 A 落地（packages/mods/pi-agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。play.mode 决定本局的**交互模式**（goal 挂机 / guide 逐步确认，缺省 guide），evolution.mode 只是建议口径的叙事偏好（off / suggest / auto），本 Mod 不自动修订、不登记修订请求、不在任何判定里消费它，gates.require_all_green 决定门禁失败是否打回切片执行，drive 段决定宿主自动推进的步数 / 无进展阈值，settlement 段决定 `--settle` 的判定口径（均宿主侧消费、内核不解释）。harness 段（可选）声明宿主的**默认 harness 适配器**：宿主据此决定 `--builtin-tool archive-sessions` 归档哪个 harness 的会话库（auto = 按环境探测），内核不解释该值。",
+    "description": "M-Agent 泳道 A 落地（packages/mods/agent-seed）：seed mod 的**静态默认配置**（两层配置的下层）。上层是运行期 KV `settings.*`（经动作 `config.set` 写入），判定口径恒为「动态覆盖 > 静态默认」；本文件只声明默认值，不承载运行期状态。play.mode 决定本局的**交互模式**（goal 挂机 / guide 逐步确认，缺省 guide），evolution.mode 只是建议口径的叙事偏好（off / suggest / auto），本 Mod 不自动修订、不登记修订请求、不在任何判定里消费它，gates.require_all_green 决定门禁失败是否打回切片执行，drive 段决定宿主自动推进的步数 / 无进展阈值，settlement 段决定 `--settle` 的判定口径（均宿主侧消费、内核不解释）。harness 段（可选）声明宿主的**默认 harness 适配器**：宿主据此决定 `--builtin-tool archive-sessions` 归档哪个 harness 的会话库（auto = 按环境探测），内核不解释该值。",
     "type": "object",
     "additionalProperties": false,
     "required": ["play", "evolution", "autosave", "hot_reload", "gates"],

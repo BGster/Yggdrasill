@@ -21,7 +21,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 │   Responsibilities: UI rendering, subagent process spawning/resuming,      │
 │   context window telemetry & compaction, data red-line firewall.           │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ Layer 1 · Playable Mod Package (.ygg/mods/pi-agent-seed, test-adventure)   │
+│ Layer 1 · Playable Mod Package (.ygg/mods/agent-seed, test-adventure)   │
 │   - Executable Logic: Entry manifest (mod.lua) + pure modules (src/**)     │
 │   - Declarative Resources: data/texts/*, data/config.json,                 │
 │     data/playbook/*, pack.json, manifest.json                              │
@@ -39,7 +39,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 ### 1.1 跨治理引擎能力协商矩阵
 
-由于 Layer 1（`pi-agent-seed`）发出自包含的 `HarnessAction` 规格（`summary.jobs[i].subagentAction`），并经 Layer 0（`ygg.tool.call`）内联执行确定性仪式，任何编码 agent 宿主都能按其能力层级驱动 Yggdrasill：
+由于 Layer 1（`agent-seed`）发出自包含的 `HarnessAction` 规格（`summary.jobs[i].subagentAction`），并经 Layer 0（`ygg.tool.call`）内联执行确定性仪式，任何编码 agent 宿主都能按其能力层级驱动 Yggdrasill：
 
 | 层级 | 宿主环境 | 子代理执行与恢复 | 上下文遥测与压缩 | 集成机制 |
 | --- | --- | --- | --- | --- |
@@ -179,7 +179,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 ### 3.3 事件 Payload 线协议契约
 
-派发到 `pi-agent-seed` 的所有事件使用管道分隔（`|`）的 UTF-8 字符串 payload（在支持处附带可选尾随 `@ext=<id>` 幂等键）：
+派发到 `agent-seed` 的所有事件使用管道分隔（`|`）的 UTF-8 字符串 payload（在支持处附带可选尾随 `@ext=<id>` 幂等键）：
 
 | 事件名 | 线协议 Payload 格式 | 契约与校验规则 |
 | --- | --- | --- |
@@ -210,7 +210,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 
 | 层 | 载体 | 值域 | 权威来源 | 职责边界 |
 | --- | --- | --- | --- | --- |
-| **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 34 个事件名（全集见本节末注，payload 位次见 §3.3） | Mod（`.ygg/mods/pi-agent-seed/src/**`、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
+| **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 34 个事件名（全集见本节末注，payload 位次见 §3.3） | Mod（`.ygg/mods/agent-seed/src/**`、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
 | **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/agent.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
 | **L3 `action`** | `ygg_session` 工具的 `action` 参数（`StringEnum`） | `kickoff` / `dispatch` / `approve_gate` / `reject_gate` / `vfs_write` / `vfs_read` / `vfs_list` / `handoff_compact` / `settle_close`（9 个） | Layer 2 适配器（`.pi/extensions/ygg-pi-harness`） | **面向模型/人的语义入口**：它只决定「用哪个动词说出意图、由谁拼 payload」，**不决定状态**。值域随适配器可变，**不是**跨 harness 契约。 |
 
@@ -265,7 +265,7 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 `agent.summary`、`task.intake`、`requirement.add` / `requirement.list` / `requirement.dispatch` / `requirement.amend` / `requirement.split` / `requirement.merge` / `requirement.conflict` / `requirement.resolve`、`lane.claim` / `lane.release`、`proposal.submit` / `proposal.accept` / `proposal.reject`、`coordinate.submit`、`verify.submit`、`settlement.evolution` / `settlement.sessions` / `settlement.todo`、`review.note`、`gate.approve` / `gate.reject`、`config.set` / `config.open` / `config.close`、`guide.show`、`map.show`、`ygg.choice_selected`、`event.start`、`tool.call` / `tool.result`、`vfs.write`、`stage.advance`。
 
-计数口径（可复核）：前 33 个由 Mod 直接调用 `ygg.on(...)` 注册；`stage.advance` 是第 34 个，它由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，**不在** `ygg.on` 的字面出现处。可执行复算：`grep -rn 'ygg\.on("' .ygg/mods/pi-agent-seed/ | sed 's/.*ygg\.on("\([^"]*\)".*/\1/' | sort -u` 得到 33 项，再加上 `mod.lua` 的 `ygg.fsm.define` 声明里那一项 `event = "stage.advance"`，合计 34。这 34 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 34 个之外还有别的状态转换」。
+计数口径（可复核）：前 33 个由 Mod 直接调用 `ygg.on(...)` 注册；`stage.advance` 是第 34 个，它由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，**不在** `ygg.on` 的字面出现处。可执行复算：`grep -rn 'ygg\.on("' .ygg/mods/agent-seed/ | sed 's/.*ygg\.on("\([^"]*\)".*/\1/' | sort -u` 得到 33 项，再加上 `mod.lua` 的 `ygg.fsm.define` 声明里那一项 `event = "stage.advance"`，合计 34。这 34 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 34 个之外还有别的状态转换」。
 
 ### 3.5 宿主 CLI 与 Daemon JSON-RPC 线协议契约
 
@@ -329,7 +329,7 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
         "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.\n...",
         "deltaPrompt": "Resume r1 (rev 1) for stage `development` in worktree `...`; write `artifacts/r1-development.md` and submit.",
         "fullFallbackBrief": "Requirement r1 ...\nResume context: prior executor `agent-plan-1`.",
-        "submitCommand": ".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
+        "submitCommand": ".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
       }
     }
   ]

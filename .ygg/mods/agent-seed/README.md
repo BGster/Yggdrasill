@@ -1,4 +1,4 @@
-# pi-agent-seed · 双层状态机 + 提案验收的元工作流 Mod
+# agent-seed · 双层状态机 + 提案验收的元工作流 Mod
 
 M-Agent 泳道的 seed mod：把「一次完整的 Agent 工作」配置成一个可游玩的 Mod——协调器派活/验收，
 每条需求各自跑 analyze → plan → 门禁 → develop → 交付 → 门禁。任何 Agent 装载它 + 注入任务描述
@@ -407,7 +407,7 @@ config.set executor.<rN>.<stage>=            # 空值 = 显式解绑
 | `schemas/*.json` | 骨架 | 资源 schema（agent-config + 两个片段 schema，与 `packages/schema/schemas/` 单源一致；整文档 schema scene-texts/agent-playbook 保留在 packages/schema 供管线与全量 Mod 使用） |
 
 骨架面（`mod.lua` + `src/**` + `schemas/` + `pack.json` 的 `code`/契约段）与
-`packages/mods/pi-agent-seed/` 逐字节一致，由 `scripts/sync-seed-mod.sh --from project` 同步；
+`packages/mods/agent-seed/` 逐字节一致，由 `scripts/sync-seed-mod.sh --from project` 同步；
 模块清单、依赖方向与三条硬规则见下节「模块结构」。
 `src/runtime/tools.lua` 是唯一带 `register()` 的模块（与 `src/view/render.lua` 同构：纯导出 + 装配期注册），
 也是 `tool.*` 的**唯一写方**。
@@ -516,15 +516,15 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 
 ```bash
 # 默认全 1 贪心：intake → coordinate.submit → verify → settlement.evolution → review.note → 【结局
-cargo run --example playtest -- .ygg/mods/pi-agent-seed
+cargo run --example playtest -- .ygg/mods/agent-seed
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
 #   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
 #   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
-#   .ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id t --runs-root .ygg/runs --resume
+#   .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id t --runs-root .ygg/runs --resume
 
 # 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
-cargo run --example pack -- .ygg/mods/pi-agent-seed
+cargo run --example pack -- .ygg/mods/agent-seed
 ```
 
 ## 十三、上层扩展：`.pi/extensions/ygg-pi-harness`

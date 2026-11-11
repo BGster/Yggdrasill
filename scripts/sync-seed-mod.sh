@@ -2,11 +2,11 @@
 # 单一事实源 Mod 校验与 manifest 重算脚本。
 #
 # 目录关系（2026 单源化）：
-#   单一事实源  .ygg/mods/pi-agent-seed
-#   兼容入口    packages/mods/pi-agent-seed -> ../../.ygg/mods/pi-agent-seed（相对软链）
+#   单一事实源  .ygg/mods/agent-seed
+#   兼容入口    packages/mods/agent-seed -> ../../.ygg/mods/agent-seed（相对软链）
 #
 # 用法：
-#   scripts/sync-seed-mod.sh                  # 重算 .ygg/mods/pi-agent-seed/manifest.json 并校验软链
+#   scripts/sync-seed-mod.sh                  # 重算 .ygg/mods/agent-seed/manifest.json 并校验软链
 #   scripts/sync-seed-mod.sh --check          # 只读校验（软链目标 + manifest.json 与内容哈希一致）
 #   scripts/sync-seed-mod.sh --from project   # 兼容旧参数
 #   scripts/sync-seed-mod.sh --no-pack        # 只校验软链/目录，不重算 manifest
@@ -65,9 +65,9 @@ esac
 unset CDPATH
 script_dir=$(dirname "$0")
 root=$(cd "$script_dir/.." && pwd)
-seed_dir="packages/mods/pi-agent-seed"
-project_dir=".ygg/mods/pi-agent-seed"
-expected_target="../../.ygg/mods/pi-agent-seed"
+seed_dir="packages/mods/agent-seed"
+project_dir=".ygg/mods/agent-seed"
+expected_target="../../.ygg/mods/agent-seed"
 
 cd "$root"
 
@@ -88,7 +88,7 @@ if [ ! -d "$project_dir/src" ] || [ ! -d "$project_dir/schemas" ]; then
     exit 1
 fi
 
-# 校验 packages/mods/pi-agent-seed 软链
+# 校验 packages/mods/agent-seed 软链
 if [ -L "$seed_dir" ]; then
     actual_target=$(readlink "$seed_dir")
     if [ "$actual_target" != "$expected_target" ]; then

@@ -3,7 +3,7 @@
 > This file carries exactly two things: the constraints you may not violate, and how to start /
 > continue / pause / settle a run. The mechanics (state machine / action protocol / async inbox /
 > progress views / run artifacts / Mod maintenance / host contract) live in
-> `.ygg/mods/pi-agent-seed/README.md` and the `harness` chapter of the playbook; fetch field rules by
+> `.ygg/mods/agent-seed/README.md` and the `harness` chapter of the playbook; fetch field rules by
 > chapter with `guide.show <section_id>`. `CLAUDE.md` is a symlink to this file.
 
 ## 1. Non-negotiable constraints
@@ -59,7 +59,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      entrypoint should be added to `crates/ygg-sandbox/examples/agent.rs` or wrapped by a script);
      ② what does a violation look like? (a run whose events were produced without a receipt review,
      or a document that suggests `--events` / a batch loop); ③ how do you confirm it next time?
-     (`grep -n '\-\-events' AGENTS.md README.md .ygg/mods/pi-agent-seed/README.md` finds nothing outside
+     (`grep -n '\-\-events' AGENTS.md README.md .ygg/mods/agent-seed/README.md` finds nothing outside
      a prohibition sentence, and `cargo build --release --example agent` still has a single
      `--event`).
 5. **Stop on violation**: when a self-check or a report tells you a constraint was bypassed, stop
@@ -71,7 +71,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 7. **Self-evolution has exactly two exits: `AGENTS.md` or the Mod — no side scripts, no CLI source
    changes**:
    - When a discipline was not followed and you want to "evolve yourself", the only legal landing
-     spots are this file (written as a decidable criterion) and `.ygg/mods/pi-agent-seed/` (gate logic
+     spots are this file (written as a decidable criterion) and `.ygg/mods/agent-seed/` (gate logic
      in `src/runtime/flow.lua` and `src/handlers/**`, prompts and scripts in `data/*.json`;
      `mod.lua` is assembly only and carries no business logic). Both may change together, but
      **no third carrier may be added**.
@@ -220,8 +220,8 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 
 #### 9.2 Behavioural acceptance (mandatory when touching Mod source or the scenes map)
 
-Changing `.ygg/mods/pi-agent-seed/src/**` (state machine, gates, render layer, tool bridge),
-`.ygg/mods/pi-agent-seed/mod.lua` or the map wording in `data/texts/` requires, besides lint and
+Changing `.ygg/mods/agent-seed/src/**` (state machine, gates, render layer, tool bridge),
+`.ygg/mods/agent-seed/mod.lua` or the map wording in `data/texts/` requires, besides lint and
 the all-1 playtest:
 `cargo test -p ygg-sandbox --test agent_seed_semantics` (24 cases: stage merge + `analysis` compat,
 accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
@@ -356,8 +356,8 @@ are git-ignored, `.ygg/mods/` is committed.
   worktree (`parked=1`, `git checkout --force --detach HEAD` + `git clean -fd` **without `-x`**) so
   `<branch>` is unlocked for main-checkout merge/delete while gitignored caches (`target/`,
   `node_modules/`) stay warm across requirements and runs.
-- **Single-source Mod symlink (`packages/mods/pi-agent-seed` -> `../../.ygg/mods/pi-agent-seed`)**:
-  `.ygg/mods/pi-agent-seed` is the single source of truth; `./scripts/sync-seed-mod.sh` recalculates
+- **Single-source Mod symlink (`packages/mods/agent-seed` -> `../../.ygg/mods/agent-seed`)**:
+  `.ygg/mods/agent-seed` is the single source of truth; `./scripts/sync-seed-mod.sh` recalculates
   its `manifest.json` and verifies the relative symlink (`./scripts/sync-seed-mod.sh --check`).
 - **`docs/CONTEXT.md` + `docs/DESIGN.md` closed loop**: every `plan` and `development` subagent brief
   mandates reading `docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md`
@@ -367,12 +367,12 @@ are git-ignored, `.ygg/mods/` is committed.
 
 ### Start
 ```bash
-.ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
+.ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
 ```
 
 ### Continue
 ```bash
-A=".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs"
+A=".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs"
 $A --resume --drive stdin                                     # interactive: the human chooses (default)
 $A --resume --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
 $A --resume --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)

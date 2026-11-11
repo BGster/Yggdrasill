@@ -469,7 +469,7 @@ fn the_old_style_module_cannot_sneak_back_in_and_reorder_dispatch() {
 // ───────────────── ⑦ 回归：无 code 段的 Mod 行为不变 ─────────────────
 
 /// 仓库里剩下的单文件 Mod（`pack.json` 没有 `code` 段）。
-/// 两套 pi-agent-seed（`.ygg/mods/pi-agent-seed` / `packages/mods/pi-agent-seed`）已迁成多文件，
+/// 两套 agent-seed（`.ygg/mods/agent-seed` / `packages/mods/agent-seed`）已迁成多文件，
 /// 不再是本用例的对象——它们的机制面由 `ygg-lint --pack` + playtest + 骨架守卫覆盖。
 const SINGLE_FILE_MODS: [&str; 1] = ["packages/mods/test-adventure"];
 

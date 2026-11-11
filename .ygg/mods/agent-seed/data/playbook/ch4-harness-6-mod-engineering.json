@@ -7,19 +7,19 @@
         {
           "id": "harness.pack",
           "modality": "must",
-          "text": "After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/pi-agent-seed`.",
+          "text": "After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/agent-seed`.",
           "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.lint",
           "modality": "must",
-          "text": "Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/pi-agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/pi-agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.",
+          "text": "Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.",
           "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.playtest",
           "modality": "must",
-          "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/pi-agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
+          "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
           "basis": "AGENTS.md §1.9 (behavioural acceptance); gates.mod-semantics-matrix"
         },
         {
@@ -61,7 +61,7 @@
         {
           "id": "harness.two-mods-layering",
           "modality": "must",
-          "text": "The two Mods are a division of labor (not the same file): the skeleton surface (`mod.lua` + `schemas/`) is byte-identical and kept in sync by `scripts/sync-seed-mod.sh` (CI has a skeleton guard); the instance surface `data/` is maintained on each side — `packages/mods/pi-agent-seed` is the distributable seed template (5 generic chapters, zero project rules) and `.ygg/mods/pi-agent-seed` is this project's instance (14 chapters, this one included).",
+          "text": "The two Mods are a division of labor (not the same file): the skeleton surface (`mod.lua` + `schemas/`) is byte-identical and kept in sync by `scripts/sync-seed-mod.sh` (CI has a skeleton guard); the instance surface `data/` is maintained on each side — `packages/mods/agent-seed` is the distributable seed template (5 generic chapters, zero project rules) and `.ygg/mods/agent-seed` is this project's instance (14 chapters, this one included).",
           "basis": "AGENTS.md §8 (pre-migration)"
         }
       ]
