@@ -3049,7 +3049,8 @@ fn summary_projection_carries_play_and_resident_trio() {
     game.narrate("task.intake", &text("watchdog|synthetic task description"));
     let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(
-        summary["batchDrained"], json!(true),
+        summary["batchDrained"],
+        json!(true),
         "coordinate ∧ gate_problem()==nil ∧ not armed → drained: {summary}"
     );
 }

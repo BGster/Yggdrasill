@@ -45,6 +45,13 @@ import {
 } from "./compaction.ts";
 import { checkToolCallFirewall } from "./firewall.ts";
 import {
+  AUTO_WAVE_CUSTOM_TYPE,
+  AutoWatchdog,
+  clampAutoIntervalMs,
+  collectKey,
+  parseAutoWake,
+} from "./watchdog.ts";
+import {
   analyzeArchiveVerdict,
   archiveSessionsSegment,
   archiveVerdictNarrative,
@@ -76,6 +83,11 @@ const daemons = new Map<string, YggDaemon>();
 const daemonsInflight = new Map<string, Promise<YggDaemon>>();
 let activeRunId = "";
 let lastSummary: RunSummary | null = null;
+// ── r1 看门狗状态（每会话单实例；`/ygg auto on|off|status` 管理，默认关） ──
+let autoWatchdog: AutoWatchdog | null = null;
+/** 已发出收波唤醒、等 `ygg_run_lanes` 消费的波次票（消费后写波次日志 + 结算预算）。 */
+let autoWavePending: { runId: string; wave: number; reason: string; keys: string[] } | null = null;
+let lastWaveLogPath = "";
 
 /** 仅供单测重置进程内缓存。 */
 export function resetClientsForTest(): void {
@@ -107,7 +119,12 @@ function hasAgentBinary(cwd: string): boolean {
 }
 
 function setStatus(ctx: ExtensionContext, summary: RunSummary | null): void {
-  const line = statusLine(activeRunId === "" ? "(no run)" : activeRunId, summary ?? lastSummary);
+  const auto =
+    autoWatchdog !== null && autoWatchdog.state.enabled
+      ? ` · auto:on(波次=${autoWatchdog.state.waveCount})`
+      : "";
+  const line =
+    statusLine(activeRunId === "" ? "(no run)" : activeRunId, summary ?? lastSummary) + auto;
   try {
     ctx.ui.setStatus(STATUS_KEY, line);
   } catch {
@@ -718,6 +735,69 @@ function formatOrchestration(result: OrchestrationResult): string {
   return lines.join("\n");
 }
 
+// ───────────────────────────── 波次日志（r1 看门狗） ─────────────────────────────
+
+/** 波次日志路径：`artifacts/auto-wave-<NNNN>.md`（四位序号；与交接单同类的宿主侧归档）。 */
+export function waveLogPath(wave: number): string {
+  return `artifacts/auto-wave-${String(Math.max(1, wave)).padStart(4, "0")}.md`;
+}
+
+/**
+ * 波次日志 markdown：触发原因 + 逐作业逐回执的 narrative **全文**（永不截断）+ 停点判定。
+ * 这是「三不之永不截断回执」在无人值守场景的落点：主会话不在场时，下个在场回合
+ * 经交接单指针完整可达（DESIGN §3.5）。
+ */
+export function buildWaveLogMarkdown(input: {
+  runId: string;
+  wave: number;
+  reason: string;
+  result: OrchestrationResult;
+  now?: Date;
+}): string {
+  const { runId, wave, reason, result } = input;
+  const lines: string[] = [
+    `# 自动收波波次日志 ${String(Math.max(1, wave)).padStart(4, "0")}`,
+    "",
+    `- run：\`${runId === "" ? "(unknown)" : runId}\``,
+    `- 触发：${reason === "" ? "(未记录)" : reason}`,
+    `- 时间：${(input.now ?? new Date()).toISOString()}`,
+    `- 作业数：${result.jobs.length}（braked=${result.contextBraked}）`,
+    "",
+  ];
+  if (result.jobs.length === 0) {
+    lines.push("(本波没有作业落地——编排拒绝或无活跃作业，原因见上方触发段)");
+    lines.push("");
+  }
+  for (const job of result.jobs) {
+    lines.push(
+      `## ${job.id}（${job.stage} rev${job.rev > 0 ? job.rev : 1}）lane=${job.lane} ${job.branch}`,
+      "",
+    );
+    if (job.error !== undefined) {
+      lines.push(`> ⚠ 作业错误：${job.error}`, "");
+    }
+    for (const entry of job.receipts) {
+      lines.push(`### ${entry.label}`, "");
+      for (const line of entry.receipt.narrative) {
+        lines.push(line);
+      }
+      lines.push("");
+    }
+  }
+  lines.push("## 停点判定", "");
+  if (result.gates.length === 0) {
+    lines.push("(无已升起门禁——本波落在待决提案或无作业)");
+  } else {
+    for (const gate of result.gates) {
+      lines.push(`- ${gate.id} 停在 \`${gate.gate}\`（rev ${gate.rev}）${gate.title}`);
+    }
+    lines.push("");
+    lines.push("> 门禁裁决是人的决定：看门狗不批门禁，等下个在场者处理。");
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 // ───────────────────────────── 扩展本体 ─────────────────────────────
 
 export default function yggHarnessExtension(pi: ExtensionAPI): void {
@@ -749,6 +829,11 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
     activeRunId = "";
     lastSummary = null;
     compactionOrigin = null;
+    // r1：看门狗随会话终局（进程内定时器，不跨会话；下一会话 `/ygg auto on` 重开）。
+    autoWatchdog?.stop("会话关闭");
+    autoWatchdog = null;
+    autoWavePending = null;
+    lastWaveLogPath = "";
   });
 
   // ①' 上下文压缩的三个钩子（任何来源的压缩都不让运行状态丢）。
@@ -813,9 +898,58 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
 
   // ③ `/ygg` 命令：人肉兜底（状态查询 / 停守护进程）。
   pi.registerCommand("ygg", {
-    description: "Yggdrasill 会话面：`/ygg status` 查当前处境，`/ygg stop` 关闭常驻守护进程",
+    description: "Yggdrasill 会话面：`/ygg status` 查当前处境，`/ygg auto on|off|status` 自动收波看门狗，`/ygg stop` 关闭常驻守护进程",
     handler: async (args, ctx) => {
       const sub = (args ?? "").trim();
+      // ③' r1 看门狗：`/ygg auto on|off|status`（默认关；on 需已有活跃 run）。
+      if (sub.startsWith("auto")) {
+        const arg = sub.slice("auto".length).trim();
+        const client = activeRunId === "" ? undefined : daemons.get(activeRunId);
+        if (arg === "on") {
+          if (client === undefined) {
+            ctx.ui.notify("ygg auto: 没有活跃 run（先 ygg_session kickoff）", "warning");
+            return;
+          }
+          if (autoWatchdog === null) {
+            const env = readEnvFiles(ctx.cwd);
+            autoWatchdog = new AutoWatchdog({
+              client,
+              sender: pi,
+              runId: client.runId,
+              isIdle: () => ctx.isIdle(),
+              pressure: () => contextPressure(ctx),
+              wakeEnabled: parseAutoWake(env.get("YGG_AUTO_WAKE")),
+              intervalMs: clampAutoIntervalMs(env.get("YGG_AUTO_INTERVAL_MS")),
+              logger: (line) => ctx.ui.notify(`ygg: ${line}`, "info"),
+            });
+          }
+          autoWatchdog.start();
+          setStatus(ctx, lastSummary);
+          ctx.ui.notify(`ygg auto: on（间隔 ${autoWatchdog.interval}ms；/ygg auto status 看判定）`, "info");
+          return;
+        }
+        if (arg === "off") {
+          autoWatchdog?.stop("手动 /ygg auto off");
+          setStatus(ctx, lastSummary);
+          ctx.ui.notify("ygg auto: off", "info");
+          return;
+        }
+        const st = autoWatchdog?.state;
+        const lines = [
+          `auto: ${st?.enabled === true ? "on" : "off"} · wake=${parseAutoWake(readEnvFiles(ctx.cwd).get("YGG_AUTO_WAKE")) ? "on" : "off"}`,
+          st === undefined
+            ? "(从未启动——`/ygg auto on` 开启)"
+            : `波次=${st.waveCount} · 连续全败=${st.consecutiveWaveFailures} · 停车表=${Object.keys(st.parked).length} 项`,
+          `最近判定：${autoWatchdog?.lastReason ?? "-"}`,
+          autoWatchdog?.isWaveArmed === true && autoWavePending !== null
+            ? `波票未消费：run=${autoWavePending.runId} wave=${autoWavePending.wave}（等 ygg_run_lanes）`
+            : lastWaveLogPath !== ""
+              ? `最近波次日志：${lastWaveLogPath}`
+              : "(尚无波次日志)",
+        ];
+        ctx.ui.notify(lines.filter((line) => line !== "").join("\n"), "info");
+        return;
+      }
       if (sub === "" || sub === "status") {
         const client = activeRunId === "" ? undefined : daemons.get(activeRunId);
         if (client === undefined) {
@@ -1141,6 +1275,39 @@ export default function yggHarnessExtension(pi: ExtensionAPI): void {
 
       lastSummary = result.summary ?? lastSummary;
       setStatus(ctx, lastSummary);
+      // r1：看门狗触发的波（消费波票）→ 波次日志（narrative 全量）+ 预算结算 + 紧凑状态块。
+      const wave =
+        autoWavePending !== null && autoWavePending.runId === runId && result !== undefined
+          ? autoWavePending
+          : null;
+      if (wave !== null) {
+        autoWavePending = null;
+        lastWaveLogPath = waveLogPath(wave.wave);
+        const wavePut = await client.vfsPut(
+          lastWaveLogPath,
+          buildWaveLogMarkdown({ runId, wave: wave.wave, reason: wave.reason, result }),
+        );
+        autoWatchdog?.recordWave(
+          result.jobs.map((job) => ({ key: collectKey(job), ok: job.error === undefined })),
+        );
+        setStatus(ctx, lastSummary);
+        // 紧凑状态块：追加到本回合结束后（triggerTurn:false——不替用户开回合）。
+        try {
+          pi.sendMessage(
+            {
+              customType: AUTO_WAVE_CUSTOM_TYPE,
+              content:
+                `[ygg 看门狗] 第 ${wave.wave} 波已落地：${result.jobs.length} 作业；` +
+                `停点=${result.gates.map((g) => `${g.id}:${g.gate}`).join(", ") || "无"}；` +
+                `波次日志 ${lastWaveLogPath}${wavePut.ok ? "" : `（VFS 写入失败：${wavePut.error ?? "?"}）`}`,
+              display: true,
+            },
+            { triggerTurn: false },
+          );
+        } catch {
+          // sendMessage 面在个别宿主形态下可能缺席：波次日志已落 VFS，状态块是锦上添花。
+        }
+      }
       const sections = [formatOrchestration(result)];
       if (result.contextBraked) {
         // 编排层已经刹车（硬：一个字都没派；软：本波已落在门上）并写好了交接单，

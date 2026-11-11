@@ -196,6 +196,25 @@ export interface HandoffInput {
   reason?: string;
   /** 注入时间源（测试用；缺省 `new Date()`）。 */
   now?: Date;
+  /**
+   * r1 加性：看门狗交接段（状态 / 最近波次 / 停点清单）。
+   * 缺省 = 看门狗未启用，本节如实写「未启用」。
+   */
+  watchdog?: WatchdogHandoffView;
+}
+
+/** 看门狗交接段数据源（index.ts 从 `AutoWatchdog` 状态归约；纯数据，无行为）。 */
+export interface WatchdogHandoffView {
+  enabled: boolean;
+  intervalMs: number;
+  waveCount: number;
+  consecutiveWaveFailures: number;
+  /** 停车表展开（`key → 连续失败次数`）。 */
+  parked: readonly { key: string; failures: number }[];
+  /** 最近一次 tick 的判定原因（一句话）。 */
+  lastReason: string;
+  /** 最近一份波次日志的 VFS 路径（还没有波次 = 缺省）。 */
+  lastWaveLog?: string;
 }
 
 export interface HandoffWrite {
@@ -311,6 +330,36 @@ function artifactsSection(input: HandoffInput): string[] {
   return lines;
 }
 
+/** r1 加性：看门狗段（状态、最近波次、停点清单）——下个在场者的无人值守局面入口。 */
+function watchdogSection(view: WatchdogHandoffView | undefined): string[] {
+  const lines: string[] = ["## 6. 看门狗（自动收波）", ""];
+  if (view === undefined) {
+    lines.push("(未启用：`/ygg auto on` 可开启；本次交接时看门狗不在运行)");
+    lines.push("");
+    return lines;
+  }
+  lines.push(
+    `- 状态：${view.enabled ? "运行中" : "已停"} · 间隔 ${view.intervalMs}ms · 已触发波次 ${view.waveCount} ` +
+      `· 连续全败 ${view.consecutiveWaveFailures}`,
+  );
+  lines.push(`- 最近判定：${cell(view.lastReason, 160)}`);
+  if (view.lastWaveLog !== undefined && view.lastWaveLog !== "") {
+    lines.push(`- 最近波次日志：\`${view.lastWaveLog}\``);
+  }
+  if (view.parked.length > 0) {
+    lines.push("");
+    lines.push("| 停车键 (req:rev:stage) | 连续整波失败 |");
+    lines.push("| --- | --- |");
+    for (const entry of view.parked) {
+      lines.push(`| ${cell(entry.key, 64)} | ${entry.failures} |`);
+    }
+    lines.push("");
+    lines.push("> 停车作业不再收波（rev 变化自动复位）；门禁裁决永远是人的决定。");
+  }
+  lines.push("");
+  return lines;
+}
+
 /**
  * 下一步的**精确命令**：压缩后主 Agent 照抄即可，不必重新推理一遍局面。
  * 顺序有意：先读交往单（重新对齐事实），再门禁（人的决定），再派活/收口。
@@ -417,7 +466,8 @@ export function buildHandoffMarkdown(input: HandoffInput): string {
   lines.push(...gatesSection(summary));
   lines.push(...conflictsSection(summary));
   lines.push(...artifactsSection(input));
-  lines.push("## 6. 压缩后从这里继续（精确到命令）");
+  lines.push(...watchdogSection(input.watchdog));
+  lines.push("## 7. 压缩后从这里继续（精确到命令）");
   lines.push("");
   lines.push(...nextStepInstructions(runId, summary));
   lines.push("");
