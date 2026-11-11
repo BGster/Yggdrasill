@@ -282,7 +282,8 @@ async function renderMods() {
     view.replaceChildren(el("p", { class: "error" }, `读取失败：${err.message}`));
     return;
   }
-  $("#runs-root").textContent = `runs-root：${fmt(body.runsRoot)}`;
+  $("#roots").textContent = `roots：${(body.roots || []).map(rootLabel).join("、")}`;
+  $("#roots").title = (body.roots || []).join("\n") || "—";
   $("#version").textContent = `version ${fmt(body.version)}`;
   // 键 = meta.mod 原始串；缺失或解析失败（metaError 行）归键 `-` 的「未知 mod」组，字段显「—」。
   // 客户端不做别名合并（别名归宿主 serve 侧，只服务面板托管，不服务分组）——数据说什么就显示什么。
@@ -318,7 +319,7 @@ async function renderMods() {
     parts.push(el("p", { class: "muted" }, "runs 数量超过 200，已截断（分组计数可能不全）。"));
   }
   if (!(body.runs || []).length) {
-    parts.push(el("p", { class: "hint" }, "当前 runs-root 下还没有已开局的 run。"));
+    parts.push(el("p", { class: "hint" }, "各观察根下还没有已开局的 run。"));
   }
   view.replaceChildren(...parts);
 }
@@ -340,7 +341,8 @@ async function renderModInstances(modKey) {
     view.replaceChildren(el("p", { class: "error" }, `读取失败：${err.message}`));
     return;
   }
-  $("#runs-root").textContent = `runs-root：${fmt(body.runsRoot)}`;
+  $("#roots").textContent = `roots：${(body.roots || []).map(rootLabel).join("、")}（${(body.roots || []).length}）`;
+  $("#roots").title = (body.roots || []).join("\n") || "—";
   $("#version").textContent = `version ${fmt(body.version)}`;
   const rows = (body.runs || []).filter((row) => (row?.meta?.mod || "-") === modKey);
   const table = el(
@@ -353,6 +355,8 @@ async function renderModInstances(modKey) {
         "tr",
         {},
         el("th", {}, "runId"),
+        el("th", {}, "root"),
+        el("th", {}, "root"),
         el("th", {}, "phase"),
         el("th", {}, "backend"),
         el("th", {}, "startedAt"),
@@ -376,6 +380,8 @@ async function renderModInstances(modKey) {
           },
         },
         cell(el("b", {}, fmt(row.runId))),
+        cell(el("span", { class: "muted", title: row.root || "—" }, rootLabel(row.root))),
+        cell(el("span", { class: "muted", title: row.root || "—" }, rootLabel(row.root))),
         cell(badge(phaseOf(row))),
         cell(fmt(row.backend)),
         cell(fmtTime(row?.meta?.started_at)),
@@ -407,12 +413,27 @@ function staleDetailRoute(pinnedRunId, runId) {
   return pinnedRunId != null; // 指定局渲染只接受仍在该局路由；默认视图只接受最新局路由
 }
 
+function rootLabel(root) {
+  // 根标识：剥掉规范化布局的 `.ygg/runs`（或 `runs`）尾巴露出项目名；
+  // 全路径放在 title 上（悬停可见），一级列表保持一屏可读。
+  const parts = String(root || "").split("/").filter(Boolean);
+  if (parts.length >= 3 && parts.slice(-2).join("/") === ".ygg/runs") {
+    return parts[parts.length - 3];
+  }
+  if (parts.length >= 2 && parts[parts.length - 1] === "runs") {
+    return parts[parts.length - 2];
+  }
+  return String(root || "—");
+}
+
 function renderNoRuns(view, runsBody) {
   if (runsBody) {
     $("#version").textContent = `version ${fmt(runsBody.version)}`;
+    $("#roots").textContent = `roots：${(runsBody.roots || []).map(rootLabel).join("、")}（${(runsBody.roots || []).length}）`;
+    $("#roots").title = (runsBody.roots || []).join("\n") || "—";
   }
   view.replaceChildren(
-    el("p", { class: "hint" }, "当前 runs-root 下还没有已开局的 run。"),
+    el("p", { class: "hint" }, "各观察根下还没有已开局的 run。"),
     el("p", { class: "hint" }, "起一局（人读起局命令）："),
     el(
       "pre",
@@ -803,7 +824,8 @@ async function renderRunDetail(pinnedRunId) {
   if (staleDetailRoute(pinnedRunId, pinnedRunId)) return;
   const runs = runsBody?.runs || [];
   if (runsBody) {
-    $("#runs-root").textContent = `runs-root：${fmt(runsBody.runsRoot)}`;
+    $("#roots").textContent = `roots：${(runsBody.roots || []).map(rootLabel).join("、")}（${(runsBody.roots || []).length}）`;
+    $("#roots").title = (runsBody.roots || []).join("\n") || "—";
   }
   const target = resolveDetailTarget(pinnedRunId, runs);
   if (!target) {

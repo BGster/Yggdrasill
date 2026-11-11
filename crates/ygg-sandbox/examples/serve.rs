@@ -10,9 +10,21 @@
 //!
 //! # 三级形态（P11 宿主零语义）
 //!
-//! ① runs 列表（egg 原生，runs-root 全量枚举）；② 局内存档列表（egg 原生，
-//! `ygg_store::observe` 只读观察面）；③ 存档视图 = **mod 自带 UI**（iframe 托管，
+//! ① runs 列表（egg 原生，**多观察根**全量枚举，行带根标识）；② 局内存档列表
+//! （egg 原生，`ygg_store::observe` 只读观察面，跨根统一 run-id 寻址，撞名 409）；
+//! ③ 存档视图 = **mod 自带 UI**（iframe 托管，
 //! egg 不解析不渲染任何 mod 领域语义，只供存档数据 API 裸数据）。
+//!
+//! # 全局唯一实例（r9）
+//!
+//! serve 是**按端口的全局唯一实例**（缺省 127.0.0.1:7800）：启动前先做只读探针
+//! （手写 `GET /api/runs`，1s 超时，零锁文件——端口即事实）——
+//! - 自家实例且请求根 ⊆ 在役根 → 打印面板 URL 幂等复用（退出 0，nohup 脚本安全）；
+//! - 自家实例但根不被覆盖 → 退出 1（在役实例不热改根——加控制通道即给只读面开口子）；
+//! - 旧代单根实例（响应含 `runsRoot`）→ 退出 1 + 重启指引；
+//! - 无自家实例 → 照常 bind；bind 失败（外姓占用）= 原样报错退出 1。
+//! 观察根解析链：可重复 `--runs-root` > `~/.config/ygg/serve.json` > `./runs`
+//! （拒绝文件系统爬扫——根集只来自显式声明，CONTEXT.md D21）。
 //!
 //! # 零内核（serve 纯度，比「观察者会话」更强）
 //!
@@ -76,6 +88,10 @@ const EVENT_LIMIT_DEFAULT: u32 = 200;
 const EVENT_LIMIT_MAX: u32 = 500;
 /// 制品原文的读侧封顶（超出 413；写入侧本就有 256 KiB 门，这是纵深防御）。
 const ARTIFACT_HTTP_CAP: usize = 1024 * 1024;
+/// 单实例探针超时（connect / 读写各 1s；探针是启动前的只读旁路，慢即视为无实例）。
+const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+/// serve 根集配置文件（`$HOME` 相对；缺席 = 回退解析链下一层）。
+const SERVE_CONFIG_REL: &str = ".config/ygg/serve.json";
 
 /// 内置两级列表页资产（编译期嵌入；`--panel-dir` 可盘上覆盖）。
 /// 嵌入对象 = 无构建三件（index.html/app.js/style.css，§8）。
@@ -90,15 +106,16 @@ const ASSET_WHITELIST: [&str; 2] = ["app.js", "style.css"];
 
 /// watcher → SSE 连接的变更广播对（§6.1：通用变更帧，无数据载荷）。
 struct Broadcaster {
-    /// `(version, 最近一次变更的 run 名；根级变更 = None)`
-    state: Mutex<(u64, Option<String>)>,
+    /// `(version, 最近一次变更的 run 名, 该局所属根)`；根级变更 = run 为 `None`、
+    /// root 点名变化的根（多根下根级帧也带根；单根时代 root 恒 `Some`）。
+    state: Mutex<(u64, Option<String>, Option<String>)>,
     cond: Condvar,
 }
 
 impl Broadcaster {
     fn new() -> Self {
         Self {
-            state: Mutex::new((0, None)),
+            state: Mutex::new((0, None, None)),
             cond: Condvar::new(),
         }
     }
@@ -108,32 +125,39 @@ impl Broadcaster {
     }
 
     /// 变更登记：version 自增 + 唤醒全部 SSE 连接。
-    fn bump(&self, run: Option<&str>) {
+    fn bump(&self, run: Option<&str>, root: Option<&Path>) {
         if let Ok(mut state) = self.state.lock() {
             state.0 += 1;
             state.1 = run.map(str::to_owned);
+            state.2 = root.map(|path| path.display().to_string());
             self.cond.notify_all();
         }
     }
 
     /// 等待 `seen` 之后的新版本；超时返回 `None`（调用方写 `: ping`）。
-    fn wait_since(&self, seen: u64, timeout: Duration) -> Option<(u64, Option<String>)> {
+    fn wait_since(
+        &self,
+        seen: u64,
+        timeout: Duration,
+    ) -> Option<(u64, Option<String>, Option<String>)> {
         let guard = self.state.lock().ok()?;
         if guard.0 > seen {
-            return Some((guard.0, guard.1.clone()));
+            return Some((guard.0, guard.1.clone(), guard.2.clone()));
         }
         let (guard, _timed_out) = self
             .cond
             .wait_timeout_while(guard, timeout, |state| state.0 <= seen)
             .ok()?;
-        let (version, run) = &*guard;
-        (*version > seen).then(|| (*version, run.clone()))
+        let (version, run, root) = &*guard;
+        (*version > seen).then(|| (*version, run.clone(), root.clone()))
     }
 }
 
 /// serve 进程的共享只读配置 + 连接计数。
 struct ServeShared {
-    runs_root: PathBuf,
+    /// 观察根（**canonicalize 后的绝对形态**：比较、行级 root 标识与探针比对
+    /// 的唯一事实形态；旗标/配置里的相对或 `~` 形态不进共享态）。
+    roots: Vec<PathBuf>,
     /// 内置页的盘上覆盖（`--panel-dir`；开发期改 HTML 刷新即生效）。
     panel_dir: Option<PathBuf>,
     broadcaster: Broadcaster,
@@ -141,20 +165,248 @@ struct ServeShared {
 }
 
 // ============================================================================
+// §根集解析与单实例探针（r9；纯函数可测）
+// ============================================================================
+
+/// 在役实例判定（[`probe_live_instance`] 的产物；纯数据可测）。
+#[derive(Debug)]
+enum InstanceVerdict {
+    /// 自家实例且请求根 ⊆ 在役根 → 幂等复用（退出 0）。
+    Reuse,
+    /// 自家实例但请求根不被覆盖 → 拒绝（退出 1 + 处置指引；不热改根）。
+    RootsNotCovered {
+        served: Vec<PathBuf>,
+        requested: Vec<PathBuf>,
+    },
+    /// 旧代单根实例（`/api/runs` 响应含 `runsRoot`）→ 拒绝（退出 1 + 重启指引）。
+    LegacyInstance,
+    /// 端口上没有自家实例（连接失败 / 非 200 / 非 egg 形状）→ 照常 bind。
+    NoInstance,
+}
+
+/// serve 根集配置：`{"roots": ["/abs/…", …]}`。fail-closed：畸形 JSON / 未知键 /
+/// 非字符串数组 / 相对路径 → Err（调用方退出 2——「相对路径相对于谁」是无解的
+/// 猜测，拒绝优于猜测）。`~` / `~/` 前缀按传入的 home 展开。
+fn parse_serve_config(text: &str, home: Option<&Path>) -> Result<Vec<PathBuf>, String> {
+    let value: Json = serde_json::from_str(text).map_err(|err| format!("JSON 畸形：{err}"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "顶层必须是 JSON 对象".to_owned())?;
+    for key in object.keys() {
+        if key != "roots" {
+            return Err(format!("未知键 `{key}`（只接受 `roots`）"));
+        }
+    }
+    let array = object
+        .get("roots")
+        .ok_or_else(|| "缺少 `roots` 数组".to_owned())?
+        .as_array()
+        .ok_or_else(|| "`roots` 必须是字符串数组".to_owned())?;
+    if array.is_empty() {
+        return Err("`roots` 不能为空数组（要回退 `./runs` 缺省请删除配置文件）".to_owned());
+    }
+    let mut roots = Vec::with_capacity(array.len());
+    for item in array {
+        let raw = item
+            .as_str()
+            .ok_or_else(|| "`roots` 必须是字符串数组".to_owned())?;
+        let path = if raw == "~" || raw.starts_with("~/") {
+            let home = home.ok_or_else(|| format!("roots 含 `~` 前缀但 $HOME 不可用：`{raw}`"))?;
+            match raw.strip_prefix("~/") {
+                Some(rest) if !rest.is_empty() => home.join(rest),
+                _ => home.to_path_buf(),
+            }
+        } else {
+            PathBuf::from(raw)
+        };
+        if !path.is_absolute() {
+            return Err(format!(
+                "roots 含相对路径 `{raw}`（serve 配置只接受绝对路径——相对路径“相对于谁”是无解的猜测，拒绝优于猜测）"
+            ));
+        }
+        roots.push(path);
+    }
+    Ok(roots)
+}
+
+/// 根集解析链：可重复 `--runs-root` 旗标 > serve 配置 > `./runs`（cwd 相对）。
+/// 拒绝文件系统爬扫：根集只来自显式声明（D21）。旗标保持逐字原样（既有 cwd
+/// 相对语义）；`./runs` 缺省解析为 cwd 绝对形态（全局实例的启动信息可读）。
+fn resolve_roots(
+    flags: &[PathBuf],
+    config_text: Option<&str>,
+    home: Option<&Path>,
+    cwd: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    if !flags.is_empty() {
+        return Ok(flags.to_vec());
+    }
+    match config_text {
+        Some(text) => parse_serve_config(text, home),
+        None => Ok(vec![cwd.join("runs")]),
+    }
+}
+
+/// canonicalize + 去重（防同一目录双别名产生双行 + watcher 双跳变）；顺序 =
+/// 首次出现序。调用方已逐根 is_dir 校验，canonicalize 失败时按 cwd 绝对化兜底。
+fn canonicalize_roots(roots: &[PathBuf], cwd: &Path) -> Vec<PathBuf> {
+    let mut seen: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| cwd.join(root));
+        if !seen.contains(&canonical) {
+            seen.push(canonical);
+        }
+    }
+    seen
+}
+
+/// 请求根 ⊆ 在役根（双方均已 canonicalize；精确路径相等）。
+fn roots_cover(requested: &[PathBuf], served: &[PathBuf]) -> bool {
+    requested.iter().all(|root| served.contains(root))
+}
+
+/// 读 serve 配置文件（缺席 = `Ok(None)`；读失败 fail-closed 上抛 → 退出 2）。
+fn read_serve_config(home: Option<&Path>) -> Result<Option<String>, String> {
+    let Some(home) = home else {
+        return Ok(None);
+    };
+    let path = home.join(SERVE_CONFIG_REL);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(Some(text)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!("读取 {} 失败：{err}", path.display())),
+    }
+}
+
+/// 单实例探针（**纯读**：手写 `GET /api/runs`，1s 超时，零锁文件——端口即事实）。
+/// 判定规则见模块头「全局唯一实例」节；探针↔bind 之间的竞态由 bind 失败路径兜住。
+fn probe_live_instance(port: u16, requested: &[PathBuf]) -> InstanceVerdict {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, PROBE_TIMEOUT) else {
+        return InstanceVerdict::NoInstance;
+    };
+    let _ = stream.set_read_timeout(Some(PROBE_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(PROBE_TIMEOUT));
+    let request = "GET /api/runs HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+    if stream.write_all(request.as_bytes()).is_err() {
+        return InstanceVerdict::NoInstance;
+    }
+    let mut raw = Vec::new();
+    if stream.read_to_end(&mut raw).is_err() {
+        return InstanceVerdict::NoInstance;
+    }
+    let Some(split) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return InstanceVerdict::NoInstance;
+    };
+    let head = String::from_utf8_lossy(&raw[..split]);
+    let status: u16 = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0);
+    if status != 200 {
+        return InstanceVerdict::NoInstance;
+    }
+    let Ok(body) = serde_json::from_slice::<Json>(&raw[split + 4..]) else {
+        return InstanceVerdict::NoInstance;
+    };
+    // egg serve 的正面证据：`runs` 数组（缺它 = 外姓服务，让 bind 失败路径说话）。
+    if body.get("runs").and_then(Json::as_array).is_none() {
+        return InstanceVerdict::NoInstance;
+    }
+    // 旧代单根实例：响应携带单数 `runsRoot` → 拒绝 + 重启指引（升级窗口期一次性路径）。
+    if body.get("runsRoot").is_some() {
+        return InstanceVerdict::LegacyInstance;
+    }
+    let served: Vec<PathBuf> = body
+        .get("roots")
+        .and_then(Json::as_array)
+        .map(|roots| {
+            roots
+                .iter()
+                .filter_map(|value| value.as_str().map(PathBuf::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if roots_cover(requested, &served) {
+        InstanceVerdict::Reuse
+    } else {
+        InstanceVerdict::RootsNotCovered {
+            served,
+            requested: requested.to_vec(),
+        }
+    }
+}
+
+// ============================================================================
 // §入口与线程编排
 // ============================================================================
 
-/// serve 模式主入口（`agent [--runs-root <目录>] serve …`）。返回进程退出码。
+/// serve 模式主入口（`egg [--runs-root <目录> …] serve …`）。返回进程退出码。
 pub(crate) fn run_serve(args: &Args) -> i32 {
-    // runs-root 必须已存在：观察台**零创建**（不 create_dir_all）。
-    if !args.runs_root.is_dir() {
-        eprintln!(
-            "error: runs-root {} 不存在或不是目录（serve 只观察既有 runs-root，不自动创建）",
-            args.runs_root.display()
-        );
-        return 1;
+    let home = super::home_dir();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    // 根集解析链（旗标 > 配置 > ./runs）。配置面畸形 = 用法错误退出 2（fail-closed）。
+    let config_text = match read_serve_config(home.as_deref()) {
+        Ok(config_text) => config_text,
+        Err(message) => {
+            eprintln!("error: serve 配置读取失败：{message}");
+            return 2;
+        }
+    };
+    let requested = match resolve_roots(
+        &args.serve_runs_roots,
+        config_text.as_deref(),
+        home.as_deref(),
+        &cwd,
+    ) {
+        Ok(roots) => roots,
+        Err(message) => {
+            eprintln!("error: serve 根集配置无效：{message}");
+            return 2;
+        }
+    };
+    // 逐根必须已存在：观察台**零创建**（不 create_dir_all，也不爬扫文件系统补根）。
+    for root in &requested {
+        if !root.is_dir() {
+            eprintln!(
+                "error: runs-root {} 不存在或不是目录（serve 只观察既有 runs-root，不自动创建；\
+                 根集解析链：--runs-root 旗标 > ~/.config/ygg/serve.json > ./runs）",
+                root.display()
+            );
+            return 1;
+        }
     }
+    let roots = canonicalize_roots(&requested, &cwd);
+    // 单实例探针（先于 bind；探针↔bind 之间的竞态由 bind 失败路径兜住）。
     let port = args.port.unwrap_or(DEFAULT_PORT);
+    match probe_live_instance(port, &roots) {
+        InstanceVerdict::Reuse => {
+            println!(
+                "serve: 已有全局唯一实例在役，复用 http://{BIND_ADDR}:{port}（roots: {}）；\
+                 本次调用幂等退出 0",
+                join_roots(&roots)
+            );
+            return 0;
+        }
+        InstanceVerdict::RootsNotCovered { served, requested } => {
+            eprintln!(
+                "error: 已有 serve 实例在役 http://{BIND_ADDR}:{port}，但其根不覆盖本次请求（serve 不热改根）：\n  在役 roots: {}\n  请求 roots: {}\n  处置：停掉在役实例后重启（pkill -f 'egg.*serve'），或把缺的根写进 ~/.config/ygg/serve.json",
+                join_roots(&served),
+                join_roots(&requested)
+            );
+            return 1;
+        }
+        InstanceVerdict::LegacyInstance => {
+            eprintln!(
+                "error: 端口 {port} 上是旧版单根 serve 实例（响应含 runsRoot）。\
+                 请停掉旧实例（Ctrl-C / pkill -f 'egg.*serve'）后重启以启用多根观察"
+            );
+            return 1;
+        }
+        InstanceVerdict::NoInstance => {}
+    }
     let listener = match TcpListener::bind((BIND_ADDR, port)) {
         Ok(listener) => listener,
         Err(err) => {
@@ -166,15 +418,15 @@ pub(crate) fn run_serve(args: &Args) -> i32 {
     };
     let bound = listener.local_addr().map_or(port, |addr| addr.port());
     let shared = Arc::new(ServeShared {
-        runs_root: args.runs_root.clone(),
+        roots,
         panel_dir: args.panel_dir.clone(),
         broadcaster: Broadcaster::new(),
         connections: AtomicUsize::new(0),
     });
     eprintln!(
-        "serve: 只读观察台已启动 http://{BIND_ADDR}:{bound}（runs-root：{}；\
+        "serve: 只读观察台已启动 http://{BIND_ADDR}:{bound}（roots: {}；\
          GET-only 零写入；两级列表 + mod 面板 iframe 托管；Ctrl-C 退出）",
-        args.runs_root.display()
+        join_roots(&shared.roots)
     );
     let poll_ms = clamp_poll_ms(args.poll_ms);
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -194,15 +446,24 @@ fn clamp_poll_ms(poll_ms: Option<u64>) -> u64 {
         .clamp(POLL_MS_MIN, POLL_MS_MAX)
 }
 
+/// 人读 roots 列表（启动信息 / 复用文案 / 报错共用）。
+fn join_roots(roots: &[PathBuf]) -> String {
+    roots
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// 测试/装配共用：绑定一个（测试用 port 0 由 OS 分配）监听器。
 #[cfg(test)]
 fn bind_serve(
-    runs_root: PathBuf,
+    roots: Vec<PathBuf>,
     panel_dir: Option<PathBuf>,
 ) -> std::io::Result<(TcpListener, Arc<ServeShared>)> {
     let listener = TcpListener::bind((BIND_ADDR, 0))?;
     let shared = Arc::new(ServeShared {
-        runs_root,
+        roots,
         panel_dir,
         broadcaster: Broadcaster::new(),
         connections: AtomicUsize::new(0),
@@ -283,31 +544,41 @@ fn fingerprint(run_dir: &Path) -> RunFingerprint {
 }
 
 fn watcher_loop(shared: &ServeShared, shutdown: &AtomicBool, poll_ms: u64) {
-    let mut known: BTreeMap<String, RunFingerprint> = BTreeMap::new();
-    let mut known_root: Vec<String> = Vec::new();
+    // 指纹键 = (根, 局名) 对：跨根同名局各自独立跟踪（r9 多根化）。
+    let mut known: BTreeMap<(PathBuf, String), RunFingerprint> = BTreeMap::new();
     while !shutdown.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(poll_ms));
-        let mut names: Vec<String> = std::fs::read_dir(&shared.runs_root)
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    .collect()
-            })
-            .unwrap_or_default();
-        names.sort();
-        if names != known_root {
-            known_root = names.clone();
-            // 名单变化（新局出现 / 旧局被删）→ 根级变更帧（run=null）。
-            shared.broadcaster.bump(None);
-            known.retain(|name, _| names.contains(name));
-        }
-        for name in &names {
-            let fp = fingerprint(&shared.runs_root.join(name));
-            if known.get(name) != Some(&fp) {
-                known.insert(name.clone(), fp);
-                shared.broadcaster.bump(Some(name));
+        for root in &shared.roots {
+            let mut names: Vec<String> = std::fs::read_dir(root)
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .filter(|entry| {
+                            entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false)
+                        })
+                        .filter_map(|entry| entry.file_name().into_string().ok())
+                        .collect()
+                })
+                .unwrap_or_default();
+            names.sort();
+            let previous: Vec<String> = known
+                .keys()
+                .filter(|(known_root, _)| known_root == root)
+                .map(|(_, name)| name.clone())
+                .collect();
+            if names != previous {
+                // 根内名单变化（新局出现 / 旧局被删 / 根消失）→ 根级变更帧（run=null，
+                // root 点名变化的根）。消失的根 read_dir 失败 = 空名单，既有容忍不变。
+                known.retain(|(known_root, name), _| known_root != root || names.contains(name));
+                shared.broadcaster.bump(None, Some(root.as_path()));
+            }
+            for name in &names {
+                let key = (root.clone(), name.clone());
+                let fp = fingerprint(&root.join(name));
+                if known.get(&key) != Some(&fp) {
+                    known.insert(key, fp);
+                    shared.broadcaster.bump(Some(name), Some(root.as_path()));
+                }
             }
         }
     }
@@ -356,6 +627,7 @@ fn reason_phrase(status: u16) -> &'static str {
         400 => "Bad Request",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
         413 => "Payload Too Large",
         500 => "Internal Server Error",
         503 => "Service Unavailable",
@@ -516,10 +788,13 @@ fn sse_loop(stream: &mut TcpStream, broadcaster: &Broadcaster, keepalive: Durati
     let mut seen = broadcaster.version();
     loop {
         match broadcaster.wait_since(seen, keepalive) {
-            Some((version, run)) => {
+            Some((version, run, root)) => {
                 seen = version;
-                let data = serde_json::to_string(&json!({"version": version, "run": run}))
-                    .unwrap_or_else(|_| "{\"version\":0,\"run\":null}".to_owned());
+                let data =
+                    serde_json::to_string(&json!({"version": version, "run": run, "root": root}))
+                        .unwrap_or_else(|_| {
+                            "{\"version\":0,\"run\":null,\"root\":null}".to_owned()
+                        });
                 if write_sse(stream, &format!("event: change\ndata: {data}\n\n")).is_err() {
                     return;
                 }
@@ -588,10 +863,70 @@ fn check_run_id(run_id: &str) -> Result<(), Response> {
     }
 }
 
+/// 跨根定位一局：0 命中 → NotFound；1 命中 → Found；>1 命中 → Ambiguous（409，
+/// 响亮上报，不静默任选一份——serve 不代调用方选择事实）。
+enum RunLocation {
+    NotFound,
+    Found(PathBuf),
+    Ambiguous(Vec<PathBuf>),
+}
+
 /// run 目录是否已是「局」（run.json 存在）；半壳目录不是局。
-fn run_dir_of(shared: &ServeShared, run_id: &str) -> Option<PathBuf> {
-    let run_dir = shared.runs_root.join(run_id);
+fn is_run_dir(root: &Path, run_id: &str) -> Option<PathBuf> {
+    let run_dir = root.join(run_id);
     run_dir.join(crate::META_FILE).is_file().then_some(run_dir)
+}
+
+/// 统一跨根定位（数据端点与面板托管共用同一条寻址事实）。
+fn locate_run(shared: &ServeShared, run_id: &str) -> RunLocation {
+    let mut hits: Vec<PathBuf> = shared
+        .roots
+        .iter()
+        .filter_map(|root| is_run_dir(root, run_id))
+        .collect();
+    match hits.len() {
+        0 => RunLocation::NotFound,
+        1 => RunLocation::Found(hits.remove(0)),
+        _ => RunLocation::Ambiguous(hits),
+    }
+}
+
+/// 定位并把三态折叠成「目录或错误响应」（404 / 409；409 的 error 对象内附 roots）。
+/// `not_found_code` 由路由面决定：数据端点 = `run_not_found`（既有契约），
+/// /panel = `panel_unavailable`（既有契约）。
+fn locate_run_dir_code(
+    shared: &ServeShared,
+    run_id: &str,
+    not_found_code: &'static str,
+) -> Result<PathBuf, Response> {
+    match locate_run(shared, run_id) {
+        RunLocation::Found(run_dir) => Ok(run_dir),
+        RunLocation::NotFound => Err(error_response(
+            404,
+            not_found_code,
+            &format!("局 `{run_id}` 不存在（run.json 缺失）"),
+        )),
+        RunLocation::Ambiguous(roots) => Err(Response::json(
+            409,
+            &json!({
+                "ok": false,
+                "error": {
+                    "code": "run_id_ambiguous",
+                    "message": format!(
+                        "局 `{run_id}` 在多个观察根下同名（serve 不代选，请合并或改名其中一份）"
+                    ),
+                    "roots": roots
+                        .iter()
+                        .map(|root| json!(root.display().to_string()))
+                        .collect::<Vec<_>>(),
+                }
+            }),
+        )),
+    }
+}
+
+fn locate_run_dir(shared: &ServeShared, run_id: &str) -> Result<PathBuf, Response> {
+    locate_run_dir_code(shared, run_id, "run_not_found")
 }
 
 /// 后端裁决（只读）：run.json 的 `store` 事实 > 产物探针；失败 = 混代等，如实上抛。
@@ -606,69 +941,73 @@ fn resolve_backend(run_dir: &Path) -> Result<ygg_store::Backend, String> {
 // §数据端点（第一级 / 第二级 / 存档数据 API）
 // ============================================================================
 
-/// `GET /api/runs`——第一级：runs 枚举（§3.2）。
+/// `GET /api/runs`——第一级：runs 枚举（§3.2；r9 起多根扫描，行带根标识）。
 fn handle_runs(shared: &ServeShared) -> Response {
-    let entries = match std::fs::read_dir(&shared.runs_root) {
-        Ok(entries) => entries,
-        Err(err) => {
-            return error_response(
-                500,
-                "runs_root_unreadable",
-                &format!("读取 runs-root 失败：{err}"),
-            )
-        }
-    };
-    // (排序键 updated_at, 行 JSON)
+    // 外层循环根、内层循环局；个别根不可读 → errors 记录、其余根照常出行
+    // （观察面「局部真」优于「全黑」，整体仍 200）。
     let mut rows: Vec<(u64, Json)> = Vec::new();
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let run_dir = entry.path();
-        let meta_path = run_dir.join(crate::META_FILE);
-        // run.json 缺失 → 跳过（中止创建的半壳目录不是局）。
-        if !meta_path.is_file() {
-            continue;
-        }
-        let run_id = entry.file_name().to_string_lossy().into_owned();
-        let (meta, meta_error) = match std::fs::read_to_string(&meta_path)
-            .map_err(|err| err.to_string())
-            .and_then(|text| serde_json::from_str::<Json>(&text).map_err(|err| err.to_string()))
-        {
-            Ok(meta) => (meta, None),
-            Err(err) => (Json::Null, Some(err)),
-        };
-        let updated_at = meta["updated_at"].as_u64().unwrap_or(0);
-        let mut row = json!({
-            "runId": run_id,
-            "meta": meta,
-            "coord": super::read_json(&run_dir.join(super::COORDINATION_FILE)),
-        });
-        if let Some(meta_error) = meta_error {
-            row["metaError"] = json!(meta_error);
-        }
-        match resolve_backend(&run_dir) {
-            Ok(backend) => {
-                row["backend"] = json!(backend.as_str());
-                row["probe"] = observe::save_probe(&run_dir, backend)
-                    .map(|probe| {
-                        json!({
-                            "generation": probe.generation,
-                            "latestId": probe.latest_id,
-                            "latestCreatedAt": probe.latest_created_at,
-                            "count": probe.count,
-                        })
-                    })
-                    .unwrap_or_else(|err| json!({"count": 0, "probeError": err.to_string()}));
-            }
+    let mut errors: Vec<Json> = Vec::new();
+    for root in &shared.roots {
+        let entries = match std::fs::read_dir(root) {
+            Ok(entries) => entries,
             Err(err) => {
-                row["backendError"] = json!(err);
-                row["probe"] =
-                    json!({"generation": null, "latestId": null, "latestCreatedAt": 0, "count": 0});
+                errors.push(json!({
+                    "root": root.display().to_string(),
+                    "message": format!("读取失败：{err}"),
+                }));
+                continue;
             }
+        };
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let run_dir = entry.path();
+            let meta_path = run_dir.join(crate::META_FILE);
+            // run.json 缺失 → 跳过（中止创建的半壳目录不是局）。
+            if !meta_path.is_file() {
+                continue;
+            }
+            let run_id = entry.file_name().to_string_lossy().into_owned();
+            let (meta, meta_error) = match std::fs::read_to_string(&meta_path)
+                .map_err(|err| err.to_string())
+                .and_then(|text| serde_json::from_str::<Json>(&text).map_err(|err| err.to_string()))
+            {
+                Ok(meta) => (meta, None),
+                Err(err) => (Json::Null, Some(err)),
+            };
+            let updated_at = meta["updated_at"].as_u64().unwrap_or(0);
+            let mut row = json!({
+                "runId": run_id,
+                "root": root.display().to_string(),
+                "meta": meta,
+                "coord": super::read_json(&run_dir.join(super::COORDINATION_FILE)),
+            });
+            if let Some(meta_error) = meta_error {
+                row["metaError"] = json!(meta_error);
+            }
+            match resolve_backend(&run_dir) {
+                Ok(backend) => {
+                    row["backend"] = json!(backend.as_str());
+                    row["probe"] = observe::save_probe(&run_dir, backend)
+                        .map(|probe| {
+                            json!({
+                                "generation": probe.generation,
+                                "latestId": probe.latest_id,
+                                "latestCreatedAt": probe.latest_created_at,
+                                "count": probe.count,
+                            })
+                        })
+                        .unwrap_or_else(|err| json!({"count": 0, "probeError": err.to_string()}));
+                }
+                Err(err) => {
+                    row["backendError"] = json!(err);
+                    row["probe"] = json!({"generation": null, "latestId": null, "latestCreatedAt": 0, "count": 0});
+                }
+            }
+            row["panel"] = panel_json(&run_id, run_mod_dir(&meta, Some(root.as_path())).as_deref());
+            rows.push((updated_at, row));
         }
-        row["panel"] = panel_json(&run_id, run_mod_dir(&meta).as_deref());
-        rows.push((updated_at, row));
     }
     // updated_at 降序（活跃局自然在前）；meta 解析失败的行（键 0）沉底。
     rows.sort_by_key(|row| std::cmp::Reverse(row.0));
@@ -677,20 +1016,44 @@ fn handle_runs(shared: &ServeShared) -> Response {
     let mut body = json!({
         "version": shared.broadcaster.version(),
         "generatedAt": now_secs(),
-        "runsRoot": shared.runs_root.display().to_string(),
+        "roots": shared
+            .roots
+            .iter()
+            .map(|root| json!(root.display().to_string()))
+            .collect::<Vec<_>>(),
         "runs": rows.into_iter().map(|(_, row)| row).collect::<Vec<_>>(),
     });
     if truncated {
         body["truncated"] = json!(true);
     }
+    if !errors.is_empty() {
+        body["errors"] = json!(errors);
+    }
     Response::json(200, &body)
 }
 
-/// run.json 里的 mod 路径（相对路径按 serve 进程 cwd 解析——与 run.json 记录形态一致）。
-fn run_mod_dir(meta: &Json) -> Option<PathBuf> {
-    meta["mod"]
-        .as_str()
-        .map(|mod_path| super::with_legacy_seed_alias(PathBuf::from(mod_path)))
+/// run.json 里的 mod 路径（只影响第三级 mod 面板托管；一二级数据面不依赖它）。
+/// 相对路径的两级解析链：① 进程 cwd（既有语义，项目内 serve 行为不变）→
+/// ② 该局所属根的父目录 / 祖父目录（规范布局 `<project>/.ygg/runs` 的直接推论：
+/// 祖父 = `<project>`，`.ygg/mods/...` 命中；扁平布局 `<project>/runs` 的父目录
+/// 同理命中；候选都做存在性检查，错候选无害）→ 皆不存 → 返回原值，交由既有的
+/// `PanelDecl::Unavailable` 降级（不炸观察）。
+fn run_mod_dir(meta: &Json, run_root: Option<&Path>) -> Option<PathBuf> {
+    let raw = meta["mod"].as_str()?;
+    let declared = super::with_legacy_seed_alias(PathBuf::from(raw));
+    if declared.is_absolute() || declared.exists() {
+        return Some(declared);
+    }
+    if let Some(root) = run_root {
+        for base in [root.parent(), root.parent().and_then(Path::parent)] {
+            let Some(base) = base else { continue };
+            let candidate = base.join(&declared);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    Some(declared)
 }
 
 /// `GET /api/runs/<id>/saves?limit=`——第二级：存档列表（§3.3）。
@@ -698,12 +1061,9 @@ fn handle_saves(shared: &ServeShared, run_id: &str, query: &str) -> Response {
     if let Err(response) = check_run_id(run_id) {
         return response;
     }
-    let Some(run_dir) = run_dir_of(shared, run_id) else {
-        return error_response(
-            404,
-            "run_not_found",
-            &format!("局 `{run_id}` 不存在（run.json 缺失）"),
-        );
+    let run_dir = match locate_run_dir(shared, run_id) {
+        Ok(run_dir) => run_dir,
+        Err(response) => return response,
     };
     let backend = match resolve_backend(&run_dir) {
         Ok(backend) => backend,
@@ -719,7 +1079,12 @@ fn handle_saves(shared: &ServeShared, run_id: &str, query: &str) -> Response {
     };
     let probe = observe::save_probe(&run_dir, backend).unwrap_or_default();
     let meta = super::read_meta(&run_dir.join(crate::META_FILE));
-    let panel = panel_json(run_id, meta.as_ref().and_then(run_mod_dir).as_deref());
+    let panel = panel_json(
+        run_id,
+        meta.as_ref()
+            .and_then(|meta| run_mod_dir(meta, run_dir.parent()))
+            .as_deref(),
+    );
     Response::json(
         200,
         &json!({
@@ -756,12 +1121,9 @@ fn handle_save_blob(shared: &ServeShared, run_id: &str, sid: &str) -> Response {
             &format!("存档 id `{sid}` 非法（只接受 `latest` 或十进制 id）"),
         );
     }
-    let Some(run_dir) = run_dir_of(shared, run_id) else {
-        return error_response(
-            404,
-            "run_not_found",
-            &format!("局 `{run_id}` 不存在（run.json 缺失）"),
-        );
+    let run_dir = match locate_run_dir(shared, run_id) {
+        Ok(run_dir) => run_dir,
+        Err(response) => return response,
     };
     let backend = match resolve_backend(&run_dir) {
         Ok(backend) => backend,
@@ -796,12 +1158,9 @@ fn handle_events(shared: &ServeShared, run_id: &str, query: &str) -> Response {
     if let Err(response) = check_run_id(run_id) {
         return response;
     }
-    let Some(run_dir) = run_dir_of(shared, run_id) else {
-        return error_response(
-            404,
-            "run_not_found",
-            &format!("局 `{run_id}` 不存在（run.json 缺失）"),
-        );
+    let run_dir = match locate_run_dir(shared, run_id) {
+        Ok(run_dir) => run_dir,
+        Err(response) => return response,
     };
     let backend = match resolve_backend(&run_dir) {
         Ok(backend) => backend,
@@ -856,12 +1215,9 @@ fn handle_artifacts(shared: &ServeShared, run_id: &str) -> Response {
     if let Err(response) = check_run_id(run_id) {
         return response;
     }
-    let Some(run_dir) = run_dir_of(shared, run_id) else {
-        return error_response(
-            404,
-            "run_not_found",
-            &format!("局 `{run_id}` 不存在（run.json 缺失）"),
-        );
+    let run_dir = match locate_run_dir(shared, run_id) {
+        Ok(run_dir) => run_dir,
+        Err(response) => return response,
     };
     let backend = match resolve_backend(&run_dir) {
         Ok(backend) => backend,
@@ -892,12 +1248,9 @@ fn handle_artifact_content(shared: &ServeShared, run_id: &str, artifact_path: &s
     if let Err(err) = ygg_store::validate_artifact_path(artifact_path) {
         return error_response(400, "bad_artifact_path", &err.to_string());
     }
-    let Some(run_dir) = run_dir_of(shared, run_id) else {
-        return error_response(
-            404,
-            "run_not_found",
-            &format!("局 `{run_id}` 不存在（run.json 缺失）"),
-        );
+    let run_dir = match locate_run_dir(shared, run_id) {
+        Ok(run_dir) => run_dir,
+        Err(response) => return response,
     };
     let backend = match resolve_backend(&run_dir) {
         Ok(backend) => backend,
@@ -1029,16 +1382,16 @@ fn serve_mod_panel(shared: &ServeShared, run_id: &str, rel: &str) -> Response {
     if let Err(response) = check_run_id(run_id) {
         return response;
     }
-    let Some(run_dir) = run_dir_of(shared, run_id) else {
-        return error_response(
-            404,
-            "panel_unavailable",
-            &format!("局 `{run_id}` 不存在（run.json 缺失）"),
-        );
+    let run_dir = match locate_run_dir_code(shared, run_id, "panel_unavailable") {
+        Ok(run_dir) => run_dir,
+        Err(response) => return response,
     };
     let meta = super::read_meta(&run_dir.join(crate::META_FILE))
         .ok_or_else(|| "run.json 不可解析".to_owned());
-    let mod_dir = meta.as_ref().ok().and_then(run_mod_dir);
+    let mod_dir = meta
+        .as_ref()
+        .ok()
+        .and_then(|meta| run_mod_dir(meta, run_dir.parent()));
     let Some(mod_dir) = mod_dir else {
         return error_response(404, "panel_unavailable", "run.json 缺少可用的 mod 路径");
     };
@@ -1191,8 +1544,12 @@ mod serve_tests {
     }
 
     fn shared_for(runs_root: &Path) -> Arc<ServeShared> {
+        shared_for_roots(&[runs_root.to_path_buf()])
+    }
+
+    fn shared_for_roots(roots: &[PathBuf]) -> Arc<ServeShared> {
         Arc::new(ServeShared {
-            runs_root: runs_root.to_path_buf(),
+            roots: roots.to_vec(),
             panel_dir: None,
             broadcaster: Broadcaster::new(),
             connections: AtomicUsize::new(0),
@@ -1228,9 +1585,8 @@ mod serve_tests {
     }
 
     impl LiveServe {
-        fn start(runs_root: &Path, poll_ms: u64) -> Self {
-            let (listener, shared) =
-                bind_serve(runs_root.to_path_buf(), None).expect("绑定测试端口");
+        fn start(roots: &[PathBuf], poll_ms: u64) -> Self {
+            let (listener, shared) = bind_serve(roots.to_vec(), None).expect("绑定测试端口");
             let port = listener.local_addr().expect("端口").port();
             let shutdown = Arc::new(AtomicBool::new(false));
             {
@@ -1495,7 +1851,7 @@ end)
         assert_eq!(BIND_ADDR, "127.0.0.1");
         // 真绑定的监听器也必须落在 loopback 上。
         let dir = case_dir("bind");
-        let (listener, _shared) = bind_serve(dir, None).expect("绑定");
+        let (listener, _shared) = bind_serve(vec![dir], None).expect("绑定");
         let ip = listener.local_addr().expect("地址").ip().to_string();
         assert!(ip.starts_with("127."), "绑定地址必须是 loopback：{ip}");
     }
@@ -1878,7 +2234,7 @@ end)
         fs::create_dir_all(&custom).expect("建覆盖目录");
         fs::write(custom.join("index.html"), b"<p>custom</p>").expect("写覆盖页");
         let shared = Arc::new(ServeShared {
-            runs_root: dir.join("runs"),
+            roots: vec![dir.join("runs")],
             panel_dir: Some(custom),
             broadcaster: Broadcaster::new(),
             connections: AtomicUsize::new(0),
@@ -1908,6 +2264,7 @@ end)
             mod_dir: Some(mod_dir.to_path_buf()),
             run_id: run_id.to_owned(),
             runs_root: runs_root.to_path_buf(),
+            serve_runs_roots: Vec::new(),
             resume: true,
             settle: false,
             watch: false,
@@ -1973,7 +2330,7 @@ end)
         let mod_dir = dir.join("mod");
         write_mod(&mod_dir, None);
         fs::create_dir_all(&runs_root).expect("建空 runs-root");
-        let serve = LiveServe::start(&runs_root, 50);
+        let serve = LiveServe::start(&[runs_root.clone()], 50);
         // 先开局（外部写者），等 watcher 拾取。
         dispatch_external(&mod_dir, &runs_root, "x", "event.start", "0");
         wait_until_seen(&serve, "x");
@@ -1982,6 +2339,11 @@ end)
             serve.sse_frame(|event, data| event == "change" && data.contains("\"run\":\"x\""));
         let frame: Json = serde_json::from_str(&data).expect("帧是 JSON");
         assert!(frame["version"].as_u64().expect("version") >= 1, "{frame}");
+        assert_eq!(
+            frame["root"],
+            json!(runs_root.display().to_string()),
+            "帧必须点名变更局所属根：{frame}"
+        );
         // 随后数据面出现新档、可取。
         let (status, _, body) = serve.get("/api/runs/x/saves");
         assert_eq!(status, 200);
@@ -2045,7 +2407,7 @@ end)
         let mod_dir = dir.join("mod");
         write_mod(&mod_dir, None);
         fs::create_dir_all(&runs_root).expect("建空 runs-root");
-        let serve = LiveServe::start(&runs_root, 50);
+        let serve = LiveServe::start(&[runs_root.clone()], 50);
         let (status, _, body) = serve.get("/api/runs");
         assert_eq!(status, 200);
         assert_eq!(
@@ -2086,7 +2448,7 @@ end)
         // 对照局：与观察局**相同的写序列**（两步），serve 从未观察过它。
         dispatch_external(&mod_dir, &control_root, "p", "event.start", "0");
         // 观察局：serve 已在观察，先走一遍全部数据端点 + SSE。
-        let serve = LiveServe::start(&watched_root, 50);
+        let serve = LiveServe::start(&[watched_root.clone()], 50);
         dispatch_external(&mod_dir, &watched_root, "p", "event.start", "0");
         wait_until_seen(&serve, "p");
         for target in [
@@ -2131,6 +2493,272 @@ end)
                 "run.json 的 {key} 面等值"
             );
         }
+    }
+
+    // ---- §11.5 多根与单实例（r9）----
+
+    #[test]
+    fn parse_serve_config_fail_closed() {
+        let home = case_dir("cfg-home");
+        // 合法：绝对路径 + `~/` 展开。
+        let roots =
+            parse_serve_config(r#"{"roots":["/tmp/a", "~/b"]}"#, Some(&home)).expect("合法配置");
+        assert_eq!(roots, vec![PathBuf::from("/tmp/a"), home.join("b")]);
+        // 未知键 → Err（G5：{"root":[...]} 必须被点名拒绝）。
+        let err = parse_serve_config(r#"{"root":["/tmp"]}"#, Some(&home)).unwrap_err();
+        assert!(err.contains("未知键") && err.contains("root"), "{err}");
+        // 相对路径 → Err（「相对于谁」无解，拒绝优于猜测）。
+        let err = parse_serve_config(r#"{"roots":["rel/path"]}"#, Some(&home)).unwrap_err();
+        assert!(err.contains("相对路径"), "{err}");
+        // 畸形 JSON / 顶层非对象 / roots 非数组 / 非字符串项 / 空数组。
+        assert!(parse_serve_config("{not json", Some(&home)).is_err());
+        assert!(parse_serve_config("[]", Some(&home)).is_err());
+        assert!(parse_serve_config(r#"{"roots":"/tmp"}"#, Some(&home)).is_err());
+        assert!(parse_serve_config(r#"{"roots":[1]}"#, Some(&home)).is_err());
+        assert!(parse_serve_config(r#"{"roots":[]}"#, Some(&home)).is_err());
+        // `~` 但无 home → Err。
+        assert!(parse_serve_config(r#"{"roots":["~/b"]}"#, None).is_err());
+    }
+
+    #[test]
+    fn resolve_roots_chain() {
+        let cwd = case_dir("chain-cwd");
+        fs::create_dir_all(cwd.join("runs")).expect("建缺省根");
+        let home = case_dir("chain-home");
+        let config_text = r#"{"roots":["/tmp/chain-cfg"]}"#;
+        let flag = cwd.join("flag-root");
+        // 旗标 > 配置 > 缺省（./runs 的 cwd 绝对形态）。
+        assert_eq!(
+            resolve_roots(&[flag.clone()], Some(config_text), Some(&home), &cwd).expect("旗标层"),
+            vec![flag]
+        );
+        assert_eq!(
+            resolve_roots(&[], Some(config_text), Some(&home), &cwd).expect("配置层"),
+            vec![PathBuf::from("/tmp/chain-cfg")]
+        );
+        assert_eq!(
+            resolve_roots(&[], None, Some(&home), &cwd).expect("缺省层"),
+            vec![cwd.join("runs")]
+        );
+    }
+
+    #[test]
+    fn canonicalize_roots_dedupes_aliases() {
+        let dir = case_dir("dedupe");
+        let real = dir.join("real");
+        fs::create_dir_all(&real).expect("建真实根");
+        let mut raw = vec![real.clone(), real.clone()];
+        #[cfg(unix)]
+        {
+            let alias = dir.join("alias");
+            std::os::unix::fs::symlink(&real, &alias).expect("建别名软链");
+            raw = vec![real.clone(), alias];
+        }
+        let cwd = case_dir("dedupe-cwd");
+        let roots = canonicalize_roots(&raw, &cwd);
+        assert_eq!(
+            roots,
+            vec![real.canonicalize().expect("canonicalize")],
+            "同一目录的双别名必须合并为一根"
+        );
+    }
+
+    #[test]
+    fn roots_cover_semantics() {
+        let a = PathBuf::from("/a");
+        let b = PathBuf::from("/b");
+        let c = PathBuf::from("/c");
+        assert!(roots_cover(&[], &[a.clone()]));
+        assert!(roots_cover(&[a.clone()], &[a.clone(), b.clone()]));
+        assert!(roots_cover(
+            &[a.clone(), b.clone()],
+            &[b.clone(), a.clone()]
+        ));
+        assert!(!roots_cover(
+            &[a.clone(), c.clone()],
+            &[a.clone(), b.clone()]
+        ));
+        assert!(!roots_cover(&[c], &[]));
+    }
+
+    #[test]
+    fn locate_run_and_409() {
+        let dir = case_dir("locate");
+        let root_a = dir.join("a-runs");
+        let root_b = dir.join("b-runs");
+        seed_run(&root_a, "solo", Backend::Json, 1);
+        seed_run(&root_a, "clash", Backend::Json, 1);
+        seed_run(&root_b, "clash", Backend::Json, 1);
+        let shared = shared_for_roots(&[root_a, root_b]);
+        // 0 命中 → 404（既有文案）；1 命中 → 200；撞名 → 409 + error.roots。
+        assert_eq!(http(&shared, "GET", "/api/runs/missing/saves").status, 404);
+        assert_eq!(http(&shared, "GET", "/api/runs/solo/saves").status, 200);
+        let response = http(&shared, "GET", "/api/runs/clash/saves");
+        assert_eq!(response.status, 409);
+        let body = body_json(&response);
+        assert_eq!(body["error"]["code"], json!("run_id_ambiguous"));
+        let roots = body["error"]["roots"].as_array().expect("error.roots");
+        assert_eq!(roots.len(), 2, "409 必须列出全部撞名根：{body}");
+        // 撞名在 /panel 与存档数据 API 上同门（同一 locate_run 事实）。
+        assert_eq!(http(&shared, "GET", "/panel/clash/").status, 409);
+        assert_eq!(
+            http(&shared, "GET", "/api/runs/clash/saves/latest").status,
+            409
+        );
+    }
+
+    #[test]
+    fn runs_api_lists_all_roots_with_row_root() {
+        let dir = case_dir("multi-runs");
+        let root_a = dir.join("a-runs");
+        let root_b = dir.join("b-runs");
+        seed_run(&root_a, "in-a", Backend::Json, 1);
+        seed_run(&root_b, "in-b", Backend::Json, 2);
+        let shared = shared_for_roots(&[root_a.clone(), root_b.clone()]);
+        let body = body_json(&http(&shared, "GET", "/api/runs"));
+        // roots 数组恰两根（= 共享态的观察根形态）；每行带 root 标识。
+        assert_eq!(
+            body["roots"],
+            json!([root_a.display().to_string(), root_b.display().to_string(),])
+        );
+        let runs = body["runs"].as_array().expect("runs");
+        assert_eq!(runs.len(), 2, "跨根各见其局");
+        for row in runs {
+            assert!(row["root"].is_string(), "行必须带根标识：{row}");
+            assert!(row["runsRoot"].is_null(), "单数 runsRoot 必须退役：{row}");
+        }
+        assert!(body["runsRoot"].is_null(), "单数 runsRoot 必须退役");
+        // 可读根照常出行；坏根（运行中目录被删）→ errors 记录 + 整体仍 200。
+        let broken_root = dir.join("gone-runs");
+        fs::create_dir_all(&broken_root).expect("建将被删除的根");
+        let shared = shared_for_roots(&[root_a, broken_root.clone()]);
+        fs::remove_dir_all(&broken_root).expect("删根模拟运行中目录被删");
+        let response = http(&shared, "GET", "/api/runs");
+        assert_eq!(response.status, 200);
+        let body = body_json(&response);
+        let errors = body["errors"].as_array().expect("errors");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0]["root"], json!(broken_root.display().to_string()));
+        assert!(
+            !body["runs"].as_array().expect("runs").is_empty(),
+            "好根照常出行（局部真优于全黑）"
+        );
+    }
+
+    #[test]
+    fn run_mod_dir_two_level_chain() {
+        let dir = case_dir("mod-chain");
+        // 规范布局：<project>/.ygg/runs 的 mod 相对路径在 <project>（祖父目录）命中。
+        let project = dir.join("proj");
+        let root = project.join(".ygg/runs");
+        let mods = project.join(".ygg/mods/m");
+        fs::create_dir_all(&root).expect("建根");
+        fs::create_dir_all(&mods).expect("建 mod");
+        let resolved =
+            run_mod_dir(&json!({"mod": ".ygg/mods/m"}), Some(&root)).expect("解析链命中");
+        assert_eq!(
+            resolved,
+            mods,
+            "祖父目录（规范布局 <project>）命中：{}",
+            resolved.display()
+        );
+        // 扁平布局：<project>/runs 的相对路径在父目录命中。
+        let flat_root = dir.join("flat/runs");
+        let flat_mods = dir.join("flat/mods/m");
+        fs::create_dir_all(&flat_root).expect("建扁平根");
+        fs::create_dir_all(&flat_mods).expect("建扁平 mod");
+        let resolved = run_mod_dir(&json!({"mod": "mods/m"}), Some(&flat_root)).expect("扁平命中");
+        assert_eq!(resolved, flat_mods);
+        // 皆不存 → 原值返回（PanelDecl::Unavailable 降级，不炸观察）。
+        let root_no_mod = dir.join("nomod/runs");
+        fs::create_dir_all(&root_no_mod).expect("建根");
+        let resolved = run_mod_dir(&json!({"mod": ".ygg/mods/nowhere"}), Some(&root_no_mod))
+            .expect("原值兑底");
+        assert_eq!(resolved, PathBuf::from(".ygg/mods/nowhere"));
+        // 绝对路径原样；缺 mod 字段 → None。
+        assert_eq!(
+            run_mod_dir(&json!({"mod": "/abs/mod"}), None).expect("绝对原样"),
+            PathBuf::from("/abs/mod")
+        );
+        assert!(run_mod_dir(&json!({}), Some(&root)).is_none());
+    }
+
+    #[test]
+    fn probe_verdicts_end_to_end() {
+        let dir = case_dir("probe");
+        let root = dir.join("runs");
+        fs::create_dir_all(&root).expect("建根");
+        let serve = LiveServe::start(&[root.clone()], 50);
+        // 覆盖 → Reuse；不覆盖 → RootsNotCovered（点名双方 roots）。
+        match probe_live_instance(serve.port, &[root.clone()]) {
+            InstanceVerdict::Reuse => {}
+            other => panic!("覆盖请求必须 Reuse：{other:?}"),
+        }
+        let outsider = case_dir("probe-outsider");
+        match probe_live_instance(serve.port, &[outsider]) {
+            InstanceVerdict::RootsNotCovered { served, .. } => {
+                assert_eq!(served, vec![root], "在役 roots 必须如实回显");
+            }
+            other => panic!("不覆盖请求必须 RootsNotCovered：{other:?}"),
+        }
+        // 端口上无 egg → NoInstance（connect refused）。
+        let listener = TcpListener::bind((BIND_ADDR, 0)).expect("占一个空闲端口再放手");
+        let port = listener.local_addr().expect("端口").port();
+        drop(listener);
+        assert!(
+            matches!(
+                probe_live_instance(port, &[dir.join("any")]),
+                InstanceVerdict::NoInstance
+            ),
+            "空端口必须判无实例"
+        );
+    }
+
+    #[test]
+    fn probe_detects_legacy_instance() {
+        // 旧代单根实例：/api/runs 响应含 runsRoot → LegacyInstance（升级窗口一次性路径）。
+        let listener = TcpListener::bind((BIND_ADDR, 0)).expect("绑定假旧代实例");
+        let port = listener.local_addr().expect("端口").port();
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                // 先排空请求再应答（真实 HTTP 服务器行为；带未读数据关连 = RST，
+                // 会把探针的 read_to_end 炸成 ECONNRESET 而不是干净 EOF）。
+                let mut drain = [0u8; 512];
+                let _ = stream.read(&mut drain);
+                let body = "{\"runs\":[],\"runsRoot\":\"/old/gen\"}";
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(body.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        match probe_live_instance(port, &[PathBuf::from("/whatever")]) {
+            InstanceVerdict::LegacyInstance => {}
+            other => panic!("runsRoot 响应必须判旧代实例：{other:?}"),
+        }
+        handle.join().expect("假服务线程收尾");
+    }
+
+    #[test]
+    fn watcher_picks_up_second_root() {
+        // B 根后开一局 → watcher 必须跨根拾取（外层循环根的内层循环局）。
+        let dir = case_dir("watch-2root");
+        let root_a = dir.join("a-runs");
+        let root_b = dir.join("b-runs");
+        let mod_dir = dir.join("mod");
+        write_mod(&mod_dir, None);
+        fs::create_dir_all(&root_a).expect("建根A");
+        fs::create_dir_all(&root_b).expect("建根B");
+        let serve = LiveServe::start(&[root_a, root_b.clone()], 50);
+        dispatch_external(&mod_dir, &root_b, "late-b", "event.start", "0");
+        wait_until_seen(&serve, "late-b");
+        let (status, _, body) = serve.get("/api/runs/late-b/saves");
+        assert_eq!(status, 200, "第二根的局必须可下钻");
+        let body: Json = serde_json::from_slice(&body).expect("JSON");
+        assert_eq!(body["runId"], json!("late-b"));
     }
 
     // ---- 互斥矩阵（serve × 全部模式旗标 → usage_error；§11.4 验收映射）----
