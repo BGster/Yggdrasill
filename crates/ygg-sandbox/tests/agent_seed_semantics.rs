@@ -240,12 +240,17 @@ fn start_requirement(game: &mut Game) {
     game.assert_kv("req.1.job", json!("plan"));
 }
 
-/// Submit an `r1` proposal: `req|rev|stage|summary|artifacts|changes|ext` (changes empty).
-fn submit(game: &mut Game, rev: u32, stage: &str, ext: &str) {
+/// Submit a proposal for any requirement: `req|rev|stage|summary|artifacts|changes|ext`.
+fn submit_req(game: &mut Game, id: &str, rev: u32, stage: &str, ext: &str) {
     let payload = text(&format!(
-        "r1|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}"
+        "{id}|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}"
     ));
     game.narrate("proposal.submit", &payload);
+}
+
+/// Submit an `r1` proposal: `req|rev|stage|summary|artifacts|changes|ext` (changes empty).
+fn submit(game: &mut Game, rev: u32, stage: &str, ext: &str) {
+    submit_req(game, "r1", rev, stage, ext);
 }
 
 /// Submit an `r1` proposal with the trailing `exec=` segment (agent ledger + proposal in one
@@ -765,6 +770,112 @@ fn legacy_save_without_plan_flag_infers_then_writes_it_back() {
     legacy.narrate("requirement.dispatch", "0");
     legacy.assert_kv("req.1.status", json!("developing"));
     legacy.assert_kv("req.1.job", json!("development"));
+}
+
+// ───────────────────────── ⑤b gate locality (approve starts work) ─────────────────────────
+
+/// Gate independence: **another requirement's** pending proposal / running job does not
+/// block r1's gate. Approving r1 at the plan gate while r2 sits in `plan_review` (pending
+/// plan proposal) and r3's plan job is running must pass the gate and auto-dispatch r1's
+/// development in the same turn. The run-closing preconditions (`coordinate.submit` /
+/// `verify.submit` / `review.note`) stay global — only per-requirement advancement is
+/// localized (AGENTS.md §9: gate_problem stays for the closing chain).
+#[test]
+fn gate_independence_other_requirements_do_not_block() {
+    let mut game = drive_to_plan_gate();
+    // r2: add → dispatch → submit a plan proposal that stays pending (`plan_review`).
+    game.narrate(
+        "requirement.add",
+        &text("second requirement|synthetic description|semantics-r2"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    submit_req(&mut game, "r2", 1, "plan", "semantics-r2-p1");
+    game.assert_kv("prop.2.status", json!("pending"));
+    // A submitted proposal releases the job slot (waiting for acceptance, not running).
+    game.assert_kv("req.2.job", json!(""));
+    // r3: add → dispatch (its plan job is running, no proposal yet).
+    game.narrate(
+        "requirement.add",
+        &text("third requirement|synthetic description|semantics-r3"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    game.assert_kv("req.3.job", json!("plan"));
+
+    let reply = game.click("gate.approve — ");
+    let narrative: Vec<String> = reply["narrative"]
+        .as_array()
+        .expect("narrative")
+        .iter()
+        .map(|line| line.as_str().expect("narrative line").to_owned())
+        .collect();
+    assert!(
+        narrative
+            .iter()
+            .any(|line| line.starts_with("[AUTO-DISPATCH]")),
+        "approving r1 must auto-dispatch its development in the same turn: {narrative:#?}"
+    );
+    game.assert_kv("req.1.plan_ok", json!(true));
+    game.assert_kv("req.1.job", json!("development"));
+    game.assert_kv("req.1.lane", json!(1));
+    // The neighbours are untouched: r2's proposal stays pending (its job slot was released
+    // at submit — waiting for acceptance, not running), r3's job keeps running.
+    game.assert_kv("prop.2.status", json!("pending"));
+    game.assert_kv("req.2.job", json!(""));
+    assert_eq!(game.phase("r2"), "plan_review");
+    game.assert_kv("req.3.job", json!("plan"));
+}
+
+/// A requirement's **own** pending proposal still blocks its gate. While a gate is up the
+/// `submit_slot_ok` guard refuses live submits, so the own proposal is injected into the
+/// in-memory save fixture (never a run directory) and restored: the approval must be
+/// refused and the stored state must not move.
+#[test]
+fn gate_still_blocked_by_own_pending_proposal() {
+    let mut game = drive_to_plan_gate();
+    let mut save = game.save();
+    let entries = save["kv"]["entries"]
+        .as_object_mut()
+        .expect("kv.entries must be an object");
+    // p1 was accepted at the plan gate; p2 is r1's own pending plan proposal.
+    let injected = 2;
+    entries.insert("prop.count".to_owned(), json!(injected));
+    for (key, value) in [
+        ("req", json!(1)),
+        ("rev", json!(1)),
+        ("stage", json!("plan")),
+        ("summary", json!("injected own pending proposal")),
+        ("artifacts", json!("artifacts/injected.md")),
+        ("status", json!("pending")),
+        ("ext", json!("semantics-injected")),
+        ("changes", json!("")),
+    ] {
+        entries.insert(format!("prop.{injected}.{key}"), value);
+    }
+    let bytes = serde_json::to_vec(&save).expect("serialize the save");
+    let mut blocked = Game {
+        bundle: game.bundle.clone(),
+        kernel: game
+            .bundle
+            .restore(&bytes)
+            .expect("a save with an injected own proposal must load"),
+    };
+    blocked.assert_kv("prop.2.status", json!("pending"));
+
+    // The snapshot's pendingChoice predates the injection (accept item absent, gate first);
+    // `ygg.choice_selected` routes against the freshly recomputed menu, so re-render first
+    // to bring the stored choice back in sync before clicking.
+    blocked.narrate("requirement.list", "0");
+
+    let refused = blocked.click("gate.approve — ");
+    let lines: Vec<String> = refused["narrative"]
+        .as_array()
+        .expect("narrative")
+        .iter()
+        .map(|line| line.as_str().expect("narrative line").to_owned())
+        .collect();
+    assert_refused(&lines, "pending proposal(s) of its own");
+    blocked.assert_kv("req.1.gate", json!("plan"));
+    blocked.assert_kv("req.1.status", json!("planning"));
 }
 
 // ───────────────────────── ⑥ two-layer map contracts ─────────────────────────

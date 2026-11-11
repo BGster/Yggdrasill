@@ -21,8 +21,8 @@ local num, text_of =
   config.num, config.text_of
 local refuse, reject, reject_payload =
   flow.refuse, flow.reject, flow.reject_payload
-local gate_evidence_problem, gate_kind, gate_next, gate_rev_ok, gate_total, req_artifacts =
-  gates.gate_evidence_problem, gates.gate_kind, gates.gate_next, gates.gate_rev_ok, gates.gate_total, gates.req_artifacts
+local gate_evidence_problem, gate_kind, gate_next, gate_problem_for, gate_rev_ok, gate_total, req_artifacts =
+  gates.gate_evidence_problem, gates.gate_kind, gates.gate_next, gates.gate_problem_for, gates.gate_rev_ok, gates.gate_total, gates.req_artifacts
 local HUMAN =
   choice.HUMAN
 local render =
@@ -71,6 +71,13 @@ function M.install(deps)
     local evidence = gate_evidence_problem(index, kind)
     if evidence ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", evidence)
+    end
+    -- 单需求门禁判据（批准即开工的前半）：rN 的门禁只被 rN 自身事态阻塞——其它需求的
+    -- pending 提案 / 在跑 job / 冲突不进本判定；run 收口链（coordinate.submit / verify /
+    -- review）的 gate_problem 全局屏障保持不动。gate.reject 不加判据（纠错通道保持畅通）。
+    local problem = gate_problem_for(index)
+    if problem ~= nil then
+      return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", problem)
     end
     local next_status = kind == "plan" and R_PLANNING or R_DONE
     ygg.kv.set(req_key(index, "status"), next_status)
