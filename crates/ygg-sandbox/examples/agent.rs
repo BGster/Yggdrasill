@@ -207,7 +207,7 @@ const WAIT_TOOLS_HEARTBEAT: Duration = Duration::from_secs(1);
 
 fn main() {
     let mut args = parse_args();
-    // 更名兼容（`agent-seed` → `pi-agent-seed`）：`--mod …/mods/agent-seed` 在旧目录
+    // 更名兼容（`pi-agent-seed` → `agent-seed`）：`--mod …/mods/pi-agent-seed` 在旧目录
     // 不存在、同父目录下新名存在时翻译成新名。旗标在**入口处统一归一**一次——
     // `Session::new` / `load_env_table` / 工具 worker 都读 `args.mod_dir`，逐处改容易漏；
     // `run.json` 里记的历史路径走另一条（`resolve_mod_dir` 调用同一个映射函数）。
@@ -703,7 +703,7 @@ host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字
                         requireEnding,requireInboxConsumed}
                         drive{maxSteps,stallLimit,stepsPerRequirement}（正整数）
   缺段 / 缺字段 / 类型不符 / 非正整数 → 装载期失败（点名缺失字段 + 应有形状 +
-  文档定位：.ygg/mods/pi-agent-seed/README.md 的「host 契约」章节）。
+  文档定位：.ygg/mods/agent-seed/README.md 的「host 契约」章节）。
 
 内置工具（`--builtin-tool <op>`；不读 Mod、不推进状态；stdout 单行
 `key=value;key=value`，失败 = stdout 空 + stderr 一行 + 退出 1；用法错 = 退出 2）：
@@ -5069,21 +5069,25 @@ fn run_single(args: &Args) -> i32 {
     }
 }
 
-/// Seed Mod 的现名与旧名（2026 更名：`agent-seed` → `pi-agent-seed`）。
+/// Seed Mod 的现名与旧名（2026 两跳更名：`agent-seed` → `pi-agent-seed` → `agent-seed`，
+/// 现名回到 `agent-seed`，legacy 名为 `pi-agent-seed`）。
 ///
-/// 旧名不是「另一个 Mod」：它是同一个 Mod 的历史目录名，`.ygg/runs/**/run.json` 里
-/// 记录的 `"mod": ".ygg/mods/agent-seed"` 必须继续能续局；反过来，通用 harness
-/// 按旧名调用时也要能命中现名目录。两个方向都由 `legacy_seed_alias` 翻译（双向）。
-const SEED_MOD_NAME: &str = "pi-agent-seed";
-const LEGACY_SEED_MOD_NAME: &str = "agent-seed";
+/// 旧名不是「另一个 Mod」：它是同一个 Mod 的历史目录名，上一跳窗口期写入
+/// `.ygg/runs/**/run.json` 的 `"mod": ".ygg/mods/pi-agent-seed"`（现存 11 个局）与
+/// 旧习惯调用方必须继续能命中；反过来，`with_legacy_seed_alias` 的存在性优先语义
+/// （请求路径存在则原样返回）使更早的 17 个记录 `"mod": ".ygg/mods/agent-seed"`
+/// 的旧局无需翻译直接命中现名目录。两个方向都由 `legacy_seed_alias` 翻译（**对称映射**，
+/// 函数体逻辑零改动，只随常量互换）。
+const SEED_MOD_NAME: &str = "agent-seed";
+const LEGACY_SEED_MOD_NAME: &str = "pi-agent-seed";
 
-/// 更名兼容的**双向**别名：`…/mods/agent-seed` ↔ `…/mods/pi-agent-seed`（**只换最后两段**）。
+/// 更名兼容的**双向**别名：`…/mods/pi-agent-seed` ↔ `…/mods/agent-seed`（**只换最后两段**）。
 ///
-/// 为什么双向：同一个 Mod 同时活在两套 harness 的调用习惯里——通用 harness 按旧名
-/// `--mod .ygg/mods/agent-seed` 走（历史习惯 / 它们的脚手架模板），Pi 这边按新名
-/// `--mod .ygg/mods/pi-agent-seed` 走；磁盘上只能有**一个**目录，所以两个方向都得能解析。
+/// 为什么双向：同一个 Mod 同时活在多种调用习惯里——Pi 这边按现名
+/// `--mod .ygg/mods/agent-seed` 走，上一跳窗口期的 run.json 与旧习惯调用方仍写
+/// `--mod .ygg/mods/pi-agent-seed`；磁盘上只能有**一个**目录，所以两个方向都得能解析。
 /// 前缀原样保留，因此相对路径（`.ygg/mods/agent-seed`）与绝对路径都适用；父目录必须叫
-/// `mods`，避免把任意同名目录（如 `/tmp/agent-seed` 探针）误改。
+/// `mods`，避免把任意同名目录（如 `/tmp/pi-agent-seed` 探针）误改。
 /// 只做**路径映射**，不碰磁盘——存在性由调用方判（[`with_legacy_seed_alias`]）。
 fn legacy_seed_alias(path: &Path) -> Option<PathBuf> {
     let name = path.file_name().and_then(|name| name.to_str())?;
@@ -6508,10 +6512,10 @@ mod harness_adapter_tests {
 }
 
 #[cfg(test)]
-/// 更名兼容（`agent-seed` → `pi-agent-seed`）的判定面：历史 run 不改 `run.json` 也能续。
+/// 更名兼容（`pi-agent-seed` → `agent-seed`）的判定面：历史 run 不改 `run.json` 也能续。
 ///
-/// 为何要有这个模块：两侧 Mod 目录在 2026 改名，但 `.ygg/runs/**/run.json` 里记的是
-/// **历史路径**（`"mod": ".ygg/mods/agent-seed"`）。历史局必须原样可读——所以翻译
+/// 为何要有这个模块：Mod 目录在 2026 两跳改名，但 `.ygg/runs/**/run.json` 里记的是
+/// **历史路径**（如 `"mod": ".ygg/mods/pi-agent-seed"`）。历史局必须原样可读——所以翻译
 /// 只发生在**解析期**（`resolve_mod_dir` → `with_legacy_seed_alias`），磁盘上的
 /// `run.json` 一个字节都不动。本模块不装内核、不派发、不读真 Mod：临时目录里建空目录当 Mod。
 mod mod_dir_alias_tests {
@@ -6556,10 +6560,10 @@ mod mod_dir_alias_tests {
     fn legacy_run_json_resolves_to_the_renamed_mod_dir() {
         let root = temp_root("e2e");
         // 磁盘现状：只有新名目录，旧名目录**不存在**（= 改名后的仓库）。
-        let renamed = root.join("mods/pi-agent-seed");
+        let renamed = root.join("mods/agent-seed");
         fs::create_dir_all(&renamed).expect("建新名目录");
         fs::write(renamed.join("pack.json"), "{}").expect("放一个标记文件");
-        let legacy = root.join("mods/agent-seed");
+        let legacy = root.join("mods/pi-agent-seed");
         assert!(!legacy.exists(), "前提：旧名目录必须不存在");
 
         // 历史局：`run.json` 原样记着旧名（绝对路径，内容事后还要逐字节比对）。
@@ -6587,7 +6591,7 @@ mod mod_dir_alias_tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// 字面量判据：历史 `run.json` 里的 `.ygg/mods/agent-seed` → `.ygg/mods/pi-agent-seed`。
+    /// 字面量判据：历史 `run.json` 里的 `.ygg/mods/pi-agent-seed` → `.ygg/mods/agent-seed`。
     ///
     /// 这里只比路径、不碰磁盘：`cargo test --example agent` 的 cwd 是 `crates/ygg-sandbox`，
     /// 直接对 `.ygg/...` 做 `exists()` 测到的是 crate 目录而不是仓库根——而宿主实际运行时的
@@ -6595,17 +6599,17 @@ mod mod_dir_alias_tests {
     #[test]
     fn legacy_relative_path_maps_to_the_renamed_sibling() {
         assert_eq!(
-            legacy_seed_alias(Path::new(".ygg/mods/agent-seed")),
-            Some(PathBuf::from(".ygg/mods/pi-agent-seed"))
+            legacy_seed_alias(Path::new(".ygg/mods/pi-agent-seed")),
+            Some(PathBuf::from(".ygg/mods/agent-seed"))
         );
         assert_eq!(
-            legacy_seed_alias(Path::new("packages/mods/agent-seed")),
-            Some(PathBuf::from("packages/mods/pi-agent-seed"))
+            legacy_seed_alias(Path::new("packages/mods/pi-agent-seed")),
+            Some(PathBuf::from("packages/mods/agent-seed"))
         );
         // 绝对路径同样只换最后两段（前缀原样保留）
         assert_eq!(
-            legacy_seed_alias(Path::new("/tmp/x/mods/agent-seed")),
-            Some(PathBuf::from("/tmp/x/mods/pi-agent-seed"))
+            legacy_seed_alias(Path::new("/tmp/x/mods/pi-agent-seed")),
+            Some(PathBuf::from("/tmp/x/mods/agent-seed"))
         );
     }
 
@@ -6613,12 +6617,12 @@ mod mod_dir_alias_tests {
     #[test]
     fn mapping_is_narrow_on_purpose() {
         for untouched in [
-            "agent-seed",              // 没有 `mods/` 父段
-            "/tmp/agent-seed",         // 父段不叫 mods（/tmp/agent-seed 常是临时探针目录）
-            ".ygg/mods/agent-seed-v2", // 只是前缀撞名
-            ".ygg/mods/agent-seeds",
-            ".ygg/mods/pi-agent-seed-v2", // 反向也只是前缀撞名
-            ".ygg/agent-seed",            // 父段不是 mods
+            "pi-agent-seed",              // 没有 `mods/` 父段（legacy 名裸值同样不翻译）
+            "/tmp/pi-agent-seed",         // 父段不叫 mods（/tmp/pi-agent-seed 常是临时探针目录）
+            ".ygg/mods/pi-agent-seed-v2", // legacy 名只是前缀撞名，不得误翻译
+            ".ygg/mods/pi-agent-seeds",
+            ".ygg/mods/agent-seed-v2", // 反向（现名）也只是前缀撞名
+            ".ygg/pi-agent-seed",      // 父段不是 mods
         ] {
             assert_eq!(
                 legacy_seed_alias(Path::new(untouched)),
@@ -6630,20 +6634,20 @@ mod mod_dir_alias_tests {
 
     /// 别名是**双向**的：新名 → 旧名，且磁盘上只有旧名目录时 `resolve_mod_dir` 落到它。
     ///
-    /// 为何要双向：同一个 Mod 同时被两套 harness 用两种目录名调用——通用 harness 写
-    /// `--mod .ygg/mods/agent-seed`，Pi 侧写 `--mod .ygg/mods/pi-agent-seed`；磁盘上只有
-    /// 一个目录，所以请求缺席的那个名字时必须翻译到存在的那个。
+    /// 为何要双向：同一个 Mod 同时被多种调用习惯用两种目录名调用——Pi 侧按现名写
+    /// `--mod .ygg/mods/agent-seed`，上一跳窗口期的 run.json 与旧习惯调用方写
+    /// `--mod .ygg/mods/pi-agent-seed`；磁盘上只有一个目录，请求缺席的名字必须翻译到存在的那个。
     #[test]
     fn the_new_name_maps_back_when_only_the_old_dir_exists() {
         assert_eq!(
-            legacy_seed_alias(Path::new(".ygg/mods/pi-agent-seed")),
-            Some(PathBuf::from(".ygg/mods/agent-seed"))
+            legacy_seed_alias(Path::new(".ygg/mods/agent-seed")),
+            Some(PathBuf::from(".ygg/mods/pi-agent-seed"))
         );
         let root = temp_root("keep-new");
-        let legacy = root.join("mods/agent-seed");
+        let legacy = root.join("mods/pi-agent-seed");
         fs::create_dir_all(&legacy).expect("建旧名目录");
         fs::write(legacy.join("pack.json"), "{}").expect("放一个标记文件");
-        let requested = root.join("mods/pi-agent-seed");
+        let requested = root.join("mods/agent-seed");
         assert!(!requested.exists(), "前提：请求的新名目录不存在");
         assert_eq!(
             resolve_mod_dir(&args(Some(requested)), &root.join("runs/r1"))
@@ -6657,9 +6661,9 @@ mod mod_dir_alias_tests {
     #[test]
     fn an_existing_legacy_dir_is_never_rewritten() {
         let root = temp_root("keep-old");
-        let legacy = root.join("mods/agent-seed");
+        let legacy = root.join("mods/pi-agent-seed");
         fs::create_dir_all(&legacy).expect("建旧名目录");
-        fs::create_dir_all(root.join("mods/pi-agent-seed")).expect("建新名目录");
+        fs::create_dir_all(root.join("mods/agent-seed")).expect("建新名目录");
         let run_dir = root.join("runs/r1");
         fs::create_dir_all(&run_dir).expect("建 run 目录");
         fs::write(
@@ -6678,10 +6682,10 @@ mod mod_dir_alias_tests {
     #[test]
     fn the_mod_flag_takes_the_same_translation() {
         let root = temp_root("flag");
-        let renamed = root.join("mods/pi-agent-seed");
+        let renamed = root.join("mods/agent-seed");
         fs::create_dir_all(&renamed).expect("建新名目录");
         let resolved = resolve_mod_dir(
-            &args(Some(root.join("mods/agent-seed"))),
+            &args(Some(root.join("mods/pi-agent-seed"))),
             &root.join("runs/r1"),
         )
         .expect("必须解析成功");
@@ -6693,7 +6697,7 @@ mod mod_dir_alias_tests {
     #[test]
     fn missing_both_sides_keeps_the_requested_path() {
         let root = temp_root("missing");
-        let legacy = root.join("mods/agent-seed");
+        let legacy = root.join("mods/pi-agent-seed");
         let run_dir = root.join("runs/r1");
         fs::create_dir_all(&run_dir).expect("建 run 目录");
         fs::write(
@@ -6722,7 +6726,7 @@ mod inbox_routes_tests {
     /// seed Mod 的契约目录（本仓内的真实契据，测试直接读它——避免在测试里
     /// 复刻一份 kind 表，哪边改了都只有一处）。
     fn seed_mod_dir() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.ygg/mods/pi-agent-seed")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.ygg/mods/agent-seed")
     }
 
     /// 三个保留键（与 kind 同层）。测试里显式声明：宿主不得内置任何字段名。
