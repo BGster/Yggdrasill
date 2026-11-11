@@ -433,8 +433,7 @@ fn run_retire_value_domain_and_retiring_close() {
         ),
     );
     let next_ends_run = |game: &mut Game| {
-        game.reply("agent.summary", "0")["meta"]["summary"]["nextEndsRun"]
-            .clone()
+        game.reply("agent.summary", "0")["meta"]["summary"]["nextEndsRun"].clone()
     };
     // Direction ① (unarmed): first item is review.note, but the run does not end.
     assert_eq!(
@@ -1814,6 +1813,15 @@ fn summary_exposes_structured_jobs_and_gates() {
         "task.intake",
         &text("subsystem gate|synthetic task description"),
     );
+
+    // r9 常驻生命周期三字段（加性）：coordinate ∧ 队列清空（无需求时充真）∧ 未武装
+    // = batchDrained=true；lifecycle 常量 resident；batch 缺省 1。
+    let fields = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    assert_eq!(fields["lifecycle"], json!("resident"), "{fields}");
+    assert_eq!(fields["batch"], json!(1), "{fields}");
+    assert_eq!(fields["batchDrained"], json!(true), "{fields}");
+    assert_eq!(fields["nextEndsRun"], json!(false), "{fields}");
+
     game.narrate(
         "requirement.add",
         &text("synthetic requirement|synthetic description|semantics-r1"),

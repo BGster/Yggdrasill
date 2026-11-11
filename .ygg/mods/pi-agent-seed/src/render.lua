@@ -21,8 +21,8 @@ local CONFIG
 
 local max_per_run, mode, num, play_mode, run_retire_armed, strict_gates, task_desc, task_title, text_of, executor_raw, goal_authorization =
   config.max_per_run, config.mode, config.num, config.play_mode, config.run_retire_armed, config.strict_gates, config.task_desc, config.task_title, config.text_of, config.executor_raw, config.goal_authorization
-local gate_total =
-  gates.gate_total
+local gate_total, gate_problem =
+  gates.gate_total, gates.gate_problem
 local narrate_stage_guide =
   guide.narrate_stage_guide
 local lane_text, narrate_lane_ledger =
@@ -834,6 +834,14 @@ local function summary_fields()
     ending = ygg.kv.get("ending") == STAGE.done,
     verifyPassed = ygg.kv.get("verify.passed") == true,
     nextEndsRun = summary_next_ends_run(),
+    -- r9 常驻生命周期三字段（加性；旧宿主容忍式解析，缺字段取保守默认）：
+    -- lifecycle = mod 自报模式（宿主所有常驻特化行为以它为闸，缺失 = 旧 mod 行为不变）；
+    -- batch = run.batch 镜像（批轮转可观测计数，缺省 1）；
+    -- batchDrained = 泵暂停信号 = coordinate ∧ gate_problem()==nil ∧ 未武装
+    --   （「本批队列已清空且没有已武装的终局流程，等新 --requirement 进料」）。
+    lifecycle = "resident",
+    batch = summary_int(num("run.batch", 1)),
+    batchDrained = stage() == STAGE.coordinate and gate_problem() == nil and not run_retire_armed(),
     pendingProposals = summary_int(prop_pending_total()),
     requirementCount = summary_int(req_count()),
     conflicts = summary_conflicts(),
