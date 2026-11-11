@@ -317,22 +317,28 @@ end
 
 MENU[STAGE.coordinate] = function()
   local items = append_all({}, resolve_items())
-  -- 主前进动作优先级：验收提案 > 过门禁 > 派活 > 收口进 review（canonical 串行）。
+  -- 主前进动作并存（canonical 序不变）：验收提案第 1 → 门禁两项紧随 → 派活 / 收口兑底。
+  -- 门禁不再被「任一需求有待验收提案」整体藏起（按需求局部化：gate.approve 只看 rN 自身，
+  -- gate_problem_for 在 handler 里判；跨需求阻塞改由串行验收 / 收口前置承担）。单需求下
+  -- accept 与 gate 结构上不同时出现（门禁只能由 accept 唯一 pending 提案升起），全 1 菜单
+  -- 首项序号不变。guide_item 相关不动（r1 泳道负责）。
   local accept = accept_item()
   local gates = gate_items()
   local dispatch = dispatch_item()
   if accept ~= nil then
     items[#items + 1] = accept
-  elseif #gates > 0 then
-    items = append_all(items, gates)
-  elseif dispatch ~= nil then
-    items[#items + 1] = dispatch
-  else
-    items[#items + 1] = {
-      text = TEXTS.options.coordinate_submit,
-      action = "coordinate.submit",
-      payload = "",
-    }
+  end
+  items = append_all(items, gates)
+  if accept == nil and #gates == 0 then
+    if dispatch ~= nil then
+      items[#items + 1] = dispatch
+    else
+      items[#items + 1] = {
+        text = TEXTS.options.coordinate_submit,
+        action = "coordinate.submit",
+        payload = "",
+      }
+    end
   end
   items[#items + 1] = map_item(STAGE.coordinate)
   items[#items + 1] = req_list_item()

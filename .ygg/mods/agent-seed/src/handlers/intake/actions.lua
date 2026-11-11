@@ -23,10 +23,8 @@ local advance, reject, reject_payload =
   flow.advance, flow.reject, flow.reject_payload
 local LANES, free_lanes, lane_text =
   lanes.LANES, lanes.free_lanes, lanes.lane_text
-local gate_total =
-  gates.gate_total
-local prop_pending_total =
-  props.prop_pending_total
+local gate_problem_for =
+  gates.gate_problem_for
 local dispatch_candidates =
   menus.dispatch_candidates
 local narrate_req_list, render, req_panel_text =
@@ -88,17 +86,20 @@ end
 
 -- 响应式：唯一后继自动派活（声明式注册，不在各 handler 末尾手写 emit）。
 -- 触发面 = 业务 handler 打的「刚就绪」标记：proposal.accept(analysis) → plan 槽打开；
--- gate.approve(plan) → 开发槽打开。判据（写进 AGENTS.md，可判定）：同轮无待验收提案、
--- 无待批门禁、无未解决冲突、job 槽未满；且目标需求确实可派（dev 还需 plan_ok / 无冲突 /
--- 依赖就绪 + 有空闲泳道）。effect 只推进状态与叙事，绝不 render / ygg.choice ——
--- 连锁反应在 render() 入口的 flush_effects 里收敛，唯一的 choice 由 render() 产出。
+-- gate.approve(plan) → 开发槽打开（批准即开工）。判据（写进 AGENTS.md，可判定，按需求
+-- 局部化）：marked rN 只被 rN 自身事态（自身 pending 提案 / 自身在跑 job / 自身冲突或
+-- needs_amend）阻塞；全局只保留 job 槽位（全局资源）。effect 只推进状态与叙事，绝不
+-- render / ygg.choice —— 连锁反应在 render() 入口的 flush_effects 里收敛，唯一的 choice
+-- 由 render() 产出。
 local AUTO_DISPATCH = "auto_dispatch"
 
 local function auto_dispatch_effect()
   local changed = false
   local items = {}
   for i = 1, req_count() do
-    if hooks.has_mark(i) then
+    -- 局部化：自身被阻塞的 rN 不派（mark 随收敛丢弃，与容量满丢 mark 同语义）；
+    -- 其它需求的事态不再一票否决。
+    if hooks.has_mark(i) and gate_problem_for(i) == nil then
       local ok, stage_name, lane = dispatch_one(i)
       if ok then
         items[#items + 1] = fill(TEXTS.beats.req_dispatch_item, {
@@ -128,9 +129,8 @@ function M.install(deps)
     if stage() ~= STAGE.coordinate then
       return nil
     end
-    if prop_pending_total() > 0 or gate_total() > 0 or req_conflict_total() > 0 then
-      return nil
-    end
+    -- 全局资源判据只留 job 槽位；pending 提案 / 门禁 / 冲突不再全局一票否决
+    -- （跨需求压制会在 rN 批准回合丢掉「刚就绪」标记，是 r12 要除的成因）。
     if job_total() >= job_capacity() then
       return nil
     end
@@ -141,6 +141,7 @@ function M.install(deps)
         deps_sig[#deps_sig + 1] = i
         deps_sig[#deps_sig + 1] = tostring(req_job_stage(i))
         deps_sig[#deps_sig + 1] = req_job(i)
+        deps_sig[#deps_sig + 1] = gate_problem_for(i) or ""
         any = true
       end
     end
