@@ -5,7 +5,19 @@
 --
 -- 派发序 = 下面 install() 的调用序（不是 require 序、也不是 pack.json 的 code.modules 声明序）。
 
-local TEXTS = ygg.data("ygg:scene/texts")
+-- 资源快照（片段装配；片段 ↔ entry 一一对应，见 pack.json entries）。
+-- 契约：beats 键跨片段不相交；playbook 章节片段按文件名序（=order 序）排列，
+--       相邻同 id（harness 7 片段）按序拼接 rules；装配不排序。
+
+local TEXTS = ygg.data("ygg:scene/texts")          -- core：scenes/endings/prompts/options/tuning
+TEXTS.beats = {}
+for _, id in ipairs({ "flow", "requirements", "lanes", "map-guide", "settlement", "harness" }) do
+  local fragment = ygg.data("ygg:scene/beats/" .. id)
+  for key, value in pairs(fragment.beats) do
+    TEXTS.beats[key] = value
+  end
+end
+
 local CONFIG = ygg.data("ygg:agent/config")
 local PLAYBOOK = ygg.data("ygg:agent/playbook")
 

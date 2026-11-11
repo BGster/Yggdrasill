@@ -3,9 +3,45 @@
   "entries": [
     {
       "id": "ygg:scene/texts",
-      "kind": "scene-texts",
-      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "path": "data/scenes.json"
+      "kind": "scene-texts-fragment",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "path": "data/texts/core.json"
+    },
+    {
+      "id": "ygg:scene/beats/flow",
+      "kind": "scene-texts-fragment",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "path": "data/texts/beats-flow.json"
+    },
+    {
+      "id": "ygg:scene/beats/requirements",
+      "kind": "scene-texts-fragment",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "path": "data/texts/beats-requirements.json"
+    },
+    {
+      "id": "ygg:scene/beats/lanes",
+      "kind": "scene-texts-fragment",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "path": "data/texts/beats-lanes.json"
+    },
+    {
+      "id": "ygg:scene/beats/map-guide",
+      "kind": "scene-texts-fragment",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "path": "data/texts/beats-map-guide.json"
+    },
+    {
+      "id": "ygg:scene/beats/settlement",
+      "kind": "scene-texts-fragment",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "path": "data/texts/beats-settlement.json"
+    },
+    {
+      "id": "ygg:scene/beats/harness",
+      "kind": "scene-texts-fragment",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "path": "data/texts/beats-harness.json"
     },
     {
       "id": "ygg:agent/config",
@@ -21,7 +57,7 @@
     }
   ],
   "schemaFiles": [
-    "schemas/scene-texts.json",
+    "schemas/scene-texts-fragment.json",
     "schemas/agent-config.json",
     "schemas/agent-playbook.json"
   ],

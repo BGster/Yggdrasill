@@ -123,12 +123,60 @@
   ],
   "entries": [
     {
-      "byteLength": 40161,
+      "byteLength": 4755,
       "id": "ygg:scene/texts",
-      "kind": "scene-texts",
-      "path": "data/scenes.json",
-      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "afc1478a53fc74eb624d452fa11751e984cfb90db75b7e3516e9ea440c8ff66f"
+      "kind": "scene-texts-fragment",
+      "path": "data/texts/core.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "sha256": "bcd39e55057f734a493802765057b8bf5827d8a21801cf9c234b3a311b7f9259"
+    },
+    {
+      "byteLength": 4241,
+      "id": "ygg:scene/beats/flow",
+      "kind": "scene-texts-fragment",
+      "path": "data/texts/beats-flow.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "sha256": "9691463d6b6d2770a6cfedd212cfd76a612fa5f9bd4988087c5a8d87f0d273a6"
+    },
+    {
+      "byteLength": 11482,
+      "id": "ygg:scene/beats/requirements",
+      "kind": "scene-texts-fragment",
+      "path": "data/texts/beats-requirements.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "sha256": "6090d8723c477a20b80755f4370d81c1bc06cac1bed99a183a1b0bb13c30a2e6"
+    },
+    {
+      "byteLength": 2911,
+      "id": "ygg:scene/beats/lanes",
+      "kind": "scene-texts-fragment",
+      "path": "data/texts/beats-lanes.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "sha256": "a60356b048b16d061778d8cfefaead3fb830d694f0aacd4008b1e3c6437bb867"
+    },
+    {
+      "byteLength": 3699,
+      "id": "ygg:scene/beats/map-guide",
+      "kind": "scene-texts-fragment",
+      "path": "data/texts/beats-map-guide.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "sha256": "5b005f8d0d0e4f053272cdc7e987559423e9bc6d5c36c67bf87f2015d764e47a"
+    },
+    {
+      "byteLength": 5634,
+      "id": "ygg:scene/beats/settlement",
+      "kind": "scene-texts-fragment",
+      "path": "data/texts/beats-settlement.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "sha256": "f54d1c2ec0b8e27ec2ba71134cc4286489b52db50998e6368ac2ed5022313f28"
+    },
+    {
+      "byteLength": 7537,
+      "id": "ygg:scene/beats/harness",
+      "kind": "scene-texts-fragment",
+      "path": "data/texts/beats-harness.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+      "sha256": "a52a6171ef50d4859e94f5bb9bb829b211862e2677defda0b91c91de83fa82b7"
     },
     {
       "byteLength": 754,

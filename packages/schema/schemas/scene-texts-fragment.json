@@ -1,11 +1,11 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-    "title": "Yggdrasill scene-texts（生成 Mod 通用模板：六节结构固定，键集故事自定）",
-    "description": "M1 管线预置的资源 schema 模板（D-5/D-10）：管线复制进生成 Mod 的 schemas/ 目录（每包自带、装载方按包内文件注册）。test-adventure 自带的同名文件是故事特化形态、保持原样不受影响。endings 值必须以【结局或 [ENDING 开头——无头走查的收口判据（ENDING_PREFIX）依赖该契约，schema 门与 playtest 门互相咬合；两个前缀并存是为了让英文重写与既有中文 Mod 共存。",
+    "$id": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
+    "title": "Yggdrasill scene-texts 片段（六组非空子集：大 JSON 按域拆分的片段面）",
+    "description": "r6 落地的资源片段 schema：data/scenes.json 拆为 data/texts/ 下若干片段文件（core 一片 + beats 六片），每片是六组（scenes/endings/prompts/options/beats/tuning）的非空子集，由 mod.lua 顶层装配回与整文件形状完全一致的 TEXTS 表后再消费。整文档级保证（六组齐备、beats 键全局唯一）不再由 schema 表达，改由拆分脚本断言（键全分配、跨片段不相交）、manifest 内容寻址（改片段不重算 → 装载失败）与 playtest/对账测试连续守卫。组值形状逐字承自 scene-texts.json（含 endings 的结局前缀 pattern）。资源只读：装载期快照进 local，handler 闭包消费，不入存档。",
     "type": "object",
     "additionalProperties": false,
-    "required": ["scenes", "endings", "prompts", "options", "beats", "tuning"],
+    "minProperties": 1,
     "properties": {
         "scenes": {
             "type": "object",

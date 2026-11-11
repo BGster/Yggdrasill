@@ -1,0 +1,52 @@
+{
+  "scenes": {
+    "prologue": "[BOOT · engine ready] the ygg world is loaded (engine {{engine}}), current stage {{stage}}, evolution preference {{mode}} (narration only — resources are never rewritten automatically). This is a two-layer agent meta-workflow: the coordinator dispatches and accepts; each requirement runs plan → gate → develop → accept → gate.",
+    "intake": "[WAITING FOR TASK] current stage {{stage}}: submit the task description first. require_all_green = {{gates}}.",
+    "coordinate": "[COORDINATING] task \"{{title}}\": {{description}} | {{count}} requirements ({{open}} open) | {{pending}} pending proposals. In this layer you do exactly three things: dispatch, accept proposals serially, pass the two mandatory gates; analyze / plan / develop of other requirements may run asynchronously in parallel.",
+    "review": "[FINAL REVIEW] task \"{{title}}\": {{count}} requirements ({{done}} done) | require_all_green {{gates}}. Closing is allowed only when every leaf requirement is done with no pending proposal and no unresolved conflict."
+  },
+  "endings": {
+    "done": "[ENDING · run closed] task \"{{title}}\" — {{count}} requirements ({{done}} done), review score {{score}}/5, evolution candidates {{candidates}} (kept/screened). One-line lesson: {{lesson}}"
+  },
+  "prompts": {
+    "intake": "Cold start: submit the task description, or adjust runtime config first?",
+    "coordinate": "Next step: accept a proposal, pass a gate, dispatch, or close into final review?",
+    "review": "Final review: how are the gates? Once green, screen evolution candidates against the evolution chapter, register settlement.evolution (it also settles sessions and todo in the same transaction), then review.note records the lesson and archives single-source to close the run."
+  },
+  "options": {
+    "intake": "task.intake — inject the task description (payload \"title|description\")",
+    "dispatch": "requirement.dispatch — dispatch by readiness order ({{count}} candidates, jobs {{jobs}}/{{cap}}, head {{id}})",
+    "accept": "proposal.accept — accept pending proposal {{id}} ({{req}} / {{stage}}, {{pending}} pending)",
+    "coordinate_submit": "coordinate.submit — enter final review once every requirement is closed",
+    "verify_green": "verify.submit all_green=true — gates are green (record evidence, move to review)",
+    "verify_fail": "verify.submit all_green=false — report the failure honestly (sent back to coordinate)",
+    "settlement_evolution": "settlement.evolution — register the evolution review and settle sessions + todo in one transaction (payload \"artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]\")",
+    "review_note": "review.note — record the lesson, archive the evolution registration single-source and close the run (payload \"lesson|score\")",
+    "req_add": "requirement.add — add a requirement (payload \"title|description[|external_id[|depends_on]]\")",
+    "req_list": "requirement.list — show the requirement graph / proposals / lanes ({{pending}} pending, {{open}} open)",
+    "map": "map.show — show the two-layer node map (coordinator {{stage}})",
+    "guide": "guide.show — fetch field rules: {{title}} ({{count}} rules)",
+    "config": "config — config entry (play mode / evolution preference / gates; opens a sub-page)",
+    "config_close": "back — return to the stage menu",
+    "config_play": "config.set — play mode {{mode}} → {{next}}",
+    "config_evolution": "config.set — evolution preference {{mode}} → {{next}} (narration only, no auto-rewrite)",
+    "config_gates": "config.set — gates require_all_green {{state}} → {{next}}",
+    "req_resolve_keep": "requirement.resolve keep_both — {{ids}} keep both sides and requeue",
+    "req_resolve_first": "requirement.resolve keep_first — {{ids}} keep the first, the other becomes dropped",
+    "req_resolve_revise": "requirement.resolve revise — {{ids}} keep both but flag needs-amend",
+    "gate_approve": "gate.approve — pass the {{kind}} gate on {{id}} ({{gates}} gates left)",
+    "gate_reject": "gate.reject — reject the {{kind}} gate on {{id}} and send it back for rework",
+    "settlement_sessions": "settlement.sessions — register subagent session cleanup (payload \"moved|remaining|destination\", remaining must be 0)",
+    "settlement_todo": "settlement.todo — register main-session todo cleanup (payload \"remaining|verified_by\", remaining must be 0)"
+  },
+  "tuning": {
+    "min_slices": 1,
+    "max_slices": 8,
+    "default_score": 3,
+    "req_capacity": 32,
+    "job_capacity": 4,
+    "tool_capacity": 64,
+    "tool_output_max": 4096,
+    "artifact_capacity": 64
+  }
+}
