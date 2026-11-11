@@ -44,8 +44,8 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 
 | 术语 | 领域定义 |
 | --- | --- |
-| **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。 |
-| **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期：`intake`（任务注入与需求立案）$\to$ `coordinate`（派发泳道、接受提案、通过门禁）$\to$ `review`（验证套件、演进筛选、会话/todo 清理）$\to$ `done`（终态结算状态）。 |
+| **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。r9 起运行是**常驻自循环**：运行级终局不再由 review.note 自动触发，而是周期性批结算 + 显式退役（`done` 仅经 `run.retire` 武装可达）；升级不迁移旧局（装载失败即开新局）。 |
+| **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期：`intake`（任务注入与需求立案，仅冷启动）$\to$ `coordinate`（常驻主态：派发泳道、接受提案、通过门禁）$\to$ `review`（批盘点相位：验证套件、演进筛选、会话/todo 清理）$\to$ 批收口回 `coordinate`（`run.batch` +1）；`done`（退役终态，仅 `run.retire` 武装后的 review.note 可达）。需求级 `done` 与运行退役态只是字面量同形（语义正交）。 |
 | **Requirement（`r1..rN`，需求）** | 由状态机跟踪的一个交付单元。以 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split` / `merged` / `dropped`）存储，并通过 `plan_ok`、`job`、`gate`、`conflict` 属性投影为细粒度展示阶段（`draft`、`planning`、`plan_review`、`plan_gate`、`ready`、`developing`、`dev_review`、`accept`、`done`、`blocked`）。 |
 | **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。泳道分支名执行强制形态 `feature/{4位uuid}-{语义词段}`（`lane.claim` 与 `git.worktree_claim` 两条入口同规则，非法名可读拒绝；默认名生成机制已删除）——契约细节见 DESIGN §2.4。 |
 | **Proposal（`p1..pM`，提案）** | 由执行者子代理针对特定 `(req_id, rev, stage)` 元组产出的不可变交付提交（`proposal.submit`），引用一个已归档的 VFS 产物（`artifacts/<req>-<stage>.md`）并绑定执行者身份（`exec=<agent_id>`）。提案在协调者串行执行 `proposal.accept` 或 `proposal.reject` 之前不会改变需求状态。 |
@@ -84,74 +84,13 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
    - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（`<repo>-lane-1..4`）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
 10. **P10 · 数据红线与显式的每运行目标授权**
     - **数据红线**：读取、列出、stat、或复制真实业务数据（`*.xlsx`、`*.xls`、`*.csv`，或诸如 `/Volumes/WenshuSpace/**` 的涉密挂载）在提示层与扩展 `tool_call` 防火墙层都被严格禁止。
-    - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在 `review.note` 能关闭运行之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。
+    - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在**每批盘点结算与退役**（常驻下 review.note 每批都走）之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。
 11. **P11 · 宿主零语义（引擎/壳分界）**
     - 宿主（内核与 CLI/服务壳）不持有、不解析任何 Mod 领域概念；跨 Mod 复用的只有通用机制
       （存储、事件、路由、裸数据服务）。领域概念出现在宿主面即层次错位。
     - 来源：r8（serve 面板两级化——需求/泳道/门禁是特定 mod 的概念，宿主解析即限制 mod 自由度）；
-      r6（新布局不硬编码为内核/CLI 硬约束）。
-    - 反例：内置面板渲染「需求图/泳道/提案队列」，或命令行出现 `--show-lanes` 类领域旗标——
-      宿主从此只为这一种 mod 服务。
-12. **P12 · 非兼容优先于兼容债**
-    - 升级不承诺旧数据可载；非兼容变更直接落地，旧数据以只读归档保留（历史可查不承诺可续）。
-      唯一义务是干净拒绝：装载失败必须可读报错并指明「开新局」。
-    - 来源：r9（三类兼容承诺表/迁移表/probe-first SOP 全删——「那本身就是技术债」）。
-    - 反例：为旧档维护迁移表、adopting 语义、版本栅栏提示文案——兼容层本身成为需要被维护的
-      第二份语义。
-13. **P13 · 删除即报错（fail-closed over silent no-op）**
-    - 语义退役必须从注册面物理移除；被移除的语义被再次使用时，得到可读报错而非静默成功——
-      静默 no-op 是「假活着」的技术债。
-    - 来源：r11（未知事件 VALIDATION 拒绝，含派生面 savepoint 回滚）；r1（guide.show 物理注销
-      而非墓碑）。
-    - 反例：注销的事件名被直派时返回 ok + 空叙事——调用方以为成功，回放日志被无意义名字污染。
-14. **P14 · 标识符 = 唯一性 + 人类意图，机器默认值机制是隐式契约**
-    - 长期存续的标识符必须同时满足机器唯一（uuid 段）与人类可辨（语义段）；宿主/框架不内置
-      「自动生成默认标识符」的机制——默认值是隐式契约，删不起也改不起。
-    - 来源：r2（`feature/{4位uuid}-{人读名}`；auto_claim 默认名机制删除）。
-    - 反例：`feature/r1` 式自动名——跨局重复、长期不可辨识；每新增一个默认值，就多一条
-      没人记得的隐式规则。
-
-### 3.5 游玩与交互设计原则（PLAY-1..PLAY-5）
-
-> 与 P1-P10 工程原则并列的第二原则命名空间：P 面约束引擎与治理系统的建造方式，
-> PLAY 面约束玩家可感知面的产品与交互形态。编号采用 PLAY 前缀子命名空间而非顺延
 > P11-P15——PLAY 不是工程原则的延续而是另一维度，同时不挤占未来工程原则编号。
-> 本节提炼自 2026-11-11 局（unify-map-and-agent-seed）用户裁决，来源需求号可溯。
-
-1. **PLAY1 · 沉浸式优先**
-   - 玩家面只呈现剧情与地图；规则书、设计机制等幕后构造不作可浏览内容暴露。
-   - 来源：r1 rev3 裁决（撤销 playbook 章节浏览——「幕后规则书」；guide.show 物理注销）。
-   - 反例：若 `map.show` 提供可选 `section_id` 用于浏览规则章节，玩家面即暴露幕后规则书——
-     这正是 rev2-2 被否决的方案。
-2. **PLAY2 · 命令极简**
-   - 一个命令一个语义；参数分支克制，能无参则无参。
-   - 来源：r1 rev3（`map.show` 零参数分支并以 payload 无关性断言钉死：
-     `narrative_lines(map.show, "") == narrative_lines(map.show, <任意payload>)`；
-     `full` 设计视图整体退役，操作视图即完整视图）。
-   - 反例：给 `map.show` 加「玩家图/设计全图」开关参数，即一个命令两种语义——
-     `full` 退役正是为消灭这种二义。
-3. **PLAY3 · 语义清零**
-   - 合并或退役一个语义，就从注册面、数据与文案中物理清除；不留别名、不留墓碑式兼容残留。
-   - 来源：r1 rev3（`guide.show` 从注册面完全移除：menus、叙事提示语、playbook 引用全部清零，
-     不做任何兑底；先例：D-MA9 的 `step` 零增量别名零残留退场）。
-   - 反例：`guide.show` 若仅隐藏菜单入口而保留 handler 与叙事 beat（墓碑形态），
-     直派旧命令仍可达旧语义——技术债原地复活。
-4. **PLAY4 · 人读输出**
-   - 面向人的回执渲染为自然语言文本，是**缺省形态**；机器契约走 `--raw` 显式旗标输出 JSON 信封（字节等价断言钉在 --raw 分支）。
-   - 来源：r5 v3（缺省 text；`--raw` 唯一旗标；`YGG_FORMAT` 环境回退 text|json）。
-   - 反例：若缺省仍是 JSON 单行，人类推进全程面对不可读输出（2026-11-11 局实测痛点）——人读缺省才是原则，机器面由显式旗标保护。
-
-5. **PLAY5 · 诚实威胁模型**
-   - 能力上限如实声明，不夸大保证范围。
-   - 来源：r3（身份互证如实声明为「防误记不防伪造、无 token」——同机进程模型下 env/flag
-     可伪造；方案价值是双通道一致性可核对，让冒用与未标注代理可见可核查）。
-   - 反例：若文档宣称 profile 注册 + actor 互证「防止身份伪造」，即越过 r3 如实声明的
-     边界——它防的是误记与张冠李戴，不是密码学意义上的伪造。
-
-> 交叉引用：PLAY2 是 P4（每机制一条规范路径）在命令面的投影；PLAY3 与 P2（零硬编码、
-> 契约驱动）共同闭环「单一规范语义」——建造面不留第二语义源，产品面退役即清除；
 > PLAY5 与 P10 数据红线同属「显式声明边界」家族；P11↔P2（零硬编码的宿主面投影）；
-> P13↔PLAY3（建造面单一语义与产品面退役清零互为表里）。
 
 ---
 
@@ -224,7 +163,7 @@ Yggdrasill/
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
-| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/agent-seed` 协调软件工程任务（`intake -> coordinate -> review -> done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`）。所有产物都要求先有状态机事件。 | 已确认 |
+| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/agent-seed` 协调软件工程任务（常驻自循环：`intake -> coordinate ⇄ review 批循环 -> (退役) done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`，详见 D-MA10）。所有产物都要求先有状态机事件。 | 已确认 |
 | **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/**` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
 | **D-MA3** | 单文件 SQLite 运行存储与 VFS | 新运行默认使用 `<run-dir>/run.sqlite`（`ygg-store`），原子提交 `events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）。既有的 JSON 运行（`autosave.json` + `events.jsonl`）保持自动检测，不隐式迁移。 | 已确认 |
 | **D-MA4** | 响应式钩子与省回合压缩 | `src/core/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |

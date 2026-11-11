@@ -119,6 +119,13 @@ local function goal_authorization()
   return ""
 end
 
+-- r9 退役武装（写方 = config.set `run.retire`，值域 "true" / ""）：
+-- 唯一真值是字符串 "true"；其余值或缺省一律视为未武装（批收口常态）。
+-- 与 goal.authorization 同构：run 级自声明预登记，由门禁动作（review.note）消费。
+local function run_retire_armed()
+  return effective("run.retire") == "true"
+end
+
 local function executor_raw(req_id, stage)
   local value = effective("executor." .. tostring(req_id) .. "." .. tostring(stage))
   if type(value) == "string" then
@@ -144,6 +151,7 @@ M.next_mode = next_mode
 M.next_play_mode = next_play_mode
 M.num = num
 M.play_mode = play_mode
+M.run_retire_armed = run_retire_armed
 M.static = static
 M.strict_gates = strict_gates
 M.task_desc = task_desc

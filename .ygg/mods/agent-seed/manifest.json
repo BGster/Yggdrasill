@@ -1,9 +1,9 @@
 {
   "code": [
     {
-      "byteLength": 3496,
+      "byteLength": 3903,
       "path": "src/core/config.lua",
-      "sha256": "561752732795a4152754395aa6fb965ed016fe4f012252d4d643fab48ca764d8"
+      "sha256": "dc6d8f71cee2c1d68e05a67c91abff934f7f2eb09e2082701999347f24fc08bf"
     },
     {
       "byteLength": 4422,
@@ -21,9 +21,9 @@
       "sha256": "6e43e67a5a7c573c6ade509825bdbc86f78202452654577833818f1ae20305b0"
     },
     {
-      "byteLength": 4020,
+      "byteLength": 6016,
       "path": "src/domain/gates.lua",
-      "sha256": "17841c2082e75c5e01b27792af2cb4be1b20dbf26edc35e20996246d6c046135"
+      "sha256": "2e5959812702aaa2b484e3afe8328448d2223a67280725766545b19023dbfd61"
     },
     {
       "byteLength": 7019,
@@ -31,9 +31,9 @@
       "sha256": "926ba005512a9a73118e2caf3429253a028d10e461fff35f1f778ea578d63b18"
     },
     {
-      "byteLength": 8701,
+      "byteLength": 10451,
       "path": "src/domain/proposals.lua",
-      "sha256": "dc66eaace011330fc7a8c0264e09dd3dc88edc5fefc13a4a4f70ac8b43dc6585"
+      "sha256": "8a28281960a42a84dea1cc11a5b3f06b21c2e15509ec74b0698720c3f5bfca81"
     },
     {
       "byteLength": 18691,
@@ -41,14 +41,14 @@
       "sha256": "4ec96fe9c7c854028c56ac5a2267b54f536b86a24b932651858a8a704b736e95"
     },
     {
-      "byteLength": 25919,
+      "byteLength": 33358,
       "path": "src/domain/wire.lua",
-      "sha256": "b810d28fbec4b067d1a83a2edfaaa7b72815aee3c6a564e639dfad2679c868c2"
+      "sha256": "5a290c5aa9344d12929c88d03b59c3beffca83b66890613db309182c44c3c5ab"
     },
     {
-      "byteLength": 10786,
+      "byteLength": 11122,
       "path": "src/handlers/intake/actions.lua",
-      "sha256": "8067a9a402693b008d7f1e0cc454802f77ad914e995abe079a6d946ac4b6e322"
+      "sha256": "7e67732775984a3b97ab5836ce6044a2aa7646529d56c9ed124dedf793a871c4"
     },
     {
       "byteLength": 1113,
@@ -66,19 +66,19 @@
       "sha256": "ce3c0cb36cf3c7dabdc10d6327b605503b5a339cb0cc1a1e5260e0fdeb7a0b76"
     },
     {
-      "byteLength": 11988,
+      "byteLength": 13112,
       "path": "src/handlers/operate/review.lua",
-      "sha256": "8c7f70cb2d57906fd9f39ae74eef1e29bb0b6bd9810b7b4f22416aa7d69c0829"
+      "sha256": "17084e7c0bb9bbb3acbdef153dad2a07fbfdbfadc60e1270b91a541884701723"
     },
     {
-      "byteLength": 6941,
+      "byteLength": 7485,
       "path": "src/handlers/requirements/gate_actions.lua",
-      "sha256": "7e273f7ba01e9ac49cce7b2816175fb89631ba9fa81559ee44017027ae821bb0"
+      "sha256": "aacfd67a9ec063bc5e5adbafb6ff33d9c81fd3225b808e0c9759c0e9995d3bf5"
     },
     {
-      "byteLength": 12297,
+      "byteLength": 13188,
       "path": "src/handlers/requirements/proposals.lua",
-      "sha256": "8cf78b0a2b0f334a4668ca774e80c0946753bd00332f70633b7c303735520cff"
+      "sha256": "f8d045be692ef64aea2d1b9e39ef13654b7d87de5f8ff2c4de7a88a5d6527390"
     },
     {
       "byteLength": 14429,
@@ -86,9 +86,9 @@
       "sha256": "bbf9e3e050b7e6ab443f92e2c3d166260753db989ca19921314cb92d40de6801"
     },
     {
-      "byteLength": 7396,
+      "byteLength": 10030,
       "path": "src/handlers/system/config.lua",
-      "sha256": "a1cca47ad91bb508a9cbb3f0b73b826c183336e7ca76c570d3cb37af096d685e"
+      "sha256": "983b99b31c68525c5970da4ebc398a128a5908ec4539f3049699ad1e5303cacd"
     },
     {
       "byteLength": 1021,
@@ -111,32 +111,32 @@
       "sha256": "345f4c6c3cfd7b98cbfbfe2736d509fd055c99eec5bb4349957a45167225674a"
     },
     {
-      "byteLength": 12835,
+      "byteLength": 14062,
       "path": "src/view/menus.lua",
-      "sha256": "8faf89683c46dd022835327d2b5a802c458cb7ad76017029a4edaae6802b7a84"
+      "sha256": "b5f86136bc2ba3b8cf3b52e9a16d175d48372d5a6464b0f60d074186b3a516d7"
     },
     {
-      "byteLength": 35035,
+      "byteLength": 41422,
       "path": "src/view/render.lua",
-      "sha256": "23102339fe3f35a0948e4a45089a55b38679c314fd36e37e370db94d187d8278"
+      "sha256": "d7a736742220a98ccf469bef974637fb5d95725456337bbfb72343f72db8e2b5"
     }
   ],
   "entries": [
     {
-      "byteLength": 4685,
+      "byteLength": 4894,
       "id": "ygg:scene/texts",
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "c17e5873bdae25063ed3ec5c6e4e4916b36a2955e5816a9f273aa1dd67f02a7f"
+      "sha256": "c2c42f96ecf39356f579e84de1cfde7859c07f9c6dfc5929a824fdc232f4e6b9"
     },
     {
-      "byteLength": 4246,
+      "byteLength": 4564,
       "id": "ygg:scene/beats/flow",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-flow.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "030859062f37df390b2ef77aa67e2821f97d78ff4517c050d18e8d14cc3ad5aa"
+      "sha256": "094c5f9619ee17b0703ac2d4aef6c6a7e68fb15a09f17ed0e4f5e91f99a3fbf8"
     },
     {
       "byteLength": 11482,
@@ -155,20 +155,20 @@
       "sha256": "a60356b048b16d061778d8cfefaead3fb830d694f0aacd4008b1e3c6437bb867"
     },
     {
-      "byteLength": 3046,
+      "byteLength": 3524,
       "id": "ygg:scene/beats/map-guide",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-map-guide.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "4c5a9ec515fd7e93fad64db408f3d1f86a539e3811aa53a5cc678f6e01f8f4b6"
+      "sha256": "eddeeec07c38d0941ed003639bc8d12816a6e2a62b0ac4ae04550798d087de27"
     },
     {
-      "byteLength": 5634,
+      "byteLength": 5853,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "f54d1c2ec0b8e27ec2ba71134cc4286489b52db50998e6368ac2ed5022313f28"
+      "sha256": "757936cebf49f8b8c23e862813254dab9cc89b5ef3b645de023941248343b0aa"
     },
     {
       "byteLength": 7537,

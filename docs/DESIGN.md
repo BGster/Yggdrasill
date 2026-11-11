@@ -88,16 +88,20 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 ### 2.1 宏观 Coordinator 阶段机
 
-Coordinator 在 4 个阶段上支配整体运行生命周期：
+Coordinator 在 4 个阶段上支配整体运行生命周期。r9 起生命周期是**常驻自循环**：`coordinate` 是常驻主态，
+`review` 是批盘点相位，`review.note` 的常态落点是**批收口**（回 `coordinate`，批计数 +1）；运行级终局
+`done` 只经**显式退役**（`config.set run.retire=true` 武装后的终局变体）可达。需求级 `done` 保留
+（accept_gate 产物，与运行退役态只是字面量同形，语义正交）：
 
 | 当前阶段 | 事件 | 守卫 / 前置条件 | 下一阶段 | 行为效果 |
 | --- | --- | --- | --- | --- |
-| `intake` | `task.intake` | 非空 `title\|description` payload | `coordinate` | 记录任务元数据并开启需求协调。 |
-| `coordinate` | `coordinate.submit` | `pendingProposals == 0` $\land$ `jobs == 0` $\land$ `conflicts == 0` $\land$ 所有叶子需求 `done` | `review` | 重置 `verify.passed = false` 并清空本轮的 `settlement.*` 键。 |
+| `intake` | `task.intake` | 非空 `title\|description` payload（仅冷启动；新任务经 `requirement.add` / inbox 进料） | `coordinate` | 记录任务元数据并开启需求协调。 |
+| `coordinate` | `coordinate.submit`（**批边界**） | `pendingProposals == 0` $\land$ `jobs == 0` $\land$ `conflicts == 0` $\land$ 所有叶子需求 `done` | `review` | 重置 `verify.passed = false` 并清空本轮的 `settlement.*` 键。 |
 | `review` | `verify.submit` / `gate.verify_suite` | `all_green=true`（或所有验证命令退出码为 `0`） | `review` | 锁存 `verify.passed = true`（`verify.source = "human"` 或 `"tool"`）。 |
-| `review` | `verify.submit` | 当 `gates.require_all_green == true` 时 `all_green=false` | `coordinate` | 将运行退回 `coordinate` 以返工，并重置结算注册。 |
+| `review` | `verify.submit` | 当 `gates.require_all_green == true` 时 `all_green=false` | `coordinate` | 将本批退回 `coordinate` 以返工，并重置结算注册。 |
 | `review` | `settlement.evolution` | `verify.passed == true` $\land$ 有效的候选/类别计数 | `review` | 注册演进摘要/产物，结算 `sessions=` 与 `todo=`，并触发内联 `harness.archive_sessions`。 |
-| `review` | `review.note` | `verify.passed == true` $\land$ `settlement.*` 完整 $\land$（`play.mode != "goal"` $\lor$ `goal.authorization != ""`） | `done` | 将演进记录归档进 `review.evolution.*`，写入 `ending = "done"`，并发出 `[ENDING · run closed]`。 |
+| `review` | `review.note`（未武装，常态） | `verify.passed == true` $\land$ `settlement.*` 完整 $\land$（`play.mode != "goal"` $\lor$ `goal.authorization != ""`） | `coordinate` | **批收口**：将演进记录归档进 `review.evolution.*`（滚动单槽），`run.batch` +1，复位 `verify.passed` 与 `settlement.*`，发出 `[BATCH <n> SETTLED]`（绝无 `[ENDING` 前缀）。 |
+| `review` | `review.note`（`run.retire` 武装，唯一终局） | 同上（goal 授权在每批盘点与退役前都查） | `done` | **退役**：归档 + 写入 `ending = "done"`，发出 `[ENDING · run retired]`。 |
 
 ### 2.2 需求生命周期与强制门禁语义
 
@@ -199,11 +203,11 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 | `requirement.merge` | `"<rA,rB>\|<merged_title>\|<merged_desc>"` | 将 $\ge 2$ 个开发前需求合并为一个带并集依赖的新 `draft` 需求。 |
 | `requirement.conflict` | `"<rA,rB>\|<note>"` | 将两个需求标记为 `blocked`，直到解决。 |
 | `requirement.resolve` | `"<rA,rB>\|<keep_both\|keep_first\|revise>[\|<note>]"` | 清除冲突并应用所选解决策略。 |
-| `coordinate.submit` | `""` \| `"0"` | 当所有关闭前置条件满足时，从 `coordinate -> review` 推进。 |
+| `coordinate.submit` | `""` \| `"0"` | 当所有关闭前置条件满足时，从 `coordinate -> review` 推进（**批边界**）。 |
 | `verify.submit` | `"all_green=<true\|false>[;report=<text>]"` | 在 `review` 中记录验证结果。 |
-| `settlement.evolution` | `"<artifact>\|<summary>[\|c=<kept>/<screened>[\|cls=<kind>:<n>,...]][\|sessions=<moved>/0/<dest>][\|todo=0/<verified_by>]"` | 在一个事务中注册演进筛选并结算会话/todo 清理。 |
-| `review.note` | `"<lesson>\|<score_1_to_5>"` | 将 `settlement.evolution.*` 归档进 `review.evolution.*` 并关闭运行（`[ENDING`）。 |
-| `config.set` | `"<key>=<value>"` | 更新运行时 `settings.<key>`（`play.mode`、`goal.authorization`、`executor.<rN>.<stage>`、`profile.<handle>.<key>`（自报身份卡，逐键校验：保留键 `harness`/`session_id`/`handle`/`role`/`assignments`，自由键 `^[a-z0-9_]{1,32}$` 值≤256，空值=清除字段；见 §3.7）、`evolution.mode`、`gates.require_all_green`、`review.evolution.*`）。 |
+| `settlement.evolution` | `"<artifact>\|<summary>[\|c=<kept>/<screened>[\|cls=<kind>:<n>,...]][\|sessions=<moved>/0/<dest>][\|todo=0/<verified_by>]"` | 在一个事务中注册演进筛选并结算会话/todo 清理（**每批一次**）。 |
+| `review.note` | `"<lesson>\|<score_1_to_5>"` | 将 `settlement.evolution.*` 归档进 `review.evolution.*`；未武装 = 批收口回 `coordinate`（`run.batch` +1，无 `[ENDING`），`run.retire` 武装 = 退役终局（`[ENDING · run retired]`）。 |
+| `config.set` | `"<key>=<value>"` | 更新运行时 `settings.<key>`（`play.mode`、`goal.authorization`、`run.retire`（`true`/`""` 退役武装/解除）、`executor.<rN>.<stage>`、`evolution.mode`、`gates.require_all_green`、`review.evolution.*`）。 |
 | `vfs.write` | `"artifacts/<name>.md\|<content>"` | 经 `ygg.fs.write` 将内容写入 `run.sqlite`（`vfs_files`），并在 `artifact.*` 中记录 SHA-256 + 字节长度。 |
 
 ### 3.4 三层动作面契约：`event` / `op` / `action`
@@ -299,6 +303,9 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
   "ending": false,
   "verifyPassed": false,
   "nextEndsRun": false,
+  "lifecycle": "resident",
+  "batch": 1,
+  "batchDrained": false,
   "pendingProposals": 0,
   "requirementCount": 1,
   "pendingTools": 0,
@@ -354,7 +361,8 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
   - `ratio < 0.60` $\to$ `normal`
   - `0.60 <= ratio < 0.75` $\to$ `soft_brake`（先让当前活跃子代理波在其门禁处落地，再写交接并压缩）
   - `ratio >= 0.75` $\to$ `hard_brake`（不再派生新子代理；立即写交接并压缩）
-- **稳定检查点谓词**：仅当 `summary.available == true` $\land$ `pendingTools == 0` $\land$（`gates.length > 0` $\lor$ `jobs.length == 0` $\lor$ `conflicts.length > 0`）时才允许压缩，除非经 `handoff_compact` 显式强制。
+- **稳定检查点谓词**：仅当 `summary.available == true` $\land$ `pendingTools == 0` $\land$（`gates.length > 0` $\lor$ `jobs.length == 0` $\lor$ `conflicts.length > 0`）时才允许压缩，除非经 `handoff_compact` 显式强制。r9 常驻语义下，**批边界是天然稳定检查点**（批收口后 `stage=coordinate ∧ jobs=0 ∧ gates=0 ∧ conflicts=0`，谓词常真）；常驻长局推荐在批边界做压缩交接。
+- **r9 常驻批排空暂停（drive 泵）**：`summary.lifecycle == "resident"` $\land$ `summary.batchDrained` $\land$ inbox 无未消费行 → 打印等待文案后安全暂停（exit 0）：空批绝不连点 `coordinate.submit`；`lifecycle` 缺失（旧 mod）不触发。
 - **交接产物（`artifacts/handoff-latest.md`）**：在压缩前持久化进 `run.sqlite` VFS 并在压缩后重新注入，包含运行 ID、阶段、token 比例、任务表（含 `executor` / `planExecutor`）、待决门禁、未解决冲突、VFS 产物清单，以及精确的下一步 `ygg_session` / `ygg_run_lanes` 命令。
 
 ---
@@ -426,5 +434,5 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 `docs/CONTEXT.md` 与 `docs/DESIGN.md` 在每次运行中都作为闭环契约强制执行：
 
-1. **执行前注入**：Mod 的 `subagent_brief` 模板（`data/texts/` 片段装配的 TEXTS）与扩展的 brief 构建器（`buildSubagentBrief`）向每个 `plan` 与 `development` 子代理 brief 注入一条强制指令：*"在提议或编辑之前，先阅读 `docs/CONTEXT.md`（领域不变量）与 `docs/DESIGN.md`（架构与契约）。"*
-2. **结算前同步**：每当某个需求修改了领域概念、架构决策（`D1+`）、模块边界、状态机迁移或线/API 契约，执行者都必须在同一特性分支中、在 `accept_gate` 与最终 `review` 结算之前更新 `docs/CONTEXT.md` 和/或 `docs/DESIGN.md`。
+1. **执行前注入**：Mod 的 `subagent_brief` 模板（`data/texts/ 片段装配的 TEXTS`）与扩展的 brief 构建器（`buildSubagentBrief`）向每个 `plan` 与 `development` 子代理 brief 注入一条强制指令：*"在提议或编辑之前，先阅读 `docs/CONTEXT.md`（领域不变量）与 `docs/DESIGN.md`（架构与契约）。"*
+2. **结算前同步**：每当某个需求修改了领域概念、架构决策（`D1+`）、模块边界、状态机迁移或线/API 契约，执行者都必须在同一特性分支中、在 `accept_gate` 与**每批的 `review` 盘点结算**（常驻局的批收口或退役）之前更新 `docs/CONTEXT.md` 和/或 `docs/DESIGN.md`。

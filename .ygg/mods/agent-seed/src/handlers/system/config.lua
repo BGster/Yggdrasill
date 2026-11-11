@@ -133,6 +133,19 @@ function M.install(deps)
       end
       render()
       return
+    elseif key == "run.retire" then
+      -- r9 退役武装（与 goal.authorization 同构：run 级自声明，空值 = 显式解除）。
+      -- 武装本身不过票据闸也不产生通过效果——终局由武装后的 review.note 人类票据完成。
+      if value ~= "true" and value ~= "" then
+        problem = fill(TEXTS.beats.bad_config_value, { key = key, value = value, allowed = 'true / "" (empty clears)' })
+      else
+        ygg.kv.set("settings.run.retire", value)
+        if value == "true" then
+          ygg.narrate(TEXTS.beats.run_retire_armed)
+        else
+          ygg.narrate(TEXTS.beats.run_retire_cleared)
+        end
+      end
     elseif key:sub(1, 9) == "executor." then
       return executor_set(key, value)
     elseif key:sub(1, 8) == "profile." then

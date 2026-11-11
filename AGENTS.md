@@ -135,11 +135,12 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   the other mode.
 - **`goal` authorization is a per-run record**: `config.set goal.authorization=<one-line note>`
   (trimmed, ≤ 200, no newline; an empty value clears it explicitly). Only runs that entered `goal`
-  **at runtime** (`settings.play.mode=goal`) are checked before `review.note` finishes: a missing
-  record blocks with a narrative line, writes no `ending`, and does not advance. A static `goal`
-  preset in `data/config.json` is the repository owner's standing configuration and is **out of
-  scope**; switching back to `guide` is not checked and `resume` keeps the record. The record only
-  proves "one sentence was registered", not that the user said it — never claim it as identity proof.
+  **at runtime** (`settings.play.mode=goal`) are checked before **every batch settlement and at
+  retirement** (resident runs hit `review.note` once per batch): a missing record blocks with a
+  narrative line, writes no `ending`, and does not advance. A static `goal` preset in
+  `data/config.json` is the repository owner's standing configuration and is **out of scope**;
+  switching back to `guide` is not checked and `resume` keeps the record. The record only proves
+  "one sentence was registered", not that the user said it — never claim it as identity proof.
 - `--drive stdin|cmd:<path>|none` is the **host** input channel (human choice / external command /
   observe only) and is orthogonal to `play.mode`: `goal` does not depend on it, and deleting an
   external decision command does not break `goal`.
@@ -178,12 +179,27 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   single-source into `review.evolution.*`, writes `review.lesson` / `review.score` / `ending` and
   enters `done` (the **[ENDING** line). **Runtime `goal` runs** additionally require a non-empty
   `settings.goal.authorization` (missing → narrative block; a static default is not checked, see §8).
-- The host decides "the next step closes the run" from `agent.summary`'s `nextEndsRun`: in `review`,
+- The host decides "the next step is the retiring close" from `agent.summary`'s `nextEndsRun`: in `review`,
   the first item is `settlement.evolution` (after verify passed and nothing is registered) and
   `review.note` afterwards; with no pre-registration the default is an empty artifact + a neutral
-  summary + `c=0/0`, so the all-1 default path can run "register zero candidates → review.note".
-  Only when the first item is `review.note` is `nextEndsRun=true`; the host then switches to
-  `closing` (blocks new writes, drains one last time) before dispatching.
+  summary + `c=0/0`, so the scripted default path can run "register zero candidates → review.note".
+  Only when the first item is `review.note` **and `run.retire` is armed** is `nextEndsRun=true`; the
+  host then switches to `closing` (blocks new writes, drains one last time) before dispatching.
+  Unarmed batch settles never report `nextEndsRun=true` (a dumb pump keeps cycling batches, never
+  pre-closes), and the drive pump pauses safely (exit 0) when `lifecycle=="resident"` ∧
+  `batchDrained` ∧ the inbox has no unconsumed line — it never machine-guns `coordinate.submit`
+  on an empty batch.
+- **Resident lifecycle (r9)**: a run no longer ends at `review.note` by default. The unarmed
+  `review.note` is a **batch settle** (archive → `run.batch`+1 → reset verify/settlement → back to
+  `coordinate`, narrative `[BATCH <n> SETTLED]`, never an `[ENDING` prefix); the run-level ending is
+  reachable only through explicit retirement (`config.set run.retire=true`, value domain `true`/`""`,
+  cleared with an empty value) whose next `review.note` writes `[ENDING · run retired]`. Requirement
+  level `done` is untouched (the accept_gate product). `coordinate.submit` is the **batch boundary**;
+  verify/settlement/evolution are per-batch (the human-gate cadence rotates per batch, strength
+  unchanged); `review.evolution.*` is a rolling single slot (last batch), full history lives in the
+  event log. Upgrade discipline: **non-compatibility beats compatibility debt — old runs are never
+  migrated or adopted; a load failure opens a new run**; the batch boundary is the natural restart
+  point (upgrade after a batch settles, then start a new run-id).
 
 #### 9.1 Turn-cut rules (each one is decidable, and each one saves a turn)
 
@@ -415,21 +431,30 @@ $A --resume --event map.show                                  # current node + o
 - Re-running the "continue" command resumes; nothing is lost.
 
 ### Settle and finish
-Finish with `.ygg/bin/egg --run-id <run-name> --runs-root .ygg/runs --settle` in this fixed
-order (no step may be skipped):
+r9 resident semantics: a run **does not end at `review.note` by default** — the unarmed `review.note`
+is a **batch settle** (back to `coordinate`, `run.batch`+1, never an ending). Operate in this cadence:
 
-1. Make sure every requirement is in a terminal state (done / split / merged / dropped) and the inbox
-   has no unconsumed line, and record the all-green evidence through `verify.submit` (the closing
-   preconditions are in §1.9).
-2. `coordinate.submit` → `review`; once verify is green, register `settlement.evolution` (screen the
-   candidates against the `evolution` chapter first), then close with `review.note`. The registration
+1. **Per batch**: keep dispatching ready requirements; when the queue is drained (every leaf done,
+   0 pending proposals / jobs / conflicts), submit the batch boundary `coordinate.submit` → record
+   all-green evidence with `verify.submit` → register `settlement.evolution` (screen the candidates
+   against the `evolution` chapter first, per-batch `c=`/`cls=` accounting) → close the batch with
+   `review.note` (under `guide` you may pre-register with
+   `config.set review.evolution.artifact|summary|candidates|classes=<value>`; `review.note` only
+   takes `lesson|score` and archives the registration record single-source). The registration
    payload is `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]]` with the optional
-   `sessions=` / `todo=` segments described in §1.9; under `guide` you may pre-register with
-   `config.set review.evolution.artifact|summary|candidates|classes=<value>`, and `review.note` only
-   takes `lesson|score` and archives the registration record single-source.
-3. Run `--settle` and verify `ok` in `settlement.json` (four switches: events non-empty / no failed
-   step / an ending line exists / the inbox was consumed).
-4. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
+   `sessions=` / `todo=` segments described in §1.9.
+2. **Batch drained = pump pause**: after a batch settles, the drive pump pauses safely (exit 0)
+   waiting for new `--requirement` feed — feed the next batch, or arm retirement.
+3. **Retire (the only ending)**: `config.set run.retire=true` (sub-page item 5), walk one last
+   `coordinate.submit → verify → settlement → review.note` → `[ENDING · run retired]` → the pump
+   pre-closes and settles (`nextEndsRun` flips only when armed). Run `--settle` and verify `ok` in
+   `settlement.json` (four switches: events non-empty / no failed step / an ending line exists / the
+   inbox was consumed). Pre-running `--settle` on an open resident run is harmless but settles
+   nothing (`reached=open, ok=false`, back to running).
+4. **Batch boundary = restart point**: upgrades (mod evolution or host binary) land after a batch
+   settles, then open a **new run-id**; old run directories are never migrated or adopted (a load
+   failure opens a new run).
+5. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
    before ending this run; never carry a finished run's tasks into the next one.
 
 ## 3. Upper layer: the pi extension `.pi/extensions/ygg-pi-harness`

@@ -17,8 +17,8 @@ local wire = require("src.domain.wire")
 
 local TEXTS
 
-local goal_authorization, num, strict_gates, text_of =
-  config.goal_authorization, config.num, config.strict_gates, config.text_of
+local goal_authorization, num, strict_gates, run_retire_armed, text_of =
+  config.goal_authorization, config.num, config.strict_gates, config.run_retire_armed, config.text_of
 local advance, refuse, reject, reject_payload =
   flow.advance, flow.refuse, flow.reject, flow.reject_payload
 local gate_problem, settlement_problem =
@@ -79,7 +79,11 @@ function M.install(deps)
     ygg.kv.set("verify.passed", false)
     -- 每次进入结算都重新登记三项任务，避免沿用上一轮过期证据。
     reset_settlement()
-    ygg.narrate(fill(TEXTS.beats.coordinate_ok, { count = tostring(req_count()) }))
+    -- r9 批语义：coordinate.submit 是**批边界**（不是「走向终局的第一步」）。
+    ygg.narrate(fill(TEXTS.beats.coordinate_ok, {
+      count = tostring(req_count()),
+      batch = tostring(num("run.batch", 1)),
+    }))
     advance(STAGE.review)
   end)
   ygg.on("verify.submit", function(payload)
@@ -127,7 +131,10 @@ function M.install(deps)
       end
       ygg.kv.set("verify.passed", true)
       ygg.kv.set("verify.last", TEXTS.beats.verify_green_record)
-      ygg.narrate(fill(TEXTS.beats.verify_ok, { count = tostring(req_count()) }))
+      ygg.narrate(fill(TEXTS.beats.verify_ok, {
+        count = tostring(req_count()),
+        batch = tostring(num("run.batch", 1)),
+      }))
       render()
       return
     end
@@ -285,9 +292,27 @@ function M.install(deps)
     ygg.kv.set("review.evolution.summary", text_of("settlement.evolution.summary", ""))
     ygg.kv.set("review.evolution.candidates", text_of("settlement.evolution.candidates", "0/0"))
     ygg.kv.set("review.evolution.classes", text_of("settlement.evolution.classes", ""))
-    ygg.kv.set("ending", STAGE.done)
-    ygg.narrate(fill(TEXTS.beats.review_ok, { score = tostring(score), lesson = lesson }))
-    advance(STAGE.done)
+    if run_retire_armed() then
+      -- 退役路径（r9 唯一终局，仅 run.retire 武装可达）：写 ending + done。
+      -- [ENDING 行由 RENDER[done] 在 node:render 上叙事，本 handler 只留归档叙事。
+      ygg.kv.set("ending", STAGE.done)
+      ygg.narrate(fill(TEXTS.beats.review_ok, { score = tostring(score), lesson = lesson }))
+      advance(STAGE.done)
+      return
+    end
+    -- 批收口路径（常驻默认）：滚动单槽已归档 → run.batch+1 → 复位 verify/settlement → 回 coordinate。
+    -- 红线：绝不写 `ending`、叙事行首绝不含 [ENDING 前缀（宿主按行首前缀判终局，测试钉死）。
+    local batch = num("run.batch", 1)
+    ygg.kv.set("run.batch", batch + 1)
+    ygg.kv.set("verify.passed", false)
+    reset_settlement()
+    ygg.narrate(fill(TEXTS.beats.review_batch_ok, {
+      batch = tostring(batch),
+      next = tostring(batch + 1),
+      score = tostring(score),
+      lesson = lesson,
+    }))
+    advance(STAGE.coordinate)
   end)
 end
 

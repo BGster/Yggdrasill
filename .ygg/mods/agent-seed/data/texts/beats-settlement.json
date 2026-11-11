@@ -32,6 +32,7 @@
     "settlement_todo_segment_bad": "the settlement.evolution todo= segment must be `<remaining>/<verified_by>`: remaining exactly 0, verified_by non-empty and <= 120 chars.",
     "settlement_verify_first": "record all-green evidence with verify.submit first, then register the three settlement tasks (all of them in the review stage).",
     "sessions_archived": "[SESSIONS ARCHIVED] moved {{moved}} -> {{dest}}",
-    "sessions_archive_refused": "[SESSIONS ARCHIVE REFUSED] remaining={{remaining}} dest={{dest}} | nothing was recorded"
+    "sessions_archive_refused": "[SESSIONS ARCHIVE REFUSED] remaining={{remaining}} dest={{dest}} | nothing was recorded",
+    "review_batch_ok": "[BATCH {{batch}} SETTLED] score {{score}}/5 — {{lesson}}; evolution archived to the rolling slot; batch counter -> {{next}}; back to coordinate — the resident run waits for the next batch."
   }
 }

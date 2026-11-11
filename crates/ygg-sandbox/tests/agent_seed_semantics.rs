@@ -2,11 +2,12 @@
 //! (5 stored states + `plan_ok`-derived display names), the turn-cut conventions, and the
 //! two-layer node map (the behavioural acceptance surface required by AGENTS.md §1.9).
 //!
-//! Why this layer exists: the all-1 `playtest` walk only proves the happy path reaches
-//! `[ENDING` — it never takes a **branch** such as `gate.reject` / `requirement.amend` /
-//! `proposal.reject` / a stale gate, and the turn-cut mechanics (inline `exec=`, the
-//! `draft -> planning` merge, the reactive auto-dispatch effect, the settlement merge) are
-//! likewise invisible to it. This file turns those into assertions:
+//! Why this layer exists: the scripted playtest walks only prove the happy paths (baseline A
+//! the batch cycle, baseline B the armed retirement) — they never take a **branch** such as
+//! `gate.reject` / `requirement.amend` / `proposal.reject` / a stale gate, and the turn-cut
+//! mechanics (inline `exec=`, the `draft -> planning` merge, the reactive auto-dispatch
+//! effect, the settlement merge) are likewise invisible to them. This file turns those into
+//! assertions:
 //!
 //! - state assertions read **`kv.entries` of the `save` receipt** (`req.*` is machine state,
 //!   not prose);
@@ -329,28 +330,39 @@ fn drive_to_review() -> Game {
     game
 }
 
-// ───────────────────────── ⑦ all-1 walk (both mods) ─────────────────────────
+// ───────────────────────── ⑦ resident lifecycle walk (both mods) ─────────────────────────
 
-/// ⑦ The all-1 walk of both mods must reach `[ENDING` with empty `warnings` / `errors`.
+/// ⑦ Resident lifecycle (r9): `review.note` **settles the batch and returns to coordinate**;
+/// the run only ends through an explicitly armed retirement (baseline B, a separate case).
 ///
-/// This is a **supplement**, never a replacement: all-1 only covers the happy path, while
-/// the semantic branches are covered by the numbered cases below.
+/// Baseline A — the scripted batch cycle (the new default walk): the all-forward script runs
+/// intake → coordinate.submit (batch boundary) → verify.submit green → settlement.evolution
+/// (merged sessions + todo) → review.note, and the script is then exhausted **back at the
+/// coordinate stage** (`reached=choice` is the success value for a scripted walk). A script
+/// pin lives in the comment so a menu reorder fails here loudly, not silently.
 #[test]
-fn playtest_reaches_ending_on_both_mods() {
+fn resident_batch_cycle_reaches_coordinate_again() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
-        let report = playtest(&dir, &PlaytestOptions::default());
+        // Script (pinned): 1=task.intake · 1=coordinate.submit · 1=verify.submit green ·
+        // 1=settlement.evolution · 1=review.note (batch settle → coordinate menu again).
+        let options = PlaytestOptions {
+            choices: vec![1, 1, 1, 1, 1],
+            ..Default::default()
+        };
+        let report = playtest(&dir, &options);
         assert!(
             report.ok,
-            "{} all-1 walk failed: reached={:?} errors={:?}",
+            "{} batch cycle failed: reached={:?} errors={:?}",
             dir.display(),
             report.reached,
             report.errors
         );
         assert_eq!(
             report.reached,
-            Some(Reached::Ending),
-            "{} must reach [ENDING",
-            dir.display()
+            Some(Reached::Choice),
+            "{} must exhaust the script back at a coordinate choice (resident run): {}",
+            dir.display(),
+            report.steps
         );
         assert!(
             report.warnings.is_empty(),
@@ -364,13 +376,149 @@ fn playtest_reaches_ending_on_both_mods() {
             dir.display(),
             report.errors
         );
-        // The settlement merge only pays off if the whole review stage collapses: start,
-        // intake, coordinate.submit, verify, evolution (with sessions= + todo=), review.note.
+    }
+}
+
+/// ⑦ Baseline B — the armed retirement (the **only** path to a run-level ending).
+///
+/// Script (pinned): 1=task.intake · 1=coordinate.submit (batch boundary) · 1=verify green ·
+/// 1=settlement.evolution · 7=config.open (the config entry is the 7th item of the registered
+/// review menu) · 4=retire_item (`config.set run.retire=true`) · 5=close_item (back) ·
+/// 1=review.note (retiring close) → `[ENDING · run retired]`.
+#[test]
+fn resident_retire_reaches_ending() {
+    for dir in [project_mod_dir(), seed_mod_dir()] {
+        let options = PlaytestOptions {
+            choices: vec![1, 1, 1, 1, 7, 4, 5, 1],
+            ..Default::default()
+        };
+        let report = playtest(&dir, &options);
         assert!(
-            report.steps <= 8,
-            "{} needed {} steps — the review stage must settle in one evolution turn",
+            report.ok,
+            "{} retirement walk failed: reached={:?} errors={:?}",
             dir.display(),
-            report.steps
+            report.reached,
+            report.errors
+        );
+        assert_eq!(
+            report.reached,
+            Some(Reached::Ending),
+            "{} must reach the retiring ending",
+            dir.display()
+        );
+        // The narrative sample only keeps the first lines of the walk, so the ending line's
+        // copy (`[ENDING · run retired]`) is pinned at Game level in
+        // `run_retire_value_domain_and_retiring_close` below.
+        assert!(
+            report.warnings.is_empty() && report.errors.is_empty(),
+            "{} must walk clean: {:?} / {:?}",
+            dir.display(),
+            report.warnings,
+            report.errors
+        );
+    }
+}
+
+/// ⑦ The retire value domain and the retiring close (the R2 two-direction lock):
+/// - unarmed (default): `review.note` is the first menu item but `nextEndsRun` stays **false**
+///   (a dumb pump keeps cycling batches, never pre-closes);
+/// - `run.retire` only accepts `true` / `""` (anything else is a payload rejection);
+/// - armed: `nextEndsRun` flips **true** (the host pre-closing protocol reuses for free), and
+///   the next `review.note` writes the retiring ending (`[ENDING · run retired]`) without
+///   touching `run.batch`.
+#[test]
+fn run_retire_value_domain_and_retiring_close() {
+    let mut game = drive_to_review();
+    // Register the settlement in one merged turn so `review.note` is the menu's first item.
+    game.narrate(
+        "settlement.evolution",
+        &text(
+            "|candidates screened against the evolution chapter|c=0/0|\
+             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
+        ),
+    );
+    let next_ends_run = |game: &mut Game| {
+        game.reply("agent.summary", "0")["meta"]["summary"]["nextEndsRun"].clone()
+    };
+    // Direction ① (unarmed): first item is review.note, but the run does not end.
+    assert_eq!(
+        next_ends_run(&mut game),
+        json!(false),
+        "unarmed: review.note first must NOT report nextEndsRun"
+    );
+
+    // Value domain: anything other than true / "" is refused and writes nothing.
+    let bad = game.narrate("config.set", &text("run.retire=false"));
+    assert_refused(&bad, "run.retire");
+    game.assert_kv("settings.run.retire", json!(null));
+
+    // Arm through the sub-page item (pure presentation entry, the write is still config.set).
+    game.click("config — ");
+    let sub_page = game.options();
+    assert!(
+        sub_page.len() == 5 && sub_page[3].starts_with("config.set — run.retire off → true"),
+        "the sub-page must offer run.retire as its 4th item: {sub_page:?}"
+    );
+    game.click("config.set — run.retire");
+    game.assert_kv("settings.run.retire", json!("true"));
+    // Direction ② (armed): the same review menu now reports the retiring close.
+    assert_eq!(
+        next_ends_run(&mut game),
+        json!(true),
+        "armed: review.note first must report nextEndsRun"
+    );
+    // The sub-page survives (only a play-mode switch leaves it).
+    assert_eq!(game.options().len(), 5, "still on the config sub-page");
+    game.click("back — ");
+
+    // The retiring close: archive + ending, and run.batch stays untouched.
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[ENDING · run retired]"),
+        "armed review.note must retire the run: {closed}"
+    );
+    game.assert_kv("ending", json!("done"));
+    // run.batch stays untouched (the key is never written: this run retired on its first
+    // settlement — the summary field still reads 1 by default).
+    game.assert_kv("run.batch", json!(null));
+    game.assert_kv("fsm.stage", json!("done"));
+    game.assert_kv(
+        "review.evolution.summary",
+        json!("candidates screened against the evolution chapter"),
+    );
+
+    // Clearing stays available after retirement (config.set is stage-less; done is read-only
+    // for requirements, not for the retire switch).
+    game.narrate("config.set", &text("run.retire="));
+    game.assert_kv("settings.run.retire", json!(""));
+}
+
+/// ⑦ The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
+/// an empty batch loops (coordinate.submit → verify → evolution → review.note → coordinate …)
+/// until the step limit — `ok=false, reached=limit` is the documented steady state, not a
+/// regression. The scripted baselines above are the pass/fail gates; the settlement merge
+/// still collapses the review stage into one evolution turn (steps ≤ 8 per batch cycle).
+#[test]
+fn default_all1_walk_loops_empty_batches_to_limit() {
+    for dir in [project_mod_dir(), seed_mod_dir()] {
+        let report = playtest(&dir, &PlaytestOptions::default());
+        assert_eq!(
+            report.reached,
+            Some(Reached::Limit),
+            "{}: the resident default walk must loop empty batches to the limit",
+            dir.display()
+        );
+        assert!(
+            !report.ok,
+            "{}: an empty-batch loop is the expected non-passing state",
+            dir.display()
+        );
+        assert!(
+            report.errors.is_empty(),
+            "{} must not error (limit is a clean stop): {:?}",
+            dir.display(),
+            report.errors
         );
     }
 }
@@ -708,14 +856,24 @@ sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo lis
     assert_refused(&bad, "sessions=");
     game.assert_kv("settlement.sessions.moved", json!(1));
 
-    // `review.note` now closes the run (all three settlement tasks are registered).
+    // `review.note` now settles the batch (all three settlement tasks are registered):
+    // resident default — archive → run.batch+1 → reset verify/settlement → coordinate,
+    // never an ending.
     let closed = game.click("review.note — ");
     let narrative = closed["narrative"].to_string();
     assert!(
-        narrative.contains("[ENDING"),
-        "review.note must close the run: {closed}"
+        narrative.contains("[BATCH 1 SETTLED]"),
+        "review.note must settle the batch: {closed}"
     );
-    game.assert_kv("ending", json!("done"));
+    assert!(
+        !narrative.contains("[ENDING"),
+        "a batch settle must never carry the ending prefix: {closed}"
+    );
+    game.assert_kv("ending", json!(null));
+    game.assert_kv("run.batch", json!(2));
+    game.assert_kv("fsm.stage", json!("coordinate"));
+    game.assert_kv("verify.passed", json!(false));
+    game.assert_kv("settlement.evolution.summary", json!(""));
     game.assert_kv("review.evolution.candidates", json!("0/0"));
     game.assert_kv(
         "review.evolution.summary",
@@ -1766,6 +1924,15 @@ fn summary_exposes_structured_jobs_and_gates() {
         "task.intake",
         &text("subsystem gate|synthetic task description"),
     );
+
+    // r9 常驻生命周期三字段（加性）：coordinate ∧ 队列清空（无需求时充真）∧ 未武装
+    // = batchDrained=true；lifecycle 常量 resident；batch 缺省 1。
+    let fields = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    assert_eq!(fields["lifecycle"], json!("resident"), "{fields}");
+    assert_eq!(fields["batch"], json!(1), "{fields}");
+    assert_eq!(fields["batchDrained"], json!(true), "{fields}");
+    assert_eq!(fields["nextEndsRun"], json!(false), "{fields}");
+
     game.narrate(
         "requirement.add",
         &text("synthetic requirement|synthetic description|semantics-r1"),
@@ -2135,15 +2302,23 @@ fn archive_sessions_result_unblocks_the_settlement() {
         json!("tool:harness.archive_sessions"),
     );
 
-    // ③ the closing chain no longer needs a `settlement.sessions` turn.
+    // ③ the closing chain no longer needs a `settlement.sessions` turn: review.note
+    // settles the batch straight away (resident default — no ending).
     game.click("verify.submit all_green=true — ");
     game.narrate("settlement.evolution", &text("|screened|c=0/0"));
     game.narrate("settlement.todo", &text("0|main session cleared"));
     let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
     assert!(
-        closed["narrative"].to_string().contains("[ENDING"),
-        "review.note must close the run: {closed}"
+        narrative.contains("[BATCH 1 SETTLED]"),
+        "review.note must settle the batch: {closed}"
     );
+    assert!(
+        !narrative.contains("[ENDING"),
+        "a batch settle must never carry the ending prefix: {closed}"
+    );
+    game.assert_kv("run.batch", json!(2));
+    game.assert_kv("fsm.stage", json!("coordinate"));
 }
 
 /// A6 The declaration surface of the active subsystem on **both** sides: the six built-in tools,
@@ -2465,10 +2640,17 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     game.assert_kv("tool.settled_count", json!(4));
 
     let closed = game.click("review.note — ");
+    let closed_text = closed["narrative"].to_string();
     assert!(
-        closed["narrative"].to_string().contains("[ENDING"),
-        "review.note must close the run after inline session archiving: {closed}"
+        closed_text.contains("[BATCH 1 SETTLED]"),
+        "review.note must settle the batch after inline session archiving: {closed}"
     );
+    assert!(
+        !closed_text.contains("[ENDING"),
+        "a batch settle must never carry the ending prefix: {closed}"
+    );
+    game.assert_kv("run.batch", json!(2));
+    game.assert_kv("fsm.stage", json!("coordinate"));
 }
 
 /// A8 Placeholder actor IDs (`"pi-ygg-harness"`, `"unregistered"`, `"main"`) recorded in the

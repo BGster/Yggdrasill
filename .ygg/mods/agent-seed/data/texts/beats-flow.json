@@ -42,6 +42,8 @@
     "evolution_auto": "evolution auto: preference marker only (cap {{cap}}, paths {{paths}}) — no auto-rewrite, no revision requests registered; suggestions still go through the separate settlement.evolution registration.",
     "evolution_none": "0/0",
     "evolution_artifact_none": "(empty)",
-    "evolution_classes_none": "(zero candidates, no classes)"
+    "evolution_classes_none": "(zero candidates, no classes)",
+    "run_retire_armed": "[RUN RETIRE ARMED] the next review.note becomes the retiring close: the run settles and ends ([ENDING · run retired]). Clear it with `config.set run.retire=\"\"`.",
+    "run_retire_cleared": "[RUN RETIRE CLEARED] review.note is back to the batch settle (resident run continues; no ending)."
   }
 }

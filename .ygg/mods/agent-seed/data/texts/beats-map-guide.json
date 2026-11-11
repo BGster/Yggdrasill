@@ -32,6 +32,11 @@
     "map_edge_no_condition": "condition not shown",
     "map_local_head": "[CURRENT NODE] [{{stage}}] | {{panel}}",
     "map_local_edge": "  {{index}}. {{text}} → [{{target}}] ({{state}}; {{when}})",
-    "map_local_foot": "(operation view: current node + selectable edges; map.show takes no payload)"
+    "map_local_foot": "(operation view: current node + selectable edges; map.show takes no payload)",
+    "map_usage": "map.show [\"\"|0|full]",
+    "map_rejected": "[MAP REJECTED] only an empty payload, \"0\" or \"full\" is accepted, got `{{got}}`.",
+    "map_note_batch_boundary": "(batch boundary: every leaf requirement is done, no pending proposals, no conflicts)",
+    "map_note_batch_settle": "(batch settle: archive -> run.batch+1 -> back to coordinate; resident)",
+    "map_note_retire": "(run retired - the only terminal edge, reachable only when run.retire is armed)"
   }
 }

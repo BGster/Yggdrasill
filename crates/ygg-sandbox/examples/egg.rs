@@ -556,11 +556,9 @@ fn parse_args() -> Args {
             }
             "--event" => event = Some(next_value(&mut iter, "--event")),
             "--payload" => payload = Some(next_value(&mut iter, "--payload")),
-<<<<<<< HEAD:crates/ygg-sandbox/examples/egg.rs
             // 单发回执输出单行 JSON（机器契约）。布尔旗标（同 --resume / --watch 同型）；
             // 环境回退 YGG_FORMAT 在循环后统一解析（含用法错误 fail-closed）。
             "--raw" => raw = true,
-=======
             "--actor" => {
                 let raw = next_value(&mut iter, "--actor");
                 // 形状校验在解析点（与 executor id 同规则）：非法值 = 用法错误，
@@ -577,7 +575,6 @@ fn parse_args() -> Args {
                         .unwrap_or_else(|m| usage_error(&m)),
                 );
             }
->>>>>>> feature/c47d-identity-profile:crates/ygg-sandbox/examples/agent.rs
             "--drive" => {
                 let text = next_value(&mut iter, "--drive");
                 drive = match parse_drive(&text) {
@@ -828,8 +825,9 @@ fn usage(code: i32) -> ! {
                                                                 交互模式
   egg --mod <mod目录> --run-id <标识> --event <名称> [--payload <JSON>] [--resume]
                                                                 单发模式（Agent 脚本化）
-  egg --run-id <标识> --settle                                局末结算
-  egg --run-id <标识> [--runs-root <目录>] --requirement '标题|描述'
+  egg --run-id <标识> --settle                                局末结算（结算已收口的局：
+                                                              常驻局的收口 = 退役）
+  egg --run-id <标识> [--runs-root <目录>] --requirement '标题|描述' 
                                                                 异步补需求（只追本局后端的 inbox）
   egg --run-id <标识> --daemon [--mod <mod目录>]
                                                                 常驻守护模式（JSON-RPC over stdio）
@@ -847,18 +845,15 @@ fn usage(code: i32) -> ! {
   --event <名称>     单发模式：派发一个事件后退出（stdout 回执：缺省人读文本，
                      --raw 输出单行 JSON 契约）
   --payload <JSON>   事件 payload（缺省 = Mod 契约的 agent.defaultPayload；必须 JSON 标量）
-<<<<<<< HEAD:crates/ygg-sandbox/examples/egg.rs
   --raw              单发回执输出单行 JSON 信封（机器契约，与历史缺省逐字节一致）。
                      仅 --event 单发路径生效；其余模式与 daemon 协议面不受影响
                      （接受但忽略）。解析顺序 = --raw > 环境变量 YGG_FORMAT
                      （text|json）> 缺省 text；非法 YGG_FORMAT 值 fail-closed 退出 2
-=======
   --actor <id>       提交者身份（Agent 工具句柄，与 exec=/profile handle 同一命名空间；
                      ≤64 字节、无空白、无 `|`）。解析链 --actor > 环境变量 YGG_ACTOR
                      > daemon 请求字段。声明了 actor 段的路由会由宿主注入 `|actor=<id>`
                      并拦截调用方自带的同名段（ACTOR_FORGED）；携带身份的成功写命令
                      /成功派发会先到先得认领 run.json 的 opener_actor（不可变）
->>>>>>> feature/c47d-identity-profile:crates/ygg-sandbox/examples/agent.rs
   --drive <方式>     交互模式推方式（默认 stdin；宿主不替你做决策）：
                        stdin      读 stdin：数字=选择 / event <名称> [JSON] / s / l / i / config / q
                        cmd:<路径> 不读 stdin：每个待选动作交给决策命令（stdout 单行 `N` 或
@@ -882,7 +877,9 @@ fn usage(code: i32) -> ! {
                      （不新造 run：本局必须已存在；不推进状态）
   --artifact-get <artifacts/名>
                      把制品原文直出 stdout（**不补换行**；缺失 = 退出 1，stdout 保持空）
-   --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）
+   --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）。
+                     语义：结算**已收口**的局（常驻局的收口 = run.retire 武装后的退役）；
+                     对未收口的常驻局预跑 = reached=open, ok=false 且退回 running（无害但不收口）
   --daemon           常驻守护模式：stdin 逐行读 JSON 请求
                      （dispatch/summary/state/vfs_put/vfs_get/vfs_list/settle/ping/shutdown），
                      stdout 逐行回 JSON。请求可带 \"id\" 字段（原样回显）；dispatch 请求可带
@@ -936,7 +933,9 @@ host 契约（**必填、无默认值**，宿主代码不含任何 Mod 语义字
   / $ENV{YGG_MOD_DIR} 引用（宿主注入 worker 环境；.env / .env.local 不得覆写）。
 
 自动推进的失控防护：基础步数 + 每条需求额外步数 + 连续无进展判停；阈值读
-  <mod>/data/config.json 的 drive 段（必填）。
+  <mod>/data/config.json 的 drive 段（必填）。r9 常驻批循环：mod 自报
+  lifecycle=batchDrained（批排空且未武装退役）且 inbox 无未消费行 → 打印等待文案后
+  安全暂停（exit 0）：空批绝不连点 coordinate.submit，投递 --requirement 后重跑继续。
 
 异步需求（inbox）：每个自动动作前、stdin 每次提示前、单发每次派发前都会消费
   inbox.jsonl 的新行，按 inboxRoutes 声明派发；dispatch 成功且存档后才前移 cursor，
@@ -1201,7 +1200,16 @@ struct Summary {
     verify_passed: bool,
     /// **下一步就是收口动作**（Mod 用「菜单首项是否 review.note」判定）：
     /// 宿主据此在派发前先进 closing，把最后一次 drain 排在收口之前。
+    /// r9 常驻语义：只有 run.retire 武装后的终局变体才为 true；未武装的批收口恒 false。
     next_ends_run: bool,
+    /// r9 常驻生命周期：mod 自报模式（常量 `"resident"`）。
+    /// 缺省空串 = 旧 mod：宿主所有常驻特化行为以它为闸（缺失即行为不变）。
+    lifecycle: String,
+    /// r9 常驻生命周期：`run.batch` 镜像（批轮转可观测计数；缺省 1）。
+    batch: usize,
+    /// r9 常驻生命周期：批排空暂停信号 =
+    /// `coordinate ∧ gate_problem()==nil ∧ run.retire 未武装`（缺省 false = 旧 mod 不触发）。
+    batch_drained: bool,
     /// 待验收提案数。
     pending_proposals: usize,
     /// 已入队需求总数（步数预算按它放宽）。
@@ -1247,6 +1255,9 @@ impl Summary {
             ending: value["ending"] == Json::Bool(true),
             verify_passed: value["verifyPassed"] == Json::Bool(true),
             next_ends_run: value["nextEndsRun"] == Json::Bool(true),
+            lifecycle: value["lifecycle"].as_str().unwrap_or("").to_owned(),
+            batch: value["batch"].as_u64().map_or(1, |n| n as usize).max(1),
+            batch_drained: value["batchDrained"] == Json::Bool(true),
             pending_proposals: count("pendingProposals"),
             requirement_count: count("requirementCount"),
             conflicts: value["conflicts"]
@@ -7619,6 +7630,14 @@ fn drive_step(summary: &Summary, current: &Json, auto_steps: usize, limit: usize
     DriveStep::Run
 }
 
+/// r9 常驻批排 暂停判定（纯函数，内嵌测试在 resident_lifecycle_tests）：
+/// mod 自报 lifecycle=resident ∧ 本批已排空且未武装退役 ∧ inbox 无未消费行。
+/// 三者缺一不可：旧 mod（lifecycle 缺失）不触发；武装退役时不暂停（让泵走
+/// 预 closing 协议收尾）；inbox 有未消费行时不暂停（先消费再判定）。
+fn batch_drained_pause(summary: &Summary, unconsumed: usize) -> bool {
+    summary.lifecycle == "resident" && summary.batch_drained && unconsumed == 0
+}
+
 fn run_interactive(args: &Args) -> i32 {
     let mut session = match Session::open(args) {
         Ok(session) => session,
@@ -7719,6 +7738,22 @@ fn run_interactive(args: &Args) -> i32 {
                 println!(
                     "  解决后重跑本命令；或改用 --drive stdin 手动选 pendingChoice 的 1/2/3（keep_both / keep_first / revise）。"
                 );
+                return 0;
+            }
+            // ①' r9 常驻批排 安全暂停（判定在 batch_drained_pause，纯函数内嵌测试）：
+            //     打印等待文案后 exit 0——哑泵绝不在空批上连点 coordinate.submit 制造
+            //     空批结算噪音。状态未推进，投递 --requirement 或武装退役后重跑继续。
+            if batch_drained_pause(&summary, unconsumed_inbox_lines(session.store.as_ref())) {
+                println!();
+                println!(
+                    "[drive] 第 {} 批已排空（coordinate，队列清空，未武装退役）——常驻运行安全暂停：",
+                    summary.batch
+                );
+                println!(
+                    "        投递新需求（--requirement '标题|描述'）继续下一批；或 config.set run.retire=true 武装退役。"
+                );
+                println!("        状态未推进，处理后重跑本命令继续。");
+                print_receipt(&current, true);
                 return 0;
             }
             // 协议：下一步若是收口动作（Mod 自报 nextEndsRun），先进入 closing——
@@ -8843,6 +8878,90 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 //  ② `maybe_reload` 必须是"换得成就换、换不成就照旧跑"：成功时 `reloaded=true`
 //     且新代码立即生效；失败时 `reloaded=false`、旧驱动继续服务，不留半更新。
 // ============================================================================
+
+// ============================================================================
+// §r9 常驻生命周期（宿主可见性与暂停）：摘要三字段容忍解析 + 批排暂停判定
+//
+// Summary 的三个新字段（lifecycle / batch / batchDrained）全部**加性**：
+// 旧 mod 的 meta.summary 缺这些字段 → 容忍式解析取保守默认（"" / 1 / false），
+// 所有常驻特化行为以 lifecycle=="resident" 为闸，旧 mod 行为不变（probe mod
+// 无 lifecycle 字段天然走旧路径，既有用例零改动即覆盖该面）。
+// ============================================================================
+#[cfg(test)]
+mod resident_lifecycle_tests {
+    use super::{batch_drained_pause, Summary};
+    use serde_json::json;
+
+    /// 旧 mod：meta.summary 没有三个新字段 → 保守默认（lifecycle=""，batch=1，
+    /// batch_drained=false），且批排暂停绝不触发（lifecycle 闸）。
+    #[test]
+    fn missing_fields_take_conservative_defaults_and_never_pause() {
+        let legacy = Summary::from_json(&json!({
+            "stage": "coordinate",
+            "ending": false,
+            "nextEndsRun": false,
+            "pendingProposals": 0,
+            "requirementCount": 0,
+            "conflicts": [],
+            "jobs": [],
+            "gates": []
+        }));
+        assert_eq!(legacy.lifecycle, "");
+        assert_eq!(legacy.batch, 1);
+        assert!(!legacy.batch_drained);
+        assert!(
+            !batch_drained_pause(&legacy, 0),
+            "旧 mod 摘要绝不触发批排暂停"
+        );
+    }
+
+    /// resident 摘要：三字段全进；batch 的 0 / 缺失都折成 1（计数下界）。
+    #[test]
+    fn resident_summary_fields_parse_additively() {
+        let resident = Summary::from_json(&json!({
+            "stage": "coordinate",
+            "ending": false,
+            "verifyPassed": true,
+            "nextEndsRun": false,
+            "lifecycle": "resident",
+            "batch": 3,
+            "batchDrained": true,
+            "pendingProposals": 0,
+            "requirementCount": 2,
+            "conflicts": [],
+            "jobs": [],
+            "gates": []
+        }));
+        assert_eq!(resident.lifecycle, "resident");
+        assert_eq!(resident.batch, 3);
+        assert!(resident.batch_drained);
+
+        let zero = Summary::from_json(&json!({"lifecycle": "resident", "batch": 0}));
+        assert_eq!(zero.batch, 1, "batch 计数下界是 1（非法 0 折成 1）");
+        let absent = Summary::from_json(&json!({"lifecycle": "resident"}));
+        assert_eq!(absent.batch, 1, "batch 缺省 1");
+    }
+
+    /// 批排暂停判定：三条件缺一不可（lifecycle 闸 / 排空信号 / inbox 无未消费行）。
+    #[test]
+    fn batch_drained_pause_requires_resident_drained_and_empty_inbox() {
+        let summary = |lifecycle: &str, drained: bool| Summary {
+            available: true,
+            lifecycle: lifecycle.to_owned(),
+            batch_drained: drained,
+            ..Default::default()
+        };
+        // ① 常驻 + 已排空 + inbox 空 → 暂停。
+        assert!(batch_drained_pause(&summary("resident", true), 0));
+        // ② lifecycle 缺失（旧 mod）→ 不触发（即使 batchDrained 误报 true）。
+        assert!(!batch_drained_pause(&summary("", true), 0));
+        // ③ 未排空（含武装退役时刻：mod 侧把 batchDrained 报 false）→ 不触发。
+        assert!(!batch_drained_pause(&summary("resident", false), 0));
+        // ④ inbox 有未消费行 → 不暂停（先消费再判定，绝不在有进料时空停）。
+        assert!(!batch_drained_pause(&summary("resident", true), 2));
+    }
+}
+
 #[cfg(test)]
 mod multiscript_hot_reload_tests {
     use super::{
@@ -12032,7 +12151,6 @@ end)
 }
 
 // ============================================================================
-<<<<<<< HEAD:crates/ygg-sandbox/examples/egg.rs
 // §r5 单发回执文本渲染（缺省 text / --raw 唯一旗标）
 // ============================================================================
 
@@ -12361,7 +12479,8 @@ mod receipt_text_tests {
             render_receipt_output(&failure, OutputFormat::Raw, "summary"),
             format!("{failure}\n")
         );
-=======
+    }
+}
 // §提交者身份通道（r3）：解析链 / 段注入 / 伪造拦截 / 回显 / opener
 //
 // 合成 Mod 自带一条声明了 actor+actor_session 的 proposal 路由与一条未声明的
@@ -12856,6 +12975,5 @@ end)
         let drain = session.drain_inbox();
         assert_eq!(drain.applied, 2, "两行都被消费：{:?}", drain.error);
         let _ = fs::remove_dir_all(&dir);
->>>>>>> feature/c47d-identity-profile:crates/ygg-sandbox/examples/agent.rs
     }
 }

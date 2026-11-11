@@ -19,10 +19,10 @@ local wire = require("src.domain.wire")
 local TEXTS
 local CONFIG
 
-local max_per_run, mode, num, play_mode, strict_gates, task_desc, task_title, text_of, executor_raw, goal_authorization =
-  config.max_per_run, config.mode, config.num, config.play_mode, config.strict_gates, config.task_desc, config.task_title, config.text_of, config.executor_raw, config.goal_authorization
-local gate_total =
-  gates.gate_total
+local max_per_run, mode, num, play_mode, run_retire_armed, strict_gates, task_desc, task_title, text_of, executor_raw, goal_authorization =
+  config.max_per_run, config.mode, config.num, config.play_mode, config.run_retire_armed, config.strict_gates, config.task_desc, config.task_title, config.text_of, config.executor_raw, config.goal_authorization
+local gate_total, gate_problem =
+  gates.gate_total, gates.gate_problem
 local narrate_stage_guide =
   guide.narrate_stage_guide
 local lane_text, narrate_lane_ledger =
@@ -456,16 +456,21 @@ end
 
 local MAP_NODES = { STAGE.intake, STAGE.coordinate, STAGE.review, STAGE.done }
 
+-- r9 常驻批循环图：review→coordinate 有两条语义边（批收口 review.note 未武装 / verify 打回），
+-- review→done 只剩退役边（run.retire 武装后的 review.note 终局变体）。
+-- 注：本表是**展示面**（不是 FSM 转移表，mod.lua 的 ygg.fsm.define 一字未动）；
+-- to_stage 对 review.note 按武装状态二选一，让操作视图的目标阶段与真实落点一致。
 local MAP_EDGES = {
   { from = STAGE.intake, to = STAGE.coordinate, action = "task.intake" },
-  { from = STAGE.coordinate, to = STAGE.review, action = "coordinate.submit", note = "map_note_all_done" },
+  { from = STAGE.coordinate, to = STAGE.review, action = "coordinate.submit", note = "map_note_batch_boundary" },
   {
     from = STAGE.review,
     to = STAGE.coordinate,
     action = "verify.submit=false",
     note = "map_note_back",
   },
-  { from = STAGE.review, to = STAGE.done, action = "review.note", note = "map_note_ending" },
+  { from = STAGE.review, to = STAGE.coordinate, action = "review.note", note = "map_note_batch_settle" },
+  { from = STAGE.review, to = STAGE.done, action = "review.note", note = "map_note_retire" },
 }
 
 -- 需求级流水线（设计视图）= 5 个存储态；每行中列是「态内的三跳」（提案 → 验收 → 门禁）。
@@ -565,7 +570,15 @@ end
 -- 不在表里的动作（map.show / requirement.* / config.* / lane.*）= 不换阶段（自环）。
 -- 特例：review → coordinate 的打回边在表里记作 `verify.submit=false`，而菜单里的
 -- 失败项载荷是 `all_green=false;report=…`，所以要按载荷前缀补一次查找。
+-- 特例二（r9）：review.note 有两条语义边（批收口 → coordinate / 退役 → done），
+-- 按 run.retire 武装状态二选一，让操作视图的目标阶段与真实落点一致。
 local function to_stage(action, payload)
+  if action == "review.note" then
+    if run_retire_armed() then
+      return STAGE.done
+    end
+    return STAGE.coordinate
+  end
   for i = 1, #MAP_EDGES do
     if MAP_EDGES[i].action == action then
       return MAP_EDGES[i].to
@@ -759,10 +772,12 @@ RENDER[STAGE.review] = function()
 end
 
 RENDER[STAGE.done] = function()
+  -- r9：done = 退役终态（仅 run.retire 武装后的 review.note 可达）。
   ygg.narrate(fill(TEXTS.endings.done, {
     title = task_title(),
     count = tostring(req_count()),
     done = tostring(req_tally(PHASE.done)),
+    batch = tostring(num("run.batch", 1)),
     score = tostring(num("review.score", TEXTS.tuning.default_score)),
     lesson = text_of("review.lesson", TEXTS.beats.default_lesson),
     candidates = text_of("review.evolution.candidates", TEXTS.beats.evolution_none),
@@ -974,7 +989,7 @@ end
 
 local function summary_next_ends_run()
   -- 只看阶段菜单（MENU 本体）：二级页打开时 pendingChoice 是子页（首项 config.set），
-  -- 不能因此把自己报成「不结局」——收口判定不能被展示层带偏。
+  -- 不能因此把自己报成「不结局」，收口判定不能被展示层带偏。
   local builder = MENU[stage()]
   if builder == nil then
     return false
@@ -983,7 +998,10 @@ local function summary_next_ends_run()
   if items == nil or #items == 0 then
     return false
   end
-  return items[1].action == "review.note"
+  -- r9 常驻语义：首项是 review.note 只说明「批盘点就绪」，不等于本局将终——
+  -- 只有 run.retire 武装时首项才是**终局变体**（宿主据此预 closing 协议）。
+  -- 未武装时恒 false（哑泵在批收口后继续循环，绝不预收口）。
+  return items[1].action == "review.note" and run_retire_armed()
 end
 
 local function summary_fields()
@@ -992,6 +1010,14 @@ local function summary_fields()
     ending = ygg.kv.get("ending") == STAGE.done,
     verifyPassed = ygg.kv.get("verify.passed") == true,
     nextEndsRun = summary_next_ends_run(),
+    -- r9 常驻生命周期三字段（加性；旧宿主容忍式解析，缺字段取保守默认）：
+    -- lifecycle = mod 自报模式（宿主所有常驻特化行为以它为闸，缺失 = 旧 mod 行为不变）；
+    -- batch = run.batch 镜像（批轮转可观测计数，缺省 1）；
+    -- batchDrained = 泵暂停信号 = coordinate ∧ gate_problem()==nil ∧ 未武装
+    --   （「本批队列已清空且没有已武装的终局流程，等新 --requirement 进料」）。
+    lifecycle = "resident",
+    batch = summary_int(num("run.batch", 1)),
+    batchDrained = stage() == STAGE.coordinate and gate_problem() == nil and not run_retire_armed(),
     pendingProposals = summary_int(prop_pending_total()),
     requirementCount = summary_int(req_count()),
     conflicts = summary_conflicts(),
