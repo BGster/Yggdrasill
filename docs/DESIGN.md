@@ -105,6 +105,8 @@ Coordinator 在 4 个阶段上支配整体运行生命周期。r9 起生命周�
 
 ### 2.2 需求生命周期与强制门禁语义
 
+门禁裁决权随 `play.mode` 划分（硬约束，与 AGENTS.md §1.8 同源）：`guide` 模式下门禁动作只收菜单票，由**人**裁决；`goal` 模式下主代理读完整回执后自行裁决（`goal.authorization` 逐局登记，证据标准不变）。机制上表现为：`proposal.accept` / `gate.approve` 等里程碑动作在 `guide` 下拒绝非票据直发（见 §3 动作表）。
+
 每个需求 `rN` 用 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split`、`merged`、`dropped`）与正交的状态属性（`plan_ok`、`job`、`gate`、`lane`、`rev`、`conflict`、`needs_amend`）存储：
 
 | 存储状态与属性 | 派生展示阶段 | 触发事件 | 目标状态与属性 | 语义契约 |
