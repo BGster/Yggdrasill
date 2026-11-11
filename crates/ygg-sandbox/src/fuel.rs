@@ -64,6 +64,73 @@ pub const FUEL_LOAD_BUDGET: u64 = 50_000_000;
 pub const FUEL_LOAD_EXHAUSTED_MESSAGE: &str =
     "fuel exhausted: module load budget consumed (instruction meter)";
 
+/// r13 预算自动扩缩：每条 KV 条目的预算增量。
+///
+/// 标定依据（r13 方案 §0.2，本局 unify-map-and-agent-seed 只读实测）：kv_len≈292
+/// 的局面 `requirement.list` 在 100k 地板下必死，~340–411 区间在 500k 下放行
+/// → 全量 list 渲染 ≈ 1.22k VM 指令/kv 条目（含 fill 模板 gsub、每行 trace 的
+/// KV 桥调用）。斜率取 2000/条 ≈ 实测值的 ~1.6× 安全系数：seq 39 局面
+/// （kv_len=292）预算 584k > 已证放行点 500k，seq 79 局面（kv_len=450）900k。
+/// 误差留痕：配了真正的 mod 工作负载后若实测最小放行预算与本斜率偏差 >2×，
+/// 先调本常量并在本注释补标定数据（测试 `autoscale_slope_calibration_documents_per_entry_cost`
+/// 输出同形工作负载的指令级实测，供复核）。
+pub const FUEL_AUTOSCALE_PER_ENTRY: u64 = 2_000;
+
+/// r13 预算自动扩缩：硬顶。扩缩只升不降的另一端——顶格后死循环击杀仍有限
+/// （4M 指令 ÷ [`FUEL_HOOK_GRANULARITY`] = 4k 次 hook；S12 实测 hook 开销比
+/// ≈ ×2.0，`while true` 在顶格预算下仍是毫秒–十毫秒级被杀）：击杀语义
+/// 保留、上限仍有限，死循环保护不因扩缩而弱化。覆盖 kv_len ≤ 2000（≈120+
+/// 条累计需求，远超 req_capacity=32 的 open 操作域；只被常驻超长局的历史
+/// 累积触及——超长局的根治是 mod 侧历史归档，见 r13 方案 §4）。
+pub const FUEL_AUTOSCALE_CAP: u64 = 4_000_000;
+
+/// r13 预算自动扩缩公式：**线性 + 地板 + 硬顶**（纯函数，独立表测）。
+///
+/// ```text
+/// auto_budget(kv_len) = clamp(2000 × kv_len, 100_000, 4_000_000)
+/// ```
+///
+/// - 地板 = [`crate::driver::DEFAULT_FUEL_BUDGET`]：空局/小局行为零变化
+///   （auto(0) = 地板，既有击杀/回滚测试不感知）。
+/// - 状态规模因子取 `kv.len()`（canonical KV 条目总数，`BTreeMap::len`
+///   O(1)，在转换起点现读）：它是 **mod 无关的充分统计**——每需求 ≈17 键、
+///   每提案 ≈8–11 键，宿主不读 `req.count` / 不扫 `prop.*.status`（域键
+///   约定只归 mod，P3 宿主零语义）。§0.2 实测证明 kv_len 与撞墙/放行点强
+///   相关（292 死 / ~411 活）。历史 done 需求计入 kv_len 只会**高估**预算，
+///   永不误杀合法转换（方向性偏置安全）。
+/// - 确定性：预算只依赖转换起点的 canonical 状态规模，回放/续局重建同
+///   状态 → 同预算序列；预算不入 save、不入状态哈希，只影响「杀或不杀」，
+///   与现有 env 语义同类。
+pub fn auto_budget(kv_entries: usize) -> u64 {
+    // 饱和乘：纯函数对全输入域无 panic（usize::MAX × 2000 溢出 → 钳到 cap）。
+    let scaled = (kv_entries as u64).saturating_mul(FUEL_AUTOSCALE_PER_ENTRY);
+    crate::driver::DEFAULT_FUEL_BUDGET
+        .max(scaled)
+        .min(FUEL_AUTOSCALE_CAP)
+}
+
+/// 运行期预算解析（r13 纯函数化，表测友好——避免测试进程 env 竞态）：
+///
+/// - **显式 env 最优先、精确采用、不受 cap 削减**：`YGG_FUEL_BUDGET` 为正
+///   整数时逐字节生效（含小于地板与大于硬顶的值——逃生门语义，r13 红线）；
+/// - **缺省或非法 → 自动扩缩**：回落 [`auto_budget`]（≥ 地板，只升不降）。
+///   这是相对旧契约的唯一行为变化：旧回落值是常量 100k，现在是随状态规模
+///   的 `[100k, 4M]` 有界区间。
+///
+/// 解析细节与旧 [`crate::driver::fuel_budget`] 逐字节同形：`trim` 后 `u64`
+/// 解析、`0` 视为非法（`filter(> 0)`）。`kv_entries = 0` 时本函数与旧
+/// `fuel_budget()` 行为逐字节一致（auto(0) = 地板）。
+pub fn resolve_budget(env_raw: Option<&str>, kv_entries: usize) -> u64 {
+    match env_raw
+        .map(|raw| raw.trim().parse::<u64>().ok())
+        .flatten()
+        .filter(|value| *value > 0)
+    {
+        Some(explicit) => explicit,
+        None => auto_budget(kv_entries),
+    }
+}
+
 /// 装载期预算句柄（纯 Rust，无 Lua）：`Rc<Cell>` 预算 + 活跃计数。
 ///
 /// 活跃计数 >0 即「正处在 require 边界内」——hook 据此把指令计量记到装载
@@ -204,6 +271,7 @@ impl FuelMeter for HookFuelMeter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::driver::DEFAULT_FUEL_BUDGET;
     use crate::sandbox::Sandbox;
 
     /// 构造沙箱并安装指定预算的正式燃料。
@@ -306,5 +374,96 @@ mod tests {
         meter.charge(1_000).expect("drain budget via kernel face");
         let v: i64 = sb.lua().load("return 1 + 1").eval().unwrap();
         assert_eq!(v, 2, "quantized vm face: sub-granularity chunk unaffected");
+    }
+
+    // ── r13 预算自动扩缩：公式表测（纯函数，无 env / 无进程状态）──
+
+    #[test]
+    fn auto_budget_table_floor_linear_cap() {
+        // 地板：空局与小局都 = 契约默认（小局行为零变化）。
+        assert_eq!(auto_budget(0), 100_000);
+        assert_eq!(auto_budget(1), 100_000);
+        assert_eq!(auto_budget(50), 100_000); // 50×2000 = 100k，恰在地板上
+        // 线性段：斜率 = FUEL_AUTOSCALE_PER_ENTRY。
+        assert_eq!(auto_budget(51), 102_000);
+        assert_eq!(auto_budget(292), 584_000); // r13 方案 §0.2 seq 39 标定点
+        assert_eq!(auto_budget(411), 822_000); // seq 68 标定点
+        assert_eq!(auto_budget(450), 900_000); // seq 79 标定点
+        // 硬顶：恰在顶点与远超顶点都钳在 cap（顶格后击杀仍有限）。
+        assert_eq!(auto_budget(2_000), FUEL_AUTOSCALE_CAP);
+        assert_eq!(auto_budget(10_000), FUEL_AUTOSCALE_CAP);
+        assert_eq!(auto_budget(usize::MAX), FUEL_AUTOSCALE_CAP);
+        // 单调不减：任意升序对，预算不降（历史累积只高估、永不误杀）。
+        let mut prev = 0;
+        for entries in [0, 10, 100, 500, 1000, 1999, 2000, 5000, 100_000] {
+            let budget = auto_budget(entries);
+            assert!(budget >= prev, "auto_budget must be monotonic");
+            assert!(budget >= 100_000 && budget <= FUEL_AUTOSCALE_CAP);
+            prev = budget;
+        }
+    }
+
+    #[test]
+    fn resolve_budget_table_env_first_fallback_autoscale() {
+        // 显式 env 最优先：任意值逐字节采用，含小于地板与大于硬顶
+        // （不受 cap 削减——逃生门语义，r13 红线）。
+        assert_eq!(resolve_budget(Some("123"), 0), 123);
+        assert_eq!(resolve_budget(Some("123"), 5000), 123);
+        assert_eq!(resolve_budget(Some("99999999999"), 0), 99_999_999_999);
+        assert_eq!(resolve_budget(Some("50"), 10_000), 50);
+        // trim 语义与旧 fuel_budget() 同形：空白包裹的合法值照常采用。
+        assert_eq!(resolve_budget(Some("  500000  "), 0), 500_000);
+        // 非法 → 自动扩缩：非数字 / 负号 / 0 / 空串 / 缺省。
+        assert_eq!(resolve_budget(Some("abc"), 0), 100_000);
+        assert_eq!(resolve_budget(Some("abc"), 1000), 2_000_000);
+        assert_eq!(resolve_budget(Some("-5"), 1000), 2_000_000);
+        assert_eq!(resolve_budget(Some("0"), 1000), 2_000_000);
+        assert_eq!(resolve_budget(Some(""), 1000), 2_000_000);
+        assert_eq!(resolve_budget(Some("   "), 1000), 2_000_000);
+        assert_eq!(resolve_budget(None, 1000), 2_000_000);
+        // 缺省/非法回落 = auto_budget 同值（同一公式，不是第二套计算）。
+        for entries in [0usize, 50, 292, 411, 2000] {
+            assert_eq!(
+                resolve_budget(None, entries),
+                auto_budget(entries),
+                "fallback must be auto_budget({entries})"
+            );
+        }
+        // kv_entries = 0 时与旧契约行为逐字节一致（auto(0) = 地板 = 常量）。
+        assert_eq!(resolve_budget(None, 0), DEFAULT_FUEL_BUDGET);
+    }
+
+    #[test]
+    fn autoscale_slope_calibration_documents_per_entry_cost() {
+        // r13 标定探针（数据记录型，println 输出供复核）：装顶格预算，跑
+        // 「1000 次 KV 桥调用同形」的工作负载，读 remaining() 得精确指令消耗
+        // ——桥 Rust 侧不耗 VM 指令，stub 与真桥在指令计量下同价。断言双界：
+        // ① 填充工作负载必须在地地板预算内完成（否则事件一开局就自死）；
+        // ② 1000 条的指令成本 ×2 后必须仍低于 kv_len=1000 的扩缩预算 2M
+        //   （斜率 2000/条 对该负载形态的覆盖性）。
+        let (sb, meter) = sandbox_with_fuel(FUEL_AUTOSCALE_CAP);
+        sb.lua()
+            .load(
+                r#"
+                local set = function() end
+                for i = 1, 1000 do set("probe." .. tostring(i), i) end
+                "#,
+            )
+            .exec()
+            .expect("bridge-shaped workload must run");
+        let used = FUEL_AUTOSCALE_CAP - meter.remaining();
+        println!(
+            "r13 autoscale calibration: 1000 bridge-shaped calls consumed ~{used} instructions \
+             ({} per entry); slope = {FUEL_AUTOSCALE_PER_ENTRY}, floor = {DEFAULT_FUEL_BUDGET:?}",
+            used / 1000
+        );
+        assert!(
+            used < DEFAULT_FUEL_BUDGET,
+            "fill workload must fit the floor budget (100k): {used}"
+        );
+        assert!(
+            used * 2 < 2_000_000,
+            "1000-entry cost {used} must be covered by the scaled budget 2M (slope 2000/entry)"
+        );
     }
 }

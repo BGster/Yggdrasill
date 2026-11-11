@@ -89,14 +89,14 @@ use crate::stdlib;
 /// 每次 dispatch 事件转换的燃料预算（转换边界全额重置，D-B1 每转换共享）。
 pub const DEFAULT_FUEL_BUDGET: u64 = 100_000;
 
-/// 运行期预算解析：`YGG_FUEL_BUDGET` 为正整数时覆盖 [`DEFAULT_FUEL_BUDGET`]，
-/// 非法值或缺省一律回落常量（不静默放大、不改变契约默认值）。
+/// 运行期预算解析（r13 起纯函数化到 [`crate::fuel::resolve_budget`]，此处只
+/// 剩构造期入口）：`YGG_FUEL_BUDGET` 为正整数时**显式最优先、精确采用、
+/// 不受 cap 削减**；非法值或缺省回落自动扩缩 [`crate::fuel::auto_budget`]
+/// （构造期 KV 尚未建立，`kv_entries = 0` → 地板 [`DEFAULT_FUEL_BUDGET`]，
+/// 与旧契约行为逐字节一致；每个转换的真实预算在 `cmd_event` 步骤④ 由
+/// [`KernelFacade::transition_budget`] 现读 `kv.len()` 重算）。
 fn fuel_budget() -> u64 {
-    std::env::var("YGG_FUEL_BUDGET")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_FUEL_BUDGET)
+    fuel::resolve_budget(std::env::var("YGG_FUEL_BUDGET").ok().as_deref(), 0)
 }
 
 /// 信封错误码（稳定字符串契约，A1 线格式；下游按码分支不解析 message）。
@@ -563,6 +563,24 @@ impl KernelFacade {
         json!({"ok": true, "log": self.external_log}).to_string()
     }
 
+    /// 本转换的燃料预算（r13 自动扩缩的唯壹取值点，`cmd_event` 步骤④消费）：
+    ///
+    /// - 显式 `YGG_FUEL_BUDGET`（进程 env）最优先、精确采用、不受 cap 削减；
+    /// - 缺省/非法 → [`crate::fuel::auto_budget`]：线性 + 地板 + 硬顶，
+    ///   `clamp(2000 × kv_len, 100k, 4M)`。
+    ///
+    /// `kv.len()` 是 canonical KV 条目总数（`BTreeMap::len` O(1)），**每转换
+    /// 现读、零缓存**：预算只依赖转换起点的 canonical 状态规模，回放/续局
+    /// 重建同状态 → 同预算序列 → 同结局；预算不入 save、不入状态哈希。因子
+    /// 取 `kv.len()` 是 mod 无关的充分统计（域键约定只归 mod，P3 宿主零语义），
+    /// 标定与取值论证见 [`crate::fuel::auto_budget`]。
+    fn transition_budget(&self) -> u64 {
+        fuel::resolve_budget(
+            std::env::var("YGG_FUEL_BUDGET").ok().as_deref(),
+            self.kv.borrow().len(),
+        )
+    }
+
     /// 事件转换路径（非保留名命令）：payload 解析（标量门）→ 外部事件
     /// 构造 → 外部日志 → 燃料重置 → snapshot-out 转换 → 信封回包。
     fn cmd_event(&mut self, name: &str, payload_json: &str) -> String {
@@ -608,8 +626,11 @@ impl KernelFacade {
             "name": event.name(),
             "payload": value_to_json(&payload),
         }));
-        // ④ 燃料预算每转换重置（D-B1：转换内级联共享同一预算）。
-        self.fuel_meter.reset(fuel_budget());
+        // ④ 燃料预算每转换重置（D-B1：转换内级联共享同一预算）。r13：预算
+        //    取 [`Self::transition_budget`]——显式 env 最优先；否则按转换起点
+        //    的 canonical 状态规模自动扩缩（`kv.len()` O(1) 现读，零缓存：
+        //    回放/续局重建同状态 → 同预算序列）。
+        self.fuel_meter.reset(self.transition_budget());
         // ⑤ dispatch 级 savepoint，**取点**：校验（⓪①②）全过、副作用
         //    （③ 日志、④ 燃料）已落之后，转换开始之前——在此冻结 canonical
         //    的两块状态面基线。基线是 canonical 的**副本**（不是换出）：
