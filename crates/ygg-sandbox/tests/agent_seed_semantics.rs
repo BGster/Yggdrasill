@@ -2955,4 +2955,3 @@ fn auto_claim_requires_a_self_reported_branch_name() {
 }
 }
 }
-}
