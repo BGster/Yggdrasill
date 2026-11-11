@@ -5,12 +5,12 @@
 //!
 //! | 声明位置 | 段 | 消费方 |
 //! | --- | --- | --- |
-//! | `pack.json` | `agent`（**必填**，八个字段） | `examples/agent.rs`、`src/playtest.rs` |
-//! | `pack.json` | `inboxRoutes`（**必填**，三个保留键 + 若干 kind） | `examples/agent.rs` |
-//! | `data/config.json` | `settlement`（**必填**） | `examples/agent.rs --settle` |
-//! | `data/config.json` | `drive`（**必填**） | `examples/agent.rs` |
-//! | `pack.json` | `tools`（**可选**，缺省 / 空对象 = 本 Mod 不请求外部工具） | `examples/agent.rs` |
-//! | `data/config.json` | `allowedTools`（**可选**，缺省 = 不允许任何工具） | `examples/agent.rs` |
+//! | `pack.json` | `agent`（**必填**，八个字段） | `examples/egg.rs`、`src/playtest.rs` |
+//! | `pack.json` | `inboxRoutes`（**必填**，三个保留键 + 若干 kind） | `examples/egg.rs` |
+//! | `data/config.json` | `settlement`（**必填**） | `examples/egg.rs --settle` |
+//! | `data/config.json` | `drive`（**必填**） | `examples/egg.rs` |
+//! | `pack.json` | `tools`（**可选**，缺省 / 空对象 = 本 Mod 不请求外部工具） | `examples/egg.rs` |
+//! | `data/config.json` | `allowedTools`（**可选**，缺省 = 不允许任何工具） | `examples/egg.rs` |
 //!
 //! **无默认值纪律**：所有段都是必填，缺失 / 字段缺失 / 类型不符 / 非正数一律
 //! 返回可读错误（带缺失字段名 + 应有形状 + 文档定位），由调用方 fail-closed
@@ -1534,7 +1534,7 @@ fn json_kind(value: &Json) -> &'static str {
 // §工具两层白名单的装载期校验（`tools` / `allowedTools`）
 //
 // 这些用例只碰纯 JSON：不建 Mod 目录、不 spawn 进程、不读环境——校验规则是
-// 装载期门禁的全部事实面（运行期执行模型在 `examples/agent.rs` 的
+// 装载期门禁的全部事实面（运行期执行模型在 `examples/egg.rs` 的
 // `tool_runner_tests` 里测）。
 // ============================================================================
 #[cfg(test)]
@@ -1747,9 +1747,9 @@ mod tool_contract_tests {
             assert!(error.contains("program"), "{error}");
         }
 
-        // 裸名 `ygg-agent` 本来就是合法形态（`execute_cli` 会把它解析到 current_exe）。
+        // 裸名 `egg` 本来就是合法形态（`execute_cli` 会把它解析到 current_exe）。
         let mut spec = cli_spec();
-        spec["program"] = json!("ygg-agent");
+        spec["program"] = json!("egg");
         assert!(parse_one(spec).is_ok());
     }
 
