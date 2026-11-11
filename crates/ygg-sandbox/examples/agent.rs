@@ -294,6 +294,139 @@ struct Args {
     /// （解析见 [`resolve_harness_adapter`]）。它只影响「默认归档哪个会话库」，
     /// 不改变本局的任何状态机判定。
     harness: Option<String>,
+    /// `--actor <id>`：提交者身份（Agent 工具句柄命名空间，与 `exec=` 同一空间）。
+    /// 解析链：旗标 > 环境变量 `YGG_ACTOR`（daemon 模式再兜底请求字段，见
+    /// [`daemon_dispatch`]）。`None` = 未携带身份（宿主不注入不认领 opener）。
+    actor: Option<String>,
+    /// `--actor-session <id>`：提交者的原生会话 id（不透明审计字段，永不参与判定）。
+    /// 解析链与 `--actor` 完全对称：旗标 > `YGG_ACTOR_SESSION` > daemon 请求字段。
+    actor_session: Option<String>,
+}
+
+/// 提交者身份（宿主解析产物，随命令/请求一次性解析）。
+///
+/// `actor` 与 `exec=` / profile handle 同一命名空间（Agent 工具句柄），三态互证、
+/// resume 寻址、账本 join 都靠字符串相等；`session` 是原生会话 id，只作审计
+/// （事件行 → 磁盘会话文件的 grep 链），永不参与任何判定。两者独立解析、独立缺席。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ActorIdentity {
+    actor: Option<String>,
+    session: Option<String>,
+}
+
+impl ActorIdentity {
+    /// 未携带身份（所有派发走旧路径：不注入、不认领、不盖章）。
+    const NONE: ActorIdentity = ActorIdentity { actor: None, session: None };
+
+    /// 是否携带至少一段身份（opener 认领只认 `actor` 非空）。
+    fn has_actor(&self) -> bool {
+        self.actor.is_some()
+    }
+}
+
+/// 身份值形状（与 executor id 同规则的轻量版）：trim 非空、≤max 字节、无空白、无 `|`、
+/// 无引号/反斜杠。形状红线不是身份认证（同机进程模型下 env/flag 可伪造）；它只拦
+/// 「明显不是标识符 / 会破坏 wire 与 JSON 信封」的值。
+fn validate_identity_value(kind: &str, raw: &str, max: usize) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{kind} 不能为空"));
+    }
+    if trimmed.len() > max {
+        return Err(format!("{kind} 超长（> {max} 字节）"));
+    }
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err(format!("{kind} 不得含空白字符"));
+    }
+    if trimmed.contains('|') {
+        return Err(format!("{kind} 不得含 `|`（会破坏 wire format 段序）"));
+    }
+    if trimmed.contains('"') || trimmed.contains('\\') {
+        return Err(format!("{kind} 不得含引号或反斜杠（会破坏 JSON 标量信封）"));
+    }
+    Ok(trimmed.to_owned())
+}
+
+/// 提交者身份解析链：`--actor` > `YGG_ACTOR`；`--actor-session` > `YGG_ACTOR_SESSION`。
+/// 旗标与环境变量都做形状校验（解析点失败 = 用法错误）；环境变量空白串视为未设置。
+fn resolve_identity(args: &Args) -> Result<ActorIdentity, String> {
+    let actor = identity_value_from(
+        args.actor.as_ref(),
+        std::env::var("YGG_ACTOR").ok(),
+        "--actor",
+        64,
+    )?;
+    let session = identity_value_from(
+        args.actor_session.as_ref(),
+        std::env::var("YGG_ACTOR_SESSION").ok(),
+        "--actor-session",
+        128,
+    )?;
+    Ok(ActorIdentity { actor, session })
+}
+
+/// 单段身份值解析（纯核心，可测）：旗标优先，环境变量兑底（空白串 = 未设置）；
+/// 两处都做形状校验——非法值是错误，不是“静默无身份”。
+fn identity_value_from(
+    flag: Option<&String>,
+    env_raw: Option<String>,
+    kind: &str,
+    max: usize,
+) -> Result<Option<String>, String> {
+    match flag {
+        Some(raw) => Ok(Some(validate_identity_value(kind, raw, max)?)),
+        None => match env_raw {
+            Some(raw) if !raw.trim().is_empty() => {
+                Ok(Some(validate_identity_value(kind, &raw, max)?))
+            }
+            _ => Ok(None),
+        },
+    }
+}
+
+/// 声明路由的段注入（纯函数，可测）：宿主是唯一盖章方，段序固定
+/// `…|exec=…|actor=<id>|actor_session=<id>`（actor 在前，两者都可独立缺席）。
+/// 未声明 / 未携带 → 原样返回。
+///
+/// `payload` 是 **JSON 标量文本**（字符串形态以 `"` 收尾）：身份段插进字符串
+/// 内部（闭引号之前），保证内核 JSON 解析仍是合法标量；非字符串标量（数字 /
+/// 布尔）没有 wire 段可言，原样返回（声明路由上调用方用非字符串载荷本来就是
+/// 契约错误，由 mod 侧拒绝）。
+fn inject_identity_segments(
+    payload: &str,
+    actor: Option<&str>,
+    actor_session: Option<&str>,
+    declares_actor: bool,
+    declares_session: bool,
+) -> String {
+    let mut suffix = String::new();
+    if declares_actor {
+        if let Some(id) = actor {
+            suffix.push_str(&format!("|actor={id}"));
+        }
+    }
+    if declares_session {
+        if let Some(session_id) = actor_session {
+            suffix.push_str(&format!("|actor_session={session_id}"));
+        }
+    }
+    if suffix.is_empty() {
+        return payload.to_owned();
+    }
+    let trimmed = payload.trim_end();
+    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        format!("{}{}\"", &trimmed[..trimmed.len() - 1], suffix)
+    } else {
+        payload.to_owned()
+    }
+}
+
+/// 身份解析失败 → 用法错误（退出码 2，与其它旗标错误同一口径）。
+fn resolve_identity_or_usage(args: &Args) -> ActorIdentity {
+    match resolve_identity(args) {
+        Ok(identity) => identity,
+        Err(message) => usage_error(&message),
+    }
 }
 
 /// `--builtin-tool` 的操作枚举（解析即校验；未知值 = 用法错误，拼出全部合法值）。
@@ -368,6 +501,8 @@ fn parse_args() -> Args {
     let mut builtin_tool: Option<BuiltinTool> = None;
     let mut daemon = false;
     let mut harness: Option<String> = None;
+    let mut actor: Option<String> = None;
+    let mut actor_session: Option<String> = None;
 
     // 写 inbox 的七个参数共享同一套「只能给一个」的校验。
     fn set_inbox(inbox: &mut Option<InboxWrite>, flag: &'static str, value: String) {
@@ -398,6 +533,19 @@ fn parse_args() -> Args {
             }
             "--event" => event = Some(next_value(&mut iter, "--event")),
             "--payload" => payload = Some(next_value(&mut iter, "--payload")),
+            "--actor" => {
+                let raw = next_value(&mut iter, "--actor");
+                // 形状校验在解析点（与 executor id 同规则）：非法值 = 用法错误，
+                // 绝不带病进 dispatch（那个值会被注入 wire 段）。
+                actor = Some(validate_identity_value("--actor", &raw, 64).unwrap_or_else(|m| usage_error(&m)));
+            }
+            "--actor-session" => {
+                let raw = next_value(&mut iter, "--actor-session");
+                actor_session = Some(
+                    validate_identity_value("--actor-session", &raw, 128)
+                        .unwrap_or_else(|m| usage_error(&m)),
+                );
+            }
             "--drive" => {
                 let text = next_value(&mut iter, "--drive");
                 drive = match parse_drive(&text) {
@@ -516,6 +664,8 @@ fn parse_args() -> Args {
             builtin_tool,
             daemon,
             harness,
+            actor,
+            actor_session,
         };
     }
 
@@ -608,6 +758,8 @@ fn parse_args() -> Args {
         builtin_tool,
         daemon,
         harness,
+        actor,
+        actor_session,
     }
 }
 
@@ -654,6 +806,11 @@ fn usage(code: i32) -> ! {
   --watch            交互模式下每步检查 mod 目录 mtime 变化并热载
   --event <名称>     单发模式：派发一个事件后退出（stdout 单行 JSON 回执）
   --payload <JSON>   事件 payload（缺省 = Mod 契约的 agent.defaultPayload；必须 JSON 标量）
+  --actor <id>       提交者身份（Agent 工具句柄，与 exec=/profile handle 同一命名空间；
+                     ≤64 字节、无空白、无 `|`）。解析链 --actor > 环境变量 YGG_ACTOR
+                     > daemon 请求字段。声明了 actor 段的路由会由宿主注入 `|actor=<id>`
+                     并拦截调用方自带的同名段（ACTOR_FORGED）；携带身份的成功写命令
+                     /成功派发会先到先得认领 run.json 的 opener_actor（不可变）
   --drive <方式>     交互模式推方式（默认 stdin；宿主不替你做决策）：
                        stdin      读 stdin：数字=选择 / event <名称> [JSON] / s / l / i / config / q
                        cmd:<路径> 不读 stdin：每个待选动作交给决策命令（stdout 单行 `N` 或
@@ -680,13 +837,19 @@ fn usage(code: i32) -> ! {
    --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）
   --daemon           常驻守护模式：stdin 逐行读 JSON 请求
                      （dispatch/summary/state/vfs_put/vfs_get/vfs_list/settle/ping/shutdown），
-                     stdout 逐行回 JSON。请求可带 \"id\" 字段（原样回显）；stdout 只有协议面，
+                     stdout 逐行回 JSON。请求可带 \"id\" 字段（原样回显）；dispatch 请求可带
+                     \"actor\"/\"actor_session\" 字段（提交者身份，仅在旗标与环境变量都缺席时兑底）。
+                     stdout 只有协议面，
                      人读输出一律走 stderr。局已存在时自动续局（无需 --resume），
                      `settle` 与独立 --settle 同一实现并终结本局
   --harness <h>      harness 适配器：auto（缺省，按现场探测）/ pi / claude-code / codex / generic。
                      解析顺序 = --harness > 环境变量 YGG_HARNESS > <mod>/data/config.json 的
                      harness.adapter > auto；只决定 `--builtin-tool archive-sessions` 默认归档哪个
                      会话库（generic 没有会话库：记 moved=0;remaining=0），不改变任何状态判定
+  --actor-session <id> 提交者的原生会话 id（不透明审计字段：事件行 → 磁盘会话文件的
+                     grep 链；永不参与判定、不做 resume 寻址键；≤128 字节、无空白、无 `|`）。
+                     解析链与 --actor 对称：旗标 > YGG_ACTOR_SESSION > daemon 请求字段；
+                     两者可独立携带，inbox 记录盖宿主保留键 actor/actor_session（None 不写键）
   --store <后端>     存储后端断言：sqlite（默认，<run 目录>/run.sqlite）|
                      json（兼容后端，autosave.json + events.jsonl）。run.json 的
                      \"store\" 字段是权威：与 --store 不一致即拒绝开局（零写入）；
@@ -1129,6 +1292,10 @@ struct Session {
     resumed: bool,
     /// `--harness` 适配器覆盖（供进程内内置工具 `archive-sessions` 读取）。
     harness: Option<String>,
+    /// 本进程的提交者身份（旗标 > 环境变量，见 [`resolve_identity`]）。
+    /// daemon 模式下请求字段可在其上按链补充；drain 派发用**记录自带**身份，
+    /// 不用本字段（谁写的行归谁）。
+    identity: ActorIdentity,
 }
 
 /// 单段 drain 的「过慢」阈值（plan-r5 §2.6 临界区时长守护：观测不阻断）。
@@ -1222,6 +1389,7 @@ impl Session {
             summary_cache: None,
             resumed: false,
             harness: args.harness.clone(),
+            identity: resolve_identity_or_usage(args),
         };
         session.mount_tool_runner();
 
@@ -1422,7 +1590,11 @@ impl Session {
         let started_at = read_meta(&self.meta_path)
             .and_then(|meta| meta["started_at"].as_u64())
             .unwrap_or_else(now_secs);
-        let meta = json!({
+        // opener 是既成事实（先到先得、不可变）：重写 meta 时原样带回
+        //（与 started_at 的保留逻辑同法）——否则开局 / reset / 热载后的
+        // 任意一次 write_meta 都会把认领记录抹掉。
+        let opener_actor = read_meta(&self.meta_path).and_then(|meta| meta.get("opener_actor").cloned());
+        let mut meta = json!({
             "run_id": self.run_id,
             "mod": self.mod_label,
             "mod_signature": self.signature_label(),
@@ -1432,6 +1604,9 @@ impl Session {
             // `--store` 仅是开局断言；旧局没有这个键 → 按产物推断为 json。
             "store": self.store.backend().as_str(),
         });
+        if let Some(opener) = opener_actor {
+            meta["opener_actor"] = opener;
+        }
         let mut text = match serde_json::to_string_pretty(&meta) {
             Ok(text) => text,
             Err(err) => {
@@ -1696,7 +1871,11 @@ impl Session {
             // payload 必须是 **JSON 字符串**（内核要求 JSON 标量），不是裸 wire format。
             let payload = json!(fields).to_string();
             let action = route.action.clone();
-            let receipt = self.dispatch_event(&action, &payload);
+            // 身份随记录走（谁写的行归谁）：写命令/worker 落行时宿主盖的保留键
+            // actor/actor_session 在这里取回，经 dispatch_event_as 注入声明路由。
+            let actor = record["actor"].as_str().map(str::to_owned);
+            let actor_session = record["actor_session"].as_str().map(str::to_owned);
+            let receipt = self.dispatch_event_as(&action, &payload, actor.as_deref(), actor_session.as_deref());
             let rejected =
                 receipt["ok"] != Json::Bool(true) || dispatch_rejected(&self.contract, &receipt);
             if rejected {
@@ -1813,9 +1992,49 @@ impl Session {
     /// （唯一事实源，删进程内计数器），事件行单次 write_all，成功步存档同临界区。
     /// 锁内失败的失败面（写 event 成功、写存档失败的偏斜）在同一进程内被消除；
     /// 跨进程的「事件与状态原子同提交」不是 P0 的承诺。
+    ///
+    /// 旧签名（不带身份）委托 [`Session::dispatch_event_as`]：所有历史调用点
+    /// （drain 无记录身份时 / scene-1 工具结果 / playtest 等）语义逐字节不变。
     fn dispatch_event(&mut self, name: &str, payload: &str) -> Json {
-        let envelope = parse_envelope(&self.kernel.dispatch(name, payload)); // 锁外：Lua 计算
-                                                                             // 真实派发可能已经改变语义面（阶段 / 结局 / 提案 / 冲突）→ 摘要缓存失效。
+        self.dispatch_event_as(name, payload, None, None)
+    }
+
+    /// 带提交者身份的派发（宿主通道单点）：声明了身份段的路由由宿主注入
+    /// `|actor=<id>` / `|actor_session=<id>`（相对顺序固定 actor 在前），
+    /// 并把调用方自带的同名段判为伪造（不派发不落盘）；任意事件回执回显
+    /// resolved 身份（加性键，None → null）；携带身份的成功步在同一持久化
+    /// 临界区内先到先得认领 opener（不可变）。
+    fn dispatch_event_as(
+        &mut self,
+        name: &str,
+        payload: &str,
+        actor: Option<&str>,
+        actor_session: Option<&str>,
+    ) -> Json {
+        // 身份段声明来自路由表（声明承重：未声明的动作没有身份段，宿主不碰载荷）。
+        let (declares_actor, declares_session) = self.inbox_routes.actor_flags_for(name);
+        // ① 保留段伪造拦截：宿主是唯一合法的盖章方，调用方载荷自带 `actor=` /
+        //    `actor_session=` 段一律拒绝——不派发、不落盘、不占 seq。
+        if let Some(receipt) = self.actor_forged_receipt(
+            name,
+            payload,
+            actor,
+            actor_session,
+            declares_actor,
+            declares_session,
+        ) {
+            return receipt;
+        }
+        // ② 声明路由的段注入（exec= 之后、相对顺序固定：actor → actor_session）。
+        let payload = &inject_identity_segments(
+            payload,
+            actor,
+            actor_session,
+            declares_actor,
+            declares_session,
+        );
+        let envelope = parse_envelope(&self.kernel.dispatch(name, &payload)); // 锁外：Lua 计算
+        // 真实派发可能已经改变语义面（阶段 / 结局 / 提案 / 冲突）→ 摘要缓存失效。
         self.summary_cache = None;
         let ok = envelope["ok"] == Json::Bool(true);
         let narrative = narrative_lines(&envelope);
@@ -1844,7 +2063,7 @@ impl Session {
                 .store
                 .commit_step(StepDraft {
                     event: name,
-                    payload,
+                    payload: &payload,
                     ok,
                     narrative_count: narrative.len(),
                     // 时间戳由宿主给：端口不取时钟（否则黄金样本永不可重放）。
@@ -1855,6 +2074,20 @@ impl Session {
                 .map_err(|err| err.to_string())?;
             // 非致命告警（事件行超大 / 写入失败但步继续）保持现状语义。
             session.notices.extend(committed.warnings);
+            // opener 认领（仅成功步 + 携带身份；锁重入直接成功——同一临界区）。
+            // 被拒 / 失败的派发不认领：失败命令不配当开局者。认领失败不阻断
+            // 已提交的步（run.json 是元信息面），降级为警告。
+            if ok {
+                if let Some(id) = actor {
+                    if let Err(message) =
+                        claim_opener(&session.run_dir, id, actor_session)
+                    {
+                        session
+                            .notices
+                            .push(format!("opener 认领失败（不影响本步）：{message}"));
+                    }
+                }
+            }
             Ok(committed.seq)
         });
         let seq = match persisted {
@@ -1905,8 +2138,62 @@ impl Session {
         if !tool_runs.is_empty() {
             receipt["tools"] = json!(tool_runs);
         }
+        // 提交者章回显（§3.5 增强，任意事件；加性键，None → null）：
+        // config.set 等非声明路由的直派回执也带提交者章，主 Agent 代写与
+        // subagent 自主写（如 profile 注册）在回执面可区分。章只进回执，
+        // 不进事件行、不进 wire（wire 段注入仅限声明路由）。
+        receipt["actor"] = json!(actor);
+        receipt["actor_session"] = json!(actor_session);
         self.reload = None;
         receipt
+    }
+
+    /// 保留段伪造拦截：声明了身份段的路由上，调用方载荷自带 `actor=` /
+    /// `actor_session=` 段一律拒绝（宿主是唯一盖章方；没有宿主章的“身份”
+    /// 不该存在）。返回 `Some(回执)` = 已拦截：未派发、未落盘、seq 不前进。
+    fn actor_forged_receipt(
+        &mut self,
+        name: &str,
+        payload: &str,
+        actor: Option<&str>,
+        actor_session: Option<&str>,
+        declares_actor: bool,
+        declares_session: bool,
+    ) -> Option<Json> {
+        if !declares_actor && !declares_session {
+            return None;
+        }
+        let offending = payload.split('|').find_map(|segment| {
+            let segment = segment.trim();
+            // `actor_session=x` 不匹配 `actor=` 前缀（第 6 字节是 `_` 不是 `=`），
+            // 两个保留段可独立判定。
+            if declares_actor && segment.starts_with("actor=") {
+                return Some("actor=");
+            }
+            if declares_session && segment.starts_with("actor_session=") {
+                return Some("actor_session=");
+            }
+            None
+        });
+        let segment = offending?;
+        let message = format!(
+            "载荷自带保留段 `{segment}`…：宿主是 `{name}` 身份段的唯一盖章方（携带身份请用 \
+             --actor / YGG_ACTOR / daemon 请求字段），本步未派发未落盘",
+        );
+        let envelope = json!({
+            "ok": false,
+            "error": {"code": "ACTOR_FORGED", "message": message},
+        });
+        let pending = self.state_envelope()["pendingChoice"].clone();
+        let narrative = vec![format!("[ACTOR FORGED] {message}")];
+        Some(self.build_receipt(
+            name,
+            self.count_events(),
+            &envelope,
+            &narrative,
+            None,
+            pending,
+        ))
     }
 
     /// 单发 / 交互统一回执（stdout 契约本体）。
@@ -3158,6 +3445,7 @@ fn append_tool_result_record(
     kind: &str,
     payload: &str,
     run_id: &str,
+    identity: &ActorIdentity,
 ) -> Result<Json, String> {
     let route = routes
         .get(kind)
@@ -3189,6 +3477,14 @@ fn append_tool_result_record(
             }
         }
     }
+    // 提交者章（worker 自身环境的身份解析产物；None 不写键）：与 `--requirement`
+    // 写命令同一套保留键，drain 消费时按记录取回注入声明路由。
+    if let Some(actor) = &identity.actor {
+        record["actor"] = json!(actor);
+    }
+    if let Some(session) = &identity.session {
+        record["actor_session"] = json!(session);
+    }
     // 写前登记（与 `--requirement` 同一准入门禁）：closing / finalized 一律拒绝。
     let token = begin_write(run_dir).map_err(|gate| match gate {
         WriteGate::Closing => {
@@ -3198,6 +3494,14 @@ fn append_tool_result_record(
         WriteGate::Internal(message) => message,
     })?;
     let pushed = store.inbox_push(&record, clock());
+    if pushed.is_ok() {
+        // opener 认领（成功落行 + 携带身份；仍在 token 临界区内，与写命令同位）。
+        if let Some(actor) = &identity.actor {
+            if let Err(message) = claim_opener(run_dir, actor, identity.session.as_deref()) {
+                eprintln!("[警告] opener 认领失败（不影响本条写入）：{message}");
+            }
+        }
+    }
     end_write(run_dir, &token);
     pushed.map_err(|err| err.to_string())?;
     Ok(record)
@@ -4825,6 +5129,44 @@ fn coordination_update<T>(run_dir: &Path, f: impl FnOnce(&mut Json) -> T) -> Res
     Ok(out)
 }
 
+/// opener 冷启动认领（§r3：本局首条**携带身份**的成功写先到先得、不可变）。
+///
+/// `run.json` 增可选字段 `opener_actor` = `{actor, session?, at}`：读档发现已
+/// 存在 → `false`（连 `at` 都不刷新——开局时刻是事实，同 id 重复 claim 也是
+/// no-op）；缺失 → tmp+rename 原子写入并返回 `true`。锁可重入：inbox 路径已
+/// 持 token、dispatch 路径在持久化临界区内，同进程重入直接成功，跨进程由
+/// `coordination.lock` 串行——「不同 actor 竞争首个 claim」严格先到先得，
+/// 后来者不报错不拒绝（多 subagent 各带身份写命令是常态）。
+///
+/// 无身份（actor 空）的调用方**根本不进**本函数：失败探针 / 被拒派发不认领，
+/// 开局者只可能是一条真实发生且带身份的成功写。
+fn claim_opener(run_dir: &Path, actor: &str, session: Option<&str>) -> Result<bool, String> {
+    let _guard = acquire_run_lock(run_dir)?;
+    let meta_path = run_dir.join(META_FILE);
+    let mut meta = read_meta(&meta_path).unwrap_or_else(|| json!({}));
+    if meta["opener_actor"]["actor"].as_str().is_some() {
+        return Ok(false); // 先到先得、不可变：已有开局者，包括同 id 重复 claim
+    }
+    let mut opener = json!({ "actor": actor, "at": now_secs() });
+    if let Some(session_id) = session {
+        opener["session"] = json!(session_id);
+    }
+    meta["opener_actor"] = opener;
+    let mut text = serde_json::to_string_pretty(&meta)
+        .map_err(|err| format!("序列化 {} 失败：{err}", meta_path.display()))?;
+    text.push('\n');
+    atomic_write(&meta_path, text.as_bytes())
+        .map_err(|err| format!("写 opener_actor 失败：{err}"))?;
+    Ok(true)
+}
+
+/// 读本局已认领的 opener（run.json 是元信息面：读不到 = 尚无开局者）。
+fn read_opener(run_dir: &Path) -> Option<String> {
+    read_meta(&run_dir.join(META_FILE))? ["opener_actor"] ["actor"]
+        .as_str()
+        .map(str::to_owned)
+}
+
 /// 写命令的准入结果。
 #[derive(Debug)]
 enum WriteGate {
@@ -5029,7 +5371,16 @@ fn run_single(args: &Args) -> i32 {
     // 被拒（局末 / 队列满 / 载荷）不阻碍本次派发，但会落 `inbox.remaining` + 警告。
     let drain = session.drain_inbox();
 
-    let mut receipt = session.dispatch_event(&event, &payload);
+    // 单发是 Agent 脚本化的主通道：解析链（旗标 > 环境）已在 open 时折进
+    // session.identity，这里原样交给 dispatch_event_as（声明路由注入 / 回显 /
+    // opener 认领都在那单点）。未携带身份 = 旧语义逐字节。
+    let identity = session.identity.clone();
+    let mut receipt = session.dispatch_event_as(
+        &event,
+        &payload,
+        identity.actor.as_deref(),
+        identity.session.as_deref(),
+    );
     if receipt["ok"] == Json::Bool(true) && receipt.get("harnessActions").is_none() {
         let actions = envelope_harness_actions(&receipt, &session.contract.meta_key);
         if !actions.is_empty() {
@@ -5221,6 +5572,9 @@ fn run_tool_worker(args: &Args, call_id: &str) -> i32 {
                 )
             })?;
         let mut store = open_store_resolved(&run_dir, args.store)?;
+        // worker 自身环境的身份（spawn 侧注入 YGG_ACTOR / YGG_ACTOR_SESSION；
+        // 未注入 = 不盖章不认领，交付行为不变）。
+        let identity = resolve_identity(args)?;
         append_tool_result_record(
             &run_dir,
             store.as_mut(),
@@ -5228,6 +5582,7 @@ fn run_tool_worker(args: &Args, call_id: &str) -> i32 {
             &kind,
             &result.payload,
             &args.run_id,
+            &identity,
         )
         .map(|_| ())
     })();
@@ -5531,10 +5886,22 @@ fn daemon_dispatch(session: &mut Session, req: &Json) -> Json {
             )
         }
     };
+    // 提交者身份（解析链与单发同序：旗标 > 环境 > 请求字段；前两层已折进
+    // session.identity，请求字段只在前面都缺席时兑底）。请求字段形状非法
+    // → 可读错误应答（守护模式没有“用法错误”，拒绝就是应答）。
+    let identity = match merge_request_identity(&session.identity, req) {
+        Ok(identity) => identity,
+        Err(message) => return daemon_error("dispatch", &message),
+    };
     // 与单发模式同序：先现查 Mod（热载），再把 inbox 存量排干净，最后派发本次事件。
     session.maybe_reload();
     let drain = session.drain_inbox();
-    let mut receipt = session.dispatch_event(event, &payload);
+    let mut receipt = session.dispatch_event_as(
+        event,
+        &payload,
+        identity.actor.as_deref(),
+        identity.session.as_deref(),
+    );
     if drain.touched() {
         receipt["inbox"] = drain.to_json();
     }
@@ -5545,6 +5912,27 @@ fn daemon_dispatch(session: &mut Session, req: &Json) -> Json {
     receipt["summary"] = summary_json;
     receipt["op"] = json!("dispatch");
     receipt
+}
+
+/// daemon `op=dispatch` 请求字段的身份合并：请求里的 `actor` / `actor_session`
+/// 只在本进程旗标与环境变量都缺席时兑底（与单发解析链同序）；形状非法 →
+/// 可读错误（拒绝就是应答）。
+fn merge_request_identity(base: &ActorIdentity, req: &Json) -> Result<ActorIdentity, String> {
+    let actor = match base.actor.clone() {
+        Some(actor) => Some(actor),
+        None => match req["actor"].as_str() {
+            Some(raw) => Some(validate_identity_value("actor", raw, 64)?),
+            None => None,
+        },
+    };
+    let session = match base.session.clone() {
+        Some(session) => Some(session),
+        None => match req["actor_session"].as_str() {
+            Some(raw) => Some(validate_identity_value("actor_session", raw, 128)?),
+            None => None,
+        },
+    };
+    Ok(ActorIdentity { actor, session })
 }
 
 /// `vfs_put`：写制品到本局后端，并**同时**灌进内核的 `ygg.fs`。
@@ -5663,6 +6051,9 @@ fn run_inbox_append(args: &Args) -> i32 {
     let Some(write) = args.inbox.clone() else {
         return 2;
     };
+    // 提交者身份（旗标 > 环境）：解析失败 = 用法错误（退出 2）；未携带身份
+    // 只是不盖章不认领 opener，不改变写命令本身的任何语义（inbox 写路径零变化）。
+    let identity = resolve_identity_or_usage(args);
     let run_dir = args.runs_root.join(&args.run_id);
     if let Err(err) = fs::create_dir_all(&run_dir) {
         eprintln!("error: 创建 run 目录 {} 失败：{err}", run_dir.display());
@@ -5740,14 +6131,40 @@ fn run_inbox_append(args: &Args) -> i32 {
         // 预成形 wire 形态：整串载荷进契约声明的载荷字段（宿主不解析、不重排）。
         WriteShape::Payload => record[payload_field] = json!(write.value.trim()),
     }
+    // 提交者章（宿主保留字段，消费方 drain 读回后经 dispatch_event_as 注入声明
+    // 路由；None 不写键——记录里没有“空身份”这种东西）。payload 形态的载荷
+    // 不掺身份：身份只进 record 键，wire 段由派发侧注入。
+    if let Some(actor) = &identity.actor {
+        record["actor"] = json!(actor);
+    }
+    if let Some(session) = &identity.session {
+        record["actor_session"] = json!(session);
+    }
     let receipt = match store.inbox_push(&record, clock()) {
         Ok(()) => {
+            // opener 认领（首条带身份的成功写，先到先得）：失败不阻断已落盘的
+            // 行（run.json 是元信息面），降级为 stderr 警告。
+            let mut claimed_opener = None;
+            if let Some(actor) = &identity.actor {
+                match claim_opener(&run_dir, actor, identity.session.as_deref()) {
+                    Ok(_) => {}
+                    Err(message) => eprintln!("[警告] opener 认领失败（不影响本条写入）：{message}"),
+                }
+                claimed_opener = read_opener(&run_dir);
+            }
             // 回执键 = 记录的契约字段名（幂等键 / 载荷 / 各命名段）：调用方不必猜。
             let mut receipt = json!({
                 "ok": true,
                 "inbox": path.display().to_string(),
                 "kind": kind,
+                // 提交者章回显（None → null）；仅携带身份的写命令回显 opener
+                //（null 只在理论竞态失败方出现，锁串行下实际不会）。
+                "actor": identity.actor,
+                "actor_session": identity.session,
             });
+            if identity.has_actor() {
+                receipt["opener"] = claimed_opener.map(Json::String).unwrap_or(Json::Null);
+            }
             receipt[external_field] = record[external_field].clone();
             receipt[payload_field] = record.get(payload_field).cloned().unwrap_or(Json::Null);
             for field in route.named_fields(external_field) {
@@ -6548,6 +6965,8 @@ mod mod_dir_alias_tests {
             builtin_tool: None,
             daemon: false,
             harness: None,
+            actor: None,
+            actor_session: None,
         }
     }
 
@@ -8224,6 +8643,8 @@ mod multiscript_hot_reload_tests {
             builtin_tool: None,
             daemon: false,
             harness: None,
+            actor: None,
+            actor_session: None,
         }
     }
 
@@ -8662,6 +9083,8 @@ end)
             builtin_tool: None,
             daemon: false,
             harness: None,
+            actor: None,
+            actor_session: None,
         }
     }
 
@@ -9620,6 +10043,8 @@ end)
             builtin_tool: None,
             daemon: false,
             harness: None,
+            actor: None,
+            actor_session: None,
         }
     }
 
@@ -10320,6 +10745,8 @@ end)
             builtin_tool: None,
             daemon: false,
             harness: None,
+            actor: None,
+            actor_session: None,
         }
     }
 
@@ -10975,6 +11402,8 @@ end)
             builtin_tool: None,
             daemon: true,
             harness: None,
+            actor: None,
+            actor_session: None,
         }
     }
 
@@ -11227,6 +11656,439 @@ end)
             "重启必须续局（ticks 从 1 累到 2）：{step}"
         );
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+// ============================================================================
+// §提交者身份通道（r3）：解析链 / 段注入 / 伪造拦截 / 回显 / opener
+//
+// 合成 Mod 自带一条声明了 actor+actor_session 的 proposal 路由与一条未声明的
+// 事件，全部断言走宿主回执与 run.json 事实面（不读真 Mod、不跑 playtest）。
+// ============================================================================
+#[cfg(test)]
+mod identity_channel_tests {
+    use super::*;
+
+    /// 用例专属临时目录（互不共享；先清空再建）。
+    fn case_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-identity-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    /// 最小合成 Mod：proposal 路由声明两布尔 + 一个透传事件（未声明身份段）+
+    /// 一个必败事件（mod 侧拒绝路径）。
+    fn write_identity_mod(dir: &Path) {
+        fs::create_dir_all(dir.join("data")).expect("建 data 目录");
+        let pack = json!({
+            "schemaVersion": 1,
+            "entries": [],
+            "schemaFiles": [],
+            "agent": {
+                "entryEvent": "event.start",
+                "choiceEvent": "ygg.choice_selected",
+                "summaryEvent": "agent.summary",
+                "endingPrefix": "【结局",
+                "metaKey": "summary",
+                "rejectionPrefixes": ["【拒绝】"],
+                "replayPrefix": "【重放】",
+                "defaultPayload": "0"
+            },
+            "inboxRoutes": {
+                "externalIdField": "external_id",
+                "payloadField": "payload",
+                "extMarker": "@ext=",
+                "proposal": {
+                    "action": "proposal.submit",
+                    "fields": ["req", "rev", "stage", "summary", "artifacts", "changes", "external_id"],
+                    "actor": true,
+                    "actor_session": true,
+                    "write": {"flag": "proposal", "shape": "payload"}
+                },
+                "tool_result": {
+                    "action": "tool.result",
+                    "fields": ["call_id", "tool_id", "status", "code", "output", "external_id"],
+                    "write": {"flag": "tool-result", "shape": "payload"}
+                }
+            }
+        });
+        write_json_pretty(&dir.join(PACK_FILE), &pack).expect("写 pack.json");
+        fs::write(
+            dir.join(MANIFEST_FILE),
+            r#"{"schemaVersion": 1, "entries": [], "code": []}"#,
+        )
+        .expect("写 manifest.json");
+        fs::write(
+            dir.join("mod.lua"),
+            r#"ygg.on("event.start", function()
+  ygg.narrate("开局")
+end)
+ygg.on("event.echo", function(payload)
+  ygg.kv.set("echoed", tostring(payload))
+  ygg.narrate("回显：" .. tostring(payload))
+end)
+ygg.on("event.boom", function()
+  error("boom")
+end)
+ygg.on("proposal.submit", function(payload)
+  ygg.kv.set("proposal_payload", tostring(payload))
+  ygg.narrate("提案载荷：" .. tostring(payload))
+end)
+ygg.on("tool.result", function(payload)
+  ygg.kv.set("last_tool_payload", tostring(payload))
+  ygg.narrate("工具结果：" .. tostring(payload))
+end)
+"#,
+        )
+        .expect("写 mod.lua");
+        let config = json!({
+            "drive": {"maxSteps": 50, "stallLimit": 5, "stepsPerRequirement": 20},
+            "settlement": {
+                "requireEvents": true,
+                "requireNoFailedSteps": true,
+                "requireEnding": true,
+                "requireInboxConsumed": true
+            },
+        });
+        write_json_pretty(&dir.join("data").join("config.json"), &config).expect("写 config.json");
+    }
+
+    /// 本模块的 Args 基底（其余字段钉成「单发新局」；身份两字段按调用方给）。
+    fn base_args(mod_dir: &Path, runs_root: &Path, run_id: &str, actor: Option<String>, session: Option<String>) -> Args {
+        Args {
+            mod_dir: Some(mod_dir.to_path_buf()),
+            run_id: run_id.to_owned(),
+            runs_root: runs_root.to_path_buf(),
+            resume: false,
+            settle: false,
+            watch: false,
+            event: None,
+            payload: None,
+            drive: Drive::None,
+            inbox: None,
+            store: Some(ygg_store::Backend::Json),
+            wait_tools: false,
+            tool_timeout_ms: None,
+            run_tool_worker: None,
+            artifact_put: None,
+            artifact_get: None,
+            builtin_tool: None,
+            daemon: false,
+            harness: None,
+            actor,
+            actor_session: session,
+        }
+    }
+
+    fn open_session(dir: &Path, tag: &str, actor: Option<&str>, session: Option<&str>) -> Session {
+        write_identity_mod(dir);
+        let runs_root = dir.join("runs");
+        let args = base_args(
+            dir,
+            &runs_root,
+            tag,
+            actor.map(str::to_owned),
+            session.map(str::to_owned),
+        );
+        Session::open(&args).expect("开局")
+    }
+
+    /// run.json 的 opener_actor（未认领 = None）。
+    fn opener_of(run_dir: &Path) -> Option<String> {
+        read_meta(&run_dir.join(META_FILE))? ["opener_actor"] ["actor"]
+            .as_str()
+            .map(str::to_owned)
+    }
+
+    // ── 形状与解析链 ─────────────────────────────────────────────
+
+    #[test]
+    fn identity_value_shape_rejects_bad_values() {
+        assert!(validate_identity_value("--actor", "agent-1", 64).is_ok());
+        assert!(validate_identity_value("--actor", "  agent-1  ", 64).is_ok()); // trim 后合法
+        assert!(validate_identity_value("--actor", "", 64).is_err(), "空值必拒");
+        assert!(validate_identity_value("--actor", "a b", 64).is_err(), "空白必拒");
+        assert!(validate_identity_value("--actor", "a|b", 64).is_err(), "竖线必拒");
+        assert!(validate_identity_value("--actor", &"x".repeat(65), 64).is_err(), "超长必拒");
+        assert!(validate_identity_value("--actor-session", &"x".repeat(128), 128).is_ok());
+        assert!(validate_identity_value("--actor-session", &"x".repeat(129), 128).is_err());
+    }
+
+    #[test]
+    fn identity_value_flag_beats_env_and_blank_env_is_absent() {
+        let flag = "flag-id".to_owned();
+        // 旗标 > 环境
+        assert_eq!(
+            identity_value_from(Some(&flag), Some("env-id".to_owned()), "--actor", 64)
+                .expect("旗标合法"),
+            Some("flag-id".to_owned())
+        );
+        // 无旗标 → 环境
+        assert_eq!(
+            identity_value_from(None, Some("env-id".to_owned()), "--actor", 64).expect("环境合法"),
+            Some("env-id".to_owned())
+        );
+        // 环境空白 = 未设置
+        assert_eq!(
+            identity_value_from(None, Some("   ".to_owned()), "--actor", 64).expect("空白视为缺省"),
+            None
+        );
+        // 都缺 → None
+        assert_eq!(identity_value_from(None, None, "--actor", 64).expect("都缺视为缺省"), None);
+        // 非法环境值 = 错误（不是静默无身份）
+        assert!(identity_value_from(None, Some("a b".to_owned()), "--actor", 64).is_err());
+    }
+
+    #[test]
+    fn identity_segments_inject_in_fixed_relative_order_and_independently() {
+        // 载荷是 JSON 字符串标量：身份段插进闭引号**之前**（内核解析仍是合法 JSON）。
+        // 双段：actor 在前
+        assert_eq!(
+            inject_identity_segments("\"r1|1|plan|s|a.md||x\"", Some("agent-1"), Some("s-1"), true, true),
+            "\"r1|1|plan|s|a.md||x|actor=agent-1|actor_session=s-1\""
+        );
+        // 只声明 actor（未声明 session 即使携带也不注入）
+        assert_eq!(
+            inject_identity_segments("\"a\"", Some("agent-1"), Some("s-1"), true, false),
+            "\"a|actor=agent-1\""
+        );
+        // 只声明 session
+        assert_eq!(
+            inject_identity_segments("\"a\"", Some("agent-1"), Some("s-1"), false, true),
+            "\"a|actor_session=s-1\""
+        );
+        // 声明但未携带 → 原样
+        assert_eq!(inject_identity_segments("\"a\"", None, None, true, true), "\"a\"");
+        // 未声明 → 原样（宿主不碰载荷）
+        assert_eq!(
+            inject_identity_segments("\"a\"", Some("agent-1"), None, false, false),
+            "\"a\""
+        );
+        // 非字符串标量（数字）：无处可插，原样返回
+        assert_eq!(inject_identity_segments("0", Some("agent-1"), None, true, true), "0");
+    }
+
+    #[test]
+    fn daemon_request_identity_fills_only_when_base_absent() {
+        let base = ActorIdentity {
+            actor: Some("base-actor".to_owned()),
+            session: None,
+        };
+        let req = json!({"actor": "req-actor", "actor_session": "req-session"});
+        // 链：旗标 > 环境（已折进 base） > 请求字段 —— base.actor 优先，session 由请求补
+        let merged = merge_request_identity(&base, &req).expect("合并合法");
+        assert_eq!(merged.actor.as_deref(), Some("base-actor"));
+        assert_eq!(merged.session.as_deref(), Some("req-session"));
+        // base 全缺 → 请求字段兜底
+        let merged = merge_request_identity(&ActorIdentity::NONE, &req).expect("合并合法");
+        assert_eq!(merged.actor.as_deref(), Some("req-actor"));
+        assert_eq!(merged.session.as_deref(), Some("req-session"));
+        // 请求字段形状非法 → 可读错误
+        let bad = json!({"actor": "a b"});
+        assert!(merge_request_identity(&ActorIdentity::NONE, &bad).is_err());
+    }
+
+    // ── 伪造拦截与注入（Session 级） ─────────────────────────────
+
+    #[test]
+    fn forged_actor_segment_is_rejected_without_dispatch_or_persist() {
+        let dir = case_dir("forged");
+        let mut session = open_session(&dir, "forged-run", Some("agent-1"), None);
+        let before = session.count_events();
+        let receipt = session.dispatch_event_as(
+            "proposal.submit",
+            "\"r1|1|plan|s|artifacts/p.md||x|actor=fake\"",
+            Some("agent-1"),
+            None,
+        );
+        assert_eq!(receipt["ok"], Json::Bool(false), "必须拒绝：{receipt}");
+        assert_eq!(receipt["error"]["code"], json!("ACTOR_FORGED"));
+        assert_eq!(session.count_events(), before, "拦截不得占 seq / 落事件行");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn forged_actor_session_segment_is_rejected_too() {
+        let dir = case_dir("forged-session");
+        let mut session = open_session(&dir, "forged-session-run", None, Some("s-1"));
+        let receipt = session.dispatch_event_as(
+            "proposal.submit",
+            "\"r1|1|plan|s|artifacts/p.md||x|actor_session=fake\"",
+            None,
+            Some("s-1"),
+        );
+        assert_eq!(receipt["ok"], Json::Bool(false), "{receipt}");
+        assert_eq!(receipt["error"]["code"], json!("ACTOR_FORGED"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn declared_route_injects_segments_and_receipt_echoes_identity() {
+        let dir = case_dir("inject");
+        let mut session = open_session(&dir, "inject-run", Some("agent-1"), Some("s-1"));
+        let receipt = session.dispatch_event_as(
+            "proposal.submit",
+            "\"r1|1|plan|s|artifacts/p.md||x\"",
+            Some("agent-1"),
+            Some("s-1"),
+        );
+        assert_eq!(receipt["ok"], Json::Bool(true), "{receipt}");
+        assert_eq!(receipt["actor"], json!("agent-1"), "回显 resolved actor");
+        assert_eq!(receipt["actor_session"], json!("s-1"));
+        // 事件行里的载荷带双段（声明承重：mod 收到的是宿主章，不是调用方原文）
+        let payload = session.kernel.dispatch("save", "");
+        let kv = parse_envelope(&payload)["save"]["kv"]["entries"]["proposal_payload"]
+            .as_str()
+            .expect("mod 已存提案载荷")
+            .to_owned();
+        assert!(kv.ends_with("|actor=agent-1|actor_session=s-1"), "{kv}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn undeclared_route_never_injects_and_passes_caller_payload_through() {
+        let dir = case_dir("undeclared");
+        let mut session = open_session(&dir, "undeclared-run", Some("agent-1"), None);
+        let receipt = session.dispatch_event_as(
+            "event.echo",
+            "\"text-with-actor=inside\"",
+            Some("agent-1"),
+            None,
+        );
+        assert_eq!(receipt["ok"], Json::Bool(true), "{receipt}");
+        assert_eq!(receipt["actor"], json!("agent-1"), "任意事件回显章（增强）");
+        // 未声明路由：载荷原样透传（不注入、不拦截）
+        let saved = parse_envelope(&session.kernel.dispatch("save", ""))["save"]["kv"]["entries"]
+            ["echoed"]
+            .as_str()
+            .expect("mod 已存回显")
+            .to_owned();
+        assert_eq!(saved, "text-with-actor=inside", "{saved}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn receipt_without_identity_echoes_nulls() {
+        let dir = case_dir("echo-null");
+        let mut session = open_session(&dir, "echo-null-run", None, None);
+        let receipt = session.dispatch_event("event.echo", "\"x\"");
+        assert_eq!(receipt["ok"], Json::Bool(true));
+        assert_eq!(receipt["actor"], Json::Null, "None → null");
+        assert_eq!(receipt["actor_session"], Json::Null);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── opener 认领 ─────────────────────────────────────────────
+
+    #[test]
+    fn opener_first_claim_wins_and_is_immutable() {
+        let dir = case_dir("opener");
+        let run_dir = dir.join("runs").join("opener-run");
+        fs::create_dir_all(&run_dir).expect("建 run 目录");
+        assert_eq!(opener_of(&run_dir), None, "未认领");
+        assert!(claim_opener(&run_dir, "agent-1", Some("s-1")).expect("首认领"));
+        assert_eq!(opener_of(&run_dir).as_deref(), Some("agent-1"));
+        // 同 id 重复 claim → no-op（不可变，连 at 都不刷新）
+        assert!(!claim_opener(&run_dir, "agent-1", Some("s-1")).expect("重 claim"));
+        // 异 actor 竞争 → 先到先得，后来者不覆盖不报错
+        assert!(!claim_opener(&run_dir, "agent-2", None).expect("后来者"));
+        assert_eq!(opener_of(&run_dir).as_deref(), Some("agent-1"));
+        let meta = read_meta(&run_dir.join(META_FILE)).expect("读 run.json");
+        assert_eq!(meta["opener_actor"]["session"], json!("s-1"), "session 随首认领落盘");
+        assert!(meta["opener_actor"]["at"].as_u64().is_some(), "开局时刻是事实");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opener_claimed_by_successful_identity_dispatch_only() {
+        let dir = case_dir("opener-dispatch");
+        let run_dir = dir.join("runs").join("opener-dispatch-run");
+        let mut session = open_session(&dir, "opener-dispatch-run", None, None);
+        // 未携带身份的成功派发不认领
+        session.dispatch_event("event.echo", "\"x\"");
+        assert_eq!(opener_of(&run_dir), None);
+        // 携带身份的成功派发认领
+        session.dispatch_event_as("event.echo", "\"x\"", Some("agent-9"), None);
+        assert_eq!(opener_of(&run_dir).as_deref(), Some("agent-9"));
+        // mod 侧拒绝（ok=false）的成功送达不认领：失败步不配当开局者
+        let receipt = session.dispatch_event_as("event.boom", "\"0\"", Some("agent-10"), None);
+        assert_eq!(receipt["ok"], Json::Bool(false));
+        assert_eq!(opener_of(&run_dir).as_deref(), Some("agent-9"), "被拒派发不认领");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_meta_preserves_opener_across_reset_and_rewrite() {
+        let dir = case_dir("opener-meta");
+        let runs_root = dir.join("runs");
+        write_identity_mod(&dir);
+        // 旧局盘面：run.json 已有 opener_actor（升级后的旧局补认领形态）
+        let run_dir = runs_root.join("opener-meta-run");
+        fs::create_dir_all(&run_dir).expect("建 run 目录");
+        fs::write(
+            run_dir.join(META_FILE),
+            r#"{"run_id":"opener-meta-run","started_at":1,"opener_actor":{"actor":"old-agent","at":42}}"#,
+        )
+        .expect("写旧 run.json");
+        // Session::open（新局）会重写 run.json（write_meta）——opener 必须原样带回
+        let args = base_args(&dir, &runs_root, "opener-meta-run", None, None);
+        let session = Session::open(&args).expect("开局");
+        assert_eq!(opener_of(&run_dir).as_deref(), Some("old-agent"), "write_meta 保留 opener");
+        // 显式再写一次 meta（热载路径同函数）也不丢
+        session.write_meta();
+        assert_eq!(opener_of(&run_dir).as_deref(), Some("old-agent"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn inbox_record_stamps_identity_and_claims_opener() {
+        let dir = case_dir("inbox-stamp");
+        let run_dir = dir.join("runs").join("inbox-stamp-run");
+        fs::create_dir_all(&run_dir).expect("建 run 目录");
+        write_identity_mod(&dir);
+        let routes = InboxRoutes::load(&dir).expect("读路由表");
+        let mut store = open_store(Backend::Json, &run_dir).expect("开 json 后端");
+        let identity = ActorIdentity {
+            actor: Some("worker-1".to_owned()),
+            session: Some("s-worker".to_owned()),
+        };
+        let record = append_tool_result_record(
+            &run_dir,
+            store.as_mut(),
+            &routes,
+            "tool_result",
+            "c1|probe.echo|ok|0|hello|ext-1",
+            "inbox-stamp-run",
+            &identity,
+        )
+        .expect("追加成功");
+        assert_eq!(record["actor"], json!("worker-1"), "记录盖宿主保留键");
+        assert_eq!(record["actor_session"], json!("s-worker"));
+        assert_eq!(opener_of(&run_dir).as_deref(), Some("worker-1"), "成功落行认领 opener");
+        // 无身份：不盖章、不认领
+        let record = append_tool_result_record(
+            &run_dir,
+            store.as_mut(),
+            &routes,
+            "tool_result",
+            "c2|probe.echo|ok|0|hi|ext-2",
+            "inbox-stamp-run",
+            &ActorIdentity::NONE,
+        )
+        .expect("追加成功");
+        assert!(record.get("actor").is_none(), "None 不写键");
+        assert_eq!(opener_of(&run_dir).as_deref(), Some("worker-1"));
+        // drain 消费：记录自带身份经 dispatch_event_as 注入声明路由（tool_result
+        // 路由未声明 → 不注入，但 mod 收到的载荷不含身份段）
+        let mut session = {
+            let args = base_args(&dir, &dir.join("runs"), "inbox-stamp-run", None, None);
+            Session::open(&args).expect("开局")
+        };
+        session.load_autosave().expect("读档");
+        let drain = session.drain_inbox();
+        assert_eq!(drain.applied, 2, "两行都被消费：{:?}", drain.error);
         let _ = fs::remove_dir_all(&dir);
     }
 }
