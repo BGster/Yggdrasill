@@ -1,4 +1,4 @@
--- .ygg/mods/pi-agent-seed/mod.lua —— 装配入口（不是 Mod 本体）
+-- .ygg/mods/agent-seed/mod.lua —— 装配入口（不是 Mod 本体）
 --
 -- 本文件只做装配：读资源快照 → require 模块 → 纯模块 install → render.register →
 -- handlers install → node:render → fsm.define。业务实现都在 src/ 下。

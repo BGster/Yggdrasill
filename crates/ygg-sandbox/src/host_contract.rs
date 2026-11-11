@@ -16,7 +16,7 @@
 //! 返回可读错误（带缺失字段名 + 应有形状 + 文档定位），由调用方 fail-closed
 //! （报错退出或 `ok=false` 报告）——宿主**不**提供任何回退默认值。旧 Mod 因此
 //! 必须在升级时补齐这四段（见 `docs/DESIGN.md` 与
-//! `.ygg/mods/pi-agent-seed/README.md` 的「host 契约」章节）。
+//! `.ygg/mods/agent-seed/README.md` 的「host 契约」章节）。
 //!
 //! # 两层工具白名单（`tools` / `allowedTools`，两者都可选）
 //!
@@ -59,7 +59,7 @@ use std::path::Path;
 use serde_json::Value as Json;
 
 /// 契约文档定位（所有契约错误文案的统一尾巴）。
-pub const CONTRACT_DOC: &str = "见 .ygg/mods/pi-agent-seed/README.md 的「host 契约」章节";
+pub const CONTRACT_DOC: &str = "见 .ygg/mods/agent-seed/README.md 的「host 契约」章节";
 
 /// `agent` 段的应有形状（错误文案里给全，便于直接抄改）。
 const AGENT_SHAPE: &str = r#"{

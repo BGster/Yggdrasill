@@ -35,8 +35,8 @@
 
 | 位置 | 角色 |
 | --- | --- |
-| `packages/mods/pi-agent-seed/` | 对外分发的**种子模板**（`data/playbook/` 只装通用纪律） |
-| `.ygg/mods/pi-agent-seed/` | **本项目实例**（`data/` 装本仓库自己的规则与配置） |
+| `packages/mods/agent-seed/` | 对外分发的**种子模板**（`data/playbook/` 只装通用纪律） |
+| `.ygg/mods/agent-seed/` | **本项目实例**（`data/` 装本仓库自己的规则与配置） |
 
 分工：**骨架面**（`mod.lua` + `schemas/`）逐字节一致；**实例面**（`data/`）各自维护。
 本脚本只搬骨架，并重算**两侧** `manifest.json`（内容寻址：少算一侧就会以哈希不符拒绝装载）。

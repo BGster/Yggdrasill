@@ -54,7 +54,7 @@
     "verify_suite_passed": "[VERIFY SUITE PASSED] {{summary}}",
     "verify_suite_failed": "[VERIFY SUITE FAILED] {{summary}}",
     "verify_suite_blocked": "[VERIFY SUITE BLOCKED] {{reason}}",
-    "subagent_submit_cmd": ".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"{{id}}|{{rev}}|{{stage}}|<summary>|{{artifact}}||exec=<agent_id>\"'",
+    "subagent_submit_cmd": ".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"{{id}}|{{rev}}|{{stage}}|<summary>|{{artifact}}||exec=<agent_id>\"'",
     "subagent_brief": "Requirement {{id}} (rev {{rev}}, stage={{stage}}): {{title}}\nDescription: {{desc}}\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.\nWorktree: {{worktree}} (branch={{branch}}, base={{base}})\nArtifact: {{artifact}}\nSubmit: {{submit}}",
     "subagent_delta": "Resume {{id}} (rev {{rev}}) for stage `{{stage}}` in worktree `{{worktree}}`; write `{{artifact}}` and submit.",
     "subagent_fallback_note": "\nResume context: prior executor `{{resume_id}}`.",

@@ -34,7 +34,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 - **一次编写、处处运行**：内核用 Rust 构建，零渲染、零平台 I/O 依赖；同一内核可编译为 WebAssembly（`ygg-wasm`，用于浏览器）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（用于多人 lockstep 回放或微信小游戏客户端-服务器架构）。
 
 ### 1.2 Agent 工作流治理平台（"工作流即游戏，治理内核即引擎"）
-- **核心价值**：软件工程多智能体协调被建模为一个可玩的 Mod（`pi-agent-seed`）。Agent 不再依赖会随长上下文窗口衰减的脆弱静态提示指令，而是通过事件信封（event envelope）逐步与工作流状态机交互。
+- **核心价值**：软件工程多智能体协调被建模为一个可玩的 Mod（`agent-seed`）。Agent 不再依赖会随长上下文窗口衰减的脆弱静态提示指令，而是通过事件信封（event envelope）逐步与工作流状态机交互。
 - **情境化可供性（Situational Affordances）**：每一次 dispatch 都返回一份完整叙述回执，描述当前状态、活动泳道、待决提案，以及显式的 `pendingChoice` 动作白名单。协议约束取代了纯提示式的纪律。
 - **两层协调**：一个主协调者 Agent 分解需求、将并行的执行者子代理派发进隔离的持久化 Git worktree 泳道、串行审查提案、通过两个强制的人/协调者门禁（`plan_gate` 与 `accept_gate`），并以结构化的 roguelike 式自进化审查结算每一次运行。
 
@@ -70,7 +70,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
    - 每个能力都有唯一的规范机制。冗余的校验块、重复的 Mod 副本、或重叠的多回合异步仪式，都被合并为单源辅助函数与 1 回合内联仪式。
 5. **P5 · 单一事实来源（Single Source of Truth）**
    - **Schema**：`packages/schema/schemas/` 是 JSON Schema 的唯一权威（由 Rust 与 TypeScript 共享）。
-   - **Mod**：`.ygg/mods/pi-agent-seed` 是唯一的物理 Mod 目录；`packages/mods/pi-agent-seed` 是指向其的相对符号链接（`../../.ygg/mods/pi-agent-seed`）。
+   - **Mod**：`.ygg/mods/agent-seed` 是唯一的物理 Mod 目录；`packages/mods/agent-seed` 是指向其的相对符号链接（`../../.ygg/mods/agent-seed`）。
    - **运行状态**：`<run-dir>/run.sqlite` 是新运行的单一存储文件。
    - **文档**：`docs/CONTEXT.md` 与 `docs/DESIGN.md` 是 `docs/` 下仅有的两份架构/设计文档。
 6. **P6 · 模块顶层纯度（`YGG-MOD-EFFECT`）**
@@ -102,14 +102,14 @@ Yggdrasill/
 ├── packages/
 │   ├── schema/          # JSON Schema 单一事实来源（manifest、pack、story、agent-config）
 │   ├── mods/
-│   │   ├── pi-agent-seed -> ../../.ygg/mods/pi-agent-seed   # 指向规范工作流 Mod 的符号链接
+│   │   ├── agent-seed -> ../../.ygg/mods/agent-seed   # 指向规范工作流 Mod 的符号链接
 │   │   └── test-adventure/                                  # 参考可玩文字冒险 Mod
 │   ├── client-web/      # React + TypeScript 浏览器播放器
 │   └── pipeline/        # TypeScript AI Mod 生成与校验循环
 ├── clients/
 │   └── godot/           # Godot 4 原生 gdext 客户端（M2.5）
 ├── .ygg/
-│   └── mods/pi-agent-seed/   # 规范多文件 Agent 治理 Mod（mod.lua、src/** 五层、data/texts|playbook|config、schemas/）
+│   └── mods/agent-seed/   # 规范多文件 Agent 治理 Mod（mod.lua、src/** 五层、data/texts|playbook|config、schemas/）
 ├── .pi/
 │   └── extensions/ygg-pi-harness/   # Pi Coding Agent Tier-1 扩展适配器（防火墙、daemon RPC 客户端、编排器、压缩）
 └── docs/
@@ -156,7 +156,7 @@ Yggdrasill/
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
-| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/pi-agent-seed` 协调软件工程任务（`intake -> coordinate -> review -> done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`）。所有产物都要求先有状态机事件。 | 已确认 |
+| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/agent-seed` 协调软件工程任务（`intake -> coordinate -> review -> done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`）。所有产物都要求先有状态机事件。 | 已确认 |
 | **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/**` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
 | **D-MA3** | 单文件 SQLite 运行存储与 VFS | 新运行默认使用 `<run-dir>/run.sqlite`（`ygg-store`），原子提交 `events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）。既有的 JSON 运行（`autosave.json` + `events.jsonl`）保持自动检测，不隐式迁移。 | 已确认 |
 | **D-MA4** | 响应式钩子与省回合压缩 | `src/core/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |
