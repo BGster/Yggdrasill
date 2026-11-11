@@ -272,7 +272,9 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 > `op` 面的 8 个操作是状态推进之外的旁路端口；`op=vfs_put` 与 `event=vfs.write` 的语义差异（阶段守卫 / 内容上限 / 台账）见 §3.4。
 
 #### 单次 CLI 与内置工具参数（`ygg-agent`）
-- **运行执行**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] --event <event> [--payload <json>]`
+- **运行执行**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] --event <event> [--payload <json>] [--raw]`
+  单发回执缺省为人读文本渲染；`--raw` = 单行 JSON 机器契约（与历史缺省逐字节一致）；解析链
+  `--raw` > `YGG_FORMAT`（text|json）> 缺省 text；不改字段契约、退出码与 daemon 协议面。
 - **结算**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs --settle`
 - **内置宿主工具（`--builtin-tool <op>`）**：
   - `worktree-claim --lane <1..4> --req <rN> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;req=<rN>;branch=<br>;base=<sha>;clean=1;path=<wt_path>`
