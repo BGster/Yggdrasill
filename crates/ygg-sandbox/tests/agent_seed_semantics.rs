@@ -41,7 +41,9 @@ use std::sync::OnceLock;
 use serde_json::{json, Value as Json};
 
 use ygg_sandbox::driver::{KernelFacade, DEFAULT_FUEL_BUDGET};
-use ygg_sandbox::fuel::{auto_budget, resolve_budget, FUEL_AUTOSCALE_CAP, FUEL_AUTOSCALE_PER_ENTRY};
+use ygg_sandbox::fuel::{
+    auto_budget, resolve_budget, FUEL_AUTOSCALE_CAP, FUEL_AUTOSCALE_PER_ENTRY,
+};
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 use ygg_sandbox::HostToolRunner;
@@ -411,7 +413,8 @@ fn resident_batch_cycle_reaches_coordinate_again() {
             dir.display()
         );
         assert_eq!(
-            report.steps, 6,
+            report.steps,
+            6,
             "{}: the pinned batch-cycle walk is 6 steps",
             dir.display()
         );
@@ -453,7 +456,8 @@ fn resident_retire_reaches_ending() {
             dir.display()
         );
         assert_eq!(
-            report.steps, 13,
+            report.steps,
+            13,
             "{}: the pinned retirement walk is 13 steps",
             dir.display()
         );
@@ -529,7 +533,11 @@ fn run_retire_value_domain_and_retiring_close() {
     // Clearing stays available after retirement (done is read-only for requirements, not
     // for the retire switch) and narrates its own beat.
     let cleared = game.narrate("config.set", &text("run.retire="));
-    assert_eq!(count_lines(&cleared, "[RUN RETIRE CLEARED]"), 1, "{cleared:#?}");
+    assert_eq!(
+        count_lines(&cleared, "[RUN RETIRE CLEARED]"),
+        1,
+        "{cleared:#?}"
+    );
     game.assert_kv("settings.run.retire", json!(""));
 }
 
@@ -1297,7 +1305,10 @@ fn lane_branch_naming_is_enforced() {
     );
 
     // Legal shape: claimed into the ledger byte-for-byte, with its own narration.
-    let claimed = game.narrate("lane.claim", &text("1|r1|feature/aa11-semantic-name|abc1234|1"));
+    let claimed = game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/aa11-semantic-name|abc1234|1"),
+    );
     assert_eq!(count_lines(&claimed, "[LANE CLAIMED]"), 1, "{claimed:#?}");
 
     // The refusal matrix (r2 rev2 judgement, one entry per rule). Every refusal moves the
@@ -1305,13 +1316,13 @@ fn lane_branch_naming_is_enforced() {
     // is among the merge-lost data keys — see the header note — so the assertion pins the
     // action name.)
     let refusals = [
-        "feature/r1",                    // bare requirement number in the uuid slot
-        "FEATURE/aa11-semantic-name",    // prefix is case-sensitive
-        "feature/aa11-x",                // uuid slot must be exactly 4 chars
-        "feature/aa1-semantic-name",     // 3-char uuid slot
-        "feature/aa11-deadbeef",         // 8-char pure hex semantic segment is illegal
-        "feature/aa11-12345",            // pure-digit semantic segment
-        "feature/aa11-",                 // empty semantic segment
+        "feature/r1",                                // bare requirement number in the uuid slot
+        "FEATURE/aa11-semantic-name",                // prefix is case-sensitive
+        "feature/aa11-x",                            // uuid slot must be exactly 4 chars
+        "feature/aa1-semantic-name",                 // 3-char uuid slot
+        "feature/aa11-deadbeef",                     // 8-char pure hex semantic segment is illegal
+        "feature/aa11-12345",                        // pure-digit semantic segment
+        "feature/aa11-",                             // empty semantic segment
         &format!("feature/aa11-{}", "a".repeat(37)), // 48+11 > 48 total
     ];
     let rejects_before = game.kv("reject.count");
@@ -1336,7 +1347,11 @@ fn lane_branch_naming_is_enforced() {
     // assert the shape; the auto-claim layer refuses the empty name instead).
     game.narrate("lane.release", &text("1"));
     let unclaimed = game.narrate("lane.claim", &text("1|r1|||1"));
-    assert_eq!(count_lines(&unclaimed, "[LANE CLAIMED]"), 1, "{unclaimed:#?}");
+    assert_eq!(
+        count_lines(&unclaimed, "[LANE CLAIMED]"),
+        1,
+        "{unclaimed:#?}"
+    );
     game.assert_kv("lane.1.branch", json!(""));
 }
 
@@ -1686,10 +1701,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
             .unwrap_or_else(|| panic!("{path}: every module must live under src/"));
         let layer = rest.split('/').next().expect("the layer segment");
         assert!(
-            matches!(
-                layer,
-                "core" | "domain" | "view" | "runtime" | "handlers"
-            ),
+            matches!(layer, "core" | "domain" | "view" | "runtime" | "handlers"),
             "{path}: modules may only live in the five layers"
         );
         layers.insert(layer.to_owned());
@@ -1739,7 +1751,10 @@ fn mod_architecture_is_fragments_plus_five_layers() {
     // ③ the assembly contract: beat keys across fragments are pairwise disjoint.
     let mut owner: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     let mut total_beats = 0usize;
-    for path in pack_entry_paths.iter().filter(|p| p.starts_with("data/texts/")) {
+    for path in pack_entry_paths
+        .iter()
+        .filter(|p| p.starts_with("data/texts/"))
+    {
         let fragment = read_json(&project.join(path));
         // core.json carries scenes/endings/prompts/options/tuning (no beats group).
         let Some(beats) = fragment["beats"].as_object() else {
@@ -1762,7 +1777,12 @@ fn mod_architecture_is_fragments_plus_five_layers() {
 
     // ④ tuning lives in the core fragment now.
     let core = read_json(&project.join("data/texts/core.json"));
-    for key in ["tool_capacity", "tool_output_max", "artifact_capacity", "job_capacity"] {
+    for key in [
+        "tool_capacity",
+        "tool_output_max",
+        "artifact_capacity",
+        "job_capacity",
+    ] {
         assert!(
             core["tuning"][key].as_u64().is_some(),
             "core.json tuning.{key} must be an unsigned integer"
@@ -1824,8 +1844,7 @@ const SHELL_BASENAMES: &[&str] = &[
 fn tool_declarations_pin_the_merged_capability_surface() {
     let project = project_mod_dir();
     let pack = read_json(&project.join("pack.json"));
-    let pack_raw =
-        std::fs::read_to_string(project.join("pack.json")).expect("read pack.json");
+    let pack_raw = std::fs::read_to_string(project.join("pack.json")).expect("read pack.json");
     let config = read_json(&project.join("data/config.json"));
 
     // ① r7: the host binary is `egg` — no stale literal anywhere in the pack.
@@ -1966,9 +1985,7 @@ fn tool_declarations_pin_the_merged_capability_surface() {
         .expect("allowedTools must be an array");
     let mut seen: Vec<String> = Vec::new();
     for item in allowed {
-        let id = item
-            .as_str()
-            .expect("allowedTools items must be strings");
+        let id = item.as_str().expect("allowedTools items must be strings");
         assert!(
             tool_id_shape_ok(id),
             "allowed tool id `{id}` must be <namespace>.<name>"
@@ -2375,7 +2392,8 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
     );
     game.assert_kv("lane.3.branch", Json::Null);
     assert_eq!(
-        game.kv("reject.count"), rejects_before,
+        game.kv("reject.count"),
+        rejects_before,
         "the tool-face refusal must not move the reject ledger"
     );
 
@@ -2911,13 +2929,21 @@ fn fuel_budget_autoscales_with_state_size_and_env_wins() {
 
     // Resolution: explicit env is byte-exact and uncapped (both escape directions).
     assert_eq!(resolve_budget(Some("12345"), 100), 12_345);
-    assert_eq!(resolve_budget(Some("1"), 100_000), 1, "below the floor: allowed");
+    assert_eq!(
+        resolve_budget(Some("1"), 100_000),
+        1,
+        "below the floor: allowed"
+    );
     assert_eq!(
         resolve_budget(Some("99999999999"), 0),
         99_999_999_999,
         "above the cap: allowed (escape hatch semantics)"
     );
-    assert_eq!(resolve_budget(Some(" 4096 "), 100), 4_096, "the raw is trimmed");
+    assert_eq!(
+        resolve_budget(Some(" 4096 "), 100),
+        4_096,
+        "the raw is trimmed"
+    );
 
     // Fallback: missing / zero / unparseable → the autoscale.
     assert_eq!(resolve_budget(None, 0), DEFAULT_FUEL_BUDGET);
@@ -2955,7 +2981,9 @@ fn requirement_list_pages_open_first_and_full_opt_in() {
     for i in 2..=13 {
         game.narrate(
             "requirement.add",
-            &text(&format!("page requirement {i}|synthetic description|page-r{i}")),
+            &text(&format!(
+                "page requirement {i}|synthetic description|page-r{i}"
+            )),
         );
     }
 
@@ -2973,7 +3001,9 @@ fn requirement_list_pages_open_first_and_full_opt_in() {
         "the closed r1 must not occupy the open-first page: {rows:?}"
     );
     assert!(
-        default_view.iter().any(|line| line.starts_with("[REQ GRAPH]")),
+        default_view
+            .iter()
+            .any(|line| line.starts_with("[REQ GRAPH]")),
         "the page keeps the graph header: {default_view:#?}"
     );
 
