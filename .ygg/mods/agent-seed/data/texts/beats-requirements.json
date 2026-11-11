@@ -122,6 +122,15 @@
     "req_prop_busy": "{{id}} already has a pending proposal ({{prop}}) — accept / reject it before resubmitting (no overwrite)",
     "req_trace_exec": "(exec {{list}})",
     "req_trace_exec_missing": "(exec {{stage}}=unregistered)",
-    "req_prop_exec_misplaced": "`exec=` must be the last segment; write `req|rev|stage|summary|artifacts||<ext>|exec=<agent_id>[:<reason>]` (the empty segment cannot be omitted)."
+    "req_prop_exec_misplaced": "`exec=` must be the last segment; write `req|rev|stage|summary|artifacts||<ext>|exec=<agent_id>[:<reason>]` (the empty segment cannot be omitted).",
+    "req_prop_actor_mismatch": "[ACTOR MISMATCH] {{id}}: exec={{exec}} != host actor {{actor}} — recorded, not rejected (the human gate decides).",
+    "req_prop_actor_misplaced": "`actor=` must sit after `exec=` and before `actor_session=` in the trailing chain (fixed relative order); the host injects this segment — carry identity via `--actor` / `YGG_ACTOR` / the daemon request field instead.",
+    "req_prop_actor_session_misplaced": "`actor_session=` must be the last segment (after `actor=`); the host injects this segment — carry identity via `--actor-session` / `YGG_ACTOR_SESSION` / the daemon request field instead.",
+    "req_prop_actor_unverified": "[ACTOR UNVERIFIED] {{id}}: exec={{exec}} arrived without a host actor stamp (old host / direct dispatch).",
+    "req_prop_actor_verified": "[ACTOR VERIFIED] {{id}}: exec={{exec}} matches the host actor stamp (same handle namespace).",
+    "req_trace_actor_mismatch": " [mismatch:actor={{actor}}]",
+    "req_trace_actor_unverified": " [unverified]",
+    "req_trace_actor_verified": " [verified]",
+    "req_trace_profile_tag": "({{harness}})"
   }
 }

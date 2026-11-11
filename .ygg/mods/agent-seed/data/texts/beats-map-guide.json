@@ -37,6 +37,8 @@
     "map_rejected": "[MAP REJECTED] only an empty payload, \"0\" or \"full\" is accepted, got `{{got}}`.",
     "map_note_batch_boundary": "(batch boundary: every leaf requirement is done, no pending proposals, no conflicts)",
     "map_note_batch_settle": "(batch settle: archive -> run.batch+1 -> back to coordinate; resident)",
-    "map_note_retire": "(run retired - the only terminal edge, reachable only when run.retire is armed)"
+    "map_note_retire": "(run retired - the only terminal edge, reachable only when run.retire is armed)",
+    "map_note_profiles": "[PROFILES] {{list}} (self-reported registry; the executor ledger stays the authority)",
+    "map_note_profiles_more": "+{{count}} more"
   }
 }

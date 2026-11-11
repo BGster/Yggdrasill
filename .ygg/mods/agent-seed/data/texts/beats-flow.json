@@ -44,6 +44,11 @@
     "evolution_artifact_none": "(empty)",
     "evolution_classes_none": "(zero candidates, no classes)",
     "run_retire_armed": "[RUN RETIRE ARMED] the next review.note becomes the retiring close: the run settles and ends ([ENDING · run retired]). Clear it with `config.set run.retire=\"\"`.",
-    "run_retire_cleared": "[RUN RETIRE CLEARED] review.note is back to the batch settle (resident run continues; no ending)."
+    "run_retire_cleared": "[RUN RETIRE CLEARED] review.note is back to the batch settle (resident run continues; no ending).",
+    "profile_bad_assignments": "assignments must be a comma-separated list of `r<n>[:<stage>]` tokens (<= 16 tokens, <= 512 chars total), e.g. `r1:plan,r1:development,r3`.",
+    "profile_bad_handle": "a profile key must be `profile.<handle>.<key>` with a handle-shaped handle (non-empty after trim, <= 64 chars, no whitespace, no `|`).",
+    "profile_bad_value": "invalid profile value for this key (harness <= 32, session_id <= 128: no whitespace / no `|` / no quotes; role <= 64 single line; free keys `^[a-z0-9_]{1,32}$` with single-line values <= 256).",
+    "profile_cleared": "[PROFILE CLEARED] {{handle}}.{{field}} (self-reported registry card only).",
+    "profile_registered": "[PROFILE REGISTERED] {{handle}}.{{field}} (self-reported, not identity proof; the executor ledger stays the authority for accountability)."
   }
 }
