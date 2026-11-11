@@ -39,8 +39,17 @@ async function fetchJson(url) {
 }
 
 function phaseOf(row) {
-  const phase = row?.coord?.phase;
-  return phase ? String(phase) : "未开局";
+  // 诚实口径：coordination.json 只有常驻模式（交互/daemon/watch）才写，
+  // 纯单发派发的活跃局没有心跳文件 —— 那是「已开局・无在跑会话」，不是「未开局」。
+  // 心跳超过 10 分钟未更新则标注失联，不让死会话冒充 running。
+  const coord = row?.coord;
+  if (!coord || !coord.phase) return "未在跑";
+  // heartbeat_at 是毫秒、generatedAt 是秒 —— 归一到秒再比 age
+  const hbRaw = Number(coord.heartbeat_at || 0);
+  const hb = hbRaw > 1e12 ? Math.floor(hbRaw / 1000) : hbRaw;
+  const now = Number(row?.generatedAt || Math.floor(Date.now() / 1000));
+  if (hb > 0 && now - hb > 600) return `${coord.phase}·失联`;
+  return String(coord.phase);
 }
 
 function badge(text) {
@@ -207,7 +216,7 @@ async function renderRun(runId) {
                   href: "#",
                   onclick: (ev) => {
                     ev.preventDefault();
-                    openPanel(runId, save.id, body.panel.url);
+                    openPanel(save.id, body.panel.url);
                   },
                 },
                 "在面板打开",
@@ -226,8 +235,9 @@ async function renderRun(runId) {
   );
 }
 
-function openPanel(runId, saveId, panelUrl) {
-  // URL 形态：/panel/<run-id>/<entry>?save=<sid>（query 传参，可收藏可刷新）。
+function openPanel(saveId, panelUrl) {
+  // URL 形态：/panel/<run-id>/<entry>?save=<sid>（panelUrl 由服务端拼好 run-id 段；
+  // query 传参，可收藏可刷新）。runId 不在客户端拼接，无死参。
   const area = $("#panel-area");
   const url = `${panelUrl}?save=${enc(saveId)}`;
   area.replaceChildren(
