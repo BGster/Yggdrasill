@@ -1196,8 +1196,7 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
     }
 
     // Capacity: the counter is a lifecycle counter, so every slot taken means the next is refused.
-    let capacity = read_texts(&project_mod_dir())["tuning"]
-        ["tool_capacity"]
+    let capacity = read_texts(&project_mod_dir())["tuning"]["tool_capacity"]
         .as_u64()
         .expect("tuning.tool_capacity must be an unsigned integer");
     let mut full = Game::open(&project_mod_dir());
