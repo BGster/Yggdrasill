@@ -1,4 +1,6 @@
 -- src/lanes.lua —— 泳道账本 `lane.<k>.{req,branch,base,since,clean}` + job / 容量计数。
+-- 另承载需求迭代分支名的强制形态判定（`LANES.branch_problem`）：lane.claim 与
+-- git.worktree_claim 两个入口共用的唯一语义点，删除默认名生成机制后分支一律由调用方自报。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：`lane.*`（唯一写方）。
@@ -22,6 +24,30 @@ local LANES = {}
 
 function LANES.key(k, name)
   return "lane." .. tostring(k) .. "." .. name
+end
+
+-- 需求迭代分支命名强制形态（r2 rev2）：^feature/[a-z0-9]{4}-<语义词段>$，总长 ≤48。
+-- 返回 nil = 合法或未断言；否则返回填好的可读文案（TEXTS.beats.lane_branch_invalid）。
+function LANES.branch_problem(branch)
+  local b = trim(branch)
+  if b == "" then
+    return nil                                  -- 未断言仍合法（lane.claim 层）
+  end
+  local illegal = fill(TEXTS.beats.lane_branch_invalid, { branch = b })
+  if #b > 48 then return illegal end            -- 总长上限
+  if b:sub(1, 8) ~= "feature/" then return illegal end   -- 结构前缀（大小写敏感）
+  local rest = b:sub(9)
+  local dash = rest:find("-", 1, true)
+  if dash == nil then return illegal end        -- feature/r1 裸编号在此落网
+  local seg, semantic = rest:sub(1, dash - 1), rest:sub(dash + 1)
+  if #seg ~= 4 or seg:match("[^a-z0-9]") ~= nil then return illegal end  -- uuid 段
+  if semantic == "" then return illegal end                              -- 缺语义词段
+  if semantic:match("[^a-z0-9%-]") ~= nil then return illegal end        -- 语义词段字符集
+  if semantic:match("%a%a%a") == nil then return illegal end             -- ≥3 连续字母
+  if semantic:match("^%d+$") ~= nil then return illegal end              -- 非纯数字
+  if #semantic >= 8 and #semantic <= 16
+    and semantic:match("^[0-9a-f]+$") ~= nil then return illegal end     -- 8–16 位纯 hex 硬非法
+  return nil
 end
 
 function LANES.req_of(k)

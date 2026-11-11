@@ -225,6 +225,12 @@
           "modality": "must-not",
           "text": "Two tasks may never share one worktree; before dispatching, `git status` must be clean (except `.lane`).",
           "basis": "AGENTS.md §3 (plaque mechanism 3)"
+        },
+        {
+          "id": "lanes.branch-naming",
+          "modality": "must",
+          "text": "A requirement iteration branch must be named `feature/<4-char-id>-<semantic-topic>` — exactly 4 lowercase letters/digits after `feature/`, then `-`, then a semantic topic with at least 3 consecutive letters (never purely numeric, never an 8-16 char hex-like hash; bare ids like `feature/r1` are not recognizable across runs), whole name at most 48 chars. Canonical example: `feature/a3f9-map-single-gone`. Both `lane.claim` and `git.worktree_claim` enforce this shape and refuse illegal names readably; an empty branch means \"not asserted yet\" and stays legal until a worktree is mounted.",
+          "basis": "AGENTS.md §3 (lane worktrees) · requirement r2 rev 1 (mod gate ruling)"
         }
       ]
     },
@@ -799,7 +805,7 @@
         {
           "id": "harness.lane-actions",
           "modality": "must",
-          "text": "Lane ledger: `lane.claim \"lane|req_id|branch|base|clean\"` claims or backfills a lane (clean must be \"1\"; a dirty tree may not be claimed); `lane.release \"lane\"` releases it (idempotent).",
+          "text": "Lane ledger: `lane.claim \"lane|req_id|branch|base|clean\"` claims or backfills a lane (clean must be \"1\"; a dirty tree may not be claimed; the branch must match feature/<4-char-id>-<semantic-topic>, e.g. feature/a3f9-map-single-gone); `lane.release \"lane\"` releases it (idempotent).",
           "basis": "AGENTS.md §4 (pre-migration)"
         },
         {

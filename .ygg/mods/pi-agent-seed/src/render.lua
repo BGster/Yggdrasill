@@ -132,7 +132,8 @@ local function req_live_status(index)
   local worktree_status = "n/a"
   if job == "development" or phase == PHASE.developing or phase == PHASE.dev_review or phase == PHASE.accept then
     if lane > 0 and lane_req == id then
-      local br = branch ~= "" and branch or ("feature/" .. id)
+      -- 未断言分支显示 `-`（lane_field_none，与账本房规一致）：展示层不再虚构 `feature/<id>`。
+      local br = branch ~= "" and branch or TEXTS.beats.lane_field_none
       if worktree_path ~= "" then
         worktree_status = "ready:" .. worktree_path .. "@" .. br
       else

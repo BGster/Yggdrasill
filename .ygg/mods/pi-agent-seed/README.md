@@ -243,7 +243,7 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 | 字段 | 含义 |
 | --- | --- |
 | `req` | 占用者需求 id（`""` = 空闲）。**兼容读**旧存档的数字 index 写法，故不需要一次性迁移 |
-| `branch` / `base` | 物理 worktree 的分支与 base（由 `lane.claim` 记）；`requirement.dispatch` 自动挂牌时留空 = **未断言** |
+| `branch` / `base` | 物理 worktree 的分支与 base（由 `lane.claim` 记）；分支名强制 `feature/{4位uuid}-{业务名}`（4 位小写字母/数字 + `-` + 语义词段 ≥3 连续字母、非纯数字、非 8–16 位纯 hex；总长 ≤48，如 `feature/a3f9-map-single-gone`）；`requirement.dispatch` 自动挂牌时留空 = **未断言** |
 | `since` | 挂牌序号（单调递增，KV `lane.seq`）。沙箱没有墙钟，`since` 只表达先后；真实时间由主 Agent 写在 worktree 根的 `.lane` |
 | `clean` | `"1"` = 主 Agent 已断言工作区干净（**mod 不能跑 git**，只认这个断言；空 = 未断言） |
 
@@ -260,10 +260,14 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 
 | 泳道动作 | 载荷 | 作用 |
 | --- | --- | --- |
-| `lane.claim` | `"泳道号\|需求id\|分支\|base\|clean"` | 挂牌 / 补记。`clean` 必须是 `"1"`（脏树禁挂牌）；泳道被别人占 / 本条已持有另一条 / 需求终态 → 可读拒绝 |
+| `lane.claim` | `"泳道号\|需求id\|分支\|base\|clean"` | 挂牌 / 补记。`clean` 必须是 `"1"`（脏树禁挂牌）；分支必须匹配上述形态（如 `feature/a3f9-map-single-gone`），裸编号（`feature/r1`）等非法名可读拒绝并留痕；泳道被别人占 / 本条已持有另一条 / 需求终态 → 可读拒绝 |
 | `lane.release` | `"泳道号"` | 摘牌（幂等：本就空闲也算成功） |
 
 两者都**不进**人类动作门禁：只记账本，不产生「通过」效果。
+
+- **默认分支名生成机制已删除**：`requirement.dispatch` 自动挂牌时分支留空 = 未断言，auto 挂载
+  worktree 前若账本分支为空将可读拒绝（文案含 `feature/<4位uuid>-<业务名>` 模板），主 Agent 须先用
+  `lane.claim` 自报合法分支或直调 `git.worktree_claim`。
 
 ## 七、宿主侧跨进程协议（Mod 不感知，但影响玩法）
 
@@ -455,7 +459,7 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 
 | 能力 | 触发面 | 写的 KV | 读 / 判 |
 | --- | --- | --- | --- |
-| `git.worktree_claim` | `tool.result` | `lane.<k>.{req,branch,base,since,clean}` + `req.<i>.lane`（走 `LANES.bind`，与 `lane.claim` **同函数同键**） | `clean=1` / 泳道空闲 / 需求未绑定 / 未终态，任一不满足 → `[WORKTREE CLAIM REFUSED]` 且账本不动 |
+| `git.worktree_claim` | `tool.result` | `lane.<k>.{req,branch,base,since,clean}` + `req.<i>.lane`（走 `LANES.bind`，与 `lane.claim` **同函数同键**） | `clean=1` / 泳道空闲 / 需求未绑定 / 未终态 / 分支合法（缺失或非法 → `[WORKTREE CLAIM REFUSED]` 且账本不动，缺省名不再自动生成），任一不满足 → `[WORKTREE CLAIM REFUSED]` 且账本不动 |
 | `git.worktree_release` | `tool.result` | 清 `lane.<k>.*` + `req.<i>.lane`（走 `LANES.release_lane(k)`） | 入参是**泳道号**（`LANES.release` 收的是 req index，别混）；`released≠1` 不动作 |
 | `git.lane_probe` | `tool.result` | `lane.<k>.probe.{commits,clean,head,files,call}`；有交集时经 `req_do_conflict(...,"radar")` 抬 `req.<i>.conflict*` | `commits=0` / `clean≠1` → `[LANE PROBE FAILED]`（**警告面**，不阻塞收口）；输出被截断 → 跳过雷达 |
 | `fs.artifact_probe` | `tool.result` | `artifact.<path>.{bytes,sha256,source}` + `artifact.count` / `artifact.seq.<n>` | `exists≠1` / `bytes=0` / 路径不合形状 → 不落库 |

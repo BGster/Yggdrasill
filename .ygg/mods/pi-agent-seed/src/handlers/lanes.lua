@@ -78,6 +78,12 @@ function M.install(deps)
     if problem ~= nil then
       return reject_payload("lane.claim", problem)
     end
+    -- 分支名强制形态（r2 rev2）：非法名可读拒绝并留痕；空分支 = 未断言仍合法。
+    -- 位置在载荷自洽组（parse 之后的自洽检查靠前，世界态检查靠后）。
+    local branch_problem = LANES.branch_problem(spec.branch)
+    if branch_problem ~= nil then
+      return refuse(TEXTS.beats.req_wait_rejected, "lane.claim", branch_problem)
+    end
     -- 脏树禁挂牌：主 Agent 已确认工作区干净才允许挂牌（这里只验它的断言）。
     if spec.clean ~= "1" then
       return refuse(TEXTS.beats.req_wait_rejected, "lane.claim", fill(TEXTS.beats.lane_claim_dirty, {

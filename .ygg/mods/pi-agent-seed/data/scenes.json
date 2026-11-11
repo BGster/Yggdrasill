@@ -144,6 +144,7 @@
     "lane_ledger_all_free": "  all {{total}} lanes free",
     "lane_bad_k": "a lane number accepts only 1..{{max}}, got `{{k}}`.",
     "lane_claim_usage": "lane.claim \"lane|req_id|branch|base|clean\" (lane 1..{{max}}; clean must be \"1\")",
+    "lane_branch_invalid": "branch `{{branch}}` is not a legal requirement-iteration branch — name it `feature/<4-char-id>-<semantic-topic>`, e.g. `feature/a3f9-map-single-gone` (exactly 4 lowercase letters/digits after `feature/`, then `-`, then a semantic topic with at least 3 letters in a row; never purely numeric; never an 8-16 char hex-like hash; bare ids like `feature/r1` are not recognizable across runs; whole name at most 48 chars)",
     "lane_claim_dirty": "lane-{{k}} claim refused: `clean` must be \"1\". The main agent runs `git status --porcelain` in the target worktree first (must be empty except `.lane`); if dirty, pick another lane or handle the changes — the mod cannot run git, it only accepts this assertion.",
     "lane_claim_occupied": "lane-{{k}} is already owned by {{id}} — pick another lane or wait for its release.",
     "lane_claim_bound": "{{id}} already holds lane-{{k}}; a second lane is not allowed.",
