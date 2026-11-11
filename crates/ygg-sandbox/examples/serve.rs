@@ -1370,6 +1370,8 @@ end)
 ygg.on("agent.summary", function()
   ygg.meta("summary", { open = true })
 end)
+ygg.on("ygg.choice_selected", function()
+end)
 "#,
         )
         .expect("写 mod.lua");
@@ -1922,6 +1924,9 @@ end)
             builtin_tool: None,
             daemon: false,
             harness: None,
+            actor: None,
+            actor_session: None,
+            output: crate::OutputFormat::Text,
             serve: false,
             port: None,
             panel_dir: None,

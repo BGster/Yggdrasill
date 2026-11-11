@@ -7240,7 +7240,7 @@ mod mod_dir_alias_tests {
             watch: false,
             event: None,
             payload: None,
-            output: OutputFormat::Text,
+            output: crate::OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -9187,7 +9187,7 @@ mod multiscript_hot_reload_tests {
             watch: false,
             event: None,
             payload: None,
-            output: OutputFormat::Text,
+            output: crate::OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -9632,7 +9632,7 @@ end)
             watch: false,
             event: None,
             payload: None,
-            output: OutputFormat::Text,
+            output: crate::OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -10661,7 +10661,7 @@ end)
             watch: false,
             event: None,
             payload: None,
-            output: OutputFormat::Text,
+            output: crate::OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -11368,7 +11368,7 @@ end)
             watch: false,
             event: None,
             payload: None,
-            output: OutputFormat::Text,
+            output: crate::OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -12033,7 +12033,7 @@ end)
             watch: false,
             event: None,
             payload: None,
-            output: OutputFormat::Text,
+            output: crate::OutputFormat::Text,
             drive: Drive::None,
             inbox: None,
             store: Some(ygg_store::Backend::Json),
@@ -12800,6 +12800,11 @@ end)
             harness: None,
             actor,
             actor_session: session,
+            output: crate::OutputFormat::Text,
+            serve: false,
+            port: None,
+            panel_dir: None,
+            poll_ms: None,
         }
     }
 
@@ -13111,7 +13116,7 @@ end)
     fn project_pack_declares_actor_bools_on_the_proposal_route() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let routes =
-            InboxRoutes::load(&repo.join(".ygg/mods/pi-agent-seed")).expect("读真 Mod 路由表");
+            InboxRoutes::load(&repo.join(".ygg/mods/agent-seed")).expect("读真 Mod 路由表");
         assert_eq!(routes.actor_flags_for("proposal.submit"), (true, true));
         // 其余动作不声明身份段（宿主不注入也不拦截）。
         assert_eq!(routes.actor_flags_for("tool.result"), (false, false));

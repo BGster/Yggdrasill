@@ -231,7 +231,9 @@
       "write": {
         "flag": "proposal",
         "shape": "payload"
-      }
+      },
+      "actor": true,
+      "actor_session": true
     },
     "tool_result": {
       "action": "tool.result",
@@ -253,7 +255,11 @@
     "git.head_short": {
       "kind": "cli",
       "program": "git",
-      "args": ["rev-parse", "--short", "HEAD"],
+      "args": [
+        "rev-parse",
+        "--short",
+        "HEAD"
+      ],
       "timeoutMs": 5000,
       "inlineWaitMs": 2000,
       "maxOutputBytes": 256,
@@ -263,7 +269,10 @@
     "git.status": {
       "kind": "cli",
       "program": "git",
-      "args": ["status", "--porcelain"],
+      "args": [
+        "status",
+        "--porcelain"
+      ],
       "timeoutMs": 5000,
       "inlineWaitMs": 2000,
       "maxOutputBytes": 1024,
@@ -292,7 +301,12 @@
     "git.worktree_release": {
       "kind": "cli",
       "program": "egg",
-      "args": ["--builtin-tool", "worktree-release", "--lane", "{{lane}}"],
+      "args": [
+        "--builtin-tool",
+        "worktree-release",
+        "--lane",
+        "{{lane}}"
+      ],
       "timeoutMs": 15000,
       "inlineWaitMs": 5000,
       "maxOutputBytes": 512,
@@ -321,7 +335,12 @@
     "fs.artifact_probe": {
       "kind": "cli",
       "program": "egg",
-      "args": ["--builtin-tool", "artifact-probe", "--path", "{{path}}"],
+      "args": [
+        "--builtin-tool",
+        "artifact-probe",
+        "--path",
+        "{{path}}"
+      ],
       "timeoutMs": 5000,
       "inlineWaitMs": 2000,
       "maxOutputBytes": 512,
@@ -331,7 +350,12 @@
     "gate.verify_suite": {
       "kind": "cli",
       "program": "egg",
-      "args": ["--builtin-tool", "verify-suite", "--mode", "{{mode}}"],
+      "args": [
+        "--builtin-tool",
+        "verify-suite",
+        "--mode",
+        "{{mode}}"
+      ],
       "timeoutMs": 600000,
       "inlineWaitMs": 0,
       "maxOutputBytes": 4096,
