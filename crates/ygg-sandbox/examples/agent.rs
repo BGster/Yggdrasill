@@ -9512,8 +9512,8 @@ end)
 
         // ③ 回执形（stdout 单行 JSON 的域内）：经 run_single 同一 dispatch_event
         //    路径断言信封字段。write_probe_mod 注册 4 个事件 + stdlib 内置 1 个。
-        let mut session = Session::open(&probe_args(&mod_dir, &runs_root, "t1b", false))
-            .expect("新局开局");
+        let mut session =
+            Session::open(&probe_args(&mod_dir, &runs_root, "t1b", false)).expect("新局开局");
         let receipt = session.dispatch_event("event.nope", "0");
         assert_eq!(receipt["ok"], serde_json::json!(false), "{receipt}");
         assert_eq!(
@@ -9528,7 +9528,10 @@ end)
             message.starts_with("未注册事件 `event.nope`："),
             "文案要点名事件：{receipt}"
         );
-        assert!(message.contains("已注册 5 个事件"), "文案要带计数：{receipt}");
+        assert!(
+            message.contains("已注册 5 个事件"),
+            "文案要带计数：{receipt}"
+        );
         for sample in [
             "agent.summary",
             "event.start",

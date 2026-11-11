@@ -943,7 +943,10 @@ mod tests {
         assert_eq!(reply_code(&rejected), code::VALIDATION);
         let parsed = reply(&rejected);
         let message = parsed["error"]["message"].as_str().unwrap();
-        assert!(message.contains("`event.nope`"), "文案要点名事件：{message}");
+        assert!(
+            message.contains("`event.nope`"),
+            "文案要点名事件：{message}"
+        );
         assert!(
             message.contains("已注册 4 个事件"),
             "文案要带计数（3 个 Mod 注册 + 1 个 stdlib 内置）：{message}"

@@ -287,10 +287,17 @@ fn the_entry_must_require_a_module_to_get_a_usable_handle() {
     )
     .expect("只 require 必须能装载");
     let probe = idle.dispatch("probe", "0");
-    let parsed: serde_json::Value =
-        serde_json::from_str(&probe).expect("回执必须是 JSON");
-    assert_eq!(parsed["ok"], serde_json::json!(false), "没调用 M.register() 就不该有 handler（模块顶层不注册任何东西）：{probe}");
-    assert_eq!(parsed["error"]["code"], serde_json::json!("VALIDATION"), "{probe}");
+    let parsed: serde_json::Value = serde_json::from_str(&probe).expect("回执必须是 JSON");
+    assert_eq!(
+        parsed["ok"],
+        serde_json::json!(false),
+        "没调用 M.register() 就不该有 handler（模块顶层不注册任何东西）：{probe}"
+    );
+    assert_eq!(
+        parsed["error"]["code"],
+        serde_json::json!("VALIDATION"),
+        "{probe}"
+    );
     assert!(
         parsed["error"]["message"]
             .as_str()

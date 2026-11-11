@@ -161,9 +161,7 @@ impl HandlerRegistry {
                 }
                 Ok(())
             }
-            None => Err(HandlerError(format!(
-                "unregistered event `{event_name}`"
-            ))),
+            None => Err(HandlerError(format!("unregistered event `{event_name}`"))),
         }
     }
 
