@@ -129,7 +129,7 @@
         {
           "id": "integration.round.merge-ritual",
           "modality": "must",
-          "text": "The `develop` → `master` merge is triggered by the user, or executed by the main agent after the user approves it: `git fetch origin`, then divergence-check `master` and `develop` separately and align each with `--ff-only`, then in the main checkout `git merge --no-ff develop`; rebasing `develop` is absolutely forbidden — the merge topology is the rollback history.",
+          "text": "The `develop` → `master` merge is triggered by the user, or executed by the main agent after the user approves it: `git fetch origin`, then divergence-check `master` and `develop` separately and align each with `--ff-only`, then in the main checkout `git merge --no-ff develop`, then `git push origin master` — the merge is not complete until the trunk is pushed; rebasing `develop` is absolutely forbidden — the merge topology is the rollback history.",
           "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
