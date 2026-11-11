@@ -100,6 +100,27 @@ import {
   writeHandoffToVfs,
   type HandoffWrite,
 } from "./compaction.ts";
+import {
+  AUTO_WAVE_CUSTOM_TYPE,
+  AutoWatchdog,
+  buildGateWakeMessage,
+  buildWaveLogMarkdown,
+  buildWaveWakeMessage,
+  clampAutoIntervalMs,
+  collectKey,
+  collectJobs,
+  DEFAULT_AUTO_INTERVAL_MS,
+  initialAutoPilotState,
+  isDeliveredJob,
+  MAX_AUTO_INTERVAL_MS,
+  MIN_AUTO_INTERVAL_MS,
+  nextAutoAction,
+  parseAutoWake,
+  recordWaveOutcome,
+  waveLogPath,
+  WAVE_FAILURES_AUTO_OFF,
+  WAVE_FAILURES_PARK,
+} from "./watchdog.ts";
 
 // ───────────────────────────── ① 数据红线 ─────────────────────────────
 
@@ -2604,3 +2625,434 @@ describe("index.ts: dispatch 只报告上下文水位，绝不触发压缩", () 
   });
 });
 
+
+// ───────────────────────────── ⑥ 看门狗（r1 自动收波） ─────────────────────────────
+
+function wdJob(partial: Partial<SummaryJob> & { id: string }): SummaryJob {
+  return {
+    rev: 1,
+    stage: "plan",
+    status: "planning",
+    phase: "",
+    lane: 0,
+    branch: "",
+    base: "",
+    title: "t",
+    description: "d",
+    ...partial,
+  };
+}
+
+/** resident 摘要（r9 三字段 + r1 play 字段就位的形状）。 */
+function wdSummary(
+  jobs: SummaryJob[],
+  overrides: Partial<RunSummary> = {},
+): RunSummary {
+  return summaryWith(jobs, [], {
+    lifecycle: "resident",
+    batch: 1,
+    batchDrained: false,
+    play: "guide",
+    ...overrides,
+  });
+}
+
+/** 手动时钟 + 记录器顶替全部 IO 的看门狗（与手发共享的「会话闸」用可变旗标模拟）。 */
+function makeWatchdog(
+  summary: RunSummary,
+  overrides: {
+    idle?: boolean;
+    pressureLevel?: "normal" | "soft_brake" | "hard_brake" | null;
+    wakeEnabled?: boolean;
+    intervalMs?: number;
+  } = {},
+): {
+  wd: AutoWatchdog;
+  sent: { content: string; triggerTurn?: boolean }[];
+  summaryCalls: () => number;
+  setIdle: (idle: boolean) => void;
+  setSummary: (summary: RunSummary) => void;
+  logs: string[];
+} {
+  let currentSummary = summary;
+  let summaryCalls = 0;
+  let idle = overrides.idle ?? true;
+  const sent: { content: string; triggerTurn?: boolean }[] = [];
+  const logs: string[] = [];
+  const wd = new AutoWatchdog({
+    client: {
+      async summary(): Promise<RunSummary> {
+        summaryCalls += 1;
+        return currentSummary;
+      },
+    } as never,
+    sender: {
+      sendMessage(message: { content: string }, options?: { triggerTurn?: boolean }): void {
+        sent.push({ content: message.content, ...(options ?? {}) });
+      },
+    },
+    runId: "run-wd",
+    isIdle: () => idle,
+    ...(overrides.pressureLevel !== undefined
+      ? {
+          pressure: () =>
+            overrides.pressureLevel === null
+              ? null
+              : { level: overrides.pressureLevel! },
+        }
+      : {}),
+    wakeEnabled: overrides.wakeEnabled ?? false,
+    ...(overrides.intervalMs !== undefined ? { intervalMs: overrides.intervalMs } : {}),
+    timer: {
+      set: () => ({ native: null }),
+      clear: () => {},
+    },
+    logger: (line) => logs.push(line),
+  });
+  return {
+    wd,
+    sent,
+    summaryCalls: () => summaryCalls,
+    setIdle: (value: boolean) => {
+      idle = value;
+    },
+    setSummary: (value: RunSummary) => {
+      currentSummary = value;
+    },
+    logs,
+  };
+}
+
+describe("watchdog: 可收波谓词（纯核，r1 方案 §4.1）", () => {
+  it("plan / development 作业收波（ACTIVE_STAGES 谓词与手发同集）", () => {
+    const state = initialAutoPilotState();
+    const plan = nextAutoAction(wdSummary([wdJob({ id: "r1", stage: "plan" })]), state);
+    assert.equal(plan.kind, "wave", "plan 作业可收");
+    assert.deepEqual(plan.jobs.map((job) => job.stage), ["plan"]);
+    const dev = nextAutoAction(
+      wdSummary([wdJob({ id: "r2", stage: "development", status: "developing" })]),
+      state,
+    );
+    assert.equal(dev.kind, "wave", "development 作业可收");
+  });
+
+  it("lifecycle 缺失 / 非 resident（旧 mod）保守不收；摘要不可用不猜", () => {
+    const state = initialAutoPilotState();
+    const legacy = wdSummary([wdJob({ id: "r1" })], { lifecycle: undefined });
+    assert.equal(nextAutoAction(legacy, state).kind, "none", "lifecycle 缺失 → 保守不收");
+    const foreign = wdSummary([wdJob({ id: "r1" })], { lifecycle: "batch" });
+    assert.equal(nextAutoAction(foreign, state).kind, "none", "非 resident → 不收");
+    assert.equal(
+      nextAutoAction(unknownSummary("没有摘要"), state).kind,
+      "none",
+      "摘要不可用 → none（不猜）",
+    );
+  });
+
+  it("delivered:* 不收——guide 模式 accept 被票拒即设计停点，不重试", () => {
+    const state = initialAutoPilotState();
+    const delivered = wdSummary([
+      wdJob({ id: "r1", stage: "development", subagentStatus: "delivered:p2(a1)" }),
+    ]);
+    assert.equal(nextAutoAction(delivered, state).kind, "none", "delivered 不收波");
+    assert.equal(isDeliveredJob(wdJob({ id: "r1", subagentStatus: "delivered:p2(a1)" })), true);
+    assert.equal(isDeliveredJob(wdJob({ id: "r1", subagentStatus: "subagent pending" })), false);
+    const mixed = wdSummary([
+      wdJob({ id: "r1", stage: "development", subagentStatus: "delivered:p2(a1)" }),
+      wdJob({ id: "r2", stage: "plan" }),
+    ]);
+    const decision = nextAutoAction(mixed, state);
+    assert.deepEqual(
+      decision.jobs.map((job) => job.id),
+      ["r2"],
+      "混合清单只收非 delivered 的那一个",
+    );
+  });
+
+  it("未决冲突不收（永不越过冲突）；停车作业不收；rev 变化换键自动复位", () => {
+    const state = initialAutoPilotState();
+    const conflict = wdSummary([wdJob({ id: "r1" })], {
+      conflicts: [{ id: "r1", peer: "lane-2", note: "branch overlaps" }],
+    });
+    assert.equal(nextAutoAction(conflict, state).kind, "none", "有冲突 → none");
+
+    const failed = recordWaveOutcome(state, [
+      { key: collectKey(wdJob({ id: "r1", rev: 1, stage: "plan" })), ok: false },
+    ]);
+    assert.equal((failed.parked[collectKey({ id: "r1", rev: 1, stage: "plan" })] ?? 0), 1);
+    const onceFailed = wdSummary([wdJob({ id: "r1", rev: 1, stage: "plan" })]);
+    assert.equal(nextAutoAction(onceFailed, failed).kind, "wave", "失败 1 次 < 阈值 2：预算内仍可收");
+    const parkedTwice = recordWaveOutcome(failed, [
+      { key: collectKey({ id: "r1", rev: 1, stage: "plan" }), ok: false },
+    ]);
+    assert.equal(nextAutoAction(onceFailed, parkedTwice).kind, "none", "连续 2 次失败 → 停车不收");
+    // rev 变化（amend / reject 打回）= 新键 = 自动复位
+    const amended = wdSummary([wdJob({ id: "r1", rev: 2, stage: "plan" })]);
+    assert.equal(nextAutoAction(amended, parkedTwice).kind, "wave", "rev+1 换键 → 重新可收");
+  });
+
+  it("goal 模式 ∧ YGG_AUTO_WAKE=on ∧ 门禁在场 → 唤醒门禁；guide 模式永不唤醒", () => {
+    const state = initialAutoPilotState();
+    const gated = wdSummary([], {
+      play: "goal",
+      gates: [{ id: "r1", gate: "plan", rev: 1, title: "T" }],
+    });
+    assert.equal(nextAutoAction(gated, state).kind, "none", "wake 未 opt-in → none");
+    const opted = nextAutoAction(gated, state, { wakeEnabled: true });
+    assert.equal(opted.kind, "wake", "goal + opt-in → 唤醒");
+    assert.equal(opted.gate?.id, "r1");
+    const guide = wdSummary([], {
+      play: "guide",
+      gates: [{ id: "r1", gate: "plan", rev: 1, title: "T" }],
+    });
+    assert.equal(
+      nextAutoAction(guide, state, { wakeEnabled: true }).kind,
+      "none",
+      "guide 模式门禁只能人点菜单，永不唤醒",
+    );
+    assert.match(buildGateWakeMessage("run", { id: "r1", gate: "plan", rev: 1, title: "T" }), /approve_gate|reject_gate/);
+  });
+
+  it("collectJobs 保持原序且排除 delivered；波唤醒消息点名 ygg_run_lanes（不越界到 gate）", () => {
+    const state = initialAutoPilotState();
+    const summary = wdSummary([
+      wdJob({ id: "r3", stage: "plan" }),
+      wdJob({ id: "r1", stage: "development", subagentStatus: "delivered:p2(a)" }),
+      wdJob({ id: "r2", stage: "development" }),
+    ]);
+    assert.deepEqual(
+      collectJobs(summary, state).map((job) => job.id),
+      ["r3", "r2"],
+      "保持 summary.jobs 原序，delivered 排除",
+    );
+    const message = buildWaveWakeMessage("run-wd", collectJobs(summary, state));
+    assert.match(message, /ygg_run_lanes/, "唤醒指令让主代理调 ygg_run_lanes");
+    assert.doesNotMatch(message, /gate\.approve/, "唤醒消息绝不指示批门禁");
+    assert.equal(AUTO_WAVE_CUSTOM_TYPE, "ygg-auto-wave");
+  });
+});
+
+describe("watchdog: 失败预算（per-job 停车 / 全局自关）", () => {
+  it("同一键连续 2 次失败停车；成功一次清停车并清零全局计数", () => {
+    let state = initialAutoPilotState();
+    const key = "r1:1:plan";
+    assert.equal(WAVE_FAILURES_PARK, 2, "预算常数钉住：per-job 连续 2 次整波失败即停车");
+    for (let i = 1; i < WAVE_FAILURES_PARK; i += 1) {
+      state = recordWaveOutcome(state, [{ key, ok: false }]);
+      assert.equal(key in state.parked, true, "失败未达阈值也已计数");
+    }
+    state = recordWaveOutcome(state, [{ key, ok: false }]);
+    assert.equal(state.parked[key], WAVE_FAILURES_PARK, "达到阈值：停车表就位");
+    assert.equal(state.waveCount, WAVE_FAILURES_PARK);
+    state = recordWaveOutcome(state, [{ key, ok: true }]);
+    assert.equal(key in state.parked, false, "成功清停车");
+    assert.equal(state.consecutiveWaveFailures, 0, "成功清零全局连续全败");
+  });
+
+  it(`全局连续 ${WAVE_FAILURES_AUTO_OFF} 波全败 → 自关（enabled=false）`, () => {
+    let state = initialAutoPilotState();
+    for (let i = 0; i < WAVE_FAILURES_AUTO_OFF; i += 1) {
+      state = recordWaveOutcome(state, [{ key: `r1:${i + 1}:plan`, ok: false }]);
+    }
+    assert.equal(state.enabled, false, "三连全败 → 看门狗自关");
+    assert.equal(state.consecutiveWaveFailures, 3);
+    state = recordWaveOutcome(state, [{ key: "r9:1:plan", ok: true }]);
+    assert.equal(state.enabled, true, "自关后再次结算（外部重启场景）恢复可运行");
+  });
+
+  it("空波（无作业落地）不累计全败：竞态空转不算失败", () => {
+    const state = recordWaveOutcome(initialAutoPilotState(), []);
+    assert.equal(state.consecutiveWaveFailures, 0, "outcomes 为空 → 不算全败");
+    assert.equal(state.enabled, true);
+  });
+});
+
+describe("watchdog: 间隔与唤醒开关解析（观测面 fail-safe）", () => {
+  it("clampAutoIntervalMs：非法 → 默认；越界钳位 1s-60s", () => {
+    assert.equal(clampAutoIntervalMs(undefined), DEFAULT_AUTO_INTERVAL_MS);
+    assert.equal(clampAutoIntervalMs("abc"), DEFAULT_AUTO_INTERVAL_MS);
+    assert.equal(clampAutoIntervalMs("-5"), DEFAULT_AUTO_INTERVAL_MS);
+    assert.equal(clampAutoIntervalMs(0), DEFAULT_AUTO_INTERVAL_MS);
+    assert.equal(clampAutoIntervalMs(500), MIN_AUTO_INTERVAL_MS, "低于 1s 钳到 1s");
+    assert.equal(clampAutoIntervalMs("120000"), MAX_AUTO_INTERVAL_MS, "高于 60s 钳到 60s");
+    assert.equal(clampAutoIntervalMs(9000), 9000, "合法值原样");
+  });
+
+  it("parseAutoWake 只认 on（默认关）", () => {
+    assert.equal(parseAutoWake(undefined), false);
+    assert.equal(parseAutoWake(""), false);
+    assert.equal(parseAutoWake("true"), false);
+    assert.equal(parseAutoWake("on"), true);
+    assert.equal(parseAutoWake(" ON "), true, "大小写与空白不敏感");
+  });
+});
+
+describe("watchdog: tick 壳（互斥/水位/心跳/波票）", () => {
+  it("会话在忙跳过（与手发共享同一把会话闸 = 单飞互斥）；波票未消费不再发新波", async () => {
+    const summary = wdSummary([wdJob({ id: "r1", stage: "plan" })]);
+    const harness = makeWatchdog(summary);
+    harness.wd.state.enabled = true;
+
+    harness.setIdle(false); // 手发编排/唤醒回合进行中
+    const busy = await harness.wd.tick();
+    assert.equal(busy.kind, "none", "忙 → 跳过本 tick");
+    assert.match(busy.reason, /会话在忙/);
+    assert.equal(harness.sent.length, 0, "忙时不发任何消息");
+
+    harness.setIdle(true);
+    const t0 = 1_000_000;
+    const first = await harness.wd.tick(t0);
+    assert.equal(first.kind, "wave");
+    assert.equal(harness.sent.length, 1, "空闲且可收 → 发一张波票");
+    assert.equal(harness.sent[0]!.triggerTurn, true, "波票是 triggerTurn:true 的自唤醒");
+    assert.match(harness.sent[0]!.content, /ygg_run_lanes/);
+
+    harness.setSummary(wdSummary([wdJob({ id: "r2", stage: "plan" })]));
+    const inGrace = await harness.wd.tick(t0 + 1_000);
+    assert.equal(inGrace.kind, "none", "宽限期内（等自唤醒回合起跑）不再发");
+    const second = await harness.wd.tick(t0 + 21_000);
+    assert.equal(second.kind, "none", "宽限超时且波票仍未消费 → 不再发新波");
+    assert.match(second.reason, /波票未消费|已有未消费/);
+    assert.equal(harness.sent.length, 1, "fail-closed：一张票卡住即停发");
+  });
+
+  it("硬水位不派任何消息（看门狗不是第三个压缩入口）；软水位照派", async () => {
+    const summary = wdSummary([wdJob({ id: "r1", stage: "plan" })]);
+    const hard = makeWatchdog(summary, { pressureLevel: "hard_brake" });
+    hard.wd.state.enabled = true;
+    const hardDecision = await hard.wd.tick();
+    assert.equal(hardDecision.kind, "none");
+    assert.match(hardDecision.reason, /hard_brake/);
+    assert.equal(hard.sent.length, 0, "硬水位零派发");
+
+    const soft = makeWatchdog(summary, { pressureLevel: "soft_brake" });
+    soft.wd.state.enabled = true;
+    const softDecision = await soft.wd.tick();
+    assert.equal(softDecision.kind, "wave", "软水位照跑（落地后由既有刹车面交接）");
+    assert.equal(soft.sent.length, 1);
+  });
+
+  it("每 tick 恰好一次 summary()——daemon 存活心跳（重启由 daemon.ts 既有单次重试自愈）", async () => {
+    const harness = makeWatchdog(wdSummary([]));
+    harness.wd.state.enabled = true;
+    await harness.wd.tick();
+    await harness.wd.tick();
+    assert.equal(harness.summaryCalls(), 2, "每 tick 一次 summary（顺带 drain + 存活探测）");
+  });
+
+  it("start/stop 走可注入时钟；全局三连全败自关时停表", () => {
+    let started = 0;
+    let cleared = 0;
+    const harness = makeWatchdog(wdSummary([]));
+    const wd = new AutoWatchdog({
+      client: { async summary() { return wdSummary([]); } } as never,
+      sender: { sendMessage() {} },
+      runId: "run-clock",
+      isIdle: () => true,
+      wakeEnabled: false,
+      timer: {
+        set: () => {
+          started += 1;
+          return { native: null };
+        },
+        clear: () => {
+          cleared += 1;
+        },
+      },
+      logger: () => {},
+    });
+    wd.start();
+    assert.equal(started, 1, "start 装定时器");
+    assert.equal(wd.state.enabled, true);
+    wd.stop("测试");
+    assert.equal(cleared, 1, "stop 清定时器");
+    assert.equal(wd.state.enabled, false);
+    assert.equal(harness.logs.length, 0, "独立实例互不干扰");
+  });
+
+  it("recordWave 三连全败 → 自关并停表（fail-closed 上报）", async () => {
+    const harness = makeWatchdog(wdSummary([wdJob({ id: "r1", stage: "plan" })]));
+    harness.wd.start();
+    harness.wd.recordWave([{ key: "r1:1:plan", ok: false }]);
+    harness.wd.recordWave([{ key: "r1:1:plan", ok: false }]);
+    harness.wd.recordWave([{ key: "r1:1:plan", ok: false }]);
+    assert.equal(harness.wd.state.enabled, false, "三连全败自关");
+    assert.match(harness.logs.join("\n"), /自关/, "自关原因进日志（诚实上报）");
+    const after = await harness.wd.tick();
+    assert.equal(after.kind, "none", "自关后 tick 不再动作");
+  });
+});
+
+describe("watchdog: 波次日志与交接单段（全量 narrative，不截断）", () => {
+  it("buildWaveLogMarkdown 逐作业逐回执落盘，长行原样保留；停点判定进文档", () => {
+    const longLine = "[LANE PROBE] ".padEnd(200, "x");
+    const markdown = buildWaveLogMarkdown({
+      runId: "run-wd",
+      wave: 3,
+      reason: "r1:plan",
+      result: {
+        jobs: [
+          {
+            id: "r1",
+            stage: "plan",
+            rev: 1,
+            lane: 1,
+            branch: "feature/r1-t",
+            base: "ac1ee3e",
+            worktreePath: "/tmp/wt",
+            artifactPath: "artifacts/r1-plan.md",
+            brief: "b",
+            report: "r",
+            archived: { ok: true },
+            receipts: [
+              { label: "worktree_claim", receipt: receipt(["[LANE CLAIMED]", longLine]) },
+              { label: "proposal.submit", receipt: receipt(["[PROPOSAL SUBMITTED] r1|1|plan"]) },
+            ],
+            expectedGate: "plan",
+          },
+        ],
+        gates: [{ id: "r1", gate: "plan", rev: 1, title: "T" }],
+        narrative: [],
+        summary: null,
+        contextBraked: false,
+      } as never,
+    });
+    assert.match(markdown, /# 自动收波波次日志 0003/);
+    assert.match(markdown, /### worktree_claim/);
+    assert.ok(markdown.includes(longLine), "长 narrative 行必须逐字保留（永不截断）");
+    assert.match(markdown, /## 停点判定/);
+    assert.match(markdown, /r1 停在 `plan`/);
+  });
+
+  it("waveLogPath 四位序号；交接单第 6 节看门狗段：未启用写明、启用带停车表", () => {
+    assert.equal(waveLogPath(1), "artifacts/auto-wave-0001.md");
+    assert.equal(waveLogPath(27), "artifacts/auto-wave-0027.md");
+
+    const off = buildHandoffMarkdown({
+      runId: "run-wd",
+      summary: wdSummary([]),
+      now: new Date(0),
+    });
+    assert.match(off, /## 6\. 看门狗（自动收波）/, "加性第 6 节存在");
+    assert.match(off, /未启用/, "缺省如实写未启用");
+
+    const on = buildHandoffMarkdown({
+      runId: "run-wd",
+      summary: wdSummary([]),
+      now: new Date(0),
+      watchdog: {
+        enabled: true,
+        intervalMs: 5_000,
+        waveCount: 4,
+        consecutiveWaveFailures: 1,
+        parked: [{ key: "r1:1:plan", failures: 2 }],
+        lastReason: "已发收波唤醒（第 4 波）：r1:plan",
+        lastWaveLog: "artifacts/auto-wave-0004.md",
+      },
+    });
+    assert.match(on, /运行中 · 间隔 5000ms · 已触发波次 4/);
+    assert.match(on, /artifacts\/auto-wave-0004\.md/);
+    assert.match(on, /r1:1:plan/, "停车表逐行可见");
+    assert.match(on, /## 7\. 压缩后从这里继续/, "下一步节顺延为第 7 节");
+  });
+});

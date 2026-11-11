@@ -34,6 +34,7 @@
  */
 
 import type { RunSummary, SummaryGate, SummaryJob, YggDaemon } from "./daemon.ts";
+import type { OrchestrationResult } from "./orchestrator.ts";
 
 // ───────────────────────────── 纯核：状态与谓词 ─────────────────────────────
 
@@ -158,6 +159,7 @@ export function collectJobs(summary: RunSummary, state?: AutoPilotState): Summar
     (job) =>
       isCollectibleJobStage(job) &&
       !isDeliveredJob(job) &&
+
       (state === undefined || (state.parked[collectKey(job)] ?? 0) < WAVE_FAILURES_PARK),
   );
 }
@@ -226,6 +228,69 @@ export function buildGateWakeMessage(runId: string, gate: SummaryGate): string {
     `[ygg 看门狗·门禁唤醒] goal 模式下有待审门禁：${gate.id} ${gate.gate} rev${gate.rev} ` +
     `（${gate.title}，run ${runId}）。请按你的裁决处理（ygg_session 的 approve_gate / reject_gate）。`
   );
+}
+
+// ───────────────────────────── 波次日志（无人值守场景的全量回执面） ─────────────────────────────
+
+/** 波次日志路径：`artifacts/auto-wave-<NNNN>.md`（四位序号；与交接单同类的宿主侧归档）。 */
+export function waveLogPath(wave: number): string {
+  return `artifacts/auto-wave-${String(Math.max(1, wave)).padStart(4, "0")}.md`;
+}
+
+/**
+ * 波次日志 markdown：触发原因 + 逐作业逐回执的 narrative **全文**（永不截断）+ 停点判定。
+ * 「三不之永不截断回执」在无人值守场景的落点：主会话不在场时，下个在场回合经交接单
+ * 指针完整可达（DESIGN §3.5）。index.ts 的 `ygg_run_lanes` 消费波票后调它落 VFS。
+ */
+export function buildWaveLogMarkdown(input: {
+  runId: string;
+  wave: number;
+  reason: string;
+  result: OrchestrationResult;
+  now?: Date;
+}): string {
+  const { runId, wave, reason, result } = input;
+  const lines: string[] = [
+    `# 自动收波波次日志 ${String(Math.max(1, wave)).padStart(4, "0")}`,
+    "",
+    `- run：\`${runId === "" ? "(unknown)" : runId}\``,
+    `- 触发：${reason === "" ? "(未记录)" : reason}`,
+    `- 时间：${(input.now ?? new Date()).toISOString()}`,
+    `- 作业数：${result.jobs.length}（braked=${result.contextBraked}）`,
+    "",
+  ];
+  if (result.jobs.length === 0) {
+    lines.push("(本波没有作业落地——编排拒绝或无活跃作业，原因见上方触发段)");
+    lines.push("");
+  }
+  for (const job of result.jobs) {
+    lines.push(
+      `## ${job.id}（${job.stage} rev${job.rev > 0 ? job.rev : 1}）lane=${job.lane} ${job.branch}`,
+      "",
+    );
+    if (job.error !== undefined) {
+      lines.push(`> ⚠ 作业错误：${job.error}`, "");
+    }
+    for (const entry of job.receipts) {
+      lines.push(`### ${entry.label}`, "");
+      for (const line of entry.receipt.narrative) {
+        lines.push(line);
+      }
+      lines.push("");
+    }
+  }
+  lines.push("## 停点判定", "");
+  if (result.gates.length === 0) {
+    lines.push("(无已升起门禁——本波落在待决提案或无作业)");
+  } else {
+    for (const gate of result.gates) {
+      lines.push(`- ${gate.id} 停在 \`${gate.gate}\`（rev ${gate.rev}）${gate.title}`);
+    }
+    lines.push("");
+    lines.push("> 门禁裁决是人的决定：看门狗不批门禁，等下个在场者处理。");
+  }
+  lines.push("");
+  return lines.join("\n");
 }
 
 // ───────────────────────────── 薄 IO 壳 ─────────────────────────────
