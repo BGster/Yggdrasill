@@ -56,11 +56,11 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      discipline is **immersive play first** — one real action per turn, read the full receipt, then
      decide.
      Three-question criterion (see 7): ① which action does it block? (any argument that a batch
-     entrypoint should be added to `crates/ygg-sandbox/examples/agent.rs` or wrapped by a script);
+     entrypoint should be added to `crates/ygg-sandbox/examples/egg.rs` or wrapped by a script);
      ② what does a violation look like? (a run whose events were produced without a receipt review,
      or a document that suggests `--events` / a batch loop); ③ how do you confirm it next time?
      (`grep -n '\-\-events' AGENTS.md README.md .ygg/mods/pi-agent-seed/README.md` finds nothing outside
-     a prohibition sentence, and `cargo build --release --example agent` still has a single
+     a prohibition sentence, and `cargo build --release --example egg` still has a single
      `--event`).
 5. **Stop on violation**: when a self-check or a report tells you a constraint was bypassed, stop
    every step, list honestly "what was dispatched / what I did myself / which output has no event",
@@ -80,7 +80,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      self-written checker that you will bypass in the same way. Scripts may only perform **read-only
      queries** (`requirement.list`, `map.show`, read-only statistics over `events.jsonl`) and **may
      not become the carrier of a constraint**.
-   - **Never patch the ygg-agent CLI source** (`crates/ygg-sandbox/examples/agent.rs` and the host
+   - **Never patch the egg CLI source** (`crates/ygg-sandbox/examples/egg.rs` and the host
      contract). The CLI is a non-negotiable host, not an implementation surface of this repository.
      If a capability gap genuinely must be solved in the host, describe the symptom and the
      reproduction and hand it to the user; never patch it yourself.
@@ -277,18 +277,18 @@ A tool request crosses two independent gates, and neither may be dropped as "red
 
 Changing `crates/**` (state machine, driver, host persistence surface) requires all three, and
 missing one is a fake green:
-`cargo test --workspace` ∧ `cargo test --example agent -p ygg-sandbox` ∧
+`cargo test --workspace` ∧ `cargo test --example egg -p ygg-sandbox` ∧
 `cargo test -p ygg-sandbox --test agent_seed_semantics`.
 The second one cannot be skipped: Cargo's `--workspace` **does not compile the example target's unit
-tests**, so the assertions inside `crates/ygg-sandbox/examples/agent.rs` (persistence atomicity,
+tests**, so the assertions inside `crates/ygg-sandbox/examples/egg.rs` (persistence atomicity,
 reset semantics, hot reload, settlement policy) **never execute** when you only run the workspace,
 and the gate still prints `failed=0`.
 Three-question criterion (see 7): ① which action does it block? ("run only `cargo test --workspace`
 after touching the kernel or the host and call the gate green"); ② what does a violation look like?
-(the pass counts of `--workspace` and of `--example agent` do not match — the former always lacks the
+(the pass counts of `--workspace` and of `--example egg` do not match — the former always lacks the
 example batch); ③ how do you confirm it next time? (compare the two counts:
 `cargo test --workspace | grep -c '^test result'` and
-`cargo test --example agent -p ygg-sandbox | grep -c '^test result'`).
+`cargo test --example egg -p ygg-sandbox | grep -c '^test result'`).
 
 #### 9.2c The active subsystem folds tool results, it never fakes a decision
 
@@ -327,13 +327,13 @@ so the KV and the narration agree on both host shapes.
 ## 2. Cold start
 
 ### Build and install
-The CLI has a single source: `crates/ygg-sandbox/examples/agent.rs` (the host itself,
+The CLI has a single source: `crates/ygg-sandbox/examples/egg.rs` (the host itself,
 contract-driven and fail-closed):
 
 ```bash
 YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"                  # repository root (or any checkout)
-(cd "$YGGDRASILL_ROOT" && cargo build --release --example agent)
-mkdir -p .ygg/bin && rm -f .ygg/bin/ygg-agent && cp "$YGGDRASILL_ROOT/target/release/examples/agent" .ygg/bin/ygg-agent
+(cd "$YGGDRASILL_ROOT" && cargo build --release --example egg)
+mkdir -p .ygg/bin && rm -f .ygg/bin/egg && cp "$YGGDRASILL_ROOT/target/release/examples/egg" .ygg/bin/egg
 ```
 
 The default build enables `store-sqlite` (`crates/ygg-sandbox/Cargo.toml` sets
@@ -367,19 +367,19 @@ are git-ignored, `.ygg/mods/` is committed.
 
 ### Start
 ```bash
-.ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
+.ygg/bin/egg --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
 ```
 
 ### Continue
 ```bash
-A=".ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs"
+A=".ygg/bin/egg --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs"
 $A --resume --drive stdin                                     # interactive: the human chooses (default)
 $A --resume --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
 $A --resume --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)
 $A --resume --drive none                                      # look at the situation, do not advance
 $A --resume --event guide.show --payload '"harness"'          # fetch a rule chapter by id (harness / credentials / gates …)
 $A --resume --event map.show                                  # current node + out-edges; add --payload '"full"' for the whole design map
-.ygg/bin/ygg-agent --run-id <run-name> --runs-root .ygg/runs --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
+.ygg/bin/egg --run-id <run-name> --runs-root .ygg/runs --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
 ```
 
 ### Pause
@@ -390,7 +390,7 @@ $A --resume --event map.show                                  # current node + o
 - Re-running the "continue" command resumes; nothing is lost.
 
 ### Settle and finish
-Finish with `.ygg/bin/ygg-agent --run-id <run-name> --runs-root .ygg/runs --settle` in this fixed
+Finish with `.ygg/bin/egg --run-id <run-name> --runs-root .ygg/runs --settle` in this fixed
 order (no step may be skipped):
 
 1. Make sure every requirement is in a terminal state (done / split / merged / dropped) and the inbox
@@ -415,8 +415,8 @@ machine, it only speaks to it through `daemon.dispatch` → `ygg.on(...)` handle
 
 | File | Job |
 | --- | --- |
-| `firewall.ts` | `tool_call` gate: the data red line (`*.xlsx` / `*.xls` / `*.csv`, `/Volumes/WenshuSpace/**`) and the batch-entrypoint prohibition (`--events`, shell `for/while … do … ygg-agent`, `xargs ygg-agent`). Pure [`checkToolCallFirewall`](.pi/extensions/ygg-pi-harness/firewall.ts), directly unit-tested. |
-| `daemon.ts` | Persistent `ygg-agent --daemon` client: line JSON-RPC, id matching, serialized request queue, 30s timeout, respawn after an unexpected exit, and a **single-shot CLI fallback** when the host predates `--daemon` (the summary then reports `available=false` instead of guessing jobs/gates). |
+| `firewall.ts` | `tool_call` gate: the data red line (`*.xlsx` / `*.xls` / `*.csv`, `/Volumes/WenshuSpace/**`) and the batch-entrypoint prohibition (`--events`, shell `for/while … do … egg`, `xargs egg`). Pure [`checkToolCallFirewall`](.pi/extensions/ygg-pi-harness/firewall.ts), directly unit-tested. |
+| `daemon.ts` | Persistent `egg --daemon` client: line JSON-RPC, id matching, serialized request queue, 30s timeout, respawn after an unexpected exit, and a **single-shot CLI fallback** when the host predates `--daemon` (the summary then reports `available=false` instead of guessing jobs/gates). |
 | `orchestrator.ts` | Lane lifecycle for active jobs: [`buildSubagentBrief`](.pi/extensions/ygg-pi-harness/orchestrator.ts) builds a self-contained brief; [`orchestrateActiveJobs`](.pi/extensions/ygg-pi-harness/orchestrator.ts) claims the worktree, runs subagents concurrently, archives into the run VFS, probes the lane, submits and accepts the proposal — landing the requirement at `plan_gate` / `accept_gate`. It also owns the **subagent create + resume** lifecycle (real `agent_id` written into `exec=`, `resume` on a gate reject / `plan → development`, one self-heal on a stream error and one on a dirty lane probe) and the **context brake** (hard = spawn nothing and hand off first, soft = land the wave, then hand off). |
 | `compaction.ts` | Context pressure monitor + stable-node predicate + structured handoff. [`evaluateContextPressure`](.pi/extensions/ygg-pi-harness/compaction.ts) (soft 0.60 / hard 0.75; unknown token counts never brake), [`isStableCheckpoint`](.pi/extensions/ygg-pi-harness/compaction.ts) (`available` ∧ no pending tools ∧ (gate ∨ no jobs ∨ conflict)), [`buildHandoffMarkdown`](.pi/extensions/ygg-pi-harness/compaction.ts) → `artifacts/handoff-latest.md` through [`writeHandoffToVfs`](.pi/extensions/ygg-pi-harness/compaction.ts), plus the resume-message and compact-instruction builders. No npm deps and erasable TypeScript only, so `node --experimental-strip-types` loads it directly. |
 | `index.ts` | Wiring: session lifecycle hooks, the `tool_call` firewall, `/ygg status` and `/ygg stop`, the tools `ygg_session` (`kickoff` / `dispatch` / gate / `vfs_*` / `handoff_compact` / `settle_close`) and `ygg_run_lanes`, the compaction hooks (`session_before_compact` / `session_compact` / `session_compact_failed`), and the footer status line. |
