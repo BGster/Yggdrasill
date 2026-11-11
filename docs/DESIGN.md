@@ -43,8 +43,8 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 | 层级 | 宿主环境 | 子代理执行与恢复 | 上下文遥测与压缩 | 集成机制 |
 | --- | --- | --- | --- | --- |
-| **Tier 1 · 原生扩展** | Pi Coding Agent（`ygg-pi-harness`） | 原生 `Agent({ resume })`，自动回退到 `fullFallbackBrief` | 实时 token 比例（`soft >= 60%`、`hard >= 75%`），自动 `artifacts/handoff-latest.md` + `compact()` | 持久化 `ygg-agent --daemon` stdio JSON-RPC 客户端 |
-| **Tier 2 · CLI / Hook 运行器** | Claude Code、Codex CLI、Cursor | 子进程调用或原生任务工具，消费 `subagentAction.brief` 与 `submitCommand` | 在稳定检查点由 Hook 触发的 `handoff_compact` | `ygg-agent --daemon` 或单次 `--resume --event` CLI |
+| **Tier 1 · 原生扩展** | Pi Coding Agent（`ygg-pi-harness`） | 原生 `Agent({ resume })`，自动回退到 `fullFallbackBrief` | 实时 token 比例（`soft >= 60%`、`hard >= 75%`），自动 `artifacts/handoff-latest.md` + `compact()` | 持久化 `egg --daemon` stdio JSON-RPC 客户端 |
+| **Tier 2 · CLI / Hook 运行器** | Claude Code、Codex CLI、Cursor | 子进程调用或原生任务工具，消费 `subagentAction.brief` 与 `submitCommand` | 在稳定检查点由 Hook 触发的 `handoff_compact` | `egg --daemon` 或单次 `--resume --event` CLI |
 | **Tier 3 · 提示委派** | 通用 LLM 聊天 / 自定义 Agent 循环 | 协调者把 `subagentAction.brief` 复制进子代理上下文并转达 `proposal.submit` | 经 `vfs.write` 手动检查点交接 | 单次 CLI 回执（`narrative` + `pendingChoice`） |
 
 ### 1.2 Adapter 一致性契约（任何 harness 都必须满足的五条义务）
@@ -80,7 +80,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 **禁止第五种**：`dest` 非空但**没有任何 harness 认领**（典型形态：在 DeepSeek Harness 局里出现 `dest=~/.pi/agent/sessions-trash/<batch>`）。那条路径确实存在，但它归档的不是本局会话——把它写成「查空了」就是谎报。识别完全在扩展侧，不需要新契约：`dest` 的 trash 根必须落在**本局声明的 adapter** 对应的根下（`archive.ts` 的 `FOREIGN_SESSION_ROOTS` + 可选的 `destRoot`）。默认判据是「宁可说没查，不谎报查空了」。
 
-> **给宿主维护者的一句话**：要让 `archive-sessions` 真正覆盖未知 harness，需要在 `agent.rs` 增加第五个适配器及其会话库约定。本仓库把 `crates/ygg-sandbox/examples/agent.rs` 当红线，所以这里只保证**不谎报**，不自行修改宿主。
+> **给宿主维护者的一句话**：要让 `archive-sessions` 真正覆盖未知 harness，需要在 `egg.rs` 增加第五个适配器及其会话库约定。本仓库把 `crates/ygg-sandbox/examples/egg.rs` 当红线，所以这里只保证**不谎报**，不自行修改宿主。
 
 ---
 
@@ -271,9 +271,9 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 > `op` 面的 8 个操作是状态推进之外的旁路端口；`op=vfs_put` 与 `event=vfs.write` 的语义差异（阶段守卫 / 内容上限 / 台账）见 §3.4。
 
-#### 单次 CLI 与内置工具参数（`ygg-agent`）
-- **运行执行**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] --event <event> [--payload <json>]`
-- **结算**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs --settle`
+#### 单次 CLI 与内置工具参数（`egg`）
+- **运行执行**：`.ygg/bin/egg --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] --event <event> [--payload <json>]`
+- **结算**：`.ygg/bin/egg --mod <mod_dir> --run-id <id> --runs-root .ygg/runs --settle`
 - **内置宿主工具（`--builtin-tool <op>`）**：
   - `worktree-claim --lane <1..4> --req <rN> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;req=<rN>;branch=<br>;base=<sha>;clean=1;path=<wt_path>`
   - `lane-probe --lane <1..4> --base <sha> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;commits=<N>;clean=<0|1>;head=<sha>;files=<csv>`

@@ -2104,7 +2104,7 @@ fn subsystem_declarations_and_beat_references_stay_complete() {
             );
             assert_eq!(
                 tools[id]["program"],
-                json!("ygg-agent"),
+                json!("egg"),
                 "{id}: the built-in tools are served by the host binary itself"
             );
         }

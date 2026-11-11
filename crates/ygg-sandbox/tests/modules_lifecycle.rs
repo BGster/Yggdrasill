@@ -6,7 +6,7 @@
 //!   （模块各执行一次）、旧对象不得泄漏（模块内状态归零）、handler 不得重复注册；
 //! - **热载**：模块文件变了要能换新代码，换不动时必须**旧 mod 继续跑**（不留
 //!   半更新态）。宿主的 `mod_signature` 判据与服务端的 `restore` 换装语义在各
-//!   自的层测：签名层在 `examples/agent.rs` 的测试里，换装层（= 本文件）走
+//!   自的层测：签名层在 `examples/egg.rs` 的测试里，换装层（= 本文件）走
 //!   `ModBundle::restore` —— 这正是 `Session::maybe_reload` 的实现路径；
 //! - **确定性**：同一 Mod 反复装载，handler 注册序（= 派发序）必须逐项相等。
 //!   这条防的是"依赖图遍历用了 HashMap 之类"——Rust 的 HashMap 迭代序在实例

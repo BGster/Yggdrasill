@@ -7,7 +7,7 @@ Mod 内部结构。
 
 ## 零、host 契约（**必填；宿主不含任何默认值**）
 
-宿主（`crates/ygg-sandbox/examples/agent.rs`、`src/playtest.rs`）不含任何事件名字面量与回退默认值：
+宿主（`crates/ygg-sandbox/examples/egg.rs`、`src/playtest.rs`）不含任何事件名字面量与回退默认值：
 事件名、inbox 路由、结算口径、推进阈值**全部**从本 Mod 的 `pack.json` 与 `data/config.json` 读。
 任何一段缺失 / 字段缺失 / 类型不符 / 非正整数 → **装载期失败**（非零退出或 `ok=false` 报告），
 错误文案会点名缺失字段并给回本节的定位。旧 Mod 升级 = 补齐下面四段。
@@ -283,7 +283,7 @@ Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
 
 ### 宿主读的摘要字段（`agent.summary` → `ygg.meta("summary", …)`）
 
-宿主（`crates/ygg-sandbox/examples/agent.rs`）对「何时收口 / 有无冲突 / 有无待验收提案 / 是否有 job
+宿主（`crates/ygg-sandbox/examples/egg.rs`）对「何时收口 / 有无冲突 / 有无待验收提案 / 是否有 job
 空等」的认知**只来自本 Mod 自报的结构化摘要**，不读任何 `req.*` / `prop.*` / `fsm.stage` / `ending` 私有键：
 
 ```lua
@@ -519,9 +519,9 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 cargo run --example playtest -- .ygg/mods/agent-seed
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
-#   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
-#   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
-#   .ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --run-id t --runs-root .ygg/runs --resume
+#   .ygg/bin/egg --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
+#   .ygg/bin/egg --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
+#   .ygg/bin/egg --mod .ygg/mods/agent-seed --run-id t --runs-root .ygg/runs --resume
 
 # 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
 cargo run --example pack -- .ygg/mods/agent-seed

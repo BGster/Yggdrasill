@@ -23,7 +23,7 @@ edition = "2021"
 # members 一次成型的第二次受控例外：`ygg-store` 是宿主 CLI 持久化面的**端口下沉**
 # （`RunStore` trait + JSON 后端 + 可选 sqlite 后端），不是第 N 个业务 crate。
 # 理由：第二个后端要能接入，就必须先把「状态事实」收敛成端口；而端口若留在
-# examples/agent.rs 里，两套实现只能各自复制一遍宿主协议。它刻意**只**承接状态
+# examples/egg.rs 里，两套实现只能各自复制一遍宿主协议。它刻意**只**承接状态
 # 事实（run.json / settlement.json / coordination.* 都留在宿主），依赖面仅
 # serde_json（+ 可选 rusqlite），不被任何业务 crate 依赖（ygg-sandbox 只在
 # dev-dependencies 里引用，故 wasm/lint 的结构面不受影响）。

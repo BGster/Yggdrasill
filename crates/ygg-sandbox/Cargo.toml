@@ -40,14 +40,14 @@ ygg-schema = { path = "../ygg-schema" }
 # ygg-core 零哈希；状态哈希 = SHA-256(canonical_state_bytes)，D-继承-5 归位）。
 sha2 = "0.10"
 
-# r-store 填充：`ygg-store` 是宿主 CLI（examples/agent.rs）持久化面的端口。
+# r-store 填充：`ygg-store` 是宿主 CLI（examples/egg.rs）持久化面的端口。
 # **必须留在 dev-dependencies**：examples 能见到 dev-deps，而 dev-deps **不向
 # 依赖者传播**——所以 ygg-wasm / ygg-lint 的依赖树里不会出现 ygg-store，更不会
 # 出现 rusqlite（`default` 只转发到这里的 feature，见下）。
 [dev-dependencies]
 ygg-store = { path = "../ygg-store" }
 
-# r-evo 填充：sqlite 后端是宿主的**默认**——`cargo build --example agent` 不带任何
+# r-evo 填充：sqlite 后端是宿主的**默认**——`cargo build --example egg` 不带任何
 # 旗标即编入 sqlite，新局默认后端见 `ygg_store::DEFAULT_BACKEND`。
 # 回退构建（关掉 sqlite）走 `--no-default-features`；此时 `--store sqlite` 必须
 # fail-closed 报「本构建未启用 sqlite 后端」。

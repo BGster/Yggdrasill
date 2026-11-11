@@ -65,7 +65,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 2. **P2 · 零硬编码 — 数据与契约驱动（`D11/D15`）**
    - 业务规则、状态迁移、叙述模板与提示节拍都归属于 Mod 脚本（`src/**`，按 core/domain/view/runtime/handlers 五层组织）与 JSON 资源（`data/*.json`），绝不硬编码在 Rust 宿主代码或 TypeScript 扩展代码中。所有提示模板、子代理 brief 与叙述行都存放在 `data/texts/` 片段（由 `mod.lua` 装配回 TEXTS）。
 3. **P3 · 契约驱动的通用宿主**
-   - Rust 宿主（`ygg-agent`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
+   - Rust 宿主（`egg`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
 4. **P4 · 少即是多 — 每个机制一条规范路径**
    - 每个能力都有唯一的规范机制。冗余的校验块、重复的 Mod 副本、或重叠的多回合异步仪式，都被合并为单源辅助函数与 1 回合内联仪式。
 5. **P5 · 单一事实来源（Single Source of Truth）**
@@ -96,7 +96,7 @@ Yggdrasill/
 │   ├── ygg-modules/     # 纯多文件 Lua 模块路径解析与副作用禁用清单（零依赖叶 crate）
 │   ├── ygg-schema/      # Manifest SHA-256 内容寻址与 JSON Schema 校验（仅依赖 ygg-core）
 │   ├── ygg-store/       # 运行持久化端口：SQLite 默认（run.sqlite + VFS）与遗留 JSON 后端（仅作为 ygg-sandbox 示例的 dev 依赖）
-│   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、ygg-agent 宿主 CLI
+│   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、egg 宿主 CLI
 │   ├── ygg-lint/        # 静态 AST 检查器（full_moon）：YGG-R1/R2/R3、YGG-MOD-EFFECT、YGG-PARSE（仅依赖 ygg-modules，零内核/VM 依赖）
 │   └── ygg-wasm/        # 浏览器 WebAssembly 绑定（wasm-bindgen 薄壳，位于 ygg-core + ygg-sandbox 之上）
 ├── packages/
@@ -121,7 +121,7 @@ Yggdrasill/
 - `ygg-core` 只能依赖 `serde`、`serde_json` 与 `thiserror`。任何 VM、Schema 校验器、I/O 或平台 API 都不得进入 `ygg-core`。
 - `ygg-modules` 是被 `ygg-sandbox` 与 `ygg-lint` 共享的零依赖叶 crate。
 - `ygg-lint` 绝不依赖 `ygg-core`、`ygg-schema` 或 `ygg-sandbox`（保证静态 AST 检查快速且免去 `mlua` 编译）。
-- `ygg-store`（及 `rusqlite`）只被原生宿主 CLI（`crates/ygg-sandbox/examples/agent.rs`，经 `[dev-dependencies]`）链接，确保 `ygg-wasm` 与 `ygg-lint` 的依赖树 100% 不含 SQLite 与文件系统依赖。
+- `ygg-store`（及 `rusqlite`）只被原生宿主 CLI（`crates/ygg-sandbox/examples/egg.rs`，经 `[dev-dependencies]`）链接，确保 `ygg-wasm` 与 `ygg-lint` 的依赖树 100% 不含 SQLite 与文件系统依赖。
 
 ---
 
@@ -137,7 +137,7 @@ Yggdrasill/
 | **D3** | 内核规格 | **从第 1 天起即为完整 RPG 级规则内核**（实体、属性、标签、事件总线、FSM、Lua 条件），使文字冒险通过增加内容/子系统演进为 RPG，而非重写内核。 | 已确认 |
 | **D4** | 首个里程碑策略 | **先引擎 + 手写参考 Mod（`test-adventure`）**，待内核语义得到证明后再接 AI 生成流水线（`M1`）。 | 已确认 |
 | **D6** | 游戏引擎集成 | **Godot 原生链接（`gdext`）** 排期于 M2.5（原生链接 Rust 库，无 Wasm 开销）；保持表现/逻辑分离。 | 已排期（Spike GO） |
-| **D7** | 内核语言 | **单一 Rust 实现**：编译为浏览器 Wasm（`ygg-wasm`）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（`ygg-agent` / Axum）。保证无 GC 抖动的确定性回放。 | 已确认 |
+| **D7** | 内核语言 | **单一 Rust 实现**：编译为浏览器 Wasm（`ygg-wasm`）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（`egg` / Axum）。保证无 GC 抖动的确定性回放。 | 已确认 |
 | **D8** | Web 表现技术栈 | **React + TypeScript**（`packages/client-web`），用于以文本为中心的叙事 UI 与成熟的 AI 工具生态。 | 已确认 |
 | **D9** | 平台服务（M2+） | **Rust + Axum**，与内核直接共享 `ygg-schema` 校验逻辑。 | 已计划 |
 | **D10** | 内容流水线技术栈 | **TypeScript**（`packages/pipeline`），用于 I/O 密集的 LLM 编排、结构化输出解析与重试循环。 | 已确认 |

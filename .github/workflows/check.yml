@@ -113,9 +113,9 @@ jobs:
         run: cargo test --workspace
 
       # `cargo test --workspace` 不覆盖 example 内的 #[cfg(test)]；
-      # `--examples` 在本仓会跑出 0 tests，必须用 `--example agent` 指定目标。
-      - name: cargo test（agent example）
-        run: cargo test --example agent -p ygg-sandbox
+      # `--examples` 在本仓会跑出 0 tests，必须用 `--example egg` 指定目标。
+      - name: cargo test（egg example）
+        run: cargo test --example egg -p ygg-sandbox
 
   # 存储后端的独立门禁：r-evo 起默认特征已含 sqlite（主 rust job
   # 会编 rusqlite），本 job 补主 job 覆盖不到的两件事：
@@ -158,10 +158,10 @@ jobs:
       # sqlite 的回退构建，所以守卫翻转：能编，且 example 单测（含 r10f
       # 的 fail-closed 断言）能跑。
       - name: "Guard — 宿主 example 在 --no-default-features 下可编译"
-        run: cargo build -p ygg-sandbox --example agent --no-default-features
+        run: cargo build -p ygg-sandbox --example egg --no-default-features
 
       - name: "Guard — 回退构建的默认后端必须 fail-closed（r10f）"
-        run: cargo test --example agent -p ygg-sandbox --no-default-features
+        run: cargo test --example egg -p ygg-sandbox --no-default-features
 
       # 结构守卫（不是 playbook 门禁命令）：ygg-store 必须
       # 留在 dev-dependencies。挪进 [dependencies] 会让依赖者

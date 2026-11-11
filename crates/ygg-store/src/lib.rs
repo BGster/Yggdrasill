@@ -2,7 +2,7 @@
 //!
 //! # 为什么有这个 crate
 //!
-//! 宿主 CLI（`crates/ygg-sandbox/examples/agent.rs`）原来把「存档 / 事件日志 /
+//! 宿主 CLI（`crates/ygg-sandbox/examples/egg.rs`）原来把「存档 / 事件日志 /
 //! inbox / 位移 / 重置」全部写死在文件操作里。要让第二个后端（sqlite）可选接入，
 //! 必须先把这个面**收敛成一个端口**：既有的 JSON 文件行为逐字节不变，新的后端
 //! 只实现同一个 trait。本 crate 因此只承接「状态事实」，**不承接**任何宿主协议
@@ -680,7 +680,7 @@ fn open_sqlite(run_dir: &Path, tick: Tick) -> Result<Box<dyn RunStore>, StoreErr
 fn open_sqlite(_run_dir: &Path, _tick: Tick) -> Result<Box<dyn RunStore>, StoreError> {
     Err(StoreError::Unavailable {
         detail: "本构建未启用 sqlite 后端（sqlite 是编译期面：宿主 `cargo build \
-                 --example agent` 默认带上，`--no-default-features` 会关掉它；\
+                 --example egg` 默认带上，`--no-default-features` 会关掉它；\
                  ygg-store 自身需 `--features sqlite`）"
             .to_owned(),
     })
