@@ -187,7 +187,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 | `task.intake` | `"<title>\|<description>"` | 从 `intake -> coordinate` 迁移。 |
 | `requirement.add` | `"<title>\|<description>[\|<ext_id>[\|<dep1,dep2>]]"` | 在 `draft` 中添加 `rN`。校验 DAG 无环与 `ext_id` 幂等。 |
 | `requirement.dispatch` | `""` \| `"0"` \| `"rN"` | 派发就绪需求，最多达 `job_capacity`（4）。`draft` 行进入 `planning`；`ready`（`planning` + `plan_ok`）行认领泳道并进入 `developing`。 |
-| `proposal.submit` | `"<req_id>\|<rev>\|<stage>\|<summary>\|<artifacts>\|[<changes>]\|[<ext_id>][\|exec=<agent_id>[:<reason>]]"` | 提交针对 `analysis`、`plan` 或 `development` 的提案。`exec=` 必须是最后一段，并在同一事务中绑定执行者台账。 |
+| `proposal.submit` | `"<req_id>\|<rev>\|<stage>\|<summary>\|<artifacts>\|[<changes>]\|[<ext_id>][\|exec=<agent_id>[:<reason>]][\|actor=<actor_id>][\|actor_session=<session_id>]"` | 提交针对 `analysis`、`plan` 或 `development` 的提案。保留尾段链固定相对序 `exec → actor → actor_session`（各自可独立缺席）：`exec=` 必须在链中 `actor=` 之前并同事务绑定执行者台账；`actor=` / `actor_session=` 由**宿主注入**（声明路由 + `--actor` / `YGG_ACTOR` / daemon 请求字段），调用方自带同名段在宿主侧即被拒（`ACTOR_FORGED`），mod 侧错位段逐段点名拒绝；三态互证（verified / mismatch / unverified）识别不拒绝，`session` 是纯审计字段永不参与判定（见 §3.7）。 |
 | `proposal.accept` | `""` \| `"0"` \| `"pN"` \| `"rN"` | 接受头部（或指定的）待决提案。在 `guide` 模式下需要菜单票据。 |
 | `proposal.reject` | `"<pN_or_rN>[\|<reason>]"` | 拒绝待决提案并将需求返回其阶段队列。 |
 | `gate.approve` | `""` \| `"0"` \| `"rN[\|<note>]"` | 通过 `plan_gate`（$\to$ `ready` + 响应式自动派发）或 `accept_gate`（$\to$ `done` + 内联泳道释放）。要求 `gate_rev == req.rev`，且对 `accept_gate` 要求非空 `artifacts`。 |
@@ -201,7 +201,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 | `verify.submit` | `"all_green=<true\|false>[;report=<text>]"` | 在 `review` 中记录验证结果。 |
 | `settlement.evolution` | `"<artifact>\|<summary>[\|c=<kept>/<screened>[\|cls=<kind>:<n>,...]][\|sessions=<moved>/0/<dest>][\|todo=0/<verified_by>]"` | 在一个事务中注册演进筛选并结算会话/todo 清理。 |
 | `review.note` | `"<lesson>\|<score_1_to_5>"` | 将 `settlement.evolution.*` 归档进 `review.evolution.*` 并关闭运行（`[ENDING`）。 |
-| `config.set` | `"<key>=<value>"` | 更新运行时 `settings.<key>`（`play.mode`、`goal.authorization`、`executor.<rN>.<stage>`、`evolution.mode`、`gates.require_all_green`、`review.evolution.*`）。 |
+| `config.set` | `"<key>=<value>"` | 更新运行时 `settings.<key>`（`play.mode`、`goal.authorization`、`executor.<rN>.<stage>`、`profile.<handle>.<key>`（自报身份卡，逐键校验：保留键 `harness`/`session_id`/`handle`/`role`/`assignments`，自由键 `^[a-z0-9_]{1,32}$` 值≤256，空值=清除字段；见 §3.7）、`evolution.mode`、`gates.require_all_green`、`review.evolution.*`）。 |
 | `vfs.write` | `"artifacts/<name>.md\|<content>"` | 经 `ygg.fs.write` 将内容写入 `run.sqlite`（`vfs_files`），并在 `artifact.*` 中记录 SHA-256 + 字节长度。 |
 
 ### 3.4 三层动作面契约：`event` / `op` / `action`
@@ -286,6 +286,10 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 每个请求是 `stdin` 上的一行 UTF-8 JSON；每个响应是 `stdout` 上的一行 UTF-8 JSON：
 - **请求**：`{ "id": <number|string>, "op": "<ping|summary|dispatch|vfs_put|vfs_get|vfs_list|settle|shutdown>", ...params }`
 - **响应**：`{ "id": <number|string>, "ok": true, "result": <object> }` 或 `{ "id": <number|string>, "ok": false, "error": "<message>" }`
+- **提交者身份（r3）**：`op=dispatch` 请求可带 `"actor"` / `"actor_session"` 字段（Agent 工具句柄 /
+  原生会话 id），仅在旗标（`--actor` / `--actor-session`）与环境变量（`YGG_ACTOR` /
+  `YGG_ACTOR_SESSION`）都缺席时兑底（解析链见 §3.7）；形状非法 → 可读错误应答。派发回执恒回显
+  `actor` / `actor_session`（None → null，加性键）；inbox 写命令回执另回显 `opener`（仅携带身份时）。
 
 #### 结构化 Summary 与 `HarnessAction` Schema（`result.summary` 与 `result.receipt`）
 ```json
@@ -299,6 +303,9 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
   "pendingTools": 0,
   "conflicts": [],
   "gates": [],
+  "profiles": [
+    { "handle": "agent-1", "harness": "pi", "session_id": "01a1c961-…", "role": "plan-executor", "assignments": ["r1:plan", "r1:development"] }
+  ],
   "jobs": [
     {
       "id": "r1",
@@ -350,6 +357,69 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 - **交接产物（`artifacts/handoff-latest.md`）**：在压缩前持久化进 `run.sqlite` VFS 并在压缩后重新注入，包含运行 ID、阶段、token 比例、任务表（含 `executor` / `planExecutor`）、待决门禁、未解决冲突、VFS 产物清单，以及精确的下一步 `ygg_session` / `ygg_run_lanes` 命令。
 
 ---
+
+### 3.7 提交者身份：双 id 命名空间、宿主章互证、profile 注册表、opener
+
+> 威胁模型边界（诚实声明）：同机进程模型下 `env` / 旗标 / profile 注册都可伪造。本机制 = 「双通道
+> 一致性可核对」——防误记、防张冠李戴、让冒用与未标注代理**可见可审计**；不做密码学、不引入 token；
+> `ACTOR_FORGED` 是**格式红线**（拒绝明显不是宿主盖章的身份段）而不是身份认证；profile 是自报
+> 身份卡（self-reported registry）不是凭据，篡改风险与 executor 账本同级，事后审计以事件日志为
+> 准绳（谁在何时写了什么 `config.set`）。
+
+#### 双 id 命名空间（实证约束，不可混用）
+
+| 命名空间 | 形态 | 用途 |
+| --- | --- | --- |
+| **Agent 工具句柄** | ≤64 字节、无空白、无 `\|`、无引号/反斜杠 | `exec=`、宿主 `actor=` 章、`YGG_ACTOR`、profile 主键、`subagentAction.resumeAgentId`——**同一空间**，互证与 join 全靠字符串相等 |
+| **原生 session id** | ≤128 字节、不透明（`PI_SESSION_ID` 命名空间） | 只作审计（事件行 `actor_session=` → 磁盘会话文件的 grep 链）；**永不参与判定、永不作 resume 寻址键**；不复用 `PI_SESSION_ID`（推断不如显式：审计字段必须由 spawn 侧 `YGG_ACTOR_SESSION` / `--actor-session` / daemon 请求字段明确背书） |
+
+#### 宿主通道与三态互证
+
+- **解析链（单发与 daemon 同序）**：`--actor` > `YGG_ACTOR` > daemon 请求字段 `actor` > None；
+  `--actor-session` > `YGG_ACTOR_SESSION` > daemon 请求字段 `actor_session` > None。两者独立解析、
+  独立缺席；形状校验在解析点，失败 = 用法错误。
+- **注入（声明承重）**：`inboxRoutes.<kind>` 声明 `"actor": true` / `"actor_session": true` 的路由，
+  宿主为该动作的载荷注入 `|actor=<id>` / `|actor_session=<id>`（JSON 字符串标量闭引号内，相对顺序
+  固定 `actor` 在前）；未声明的动作宿主不碰载荷（旧 pack 前向兼容）。调用方载荷自带保留段 =
+  `ACTOR_FORGED` 拒绝（不派发、不落盘、不占 seq）。
+- **三态互证（识别不拒绝）**：mod 在 `proposal.submit` 比对 `exec=` vs `actor=` 章——相等
+  `[ACTOR VERIFIED]`；不等 `[ACTOR MISMATCH]`（只记录 + 叙事，验收照常，裁决权在人 / 门禁）；
+  无章 `[ACTOR UNVERIFIED]`（旧宿主 / 直接派发）。落库 `prop.N.actor` / `prop.N.actor_session`；
+  trace 并列显示 `plan=agent-1(pi) [verified]`（harness 短注记来自 profile，三态来自宿主章）。
+  **判定只看 `exec=` vs `actor=`；profile 与 session 都不参与。**
+- **审计链**：账本（`settings.executor.rN.plan=agent-1`）→ grep 事件日志 `actor=agent-1` 的
+  `proposal.submit` 行 → 该行载荷含 `actor_session=01a1c9bb-…` → `ls ~/.pi/agent/sessions/**/01a1c9bb-*.jsonl`。
+
+#### profile 注册表（纯 `config.set` KV 约定，不新增事件）
+
+- **键形**：`config.set profile.<handle>.<key>`（`settings.` 前缀写法等价）→ `settings.profile.<handle>.<key>`
+  平铺 KV；`<handle>` 形状复用 executor id 规则（三层同形同值，字符串相等贯通）。
+- **保留键矩阵**：`harness`（≤32、无空白、无 `|`；不做枚举，推荐词表 `{pi, claude-code, codex, generic}`）、
+  `session_id`（≤128、不透明审计字段）、`handle`（冗余自报：必须与键名一致，一致后**不落 KV**）、
+  `role`（≤64 单行）、`assignments`（逗号分隔 `r<n>[:<stage>]` token，≤16 个、总长 ≤512）。
+  自由键 `^[a-z0-9_]{1,32}$`、值 ≤256 单行（如 `registered_by=main`）；**空值 = 清除该字段**
+  （不提供整卡删除，registry 只增改，收口随 run 终结）。
+- **为什么不新增事件**：profile 注册不推进任何状态（无守卫、无迁移、无门禁），给它事件名等于发明
+  「第二类不推进状态的事件」（违背 §3.4 L1 定义）；`config.set` 已是 `settings.*` 唯一规范写入面
+  （P4 单一机制），天然落事件行可审计、同键重写幂等、不占人类动作门禁。多键注册需 3-5 次直派，
+  半张卡按缺键降级（可接受——注册是一次性冷启动动作）。
+- **主 Agent 代注册 = fallback**：subagent 经 brief 内嵌指引自主注册；主 Agent 代写在数据面上与
+  自主注册无区别，可信度差异只体现在 `registered_by` 约定与事件日志。`config.set` 直派的派发回执
+  恒回显 resolved `actor`（加性键，不进事件行不进 wire），代写与自写在回执面可区分。
+- **与 executor 账本的关系（互链不冗余）**：账本回答「谁负责这条需求的这个阶段」（权责权威，换人
+  必须带原因）；profile 回答「这个句柄是谁」（身份索引 + 协调快照，自由 upsert 无原因要求）。渲染层
+  按 `handle == executor id` 字符串 join，零存储耦合；**assignments 是自报快照，权责仍以账本为准**。
+
+#### opener 冷启动注册（宿主元信息面，Mod 不感知）
+
+- `run.json` 可选字段 `"opener_actor": {"actor": "<id>", "session": "<id>|省略", "at": <unix_secs>}`：
+  本局**首条携带身份的成功写**先到先得、**不可变**（同 id 重复 claim 也是 no-op，连 `at` 都不刷新；
+  异 actor 竞争由 run 锁串行严格先到先得，后来者不报错不拒绝）。事后争议以事件日志为准绳。
+- **claim 触发点（仅成功写）**：inbox 写命令落行后 / worker 结果落行后 / `dispatch_event_as` 成功步
+  持久化临界区内——三处都要求携带身份；失败探针与被拒派发不认领（失败命令不配当开局者）。
+- `write_meta`（开局 / reset / 热载）原样保留既有值；旧局无字段 = 未认领，升级后首条带身份写命令
+  补认领（单调无害）。inbox 写命令回执回显 `opener`（仅携带身份时）；`writers`（coordination.json）
+  是在途互斥记账、`opener` 是持久事实标记，两者正交。
 
 ## 4. 活文档闭环
 

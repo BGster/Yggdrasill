@@ -29,6 +29,16 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      not change the binding; `split` / `merge` do not inherit it. `proposal.submit` does not
      hard-check the ledger — an unregistered executor only shows as "unregistered" in
      `requirement.list`.
+   - **Submitter identity (r3)**: subagents submit with `exec=<agent_id>` in the payload tail plus
+     their identity in the environment (`YGG_ACTOR=<agent_id>`, and `YGG_ACTOR_SESSION=<session_id>`
+     when the spawn side knows it); the host stamps the channel (`|actor=` / `|actor_session=` on
+     declared routes) and the mod cross-checks exec vs actor — **recognised, never rejected**
+     (`[verified]` / `[mismatch:actor=…]` / `[unverified]`; a main-agent proxy submission without a
+     host stamp just displays `[unverified]`). Subagents also self-register a profile card
+     (`config.set profile.<handle>.harness=…`, one `config.set` per key) per the brief's Register
+     line; main-agent registration is a **fallback** with no data-plane difference — the
+     credibility gap lives only in the `registered_by` convention and the event log. Profiles are
+     self-reported declarations, not credentials; accountability stays with the executor ledger.
    - **Requirement granularity: merge before you create.** Adjacent work with the same goal, the same
      subsystem, or that is a small change sharing one plan and one acceptance evidence set belongs in
      the same requirement. Create a new one only for: an **independent delivery + acceptance**, a
@@ -180,11 +190,19 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 - **Inline executor ledger**: `proposal.submit` takes an optional trailing segment
   `exec=<agent_id>[:<reason>]`. It registers the executor ledger through the same
   `src/executor.lua` implementation as `config.set executor.*`, in the same transaction, before the
-  proposal is stored; a failed registration refuses the payload **and creates no proposal**. `exec=`
-  is only recognised as the **last** segment — anywhere else is refused
-  (`req_prop_exec_misplaced`), because the host pads payloads shorter than the declared 7 fields and
-  would silently move it into the `artifacts` slot. Write the reason with `:` inside that segment
-  (`exec=agent2:handoff`), since the outer payload splits on `|`.
+  proposal is stored; a failed registration refuses the payload **and creates no proposal**. The
+  reserved tail segments are a fixed relative order — `…|exec=<id>[:<reason>]|actor=<actor>|actor_session=<session>`
+  (each independently omittable; at most three): `actor=` / `actor_session=` are **host-injected**
+  on declared routes (`inboxRoutes.<kind>.actor / .actor_session`); a caller-carried segment is
+  rejected host-side (`ACTOR_FORGED`, no dispatch no persist), and a segment outside the trailing
+  chain is refused mod-side with a per-segment beat (`req_prop_exec_misplaced` /
+  `req_prop_actor_misplaced` / `req_prop_actor_session_misplaced`) — the host pads payloads shorter
+  than the declared 7 fields and would silently move mid-payload segments into other slots. Write
+  the reason with `:` inside that segment (`exec=agent2:handoff`), since the outer payload splits
+  on `|`. The three-state cross-check only compares `exec=` vs the host `actor=` stamp —
+  `actor_session` is a pure audit field and never participates. **Opener fact**: the run's first
+  identity-carrying *successful* write claims `run.json` `opener_actor` first-come-first-served,
+  immutable (rejected/failed dispatches never claim; same-actor re-claims are no-ops).
 - **Stage merge (`draft -> planning`)**: `requirement.dispatch` on a `draft` row dispatches **plan**
   and stores `planning` in the same dispatch; there is no analysis turn in the default pipeline.
   `analyzing` survives only as a compatibility state (legacy saves, and an explicit `analysis`
@@ -223,7 +241,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 Changing `.ygg/mods/pi-agent-seed/src/**` (state machine, gates, render layer, tool bridge),
 `.ygg/mods/pi-agent-seed/mod.lua` or the map wording in `data/scenes.json` requires, besides lint and
 the all-1 playtest:
-`cargo test -p ygg-sandbox --test agent_seed_semantics` (24 cases: stage merge + `analysis` compat,
+`cargo test -p ygg-sandbox --test agent_seed_semantics` (36 cases: stage merge + `analysis` compat,
 accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
 reject, reactive auto-dispatch in the same turn (plus `useMemo` invalidation), development proposal
 reject (not amended / amended), inline `exec=` (misplaced / no reason / `:` form), settlement merge
