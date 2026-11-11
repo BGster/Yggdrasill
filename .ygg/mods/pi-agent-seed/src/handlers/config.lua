@@ -16,8 +16,8 @@ local wire = require("src.wire")
 
 local TEXTS
 
-local MODES, PLAY_MODES, effective, goal_authorization =
-  config.MODES, config.PLAY_MODES, config.effective, config.goal_authorization
+local MODES, PLAY_MODES, effective, goal_authorization, text_of =
+  config.MODES, config.PLAY_MODES, config.effective, config.goal_authorization, config.text_of
 local refuse, reject, reject_payload =
   flow.refuse, flow.reject, flow.reject_payload
 local CONFIG_UI =
@@ -26,8 +26,8 @@ local render =
   render_mod.receipt
 local stage =
   reqs.stage
-local contains, cut, fill, join, to_bool, trim =
-  util.contains, util.cut, util.fill, util.join, util.to_bool, util.trim
+local contains, cut, fill, join, split, to_bool, trim =
+  util.contains, util.cut, util.fill, util.join, util.split, util.to_bool, util.trim
 local probe_payload_ok =
   wire.probe_payload_ok
 
@@ -42,6 +42,47 @@ local function executor_set(key, value)
     return reject_payload("config.set", problem.detail)
   end
   return render()
+end
+
+-- profile 注册表索引（r3）：沙箱无键枚举，用平铺索引键维护句柄清单（只增不删，
+-- registry 只增改、收口随 run 终结）。索引键不在 config.set 用户面（不在分支链 →
+-- 直写会被 bad_config_key 拒），只能由本函数维护。投影按 handle 升序（render 排）。
+local function profile_index_add(handle)
+  local raw = text_of("settings.profile_index", "")
+  for _, part in ipairs(split(raw, ",")) do
+    if trim(part) == handle then
+      return
+    end
+  end
+  ygg.kv.set("settings.profile_index", raw == "" and handle or (raw .. "," .. handle))
+end
+
+-- profile 注册表（r3，自报身份卡）：`profile.<handle>.<key>` 逐键直写。注册走
+-- config.set（不新增事件）：天然落事件行可审计、同键重写幂等 upsert、不占人类动作门禁。
+-- `handle` 键是冗余自报：一致即通过但**不落 KV**（键即 handle，免冗余存储）；
+-- 整卡删除不提供（空值逐字段清除，收口随 run 终结）。
+local function profile_set(key, value)
+  local handle, field = wire.parse_profile_key(key)
+  if handle == nil then
+    return reject_payload("config.set", TEXTS.beats.profile_bad_handle)
+  end
+  local clean, problem = wire.validate_profile_value(handle, field, value)
+  if problem ~= nil then
+    return reject_payload("config.set", problem)
+  end
+  if field == "handle" then
+    ygg.narrate(fill(TEXTS.beats.profile_registered, { handle = handle, field = field }))
+    render()
+    return
+  end
+  ygg.kv.set("settings.profile." .. handle .. "." .. field, clean)
+  profile_index_add(handle)
+  if clean == "" then
+    ygg.narrate(fill(TEXTS.beats.profile_cleared, { handle = handle, field = field }))
+  else
+    ygg.narrate(fill(TEXTS.beats.profile_registered, { handle = handle, field = field }))
+  end
+  render()
 end
 
 
@@ -94,6 +135,8 @@ function M.install(deps)
       return
     elseif key:sub(1, 9) == "executor." then
       return executor_set(key, value)
+    elseif key:sub(1, 8) == "profile." then
+      return profile_set(key, value)
     elseif key == "evolution.mode" then
       if not contains(MODES, value) then
         problem = fill(TEXTS.beats.bad_config_value, { key = key, value = value, allowed = join(MODES, " / ") })

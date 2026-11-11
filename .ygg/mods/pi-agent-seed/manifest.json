@@ -36,9 +36,9 @@
       "sha256": "54f9a91e193459c26440d3560d0a02581cce9e08bc4ed9efeda3d33f19c7bf1b"
     },
     {
-      "byteLength": 7333,
+      "byteLength": 9303,
       "path": "src/handlers/config.lua",
-      "sha256": "619f85667fa1a18e386b9aab786e729d96407f0f0d4609a65dbda33a59bdcda1"
+      "sha256": "5d4c3e1f4ee632b19df2143877bfdfbf468c5b8c6071a0068c53ef4ec50e78e8"
     },
     {
       "byteLength": 6423,
@@ -96,9 +96,9 @@
       "sha256": "5058bf6c70776c7754478e7a554eb6152b2f898d95519fe8061384d3e89e2b55"
     },
     {
-      "byteLength": 33399,
+      "byteLength": 36608,
       "path": "src/render.lua",
-      "sha256": "2ded2ee9cd6d2bcb0e94464e22ae3d60a7f3547a92cd7e40ad6d15d2dbc3cf3a"
+      "sha256": "ada2702b819bd9d2b8f76aac5430bea0f4511a1e9fb8712df4150dff423785f7"
     },
     {
       "byteLength": 18674,
@@ -116,19 +116,19 @@
       "sha256": "79cc86d03760e4af0faaab66a6ce5c619609f890808b61e185c21aece5555e00"
     },
     {
-      "byteLength": 29258,
+      "byteLength": 33241,
       "path": "src/wire.lua",
-      "sha256": "d3f6afaa8057b1e055458ab67292f3596f7c6d523d9f3eb3ba0aa0bfb9ef3143"
+      "sha256": "92395610e0a58c918958b77e8470933ecd878856f0933b13a30e0a9466d2ea9f"
     }
   ],
   "entries": [
     {
-      "byteLength": 42804,
+      "byteLength": 43425,
       "id": "ygg:scene/texts",
       "kind": "scene-texts",
       "path": "data/scenes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "5f643b669c64a94861166b05ed77132106c301242b19dd12e731fd60efeab0c8"
+      "sha256": "09d9f82209628a2f390bda528e9a2273298b750b95ba36096a516c759bfcdd29"
     },
     {
       "byteLength": 754,

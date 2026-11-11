@@ -33,8 +33,8 @@ local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, pr
   props.P_PENDING, props.prop_count, props.prop_id, props.prop_key, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
 local PHASE, R_MERGED, R_SPLIT, STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_gate, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase_name, req_rev, req_stale, req_status, req_tally, req_title, stage =
   reqs.PHASE, reqs.R_MERGED, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase_name, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
-local fill, join, spaces, trim =
-  util.fill, util.join, util.spaces, util.trim
+local fill, join, spaces, trim, split =
+  util.fill, util.join, util.spaces, util.trim, util.split
 
 -- 面板汇总走响应式记忆化（useMemo）：依赖签名 = 逐需求的派生展示名 + 待验收提案数 +
 -- 需求总数（均由 KV 状态派生，读档/重启后签名一变即重算，不靠内存推断）。
@@ -186,6 +186,95 @@ local function prop_verdict(index, stage_name, exec_id)
     return TEXTS.beats.req_trace_actor_verified
   end
   return fill(TEXTS.beats.req_trace_actor_mismatch, { actor = actor })
+end
+
+-- ── profile 注册表投影（r3，自报身份卡：声明面不是凭据）─────────────────
+
+-- 沙箱无 table 库：插入排序（handle 量小，线性插入足够；投影口径 = handle 升序）。
+local function sorted_strings(list)
+  local out = {}
+  for _, value in ipairs(list) do
+    local pos = #out + 1
+    for i = 1, #out do
+      if out[i] > value then
+        pos = i
+        break
+      end
+    end
+    for i = #out, pos, -1 do
+      out[i + 1] = out[i]
+    end
+    out[pos] = value
+  end
+  return out
+end
+
+-- 注册句柄清单（settings.profile_index 维护序 → handle 升序；索引键由
+-- handlers/config.lua 的 profile_set 单源维护，用户面写不进去）。
+local function profile_handles()
+  local out = {}
+  for _, part in ipairs(split(text_of("settings.profile_index", ""), ",")) do
+    local piece = trim(part)
+    if piece ~= "" then
+      out[#out + 1] = piece
+    end
+  end
+  return sorted_strings(out)
+end
+
+local function profile_field(handle, name)
+  return text_of("settings.profile." .. handle .. "." .. name, "")
+end
+
+-- 设计视图 PROFILES 行：≤4 张全列（harness[,role] 短注）+ 截断计数；无注册整行
+-- 省略（不占默认视图——操作视图不加，保持最小）。
+local function narrate_profiles()
+  local handles = profile_handles()
+  if #handles == 0 then
+    return
+  end
+  local items = {}
+  local shown = #handles < 4 and #handles or 4
+  for i = 1, shown do
+    local handle = handles[i]
+    local harness = profile_field(handle, "harness")
+    local role = profile_field(handle, "role")
+    local piece = handle .. "(" .. harness
+    if role ~= "" then
+      piece = piece .. "," .. role
+    end
+    items[#items + 1] = piece .. ")"
+  end
+  if #handles > shown then
+    items[#items + 1] = fill(TEXTS.beats.map_note_profiles_more, { count = tostring(#handles - shown) })
+  end
+  ygg.narrate(fill(TEXTS.beats.map_note_profiles, { list = join(items, " ") }))
+end
+
+-- summary 结构化面（编排层的机器可读面）：≤8 张，handle 升序；assignments 解析成
+-- token 数组（编排层直接消费）。半张卡按缺键降级——自报注册可分多次 config.set 完成。
+local function summary_profiles()
+  local out = {}
+  for i, handle in ipairs(profile_handles()) do
+    if i > 8 then
+      break
+    end
+    local assignments = {}
+    for _, token in ipairs(split(profile_field(handle, "assignments"), ",")) do
+      local piece = trim(token)
+      if piece ~= "" then
+        assignments[#assignments + 1] = piece
+      end
+    end
+    out[#out + 1] = {
+      handle = handle,
+      harness = profile_field(handle, "harness"),
+      session_id = profile_field(handle, "session_id"),
+      role = profile_field(handle, "role"),
+      assignments = assignments,
+    }
+  end
+  return out
 end
 
 local function req_trace(index)
@@ -520,6 +609,7 @@ local function narrate_map(current, full, items, prompt)
     pending = tostring(prop_pending_total()),
   }))
   narrate_lane_ledger()
+  narrate_profiles()
   ygg.narrate(TEXTS.beats.map_foot)
 end
 
@@ -852,6 +942,9 @@ local function summary_fields()
       candidates = text_of("review.evolution.candidates", TEXTS.beats.evolution_none),
       classes = text_of("review.evolution.classes", ""),
     },
+    -- profile 注册表（r3，自报身份卡）：编排层按 harness 选 multi-agent 机制、按
+    -- assignments 找跟进需求；assignments 是协调快照，权责仍以 executor 账本为准。
+    profiles = summary_profiles(),
   }
   local awaiting = summary_awaiting()
   if awaiting ~= nil then
@@ -915,6 +1008,7 @@ M.evolution_receipt = evolution_receipt
 M.is_resumable_agent_id = is_resumable_agent_id
 M.narrate_map = narrate_map
 M.narrate_play_mode = narrate_play_mode
+M.narrate_profiles = narrate_profiles
 M.narrate_req_list = narrate_req_list
 M.narrate_req_panel = narrate_req_panel
 M.out_edges = out_edges
@@ -933,5 +1027,6 @@ M.summary_gates = summary_gates
 M.summary_int = summary_int
 M.summary_jobs = summary_jobs
 M.summary_next_ends_run = summary_next_ends_run
+M.summary_profiles = summary_profiles
 
 return M

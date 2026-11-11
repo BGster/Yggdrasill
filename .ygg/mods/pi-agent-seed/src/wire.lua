@@ -187,6 +187,100 @@ local function identity_segment_value(segment, max, bad_beat)
   return value, nil
 end
 
+-- ── profile 注册表（r3，自报身份卡：声明面不是凭据）─────────────────────────
+-- 键形 `profile.<handle>.<key>`：handle 形状复用 exec=/YGG_ACTOR 规则（账本 /
+-- profile / 宿主章三层同形同值，字符串相等贯通）；保留键 harness / session_id /
+-- handle / role / assignments，其余自由键；空值 = 清除该字段（整卡随 run 终结）。
+-- 写面单源在 handlers/config.lua 的 profile_set；解析/校验纯函数单源在这里。
+
+-- `profile.<handle>.<key>` → handle, field；任何形状偏差 → nil（调用方回 profile_bad_handle）。
+local function parse_profile_key(key)
+  if type(key) ~= "string" then
+    return nil, nil
+  end
+  local handle, field = key:match("^profile%.([^.]+)%.(.+)$")
+  if handle == nil or trim(field or "") == "" then
+    return nil, nil
+  end
+  -- handle 形状复用 executor id 规则：非空、≤64、无空白、无 `|`（键里可能带 `|`，显式拦）。
+  if #handle > 64 or handle:find("%s") ~= nil or handle:find("|", 1, true) ~= nil then
+    return nil, nil
+  end
+  return handle, field
+end
+
+-- assignments token 化：逗号分隔 `r<n>[:<stage>]`，≤16 个、总长 ≤512；空串 = 空
+-- 清单（清除字段）。编排层要机器解析，形状必须够硬。
+local function parse_assignments(raw)
+  local tokens = {}
+  local total = 0
+  for _, part in ipairs(split(trim(raw or ""), ",")) do
+    local piece = trim(part)
+    if piece ~= "" then
+      if piece:match("^r%d+(:[a-z_]+)?$") == nil then
+        return nil, TEXTS.beats.profile_bad_assignments
+      end
+      total = total + #piece + 1
+      tokens[#tokens + 1] = piece
+      if #tokens > 16 then
+        return nil, TEXTS.beats.profile_bad_assignments
+      end
+    end
+  end
+  if total - 1 > 512 then
+    return nil, TEXTS.beats.profile_bad_assignments
+  end
+  return tokens, nil
+end
+
+-- 保留键/自由键校验矩阵（§3.2.2）：返回清洗后的值 + 错误。空值 = 清除（除
+-- handle：显式写了就必须与键名一致，空 ≠ handle → 拒）。
+local function validate_profile_value(handle, field, value)
+  local raw = trim(value or "")
+  if field == "handle" then
+    if raw ~= handle then
+      return nil, TEXTS.beats.profile_bad_handle
+    end
+    return raw, nil
+  end
+  if raw == "" then
+    return "", nil -- 保留键/自由键空值 = 清除该字段，不做形状校验
+  end
+  if field == "harness" then
+    -- 不做枚举（enum 会 fail-closed 掉未来 harness）；文档推荐词表 {pi, claude-code, codex, generic}。
+    if #raw > 32 or raw:find("%s") ~= nil or raw:find("|", 1, true) ~= nil then
+      return nil, TEXTS.beats.profile_bad_value
+    end
+    return raw, nil
+  elseif field == "session_id" then
+    -- 不透明审计字段：原生 session id，不做形状强校验（不同 harness 格式不同）。
+    if #raw > 128 or raw:find("%s") ~= nil or raw:find("|", 1, true) ~= nil then
+      return nil, TEXTS.beats.profile_bad_value
+    end
+    return raw, nil
+  elseif field == "role" then
+    if #raw > 64 or raw:find("[\\r\\n]") ~= nil then
+      return nil, TEXTS.beats.profile_bad_value
+    end
+    return raw, nil
+  elseif field == "assignments" then
+    -- token 化只做校验（存储仍是逗号串；summary 投影时再解析成数组）。
+    local _, problem = parse_assignments(raw)
+    if problem ~= nil then
+      return nil, problem
+    end
+    return raw, nil
+  end
+  -- 自由键：键名 ^[a-z0-9_]{1,32}$，值 ≤256 单行（`|` 允许——自由值不进叙事不进 wire）。
+  if field:match("^[a-z0-9_]+$") == nil or #field > 32 then
+    return nil, TEXTS.beats.profile_bad_value
+  end
+  if #raw > 256 or raw:find("[\\r\\n]") ~= nil then
+    return nil, TEXTS.beats.profile_bad_value
+  end
+  return raw, nil
+end
+
 local function inbox_replay(ext)
   if type(ext) ~= "string" or ext == "" then
     return false
@@ -816,6 +910,9 @@ M.parse_exec_segment = parse_exec_segment
 M.parse_executor_key = parse_executor_key
 M.parse_executor_value = parse_executor_value
 M.parse_goal_auth = parse_goal_auth
+M.parse_profile_key = parse_profile_key
+M.parse_assignments = parse_assignments
+M.validate_profile_value = validate_profile_value
 M.EVOLUTION_KEPT = EVOLUTION_KEPT
 M.artifact_path_ok = evolution_path_ok
 M.evolution_path_ok = evolution_path_ok
