@@ -44,8 +44,8 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 
 | 术语 | 领域定义 |
 | --- | --- |
-| **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。 |
-| **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期：`intake`（任务注入与需求立案）$\to$ `coordinate`（派发泳道、接受提案、通过门禁）$\to$ `review`（验证套件、演进筛选、会话/todo 清理）$\to$ `done`（终态结算状态）。 |
+| **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。r9 起运行是**常驻自循环**：运行级终局不再由 review.note 自动触发，而是周期性批结算 + 显式退役（`done` 仅经 `run.retire` 武装可达）；升级不迁移旧局（装载失败即开新局）。 |
+| **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期：`intake`（任务注入与需求立案，仅冷启动）$\to$ `coordinate`（常驻主态：派发泳道、接受提案、通过门禁）$\to$ `review`（批盘点相位：验证套件、演进筛选、会话/todo 清理）$\to$ 批收口回 `coordinate`（`run.batch` +1）；`done`（退役终态，仅 `run.retire` 武装后的 review.note 可达）。需求级 `done` 与运行退役态只是字面量同形（语义正交）。 |
 | **Requirement（`r1..rN`，需求）** | 由状态机跟踪的一个交付单元。以 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split` / `merged` / `dropped`）存储，并通过 `plan_ok`、`job`、`gate`、`conflict` 属性投影为细粒度展示阶段（`draft`、`planning`、`plan_review`、`plan_gate`、`ready`、`developing`、`dev_review`、`accept`、`done`、`blocked`）。 |
 | **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。 |
 | **Proposal（`p1..pM`，提案）** | 由执行者子代理针对特定 `(req_id, rev, stage)` 元组产出的不可变交付提交（`proposal.submit`），引用一个已归档的 VFS 产物（`artifacts/<req>-<stage>.md`）并绑定执行者身份（`exec=<agent_id>`）。提案在协调者串行执行 `proposal.accept` 或 `proposal.reject` 之前不会改变需求状态。 |
@@ -83,7 +83,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
    - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（`<repo>-lane-1..4`）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
 10. **P10 · 数据红线与显式的每运行目标授权**
     - **数据红线**：读取、列出、stat、或复制真实业务数据（`*.xlsx`、`*.xls`、`*.csv`，或诸如 `/Volumes/WenshuSpace/**` 的涉密挂载）在提示层与扩展 `tool_call` 防火墙层都被严格禁止。
-    - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在 `review.note` 能关闭运行之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。
+    - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在**每批盘点结算与退役**（常驻下 review.note 每批都走）之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。
 
 ---
 
@@ -156,7 +156,7 @@ Yggdrasill/
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
-| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/pi-agent-seed` 协调软件工程任务（`intake -> coordinate -> review -> done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`）。所有产物都要求先有状态机事件。 | 已确认 |
+| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/pi-agent-seed` 协调软件工程任务（常驻自循环：`intake -> coordinate ⇄ review 批循环 -> (退役) done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`，详见 D-MA10）。所有产物都要求先有状态机事件。 | 已确认 |
 | **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/*.lua` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
 | **D-MA3** | 单文件 SQLite 运行存储与 VFS | 新运行默认使用 `<run-dir>/run.sqlite`（`ygg-store`），原子提交 `events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）。既有的 JSON 运行（`autosave.json` + `events.jsonl`）保持自动检测，不隐式迁移。 | 已确认 |
 | **D-MA4** | 响应式钩子与省回合压缩 | `src/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |
@@ -165,3 +165,4 @@ Yggdrasill/
 | **D-MA7** | 通用治理引擎适配器（`subagentAction`） | Mod 计算 `summary.jobs[i].subagentAction`（`subagent.spawn` / `subagent.resume`），携带渲染后的 brief（`data/scenes.json` 模板）与实时的 `worktreeStatus` / `subagentStatus` / `probeStatus`，使 `.pi/extensions/ygg-pi-harness`（或 Claude Code / Codex / Cursor 适配器）能充当薄执行壳。 | 已确认 |
 | **D-MA8** | 活文档整合 | 将所有架构、领域与契约文档整合进 `docs/CONTEXT.md`（领域与决策）与 `docs/DESIGN.md`（系统行为与接口契约），通过子代理 brief 中的强制必读引用与最终审查时的同步检查来执行。 | 已确认 |
 | **D-MA9** | 动作面三层分层（`event` / `op` / `action`） | **取向：部分收敛（Partial Convergence）。** `event` 是状态推进的唯一货币（34 个），`op` 是状态之外的宿主端口（8 个），`action` 是适配器的语义入口（9 个，值域随 harness 可变）。**禁止把 `action` 理解为 `event` 的第二份清单**：9 个 `action` 里只有 `approve_gate` / `reject_gate` 与 `event` 重叠，且是**有意保留的位次正确性别名**（`reqId` 必填可防「批错需求」，判据为「能防止一类可命名的 payload 错位才配拥有别名」）；`vfs_write` 与 `event=vfs.write` **语义不等价**（事件路径有阶段守卫、64 KiB 上限、`artifact.*` 台账与 `[VFS LEDGER ONLY]` 降级，`op=vfs_put` 全都没有），故不得互替；`kickoff` / `settle_close` 是多步编排（顺序契约在适配器侧），`dispatch` 是唯一的事件直通口。零增量同义别名（原 `step`）**已从值域退场**，不做兼容残留。`dispatch` **不得附带压缩等回合后动作**：压缩只经 `action=handoff_compact` 与 `ygg_run_lanes` 编排层刹车两个显式入口。契约正文见 `docs/DESIGN.md` §3.4。 | 已确认 |
+| **D-MA10** | 常驻自循环生命周期（r9：批结算 + 显式退役） | 运行级收口从唯一终局改为**周期性批结算 + 显式退役**：`review.note` 未武装 = 批收口（归档滚动单槽 → `run.batch`+1 → 复位 verify/settlement → 回 `coordinate`，绝不写 `ending`、叙事绝无 `[ENDING` 前缀）；`done` 仅经 `config.set run.retire=true` 武装后的终局变体可达（`[ENDING · run retired]`）。**需求级 done 保留**（accept_gate 产物，与运行退役态字面量同形、语义正交）。**FSM 转移表、事件全集、载荷形状、人类动作五动作票据闸零变更**——门禁频率随批轮转，强度不减（P12）；`nextEndsRun` = 首项 review.note ∧ 武装（宿主预 closing 协议零改动复用）；`meta.summary` 加性增 `lifecycle/batch/batchDrained`，泵在批排空 ∧ inbox 空时安全暂停（绝不空批连点）。升级**非兼容即重启**：旧局不迁移不 adopt，装载失败开新局；批边界即重启时点。 | 已确认 |

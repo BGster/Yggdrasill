@@ -595,13 +595,13 @@
         {
           "id": "harness.goal-authorization",
           "modality": "must",
-          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before `review.note` closes: a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the all-1 smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
+          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before **every batch settlement and at retirement** (resident runs hit review.note once per batch, so the human-audit cadence rotates per batch): a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the scripted smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
           "basis": "user decision 2026-11-01 (E2 ruling: the closing check covers runtime goal only; a static default does not block)"
         },
         {
           "id": "harness.coordinator-chain",
           "modality": "must",
-          "text": "The coordinator has a four-state chain: intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done; inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
+          "text": "The coordinator has a resident two-phase loop (r9): intake ──task.intake──▶ coordinate (the resident main state) ──coordinate.submit──▶ review (the per-batch audit phase) ──review.note (unarmed)──▶ coordinate again (batch settle: archive → run.batch+1 → reset verify/settlement; never an ending); inside review, `verify.submit=false` sends the batch back to coordinate. The only run-level ending is the retiring close: `config.set run.retire=true` armed → the next review.note writes `[ENDING · run retired]` and moves to done. Requirement-level done is untouched (the accept_gate product).",
           "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
@@ -619,7 +619,7 @@
         {
           "id": "harness.coordinator-scope",
           "modality": "must",
-          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and close with the final review (verify.submit → settlement.evolution → review.note); it never carries development itself and may never bypass a gate.",
+          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and settle each batch through the review audit (coordinate.submit → verify.submit → settlement.evolution → review.note; unarmed review.note settles the batch back into coordinate, the armed one retires the run); it never carries development itself and may never bypass a gate.",
           "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
@@ -775,7 +775,7 @@
         {
           "id": "harness.agent-summary",
           "modality": "must",
-          "text": "The summary travels through the kernel's structured receipt channel `ygg.meta(\"summary\", {…})` and lands in the receipt envelope at `meta.summary` (stage / ending / verifyPassed / nextEndsRun / pendingProposals / requirementCount / conflicts / awaiting / evolution{artifact,summary,candidates,classes}); the host only reads that field, so writing the same content into the narrative cannot be misread; a payload of \"0\" is read-only.",
+          "text": "The summary travels through the kernel's structured receipt channel `ygg.meta(\"summary\", {…})` and lands in the receipt envelope at `meta.summary` (stage / ending / verifyPassed / nextEndsRun / lifecycle / batch / batchDrained / pendingProposals / requirementCount / conflicts / awaiting / evolution{artifact,summary,candidates,classes}); the host only reads that field, so writing the same content into the narrative cannot be misread; a payload of \"0\" is read-only. The r9 resident fields are additive: `lifecycle` is the mod's self-declared mode (constant \"resident\"; every resident-specific host behavior gates on it — missing means an old mod and unchanged behavior), `batch` mirrors `run.batch` (default 1), and `batchDrained` is the pump pause signal (coordinate ∧ queue drained ∧ retire not armed).",
           "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
@@ -805,7 +805,7 @@
         {
           "id": "harness.config-subpage",
           "modality": "must",
-          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates); it is a presentation layer only and never advances state. config.set / guide.show / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used by the closing check), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only).",
+          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates · run.retire); it is a presentation layer only and never advances state. config.set / guide.show / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used at every batch settlement and retirement), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only). The retire switch `run.retire` takes the sub-page's 5th item (pure presentation entry; the write is still `config.set`, value domain `true`/`\"\"`, and arming itself passes no ticket gate — the retiring close is the next armed review.note's human ticket).",
           "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
@@ -847,7 +847,7 @@
         {
           "id": "harness.coordination-closing",
           "modality": "must",
-          "text": "Before dispatching the final `review.note`, automatic advancement switches phase to closing, waits until the in-flight writers reach zero, and then does one last drain under the same protection: when a new requirement exists and is not done → lift closing and continue the loop (no ending); when nothing new arrived → finish `review.note` + settle under the same protection and set phase=finalized. So \"the write command succeeded but the run already crossed the last drain\" is impossible by protocol.",
+          "text": "Before dispatching the final (armed) `review.note`, automatic advancement switches phase to closing, waits until the in-flight writers reach zero, and then does one last drain under the same protection: when a new requirement exists and is not done → lift closing and continue the loop (no ending); when nothing new arrived → finish the retiring `review.note` + settle under the same protection and set phase=finalized. So \"the write command succeeded but the run already crossed the last drain\" is impossible by protocol. Resident runs keep phase=running for their whole life — closing/finalized are reached only through the retirement flow or an explicit `--settle`.",
           "basis": "AGENTS.md §5 (pre-migration)"
         },
         {
@@ -967,7 +967,7 @@
         {
           "id": "harness.playtest",
           "modality": "must",
-          "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/pi-agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
+          "text": "Smoke walk (r9, two scripted baselines): `cargo run --example playtest -- .ygg/mods/pi-agent-seed --choices 1,1,1,1,1` (baseline A, the batch cycle — script exhausted back at the coordinate menu, `reached=choice` is the success value) and `--choices 1,1,1,1,7,4,5,1` (baseline B, the armed retirement — `reached=ending`, `[ENDING · run retired]`). The default no-arg all-1 walk loops empty batches to the step limit (`ok=false, reached=limit`) — that is the documented steady state of a resident run, not a regression. The scripted walks cover the happy paths only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
           "basis": "AGENTS.md §1.9 (behavioural acceptance); gates.mod-semantics-matrix"
         },
         {
@@ -1121,7 +1121,7 @@
         {
           "id": "evolution.record-shape",
           "modality": "must",
-          "text": "After `verify.submit=true`, register with `settlement.evolution`: `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`. The summary is required after trimming; the artifact may be empty, but **when `screened > 0` it must be `artifacts/<file>.md` and `cls` is required**; the six class counts sum to `screened` and the kept classes sum to `kept`; **c=0/0 allows an empty artifact**. Missing c/cls fall back in order to `settings.review.evolution.*` and then to 0/0 with no classes. Under guide you may pre-register with `config.set review.evolution.artifact|summary|candidates|classes=<value>` (shape checked per key, cross-field completeness only at `settlement.evolution`), and the menu builds the payload from it; with no pre-registration it uses the neutral summary plus c=0/0. The optional `sessions=` / `todo=` segments settle the two end-of-run cleanups in the same transaction. `review.note` afterwards accepts only `lesson|score` and archives the four settlement keys single-source into `review.evolution.*`.",
+          "text": "After `verify.submit=true`, register with `settlement.evolution` **once per batch** (resident cadence: the unarmed review.note cannot pass while `settlement_problem()` is non-empty, so deferring the registration defers the batch, which shows up as a non-drained queue — no extra enforcer exists): `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`. The summary is required after trimming; the artifact may be empty, but **when `screened > 0` it must be `artifacts/<file>.md` and `cls` is required**; the six class counts sum to `screened` and the kept classes sum to `kept`; **c=0/0 allows an empty artifact**. Per-batch accounting: `c=<kept>/<screened>` counts this batch's screened candidates (reuse / already-present classes included); a `c=0/0` batch must state in the summary that the batch was screened and nothing new was kept — under-registering and false \"screened empty\" claims are the same offense. `evolution.max_per_run` is read per-batch (configuration unchanged). Missing c/cls fall back in order to `settings.review.evolution.*` and then to 0/0 with no classes (pre-registrations survive across batches). Under guide you may pre-register with `config.set review.evolution.artifact|summary|candidates|classes=<value>` (shape checked per key, cross-field completeness only at `settlement.evolution`), and the menu builds the payload from it; with no pre-registration it uses the neutral summary plus c=0/0. The optional `sessions=` / `todo=` segments settle the two end-of-batch cleanups in the same transaction. `review.note` afterwards accepts only `lesson|score` and archives the four settlement keys single-source into `review.evolution.*` (a rolling single slot — last batch only; full history lives in the event log).",
           "basis": "the settlement.evolution / review.note / config.set contracts (this Mod)"
         },
         {
@@ -1139,7 +1139,7 @@
         {
           "id": "evolution.living-docs-sync",
           "modality": "must",
-          "text": "Whenever a run evolves domain concepts, state-machine rules, persistent lane semantics, or architectural contracts, `docs/CONTEXT.md` and `docs/DESIGN.md` must be reviewed and updated before `settlement.evolution` and `review.note` close the run.",
+          "text": "Whenever a run evolves domain concepts, state-machine rules, persistent lane semantics, or architectural contracts, `docs/CONTEXT.md` and `docs/DESIGN.md` must be reviewed and updated before the batch's `settlement.evolution` and `review.note` settle the batch (resident runs settle once per batch, or at retirement).",
           "basis": "AGENTS.md §2 + docs/{CONTEXT,DESIGN}.md closed loop"
         }
       ]

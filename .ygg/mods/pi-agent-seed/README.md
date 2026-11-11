@@ -126,14 +126,25 @@ Mod 内部结构。
 
 ## 一、协调器（`fsm.stage`，单机单事件 `stage.advance`）
 
+r9 起运行生命周期是**常驻自循环**：需求级 done 保留（accept_gate 产物），运行级终局不再由
+review.note 自动触发——review.note 的常态落点是**批收口**（回 coordinate，批计数 +1），
+`done` 只经**显式退役**（`config.set run.retire=true` 武装后）可达：
+
 ```text
-intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done
-                           ▲                                 │
-                           └──────── verify.submit=false ─────┘（门禁失败打回）
+intake ──task.intake──▶ coordinate ◀══════════════════════╗
+ （仅冷启动）            │  ▲                               ║ 批收口 review.note（未武装）：
+                        ▼   └─ verify.submit=false ─┐       ║ 归档 → run.batch+1 → 复位 → 回 coordinate
+                       review ── verify / settlement ┘       ║ （绝不写 ending）
+                        │                                     ║
+                        └── review.note（run.retire 武装）──▶ done（唯一终局 = 退役）
 ```
 
 - `coordinate.submit` 有硬门禁：全部叶子需求 `done` ∧ 0 待验收提案 ∧ 0 在跑 job ∧ 0 未解决冲突。
-- `review` 里 `verify.submit=true` 只记录门禁证据；随后必须先 `settlement.evolution` 登记，`review.note` 才单源归档并收口。
+  它是**批边界**：成功即进入本批的结算盘点（review 相位）。
+- `review` 里 `verify.submit=true` 只记录门禁证据；随后必须先 `settlement.evolution` 登记，
+  `review.note` 才单源归档。未武装时 review.note **批收口**（回 coordinate 开下一批，
+  叙事 `[BATCH {n} SETTLED]`，绝不含 `[ENDING` 前缀）；`run.retire=true` 武装后才是终局
+  （`[ENDING · run retired]`）。goal 授权校验在**每批盘点与退役前**都生效（人审节拍逐批轮转）。
 
 ## 二、需求级流水线（`req.<i>.status`）
 
@@ -204,9 +215,9 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 | --- | --- |
 | `proposal.accept` | 验收判断（自批 = 伪造验收结论） |
 | `gate.approve` | 两个强制门禁 |
-| `coordinate.submit` | 收口进 review |
+| `coordinate.submit` | 批边界（进本批结算盘点） |
 | `verify.submit` | 门禁自检结论 |
-| `review.note` | 结局评分 / 经验 + settlement 单源归档（`lesson|score`） |
+| `review.note` | 结局评分 / 经验 + settlement 单源归档（`lesson|score`）；未武装 = 批收口，武装 = 退役终局——两条路径都过闸（P12：门禁频率逐批轮转，强度不减） |
 
 - 打回类（`gate.reject` / `proposal.reject`）**故意不在内**：打回不产生任何通过效果，自打回
   只会让自己返工；而它是唯一的纠错通道（菜单本就没有带理由的 reject 项）。
@@ -218,7 +229,8 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 
 ### 5.2 二级菜单页
 
-顶层菜单只留一个 `config` 入口，三项设置进子页：运行模式 / 演进偏好 / 门禁。进化声明的预登记键
+顶层菜单只留一个 `config` 入口，四项设置进子页：运行模式 / 演进偏好 / 门禁 / **退役切换**
+（r9）。进化声明的预登记键
 （`review.evolution.artifact` / `summary` / `candidates` / `classes`）**不占菜单项**——菜单没有自由文本输入，
 所以它们走 `config.set` 直派，写 `settings.review.evolution.*`；verify 通过后的 `settlement.evolution`
 菜单项读取这些值构造载荷并集中校验（见 §八）。
@@ -229,7 +241,10 @@ proposal.reject  "pN|理由" / "rN|理由" / ""
 | `config.close` | `""` | 回阶段菜单 |
 
 - 纯展示层：**不参与状态机**，只改 `ui.page` / `ui.page.stage` 两个展示键；不进摘要、不影响
-  派活，也**不占顶层首项**（主前进动作永远是 `pendingChoice` 第 1 项，`playtest` 全 1 照旧通关）。
+  派活，也**不占顶层首项**（主前进动作永远是 `pendingChoice` 第 1 项，脚本化基线照常可走）。
+- **退役切换项（第 5 项）**：`config.set run.retire=<取反值>`——`off → true` 武装（下一条
+  review.note 变终局变体），`armed → ""` 解除；武装本身不过票据闸也不产生通过效果，终局仍由
+  review.note 人类票据完成。
 - 清空时机：阶段变化（`advance()` 清、`render()` 再兜一次）、选了任何非 `config.*` 的菜单项、
   以及**切换运行模式**——驱动者换了人，子页处境已失效；不这样做，goal / `--drive cmd` 会在
   子页首项上来回翻模式直到步数上限。
@@ -276,10 +291,13 @@ Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
 
 - **写命令**（`--requirement` / `--proposal` / …）：先在 `running` 下登记 `writers`，行落盘后才摘除；
   `closing` → 非零拒绝；`finalized` → 非零拒绝（需开新局）。
-- **收口**：goal 在最后的 `review.note` 前切到 `closing`，等在途写者归零，**同一保护下**最后一次 drain：
-  有新需求就解除 closing 继续 loop，无新需求才 `review.note` + settle → `finalized`。
+- **常驻语义（r9）**：`running` 永驻即常驻本体——常驻局批循环期间相位长期停在 `running`；
+  `closing` / `finalized` 只由**退役流**（`run.retire` 武装 → review.note 终局 → 泵预 closing →
+  settle → finalize）或显式 `--settle` 触发；serve 关闭绝不触发 settle。
+- **退役收口**：goal / 编排在最后的终局 review.note 前切到 `closing`，等在途写者归零，**同一保护下**
+ 最后一次 drain：有新需求就解除 closing 继续 loop，无新需求才 review.note（终局）+ settle → `finalized`。
 - **崩溃恢复**：closing 用心跳续命（10s），过期后写命令或 resume 会恢回 `running`；锁也按 mtime 抢占，
-  不会永久卡死。
+  不会永久卡死。常驻局批结算期间崩溃 → 心跳过期 → resume 恢复 running，从断点继续批盘点。
 
 ### 宿主读的摘要字段（`agent.summary` → `ygg.meta("summary", …)`）
 
@@ -289,6 +307,7 @@ Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
 ```lua
 ygg.on("agent.summary", function()
   ygg.meta("summary", { stage = ..., ending = ..., verifyPassed = ..., nextEndsRun = ...,
+                        lifecycle = "resident", batch = ..., batchDrained = ...,
                         pendingProposals = ..., requirementCount = ...,
                         conflicts = { { id = ..., peer = ..., note = ... } },
                         evolution = { artifact = ..., summary = ..., candidates = ..., classes = ... },
@@ -301,6 +320,12 @@ end)
   叙事里**没有** `【摘要】` 前缀行，宿主也不从叙事文本里剖 JSON。
 - 该动作**只读**：不推进状态、不改 KV、`pendingChoice` 保持不变（只重渲染一屏）。
 - `meta` 是瞬态回执面，不进存档也不进状态哈希（调不调它不影响 `state_hash`）。
+- **r9 常驻生命周期三字段（加性；旧宿主/旧 mod 双向兼容）**：
+  - `lifecycle`（常量 `"resident"`）：mod 自报模式，宿主所有常驻特化行为以它为闸（缺失 = 旧 mod 行为不变）；
+  - `batch`（integer ≥1，缺省 1）：`run.batch` 镜像，批轮转的可观测计数；
+  - `batchDrained`（boolean）：**泵暂停信号** = coordinate ∧ 队列清空 ∧ 未武装退役——「本批已排空，
+    等新 `--requirement` 进料」。宿主 drive 泵在它 ∧ inbox 无未消费行时打印等待文案后安全暂停（exit 0），
+    绝不在空批上连点 `coordinate.submit`；武装 retire 时刻意为 false，让泵把最后一批发完再退役。
 - `evolution` 四个子键是**声明回显**（`review.evolution.*` 的同一份值，按 artifact / summary /
   candidates / classes 顺序缺省 `""` / `""` / `"0/0"` / `""`）：
   它可以被断言「声明了没有」，不能拿来断言建议质量或复核独立性。
@@ -338,19 +363,26 @@ review.note "lesson|score"
 | `c` | 两个非负整数，`kept ≤ screened` | 先回落预登记，再 `0/0` | `review.evolution.candidates` |
 | `cls` | `<kind>:<n>` 逗号分隔，kind ∈ `long_term` / `unused` / `one_off` / `temp_tool` / `redundant` / `no_scene` | 先回落预登记，再空 | `review.evolution.classes` |
 
-- **登记前件**：只在 review 且 `verify.passed=true` 后可用，每轮 done 前都必须登记。成功写
+- **登记前件**：只在 review 且 `verify.passed=true` 后可用，**每批盘点都必须登记**（批收口的前件链
+  把「不登记就无法批收口」结构化封死：settlement_problem 非空则 review.note 被阻断）。成功写
   `settlement.evolution.{artifact,summary,candidates,classes}`；`c=0/0` 允许 artifact 为空，避免零候选造空文档。
+  **批口径（常驻操作守则）**：`c=<kept>/<screened>` 按批计，`cls=<kind>:<n>` 按根因类按批计；
+  批收口允许 `c=0/0`，但 summary 必须写明「本批筛查过、无新增」——漏登记与谎报查空同罪，如实转登记优先；
+  `evolution.max_per_run` 按**每批**口径理解（配置零改动）。历史不靠 KV（滚动单槽只留最近一批），全史查事件表
+  （`settlement.evolution` / `review.note` 的 `generation,seq` 序列，payload 自带 `c=/cls=/sessions=/todo=`）。
 - **预登记与完整性**：guide 可先 `config.set review.evolution.artifact|summary|candidates|classes=<值>`
   （空 summary = 清除），逐键校形状；跨字段完整性只在 `settlement.evolution` 校。`screened > 0` 时
   artifact 与 `cls` 必填，`cls` 总和 = `screened`，保留类（`long_term` + `unused` + `redundant`）总和 = `kept`。
   可选段只接受 `c=` / `cls=`；`ev=`、重复段与未知段均【载荷被拒】。
 - **菜单不变式**：verify 已通过且未登记时首项是 `settlement.evolution`，载荷由 settings 预登记构造；
-  未预登记时给空 artifact、中性 summary 与 `c=0/0`。登记后首项才是 `review.note`，保持 `nextEndsRun`
-  契约；默认零候选载荷保证全 1 走查可按「登记 → 收口」通关，不引入 disabled 项。
+  未预登记时给空 artifact、中性 summary 与 `c=0/0`。登记后首项才是 `review.note`；`nextEndsRun` 契约 =
+  首项 review.note **∧ run.retire 武装**（未武装的批收口不触发宿主预 closing 协议）。
 - **单源归档**：`review.note` 只接受 `lesson|score`；旧 `ev=` / `c=` / `cls=` 段一律拒绝并提示先
   `settlement.evolution`。它只把本轮 settlement 四键归档到 `review.evolution.*`，不再读载荷或 settings
-  重算。`coordinate.submit` 重入 review、以及 `verify.submit=false` 打回时清空本轮 settlement 四键，
-  但保留 settings 预登记。
+  重算。归档后的落点分两支：**未武装** = 批收口（`run.batch+1` → 复位 verify/settlement → 回 coordinate，
+  叙事 `[BATCH {n} SETTLED]`，绝不写 ending）；**武装** = 退役终局（写 `ending=done`，`[ENDING · run retired]`）。
+  `coordinate.submit` 重入 review、以及 `verify.submit=false` 打回时清空本轮 settlement 四键，
+  但保留 settings 预登记（跨批存活，供下一批菜单缺省）。
 - **声明 ≠ 证明**：沙箱读不到文件，Mod 只校声明形状与计数自洽；不校验 artifact 内容、也不知道复核是否独立执行。
   `agent.summary.evolution` 回显归档的 artifact / summary / candidates / classes 四键，随存档与
   `settlement.json.final_state.kv` 自然可见。
@@ -361,8 +393,7 @@ review.note "lesson|score"
 config.set goal.authorization=<单行说明>      # trim ≤200、无换行；空值 = 显式清除
 ```
 
-- 落点 `settings.goal.authorization`；**只有运行期进入 goal**（`settings.play.mode=goal`）的局在 `review.note`
-  收口前校验：缺记录则旁白阻断（不写 `ending`、不推进），登记后即可收口；resume 保留；切回 guide 不校验。
+- 落点 `settings.goal.authorization`；**只有运行期进入 goal**（`settings.play.mode=goal`）的局在**每批盘点与退役前**校验（常驻下 review.note 每批都走）：缺记录则旁白阻断（不写 `ending`、不推进），登记后即可批收口/退役；resume 保留；切回 guide 不校验。
 - 静态 `data/config.json` 预设 goal 视为仓库所有者常设配置，**不在校验范围**（否则全 1 冒烟会断）；若静态 goal 的局
   中途切过一次模式（`settings.play.mode` 被写入），之后收口就会要求授权——语义是「运行期重新进入 goal 要说清谁授权」。
 - 它只证明「登记过一句话」，不是身份认证，也不进 `agent.summary`；配置页会回显摘要或「未登记」。
@@ -482,9 +513,17 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 
 ## 十二、走查
 
+r9 起默认基线是两条**脚本化走查**（默认无参全 1 在常驻语义下空批循环至步数上限 →
+`ok=false, reached=limit`，这是**预期态**，不是回归——空批循环即「队列已清空等进料」）:
+
 ```bash
-# 默认全 1 贪心：intake → coordinate.submit → verify → settlement.evolution → review.note → 【结局
-cargo run --example playtest -- .ygg/mods/pi-agent-seed
+# 基线 A · 批循环（新默认）：intake → coordinate.submit(批边界) → verify → settlement.evolution
+#   → review.note(批收口) → 回 coordinate，脚本耗尽（reached=choice 是脚本走查的成功值）
+cargo run --example playtest -- .ygg/mods/pi-agent-seed --choices 1,1,1,1,1
+
+# 基线 B · 退役：批盘点 → config 子页（7=config 入口）武装 run.retire（4=第 5 项）→ 关子页（5）
+#   → review.note（终局）→ [ENDING · run retired]（reached=ending）
+cargo run --example playtest -- .ygg/mods/pi-agent-seed --choices 1,1,1,1,7,4,5,1
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
 #   .ygg/bin/ygg-agent --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
@@ -494,6 +533,21 @@ cargo run --example playtest -- .ygg/mods/pi-agent-seed
 # 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
 cargo run --example pack -- .ygg/mods/pi-agent-seed
 ```
+
+## 十二 b、常驻运行守则（批边界 = 重启时点；升级不迁移）
+
+- **批边界即升级/进化的自然重启时点**：批收口后 stage=coordinate ∧ jobs=0 ∧ gates=0 ∧ conflicts=0
+  （稳定检查点的常驻特化）。升级（mod 进化落盘或宿主二进制替换）在批收口后落地，然后以**新 run-id 开局**
+  走批循环；旧局目录保留不动，历史经事件表只读可查。
+- **原则：非兼容优先于兼容债——旧局不迁移不 adopt，装载失败开新局。** 升级不做旧档兼容承诺：
+  非兼容变更直接落地，新 bundle 下装载失败（可读报错，`format_version` / `engine_version` 双硬门）
+  即开新局；不设迁移层、不设兼容承诺表。新增键（`run.batch` / `settings.run.retire`）带缺省读仅为
+  新局冷启动所需，不构成对旧档的承诺。
+- **批中改动机制上安全但证据纪律优先选批边界**：热载原子换装（不存在半更新态）、挂起菜单随存档往返；
+  但批中升级会让「本批回执由哪版逻辑产生」变含混——进化改动应在批收口之后提交，让下一批整批跑在新逻辑上，
+  并在该批 settlement.evolution 的 artifact 中登记（两出口同账）。
+- **多轮轮转实测路径**：daemon 常驻 + 逐批 `--requirement` 进料 → 泵驱动至批收口 → `summary` 断言
+  `batch` 递增、泳道复用释放、全程无 `[ENDING` 行；批排空后泵安全暂停（exit 0）等进料或退役。
 
 ## 十三、上层扩展：`.pi/extensions/ygg-pi-harness`
 
