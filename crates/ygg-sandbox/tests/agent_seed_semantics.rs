@@ -1661,7 +1661,10 @@ fn summary_exposes_structured_jobs_and_gates() {
     );
     // Pre-claim a lane **with** branch/base: `jobs[].branch` / `jobs[].base` must be the lane
     // ledger's own bytes, not something reconstructed from the requirement row.
-    game.narrate("lane.claim", &text("1|r1|feature/c9d4-jobs-ledger|abc1234|1"));
+    game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/c9d4-jobs-ledger|abc1234|1"),
+    );
     game.narrate("requirement.dispatch", "0");
     game.assert_kv("req.1.job", json!("plan"));
 
@@ -2238,7 +2241,10 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     // r2: `proposal.accept` (plan) releases the lane ledger (req_release → LANES.release), so
     // the main agent self-reports the branch HERE — after the accept, before the gate. The
     // gate.approve(plan) auto mount then consumes this ledger name in the SAME turn.
-    game.narrate("lane.claim", &text("1|r1|feature/a3f9-map-single-gone|HEAD|1"));
+    game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/a3f9-map-single-gone|HEAD|1"),
+    );
 
     // 1) Approving plan_gate triggers auto_dispatch -> auto_claim_worktree in the SAME turn!
     let approved_plan = game.click("gate.approve — ");
@@ -2274,7 +2280,9 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     assert_eq!(dev_jobs[0]["probeStatus"], json!("pending"));
     let dev_list = game.narrate("requirement.list", "0").join("\n");
     assert!(
-        dev_list.contains("(wt=ready:/tmp/ygg-wt-lane-1@feature/a3f9-map-single-gone)(subagent=pending)"),
+        dev_list.contains(
+            "(wt=ready:/tmp/ygg-wt-lane-1@feature/a3f9-map-single-gone)(subagent=pending)"
+        ),
         "requirement.list must show live worktreeStatus and subagentStatus: {dev_list}"
     );
     let dev_action = &dev_jobs[0]["subagentAction"];
@@ -2492,20 +2500,13 @@ fn lane_branch_naming_is_enforced_at_both_entries() {
         "lane.claim",
         &text("1|r1|feature/a3f9-map-single-gone|abc1234|1"),
     );
-    assert_eq!(
-        count_lines(&claimed, "[LANE CLAIMED]"),
-        1,
-        "{claimed:#?}"
-    );
+    assert_eq!(count_lines(&claimed, "[LANE CLAIMED]"), 1, "{claimed:#?}");
     game.assert_kv("lane.1.branch", json!("feature/a3f9-map-single-gone"));
     game.assert_kv("reject.count", json!(null));
 
     // P2 — the 48-char upper bound passes (8 + 4 + 1 + 35 = 48).
     let name48 = format!("feature/a3f9-{}", "a".repeat(35));
-    let claimed48 = game.narrate(
-        "lane.claim",
-        &text(&format!("2|r2|{name48}|abc1234|1")),
-    );
+    let claimed48 = game.narrate("lane.claim", &text(&format!("2|r2|{name48}|abc1234|1")));
     assert_eq!(
         count_lines(&claimed48, "[LANE CLAIMED]"),
         1,
@@ -2543,11 +2544,7 @@ fn lane_branch_naming_is_enforced_at_both_entries() {
             "case {n} ({branch}) must carry the canonical example: {joined}"
         );
         game.assert_kv("reject.count", json!((n + 1) as u64));
-        let last = game
-            .kv("reject.last")
-            .as_str()
-            .unwrap_or("")
-            .to_owned();
+        let last = game.kv("reject.last").as_str().unwrap_or("").to_owned();
         assert!(
             last.starts_with("lane.claim: "),
             "reject.last must record the action: {last}"
@@ -2562,11 +2559,7 @@ fn lane_branch_naming_is_enforced_at_both_entries() {
     // P3 — an empty branch stays legal at lane.claim ("not asserted yet") and leaves the
     // reject ledger untouched.
     let asserted = game.narrate("lane.claim", &text("3|r3|||1"));
-    assert_eq!(
-        count_lines(&asserted, "[LANE CLAIMED]"),
-        1,
-        "{asserted:#?}"
-    );
+    assert_eq!(count_lines(&asserted, "[LANE CLAIMED]"), 1, "{asserted:#?}");
     game.assert_kv("lane.3.branch", json!(""));
     game.assert_kv("reject.count", json!(8));
 
@@ -2648,9 +2641,7 @@ fn auto_claim_requires_a_self_reported_branch_name() {
     );
     game.narrate(
         "requirement.add",
-        &text(
-            "branch self report|auto claim refuses an empty ledger branch|sync-r1",
-        ),
+        &text("branch self report|auto claim refuses an empty ledger branch|sync-r1"),
     );
     game.narrate("requirement.dispatch", "0");
     game.assert_kv("req.1.job", json!("plan"));

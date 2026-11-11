@@ -10662,7 +10662,10 @@ end)
         ]);
         let fields = claim_fields_with(&lane2).expect("跨车道重派认领必须成功");
         let line = wire_line(&fields);
-        assert!(line.contains("lane=2;req=r1;branch=feature/a3f9-map-single-gone;"), "{line}");
+        assert!(
+            line.contains("lane=2;req=r1;branch=feature/a3f9-map-single-gone;"),
+            "{line}"
+        );
         assert!(line.contains(";clean=1;reused=0;path="), "{line}");
     }
 
