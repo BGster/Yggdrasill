@@ -308,6 +308,7 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
   "lifecycle": "resident",
   "batch": 1,
   "batchDrained": false,
+  "play": "guide",
   "pendingProposals": 0,
   "requirementCount": 1,
   "pendingTools": 0,
@@ -346,12 +347,41 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
         "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.\n...",
         "deltaPrompt": "Resume r1 (rev 1) for stage `development` in worktree `...`; write `artifacts/r1-development.md` and submit.",
         "fullFallbackBrief": "Requirement r1 ...\nResume context: prior executor `agent-plan-1`.",
-        "submitCommand": ".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
+        "submitCommand": ".ygg/bin/egg --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
       }
     }
   ]
 }
 ```
+
+#### r1 自动收波看门狗契约（D-MA16）
+
+> 实体：`.pi/extensions/ygg-pi-harness/watchdog.ts`（纯核 + 薄 IO 壳）+ `index.ts` 接线。
+> 触发与边界一句话：进程内定时器轮询 `op=summary`，可收波则拉起**确定性自唤醒回合**
+> 复用 `ygg_run_lanes` 全链；永不批门禁、永不越过冲突、不是第三个压缩入口。宿主零改动。
+
+- **触发面（spike 实证后的降级路径）**：`ctx.executeTool` 只存在于工具 `execute()` 的
+  `ExtensionToolContext`，回合外的 handler ctx 上是 `undefined`（`--mode rpc` 空闲探针实测）；
+  看门狗因此经工厂级 `pi.sendMessage({customType:"ygg-auto-wave", triggerTurn:true})` 拉起主代理
+  回合，由它调 `ygg_run_lanes`——事件链与回执与手发逐字节同构，代价是每波多耗一个模型回合。
+  定时器是进程内的（批量入口禁令下的唯一合法形态）；`YGG_AUTO_INTERVAL_MS` 钳位 1s–60s，缺省 5s。
+- **可收波谓词（纯函数 `nextAutoAction`，进测试面）**：`summary.available ∧
+  lifecycle=="resident" ∧ conflicts==[] ∧ ∃ job ∈ collectibleJobs(summary):
+  stage∈{plan,development} ∧ ¬subagentStatus.startsWith("delivered") ∧ ¬parked`。
+  `delivered:*` 排除 = guide 模式 accept 被票拒即权威停点（拒绝即设计停点，不重试）；
+  `lifecycle` 缺失（旧 mod）保守不收。
+- **单飞互斥**：看门狗与手发共享同一把「会话闸」——`ctx.isIdle()`（回合内的一切都让它为
+  false）+ 波票闩（一张票未消费前不再发新波，fail-closed 防自唤醒回合不遵指令时的无限重发）。
+- **预算**：per `(req,rev,stage)` 连续 2 次整波失败 → 停车（rev 变化自动复位）；全局连续 3 波
+  全败 → 自关（fail-closed，`/ygg auto status` 可见）。空波（无作业落地）不算全败。
+- **回执面**：每波 `artifacts/auto-wave-<NNNN>.md`（`ygg_run_lanes` 消费波票后写，narrative 全量
+  不截断）+ 交接单重写（§3.6 交接产物新增第 6 节看门狗段：状态/最近波次/停车表）+ 会话追加一条
+  紧凑状态块（`triggerTurn:false`，不替用户开回合）。
+- **在场唤醒（goal 限定 opt-in）**：`YGG_AUTO_WAKE=on` 且 `summary.play=="goal"` 且有待审门禁时，
+  发一次唤醒消息让主代理裁决；guide 模式永不唤醒（门禁只能人点菜单）。
+- **daemon 存活**：每 tick 一次 `op=summary` 既是轮询数据源也是心跳；传输失败由 daemon 客户端
+  既有单次重启重试自愈（`kill -9` 后下一 tick 内恢复）。诚实边界：pi 会话退出则 daemon 随之退
+  （stdin EOF 自尽，无孤儿）；`/ygg auto on\|off\|status` 是运行时 kill-switch。
 
 ### 3.6 上下文压缩与检查点交接契约
 
