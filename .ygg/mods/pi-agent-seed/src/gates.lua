@@ -14,10 +14,10 @@ local TEXTS
 
 local num, text_of =
   config.num, config.text_of
-local prop_pending_total =
-  props.prop_pending_total
-local job_capacity, job_total, req_all_done, req_conflict_total, req_count, req_gate, req_id, req_key, req_open_total, req_rev, req_status =
-  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_key, reqs.req_open_total, reqs.req_rev, reqs.req_status
+local P_PENDING, prop_count, prop_pending_total, prop_req, prop_status =
+  props.P_PENDING, props.prop_count, props.prop_pending_total, props.prop_req, props.prop_status
+local job_capacity, job_total, req_all_done, req_conflict, req_conflict_total, req_count, req_gate, req_id, req_job, req_key, req_needs_amend, req_open_total, req_rev, req_status =
+  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_status
 local fill, join, trim =
   util.fill, util.join, util.trim
 
@@ -81,6 +81,41 @@ local function gate_problem()
   return nil
 end
 
+-- 需求自身的 pending 提案数（gate_problem_for 的计数口径；与 requirements.req_has_pending
+-- 同读一张 prop.* 表、同一个 pending 状态，布尔版只给真值不给数量，这里要有 {{count}} 文案）。
+local function req_pending_total(index)
+  local total = 0
+  for i = 1, prop_count() do
+    if prop_status(i) == P_PENDING and prop_req(i) == index then
+      total = total + 1
+    end
+  end
+  return total
+end
+
+-- 单需求门禁判据（推进类专用，与 gate_problem 的 run 收口/证据全局屏障分层）：
+-- rN 的门禁只被 rN 自身事态阻塞——其它需求的 pending 提案 / 在跑 job / 冲突不进本判定。
+-- 依序返回第一个命中（人类可读细节），否则 nil：
+--   1) 自身 pending 提案（防御性：正常流被 submit_slot_ok 的 gate 守卫 + req_prop_busy 挡住）
+--   2) 自身在跑 job（防御性：门禁升起时 req_advance_after_accept 已释放 job）
+--   3) 自身未解决冲突 / needs_amend（唯一真实可共存：冲突雷达 / resolve revise 可在待批期落）
+-- 显式不含：stale / gate_rev 失配（gate.approve 的 gate_rev_ok 已查，避免双报）、
+-- req_all_done / req_open_total（收口专用）与一切全局计数。
+local function gate_problem_for(index)
+  local own = req_pending_total(index)
+  if own > 0 then
+    return fill(TEXTS.beats.req_gate_own_props, { id = req_id(index), count = tostring(own) })
+  end
+  local job = req_job(index)
+  if job ~= "" then
+    return fill(TEXTS.beats.req_gate_own_job, { id = req_id(index), job = job })
+  end
+  if req_conflict(index) ~= "" or req_needs_amend(index) then
+    return fill(TEXTS.beats.req_gate_own_conflict, { id = req_id(index) })
+  end
+  return nil
+end
+
 -- 局末清理前件（收口专用，与 gate_problem 分层）：
 -- gate_problem 管需求侧（待验收提案 / 在跑 job / 未解决冲突 / 未 done）；
 -- 这里管 run 级结算（进化复核 / subagent 会话 / 主会话 Todo）。全部通过才允许 review.note。
@@ -113,6 +148,7 @@ M.gate_evidence_problem = gate_evidence_problem
 M.gate_kind = gate_kind
 M.gate_next = gate_next
 M.gate_problem = gate_problem
+M.gate_problem_for = gate_problem_for
 M.gate_rev_ok = gate_rev_ok
 M.gate_total = gate_total
 M.req_artifacts = req_artifacts
