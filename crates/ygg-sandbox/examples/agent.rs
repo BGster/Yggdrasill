@@ -316,7 +316,10 @@ struct ActorIdentity {
 
 impl ActorIdentity {
     /// 未携带身份（所有派发走旧路径：不注入、不认领、不盖章）。
-    const NONE: ActorIdentity = ActorIdentity { actor: None, session: None };
+    const NONE: ActorIdentity = ActorIdentity {
+        actor: None,
+        session: None,
+    };
 
     /// 是否携带至少一段身份（opener 认领只认 `actor` 非空）。
     fn has_actor(&self) -> bool {
@@ -537,7 +540,10 @@ fn parse_args() -> Args {
                 let raw = next_value(&mut iter, "--actor");
                 // 形状校验在解析点（与 executor id 同规则）：非法值 = 用法错误，
                 // 绝不带病进 dispatch（那个值会被注入 wire 段）。
-                actor = Some(validate_identity_value("--actor", &raw, 64).unwrap_or_else(|m| usage_error(&m)));
+                actor = Some(
+                    validate_identity_value("--actor", &raw, 64)
+                        .unwrap_or_else(|m| usage_error(&m)),
+                );
             }
             "--actor-session" => {
                 let raw = next_value(&mut iter, "--actor-session");
@@ -1593,7 +1599,8 @@ impl Session {
         // opener 是既成事实（先到先得、不可变）：重写 meta 时原样带回
         //（与 started_at 的保留逻辑同法）——否则开局 / reset / 热载后的
         // 任意一次 write_meta 都会把认领记录抹掉。
-        let opener_actor = read_meta(&self.meta_path).and_then(|meta| meta.get("opener_actor").cloned());
+        let opener_actor =
+            read_meta(&self.meta_path).and_then(|meta| meta.get("opener_actor").cloned());
         let mut meta = json!({
             "run_id": self.run_id,
             "mod": self.mod_label,
@@ -1875,7 +1882,12 @@ impl Session {
             // actor/actor_session 在这里取回，经 dispatch_event_as 注入声明路由。
             let actor = record["actor"].as_str().map(str::to_owned);
             let actor_session = record["actor_session"].as_str().map(str::to_owned);
-            let receipt = self.dispatch_event_as(&action, &payload, actor.as_deref(), actor_session.as_deref());
+            let receipt = self.dispatch_event_as(
+                &action,
+                &payload,
+                actor.as_deref(),
+                actor_session.as_deref(),
+            );
             let rejected =
                 receipt["ok"] != Json::Bool(true) || dispatch_rejected(&self.contract, &receipt);
             if rejected {
@@ -2034,7 +2046,7 @@ impl Session {
             declares_session,
         );
         let envelope = parse_envelope(&self.kernel.dispatch(name, &payload)); // 锁外：Lua 计算
-        // 真实派发可能已经改变语义面（阶段 / 结局 / 提案 / 冲突）→ 摘要缓存失效。
+                                                                              // 真实派发可能已经改变语义面（阶段 / 结局 / 提案 / 冲突）→ 摘要缓存失效。
         self.summary_cache = None;
         let ok = envelope["ok"] == Json::Bool(true);
         let narrative = narrative_lines(&envelope);
@@ -2079,9 +2091,7 @@ impl Session {
             // 已提交的步（run.json 是元信息面），降级为警告。
             if ok {
                 if let Some(id) = actor {
-                    if let Err(message) =
-                        claim_opener(&session.run_dir, id, actor_session)
-                    {
+                    if let Err(message) = claim_opener(&session.run_dir, id, actor_session) {
                         session
                             .notices
                             .push(format!("opener 认领失败（不影响本步）：{message}"));
@@ -5162,7 +5172,7 @@ fn claim_opener(run_dir: &Path, actor: &str, session: Option<&str>) -> Result<bo
 
 /// 读本局已认领的 opener（run.json 是元信息面：读不到 = 尚无开局者）。
 fn read_opener(run_dir: &Path) -> Option<String> {
-    read_meta(&run_dir.join(META_FILE))? ["opener_actor"] ["actor"]
+    read_meta(&run_dir.join(META_FILE))?["opener_actor"]["actor"]
         .as_str()
         .map(str::to_owned)
 }
@@ -6148,7 +6158,9 @@ fn run_inbox_append(args: &Args) -> i32 {
             if let Some(actor) = &identity.actor {
                 match claim_opener(&run_dir, actor, identity.session.as_deref()) {
                     Ok(_) => {}
-                    Err(message) => eprintln!("[警告] opener 认领失败（不影响本条写入）：{message}"),
+                    Err(message) => {
+                        eprintln!("[警告] opener 认领失败（不影响本条写入）：{message}")
+                    }
                 }
                 claimed_opener = read_opener(&run_dir);
             }
@@ -11756,7 +11768,13 @@ end)
     }
 
     /// 本模块的 Args 基底（其余字段钉成「单发新局」；身份两字段按调用方给）。
-    fn base_args(mod_dir: &Path, runs_root: &Path, run_id: &str, actor: Option<String>, session: Option<String>) -> Args {
+    fn base_args(
+        mod_dir: &Path,
+        runs_root: &Path,
+        run_id: &str,
+        actor: Option<String>,
+        session: Option<String>,
+    ) -> Args {
         Args {
             mod_dir: Some(mod_dir.to_path_buf()),
             run_id: run_id.to_owned(),
@@ -11797,7 +11815,7 @@ end)
 
     /// run.json 的 opener_actor（未认领 = None）。
     fn opener_of(run_dir: &Path) -> Option<String> {
-        read_meta(&run_dir.join(META_FILE))? ["opener_actor"] ["actor"]
+        read_meta(&run_dir.join(META_FILE))?["opener_actor"]["actor"]
             .as_str()
             .map(str::to_owned)
     }
@@ -11808,10 +11826,22 @@ end)
     fn identity_value_shape_rejects_bad_values() {
         assert!(validate_identity_value("--actor", "agent-1", 64).is_ok());
         assert!(validate_identity_value("--actor", "  agent-1  ", 64).is_ok()); // trim 后合法
-        assert!(validate_identity_value("--actor", "", 64).is_err(), "空值必拒");
-        assert!(validate_identity_value("--actor", "a b", 64).is_err(), "空白必拒");
-        assert!(validate_identity_value("--actor", "a|b", 64).is_err(), "竖线必拒");
-        assert!(validate_identity_value("--actor", &"x".repeat(65), 64).is_err(), "超长必拒");
+        assert!(
+            validate_identity_value("--actor", "", 64).is_err(),
+            "空值必拒"
+        );
+        assert!(
+            validate_identity_value("--actor", "a b", 64).is_err(),
+            "空白必拒"
+        );
+        assert!(
+            validate_identity_value("--actor", "a|b", 64).is_err(),
+            "竖线必拒"
+        );
+        assert!(
+            validate_identity_value("--actor", &"x".repeat(65), 64).is_err(),
+            "超长必拒"
+        );
         assert!(validate_identity_value("--actor-session", &"x".repeat(128), 128).is_ok());
         assert!(validate_identity_value("--actor-session", &"x".repeat(129), 128).is_err());
     }
@@ -11836,7 +11866,10 @@ end)
             None
         );
         // 都缺 → None
-        assert_eq!(identity_value_from(None, None, "--actor", 64).expect("都缺视为缺省"), None);
+        assert_eq!(
+            identity_value_from(None, None, "--actor", 64).expect("都缺视为缺省"),
+            None
+        );
         // 非法环境值 = 错误（不是静默无身份）
         assert!(identity_value_from(None, Some("a b".to_owned()), "--actor", 64).is_err());
     }
@@ -11846,7 +11879,13 @@ end)
         // 载荷是 JSON 字符串标量：身份段插进闭引号**之前**（内核解析仍是合法 JSON）。
         // 双段：actor 在前
         assert_eq!(
-            inject_identity_segments("\"r1|1|plan|s|a.md||x\"", Some("agent-1"), Some("s-1"), true, true),
+            inject_identity_segments(
+                "\"r1|1|plan|s|a.md||x\"",
+                Some("agent-1"),
+                Some("s-1"),
+                true,
+                true
+            ),
             "\"r1|1|plan|s|a.md||x|actor=agent-1|actor_session=s-1\""
         );
         // 只声明 actor（未声明 session 即使携带也不注入）
@@ -11860,14 +11899,20 @@ end)
             "\"a|actor_session=s-1\""
         );
         // 声明但未携带 → 原样
-        assert_eq!(inject_identity_segments("\"a\"", None, None, true, true), "\"a\"");
+        assert_eq!(
+            inject_identity_segments("\"a\"", None, None, true, true),
+            "\"a\""
+        );
         // 未声明 → 原样（宿主不碰载荷）
         assert_eq!(
             inject_identity_segments("\"a\"", Some("agent-1"), None, false, false),
             "\"a\""
         );
         // 非字符串标量（数字）：无处可插，原样返回
-        assert_eq!(inject_identity_segments("0", Some("agent-1"), None, true, true), "0");
+        assert_eq!(
+            inject_identity_segments("0", Some("agent-1"), None, true, true),
+            "0"
+        );
     }
 
     #[test]
@@ -11996,8 +12041,15 @@ end)
         assert!(!claim_opener(&run_dir, "agent-2", None).expect("后来者"));
         assert_eq!(opener_of(&run_dir).as_deref(), Some("agent-1"));
         let meta = read_meta(&run_dir.join(META_FILE)).expect("读 run.json");
-        assert_eq!(meta["opener_actor"]["session"], json!("s-1"), "session 随首认领落盘");
-        assert!(meta["opener_actor"]["at"].as_u64().is_some(), "开局时刻是事实");
+        assert_eq!(
+            meta["opener_actor"]["session"],
+            json!("s-1"),
+            "session 随首认领落盘"
+        );
+        assert!(
+            meta["opener_actor"]["at"].as_u64().is_some(),
+            "开局时刻是事实"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -12015,7 +12067,11 @@ end)
         // mod 侧拒绝（ok=false）的成功送达不认领：失败步不配当开局者
         let receipt = session.dispatch_event_as("event.boom", "\"0\"", Some("agent-10"), None);
         assert_eq!(receipt["ok"], Json::Bool(false));
-        assert_eq!(opener_of(&run_dir).as_deref(), Some("agent-9"), "被拒派发不认领");
+        assert_eq!(
+            opener_of(&run_dir).as_deref(),
+            Some("agent-9"),
+            "被拒派发不认领"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -12035,7 +12091,11 @@ end)
         // Session::open（新局）会重写 run.json（write_meta）——opener 必须原样带回
         let args = base_args(&dir, &runs_root, "opener-meta-run", None, None);
         let session = Session::open(&args).expect("开局");
-        assert_eq!(opener_of(&run_dir).as_deref(), Some("old-agent"), "write_meta 保留 opener");
+        assert_eq!(
+            opener_of(&run_dir).as_deref(),
+            Some("old-agent"),
+            "write_meta 保留 opener"
+        );
         // 显式再写一次 meta（热载路径同函数）也不丢
         session.write_meta();
         assert_eq!(opener_of(&run_dir).as_deref(), Some("old-agent"));
@@ -12047,7 +12107,8 @@ end)
     #[test]
     fn project_pack_declares_actor_bools_on_the_proposal_route() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let routes = InboxRoutes::load(&repo.join(".ygg/mods/pi-agent-seed")).expect("读真 Mod 路由表");
+        let routes =
+            InboxRoutes::load(&repo.join(".ygg/mods/pi-agent-seed")).expect("读真 Mod 路由表");
         assert_eq!(routes.actor_flags_for("proposal.submit"), (true, true));
         // 其余动作不声明身份段（宿主不注入也不拦截）。
         assert_eq!(routes.actor_flags_for("tool.result"), (false, false));
@@ -12078,7 +12139,11 @@ end)
         .expect("追加成功");
         assert_eq!(record["actor"], json!("worker-1"), "记录盖宿主保留键");
         assert_eq!(record["actor_session"], json!("s-worker"));
-        assert_eq!(opener_of(&run_dir).as_deref(), Some("worker-1"), "成功落行认领 opener");
+        assert_eq!(
+            opener_of(&run_dir).as_deref(),
+            Some("worker-1"),
+            "成功落行认领 opener"
+        );
         // 无身份：不盖章、不认领
         let record = append_tool_result_record(
             &run_dir,
