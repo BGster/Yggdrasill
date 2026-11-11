@@ -1,4 +1,4 @@
-//! agent-seed semantics gate: **decidable** assertions for the requirement-level state machine
+//! pi-agent-seed semantics gate: **decidable** assertions for the requirement-level state machine
 //! (5 stored states + `plan_ok`-derived display names), the turn-cut conventions, and the
 //! two-layer node map (the behavioural acceptance surface required by AGENTS.md §1.9).
 //!
@@ -42,15 +42,15 @@ fn repo_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// The instance this project actually loads (`data/texts/` and `data/playbook/` fragments
+/// The instance this project actually loads (`data/scenes.json` and `data/playbook.json`
 /// are this project's field surface).
 fn project_mod_dir() -> PathBuf {
-    repo_dir().join(".ygg/mods/agent-seed")
+    repo_dir().join(".ygg/mods/pi-agent-seed")
 }
 
 /// The seed template that ships to users (skeleton is byte-identical; `data/` differs).
 fn seed_mod_dir() -> PathBuf {
-    repo_dir().join("packages/mods/agent-seed")
+    repo_dir().join("packages/mods/pi-agent-seed")
 }
 
 // ───────────────────────── drive surface ─────────────────────────
@@ -767,7 +767,7 @@ fn legacy_save_without_plan_flag_infers_then_writes_it_back() {
     legacy.assert_kv("req.1.job", json!("development"));
 }
 
-// ───────────────────────── ⑥ map view contracts ─────────────────────────
+// ───────────────────────── ⑥ two-layer map contracts ─────────────────────────
 
 /// Take the **map window** from the `map.show` receipt: from the map head line to the map
 /// foot line (ignoring the other rendered lines in the same receipt).
@@ -788,15 +788,36 @@ fn map_window(lines: &[String], head: &str, foot: &str) -> Vec<String> {
     lines[start..=end].to_vec()
 }
 
-/// Operation view (`map.show`, the **single** view — any payload is ignored): it only
-/// promises "selectable" and says "condition not shown" when the condition is unknown.
+/// Split a map row into "left column (precondition/current node) | action area" and
+/// "right column (target/result)".
+#[track_caller]
+fn split_row(row: &str) -> (&str, &str) {
+    row.split_once("──▶ ")
+        .unwrap_or_else(|| panic!("map row lacks the `──▶` separator: {row}"))
+}
+
+/// A bracketed label in the left column (`[planning]` / `[draft/ready conflict pair]`).
+#[track_caller]
+fn row_label(left: &str) -> &str {
+    let open = left
+        .find('[')
+        .unwrap_or_else(|| panic!("map row left column lacks a label: {left}"));
+    let close = left[open..]
+        .find(']')
+        .unwrap_or_else(|| panic!("map row left column label is not closed: {left}"))
+        + open;
+    &left[open..=close]
+}
+
+/// Operation view (`map.show`, default): it only promises "selectable" and says
+/// "condition not shown" when the condition is unknown.
 ///
 /// The counter-examples are the two wording regressions from an earlier round: writing
 /// "executable" for "selectable" (the render layer cannot see the choice-side precondition)
 /// and "no extra condition" for "condition not shown" (that would vouch for the candidate).
 #[track_caller]
 fn assert_map_local(lines: &[String]) {
-    let window = map_window(lines, "[CURRENT NODE]", "(operation view");
+    let window = map_window(lines, "[CURRENT NODE]", "(full design map");
     let joined = window.join("\n");
     assert!(
         joined.contains("selectable"),
@@ -816,94 +837,100 @@ fn assert_map_local(lines: &[String]) {
     );
 }
 
-/// ⑥ The operation-map contract (both mods: the `map.show` wording lives in the scenes
-/// resource and can drift on either side). One **single** view: any payload is ignored, so
-/// the former design view is retired from the CLI (r8 serve-panel takeover is a separate
-/// requirement; the render branch stays as its hand-over base).
-#[test]
-fn map_view_keeps_operation_contract() {
-    for dir in [project_mod_dir(), seed_mod_dir()] {
-        let mut game = Game::open(&dir);
-        assert_map_local(&game.narrate("map.show", "0"));
+/// Design view (`map.show full`):
+/// - both requirement-level hops (`planning` / `developing`) must show `proposal.accept`
+///   between the proposal and the gate;
+/// - the bypass left column is a **mutable precondition**, the right column is the
+///   **resulting terminal state**.
+#[track_caller]
+fn assert_map_full(lines: &[String]) {
+    let window = map_window(lines, "[MAP]", "always-on actions");
 
-        // Payload-independence pin (no argument branch at all): "0" and "full" must render
-        // the byte-identical view — a surviving design-view branch would diverge here.
-        assert_eq!(
-            narrative_lines(&game.reply("map.show", "0")),
-            narrative_lines(&game.reply("map.show", &text("full"))),
-            "map.show must ignore every payload: one single view"
-        );
+    // Two hops: the middle `proposal.accept` hop must not be lost.
+    let hop = "proposal → proposal.accept → gate.approve";
+    let hop_rows: Vec<&String> = window.iter().filter(|row| row.contains(hop)).collect();
+    assert_eq!(
+        hop_rows.len(),
+        2,
+        "the pipeline must show proposal.accept on both the planning and the developing hop: {window:#?}"
+    );
+    let planning = hop_rows
+        .iter()
+        .find(|row| row_label(split_row(row).0) == "[planning]")
+        .unwrap_or_else(|| panic!("missing the `[planning]` hop: {window:#?}"));
+    assert!(
+        split_row(planning)
+            .1
+            .trim_start()
+            .starts_with("[planning·plan_ok]"),
+        "`[planning]` must lead to `[planning·plan_ok]` (approved first, then develop): {planning}"
+    );
+    let developing = hop_rows
+        .iter()
+        .find(|row| row_label(split_row(row).0) == "[developing]")
+        .unwrap_or_else(|| panic!("missing the `[developing]` hop: {window:#?}"));
+    assert!(
+        split_row(developing).1.trim_start().starts_with("[done]"),
+        "`[developing]` must lead to `[done]`: {developing}"
+    );
 
-        // Menu surface: no guide item may come back (physical deregistration, r1 rev3).
-        let options = game.options();
+    // Bypass direction: precondition → resulting terminal state.
+    const BYPASS_ACTIONS: [&str; 3] = [
+        "requirement.split",
+        "requirement.merge",
+        "requirement.resolve keep_first",
+    ];
+    const PRECONDITIONS: [&str; 4] = ["draft", "analyzing", "planning", "ready"];
+    const TERMINALS: [&str; 3] = ["split", "merged", "dropped"];
+    const TERMINAL_TARGETS: [&str; 3] = ["[split]", "[merged]", "[dropped]"];
+
+    let bypass_rows: Vec<&String> = window
+        .iter()
+        .filter(|row| BYPASS_ACTIONS.iter().any(|action| row.contains(action)))
+        .collect();
+    assert_eq!(
+        bypass_rows.len(),
+        BYPASS_ACTIONS.len(),
+        "there must be exactly three bypass rows: {window:#?}"
+    );
+    for row in bypass_rows {
+        let (left, right) = split_row(row);
+        let label = row_label(left);
         assert!(
-            options
-                .iter()
-                .all(|option| !option.starts_with("guide.show — ")),
-            "guide.show must not appear in the pending choice: {options:?}"
+            PRECONDITIONS.iter().any(|state| label.contains(state)),
+            "the bypass left column must name a precondition (not a terminal state): {row}"
+        );
+        for terminal in TERMINALS {
+            assert!(
+                !label.contains(terminal),
+                "the bypass left column must not be the terminal `{terminal}` (direction reversed): {row}"
+            );
+        }
+        let target = right.trim_start();
+        assert!(
+            TERMINAL_TARGETS.iter().any(|end| target.starts_with(end)),
+            "the bypass right column must be the resulting terminal state: {row}"
         );
     }
 }
 
-/// ⑥ r1 rev3: `guide.show` is **physically deregistered** — no registration, no alias, no
-/// tombstone, no refusal. A direct dispatch falls through to the kernel default for an
-/// unknown event: envelope ok, empty narrative. Pinned here so a re-registration cannot
-/// sneak back in unnoticed.
+/// ⑥ Both map contracts (both mods: the `map.show` wording lives in the scenes resource and
+/// can drift on either side).
 #[test]
-fn guide_show_is_deregistered() {
-    fn count_guide_show_literals(dir: &Path) -> usize {
-        fn walk(path: &Path, files: &mut Vec<PathBuf>) {
-            if path.is_file() {
-                files.push(path.to_owned());
-                return;
-            }
-            let Ok(entries) = std::fs::read_dir(path) else {
-                return;
-            };
-            for entry in entries.flatten() {
-                walk(&entry.path(), files);
-            }
-        }
-        let mut files = Vec::new();
-        walk(&dir.join("mod.lua"), &mut files);
-        walk(&dir.join("src"), &mut files);
-        let mut hits = 0;
-        for file in files {
-            let Ok(source) = std::fs::read_to_string(&file) else {
-                continue;
-            };
-            let mut rest = source.as_str();
-            while let Some(at) = rest.find("guide.show") {
-                hits += 1;
-                rest = &rest[at + "guide.show".len()..];
-            }
-        }
-        hits
-    }
-
+fn map_views_keep_operation_and_design_contracts() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
-        // Source surface: not a single `guide.show` literal in mod.lua or src/.
-        assert_eq!(
-            count_guide_show_literals(&dir),
-            0,
-            "no `guide.show` literal may survive in the mod source: {}",
-            dir.display()
-        );
-
         let mut game = Game::open(&dir);
+        assert_map_local(&game.narrate("map.show", "0"));
 
-        // State surface canary: the dispatch must not write anything (the key does not
-        // exist before and must still not exist after).
-        game.assert_kv("guide.show.canary", json!(null));
+        // Design view in the planning situation.
+        let mut game = drive_to_plan_gate_in(&dir);
+        assert_eq!(game.phase("r1"), "plan_gate");
+        assert_map_full(&game.narrate("map.show", &text("full")));
 
-        // Behaviour surface: the envelope is ok (reply asserts that) and the narrative is
-        // empty — exactly the kernel default for an unregistered event.
-        let lines = game.narrate("guide.show", "0");
-        assert!(
-            lines.is_empty(),
-            "guide.show must stay deregistered: the kernel answers an unknown event with an empty narrative, got {lines:?}"
-        );
-        game.assert_kv("guide.show.canary", json!(null));
+        // Design view in the developing situation (both hops on the same map).
+        game.click("gate.approve — ");
+        assert_eq!(game.phase("r1"), "developing");
+        assert_map_full(&game.narrate("map.show", &text("full")));
     }
 }
 
@@ -935,33 +962,6 @@ fn read_json(path: &Path) -> Json {
     let raw = std::fs::read_to_string(path)
         .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
     serde_json::from_str(&raw).unwrap_or_else(|err| panic!("parse {}: {err}", path.display()))
-}
-
-/// The aggregated scene-texts surface: the `data/texts/*.json` fragments merged with the same
-/// rule as the mod's `mod.lua` assembly (core groups as-is; the six `beats` fragments
-/// concatenated in filename order — the beats key sets are disjoint, so merge order cannot
-/// shadow). The result is shape-identical to the former single `data/scenes.json`.
-fn read_texts(dir: &Path) -> Json {
-    let texts_dir = dir.join("data/texts");
-    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&texts_dir)
-        .unwrap_or_else(|err| panic!("read {}: {err}", texts_dir.display()))
-        .map(|entry| entry.expect("read_dir entry").path())
-        .collect();
-    files.sort();
-    let mut texts = Json::Object(serde_json::Map::new());
-    for path in files {
-        let fragment = read_json(&path);
-        for (group, value) in fragment.as_object().expect("fragment must be an object") {
-            if group == "beats" {
-                for (key, item) in value.as_object().expect("beats must be an object") {
-                    texts["beats"][key] = item.clone();
-                }
-            } else {
-                texts[group] = value.clone();
-            }
-        }
-    }
-    texts
 }
 
 /// `<namespace>.<name>`: two segments, lowercase letter first, then lowercase / digits / `_` / `-`.
@@ -1169,7 +1169,8 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
     }
 
     // Capacity: the counter is a lifecycle counter, so every slot taken means the next is refused.
-    let capacity = read_texts(&project_mod_dir())["tuning"]["tool_capacity"]
+    let capacity = read_json(&project_mod_dir().join("data/scenes.json"))["tuning"]
+        ["tool_capacity"]
         .as_u64()
         .expect("tuning.tool_capacity must be an unsigned integer");
     let mut full = Game::open(&project_mod_dir());
@@ -1187,7 +1188,7 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
 }
 
 /// T5 The declaration surface on both sides: `pack.json` `tools` + `data/config.json`
-/// `allowedTools` + `data/texts/` beats. Pure disk reads (no kernel needed) — the two mods
+/// `allowedTools` + `data/scenes.json` beats. Pure disk reads (no kernel needed) — the two mods
 /// ship the same mechanism, so any drift here is two different capability sets.
 #[test]
 fn tool_declarations_stay_consistent_across_both_mods() {
@@ -1367,11 +1368,11 @@ fn tool_declarations_stay_consistent_across_both_mods() {
     ];
     let mut output_cap = 0;
     for dir in [&project, &seed] {
-        let scenes = read_texts(dir);
+        let scenes = read_json(&dir.join("data/scenes.json"));
         for key in beats {
             assert!(
                 scenes["beats"].get(key).and_then(|value| value.as_str()).is_some(),
-                "{}: data/texts/ beats is missing `{key}` (the shared src/ would render a raw placeholder)",
+                "{}: data/scenes.json beats is missing `{key}` (the shared src/ would render a raw placeholder)",
                 dir.display()
             );
         }
@@ -1404,8 +1405,8 @@ fn tool_declarations_stay_consistent_across_both_mods() {
         .as_array()
         .expect("code.modules must be an array");
     assert!(
-        modules.iter().any(|item| item == "src/runtime/tools.lua"),
-        "src/runtime/tools.lua must be declared in code.modules: {modules:?}"
+        modules.iter().any(|item| item == "src/tools.lua"),
+        "src/tools.lua must be declared in code.modules: {modules:?}"
     );
     for pack in [&project_pack, &seed_pack] {
         let route = &pack["inboxRoutes"]["tool_result"];
@@ -1508,8 +1509,8 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
 
     let claimed = tool_round(
         &mut game,
-        "git.worktree_claim|lane=2;req=r1;branch=feature/b7c2-alpha-lane|t1",
-        "t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feature/b7c2-alpha-lane;base=abc1234;clean=1;path=/tmp/wt2",
+        "git.worktree_claim|lane=2;req=r1;branch=feat-a|t1",
+        "t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feat-a;base=abc1234;clean=1;path=/tmp/wt2",
     );
     assert_eq!(
         count_lines(&claimed, "[WORKTREE CLAIMED]"),
@@ -1517,18 +1518,25 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
         "{claimed:#?}"
     );
     game.assert_kv("lane.2.req", json!("r1"));
-    game.assert_kv("lane.2.branch", json!("feature/b7c2-alpha-lane"));
+    game.assert_kv("lane.2.branch", json!("feat-a"));
     game.assert_kv("lane.2.base", json!("abc1234"));
     game.assert_kv("lane.2.clean", json!("1"));
     game.assert_kv("lane.2.since", json!(1));
     game.assert_kv("req.1.lane", json!(2));
     game.assert_kv("tool.reacted.t1", json!(true));
+    // The ledger is a read surface too: the design map prints the ledger row.
+    assert!(
+        game.narrate("map.show", &text("full"))
+            .join("\n")
+            .contains("lane-2 ← r1"),
+        "map.show full must show the claimed lane"
+    );
 
     // A fresh external_id re-applies the result (idempotency key only) but the latch keeps the
     // domain fold one-shot: no second `[WORKTREE CLAIMED]`.
     let replayed = narrative_lines(&game.reply(
         "tool.result",
-        &text("t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feature/b7c2-alpha-lane;base=abc1234;clean=1;path=/tmp/wt2|ext-1"),
+        &text("t1|git.worktree_claim|ok|0|lane=2;req=r1;branch=feat-a;base=abc1234;clean=1;path=/tmp/wt2|ext-1"),
     ));
     assert_eq!(
         count_lines(&replayed, "[WORKTREE CLAIMED]"),
@@ -1571,8 +1579,8 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     // ① the probe lands in KV, no overlap yet.
     tool_round(
         &mut game,
-        "git.lane_probe|lane=1;base=abc;branch=feature/b7c2-alpha-lane|t1",
-        "t1|git.lane_probe|ok|0|lane=1;branch=feature/b7c2-alpha-lane;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
+        "git.lane_probe|lane=1;base=abc;branch=feat-a|t1",
+        "t1|git.lane_probe|ok|0|lane=1;branch=feat-a;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
     );
     game.assert_kv("lane.1.probe.commits", json!(2));
     game.assert_kv("lane.1.probe.clean", json!("1"));
@@ -1584,8 +1592,8 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     // ② a shared file raises one conflict through the very same writer as the human path.
     let radar = tool_round(
         &mut game,
-        "git.lane_probe|lane=2;base=abc;branch=feature/d5e8-beta-probe|t2",
-        "t2|git.lane_probe|ok|0|lane=2;branch=feature/d5e8-beta-probe;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
+        "git.lane_probe|lane=2;base=abc;branch=feat-b|t2",
+        "t2|git.lane_probe|ok|0|lane=2;branch=feat-b;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
     );
     assert_eq!(count_lines(&radar, "[CONFLICT RADAR]"), 1, "{radar:#?}");
     game.assert_kv("req.1.conflict", json!("overlapping file: src/b.lua"));
@@ -1608,8 +1616,8 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     // ③ a failed probe (commits=0) is a warning, never a block: no new conflict, state stays.
     let failed = tool_round(
         &mut game,
-        "git.lane_probe|lane=2;base=abc;branch=feature/d5e8-beta-probe|t3",
-        "t3|git.lane_probe|ok|0|lane=2;branch=feature/d5e8-beta-probe;base=abc;head=2222222;commits=0;clean=1;files=",
+        "git.lane_probe|lane=2;base=abc;branch=feat-b|t3",
+        "t3|git.lane_probe|ok|0|lane=2;branch=feat-b;base=abc;head=2222222;commits=0;clean=1;files=",
     );
     assert_eq!(
         count_lines(&failed, "[LANE PROBE FAILED]"),
@@ -1653,10 +1661,7 @@ fn summary_exposes_structured_jobs_and_gates() {
     );
     // Pre-claim a lane **with** branch/base: `jobs[].branch` / `jobs[].base` must be the lane
     // ledger's own bytes, not something reconstructed from the requirement row.
-    game.narrate(
-        "lane.claim",
-        &text("1|r1|feature/c9d4-jobs-ledger|abc1234|1"),
-    );
+    game.narrate("lane.claim", &text("1|r1|feat-jobs|abc1234|1"));
     game.narrate("requirement.dispatch", "0");
     game.assert_kv("req.1.job", json!("plan"));
 
@@ -1682,7 +1687,7 @@ fn summary_exposes_structured_jobs_and_gates() {
     assert_eq!(job["status"], json!("planning"), "{fields}");
     assert_eq!(job["phase"], json!("planning"), "{fields}");
     assert_eq!(job["lane"], json!(1), "{fields}");
-    assert_eq!(job["branch"], json!("feature/c9d4-jobs-ledger"), "{fields}");
+    assert_eq!(job["branch"], json!("feat-jobs"), "{fields}");
     assert_eq!(job["base"], json!("abc1234"), "{fields}");
     // The executor ledger is mirrored onto every job row: unbound = the empty string
     // (never `null`), so a scheduler can read it without a null check.
@@ -2034,7 +2039,7 @@ fn archive_sessions_result_unblocks_the_settlement() {
 /// their `allowedTools` entries, a usable `artifact_capacity`, and — the structural half — every
 /// `TEXTS.<group>.<name>` the source references exists in both scene files.
 ///
-/// Mutation: delete one beat from one side's `data/texts/` beats fragments (or rename it in the source) →
+/// Mutation: delete one beat from one side's `data/scenes.json` (or rename it in the source) →
 /// this test names the missing key instead of letting the run render a raw `{{placeholder}}`.
 #[test]
 fn subsystem_declarations_and_beat_references_stay_complete() {
@@ -2052,7 +2057,7 @@ fn subsystem_declarations_and_beat_references_stay_complete() {
     for dir in [&project, &seed] {
         let pack = read_json(&dir.join("pack.json"));
         let config = read_json(&dir.join("data/config.json"));
-        let scenes = read_texts(dir);
+        let scenes = read_json(&dir.join("data/scenes.json"));
         let tools = pack["tools"]
             .as_object()
             .unwrap_or_else(|| panic!("{}: pack.json tools must be an object", dir.display()));
@@ -2073,14 +2078,14 @@ fn subsystem_declarations_and_beat_references_stay_complete() {
             );
             assert_eq!(
                 tools[id]["program"],
-                json!("egg"),
+                json!("ygg-agent"),
                 "{id}: the built-in tools are served by the host binary itself"
             );
         }
         for (group, name) in text_references(&project) {
             assert!(
                 scenes[group.as_str()][name.as_str()].as_str().is_some(),
-                "{}: data/texts/ `{group}.{name}` is referenced by the source but missing \
+                "{}: data/scenes.json `{group}.{name}` is referenced by the source but missing \
                  (the run would narrate a raw `{{{{placeholder}}}}`)",
                 dir.display()
             );
@@ -2118,9 +2123,7 @@ impl HostToolRunner for SyncRitualRunner {
                 let branch = args
                     .get("branch")
                     .cloned()
-                    // r2: the mod never issues a nameless claim any more; this default is
-                    // only a fallback and always a legal example name.
-                    .unwrap_or_else(|| "feature/a3f9-map-single-gone".to_owned());
+                    .unwrap_or_else(|| format!("feature/{req}"));
                 out.insert("lane".to_owned(), lane.clone());
                 out.insert("req".to_owned(), req);
                 out.insert("branch".to_owned(), branch);
@@ -2138,7 +2141,7 @@ impl HostToolRunner for SyncRitualRunner {
                 let branch = args
                     .get("branch")
                     .cloned()
-                    .unwrap_or_else(|| "feature/a3f9-map-single-gone".to_owned());
+                    .unwrap_or_else(|| "feature/r1".to_owned());
                 out.insert("lane".to_owned(), lane);
                 out.insert("base".to_owned(), base);
                 out.insert("branch".to_owned(), branch);
@@ -2191,8 +2194,6 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
         "requirement.add",
         &text("sync tool bridge|implement synchronous ygg.tool.call|sync-r1"),
     );
-    // r2: the main agent pre-asserts a **legal** branch before dispatching — the auto mount
-    // consumes the ledger's own name (the stub default is only a fallback now).
     game.narrate("requirement.dispatch", "0");
 
     // 0) During plan stage, summary.jobs[0].subagentAction is `subagent.spawn`.
@@ -2230,14 +2231,6 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     );
     game.click("proposal.accept — ");
 
-    // r2: `proposal.accept` (plan) releases the lane ledger (req_release → LANES.release), so
-    // the main agent self-reports the branch HERE — after the accept, before the gate. The
-    // gate.approve(plan) auto mount then consumes this ledger name in the SAME turn.
-    game.narrate(
-        "lane.claim",
-        &text("1|r1|feature/a3f9-map-single-gone|HEAD|1"),
-    );
-
     // 1) Approving plan_gate triggers auto_dispatch -> auto_claim_worktree in the SAME turn!
     let approved_plan = game.click("gate.approve — ");
     let approved_plan_lines = narrative_lines(&approved_plan);
@@ -2252,7 +2245,7 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
         "{approved_plan_lines:#?}"
     );
     game.assert_kv("lane.1.req", json!("r1"));
-    game.assert_kv("lane.1.branch", json!("feature/a3f9-map-single-gone"));
+    game.assert_kv("lane.1.branch", json!("feature/r1"));
     game.assert_kv("lane.1.base", json!("2e24c45"));
     game.assert_kv("lane.1.path", json!("/tmp/ygg-wt-lane-1"));
     game.assert_kv("tool.settled_count", json!(1));
@@ -2266,15 +2259,13 @@ fn synchronous_tool_bridge_runs_inline_rituals_and_projects_subagent_actions() {
     assert_eq!(dev_jobs[0]["worktreePath"], json!("/tmp/ygg-wt-lane-1"));
     assert_eq!(
         dev_jobs[0]["worktreeStatus"],
-        json!("ready:/tmp/ygg-wt-lane-1@feature/a3f9-map-single-gone")
+        json!("ready:/tmp/ygg-wt-lane-1@feature/r1")
     );
     assert_eq!(dev_jobs[0]["subagentStatus"], json!("pending"));
     assert_eq!(dev_jobs[0]["probeStatus"], json!("pending"));
     let dev_list = game.narrate("requirement.list", "0").join("\n");
     assert!(
-        dev_list.contains(
-            "(wt=ready:/tmp/ygg-wt-lane-1@feature/a3f9-map-single-gone)(subagent=pending)"
-        ),
+        dev_list.contains("(wt=ready:/tmp/ygg-wt-lane-1@feature/r1)(subagent=pending)"),
         "requirement.list must show live worktreeStatus and subagentStatus: {dev_list}"
     );
     let dev_action = &dev_jobs[0]["subagentAction"];
@@ -2413,8 +2404,8 @@ fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
     );
     tool_round(
         &mut game,
-        "git.lane_probe|lane=1;base=2e24c45;branch=feature/a3f9-map-single-gone|tp1",
-        "tp1|git.lane_probe|ok|0|lane=1;branch=feature/a3f9-map-single-gone;base=2e24c45;head=deadbeef1234;commits=2;clean=1;files=src/render.lua",
+        "git.lane_probe|lane=1;base=2e24c45;branch=feature/r1|tp1",
+        "tp1|git.lane_probe|ok|0|lane=1;branch=feature/r1;base=2e24c45;head=deadbeef1234;commits=2;clean=1;files=src/render.lua",
     );
     let probed_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     let probed_jobs = probed_summary["jobs"]
@@ -2454,505 +2445,4 @@ fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
         0,
         "{goal_with_auth:#?}"
     );
-}
-
-// ───────────────────────── r13 · requirement.list pagination ─────────────────────────
-
-/// The requirement rows of a list receipt (`  <mark> rN [phase] title(trace)`):
-/// the second space-separated token after the leading mark glyph is the `rN` id.
-/// Proposal rows (`  · pN → …`, id token starts with `p`) and the omission hint
-/// (`  … N more omitted …`, second token is a number) never match.
-fn req_row_ids(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .filter_map(|line| {
-            if !line.starts_with("  ") {
-                return None;
-            }
-            let token = line.trim_start().split(' ').nth(1)?;
-            let digits = token.strip_prefix('r')?;
-            if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
-                return None;
-            }
-            Some(token.to_owned())
-        })
-        .collect()
-}
-
-/// The pending-proposal rows of a list receipt (`  · pN → rM rev …`).
-fn prop_row_ids(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .filter_map(|line| {
-            if !line.starts_with("  ") {
-                return None;
-            }
-            let token = line.trim_start().split(' ').nth(1)?;
-            let digits = token.strip_prefix('p')?;
-            if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
-                return None;
-            }
-            Some(token.to_owned())
-        })
-        .collect()
-}
-
-/// Pile up `count` simultaneously-pending proposals (one per requirement): each
-/// round dispatches a batch of plan jobs, then per batch member submits a
-/// staging proposal, accepts it (frees the job slot, raises the plan gate) and
-/// rejects the gate (back to `planning` with no job — the submit slot only
-/// checks the stored status, so it is still submittable **without holding a
-/// job slot**), then leaves one permanent pending on the requirement. Job
-/// capacity (4) bounds the batch, never the total: pending proposals do not
-/// hold job slots once their gate has been rejected.
-fn pile_pending_proposals(game: &mut Game, count: usize) {
-    // Phase 1 — walk fresh requirements in targeted batches of ≤ job_capacity:
-    // per member, a **targeted** `requirement.dispatch rN` (the batch dispatch
-    // would re-pick already-processed planning rows first), then a staging
-    // proposal → accept → gate-reject. The guide ticket always takes the
-    // **head** pending / gate, so every accept/reject must see exactly one
-    // candidate in the whole run: staging proposals are consumed immediately
-    // and the permanent pendings are deferred to phase 2. After the cycle the
-    // member sits in `planning` with no job/gate/pending and an unchanged rev
-    // (gate.reject does not bump it) — still submittable **without a job slot**.
-    let mut submittable = Vec::new();
-    let mut next = 1;
-    while next <= count {
-        let last = (next + 3).min(count);
-        for i in next..=last {
-            game.narrate("requirement.dispatch", &text(&format!("r{i}")));
-            if game.kv(&format!("req.{i}.job")) != json!("plan") {
-                continue; // not dispatchable (unexpected) — skip, don't wedge
-            }
-            let id = format!("r{i}");
-            game.narrate(
-                "proposal.submit",
-                &text(&format!(
-                    "{id}|1|plan|staging summary {id}|artifacts/{id}-plan.md||staging-{id}"
-                )),
-            );
-            game.click("proposal.accept — ");
-            game.click("gate.reject — ");
-            submittable.push(i);
-        }
-        next += 4;
-    }
-    assert!(
-        submittable.len() >= count.min(4),
-        "piling produced nothing submittable"
-    );
-    // Phase 2 — one permanent pending per member (plain submit, no accept
-    // involved — proposal.submit never head-picks).
-    for &i in submittable.iter().take(count) {
-        let id = format!("r{i}");
-        let rev = game.kv(&format!("req.{i}.rev"));
-        game.narrate(
-            "proposal.submit",
-            &text(&format!(
-                "{id}|{}|plan|{}|artifacts/{id}-plan.md||piled-{id}",
-                rev,
-                "long pending summary for the pagination walkthrough; ".repeat(8)
-            )),
-        );
-    }
-}
-
-/// Mutation: drop the open-first ordering in `req_page_order` → the canonical
-/// prefix (r1, r2 — both merged/closed) would head the page and the first-row
-/// assert goes red; pad closed rows oldest-first → the r2/r1 tail order reds.
-#[test]
-fn requirement_list_orders_open_first_and_pads_recent_closed() {
-    let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "task.intake",
-        &text("pagination gate|open-first display order"),
-    );
-    for i in 1..=5 {
-        game.narrate(
-            "requirement.add",
-            &text(&format!("req {i}|description {i}|ext-{i}")),
-        );
-    }
-    // r1, r2 → merged into r6 (terminal/closed): the canonical prefix is now
-    // closed history — exactly the long-run shape a plain prefix page fails
-    // (the whole page would be done rows while every active row is omitted).
-    game.narrate("requirement.merge", &text("r1,r2|merged req|description"));
-    game.assert_kv("req.1.status", json!("merged"));
-    game.assert_kv("req.2.status", json!("merged"));
-
-    let lines = game.narrate("requirement.list", "0");
-    assert_eq!(
-        req_row_ids(&lines),
-        vec!["r3", "r4", "r5", "r6", "r2", "r1"],
-        "open rows first (canonical), then closed rows newest-first: {lines:#?}"
-    );
-    // M ≤ page width → no omission hint; the legend still closes the view.
-    assert!(
-        !lines.iter().any(|line| line.contains("more omitted")),
-        "{lines:#?}"
-    );
-    assert!(lines.iter().any(|line| line.starts_with("legend: ")));
-}
-
-#[test]
-fn requirement_list_truncates_to_the_page_and_opts_in_full() {
-    let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "task.intake",
-        &text("pagination gate|page width + full opt-in"),
-    );
-    for i in 1..=15 {
-        game.narrate(
-            "requirement.add",
-            &text(&format!("req {i}|description {i}|ext-{i}")),
-        );
-    }
-    let before = game.save();
-
-    // Default view: exactly `tuning.req_list_page` (12) rows + the hint line.
-    let lines = game.narrate("requirement.list", "0");
-    let ids = req_row_ids(&lines);
-    assert_eq!(ids.len(), 12, "default page width: {lines:#?}");
-    assert_eq!(ids.first(), Some(&"r1".to_string()));
-    let hint = lines
-        .iter()
-        .find(|line| line.contains("more omitted"))
-        .unwrap_or_else(|| panic!("the omission hint is missing: {lines:#?}"));
-    assert!(
-        hint.contains("3 more omitted") && hint.contains("15 total"),
-        "hint must carry K/M: {hint}"
-    );
-    assert!(hint.contains("requirement.list full"), "{hint}");
-
-    // `full` opt-in: every row, no hint.
-    let full = game.narrate("requirement.list", &text("full"));
-    let full_ids = req_row_ids(&full);
-    assert_eq!(full_ids.len(), 15, "full view shows all rows: {full:#?}");
-    assert_eq!(full_ids.last(), Some(&"r15".to_string()));
-    assert!(
-        !full.iter().any(|line| line.contains("more omitted")),
-        "{full:#?}"
-    );
-
-    // The list is a read-only view: state after both listings is identical.
-    assert_eq!(before, game.save(), "requirement.list must not touch state");
-}
-
-#[test]
-fn requirement_list_keeps_empty_state_and_payload_gate() {
-    let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "task.intake",
-        &text("pagination gate|empty state + payload gate"),
-    );
-    // Empty run: same empty-state line, no hint line.
-    let lines = game.narrate("requirement.list", "0");
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("no requirements yet")),
-        "{lines:#?}"
-    );
-    assert!(!lines.iter().any(|line| line.contains("more omitted")));
-    // The payload gate is unchanged: anything beyond empty/0/full is refused.
-    let refused = game.narrate("requirement.list", &text("bogus"));
-    assert_refused(&refused, "requirement.list");
-}
-
-/// r13 验收走查（大状态局 × 零 env）：15 条长描述需求 + 13 条长摘要 pending
-/// 提案把 kv_len 推到历史撞墙规模（§0.2：kv_len≈292 时全量 list 在 100k 地板
-/// 下必死）。默认 env 下三个视图全部 ok:true（燃料耗尽会直接翻红信封），
-/// 且默认页同时呈现需求段与提案段的截断 + 提示行（同页约束）。
-/// Mutation: remove the autoscale reset or the pagination → the full-row render
-/// at this kv_len crosses the floor budget and the receipt turns FUEL_EXHAUSTED.
-#[test]
-fn big_state_walks_all_views_without_fuel_exhaustion_under_the_default_budget() {
-    let mut game = Game::open(&project_mod_dir());
-    let long_desc = "long description for the big-state walkthrough; ".repeat(8);
-    game.narrate("task.intake", &text(&format!("big state gate|{long_desc}")));
-    for i in 1..=15 {
-        game.narrate(
-            "requirement.add",
-            &text(&format!("big req {i}|{long_desc}|big-{i}")),
-        );
-    }
-    // 13 pendings (one per requirement, r14/r15 stay dispatchable drafts).
-    pile_pending_proposals(&mut game, 13);
-
-    // Default view: paged in BOTH segments + both hint lines.
-    let lines = game.narrate("requirement.list", "0");
-    let ids = req_row_ids(&lines);
-    assert_eq!(ids.len(), 12, "requirement rows are paged: {lines:#?}");
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("3 more omitted") && line.contains("15 total")),
-        "{lines:#?}"
-    );
-    let prop_ids = prop_row_ids(&lines);
-    assert_eq!(prop_ids.len(), 12, "pending rows share the page width");
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("1 more pending proposals omitted")
-                && line.contains("13 total")),
-        "{lines:#?}"
-    );
-
-    // full opt-in: all rows in both segments, no hints.
-    let full = game.narrate("requirement.list", &text("full"));
-    assert_eq!(req_row_ids(&full).len(), 15, "{full:#?}");
-    assert_eq!(prop_row_ids(&full).len(), 13);
-    assert!(!full.iter().any(|line| line.contains("more omitted")));
-
-    // The other heavy views stay usable (ok:true — a fuel death fails the envelope).
-    let map_full = game.narrate("map.show", &text("full"));
-    assert!(!map_full.is_empty(), "map.show full must narrate");
-=======
-/// A9 Iteration-branch naming is a forced shape at BOTH entries: `lane.claim` refuses via
-/// flow.refuse (reject.count/last bookkeeping), `git.worktree_claim` refuses via the reactor
-/// narrative (ledger untouched, reject.* untouched). Empty branch stays legal at lane.claim
-/// ("not asserted yet"); the canonical example is `feature/a3f9-map-single-gone`.
-///
-/// Mutation: delete the `LANES.branch_problem` call in either entry → every negative case
-/// below goes red (the illegal name lands in the ledger / the mount succeeds).
-#[test]
-fn lane_branch_naming_is_enforced_at_both_entries() {
-    let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "task.intake",
-        &text("subsystem gate|synthetic task description"),
-    );
-    game.narrate(
-        "requirement.add",
-        &text("synthetic requirement|synthetic description|subsys-r1"),
-    );
-    game.narrate(
-        "requirement.add",
-        &text("second requirement|synthetic description|subsys-r2"),
-    );
-    game.narrate(
-        "requirement.add",
-        &text("third requirement|synthetic description|subsys-r3"),
-    );
-    game.narrate(
-        "requirement.add",
-        &text("fourth requirement|synthetic description|subsys-r4"),
-    );
-
-    // P1 — a canonical legal name claims the lane; the reject ledger stays untouched.
-    let claimed = game.narrate(
-        "lane.claim",
-        &text("1|r1|feature/a3f9-map-single-gone|abc1234|1"),
-    );
-    assert_eq!(count_lines(&claimed, "[LANE CLAIMED]"), 1, "{claimed:#?}");
-    game.assert_kv("lane.1.branch", json!("feature/a3f9-map-single-gone"));
-    game.assert_kv("reject.count", json!(null));
-
-    // P2 — the 48-char upper bound passes (8 + 4 + 1 + 35 = 48).
-    let name48 = format!("feature/a3f9-{}", "a".repeat(35));
-    let claimed48 = game.narrate("lane.claim", &text(&format!("2|r2|{name48}|abc1234|1")));
-    assert_eq!(
-        count_lines(&claimed48, "[LANE CLAIMED]"),
-        1,
-        "{claimed48:#?}"
-    );
-    game.assert_kv("lane.2.branch", json!(name48.clone()));
-
-    // N1..N8 — every illegal shape refuses readably on a free lane (4|r4): the narrative
-    // carries the template and the canonical example, reject.count/last record the refusal,
-    // and the lane ledger row is never written.
-    let illegal = [
-        "feature/r1",
-        "feature/map-gone",
-        "feature/a3f9",
-        "feature/a3f9-deadbeef",
-        "Feature/A3f9-x",
-        // 49 chars: one past the upper bound.
-        &format!("feature/a3f9-{}", "a".repeat(36)),
-        "feature//a3f9-x",
-        "feature/a3f9-12345",
-    ];
-    for (n, branch) in illegal.iter().enumerate() {
-        let refused = game.narrate("lane.claim", &text(&format!("4|r4|{branch}||1")));
-        let joined = refused.join("\n");
-        assert!(
-            joined.contains("not a legal requirement-iteration branch"),
-            "case {n} ({branch}) must refuse readably: {joined}"
-        );
-        assert!(
-            joined.contains("feature/<4-char-id>-<semantic-topic>"),
-            "case {n} ({branch}) must carry the template: {joined}"
-        );
-        assert!(
-            joined.contains("feature/a3f9-map-single-gone"),
-            "case {n} ({branch}) must carry the canonical example: {joined}"
-        );
-        game.assert_kv("reject.count", json!((n + 1) as u64));
-        let last = game.kv("reject.last").as_str().unwrap_or("").to_owned();
-        assert!(
-            last.starts_with("lane.claim: "),
-            "reject.last must record the action: {last}"
-        );
-        assert!(
-            last.contains(branch),
-            "reject.last must carry the illegal name: {last}"
-        );
-        game.assert_kv("lane.4.req", json!(null));
-    }
-
-    // P3 — an empty branch stays legal at lane.claim ("not asserted yet") and leaves the
-    // reject ledger untouched.
-    let asserted = game.narrate("lane.claim", &text("3|r3|||1"));
-    assert_eq!(count_lines(&asserted, "[LANE CLAIMED]"), 1, "{asserted:#?}");
-    game.assert_kv("lane.3.branch", json!(""));
-    game.assert_kv("reject.count", json!(8));
-
-    // P4 — the worktree entry accepts the same legal name (same-holder rebind on lane 1).
-    let wt = tool_round(
-        &mut game,
-        "git.worktree_claim|lane=1;req=r1;branch=feature/a3f9-map-single-gone|tw1",
-        "tw1|git.worktree_claim|ok|0|lane=1;req=r1;branch=feature/a3f9-map-single-gone;base=abc1234;clean=1;path=/tmp/wt1",
-    );
-    assert_eq!(count_lines(&wt, "[WORKTREE CLAIMED]"), 1, "{wt:#?}");
-    game.assert_kv("lane.1.branch", json!("feature/a3f9-map-single-gone"));
-    game.assert_kv("lane.1.base", json!("abc1234"));
-    game.assert_kv("reject.count", json!(8));
-
-    // N9 — the worktree entry refuses an illegal name: narrative only, ledger untouched,
-    // reject.* untouched (reactors never flow.refuse — the hard boundary keeps its reverse
-    // assertion here).
-    let refused_wt = tool_round(
-        &mut game,
-        "git.worktree_claim|lane=4;req=r4;branch=feature/r1|tw9",
-        "tw9|git.worktree_claim|ok|0|lane=4;req=r4;branch=feature/r1;base=abc1234;clean=1;path=/tmp/wt4",
-    );
-    assert_eq!(
-        count_lines(&refused_wt, "[WORKTREE CLAIM REFUSED]"),
-        1,
-        "{refused_wt:#?}"
-    );
-    assert_eq!(
-        count_lines(&refused_wt, "[WORKTREE CLAIMED]"),
-        0,
-        "{refused_wt:#?}"
-    );
-    assert!(
-        refused_wt
-            .join("\n")
-            .contains("feature/<4-char-id>-<semantic-topic>"),
-        "{refused_wt:#?}"
-    );
-    game.assert_kv("lane.4.req", json!(null));
-    game.assert_kv("reject.count", json!(8));
-
-    // N10 — an empty branch at the mount layer is the "(missing)" refusal (the default
-    // generation is gone; the caller must self-report).
-    let missing_wt = tool_round(
-        &mut game,
-        "git.worktree_claim|lane=4;req=r4;branch=|tw10",
-        "tw10|git.worktree_claim|ok|0|lane=4;req=r4;branch=;base=abc1234;clean=1;path=/tmp/wt4",
-    );
-    assert_eq!(
-        count_lines(&missing_wt, "[WORKTREE CLAIM REFUSED]"),
-        1,
-        "{missing_wt:#?}"
-    );
-    assert!(
-        missing_wt.join("\n").contains("(missing)"),
-        "{missing_wt:#?}"
-    );
-    game.assert_kv("lane.4.req", json!(null));
-    game.assert_kv("reject.count", json!(8));
-}
-
-/// A10 auto_claim_worktree no longer fabricates `feature/<req>`: dispatch without a
-/// pre-asserted branch refuses readably and mounts nothing; auto_probe_lane likewise skips
-/// with a readable line; the display layer shows `-` instead of a fabricated name. The
-/// pre-asserted happy path is covered by A7 (restructured).
-///
-/// Mutation: restore `local branch = "feature/" .. id` in auto_claim_worktree → the
-/// `[TOOL SETTLED]`-absence / `[WORKTREE CLAIM REFUSED]` assertions go red; restore the
-/// `render.lua` `"feature/" .. id` fallback → the `bound:lane-1@-` assertion goes red.
-#[test]
-fn auto_claim_requires_a_self_reported_branch_name() {
-    let mut game = Game::open(&project_mod_dir());
-    game.kernel
-        .set_tool_runner(Some(Box::new(SyncRitualRunner)));
-
-    game.narrate(
-        "task.intake",
-        &text("sync bridge|auto mount needs a self-reported branch"),
-    );
-    game.narrate(
-        "requirement.add",
-        &text("branch self report|auto claim refuses an empty ledger branch|sync-r1"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.job", json!("plan"));
-
-    game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|plan ready|artifacts/r1-plan.md||exec=agent-plan"),
-    );
-    game.click("proposal.accept — ");
-
-    // Approving plan_gate auto-dispatches development; with no pre-asserted branch the
-    // auto mount refuses READABLY and issues no host call at all.
-    let approved = game.click("gate.approve — ");
-    let lines = narrative_lines(&approved);
-    assert_eq!(
-        count_lines(&lines, "[WORKTREE CLAIM REFUSED]"),
-        1,
-        "{lines:#?}"
-    );
-    let refused_text = lines.join("\n");
-    assert!(
-        refused_text.contains("(missing)"),
-        "the refusal must name the missing branch readably: {refused_text}"
-    );
-    assert!(
-        refused_text.contains("feature/<4-char-id>-<semantic-topic>"),
-        "the refusal must carry the template: {refused_text}"
-    );
-    assert_eq!(count_lines(&lines, "[TOOL SETTLED]"), 0, "{lines:#?}");
-    assert_eq!(count_lines(&lines, "[WORKTREE CLAIMED]"), 0, "{lines:#?}");
-    game.assert_kv("tool.settled_count", json!(null));
-    // The development slot and its bare lane are still taken (the ledger row stays
-    // unasserted — the playable state is unchanged by the refusal).
-    game.assert_kv("req.1.job", json!("development"));
-    game.assert_kv("req.1.lane", json!(1));
-    game.assert_kv("lane.1.req", json!("r1"));
-    game.assert_kv("lane.1.branch", json!(""));
-
-    // The display layer no longer fabricates a name: the unasserted branch renders as `-`.
-    let dev_summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
-    let dev_jobs = dev_summary["jobs"].as_array().expect("summary.jobs array");
-    assert_eq!(
-        dev_jobs[0]["worktreeStatus"],
-        json!("bound:lane-1@-"),
-        "an unasserted branch must render as `-`, not a fabricated name: {dev_summary}"
-    );
-
-    // Delivering development triggers auto_probe_lane in the same turn; with an empty
-    // ledger branch the probe skips with a readable line and no host call.
-    let dev_prop = game.narrate(
-        "proposal.submit",
-        &text(
-            "r1|1|development|dev done|artifacts/r1-development.md|src/tools.lua|exec=agent-plan",
-        ),
-    );
-    let dev_text = dev_prop.join("\n");
-    assert_eq!(count_lines(&dev_prop, "[LANE PROBE"), 0, "{dev_text}");
-    assert!(
-        dev_text.contains("not a legal requirement-iteration branch"),
-        "auto_probe_lane must skip with a readable line: {dev_text}"
-    );
-    assert!(dev_text.contains("(missing)"), "{dev_text}");
-    game.assert_kv("tool.settled_count", json!(null));
-    game.assert_kv("lane.1.probe.commits", json!(null));
-}
-}
-}
-}
 }
