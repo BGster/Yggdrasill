@@ -1,0 +1,172 @@
+{
+  "sections": [
+    {
+      "id": "dispatch",
+      "order": 5,
+      "title": "3c. Subagent dispatch discipline",
+      "summary": "Background dispatch never blocks the main session; the model and thinking level come from `.env.local`, are used as dispatch parameters only, and are never printed or committed.",
+      "source": "AGENTS.md §3 (subagent dispatch discipline)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "dispatch.executor-ledger",
+          "modality": "must",
+          "text": "After dispatching you must register the executor (a **self-declared ledger**, not identity proof): `config.set executor.<rN>.<stage>=<agent_id>`, stage ∈ analysis / plan / development; when one subagent covers all three stages, register the same id stage by stage. Replacing the executor for the same (req, stage) with a different id **requires** a reason (`=<new_id>|<reason>`); a **cross-stage handoff** (a plan id different from the analysis one, or — with no plan — different from the analysis one) equally requires a reason and may never be silently overwritten as a \"first binding for that stage\". A successful handoff writes `id|reason` and appends one entry to `req.<i>.hist` (reusing the rolling cap; no separate history/handoff key); a clean first binding writes no history. The ledger carries no rev: `amend` does not change the binding and `split` / `merge` do not inherit it. `proposal.submit` performs no hard check — an unregistered executor only shows as \"unregistered\" in `requirement.list` and never blocks external proposals or same-ext replays.",
+          "basis": "user decision 2026-11-01 (E2 ruling: reuse config.set, bind no rev, no hard submit gate, a cross-stage handoff must give a reason)"
+        },
+        {
+          "id": "dispatch.background-only",
+          "modality": "must",
+          "text": "Every subagent task runs in the background; the main session never waits in place — keep advancing other lanes, verifications or planning while it runs, and verify and merge once the completion notice arrives.",
+          "basis": "AGENTS.md §3 (dispatch discipline 1)"
+        },
+        {
+          "id": "dispatch.sync-wait-exception",
+          "modality": "should",
+          "text": "Synchronous waiting is allowed only when the next action strictly depends on the result and nothing else can progress in parallel; even then, spend the waiting time on other lanes first.",
+          "basis": "AGENTS.md §3 (dispatch discipline 1)"
+        },
+        {
+          "id": "dispatch.params-from-env-local",
+          "modality": "must",
+          "text": "Before dispatching, read the repository-root `.env.local` (git-ignored, never committed): `YGG_SUBAGENT_MODEL` (the subagent model, e.g. `sonnet` / `provider/model-id`) and `YGG_SUBAGENT_THINKING` (`off|minimal|low|medium|high|xhigh|max`); when unset, pass nothing explicitly and use the harness default.",
+          "basis": "AGENTS.md §3 (dispatch discipline 2)"
+        },
+        {
+          "id": "dispatch.params-not-disclosed",
+          "modality": "must-not",
+          "text": "These two values are dispatch parameters only — never printed, never written into documentation, never committed.",
+          "basis": "AGENTS.md §3 (dispatch discipline 2)"
+        }
+      ]
+    },
+    {
+      "id": "integration",
+      "order": 6,
+      "title": "4. Develop → integrate → merge → deploy",
+      "summary": "Three closing levels: the iteration point (feature branch) → the round (a releasable batch) → deployment; integration, merging and deployment are always done serially by the main agent.",
+      "source": "AGENTS.md §4",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "integration.serial-closeout",
+          "modality": "must",
+          "text": "Integration, merging and deployment are executed serially by the main agent (the main session); lane subagents only develop, pass their gates and push their feature branch.",
+          "basis": "AGENTS.md §4 (serial closeout)"
+        },
+        {
+          "id": "integration.iter.fetch",
+          "modality": "must",
+          "text": "First step of an iteration closeout: `git fetch origin`.",
+          "basis": "AGENTS.md §4 (1)"
+        },
+        {
+          "id": "integration.iter.rebase-on-trunk",
+          "modality": "must",
+          "text": "Check whether the trunk moved: if the histories diverged, align first with `git pull --ff-only`, then rebase the feature branch.",
+          "basis": "AGENTS.md §4 (1)"
+        },
+        {
+          "id": "integration.iter.gates-green-first",
+          "modality": "must",
+          "text": "All gates must be green (see the gates chapter) before a merge is requested — a merge may never be requested with a failing gate.",
+          "basis": "AGENTS.md §4 (1)"
+        },
+        {
+          "id": "integration.iter.merge-ritual",
+          "modality": "must",
+          "text": "The merge is triggered by the user, or executed by the main agent after the user approves it: in the main checkout run `git merge --no-ff <feature>`, then push master; deleting the remote feature branch is optional.",
+          "basis": "AGENTS.md §4 (1)"
+        },
+        {
+          "id": "integration.round.e2e-acceptance",
+          "modality": "must",
+          "text": "A round-level closeout first passes end-to-end acceptance: the example game completed end to end plus save/load verification; after M1 this adds the AI-generated → playable loop.",
+          "basis": "AGENTS.md §4 (2)"
+        },
+        {
+          "id": "integration.round.batch-tag",
+          "modality": "must",
+          "text": "Once acceptance passes, tag the batch `v<YYYY.MM.DD>.<n>` — the no-FF merge node is the rollback anchor.",
+          "basis": "AGENTS.md §4 (2)"
+        },
+        {
+          "id": "integration.round.changelog",
+          "modality": "should",
+          "text": "A batch closeout updates the CHANGELOG / report when one exists.",
+          "basis": "AGENTS.md §4 (2)"
+        },
+        {
+          "id": "integration.deploy.master-only",
+          "modality": "must-not",
+          "text": "Anything deployed through any channel must already be merged into master: a non-master ref is refused outright, with no exception switch.",
+          "basis": "AGENTS.md §4 (3)"
+        },
+        {
+          "id": "integration.deploy.requires-approval",
+          "modality": "must",
+          "text": "Deployment is a write operation: report it to the user and get approval before every deployment.",
+          "basis": "AGENTS.md §4 (3)"
+        }
+      ]
+    },
+    {
+      "id": "gates",
+      "order": 7,
+      "title": "5. Verification-command gates",
+      "summary": "The gate baseline is a snapshot: the acceptance standard is \"introduce no new failure\"; a module whose gate is not wired up must be declared uncovered explicitly.",
+      "source": "AGENTS.md §5",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "gates.baseline-snapshot",
+          "modality": "must",
+          "text": "The gate baseline is a snapshot that grows with each iteration, and the acceptance standard is \"introduce no new failure\" — historical debt does not have to be zero, but no new failure may appear.",
+          "basis": "AGENTS.md §5"
+        },
+        {
+          "id": "gates.core-purity-review",
+          "modality": "must",
+          "text": "The dependency list in `ygg-core`'s `Cargo.toml` is part of the review: a rendering, platform or IO dependency is a violation with no exception mechanism.",
+          "basis": "AGENTS.md §5 (kernel purity check)"
+        },
+        {
+          "id": "gates.uncovered-declaration",
+          "modality": "must",
+          "text": "A module whose gate is not wired up yet (no tests exist) must be declared \"gate not covered\" in the report; it never passes by default.",
+          "basis": "AGENTS.md §5"
+        },
+        {
+          "id": "gates.mod-semantics-matrix",
+          "modality": "must",
+          "text": "Changing `.ygg/mods/pi-agent-seed/src/**` (state machine / gates / render layer), `mod.lua`, or the map wording in `.ygg/mods/pi-agent-seed/data/texts/beats-map-guide.json` adds `cargo test -p ygg-sandbox --test agent_seed_semantics` to the gate list on top of lint and the all-1 playtest: the case list = stage merge plus the compatibility `analysis` slot / accept-gate reject / accept-gate approval releasing the lane / accept-gate amend → stale / plan-gate reject / reactive auto-dispatch in the same turn (with `useMemo` invalidation) / development proposal reject (not amended and amended) / inline `exec=` (misplaced, missing reason, `:` form) / settlement merge with `sessions=` + `todo=` and a refused malformed segment / legacy save without `plan_ok` / the operation and design map wording on both packs / the all-1 walk of both packs / the six active-subsystem cases (`worktree_claim` + release, lane probe + conflict radar blocking `coordinate.submit`, artifact probe + `vfs.write` ledger, `gate.verify_suite` green evidence, `harness.archive_sessions` settlement, declaration completeness). The all-1 playtest only covers the happy path — it never takes a branch (`gate.reject` / `requirement.amend` / `proposal.reject`) and cannot see the turn-cut mechanics at all; a temporary probe under `/tmp` may only supplement this test and never replace it; every uncovered scenario must be declared item by item in the report. Three-question criterion: ① the blocked action is \"change the Mod source or the map wording, run only lint plus all-1, and call it accepted\"; ② the visible symptom of a violation is that branch semantics and map wording regress while every gate stays green, so the defect only shows in a real run; ③ confirm it next time with that command (24/24) plus one mutation probe (put the old semantics back → the test must go red) to prove the assertions are not vacuous.",
+          "basis": "AGENTS.md §1.9 (behavioural acceptance); crates/ygg-sandbox/tests/agent_seed_semantics.rs"
+        },
+        {
+          "id": "gates.no-wasm-pack",
+          "modality": "must-not",
+          "text": "Never build the wasm bindings with wasm-pack: the exception-handling module needs `wasm-bindgen --reference-types` and wasm-pack does not pass that flag through; the build chain is fixed to `scripts/build-wasm.sh` (cargo plus the wasm-bindgen CLI, two steps).",
+          "basis": "AGENTS.md §5 (wasm binding note); .cargo/config.toml header note"
+        },
+        {
+          "id": "gates.no-silent-baseline-edit",
+          "modality": "must-not",
+          "text": "When the FR-9 dual-run state hashes differ, never silently edit the fixture baseline — a mismatch is a determinism breach between platforms, and a baseline change requires an explicit decision plus a record.",
+          "basis": "AGENTS.md §5 (FR-9 note)"
+        },
+        {
+          "id": "gates.fr9-browser-lane-gap",
+          "modality": "must",
+          "text": "Before claiming full FR-9 compliance, add the wasm-bindgen-test browser lane (replay the same assertions in a real browser wasm instance) or take an explicit waiver decision; today the node lane covers native/wasm dual-run equivalence, and the browser lane does not exist.",
+          "basis": "AGENTS.md §5 (FR-9 residual-gap note)"
+        },
+        {
+          "id": "gates.contract-parity",
+          "modality": "must",
+          "text": "Contract parity criterion: the same Mod sample must produce identical results through ajv and through the jsonschema crate; the CI script does not exist yet, so until it lands that surface is declared \"gate not covered\".",
+          "basis": "AGENTS.md §5 (contract parity)"
+        }
+      ]
+    }
+  ]
+}

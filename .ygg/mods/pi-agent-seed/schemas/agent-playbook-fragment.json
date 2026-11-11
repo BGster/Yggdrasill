@@ -1,0 +1,145 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
+    "title": "Yggdrasill agent-playbook 片段（文档头 XOR 章节集合：大 JSON 按域拆分的片段面）",
+    "description": "r6 落地的资源片段 schema：data/playbook.json 拆为 data/playbook/ 下 12 个片段（head 一片 + 章组四片 + harness 七域七片），由 mod.lua 顶层按文件名序（=order 序）装配回与整文件形状完全一致的 PLAYBOOK 表后再消费。oneOf 表达两种合法片段形状的 XOR：文档头片段（schemaVersion/title/summary/source 四字段齐备，不含 sections）与章节片段（含 sections 数组，不含文档头）——混装或两头皆缺在装载期即被拒（fail-closed）。整文档级保证（15 章不缺不重、章序=叙事序、harness 81 条规则序）不再由 schema 表达，改由拆分脚本断言、manifest 内容寻址与 playtest guide 路径连续守卫。section 的 required 相应放宽为 [id, order]（harness 续片段只携带 id/order/rules）；title/summary/source 等章元数据由「组首片段携带、续片段不含」的拆分纪律保证。$defs 逐字承自 agent-playbook.json。资源只读：装载期快照进 local，handler 闭包消费，不入存档。",
+    "type": "object",
+    "additionalProperties": false,
+    "oneOf": [
+        {
+            "description": "文档头片段（head.json）：手册元数据四字段齐备。",
+            "required": ["schemaVersion", "title", "summary", "source"]
+        },
+        {
+            "description": "章节片段：至少一章的有序规则集（相邻同 id 的 harness 续片段在装配时按序拼接 rules）。",
+            "required": ["sections"]
+        }
+    ],
+    "properties": {
+        "schemaVersion": {
+            "description": "线格式版本（与 manifest.json 同口径；破坏性改动才递增）。",
+            "const": 1
+        },
+        "title": {
+            "description": "手册标题（叙事开场用）。",
+            "type": "string",
+            "minLength": 1
+        },
+        "summary": {
+            "description": "一句话概括：这本手册是什么、给谁用、与 AGENTS.md 的关系。",
+            "type": "string",
+            "minLength": 1
+        },
+        "source": {
+            "description": "迁移来源与修订口径——资源是派生面，发生冲突时以被迁移文档的当次正文为准并回改本资源。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["document", "revision", "note"],
+            "properties": {
+                "document": {
+                    "description": "被迁移的源文档路径（相对仓库根）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "revision": {
+                    "description": "迁移依据的源文档修订日期（YYYY-MM-DD）；源文档语义变更后须复查本资源并更新该日期。",
+                    "type": "string",
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                },
+                "note": {
+                    "description": "迁移口径说明（哪些是照搬、哪些按当前仓库形态更新过时状态、哪些是新决策不许发明）。",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "sections": {
+            "description": "规则章节的有序集合（order 升序即叙事序；section id 全局唯一）。",
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/section" }
+        }
+    },
+    "$defs": {
+        "modality": {
+            "description": "规则的模态，决定叙事前缀：must = 必须做 / must-not = 禁止 / should = 应当（可解释例外的软约束）。",
+            "enum": ["must", "must-not", "should"]
+        },
+        "source": {
+            "description": "章节来源锚（形如 `AGENTS.md §三`）。",
+            "type": "string",
+            "minLength": 1
+        },
+        "rule": {
+            "description": "一条**原子**规则：一句可执行/可判定的约束，不做复合陈述（复合陈述拆成多条 rule，叙事才能逐条点名）。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "modality", "text"],
+            "properties": {
+                "id": {
+                    "description": "稳定规则 id（小写点号命名空间，如 `gates.no-wasm-pack`）：跨章节引用与叙事标注出处的锚点；全局唯一由作者纪律保证。",
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9._-]*$",
+                    "maxLength": 64
+                },
+                "modality": { "$ref": "#/$defs/modality" },
+                "text": {
+                    "description": "规则正文（中文；命令、路径、标识符保持原样英文）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "basis": {
+                    "description": "依据指针（文档章节 / 决策编号 / 源码位置），叙事需要交代「凭什么」时回读这里。",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "section": {
+            "description": "一章规则：标题 + 摘要 + 原子规则集，可附带优先级、规则依据与章节备注。片段化后 required 放宽为 [id, order]：harness 续片段只携带 id/order/rules，章元数据由组首片段携带。",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "order"],
+            "properties": {
+                "id": {
+                    "description": "稳定 section id（小写下划线，如 `live_evidence`）：mod.lua 取章节的唯一键，也是阶段呈现的检索面。",
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$",
+                    "maxLength": 64
+                },
+                "order": {
+                    "description": "叙事序（升序；对应 AGENTS.md 原章节顺序，1 起）。",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99
+                },
+                "title": {
+                    "description": "章节标题（含原文档序号，如「一、凭据与数据红线」）。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "summary": {
+                    "description": "章节摘要一句话：先给结论，再让规则逐条展开。",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "source": { "$ref": "#/$defs/source" },
+                "priority": {
+                    "description": "优先级：critical = 不可协商的红线章（叙事须前置警示）；standard = 常规纪律章（缺省值）。",
+                    "enum": ["critical", "standard"]
+                },
+                "rules": {
+                    "description": "该章的原子规则集（至少一条）。",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "#/$defs/rule" }
+                },
+                "notes": {
+                    "description": "章节备注（不属于任何单条规则的事实/状态面，如受管凭据面的枚举、部署通道状态）。",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        }
+    }
+}

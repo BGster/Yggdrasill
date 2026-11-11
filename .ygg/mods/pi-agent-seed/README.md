@@ -394,22 +394,54 @@ config.set executor.<rN>.<stage>=            # 空值 = 显式解绑
 
 | 文件 | 面 | 作用 |
 | --- | --- | --- |
-| `mod.lua` | 骨架 | **装配入口**：资源快照 → require 22 模块 → install → `render.register()` → `tools.register()` → `fsm.define`（≈115 行） |
-| `src/*.lua` | 骨架 | 12 个纯导出模块：util / config / requirements / lanes / proposals / gates / guide / menus / render / wire / tools / flow |
-| `src/handlers/*.lua` | 骨架 | 10 个注册模块：actions / lanes / proposals / review / requirement_ops / gate_actions / config / views / choice / lifecycle |
-| `data/scenes.json` | 实例 | 文本资源（scenes / endings / prompts / options / beats / tuning） |
-| `data/playbook.json` | 实例 | 现场规则资源（`guide.show` 按 section id 取用） |
-| `data/config.json` | 实例 | 静态配置默认值 |
-| `pack.json` / `manifest.json` | 骨架 + 生成物 | 打包声明（`code` 段属骨架，`agent`/`inboxRoutes` 属实例）与内容寻址清单 |
-| `schemas/*.json` | 骨架 | 资源 schema（与 `packages/schema/schemas/` 单源一致） |
+| `mod.lua` | 骨架 | **装配入口**：资源片段装配（TEXTS/PLAYBOOK）→ require 23 模块 → install → `render.register()` → `tools.register()` → `fsm.define`（150 行） |
+| `src/core/` | 骨架 | 基础设施层：util（纯函数）/ config（两层配置）/ hooks（响应式原语） |
+| `src/domain/` | 骨架 | 领域模型层：requirements / lanes / proposals / wire / gates / executor |
+| `src/view/` | 骨架 | 叙事渲染层：guide / menus / render |
+| `src/runtime/` | 骨架 | 跨层运行时子系统：flow（转场/拒绝出口 + 状态机票据）/ tools（工具桥） |
+| `src/handlers/{intake,requirements,operate,system}/` | 骨架 | 10 个注册模块按域分组：intake（actions/lifecycle）、requirements（requirement_ops/proposals/gate_actions）、operate（choice/lanes/review）、system（config/views） |
+| `data/texts/` | 实例 | 文本资源片段（core + beats 六域，7 片段；`ygg.data` 逐条读入，`mod.lua` 装配回 TEXTS） |
+| `data/playbook/` | 实例 | 现场规则资源片段（head + 章组 + harness 七域，12 片段；装配回 15 章，`guide.show` 按 section id 取用） |
+| `data/config.json` | 实例 | 静态配置默认值（`ygg:agent/config`；宿主回落路径，不拆） |
+| `pack.json` / `manifest.json` | 骨架 + 生成物 | 打包声明（20 条 entries / `code` 段与 `agent`/`inboxRoutes`/`tools` 契约）与内容寻址清单 |
+| `schemas/*.json` | 骨架 | 资源 schema（agent-config + 两个片段 schema，与 `packages/schema/schemas/` 单源一致；整文档 schema scene-texts/agent-playbook 保留在 packages/schema 供管线与全量 Mod 使用） |
 
-骨架面（`mod.lua` + `src/**` + `schemas/` + `pack.json` 的 `code` 段）与
+骨架面（`mod.lua` + `src/**` + `schemas/` + `pack.json` 的 `code`/契约段）与
 `packages/mods/pi-agent-seed/` 逐字节一致，由 `scripts/sync-seed-mod.sh --from project` 同步；
-模块清单、依赖方向与三条硬规则见种子侧 README 的「模块结构」一节。
-`src/tools.lua` 是唯一带 `register()` 的 `src/` 模块（与 `render.lua` 同构：纯导出 + 装配期注册），
+模块清单、依赖方向与三条硬规则见下节「模块结构」。
+`src/runtime/tools.lua` 是唯一带 `register()` 的模块（与 `src/view/render.lua` 同构：纯导出 + 装配期注册），
 也是 `tool.*` 的**唯一写方**。
 本实例新增的 KV 前缀：`reject.count` / `reject.last`（`flow.refuse` 的拒绝留痕，只读查询用）。
-`data/` 与 `pack.json` 的 `agent`/`inboxRoutes` 属实例面，不参与同步。
+`data/` 的实例片段与 `pack.json` 的 `agent`/`inboxRoutes` 属实例面，不参与同步。
+
+### 模块结构
+
+依赖分层（T0 → T8 单向无环；`mod.lua` 是唯一装配点，注册序 = install 调用序 ≠ require 序）：
+
+```text
+T0 core/util
+T1 core/config, core/hooks, view/guide                 (→util)
+T2 domain/requirements                                 (→config,util)
+T3 domain/lanes, domain/proposals, domain/wire         (→config,requirements,util)
+T4 domain/gates(→proposals), domain/executor(→wire),
+   view/menus(→gates,guide,hooks,proposals,wire)
+T5 view/render                                         (→…menus…)
+T6 runtime/flow                                        (→menus,render,requirements)
+T7 runtime/tools                                       (→flow,render,…)
+T8 handlers/{intake,requirements,operate,system}/*     （纯层 + handlers.operate.choice×3）
+mod.lua → 全部（唯一装配点）
+```
+
+三条硬规则：
+
+1. **纯导出模块顶层零副作用**：注册 / 状态写入 / 输出只发生在 `mod.lua` 调用的
+   `install()` 里（`ygg-lint` 的 `YGG-MOD-EFFECT` + 装载期双重拒绝）。
+2. **事件注册与领域 KV 写面只在 `src/handlers/**`**；`src/runtime/tools.lua` 的
+   `register()` 与 render 同构（纯导出 + 装配期注册），是唯一例外位。
+3. **依赖方向 T0→T8 单向**：`view/render.lua` 不得 require `runtime/tools.lua`（成环）。
+
+资源片段装配契约（`mod.lua` 顶层）：beats 键跨片段不相交；playbook 章节片段按文件名序
+（= order 序）显式 id 列表装配，相邻同 id（harness 7 片段）按序拼接 rules；装配不排序。
 
 ## 十、工具桥（`tool.call` / `tool.result`）
 
@@ -431,11 +463,11 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
   **省略** `args` 键（Lua 空表只能序列化成 `[]`）。终态后为 `[]`（不是缺键）。
 - **幂等**：请求侧 `@ext=` 已应用 → `[REPLAY:TOOL]`；结果侧同一 `external_id` 重投 → `[REPLAY:TOOL]`，
   不改状态、不减计数、不重出 `[TOOL SETTLED]`。一个 call 只有一个终态（换状态是冲突，不静默覆盖）。
-- **KV 面**（`src/tools.lua` 是唯一写方）：`tool.count`（生命周期计数）/ `tool.pending`（未终态计数，
+- **KV 面**（`src/runtime/tools.lua` 是唯一写方）：`tool.count`（生命周期计数）/ `tool.pending`（未终态计数，
   摘要字段 `pendingTools` 读它）/ `tool.last` / `tool.seq.<i>`（分配序索引，`flush_meta` 的遍历面）/ 
   `tool.<id>.{id,tool,args,status,code,output,ext,res_ext,truncated}` / `tool.notified.<id>`（回执闩锁）/
   `tool.reacted.<id>`（响应式闩锁）。响应式子系统另写 `lane.*` / `req.<i>.conflict*` / `artifact.*` /
-  `verify.{passed,report,source}` / `settlement.sessions.*`（见 §十一；逐键登记在 `src/tools.lua` 头注释）。
+  `verify.{passed,report,source}` / `settlement.sessions.*`（见 §十一；逐键登记在 `src/runtime/tools.lua` 头注释）。
 - **回执 effect**：`hooks.useEffect("tools.receipt")` 只置闩锁 + 一行叙事，不 render、不 choose、不改业务状态；
   因此 `[TOOL SETTLED]` 一定与 `[TOOL RESULT]` 在**同一回合**、且一生只有一次。**领域折叠在另一条 effect**
   （`tools.reactive`，见 §十一）：两条 effect 同处一次 `flush_effects`，但边界不混。
@@ -463,7 +495,7 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 | `harness.archive_sessions` | `tool.result` | `settlement.sessions.{moved,remaining,destination,source}` | 只在 `review`、只在 `remaining=0` 且 `dest≠""` 时登记 |
 | `vfs.write` | 事件 handler | `artifact.<path>.{bytes,sha256,source="vfs"}` | 载荷 = 路径 + 竖线 + 内容（首个竖线前是路径，其后全部是内容；内容可含竖线） |
 
-**三条硬边界**（`data/playbook.json` 的 `tools.reactive-effect-scope` / `subsystems.probe-is-warning` /
+**三条硬边界**（`data/playbook/` 的 `tools.reactive-effect-scope` / `subsystems.probe-is-warning` /
 `subsystems.machine-evidence-parity`）：
 
 1. **反应器只写 KV + 叙事**，绝不 `render()` / `ygg.choice` / `flow.refuse`——拒绝行会被宿主记成失败步，

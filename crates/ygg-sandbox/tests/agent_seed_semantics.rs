@@ -42,7 +42,7 @@ fn repo_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// The instance this project actually loads (`data/scenes.json` and `data/playbook.json`
+/// The instance this project actually loads (`data/texts/` and `data/playbook/` fragments
 /// are this project's field surface).
 fn project_mod_dir() -> PathBuf {
     repo_dir().join(".ygg/mods/pi-agent-seed")
@@ -964,6 +964,33 @@ fn read_json(path: &Path) -> Json {
     serde_json::from_str(&raw).unwrap_or_else(|err| panic!("parse {}: {err}", path.display()))
 }
 
+/// The aggregated scene-texts surface: the `data/texts/*.json` fragments merged with the same
+/// rule as the mod's `mod.lua` assembly (core groups as-is; the six `beats` fragments
+/// concatenated in filename order — the beats key sets are disjoint, so merge order cannot
+/// shadow). The result is shape-identical to the former single `data/scenes.json`.
+fn read_texts(dir: &Path) -> Json {
+    let texts_dir = dir.join("data/texts");
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&texts_dir)
+        .unwrap_or_else(|err| panic!("read {}: {err}", texts_dir.display()))
+        .map(|entry| entry.expect("read_dir entry").path())
+        .collect();
+    files.sort();
+    let mut texts = Json::Object(serde_json::Map::new());
+    for path in files {
+        let fragment = read_json(&path);
+        for (group, value) in fragment.as_object().expect("fragment must be an object") {
+            if group == "beats" {
+                for (key, item) in value.as_object().expect("beats must be an object") {
+                    texts["beats"][key] = item.clone();
+                }
+            } else {
+                texts[group] = value.clone();
+            }
+        }
+    }
+    texts
+}
+
 /// `<namespace>.<name>`: two segments, lowercase letter first, then lowercase / digits / `_` / `-`.
 fn tool_segment_ok(part: &str) -> bool {
     let mut chars = part.chars();
@@ -1169,8 +1196,7 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
     }
 
     // Capacity: the counter is a lifecycle counter, so every slot taken means the next is refused.
-    let capacity = read_json(&project_mod_dir().join("data/scenes.json"))["tuning"]
-        ["tool_capacity"]
+    let capacity = read_texts(&project_mod_dir())["tuning"]["tool_capacity"]
         .as_u64()
         .expect("tuning.tool_capacity must be an unsigned integer");
     let mut full = Game::open(&project_mod_dir());
@@ -1188,7 +1214,7 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
 }
 
 /// T5 The declaration surface on both sides: `pack.json` `tools` + `data/config.json`
-/// `allowedTools` + `data/scenes.json` beats. Pure disk reads (no kernel needed) — the two mods
+/// `allowedTools` + `data/texts/` beats. Pure disk reads (no kernel needed) — the two mods
 /// ship the same mechanism, so any drift here is two different capability sets.
 #[test]
 fn tool_declarations_stay_consistent_across_both_mods() {
@@ -1368,11 +1394,11 @@ fn tool_declarations_stay_consistent_across_both_mods() {
     ];
     let mut output_cap = 0;
     for dir in [&project, &seed] {
-        let scenes = read_json(&dir.join("data/scenes.json"));
+        let scenes = read_texts(dir);
         for key in beats {
             assert!(
                 scenes["beats"].get(key).and_then(|value| value.as_str()).is_some(),
-                "{}: data/scenes.json beats is missing `{key}` (the shared src/ would render a raw placeholder)",
+                "{}: data/texts/ beats is missing `{key}` (the shared src/ would render a raw placeholder)",
                 dir.display()
             );
         }
@@ -1405,8 +1431,8 @@ fn tool_declarations_stay_consistent_across_both_mods() {
         .as_array()
         .expect("code.modules must be an array");
     assert!(
-        modules.iter().any(|item| item == "src/tools.lua"),
-        "src/tools.lua must be declared in code.modules: {modules:?}"
+        modules.iter().any(|item| item == "src/runtime/tools.lua"),
+        "src/runtime/tools.lua must be declared in code.modules: {modules:?}"
     );
     for pack in [&project_pack, &seed_pack] {
         let route = &pack["inboxRoutes"]["tool_result"];
@@ -2039,7 +2065,7 @@ fn archive_sessions_result_unblocks_the_settlement() {
 /// their `allowedTools` entries, a usable `artifact_capacity`, and — the structural half — every
 /// `TEXTS.<group>.<name>` the source references exists in both scene files.
 ///
-/// Mutation: delete one beat from one side's `data/scenes.json` (or rename it in the source) →
+/// Mutation: delete one beat from one side's `data/texts/` beats fragments (or rename it in the source) →
 /// this test names the missing key instead of letting the run render a raw `{{placeholder}}`.
 #[test]
 fn subsystem_declarations_and_beat_references_stay_complete() {
@@ -2057,7 +2083,7 @@ fn subsystem_declarations_and_beat_references_stay_complete() {
     for dir in [&project, &seed] {
         let pack = read_json(&dir.join("pack.json"));
         let config = read_json(&dir.join("data/config.json"));
-        let scenes = read_json(&dir.join("data/scenes.json"));
+        let scenes = read_texts(dir);
         let tools = pack["tools"]
             .as_object()
             .unwrap_or_else(|| panic!("{}: pack.json tools must be an object", dir.display()));
@@ -2085,7 +2111,7 @@ fn subsystem_declarations_and_beat_references_stay_complete() {
         for (group, name) in text_references(&project) {
             assert!(
                 scenes[group.as_str()][name.as_str()].as_str().is_some(),
-                "{}: data/scenes.json `{group}.{name}` is referenced by the source but missing \
+                "{}: data/texts/ `{group}.{name}` is referenced by the source but missing \
                  (the run would narrate a raw `{{{{placeholder}}}}`)",
                 dir.display()
             );

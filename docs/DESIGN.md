@@ -22,9 +22,9 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 │   context window telemetry & compaction, data red-line firewall.           │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Layer 1 · Playable Mod Package (.ygg/mods/pi-agent-seed, test-adventure)   │
-│   - Executable Logic: Entry manifest (mod.lua) + pure modules (src/*.lua)  │
-│   - Declarative Resources: data/scenes.json, data/config.json,             │
-│     data/playbook.json, pack.json, manifest.json                           │
+│   - Executable Logic: Entry manifest (mod.lua) + pure modules (src/**)     │
+│   - Declarative Resources: data/texts/*, data/config.json,                 │
+│     data/playbook/*, pack.json, manifest.json                              │
 │   Responsibilities: Two-layer state machine, gate predicates, reactive     │
 │   hooks, tool reactors, narrative receipts, and HarnessAction projection.  │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -61,7 +61,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 **锚线为什么必须是「行首前缀」而不是 `includes`**：`job.description` 是多行需求正文，正文里完全可能出现 `Mandatory references: …` 这几个字。用任意 `includes` 判定会被一句话绕过——那是自指类断言的经典空转（`harness.test.ts` 有一个用例专门喂这种输入）。`Submit:` 额外要求**后续非空**（`^Submit:\s*\S`），这样「有这条命令」与「命令不是空的」被同时钉住。
 
-**两条路必须同形状**：Core 的 `subagent_brief` 模板（`data/scenes.json`）带这两行；adapter **本地拼装**的 brief 也必须带。否则「旧 Mod 兼容路径」会自己违反 C1——`harness.test.ts` 的 `本地拼装路径也满足两条锚线` 用例咬住这一点。
+**两条路必须同形状**：Core 的 `subagent_brief` 模板（`data/texts/` 片段装配的 TEXTS）带这两行；adapter **本地拼装**的 brief 也必须带。否则「旧 Mod 兼容路径」会自己违反 C1——`harness.test.ts` 的 `本地拼装路径也满足两条锚线` 用例咬住这一点。
 
 **`preferCoreBrief` 不是绕过开关**：`preferCoreBrief: false` 是**显式的旧 Mod 兼容降级**，不是静默默认——此时回执写 `[ADAPTER NOTE]` 且 `OrchestrationResult.degraded` 非空，让上层看见；而 Core 明明给了 `subagentAction` 却被关掉**不构成** `no-core-action` 的豁免理由（那正是本契约要消灭的路径）。
 
@@ -166,7 +166,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 1. **`pack.json`（编写与宿主契约声明）**：
    - `id`、`version`、`engineVersion`（semver 范围）、`seed`、`limits`（`maxFuelPerDispatch`、`maxCascadeDepth`、`maxMemoryBytes`）。
-   - `code`（可选）：`{ "entry": "mod.lua", "modules": ["src/util.lua", ...] }`。当存在时，`entry` 不得出现在 `modules` 中，且每个模块 chunk 顶层由 `ygg_modules::effects` 强制为纯。
+   - `code`（可选）：`{ "entry": "mod.lua", "modules": ["src/core/util.lua", ...] }`。当存在时，`entry` 不得出现在 `modules` 中，且每个模块 chunk 顶层由 `ygg_modules::effects` 强制为纯。
    - `entries`：将逻辑资源 ID（`config`、`scenes`、`playbook`）映射到 `{ path, schema }`。
    - `agent`：8 个必填字段（`startEvent`、`summaryEvent`、`choiceEvent`、`endingPrefix`、`rejectionPrefixes`、`configEntry`、`guideEntry`、`guideEvent`）。
    - `inboxRoutes`：声明 `idField`、`externalIdField`、`kindField`，以及每 kind 的 `{ event, fields[] }` 映射，用于异步 JSONL 收件箱摄入。
@@ -219,7 +219,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 #### 三条硬不变量
 
 1. **I1 · 推进唯一性**：任何 `action` 都**不得**绕过 `op=dispatch` → Mod handler 去改状态。适配器里没有第二套状态机，也没有第二份状态投影。
-2. **I2 · 状态不可写性**：适配器**绝不**直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`。`stage` 由 `ygg.fsm` 独占写；其余领域键只由 Mod handler 写（`ygg.kv.set` 的全部领域键都落在 `src/handlers/*.lua` 内）。
+2. **I2 · 状态不可写性**：适配器**绝不**直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`。`stage` 由 `ygg.fsm` 独占写；其余领域键只由 Mod handler 写（`ygg.kv.set` 的全部领域键都落在 `src/handlers/**` 内）。
 3. **I3 · 拒绝不可洗白**：Mod 的回执一旦带 `agent.rejectionPrefixes` 命中的行（`[REJECTED:*]` / `[BLOCKED:*]`），适配器必须**原样回贴**并停止该步的后续编排，绝不复述为成功，也绝不重试到看起来通过。
 
 #### `action` 面的四类落点（每个 `action` 必须可归入且只归入一类）
@@ -355,5 +355,5 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 `docs/CONTEXT.md` 与 `docs/DESIGN.md` 在每次运行中都作为闭环契约强制执行：
 
-1. **执行前注入**：Mod 的 `subagent_brief` 模板（`data/scenes.json`）与扩展的 brief 构建器（`buildSubagentBrief`）向每个 `plan` 与 `development` 子代理 brief 注入一条强制指令：*"在提议或编辑之前，先阅读 `docs/CONTEXT.md`（领域不变量）与 `docs/DESIGN.md`（架构与契约）。"*
+1. **执行前注入**：Mod 的 `subagent_brief` 模板（`data/texts/` 片段装配的 TEXTS）与扩展的 brief 构建器（`buildSubagentBrief`）向每个 `plan` 与 `development` 子代理 brief 注入一条强制指令：*"在提议或编辑之前，先阅读 `docs/CONTEXT.md`（领域不变量）与 `docs/DESIGN.md`（架构与契约）。"*
 2. **结算前同步**：每当某个需求修改了领域概念、架构决策（`D1+`）、模块边界、状态机迁移或线/API 契约，执行者都必须在同一特性分支中、在 `accept_gate` 与最终 `review` 结算之前更新 `docs/CONTEXT.md` 和/或 `docs/DESIGN.md`。

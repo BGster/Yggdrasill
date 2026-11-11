@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "title": "Yggdrasill main-agent field manual (AGENTS.md turned into a rule resource)",
+  "summary": "The field rules a main agent developing Yggdrasill must follow through planning, development, integration, merging and deployment: fetched per section, presented per stage. The rule text lives only in this resource; the play guide is the repository-root AGENTS.md.",
+  "source": {
+    "document": "AGENTS.md",
+    "revision": "2026-11-01",
+    "note": "Migrated item by item from the ten chapters of the repository-root AGENTS.md: every constraint was split into atomic rules (a compound sentence was divided at its decision points), the repository shape was updated to the current reality (a five-crate workspace / four `packages` packages / `clients/godot` / the in-repo `.ygg` harness), stale states (\"M0 in progress\", \"packages planned\", ...) were dropped, and no constraint absent from the original document was added. One exception (the user instruction of 2026-10-29, included in this slice): the four \"no sensitive information on the committed surface\" rules in the credentials chapter are additions, and their `basis` says \"user decision\" instead of quoting AGENTS.md. The evolution chapter (user decision E1 of 2026-11-01: how to screen and review end-of-run evolution candidates) is likewise an addition and not AGENTS.md text. **AGENTS.md was condensed into a pure play guide in s2** - the rule text lives only in this resource; an `AGENTS.md §X` in a `basis` refers to the pre-migration text (see the git history)."
+  }
+}

@@ -5,33 +5,65 @@
 --
 -- 派发序 = 下面 install() 的调用序（不是 require 序、也不是 pack.json 的 code.modules 声明序）。
 
-local TEXTS = ygg.data("ygg:scene/texts")
-local CONFIG = ygg.data("ygg:agent/config")
-local PLAYBOOK = ygg.data("ygg:agent/playbook")
+-- 资源快照（片段装配；片段 ↔ entry 一一对应，见 pack.json entries）。
+-- 契约：beats 键跨片段不相交；playbook 章节片段按文件名序（=order 序）排列，
+--       相邻同 id（harness 7 片段）按序拼接 rules；装配不排序。
 
-local util = require("src.util")
-local config = require("src.config")
-local reqs = require("src.requirements")
-local lanes = require("src.lanes")
-local props = require("src.proposals")
-local gates = require("src.gates")
-local guide = require("src.guide")
-local menus = require("src.menus")
-local render_mod = require("src.render")
-local wire = require("src.wire")
-local flow = require("src.flow")
-local executor = require("src.executor")
-local actions = require("src.handlers.actions")
-local lane_actions = require("src.handlers.lanes")
-local prop_actions = require("src.handlers.proposals")
-local review = require("src.handlers.review")
-local req_ops = require("src.handlers.requirement_ops")
-local gate_actions = require("src.handlers.gate_actions")
-local config_actions = require("src.handlers.config")
-local views = require("src.handlers.views")
-local choice = require("src.handlers.choice")
-local lifecycle = require("src.handlers.lifecycle")
-local tools = require("src.tools")
+local TEXTS = ygg.data("ygg:scene/texts")          -- core：scenes/endings/prompts/options/tuning
+TEXTS.beats = {}
+for _, id in ipairs({ "flow", "requirements", "lanes", "map-guide", "settlement", "harness" }) do
+  local fragment = ygg.data("ygg:scene/beats/" .. id)
+  for key, value in pairs(fragment.beats) do
+    TEXTS.beats[key] = value
+  end
+end
+
+local CONFIG = ygg.data("ygg:agent/config")
+local PLAYBOOK = ygg.data("ygg:agent/playbook")    -- head：schemaVersion/title/summary/source
+PLAYBOOK.sections = {}
+for _, id in ipairs({
+  "ch1-foundation", "ch2-delivery", "ch3-evidence",
+  "ch4-harness-1-state-gates", "ch4-harness-2-drive-actions",
+  "ch4-harness-3-closeout-registries", "ch4-harness-4-inbox-coordination",
+  "ch4-harness-5-views-settlement", "ch4-harness-6-mod-engineering",
+  "ch4-harness-7-host-contract", "ch5-evolution-tools",
+}) do
+  local fragment = ygg.data("ygg:agent/playbook/" .. id)
+  for _, section in ipairs(fragment.sections) do
+    local last = PLAYBOOK.sections[#PLAYBOOK.sections]
+    if last ~= nil and last.id == section.id then
+      for _, rule in ipairs(section.rules) do
+        last.rules[#last.rules + 1] = rule
+      end
+    else
+      PLAYBOOK.sections[#PLAYBOOK.sections + 1] = section
+    end
+  end
+end
+
+local util = require("src.core.util")
+local config = require("src.core.config")
+local reqs = require("src.domain.requirements")
+local lanes = require("src.domain.lanes")
+local props = require("src.domain.proposals")
+local gates = require("src.domain.gates")
+local guide = require("src.view.guide")
+local menus = require("src.view.menus")
+local render_mod = require("src.view.render")
+local wire = require("src.domain.wire")
+local flow = require("src.runtime.flow")
+local executor = require("src.domain.executor")
+local actions = require("src.handlers.intake.actions")
+local lane_actions = require("src.handlers.operate.lanes")
+local prop_actions = require("src.handlers.requirements.proposals")
+local review = require("src.handlers.operate.review")
+local req_ops = require("src.handlers.requirements.requirement_ops")
+local gate_actions = require("src.handlers.requirements.gate_actions")
+local config_actions = require("src.handlers.system.config")
+local views = require("src.handlers.system.views")
+local choice = require("src.handlers.operate.choice")
+local lifecycle = require("src.handlers.intake.lifecycle")
+local tools = require("src.runtime.tools")
 
 -- 注册序（35 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
 --   1     agent.summary（render.register）
