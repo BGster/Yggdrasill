@@ -399,7 +399,7 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 ---
 
-### 3.7 serve 观察面契约（只读观察台 + 两级列表 + mod 面板 iframe 托管）
+### 3.7 serve 观察面契约（只读观察台 + 内置面板页 + mod 面板 iframe 托管）
 
 > r8 · rev2。`serve` 是继单发 `--event` / 交互 / `--daemon` 之后的**第四模式**（加性）。
 > 不改既有单发 CLI 与 daemon 的任何行为；面板默认只读，gate/accept 类人类门禁
@@ -426,20 +426,27 @@ agent [--runs-root <目录>] serve [--port <1..65535>] [--panel-dir <目录>] [-
 
 | 级 | 归属 | 内容 | 数据源 |
 | --- | --- | --- | --- |
-| 一级：mod 列表 | egg 原生 | 按 `meta.mod` 分组的实例枚举（组按组内最新 `updated_at` 降序） | runs-root 扫描 + 存储探针（前端对 `/api/runs` 分组推导，serve 零改动） |
-| 二级：mod 实例列表 | egg 原生 | 该 mod 的 runs 枚举 | 同上（前端按 key 过滤） |
-| 三级：局内存档 | egg 原生 | 该 run 的存档列表 | `ygg_store::observe` 只读观察面 |
-| 四级：存档视图 | **mod 自行维护** | mod 自带 UI | 存档数据 API（裸数据） |
+| 一级：历史局（mod 分组列表） | egg 原生 | `#/runs`；按 `meta.mod` 分组的实例枚举（组按组内最新 `updated_at` 降序） | runs-root 扫描 + 存储探针（前端对 `/api/runs` 分组推导，serve 零改动） |
+| 二级：mod 实例列表 | egg 原生 | `#/mods/<key>`；该 mod 的 runs 枚举 | 同上（前端按 key 过滤） |
+| 三级：局详情 | egg 原生 | `#/runs/<id>`；存档折叠段 + 投影区（见下注） | `ygg_store::observe` 只读观察面 |
+| 四级：存档视图 | **mod 自行维护** | mod 自带 UI（详情页存档折叠段内 iframe 入口） | 存档数据 API（裸数据） |
 
-宿主对第四级**仅托管静态文件 + 裸数据 API**，零解析零渲染任何 mod 领域语义（P11）。
+> **默认视图 = 最新局详情（内置页展示投影，只读；裁决见 CONTEXT `D-MA17`）**：`#/` 与空 hash
+> 渲染 `/api/runs` 首行的局详情——局头条（宏观阶段/会话活性/批次/模式/退役徽章）、
+> `intake → coordinate ⇄ review(批 n) → done` 四节点主流程状态条、需求卡（分 stage 决策产物行、
+> 被拒灰显）、近期决策时间线（尾窗 500 内、决策事件族、倒序前 20）、本局存档折叠段。
+> 投影数据源全部是既有只读端点：`/saves/latest`（KV 键族）+ `/events`（尾窗两步取）+ `/artifacts`；
+> 对无 `req.*` 键族的 mod 无害退化为通用摘要（判据见 D-MA17）。
 
-hash 路由（纯前端，URL=状态、可收藏可刷新）：`#/` = mod 列表；`#/mods/<encodeURIComponent(meta.mod)>` = 实例列表；`#/runs/<id>` = 局内存档。返回导航由前端按当前路由推导（`#nav-back` 空容器；根视图无返回入口；三级父级解析失败——截断/已删——降级为「← mod 列表」），不由点击历史推导——渲染即有意义，结构上不可能 no-op。`meta.mod` 缺失/解析失败的行归键 `-` 的「未知 mod」组，诚实呈现、不做客户端别名合并（别名归宿主 serve 侧，只服务面板托管，不服务分组）。
+宿主服务面对第四级**仅托管静态文件 + 裸数据 API**，零解析零渲染任何 mod 领域语义（P11 字面边界不动）；展示投影只发生在内置页前端资产层。
+
+hash 路由（纯前端，URL=状态、可收藏可刷新）：`#/`（与空 hash）= 最新局详情（默认视图，SSE/轮询重取时自动跟随新最新局）；`#/runs` = 历史局列表；`#/mods/<encodeURIComponent(meta.mod)>` = 实例列表；`#/runs/<id>` = 指定局详情（与默认视图共用同一渲染器；非最新局显示「← 最新局」返回）。返回导航由前端按当前路由推导（`#nav-back` 空容器 + 常驻「历史局」入口；历史局自身不渲染任何入口，防 no-op；局详情父级解析失败——截断/已删——降级为「← mod 列表」），不由点击历史推导——渲染即有意义，结构上不可能 no-op。`meta.mod` 缺失/解析失败的行归键 `-` 的「未知 mod」组，诚实呈现、不做客户端别名合并（别名归宿主 serve 侧，只服务面板托管，不服务分组）。
 
 #### 3.7.3 API 契约总表（全部 GET；非 GET → 405；未知路径 → 404）
 
 | 路由 | 语义 | 响应形状（关键字段） |
 | --- | --- | --- |
-| `GET /` | 内置两级列表页 `index.html` | text/html |
+| `GET /` | 内置面板页 `index.html`（默认视图=最新局详情，见 §3.7.2 注） | text/html |
 | `GET /assets/<name>` | 内置页静态资产（白名单 `app.js` / `style.css`） | 按扩展名映射 + nosniff |
 | `GET /api/runs` | **第一级**：runs 枚举 | `{version, generatedAt, runsRoot, truncated?, runs:[{runId, meta:<run.json 原样>, coord:<原样\|null>, backend, probe:{generation,latestId,latestCreatedAt,count}, panel:{available,url?,reason?}, metaError?}]}`（updated_at 降序；封顶 200） |
 | `GET /api/runs/<id>/saves?limit=` | **第二级**：存档列表 | `{runId, backend, generation, saves:[{id,generation,seq,createdAt,bytes,latest}], panel:{available,url?}}`（limit 缺省 50 封顶 200；JSON 局恒单行 `latest`——单档后端的物理事实） |
