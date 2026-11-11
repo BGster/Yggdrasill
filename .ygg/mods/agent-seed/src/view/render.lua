@@ -33,8 +33,8 @@ local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, pr
   props.P_PENDING, props.prop_count, props.prop_id, props.prop_key, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
 local PHASE, R_MERGED, R_SPLIT, STAGE, job_capacity, job_total, req_closed, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_gate, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase_name, req_rev, req_stale, req_status, req_tally, req_title, stage =
   reqs.PHASE, reqs.R_MERGED, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_closed, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase_name, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
-local fill, join, spaces, trim =
-  util.fill, util.join, util.spaces, util.trim
+local fill, join, spaces, split, trim =
+  util.fill, util.join, util.spaces, util.split, util.trim
 
 -- 面板汇总走响应式记忆化（useMemo）：依赖签名 = 逐需求的派生展示名 + 待验收提案数 +
 -- 需求总数（均由 KV 状态派生，读档/重启后签名一变即重算，不靠内存推断）。
@@ -1018,6 +1018,9 @@ local function summary_fields()
     lifecycle = "resident",
     batch = summary_int(num("run.batch", 1)),
     batchDrained = stage() == STAGE.coordinate and gate_problem() == nil and not run_retire_armed(),
+    -- r1 加性一键：当前 play.mode（goal/guide）投影到摘要。旧宿主容忍式解析
+    -- （缺字段取保守缺省），在场唤醒（YGG_AUTO_WAKE=on）只认 "goal"。
+    play = play_mode(),
     pendingProposals = summary_int(prop_pending_total()),
     requirementCount = summary_int(req_count()),
     conflicts = summary_conflicts(),

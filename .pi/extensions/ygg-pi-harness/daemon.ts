@@ -109,6 +109,23 @@ export interface RunSummary {
   degraded?: string;
   /** 原始摘要对象（诊断用；不做二次解释）。 */
   raw?: Record<string, unknown>;
+  /**
+   * r9 常驻生命周期自报（`summary.lifecycle`）。旧 mod 不给 → `undefined`；
+   * 自动收波以它为保守闸：非 `"resident"` / 缺失都不收。
+   */
+  lifecycle?: string;
+  /** r9 批次镜像（`run.batch`，缺省 1；旧 mod 缺失 → `undefined`，纯观测位）。 */
+  batch?: number;
+  /**
+   * r9 泵暂停信号（批队列已清空且无武装终局，等新进料）。
+   * 旧 mod 缺失 → `undefined`（观测位；不作为收波判定）。
+   */
+  batchDrained?: boolean;
+  /**
+   * r1 使能项：当前 `play.mode` 投影（mod `summary_fields` 加性一键）。
+   * 旧 mod 缺失 → `undefined`；`YGG_AUTO_WAKE=on` 的在场唤醒只认 `"goal"`。
+   */
+  play?: string;
 }
 
 /** 一次派发的回执（daemon 的 `dispatch` / 单发的 stdout JSON）。 */
@@ -483,6 +500,17 @@ export function parseSummary(value: unknown, metaKey = "summary"): RunSummary {
     gates,
     harnessActions,
     raw: row,
+    // r9/r1 加性字段：旧 mod 不给就缺席（保守缺省，不造默认值）。
+    ...(typeof row.lifecycle === "string" && row.lifecycle !== ""
+      ? { lifecycle: asString(row.lifecycle) }
+      : {}),
+    ...(typeof row.batch === "number" ? { batch: asNumber(row.batch) } : {}),
+    ...(typeof row.batchDrained === "boolean"
+      ? { batchDrained: row.batchDrained }
+      : {}),
+    ...(typeof row.play === "string" && row.play !== ""
+      ? { play: asString(row.play) }
+      : {}),
     ...(hasStage
       ? {}
       : { degraded: `摘要形状可用但 \`stage\` 为空（metaKey=${metaKey}）` }),
@@ -689,11 +717,27 @@ export class YggDaemon {
     return this.request("summary", {});
   }
 
-  /** 派发一个事件（payload 可以是字符串 / 数字 / 缺省）。 */
-  async dispatch(event: string, payload?: string | number): Promise<StepReceipt> {
+  /**
+   * 派发一个事件（payload 可以是字符串 / 数字 / 缺省）。
+   *
+   * `identity`（r3 互证，可选）：提交者身份随请求透传——daemon 下进请求字段
+   * （宿主在旗标/env 缺席时兑底注入 wire 段），单发降级下转 `--actor` / `--actor-session`
+   * 旗标。不携带则维持现状（自动提案在 trace 上会是 `[unverified]`）。
+   */
+  async dispatch(
+    event: string,
+    payload?: string | number,
+    identity?: DispatchIdentity,
+  ): Promise<StepReceipt> {
     const params: Record<string, unknown> = { event };
     if (payload !== undefined) {
       params.payload = payload;
+    }
+    if (identity?.actor !== undefined && identity.actor !== "") {
+      params.actor = identity.actor;
+    }
+    if (identity?.actorSession !== undefined && identity.actorSession !== "") {
+      params.actor_session = identity.actorSession;
     }
     return this.request("dispatch", params);
   }

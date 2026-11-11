@@ -211,7 +211,11 @@ const DEFAULT_MAX_LANES = 4;
 const DEFAULT_ARTIFACT_PREFIX = "artifacts";
 const DEFAULT_LANE_POLL_MS = 200;
 const DEFAULT_LANE_WAIT_MS = 20_000;
-const DEFAULT_ACTOR_ID = "pi-ygg-harness";
+/**
+ * 扩展自报身份（r3 互证）：本扩展代表主会话派发时使用的 actor handle。
+ * 与 RESERVED_AGENT_IDS 里的占位一致（不可续跑）；单源，勿在调用方重复字面量。
+ */
+export const DEFAULT_ACTOR_ID = "pi-ygg-harness";
 const DEFAULT_VERIFICATION = ["cargo test --workspace"];
 const DEFAULT_MAX_SELF_HEAL_RETRIES = 1;
 /**
@@ -234,6 +238,25 @@ export const COMMIT_NUDGE_TEXT =
   "git.lane_probe reported uncommitted changes or 0 commits ahead of base. " +
   "Please git add and git commit your changes in the worktree now.";
 const ACTIVE_STAGES = new Set(["plan", "development"]);
+
+/**
+ * 可收波作业谓词：作业阶段属于活跃集（plan / development）。
+ *
+ * r1.1 谓词化：手发编排（`orchestrateActiveJobs`）与自动收波看门狗（`watchdog.ts`）
+ * 共用的唯一阶段判定。注意它**不**含 `delivered:*` 排除——那是收波决策层
+ * （看门狗的摘要级谓词）的防重复位；本函数与既有手发语义逐字节同集。
+ */
+export function isCollectibleJob(job: SummaryJob): boolean {
+  return ACTIVE_STAGES.has(job.stage);
+}
+
+/** 摘要里的可收波作业清单（保持 `summary.jobs` 原序；摘要不可用 → 空表）。 */
+export function collectibleJobs(summary: RunSummary): SummaryJob[] {
+  if (!summary.available) {
+    return [];
+  }
+  return summary.jobs.filter(isCollectibleJob);
+}
 
 // ───────────────────────────── 纯函数：命名与载荷 ─────────────────────────────
 
@@ -1420,7 +1443,7 @@ export async function orchestrateActiveJobs(
     };
   }
 
-  const active = summary.jobs.filter((job) => ACTIVE_STAGES.has(job.stage));
+  const active = collectibleJobs(summary);
   if (active.length === 0) {
     return {
       jobs: [],

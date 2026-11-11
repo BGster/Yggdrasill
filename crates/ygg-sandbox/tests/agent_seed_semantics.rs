@@ -3025,3 +3025,31 @@ fn requirement_list_pages_open_first_and_full_opt_in() {
         "the full view keeps the graph header: {full_view:#?}"
     );
 }
+
+/// r1: the summary projection carries the additive `play` key (the `play_mode()` mirror)
+/// beside the r9 resident trio — the auto-collect watchdog and the opt-in wake-up read
+/// `meta.summary` without any host-side parsing (P11: the host never interprets it).
+#[test]
+fn summary_projection_carries_play_and_resident_trio() {
+    let mut game = Game::open(&project_mod_dir());
+
+    // Fresh run: the stage is `intake`, so the pump is NOT drained (stage ≠ coordinate).
+    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    assert_eq!(
+        summary["play"],
+        json!("guide"),
+        "play.mode default is guide and must be projected: {summary}"
+    );
+    assert_eq!(summary["lifecycle"], json!("resident"));
+    assert_eq!(summary["batch"], json!(1));
+    assert_eq!(summary["batchDrained"], json!(false));
+
+    // `task.intake` moves the run to `coordinate`; with no pending gate and no armed
+    // retirement the pump is drained (waiting for new `--requirement` feed).
+    game.narrate("task.intake", &text("watchdog|synthetic task description"));
+    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    assert_eq!(
+        summary["batchDrained"], json!(true),
+        "coordinate ∧ gate_problem()==nil ∧ not armed → drained: {summary}"
+    );
+}

@@ -56,9 +56,11 @@ export {
   type ArchiveVerdict,
 } from "./archive.ts";
 import {
+  DEFAULT_ACTOR_ID,
   extractAgentId,
   isResumableAgentId,
   orchestrateActiveJobs,
+  sanitizeSegment,
   type ExecuteSubagent,
   type OrchestrationResult,
   type SubagentResult,
@@ -401,7 +403,13 @@ export async function dispatchSessionEvent(
   event: string,
   payload: string | number | undefined,
 ): Promise<DispatchSessionResult> {
-  const receipt = await client.dispatch(event, payload);
+  // r3 互证：主会话面派发统一自报身份（actor = 扩展占位 handle；actorSession = 原生会话 id）。
+  // 会话 id 是不透明审计字段，取不到就缺席（绝不阻塞派发）。
+  const sessionId = String(ctx.sessionManager?.getSessionId?.() ?? "").trim();
+  const receipt = await client.dispatch(event, payload, {
+    actor: DEFAULT_ACTOR_ID,
+    ...(sessionId !== "" ? { actorSession: sanitizeSegment(sessionId, 128) } : {}),
+  });
   if (receipt.summary !== undefined) {
     lastSummary = receipt.summary;
   } else {
