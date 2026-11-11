@@ -837,7 +837,9 @@ fn map_view_keeps_operation_contract() {
         // Menu surface: no guide item may come back (physical deregistration, r1 rev3).
         let options = game.options();
         assert!(
-            options.iter().all(|option| !option.starts_with("guide.show — ")),
+            options
+                .iter()
+                .all(|option| !option.starts_with("guide.show — ")),
             "guide.show must not appear in the pending choice: {options:?}"
         );
     }
