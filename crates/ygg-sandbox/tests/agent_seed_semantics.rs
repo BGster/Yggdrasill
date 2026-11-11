@@ -2446,3 +2446,404 @@ fn placeholder_executor_ids_do_not_trigger_false_subagent_resume() {
         "{goal_with_auth:#?}"
     );
 }
+
+// ───────────────────────── r3 提交者身份（actor 章 + profile 注册表） ─────────────────────────
+
+/// Submit an `r1` proposal with the full identity tail chain
+/// `…|exec=<exec>[:<reason>]|actor=<actor>|actor_session=<session>` (the channel the
+/// host stamps on declared routes; here dispatched straight at the kernel).
+#[track_caller]
+fn submit_with_identity(
+    game: &mut Game,
+    rev: u32,
+    stage: &str,
+    ext: &str,
+    exec: Option<&str>,
+    actor: Option<&str>,
+    session: Option<&str>,
+) -> Vec<String> {
+    submit_identity_for(game, "r1", rev, stage, ext, exec, actor, session)
+}
+
+/// 同上，但需求 id 可指定（actor-only 用例在无账本绑定的干净需求上验证）。
+#[track_caller]
+fn submit_identity_for(
+    game: &mut Game,
+    req: &str,
+    rev: u32,
+    stage: &str,
+    ext: &str,
+    exec: Option<&str>,
+    actor: Option<&str>,
+    session: Option<&str>,
+) -> Vec<String> {
+    let mut payload =
+        format!("{req}|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}");
+    if let Some(exec) = exec {
+        payload.push_str(&format!("|exec={exec}"));
+    }
+    if let Some(actor) = actor {
+        payload.push_str(&format!("|actor={actor}"));
+    }
+    if let Some(session) = session {
+        payload.push_str(&format!("|actor_session={session}"));
+    }
+    game.narrate("proposal.submit", &text(&payload))
+}
+
+/// The `requirement.list` row carrying the executor trace (the display surface).
+#[track_caller]
+fn exec_trace_row(game: &mut Game) -> String {
+    game.narrate("requirement.list", "0")
+        .into_iter()
+        .find(|line| line.contains("(exec "))
+        .expect("requirement.list must carry an exec trace once an executor is bound")
+}
+
+/// verified：exec 与宿主章同句柄 → `[ACTOR VERIFIED]` 叙事 + 双章落库 + trace 后缀；
+/// save/重放后 trace 仍可读（事件存档携带的 KV 投影不丢）。
+#[test]
+fn actor_channel_verified_lands_in_kv_narrative_and_survives_a_reload() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    submit_with_identity(
+        &mut game,
+        1,
+        "plan",
+        "id-verified",
+        Some("agent-1"),
+        Some("agent-1"),
+        Some("s-plan-1"),
+    );
+    game.assert_kv("prop.1.actor", json!("agent-1"));
+    game.assert_kv("prop.1.actor_session", json!("s-plan-1"));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    let row = exec_trace_row(&mut game);
+    assert!(row.contains("plan=agent-1 [verified]"), "{row}");
+
+    // save → rebuild → trace verdict still readable (the KV projection survives a reload).
+    let save = game.save();
+    let bytes = serde_json::to_vec(&save).expect("serialize the save");
+    let mut rebuilt = Game {
+        bundle: game.bundle.clone(),
+        kernel: game.bundle.restore(&bytes).expect("restore from save"),
+    };
+    let row = exec_trace_row(&mut rebuilt);
+    assert!(row.contains("plan=agent-1 [verified]"), "{row}");
+}
+
+/// mismatch：exec 与章不同句柄 → 识别不拒绝（记录 + 叙事，验收照常走）。
+#[test]
+fn actor_channel_mismatch_is_recorded_never_rejected() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    let lines = submit_with_identity(
+        &mut game,
+        1,
+        "plan",
+        "id-mismatch",
+        Some("agent-1"),
+        Some("agent-2"),
+        None,
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("[ACTOR MISMATCH]")),
+        "{lines:#?}"
+    );
+    game.assert_kv("prop.1.actor", json!("agent-2"));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    let row = exec_trace_row(&mut game);
+    assert!(
+        row.contains("plan=agent-1 [mismatch:actor=agent-2]"),
+        "{row}"
+    );
+    // 识别不拒绝：提案照常待验收、验收照常推进门禁。
+    game.click("proposal.accept — ");
+    game.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// unverified + actor-only：无章 = `[unverified]` 后缀；只带章不带 exec = 只记章、
+/// 不绑账本、不出三态叙事（账本没有“被验证者”）。
+#[test]
+fn actor_channel_unverified_and_actor_only() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    // unverified：exec 有、章无（旧宿主 / 直接派发面）。
+    let lines = submit_with_identity(&mut game, 1, "plan", "id-unv", Some("agent-1"), None, None);
+    assert!(
+        lines.iter().any(|line| line.contains("[ACTOR UNVERIFIED]")),
+        "{lines:#?}"
+    );
+    game.assert_kv("prop.1.actor", json!(""));
+    let row = exec_trace_row(&mut game);
+    assert!(row.contains("plan=agent-1 [unverified]"), "{row}");
+
+    // r1 的账本绑定不受“打回”影响（账本只增改）：拒绝后 ledger 仍在。
+    game.narrate("proposal.reject", &text("r1|replan without identity"));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+
+    // actor-only：干净需求上只带章不带 exec —— 不绑账本、章落库、无三态叙事。
+    game.narrate(
+        "requirement.add",
+        &text("actor-only requirement|synthetic description|id-r2"),
+    );
+    game.narrate("requirement.dispatch", &text("r2"));
+    let lines = submit_identity_for(
+        &mut game,
+        "r2",
+        1,
+        "plan",
+        "id-actor-only",
+        None,
+        Some("agent-9"),
+        None,
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("[ACTOR ")),
+        "actor-only must not narrate a three-state verdict: {lines:#?}"
+    );
+    game.assert_kv("prop.2.actor", json!("agent-9"));
+    game.assert_kv("settings.executor.r2.plan", Json::Null);
+    // r2 无账本绑定 → 它的 trace 行没有 exec 项。
+    let r2_row = game
+        .narrate("requirement.list", "0")
+        .into_iter()
+        .find(|line| line.contains(" r2 ["))
+        .expect("r2 must be listed");
+    assert!(!r2_row.contains("(exec "), "{r2_row}");
+}
+
+/// 段序契约（mod 侧半）：错位 / 乱序 / 重复 / 坏形状逐段点名拒绝；全链 10 段载荷
+/// （7 段主体 + exec + actor + actor_session）各归其位。
+#[test]
+fn actor_session_segment_order_and_shapes_are_locked() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    // actor_session= 在中间段 → 拒（必须最后）。
+    let misplaced = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|s|artifacts/p.md||x|actor_session=s1|exec=agent-1"),
+    );
+    assert_refused(&misplaced, "actor_session=");
+    // actor= 在 actor_session= 之后 → 拒（固定相对序）。
+    let swapped = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|s|artifacts/p.md||x|actor_session=s1|actor=agent-1"),
+    );
+    assert_refused(&swapped, "actor_session=");
+    // 重复 exec= → 拒（多出的进中间段 = 错位）。
+    let duplicated = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|s|artifacts/p.md||x|exec=agent-1|exec=agent-2"),
+    );
+    assert_refused(&duplicated, "exec=");
+    // actor 值带空白 → 形状拒绝。
+    let bad_shape = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|s|artifacts/p.md||x|exec=agent-1|actor=agent 2"),
+    );
+    assert_refused(&bad_shape, "actor id must be");
+
+    // 全链 10 段（R5 形状锁）：字段与三个尾段各归其位。
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|full-chain summary|artifacts/plan.md|ch=1|id-full|exec=agent-1|actor=agent-1|actor_session=s-full"),
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("REJECTED")),
+        "full chain must parse: {lines:#?}"
+    );
+    game.assert_kv("prop.1.stage", json!("plan"));
+    game.assert_kv("prop.1.summary", json!("full-chain summary"));
+    game.assert_kv("prop.1.changes", json!("ch=1"));
+    game.assert_kv("prop.1.ext", json!("id-full"));
+    game.assert_kv("prop.1.actor", json!("agent-1"));
+    game.assert_kv("prop.1.actor_session", json!("s-full"));
+    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+}
+
+/// profile 注册表：config.set 逐键注册 roundtrip（KV 落位 / upsert / 未知键文案）。
+#[test]
+fn profile_registration_via_config_set_roundtrip() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    game.narrate("config.set", &text("profile.agent-1.harness=pi"));
+    game.assert_kv("settings.profile.agent-1.harness", json!("pi"));
+    game.assert_kv("settings.profile_index", json!("agent-1"));
+    // upsert：同键重写覆盖。
+    game.narrate("config.set", &text("profile.agent-1.harness=codex"));
+    game.assert_kv("settings.profile.agent-1.harness", json!("codex"));
+    // 其余保留键 + 自由键。
+    game.narrate(
+        "config.set",
+        &text("profile.agent-1.session_id=01a1c961-test"),
+    );
+    game.narrate("config.set", &text("profile.agent-1.role=plan-executor"));
+    game.narrate(
+        "config.set",
+        &text("profile.agent-1.assignments=r1:plan,r1:development,r3"),
+    );
+    game.narrate("config.set", &text("profile.agent-1.registered_by=main"));
+    game.assert_kv(
+        "settings.profile.agent-1.session_id",
+        json!("01a1c961-test"),
+    );
+    game.assert_kv("settings.profile.agent-1.role", json!("plan-executor"));
+    game.assert_kv(
+        "settings.profile.agent-1.assignments",
+        json!("r1:plan,r1:development,r3"),
+    );
+    game.assert_kv("settings.profile.agent-1.registered_by", json!("main"));
+    game.assert_kv("settings.profile_index", json!("agent-1"));
+    // settings. 前缀写法等价。
+    game.narrate("config.set", &text("settings.profile.agent-1.role=dev"));
+    game.assert_kv("settings.profile.agent-1.role", json!("dev"));
+    // 键形坏（缺 <key> 段）→ bad_handle 文案。
+    let malformed = game.narrate("config.set", &text("profile.agent-1=x"));
+    assert_refused(&malformed, "profile.<handle>.<key>");
+    // 保留键/自由键之外的键名 → bad_value 文案。
+    let unknown = game.narrate("config.set", &text("profile.agent-1.UPPER=x"));
+    assert_refused(&unknown, "invalid profile value");
+    // 真未知键 → bad_config_key 文案，且 config_keys 包含 profile 家族（fail-closed 面同步）。
+    let alien = game.narrate("config.set", &text("profile_index=agent-x"));
+    assert_refused(&alien, "profile.<handle>.<key>");
+}
+
+/// profile 保留键校验矩阵：handle 张冠李戴 / assignments 坏 token / harness 空白 /
+/// 空值清除 / handle 一致不落 KV。
+#[test]
+fn profile_reserved_key_validation() {
+    let mut game = Game::open(&project_mod_dir());
+
+    // handle 与键名不一致 → 拒。
+    let mismatch = game.narrate("config.set", &text("profile.agent-1.handle=other"));
+    assert_refused(&mismatch, "profile key must be");
+    // handle 一致 → 通过但不落 KV（键即 handle，免冗余存储）。
+    let consistent = game.narrate("config.set", &text("profile.agent-1.handle=agent-1"));
+    assert!(
+        consistent
+            .iter()
+            .any(|line| line.contains("[PROFILE REGISTERED]")),
+        "{consistent:#?}"
+    );
+    game.assert_kv("settings.profile.agent-1.handle", Json::Null);
+    // assignments 坏 token → 拒。
+    let bad_token = game.narrate(
+        "config.set",
+        &text("profile.agent-1.assignments=r1:plan,bogus"),
+    );
+    assert_refused(&bad_token, "assignments must be");
+    // 超量 token → 拒（17 个）。
+    let many: String = (1..=17)
+        .map(|i| format!("r{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let too_many = game.narrate(
+        "config.set",
+        &text(&format!("profile.agent-1.assignments={many}")),
+    );
+    assert_refused(&too_many, "assignments must be");
+    // harness 带空白 → 拒。
+    let bad_harness = game.narrate("config.set", &text("profile.agent-1.harness=pi codex"));
+    assert_refused(&bad_harness, "invalid profile value");
+    // 合法先落一个 role，再用空值清除。
+    game.narrate("config.set", &text("profile.agent-1.role=plan-executor"));
+    game.assert_kv("settings.profile.agent-1.role", json!("plan-executor"));
+    game.narrate("config.set", &text("profile.agent-1.role="));
+    game.assert_kv("settings.profile.agent-1.role", json!(""));
+}
+
+/// profile 显示形态：trace harness 短注记、map full 的 [PROFILES] 行（操作视图无）、
+/// summary.profiles 数组（assignments 解析为数组、handle 升序、≤8 截断）。
+#[test]
+fn profile_shows_in_trace_map_and_summary() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    game.narrate("config.set", &text("profile.agent-2.harness=codex"));
+    game.narrate("config.set", &text("profile.agent-1.harness=pi"));
+    game.narrate("config.set", &text("profile.agent-1.role=plan-executor"));
+    game.narrate(
+        "config.set",
+        &text("profile.agent-1.assignments=r1:plan,r3"),
+    );
+
+    submit_with_identity(
+        &mut game,
+        1,
+        "plan",
+        "id-prof",
+        Some("agent-1"),
+        Some("agent-1"),
+        None,
+    );
+    let row = exec_trace_row(&mut game);
+    assert!(row.contains("plan=agent-1(pi) [verified]"), "{row}");
+
+    // 设计视图有 [PROFILES]（handle 升序：agent-1 在前），操作视图没有。
+    let full = game.narrate("map.show", &text("full"));
+    let profiles_line = full
+        .iter()
+        .find(|line| line.contains("[PROFILES]"))
+        .expect("design view must carry the [PROFILES] line");
+    assert!(
+        profiles_line.contains("agent-1(pi,plan-executor)")
+            && profiles_line.contains("agent-2(codex)"),
+        "{profiles_line}"
+    );
+    let local = game.narrate("map.show", "0");
+    assert!(
+        !local.iter().any(|line| line.contains("[PROFILES]")),
+        "operation view must stay minimal: {local:#?}"
+    );
+
+    // summary.profiles：结构化数组（编排层的机器可读面）。
+    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    let profiles = summary["profiles"]
+        .as_array()
+        .expect("summary.profiles array");
+    assert_eq!(profiles.len(), 2);
+    assert_eq!(profiles[0]["handle"], json!("agent-1"));
+    assert_eq!(profiles[0]["harness"], json!("pi"));
+    assert_eq!(profiles[0]["role"], json!("plan-executor"));
+    assert_eq!(
+        profiles[0]["assignments"],
+        json!(["r1:plan", "r3"]),
+        "assignments must be a token array"
+    );
+    assert_eq!(profiles[1]["handle"], json!("agent-2"));
+    assert_eq!(profiles[1]["harness"], json!("codex"));
+}
+
+/// profile ≠ 凭据：注册/篡改 profile 不翻转三态判定（判定只看 exec= vs 宿主章）。
+#[test]
+fn profile_does_not_affect_verification() {
+    let mut game = Game::open(&project_mod_dir());
+    start_requirement(&mut game);
+
+    submit_with_identity(
+        &mut game,
+        1,
+        "plan",
+        "id-prof-free",
+        Some("agent-1"),
+        Some("agent-1"),
+        None,
+    );
+    let row = exec_trace_row(&mut game);
+    assert!(row.contains("plan=agent-1 [verified]"), "{row}");
+    // 无 profile → verified 照常（判定不依赖注册表）。
+    game.narrate("config.set", &text("profile.agent-1.role=reviewer"));
+    let row = exec_trace_row(&mut game);
+    assert!(
+        row.contains("plan=agent-1 [verified]"),
+        "role upsert must not flip the verdict: {row}"
+    );
+    // verdict 与 harness 注记解耦：harness 未注册 → 无短注记，但三态仍在。
+    assert!(!row.contains("agent-1("), "{row}");
+}

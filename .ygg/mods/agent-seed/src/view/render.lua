@@ -175,6 +175,109 @@ local function req_live_status(index)
   return worktree_status, subagent_status, probe_status
 end
 
+-- 宿主通道三态后缀（r3，显示 join 不改权责）：(req, stage) 最新提案落库的宿主
+-- actor 章对照账本 id——相等 = [verified]；不等 = [mismatch:actor=…]（识别不拒绝）；
+-- 无章（旧提案 / config.set 直接登记 / 旧宿主回滚面）= [unverified]。
+local function prop_verdict(index, stage_name, exec_id)
+  local actor = props.prop_actor_for(index, stage_name)
+  if actor == nil then
+    return TEXTS.beats.req_trace_actor_unverified
+  end
+  if actor == exec_id then
+    return TEXTS.beats.req_trace_actor_verified
+  end
+  return fill(TEXTS.beats.req_trace_actor_mismatch, { actor = actor })
+end
+
+-- ── profile 注册表投影（r3，自报身份卡：声明面不是凭据）─────────────────
+
+-- 沙箱无 table 库：插入排序（handle 量小，线性插入足够；投影口径 = handle 升序）。
+local function sorted_strings(list)
+  local out = {}
+  for _, value in ipairs(list) do
+    local pos = #out + 1
+    for i = 1, #out do
+      if out[i] > value then
+        pos = i
+        break
+      end
+    end
+    for i = #out, pos, -1 do
+      out[i + 1] = out[i]
+    end
+    out[pos] = value
+  end
+  return out
+end
+
+-- 注册句柄清单（settings.profile_index 维护序 → handle 升序；索引键由
+-- handlers/config.lua 的 profile_set 单源维护，用户面写不进去）。
+local function profile_handles()
+  local out = {}
+  for _, part in ipairs(split(text_of("settings.profile_index", ""), ",")) do
+    local piece = trim(part)
+    if piece ~= "" then
+      out[#out + 1] = piece
+    end
+  end
+  return sorted_strings(out)
+end
+
+local function profile_field(handle, name)
+  return text_of("settings.profile." .. handle .. "." .. name, "")
+end
+
+-- 设计视图 PROFILES 行：≤4 张全列（harness[,role] 短注）+ 截断计数；无注册整行
+-- 省略（不占默认视图——操作视图不加，保持最小）。
+local function narrate_profiles()
+  local handles = profile_handles()
+  if #handles == 0 then
+    return
+  end
+  local items = {}
+  local shown = #handles < 4 and #handles or 4
+  for i = 1, shown do
+    local handle = handles[i]
+    local harness = profile_field(handle, "harness")
+    local role = profile_field(handle, "role")
+    local piece = handle .. "(" .. harness
+    if role ~= "" then
+      piece = piece .. "," .. role
+    end
+    items[#items + 1] = piece .. ")"
+  end
+  if #handles > shown then
+    items[#items + 1] = fill(TEXTS.beats.map_note_profiles_more, { count = tostring(#handles - shown) })
+  end
+  ygg.narrate(fill(TEXTS.beats.map_note_profiles, { list = join(items, " ") }))
+end
+
+-- summary 结构化面（编排层的机器可读面）：≤8 张，handle 升序；assignments 解析成
+-- token 数组（编排层直接消费）。半张卡按缺键降级——自报注册可分多次 config.set 完成。
+local function summary_profiles()
+  local out = {}
+  for i, handle in ipairs(profile_handles()) do
+    if i > 8 then
+      break
+    end
+    local assignments = {}
+    for _, token in ipairs(split(profile_field(handle, "assignments"), ",")) do
+      local piece = trim(token)
+      if piece ~= "" then
+        assignments[#assignments + 1] = piece
+      end
+    end
+    out[#out + 1] = {
+      handle = handle,
+      harness = profile_field(handle, "harness"),
+      session_id = profile_field(handle, "session_id"),
+      role = profile_field(handle, "role"),
+      assignments = assignments,
+    }
+  end
+  return out
+end
+
 local function req_trace(index)
   local parts = {}
   local deps = req_deps(index)
@@ -200,6 +303,8 @@ local function req_trace(index)
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_job, { job = job })
   end
   -- E2 执行者账本（自声明）：已登记就列出来；当前 job 对应阶段未登记就明说。
+  -- r3：每项并列两组短注记——profile harness 短注记（声明面）+ 宿主通道三态
+  --（最新提案的宿主 actor 章对照账本 id）；session id 不进 trace（grep 链走事件行）。
   local exec_ids = {}
   local exec_list = {}
   for i = 1, #wire.EXECUTOR_STAGES do
@@ -207,7 +312,12 @@ local function req_trace(index)
     local agent = wire.executor_id_of(executor_raw(req_id(index), name))
     if agent ~= "" then
       exec_ids[name] = agent
-      exec_list[#exec_list + 1] = name .. "=" .. agent
+      local shown = agent
+      local harness = text_of("settings.profile." .. agent .. ".harness", "")
+      if harness ~= "" then
+        shown = shown .. fill(TEXTS.beats.req_trace_profile_tag, { harness = harness })
+      end
+      exec_list[#exec_list + 1] = name .. "=" .. shown .. prop_verdict(index, name, agent)
     end
   end
   if #exec_list > 0 then
@@ -564,6 +674,7 @@ local function narrate_map(current, full, items, prompt)
     pending = tostring(prop_pending_total()),
   }))
   narrate_lane_ledger()
+  narrate_profiles()
   ygg.narrate(TEXTS.beats.map_foot)
 end
 
@@ -896,6 +1007,9 @@ local function summary_fields()
       candidates = text_of("review.evolution.candidates", TEXTS.beats.evolution_none),
       classes = text_of("review.evolution.classes", ""),
     },
+    -- profile 注册表（r3，自报身份卡）：编排层按 harness 选 multi-agent 机制、按
+    -- assignments 找跟进需求；assignments 是协调快照，权责仍以 executor 账本为准。
+    profiles = summary_profiles(),
   }
   local awaiting = summary_awaiting()
   if awaiting ~= nil then
@@ -959,6 +1073,7 @@ M.evolution_receipt = evolution_receipt
 M.is_resumable_agent_id = is_resumable_agent_id
 M.narrate_map = narrate_map
 M.narrate_play_mode = narrate_play_mode
+M.narrate_profiles = narrate_profiles
 M.narrate_req_list = narrate_req_list
 M.narrate_req_panel = narrate_req_panel
 M.out_edges = out_edges
@@ -977,5 +1092,6 @@ M.summary_gates = summary_gates
 M.summary_int = summary_int
 M.summary_jobs = summary_jobs
 M.summary_next_ends_run = summary_next_ends_run
+M.summary_profiles = summary_profiles
 
 return M

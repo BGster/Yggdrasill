@@ -171,11 +171,16 @@ draft ─dispatch→ analyzing ─proposal→ analysis_review ─accept→ plann
 
 ```text
 proposal.submit  "r1|1|analysis|summary|artifacts[|changes[|external_id]]"
+                 [ |exec=<agent_id>[:<reason>]] [ |actor=<actor_id>] [ |actor_session=<session_id>]
 proposal.accept  "pN" / "rN" / ""      → 空 = requirement_id canonical 序取一条（串行验收）
 proposal.reject  "pN|理由" / "rN|理由" / ""
 ```
 
 - `stage ∈ analysis | plan | development`，必须与需求当前状态匹配（`analyzing` / `planning`(job) / `developing`）。
+- **保留尾段链（固定相对序）**：`…|exec=<id>[:<reason>]|actor=<actor>|actor_session=<session>`
+  （各自可独立缺席；错位 / 乱序 / 重复 → 可读拒绝）。`actor=` / `actor_session=` 由**宿主注入**
+  （声明路由 + `--actor` / `YGG_ACTOR` / daemon 请求字段），调用方载荷自带同名段在宿主侧即被拒
+  （`ACTOR_FORGED`）；三态互证只比 `exec=` vs `actor=`（session 是纯审计字段，见 §8.4）。
 - `changes` 是**拟议变更**，验收时才应用：`split=a,b` / `merge=r5` / `amend=标题:描述` / `conflict=r5:说明`。
 - 验收时 `rev ≠ req.<i>.rev` → 提案置 `stale`、需求置 `stale` 标记，可读拒绝（旧提案不得覆盖新决定）。
   **重定基**：直接提交同阶段、**当前 rev** 的新提案即可——`analysis_review` / `plan_review` /
@@ -288,6 +293,12 @@ Mod 本身无 IO，跨进程互斥全部在宿主的 run 目录里：
   有新需求就解除 closing 继续 loop，无新需求才 `review.note` + settle → `finalized`。
 - **崩溃恢复**：closing 用心跳续命（10s），过期后写命令或 resume 会恢回 `running`；锁也按 mtime 抢占，
   不会永久卡死。
+- **提交者身份（r3）**：写命令与派发可携带身份（`--actor` > `YGG_ACTOR` > daemon 请求字段；
+  `--actor-session` > `YGG_ACTOR_SESSION` 对称）：inbox 记录盖宿主保留键 `actor` / `actor_session`
+  （None 不写键），声明路由由宿主注入 wire 段；携带身份的**成功写**先到先得认领 `run.json` 的
+  `opener_actor = {actor, session?, at}`（**不可变**，同 id 重复 claim 也是 no-op；失败步 /
+  被拒派发不认领）。`run.json` 是宿主元信息面（Mod 不感知）；重写 meta（开局 / reset / 热载）
+  原样保留该字段。
 
 ### 宿主读的摘要字段（`agent.summary` → `ygg.meta("summary", …)`）
 
@@ -397,6 +408,45 @@ config.set executor.<rN>.<stage>=            # 空值 = 显式解绑
   未登记时显示 `〔exec <stage>=未登记〕`。
 - id 形状：trim 非空、≤64、无空白、不含 `|`；`external` 可作为「用户/外部提案人」的约定 token（Mod 不特殊处理）。
 - 同样是**自声明**：它只证明主 Agent 登记了什么，不证明宿主身份或真实执行者，不得包装成身份认证。
+
+### 8.4 提交者身份（r3）：双 id 命名空间、宿主章互证、profile 注册表
+
+**双 id 命名空间（实证约束，不可混用）**：
+
+| 命名空间 | 形态 | 用途 |
+| --- | --- | --- |
+| Agent 工具句柄 | `agent-1`（≤64、无空白、无 `\|`） | `exec=`、宿主 `actor=` 章、`YGG_ACTOR`、profile 主键、resume 寻址——**同一空间**，互证与 join 全靠字符串相等 |
+| 原生 session id | `01a1c961-…`（≤128，不透明） | 只作审计（事件行 `actor_session=` → 磁盘会话文件的 grep 链）；**永不参与判定、永不作 resume 键** |
+
+**三态互证（识别不拒绝）**：`proposal.submit` 的 `exec=` 与宿主注入的 `actor=` 章比对——
+相等 `[verified]`；不等 `[mismatch:actor=…]`（只记录 + 叙事，验收照常）；无章 `[unverified]`
+（旧宿主 / 直接派发）。判定只看这两个值；profile 与 session 都**不参与**。
+`requirement.list` trace 并列显示：`plan=agent-1(pi) [verified]`。
+
+**profile 注册表（自报身份卡，声明面不是凭据）**：
+
+```text
+config.set profile.<handle>.harness=<值>      # ≤32、无空白、无 `\|`；推荐词表 {pi, claude-code, codex, generic}
+config.set profile.<handle>.session_id=<值>   # ≤128、不透明（原生 session id）
+config.set profile.<handle>.role=<值>         # ≤64 单行（如 plan-executor / reviewer）
+config.set profile.<handle>.assignments=<值>  # 逗号分隔 r<n>[:<stage>]，≤16 个、总长 ≤512
+config.set profile.<handle>.handle=<handle>   # 冗余自报：必须与键名一致；一致后不落 KV（键即 handle）
+config.set profile.<handle>.<free_key>=<值>   # 自由键 ^[a-z0-9_]{1,32}$，值 ≤256 单行（如 registered_by=main）
+config.set profile.<handle>.<key>=            # 空值 = 清除该字段（不提供整卡删除，收口随 run 终结）
+```
+
+- **注册 = 纯 `config.set` KV 约定**（`settings.profile.<handle>.<key>` 平铺），不新增事件：天然落事件行
+  可审计、同键重写幂等、不占人类动作门禁。subagent 经 brief 内嵌指引自主注册；主 Agent 代注册是
+  **fallback**——两者在数据面上无区别，可信度差异只体现在 `registered_by` 约定与事件日志。
+- **与账本互链不冗余**：账本回答「谁负责这条需求的这个阶段」（权责权威），profile 回答「这个句柄是谁」
+  （身份索引 + 协调快照）。渲染层按 `handle == executor id` 字符串 join，零存储耦合；assignments 是
+  自报快照，**权责仍以账本为准**。
+- **投影**：`map.show full` 的 `[PROFILES]` 行（≤4 张 + 截断计数）；`agent.summary` 的 `profiles`
+  数组（≤8 张，handle 升序，assignments 解析成 token 数组）——编排层按 `harness` 选 multi-agent
+  机制、按 `assignments` 找跟进需求，半张卡按缺键降级。
+- **诚实威胁模型**：同机进程模型下 env / flag / profile 都可伪造；本机制 = 「双通道一致性可核对」，
+  防误记 / 防张冠李戴 / 让冒用与未标注代理可见可审计，**不做密码学、不引入 token**；`ACTOR_FORGED`
+  是格式红线不是身份认证，profile 是自报卡不是凭据。
 
 ## 九、文件
 

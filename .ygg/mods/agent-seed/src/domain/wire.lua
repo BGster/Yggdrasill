@@ -11,10 +11,8 @@ local util = require("src.core.util")
 
 local TEXTS
 
-local effective, mode, text_of =
-  config.effective, config.mode, config.text_of
-local stage =
-  reqs.stage
+local effective, text_of =
+  config.effective, config.text_of
 local contains, cut, fill, join, split, trim =
   util.contains, util.cut, util.fill, util.join, util.split, util.trim
 
@@ -156,6 +154,132 @@ local function strip_ext(payload)
   return payload:sub(1, index - 1), trim(payload:sub(index + #marker))
 end
 
+-- ── 保留尾段链（r3 提交者身份）─────────────────────────────────────────────────────────
+-- 宿主是唯一盖章方：声明路由上宿主在载荷末尾注入 `|actor=<id>` / `|actor_session=<id>`；
+-- 调用方自带的同名段在宿主侧已被拒（ACTOR_FORGED），到达这里还带保留段 = 错位（旧宿主回滚面）。
+-- 固定相对顺序：…|exec=<id>[:<reason>]|actor=<actor>|actor_session=<session>（各自可独立缺席）。
+local TAIL_SEGMENTS = {
+  { name = "exec", rank = 1, beat = "req_prop_exec_misplaced" },
+  { name = "actor", rank = 2, beat = "req_prop_actor_misplaced" },
+  { name = "actor_session", rank = 3, beat = "req_prop_actor_session_misplaced" },
+}
+
+local function tail_segment_of(segment)
+  for _, item in ipairs(TAIL_SEGMENTS) do
+    -- `actor_session=x` 不匹配 `^actor=`（第 6 字节是 `_` 不是 `=`），三段可独立判定。
+    if segment:match("^" .. item.name .. "=") ~= nil then
+      return item
+    end
+  end
+  return nil
+end
+
+-- 身份段值形状（与宿主 validate 同规则）：非空、≤max、无空白、无引号/反斜杠
+--（`|` 不可能：段已按 `|` 切开）。非法 → 可读拒绝（防张冠李戴的“身份”进存档）。
+local function identity_segment_value(segment, max, bad_beat)
+  local value = trim(segment:match("^[^=]+=(.*)$") or "")
+  if value == "" or #value > max or value:find("%s") ~= nil
+    or value:find('["\\]') ~= nil then
+    return nil, TEXTS.beats[bad_beat]
+  end
+  return value, nil
+end
+
+-- ── profile 注册表（r3，自报身份卡：声明面不是凭据）─────────────────────────
+-- 键形 `profile.<handle>.<key>`：handle 形状复用 exec=/YGG_ACTOR 规则（账本 /
+-- profile / 宿主章三层同形同值，字符串相等贯通）；保留键 harness / session_id /
+-- handle / role / assignments，其余自由键；空值 = 清除该字段（整卡随 run 终结）。
+-- 写面单源在 handlers/config.lua 的 profile_set；解析/校验纯函数单源在这里。
+
+-- `profile.<handle>.<key>` → handle, field；任何形状偏差 → nil（调用方回 profile_bad_handle）。
+local function parse_profile_key(key)
+  if type(key) ~= "string" then
+    return nil, nil
+  end
+  local handle, field = key:match("^profile%.([^.]+)%.(.+)$")
+  if handle == nil or trim(field or "") == "" then
+    return nil, nil
+  end
+  -- handle 形状复用 executor id 规则：非空、≤64、无空白、无 `|`（键里可能带 `|`，显式拦）。
+  if #handle > 64 or handle:find("%s") ~= nil or handle:find("|", 1, true) ~= nil then
+    return nil, nil
+  end
+  return handle, field
+end
+
+-- assignments token 化：逗号分隔 `r<n>[:<stage>]`，≤16 个、总长 ≤512；空串 = 空
+-- 清单（清除字段）。编排层要机器解析，形状必须够硬。
+local function parse_assignments(raw)
+  local tokens = {}
+  local total = 0
+  for _, part in ipairs(split(trim(raw or ""), ",")) do
+    local piece = trim(part)
+    if piece ~= "" then
+      -- Lua 模式不支持对捕获组加 `?` 量词（`?` 会变字面问号）：两种形态分别判定。
+      if piece:match("^r%d+$") == nil and piece:match("^r%d+:[a-z_]+$") == nil then
+        return nil, TEXTS.beats.profile_bad_assignments
+      end
+      total = total + #piece + 1
+      tokens[#tokens + 1] = piece
+      if #tokens > 16 then
+        return nil, TEXTS.beats.profile_bad_assignments
+      end
+    end
+  end
+  if total - 1 > 512 then
+    return nil, TEXTS.beats.profile_bad_assignments
+  end
+  return tokens, nil
+end
+
+-- 保留键/自由键校验矩阵（§3.2.2）：返回清洗后的值 + 错误。空值 = 清除（除
+-- handle：显式写了就必须与键名一致，空 ≠ handle → 拒）。
+local function validate_profile_value(handle, field, value)
+  local raw = trim(value or "")
+  if field == "handle" then
+    if raw ~= handle then
+      return nil, TEXTS.beats.profile_bad_handle
+    end
+    return raw, nil
+  end
+  if raw == "" then
+    return "", nil -- 保留键/自由键空值 = 清除该字段，不做形状校验
+  end
+  if field == "harness" then
+    -- 不做枚举（enum 会 fail-closed 掉未来 harness）；文档推荐词表 {pi, claude-code, codex, generic}。
+    if #raw > 32 or raw:find("%s") ~= nil or raw:find("|", 1, true) ~= nil then
+      return nil, TEXTS.beats.profile_bad_value
+    end
+    return raw, nil
+  elseif field == "session_id" then
+    -- 不透明审计字段：原生 session id，不做形状强校验（不同 harness 格式不同）。
+    if #raw > 128 or raw:find("%s") ~= nil or raw:find("|", 1, true) ~= nil then
+      return nil, TEXTS.beats.profile_bad_value
+    end
+    return raw, nil
+  elseif field == "role" then
+    if #raw > 64 or raw:find("[\r\n]") ~= nil then
+      return nil, TEXTS.beats.profile_bad_value
+    end
+    return raw, nil
+  elseif field == "assignments" then
+    -- token 化只做校验（存储仍是逗号串；summary 投影时再解析成数组）。
+    local _, problem = parse_assignments(raw)
+    if problem ~= nil then
+      return nil, problem
+    end
+    return raw, nil
+  end
+  -- 自由键：键名 ^[a-z0-9_]{1,32}$，值 ≤256 单行（`|` 允许——自由值不进叙事不进 wire）。
+  if field:match("^[a-z0-9_]+$") == nil or #field > 32 then
+    return nil, TEXTS.beats.profile_bad_value
+  end
+  if #raw > 256 or raw:find("[\r\n]") ~= nil then
+    return nil, TEXTS.beats.profile_bad_value
+  end
+  return raw, nil
+end
+
 local function inbox_replay(ext)
   if type(ext) ~= "string" or ext == "" then
     return false
@@ -178,23 +302,65 @@ local function parse_proposal(payload)
     return nil, fill(TEXTS.beats.bad_payload, { action = "proposal.submit" })
   end
   local parts = split(trim(payload), "|")
-  -- `exec=` 只认末段：宿主对 <7 段的载荷会补段重排，放在中间会被静默挪到 artifacts 位。
-  for i = 1, #parts - 1 do
-    if trim(parts[i]):match("^exec=") ~= nil then
-      return nil, TEXTS.beats.req_prop_exec_misplaced
+  -- 保留尾段只认**尾链固定相对序**（至多 3 段）：先从末尾连弹 → 校验相对序 →
+  -- 余下段再带保留前缀 = 错位（宿主对 <7 段的载荷会补段重排，中间段会被静默挪进别的槽位）。
+  -- 沙箱无 `table` 库：tail 按弹出序（载荷逆序）追加，校验/取值时反向遍历即得载荷原序。
+  local tail = {} -- { {name, segment, meta}, … }（弹出序 = 载荷逆序）
+  for _ = 1, 3 do
+    local last = #parts
+    if last == 0 then
+      break
+    end
+    local item = tail_segment_of(trim(parts[last]))
+    if item == nil then
+      break
+    end
+    tail[#tail + 1] = { name = item.name, segment = trim(parts[last]), meta = item }
+    parts[last] = nil
+  end
+  for i = 1, #parts do
+    local item = tail_segment_of(trim(parts[i]))
+    if item ~= nil then
+      return nil, TEXTS.beats[item.beat]
     end
   end
-  local exec_id, exec_reason = nil, nil
-  if #parts > 0 and trim(parts[#parts]):match("^exec=") ~= nil then
-    local id, reason, exec_problem = parse_exec_segment(trim(parts[#parts]))
-    if exec_problem ~= nil then
-      return nil, exec_problem
+  -- 相对序：弹出序是载荷逆序 → rank 必须严格递减；违规拒绝并点名错位段
+  --（如 …|actor_session=s|actor=a：actor_session 没有落在最后）。
+  local last_rank = nil
+  for i = 1, #tail do
+    local rank = tail[i].meta.rank
+    if last_rank ~= nil and rank >= last_rank then
+      return nil, TEXTS.beats[tail[i].meta.beat]
     end
-    if id == "" then
-      return nil, TEXTS.beats.executor_bad_id
+    last_rank = rank
+  end
+  -- 逐段取值（反向遍历 = 载荷原序）：exec= 复用执行者形状校验；actor/actor_session
+  -- 用身份形状（互不混用）。
+  local exec_id, exec_reason, host_actor, host_actor_session = nil, nil, nil, nil
+  for i = #tail, 1, -1 do
+    local item = tail[i]
+    if item.name == "exec" then
+      local id, reason, problem = parse_exec_segment(item.segment)
+      if problem ~= nil then
+        return nil, problem
+      end
+      if id == "" then
+        return nil, TEXTS.beats.executor_bad_id
+      end
+      exec_id, exec_reason = id, reason
+    elseif item.name == "actor" then
+      local value, problem = identity_segment_value(item.segment, 64, "executor_bad_actor")
+      if problem ~= nil then
+        return nil, problem
+      end
+      host_actor = value
+    else
+      local value, problem = identity_segment_value(item.segment, 128, "executor_bad_actor_session")
+      if problem ~= nil then
+        return nil, problem
+      end
+      host_actor_session = value
     end
-    exec_id, exec_reason = id, reason
-    parts[#parts] = nil
   end
   if #parts < 4 then
     return nil, TEXTS.beats.req_prop_usage
@@ -215,6 +381,8 @@ local function parse_proposal(payload)
     ext = trim(parts[7] or ""),
     exec = exec_id,
     exec_reason = exec_reason,
+    host_actor = host_actor,
+    host_actor_session = host_actor_session,
   }, nil
 end
 
@@ -741,6 +909,9 @@ M.parse_exec_segment = parse_exec_segment
 M.parse_executor_key = parse_executor_key
 M.parse_executor_value = parse_executor_value
 M.parse_goal_auth = parse_goal_auth
+M.parse_profile_key = parse_profile_key
+M.parse_assignments = parse_assignments
+M.validate_profile_value = validate_profile_value
 M.EVOLUTION_KEPT = EVOLUTION_KEPT
 M.artifact_path_ok = evolution_path_ok
 M.evolution_path_ok = evolution_path_ok
