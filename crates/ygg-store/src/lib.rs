@@ -65,6 +65,9 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 pub mod json;
+/// 只读观察面（serve 这类不持锁观察者的读取面；写面仍归 `RunStore`）。
+/// 函数集与零写入纪律的文档见模块头；测试锁见 `observe::observe_tests`。
+pub mod observe;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
