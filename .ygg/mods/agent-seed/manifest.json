@@ -171,12 +171,12 @@
       "sha256": "c479926166c4e635e4e1f59aa16e4a01c4928eac522579f96711d98fe40b6376"
     },
     {
-      "byteLength": 8253,
+      "byteLength": 8977,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "e9d5b0683bef020d42acd888b935e4fbb85f0670efacb4f27d8ddf2e812f5351"
+      "sha256": "af6aa50171797741e4476edd584ccc393467da5fc7bfefad1425ef4979674b4b"
     },
     {
       "byteLength": 722,
