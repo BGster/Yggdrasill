@@ -1911,9 +1911,10 @@ fn tool_declarations_pin_the_merged_capability_surface() {
             json!("cli"),
             "{id}: this round only declares cli tools"
         );
-        // `readOnly` is a declared fact, not a policy: the active subsystem needs writer
-        // tools (`git.worktree_claim` / `harness.archive_sessions`), and a writer may never
-        // detach (host contract: `inlineWaitMs > 0` when `readOnly == false`).
+        // `readOnly` is a declared fact, not a policy: the active subsystem needs a writer
+        // tool (`git.worktree_claim`; r5/D-MA21 retired the `harness.archive_sessions`
+        // writer), and a writer may never detach (host contract: `inlineWaitMs > 0` when
+        // `readOnly == false`).
         let read_only = spec["readOnly"]
             .as_bool()
             .unwrap_or_else(|| panic!("{id}: readOnly must be a boolean"));
@@ -1999,7 +2000,6 @@ fn tool_declarations_pin_the_merged_capability_surface() {
         "git.lane_probe",
         "fs.artifact_probe",
         "gate.verify_suite",
-        "harness.archive_sessions",
     ];
     for id in subsystem_tools {
         assert_eq!(
@@ -2180,6 +2180,40 @@ fn mod_text_fragments_carry_no_retired_paths() {
         violations.is_empty(),
         "retired path literals in Mod text (rewrite to `agent-seed`/`egg` or mark \
          `[deprecated-ref]`): {}",
+        violations.join(", ")
+    );
+}
+
+/// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
+/// is delegated to the main session's own environment, so `data/texts/beats-settlement.json`
+/// must not carry any harness-implementation literal (`pi-subagents`, `.pi/agent`, `.claude`,
+/// `.codex`, `archive_sessions`). Machine-checkable half of the cross-harness rule; mutation:
+/// inject a forbidden literal line into the fragment → this test goes red.
+#[test]
+fn beats_cleanup_prompt_carries_no_harness_literals() {
+    let mod_dir = project_mod_dir();
+    let fragment = mod_dir.join("data/texts/beats-settlement.json");
+    let text = std::fs::read_to_string(&fragment)
+        .unwrap_or_else(|err| panic!("read {}: {err}", fragment.display()));
+    let forbidden = [
+        "pi-subagents",
+        ".pi/agent",
+        ".claude",
+        ".codex",
+        "archive_sessions",
+    ];
+    let mut violations: Vec<String> = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        for literal in forbidden {
+            if line.contains(literal) {
+                violations.push(format!("{}:{} ({literal})", fragment.display(), index + 1));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "harness-implementation literals in the cleanup prompt fragment (keep it \
+         harness-agnostic): {}",
         violations.join(", ")
     );
 }
@@ -2720,62 +2754,55 @@ fn verify_suite_result_records_green_evidence_only_in_review() {
     game.assert_kv("verify.source", json!("tool:gate.verify_suite"));
 }
 
-/// A5 `harness.archive_sessions` registers the settlement evidence only when `remaining=0`, and
-/// the batch can then close without a separate `settlement.sessions` turn.
-///
-/// Mutation: drop the `settlement.sessions.destination` write from the reactor → `review.note` is
-/// stopped by `gates.settlement_problem()` and the batch-close assertion goes red.
+/// A5 (r5 rewrite, D-MA21): `harness.archive_sessions` is retired from the Mod tool bridge —
+/// the cleanup is prompt-driven (the `[SESSIONS CLEANUP PENDING]` beat) and the only
+/// settlement path is the human `settlement.sessions` declaration. The predecessor asserted
+/// the auto-archive contract that r1 removed; this re-pin asserts the retirement facts:
+/// the tool is declared in neither `pack.json` nor `allowedTools`, and a direct
+/// `settlement.sessions` registration still unblocks the batch close.
 #[test]
-fn archive_sessions_result_unblocks_the_settlement() {
+fn archive_sessions_is_retired_from_the_tool_bridge() {
+    let mod_dir = project_mod_dir();
+    let pack: Json = serde_json::from_str(
+        &std::fs::read_to_string(mod_dir.join("pack.json")).expect("read pack.json"),
+    )
+    .expect("parse pack.json");
+    assert!(
+        pack["tools"].get("harness.archive_sessions").is_none(),
+        "pack.json must no longer declare harness.archive_sessions"
+    );
+    let config: Json = serde_json::from_str(
+        &std::fs::read_to_string(mod_dir.join("data/config.json")).expect("read config"),
+    )
+    .expect("parse data/config.json");
+    let allowed = config["allowedTools"]
+        .as_array()
+        .expect("allowedTools is an array");
+    assert!(
+        !allowed
+            .iter()
+            .any(|entry| entry == "harness.archive_sessions"),
+        "allowedTools must no longer release harness.archive_sessions"
+    );
+
+    // The human declaration path (the only one left) still unblocks the close.
     let mut game = drive_to_accept(drive_to_plan_gate());
     game.click("gate.approve — ");
     game.click("coordinate.submit — ");
-
-    // ① leftovers are not evidence.
-    let bad = tool_round(
-        &mut game,
-        "harness.archive_sessions|parent=x;batch=y|t1",
-        "t1|harness.archive_sessions|ok|0|moved=1;remaining=2;dest=/tmp/trash",
-    );
-    assert_eq!(
-        count_lines(&bad, "[SESSIONS ARCHIVE REFUSED]"),
-        1,
-        "{bad:#?}"
-    );
-    game.assert_kv("settlement.sessions.destination", json!(""));
-
-    // ② a clean sweep registers all four keys.
-    let ok = tool_round(
-        &mut game,
-        "harness.archive_sessions|parent=x;batch=y|t2",
-        "t2|harness.archive_sessions|ok|0|moved=3;remaining=0;dest=/tmp/trash/r2",
-    );
-    assert_eq!(count_lines(&ok, "[SESSIONS ARCHIVED]"), 1, "{ok:#?}");
-    game.assert_kv("settlement.sessions.moved", json!(3));
-    game.assert_kv("settlement.sessions.remaining", json!(0));
-    game.assert_kv("settlement.sessions.destination", json!("/tmp/trash/r2"));
-    game.assert_kv(
-        "settlement.sessions.source",
-        json!("tool:harness.archive_sessions"),
-    );
-
-    // ③ the closing chain no longer needs a `settlement.sessions` turn: review.note
-    // settles the batch straight away (resident default — no ending).
     game.click("verify.submit all_green=true — ");
     game.narrate("settlement.evolution", &text("|screened|c=0/0"));
     game.narrate("settlement.todo", &text("0|main session cleared"));
+    game.narrate(
+        "settlement.sessions",
+        &text("2|0|/tmp/sessions-trash/retired"),
+    );
     let closed = game.click("review.note — ");
-    let narrative = closed["narrative"].to_string();
     assert!(
-        narrative.contains("[BATCH 1 SETTLED]"),
-        "review.note must settle the batch: {closed}"
+        closed["narrative"]
+            .to_string()
+            .contains("[BATCH 1 SETTLED]"),
+        "review.note must settle after the human sessions declaration: {closed}"
     );
-    assert!(
-        !narrative.contains("[ENDING"),
-        "a batch settle must never carry the ending prefix: {closed}"
-    );
-    game.assert_kv("run.batch", json!(2));
-    game.assert_kv("fsm.stage", json!("coordinate"));
 }
 
 struct SyncRitualRunner;
@@ -2831,24 +2858,15 @@ impl HostToolRunner for SyncRitualRunner {
                 out.insert("released".to_owned(), "1".to_owned());
                 Ok(out)
             }
-            "harness.archive_sessions" => {
-                let batch = args
-                    .get("batch")
-                    .cloned()
-                    .unwrap_or_else(|| "default".to_owned());
-                out.insert("moved".to_owned(), "2".to_owned());
-                out.insert("remaining".to_owned(), "0".to_owned());
-                out.insert("dest".to_owned(), format!("/tmp/sessions-trash/{batch}"));
-                Ok(out)
-            }
             other => Err(format!("unexpected tool_id: {other}")),
         }
     }
 }
 
-/// A7 Synchronous `ygg.tool.call` mounted on `KernelFacade` settles all 4 inline engineering
-/// rituals (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`, and
-/// `harness.archive_sessions`) in **1 single turn each** without `tool.result` callbacks.
+/// A7 Synchronous `ygg.tool.call` mounted on `KernelFacade` settles the 3 inline engineering
+/// rituals (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`) in **1 single turn
+/// each** without `tool.result` callbacks. (r5/D-MA21: `harness.archive_sessions` left the
+/// bridge — the fourth ritual is retired, see `archive_sessions_is_retired_from_the_tool_bridge`.)
 /// The branch is **pre-claimed** through `lane.claim` in the forced r2 shape — the default
 /// name generator is gone, the auto-claim consumes the ledger's own branch.
 #[test]
@@ -2945,7 +2963,7 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
     //    settlement.evolution WITHOUT a `sessions=` segment must NOT auto-archive —
     //    fabricating parent="default" could rename the main session into the trash
     //    (the host selects files by substring match). The evolution turn narrates a
-    //    readable [SESSIONS UNSETTLED] hint instead, writes no forged remaining=0
+    //    readable [SESSIONS CLEANUP PENDING] hint instead, writes no forged remaining=0
     //    (the -1 from reset_settlement survives), and stays at 3 settled rituals.
     game.click("coordinate.submit — ");
     game.click("verify.submit all_green=true — ");
@@ -2964,7 +2982,7 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
         "{evo_lines:#?}"
     );
     assert_eq!(
-        count_lines(&evo_lines, "[SESSIONS UNSETTLED]"),
+        count_lines(&evo_lines, "[SESSIONS CLEANUP PENDING]"),
         1,
         "{evo_lines:#?}"
     );
@@ -2975,7 +2993,7 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
     let blocked = game.click("review.note — ");
     let blocked_text = blocked["narrative"].to_string();
     assert!(
-        blocked_text.contains("[SESSIONS UNSETTLED]"),
+        blocked_text.contains("[SESSIONS CLEANUP PENDING]"),
         "a blocked review.note must explain the safe cleanup path: {blocked}"
     );
     assert!(

@@ -36,7 +36,6 @@
     "git.worktree_release",
     "git.lane_probe",
     "fs.artifact_probe",
-    "gate.verify_suite",
-    "harness.archive_sessions"
+    "gate.verify_suite"
   ]
 }
