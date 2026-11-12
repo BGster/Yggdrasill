@@ -65,7 +65,7 @@
         {
           "id": "mod.two-mods-layering",
           "modality": "must",
-          "text": "The two Mods are a division of labor (not the same file): the skeleton surface (`mod.lua` + `schemas/`) is byte-identical and kept in sync by `scripts/sync-seed-mod.sh` (CI has a skeleton guard); the instance surface `data/` is maintained on each side — `packages/mods/agent-seed` is the distributable seed template (5 generic chapters, zero project rules) and `.ygg/mods/agent-seed` is this project's instance (14 chapters, this one included).",
+          "text": "The two mod paths are one Mod, not two copies: `.ygg/mods/agent-seed` is the single source of truth (the installed instance), and `packages/mods/agent-seed` is a git-tracked relative symlink to `../../.ygg/mods/agent-seed` — the stable packages-side entry, never an independent copy. `scripts/sync-seed-mod.sh` verifies the link target and the schema single-source (`packages/schema/schemas/`) and recomputes the content-addressed `manifest.json` (`--check` = read-only); the CI skeleton guard in `check.yml` still runs its diffs, but through the symlink they now compare the same files with themselves. The playbook is assembled, not duplicated: nine fragments under `data/playbook/` (a head plus eight chapter files) are joined by `mod.lua` in fixed order into 21 chapters — one fragment carries one to five chapters, section ids are globally unique across fragments, and this rule lives in the assembled `mod_engineering` chapter.",
           "basis": "AGENTS.md §8 (pre-migration)"
         }
       ]

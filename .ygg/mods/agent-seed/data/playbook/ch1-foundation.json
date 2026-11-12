@@ -23,7 +23,7 @@
         {
           "id": "credentials.no-secret-in-committed-resources",
           "modality": "must-not",
-          "text": "No sensitive information may enter a committed resource — the committed surface explicitly includes: game settings `data/config.json`, this playbook `data/playbook.json`, the experience/growth (evolution) Mod and its output, and every other Mod resource or document committed with the repository.",
+          "text": "No sensitive information may enter a committed resource — the committed surface explicitly includes: game settings `data/config.json`, the playbook resources under `data/playbook/` (the head plus the chapter fragments assembled at load), the experience/growth (evolution) Mod and its output, and every other Mod resource or document committed with the repository.",
           "basis": "user decision 2026-10-29 (s1 addition, not in the original AGENTS.md)"
         },
         {

@@ -606,19 +606,22 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 
 ## 十二、走查
 
-r9 起默认基线是两条**脚本化走查**（默认无参全 1 在常驻语义下空批循环至步数上限 →
-`ok=false, reached=limit`，这是**预期态**，不是回归——空批循环即「队列已清空等进料」）:
+r9 起默认基线是两条**脚本化走查**（默认无参全 1 在 v2 立局幕被 `1=charter.set` 原地自循环拖到步数上限
+→ `ok=false, reached=limit`，这是**预期态**，不是回归——循环机制是章程菜单重设，不是空批循环）：
 
 ```bash
-# 默认全 1 贪心：intake → coordinate.submit → verify → settlement.evolution → review.note → 【结局
+# 默认全 1 贪心：立局菜单 1=charter.set 恒重设章程，全 1 原地循环至步数上限（reached=limit 预期态；
+#   旧「intake→批盘点→发布→结局」叙事已随五幕机退役）
 cargo run --example playtest -- .ygg/mods/agent-seed
-# 基线 A · 批循环（新默认）：intake → coordinate.submit(批边界) → verify → settlement.evolution
-#   → review.note(批收口) → 回 coordinate，脚本耗尽（reached=choice 是脚本走查的成功值）
-cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,1
+# 基线 A · 立局到派活（choices 通道最深点）：charter.set → run.begin → requirement.add
+#   → requirement.dispatch，5 步停在协调幕（1 个 development job 在跑；reached=choice 是脚本走查的成功值）
+cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1
 
-# 基线 B · 退役：批盘点 → config 子页（7=config 入口）武装 run.retire（4=第 5 项）→ 关子页（5）
-#   → review.note（终局）→ [ENDING · run retired]（reached=ending）
-cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,7,4,5,1
+# 基线 B · 退役（混合驱动，纯 choices 结构性不可达 [ENDING：完成需求必须经执行者收件箱
+#   事件 proposal.submit ×2 + integration.confirm，菜单面无对应项]）：完整 15 choices +
+#   3 事件链见 AGENTS.md §2「Settle and finish」；config 子页经菜单可达（立局幕 3=进、
+#   4=武装 run.retire、5=退），端到端已在 /tmp runs-root 实测
+cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1   # 前缀钉
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
 #   .ygg/bin/egg --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
