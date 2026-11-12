@@ -15,6 +15,12 @@
           "basis": "user decision 2026-11-01 (E2 ruling: reuse config.set, bind no rev, no hard submit gate, a cross-stage handoff must give a reason)"
         },
         {
+          "id": "dispatch.decision-id-preallocation",
+          "modality": "must",
+          "text": "A genuinely new architectural decision gets its `D-MAx` number allocated serially by the main session at dispatch time and written into the requirement description and the subagent brief; an existing decision reuses its existing number. An executor never self-allocates `max+1`: two lanes picking `max+1` from the same base double-claimed `D-MA16` (see docs/CONTEXT.md history `d0b4a7c` / `6848138`). IDs beyond the brief are not self-served — return to the coordinator.",
+          "basis": "user decision 2026-11-12 (E9: parallel-lane D-MA16 collision)"
+        },
+        {
           "id": "dispatch.background-only",
           "modality": "must",
           "text": "Every subagent task runs in the background; the main session never waits in place — keep advancing other lanes, verifications or planning while it runs, and verify and merge once the completion notice arrives.",
@@ -177,6 +183,12 @@
           "modality": "must",
           "text": "The gate baseline is a snapshot that grows with each iteration, and the acceptance standard is \"introduce no new failure\" — historical debt does not have to be zero, but no new failure may appear.",
           "basis": "AGENTS.md §5"
+        },
+        {
+          "id": "gates.three-suite-literal-evidence",
+          "modality": "must",
+          "text": "The three-suite green of this repository is claimed only by running the three commands verbatim (`cargo test --workspace`; `cargo test --example egg -p ygg-sandbox`; `cargo test -p ygg-sandbox --test agent_seed_semantics`) and recording each command with its real exit code and test counts. Member-equivalent runs (`cargo check`, single-test selections, filtered runs), `verify-suite --mode fast`, and any `YGG_VERIFY_COMMANDS` override are evidence of the substitute only and never substitute for the literal suite evidence.",
+          "basis": "user decision 2026-11-12 (E7: member-equivalent runs masked kernel_facade runtime failures in two consecutive runs)"
         },
         {
           "id": "gates.core-purity-review",
