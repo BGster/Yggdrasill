@@ -414,9 +414,8 @@ are git-ignored, `.ygg/mods/` is committed.
 
 ### Start
 ```bash
-.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
-.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --raw --resume --event task.intake --payload '"<局级任务标题>|<一句话目标>"'
-```（第二步把局推进 coordinate——收官动作都在那之后才可用。）
+.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --raw --resume --event event.start --payload '"<局级任务标题>|<一句话目标>"'
+```（启动载荷即章程：boot 直接落 coordinate；无载荷也能 boot，任务显示 (untitled task)，空局收口会被可读拒绝。）
 
 ### Serve（只读观察台，r9 全局唯一实例）
 ```bash

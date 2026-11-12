@@ -12386,13 +12386,13 @@ end)
 mod receipt_text_tests {
     use super::*;
 
-    /// `build_receipt` 形状的 ok fixture（新局 task.intake，r5-plan §2.2 成功样例骨架）。
+    /// `build_receipt` 形状的 ok fixture（新局 requirement.add，r5-plan §2.2 成功样例骨架；r2 rev2 注销 intake 后换存留事件）。
     fn ok_receipt() -> Json {
         json!({
             "ok": true,
-            "event": "task.intake",
+            "event": "requirement.add",
             "narrative": [
-                "[TASK ACCEPTED] task 把宿主 CLI 回执渲染成自然语言 — moving to coordinate.",
+                "[REQ ADDED] r1 \"把宿主 CLI 回执渲染成自然语言\" — 1 requirement(s) in the graph.",
                 "second narrative line",
             ],
             "pendingChoice": {
@@ -12462,12 +12462,12 @@ mod receipt_text_tests {
         // 头行：event/seq/revision/存档齐备
         assert_eq!(
             lines[0],
-            "── task.intake · ok · seq 0 · revision 2 · 存档 .ygg/runs/cli-text-probe-01/run.sqlite#latest ──"
+            "── requirement.add · ok · seq 0 · revision 2 · 存档 .ygg/runs/cli-text-probe-01/run.sqlite#latest ──"
         );
         // narrative 原样逐行、两格缩进
         assert_eq!(
             lines[1],
-            "  [TASK ACCEPTED] task 把宿主 CLI 回执渲染成自然语言 — moving to coordinate."
+            "  [REQ ADDED] r1 \"把宿主 CLI 回执渲染成自然语言\" — 1 requirement(s) in the graph."
         );
         assert_eq!(lines[2], "  second narrative line");
         // 状态行在 narrative 之后
@@ -12542,7 +12542,7 @@ mod receipt_text_tests {
         );
         assert_eq!(
             lines[0],
-            "── task.intake · ok · seq 0 · revision 2 · 存档 .ygg/runs/cli-text-probe-01/run.sqlite#latest ──"
+            "── requirement.add · ok · seq 0 · revision 2 · 存档 .ygg/runs/cli-text-probe-01/run.sqlite#latest ──"
         );
         assert!(lines
             .iter()

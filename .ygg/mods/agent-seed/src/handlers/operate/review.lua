@@ -176,6 +176,35 @@ function M.install(deps)
     if record == nil then
       return reject_payload("settlement.evolution", record_err)
     end
+    -- E2（r2 rev2）：登记前对非空 artifact 做挂载探针核验（fs.artifact_probe 同步工具桥）。
+    -- 空 artifact（c=0/0）保持合法；缺失 / 空 / 读错 / 工具未挂载 → 可读拒绝登记：
+    -- 不写任何 settlement.* KV，也不触发归档副作用（auto_archive 只在登记成功后才可能触发）。
+    if trim(record.artifact) ~= "" then
+      local call_id = tools.try_sync_call(
+        "fs.artifact_probe",
+        { path = record.artifact },
+        "path=" .. record.artifact,
+        "",
+        ""
+      )
+      local artifact_problem = nil
+      if call_id == nil or call_id == "" then
+        artifact_problem = fill(TEXTS.beats.settlement_artifact_no_vfs, { artifact = record.artifact })
+      elseif tools.status_of(call_id) ~= "ok" then
+        artifact_problem = fill(TEXTS.beats.settlement_artifact_read_error, { artifact = record.artifact })
+      else
+        local pairs_map = tools.output_pairs(tools.output_of(call_id))
+        local bytes = tonumber(pairs_map.bytes) or 0
+        if pairs_map.exists ~= "1" then
+          artifact_problem = fill(TEXTS.beats.settlement_artifact_absent, { artifact = record.artifact })
+        elseif bytes <= 0 then
+          artifact_problem = fill(TEXTS.beats.settlement_artifact_empty, { artifact = record.artifact })
+        end
+      end
+      if artifact_problem ~= nil then
+        return reject_payload("settlement.evolution", artifact_problem)
+      end
+    end
     local candidates = tostring(record.kept) .. "/" .. tostring(record.screened)
     local classes_text = wire.format_classes(record.classes)
     ygg.kv.set("settlement.evolution.artifact", record.artifact)

@@ -1,7 +1,6 @@
 {
   "scenes": {
     "prologue": "[BOOT · engine ready] the ygg world is loaded (engine {{engine}}), current stage {{stage}}, evolution preference {{mode}} (narration only — resources are never rewritten automatically). This is a two-layer agent meta-workflow: the coordinator dispatches and accepts; each requirement runs plan → gate → develop → accept → gate.",
-    "intake": "[WAITING FOR TASK] current stage {{stage}}: submit the task description first. require_all_green = {{gates}}.",
     "coordinate": "[COORDINATING] task \"{{title}}\": {{description}} | {{count}} requirements ({{open}} open) | {{pending}} pending proposals. In this layer you do exactly three things: dispatch, accept proposals serially, pass the two mandatory gates; analyze / plan / develop of other requirements may run asynchronously in parallel.",
     "review": "[FINAL REVIEW] task \"{{title}}\": {{count}} requirements ({{done}} done) | require_all_green {{gates}}. Closing is allowed only when every leaf requirement is done with no pending proposal and no unresolved conflict."
   },
@@ -9,12 +8,10 @@
     "done": "[ENDING · run retired] task \"{{title}}\" — {{count}} requirements ({{done}} done) after {{batch}} settled batch(es); review score {{score}}/5, evolution candidates {{candidates}} (kept/screened). One-line lesson: {{lesson}}"
   },
   "prompts": {
-    "intake": "Cold start: submit the task description, or adjust runtime config first?",
     "coordinate": "Next step: accept a proposal, pass a gate, dispatch, or close into final review?",
     "review": "Final review: how are the gates? Once green, screen evolution candidates against the evolution chapter, register settlement.evolution (it also settles sessions and todo in the same transaction), then review.note records the lesson and archives single-source to close the run."
   },
   "options": {
-    "intake": "task.intake — inject the task description (payload \"title|description\")",
     "dispatch": "requirement.dispatch — dispatch by readiness order ({{count}} candidates, jobs {{jobs}}/{{cap}}, head {{id}})",
     "accept": "proposal.accept — accept pending proposal {{id}} ({{req}} / {{stage}}, {{pending}} pending)",
     "coordinate_submit": "coordinate.submit — enter final review once every requirement is closed",

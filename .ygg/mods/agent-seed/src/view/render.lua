@@ -454,14 +454,13 @@ local function req_graph_lines()
   narrate_req_list()
 end
 
-local MAP_NODES = { STAGE.intake, STAGE.coordinate, STAGE.review, STAGE.done }
+local MAP_NODES = { STAGE.coordinate, STAGE.review, STAGE.done }
 
 -- r9 常驻批循环图：review→coordinate 有两条语义边（批收口 review.note 未武装 / verify 打回），
 -- review→done 只剩退役边（run.retire 武装后的 review.note 终局变体）。
 -- 注：本表是**展示面**（不是 FSM 转移表，mod.lua 的 ygg.fsm.define 一字未动）；
 -- to_stage 对 review.note 按武装状态二选一，让操作视图的目标阶段与真实落点一致。
 local MAP_EDGES = {
-  { from = STAGE.intake, to = STAGE.coordinate, action = "task.intake" },
   { from = STAGE.coordinate, to = STAGE.review, action = "coordinate.submit", note = "map_note_batch_boundary" },
   {
     from = STAGE.review,
@@ -731,17 +730,6 @@ local function narrate_req_panel()
   }))
 end
 
-RENDER[STAGE.intake] = function()
-  local current = stage()
-  ygg.narrate(fill(TEXTS.scenes.intake, { stage = current, gates = tostring(strict_gates()) }))
-  ygg.narrate(fill(stage_prompt(STAGE.intake), prompt_vars()))
-  if req_count() > 0 then
-    narrate_req_panel()
-  end
-  narrate_stage_guide(current)
-  ygg.choice(TEXTS.prompts.intake, option_texts(menu(current)))
-end
-
 RENDER[STAGE.coordinate] = function()
   local current = stage()
   ygg.narrate(fill(TEXTS.scenes.coordinate, {
@@ -830,7 +818,7 @@ local function render()
   local renderer = RENDER[current]
   if renderer == nil then
     ygg.narrate(fill(TEXTS.beats.unknown_stage, { stage = tostring(current) }))
-    renderer = RENDER[STAGE.intake]
+    renderer = RENDER[STAGE.coordinate]
   end
   renderer()
 end

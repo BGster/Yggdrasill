@@ -13,7 +13,7 @@
         {
           "id": "harness.contract-agent-seg",
           "modality": "must",
-          "text": "The coordinator has a four-state chain: intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done; inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
+          "text": "The coordinator has a three-state chain: coordinate ──coordinate.submit──▶ review ──review.note──▶ done (boot lands in coordinate; the event.start payload IS the charter); inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
           "basis": "AGENTS.md §2 (pre-migration)"
         },
         {
@@ -67,7 +67,7 @@
         {
           "id": "harness.living-docs-closed-loop",
           "modality": "must",
-          "text": "Cold start of a run: `.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
+          "text": "Cold start of a run (one step, payload = charter): `.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --raw --resume --event event.start --payload '\"<task title>|<one-line goal>\"'`.",
           "basis": "AGENTS.md §3 (pre-migration)"
         }
       ]

@@ -314,20 +314,6 @@ local function gate_items()
   }
 end
 
-MENU[STAGE.intake] = function()
-  local items = append_all({}, resolve_items())
-  items[#items + 1] = {
-    text = TEXTS.options.intake,
-    action = "task.intake",
-    payload = TEXTS.beats.default_task_title .. "|" .. TEXTS.beats.default_task_desc,
-  }
-  items[#items + 1] = map_item(STAGE.intake)
-  items[#items + 1] = req_list_item()
-  items[#items + 1] = req_add_item()
-  items[#items + 1] = CONFIG_UI.item()
-  return items
-end
-
 MENU[STAGE.coordinate] = function()
   local items = append_all({}, resolve_items())
   -- 主前进动作并存（canonical 序不变）：验收提案第 1 → 门禁两项紧随 → 派活 / 收口兑底。

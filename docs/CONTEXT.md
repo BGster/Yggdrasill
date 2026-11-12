@@ -11,7 +11,7 @@
 | 术语 | 中文释义 |
 | --- | --- |
 | `Run` | 运行实例 |
-| `stage`（Coordinator Stage） | 协调者宏观阶段（`intake` → `coordinate` → `review` → `done`） |
+| `stage`（Coordinator Stage） | 协调者宏观阶段（`coordinate` → `review` → `done`；r2 rev2 B 裁决后 boot 直落 `coordinate`，`intake` 阶段已注销） |
 | `Requirement`（`r1..rN`） | 需求（交付单元） |
 | `Lane`（Persistent Lane Pool） | 持久化泳道工作树池 |
 | `Proposal`（`p1..pM`） | 提案（不可变交付提交） |
@@ -45,7 +45,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 | 术语 | 领域定义 |
 | --- | --- |
 | **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。r9 起运行是**常驻自循环**：运行级终局不再由 review.note 自动触发，而是周期性批结算 + 显式退役（`done` 仅经 `run.retire` 武装可达）；升级不迁移旧局（装载失败即开新局）。 |
-| **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期：`intake`（任务注入与需求立案，仅冷启动）$\to$ `coordinate`（常驻主态：派发泳道、接受提案、通过门禁）$\to$ `review`（批盘点相位：验证套件、演进筛选、会话/todo 清理）$\to$ 批收口回 `coordinate`（`run.batch` +1）；`done`（退役终态，仅 `run.retire` 武装后的 review.note 可达）。需求级 `done` 与运行退役态只是字面量同形（语义正交）。 |
+| **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期（r2 rev2 B 裁决：`intake` 阶段与 `task.intake` 事件已注销，冷启动章程由 `event.start` 启动载荷承载，boot 直落 `coordinate`）：`coordinate`（常驻主态：派发泳道、接受提案、通过门禁）$\to$ `review`（批盘点相位：验证套件、演进筛选、会话/todo 清理）$\to$ 批收口回 `coordinate`（`run.batch` +1）；`done`（退役终态，仅 `run.retire` 武装后的 review.note 可达）。需求级 `done` 与运行退役态只是字面量同形（语义正交）。 |
 | **Requirement（`r1..rN`，需求）** | 由状态机跟踪的一个交付单元。以 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split` / `merged` / `dropped`）存储，并通过 `plan_ok`、`job`、`gate`、`conflict` 属性投影为细粒度展示阶段（`draft`、`planning`、`plan_review`、`plan_gate`、`ready`、`developing`、`dev_review`、`accept`、`done`、`blocked`）。 |
 | **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。泳道分支名执行强制形态 `feature/{4位uuid}-{语义词段}`（`lane.claim` 与 `git.worktree_claim` 两条入口同规则，非法名可读拒绝；默认名生成机制已删除）——契约细节见 DESIGN §2.4。 |
 | **Proposal（`p1..pM`，提案）** | 由执行者子代理针对特定 `(req_id, rev, stage)` 元组产出的不可变交付提交（`proposal.submit`），引用一个已归档的 VFS 产物（`artifacts/<req>-<stage>.md`）并绑定执行者身份（`exec=<agent_id>`）。提案在协调者串行执行 `proposal.accept` 或 `proposal.reject` 之前不会改变需求状态。 |
@@ -163,7 +163,7 @@ Yggdrasill/
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
-| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/agent-seed` 协调软件工程任务（常驻自循环：`intake -> coordinate ⇄ review 批循环 -> (退役) done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`，详见 D-MA10）。所有产物都要求先有状态机事件。 | 已确认 |
+| **D-MA1** | 工作流即 Mod 架构 | 通过 `.ygg/mods/agent-seed` 协调软件工程任务（常驻自循环：`boot(event.start 载荷章程) -> coordinate ⇄ review 批循环 -> (退役) done` + 每个需求的 `draft -> planning -> plan_gate -> ready -> developing -> accept -> done`，详见 D-MA10）。所有产物都要求先有状态机事件。 | 已确认 |
 | **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/**` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
 | **D-MA3** | 单文件 SQLite 运行存储与 VFS | 新运行默认使用 `<run-dir>/run.sqlite`（`ygg-store`），原子提交 `events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）。既有的 JSON 运行（`autosave.json` + `events.jsonl`）保持自动检测，不隐式迁移。 | 已确认 |
 | **D-MA4** | 响应式钩子与省回合压缩 | `src/core/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |
@@ -180,4 +180,5 @@ Yggdrasill/
 | **D-MA15** | Mod 片段化与 src 五层（r6） | 大 JSON 按域拆片：`data/texts/`（scene-texts-fragment 若干片，`mod.lua` 装配回 TEXTS）与 `data/playbook/`（agent-playbook-fragment 若干片），`pack.json` `entries` 数组逐片声明；`src/**` 重组为 core/domain/view/runtime/handlers 五层（24 模块纯移动）。宿主不感知 Mod 内部布局——拆分是 Mod 自由度，不是内核契约（P11）。 | 已确认 |
 | **D-MA16** | 自动收波看门狗（r1） | 触发 = 扩展内进程内定时器轮询 daemon `summary`（`YGG_AUTO_INTERVAL_MS` 钳位 1s–60s，缺省 5s；批量入口禁令下唯一合法形态）；落点 = 每波原样复用 `ygg_run_lanes` 全链，天然停在门禁/待决提案（可收波谓词：available ∧ `lifecycle=="resident"` ∧ 无冲突 ∧ ∃ plan/development 作业未 `delivered:*` 未停车）；回执 = 事件账与手发同构 + `artifacts/auto-wave-<NNNN>.md` 波次日志（narrative 全量不截断）+ 交接单重写；保活 = 每 tick 一次 `summary()` 心跳，意外退出由 daemon 客户端既有单次重启自愈（spike 实证：`ctx.executeTool` 在回合外 handler ctx 上不可用 → 降级为 `pi.sendMessage(triggerTurn:true)` 确定性自唤醒回合，主代理代跑 `ygg_run_lanes`，每波多耗一个模型回合，语义与回执不变）；预算 = per `(req,rev,stage)` 连续 2 次整波失败停车（rev 变化自动复位）+ 全局 3 波全败自关（fail-closed）；在场唤醒 = goal 模式限定 opt-in（`YGG_AUTO_WAKE=on`），guide 模式永不唤醒；压缩边界 = 看门狗不是第三个压缩入口（硬水位只抑制派波）。宿主零改动；mod 仅 `summary_fields` 加性 `play` 投影。契约正文见 `docs/DESIGN.md` §3.5。 | **已废弃**（扩展层删除 2026-11-12，看门狗随层移除；daemon 常驻由宿主原生承担） |
 | **D-MA17** | 观察台展示投影（面板默认局详情视图） | 内置面板页允许对 agent-seed 工作流做**只读展示投影**：Rust 服务面保持零语义（零新端点、零解析——P11 字面边界不动），领域词汇（`fsm.stage`/`req.*`/`prop.*`/`lane.*` 键族、`req_phase_name` 派生名、决策事件族）的解析只发生在 `assets/panel` 展示层，且对无 `req.*` 键族的 mod **无害退化**（详情退化为通用摘要、零报错）。理由：面板=纯前端资产是「同 r3」需求约束，mod 侧自建 panel 违反该约束且引入第二套 UI（违 P4）；投影不限制 mod 自由度——任何 mod 的局仍可被观察，r8 的「宿主解析限制 mod 自由度」担忧只落在 Rust 面。判据=投影失败必须无害退化（字段缺失显「—」、非 seed 局只显摘要段）；权威仍是 mod 回执/CLI，面板仅为投影。 | 已确认 |
+| **D-MA18** | intake 阶段注销与章程载荷化（r2 rev2 B 裁决） | 注销 `intake` 宏观阶段与 `task.intake` 事件（零残留：菜单/渲染/地图/文案/playbook 链句全清，事件全集 33→32 见 DESIGN §3.3 末注）；冷启动章程改由 `event.start` 启动载荷承载（`title\|description`，复用 `parse_intake` 校验；`""`/`"0"` 同判无载荷；coordinate 内再带载荷 = 幂等补写不过段）； 局保护：`gate_problem` 增两条款（章程非空 ∧ 需求数 ≥1），`coordinate.submit`/`verify.submit`/`review.note` 共用可读拒绝，同时堵 `req_all_done` 0 需求空真洞。理由：冷启动两步仪式是 E3 筛查确认的隐藏出边——intake 阶段可立案后直接派活、 局可空收口，治理面外泄；载荷化后 boot 一步落 coordinate，章程与收口前置由状态机强制。判据=全 Mod grep intake 除 `[deprecated-ref]`/`parse_intake` 标识符/pack 钉死路径外归零；变异（重注册 task.intake）下 VALIDATION 拒绝集与 33 事件计数断言必红。 | 已确认 |
 

@@ -1,4 +1,6 @@
--- src/handlers/intake/actions.lua —— action 入口：task.intake / requirement.add|list|dispatch。
+-- src/handlers/intake/actions.lua —— action 入口：requirement.add|list|dispatch。 -- [deprecated-ref] module path pinned by pack.json code.modules
+--（r2 rev2 B 方案：task.intake 已随 intake 阶段注销 [deprecated-ref: historical note]；冷启动章程由 event.start
+-- 启动载荷承载，见 lifecycle.lua。）
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
@@ -19,8 +21,8 @@ local wire = require("src.domain.wire")
 
 local TEXTS
 
-local advance, reject, reject_payload =
-  flow.advance, flow.reject, flow.reject_payload
+local reject, reject_payload =
+  flow.reject, flow.reject_payload
 local LANES, free_lanes, lane_text =
   lanes.LANES, lanes.free_lanes, lanes.lane_text
 local gate_problem_for =
@@ -33,8 +35,8 @@ local R_DEVELOPING, R_PLANNING, STAGE, job_capacity, job_total, req_append, req_
   reqs.R_DEVELOPING, reqs.R_PLANNING, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_append, reqs.req_capacity, reqs.req_conflict_total, reqs.req_count, reqs.req_deps_text, reqs.req_dev_blocked_text, reqs.req_dev_ready, reqs.req_display, reqs.req_id, reqs.req_index_of, reqs.req_job, reqs.req_job_stage, reqs.req_key, reqs.req_open_total, reqs.req_validate_deps, reqs.stage
 local contains, fill, join, trim =
   util.contains, util.fill, util.join, util.trim
-local parse_dispatch, parse_intake, parse_requirement, probe_payload_ok =
-  wire.parse_dispatch, wire.parse_intake, wire.parse_requirement, wire.probe_payload_ok
+local parse_dispatch, parse_requirement, probe_payload_ok =
+  wire.parse_dispatch, wire.parse_requirement, wire.probe_payload_ok
 
 
 
@@ -79,6 +81,14 @@ local function dispatch_one(index)
     end
     if lane > 0 then
       tools.auto_claim_worktree(lane, index)
+      -- E4（r2 rev2）：泳道无自报分支时给可读引导（手动与自动派发共用此出口；
+      -- 工作树认领由 auto_claim_worktree 在空分支时拒绝并发起可读拒绝叙事）。
+      if LANES.branch_of(lane) == "" then
+        ygg.narrate(fill(TEXTS.beats.lane_branch_hint, {
+          k = tostring(lane),
+          id = req_id(index),
+        }))
+      end
     end
   end
   return true, stage_name, lane
@@ -150,20 +160,6 @@ function M.install(deps)
     end
     return deps_sig
   end, auto_dispatch_effect)
-  ygg.on("task.intake", function(payload)
-    local current = stage()
-    if current ~= STAGE.intake then
-      return reject("task.intake", fill(TEXTS.beats.stage_expected, { expected = STAGE.intake }))
-    end
-    local title, description, problem = parse_intake(payload)
-    if problem ~= nil then
-      return reject_payload("task.intake", problem)
-    end
-    ygg.kv.set("task.title", title)
-    ygg.kv.set("task.description", description)
-    ygg.narrate(fill(TEXTS.beats.intake_ok, { title = title }))
-    advance(STAGE.coordinate)
-  end)
   ygg.on("requirement.add", function(payload)
     if stage() == STAGE.done then
       return reject("requirement.add", TEXTS.beats.req_after_done)

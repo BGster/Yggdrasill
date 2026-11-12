@@ -74,9 +74,9 @@ local function valid_ext(ext)
   return raw:find("%s") == nil
 end
 
-local function parse_intake(payload)
+local function parse_intake(payload) -- [deprecated-ref] name kept: r2 rev2 spec reuses this parser for the event.start charter
   if type(payload) ~= "string" then
-    return nil, nil, fill(TEXTS.beats.bad_payload, { action = "task.intake" })
+    return nil, nil, fill(TEXTS.beats.bad_payload, { action = "event.start" })
   end
   local raw = trim(payload)
   if raw == "" then

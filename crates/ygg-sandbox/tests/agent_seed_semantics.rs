@@ -277,7 +277,7 @@ fn assert_refused(lines: &[String], needle: &str) {
 /// moves to `planning` in the same dispatch.
 fn start_requirement(game: &mut Game) {
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("semantics gate|synthetic task description"),
     );
     game.narrate(
@@ -384,18 +384,18 @@ fn drive_to_review() -> Game {
 /// r9 Resident lifecycle: `review.note` **settles the batch and returns to coordinate**;
 /// the run only ends through an explicitly armed retirement (baseline B, a separate case).
 ///
-/// Baseline A — the scripted batch cycle (the default walk): the all-forward script runs
-/// intake → coordinate.submit (batch boundary) → verify.submit green → settlement.evolution
-/// (merged sessions + todo) → review.note, and the script is then exhausted **back at the
-/// coordinate stage** (`reached=choice`, 6 steps). Script pins make a menu reorder fail
-/// here loudly, not silently.
+/// Baseline A — the scripted batch cycle (the default walk): since r2 rev2 the boot lands
+/// directly in `coordinate` and the charter gate refuses every closer on a charterless
+/// empty run, so the four-forward script (1=coordinate.submit · 1=verify.submit ·
+/// 1=settlement.evolution · 1=review.note) is refused at step one and the walk exhausts
+/// back at the coordinate choice (`reached=choice`, 5 steps) with **no closure beat**
+/// narrated anywhere. Script pins make a menu reorder fail here loudly, not silently.
 #[test]
 fn resident_batch_cycle_reaches_coordinate_again() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
-        // Script (pinned): 1=task.intake · 1=coordinate.submit · 1=verify.submit green ·
-        // 1=settlement.evolution · 1=review.note (batch settle → coordinate menu again).
+        // Script (pinned, r2 rev2): every closer refused on the empty run → exhaust at choice.
         let options = PlaytestOptions {
-            choices: vec![1, 1, 1, 1, 1],
+            choices: vec![1, 1, 1, 1],
             ..Default::default()
         };
         let report = playtest(&dir, &options);
@@ -414,9 +414,22 @@ fn resident_batch_cycle_reaches_coordinate_again() {
         );
         assert_eq!(
             report.steps,
-            6,
-            "{}: the pinned batch-cycle walk is 6 steps",
+            5,
+            "{}: the pinned batch-cycle walk is 5 steps (boot + four refused closers)",
             dir.display()
+        );
+        // Readable-rejection direction: a charterless empty run must never close — none of
+        // the closure beats may appear in the walked narrative.
+        let closed = report.narrative_sample.iter().any(|line| {
+            line.starts_with("[COORDINATION DONE]")
+                || line.starts_with("[GATES GREEN]")
+                || line.starts_with("[BATCH")
+        });
+        assert!(
+            !closed,
+            "{}: an unchartered empty run must never close: {:?}",
+            dir.display(),
+            report.narrative_sample
         );
         assert!(
             report.warnings.is_empty() && report.errors.is_empty(),
@@ -430,15 +443,16 @@ fn resident_batch_cycle_reaches_coordinate_again() {
 
 /// r9 Baseline B — the armed retirement (the **only** path to a run-level ending).
 ///
-/// Script (pinned, 12 choices / 13 steps): two full batch cycles (8 × item 1: intake →
-/// coordinate.submit → verify green → settlement.evolution → review.note batch-close →
-/// coordinate.submit → verify green → settlement.evolution), then `6=config.open` ·
-/// `4=config.set run.retire=true` · `5=back` · `1=review.note` → `[ENDING · run retired]`.
+/// r2 rev2: on a charterless empty run every closer refuses at the charter gate, so the
+/// script can never reach `review` and the retiring ending is **unreachable**: the walk
+/// (1×7 refused closers · 5=config.open · 4=arm run.retire · 5=back · 1=refused
+/// review.note) exhausts at the coordinate choice (`reached=choice`, 12 steps) with no
+/// `[ENDING` line anywhere. Script pins make a menu reorder fail here loudly, not silently.
 #[test]
-fn resident_retire_reaches_ending() {
+fn resident_retire_is_unreachable_without_a_charter() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
         let options = PlaytestOptions {
-            choices: vec![1, 1, 1, 1, 1, 1, 1, 1, 6, 4, 5, 1],
+            choices: vec![1, 1, 1, 1, 1, 1, 1, 5, 4, 5, 1],
             ..Default::default()
         };
         let report = playtest(&dir, &options);
@@ -451,15 +465,24 @@ fn resident_retire_reaches_ending() {
         );
         assert_eq!(
             report.reached,
-            Some(Reached::Ending),
-            "{} must reach the retiring ending",
+            Some(Reached::Choice),
+            "{} without a charter the retiring ending must be unreachable",
             dir.display()
         );
         assert_eq!(
             report.steps,
-            13,
-            "{}: the pinned retirement walk is 13 steps",
+            12,
+            "{}: the pinned retirement walk is 12 steps",
             dir.display()
+        );
+        assert!(
+            !report
+                .narrative_sample
+                .iter()
+                .any(|line| line.starts_with("[ENDING")),
+            "{}: no ending line may appear on a charterless empty run: {:?}",
+            dir.display(),
+            report.narrative_sample
         );
         assert!(
             report.warnings.is_empty() && report.errors.is_empty(),
@@ -544,8 +567,8 @@ fn run_retire_value_domain_and_retiring_close() {
 /// r9 The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
 /// an empty batch loops (coordinate.submit → verify → evolution → review.note → coordinate …)
 /// until the step limit — `ok=false, reached=limit` is the documented steady state, not a
-/// regression. The scripted baselines above are the pass/fail gates; the settlement merge
-/// still collapses the review stage into one evolution turn.
+/// regression. r2 rev2: the loop is now the **charter-rejection loop** — every closer is
+/// refused at the charter gate, so no closure beat may ever appear in the walked narrative.
 #[test]
 fn default_all1_walk_loops_empty_batches_to_limit() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
@@ -566,6 +589,19 @@ fn default_all1_walk_loops_empty_batches_to_limit() {
             "{} must not error (limit is a clean stop): {:?}",
             dir.display(),
             report.errors
+        );
+        // r2 rev2 readable-rejection direction: the charter gate keeps the empty run from
+        // ever closing — no batch boundary / gate-green / batch-settle beat may appear.
+        let closed = report.narrative_sample.iter().any(|line| {
+            line.starts_with("[COORDINATION DONE]")
+                || line.starts_with("[GATES GREEN]")
+                || line.starts_with("[BATCH")
+        });
+        assert!(
+            !closed,
+            "{}: the charter rejection loop must never close: {:?}",
+            dir.display(),
+            report.narrative_sample
         );
     }
 }
@@ -1230,9 +1266,10 @@ fn assert_fail_closed(game: &mut Game, event: &str) -> Json {
     let count: usize = digits
         .parse()
         .unwrap_or_else(|err| panic!("the registered count must be a number: {message} ({err})"));
-    assert!(
-        count > 30,
-        "the merged mod registers 33+ events — got {count}: {message}"
+    // r2 rev2: task.intake was deregistered with the intake stage — exactly 33 events remain.
+    assert_eq!(
+        count, 33,
+        "the merged mod registers 33 events after the intake deregistration — got {count}: {message}"
     );
     let set = registered_set(message);
     assert!(
@@ -1296,7 +1333,7 @@ fn unknown_events_fail_closed_with_zero_side_effects() {
 fn lane_branch_naming_is_enforced() {
     let mut game = Game::open(&project_mod_dir());
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("branch naming|synthetic task description"),
     );
     game.narrate(
@@ -2131,7 +2168,7 @@ fn count_lines(lines: &[String], needle: &str) -> usize {
 fn tool_call_publishes_a_dense_pending_snapshot_and_kv_rows() {
     let mut game = Game::open(&project_mod_dir());
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("tools gate|synthetic task description"),
     );
 
@@ -2243,7 +2280,7 @@ fn tool_result_replay_is_idempotent_and_never_refires_the_effect() {
 fn tool_payloads_are_shape_checked_and_allowlisted() {
     let mut game = Game::open(&project_mod_dir());
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("tools gate|synthetic task description"),
     );
 
@@ -2305,7 +2342,7 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
         .expect("tuning.tool_capacity must be an unsigned integer");
     let mut full = Game::open(&project_mod_dir());
     full.narrate(
-        "task.intake",
+        "event.start",
         &text("tools gate|synthetic task description"),
     );
     for _ in 0..capacity {
@@ -2338,7 +2375,7 @@ fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
 fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
     let mut game = Game::open(&project_mod_dir());
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("subsystem gate|synthetic task description"),
     );
     game.narrate(
@@ -2421,7 +2458,7 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
 fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     let mut game = Game::open(&project_mod_dir());
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("subsystem gate|synthetic task description"),
     );
     game.narrate("requirement.add", &text("left half|description|subsys-a"));
@@ -2492,7 +2529,7 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
 fn artifact_probe_and_vfs_keep_one_ledger() {
     let mut game = Game::open(&project_mod_dir());
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("subsystem gate|synthetic task description"),
     );
     let sha = "a".repeat(64);
@@ -2775,7 +2812,7 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
         .set_tool_runner(Some(Box::new(SyncRitualRunner)));
 
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("sync bridge|verify 1-turn inline rituals"),
     );
     game.narrate(
@@ -2959,7 +2996,7 @@ fn fuel_budget_autoscales_with_state_size_and_env_wins() {
 fn requirement_list_pages_open_first_and_full_opt_in() {
     let mut game = Game::open(&project_mod_dir());
     game.narrate(
-        "task.intake",
+        "event.start",
         &text("pagination|synthetic task description"),
     );
 
@@ -3033,7 +3070,8 @@ fn requirement_list_pages_open_first_and_full_opt_in() {
 fn summary_projection_carries_play_and_resident_trio() {
     let mut game = Game::open(&project_mod_dir());
 
-    // Fresh run: the stage is `intake`, so the pump is NOT drained (stage ≠ coordinate).
+    // Fresh run: the boot lands in `coordinate`, but the charter gate keeps the pump
+    // NOT drained — `gate_problem() != nil` (no charter payload, no requirements).
     let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(
         summary["play"],
@@ -3046,11 +3084,17 @@ fn summary_projection_carries_play_and_resident_trio() {
 
     // `task.intake` moves the run to `coordinate`; with no pending gate and no armed
     // retirement the pump is drained (waiting for new `--requirement` feed).
-    game.narrate("task.intake", &text("watchdog|synthetic task description"));
+    // r2 rev2: chartering the run (boot payload) alone is still not enough — the open
+    // (draft) requirement keeps `req_all_done()` false, so the run stays not-drained.
+    game.narrate("event.start", &text("watchdog|synthetic task description"));
+    game.narrate(
+        "requirement.add",
+        &text("watchdog req|synthetic description|watchdog-r1"),
+    );
     let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(
         summary["batchDrained"],
-        json!(true),
-        "coordinate ∧ gate_problem()==nil ∧ not armed → drained: {summary}"
+        json!(false),
+        "coordinate ∧ charter ∧ open requirement → still not drained: {summary}"
     );
 }

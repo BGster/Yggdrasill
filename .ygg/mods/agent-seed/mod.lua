@@ -53,7 +53,7 @@ local render_mod = require("src.view.render")
 local wire = require("src.domain.wire")
 local flow = require("src.runtime.flow")
 local executor = require("src.domain.executor")
-local actions = require("src.handlers.intake.actions")
+local actions = require("src.handlers.intake.actions") -- [deprecated-ref] module path pinned by pack.json code.modules
 local lane_actions = require("src.handlers.operate.lanes")
 local prop_actions = require("src.handlers.requirements.proposals")
 local review = require("src.handlers.operate.review")
@@ -62,23 +62,23 @@ local gate_actions = require("src.handlers.requirements.gate_actions")
 local config_actions = require("src.handlers.system.config")
 local views = require("src.handlers.system.views")
 local choice = require("src.handlers.operate.choice")
-local lifecycle = require("src.handlers.intake.lifecycle")
+local lifecycle = require("src.handlers.intake.lifecycle") -- [deprecated-ref] module path pinned by pack.json code.modules
 local tools = require("src.runtime.tools")
 
 -- 注册序（34 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
 --   1     agent.summary（render.register）
---   2-5   actions: task.intake / requirement.add / requirement.list / requirement.dispatch
---   6-7   lanes: lane.claim / lane.release
---   8-10  proposals: proposal.submit / accept / reject
---   11-16 review: coordinate.submit / verify.submit / settlement.evolution / settlement.sessions / settlement.todo / review.note
---   17-21 requirement_ops: split / merge / amend / conflict / resolve
---   22-23 gate_actions: gate.approve / gate.reject
---   24-26 config: config.set / open / close
---   27    views: map.show（完整视图 = 地图 + 当前剧情提示，payload 一律忽略）
---   28    choice: ygg.choice_selected
---   29-30 lifecycle: event.start / node:render
---   31-33 tools: tool.call / tool.result / vfs.write
---   34    fsm.define（本文件末尾）
+--   2-4   actions: requirement.add / requirement.list / requirement.dispatch
+--   5-6   lanes: lane.claim / lane.release
+--   7-9   proposals: proposal.submit / accept / reject
+--   10-15 review: coordinate.submit / verify.submit / settlement.evolution / settlement.sessions / settlement.todo / review.note
+--   16-20 requirement_ops: split / merge / amend / conflict / resolve
+--   21-22 gate_actions: gate.approve / gate.reject
+--   23-25 config: config.set / open / close
+--   26    views: map.show（完整视图 = 地图 + 当前剧情提示，payload 一律忽略）
+--   27    choice: ygg.choice_selected
+--   28-29 lifecycle: event.start / node:render
+--   30-32 tools: tool.call / tool.result / vfs.write
+--   33    fsm.define（本文件末尾）
 -- 两条 effect（hooks.useEffect("tools.receipt") 与 hooks.useEffect("tools.reactive")）由
 -- `tools.register()` 注册，与 `actions` 的 `auto_dispatch` 同性质：不是 handler，不占注册序号，
 -- 也不参与「同名事件多 handler」的排序。两者同处 render() 入口的同一个 flush_effects。
@@ -115,16 +115,9 @@ local STAGE =
 
 ygg.fsm.define({
   name = "stage",
-  initial = STAGE.intake,
+  initial = STAGE.coordinate,
   event = "stage.advance",
   transitions = {
-    {
-      from = STAGE.intake,
-      to = STAGE.coordinate,
-      when = function(target)
-        return flow.allowed(target, STAGE.coordinate)
-      end,
-    },
     {
       from = STAGE.coordinate,
       to = STAGE.review,
