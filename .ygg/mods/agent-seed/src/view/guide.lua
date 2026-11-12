@@ -15,12 +15,14 @@ local fill =
 
 local SECTIONS = {}
 
--- 相位→规则章节索引（微状态口径）：立局看仓库形态；协调看派发/泳道/集成；
--- 盘点看演进/门禁/证据；发布看集成章（develop→integrate→merge→deploy）；退役看指引。
+-- 相位→规则章节索引（微状态口径）：立局看仓库形态；协调看机器/协议/驱动/异步/派发/泳道/集成；
+-- 盘点看演进/门禁/运行产物/证据/Mod 工程/宿主契约；发布看集成章（develop→integrate→merge→deploy）；退役看指引。
+-- r5（D-MA 规则大迁移）：harness 盲区章废除，81 条按域迁入 run_machine/drive/actions/inbox/
+-- run_artifacts/mod_engineering/host_contract 七新章；每个映射章存在且非空由语义用例钉死。
 local STAGE_GUIDE = {
   charter = { "repository" },
-  coordinate = { "dispatch", "lanes", "integration" },
-  settle = { "evolution", "gates", "evidence" },
+  coordinate = { "run_machine", "actions", "drive", "inbox", "dispatch", "lanes", "integration" },
+  settle = { "evolution", "gates", "run_artifacts", "evidence", "mod_engineering", "host_contract" },
   release = { "integration" },
   retired = { "pointers" },
 }

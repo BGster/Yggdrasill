@@ -125,6 +125,12 @@
           "modality": "must",
           "text": "Dependency direction is one-way: `ygg-sandbox` → `ygg-core` + `ygg-schema`; `ygg-wasm` → `ygg-sandbox`; `ygg-lint` has no ygg-* kernel dependency; `ygg-schema` and `ygg-core` have no code dependency edge.",
           "basis": "docs/context/topology.md (inter-module dependency constraints); the Cargo.toml header note of each crate"
+        },
+        {
+          "id": "repository.living-docs-closed-loop",
+          "modality": "must",
+          "text": "The docs wiki indexed by `docs/README.md` — `docs/context/*` (domain invariants and vocabulary) and `docs/design/*` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) — are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.",
+          "basis": "AGENTS.md §1.7 + docs/{CONTEXT,DESIGN}.md closed loop"
         }
       ]
     },

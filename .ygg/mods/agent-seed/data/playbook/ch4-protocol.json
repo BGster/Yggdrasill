@@ -1,122 +1,178 @@
 {
   "sections": [
     {
-      "id": "harness",
-      "order": 13,
+      "id": "drive",
+      "order": 17,
+      "title": "17. Cold start · drive modes · decision protocol · play mode",
+      "summary": "How a run is driven: the egg cold-start command, the three `--drive` modes, the external decision-command protocol with its fail-closed pauses, the human-action gate and goal mode (the agent is the decider, never a script), and the runaway-guard thresholds.",
+      "source": "AGENTS.md §2/§3 (text before the 2026-10-31 condensation)",
+      "priority": "standard",
       "rules": [
         {
-          "id": "harness.start-command",
+          "id": "drive.start-command",
           "modality": "must",
           "text": "Cold start of a run: `.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start` — boot narrates the three opening lines and lands the charter act; the payload may carry the charter (`\"title|goal|success\"`) to set it in the same step, and `run.begin` then opens the coordinate act.",
           "basis": "AGENTS.md §2 Start (D-MA23 charter sequence, 2026-11-12)"
         },
         {
-          "id": "harness.drive-stdin",
+          "id": "drive.stdin",
           "modality": "must",
           "text": "`--drive stdin` (the default) reads stdin: every step, every proposal acceptance and every gate needs a human-typed index; `q` or end-of-input exits.",
           "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
-          "id": "harness.drive-cmd",
+          "id": "drive.cmd",
           "modality": "must",
           "text": "`--drive cmd:<path>` does not read stdin: every pending choice goes to the decision command, and the run settles automatically at the ending; a `HUMAN` answer pauses safely (exit 0).",
           "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
-          "id": "harness.drive-none",
+          "id": "drive.none",
           "modality": "must",
           "text": "`--drive none` prints the current receipt (including `pendingChoice`) and exits without advancing or reading stdin (exit 0).",
           "basis": "AGENTS.md §3 (table, pre-migration)"
         },
         {
-          "id": "harness.drive-conflict-pause",
+          "id": "drive.conflict-pause",
           "modality": "must",
           "text": "`cmd:` must pause on a conflict: print both sides and the note, then exit 0 without choosing a path; after resolving it, rerun the command, or switch to `--drive stdin` and pick 1/2/3 (keep_both / keep_first / revise) from `pendingChoice`.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
-          "id": "harness.decide-protocol",
+          "id": "drive.decide-protocol",
           "modality": "must",
           "text": "Decision-command protocol: stdin does not participate; the command receives the path of `decide-input.json` (the full current receipt) as its only argument, and stdout may contain exactly one line — `N` (1..=option count) or `HUMAN[:reason]`.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
-          "id": "harness.decide-fail-closed",
+          "id": "drive.decide-fail-closed",
           "modality": "must",
           "text": "A 5-second timeout, a non-zero exit, an invalid output or an out-of-range index all fail closed (safe pause, state unchanged); `YGG_DECIDE_CMD` may temporarily override the decision-command path.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
-          "id": "harness.human-action-gate",
+          "id": "drive.human-action-gate",
           "modality": "must",
           "text": "Human-action gate (effective when `play.mode=guide`): proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note / `config.set play.mode` may only enter through `ygg.choice_selected`; a direct single-shot `--event` is refused with `[REJECTED:ACTION]` (the envelope stays `ok:true` and the primary state is unchanged). Rejects (gate.reject / proposal.reject) are not restricted — they are the correction channel. So there is exactly one way to accept on a human's behalf: `ygg.choice_selected` (typed by the human, or sent by the agent after reading the receipt).",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
-          "id": "harness.no-placeholder-proposal",
+          "id": "drive.no-placeholder-proposal",
           "modality": "must-not",
           "text": "Never fabricate content: when a job is running but there is no pending proposal, the host does not generate a placeholder proposal (a gate must be satisfied by a real delivery) — it prints a readable reason, pauses safely and exits 0, waiting for an external executor to submit and the command to be rerun.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
-          "id": "harness.drive-limits",
+          "id": "drive.limits",
           "modality": "must",
           "text": "The runaway guard thresholds come from the Mod's `data/config.json` `drive` section (each field falls back when missing or invalid): the hard step cap is `maxSteps + stepsPerRequirement × requirement count` (fallback 64 + 16×n); a separate stop triggers after `stallLimit` consecutive steps with an unchanged `pendingChoice` (fallback 12).",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
-          "id": "harness.play-mode-is-narrative",
+          "id": "drive.play-mode-is-narrative",
           "modality": "must",
           "text": "`play.mode` is Mod narrative semantics, not something the host interprets: `config.set play.mode=<goal|guide>` only switches the Mod's prompts and narrative tone; advancement is driven by `--drive` alone — the host reads neither `play.mode` from `data/config.json` nor `settings.play.mode` from the save KV.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {
-          "id": "harness.goal-mode-decider",
+          "id": "drive.goal-mode-decider",
           "modality": "must",
           "text": "In goal mode the decider is **the agent itself**, not a script and not \"always pick 1\": under goal the Mod only changes the wording and the prompt tone, advancement still goes through `ygg.choice_selected`, and the agent judges every step from the narrative and the candidates — an acceptance that should be rejected must be rejected, a gate that should wait must wait, and mechanically taking the first item forges a conclusion. The repository ships no default decision script; by design the menu's first item is the main forward action, but it is **not guaranteed to be correct at that step**.",
           "basis": "user instruction: the decision belongs to the agent, not to a script"
-        },
+        }
+      ]
+    },
+    {
+      "id": "actions",
+      "order": 18,
+      "title": "18. Action protocol · payloads · accept/reject",
+      "summary": "Every action's pipe-separated payload format, the serial accept and the reject / stale / rebase paths, the direct mutation and lane actions, the read-only views and the pendingChoice order, and the config sub-page with its pre-registration keys.",
+      "source": "AGENTS.md §4/§6 (text before the 2026-10-31 condensation) + docs/design/events.md; plan-presentation is requirement r4 (2026-11-12)",
+      "priority": "standard",
+      "rules": [
         {
-          "id": "harness.payload-formats",
+          "id": "action.payload-formats",
           "modality": "must",
           "text": "Action payloads are JSON strings whose fields are separated by `|`: event.start `\"\"` / `\"title|goal|success\"` (optional charter, R3); charter.set `\"title|goal|success\"`; run.begin `\"\"`; requirement.add `\"title|description[|external_id[|depends_on]]\"`; requirement.dispatch `\"\"` / `\"0\"` (readiness order) / `\"rN\"` (that requirement only); proposal.submit `\"rN|rev|stage|summary|artifacts[|changes[|external_id[|exec=<agent_id>[:<reason>]]]]\"` (the tail chain `exec` → `actor` → `actor_session` is host-injected on declared routes); proposal.accept `\"pN\"`; proposal.reject `\"pN|<reason>\"`; gate.approve `\"rN[|note]\"` / `\"\"`; gate.reject `\"rN|feedback\"` / `\"\"`; integration.confirm `\"rN|develop@<sha>\"`; integration.reject `\"rN|<reason>\"`; coordinate.submit `\"\"`; verify.submit `\"true\"` / `\"all_green=false;report=…\"`; settlement.evolution `\"artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]\"`; settlement.sessions `\"moved|remaining|destination\"`; settlement.todo `\"remaining|verified_by\"`; release.confirm `\"master@<sha>|vYYYY.MM.DD.N\"`; release.skip `\"<reason>\"`; review.note `\"lesson|score(1-5)\"`. The shape printed in a rejection receipt is the correct format — copy it, never guess a segment position.",
           "basis": "docs/design/events.md event table (ex-DESIGN §2.6; D-MA23, 2026-11-12); AGENTS.md §4 (pre-migration)"
         },
         {
-          "id": "harness.dispatch-idempotent",
+          "id": "action.dispatch-idempotent",
           "modality": "must",
           "text": "requirement.dispatch dispatches by readiness order (draft → plan; ready → development·lane, development deps all done), with a job cap of 4; no candidate or a full slot set is a normal `[DISPATCH] 0 candidates` receipt (idempotent, never counted as a failed step).",
           "basis": "AGENTS.md §4 (pre-migration) + docs/design/requirement-story.md (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
         },
         {
-          "id": "harness.proposal-changes",
+          "id": "action.proposal-changes",
           "modality": "must",
           "text": "A proposal's `changes` reads like `split=a,b` / `merge=r5` / `amend=title:description` / `conflict=r5:note`: a subagent only suggests, and the change lands at `proposal.accept`.",
           "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
-          "id": "harness.serial-accept",
+          "id": "proposal.plan-presentation",
+          "modality": "must",
+          "text": "A proposal's `summary` is the adjudication surface the human gate reads, not a change log: write it top-down for the gate decision — the plan's shape and its reasons first, then impact and detail — in human-readable prose a reviewer can rule from without opening the code. Technical bulk (file:line references, key names, pseudocode, test inventories) belongs in the `artifacts` file(s). Division of labor: the summary argues why this plan should pass, the artifacts show how it is implemented and verified.",
+          "basis": "requirement r4 (plan-presentation, 2026-11-12); AGENTS.md §1.3"
+        },
+        {
+          "id": "action.serial-accept",
           "modality": "must",
           "text": "`proposal.accept` accepts exactly one proposal serially and names it with `pN` / `rN`; an empty payload takes the first in requirement-id canonical order — with more than one pending proposal you must name it, otherwise you verify the wrong requirement.",
           "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
-          "id": "harness.reject-paths",
+          "id": "action.reject-paths",
           "modality": "must",
           "text": "Reject paths (D-MA23 unification, R6): `proposal.reject` on a plan proposal → back to planning (gate cleared, `job=\"plan\"` re-hung on the executor, `plan_ok` stays false, rev untouched); `proposal.reject` on a development delivery / `gate.reject` on the accept gate / `integration.reject` all land the ready act — `plan_ok` kept, `job=\"\"`, lane released, feedback written; `gate.reject` on the plan gate → planning with `plan_ok=false`, `rev+1` (a new plan is required).",
           "basis": "AGENTS.md §4 (pre-migration) + docs/design/requirement-story.md R6 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
         },
         {
-          "id": "harness.stale-rebase",
+          "id": "action.stale-rebase",
           "modality": "must",
           "text": "At acceptance, `rev ≠ req.<i>.rev` → the proposal becomes stale and the requirement gets the stale marker (a readable refusal; an old proposal must never override a newer decision). The recovery path is a new proposal for the same stage at the current rev — such a rebase proposal is accepted only when the requirement has no other pending proposal, and refused otherwise; once the rebase lands the stale marker clears automatically.",
           "basis": "AGENTS.md §4 (pre-migration)"
         },
         {
-          "id": "harness.rejection-prefixes",
+          "id": "action.rejection-prefixes",
           "modality": "must",
           "text": "An action outside its stage → `[REJECTED:ACTION]`; an invalid payload → `[REJECTED:PAYLOAD]`; an unmet precondition → `[BLOCKED:TODO]`; a human action dispatched single-shot → `[REJECTED:ACTION]`. All four re-render in place (the primary state is unchanged) and all four match `agent.rejectionPrefixes` in `pack.json` (the host reads that to decide \"no effect\" and does not record a failed step).",
           "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "action.mutation-actions",
+          "modality": "must",
+          "text": "Direct mutation actions of the main agent: requirement.split \"parent|child title A|child title B[|…]\" (the parent becomes split, children inherit the deps, at least 2 children); requirement.merge \"source_id_1,source_id_2|merged title|merged description\" (sources become merged, the new requirement unions their deps); requirement.amend \"id|new title|new description|new deps\" (rev+1; amending a done requirement derives a new one, amending a developing one only updates its notes); requirement.conflict \"id1,id2|note\" (both become blocked; dispatch and closing skip them); requirement.resolve \"id1,id2|keep_both|keep_first|revise[|note]\".",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "action.lane-actions",
+          "modality": "must",
+          "text": "Lane ledger: `lane.pool \"label|path\"` registers a named pool (idempotent upsert; label `^[a-z][a-z0-9-]{0,23}$`, reserved seq/pools; path = the local checkout passed to the host as `--repo`). `lane.claim \"lane|req_id|branch|base|clean|label\"` claims or backfills a lane (clean must be \"1\"; a dirty tree may not be claimed; the trailing pool segment is optional — omitted = the default pool of the run repo). `lane.release \"lane|label\"` releases it (idempotent, (pool, lane)-scoped). Parallelism counts per pool (each pool k ∈ 1..job_capacity); the conflict radar compares probes within one pool only.",
+          "basis": "AGENTS.md §4 (pre-migration; r1 per-repo pools)"
+        },
+        {
+          "id": "action.config-subpage",
+          "modality": "must",
+          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates); it is a presentation layer only and never advances state. config.set / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used by the closing check), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only).",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "action.requirement-list",
+          "modality": "must",
+          "text": "requirement.list (\"\" / \"0\" / \"full\") is read-only: the requirement graph row by row (status + deps + rev + lane + job + conflict/stale traces), the pending-proposal list, the lane ledger and the legend.",
+          "basis": "AGENTS.md §6 (pre-migration)"
+        },
+        {
+          "id": "action.map-show",
+          "modality": "must",
+          "text": "map.show prints the two-layer map: the coordinator's 4-state node graph + the requirement pipeline (including both gates) + the job / lane ledger; each lane row reads `lane-<k> ← <requirement> | branch | base | since #N | clean` (an unset field shows `-`).",
+          "basis": "AGENTS.md §6 (pre-migration)"
+        },
+        {
+          "id": "action.pending-choice-order",
+          "modality": "must",
+          "text": "pendingChoice order: resolve conflict (if any) → main forward action (proposal.accept > gate.approve > requirement.dispatch > coordinate.submit) → map.show → requirement.list → requirement.add → config (inside the sub-page: play.mode → evolution.mode → gates + back).",
+          "basis": "AGENTS.md §6 (pre-migration)"
         }
       ]
     }

@@ -167,7 +167,7 @@ mod serve;
 // 推进阈值**一律来自 Mod 自己的声明**（`pack.json` 的 `agent` / `inboxRoutes` +
 // `config.json` 的 `settlement` / `drive`，解析在 `ygg_sandbox::host_contract`）。
 // 本文件**不含任何 Mod 语义字面量**与回退默认值：契约缺失即装载期失败（fail-closed）。
-// 归属边界（哪些字面量属于 host）见 `data/playbook.json` harness 章节的 `literal-ownership`。
+// 归属边界（哪些字面量属于 host）见 `data/playbook/ch4-mod-host.json` 的 `contract.literal-ownership`。
 // ============================================================================
 
 /// 外部决策命令的最长执行时间；任何异常都 fail closed，绝不回退到固定序号。

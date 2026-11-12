@@ -495,7 +495,7 @@ config.set profile.<handle>.<key>=            # 空值 = 清除该字段（不�
 | `src/runtime/` | 骨架 | 跨层运行时子系统：flow（转场/拒绝出口 + 状态机票据）/ tools（工具桥） |
 | `src/handlers/{intake,requirements,operate,system}/` | 骨架 | 10 个注册模块按域分组：intake（actions/lifecycle）、requirements（requirement_ops/proposals/gate_actions）、operate（choice/lanes/review）、system（config/views） |
 | `data/texts/` | 实例 | 文本资源片段（core + beats 六域，7 片段；`ygg.data` 逐条读入，`mod.lua` 装配回 TEXTS） |
-| `data/playbook/` | 实例 | 现场规则资源片段（head + 章组 + harness 七域，12 片段；装配回 15 章，`guide.show` 按 section id 取用） |
+| `data/playbook/` | 实例 | 现场规则资源片段（head + 8 章组片段，其中 ch4- 四片各载一至二章；装配 21 章，章 id 全局唯一；相位→章映射见 `src/view/guide.lua` STAGE_GUIDE，正文直读片段文件） |
 | `data/config.json` | 实例 | 静态配置默认值（`ygg:agent/config`；宿主回落路径，不拆） |
 | `pack.json` / `manifest.json` | 骨架 + 生成物 | 打包声明（20 条 entries / `code` 段与 `agent`/`inboxRoutes`/`tools` 契约）与内容寻址清单 |
 | `schemas/*.json` | 骨架 | 资源 schema（agent-config + 两个片段 schema，与 `packages/schema/schemas/` 单源一致；整文档 schema scene-texts/agent-playbook 保留在 packages/schema 供管线与全量 Mod 使用） |
@@ -535,7 +535,7 @@ mod.lua → 全部（唯一装配点）
 3. **依赖方向 T0→T8 单向**：`view/render.lua` 不得 require `runtime/tools.lua`（成环）。
 
 资源片段装配契约（`mod.lua` 顶层）：beats 键跨片段不相交；playbook 章节片段按文件名序
-（= order 序）显式 id 列表装配，相邻同 id（harness 7 片段）按序拼接 rules；装配不排序。
+（= order 序）显式 id 列表装配，各 section id 全局唯一（r5 起 harness 七片段同 id 拼接退役）；装配不排序。
 
 ## 十、工具桥（`tool.call` / `tool.result`）
 
