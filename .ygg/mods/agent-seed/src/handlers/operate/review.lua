@@ -196,7 +196,10 @@ function M.install(deps)
         registration.sessions.destination
       )
     elseif tostring(ygg.kv.get("settlement.sessions.remaining") or "") ~= "0" then
-      tools.auto_archive_sessions()
+      -- r1 rev1：不再静默自动归档（会伪造主会话身份），改可读提示由用户决定安全清理路径。
+      ygg.narrate(fill(TEXTS.beats.settlement_sessions_unsetted_hint, {
+        remaining = tostring(ygg.kv.get("settlement.sessions.remaining") or "?"),
+      }))
     end
     if registration.todo ~= nil then
       apply_todo(registration.todo.remaining, registration.todo.verified_by)
@@ -250,7 +253,10 @@ function M.install(deps)
       return
     end
     if tostring(ygg.kv.get("settlement.sessions.remaining") or "") ~= "0" then
-      tools.auto_archive_sessions()
+      -- r1 rev1：不再静默自动归档；保留未结算阻断，改可读提示由用户决定安全清理路径。
+      ygg.narrate(fill(TEXTS.beats.settlement_sessions_unsetted_hint, {
+        remaining = tostring(ygg.kv.get("settlement.sessions.remaining") or "?"),
+      }))
     end
     -- 三项结算任务未登记（或 remaining ≠ 0）就不允许收口。
     local settlement = settlement_problem()
