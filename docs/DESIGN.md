@@ -1,20 +1,41 @@
-<!-- r2 wiki 拆分 · Commit 1 占位：本文件将在 Commit 2 改写为薄壳索引（映射表）。以下为原 L1–9 定位段与 L733–739 §4 verbatim 暂存（§4 将迁入 docs/wiki-governance.md 并改写载体指称，列入 R4 清单）。 -->
-# Yggdrasill · 系统架构、行为语义与接口契约（`docs/DESIGN.md`）
+# Yggdrasill · 系统架构、行为语义与接口契约（薄壳索引）
 
-> **定位**：`docs/DESIGN.md` 规定 Yggdrasill **始终最新的产品形态、系统行为、状态机语义与规范接口契约**——它是当前设计方案的权威快照，不是流水账：变更就地在对应章节改写，历史归 git 与结算产物，不进本文档。覆盖范围是**整个仓库**，按子系统分章节：内核（§3.1 Lua 宿主 API）、Mod（§3.2 包契约）、宿主 CLI/Daemon（§3.5 线协议）、serve 观察面（§3.7）等各有其章，修改哪个子系统就更新哪个章节。领域词汇、愿景、架构原则与决策台账（`D1–D20` 与 `D-MA` 系列台账，上界随台账顺延不写死）见 [`docs/CONTEXT.md`](CONTEXT.md)。为使本文档在实现重构下保持持久，其契约定义在边界层（**JSON Schema、CLI/JSON-RPC 线协议、Lua 沙箱宿主 API、事件 Payload、状态迁移表**），而非内部源码函数名或行号。
->
-> **术语速览**：领域术语的完整定义见 [CONTEXT §2 核心领域词汇](CONTEXT.md#2-核心领域词汇)，本文档不再重复维护。
->
-> **动作面分层**：Layer 2 的工具参数面契约（`ygg_session.action` 与 `event` / `op` 的分层、三类落点与硬不变量）见 [§3.4](#34-三层动作面契约event--op--action)。
+> **定位**：`docs/design/*` 树的入口薄壳——原单文件已按 r2 拆分为 LLM Wiki，本文件保留定位职责并承载旧式 `§N` 引用的解析映射。
+> **replaces**：原 DESIGN.md 全文（L1–739 @ `3a2536f`），逐节映射见下表。
+> **上游**：[README.md](README.md) · **相关**：[CONTEXT.md](CONTEXT.md)（领域/决策薄壳）
 
----
+**定位（载体改写，语义保留）**：本树规定 Yggdrasill **始终最新的产品形态、系统行为、状态机语义与规范接口契约**——当前设计方案权威快照，不是流水账：变更就在对应主题文件就地改写，历史归 git 与结算产物。覆盖范围是**整个仓库**，按子系统分文件：内核（[lua-api.md](design/lua-api.md)）、Mod 包（[mod-package.md](design/mod-package.md)）、宿主 CLI/Daemon（[cli-daemon.md](design/cli-daemon.md)）、serve 观察面（[serve.md](design/serve.md)）等各有其章，修改哪个子系统就更新哪个文件。领域词汇、愿景、架构原则与决策台账（`D1–D21` 与 `D-MA` 系列台账，上界随台账顺延不写死）见 [CONTEXT.md](CONTEXT.md) 薄壳所引 `docs/context/*` 树。为使契约在实现重构下保持持久，其定义保持在边界层（**JSON Schema、CLI/JSON-RPC 线协议、Lua 沙箱宿主 API、事件 Payload、状态迁移表**），而非内部源码函数名或行号。术语速览见 [context/vocabulary.md](context/vocabulary.md)；动作面分层见 [action-faces.md](design/action-faces.md)。
 
-<!-- —— 以下为原 §4 活文档闭环（L733–739）verbatim 暂存 —— -->
+## 拆分映射表（旧 § → 新文件；旧式引用按此行解析）
 
-## 4. 活文档闭环
+| 旧章节 | 新文件 |
+| --- | --- |
+| §1 产品形态与三层系统边界（含 1.1 协商矩阵、1.2 Adapter 五义务） | [design/system-boundaries.md](design/system-boundaries.md) |
+| §2 章首（组织原则） | [design/state-machine.md](design/state-machine.md) |
+| §2.1 Mod 是什么（边界与纯度） | [design/state-machine.md](design/state-machine.md) |
+| §2.2 双层结构与真状态压缩 | [design/state-machine.md](design/state-machine.md) |
+| §2.3 运行级剧情（live） | [design/run-story.md](design/run-story.md) |
+| §2.4 需求级剧情（open） | [design/requirement-story.md](design/requirement-story.md) |
+| §2.5 微状态判定的单一来源 | [design/state-machine.md](design/state-machine.md) |
+| §2.6 事件总表（38 口径） | [design/events.md](design/events.md) |
+| §2.7 拒绝面矩阵 | [design/state-surface.md](design/state-surface.md) |
+| §2.8 状态存储契约 | [design/state-surface.md](design/state-surface.md) |
+| §2.9 响应式推进契约 | [design/state-machine.md](design/state-machine.md) |
+| §2.10 持久化泳道池与实时进度投影 | [design/lanes.md](design/lanes.md) |
+| §2.11 工具桥契约 | [design/tool-bridge.md](design/tool-bridge.md) |
+| §2.12 提示词面（beats）契约 | [design/prompt-surface.md](design/prompt-surface.md) |
+| §2.13 身份与权限（不进剧情） | [design/identity.md](design/identity.md) |
+| §3 章题 | [design/lua-api.md](design/lua-api.md) |
+| §3.1 Lua 沙箱宿主 API 契约 | [design/lua-api.md](design/lua-api.md) |
+| §3.2 Mod 包与多文件纯度契约 | [design/mod-package.md](design/mod-package.md) |
+| §3.3 事件 Payload 线协议契约 | [design/wire-protocol.md](design/wire-protocol.md) |
+| §3.4 三层动作面契约（含 registry 末注 33/34 口径） | [design/action-faces.md](design/action-faces.md) |
+| §3.5 宿主 CLI 与 Daemon JSON-RPC 线协议 | [design/cli-daemon.md](design/cli-daemon.md) |
+| §3.6 上下文压缩与检查点交接契约 | [design/compaction.md](design/compaction.md) |
+| §3.7 serve 观察面契约 | [design/serve.md](design/serve.md) |
+| §4 活文档闭环 | [wiki-governance.md](wiki-governance.md)（载体指称已改述，三职责语义保留） |
 
-`docs/CONTEXT.md` 与 `docs/DESIGN.md` 在每次运行中都作为闭环契约强制执行：
+## 旧引用解析注记
 
-1. **执行前注入**：Mod 的 `subagent_brief` 模板向每个 `plan` 与 `development` 子代理 brief 注入强制指令：*"在提议或编辑之前，先阅读 `docs/CONTEXT.md`（领域不变量）与 `docs/DESIGN.md`（架构与契约）。"* 以及 Doc sync 职责（见下）。
-2. **执行中同步（Doc sync）**：两份文档是**整个仓库始终最新的设计原则与设计方案权威**（内核 / CLI / Mod / serve / 工具链分章节），不是流水账。子代理职责分阶段：`plan` 阶段在其 plan artifact 中声明本次变更触碰哪份文档的哪些章节；`development` 阶段在同一特性分支上就地更新对应章节（决策与领域词汇 → `docs/CONTEXT.md` 决策表行/词汇条目；行为与契约 → `docs/DESIGN.md` 对应子系统章节），不追加任何变更叙事。纯缺陷修复与措辞调整不触碰文档。
-3. **结算前核验**：主会话在 `accept_gate` 核验文档更新已随特性分支集成（决策类需求对应 `D-MAx` 行、契约类需求对应章节），并在每批的 `review` 盘点结算（常驻局的批收口或退役）前复查两份文档仍与当前代码一致——`settlement.evolution` 前是最后期限。
+- 决策表行、crates 注释与测试断言中的 `docs/DESIGN.md §N` 引用（如 §3.2 → [mod-package.md](design/mod-package.md)、§3.7 → [serve.md](design/serve.md)、§3.4 → [action-faces.md](design/action-faces.md)、§3.5 → [cli-daemon.md](design/cli-daemon.md)）经本表解析，持续有效——方案 A 裁决下 `crates/**` 零改动。
+- §2.6 的 38 口径与 §3.4 末注的 registry 33/34 口径**有意并存**（前者 = D-MA23 设计目标全集，后者 = 已装载 Mod 事实集），拆分后分居 [events.md](design/events.md) 与 [action-faces.md](design/action-faces.md) 并互链，不得合并。

@@ -30,7 +30,7 @@
           "id": "credentials.settings-not-a-secret-vault",
           "modality": "must",
           "text": "The runtime KV family `settings.*` is no exception for sensitive values: the static defaults (`data/config.json`) and the dynamic overrides (`settings.*` written by `config.set`) only ever hold non-sensitive behavior switches, numbers and experience text (such as `evolution.mode` / `gates.require_all_green` / `evolution.max_per_run`).",
-          "basis": "docs/CONTEXT.md §5 (user decision added 2026-10-29)"
+          "basis": "docs/context/decisions-engine.md + docs/context/decisions-agent.md (ex-CONTEXT §5; user decision added 2026-10-29)"
         },
         {
           "id": "credentials.secret-values-local-only",
@@ -87,7 +87,7 @@
         {
           "id": "repository.vision-single-source",
           "modality": "must",
-          "text": "The decision table in `docs/CONTEXT.md` is the single source of truth for project decisions; any new decision produced by a design discussion (D11+) must be written back into that table.",
+          "text": "The decision tables in `docs/context/decisions-engine.md` and `docs/context/decisions-agent.md` are the single source of truth for project decisions; any new decision produced by a design discussion (D11+) must be written back into those tables.",
           "basis": "AGENTS.md §2 (constraint 1)"
         },
         {
@@ -100,7 +100,7 @@
           "id": "repository.schema-single-source",
           "modality": "must",
           "text": "Resource format contracts live only in `packages/schema/schemas/` (D15): the TS side (ajv) and the Rust side (jsonschema crate) read the same file, and neither side may keep an inline copy.",
-          "basis": "AGENTS.md §2 constraint 2; docs/CONTEXT.md D15/D20"
+          "basis": "AGENTS.md §2 constraint 2; docs/context/decisions-engine.md D15/D20"
         },
         {
           "id": "repository.schema-does-not-constrain-lua",
@@ -112,19 +112,19 @@
           "id": "repository.core-purity",
           "modality": "must-not",
           "text": "`crates/ygg-core` has a zero-dependency invariant: no internal module, no DOM/platform API, no rendering library; the allowlist is serde / serde_json / thiserror only.",
-          "basis": "AGENTS.md §2 constraint 3; docs/CONTEXT.md §3 & §4"
+          "basis": "AGENTS.md §2 constraint 3; docs/context/principles.md & docs/context/topology.md"
         },
         {
           "id": "repository.vm-dependency-location",
           "modality": "must",
           "text": "VM dependencies such as mlua may appear only in `crates/ygg-sandbox` (D12).",
-          "basis": "AGENTS.md §2 constraint 3; docs/CONTEXT.md D12"
+          "basis": "AGENTS.md §2 constraint 3; docs/context/decisions-engine.md D12"
         },
         {
           "id": "repository.dependency-direction",
           "modality": "must",
           "text": "Dependency direction is one-way: `ygg-sandbox` → `ygg-core` + `ygg-schema`; `ygg-wasm` → `ygg-sandbox`; `ygg-lint` has no ygg-* kernel dependency; `ygg-schema` and `ygg-core` have no code dependency edge.",
-          "basis": "docs/CONTEXT.md §4 (inter-module dependency constraints); the Cargo.toml header note of each crate"
+          "basis": "docs/context/topology.md (inter-module dependency constraints); the Cargo.toml header note of each crate"
         }
       ]
     },

@@ -74,7 +74,7 @@
         "resumeAgentId": "agent-plan-1",
         "worktreePath": "/Users/.../tmp/worktrees/Yggdrasill-lane-1",
         "artifactPath": "artifacts/r1-development.md",
-        "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.\n...",
+        "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/README.md (wiki index) first, then docs/context/* (domain invariants) and docs/design/* (architecture & contracts) before proposing or editing.\n...",
         "deltaPrompt": "Resume r1 (rev 1) for stage `development` in worktree `...`; write `artifacts/r1-development.md` and submit.",
         "fullFallbackBrief": "Requirement r1 ...\nResume context: prior executor `agent-plan-1`.",
         "submitCommand": ".ygg/bin/egg --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"

@@ -30,8 +30,12 @@ Yggdrasill/
 │   └── mods/agent-seed/      # 规范多文件 Agent 治理 Mod（mod.lua、src/** 五层、data/texts|playbook|config、schemas/）
 ├── .pi/
 └── docs/
-    ├── CONTEXT.md       # 领域知识、愿景、原则与架构决策台账（本文件）
-    └── DESIGN.md        # 系统架构、状态机语义与接口契约
+    ├── README.md            # LLM Wiki 顶层索引（地图 + 导航表 + 阅读路径）
+    ├── CONTEXT.md           # 薄壳索引：领域/决策树入口（context/）
+    ├── DESIGN.md            # 薄壳索引：系统设计树入口（design/）
+    ├── wiki-governance.md   # 活文档闭环三职责
+    ├── context/             # 领域语境：愿景/词汇/原则/拓扑/决策台账
+    └── design/              # 系统设计：边界/状态机/剧情/事件/接口契约
 ```
 
 ### 硬性依赖不变量

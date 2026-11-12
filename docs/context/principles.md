@@ -19,7 +19,7 @@
    - **Schema**：`packages/schema/schemas/` 是 JSON Schema 的唯一权威（由 Rust 与 TypeScript 共享）。
    - **Mod**：`.ygg/mods/agent-seed` 是唯一的物理 Mod 目录；`packages/mods/agent-seed` 是指向其的相对符号链接（`../../.ygg/mods/agent-seed`）。
    - **运行状态**：`<run-dir>/run.sqlite` 是新运行的单一存储文件。
-   - **文档**：`docs/CONTEXT.md` 与 `docs/DESIGN.md` 是 `docs/` 下仅有的两份架构/设计文档。
+   - **文档**：`docs/` 下仅有一个受索引约束的 LLM Wiki 树（入口 `docs/README.md`；领域与决策在 `docs/context/`，架构与契约在 `docs/design/`；旧两单文件为薄壳索引，r2）。
 6. **P6 · 模块顶层纯度（`YGG-MOD-EFFECT`）**
    - 在多文件 Mod 中，`mod.lua` 是唯一的装配入口。支撑模块（`src/**` 五层）在顶层只能导出纯函数与常量；在模块顶层调用有副作用的宿主 API（`ygg.on`、`ygg.emit`、`ygg.narrate`、`ygg.choice`、`ygg.kv.set`、`ygg.entity.*`、`ygg.fsm.define`）会在静态阶段（`ygg-lint`）与加载阶段（`ygg-sandbox`）被双重拒绝。这保证了处理器注册顺序（进而 dispatch 顺序）由 `mod.lua` 显式控制，而从不取决于 `require` 顺序。
 7. **P7 · 响应式收敛效应先于选择（Choice）**
