@@ -281,6 +281,7 @@ struct InboxWrite {
 struct Args {
     mod_dir: Option<PathBuf>,
     run_id: String,
+    /// runs 根目录（`--runs-root` 末次出现生效；serve 模式的多根见 [`Args::serve_runs_roots`]）。
     runs_root: PathBuf,
     resume: bool,
     settle: bool,
@@ -338,6 +339,10 @@ struct Args {
     panel_dir: Option<PathBuf>,
     /// `--poll-ms <ms>`：watcher 变更检测周期（缺省 700，钟制 [200, 5000]）。
     poll_ms: Option<u64>,
+    /// `--runs-root` 的**全部出现**（按序收集；仅 serve 模式消费——多根观察集，
+    /// 缺席时 serve 走配置文件/`./runs` 解析链）。非 serve 模式只用 [`Args::runs_root`]
+    /// （末次出现，覆盖语义与历史逐字节一致）。
+    serve_runs_roots: Vec<PathBuf>,
 }
 
 /// 提交者身份（宿主解析产物，随命令/请求一次性解析）。
@@ -524,7 +529,7 @@ impl BuiltinTool {
 fn parse_args() -> Args {
     let mut mod_dir: Option<PathBuf> = None;
     let mut run_id: Option<String> = None;
-    let mut runs_root = PathBuf::from("runs");
+    let mut runs_roots: Vec<PathBuf> = Vec::new();
     let mut resume = false;
     let mut settle = false;
     let mut watch = false;
@@ -562,7 +567,8 @@ fn parse_args() -> Args {
         match argument.as_str() {
             "--mod" => mod_dir = Some(PathBuf::from(next_value(&mut iter, "--mod"))),
             "--run-id" => run_id = Some(next_value(&mut iter, "--run-id")),
-            "--runs-root" => runs_root = PathBuf::from(next_value(&mut iter, "--runs-root")),
+            // 可重复收集（serve 多根观察集）；非 serve 模式取末次出现 = 历史覆盖语义。
+            "--runs-root" => runs_roots.push(PathBuf::from(next_value(&mut iter, "--runs-root"))),
             "--resume" => resume = true,
             "--settle" => settle = true,
             "--watch" => watch = true,
@@ -724,7 +730,11 @@ fn parse_args() -> Args {
         return Args {
             mod_dir,
             run_id: run_id.unwrap_or_default(),
-            runs_root,
+            runs_root: runs_roots
+                .last()
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("runs")),
+            serve_runs_roots: runs_roots,
             resume,
             settle,
             watch,
@@ -779,7 +789,11 @@ fn parse_args() -> Args {
         return Args {
             mod_dir: None,
             run_id: String::new(),
-            runs_root,
+            runs_root: runs_roots
+                .last()
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("runs")),
+            serve_runs_roots: runs_roots,
             resume: false,
             settle: false,
             watch: false,
@@ -878,7 +892,11 @@ fn parse_args() -> Args {
     Args {
         mod_dir,
         run_id,
-        runs_root,
+        runs_root: runs_roots
+            .last()
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from("runs")),
+        serve_runs_roots: runs_roots,
         resume,
         settle,
         watch,
@@ -946,7 +964,7 @@ fn usage(code: i32) -> ! {
                      即装载期失败。--settle / inbox 写命令可省略（改读 run.json 记录的
                      本局 mod 路径，两者都没有则报错）
   --run-id <标识>    本局标识：产物落 <runs-root>/<标识>/（必填）
-  --runs-root <目录> runs 根目录（默认 ./runs）
+  --runs-root <目录> runs 根目录（默认 ./runs；多次出现取末次；serve 模式下可重复声明多根）
   --resume           从本局后端的存档续局（json 局 = autosave.json；缺存档则按新局开局）
   --watch            交互模式下每步检查 mod 目录 mtime 变化并热载
   --event <名称>     单发模式：派发一个事件后退出（stdout 回执：缺省人读文本，
@@ -1003,10 +1021,19 @@ fn usage(code: i32) -> ! {
                      解析链与 --actor 对称：旗标 > YGG_ACTOR_SESSION > daemon 请求字段；
                      两者可独立携带，inbox 记录盖宿主保留键 actor/actor_session（None 不写键）
 serve 模式（只读观察台；GET-only 零写入，与其它全部模式互斥）:
-  --runs-root <目录> 观察目标 runs 根目录（默认 ./runs；不存在 = 报错退出 1，不自动创建）
-  --port <端口>      监听端口（默认 7800；恒绑定 127.0.0.1；被占用 = 报错退出 1，不自动递增）
+  --runs-root <目录> 观察目标 runs 根目录，**可重复**（--runs-root A --runs-root B = 同时观察两根；
+                     单次出现与旧版同义）。根集解析链：旗标 > ~/.config/ygg/serve.json
+                     （{\"roots\":[\"/abs/…\",…]}；畸形 / 未知键 / 相对路径 = 用法错误退出 2，
+                     `~/` 前缀可展开）> ./runs。目录不存在 = 报错退出 1（不自动创建，
+                     也不爬扫文件系统补根——根集只来自显式声明）
+  --port <端口>      监听端口（默认 7800；恒绑定 127.0.0.1；被占用 = 报错退出 1，不自动递增）。
+                     单实例语义**按端口**成立：7800 是全局唯一缺省实例，显式换端口 = 显式逃生门
   --panel-dir <目录> 内置两级列表页的盘上覆盖（开发期改 HTML 刷新即生效；缺失文件 404）
   --poll-ms <ms>     变更检测周期（默认 700ms，钟制 200..=5000；SSE 通知 ≤ 一个周期）
+  全局唯一实例（零锁文件，端口即事实）：启动前只读探针 GET /api/runs——
+  自家实例且请求根 ⊆ 在役根 → 幂等复用（打印面板 URL 退出 0，nohup 脚本安全）；
+  请求根不被覆盖 → 退出 1（在役实例不热改根；处置：pkill 后重启或把根写进配置）；
+  旧版单根实例 → 退出 1 提示重启；无自家实例 → 照常启动（外姓占用由 bind 失败兑住）。
   面板三级：① runs 列表（egg 原生）② 局内存档列表（egg 原生）③ mod 自带 UI
   （iframe 托管，pack.json 可选顶层 panel 段声明 entry，如 panel/index.html；
   egg 不解析不渲染任何 mod 领域语义，只供存档数据 API 裸数据）。
@@ -7235,6 +7262,7 @@ mod mod_dir_alias_tests {
             mod_dir,
             run_id: "r1".to_owned(),
             runs_root: PathBuf::from("ygg-runs-should-not-be-touched"),
+            serve_runs_roots: Vec::new(),
             resume: true,
             settle: false,
             watch: false,
@@ -9182,6 +9210,7 @@ mod multiscript_hot_reload_tests {
             mod_dir: Some(dir.to_path_buf()),
             run_id: run_id.to_owned(),
             runs_root: dir.join("runs"),
+            serve_runs_roots: Vec::new(),
             resume: false,
             settle: false,
             watch: false,
@@ -9627,6 +9656,7 @@ end)
             mod_dir: Some(mod_dir.to_path_buf()),
             run_id: run_id.to_owned(),
             runs_root: runs_root.to_path_buf(),
+            serve_runs_roots: Vec::new(),
             resume,
             settle: false,
             watch: false,
@@ -10656,6 +10686,7 @@ end)
             mod_dir: Some(mod_dir.to_path_buf()),
             run_id: run_id.to_owned(),
             runs_root: runs_root.to_path_buf(),
+            serve_runs_roots: Vec::new(),
             resume: false,
             settle: false,
             watch: false,
@@ -11363,6 +11394,7 @@ end)
             mod_dir: mod_dir.map(Path::to_path_buf),
             run_id: run_id.to_owned(),
             runs_root: runs_root.to_path_buf(),
+            serve_runs_roots: Vec::new(),
             resume,
             settle: false,
             watch: false,
@@ -12028,6 +12060,7 @@ end)
             mod_dir: Some(mod_dir.to_path_buf()),
             run_id: run_id.to_owned(),
             runs_root: runs_root.to_path_buf(),
+            serve_runs_roots: Vec::new(),
             resume: false,
             settle: false,
             watch: false,
@@ -12782,6 +12815,7 @@ end)
             mod_dir: Some(mod_dir.to_path_buf()),
             run_id: run_id.to_owned(),
             runs_root: runs_root.to_path_buf(),
+            serve_runs_roots: Vec::new(),
             resume: false,
             settle: false,
             watch: false,

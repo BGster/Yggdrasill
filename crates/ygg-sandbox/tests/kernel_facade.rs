@@ -72,6 +72,8 @@ end)
 ygg.on("event.loop", function()
   while true do end
 end)
+-- 击杀步后的还原验证需要一次后续 dispatch（③）：注册一个 no-op 事件作探针。
+ygg.on("event.start", function() end)
 "#;
 
 /// 沙箱拒绝 Mod：handler 内 require（白名单拒绝桩，可读 "sandbox denied"）。

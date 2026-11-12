@@ -132,11 +132,11 @@ Yggdrasill/
 
 ---
 
-## 5. 关键架构决策台账（`D1–D20` 与 `M-Agent` 演进）
+## 5. 关键架构决策台账（`D1–D21` 与 `M-Agent` 演进）
 
 > 任何新的项目级架构决策，或对既有决策的修订，都必须在实现它的同一次提交中记录到本表。
 
-### 5.1 核心引擎与平台决策（`D1–D20`）
+### 5.1 核心引擎与平台决策（`D1–D21`）
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
@@ -158,6 +158,7 @@ Yggdrasill/
 | **D18** | LLM 提供方抽象 | **双协议适配器（`openai-chat` 默认 + `anthropic-messages` 回退）**，严格通过 git-ignored 的 `.env` 键（`YGG_LLM_*`）配置。 | 已确认 |
 | **D19** | 试玩验证契约 | `playtest` 产出的**机器可读 8 键 JSON 报告**（贪心 option-1 遍历、自定义 `--choices`、`--max-steps`），通过 Mod 声明的 `agent.endingPrefix` 将结局归类为 `ending` / `choice` / `limit` / `deadend`。 | 已确认 |
 | **D20** | 资源模板单一来源 | **`scene-texts.json` 与 `agent-config.json` 的 Schema 规范地存放于 `packages/schema/schemas/`**；LLM 填充数据实例，绝不自创 Schema 定义。 | 已确认 |
+| **D21** | egg 全局化与全局唯一 serve | **链式软链**：`~/.local/bin/egg` → `<repo>/.ygg/bin/egg`（安装副本为唯一事实源，重建后重跑 `scripts/install-egg.sh` 即同步；cargo clean 无感、免 sudo、零墓碑）；**单实例按端口成立**：启动前只读探针 `GET /api/runs`（零锁文件）——自家实例幂等复用退出 0 / 根不被覆盖拒绝退出 1（不热改根）/ 旧代单根实例拒绝并提示重启 / 外姓占用由 bind 失败兑住；**根集三层显式解析链**：可重复 `--runs-root` > `~/.config/ygg/serve.json` > `./runs`，**拒绝文件系统爬扫**（根集随文件系统静默漂移违反 P10 显式声明边界；面板不得出现未声明过的根）。 | 已确认 |
 
 ### 5.2 Agent 治理（`M-Agent`）架构决策
 
