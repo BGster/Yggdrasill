@@ -163,12 +163,12 @@
       "sha256": "d1939b9ef1ef1be94aefad2007e34a4b7246f73de458fa3fb2feccecc003a77f"
     },
     {
-      "byteLength": 6987,
+      "byteLength": 7339,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "5e6798ef97ba1a30a76b53d9db8032d63062479c05d397bc9fc7de8fdef13432"
+      "sha256": "4e944614932cfe72b9a54686927d81f1943cb9b7ee63f91c54e666d715713e4c"
     },
     {
       "byteLength": 7935,
