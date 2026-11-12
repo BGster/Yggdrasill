@@ -332,6 +332,65 @@
       "readOnly": true,
       "resultEvent": "tool.result"
     },
+    "git.worktree_claim_pool": {
+      "kind": "cli",
+      "program": "egg",
+      "args": [
+        "--builtin-tool",
+        "worktree-claim",
+        "--lane",
+        "{{lane}}",
+        "--req",
+        "{{req}}",
+        "--branch",
+        "{{branch}}",
+        "--repo",
+        "{{repo}}"
+      ],
+      "timeoutMs": 15000,
+      "inlineWaitMs": 5000,
+      "maxOutputBytes": 1024,
+      "readOnly": false,
+      "resultEvent": "tool.result"
+    },
+    "git.worktree_release_pool": {
+      "kind": "cli",
+      "program": "egg",
+      "args": [
+        "--builtin-tool",
+        "worktree-release",
+        "--lane",
+        "{{lane}}",
+        "--repo",
+        "{{repo}}"
+      ],
+      "timeoutMs": 15000,
+      "inlineWaitMs": 5000,
+      "maxOutputBytes": 512,
+      "readOnly": false,
+      "resultEvent": "tool.result"
+    },
+    "git.lane_probe_pool": {
+      "kind": "cli",
+      "program": "egg",
+      "args": [
+        "--builtin-tool",
+        "lane-probe",
+        "--lane",
+        "{{lane}}",
+        "--base",
+        "{{base}}",
+        "--branch",
+        "{{branch}}",
+        "--repo",
+        "{{repo}}"
+      ],
+      "timeoutMs": 10000,
+      "inlineWaitMs": 3000,
+      "maxOutputBytes": 2048,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
     "fs.artifact_probe": {
       "kind": "cli",
       "program": "egg",

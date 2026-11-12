@@ -23,7 +23,7 @@
     "map_note_deliver": "(self-check and delivery ≠ acceptance)",
     "map_note_gate_accept": "(**mandatory gate**: approve only on artifacts / gate evidence; reject keeps plan_ok → ready, an amended one falls back to planning)",
     "map_note_lane": "(development lane; deps ready and no conflict)",
-    "map_foot": "always-on actions: config · map.show · requirement.add · requirement.list · lane.claim / lane.release (split / merge / amend / conflict / resolve are explicit main-agent commands)",
+    "map_foot": "always-on actions: config · map.show · requirement.add · requirement.list · lane.pool / lane.claim / lane.release (split / merge / amend / conflict / resolve are explicit main-agent commands)",
     "map_edge_ready": "selectable",
     "map_edge_no_condition": "condition not shown",
     "map_local_head": "[CURRENT NODE] [{{stage}}] | {{panel}}",

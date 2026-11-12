@@ -13,7 +13,8 @@
 | `Run` | 运行实例（常驻自循环：立局 → 批循环 → 显式退役） |
 | `stage`（Run Stage） | 运行级真状态（`live` / `retired`）；协调 / 盘点 / 发布为 `run.phase` 微状态 |
 | `Requirement`（`r1..rN`） | 需求（交付单元） |
-| `Lane`（Persistent Lane Pool） | 持久化泳道工作树池 |
+| `Lane`（Persistent Lane Pool） | 持久化泳道工作树池。r1（D-MA24）起按**池**组织：默认池（""，运行仓自己的池，键形 `lane.<k>.*` 沿旧）+ 具名池（`lane.<label>.<k>.*`，`lane.pool "label\|path"` 注册本地检出路径），并行度按池计（每池 k ∈ 1..job_capacity）；多仓需求 = 注册 + 预挂牌 |
+| `Lane Pool Registry`（`lane.pools` / `lane.pool.<label>.path`） | 具名池注册表（r1，D-MA24）：label 形状 `^[a-z][a-z0-9-]{0,23}$`（保留字 seq/pools），path 是传给宿主 `--repo` 的本地检出路径（仅形状校验，不验是否 git 仓——首次 claim 由宿主可读回传） |
 | `Proposal`（`p1..pM`） | 提案（不可变交付提交） |
 | `Gate`（`plan_gate` / `accept_gate`） | 强制门禁 |
 | `Executor Ledger` | 执行者台账 |
@@ -81,7 +82,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 8. **P8 · 可选加入的能力降级（Wasm 纯度 vs 本地宿主能力）**
    - Lua 沙箱默认严格隔离（无 I/O、无时钟、确定性 PRNG、指令燃料上限），使 Mod 在浏览器 Wasm 中运行结果完全一致。本地宿主能力（`ygg.fs` VFS 与 `ygg.tool.call` 同步工具运行器）通过可选的宿主 trait 注入；当未挂载时，Mod 优雅降级而不破坏状态语义。
 9. **P9 · 保留构建缓存的持久化泳道工作区**
-   - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（`<repo>-lane-1..4`）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
+   - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（r1/D-MA24 起按池：`<pool-root>/<repo>-lane-<k>`，默认池 + `lane.pool` 注册的具名池）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
 10. **P10 · 数据红线与显式的每运行目标授权**
     - **数据红线**：读取、列出、stat、或复制真实业务数据（`*.xlsx`、`*.xls`、`*.csv`，或诸如 `/Volumes/WenshuSpace/**` 的涉密挂载）在提示层与扩展 `tool_call` 防火墙层都被严格禁止。
     - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在**每批盘点结算与退役**（常驻下 review.note 每批都走）之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。
@@ -186,4 +187,5 @@ Yggdrasill/
 | **D-MA21** | 提示词驱动子会话清理（r5） | 用户核心需求修正：「删除 subagent 会话记录」必须可用且**跨 harness**——动作走提示词而非宿主代码。清理提示词 beat（`[SESSIONS CLEANUP PENDING]`）指引用主会话自身环境原生能力删除本局 subagent 会话记录（仅限本局产物，主会话与无关会话绝不碰），完成后声明 `settlement.sessions`（`moved/remaining/destination`，`moved=0` 合法；缺声明 = 诚实未清理，`review.note` 保持阻断）。`harness.archive_sessions` 从 Mod 工具桥整体退役（pack.json + allowedTools 同批摘除保 superset 一致、REACTORS 条目与死代码 `auto_archive_sessions` 删除、beats 去专名）；机检护栏 = `agent_seed_semantics::beats_cleanup_prompt_carries_no_harness_literals`；宿主 builtin 的物理退役（含子串匹配危险与 dry-run 缺失）归 N2 宿主决策。 | 已确认 |
 | **D-MA22** | 集成职责再分配：执行者集成 feature→develop，主流程只做 develop→master | 原 `integration.serial-closeout` 把全部集成串行分配给主代理，且状态机无集成事件——集成退化为批次末 集中合并，需求量大时冲突集中爆发（2026-11-12 局实证：4 个 feature 批末一起合 develop）。现按用户设计意图翻转：迭代点集成（feature→develop：对齐 origin/develop → `--no-ff` 合并 → 集成态门禁 → push develop）由需求开发执行者在自己 lane 收口时完成，验收 artifacts 必带 `develop@<sha>` 集成证据；同仓库集成经 `origin/develop` 自串行（push 被拒=别人先落，重对齐重试；栈叠 lane 按基线序）；轮次收口（develop→master、用户触发）与部署仍为主代理串行职责。落地：ch2-delivery §integration 五条改写、ch3-evidence 翻转、subagent_brief 模板补集成职责行。 | 已确认 （2026-11-12 用户修订：`develop` 与 `master` 的同步一律走 `git reset --hard master` + `--force-with-lease` push，反向合并 master→develop 禁止——见 playbook `integration.round.reset-develop`。）|
 | **D-MA23** | 剧情双层重写：真状态压缩与自循环 | **4 真状态**（运行级 `live`/`retired` + 需求级 `open`/`done`，11→4；判据 = 不可逆语义 ∨ 改变全局行为，`split`/`merged`/`dropped` 降为 `closed_reason` 字段）+ **13 微状态**（运行级 立局/协调/盘点/发布 + 需求级九幕 立项/计划中/计划门禁/待开发/开发中/交付受理/验收门禁/集成/done，由 KV 标志位派生不独立存储）+ **38 事件**（+`charter.set`/`run.begin`/`integration.confirm`·`reject`/`release.confirm`·`skip`）+ **微状态判定单一来源** `run_phase()` / `req_phase()`（菜单/文案/渲染/投影全从它派生；三条打回路径统一落待开发，R6）+ **发布幕**（R-a：`review.note` 前置 = 发布已声明，`release.skip` 必填理由）+ **身份与权限不进剧情**（执行者台账/身份章/profile/票据门 = 事件准入校验与留痕，见 DESIGN §2.13）+ 内核 FSM 唯一转场 `live→retired`、`run.phase` 微状态标志；旧局存档不兼容不迁移。契约正文见 DESIGN §2（D-MA22 的执行者集成是需求级第 8 幕的职责内容）；分支 `feature/6f2a-story-rewrite`。 | 已确认 |
+| **D-MA24** | 泳道分池：按仓库×并行度粒度组织泳道（r1） | 原台账平铺 `lane.<k>.*` 单键空间，主仓与 submodule 需求共用同一池：不同仓需求无法同时持同一 k（目录与台账双重瓶颈）。现按池组织：默认池（""，运行仓 CWD toplevel，键形字节沿旧）+ 具名池（`lane.<label>.<k>.*`，label `^[a-z][a-z0-9-]{0,23}$`，保留 seq/pools），`lane.pool "label\|path"` 幂等注册本地检出路径；`lane.claim`/`lane.release` 载荷尾部可选池段；需求侧双写 `req.<i>.lane` + `lane_pool`；并行度按池计（每池 k ∈ 1..job_capacity），自动派活仍只取默认池；工具桥新增三个 `*_pool` 声明（固定 `--repo` 尾参，池归属从**请求快照** `tool.<id>.args` 反查——宿主输出键序冻结不携带 repo，反查失败 fail-closed）；冲突雷达只比同池对（修跨池同名文件误报）。宿主零改动（`worktree-claim/release/lane-probe` 早已支持 `--repo`，目录落位 `<root>/<basename>-lane-<k>`）；已知限制：池前缀是派生 basename（同名 basename 检出共享池目录）、`--repo` 只收本地路径。分支 `feature/b7e2-lane-pool`。 | 已确认 |
 

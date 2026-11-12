@@ -191,8 +191,8 @@
         {
           "id": "lanes.path-convention",
           "modality": "must",
-          "text": "Lane worktrees use the conventional path `~/tmp/worktrees/yggdrasill-<n>` and sit detached at the `origin/master` head while idle.",
-          "basis": "AGENTS.md §3 (lane worktrees)"
+          "text": "Lane worktrees use the conventional path `<pool-root>/<repo>-lane-<k>` (default pool-root `~/tmp/worktrees`, overridable via `--root` / `$YGG_WORKTREE_ROOT`) and sit detached at the `origin/master` head while idle. Named pools (r1, D-MA24) extend this to one pool per repo: register the local checkout once with `lane.pool \"label|path\"`, then claim inside it with `lane.claim \"lane|req_id|branch|base|clean|label\"` — the worktree lands at `<pool-root>/<checkout-basename>-lane-<k>`.",
+          "basis": "AGENTS.md §3 (lane worktrees; r1 per-repo pools)"
         },
         {
           "id": "lanes.plaque-file",

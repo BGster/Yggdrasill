@@ -37,8 +37,8 @@
         {
           "id": "harness.lane-actions",
           "modality": "must",
-          "text": "Lane ledger: `lane.claim \"lane|req_id|branch|base|clean\"` claims or backfills a lane (clean must be \"1\"; a dirty tree may not be claimed); `lane.release \"lane\"` releases it (idempotent).",
-          "basis": "AGENTS.md §4 (pre-migration)"
+          "text": "Lane ledger: `lane.pool \"label|path\"` registers a named pool (idempotent upsert; label `^[a-z][a-z0-9-]{0,23}$`, reserved seq/pools; path = the local checkout passed to the host as `--repo`). `lane.claim \"lane|req_id|branch|base|clean|label\"` claims or backfills a lane (clean must be \"1\"; a dirty tree may not be claimed; the trailing pool segment is optional — omitted = the default pool of the run repo). `lane.release \"lane|label\"` releases it (idempotent, (pool, lane)-scoped). Parallelism counts per pool (each pool k ∈ 1..job_capacity); the conflict radar compares probes within one pool only.",
+          "basis": "AGENTS.md §4 (pre-migration; r1 per-repo pools)"
         },
         {
           "id": "harness.config-subpage",

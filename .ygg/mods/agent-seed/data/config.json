@@ -35,6 +35,9 @@
     "git.worktree_claim",
     "git.worktree_release",
     "git.lane_probe",
+    "git.worktree_claim_pool",
+    "git.worktree_release_pool",
+    "git.lane_probe_pool",
     "fs.artifact_probe",
     "gate.verify_suite"
   ]
