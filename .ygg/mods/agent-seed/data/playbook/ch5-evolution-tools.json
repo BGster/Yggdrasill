@@ -117,8 +117,8 @@
         {
           "id": "subsystems.machine-evidence-parity",
           "modality": "must",
-          "text": "Machine evidence (`gate.verify_suite`, `harness.archive_sessions`) writes the same KV as human evidence (`verify.submit`, `settlement.sessions`): same level, not stronger. It only proves \"the suite ran and this output was read\", so `verify.source` / `settlement.sessions.source` must keep the provenance and a report may never claim machine evidence outranks a self-declaration.",
-          "basis": "src/tools.lua `react_verify_suite()` / `react_archive_sessions()` + `gates.settlement_problem()`"
+          "text": "Machine evidence (`gate.verify_suite`) writes the same KV as human evidence (`verify.submit`, `settlement.sessions`): same level, not stronger. It only proves \"the suite ran and this output was read\", so `verify.source` / `settlement.sessions.source` must keep the provenance and a report may never claim machine evidence outranks a self-declaration. (r5, D-MA21: `harness.archive_sessions` left the Mod tool bridge — session cleanup is prompt-driven and declared via `settlement.sessions`.)",
+          "basis": "src/tools.lua `react_verify_suite()` + `gates.settlement_problem()`"
         },
         {
           "id": "subsystems.probe-is-warning",

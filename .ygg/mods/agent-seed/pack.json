@@ -361,23 +361,6 @@
       "maxOutputBytes": 4096,
       "readOnly": true,
       "resultEvent": "tool.result"
-    },
-    "harness.archive_sessions": {
-      "kind": "cli",
-      "program": "egg",
-      "args": [
-        "--builtin-tool",
-        "archive-sessions",
-        "--parent",
-        "{{parent}}",
-        "--batch",
-        "{{batch}}"
-      ],
-      "timeoutMs": 15000,
-      "inlineWaitMs": 5000,
-      "maxOutputBytes": 1024,
-      "readOnly": false,
-      "resultEvent": "tool.result"
     }
   },
   "code": {
