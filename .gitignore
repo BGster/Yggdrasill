@@ -232,3 +232,6 @@ packages/mods/generated/
 # 项目内 Agent harness：仅 Mod 入库；二进制与局运行产物不入库
 .ygg/bin/
 .ygg/runs/
+
+# 局工件（plan/development 产物）不进版本库
+artifacts/

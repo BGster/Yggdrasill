@@ -3,8 +3,10 @@
 > This file carries exactly two things: the constraints you may not violate, and how to start /
 > continue / pause / settle a run. The mechanics (state machine / action protocol / async inbox /
 > progress views / run artifacts / Mod maintenance / host contract) live in
-> `.ygg/mods/agent-seed/README.md` and the `harness` chapter of the playbook; fetch field rules by
-> chapter with `guide.show <section_id>`. `CLAUDE.md` is a symlink to this file.
+> `.ygg/mods/agent-seed/README.md` and the playbook chapters under
+> `.ygg/mods/agent-seed/data/playbook/`; read the chapter whose section id matches your question
+> (the STAGE_GUIDE table in `src/view/guide.lua` maps run phases to chapters). `CLAUDE.md` is a
+> symlink to this file.
 
 ## 1. Non-negotiable constraints
 
@@ -15,7 +17,7 @@ classified as the values). Verifications that need real data are run by the user
 output back; synthetic data generated under `/tmp` is unrestricted.
 
 0b. **serve is read-only**: the `serve` mode (r8) exposes exactly the GET-only HTTP
-    observation plane (`docs/DESIGN.md` §3.7). It must never gain a write endpoint — the
+    observation plane (`docs/design/serve.md`, ex-DESIGN §3.7). It must never gain a write endpoint — the
     human gates (`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit`
     / `review.note`) have **no online path** and are still ticketed through the CLI/daemon.
     All state writes go exclusively through the single-shot CLI / interactive / daemon modes.
@@ -64,8 +66,12 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 3. **Render receipts in full; never parse-and-truncate**: no `narrative[0][:N]`, no "first line
    only", no line filtering with `startswith`, no stuffing a receipt into `grep` / `python` to read
    just a summary. Every dispatch prints **all narrative lines** into the conversation and hands the
-   raw `pendingChoice` to the user. If you need a rule, fetch the whole chapter with
-   `guide.show <section_id>` instead of trusting memory.
+   raw `pendingChoice` to the user. If you need a rule, read the chapter directly under
+   `.ygg/mods/agent-seed/data/playbook/` (each fragment's `sections[].id` names the chapter) instead
+   of trusting memory; the STAGE_GUIDE table in `.ygg/mods/agent-seed/src/view/guide.lua` maps
+   chapters to run phases — charter: repository · coordinate: run_machine, actions, drive, inbox,
+   dispatch, lanes, integration · settle: evolution, gates, run_artifacts, evidence,
+   mod_engineering, host_contract · release: integration · retired: pointers.
 4. **Single-shot dispatching is not compliance**: batching `--event` flags only hides state from the
    script guard; it does not replace the `requirement.dispatch` → proposal → gate chain. Never edit
    `autosave.json` / `events.jsonl` by hand. **Dispatching directly under `goal` mode is a legal
@@ -288,7 +294,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 Changing `.ygg/mods/agent-seed/src/**` (state machine, gates, render layer, tool bridge),
 `.ygg/mods/agent-seed/mod.lua` or the map wording in `data/texts/` requires, besides lint and
 the all-1 playtest:
-`cargo test -p ygg-sandbox --test agent_seed_semantics` (36 cases: stage merge + `analysis` compat,
+`cargo test -p ygg-sandbox --test agent_seed_semantics` (53 cases: stage merge + `analysis` compat,
 accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
 reject, reactive auto-dispatch in the same turn (plus `useMemo` invalidation), gate independence
 (other requirements' pending proposals / running jobs do not block a gate approval — approve starts
@@ -436,11 +442,16 @@ are git-ignored, `.ygg/mods/` is committed.
 - **Single-source Mod symlink (`packages/mods/agent-seed` -> `../../.ygg/mods/agent-seed`)**:
   `.ygg/mods/agent-seed` is the single source of truth; `./scripts/sync-seed-mod.sh` recalculates
   its `manifest.json` and verifies the relative symlink (`./scripts/sync-seed-mod.sh --check`).
-- **`docs/CONTEXT.md` + `docs/DESIGN.md` closed loop**: every `plan` and `development` subagent brief
-  mandates reading `docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md`
-  (three-layer architecture, lane lifecycle, and `harnessActions[]` contracts) before proposing or
-  editing; during settle-phase settlement (`settlement.evolution`), both documents must be checked and
-  updated whenever domain concepts or architectural contracts changed.
+- **docs wiki closed loop (r2)**: every `plan` and `development` subagent brief mandates reading the
+  docs wiki indexed by `docs/README.md` — `docs/context/*` (domain invariants and vocabulary) and
+  `docs/design/*` (three-layer architecture, lane lifecycle, and `harnessActions[]` contracts; the
+  former two monoliths remain as thin index shells) — before proposing or editing; during
+  settle-phase settlement (`settlement.evolution`), the wiki must be checked and updated whenever
+  domain concepts or architectural contracts changed. Machine-side closure (D-MA25, r3): every
+  unarmed `review.note` batch settle auto-appends one open/draft docs-maintenance requirement into
+  the next batch's dispatch queue (dedup by the `req.<i>.maintenance` marker + canonical title; the
+  retired path appends nothing) — it blocks the next `coordinate.submit` until done, so the
+  per-batch docs pass is enforced by the state machine.
 
 ### Start
 ```bash
@@ -458,7 +469,7 @@ egg serve                                                                       
 .ygg/bin/egg serve --port 7801 --poll-ms 300                                     # --port = 显式逃生门（不进全局唯一语义）；--poll-ms 加快变更检测
 # 单实例语义：同端口已有自家实例 = 幂等复用退出 0（打印面板 URL）；根不被覆盖/旧版单根实例 = 退出 1。
 # 面板：http://127.0.0.1:7800/（默认=最新局详情：主流程状态条+需求卡+决策时间线；#/runs=mod 分组历史局 → #/mods/<key> 实例 → #/runs/<id> 局详情；存档折叠段内 mod 面板 iframe）
-# 契约与安全边界见 docs/DESIGN.md §3.7；serve 只读：gate/accept 类人类门禁不在线上，仍走 CLI 票据。
+# 契约与安全边界见 docs/design/serve.md（原 DESIGN §3.7）；serve 只读：gate/accept 类人类门禁不在线上，仍走 CLI 票据。
 ```
 
 ### Continue
@@ -468,7 +479,6 @@ $A --resume --drive stdin                                     # interactive: the
 $A --resume --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
 $A --resume --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)
 $A --resume --drive none                                      # look at the situation, do not advance
-$A --resume --event guide.show --payload '"harness"'          # fetch a rule chapter by id (harness / credentials / gates …)
 $A --resume --event map.show                                  # current node + out-edges; add --payload '"full"' for the whole design map
 .ygg/bin/egg --run-id <run-name> --runs-root .ygg/runs --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
 ```

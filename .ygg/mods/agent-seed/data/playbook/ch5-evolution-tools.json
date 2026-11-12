@@ -59,7 +59,7 @@
         {
           "id": "evolution.living-docs-sync",
           "modality": "must",
-          "text": "Whenever a run evolves domain concepts, state-machine rules, persistent lane semantics, or architectural contracts, `docs/CONTEXT.md` and `docs/DESIGN.md` must be reviewed and updated before `settlement.evolution` and `review.note` close the run.",
+          "text": "Whenever a run evolves domain concepts, state-machine rules, persistent lane semantics, or architectural contracts, the docs wiki (`docs/context/*` and `docs/design/*`, indexed by `docs/README.md`) must be reviewed and updated before `settlement.evolution` and `review.note` close the run.",
           "basis": "AGENTS.md §2 + docs/{CONTEXT,DESIGN}.md closed loop"
         }
       ]

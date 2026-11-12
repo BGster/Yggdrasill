@@ -131,7 +131,8 @@ Mod 内部结构。
 ## 一、协调器（`fsm.stage`，单机单事件 `stage.advance`）
 
 r9 起运行生命周期是**常驻自循环**：需求级 done 保留（accept_gate 产物），运行级终局不再由
-review.note 自动触发——review.note 的常态落点是**批收口**（回 coordinate，批计数 +1），
+review.note 自动触发——review.note 的常态落点是**批收口**（回 coordinate，批计数 +1；
+批结算尾部自动追加下一批的 docs 维护需求，D-MA25），
 `done` 只经**显式退役**（`config.set run.retire=true` 武装后）可达：
 
 ```text
@@ -495,7 +496,7 @@ config.set profile.<handle>.<key>=            # 空值 = 清除该字段（不�
 | `src/runtime/` | 骨架 | 跨层运行时子系统：flow（转场/拒绝出口 + 状态机票据）/ tools（工具桥） |
 | `src/handlers/{intake,requirements,operate,system}/` | 骨架 | 10 个注册模块按域分组：intake（actions/lifecycle）、requirements（requirement_ops/proposals/gate_actions）、operate（choice/lanes/review）、system（config/views） |
 | `data/texts/` | 实例 | 文本资源片段（core + beats 六域，7 片段；`ygg.data` 逐条读入，`mod.lua` 装配回 TEXTS） |
-| `data/playbook/` | 实例 | 现场规则资源片段（head + 章组 + harness 七域，12 片段；装配回 15 章，`guide.show` 按 section id 取用） |
+| `data/playbook/` | 实例 | 现场规则资源片段（head + 8 章组片段，其中 ch4- 四片各载一至二章；装配 21 章，章 id 全局唯一；相位→章映射见 `src/view/guide.lua` STAGE_GUIDE，正文直读片段文件） |
 | `data/config.json` | 实例 | 静态配置默认值（`ygg:agent/config`；宿主回落路径，不拆） |
 | `pack.json` / `manifest.json` | 骨架 + 生成物 | 打包声明（20 条 entries / `code` 段与 `agent`/`inboxRoutes`/`tools` 契约）与内容寻址清单 |
 | `schemas/*.json` | 骨架 | 资源 schema（agent-config + 两个片段 schema，与 `packages/schema/schemas/` 单源一致；整文档 schema scene-texts/agent-playbook 保留在 packages/schema 供管线与全量 Mod 使用） |
@@ -535,7 +536,7 @@ mod.lua → 全部（唯一装配点）
 3. **依赖方向 T0→T8 单向**：`view/render.lua` 不得 require `runtime/tools.lua`（成环）。
 
 资源片段装配契约（`mod.lua` 顶层）：beats 键跨片段不相交；playbook 章节片段按文件名序
-（= order 序）显式 id 列表装配，相邻同 id（harness 7 片段）按序拼接 rules；装配不排序。
+（= order 序）显式 id 列表装配，各 section id 全局唯一（r5 起 harness 七片段同 id 拼接退役）；装配不排序。
 
 ## 十、工具桥（`tool.call` / `tool.result`）
 
@@ -606,19 +607,22 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 
 ## 十二、走查
 
-r9 起默认基线是两条**脚本化走查**（默认无参全 1 在常驻语义下空批循环至步数上限 →
-`ok=false, reached=limit`，这是**预期态**，不是回归——空批循环即「队列已清空等进料」）:
+r9 起默认基线是两条**脚本化走查**（默认无参全 1 在 v2 立局幕被 `1=charter.set` 原地自循环拖到步数上限
+→ `ok=false, reached=limit`，这是**预期态**，不是回归——循环机制是章程菜单重设，不是空批循环）：
 
 ```bash
-# 默认全 1 贪心：intake → coordinate.submit → verify → settlement.evolution → review.note → 【结局
+# 默认全 1 贪心：立局菜单 1=charter.set 恒重设章程，全 1 原地循环至步数上限（reached=limit 预期态；
+#   旧「intake→批盘点→发布→结局」叙事已随五幕机退役）
 cargo run --example playtest -- .ygg/mods/agent-seed
-# 基线 A · 批循环（新默认）：intake → coordinate.submit(批边界) → verify → settlement.evolution
-#   → review.note(批收口) → 回 coordinate，脚本耗尽（reached=choice 是脚本走查的成功值）
-cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,1
+# 基线 A · 立局到派活（choices 通道最深点）：charter.set → run.begin → requirement.add
+#   → requirement.dispatch，5 步停在协调幕（1 个 development job 在跑；reached=choice 是脚本走查的成功值）
+cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1
 
-# 基线 B · 退役：批盘点 → config 子页（7=config 入口）武装 run.retire（4=第 5 项）→ 关子页（5）
-#   → review.note（终局）→ [ENDING · run retired]（reached=ending）
-cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,7,4,5,1
+# 基线 B · 退役（混合驱动，纯 choices 结构性不可达 [ENDING：完成需求必须经执行者收件箱
+#   事件 proposal.submit ×2 + integration.confirm，菜单面无对应项]）：完整 15 choices +
+#   3 事件链见 AGENTS.md §2「Settle and finish」；config 子页经菜单可达（立局幕 3=进、
+#   4=武装 run.retire、5=退），端到端已在 /tmp runs-root 实测
+cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1   # 前缀钉
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
 #   .ygg/bin/egg --run-id t --runs-root .ygg/runs --requirement '需求A|描述'

@@ -25,8 +25,9 @@ local gate_total, gate_problem =
   gates.gate_total, gates.gate_problem
 local narrate_stage_guide =
   guide.narrate_stage_guide
-local lane_text, narrate_lane_ledger =
-  lanes.lane_text, lanes.narrate_lane_ledger
+local LANES, lane_text, narrate_lane_ledger =
+  lanes.LANES, lanes.lane_text, lanes.narrate_lane_ledger
+local req_lane_pool = reqs.req_lane_pool
 local CONFIG_UI, MENU, menu, option_texts =
   menus.CONFIG_UI, menus.MENU, menus.menu, menus.option_texts
 local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status =
@@ -125,11 +126,12 @@ end
 local function req_live_status(index)
   local id = req_id(index)
   local lane = req_lane(index)
+  local pool = lane > 0 and req_lane_pool(index) or ""
   local job = req_job(index)
   local phase = req_phase(index)
-  local branch = lane > 0 and text_of("lane." .. tostring(lane) .. ".branch", "") or ""
-  local worktree_path = lane > 0 and text_of("lane." .. tostring(lane) .. ".path", "") or ""
-  local lane_req = lane > 0 and text_of("lane." .. tostring(lane) .. ".req", "") or ""
+  local branch = lane > 0 and text_of(LANES.key(pool, lane, "branch"), "") or ""
+  local worktree_path = lane > 0 and text_of(LANES.key(pool, lane, "path"), "") or ""
+  local lane_req = lane > 0 and text_of(LANES.key(pool, lane, "req"), "") or ""
 
   local worktree_status = "n/a"
   -- R7：泳道绑定窗口覆盖 开发中→交付受理→验收门禁→集成 四幕（执行者要工作树做集成）。
@@ -141,7 +143,7 @@ local function req_live_status(index)
       if worktree_path ~= "" then
         worktree_status = "ready:" .. worktree_path .. "@" .. br
       else
-        worktree_status = "bound:lane-" .. tostring(lane) .. "@" .. br
+        worktree_status = "bound:" .. LANES.label(pool, lane) .. "@" .. br
       end
     end
   elseif phase == PHASE.ready then
@@ -166,11 +168,11 @@ local function req_live_status(index)
     end
   end
 
-  local probe_head = lane > 0 and text_of("lane." .. tostring(lane) .. ".probe.head", "") or ""
+  local probe_head = lane > 0 and text_of(LANES.key(pool, lane, "probe.head"), "") or ""
   local probe_status = "n/a"
   if lane > 0 and probe_head ~= "" then
-    local probe_commits = tostring(ygg.kv.get("lane." .. tostring(lane) .. ".probe.commits") or "0")
-    local probe_clean = text_of("lane." .. tostring(lane) .. ".probe.clean", "0")
+    local probe_commits = tostring(ygg.kv.get(LANES.key(pool, lane, "probe.commits")) or "0")
+    local probe_clean = text_of(LANES.key(pool, lane, "probe.clean"), "0")
     probe_status = "verified:commits=" .. probe_commits .. ",clean=" .. probe_clean
   elseif job == "development" then
     probe_status = "pending"
@@ -301,7 +303,7 @@ local function req_trace(index)
   end
   local lane = req_lane(index)
   if lane > 0 then
-    parts[#parts + 1] = fill(TEXTS.beats.req_trace_lane, { lane = "lane-" .. tostring(lane) })
+    parts[#parts + 1] = fill(TEXTS.beats.req_trace_lane, { lane = LANES.label(req_lane_pool(index), lane) })
   end
   local job = req_job(index)
   if job ~= "" then
@@ -927,9 +929,10 @@ summary_jobs = function()
       local lane = req_lane(i)
       local id = req_id(i)
       local rev = summary_int(req_rev(i))
-      local branch = lane > 0 and text_of("lane." .. tostring(lane) .. ".branch", "") or ""
-      local base = lane > 0 and text_of("lane." .. tostring(lane) .. ".base", "") or ""
-      local worktree_path = lane > 0 and text_of("lane." .. tostring(lane) .. ".path", "") or ""
+      local lane_pool = lane > 0 and req_lane_pool(i) or ""
+      local branch = lane > 0 and text_of(LANES.key(lane_pool, lane, "branch"), "") or ""
+      local base = lane > 0 and text_of(LANES.key(lane_pool, lane, "base"), "") or ""
+      local worktree_path = lane > 0 and text_of(LANES.key(lane_pool, lane, "path"), "") or ""
       local exec_id = wire.executor_id_of(executor_raw(id, job))
       local plan_exec_id = wire.executor_id_of(executor_raw(id, "plan"))
       local resume_id = ""

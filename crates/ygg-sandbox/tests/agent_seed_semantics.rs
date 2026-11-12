@@ -1142,19 +1142,26 @@ fn release_declaration_gates_the_batch_settlement() {
     game.assert_kv("run.phase", json!(""));
     game.assert_kv("run.batch", json!(2));
 
-    // Batch 2 proves the self-loop with the confirm path: a fresh requirement walks the
-    // nine acts, then confirm (not skip) declares the merge.
+    // Batch 2 proves the self-loop with the confirm path: the auto-appended maintenance
+    // row (r2, D-MA25) and a fresh requirement (r3) walk the pipeline side by side, then
+    // confirm (not skip) declares the merge.
     game.narrate(
         "requirement.add",
         &text("second batch requirement|desc|semantics-b2"),
     );
-    game.narrate("requirement.dispatch", "0");
-    submit_req(&mut game, "r2", 1, "plan", "semantics-b2-p1");
-    game.click("gate.approve — ");
-    submit_req(&mut game, "r2", 1, "development", "semantics-b2-p2");
-    game.click("proposal.accept — ");
-    game.click("gate.approve — ");
+    game.narrate("requirement.dispatch", "0"); // dispatches r2 (maintenance) + r3 (fresh)
+    submit_req(&mut game, "r2", 1, "plan", "semantics-m-p1");
+    submit_req(&mut game, "r3", 1, "plan", "semantics-b2-p1");
+    game.click("gate.approve — "); // r2 plan gate → auto-dispatch r2 development
+    game.click("gate.approve — "); // r3 plan gate → auto-dispatch r3 development
+    submit_req(&mut game, "r2", 1, "development", "semantics-m-p2");
+    submit_req(&mut game, "r3", 1, "development", "semantics-b2-p2");
+    game.click("proposal.accept — "); // r2 dev review → accept gate
+    game.click("proposal.accept — "); // r3 dev review → accept gate
+    game.click("gate.approve — "); // r2 accept gate → integrating
+    game.click("gate.approve — "); // r3 accept gate → integrating
     game.narrate("integration.confirm", &text("r2|develop@beef123"));
+    game.narrate("integration.confirm", &text("r3|develop@beef124"));
     game.click("coordinate.submit — ");
     game.click("verify.submit all_green=true — ");
     game.narrate(
@@ -1180,6 +1187,221 @@ fn release_declaration_gates_the_batch_settlement() {
     );
     game.assert_kv("run.batch", json!(3));
     game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
+}
+
+// ───────────────────── batch-maintenance auto-append (r3 / D-MA25) ─────────────────────
+
+/// An unarmed batch settle **auto-appends the next batch's docs-maintenance requirement**
+/// (D-MA25): the `[BATCH 1 SETTLED]` receipt is followed by `[MAINTENANCE REQ ADDED]` in
+/// the same transaction — one new open/draft row carrying the `req.<i>.maintenance` marker,
+/// the canonical title (no batch number, so the dedup title match stays exact) and the
+/// per-file wiki guidance in its description; `run.maintenance.last` points at it.
+#[test]
+fn batch_settle_auto_appends_maintenance_requirement() {
+    let mut game = drive_to_release();
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[BATCH 1 SETTLED]"),
+        "review.note must settle the batch: {closed}"
+    );
+    assert!(
+        narrative.contains("[MAINTENANCE REQ ADDED]"),
+        "the batch settle must append the maintenance requirement: {closed}"
+    );
+    assert!(
+        !narrative.contains("[ENDING"),
+        "a batch settle must never carry the ending prefix: {closed}"
+    );
+    game.assert_kv("run.batch", json!(2));
+    game.assert_kv("run.phase", json!(""));
+    // The appended row: open/draft, unmarked-by-auto-dispatch (no job, no gate), marker set.
+    game.assert_kv("req.count", json!(2));
+    game.assert_kv("req.2.status", json!("open"));
+    game.assert_kv("req.2.title", json!("维护更新 docs wiki（上批收口）"));
+    game.assert_kv("req.2.maintenance", json!("1"));
+    game.assert_kv("run.maintenance.last", json!("r2"));
+    game.assert_kv("req.2.closed_reason", json!(""));
+    game.assert_kv("req.2.job", json!(""));
+    game.assert_kv("req.2.gate", json!(""));
+    game.assert_kv("req.2.plan_ok", json!(false));
+    assert_eq!(game.phase("r2"), "draft");
+    // The description carries the r2 wiki topology guidance (three duties + per-file map).
+    let desc = game
+        .kv("req.2.description")
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        desc.contains("wiki-governance") && desc.contains("三职责"),
+        "description must cite the governance duties: {desc}"
+    );
+    assert!(
+        desc.contains("docs/README.md")
+            && desc.contains("docs/context/decisions-agent.md")
+            && desc.contains("docs/design/"),
+        "description must carry the per-file wiki guidance: {desc}"
+    );
+}
+
+/// The dedup boundary (③「未终态」语义): a **terminal** same-title maintenance requirement
+/// does **not** suppress the auto-append. A manual same-title add during the settle act is
+/// legal (requirement.add admits settle), but it re-arms the global gate: all-green verify
+/// is refused (the row is open), the batch falls back to coordinate, the manual row walks
+/// the pipeline like any requirement, and when the batch finally closes it appends a
+/// fresh round's row (r3) — a terminal same-title row does not suppress it. (The failed
+/// verify never completed the close, so `run.batch` stays 1: this IS batch 1's close.)
+#[test]
+fn terminal_maintenance_row_does_not_suppress_next_batch_append() {
+    let mut game = drive_to_settle();
+    // Manual same-title add during the settle act (no marker — the manual path).
+    game.narrate(
+        "requirement.add",
+        &text("维护更新 docs wiki（上批收口）|manual maintenance during settle"),
+    );
+    game.assert_kv("req.count", json!(2));
+    game.assert_kv("req.2.maintenance", json!(null));
+    // All-green verify is refused: the open row re-arms the global gate_problem barrier
+    // (verify.submit is a pass-type action — it must be picked from the menu).
+    let verify = game.click("verify.submit all_green=true — ");
+    assert!(
+        verify["narrative"].to_string().contains("not done yet"),
+        "an open row must block all-green verify: {verify}"
+    );
+    game.assert_kv("verify.passed", json!(false));
+    // Failed verify returns the whole batch to coordinate (R9).
+    game.click("verify.submit all_green=false — ");
+    game.assert_kv("run.phase", json!(""));
+    // The manual maintenance row walks the nine acts like any requirement.
+    game.narrate("requirement.dispatch", "0");
+    game.assert_kv("req.2.job", json!("plan"));
+    submit_req(&mut game, "r2", 1, "plan", "maint-p1");
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.plan_ok", json!(true));
+    game.assert_kv("req.2.job", json!("development"));
+    submit_req(&mut game, "r2", 1, "development", "maint-d1");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.integrating", json!(true));
+    game.narrate("integration.confirm", &text("r2|develop@abc1234"));
+    game.assert_kv("req.2.status", json!("done"));
+    // Batch 2 closes: the terminal manual row does not suppress the auto-append.
+    game.click("coordinate.submit — ");
+    game.click("verify.submit all_green=true — ");
+    game.narrate(
+        "settlement.evolution",
+        &text(
+            "|candidates screened against the evolution chapter|c=0/0|\
+             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
+        ),
+    );
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[BATCH 1 SETTLED]") && narrative.contains("[MAINTENANCE REQ ADDED]"),
+        "a terminal same-title row must not suppress the append: {closed}"
+    );
+    game.assert_kv("req.count", json!(3));
+    game.assert_kv("req.3.maintenance", json!("1"));
+    game.assert_kv("run.maintenance.last", json!("r3"));
+}
+
+/// The auto-appended maintenance requirement **walks the nine acts** and **gates the next
+/// boundary** until done: the per-batch docs cadence is enforced by `gate_problem()`, not
+/// by convention. The second batch settle appends the next round's row (r3).
+#[test]
+fn maintenance_requirement_walks_nine_acts_and_gates_next_boundary() {
+    let mut game = drive_to_release();
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    let closed = game.click("review.note — ");
+    assert!(closed["narrative"]
+        .to_string()
+        .contains("[MAINTENANCE REQ ADDED]"));
+    // Batch 2: the open/draft maintenance row withholds the boundary item — menu data
+    // does not lie, and the drained queue is what brings `coordinate.submit` back.
+    assert!(
+        !game
+            .options()
+            .iter()
+            .any(|item| item.starts_with("coordinate.submit — ")),
+        "the open maintenance row must withhold the next boundary: {:?}",
+        game.options()
+    );
+    // ...and walks the full pipeline (draft → planning → plan gate → development →
+    // accept gate → integrating → done).
+    game.narrate("requirement.dispatch", "0");
+    game.assert_kv("req.2.job", json!("plan"));
+    assert_eq!(game.phase("r2"), "planning");
+    submit_req(&mut game, "r2", 1, "plan", "maint-p1");
+    game.assert_kv("req.2.gate", json!("plan"));
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.plan_ok", json!(true));
+    game.assert_kv("req.2.job", json!("development"));
+    game.assert_kv("req.2.lane", json!(1));
+    submit_req(&mut game, "r2", 1, "development", "maint-d1");
+    game.assert_kv("req.2.job", json!(""));
+    assert_eq!(game.phase("r2"), "dev_review");
+    game.click("proposal.accept — ");
+    game.assert_kv("req.2.gate", json!("accept"));
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.integrating", json!(true));
+    let confirmed = game.narrate("integration.confirm", &text("r2|develop@abc1234"));
+    assert!(
+        confirmed
+            .iter()
+            .any(|line| line.contains("[INTEGRATION CONFIRMED]")),
+        "the integration confirm must narrate its beat: {confirmed:#?}"
+    );
+    game.assert_kv("req.2.status", json!("done"));
+    game.assert_kv("req.2.maintenance", json!("1"));
+    // Now batch 2 can close — and the second settle appends round 3's row.
+    game.click("coordinate.submit — ");
+    game.click("verify.submit all_green=true — ");
+    game.narrate(
+        "settlement.evolution",
+        &text(
+            "|candidates screened against the evolution chapter|c=0/0|\
+             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
+        ),
+    );
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    let closed2 = game.click("review.note — ");
+    let narrative = closed2["narrative"].to_string();
+    assert!(
+        narrative.contains("[BATCH 2 SETTLED]") && narrative.contains("[MAINTENANCE REQ ADDED]"),
+        "the second settle must append round 3's maintenance row: {closed2}"
+    );
+    game.assert_kv("req.count", json!(3));
+    game.assert_kv("run.maintenance.last", json!("r3"));
+}
+
+/// The **retired path appends nothing**: an armed `review.note` writes the ending and
+/// leaves the register (and the pointer) untouched — no maintenance row for a closed run.
+#[test]
+fn retire_appends_no_maintenance_requirement() {
+    let mut game = drive_to_release();
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    game.narrate("config.set", &text("run.retire=true"));
+    game.assert_kv("settings.run.retire", json!("true"));
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[ENDING · run retired]"),
+        "armed review.note must retire the run: {closed}"
+    );
+    assert!(
+        !narrative.contains("[MAINTENANCE REQ"),
+        "the retired path must not append a maintenance row: {closed}"
+    );
+    assert!(
+        !narrative.contains("[BATCH"),
+        "a retiring close must never carry a batch-settle line: {closed}"
+    );
+    game.assert_kv("req.count", json!(1));
+    game.assert_kv("run.maintenance.last", json!(null));
+    game.assert_kv("ending", json!("retired"));
 }
 
 // ───────────────────── gate locality & the integration act ─────────────────────
@@ -1563,10 +1785,11 @@ fn assert_fail_closed(game: &mut Game, event: &str) -> Json {
         .parse()
         .unwrap_or_else(|err| panic!("the registered count must be a number: {message} ({err})"));
     // D-MA23: 38 story/operate/infrastructure events (DESIGN §2.6) + `ygg.narrative.goto`
-    // (the node:render render event) = 39 registered handlers.
+    // (the node:render render event) = 39 registered handlers; r1 (D-MA24) adds
+    // `lane.pool` (the named-pool registry action) = 40 registered handlers.
     assert_eq!(
-        count, 39,
-        "the merged mod registers 39 events after D-MA23 — got {count}: {message}"
+        count, 40,
+        "the merged mod registers 40 events after r1 lane.pool — got {count}: {message}"
     );
     let set = registered_set(message);
     assert!(
@@ -2011,8 +2234,9 @@ fn seed_layout_is_single_source_agent_seed() {
 /// r6 The mod architecture is **fragments + five layers**: 27 code modules all under
 /// `src/{{core,domain,view,runtime,handlers}}/` (D-MA23 added the charter / integration /
 /// release handlers), texts split into 7 fragments (core + 6 beats groups) whose beat keys
-/// are pairwise disjoint (the `mod.lua` assembly contract), the playbook split into 12
-/// chapter fragments, no monolith survives, and tuning living in `data/texts/core.json`.
+/// are pairwise disjoint (the `mod.lua` assembly contract), the playbook split into 9
+/// chapter fragments (r5: head + ch1..ch5 + the four ch4- domain fragments; the former
+/// seven-fragment `harness` chapter is abolished), no monolith survives, and tuning living in `data/texts/core.json`.
 #[test]
 fn mod_architecture_is_fragments_plus_five_layers() {
     let project = project_mod_dir();
@@ -2076,7 +2300,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         .iter()
         .filter(|path| path.starts_with("data/playbook/"))
         .count();
-    assert_eq!(playbook, 12, "playbook = head + 11 chapter fragments");
+    assert_eq!(playbook, 9, "playbook = head + 8 chapter fragments (r5)");
     for path in &pack_entry_paths {
         assert!(
             project.join(path).is_file(),
@@ -2123,6 +2347,83 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         assert!(
             core["tuning"][key].as_u64().is_some(),
             "core.json tuning.{key} must be an unsigned integer"
+        );
+    }
+}
+
+/// r5 The playbook is reachable: every chapter id in `guide.lua`'s STAGE_GUIDE must resolve to
+/// an assembled section carrying at least one rule (a mapped-but-missing or mapped-but-empty
+/// chapter would make the per-phase hint narrate nothing). Forward direction only — chapters
+/// outside the mapping are a pre-existing gap, not this contract.
+#[test]
+fn stage_guide_maps_existing_nonempty_sections() {
+    let project = project_mod_dir();
+    let guide_src =
+        std::fs::read_to_string(project.join("src/view/guide.lua")).expect("read guide.lua");
+    let start = guide_src
+        .find("local STAGE_GUIDE = {")
+        .expect("STAGE_GUIDE table must exist in guide.lua");
+    let end = guide_src[start..]
+        .find("\n}")
+        .expect("STAGE_GUIDE table must close");
+    let block = &guide_src[start..start + end];
+    // odd indices of a `"` split are exactly the quoted fragments inside the table
+    let mapped: std::collections::BTreeSet<String> = block
+        .split('"')
+        .enumerate()
+        .filter(|(index, _)| index % 2 == 1)
+        .map(|(_, part)| part.to_owned())
+        .collect();
+    assert_eq!(
+        mapped.len(),
+        15,
+        "the r5 STAGE_GUIDE maps exactly 15 distinct chapters: {mapped:?}"
+    );
+
+    // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
+    let pack = read_json(&project.join("pack.json"));
+    let mut sections: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut assembly_order: Vec<String> = Vec::new();
+    for entry in pack["entries"].as_array().expect("pack entries") {
+        let path = entry["path"].as_str().expect("entry path");
+        let Some(rel) = path.strip_prefix("data/playbook/") else {
+            continue;
+        };
+        if rel == "head.json" {
+            continue;
+        }
+        let fragment = read_json(&project.join(path));
+        for section in fragment["sections"].as_array().expect("sections") {
+            let id = section["id"].as_str().expect("section id").to_owned();
+            let rules = section["rules"].as_array().expect("rules").len();
+            match sections.get_mut(&id) {
+                Some(count) => {
+                    assert_eq!(
+                        assembly_order.last().map(String::as_str),
+                        Some(id.as_str()),
+                        "mod.lua merges only ADJACENT same-id sections; `{id}` reappears after another id"
+                    );
+                    *count += rules;
+                }
+                None => {
+                    sections.insert(id.clone(), rules);
+                    assembly_order.push(id);
+                }
+            }
+        }
+    }
+    assert_eq!(
+        sections.len(),
+        21,
+        "r5 assembles 21 chapters (14 legacy + 7 new): {sections:?}"
+    );
+    for id in &mapped {
+        let rules = sections.get(id).unwrap_or_else(|| {
+            panic!("STAGE_GUIDE maps `{id}` but no playbook section carries that id")
+        });
+        assert!(
+            *rules >= 1,
+            "STAGE_GUIDE maps `{id}` but the section is empty"
         );
     }
 }
@@ -2844,6 +3145,343 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     assert_eq!(game.phase("r1"), "draft");
 }
 
+/// r1 (D-MA24) lane pools: `lane.pool "label|path"` registers named pools and the same lane
+/// number k hosts **different requirements in different pools** (the multi-repo case that a
+/// flat `lane.<k>` ledger could never express). Registration is an idempotent upsert with a
+/// shape gate (label regex + reserved words; path without `|` `;` newline or edge spaces).
+#[test]
+fn lane_pool_registry_and_multi_repo_parallel_claims() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("requirement.add", &text("alpha side|description|subsys-a"));
+    game.narrate("requirement.add", &text("beta side|description|subsys-b"));
+
+    // ① registration is an idempotent upsert: re-registering `alpha` updates in place.
+    let first = game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    assert_eq!(count_lines(&first, "[LANE POOL]"), 1, "{first:#?}");
+    game.narrate("lane.pool", &text("beta|/tmp/checkout-beta"));
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.assert_kv("lane.pools", json!("alpha,beta"));
+    game.assert_kv("lane.pool.alpha.path", json!("/tmp/checkout-alpha"));
+
+    // ② THE multi-repo case: the same k=1 in two pools holds two requirements at once.
+    let a = game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/aa11-alpha|abc1234|1|alpha"),
+    );
+    assert_eq!(count_lines(&a, "[LANE CLAIMED]"), 1, "{a:#?}");
+    assert!(
+        a.iter().any(|line| line.contains("lane-alpha-1")),
+        "a named-pool claim is labelled lane-<pool>-<k>: {a:#?}"
+    );
+    let b = game.narrate("lane.claim", &text("1|r2|feature/aa11-beta|abc1234|1|beta"));
+    assert_eq!(count_lines(&b, "[LANE CLAIMED]"), 1, "{b:#?}");
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+    game.assert_kv("lane.beta.1.req", json!("r2"));
+    game.assert_kv("lane.1.req", Json::Null); // the default pool's k=1 stays untouched
+    game.assert_kv("req.1.lane", json!(1));
+    game.assert_kv("req.1.lane_pool", json!("alpha"));
+    game.assert_kv("req.2.lane_pool", json!("beta"));
+
+    // ③ registration shape gate: bad label / reserved word / dirty path segments are refused
+    // (payload-face rejections move the reject ledger) and register nothing.
+    let rejects_before = game.kv("reject.count");
+    for payload in [
+        "Alpha|/tmp/x",   // label must be lowercase
+        "seq|/tmp/x",     // reserved word
+        "pools|/tmp/x",   // reserved word
+        "alpha| /tmp/x ", // leading/trailing spaces in path
+        "alpha|/tmp/a;b", // `;` would corrupt the args wire
+        "alpha|",         // empty path
+    ] {
+        let lines = game.narrate("lane.pool", &text(payload));
+        assert_refused(&lines, "lane.pool");
+    }
+    assert_ne!(
+        game.kv("reject.count"),
+        rejects_before,
+        "the registration refusals must move the reject ledger"
+    );
+    game.assert_kv("lane.pools", json!("alpha,beta"));
+
+    // ④ a claim naming an unregistered pool is refused, ledger untouched.
+    let rejects_before = game.kv("reject.count");
+    let unknown = game.narrate(
+        "lane.claim",
+        &text("2|r1|feature/aa11-gamma|abc1234|1|gamma"),
+    );
+    assert_refused(&unknown, "lane.claim");
+    assert_ne!(game.kv("reject.count"), rejects_before);
+    game.assert_kv("lane.gamma.2.req", Json::Null);
+}
+
+/// r1 (D-MA24) parallelism is counted **per pool** (k ∈ 1..job_capacity inside one pool),
+/// occupancy and the one-lane-per-requirement bound are (pool, k)-scoped, and a different
+/// pool's same k never counts as occupied.
+#[test]
+fn same_pool_parallelism_and_occupancy_scoped() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.narrate("requirement.add", &text("first|description|subsys-a"));
+    game.narrate("requirement.add", &text("second|description|subsys-b"));
+    game.narrate("requirement.add", &text("third|description|subsys-c"));
+
+    // ① two parallel lanes inside one named pool.
+    game.narrate("lane.claim", &text("1|r1|feature/aa11-one|abc1234|1|alpha"));
+    game.narrate("lane.claim", &text("2|r2|feature/aa11-two|abc1234|1|alpha"));
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+    game.assert_kv("lane.alpha.2.req", json!("r2"));
+
+    // ② k beyond the per-pool capacity is refused (job_capacity = 4).
+    let over = game.narrate(
+        "lane.claim",
+        &text("5|r3|feature/aa11-five|abc1234|1|alpha"),
+    );
+    assert_refused(&over, "lane.claim");
+
+    // ③ occupancy is (pool, k)-scoped: r3 cannot take alpha-1 (held by r1), and r1 cannot
+    // hold a second lane in the same pool — but r3 CAN take default-1 while alpha-1 is held.
+    let occupied = game.narrate(
+        "lane.claim",
+        &text("1|r3|feature/aa11-three|abc1234|1|alpha"),
+    );
+    assert_refused(&occupied, "lane.claim");
+    let bound = game.narrate(
+        "lane.claim",
+        &text("2|r1|feature/aa11-one-b|abc1234|1|alpha"),
+    );
+    assert_refused(&bound, "lane.claim");
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+    game.assert_kv("lane.alpha.2.req", json!("r2"));
+    let cross = game.narrate("lane.claim", &text("1|r3|feature/aa11-def|abc1234|1"));
+    assert_eq!(count_lines(&cross, "[LANE CLAIMED]"), 1, "{cross:#?}");
+    game.assert_kv("lane.1.req", json!("r3"));
+    game.assert_kv("req.3.lane_pool", json!(""));
+
+    // ④ the pool-scoped lane labels flow through the panel surface (`lane_text` rides the
+    // requirement.list head): the default pool keeps the byte-stable `lane-<k>` labels and
+    // the named pool adds `lane-<pool>-<k>` rows.
+    let list = game.narrate("requirement.list", "0");
+    let joined = list.iter().cloned().collect::<Vec<_>>().join("\n");
+    assert!(
+        joined.contains("lane-1 `r3`(open)"),
+        "the default pool keeps the byte-stable label: {joined}"
+    );
+    assert!(
+        joined.contains("lane-alpha-1 `r1`(open)") && joined.contains("lane-alpha-2 `r2`(open)"),
+        "named-pool rows use the lane-<pool>-<k> label: {joined}"
+    );
+}
+
+/// r1 (D-MA24) release is (pool, k)-scoped: releasing one pool's lane never touches another
+/// pool's same-k lane, the requirement-side binding (lane + lane_pool) clears together, and
+/// the tool-face pooled release resolves the pool from the **request** repo argument.
+#[test]
+fn release_paths_are_pool_scoped() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.narrate("lane.pool", &text("beta|/tmp/checkout-beta"));
+    game.narrate("requirement.add", &text("first|description|subsys-a"));
+    game.narrate("requirement.add", &text("second|description|subsys-b"));
+    game.narrate("requirement.add", &text("third|description|subsys-c"));
+    game.narrate("lane.claim", &text("1|r1|feature/aa11-one|abc1234|1|alpha"));
+    game.narrate("lane.claim", &text("1|r2|feature/aa11-two|abc1234|1|beta"));
+    game.narrate("lane.claim", &text("1|r3|feature/aa11-three|abc1234|1"));
+
+    // ① releasing beta-1 leaves alpha-1 and default-1 (same k!) untouched.
+    let rel = game.narrate("lane.release", &text("1|beta"));
+    assert_eq!(count_lines(&rel, "[LANE RELEASED]"), 1, "{rel:#?}");
+    assert!(
+        rel.iter().any(|line| line.contains("lane-beta-1")),
+        "the release names the pool-scoped label: {rel:#?}"
+    );
+    game.assert_kv("lane.beta.1.req", json!(""));
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+    game.assert_kv("lane.1.req", json!("r3"));
+    game.assert_kv("req.2.lane", json!(0));
+    game.assert_kv("req.2.lane_pool", json!(""));
+
+    // ② re-releasing the now-empty pool lane is idle, narrated, and moves nothing.
+    let idle = game.narrate("lane.release", &text("1|beta"));
+    assert_eq!(count_lines(&idle, "[LANE RELEASED]"), 1, "{idle:#?}");
+    assert!(
+        idle.iter()
+            .any(|line| line.contains("none (it was already free)")),
+        "{idle:#?}"
+    );
+
+    // ③ the default-pool release path is untouched by the pool segments.
+    game.narrate("lane.release", &text("1"));
+    game.assert_kv("lane.1.req", json!(""));
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+
+    // ④ the pooled release tool resolves the pool from the request repo and clears the
+    // requirement side (lane + lane_pool) in the same fold.
+    let released = tool_round(
+        &mut game,
+        "git.worktree_release_pool|lane=1;repo=/tmp/checkout-alpha|t5",
+        "t5|git.worktree_release_pool|ok|0|lane=1;released=1;parked=1;path=/tmp/checkout-alpha-lane-1",
+    );
+    assert_eq!(
+        count_lines(&released, "[WORKTREE RELEASED]"),
+        1,
+        "{released:#?}"
+    );
+    game.assert_kv("lane.alpha.1.req", json!(""));
+    game.assert_kv("lane.alpha.1.path", json!(""));
+    game.assert_kv("req.1.lane", json!(0));
+    game.assert_kv("req.1.lane_pool", json!(""));
+
+    // ⑤ a repo that resolves to no registered pool is refused; the ledger stays untouched.
+    let refused = tool_round(
+        &mut game,
+        "git.worktree_release_pool|lane=2;repo=/tmp/ghost|t6",
+        "t6|git.worktree_release_pool|ok|0|lane=2;released=1;parked=0;path=/tmp/ghost-lane-2",
+    );
+    assert_eq!(
+        count_lines(&refused, "[WORKTREE RELEASE REFUSED]"),
+        1,
+        "{refused:#?}"
+    );
+    game.assert_kv("lane.alpha.2.req", Json::Null);
+}
+
+/// r1 (D-MA24) the conflict radar compares probes **within one pool only**: the same file
+/// list in two different pools raises nothing (different repos, unrelated file trees), while
+/// the same overlap inside one pool still blocks through the human-path writer.
+#[test]
+fn conflict_radar_compares_within_pool_only() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.narrate("requirement.add", &text("left half|description|subsys-a"));
+    game.narrate("requirement.add", &text("right half|description|subsys-b"));
+    game.narrate("requirement.add", &text("other repo|description|subsys-c"));
+    game.narrate("lane.claim", &text("1|r1|||1|alpha"));
+    game.narrate("lane.claim", &text("2|r2|||1|alpha"));
+    game.narrate("lane.claim", &text("1|r3|||1"));
+
+    // ① probe alpha-1: the facts land in the pool-scoped probe keys.
+    tool_round(
+        &mut game,
+        "git.lane_probe_pool|lane=1;base=abc;branch=feature/aa11-left;repo=/tmp/checkout-alpha|t1",
+        "t1|git.lane_probe_pool|ok|0|lane=1;branch=feature/aa11-left;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
+    );
+    game.assert_kv("lane.alpha.1.probe.commits", json!(2));
+    game.assert_kv("lane.alpha.1.probe.files", json!("src/a.lua,src/b.lua"));
+
+    // ② the SAME file list in a different pool (default lane-1) raises no conflict —
+    // the flat ledger would have false-positived here. (`req.conflicts` is created
+    // lazily by the conflict writer, so assert the per-requirement fields instead.)
+    tool_round(
+        &mut game,
+        "git.lane_probe|lane=1;base=abc;branch=feature/aa11-other|t2",
+        "t2|git.lane_probe|ok|0|lane=1;branch=feature/aa11-other;base=abc;head=3333333;commits=1;clean=1;files=src/a.lua",
+    );
+    game.assert_kv("req.1.conflict", json!(""));
+    game.assert_kv("req.3.conflict", json!(""));
+
+    // ③ the same overlap inside one pool still blocks, labelled with pool-scoped names.
+    let radar = tool_round(
+        &mut game,
+        "git.lane_probe_pool|lane=2;base=abc;branch=feature/aa11-right;repo=/tmp/checkout-alpha|t3",
+        "t3|git.lane_probe_pool|ok|0|lane=2;branch=feature/aa11-right;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
+    );
+    assert_eq!(count_lines(&radar, "[CONFLICT RADAR]"), 1, "{radar:#?}");
+    assert!(
+        radar
+            .iter()
+            .any(|line| line.contains("lane-alpha-1") && line.contains("lane-alpha-2")),
+        "the radar names both pool-scoped lanes: {radar:#?}"
+    );
+    game.assert_kv("req.conflicts", json!(2));
+    game.assert_kv("req.1.conflict", json!("overlapping file: src/b.lua"));
+    game.assert_kv("req.3.conflict", json!(""));
+
+    // ④ `requirement.resolve` remains the only way out.
+    game.narrate("requirement.resolve", &text("r1,r2|keep_both|re-checked"));
+    game.assert_kv("req.conflicts", json!(0));
+    game.assert_kv("req.1.conflict", json!(""));
+}
+
+/// r1 (D-MA24) the pooled tool bridge folds into the pool ledger via the **request** repo
+/// argument (the host output line does not carry `--repo`): a pooled claim binds
+/// `lane.<pool>.<k>.*`, the default tool still binds the flat legacy keys, and an
+/// unregistered repo is refused without touching the ledger or the reject counter.
+#[test]
+fn pooled_tool_bridge_folds_and_refuses() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.narrate("requirement.add", &text("pooled req|description|subsys-a"));
+    game.narrate("requirement.add", &text("default req|description|subsys-b"));
+    game.narrate(
+        "lane.claim",
+        &text("2|r1|feature/aa11-pool|abc1234|1|alpha"),
+    );
+
+    // ① the pooled claim folds into `lane.alpha.2.*` with the host-reported worktree path.
+    let claimed = tool_round(
+        &mut game,
+        "git.worktree_claim_pool|lane=2;req=r1;branch=feature/aa11-pool;repo=/tmp/checkout-alpha|t1",
+        "t1|git.worktree_claim_pool|ok|0|lane=2;req=r1;branch=feature/aa11-pool;base=abc1234;clean=1;reused=0;path=/tmp/checkout-alpha-lane-2",
+    );
+    assert_eq!(
+        count_lines(&claimed, "[WORKTREE CLAIMED]"),
+        1,
+        "{claimed:#?}"
+    );
+    assert!(
+        claimed
+            .iter()
+            .any(|line| line.contains("lane-alpha-2 <- r1")),
+        "the narration names the pool-scoped lane: {claimed:#?}"
+    );
+    game.assert_kv("lane.alpha.2.req", json!("r1"));
+    game.assert_kv("lane.alpha.2.path", json!("/tmp/checkout-alpha-lane-2"));
+    // tick 1 = the pre-claim, tick 2 = this tool round's re-bind (same fold, fresh since).
+    game.assert_kv("lane.alpha.2.since", json!(2));
+    game.assert_kv("req.1.lane", json!(2));
+    game.assert_kv("req.1.lane_pool", json!("alpha"));
+
+    // ② the default tool still folds into the flat legacy keys — both pools coexist at k=2.
+    let default_claim = tool_round(
+        &mut game,
+        "git.worktree_claim|lane=2;req=r2;branch=feature/aa11-def|t2",
+        "t2|git.worktree_claim|ok|0|lane=2;req=r2;branch=feature/aa11-def;base=abc1234;clean=1;reused=0;path=/tmp/wt-default-2",
+    );
+    assert_eq!(
+        count_lines(&default_claim, "[WORKTREE CLAIMED]"),
+        1,
+        "{default_claim:#?}"
+    );
+    game.assert_kv("lane.2.req", json!("r2"));
+    game.assert_kv("lane.alpha.2.req", json!("r1"));
+
+    // ③ a repo that resolves to no registered pool is refused before any ledger write, and
+    // the tool-face refusal does not move the reject ledger (same face as the legacy path).
+    let rejects_before = game.kv("reject.count");
+    let ghost = tool_round(
+        &mut game,
+        "git.worktree_claim_pool|lane=3;req=r1;branch=feature/aa11-ghost;repo=/tmp/ghost|t3",
+        "t3|git.worktree_claim_pool|ok|0|lane=3;req=r1;branch=feature/aa11-ghost;base=abc1234;clean=1;reused=0;path=/tmp/ghost-lane-3",
+    );
+    assert_eq!(
+        count_lines(&ghost, "[WORKTREE CLAIM REFUSED]"),
+        1,
+        "{ghost:#?}"
+    );
+    game.assert_kv("lane.alpha.3.req", Json::Null);
+    game.assert_kv("lane.3.req", Json::Null);
+    assert_eq!(
+        game.kv("reject.count"),
+        rejects_before,
+        "the tool-face refusal must not move the reject ledger"
+    );
+}
+
 /// A3 `fs.artifact_probe` and `vfs.write` feed **one** bounded ledger (`record_artifact` is the
 /// single writer), and the VFS path shape is refused before anything is recorded.
 #[test]
@@ -3415,9 +4053,23 @@ fn summary_projection_carries_play_and_resident_trio() {
     game.click("review.note — ");
     let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(summary["batch"], json!(2));
+    // The auto-appended maintenance requirement (D-MA25) keeps the queue non-empty after
+    // a batch settle: the pump is NOT drained until that row is done.
+    assert_eq!(summary["batchDrained"], json!(false));
+    game.assert_kv("req.count", json!(2));
+    game.assert_kv("req.2.maintenance", json!("1"));
+    // Walk the maintenance row through the pipeline; only then does the pump drain.
+    game.narrate("requirement.dispatch", "0");
+    submit_req(&mut game, "r2", 1, "plan", "watchdog-m1");
+    game.click("gate.approve — ");
+    submit_req(&mut game, "r2", 1, "development", "watchdog-m2");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.narrate("integration.confirm", &text("r2|develop@abc1234"));
+    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(
         summary["batchDrained"],
         json!(true),
-        "a settled batch with an empty queue drains the pump: {summary}"
+        "a settled batch drains the pump once the maintenance row is done: {summary}"
     );
 }

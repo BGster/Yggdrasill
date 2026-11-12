@@ -7,7 +7,7 @@
 
 -- 资源快照（片段装配；片段 ↔ entry 一一对应，见 pack.json entries）。
 -- 契约：beats 键跨片段不相交；playbook 章节片段按文件名序（=order 序）排列，
---       相邻同 id（harness 7 片段）按序拼接 rules；装配不排序。
+--       各 section id 全局唯一（r5 起 harness 七片段同 id 拼接模式退役），装配不排序。
 
 local TEXTS = ygg.data("ygg:scene/texts")          -- core：scenes/endings/prompts/options/tuning
 TEXTS.beats = {}
@@ -23,10 +23,8 @@ local PLAYBOOK = ygg.data("ygg:agent/playbook")    -- head：schemaVersion/title
 PLAYBOOK.sections = {}
 for _, id in ipairs({
   "ch1-foundation", "ch2-delivery", "ch3-evidence",
-  "ch4-harness-1-state-gates", "ch4-harness-2-drive-actions",
-  "ch4-harness-3-closeout-registries", "ch4-harness-4-inbox-coordination",
-  "ch4-harness-5-views-settlement", "ch4-harness-6-mod-engineering",
-  "ch4-harness-7-host-contract", "ch5-evolution-tools",
+  "ch4-run-machine", "ch4-protocol", "ch4-async", "ch4-mod-host",
+  "ch5-evolution-tools",
 }) do
   local fragment = ygg.data("ygg:agent/playbook/" .. id)
   for _, section in ipairs(fragment.sections) do

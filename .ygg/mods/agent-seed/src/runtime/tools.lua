@@ -13,8 +13,9 @@
 --   tool.count / tool.pending / tool.last / tool.seq.* / tool.<id>.* / tool.notified.*
 -- 响应式子系统（本模块的响应式分区；与既有写方共存，逐键登记）：
 --   tool.reacted.*（本模块唯一）
---   lane.<k>.{req,branch,base,since,clean}（= `lane.claim` 的等价写面，共用 src.lanes 的 LANES.bind）
---   lane.<k>.probe.*（本模块唯一）
+--   lane.<pool>.<k>.{req,branch,base,since,clean}（= `lane.claim` 的等价写面，共用 src.domain.lanes 的
+--     LANES.bind；pool == "" = 默认池，键形沿用旧版 `lane.<k>.*`）
+--   lane.<pool>.<k>.probe.*（本模块唯一；探针与雷达均池内作用）
 --   req.<i>.conflict{,_peer,_note,_source}（经 src/proposals.req_do_conflict 这唯一函数写）
 --   artifact.*（本模块唯一；`record_artifact` 是唯一写点）
 --   verify.passed / verify.report / verify.source（src/handlers/operate/review.lua 写 verify.last / verify.failures）
@@ -619,9 +620,10 @@ local function record_artifact(path, bytes, sha, source)
   return true
 end
 
--- 跳泳道冲突雷达：两条泳道的探针文件列表有交集 → 走 req_do_conflict（与人类路径同一函数），
--- 因此自动进 req_conflict_total → 阻塞派活与收口。一次探针最多抬一条冲突（防一条探针刷屏）。
-local function radar_raise(k, files_text)
+-- 跳泳道冲突雷达：**同池**两条泳道的探针文件列表有交集 → 走 req_do_conflict（与人类路径
+-- 同一函数），因此自动进 req_conflict_total → 阻塞派活与收口。一次探针最多抬一条冲突
+--（防一条探针刷屏）。r1 分池：跨池文件树无关，雷达只比同池对（跨池同名文件不再误报）。
+local function radar_raise(pool, k, files_text)
   local mine = split(trim(files_text), ",")
   for i = 1, #mine do
     mine[i] = trim(mine[i])
@@ -629,19 +631,19 @@ local function radar_raise(k, files_text)
   if #mine == 0 or #mine > MAX_RADAR_FILES then
     return false
   end
-  local self_id = LANES.req_of(k)
+  local self_id = LANES.req_of(pool, k)
   local self_index = req_index_of(self_id)
   if self_index == nil or req_closed(self_index) then
     return false
   end
   for other = 1, job_capacity() do
     if other ~= k then
-      local peer_id = LANES.req_of(other)
+      local peer_id = LANES.req_of(pool, other)
       local peer_index = req_index_of(peer_id)
       if peer_id ~= "" and peer_id ~= self_id and peer_index ~= nil
         and not req_closed(peer_index)
         and req_conflict(self_index) == "" and req_conflict(peer_index) == "" then
-        local theirs = split(text_of(LANES.key(other, "probe.files"), ""), ",")
+        local theirs = split(text_of(LANES.key(pool, other, "probe.files"), ""), ",")
         for i = 1, #theirs do
           theirs[i] = trim(theirs[i])
         end
@@ -658,9 +660,9 @@ local function radar_raise(k, files_text)
           req_sync_conflicts()
           ygg.narrate(fill(TEXTS.beats.conflict_radar, {
             first = self_id,
-            k = tostring(k),
+            lane = LANES.label(pool, k),
             second = peer_id,
-            other = tostring(other),
+            peer = LANES.label(pool, other),
             file = hit,
           }))
           return true
@@ -675,44 +677,69 @@ end
 -- 原因文案复用既有 beat（`lane_*` / `req_unknown`），不新增第二套措辞。
 local REACTORS = {}
 
-REACTORS["git.worktree_claim"] = function(pairs)
+-- r1 分池：池归属从**请求快照**（`tool.<call_id>.args` 的 repo= 段）反查——宿主输出行
+-- 不携带 --repo（claim/release/probe 的输出键序是冻结的宿主契约），请求行才有；
+-- 同步路径 try_sync_call 也写同一 args KV，两路同源。默认工具（无 repo 段）= 默认池
+-- ("")；带 repo 段但反查不到已注册池 = fail-closed 拒绝（返回 nil 池 + 可读原因）。
+local function pool_of_call(pairs, call_id)
+  local repo = trim(pairs.repo or "")
+  if repo == "" then
+    local args = args_table(call_id)
+    if args ~= nil then
+      repo = trim(args.repo or "")
+    end
+  end
+  if repo == "" then
+    return "", nil
+  end
+  local pool = LANES.pool_of_path(repo)
+  if pool == nil then
+    return nil, fill(TEXTS.beats.lane_pool_unknown, { pool = repo })
+  end
+  return pool, nil
+end
+
+REACTORS["git.worktree_claim"] = function(pairs, call_id)
   local k = whole_at(pairs, "lane")
   local index = req_index_of(pairs.req)
   local branch = trim(pairs.branch or "")
   local branch_problem = LANES.branch_problem(branch)
+  local pool, pool_problem = pool_of_call(pairs, call_id)
   local reason = nil
   if k == nil or k < 1 or k > job_capacity() then
     reason = fill(TEXTS.beats.lane_bad_k, { k = tostring(pairs.lane or "?"), max = tostring(job_capacity()) })
+  elseif pool_problem ~= nil then
+    reason = pool_problem
   elseif index == nil then
     reason = fill(TEXTS.beats.req_unknown, { id = tostring(pairs.req or "") })
   elseif req_closed(index) then
     reason = fill(TEXTS.beats.lane_claim_closed, { id = req_id(index), status = req_status(index) })
   elseif pairs.clean ~= "1" then
-    reason = fill(TEXTS.beats.lane_claim_dirty, { k = tostring(k) })
+    reason = fill(TEXTS.beats.lane_claim_dirty, { lane = LANES.label(pool, k) })
   elseif branch == "" then
     reason = fill(TEXTS.beats.lane_branch_invalid, { branch = "(missing)" })  -- 挂载层缺省拒绝（不再自动生成默认名）
   elseif branch_problem ~= nil then
     reason = branch_problem
-  elseif LANES.req_of(k) ~= "" and LANES.req_of(k) ~= req_id(index) then
-    reason = fill(TEXTS.beats.lane_claim_occupied, { k = tostring(k), id = LANES.req_of(k) })
-  elseif req_lane(index) > 0 and req_lane(index) ~= k then
-    reason = fill(TEXTS.beats.lane_claim_bound, { id = req_id(index), k = tostring(req_lane(index)) })
+  elseif LANES.req_of(pool, k) ~= "" and LANES.req_of(pool, k) ~= req_id(index) then
+    reason = fill(TEXTS.beats.lane_claim_occupied, { lane = LANES.label(pool, k), id = LANES.req_of(pool, k) })
+  elseif req_lane(index) > 0 and (req_lane(index) ~= k or LANES.req_pool(index) ~= pool) then
+    reason = fill(TEXTS.beats.lane_claim_bound, { id = req_id(index), lane = LANES.label(LANES.req_pool(index), req_lane(index)) })
   end
   if reason ~= nil then
     ygg.narrate(fill(TEXTS.beats.worktree_claim_refused, {
-      k = tostring(pairs.lane or "?"),
+      lane = tostring(pairs.lane or "?"),
       reason = reason,
     }))
     return false
   end
-  -- 与 `lane.claim` 同函数同键（含 `since` 的 tick 分配与 `req.<i>.lane` 回写）。
-  LANES.bind(k, index, pairs.branch or "", pairs.base or "", "1")
+  -- 与 `lane.claim` 同函数同键（含 `since` 的 tick 分配与 `req.<i>.lane`/`lane_pool` 回写）。
+  LANES.bind(pool, k, index, pairs.branch or "", pairs.base or "", "1")
   local wt_path = trim(pairs.path or "")
   if wt_path ~= "" then
-    ygg.kv.set(LANES.key(k, "path"), wt_path)
+    ygg.kv.set(LANES.key(pool, k, "path"), wt_path)
   end
   ygg.narrate(fill(TEXTS.beats.worktree_claimed, {
-    k = tostring(k),
+    lane = LANES.label(pool, k),
     req = req_id(index),
     branch = LANES.text_or(pairs.branch, TEXTS.beats.lane_field_none),
     base = LANES.text_or(pairs.base, TEXTS.beats.lane_field_none),
@@ -720,7 +747,7 @@ REACTORS["git.worktree_claim"] = function(pairs)
   return true
 end
 
-REACTORS["git.worktree_release"] = function(pairs)
+REACTORS["git.worktree_release"] = function(pairs, call_id)
   local k = whole_at(pairs, "lane")
   if k == nil or k < 1 or k > job_capacity() then
     ygg.narrate(fill(TEXTS.beats.worktree_release_refused, {
@@ -728,17 +755,22 @@ REACTORS["git.worktree_release"] = function(pairs)
     }))
     return false
   end
+  local pool, pool_problem = pool_of_call(pairs, call_id)
+  if pool_problem ~= nil then
+    ygg.narrate(fill(TEXTS.beats.worktree_release_refused, { reason = pool_problem }))
+    return false
+  end
   if pairs.released ~= "1" then
     return false
   end
-  ygg.kv.set(LANES.key(k, "path"), "")
-  if LANES.req_of(k) == "" then
-    ygg.narrate(fill(TEXTS.beats.worktree_release_idle, { k = tostring(k) }))
+  ygg.kv.set(LANES.key(pool, k, "path"), "")
+  if LANES.req_of(pool, k) == "" then
+    ygg.narrate(fill(TEXTS.beats.worktree_release_idle, { lane = LANES.label(pool, k) }))
     return false
   end
   -- **不能**写 `LANES.release(k)`：那个函数的入参是 req index，传 k 会释放错需求或空转。
-  LANES.release_lane(k)
-  ygg.narrate(fill(TEXTS.beats.worktree_released, { k = tostring(k) }))
+  LANES.release_lane(pool, k)
+  ygg.narrate(fill(TEXTS.beats.worktree_released, { lane = LANES.label(pool, k) }))
   return true
 end
 
@@ -751,22 +783,27 @@ REACTORS["git.lane_probe"] = function(pairs, call_id)
     }))
     return false
   end
+  local pool, pool_problem = pool_of_call(pairs, call_id)
+  if pool_problem ~= nil then
+    ygg.narrate(fill(TEXTS.beats.worktree_release_refused, { reason = pool_problem }))
+    return false
+  end
   local commits = whole_at(pairs, "commits")
   local clean = pairs.clean or ""
-  ygg.kv.set(LANES.key(k, "probe.commits"), commits or -1)
-  ygg.kv.set(LANES.key(k, "probe.clean"), clean)
-  ygg.kv.set(LANES.key(k, "probe.head"), pairs.head or "")
-  ygg.kv.set(LANES.key(k, "probe.files"), pairs.files or "")
-  ygg.kv.set(LANES.key(k, "probe.call"), call_id)
+  ygg.kv.set(LANES.key(pool, k, "probe.commits"), commits or -1)
+  ygg.kv.set(LANES.key(pool, k, "probe.clean"), clean)
+  ygg.kv.set(LANES.key(pool, k, "probe.head"), pairs.head or "")
+  ygg.kv.set(LANES.key(pool, k, "probe.files"), pairs.files or "")
+  ygg.kv.set(LANES.key(pool, k, "probe.call"), call_id)
   if commits == nil or commits == 0 or clean ~= "1" then
     ygg.narrate(fill(TEXTS.beats.lane_probe_failed, {
-      k = tostring(k),
+      lane = LANES.label(pool, k),
       commits = tostring(commits or -1),
       clean = (clean ~= "" and clean) or TEXTS.beats.lane_field_none,
     }))
   else
     ygg.narrate(fill(TEXTS.beats.lane_probe_recorded, {
-      k = tostring(k),
+      lane = LANES.label(pool, k),
       commits = tostring(commits),
       clean = clean,
       head = short_sha(pairs.head),
@@ -777,9 +814,15 @@ REACTORS["git.lane_probe"] = function(pairs, call_id)
     ygg.narrate(fill(TEXTS.beats.lane_probe_truncated, { call_id = call_id }))
     return true
   end
-  radar_raise(k, pairs.files or "")
+  radar_raise(pool, k, pairs.files or "")
   return true
 end
+
+-- r1 分池：池化工具与默认工具共用同一折叠语义（池归属由请求 repo 段反查，见
+-- pool_of_call）——只是同函数别名注册，不写第二套实现。
+REACTORS["git.worktree_claim_pool"] = REACTORS["git.worktree_claim"]
+REACTORS["git.worktree_release_pool"] = REACTORS["git.worktree_release"]
+REACTORS["git.lane_probe_pool"] = REACTORS["git.lane_probe"]
 
 REACTORS["fs.artifact_probe"] = function(pairs)
   local path = trim(pairs.path or "")
@@ -1080,89 +1123,122 @@ local function try_sync_call(tool_id, args_map, raw_args_text, call_id, ext)
   return chosen
 end
 
-local function auto_claim_worktree(lane, req_index)
-  if not contains(allowed(), "git.worktree_claim") then
-    return nil
-  end
+local function auto_claim_worktree(pool, lane, req_index)
   local k = whole(lane)
   if k == nil or k <= 0 or req_index == nil then
     return nil
   end
   local id = req_id(req_index)
-  -- r2 rev2：默认分支名生成机制已删除——分支由主 Agent 预挂牌自报（账本 `lane.<k>.branch`），
+  -- r2 rev2：默认分支名生成机制已删除——分支由主 Agent 预挂牌自报（账本 `lane.<pool>.<k>.branch`），
   -- 空 = 可读拒绝不发起宿主调用（宿主先执行、反应器后折叠，发空名调用会让宿主 git 报错，
   -- 叙事不可读——必须在 mod 层拦）。
-  local branch = text_of(LANES.key(k, "branch"), "")
+  local branch = text_of(LANES.key(pool, k, "branch"), "")
   if branch == "" then
     ygg.narrate(fill(TEXTS.beats.worktree_claim_refused, {
-      k = tostring(k),
+      lane = LANES.label(pool, k),
       reason = fill(TEXTS.beats.lane_branch_invalid, { branch = "(missing)" }),
     }))
     return nil
   end
-  local args_map = {
-    lane = tostring(k),
-    req = id,
-    branch = branch,
-  }
+  -- r1 分池：pool == "" 走默认工具（宿主以 CWD toplevel 落位）；具名池走 *_pool 工具，
+  -- repo 取注册表路径；路径缺失 = 未注册/注册不全 → 可读拒绝，不发起宿主调用。
+  local tool_id = "git.worktree_claim"
+  local args_map = { lane = tostring(k), req = id, branch = branch }
   local raw_args = "lane=" .. tostring(k) .. ";req=" .. id .. ";branch=" .. branch
-  return try_sync_call("git.worktree_claim", args_map, raw_args, "", "")
-end
-
-local function auto_probe_lane(lane)
-  if not contains(allowed(), "git.lane_probe") then
+  if pool ~= "" then
+    local repo = LANES.pool_path(pool)
+    if repo == "" then
+      ygg.narrate(fill(TEXTS.beats.worktree_claim_refused, {
+        lane = LANES.label(pool, k),
+        reason = fill(TEXTS.beats.lane_pool_path_missing, { pool = pool }),
+      }))
+      return nil
+    end
+    tool_id = "git.worktree_claim_pool"
+    args_map.repo = repo
+    raw_args = raw_args .. ";repo=" .. repo
+  end
+  if not contains(allowed(), tool_id) then
     return nil
   end
+  return try_sync_call(tool_id, args_map, raw_args, "", "")
+end
+
+local function auto_probe_lane(pool, lane)
   local k = whole(lane)
   if k == nil or k <= 0 then
     return nil
   end
-  local base = text_of(LANES.key(k, "base"), "HEAD")
+  local base = text_of(LANES.key(pool, k, "base"), "HEAD")
   if base == "" then
     base = "HEAD"
   end
-  local branch = text_of(LANES.key(k, "branch"), "")
+  local branch = text_of(LANES.key(pool, k, "branch"), "")
   if branch == "" then
     -- r2 rev2：不再用 `feature/<holder>` 兑底虚构名字；账本分支空 = 可读提示并跳过探针
     -- （探针是警告面，不阻塞——但也不该拿编造的分支名去探测）。
     ygg.narrate(fill(TEXTS.beats.lane_branch_invalid, { branch = "(missing)" }))
     return nil
   end
-  local args_map = {
-    lane = tostring(k),
-    base = base,
-    branch = branch,
-  }
+  local tool_id = "git.lane_probe"
+  local args_map = { lane = tostring(k), base = base, branch = branch }
   local raw_args = "lane=" .. tostring(k) .. ";base=" .. base .. ";branch=" .. branch
-  return try_sync_call("git.lane_probe", args_map, raw_args, "", "")
-end
-
-local function auto_release_worktree(lane)
-  if not contains(allowed(), "git.worktree_release") then
+  if pool ~= "" then
+    local repo = LANES.pool_path(pool)
+    if repo == "" then
+      ygg.narrate(fill(TEXTS.beats.lane_pool_path_missing, { pool = pool }))
+      return nil
+    end
+    tool_id = "git.lane_probe_pool"
+    args_map.repo = repo
+    raw_args = raw_args .. ";repo=" .. repo
+  end
+  if not contains(allowed(), tool_id) then
     return nil
   end
+  return try_sync_call(tool_id, args_map, raw_args, "", "")
+end
+
+local function auto_release_worktree(pool, lane)
   local k = whole(lane)
   if k == nil or k <= 0 then
     return nil
   end
-  local args_map = {
-    lane = tostring(k),
-  }
+  local tool_id = "git.worktree_release"
+  local args_map = { lane = tostring(k) }
   local raw_args = "lane=" .. tostring(k)
-  return try_sync_call("git.worktree_release", args_map, raw_args, "", "")
+  if pool ~= "" then
+    local repo = LANES.pool_path(pool)
+    if repo == "" then
+      ygg.narrate(fill(TEXTS.beats.worktree_release_refused, {
+        reason = fill(TEXTS.beats.lane_pool_path_missing, { pool = pool }),
+      }))
+      return nil
+    end
+    tool_id = "git.worktree_release_pool"
+    args_map.repo = repo
+    raw_args = raw_args .. ";repo=" .. repo
+  end
+  if not contains(allowed(), tool_id) then
+    return nil
+  end
+  return try_sync_call(tool_id, args_map, raw_args, "", "")
 end
 
 -- R7 泳道释放（连工作树停车）：交付受理 reject / 验收门禁 reject / 集成 confirm·reject / done
--- 四个释放点共用——先用 lane 号唤宿主 git.worktree_release 停车，再清 KV 账本。
+-- 四个释放点共用——先用 (池, lane 号) 唤宿主 git.worktree_release 停车，再清 KV 账本。
 -- 泳道绑定窗口保持到这些点才释放（交付受理→验收门禁→集成三幕期间不释放，执行者要工作树做集成）。
 local function release_lane_with_worktree(index)
   local lane_idx = req_lane(index)
+  local pool = LANES.req_pool(index)
   if lane_idx <= 0 then
     lane_idx = num(req_key(index, "last_lane"), 0)
+    pool = text_of(req_key(index, "last_lane_pool"), "")
   end
   if lane_idx > 0 then
-    auto_release_worktree(lane_idx)
+    auto_release_worktree(pool, lane_idx)
     ygg.kv.set(req_key(index, "last_lane"), 0)
+    ygg.kv.set(req_key(index, "last_lane_pool"), "")
   end
   req_release(index)
 end

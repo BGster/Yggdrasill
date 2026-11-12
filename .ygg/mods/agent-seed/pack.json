@@ -74,46 +74,28 @@
       "path": "data/playbook/ch3-evidence.json"
     },
     {
-      "id": "ygg:agent/playbook/ch4-harness-1-state-gates",
+      "id": "ygg:agent/playbook/ch4-run-machine",
       "kind": "agent-playbook-fragment",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-harness-1-state-gates.json"
+      "path": "data/playbook/ch4-run-machine.json"
     },
     {
-      "id": "ygg:agent/playbook/ch4-harness-2-drive-actions",
+      "id": "ygg:agent/playbook/ch4-protocol",
       "kind": "agent-playbook-fragment",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-harness-2-drive-actions.json"
+      "path": "data/playbook/ch4-protocol.json"
     },
     {
-      "id": "ygg:agent/playbook/ch4-harness-3-closeout-registries",
+      "id": "ygg:agent/playbook/ch4-async",
       "kind": "agent-playbook-fragment",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-harness-3-closeout-registries.json"
+      "path": "data/playbook/ch4-async.json"
     },
     {
-      "id": "ygg:agent/playbook/ch4-harness-4-inbox-coordination",
+      "id": "ygg:agent/playbook/ch4-mod-host",
       "kind": "agent-playbook-fragment",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-harness-4-inbox-coordination.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch4-harness-5-views-settlement",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-harness-5-views-settlement.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch4-harness-6-mod-engineering",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-harness-6-mod-engineering.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch4-harness-7-host-contract",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-harness-7-host-contract.json"
+      "path": "data/playbook/ch4-mod-host.json"
     },
     {
       "id": "ygg:agent/playbook/ch5-evolution-tools",
@@ -325,6 +307,65 @@
         "{{base}}",
         "--branch",
         "{{branch}}"
+      ],
+      "timeoutMs": 10000,
+      "inlineWaitMs": 3000,
+      "maxOutputBytes": 2048,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
+    "git.worktree_claim_pool": {
+      "kind": "cli",
+      "program": "egg",
+      "args": [
+        "--builtin-tool",
+        "worktree-claim",
+        "--lane",
+        "{{lane}}",
+        "--req",
+        "{{req}}",
+        "--branch",
+        "{{branch}}",
+        "--repo",
+        "{{repo}}"
+      ],
+      "timeoutMs": 15000,
+      "inlineWaitMs": 5000,
+      "maxOutputBytes": 1024,
+      "readOnly": false,
+      "resultEvent": "tool.result"
+    },
+    "git.worktree_release_pool": {
+      "kind": "cli",
+      "program": "egg",
+      "args": [
+        "--builtin-tool",
+        "worktree-release",
+        "--lane",
+        "{{lane}}",
+        "--repo",
+        "{{repo}}"
+      ],
+      "timeoutMs": 15000,
+      "inlineWaitMs": 5000,
+      "maxOutputBytes": 512,
+      "readOnly": false,
+      "resultEvent": "tool.result"
+    },
+    "git.lane_probe_pool": {
+      "kind": "cli",
+      "program": "egg",
+      "args": [
+        "--builtin-tool",
+        "lane-probe",
+        "--lane",
+        "{{lane}}",
+        "--base",
+        "{{base}}",
+        "--branch",
+        "{{branch}}",
+        "--repo",
+        "{{repo}}"
       ],
       "timeoutMs": 10000,
       "inlineWaitMs": 3000,
