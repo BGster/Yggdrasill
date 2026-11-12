@@ -1039,8 +1039,7 @@ fn handle_runs(shared: &ServeShared) -> Response {
 /// 同理命中；候选都做存在性检查，错候选无害）→ 皆不存 → 返回原值，交由既有的
 /// `PanelDecl::Unavailable` 降级（不炸观察）。
 fn run_mod_dir(meta: &Json, run_root: Option<&Path>) -> Option<PathBuf> {
-    let raw = meta["mod"].as_str()?;
-    let declared = super::with_legacy_seed_alias(PathBuf::from(raw));
+    let declared = PathBuf::from(meta["mod"].as_str()?);
     if declared.is_absolute() || declared.exists() {
         return Some(declared);
     }
@@ -1296,6 +1295,13 @@ enum PanelDecl {
 /// 语法门 = 不以 `/` 开头、不含 `..`、以 `.html` 结尾；entry 文件必须真实存在
 /// 且 canonicalize 后仍在面板根内（拦 symlink 逃逸）。
 fn panel_decl(mod_dir: &Path) -> PanelDecl {
+    // 退役旧名（D-MA19）先给专名降级理由：目录缺席且形状命中时，点名规范路径
+    // （观察面不炸，§4.1：声明损坏 ≠ 装载错误）。
+    if !mod_dir.exists() {
+        if let Some(reason) = super::retired_seed_name_reason(mod_dir) {
+            return PanelDecl::Unavailable { reason };
+        }
+    }
     let pack_path = mod_dir.join(super::PACK_FILE);
     let pack = match std::fs::read_to_string(&pack_path)
         .map_err(|err| err.to_string())
@@ -2675,6 +2681,28 @@ end)
         let resolved = run_mod_dir(&json!({"mod": ".ygg/mods/nowhere"}), Some(&root_no_mod))
             .expect("原值兑底");
         assert_eq!(resolved, PathBuf::from(".ygg/mods/nowhere"));
+        // 旧名已退役（D-MA19）：相对旧名不再翻译——链不命中 → 原值返回；
+        // panel 面给专名降级理由，点名规范路径（观察面不炸）。
+        let retired_root = dir.join("retired/runs");
+        fs::create_dir_all(&retired_root).expect("建退役根");
+        let resolved = run_mod_dir(
+            &json!({"mod": ".ygg/mods/pi-agent-seed"}),
+            Some(&retired_root),
+        )
+        .expect("原值兑底（不再翻译）");
+        assert_eq!(resolved, PathBuf::from(".ygg/mods/pi-agent-seed"));
+        let retired_abs = dir.join("mods/pi-agent-seed"); // 绝对旧名同样不命中链
+        let resolved = run_mod_dir(&json!({"mod": retired_abs.display().to_string()}), None)
+            .expect("绝对旧名原样返回");
+        assert_eq!(resolved, retired_abs);
+        let PanelDecl::Unavailable { reason } = panel_decl(&retired_abs) else {
+            panic!("退役旧名必须不可用");
+        };
+        assert!(
+            reason.contains("agent-seed"),
+            "理由必须点名规范路径：{reason}"
+        );
+        assert!(reason.contains("退役"), "理由必须宣布退役：{reason}");
         // 绝对路径原样；缺 mod 字段 → None。
         assert_eq!(
             run_mod_dir(&json!({"mod": "/abs/mod"}), None).expect("绝对原样"),

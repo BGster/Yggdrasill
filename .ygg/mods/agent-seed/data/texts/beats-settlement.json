@@ -19,7 +19,7 @@
     "settlement_evolution_duplicate_segment": "the c= / cls= / sessions= / todo= segments must not repeat.",
     "settlement_evolution_need_summary": "the settlement.evolution summary must be non-empty after trim; with zero candidates you may register the neutral summary and c=0/0 with an empty artifact.",
     "settlement_sessions_missing": "subagent sessions are not settled (settlement.sessions, remaining must be 0)",
-    "settlement_sessions_ok": "subagent sessions settled: moved {{moved}} to {{destination}} (moved to the trash — never permanently deleted, main session untouched).",
+    "settlement_sessions_ok": "subagent sessions settled: moved {{moved}} to {{destination}} (files renamed into the trash directory — not a permanent deletion; no per-file guarantee about which sessions were spared: verify the destination yourself).",
     "settlement_sessions_payload": "0|0|~/.pi/agent/sessions-trash/<batch>",
     "settlement_sessions_usage": "settlement.sessions payload \"moved|remaining|destination\": moved a non-negative integer, remaining exactly 0, destination non-empty (e.g. ~/.pi/agent/sessions-trash/<batch>); all three segments are required.",
     "settlement_sessions_segment": "sessions=0/0/~/.pi/agent/sessions-trash/<batch>",
@@ -31,8 +31,14 @@
     "settlement_todo_segment": "todo=0/main session todo list re-checked to 0 items (done + historical included)",
     "settlement_todo_segment_bad": "the settlement.evolution todo= segment must be `<remaining>/<verified_by>`: remaining exactly 0, verified_by non-empty and <= 120 chars.",
     "settlement_verify_first": "record all-green evidence with verify.submit first, then register the three settlement tasks (all of them in the review stage).",
+    "sessions_archive_held": "[SESSIONS ARCHIVE HELD] safe parent metadata missing (run.id={{batch}}, run.parent={{parent}}) — no archive request sent, nothing recorded. The host picks files by substring match, so a fabricated parent could rename the main session into the trash. Decide the cleanup path yourself: run harness.archive_sessions with a human-verified parent/batch, or register settlement.sessions. Never probe or enumerate the real session library to pick the identity.",
+    "settlement_sessions_unsetted_hint": "[SESSIONS UNSETTLED] subagent sessions remaining={{remaining}} — review.note stays blocked. Choose the safe cleanup path yourself: register settlement.sessions (or the settlement.evolution sessions= segment) after doing the move, or run harness.archive_sessions explicitly with a parent/batch verified against a synthetic fixture. This path no longer archives automatically.",
     "sessions_archived": "[SESSIONS ARCHIVED] moved {{moved}} -> {{dest}}",
     "sessions_archive_refused": "[SESSIONS ARCHIVE REFUSED] remaining={{remaining}} dest={{dest}} | nothing was recorded",
-    "review_batch_ok": "[BATCH {{batch}} SETTLED] score {{score}}/5 — {{lesson}}; evolution archived to the rolling slot; batch counter -> {{next}}; back to coordinate — the resident run waits for the next batch."
+    "review_batch_ok": "[BATCH {{batch}} SETTLED] score {{score}}/5 — {{lesson}}; evolution archived to the rolling slot; batch counter -> {{next}}; back to coordinate — the resident run waits for the next batch.",
+    "settlement_artifact_no_vfs": "artifact {{artifact}} cannot be verified: the host VFS is not mounted — non-empty registration refused (no settlement written, no archive side effects)",
+    "settlement_artifact_absent": "artifact {{artifact}} does not exist in the mounted VFS — registration refused (no settlement written, no archive side effects)",
+    "settlement_artifact_empty": "artifact {{artifact}} is empty in the mounted VFS — registration refused (no settlement written, no archive side effects)",
+    "settlement_artifact_read_error": "artifact {{artifact}} probe failed — registration refused (no settlement written, no archive side effects)"
   }
 }

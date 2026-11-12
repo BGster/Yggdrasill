@@ -16,7 +16,6 @@ local fill =
 local SECTIONS = {}
 
 local STAGE_GUIDE = {
-  intake = { "output" },
   coordinate = { "dispatch", "lanes", "integration" },
   review = { "evolution", "gates", "evidence" },
   done = { "pointers" },

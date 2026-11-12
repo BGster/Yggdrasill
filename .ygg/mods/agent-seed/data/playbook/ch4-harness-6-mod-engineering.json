@@ -13,7 +13,7 @@
         {
           "id": "harness.lint",
           "modality": "must",
-          "text": "The coordinator has a four-state chain: intake ──task.intake──▶ coordinate ──coordinate.submit──▶ review ──review.note──▶ done; inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
+          "text": "The coordinator has a three-state chain: coordinate ──coordinate.submit──▶ review ──review.note──▶ done (boot lands in coordinate; the event.start payload IS the charter); inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
           "basis": "AGENTS.md §2 (pre-migration)"
         },
         {

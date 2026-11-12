@@ -94,6 +94,11 @@ function LANES.bound(index)
   return 0
 end
 
+-- 泳道当前自报分支（r2 rev2 E4：派发引导用）。
+function LANES.branch_of(k)
+  return text_of(LANES.key(k, "branch"), "")
+end
+
 function LANES.release(index)
   local k = req_lane(index)
   if k > 0 and LANES.req_of(k) == req_id(index) then

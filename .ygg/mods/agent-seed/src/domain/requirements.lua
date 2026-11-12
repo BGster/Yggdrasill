@@ -18,7 +18,6 @@ local fill, join, split, trim =
   util.fill, util.join, util.split, util.trim
 
 local STAGE = {
-  intake = "intake",
   coordinate = "coordinate",
   review = "review",
   done = "done",
@@ -27,7 +26,7 @@ local STAGE = {
 local function stage()
   local value = ygg.kv.get("fsm.stage")
   if type(value) ~= "string" then
-    return STAGE.intake
+    return STAGE.coordinate
   end
   return value
 end
@@ -412,6 +411,9 @@ local function req_open_total()
 end
 
 local function req_all_done()
+  if req_count() == 0 then
+    return false
+  end
   for i = 1, req_count() do
     if not req_satisfied(i, nil) then
       return false

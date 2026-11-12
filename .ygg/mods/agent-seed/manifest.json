@@ -21,14 +21,14 @@
       "sha256": "6e43e67a5a7c573c6ade509825bdbc86f78202452654577833818f1ae20305b0"
     },
     {
-      "byteLength": 6016,
+      "byteLength": 6388,
       "path": "src/domain/gates.lua",
-      "sha256": "2e5959812702aaa2b484e3afe8328448d2223a67280725766545b19023dbfd61"
+      "sha256": "2373050006959cd81c0f30d458d3cd3e48e58b9636131b8f3334e36a41059740"
     },
     {
-      "byteLength": 7019,
+      "byteLength": 7162,
       "path": "src/domain/lanes.lua",
-      "sha256": "926ba005512a9a73118e2caf3429253a028d10e461fff35f1f778ea578d63b18"
+      "sha256": "9a3ee36994b1372bb1a721877d2b1992e0a38cc9113308bfc92143de292f3774"
     },
     {
       "byteLength": 10451,
@@ -36,24 +36,24 @@
       "sha256": "8a28281960a42a84dea1cc11a5b3f06b21c2e15509ec74b0698720c3f5bfca81"
     },
     {
-      "byteLength": 18691,
+      "byteLength": 18724,
       "path": "src/domain/requirements.lua",
-      "sha256": "4ec96fe9c7c854028c56ac5a2267b54f536b86a24b932651858a8a704b736e95"
+      "sha256": "244b3fef46ac3057c99ed520239b47978e50f9c96aa0f3660f9a02ba5ac7a131"
     },
     {
-      "byteLength": 33358,
+      "byteLength": 33449,
       "path": "src/domain/wire.lua",
-      "sha256": "5a290c5aa9344d12929c88d03b59c3beffca83b66890613db309182c44c3c5ab"
+      "sha256": "34ef65af35ec3f7e410da67174fe433862d37174cb868e2ca471c4ac2da1b1f7"
     },
     {
-      "byteLength": 11122,
+      "byteLength": 11142,
       "path": "src/handlers/intake/actions.lua",
-      "sha256": "7e67732775984a3b97ab5836ce6044a2aa7646529d56c9ed124dedf793a871c4"
+      "sha256": "4c57068c27a211d109e7520dbb13e618857fe08e5dde602df8e264f17202ee4f"
     },
     {
-      "byteLength": 1113,
+      "byteLength": 2281,
       "path": "src/handlers/intake/lifecycle.lua",
-      "sha256": "3c8e7d8eb4de43d9e82ee70f58dcf9e9a1903719322bd4f9944033bacc8a4bb9"
+      "sha256": "a29c3dc8449cc2a30cf53de9da5755458e3c5935557b29e2d5603b7eeeb56c2b"
     },
     {
       "byteLength": 2782,
@@ -66,9 +66,9 @@
       "sha256": "ce3c0cb36cf3c7dabdc10d6327b605503b5a339cb0cc1a1e5260e0fdeb7a0b76"
     },
     {
-      "byteLength": 13112,
+      "byteLength": 15096,
       "path": "src/handlers/operate/review.lua",
-      "sha256": "17084e7c0bb9bbb3acbdef153dad2a07fbfdbfadc60e1270b91a541884701723"
+      "sha256": "11d5600e8a8de428a78d5477c5132e13692f59f37b62a12529358ab9d4adc241"
     },
     {
       "byteLength": 7485,
@@ -96,47 +96,47 @@
       "sha256": "e405b321fbad3fede19e90cfaff0ca6ed3de5dc2b0a209daa0495e0a273f4bca"
     },
     {
-      "byteLength": 3883,
+      "byteLength": 3869,
       "path": "src/runtime/flow.lua",
-      "sha256": "61373c56de1292f27357e238cfcf4ddfb71030526c586a62bb0d4278e1449dc5"
+      "sha256": "9fa21e9187c436994d78ec1c6add9505b5f790a7b77b0de1737ff39a64d3599c"
     },
     {
-      "byteLength": 49047,
+      "byteLength": 49666,
       "path": "src/runtime/tools.lua",
-      "sha256": "4d06c22a1cb346c5f854f175a2b3d4ea12b96d5a59d5076ea2c95a29c4a852e1"
+      "sha256": "4e37cc29a2bab8d16b2a18375391e98b6751db92d5e5566a36707b635ab1f9cc"
     },
     {
-      "byteLength": 1377,
+      "byteLength": 1352,
       "path": "src/view/guide.lua",
-      "sha256": "345f4c6c3cfd7b98cbfbfe2736d509fd055c99eec5bb4349957a45167225674a"
+      "sha256": "02db2f9346c231a80d70299d405a42464390ad9eb0e1a3ca1a120ec2d7891cb8"
     },
     {
-      "byteLength": 14062,
+      "byteLength": 13628,
       "path": "src/view/menus.lua",
-      "sha256": "b5f86136bc2ba3b8cf3b52e9a16d175d48372d5a6464b0f60d074186b3a516d7"
+      "sha256": "fb8789c6aca5f737bdde5f47f8a4ac812bfec1ded0bbe5d2339fd30bf69a2d10"
     },
     {
-      "byteLength": 41656,
+      "byteLength": 41197,
       "path": "src/view/render.lua",
-      "sha256": "02a5b9df1bb372241acf981553f48f11f3231291d446ad903365ac84a275f2d5"
+      "sha256": "12e18de2c3f5af79370830abb00fc2c966f3070e9d8d55d1083e34c4622751e6"
     }
   ],
   "entries": [
     {
-      "byteLength": 4894,
+      "byteLength": 4584,
       "id": "ygg:scene/texts",
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "c2c42f96ecf39356f579e84de1cfde7859c07f9c6dfc5929a824fdc232f4e6b9"
+      "sha256": "cfb1a35b23cd56aa20d0496804d9d6cf35ce94745ded210b748e7863f9547eb3"
     },
     {
-      "byteLength": 5392,
+      "byteLength": 5507,
       "id": "ygg:scene/beats/flow",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-flow.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "6f36fd4818c25a5889edc7f353660a6e59042525aa13f95e398cea47f6e19768"
+      "sha256": "f4d52aae9787c022a994fdd2dfb6960d58b63392c987765be6c708da6ea946c4"
     },
     {
       "byteLength": 12594,
@@ -147,12 +147,12 @@
       "sha256": "4903859564ac96689acf6d7a82c386257c31d813267ea39f726cff4a92a93c46"
     },
     {
-      "byteLength": 3134,
+      "byteLength": 3390,
       "id": "ygg:scene/beats/lanes",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-lanes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "426b9d7b968c8438e918550336eb689e6160162e582108924b03d74091011a0d"
+      "sha256": "b6efd38d4f980354ffe9c39458bb220452df08b8ebe522f898dfd0b83817ab5b"
     },
     {
       "byteLength": 3687,
@@ -163,12 +163,12 @@
       "sha256": "d1939b9ef1ef1be94aefad2007e34a4b7246f73de458fa3fb2feccecc003a77f"
     },
     {
-      "byteLength": 5853,
+      "byteLength": 7514,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "757936cebf49f8b8c23e862813254dab9cc89b5ef3b645de023941248343b0aa"
+      "sha256": "4866d379514b63e889d8ab9690babf8ac27bf22dc92b3252942dd34c068336db"
     },
     {
       "byteLength": 7935,
@@ -203,12 +203,12 @@
       "sha256": "c2741c6ff3f37318c20371a77dc583436145d9a7cf3c082ce1f05c86b7ec9959"
     },
     {
-      "byteLength": 16399,
+      "byteLength": 17870,
       "id": "ygg:agent/playbook/ch2-delivery",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch2-delivery.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "75fbeba41b3e6c2c7693a51344b52dca40b464f986bf0cec2034e1a0e87dd671"
+      "sha256": "f532dbee9286c630acfacf59127b81298206d45409c7233751bdddbea89b5db2"
     },
     {
       "byteLength": 8729,
@@ -219,68 +219,68 @@
       "sha256": "525931f4b4c68f5697a4dc898351dbfba9b0169698c85eb370af3df5b64f9e3b"
     },
     {
-      "byteLength": 6919,
+      "byteLength": 6953,
       "id": "ygg:agent/playbook/ch4-harness-1-state-gates",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-1-state-gates.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "948cf2424929e833f792285be65145de90458ffa8c5f24ce66ac37e0cb9fe6c3"
+      "sha256": "214f90f20746ca54c09207c3d4276b05f10963d81385626a901fb719282aa2c0"
     },
     {
-      "byteLength": 9941,
+      "byteLength": 10065,
       "id": "ygg:agent/playbook/ch4-harness-2-drive-actions",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-2-drive-actions.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "e71ccd28a6c9c707c3f34d95910f08236a8d70a1670d05eea7a1107f54831de9"
+      "sha256": "35470204499c6c53e32dfd1176fcda36f8918bd06a993b92db18ca0e917e0b86"
     },
     {
-      "byteLength": 4845,
+      "byteLength": 4879,
       "id": "ygg:agent/playbook/ch4-harness-3-closeout-registries",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-3-closeout-registries.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "7cfa8fbd5b4921ed8daebf06f49b8a86e584f03b5c71606456a0a8c027a9aa5e"
+      "sha256": "0ac60f3eec5f0c39400a28e3ffba4125e5de0663c56f0f74e8db7265075bad16"
     },
     {
-      "byteLength": 7234,
+      "byteLength": 7358,
       "id": "ygg:agent/playbook/ch4-harness-4-inbox-coordination",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-4-inbox-coordination.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "28def178e0e1aeac9887aee4bde99285fa292b0504d00699c8cfd10345e5ffa5"
+      "sha256": "1af83bbc6f9db12d1ab09c9b9c84c32442fa6f06cd3a66d88794dee8ef2a674a"
     },
     {
-      "byteLength": 6522,
+      "byteLength": 6646,
       "id": "ygg:agent/playbook/ch4-harness-5-views-settlement",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-5-views-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "a8ca84c23a6f604189177425d37d373af9e069d54c5df2eb824f58ceafe87723"
+      "sha256": "9e4293ebeefaf2e6810c170705b4245c449426db4f3d98ba24f77d0e48091601"
     },
     {
-      "byteLength": 6247,
+      "byteLength": 6281,
       "id": "ygg:agent/playbook/ch4-harness-6-mod-engineering",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-6-mod-engineering.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "e4c5925fe69c35152378fa288fc9b24de2d5b68ee678a3cd7d4153c9d402b25f"
+      "sha256": "d6e3f90a7b82a75ef75e1915f97e251217809d70af65837b9bbe37da5e6ce4b5"
     },
     {
-      "byteLength": 6590,
+      "byteLength": 6714,
       "id": "ygg:agent/playbook/ch4-harness-7-host-contract",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-7-host-contract.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "86480185b26eb1e7870ed76caa1d46d488d1abedaba01a4e7443817fefbeef23"
+      "sha256": "c8544733705f90daa7e99835cfb71fab5b8f9d1ffd5989ce09a5244e8613fe10"
     },
     {
-      "byteLength": 12469,
+      "byteLength": 12672,
       "id": "ygg:agent/playbook/ch5-evolution-tools",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch5-evolution-tools.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "e0b600c37271d3012d46587604493650307bd9d094e3a948e2da8f9363c93e20"
+      "sha256": "8170da41962f47f062e14ad1da6f1cfabb0dbae2fa506c063d8286b3e343b0e6"
     }
   ],
   "schemaVersion": 1

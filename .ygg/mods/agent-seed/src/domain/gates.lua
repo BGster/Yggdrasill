@@ -66,6 +66,14 @@ local function gate_rev_ok(index)
 end
 
 local function gate_problem()
+  -- r2 rev2（B 方案⑥）空局保护两条款：章程非空 ∧ 需求数 ≥1，否则三个收口动作
+  -- （coordinate.submit / verify.submit / review.note）共用同一条可读拒绝。
+  if trim(text_of("task.title", "")) == "" then
+    return TEXTS.beats.gate_charter_first
+  end
+  if req_count() == 0 then
+    return TEXTS.beats.gate_charter_first
+  end
   if prop_pending_total() > 0 then
     return fill(TEXTS.beats.req_gate_props, { pending = tostring(prop_pending_total()) })
   end
