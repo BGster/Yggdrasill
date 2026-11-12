@@ -22,8 +22,8 @@ local LANES =
   lanes.LANES
 local render =
   render_mod.receipt
-local STAGE, job_capacity, req_closed, req_id, req_index_of, req_lane, req_status, req_title, stage =
-  reqs.STAGE, reqs.job_capacity, reqs.req_closed, reqs.req_id, reqs.req_index_of, reqs.req_lane, reqs.req_status, reqs.req_title, reqs.stage
+local STAGE, RUN_PHASE, job_capacity, req_closed, req_id, req_index_of, req_lane, req_status, req_title, stage =
+  reqs.STAGE, reqs.RUN_PHASE, reqs.job_capacity, reqs.req_closed, reqs.req_id, reqs.req_index_of, reqs.req_lane, reqs.req_status, reqs.req_title, reqs.stage
 local fill, split, trim =
   util.fill, util.split, util.trim
 
@@ -71,8 +71,12 @@ end
 function M.install(deps)
   TEXTS = deps.texts
   ygg.on("lane.claim", function(payload)
-    if stage() == STAGE.done then
+    -- 泳道认领只在协调幕（§2.7：立局未开工；盘点/发布冻结 lane.*；退役全拒）。
+    if stage() == STAGE.retired then
       return reject("lane.claim", TEXTS.beats.req_after_done)
+    end
+    if not flow.phase_guard("lane.claim", { RUN_PHASE.coordinate }) then
+      return
     end
     local spec, problem = LANES.parse_claim(payload)
     if problem ~= nil then
@@ -126,8 +130,12 @@ function M.install(deps)
     render()
   end)
   ygg.on("lane.release", function(payload)
-    if stage() == STAGE.done then
+    -- 泳道释放在协调幕（与认领同口径；集成/门禁打回的自动释放不走这里）。
+    if stage() == STAGE.retired then
       return reject("lane.release", TEXTS.beats.req_after_done)
+    end
+    if not flow.phase_guard("lane.release", { RUN_PHASE.coordinate }) then
+      return
     end
     local k, problem = LANES.parse_ref(payload)
     if problem ~= nil then

@@ -1,9 +1,9 @@
 {
   "code": [
     {
-      "byteLength": 3903,
+      "byteLength": 4028,
       "path": "src/core/config.lua",
-      "sha256": "dc6d8f71cee2c1d68e05a67c91abff934f7f2eb09e2082701999347f24fc08bf"
+      "sha256": "de2bbb231c6c35ee6d57e7655bab3a03ff555d9bd63e406fbb1b32965c023bb2"
     },
     {
       "byteLength": 4422,
@@ -16,14 +16,14 @@
       "sha256": "b331ed5ead0f7ae59fe1e3cbc25cea69e2eddb33c743de17b7a66f5f9b9c2961"
     },
     {
-      "byteLength": 3960,
+      "byteLength": 3777,
       "path": "src/domain/executor.lua",
-      "sha256": "6e43e67a5a7c573c6ade509825bdbc86f78202452654577833818f1ae20305b0"
+      "sha256": "892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
     },
     {
-      "byteLength": 6388,
+      "byteLength": 6404,
       "path": "src/domain/gates.lua",
-      "sha256": "2373050006959cd81c0f30d458d3cd3e48e58b9636131b8f3334e36a41059740"
+      "sha256": "7c588636da94424c4439b8a8375213ccceec1778105db2fe17ef06f72d7d915d"
     },
     {
       "byteLength": 7162,
@@ -31,120 +31,135 @@
       "sha256": "9a3ee36994b1372bb1a721877d2b1992e0a38cc9113308bfc92143de292f3774"
     },
     {
-      "byteLength": 10451,
+      "byteLength": 11085,
       "path": "src/domain/proposals.lua",
-      "sha256": "8a28281960a42a84dea1cc11a5b3f06b21c2e15509ec74b0698720c3f5bfca81"
+      "sha256": "1d6712ee1ffb9c58b699d7064ceda7f94c9baa08dcb6e5ddfe893d6879ae31b6"
     },
     {
-      "byteLength": 18724,
+      "byteLength": 19083,
       "path": "src/domain/requirements.lua",
-      "sha256": "244b3fef46ac3057c99ed520239b47978e50f9c96aa0f3660f9a02ba5ac7a131"
+      "sha256": "48e87e2b817adeeba7c006898967bae0ee8f77ede96dc845da865d6973113fde"
     },
     {
-      "byteLength": 33449,
+      "byteLength": 34552,
       "path": "src/domain/wire.lua",
-      "sha256": "34ef65af35ec3f7e410da67174fe433862d37174cb868e2ca471c4ac2da1b1f7"
+      "sha256": "8bdb894a7f6d251540100d1a9e6de44d9adbddf6f0aa411afa7e3ca5e6e80ff4"
     },
     {
-      "byteLength": 11142,
+      "byteLength": 11148,
       "path": "src/handlers/intake/actions.lua",
-      "sha256": "4c57068c27a211d109e7520dbb13e618857fe08e5dde602df8e264f17202ee4f"
+      "sha256": "90d20afe40b4fda71dde970046f857f4b93a4abf32e0f155f82fb03f4b5dfc8a"
     },
     {
-      "byteLength": 2281,
+      "byteLength": 2825,
+      "path": "src/handlers/intake/charter.lua",
+      "sha256": "6256d8dd9461f4834f94f46dbc205f834afa4f24aad310530da37a5f6fefd9d7"
+    },
+    {
+      "byteLength": 2611,
       "path": "src/handlers/intake/lifecycle.lua",
-      "sha256": "a29c3dc8449cc2a30cf53de9da5755458e3c5935557b29e2d5603b7eeeb56c2b"
+      "sha256": "ab8a748c8af18c006c2ec907b8598ddb9eaa6a075440ae78c2e11434d7df424a"
     },
     {
-      "byteLength": 2782,
+      "byteLength": 2794,
       "path": "src/handlers/operate/choice.lua",
-      "sha256": "83487b8ca3431af38fe55975315cbd41f4ccb6ea54ef717d829eaf6429cba2ea"
+      "sha256": "bfe8368afb106a4777b3acf6a330535ba9ce7a0792c6ce869df10a038566802f"
     },
     {
-      "byteLength": 5064,
+      "byteLength": 5506,
       "path": "src/handlers/operate/lanes.lua",
-      "sha256": "ce3c0cb36cf3c7dabdc10d6327b605503b5a339cb0cc1a1e5260e0fdeb7a0b76"
+      "sha256": "298bbb5505490b6b96047311bf380bd1d1cc38b36c70b34a398dbe9e841928b3"
     },
     {
-      "byteLength": 15096,
+      "byteLength": 3307,
+      "path": "src/handlers/operate/release.lua",
+      "sha256": "f6f79e07101987e574888d8e85e83adaec7fa2c45b992ee87115938cb0ea02e6"
+    },
+    {
+      "byteLength": 17032,
       "path": "src/handlers/operate/review.lua",
-      "sha256": "11d5600e8a8de428a78d5477c5132e13692f59f37b62a12529358ab9d4adc241"
+      "sha256": "79b6e8d134815ad90680b63633ae3516f8ca6253c9beab5580d94eabfec43483"
     },
     {
-      "byteLength": 7485,
+      "byteLength": 7635,
       "path": "src/handlers/requirements/gate_actions.lua",
-      "sha256": "aacfd67a9ec063bc5e5adbafb6ff33d9c81fd3225b808e0c9759c0e9995d3bf5"
+      "sha256": "4852c1fc03563322a88e1ccecb2b3d603828376de543039d619a7b2b8e6462aa"
     },
     {
-      "byteLength": 13188,
+      "byteLength": 4923,
+      "path": "src/handlers/requirements/integration.lua",
+      "sha256": "a70506ba126f783958cd413fe46644af8c0bc5d36a212deb7e52626ab12752a5"
+    },
+    {
+      "byteLength": 12990,
       "path": "src/handlers/requirements/proposals.lua",
-      "sha256": "f8d045be692ef64aea2d1b9e39ef13654b7d87de5f8ff2c4de7a88a5d6527390"
+      "sha256": "a04325b97d9ea046fc736c0a3cda54b7b966d14961e1fc54c4344410321f8a6a"
     },
     {
-      "byteLength": 14429,
+      "byteLength": 15799,
       "path": "src/handlers/requirements/requirement_ops.lua",
-      "sha256": "bbf9e3e050b7e6ab443f92e2c3d166260753db989ca19921314cb92d40de6801"
+      "sha256": "e7e020d146871cc99d3807f9e1347c345799722d240741ecd8d0a42aedd958ca"
     },
     {
-      "byteLength": 10030,
+      "byteLength": 10268,
       "path": "src/handlers/system/config.lua",
-      "sha256": "983b99b31c68525c5970da4ebc398a128a5908ec4539f3049699ad1e5303cacd"
+      "sha256": "552b74ff395e659a00e5e2be2f3130e591360de0904a04000daab33c108ed172"
     },
     {
-      "byteLength": 1021,
+      "byteLength": 1033,
       "path": "src/handlers/system/views.lua",
-      "sha256": "e405b321fbad3fede19e90cfaff0ca6ed3de5dc2b0a209daa0495e0a273f4bca"
+      "sha256": "95348a69a3af07aae0d967ede2086e049c6150f3aa327f7b6e269765a1e0a9bf"
     },
     {
-      "byteLength": 3869,
+      "byteLength": 5127,
       "path": "src/runtime/flow.lua",
-      "sha256": "9fa21e9187c436994d78ec1c6add9505b5f790a7b77b0de1737ff39a64d3599c"
+      "sha256": "9e0ac446037a65edf201d7ff7c700b430a6a0f06dde8afb7b3b431cee5b1e427"
     },
     {
-      "byteLength": 47583,
+      "byteLength": 48551,
       "path": "src/runtime/tools.lua",
-      "sha256": "d34c1267c0aa16587e84b6df3d202635ae51bd96223ea3e50a94bc2814ad93ca"
+      "sha256": "75efdf9edfe375e68b14251a924a6be98456d7d7760f8deb00e098d419e85a2d"
     },
     {
-      "byteLength": 1352,
+      "byteLength": 1644,
       "path": "src/view/guide.lua",
-      "sha256": "02db2f9346c231a80d70299d405a42464390ad9eb0e1a3ca1a120ec2d7891cb8"
+      "sha256": "ac7c7647949d2535b5195b6f67c9ba4ec10455ad4290fb0dda475254538ddb71"
     },
     {
-      "byteLength": 13628,
+      "byteLength": 15794,
       "path": "src/view/menus.lua",
-      "sha256": "fb8789c6aca5f737bdde5f47f8a4ac812bfec1ded0bbe5d2339fd30bf69a2d10"
+      "sha256": "e59040bd146aa6b9ff74ac4cfaae1ce901976fed134d35e5828d234e98256cd2"
     },
     {
-      "byteLength": 41283,
+      "byteLength": 44100,
       "path": "src/view/render.lua",
-      "sha256": "6b654dfd860077390a772e7f169123cb1910805633f0024982f83b288fa74344"
+      "sha256": "469da8ff809cb86c792331d42b81e86dd7841f3b90c1899c0c0a2cadc8595fb6"
     }
   ],
   "entries": [
     {
-      "byteLength": 4584,
+      "byteLength": 5646,
       "id": "ygg:scene/texts",
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "cfb1a35b23cd56aa20d0496804d9d6cf35ce94745ded210b748e7863f9547eb3"
+      "sha256": "fddce71fc82ca6b5e6bf65db4fdce2eeef69db3312ead35b2bace73584917ed5"
     },
     {
-      "byteLength": 5507,
+      "byteLength": 7384,
       "id": "ygg:scene/beats/flow",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-flow.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "f4d52aae9787c022a994fdd2dfb6960d58b63392c987765be6c708da6ea946c4"
+      "sha256": "1ba5ff6daabfb8049b0e25ab09af49d0a17ab5b9337267c550b60fe85880c49a"
     },
     {
-      "byteLength": 12594,
+      "byteLength": 13927,
       "id": "ygg:scene/beats/requirements",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-requirements.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "4903859564ac96689acf6d7a82c386257c31d813267ea39f726cff4a92a93c46"
+      "sha256": "af58944a356e4bc967f1fdc82b4f047e7df842eddc8f387931f2a63c0f482649"
     },
     {
       "byteLength": 3390,
@@ -155,20 +170,20 @@
       "sha256": "b6efd38d4f980354ffe9c39458bb220452df08b8ebe522f898dfd0b83817ab5b"
     },
     {
-      "byteLength": 3687,
+      "byteLength": 3658,
       "id": "ygg:scene/beats/map-guide",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-map-guide.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "d1939b9ef1ef1be94aefad2007e34a4b7246f73de458fa3fb2feccecc003a77f"
+      "sha256": "97f33ac16d06c5fbc4c18fb8d19289c40cb390e9e582e5c67e3a5bea9550ac4b"
     },
     {
-      "byteLength": 7486,
+      "byteLength": 7757,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "c479926166c4e635e4e1f59aa16e4a01c4928eac522579f96711d98fe40b6376"
+      "sha256": "0cd1a3550143714a824de28e96e838750ad901638b95f9640dbe93845508e4cd"
     },
     {
       "byteLength": 8977,
@@ -219,60 +234,60 @@
       "sha256": "ca0b9c0b74eb7df13d7fe733930ca7f4ee5b9c0d534ec25ec9c07d3b21a69098"
     },
     {
-      "byteLength": 6953,
+      "byteLength": 9199,
       "id": "ygg:agent/playbook/ch4-harness-1-state-gates",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-1-state-gates.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "214f90f20746ca54c09207c3d4276b05f10963d81385626a901fb719282aa2c0"
+      "sha256": "ddfda279c5d16233a5b8b7e867df9bc6e2718e2de6e82ea761d91c4b1c71c4d2"
     },
     {
-      "byteLength": 10065,
+      "byteLength": 10502,
       "id": "ygg:agent/playbook/ch4-harness-2-drive-actions",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-2-drive-actions.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "35470204499c6c53e32dfd1176fcda36f8918bd06a993b92db18ca0e917e0b86"
+      "sha256": "f8bde805ca84f0dfee10bb99aeff17d40e5ab23838fa58192a67a5b8f26191a8"
     },
     {
-      "byteLength": 4879,
+      "byteLength": 3905,
       "id": "ygg:agent/playbook/ch4-harness-3-closeout-registries",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-3-closeout-registries.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "0ac60f3eec5f0c39400a28e3ffba4125e5de0663c56f0f74e8db7265075bad16"
+      "sha256": "381818979f444636c6f7f8d3844af9afa7724ac9cc071c9354c93a5cf9bda99a"
     },
     {
-      "byteLength": 7358,
+      "byteLength": 5809,
       "id": "ygg:agent/playbook/ch4-harness-4-inbox-coordination",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-4-inbox-coordination.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "1af83bbc6f9db12d1ab09c9b9c84c32442fa6f06cd3a66d88794dee8ef2a674a"
+      "sha256": "76af2263e35c09b94d61fa019eacb267762b6dd9d1e6bb804c71c0a85c4a694d"
     },
     {
-      "byteLength": 6646,
+      "byteLength": 4159,
       "id": "ygg:agent/playbook/ch4-harness-5-views-settlement",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-5-views-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "9e4293ebeefaf2e6810c170705b4245c449426db4f3d98ba24f77d0e48091601"
+      "sha256": "eba4d517c725925a0f0c4af13216fac38a47687cdeccdf9b2c25c854e801ea64"
     },
     {
-      "byteLength": 6281,
+      "byteLength": 6860,
       "id": "ygg:agent/playbook/ch4-harness-6-mod-engineering",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-6-mod-engineering.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "d6e3f90a7b82a75ef75e1915f97e251217809d70af65837b9bbe37da5e6ce4b5"
+      "sha256": "fa85ccd83db029191bb8a875894a448e9770c3065935efe735e74ed0c6a4b778"
     },
     {
-      "byteLength": 6714,
+      "byteLength": 5813,
       "id": "ygg:agent/playbook/ch4-harness-7-host-contract",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-7-host-contract.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "c8544733705f90daa7e99835cfb71fab5b8f9d1ffd5989ce09a5244e8613fe10"
+      "sha256": "8cc98dd2986f6ef433502255bcc393fdbfc6b21652286bf518cdfefa519f89af"
     },
     {
       "byteLength": 12758,

@@ -389,7 +389,10 @@
       "src/handlers/system/config.lua",
       "src/handlers/system/views.lua",
       "src/handlers/operate/choice.lua",
-      "src/handlers/intake/lifecycle.lua"
+      "src/handlers/intake/lifecycle.lua",
+      "src/handlers/intake/charter.lua",
+      "src/handlers/requirements/integration.lua",
+      "src/handlers/operate/release.lua"
     ]
   }
 }

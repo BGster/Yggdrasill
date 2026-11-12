@@ -20,38 +20,46 @@ local reject_payload =
   flow.reject_payload
 local prompt_vars, render, stage_prompt =
   render_mod.prompt_vars, render_mod.receipt, render_mod.stage_prompt
-local stage =
-  reqs.stage
+local run_phase, run_phase_label =
+  reqs.run_phase, reqs.run_phase_label
 local fill, trim =
   util.fill, util.trim
 local parse_intake =
-  wire.parse_intake -- [deprecated-ref] name kept: r2 rev2 spec reuses this parser for the event.start charter
-
-
+  wire.parse_intake
 
 function M.install(deps)
   TEXTS = deps.texts
   ygg.on("event.start", function(payload)
+    -- R2：run.phase 初值 charter（只在真缺席时写入——重放不把已开工的局拉回立局）。
+    -- 判缺席用 nil：合法的 ""（= 协调，run.begin 写入）不能被重放拉回 charter（T4 缺陷 2）。
+    if ygg.kv.get("run.phase") == nil then
+      ygg.kv.set("run.phase", "charter")
+    end
+    -- boot 三则：引擎 / 模式 / 红线（R3：只叙述，不转场）。
     ygg.narrate(fill(TEXTS.scenes.prologue, {
       engine = tostring(ygg.engine_version),
-      stage = stage(),
+      stage = run_phase_label(run_phase()),
       mode = mode(),
     }))
     ygg.narrate(fill(stage_prompt("prologue"), prompt_vars()))
     ygg.narrate(TEXTS.beats.secret_redline)
-    -- r2 rev2（B 方案①）：启动载荷即章程（title|description，复用 parse_intake 校验）。
-    -- "" 与 "0" 都视为无载荷：照常 boot，章程由渲染回退显示 (untitled task)；
-    -- 有载荷：同拍写 task.* 并落 coordinate（initial 即 coordinate，无段可过）；
-    -- 已在 coordinate 再带载荷 = 幂等补写，不过段、不转场。
+    -- R3：启动载荷即章程（title|goal|success，宽松解析——空段回退默认文案，不拒绝；
+    -- 章程的严格校验在 charter.set）。"" 与 "0" 都视为无载荷：照常 boot，
+    -- 章程由后续 charter.set 或渲染回退显示。
     local raw = trim(tostring(payload or ""))
     if raw ~= "" and raw ~= "0" then
-      local title, description, problem = parse_intake(payload)
+      local title, goal, success, problem = parse_intake(payload)
       if problem ~= nil then
         return reject_payload("event.start", problem)
       end
       ygg.kv.set("task.title", title)
-      ygg.kv.set("task.description", description)
-      ygg.narrate(fill(TEXTS.beats.charter_ok, { title = title, description = description }))
+      ygg.kv.set("task.goal", goal)
+      ygg.kv.set("task.success", success)
+      ygg.narrate(fill(TEXTS.beats.charter_ok, {
+        title = title,
+        goal = goal,
+        success = success,
+      }))
     end
     render()
   end)

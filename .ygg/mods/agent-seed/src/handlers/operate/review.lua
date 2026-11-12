@@ -1,14 +1,19 @@
--- src/handlers/operate/review.lua —— 协调与复盘：coordinate.submit / verify.submit / settlement.* / review.note。
+-- src/handlers/operate/review.lua —— 批循环四幕：coordinate.submit / verify.submit / settlement.* / review.note。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
+-- D-MA23：协调/盘点/发布是 run.phase 微状态——coordinate.submit 不再转场（R8）；
+-- 盘点四项齐备由响应式效应自动转发布幕（R9）；review.note 前置=发布已声明（R10），
+-- 未武装=批结算（batch+1 回协调），run.retire 武装=退役终局（唯一真转场 live→retired）。
 
 local M = {}
 
 local config = require("src.core.config")
 local flow = require("src.runtime.flow")
 local gates = require("src.domain.gates")
+local hooks = require("src.core.hooks")
 local choice = require("src.handlers.operate.choice")
+local release_mod = require("src.handlers.operate.release")
 local render_mod = require("src.view.render")
 local reqs = require("src.domain.requirements")
 local tools = require("src.runtime.tools")
@@ -19,8 +24,8 @@ local TEXTS
 
 local goal_authorization, num, strict_gates, run_retire_armed, text_of =
   config.goal_authorization, config.num, config.strict_gates, config.run_retire_armed, config.text_of
-local advance, refuse, reject, reject_payload =
-  flow.advance, flow.refuse, flow.reject, flow.reject_payload
+local advance, phase_guard, refuse, reject, reject_payload =
+  flow.advance, flow.phase_guard, flow.refuse, flow.reject, flow.reject_payload
 local gate_problem, settlement_problem =
   gates.gate_problem, gates.settlement_problem
 local HUMAN =
@@ -29,14 +34,14 @@ local render =
   render_mod.receipt
 local reset_settlement =
   render_mod.reset_settlement
-local STAGE, req_count, stage =
-  reqs.STAGE, reqs.req_count, reqs.stage
+local reset_release =
+  release_mod.reset_release
+local RUN_PHASE, req_count, run_phase, stage =
+  reqs.RUN_PHASE, reqs.req_count, reqs.run_phase, reqs.stage
 local cut, fill, split, trim =
   util.cut, util.fill, util.split, util.trim
 local probe_payload_ok =
   wire.probe_payload_ok
-
-
 
 -- 局末两项清理的落库（独立动作与 settlement.evolution 可选段共用）：写 KV + 叙事，不 render。
 local function apply_sessions(moved, remaining, destination)
@@ -55,15 +60,49 @@ local function apply_todo(remaining, verified_by)
   ygg.narrate(fill(TEXTS.beats.settlement_todo_ok, { verified_by = verified_by }))
 end
 
+-- 盘点四项齐备（验证 / 演进登记 / 会话清理 / 待办清理）。
+local function settle_four_ready()
+  if run_phase() ~= RUN_PHASE.settle then
+    return false
+  end
+  if ygg.kv.get("verify.passed") ~= true then
+    return false
+  end
+  if trim(text_of("settlement.evolution.summary", "")) == "" then
+    return false
+  end
+  if text_of("settlement.sessions.destination", "") == "" then
+    return false
+  end
+  if num("settlement.todo.remaining", -1) ~= 0 then
+    return false
+  end
+  return true
+end
+
 function M.install(deps)
   TEXTS = deps.texts
+  -- 盘点收口效应（R9）：四项齐备 → run.phase="release"（自动转发布幕，不新增事件、
+  -- 不渲染、非门禁动作——「唯一声明后继」的又一实例，§2.9 四不变量全满足）。
+  hooks.useEffect("settle.close", function()
+    if not settle_four_ready() then
+      return nil
+    end
+    return { "settle_ready" }
+  end, function()
+    if not settle_four_ready() then
+      return false
+    end
+    ygg.kv.set("run.phase", "release")
+    ygg.narrate(TEXTS.beats.settle_ready)
+    return true
+  end)
   ygg.on("coordinate.submit", function(payload)
     if not HUMAN.gated("coordinate.submit") then
       return
     end
-    local current = stage()
-    if current ~= STAGE.coordinate then
-      return reject("coordinate.submit", fill(TEXTS.beats.stage_expected, { expected = STAGE.coordinate }))
+    if not phase_guard("coordinate.submit", { RUN_PHASE.coordinate }) then
+      return
     end
     if not probe_payload_ok(payload) then
       return reject_payload("coordinate.submit", fill(TEXTS.beats.probe_rejected, {
@@ -79,20 +118,21 @@ function M.install(deps)
     ygg.kv.set("verify.passed", false)
     -- 每次进入结算都重新登记三项任务，避免沿用上一轮过期证据。
     reset_settlement()
-    -- r9 批语义：coordinate.submit 是**批边界**（不是「走向终局的第一步」）。
+    -- r9 / R8 批语义：coordinate.submit 是**批边界**（不是「走向终局的第一步」）；
+    -- settle 是 run.phase 微状态，内核 FSM 不转场。
+    ygg.kv.set("run.phase", "settle")
     ygg.narrate(fill(TEXTS.beats.coordinate_ok, {
       count = tostring(req_count()),
       batch = tostring(num("run.batch", 1)),
     }))
-    advance(STAGE.review)
+    render()
   end)
   ygg.on("verify.submit", function(payload)
     if not HUMAN.gated("verify.submit") then
       return
     end
-    local current = stage()
-    if current ~= STAGE.review then
-      return reject("verify.submit", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
+    if not phase_guard("verify.submit", { RUN_PHASE.settle }) then
+      return
     end
     local all_green = true
     local report = ""
@@ -138,25 +178,26 @@ function M.install(deps)
       render()
       return
     end
+    -- R9：整批退回协调——run.phase=""（不转场）并清 settlement 与 release 键。
     ygg.kv.set("verify.passed", false)
     reset_settlement()
+    reset_release()
+    ygg.kv.set("run.phase", "")
     local failures = num("verify.failures", 0) + 1
     ygg.kv.set("verify.failures", failures)
     ygg.kv.set("verify.last", report ~= "" and report or TEXTS.beats.verify_failed_record)
     if strict_gates() then
       ygg.narrate(fill(TEXTS.beats.verify_fail, { failures = tostring(failures) }))
-      advance(STAGE.coordinate)
     else
       ygg.narrate(fill(TEXTS.beats.gate_bypass, { failures = tostring(failures) }))
       ygg.kv.set("verify.passed", true)
-      render()
     end
+    render()
   end)
   -- 三项结算登记都是自声明：进化复核只校形状与计数，会话 / Todo 只校形状与 remaining=0。
   ygg.on("settlement.evolution", function(payload)
-    local current = stage()
-    if current ~= STAGE.review then
-      return reject("settlement.evolution", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
+    if not phase_guard("settlement.evolution", { RUN_PHASE.settle }) then
+      return
     end
     if ygg.kv.get("verify.passed") ~= true then
       return refuse(TEXTS.beats.req_wait_rejected, "settlement.evolution", TEXTS.beats.settlement_verify_first)
@@ -237,9 +278,8 @@ function M.install(deps)
   end)
   -- 局末两项清理：subagent 会话与主会话 Todo。Mod 读不到会话与 Todo API，真实清理由主会话做。
   ygg.on("settlement.sessions", function(payload)
-    local current = stage()
-    if current ~= STAGE.review then
-      return reject("settlement.sessions", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
+    if not phase_guard("settlement.sessions", { RUN_PHASE.settle }) then
+      return
     end
     local sessions, sessions_problem = wire.parse_sessions_payload(payload)
     if sessions == nil then
@@ -249,9 +289,8 @@ function M.install(deps)
     render()
   end)
   ygg.on("settlement.todo", function(payload)
-    local current = stage()
-    if current ~= STAGE.review then
-      return reject("settlement.todo", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
+    if not phase_guard("settlement.todo", { RUN_PHASE.settle }) then
+      return
     end
     -- 载荷 "remaining|verified_by"：恰好两段；remaining 必须恰为 0；verified_by 非空。
     -- Lua 沙箱没有 Todo API：这里只记「主会话复核到 0 项」这条断言，不声称清理条数。
@@ -266,9 +305,8 @@ function M.install(deps)
     if not HUMAN.gated("review.note") then
       return
     end
-    local current = stage()
-    if current ~= STAGE.review then
-      return reject("review.note", fill(TEXTS.beats.stage_expected, { expected = STAGE.review }))
+    if not phase_guard("review.note", { RUN_PHASE.release }) then
+      return
     end
     local problem = gate_problem()
     if problem ~= nil then
@@ -303,6 +341,17 @@ function M.install(deps)
       render()
       return
     end
+    -- R10 新前置：发布已声明（master_sha ∨ skipped_reason 任一非空）。
+    local master_sha = text_of("run.release.master_sha", "")
+    local skipped_reason = text_of("run.release.skipped_reason", "")
+    if master_sha == "" and skipped_reason == "" then
+      ygg.narrate(fill(TEXTS.beats.req_gate_block, {
+        action = "review.note",
+        detail = TEXTS.beats.release_required,
+      }))
+      render()
+      return
+    end
     local note, note_err = wire.parse_review_note(payload)
     if note == nil then
       return reject_payload("review.note", note_err)
@@ -328,28 +377,32 @@ function M.install(deps)
     ygg.kv.set("review.evolution.candidates", text_of("settlement.evolution.candidates", "0/0"))
     ygg.kv.set("review.evolution.classes", text_of("settlement.evolution.classes", ""))
     if run_retire_armed() then
-      -- 退役路径（r9 唯一终局，仅 run.retire 武装可达）：写 ending + done。
-      -- [ENDING 行由 RENDER[done] 在 node:render 上叙事，本 handler 只留归档叙事。
-      ygg.kv.set("ending", STAGE.done)
+      -- 退役路径（r9 唯一终局，仅 run.retire 武装可达）：写 ending + advance(retired)。
+      -- [ENDING 行由 RENDER[retired] 在 node:render 上叙事，本 handler 只留归档叙事。
+      ygg.kv.set("ending", reqs.STAGE.retired)
       ygg.narrate(fill(TEXTS.beats.review_ok, { score = tostring(score), lesson = lesson }))
-      advance(STAGE.done)
+      advance(reqs.STAGE.retired)
       return
     end
-    -- 批收口路径（常驻默认）：滚动单槽已归档 → run.batch+1 → 复位 verify/settlement → 回 coordinate。
+    -- 批收口路径（常驻默认）：滚动单槽已归档 → 清 release 声明 → run.batch+1 → 复位
+    -- verify/settlement → run.phase=""（回协调，不转场）。
     -- 红线：绝不写 `ending`、叙事行首绝不含 [ENDING 前缀（宿主按行首前缀判终局，测试钉死）。
+    reset_release()
     local batch = num("run.batch", 1)
     ygg.kv.set("run.batch", batch + 1)
     ygg.kv.set("verify.passed", false)
     reset_settlement()
+    ygg.kv.set("run.phase", "")
     ygg.narrate(fill(TEXTS.beats.review_batch_ok, {
       batch = tostring(batch),
       next = tostring(batch + 1),
       score = tostring(score),
       lesson = lesson,
     }))
-    advance(STAGE.coordinate)
+    render()
   end)
 end
 
+M.settle_four_ready = settle_four_ready
 
 return M

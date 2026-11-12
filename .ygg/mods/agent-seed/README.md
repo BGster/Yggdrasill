@@ -586,7 +586,6 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 | `git.lane_probe` | `tool.result` | `lane.<k>.probe.{commits,clean,head,files,call}`；有交集时经 `req_do_conflict(...,"radar")` 抬 `req.<i>.conflict*` | `commits=0` / `clean≠1` → `[LANE PROBE FAILED]`（**警告面**，不阻塞收口）；输出被截断 → 跳过雷达 |
 | `fs.artifact_probe` | `tool.result` | `artifact.<path>.{bytes,sha256,source}` + `artifact.count` / `artifact.seq.<n>` | `exists≠1` / `bytes=0` / 路径不合形状 → 不落库 |
 | `gate.verify_suite` | `tool.result` | `verify.passed` / `verify.report` / `verify.source` | 只在 `review` 阶段、只在 `passed=1`、且 `gate_problem()==nil` 时写绿 |
-| `harness.archive_sessions` | `tool.result` | `settlement.sessions.{moved,remaining,destination,source}` | 只在 `review`、只在 `remaining=0` 且 `dest≠""` 时登记 |
 | `vfs.write` | 事件 handler | `artifact.<path>.{bytes,sha256,source="vfs"}` | 载荷 = 路径 + 竖线 + 内容（首个竖线前是路径，其后全部是内容；内容可含竖线） |
 
 **三条硬边界**（`data/playbook/` 的 `tools.reactive-effect-scope` / `subsystems.probe-is-warning` /
@@ -597,8 +596,7 @@ Mod **永不做 IO**（沙箱无 `io` / `os`，也没有 process / 网络 API）
 2. **探针失败不接门禁**：`[LANE PROBE FAILED]` 只叙事 + 留 `lane.<k>.probe.*` 可查；接进 `gate_problem()` 会让
    一次脏树探针把收口永久卡死（没有「撤销探针」的动作）。**冲突雷达例外**：它走 `req.<i>.conflict`，因此
    自动进 `req_conflict_total` → 阻塞派活与收口，解除只走 `requirement.resolve`。
-3. **机证与人证同级不等强**：`gate.verify_suite` / `harness.archive_sessions` 写的是与 `verify.submit` /
-   `settlement.sessions` **同一批 KV**，只省一个回合；`verify.source` / `settlement.sessions.source` 保留溯源，
+3. **机证与人证同级不等强**：`gate.verify_suite` 写的是与 `verify.submit` **同一批 KV**，只省一个回合；`verify.source` 保留溯源，
    汇报时不得声称机证比自声明更强。
 
 **`vfs.write` 与 `ygg.fs`**：Mod 仍不做 IO，写盘一律委托宿主中介的 `ygg.fs`（run 相对 + 路径狱）。宿主没装

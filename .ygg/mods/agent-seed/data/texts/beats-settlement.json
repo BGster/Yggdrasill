@@ -4,9 +4,7 @@
     "settlement_evolution_usage": "settlement.evolution payload: artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]; summary is required after trim and must not contain |; the only optional segments are c=, cls=, sessions= and todo= — ev=, duplicates and unknown segments are refused.",
     "settlement_evolution_ok": "[EVOLUTION REGISTERED] {{summary}} | candidates {{candidates}} (kept/screened) | classes {{classes}}. Sessions and todo are settled in the same transaction when their segments are present; review.note archives single-source and closes the run.",
     "settlement_evolution_missing": "evolution registration is missing: run settlement.evolution first; summary must be non-empty after trim (artifact may stay empty when c=0/0).",
-    "settlement_evolution_verify_first": "run verify.submit all_green=true before settlement.evolution / review.note.",
     "settlement_evolution_default_summary": "candidates screened against the evolution chapter",
-    "review_common": "once every gate is green, register settlement.evolution first (it settles sessions and todo in the same transaction), then review.note records the lesson and archives single-source to close the run; screen candidates against the evolution chapter first. summary is required after trim; when screened > 0 artifact and cls are required, c=0/0 allows an empty artifact; a declaration only proves what was declared, not the quality of the suggestions.",
     "review_note_usage": "review.note accepts only lesson|score; the evolution record must be registered through settlement.evolution first — this action only archives it single-source.",
     "review_note_legacy_evolution": "review.note no longer accepts ev= / c= / cls= segments; register with settlement.evolution first, then close with lesson|score.",
     "review_evolution_bad_path": "invalid evolution artifact path: must be `artifacts/<file>.md`, no `..` and no whitespace.",
@@ -36,6 +34,13 @@
     "settlement_artifact_no_vfs": "artifact {{artifact}} cannot be verified: the host VFS is not mounted — non-empty registration refused (no settlement written, no archive side effects)",
     "settlement_artifact_absent": "artifact {{artifact}} does not exist in the mounted VFS — registration refused (no settlement written, no archive side effects)",
     "settlement_artifact_empty": "artifact {{artifact}} is empty in the mounted VFS — registration refused (no settlement written, no archive side effects)",
-    "settlement_artifact_read_error": "artifact {{artifact}} probe failed — registration refused (no settlement written, no archive side effects)"
+    "settlement_artifact_read_error": "artifact {{artifact}} probe failed — registration refused (no settlement written, no archive side effects)",
+    "release_confirmed": "[RELEASE CONFIRMED] 第 {{batch}} 批合并已声明：master@{{sha}} tag {{tag}}——review.note 可批结算/退役",
+    "release_skipped": "[RELEASE SKIPPED] 第 {{batch}} 批无需发布：{{reason}}——review.note 可批结算/退役",
+    "release_required": "发布未声明：先 release.confirm（master@<sha> + 批次 tag）或 release.skip（跳过理由），review.note 才能收口本批",
+    "release_usage": "release.confirm 载荷：\"master@<sha>|v年.月.日.序号\"——sha 为 7-40 位十六进制，标签 v 开头四段数字点分",
+    "release_skip_usage": "release.skip 载荷 = 非空理由（本批无需发布的显式声明）",
+    "release_confirm_payload": "master@1a2b3c4d|v2026.11.12.1",
+    "release_skip_payload": "本批无需发布：纯文档/测试批次，无 develop→master 合并"
   }
 }

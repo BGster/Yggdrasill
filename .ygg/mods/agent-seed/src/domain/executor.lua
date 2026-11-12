@@ -60,19 +60,14 @@ local function bind(key, value)
     }))
     return nil
   end
-  -- 跨阶段：plan 看 analysis；development 看 plan（plan 缺失时回看 analysis）。
+  -- R12：活跃阶段只剩 plan / development；跨阶段回看只看 plan（analysis 槽位已删）。
   local prev_stage = nil
-  if stage_name == "plan" then
-    prev_stage = "analysis"
-  elseif stage_name == "development" then
+  if stage_name == "development" then
     prev_stage = "plan"
   end
   local prev = ""
   if prev_stage ~= nil then
     prev = wire.executor_id_of(executor_raw(req_text, prev_stage))
-    if prev == "" and stage_name == "development" then
-      prev = wire.executor_id_of(executor_raw(req_text, "analysis"))
-    end
   end
   local handoff_from = current ~= "" and current or prev
   local needs_reason = handoff_from ~= "" and handoff_from ~= agent

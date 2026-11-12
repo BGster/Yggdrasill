@@ -24,8 +24,8 @@ local CONFIG_UI =
   menus.CONFIG_UI
 local render =
   render_mod.receipt
-local stage =
-  reqs.stage
+local stage, run_phase =
+  reqs.stage, reqs.run_phase
 local contains, cut, fill, join, split, to_bool, trim =
   util.contains, util.cut, util.fill, util.join, util.split, util.to_bool, util.trim
 local probe_payload_ok =
@@ -226,7 +226,9 @@ function M.install(deps)
         usage = TEXTS.beats.config_open_usage,
       }))
     end
-    CONFIG_UI.set_page("config", stage())
+    -- 子页键用微状态口径（与 CONFIG_UI.open 的比对侧一致，T4 缺陷 4：真状态 "live"
+    -- 与微状态比对永不相等 → 子页打不开、run.retire 武装路径不可用）。
+    CONFIG_UI.set_page("config", run_phase())
     ygg.narrate(TEXTS.beats.config_opened)
     render()
   end)

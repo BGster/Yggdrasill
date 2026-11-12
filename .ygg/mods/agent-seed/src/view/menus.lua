@@ -21,8 +21,8 @@ local gate_kind, gate_next, gate_total =
   gates.gate_kind, gates.gate_next, gates.gate_total
 local prop_id, prop_next, prop_pending_total, prop_req, prop_stage =
   props.prop_id, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_stage
-local STAGE, job_capacity, job_total, req_conflict, req_conflict_peer, req_count, req_dev_ready, req_has_pending, req_id, req_job, req_job_stage, req_open_total, stage =
-  reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_dev_ready, reqs.req_has_pending, reqs.req_id, reqs.req_job, reqs.req_job_stage, reqs.req_open_total, reqs.stage
+local RUN_PHASE, job_capacity, job_total, req_conflict, req_conflict_peer, req_count, req_dev_ready, req_has_pending, req_id, req_job, req_job_stage, req_open_total, run_phase =
+  reqs.RUN_PHASE, reqs.job_capacity, reqs.job_total, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_count, reqs.req_dev_ready, reqs.req_has_pending, reqs.req_id, reqs.req_job, reqs.req_job_stage, reqs.req_open_total, reqs.run_phase
 local fill =
   util.fill
 local trim =
@@ -87,12 +87,12 @@ function CONFIG_UI.set_page(page, st)
   if next_page == "" then
     ygg.kv.set("ui.page.stage", "")
   else
-    ygg.kv.set("ui.page.stage", st or stage())
+    ygg.kv.set("ui.page.stage", st or run_phase())
   end
 end
 
 function CONFIG_UI.open(st)
-  return CONFIG_UI.page() == "config" and CONFIG_UI.page_stage() == (st or stage())
+  return CONFIG_UI.page() == "config" and CONFIG_UI.page_stage() == (st or run_phase())
 end
 
 function CONFIG_UI.item()
@@ -160,6 +160,22 @@ function CONFIG_UI.page_items()
 end
 
 local MENU = {}
+
+-- 章程三件套齐备（RAW KV 读取，与 charter.lua 同口径；不带默认值）。
+local function charter_complete()
+  for _, name in ipairs({ "title", "goal", "success" }) do
+    if trim(tostring(ygg.kv.get("task." .. name) or "")) == "" then
+      return false
+    end
+  end
+  return true
+end
+
+-- 发布已声明（R10）：master_sha ∨ skipped_reason 任一非空。
+local function release_declared()
+  return text_of("run.release.master_sha", "") ~= ""
+    or text_of("run.release.skipped_reason", "") ~= ""
+end
 
 local function req_list_item()
   return {
@@ -229,8 +245,8 @@ local function dispatch_candidates()
   local cached = hooks.useMemo("menus.dispatch_candidates", function()
     local out = {}
     for i = 1, req_count() do
-      -- 待验收提案在 5 态下不再是一个状态，所以「等验收期间不重派」必须在这里显式排除
-      -- （旧版靠 analysis_review / plan_review / dev_review 三个状态天然不可派）。
+      -- 微状态口径：可派微状态只有立项（→ plan）与待开发（→ development）；交付受理 /
+      -- 门禁 / 集成 / 已闭环的结构性排除由 req_job_stage（nil）与 pending / gate 判据承担。
       if req_job_stage(i) ~= nil and req_job(i) == "" and not req_has_pending(i) then
         if req_job_stage(i) ~= "development" or req_dev_ready(i) then
           out[#out + 1] = i
@@ -314,13 +330,34 @@ local function gate_items()
   }
 end
 
-MENU[STAGE.coordinate] = function()
+MENU[RUN_PHASE.charter] = function()
+  local items = {
+    {
+      text = TEXTS.options.charter_set,
+      action = "charter.set",
+      payload = TEXTS.beats.charter_payload,
+    },
+  }
+  -- run.begin 只在章程三件套齐备时上桌（菜单数据不说谎：未齐备时派发只会可读拒绝）。
+  if charter_complete() then
+    items[#items + 1] = {
+      text = TEXTS.options.run_begin,
+      action = "run.begin",
+      payload = "",
+    }
+  end
+  items[#items + 1] = map_item(RUN_PHASE.charter)
+  items[#items + 1] = CONFIG_UI.item()
+  return items
+end
+
+MENU[RUN_PHASE.coordinate] = function()
   local items = append_all({}, resolve_items())
   -- 主前进动作并存（canonical 序不变）：验收提案第 1 → 门禁两项紧随 → 派活 / 收口兑底。
   -- 门禁不再被「任一需求有待验收提案」整体藏起（按需求局部化：gate.approve 只看 rN 自身，
   -- gate_problem_for 在 handler 里判；跨需求阻塞改由串行验收 / 收口前置承担）。单需求下
-  -- accept 与 gate 结构上不同时出现（门禁只能由 accept 唯一 pending 提案升起），全 1 菜单
-  -- 首项序号不变。guide_item 相关不动（r1 泳道负责）。
+  -- accept 与 gate 结构上不同时出现（门禁只能由受理唯一 pending 提案升起），全 1 菜单
+  -- 首项序号不变。（plan 门禁已随 D-MA23 改为提交即门禁——不再经由 proposal.accept。）
   local accept = accept_item()
   local gates = gate_items()
   local dispatch = dispatch_item()
@@ -339,7 +376,7 @@ MENU[STAGE.coordinate] = function()
       }
     end
   end
-  items[#items + 1] = map_item(STAGE.coordinate)
+  items[#items + 1] = map_item(RUN_PHASE.coordinate)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
   items[#items + 1] = CONFIG_UI.item()
@@ -366,10 +403,10 @@ local function option_texts(items)
   return out
 end
 
-MENU[STAGE.review] = function()
+MENU[RUN_PHASE.settle] = function()
   local items = append_all({}, resolve_items())
-  -- 全 1 推进顺序：verify → evolution → sessions → todo → review.note。
-  -- 未完成的结算项排在 review.note 前；骨架不引入 enabled 概念。
+  -- 盘点内子微状态序（§2.3）：待验证 → 待登记演进 → 待结会话 → 待清待办；
+  -- 四项齐备由 settle.close 效应自动转发布幕（不占菜单项，不新增事件）。
   if ygg.kv.get("verify.passed") == true then
     if not settlement_registered() then
       items[#items + 1] = {
@@ -392,11 +429,6 @@ MENU[STAGE.review] = function()
         payload = TEXTS.beats.settlement_todo_payload,
       }
     end
-    items[#items + 1] = {
-      text = TEXTS.options.review_note,
-      action = "review.note",
-      payload = review_note_payload(),
-    }
   else
     items[#items + 1] = { text = TEXTS.options.verify_green, action = "verify.submit", payload = "true" }
   end
@@ -405,11 +437,46 @@ MENU[STAGE.review] = function()
     action = "verify.submit",
     payload = "all_green=false;report=" .. TEXTS.beats.default_gate_report,
   }
-  items[#items + 1] = map_item(STAGE.review)
+  items[#items + 1] = map_item(RUN_PHASE.settle)
   items[#items + 1] = req_list_item()
   items[#items + 1] = req_add_item()
   items[#items + 1] = CONFIG_UI.item()
   return items
+end
+
+MENU[RUN_PHASE.release] = function()
+  local items = append_all({}, resolve_items())
+  if not release_declared() then
+    -- 发布未声明：先声明本批结果（confirm / skip 二选一）。
+    items[#items + 1] = {
+      text = TEXTS.options.release_confirm,
+      action = "release.confirm",
+      payload = TEXTS.beats.release_confirm_payload,
+    }
+    items[#items + 1] = {
+      text = TEXTS.options.release_skip,
+      action = "release.skip",
+      payload = TEXTS.beats.release_skip_payload,
+    }
+  else
+    -- 已声明：首项 = review.note（批结算；run.retire 武装时它是终局变体，
+    -- summary.nextEndsRun 据首项判定，宿主预收口协议只认它）。
+    items[#items + 1] = {
+      text = TEXTS.options.review_note,
+      action = "review.note",
+      payload = review_note_payload(),
+    }
+  end
+  items[#items + 1] = map_item(RUN_PHASE.release)
+  items[#items + 1] = CONFIG_UI.item()
+  return items
+end
+
+MENU[RUN_PHASE.retired] = function()
+  return {
+    map_item(RUN_PHASE.retired),
+    req_list_item(),
+  }
 end
 
 function M.install(deps)
@@ -420,14 +487,14 @@ M.CONFIG_UI = CONFIG_UI
 M.MENU = MENU
 M.accept_item = accept_item
 M.append_all = append_all
+M.charter_complete = charter_complete
 M.dispatch_candidates = dispatch_candidates
 M.dispatch_item = dispatch_item
 M.gate_items = gate_items
-M.retire_item = CONFIG_UI.retire_item
-M.guide_item = guide_item
 M.map_item = map_item
 M.menu = menu
 M.option_texts = option_texts
+M.release_declared = release_declared
 M.req_add_item = req_add_item
 M.req_list_item = req_list_item
 M.resolve_items = resolve_items

@@ -15,8 +15,8 @@ local narrate_map, render, stage_prompt, prompt_vars =
   render_mod.narrate_map, render_mod.receipt, render_mod.stage_prompt, render_mod.prompt_vars
 local menu =
   menus.menu
-local stage =
-  reqs.stage
+local run_phase =
+  reqs.run_phase
 local fill =
   util.fill
 
@@ -25,7 +25,7 @@ local fill =
 function M.install(_)
   ygg.on("map.show", function()
     -- rev1 r3：单一行为，任何 payload 一律忽略（无 ""/0/full/section_id 分支）。
-    local current = stage()
+    local current = run_phase()
     narrate_map(current, false, menu(current),
       fill(stage_prompt(current), prompt_vars()))
     render()

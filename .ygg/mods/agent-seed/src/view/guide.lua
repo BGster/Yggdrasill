@@ -15,10 +15,14 @@ local fill =
 
 local SECTIONS = {}
 
+-- 相位→规则章节索引（微状态口径）：立局看仓库形态；协调看派发/泳道/集成；
+-- 盘点看演进/门禁/证据；发布看集成章（develop→integrate→merge→deploy）；退役看指引。
 local STAGE_GUIDE = {
+  charter = { "repository" },
   coordinate = { "dispatch", "lanes", "integration" },
-  review = { "evolution", "gates", "evidence" },
-  done = { "pointers" },
+  settle = { "evolution", "gates", "evidence" },
+  release = { "integration" },
+  retired = { "pointers" },
 }
 
 local function guide_section(st)

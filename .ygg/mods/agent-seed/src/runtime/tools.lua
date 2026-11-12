@@ -47,8 +47,8 @@ local req_do_conflict =
   props.req_do_conflict
 local render =
   render_mod.receipt
-local STAGE, job_capacity, req_closed, req_conflict, req_id, req_index_of, req_lane, req_status, req_sync_conflicts, stage =
-  reqs.STAGE, reqs.job_capacity, reqs.req_closed, reqs.req_conflict, reqs.req_id, reqs.req_index_of, reqs.req_lane, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
+local STAGE, RUN_PHASE, job_capacity, req_closed, req_conflict, req_id, req_index_of, req_key, req_lane, req_release, req_status, req_sync_conflicts, run_phase, stage =
+  reqs.STAGE, reqs.RUN_PHASE, reqs.job_capacity, reqs.req_closed, reqs.req_conflict, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_lane, reqs.req_release, reqs.req_status, reqs.req_sync_conflicts, reqs.run_phase, reqs.stage
 local contains, cut, fill, join, split, trim =
   util.contains, util.cut, util.fill, util.join, util.split, util.trim
 local artifact_path_ok, strip_ext, valid_ext =
@@ -809,9 +809,10 @@ end
 
 REACTORS["gate.verify_suite"] = function(pairs)
   local summary = trim(pairs.summary or "")
-  if stage() ~= STAGE.review then
+  -- 盘点幕（settle 微状态）是 verify 证据的唯一直落点（§9.2c：机证与人证同前件）。
+  if run_phase() ~= RUN_PHASE.settle then
     ygg.narrate(fill(TEXTS.beats.verify_suite_blocked, {
-      reason = fill(TEXTS.beats.stage_expected, { expected = STAGE.review }),
+      reason = fill(TEXTS.beats.stage_expected, { expected = "盘点" }),
     }))
     return false
   end
@@ -1151,6 +1152,21 @@ local function auto_release_worktree(lane)
   return try_sync_call("git.worktree_release", args_map, raw_args, "", "")
 end
 
+-- R7 泳道释放（连工作树停车）：交付受理 reject / 验收门禁 reject / 集成 confirm·reject / done
+-- 四个释放点共用——先用 lane 号唤宿主 git.worktree_release 停车，再清 KV 账本。
+-- 泳道绑定窗口保持到这些点才释放（交付受理→验收门禁→集成三幕期间不释放，执行者要工作树做集成）。
+local function release_lane_with_worktree(index)
+  local lane_idx = req_lane(index)
+  if lane_idx <= 0 then
+    lane_idx = num(req_key(index, "last_lane"), 0)
+  end
+  if lane_idx > 0 then
+    auto_release_worktree(lane_idx)
+    ygg.kv.set(req_key(index, "last_lane"), 0)
+  end
+  req_release(index)
+end
+
 -- ───────────────────────────── 装配面 ─────────────────────────────
 
 function M.install(deps)
@@ -1158,7 +1174,7 @@ function M.install(deps)
 end
 
 local function handle_call(payload)
-  if stage() == STAGE.done then
+  if stage() == STAGE.retired then
     return reject("tool.call", TEXTS.beats.tool_after_done)
   end
   local body, marked_ext = strip_ext(payload)
@@ -1211,7 +1227,7 @@ function M.register()
   -- 机器动作（外部派发），不是人类里程碑动作：不进菜单、不占票据（AGENTS.md §8）。
   ygg.on("tool.call", handle_call)
   ygg.on("tool.result", function(payload)
-    if stage() == STAGE.done then
+    if stage() == STAGE.retired then
       return reject("tool.result", TEXTS.beats.tool_after_done)
     end
     local rec, problem = parse_result(payload)
@@ -1244,7 +1260,7 @@ function M.register()
   -- 无论宿主是否提供 `ygg.fs`，都落 `artifact.*` 账本——否则同一份代码在「宿主管线」与
   -- 「无 ygg.fs 的宿主」下言行不一致；区别只在叙事行（`[VFS WRITTEN]` vs `[VFS LEDGER ONLY]`）。
   ygg.on("vfs.write", function(payload)
-    if stage() == STAGE.done then
+    if stage() == STAGE.retired then
       return reject("vfs.write", TEXTS.beats.tool_after_done)
     end
     if type(payload) ~= "string" then
@@ -1306,6 +1322,7 @@ M.artifact_path_ok = artifact_path_ok
 M.auto_claim_worktree = auto_claim_worktree
 M.auto_probe_lane = auto_probe_lane
 M.auto_release_worktree = auto_release_worktree
+M.release_lane_with_worktree = release_lane_with_worktree
 M.call_id_at = call_id_at
 M.code_of = code_of
 M.flush_meta = flush_meta

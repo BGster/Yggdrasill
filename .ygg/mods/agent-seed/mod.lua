@@ -64,8 +64,11 @@ local views = require("src.handlers.system.views")
 local choice = require("src.handlers.operate.choice")
 local lifecycle = require("src.handlers.intake.lifecycle") -- [deprecated-ref] module path pinned by pack.json code.modules
 local tools = require("src.runtime.tools")
+local charter = require("src.handlers.intake.charter")
+local integration = require("src.handlers.requirements.integration")
+local release = require("src.handlers.operate.release")
 
--- 注册序（34 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
+-- 注册序（40 点；handler 内的注册顺序 = 其在 install() 里的语句序）：
 --   1     agent.summary（render.register）
 --   2-4   actions: requirement.add / requirement.list / requirement.dispatch
 --   5-6   lanes: lane.claim / lane.release
@@ -73,12 +76,15 @@ local tools = require("src.runtime.tools")
 --   10-15 review: coordinate.submit / verify.submit / settlement.evolution / settlement.sessions / settlement.todo / review.note
 --   16-20 requirement_ops: split / merge / amend / conflict / resolve
 --   21-22 gate_actions: gate.approve / gate.reject
---   23-25 config: config.set / open / close
---   26    views: map.show（完整视图 = 地图 + 当前剧情提示，payload 一律忽略）
---   27    choice: ygg.choice_selected
---   28-29 lifecycle: event.start / node:render
---   30-32 tools: tool.call / tool.result / vfs.write
---   33    fsm.define（本文件末尾）
+--   23-24 charter: charter.set / run.begin
+--   25-26 integration: integration.confirm / integration.reject
+--   27-28 release: release.confirm / release.skip
+--   29-31 config: config.set / open / close
+--   32    views: map.show（完整视图 = 地图 + 当前剧情提示，payload 一律忽略）
+--   33    choice: ygg.choice_selected
+--   34-35 lifecycle: event.start / node:render
+--   36-38 tools: tool.call / tool.result / vfs.write
+--   39    fsm.define（本文件末尾）
 -- 两条 effect（hooks.useEffect("tools.receipt") 与 hooks.useEffect("tools.reactive")）由
 -- `tools.register()` 注册，与 `actions` 的 `auto_dispatch` 同性质：不是 handler，不占注册序号，
 -- 也不参与「同名事件多 handler」的排序。两者同处 render() 入口的同一个 flush_effects。
@@ -108,35 +114,26 @@ config_actions.install({ texts = TEXTS })
 views.install({ texts = TEXTS })
 choice.install({ texts = TEXTS })
 lifecycle.install({ texts = TEXTS })
+charter.install({ texts = TEXTS })
+integration.install({ texts = TEXTS })
+release.install({ texts = TEXTS })
 tools.register()
 
 local STAGE =
   reqs.STAGE
 
+-- D-MA23（R1）：内核 FSM 唯一转场 = live → retired（review.note 武装路径经 flow.advance 盖章）。
+-- 原坐标 / review / done 三值废除；协调 / 盘点 / 发布是 run.phase 微状态（不占转场预算）。
 ygg.fsm.define({
   name = "stage",
-  initial = STAGE.coordinate,
+  initial = STAGE.live,
   event = "stage.advance",
   transitions = {
     {
-      from = STAGE.coordinate,
-      to = STAGE.review,
+      from = STAGE.live,
+      to = STAGE.retired,
       when = function(target)
-        return flow.allowed(target, STAGE.review)
-      end,
-    },
-    {
-      from = STAGE.review,
-      to = STAGE.coordinate,
-      when = function(target)
-        return flow.allowed(target, STAGE.coordinate)
-      end,
-    },
-    {
-      from = STAGE.review,
-      to = STAGE.done,
-      when = function(target)
-        return flow.allowed(target, STAGE.done)
+        return flow.allowed(target, STAGE.retired)
       end,
     },
   },

@@ -21,8 +21,8 @@ local wire = require("src.domain.wire")
 
 local TEXTS
 
-local reject, reject_payload =
-  flow.reject, flow.reject_payload
+local phase_guard, reject_payload =
+  flow.phase_guard, flow.reject_payload
 local LANES, free_lanes, lane_text =
   lanes.LANES, lanes.free_lanes, lanes.lane_text
 local gate_problem_for =
@@ -31,8 +31,8 @@ local dispatch_candidates =
   menus.dispatch_candidates
 local narrate_req_list, render, req_panel_text =
   render_mod.narrate_req_list, render_mod.receipt, render_mod.req_panel_text
-local R_DEVELOPING, R_PLANNING, STAGE, job_capacity, job_total, req_append, req_capacity, req_conflict_total, req_count, req_deps_text, req_dev_blocked_text, req_dev_ready, req_display, req_id, req_index_of, req_job, req_job_stage, req_key, req_open_total, req_validate_deps, stage =
-  reqs.R_DEVELOPING, reqs.R_PLANNING, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_append, reqs.req_capacity, reqs.req_conflict_total, reqs.req_count, reqs.req_deps_text, reqs.req_dev_blocked_text, reqs.req_dev_ready, reqs.req_display, reqs.req_id, reqs.req_index_of, reqs.req_job, reqs.req_job_stage, reqs.req_key, reqs.req_open_total, reqs.req_validate_deps, reqs.stage
+local RUN_PHASE, job_capacity, job_total, req_append, req_capacity, req_conflict_total, req_count, req_deps_text, req_dev_blocked_text, req_dev_ready, req_display, req_id, req_index_of, req_job, req_job_stage, req_key, req_open_total, req_run_phase, req_validate_deps =
+  reqs.RUN_PHASE, reqs.job_capacity, reqs.job_total, reqs.req_append, reqs.req_capacity, reqs.req_conflict_total, reqs.req_count, reqs.req_deps_text, reqs.req_dev_blocked_text, reqs.req_dev_ready, reqs.req_display, reqs.req_id, reqs.req_index_of, reqs.req_job, reqs.req_job_stage, reqs.req_key, reqs.req_open_total, reqs.run_phase, reqs.req_validate_deps
 local contains, fill, join, trim =
   util.contains, util.fill, util.join, util.trim
 local parse_dispatch, parse_requirement, probe_payload_ok =
@@ -70,12 +70,9 @@ local function dispatch_one(index)
     end
   end
   ygg.kv.set(req_key(index, "job"), stage_name)
-  if stage_name == "plan" then
-    -- draft 直接派 plan（analysis + plan 合并）：派活就把存储态推进到 planning，
-    -- 不再落 analyzing（R_ANALYZING 仅保留给 legacy 存档与显式 analysis 提案）。
-    ygg.kv.set(req_key(index, "status"), R_PLANNING)
-  elseif stage_name == "development" then
-    ygg.kv.set(req_key(index, "status"), R_DEVELOPING)
+  if stage_name == "development" then
+    -- D-MA23：真状态不再随派活推进（open 恒定；微状态由 job 派生）——只写 job，
+    -- 认领与引导照旧。
     if claimed == 0 then
       LANES.bind(lane, index)
     end
@@ -136,7 +133,7 @@ function M.install(deps)
   TEXTS = deps.texts
   -- 装配期注册（mod.lua 调用 install 时一次）：运行期由 render() 入口的 flush_effects 驱动。
   hooks.useEffect(AUTO_DISPATCH, function()
-    if stage() ~= STAGE.coordinate then
+    if req_run_phase() ~= RUN_PHASE.coordinate then
       return nil
     end
     -- 全局资源判据只留 job 槽位；pending 提案 / 门禁 / 冲突不再全局一票否决
@@ -161,8 +158,9 @@ function M.install(deps)
     return deps_sig
   end, auto_dispatch_effect)
   ygg.on("requirement.add", function(payload)
-    if stage() == STAGE.done then
-      return reject("requirement.add", TEXTS.beats.req_after_done)
+    -- 立项在协调/盘点/发布幕可用（§2.7：立局拒绝全部业务事件；退役同拒）。
+    if not phase_guard("requirement.add", { RUN_PHASE.coordinate, RUN_PHASE.settle, RUN_PHASE.release }) then
+      return
     end
     local title, description, ext, deps, problem = parse_requirement(payload)
     if problem ~= nil then
@@ -212,8 +210,9 @@ function M.install(deps)
     render()
   end)
   ygg.on("requirement.dispatch", function(payload)
-    if stage() == STAGE.done then
-      return reject("requirement.dispatch", TEXTS.beats.req_after_done)
+    -- 派活仅在协调幕（§2.7：盘点/发布冻结派发与门禁，立局未开工，退役全拒）。
+    if not phase_guard("requirement.dispatch", { RUN_PHASE.coordinate }) then
+      return
     end
     local spec_target, dispatch_problem = parse_dispatch(payload)
     if dispatch_problem ~= nil then

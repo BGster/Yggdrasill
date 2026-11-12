@@ -7,62 +7,62 @@
         {
           "id": "harness.pack",
           "modality": "must",
-          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before `review.note` closes: a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the all-1 smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
-          "basis": "user decision 2026-11-01 (E2 ruling: the closing check covers runtime goal only; a static default does not block)"
+          "text": "After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/agent-seed`.",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.lint",
           "modality": "must",
-          "text": "The coordinator has a three-state chain: coordinate ──coordinate.submit──▶ review ──review.note──▶ done (boot lands in coordinate; the event.start payload IS the charter); inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.playtest",
           "modality": "must",
-          "text": "There is one requirement pipeline per requirement (`req.<i>.status`, 5 stored states): draft ──dispatch──▶ planning (job=plan) ──proposal → proposal.accept──▶ planning+gate=plan ──gate.approve(plan)──▶ planning+plan_ok ──dispatch (reactive auto-dispatch)──▶ developing (lane) ──proposal → proposal.accept──▶ developing+gate=accept ──gate.approve(accept)──▶ done. Display names are derived from status + job / pending proposal / gate / plan_ok (analysis_review / plan_review / plan_gate / ready / dev_review / accept) and are never stored. `analyzing` survives only as a compatibility state: legacy saves, and an explicit `analysis` proposal accepted on a planning row.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
+          "basis": "AGENTS.md §1.9 (behavioural acceptance); gates.mod-semantics-matrix"
         },
         {
           "id": "harness.manifest-content-addressed",
           "modality": "must",
-          "text": "There are also the traceable terminal states split / merged / dropped, plus the two marker states blocked (conflict) and stale (a proposal whose rev is outdated).",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The manifest is content-addressed (sha256 + byteLength): editing `data/*.json` without recomputing the pack makes loading fail with a content-hash mismatch.",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.multi-script-load",
           "modality": "must",
-          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and close with the final review (verify.submit → settlement.evolution → review.note); it never carries development itself and may never bypass a gate.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "A multi-file Mod is registered only in the `code` section of `pack.json`: `entry` is not registered as a module, `modules` enumerates every file explicitly (no glob), and a missing `code` section means a single-file Mod (no migration needed for existing Mods). `require` works both at load time and at runtime (inside a handler) — `host.seal` only seals `ygg.on`, so a pure library may be loaded lazily; the price is that a module's top level may be a pure export surface only (see `harness.module-pure-export`). After changing any module file you must rerun pack (content-addressed: a byte-count or hash mismatch fails loading).",
+          "basis": "docs/DESIGN.md §3.2 \"multi-file Mod\" (the r5 documentation surface; the same-named subsection expands each item)"
         },
         {
           "id": "harness.module-pure-export",
           "modality": "must",
-          "text": "Requirement granularity: adjacent work with the same goal, the same subsystem, a small change, or that can share one plan and one acceptance evidence set belongs in the same requirement; create a new one only for an independent delivery + acceptance, a cross-repository or cross-lane change, or risk isolation. A new adjacent requirement must state in its description why it cannot be merged (no reason = treat as mergeable). Three-question criterion: ① the blocked action is filing through requirement.add / --requirement; ② the visible symptom of a violation is that the adjacent requirement is pointed out as \"just part of the previous one\" while its description has no cannot-merge reason; ③ confirm it next time by walking `requirement.list` and checking that every new requirement's description carries that reason.",
-          "basis": "user decision 2026-11-02 (r3 requirement-merge decision)"
+          "text": "A multi-file Mod's module chunk performs pure exports only (function and constant definitions) and does nothing with side effects: registration / state writes / output all live in the entry `mod.lua`. A module exposes registration as a function (`function M.install(deps)`) that the entry calls explicitly in order; touching `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / `ygg.entity.spawn` / `ygg.entity.set_attribute` / `ygg.entity.add_tag` / `ygg.entity.remove_tag` / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative[\"goto\"]` at a module's top level is refused (the static `YGG-MOD-EFFECT` rule and the runtime shadow table share the single list `ygg_modules::effects`); at the top level only pure reads are allowed (`ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity.has_tag` / `ygg.entity.get_attribute`); the entry chunk is exempt (it is the assembly manifest). Why: a handler's dispatch order equals the `ygg.on` registration order — letting a module register itself means \"how the files are split / who is required first\" decides runtime behavior, so splitting a file or reordering a `require` would change the dispatch order and refactoring would not preserve behavior. `require` is therefore usable at any time (including lazy-loading a pure library inside a handler), but lazy loading never relaxes the boundary: a lazily loaded module's top level is still pure exports. See `docs/DESIGN.md` §3.2 \"Mod Package & Multi-File Purity Contract\".",
+          "basis": "docs/DESIGN.md §3.2 \"multi-file Mod\", side-effect boundary (semantics tightened in r1/r2/r3; the single source for both lists is ygg_modules::effects)"
         },
         {
           "id": "harness.kv-prefix-owner",
           "modality": "must",
-          "text": "The plan gate (`req.gate=plan`) fires after a plan proposal is accepted; approve → `plan_ok` is set (the former `ready`, the only state that may dispatch into development); reject → back to planning for rework; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
-          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+          "text": "In a multi-file Mod the KV prefixes are partitioned by ownership and each prefix has exactly one writer (a documentation convention; loading does not validate it): `fsm.*` is written only by the stdlib `ygg.fsm` and read-only for the Mod; `settings.*` is written only by `config.set`; `req.*` = the requirement table, `prop.*` = the proposal table, `lane.*` = the lane ledger, `ui.*` = presentation only (never in the summary, never affecting dispatch), and `task.*` / `verify.*` / `review.*` / `inbox.*` plus the bare key `ending` each have their own single writer. Two modules writing one prefix is implicit coupling — share through a module's return value instead.",
+          "basis": "docs/DESIGN.md §3.2 \"KV prefix ownership\" (user decision: documentation convention only, no load-time validation surface)"
         },
         {
           "id": "harness.module-error-locates",
           "modality": "must-not",
-          "text": "The accept gate (`req.gate=accept`) fires after a development proposal is accepted (the executor delivered); approve → done; reject → the stored state returns to planning and `plan_ok` keeps its value (not amended → the former ready, back into the development queue; amended → `plan_ok` was already invalidated → it stops in planning and must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
-          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+          "text": "Never \"glue a multi-file Mod back into one file and then report errors\": a module chunk name must carry the real file (`@src/core/util.lua`), a refusal the loader decides itself must carry the call site (`src/a.lua:3: <reason>`) and the require chain, and static checks must parse each module independently (a module's `local` never spans chunks, so gluing would invent a shared scope that does not exist at load time). A diagnostic whose line number does not match the real file is a defect.",
+          "basis": "docs/DESIGN.md §3.2 \"error location: real file + real line number\""
         },
         {
           "id": "harness.hot-reload",
           "modality": "must",
-          "text": "accept means the executor self-checked and delivered; it does not mean the main agent has accepted. Only gate.approve is the verification.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "Hot reload: single-shot mode loads from disk in every new process; a `--resume` receipt with `hotReload.source=\"resume\"` proves the change is in effect.",
+          "basis": "AGENTS.md §8 (pre-migration)"
         },
         {
           "id": "harness.two-mods-layering",
           "modality": "must",
-          "text": "A requirement sitting on the plan / accept gate (`req.gate ~= \"\"`) cannot be dispatched, accepts no new proposal and cannot be skipped; even automatic advancement (`--drive cmd:…`) runs one `gate.approve` per gate — only the index comes from the external decision command.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The two Mods are a division of labor (not the same file): the skeleton surface (`mod.lua` + `schemas/`) is byte-identical and kept in sync by `scripts/sync-seed-mod.sh` (CI has a skeleton guard); the instance surface `data/` is maintained on each side — `packages/mods/agent-seed` is the distributable seed template (5 generic chapters, zero project rules) and `.ygg/mods/agent-seed` is this project's instance (14 chapters, this one included).",
+          "basis": "AGENTS.md §8 (pre-migration)"
         }
       ]
     }

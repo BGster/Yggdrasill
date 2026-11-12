@@ -19,8 +19,8 @@ local wire = require("src.domain.wire")
 local TEXTS
 local CONFIG
 
-local max_per_run, mode, num, play_mode, run_retire_armed, strict_gates, task_desc, task_title, text_of, executor_raw, goal_authorization =
-  config.max_per_run, config.mode, config.num, config.play_mode, config.run_retire_armed, config.strict_gates, config.task_desc, config.task_title, config.text_of, config.executor_raw, config.goal_authorization
+local max_per_run, mode, num, play_mode, run_retire_armed, strict_gates, task_goal, task_success, task_title, text_of, executor_raw, goal_authorization =
+  config.max_per_run, config.mode, config.num, config.play_mode, config.run_retire_armed, config.strict_gates, config.task_goal, config.task_success, config.task_title, config.text_of, config.executor_raw, config.goal_authorization
 local gate_total, gate_problem =
   gates.gate_total, gates.gate_problem
 local narrate_stage_guide =
@@ -31,29 +31,30 @@ local CONFIG_UI, MENU, menu, option_texts =
   menus.CONFIG_UI, menus.MENU, menus.menu, menus.option_texts
 local P_PENDING, prop_count, prop_id, prop_key, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status =
   props.P_PENDING, props.prop_count, props.prop_id, props.prop_key, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
-local PHASE, R_MERGED, R_SPLIT, STAGE, job_capacity, job_total, req_closed, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_gate, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase_name, req_rev, req_stale, req_status, req_tally, req_title, stage =
-  reqs.PHASE, reqs.R_MERGED, reqs.R_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_closed, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase_name, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.stage
+local PHASE, RUN_PHASE, CLOSED_MERGED, CLOSED_SPLIT, STAGE, job_capacity, job_total, req_closed, req_closed_reason, req_conflict, req_conflict_peer, req_conflict_total, req_count, req_deps, req_display, req_gate, req_id, req_job, req_key, req_lane, req_needs_amend, req_open_total, req_phase, req_rev, req_stale, req_status, req_tally, req_title, run_phase, stage =
+  reqs.PHASE, reqs.RUN_PHASE, reqs.CLOSED_MERGED, reqs.CLOSED_SPLIT, reqs.STAGE, reqs.job_capacity, reqs.job_total, reqs.req_closed, reqs.req_closed_reason, reqs.req_conflict, reqs.req_conflict_peer, reqs.req_conflict_total, reqs.req_count, reqs.req_deps, reqs.req_display, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_needs_amend, reqs.req_open_total, reqs.req_phase, reqs.req_rev, reqs.req_stale, reqs.req_status, reqs.req_tally, reqs.req_title, reqs.run_phase, reqs.stage
 local fill, join, spaces, split, trim =
   util.fill, util.join, util.spaces, util.split, util.trim
 
--- 面板汇总走响应式记忆化（useMemo）：依赖签名 = 逐需求的派生展示名 + 待验收提案数 +
+-- 面板汇总走响应式记忆化（useMemo）：依赖签名 = 逐需求的微状态 + 待验收提案数 +
 -- 需求总数（均由 KV 状态派生，读档/重启后签名一变即重算，不靠内存推断）。
 local function panel_tally()
   return hooks.useMemo("render.panel_tally", function()
     return {
       draft = req_tally(PHASE.draft),
-      analyzing = req_tally(PHASE.analyzing) + req_tally(PHASE.analysis_review),
-      planning = req_tally(PHASE.planning) + req_tally(PHASE.plan_review),
+      planning = req_tally(PHASE.planning),
       gate = gate_total(),
       ready = req_tally(PHASE.ready),
-      developing = req_tally(PHASE.developing) + req_tally(PHASE.dev_review),
-      done = req_tally(PHASE.done),
+      developing = req_tally(PHASE.developing),
+      review = req_tally(PHASE.dev_review) + req_tally(PHASE.accept_gate),
+      integrating = req_tally(PHASE.integrating),
+      done = req_tally(PHASE.done) + req_tally(PHASE.closed),
       total = req_count(),
     }
   end, function()
     local deps_sig = { req_count(), gate_total(), prop_pending_total() }
     for i = 1, req_count() do
-      deps_sig[#deps_sig + 1] = req_phase_name(i)
+      deps_sig[#deps_sig + 1] = req_phase(i)
     end
     return deps_sig
   end)
@@ -64,11 +65,12 @@ local function req_panel_text()
   local parts = {}
   parts[#parts + 1] = fill(TEXTS.beats.req_panel_counts, {
     draft = tostring(tally.draft),
-    analyzing = tostring(tally.analyzing),
     planning = tostring(tally.planning),
     gate = tostring(tally.gate),
     ready = tostring(tally.ready),
     developing = tostring(tally.developing),
+    review = tostring(tally.review),
+    integrating = tostring(tally.integrating),
     done = tostring(tally.done),
     total = tostring(tally.total),
   })
@@ -81,22 +83,22 @@ local function req_panel_text()
   return join(parts, " | ")
 end
 
--- 字形表以 PHASE（派生展示名）为键：存储只有 5 态，展示仍有 14 个旧名。
+-- 字形表以 PHASE（10 微状态）为键 + 旁路关闭原因（R11：closed 不是幕名，由
+-- closed_reason 区分）+ blocked 覆盖层：存储只有 open/done 两个真状态，展示全由 req_phase 派生。
 local R_MARK = {
   [PHASE.draft] = "·",
-  [PHASE.analyzing] = "◐",
-  [PHASE.analysis_review] = "◑",
   [PHASE.planning] = "◇",
-  [PHASE.plan_review] = "◈",
   [PHASE.plan_gate] = "⊟",
   [PHASE.ready] = "○",
   [PHASE.developing] = "▶",
   [PHASE.dev_review] = "◀",
-  [PHASE.accept] = "⊞",
+  [PHASE.accept_gate] = "⊞",
+  [PHASE.integrating] = "◉",
   [PHASE.done] = "✓",
-  [PHASE.split] = "⑂",
-  [PHASE.merged] = "⇄",
-  [PHASE.dropped] = "⊘",
+  [PHASE.closed] = "✗",
+  [reqs.CLOSED_SPLIT] = "⑂",
+  [reqs.CLOSED_MERGED] = "⇄",
+  [reqs.CLOSED_DROPPED] = "⊘",
   blocked = "⚠",
 }
 
@@ -124,13 +126,15 @@ local function req_live_status(index)
   local id = req_id(index)
   local lane = req_lane(index)
   local job = req_job(index)
-  local phase = req_phase_name(index)
+  local phase = req_phase(index)
   local branch = lane > 0 and text_of("lane." .. tostring(lane) .. ".branch", "") or ""
   local worktree_path = lane > 0 and text_of("lane." .. tostring(lane) .. ".path", "") or ""
   local lane_req = lane > 0 and text_of("lane." .. tostring(lane) .. ".req", "") or ""
 
   local worktree_status = "n/a"
-  if job == "development" or phase == PHASE.developing or phase == PHASE.dev_review or phase == PHASE.accept then
+  -- R7：泳道绑定窗口覆盖 开发中→交付受理→验收门禁→集成 四幕（执行者要工作树做集成）。
+  if job == "development" or phase == PHASE.developing or phase == PHASE.dev_review
+    or phase == PHASE.accept_gate or phase == PHASE.integrating then
     if lane > 0 and lane_req == id then
       -- 未断言分支显示 `-`（lane_field_none，与账本房规一致）：展示层不再虚构 `feature/<id>`。
       local br = branch ~= "" and branch or TEXTS.beats.lane_field_none
@@ -288,10 +292,11 @@ local function req_trace(index)
   if origin ~= "" then
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_origin, { id = origin })
   end
-  local status = req_status(index)
-  if status == R_SPLIT then
+  -- R11：split / merged 是 closed_reason，不再是状态值。
+  local closed_reason = req_closed_reason(index)
+  if closed_reason == CLOSED_SPLIT then
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_split, { ids = text_of(req_key(index, "children"), "") })
-  elseif status == R_MERGED then
+  elseif closed_reason == CLOSED_MERGED then
     parts[#parts + 1] = fill(TEXTS.beats.req_trace_merged, { id = text_of(req_key(index, "into"), "") })
   end
   local lane = req_lane(index)
@@ -388,7 +393,7 @@ end
 local function narrate_req_list(full)
   ygg.narrate(fill(TEXTS.beats.req_list_head, {
     panel = req_panel_text(),
-    stage = stage(),
+    stage = run_phase(),
     lanes = lane_text(),
   }))
   local total = req_count()
@@ -454,70 +459,85 @@ local function req_graph_lines()
   narrate_req_list()
 end
 
-local MAP_NODES = { STAGE.coordinate, STAGE.review, STAGE.done }
+local MAP_NODES = { RUN_PHASE.charter, RUN_PHASE.coordinate, RUN_PHASE.settle, RUN_PHASE.release, RUN_PHASE.retired }
 
--- r9 常驻批循环图：review→coordinate 有两条语义边（批收口 review.note 未武装 / verify 打回），
--- review→done 只剩退役边（run.retire 武装后的 review.note 终局变体）。
+-- D-MA23 常驻批循环图（§2.3）：live 内四幕自循环（立局→协调⇄盘点→发布→批结算）；
+-- live→retired 是唯一真转场（review.note 武装路径经 flow.advance 盖章）。
 -- 注：本表是**展示面**（不是 FSM 转移表，mod.lua 的 ygg.fsm.define 一字未动）；
--- to_stage 对 review.note 按武装状态二选一，让操作视图的目标阶段与真实落点一致。
+-- to_stage 对 review.note 按武装状态二选一，让操作视图的目标相位与真实落点一致。
 local MAP_EDGES = {
-  { from = STAGE.coordinate, to = STAGE.review, action = "coordinate.submit", note = "map_note_batch_boundary" },
+  { from = RUN_PHASE.charter, to = RUN_PHASE.coordinate, action = "run.begin", note = "map_note_run_begin" },
+  { from = RUN_PHASE.coordinate, to = RUN_PHASE.settle, action = "coordinate.submit", note = "map_note_batch_boundary" },
   {
-    from = STAGE.review,
-    to = STAGE.coordinate,
+    from = RUN_PHASE.settle,
+    to = RUN_PHASE.coordinate,
     action = "verify.submit=false",
     note = "map_note_back",
   },
-  { from = STAGE.review, to = STAGE.coordinate, action = "review.note", note = "map_note_batch_settle" },
-  { from = STAGE.review, to = STAGE.done, action = "review.note", note = "map_note_retire" },
+  -- 盘点四项齐备自动转发布（R9 效应驱动，不是事件边）。
+  { from = RUN_PHASE.settle, to = RUN_PHASE.release, action = "(auto) settle complete", note = "map_note_settle_ready" },
+  { from = RUN_PHASE.release, to = RUN_PHASE.coordinate, action = "review.note", note = "map_note_batch_settle" },
+  { from = RUN_PHASE.release, to = RUN_PHASE.retired, action = "review.note", note = "map_note_retire" },
 }
 
--- 需求级流水线（设计视图）= 5 个存储态；每行中列是「态内的三跳」（提案 → 验收 → 门禁）。
--- 上一轮这里漏了中间那跳 proposal.accept，读起来像「提案直接进门禁」，方向是反的。
--- analysis + plan 已合并：draft 派活直接进 planning（prop 仍走「提案 → 验收」两跳）。
+-- 需求级流水线（设计视图）= 九幕（§2.4）：立项 → 计划中 → 计划门禁 → 待开发 →
+-- 开发中 → 交付受理 → 验收门禁 → 集成 → done；三条打回边（R6）统一落待开发。
 local PIPELINE = {
   { node = "[draft]", action = "requirement.dispatch", target = "[planning]", note = "map_note_job" },
+  { node = "[planning]", action = "proposal.submit(plan)", target = "[plan_gate]", note = "map_note_plan_submit" },
   {
-    node = "[planning]",
-    action = "proposal → proposal.accept → gate.approve",
-    target = "[planning·plan_ok]",
+    node = "[plan_gate]",
+    action = "gate.approve / gate.reject",
+    target = "[ready] / [planning]",
     note = "map_note_gate_plan",
   },
   {
-    node = "[planning·plan_ok]",
+    node = "[ready]",
     action = "requirement.dispatch",
     target = "[developing·lane]",
     note = "map_note_lane",
   },
+  { node = "[developing]", action = "proposal.submit(development)", target = "[dev_review]", note = "map_note_deliver" },
   {
-    node = "[developing]",
-    action = "proposal → proposal.accept → gate.approve",
-    target = "[done]",
+    node = "[dev_review]",
+    action = "proposal.accept / proposal.reject",
+    target = "[accept_gate] / [ready]",
+    note = "map_note_accept",
+  },
+  {
+    node = "[accept_gate]",
+    action = "gate.approve / gate.reject",
+    target = "[integrating] / [ready]",
     note = "map_note_gate_accept",
+  },
+  {
+    node = "[integrating]",
+    action = "integration.confirm / integration.reject",
+    target = "[done] / [ready]",
+    note = "map_note_integration",
   },
 }
 
--- 旁路（不进主流水线）：左列是**可变前件**（不是状态，是可做该操作的条件），右列是结果终态。
--- 旧版的左右是反的——把 split / merged / dropped 这些终态摆在左列，读起来像「终态还能再拆
--- 一次」。方向修正：前件 = draft / analyzing / planning（无在途工作，见 req_graph_mutable）；
--- keep_first 的前件是「draft / ready 的冲突对」（见 requirement.resolve 的守卫）。
+-- 旁路（不进主流水线，R11：旁路关闭 = closed_reason 字段）：左列是**可变前件**
+-- （结构化判据 = open ∧ 无门禁 ∧ 无 pending ∧ 无 job ∧ 无泳道，覆盖立项/计划中/待开发），
+-- 右列是结果（status=done + closed_reason）。
 local PIPELINE_BYPASS = {
   {
-    node = "[draft/analyzing/planning]",
+    node = "[draft/planning/ready]",
     action = "requirement.split",
-    target = "[split] + [children·draft]",
+    target = "[closed·split] + [children·draft]",
     note = "map_note_split",
   },
   {
-    node = "[draft/analyzing/planning]",
+    node = "[draft/planning/ready]",
     action = "requirement.merge",
-    target = "[merged] + [new·draft]",
+    target = "[closed·merged] + [new·draft]",
     note = "map_note_merge",
   },
   {
     node = "[draft/ready conflict pair]",
     action = "requirement.resolve keep_first",
-    target = "[dropped]",
+    target = "[closed·dropped]",
     note = "map_note_dropped",
   },
 }
@@ -565,18 +585,22 @@ local function out_edges(node)
   return out
 end
 
--- 出边的目标阶段：`MAP_EDGES` 是唯一来源（不另建第二份边表）。
--- 不在表里的动作（map.show / requirement.* / config.* / lane.*）= 不换阶段（自环）。
--- 特例：review → coordinate 的打回边在表里记作 `verify.submit=false`，而菜单里的
+-- 出边的目标相位：`MAP_EDGES` 是唯一来源（不另建第二份边表）。
+-- 不在表里的动作（map.show / requirement.* / config.* / lane.* / release.*）= 不换相位（自环）。
+-- 特例：settle → coordinate 的打回边在表里记作 `verify.submit=false`，而菜单里的
 -- 失败项载荷是 `all_green=false;report=…`，所以要按载荷前缀补一次查找。
--- 特例二（r9）：review.note 有两条语义边（批收口 → coordinate / 退役 → done），
--- 按 run.retire 武装状态二选一，让操作视图的目标阶段与真实落点一致。
+-- 特例二（r9/D-MA23）：review.note 有两条语义边（批收口 → 协调 / 退役 → 退役），
+-- 按 run.retire 武装状态二选一，让操作视图的目标相位与真实落点一致；
+-- run.begin 是立局幕的唯一出口（→ 协调）。
 local function to_stage(action, payload)
   if action == "review.note" then
     if run_retire_armed() then
-      return STAGE.done
+      return RUN_PHASE.retired
     end
-    return STAGE.coordinate
+    return RUN_PHASE.coordinate
+  end
+  if action == "run.begin" then
+    return RUN_PHASE.coordinate
   end
   for i = 1, #MAP_EDGES do
     if MAP_EDGES[i].action == action then
@@ -730,41 +754,74 @@ local function narrate_req_panel()
   }))
 end
 
-RENDER[STAGE.coordinate] = function()
-  local current = stage()
+RENDER[RUN_PHASE.charter] = function()
+  local current = run_phase()
+  ygg.narrate(fill(TEXTS.scenes.charter, {
+    title = task_title(),
+    goal = task_goal(),
+    success = task_success(),
+    batch = tostring(num("run.batch", 1)),
+  }))
+  ygg.narrate(fill(stage_prompt(RUN_PHASE.charter), prompt_vars()))
+  narrate_stage_guide(current)
+  ygg.choice(TEXTS.prompts.charter, option_texts(menu(current)))
+end
+
+RENDER[RUN_PHASE.coordinate] = function()
+  local current = run_phase()
   ygg.narrate(fill(TEXTS.scenes.coordinate, {
     title = task_title(),
-    description = task_desc(),
+    goal = task_goal(),
     count = tostring(req_count()),
     open = tostring(req_open_total()),
     pending = tostring(prop_pending_total()),
   }))
-  ygg.narrate(fill(stage_prompt(STAGE.coordinate), prompt_vars()))
+  ygg.narrate(fill(stage_prompt(RUN_PHASE.coordinate), prompt_vars()))
   narrate_req_panel()
   narrate_stage_guide(current)
   ygg.choice(TEXTS.prompts.coordinate, option_texts(menu(current)))
 end
 
-RENDER[STAGE.review] = function()
-  local current = stage()
-  ygg.narrate(fill(TEXTS.scenes.review, {
+RENDER[RUN_PHASE.settle] = function()
+  local current = run_phase()
+  ygg.narrate(fill(TEXTS.scenes.settle, {
     title = task_title(),
     count = tostring(req_count()),
-    done = tostring(req_tally(PHASE.done)),
+    done = tostring(req_tally(PHASE.done) + req_tally(PHASE.closed)),
     gates = tostring(strict_gates()),
   }))
   -- 数据红线只在开局（event.start）与规则章里出现；常规步不重复。
   narrate_req_panel()
   narrate_stage_guide(current)
-  ygg.choice(TEXTS.prompts.review, option_texts(menu(current)))
+  ygg.choice(TEXTS.prompts.settle, option_texts(menu(current)))
 end
 
-RENDER[STAGE.done] = function()
-  -- r9：done = 退役终态（仅 run.retire 武装后的 review.note 可达）。
+RENDER[RUN_PHASE.release] = function()
+  local current = run_phase()
+  -- 发布已声明的展示串：confirm → master@<sha> + tag；skip → 跳过理由；未声明 → 空串。
+  local declared = ""
+  local master_sha = text_of("run.release.master_sha", "")
+  if master_sha ~= "" then
+    declared = "｜已声明合并 master@" .. master_sha .. " tag " .. text_of("run.release.tag", "")
+  elseif text_of("run.release.skipped_reason", "") ~= "" then
+    declared = "｜已声明跳过：" .. text_of("run.release.skipped_reason", "")
+  end
+  ygg.narrate(fill(TEXTS.scenes.release, {
+    title = task_title(),
+    batch = tostring(num("run.batch", 1)),
+    declared = declared,
+  }))
+  ygg.narrate(fill(stage_prompt(RUN_PHASE.release), prompt_vars()))
+  narrate_stage_guide(current)
+  ygg.choice(TEXTS.prompts.release, option_texts(menu(current)))
+end
+
+RENDER[RUN_PHASE.retired] = function()
+  -- r9/D-MA23：retired = 退役终态（仅 run.retire 武装后的 review.note 可达）。
   ygg.narrate(fill(TEXTS.endings.done, {
     title = task_title(),
     count = tostring(req_count()),
-    done = tostring(req_tally(PHASE.done)),
+    done = tostring(req_tally(PHASE.done) + req_tally(PHASE.closed)),
     batch = tostring(num("run.batch", 1)),
     score = tostring(num("review.score", TEXTS.tuning.default_score)),
     lesson = text_of("review.lesson", TEXTS.beats.default_lesson),
@@ -773,6 +830,7 @@ RENDER[STAGE.done] = function()
   if play_mode() == "goal" then
     ygg.narrate(TEXTS.beats.play_done_goal)
   end
+  ygg.choice(TEXTS.prompts.retired, option_texts(menu(RUN_PHASE.retired)))
 end
 
 local flushing = false
@@ -799,8 +857,8 @@ local function render()
       ygg.meta("harness_actions", actions_now)
     end
   end
-  local current = stage()
-  -- 二级页不跨阶段存活：阶段一变就清空（子页是当前处境的入口，不是全局抽屉）。
+  local current = run_phase()
+  -- 二级页不跨相位存活：相位一变就清空（子页是当前处境的入口，不是全局抽屉）。
   if CONFIG_UI.page() ~= "" and CONFIG_UI.page_stage() ~= current then
     CONFIG_UI.set_page("")
   end
@@ -818,7 +876,7 @@ local function render()
   local renderer = RENDER[current]
   if renderer == nil then
     ygg.narrate(fill(TEXTS.beats.unknown_stage, { stage = tostring(current) }))
-    renderer = RENDER[STAGE.coordinate]
+    renderer = RENDER[RUN_PHASE.coordinate]
   end
   renderer()
 end
@@ -940,7 +998,7 @@ summary_jobs = function()
         rev = rev,
         stage = job,
         status = req_status(i),
-        phase = req_phase_name(i),
+        phase = req_phase(i),
         lane = summary_int(lane),
         branch = branch,
         base = base,
@@ -977,9 +1035,9 @@ local function summary_gates()
 end
 
 local function summary_next_ends_run()
-  -- 只看阶段菜单（MENU 本体）：二级页打开时 pendingChoice 是子页（首项 config.set），
+  -- 只看相位菜单（MENU 本体）：二级页打开时 pendingChoice 是子页（首项 config.set），
   -- 不能因此把自己报成「不结局」，收口判定不能被展示层带偏。
-  local builder = MENU[stage()]
+  local builder = MENU[run_phase()]
   if builder == nil then
     return false
   end
@@ -987,7 +1045,7 @@ local function summary_next_ends_run()
   if items == nil or #items == 0 then
     return false
   end
-  -- r9 常驻语义：首项是 review.note 只说明「批盘点就绪」，不等于本局将终——
+  -- r9 常驻语义：首项是 review.note 只说明「发布已声明、批收口就绪」，不等于本局将终——
   -- 只有 run.retire 武装时首项才是**终局变体**（宿主据此预 closing 协议）。
   -- 未武装时恒 false（哑泵在批收口后继续循环，绝不预收口）。
   return items[1].action == "review.note" and run_retire_armed()
@@ -996,17 +1054,17 @@ end
 local function summary_fields()
   local fields = {
     stage = stage(),
-    ending = ygg.kv.get("ending") == STAGE.done,
+    ending = ygg.kv.get("ending") == STAGE.retired,
     verifyPassed = ygg.kv.get("verify.passed") == true,
     nextEndsRun = summary_next_ends_run(),
     -- r9 常驻生命周期三字段（加性；旧宿主容忍式解析，缺字段取保守默认）：
     -- lifecycle = mod 自报模式（宿主所有常驻特化行为以它为闸，缺失 = 旧 mod 行为不变）；
     -- batch = run.batch 镜像（批轮转可观测计数，缺省 1）；
-    -- batchDrained = 泵暂停信号 = coordinate ∧ gate_problem()==nil ∧ 未武装
+    -- batchDrained = 泵暂停信号 = 协调相位 ∧ gate_problem()==nil ∧ 未武装
     --   （「本批队列已清空且没有已武装的终局流程，等新 --requirement 进料」）。
     lifecycle = "resident",
     batch = summary_int(num("run.batch", 1)),
-    batchDrained = stage() == STAGE.coordinate and gate_problem() == nil and not run_retire_armed(),
+    batchDrained = run_phase() == RUN_PHASE.coordinate and gate_problem() == nil and not run_retire_armed(),
     -- r1 加性一键：当前 play.mode（goal/guide）投影到摘要。旧宿主容忍式解析
     -- （缺字段取保守缺省），在场唤醒（YGG_AUTO_WAKE=on）只认 "goal"。
     play = play_mode(),
@@ -1039,7 +1097,7 @@ end
 prompt_vars = function()
   return {
     engine = tostring(ygg.engine_version),
-    stage = stage(),
+    stage = run_phase(),
     play = play_mode(),
     mode = mode(),
     gates = tostring(strict_gates()),
