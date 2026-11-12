@@ -120,6 +120,20 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      self-consistent). The sandbox cannot read the artifact and does not know the subagent session,
      so it may never be used to claim that the suggestion quality or the review independence was
      proven.
+   - **Mod text hygiene (retired path literals)**: the Mod's prose resources — `data/texts/**`
+     and `data/playbook/**` — must not contain the retired path literals `ygg-agent` or
+     `pi-agent-seed`; prose must name the current `agent-seed` / `egg` so executors never follow
+     text into a non-existent path (the host's `with_legacy_seed_alias` compat layer is the only
+     legitimate consumer of the old names, and it lives in `crates/**`, not in Mod text). A line is
+     exempt only when it marks itself on the same line with the literal `[deprecated-ref]` — any
+     other occurrence is a violation. ① blocks: any edit to Mod texts, briefs or playbook wording
+     that reintroduces the old mod/CLI path; ② symptom: an executor runs a gate/probe against
+     `…/mods/pi-agent-seed` or a `ygg-agent` binary that does not exist (fail-closed error), or the
+     serve panel resolves a stale alias instead of the real mod dir; ③ verification (repo root,
+     empty output = pass):
+     `grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ .ygg/mods/agent-seed/data/playbook/ | grep -v '\[deprecated-ref\]'`
+     — any surviving line must add the marker (genuinely historical reference) or be rewritten to
+     the current names.
 
 ### 8. `goal` / `guide`: who holds the decision
 

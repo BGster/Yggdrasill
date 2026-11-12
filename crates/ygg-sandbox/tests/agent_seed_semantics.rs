@@ -2138,6 +2138,52 @@ fn assembled_beats(project: &Path) -> std::collections::BTreeMap<String, Json> {
     out
 }
 
+// ───────────────────── E6 · Mod text hygiene (D-MA19) ─────────────────────
+
+/// Mod prose fragments must not carry retired path literals (`ygg-agent` / `pi-agent-seed`).
+/// Scope = pack.json `entries` whose path sits under `data/texts/` or `data/playbook/`; a line
+/// violates when it names a retired literal without the explicit `[deprecated-ref]` marker on
+/// the same line. Failure output lists `file:line` per violation. Machine-checkable half of
+/// AGENTS.md §1.7 「Mod text hygiene (retired path literals)」; D-MA19 retired the alias layer,
+/// so prose must point at the current names (`agent-seed` / `egg`).
+#[test]
+fn mod_text_fragments_carry_no_retired_paths() {
+    let mod_dir = project_mod_dir();
+    let pack: Json = serde_json::from_str(
+        &std::fs::read_to_string(mod_dir.join("pack.json")).expect("read pack.json"),
+    )
+    .expect("parse pack.json");
+    let fragments: Vec<std::path::PathBuf> = pack["entries"]
+        .as_array()
+        .expect("pack.json entries is an array")
+        .iter()
+        .filter_map(|entry| entry["path"].as_str())
+        .filter(|path| path.starts_with("data/texts/") || path.starts_with("data/playbook/"))
+        .map(|path| mod_dir.join(path))
+        .collect();
+    assert!(
+        !fragments.is_empty(),
+        "scope guard: pack.json must declare texts/playbook fragments"
+    );
+    let mut violations: Vec<String> = Vec::new();
+    for fragment in &fragments {
+        let text = std::fs::read_to_string(fragment)
+            .unwrap_or_else(|err| panic!("read {}: {err}", fragment.display()));
+        for (index, line) in text.lines().enumerate() {
+            let retired = line.contains("ygg-agent") || line.contains("pi-agent-seed");
+            if retired && !line.contains("[deprecated-ref]") {
+                violations.push(format!("{}:{}", fragment.display(), index + 1));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "retired path literals in Mod text (rewrite to `agent-seed`/`egg` or mark \
+         `[deprecated-ref]`): {}",
+        violations.join(", ")
+    );
+}
+
 // ───────────────────────── tool bridge (T1–T4) ─────────────────────────
 
 /// The narrative array of an envelope (state assertions stay on `kv.entries`, prose assertions
