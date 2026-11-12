@@ -67,7 +67,7 @@
         {
           "id": "harness.play-mode-is-narrative",
           "modality": "must",
-          "text": "Cold start of a run: `.ygg/bin/ygg-agent --mod .ygg/mods/pi-agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
+          "text": "Cold start of a run: `.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start`.",
           "basis": "AGENTS.md §3 (pre-migration)"
         },
         {

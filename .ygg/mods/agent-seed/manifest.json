@@ -227,12 +227,12 @@
       "sha256": "948cf2424929e833f792285be65145de90458ffa8c5f24ce66ac37e0cb9fe6c3"
     },
     {
-      "byteLength": 9950,
+      "byteLength": 9941,
       "id": "ygg:agent/playbook/ch4-harness-2-drive-actions",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-2-drive-actions.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "27c3cfe8bd83fec91bb3ec95b9d5e05afe89b8e25909f5d3a0275128aef7d6dc"
+      "sha256": "e71ccd28a6c9c707c3f34d95910f08236a8d70a1670d05eea7a1107f54831de9"
     },
     {
       "byteLength": 4845,
@@ -243,20 +243,20 @@
       "sha256": "7cfa8fbd5b4921ed8daebf06f49b8a86e584f03b5c71606456a0a8c027a9aa5e"
     },
     {
-      "byteLength": 7243,
+      "byteLength": 7234,
       "id": "ygg:agent/playbook/ch4-harness-4-inbox-coordination",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-4-inbox-coordination.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "2c5a65679849bf72f7d0b1f074e935237aaf93df2b58f30aefcb826ecc0b7dd3"
+      "sha256": "28def178e0e1aeac9887aee4bde99285fa292b0504d00699c8cfd10345e5ffa5"
     },
     {
-      "byteLength": 6531,
+      "byteLength": 6522,
       "id": "ygg:agent/playbook/ch4-harness-5-views-settlement",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-5-views-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "b9bae024e4feb80ea59fc1004b7fb7528487ff7ef7fb726555da04f640a82fab"
+      "sha256": "a8ca84c23a6f604189177425d37d373af9e069d54c5df2eb824f58ceafe87723"
     },
     {
       "byteLength": 6247,
@@ -267,12 +267,12 @@
       "sha256": "e4c5925fe69c35152378fa288fc9b24de2d5b68ee678a3cd7d4153c9d402b25f"
     },
     {
-      "byteLength": 6599,
+      "byteLength": 6590,
       "id": "ygg:agent/playbook/ch4-harness-7-host-contract",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-harness-7-host-contract.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "f438cdef8869e6193a5fac1387b4406e859007995423befdbfd5e26373f2cad2"
+      "sha256": "86480185b26eb1e7870ed76caa1d46d488d1abedaba01a4e7443817fefbeef23"
     },
     {
       "byteLength": 12469,

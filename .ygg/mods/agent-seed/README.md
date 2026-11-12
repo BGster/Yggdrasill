@@ -616,11 +616,11 @@ r9 起默认基线是两条**脚本化走查**（默认无参全 1 在常驻语�
 cargo run --example playtest -- .ygg/mods/agent-seed
 # 基线 A · 批循环（新默认）：intake → coordinate.submit(批边界) → verify → settlement.evolution
 #   → review.note(批收口) → 回 coordinate，脚本耗尽（reached=choice 是脚本走查的成功值）
-cargo run --example playtest -- .ygg/mods/pi-agent-seed --choices 1,1,1,1,1
+cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,1
 
 # 基线 B · 退役：批盘点 → config 子页（7=config 入口）武装 run.retire（4=第 5 项）→ 关子页（5）
 #   → review.note（终局）→ [ENDING · run retired]（reached=ending）
-cargo run --example playtest -- .ygg/mods/pi-agent-seed --choices 1,1,1,1,7,4,5,1
+cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,1,1,1,7,4,5,1
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
 #   .ygg/bin/egg --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
