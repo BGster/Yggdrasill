@@ -2865,7 +2865,10 @@ fn lane_pool_registry_and_multi_repo_parallel_claims() {
     game.assert_kv("lane.pool.alpha.path", json!("/tmp/checkout-alpha"));
 
     // ② THE multi-repo case: the same k=1 in two pools holds two requirements at once.
-    let a = game.narrate("lane.claim", &text("1|r1|feature/aa11-alpha|abc1234|1|alpha"));
+    let a = game.narrate(
+        "lane.claim",
+        &text("1|r1|feature/aa11-alpha|abc1234|1|alpha"),
+    );
     assert_eq!(count_lines(&a, "[LANE CLAIMED]"), 1, "{a:#?}");
     assert!(
         a.iter().any(|line| line.contains("lane-alpha-1")),
@@ -2884,25 +2887,29 @@ fn lane_pool_registry_and_multi_repo_parallel_claims() {
     // (payload-face rejections move the reject ledger) and register nothing.
     let rejects_before = game.kv("reject.count");
     for payload in [
-        "Alpha|/tmp/x",                     // label must be lowercase
-        "seq|/tmp/x",                       // reserved word
-        "pools|/tmp/x",                     // reserved word
-        "alpha| /tmp/x ",                   // leading/trailing spaces in path
-        "alpha|/tmp/a;b",                   // `;` would corrupt the args wire
-        "alpha|",                           // empty path
+        "Alpha|/tmp/x",   // label must be lowercase
+        "seq|/tmp/x",     // reserved word
+        "pools|/tmp/x",   // reserved word
+        "alpha| /tmp/x ", // leading/trailing spaces in path
+        "alpha|/tmp/a;b", // `;` would corrupt the args wire
+        "alpha|",         // empty path
     ] {
         let lines = game.narrate("lane.pool", &text(payload));
         assert_refused(&lines, "lane.pool");
     }
     assert_ne!(
-        game.kv("reject.count"), rejects_before,
+        game.kv("reject.count"),
+        rejects_before,
         "the registration refusals must move the reject ledger"
     );
     game.assert_kv("lane.pools", json!("alpha,beta"));
 
     // ④ a claim naming an unregistered pool is refused, ledger untouched.
     let rejects_before = game.kv("reject.count");
-    let unknown = game.narrate("lane.claim", &text("2|r1|feature/aa11-gamma|abc1234|1|gamma"));
+    let unknown = game.narrate(
+        "lane.claim",
+        &text("2|r1|feature/aa11-gamma|abc1234|1|gamma"),
+    );
     assert_refused(&unknown, "lane.claim");
     assert_ne!(game.kv("reject.count"), rejects_before);
     game.assert_kv("lane.gamma.2.req", Json::Null);
@@ -2927,14 +2934,23 @@ fn same_pool_parallelism_and_occupancy_scoped() {
     game.assert_kv("lane.alpha.2.req", json!("r2"));
 
     // ② k beyond the per-pool capacity is refused (job_capacity = 4).
-    let over = game.narrate("lane.claim", &text("5|r3|feature/aa11-five|abc1234|1|alpha"));
+    let over = game.narrate(
+        "lane.claim",
+        &text("5|r3|feature/aa11-five|abc1234|1|alpha"),
+    );
     assert_refused(&over, "lane.claim");
 
     // ③ occupancy is (pool, k)-scoped: r3 cannot take alpha-1 (held by r1), and r1 cannot
     // hold a second lane in the same pool — but r3 CAN take default-1 while alpha-1 is held.
-    let occupied = game.narrate("lane.claim", &text("1|r3|feature/aa11-three|abc1234|1|alpha"));
+    let occupied = game.narrate(
+        "lane.claim",
+        &text("1|r3|feature/aa11-three|abc1234|1|alpha"),
+    );
     assert_refused(&occupied, "lane.claim");
-    let bound = game.narrate("lane.claim", &text("2|r1|feature/aa11-one-b|abc1234|1|alpha"));
+    let bound = game.narrate(
+        "lane.claim",
+        &text("2|r1|feature/aa11-one-b|abc1234|1|alpha"),
+    );
     assert_refused(&bound, "lane.claim");
     game.assert_kv("lane.alpha.1.req", json!("r1"));
     game.assert_kv("lane.alpha.2.req", json!("r2"));
@@ -2991,7 +3007,8 @@ fn release_paths_are_pool_scoped() {
     let idle = game.narrate("lane.release", &text("1|beta"));
     assert_eq!(count_lines(&idle, "[LANE RELEASED]"), 1, "{idle:#?}");
     assert!(
-        idle.iter().any(|line| line.contains("none (it was already free)")),
+        idle.iter()
+            .any(|line| line.contains("none (it was already free)")),
         "{idle:#?}"
     );
 
@@ -3007,7 +3024,11 @@ fn release_paths_are_pool_scoped() {
         "git.worktree_release_pool|lane=1;repo=/tmp/checkout-alpha|t5",
         "t5|git.worktree_release_pool|ok|0|lane=1;released=1;parked=1;path=/tmp/checkout-alpha-lane-1",
     );
-    assert_eq!(count_lines(&released, "[WORKTREE RELEASED]"), 1, "{released:#?}");
+    assert_eq!(
+        count_lines(&released, "[WORKTREE RELEASED]"),
+        1,
+        "{released:#?}"
+    );
     game.assert_kv("lane.alpha.1.req", json!(""));
     game.assert_kv("lane.alpha.1.path", json!(""));
     game.assert_kv("req.1.lane", json!(0));
@@ -3019,7 +3040,11 @@ fn release_paths_are_pool_scoped() {
         "git.worktree_release_pool|lane=2;repo=/tmp/ghost|t6",
         "t6|git.worktree_release_pool|ok|0|lane=2;released=1;parked=0;path=/tmp/ghost-lane-2",
     );
-    assert_eq!(count_lines(&refused, "[WORKTREE RELEASE REFUSED]"), 1, "{refused:#?}");
+    assert_eq!(
+        count_lines(&refused, "[WORKTREE RELEASE REFUSED]"),
+        1,
+        "{refused:#?}"
+    );
     game.assert_kv("lane.alpha.2.req", Json::Null);
 }
 
@@ -3066,7 +3091,9 @@ fn conflict_radar_compares_within_pool_only() {
     );
     assert_eq!(count_lines(&radar, "[CONFLICT RADAR]"), 1, "{radar:#?}");
     assert!(
-        radar.iter().any(|line| line.contains("lane-alpha-1") && line.contains("lane-alpha-2")),
+        radar
+            .iter()
+            .any(|line| line.contains("lane-alpha-1") && line.contains("lane-alpha-2")),
         "the radar names both pool-scoped lanes: {radar:#?}"
     );
     game.assert_kv("req.conflicts", json!(2));
@@ -3090,7 +3117,10 @@ fn pooled_tool_bridge_folds_and_refuses() {
     game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
     game.narrate("requirement.add", &text("pooled req|description|subsys-a"));
     game.narrate("requirement.add", &text("default req|description|subsys-b"));
-    game.narrate("lane.claim", &text("2|r1|feature/aa11-pool|abc1234|1|alpha"));
+    game.narrate(
+        "lane.claim",
+        &text("2|r1|feature/aa11-pool|abc1234|1|alpha"),
+    );
 
     // ① the pooled claim folds into `lane.alpha.2.*` with the host-reported worktree path.
     let claimed = tool_round(
@@ -3098,9 +3128,15 @@ fn pooled_tool_bridge_folds_and_refuses() {
         "git.worktree_claim_pool|lane=2;req=r1;branch=feature/aa11-pool;repo=/tmp/checkout-alpha|t1",
         "t1|git.worktree_claim_pool|ok|0|lane=2;req=r1;branch=feature/aa11-pool;base=abc1234;clean=1;reused=0;path=/tmp/checkout-alpha-lane-2",
     );
-    assert_eq!(count_lines(&claimed, "[WORKTREE CLAIMED]"), 1, "{claimed:#?}");
+    assert_eq!(
+        count_lines(&claimed, "[WORKTREE CLAIMED]"),
+        1,
+        "{claimed:#?}"
+    );
     assert!(
-        claimed.iter().any(|line| line.contains("lane-alpha-2 <- r1")),
+        claimed
+            .iter()
+            .any(|line| line.contains("lane-alpha-2 <- r1")),
         "the narration names the pool-scoped lane: {claimed:#?}"
     );
     game.assert_kv("lane.alpha.2.req", json!("r1"));
@@ -3116,7 +3152,11 @@ fn pooled_tool_bridge_folds_and_refuses() {
         "git.worktree_claim|lane=2;req=r2;branch=feature/aa11-def|t2",
         "t2|git.worktree_claim|ok|0|lane=2;req=r2;branch=feature/aa11-def;base=abc1234;clean=1;reused=0;path=/tmp/wt-default-2",
     );
-    assert_eq!(count_lines(&default_claim, "[WORKTREE CLAIMED]"), 1, "{default_claim:#?}");
+    assert_eq!(
+        count_lines(&default_claim, "[WORKTREE CLAIMED]"),
+        1,
+        "{default_claim:#?}"
+    );
     game.assert_kv("lane.2.req", json!("r2"));
     game.assert_kv("lane.alpha.2.req", json!("r1"));
 
@@ -3128,11 +3168,16 @@ fn pooled_tool_bridge_folds_and_refuses() {
         "git.worktree_claim_pool|lane=3;req=r1;branch=feature/aa11-ghost;repo=/tmp/ghost|t3",
         "t3|git.worktree_claim_pool|ok|0|lane=3;req=r1;branch=feature/aa11-ghost;base=abc1234;clean=1;reused=0;path=/tmp/ghost-lane-3",
     );
-    assert_eq!(count_lines(&ghost, "[WORKTREE CLAIM REFUSED]"), 1, "{ghost:#?}");
+    assert_eq!(
+        count_lines(&ghost, "[WORKTREE CLAIM REFUSED]"),
+        1,
+        "{ghost:#?}"
+    );
     game.assert_kv("lane.alpha.3.req", Json::Null);
     game.assert_kv("lane.3.req", Json::Null);
     assert_eq!(
-        game.kv("reject.count"), rejects_before,
+        game.kv("reject.count"),
+        rejects_before,
         "the tool-face refusal must not move the reject ledger"
     );
 }
