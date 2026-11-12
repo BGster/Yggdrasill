@@ -1142,19 +1142,26 @@ fn release_declaration_gates_the_batch_settlement() {
     game.assert_kv("run.phase", json!(""));
     game.assert_kv("run.batch", json!(2));
 
-    // Batch 2 proves the self-loop with the confirm path: a fresh requirement walks the
-    // nine acts, then confirm (not skip) declares the merge.
+    // Batch 2 proves the self-loop with the confirm path: the auto-appended maintenance
+    // row (r2, D-MA25) and a fresh requirement (r3) walk the pipeline side by side, then
+    // confirm (not skip) declares the merge.
     game.narrate(
         "requirement.add",
         &text("second batch requirement|desc|semantics-b2"),
     );
-    game.narrate("requirement.dispatch", "0");
-    submit_req(&mut game, "r2", 1, "plan", "semantics-b2-p1");
-    game.click("gate.approve — ");
-    submit_req(&mut game, "r2", 1, "development", "semantics-b2-p2");
-    game.click("proposal.accept — ");
-    game.click("gate.approve — ");
+    game.narrate("requirement.dispatch", "0"); // dispatches r2 (maintenance) + r3 (fresh)
+    submit_req(&mut game, "r2", 1, "plan", "semantics-m-p1");
+    submit_req(&mut game, "r3", 1, "plan", "semantics-b2-p1");
+    game.click("gate.approve — "); // r2 plan gate → auto-dispatch r2 development
+    game.click("gate.approve — "); // r3 plan gate → auto-dispatch r3 development
+    submit_req(&mut game, "r2", 1, "development", "semantics-m-p2");
+    submit_req(&mut game, "r3", 1, "development", "semantics-b2-p2");
+    game.click("proposal.accept — "); // r2 dev review → accept gate
+    game.click("proposal.accept — "); // r3 dev review → accept gate
+    game.click("gate.approve — "); // r2 accept gate → integrating
+    game.click("gate.approve — "); // r3 accept gate → integrating
     game.narrate("integration.confirm", &text("r2|develop@beef123"));
+    game.narrate("integration.confirm", &text("r3|develop@beef124"));
     game.click("coordinate.submit — ");
     game.click("verify.submit all_green=true — ");
     game.narrate(
@@ -1180,6 +1187,219 @@ fn release_declaration_gates_the_batch_settlement() {
     );
     game.assert_kv("run.batch", json!(3));
     game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
+}
+
+// ───────────────────── batch-maintenance auto-append (r3 / D-MA25) ─────────────────────
+
+/// An unarmed batch settle **auto-appends the next batch's docs-maintenance requirement**
+/// (D-MA25): the `[BATCH 1 SETTLED]` receipt is followed by `[MAINTENANCE REQ ADDED]` in
+/// the same transaction — one new open/draft row carrying the `req.<i>.maintenance` marker,
+/// the canonical title (no batch number, so the dedup title match stays exact) and the
+/// per-file wiki guidance in its description; `run.maintenance.last` points at it.
+#[test]
+fn batch_settle_auto_appends_maintenance_requirement() {
+    let mut game = drive_to_release();
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[BATCH 1 SETTLED]"),
+        "review.note must settle the batch: {closed}"
+    );
+    assert!(
+        narrative.contains("[MAINTENANCE REQ ADDED]"),
+        "the batch settle must append the maintenance requirement: {closed}"
+    );
+    assert!(
+        !narrative.contains("[ENDING"),
+        "a batch settle must never carry the ending prefix: {closed}"
+    );
+    game.assert_kv("run.batch", json!(2));
+    game.assert_kv("run.phase", json!(""));
+    // The appended row: open/draft, unmarked-by-auto-dispatch (no job, no gate), marker set.
+    game.assert_kv("req.count", json!(2));
+    game.assert_kv("req.2.status", json!("open"));
+    game.assert_kv("req.2.title", json!("维护更新 docs wiki（上批收口）"));
+    game.assert_kv("req.2.maintenance", json!("1"));
+    game.assert_kv("run.maintenance.last", json!("r2"));
+    game.assert_kv("req.2.closed_reason", json!(""));
+    game.assert_kv("req.2.job", json!(""));
+    game.assert_kv("req.2.gate", json!(""));
+    game.assert_kv("req.2.plan_ok", json!(false));
+    assert_eq!(game.phase("r2"), "draft");
+    // The description carries the r2 wiki topology guidance (three duties + per-file map).
+    let desc = game
+        .kv("req.2.description")
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        desc.contains("wiki-governance") && desc.contains("三职责"),
+        "description must cite the governance duties: {desc}"
+    );
+    assert!(
+        desc.contains("docs/README.md")
+            && desc.contains("docs/context/decisions-agent.md")
+            && desc.contains("docs/design/"),
+        "description must carry the per-file wiki guidance: {desc}"
+    );
+}
+
+/// The dedup boundary (③「未终态」语义): a **terminal** same-title maintenance requirement
+/// does **not** suppress the auto-append. A manual same-title add during the settle act is
+/// legal (requirement.add admits settle), but it re-arms the global gate: all-green verify
+/// is refused (the row is open), the batch falls back to coordinate, the manual row walks
+/// the pipeline like any requirement, and when the batch finally closes it appends a
+/// fresh round's row (r3) — a terminal same-title row does not suppress it. (The failed
+/// verify never completed the close, so `run.batch` stays 1: this IS batch 1's close.)
+#[test]
+fn terminal_maintenance_row_does_not_suppress_next_batch_append() {
+    let mut game = drive_to_settle();
+    // Manual same-title add during the settle act (no marker — the manual path).
+    game.narrate(
+        "requirement.add",
+        &text("维护更新 docs wiki（上批收口）|manual maintenance during settle"),
+    );
+    game.assert_kv("req.count", json!(2));
+    game.assert_kv("req.2.maintenance", json!(null));
+    // All-green verify is refused: the open row re-arms the global gate_problem barrier
+    // (verify.submit is a pass-type action — it must be picked from the menu).
+    let verify = game.click("verify.submit all_green=true — ");
+    assert!(
+        verify["narrative"].to_string().contains("not done yet"),
+        "an open row must block all-green verify: {verify}"
+    );
+    game.assert_kv("verify.passed", json!(false));
+    // Failed verify returns the whole batch to coordinate (R9).
+    game.click("verify.submit all_green=false — ");
+    game.assert_kv("run.phase", json!(""));
+    // The manual maintenance row walks the nine acts like any requirement.
+    game.narrate("requirement.dispatch", "0");
+    game.assert_kv("req.2.job", json!("plan"));
+    submit_req(&mut game, "r2", 1, "plan", "maint-p1");
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.plan_ok", json!(true));
+    game.assert_kv("req.2.job", json!("development"));
+    submit_req(&mut game, "r2", 1, "development", "maint-d1");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.integrating", json!(true));
+    game.narrate("integration.confirm", &text("r2|develop@abc1234"));
+    game.assert_kv("req.2.status", json!("done"));
+    // Batch 2 closes: the terminal manual row does not suppress the auto-append.
+    game.click("coordinate.submit — ");
+    game.click("verify.submit all_green=true — ");
+    game.narrate(
+        "settlement.evolution",
+        &text(
+            "|candidates screened against the evolution chapter|c=0/0|\
+             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
+        ),
+    );
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[BATCH 1 SETTLED]") && narrative.contains("[MAINTENANCE REQ ADDED]"),
+        "a terminal same-title row must not suppress the append: {closed}"
+    );
+    game.assert_kv("req.count", json!(3));
+    game.assert_kv("req.3.maintenance", json!("1"));
+    game.assert_kv("run.maintenance.last", json!("r3"));
+}
+
+/// The auto-appended maintenance requirement **walks the nine acts** and **gates the next
+/// boundary** until done: the per-batch docs cadence is enforced by `gate_problem()`, not
+/// by convention. The second batch settle appends the next round's row (r3).
+#[test]
+fn maintenance_requirement_walks_nine_acts_and_gates_next_boundary() {
+    let mut game = drive_to_release();
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    let closed = game.click("review.note — ");
+    assert!(closed["narrative"].to_string().contains("[MAINTENANCE REQ ADDED]"));
+    // Batch 2: the open/draft maintenance row withholds the boundary item — menu data
+    // does not lie, and the drained queue is what brings `coordinate.submit` back.
+    assert!(
+        !game
+            .options()
+            .iter()
+            .any(|item| item.starts_with("coordinate.submit — ")),
+        "the open maintenance row must withhold the next boundary: {:?}",
+        game.options()
+    );
+    // ...and walks the full pipeline (draft → planning → plan gate → development →
+    // accept gate → integrating → done).
+    game.narrate("requirement.dispatch", "0");
+    game.assert_kv("req.2.job", json!("plan"));
+    assert_eq!(game.phase("r2"), "planning");
+    submit_req(&mut game, "r2", 1, "plan", "maint-p1");
+    game.assert_kv("req.2.gate", json!("plan"));
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.plan_ok", json!(true));
+    game.assert_kv("req.2.job", json!("development"));
+    game.assert_kv("req.2.lane", json!(1));
+    submit_req(&mut game, "r2", 1, "development", "maint-d1");
+    game.assert_kv("req.2.job", json!(""));
+    assert_eq!(game.phase("r2"), "dev_review");
+    game.click("proposal.accept — ");
+    game.assert_kv("req.2.gate", json!("accept"));
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.integrating", json!(true));
+    let confirmed = game.narrate("integration.confirm", &text("r2|develop@abc1234"));
+    assert!(
+        confirmed
+            .iter()
+            .any(|line| line.contains("[INTEGRATION CONFIRMED]")),
+        "the integration confirm must narrate its beat: {confirmed:#?}"
+    );
+    game.assert_kv("req.2.status", json!("done"));
+    game.assert_kv("req.2.maintenance", json!("1"));
+    // Now batch 2 can close — and the second settle appends round 3's row.
+    game.click("coordinate.submit — ");
+    game.click("verify.submit all_green=true — ");
+    game.narrate(
+        "settlement.evolution",
+        &text(
+            "|candidates screened against the evolution chapter|c=0/0|\
+             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
+        ),
+    );
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    let closed2 = game.click("review.note — ");
+    let narrative = closed2["narrative"].to_string();
+    assert!(
+        narrative.contains("[BATCH 2 SETTLED]") && narrative.contains("[MAINTENANCE REQ ADDED]"),
+        "the second settle must append round 3's maintenance row: {closed2}"
+    );
+    game.assert_kv("req.count", json!(3));
+    game.assert_kv("run.maintenance.last", json!("r3"));
+}
+
+/// The **retired path appends nothing**: an armed `review.note` writes the ending and
+/// leaves the register (and the pointer) untouched — no maintenance row for a closed run.
+#[test]
+fn retire_appends_no_maintenance_requirement() {
+    let mut game = drive_to_release();
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
+    game.narrate("config.set", &text("run.retire=true"));
+    game.assert_kv("settings.run.retire", json!("true"));
+    let closed = game.click("review.note — ");
+    let narrative = closed["narrative"].to_string();
+    assert!(
+        narrative.contains("[ENDING · run retired]"),
+        "armed review.note must retire the run: {closed}"
+    );
+    assert!(
+        !narrative.contains("[MAINTENANCE REQ"),
+        "the retired path must not append a maintenance row: {closed}"
+    );
+    assert!(
+        !narrative.contains("[BATCH"),
+        "a retiring close must never carry a batch-settle line: {closed}"
+    );
+    game.assert_kv("req.count", json!(1));
+    game.assert_kv("run.maintenance.last", json!(null));
+    game.assert_kv("ending", json!("retired"));
 }
 
 // ───────────────────── gate locality & the integration act ─────────────────────
@@ -3831,9 +4051,23 @@ fn summary_projection_carries_play_and_resident_trio() {
     game.click("review.note — ");
     let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(summary["batch"], json!(2));
+    // The auto-appended maintenance requirement (D-MA25) keeps the queue non-empty after
+    // a batch settle: the pump is NOT drained until that row is done.
+    assert_eq!(summary["batchDrained"], json!(false));
+    game.assert_kv("req.count", json!(2));
+    game.assert_kv("req.2.maintenance", json!("1"));
+    // Walk the maintenance row through the pipeline; only then does the pump drain.
+    game.narrate("requirement.dispatch", "0");
+    submit_req(&mut game, "r2", 1, "plan", "watchdog-m1");
+    game.click("gate.approve — ");
+    submit_req(&mut game, "r2", 1, "development", "watchdog-m2");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.narrate("integration.confirm", &text("r2|develop@abc1234"));
+    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(
         summary["batchDrained"],
         json!(true),
-        "a settled batch with an empty queue drains the pump: {summary}"
+        "a settled batch drains the pump once the maintenance row is done: {summary}"
     );
 }
