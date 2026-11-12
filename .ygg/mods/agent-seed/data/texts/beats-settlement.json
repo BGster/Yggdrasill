@@ -35,6 +35,10 @@
     "settlement_sessions_unsetted_hint": "[SESSIONS UNSETTLED] subagent sessions remaining={{remaining}} — review.note stays blocked. Choose the safe cleanup path yourself: register settlement.sessions (or the settlement.evolution sessions= segment) after doing the move, or run harness.archive_sessions explicitly with a parent/batch verified against a synthetic fixture. This path no longer archives automatically.",
     "sessions_archived": "[SESSIONS ARCHIVED] moved {{moved}} -> {{dest}}",
     "sessions_archive_refused": "[SESSIONS ARCHIVE REFUSED] remaining={{remaining}} dest={{dest}} | nothing was recorded",
-    "review_batch_ok": "[BATCH {{batch}} SETTLED] score {{score}}/5 — {{lesson}}; evolution archived to the rolling slot; batch counter -> {{next}}; back to coordinate — the resident run waits for the next batch."
+    "review_batch_ok": "[BATCH {{batch}} SETTLED] score {{score}}/5 — {{lesson}}; evolution archived to the rolling slot; batch counter -> {{next}}; back to coordinate — the resident run waits for the next batch.",
+    "settlement_artifact_no_vfs": "artifact {{artifact}} cannot be verified: the host VFS is not mounted — non-empty registration refused (no settlement written, no archive side effects)",
+    "settlement_artifact_absent": "artifact {{artifact}} does not exist in the mounted VFS — registration refused (no settlement written, no archive side effects)",
+    "settlement_artifact_empty": "artifact {{artifact}} is empty in the mounted VFS — registration refused (no settlement written, no archive side effects)",
+    "settlement_artifact_read_error": "artifact {{artifact}} probe failed — registration refused (no settlement written, no archive side effects)"
   }
 }

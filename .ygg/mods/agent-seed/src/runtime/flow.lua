@@ -23,8 +23,8 @@ local contains, fill, join =
   util.contains, util.fill, util.join
 
 -- 转场票据：`stage.advance` 本身是可被外部直派的事件（`--event stage.advance`）。
--- 不设闸就能把协调器从 intake 直接搬到 coordinate、从 review 直接搬进 done，
--- 绕过 task.intake / coordinate.submit / review.note 与全部前置校验。
+-- 不设闸就能把协调器从 coordinate 直接搬进 review、从 review 直接搬进 done，
+-- 绕过 coordinate.submit / review.note 与全部前置校验。
 -- 只给 advance() 盖章，FSM 的 when 取证即消费——外部直派没有章，一律静默 no-op。
 local stage_ticket = nil
 local reject_count = 0

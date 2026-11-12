@@ -88,15 +88,14 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 ### 2.1 宏观 Coordinator 阶段机
 
-Coordinator 在 4 个阶段上支配整体运行生命周期。r9 起生命周期是**常驻自循环**：`coordinate` 是常驻主态，
+Coordinator 在 3 个阶段上支配整体运行生命周期（r2 rev2 B 裁决：`intake` 阶段与 `task.intake` 事件已注销，冷启动章程由 `event.start` 启动载荷承载，boot 直落 `coordinate`）。r9 起生命周期是**常驻自循环**：`coordinate` 是常驻主态，
 `review` 是批盘点相位，`review.note` 的常态落点是**批收口**（回 `coordinate`，批计数 +1）；运行级终局
 `done` 只经**显式退役**（`config.set run.retire=true` 武装后的终局变体）可达。需求级 `done` 保留
 （accept_gate 产物，与运行退役态只是字面量同形，语义正交）：
 
 | 当前阶段 | 事件 | 守卫 / 前置条件 | 下一阶段 | 行为效果 |
 | --- | --- | --- | --- | --- |
-| `intake` | `task.intake` | 非空 `title\|description` payload（仅冷启动；新任务经 `requirement.add` / inbox 进料） | `coordinate` | 记录任务元数据并开启需求协调。 |
-| `coordinate` | `coordinate.submit`（**批边界**） | `pendingProposals == 0` $\land$ `jobs == 0` $\land$ `conflicts == 0` $\land$ 所有叶子需求 `done` | `review` | 重置 `verify.passed = false` 并清空本轮的 `settlement.*` 键。 |
+| `coordinate` | `coordinate.submit`（**批边界**） | `pendingProposals == 0` $\land$ `jobs == 0` $\land$ `conflicts == 0` $\land$ 所有叶子需求 `done`（r2 rev2 起：另需章程非空 ∧ 需求数 ≥1， 局可读拒绝） | `review` | 重置 `verify.passed = false` 并清空本轮的 `settlement.*` 键。 |
 | `review` | `verify.submit` / `gate.verify_suite` | `all_green=true`（或所有验证命令退出码为 `0`） | `review` | 锁存 `verify.passed = true`（`verify.source = "human"` 或 `"tool"`）。 |
 | `review` | `verify.submit` | 当 `gates.require_all_green == true` 时 `all_green=false` | `coordinate` | 将本批退回 `coordinate` 以返工，并重置结算注册。 |
 | `review` | `settlement.evolution` | `verify.passed == true` $\land$ 有效的候选/类别计数 | `review` | 注册演进摘要/产物，结算 `sessions=` 与 `todo=`，并触发内联 `harness.archive_sessions`。 |
@@ -191,8 +190,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 | 事件名 | 线协议 Payload 格式 | 契约与校验规则 |
 | --- | --- | --- |
-| `event.start` | `"0"` 或 `""` | 初始化默认值并渲染 `intake` 阶段回执。 |
-| `task.intake` | `"<title>\|<description>"` | 从 `intake -> coordinate` 迁移。 |
+| `event.start` | `""`/`"0"` = 无载荷 boot；`"<title>\|<description>"` = 章程载荷 | 无载荷照常 boot（章程显示 (untitled task)）；有载荷同拍写 `task.title`/`task.description` 并落 `coordinate`；已在 `coordinate` 再带载荷 = 幂等补写不过段（r2 rev2 B 裁决）。 |
 | `requirement.add` | `"<title>\|<description>[\|<ext_id>[\|<dep1,dep2>]]"` | 在 `draft` 中添加 `rN`。校验 DAG 无环与 `ext_id` 幂等。 |
 | `requirement.dispatch` | `""` \| `"0"` \| `"rN"` | 派发就绪需求，最多达 `job_capacity`（4）。`draft` 行进入 `planning`；`ready`（`planning` + `plan_ok`）行认领泳道并进入 `developing`。 |
 | `proposal.submit` | `"<req_id>\|<rev>\|<stage>\|<summary>\|<artifacts>\|[<changes>]\|[<ext_id>][\|exec=<agent_id>[:<reason>]][\|actor=<actor_id>][\|actor_session=<session_id>]"` | 提交针对 `analysis`、`plan` 或 `development` 的提案。保留尾段链固定相对序 `exec → actor → actor_session`（各自可独立缺席）：`exec=` 必须在链中 `actor=` 之前并同事务绑定执行者台账；`actor=` / `actor_session=` 由**宿主注入**（声明路由 + `--actor` / `YGG_ACTOR` / daemon 请求字段），调用方自带同名段在宿主侧即被拒（`ACTOR_FORGED`），mod 侧错位段逐段点名拒绝；三态互证（verified / mismatch / unverified）识别不拒绝，`session` 是纯审计字段永不参与判定（见 §3.7）。 |
@@ -218,7 +216,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 
 | 层 | 载体 | 值域 | 权威来源 | 职责边界 |
 | --- | --- | --- | --- | --- |
-| **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 33 个事件名（全集见本节末注，payload 位次见 §3.3；`guide.show` 已随 r1 注销） | Mod（`.ygg/mods/agent-seed/src/**`（core/domain/view/runtime/handlers 五层）、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
+| **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 32 个事件名（全集见本节末注，payload 位次见 §3.3；`guide.show` 已随 r1 注销、`task.intake` 已随 r2 rev2 注销） | Mod（`.ygg/mods/agent-seed/src/**`（core/domain/view/runtime/handlers 五层）、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
 | **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/egg.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
 | **L3 `action`** | `ygg_session` 工具的 `action` 参数（`StringEnum`） | `kickoff` / `dispatch` / `approve_gate` / `reject_gate` / `vfs_write` / `vfs_read` / `vfs_list` / `handoff_compact` / `settle_close`（9 个） | Layer 2 适配器（`.pi/extensions/ygg-pi-harness`） | **面向模型/人的语义入口**：它只决定「用哪个动词说出意图、由谁拼 payload」，**不决定状态**。值域随适配器可变，**不是**跨 harness 契约。 |
 
@@ -269,11 +267,11 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 结论：凡需要进入 `artifact.*` 台账、需要阶段守卫或 64 KiB 上限的制品，**必须**经 `event=vfs.write`；`op=vfs_put` 只用于「不参与台账」的宿主侧归档（例如交接单 `artifacts/handoff-latest.md` 与 `settle_close` 的进化复盘）。这两个名字长得像，但**不是**同一个原语的两种写法。
 
-#### 本节末注 · `event` 全集（33 个）
+#### 本节末注 · `event` 全集（32 个）
 
-`agent.summary`、`task.intake`、`requirement.add` / `requirement.list` / `requirement.dispatch` / `requirement.amend` / `requirement.split` / `requirement.merge` / `requirement.conflict` / `requirement.resolve`、`lane.claim` / `lane.release`、`proposal.submit` / `proposal.accept` / `proposal.reject`、`coordinate.submit`、`verify.submit`、`settlement.evolution` / `settlement.sessions` / `settlement.todo`、`review.note`、`gate.approve` / `gate.reject`、`config.set` / `config.open` / `config.close`、`map.show`、`ygg.choice_selected`、`event.start`、`tool.call` / `tool.result`、`vfs.write`、`stage.advance`。
+`agent.summary`、`requirement.add` / `requirement.list` / `requirement.dispatch` / `requirement.amend` / `requirement.split` / `requirement.merge` / `requirement.conflict` / `requirement.resolve`、`lane.claim` / `lane.release`、`proposal.submit` / `proposal.accept` / `proposal.reject`、`coordinate.submit`、`verify.submit`、`settlement.evolution` / `settlement.sessions` / `settlement.todo`、`review.note`、`gate.approve` / `gate.reject`、`config.set` / `config.open` / `config.close`、`map.show`、`ygg.choice_selected`、`event.start`、`tool.call` / `tool.result`、`vfs.write`、`stage.advance`。
 
-计数口径（可复核）：前 32 个由 Mod 直接调用 `ygg.on(...)` 注册；`stage.advance` 是第 33 个，它由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，**不在** `ygg.on` 的字面出现处。可执行复算：`grep -rn 'ygg\.on("' .ygg/mods/agent-seed/ | sed 's/.*ygg\.on("\([^"]*\)".*/\1/' | sort -u` 得到 32 项，再加上 `mod.lua` 的 `ygg.fsm.define` 声明里那一项 `event = "stage.advance"`，合计 33。这 33 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 33 个之外还有别的状态转换」。运行期 registry = 这 33 个 + stdlib 内置注册面（`ygg.narrative.goto`，合计 34）；registry 之外的事件名（含拼错的名字与未注册的 `ygg.*`）派发一律 **fail-closed**——外部名在门面预检零副作用拒绝（可读 VALIDATION，文案带已注册全集），派生名（handler `ygg.emit`）使整次转换失败回滚。registry 是运行时唯一事实，宿主不持任何事件名白名单。
+计数口径（可复核）：前 31 个由 Mod 直接调用 `ygg.on(...)` 注册；`stage.advance` 是第 32 个，它由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，**不在** `ygg.on` 的字面出现处。可执行复算：`grep -rn 'ygg\.on("' .ygg/mods/agent-seed/ | sed 's/.*ygg\.on("\([^"]*\)".*/\1/' | sort -u` 得到 31 项，再加上 `mod.lua` 的 `ygg.fsm.define` 声明里那一项 `event = "stage.advance"`，合计 33。这 33 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 33 个之外还有别的状态转换」。运行期 registry = 这 33 个 + stdlib 内置注册面（`ygg.narrative.goto`，合计 34）；registry 之外的事件名（含拼错的名字与未注册的 `ygg.*`）派发一律 **fail-closed**——外部名在门面预检零副作用拒绝（可读 VALIDATION，文案带已注册全集），派生名（handler `ygg.emit`）使整次转换失败回滚。registry 是运行时唯一事实，宿主不持任何事件名白名单。
 
 ### 3.5 宿主 CLI 与 Daemon JSON-RPC 线协议契约
 
@@ -421,7 +419,7 @@ egg [--runs-root <目录>]… serve [--port <1..65535>] [--panel-dir <目录>] [
 
 > **默认视图 = 最新局详情（内置页展示投影，只读；裁决见 CONTEXT `D-MA17`）**：`#/` 与空 hash
 > 渲染 `/api/runs` 首行的局详情——局头条（宏观阶段/会话活性/批次/模式/退役徽章）、
-> `intake → coordinate ⇄ review(批 n) → done` 四节点主流程状态条、需求卡（分 stage 决策产物行、
+> `coordinate → review(批 n) → done` 三节点主流程状态条（r2 rev2 后 intake 节点已注销）、需求卡（分 stage 决策产物行、
 > 被拒灰显）、近期决策时间线（尾窗 500 内、决策事件族、倒序前 20）、本局存档折叠段。
 > 投影数据源全部是既有只读端点：`/saves/latest`（KV 键族）+ `/events`（尾窗两步取）+ `/artifacts`；
 > 对无 `req.*` 键族的 mod 无害退化为通用摘要（判据见 D-MA17）。

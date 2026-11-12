@@ -18,6 +18,7 @@
     "probe_rejected": "only an empty payload, \"0\" or \"full\" is accepted, got `{{got}}`; usage: {{usage}}",
     "worktree_claimed": "[WORKTREE CLAIMED] lane-{{k}} <- {{req}} | branch {{branch}} | base {{base}} | clean=1",
     "worktree_claim_refused": "[WORKTREE CLAIM REFUSED] lane-{{k}}: {{reason}} | the lane ledger was not touched",
+    "lane_branch_hint": "[HINT] lane-{{k}} carries no branch: run lane.claim first (payload \"lane|req_id|branch|base|clean\", branch = feature/xxxx-semantic) so the worktree claim can bind a real branch; dispatching without one only records the ledger.",
     "worktree_released": "[WORKTREE RELEASED] lane-{{k}} -> free",
     "worktree_release_idle": "[WORKTREE RELEASED] lane-{{k}} -> free (it was already idle)",
     "worktree_release_refused": "[WORKTREE RELEASE REFUSED] {{reason}} | the lane ledger was not touched",
