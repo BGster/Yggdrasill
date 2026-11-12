@@ -116,9 +116,9 @@
       "sha256": "fb8789c6aca5f737bdde5f47f8a4ac812bfec1ded0bbe5d2339fd30bf69a2d10"
     },
     {
-      "byteLength": 41197,
+      "byteLength": 41283,
       "path": "src/view/render.lua",
-      "sha256": "12e18de2c3f5af79370830abb00fc2c966f3070e9d8d55d1083e34c4622751e6"
+      "sha256": "6b654dfd860077390a772e7f169123cb1910805633f0024982f83b288fa74344"
     }
   ],
   "entries": [
@@ -203,12 +203,12 @@
       "sha256": "c2741c6ff3f37318c20371a77dc583436145d9a7cf3c082ce1f05c86b7ec9959"
     },
     {
-      "byteLength": 18500,
+      "byteLength": 18540,
       "id": "ygg:agent/playbook/ch2-delivery",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch2-delivery.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "316e8461773c82f19caa9de633e9e5345dd44eb797e4393069f1f6a47f3c33b3"
+      "sha256": "ead00c7f7fa66a16fdbf0165a72932dde8084b77733211982a667df1ab9ef010"
     },
     {
       "byteLength": 8875,

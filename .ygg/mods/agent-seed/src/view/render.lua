@@ -823,7 +823,7 @@ local function render()
   renderer()
 end
 
-local SUMMARY_JOB_STAGES = { analysis = true, plan = true, development = true }
+local SUMMARY_JOB_STAGES = { plan = true, development = true }
 
 local function summary_int(value)
   local number = tonumber(value) or 0
@@ -854,7 +854,8 @@ local function summary_awaiting()
   return nil
 end
 
--- 在跑作业的结构化明细（analysis / plan / development 三阶段各占一条）。
+-- 在跑作业的结构化明细（plan / development 两个活跃阶段各占一条；
+-- analysis 槽位已随阶段合并注销，req_job_stage 永不返回 analysis，此处不再列出）。
 -- 只读 KV 派生的展示面：与 summary_awaiting 同源（后者只返回第一条），
 -- 这里返回全量，供守护模式的调度端一次性取到 id / rev / lane / branch / base / 标题 / 描述，
 -- 以及**账本里绑定的执行者**：`executor` = 当前阶段的 agent id，`planExecutor` = plan 阶段的
