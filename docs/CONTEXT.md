@@ -10,8 +10,8 @@
 
 | 术语 | 中文释义 |
 | --- | --- |
-| `Run` | 运行实例 |
-| `stage`（Coordinator Stage） | 协调者宏观阶段（`coordinate` → `review` → `done`；r2 rev2 B 裁决后 boot 直落 `coordinate`，`intake` 阶段已注销） |
+| `Run` | 运行实例（常驻自循环：立局 → 批循环 → 显式退役） |
+| `stage`（Run Stage） | 运行级真状态（`live` / `retired`）；协调 / 盘点 / 发布为 `run.phase` 微状态 |
 | `Requirement`（`r1..rN`） | 需求（交付单元） |
 | `Lane`（Persistent Lane Pool） | 持久化泳道工作树池 |
 | `Proposal`（`p1..pM`） | 提案（不可变交付提交） |
@@ -47,13 +47,13 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 | **Run（运行实例）** | 由 `run_id` 标识的单个隔离执行实例，位于 `.ygg/runs/<run_id>/` 下，持久化于单个 SQLite 数据库（`run.sqlite`），内含事件日志、状态快照、收件箱队列与虚拟文件系统产物。r9 起运行是**常驻自循环**：运行级终局不再由 review.note 自动触发，而是周期性批结算 + 显式退役（`done` 仅经 `run.retire` 武装可达）；升级不迁移旧局（装载失败即开新局）。 |
 | **Coordinator Stage（`stage`，协调者宏观阶段）** | 一次 Run 的宏观生命周期（r2 rev2 B 裁决：`intake` 阶段与 `task.intake` 事件已注销，冷启动章程由 `event.start` 启动载荷承载，boot 直落 `coordinate`）：`coordinate`（常驻主态：派发泳道、接受提案、通过门禁）$\to$ `review`（批盘点相位：验证套件、演进筛选、会话/todo 清理）$\to$ 批收口回 `coordinate`（`run.batch` +1）；`done`（退役终态，仅 `run.retire` 武装后的 review.note 可达）。需求级 `done` 与运行退役态只是字面量同形（语义正交）。 |
 | **Requirement（`r1..rN`，需求）** | 由状态机跟踪的一个交付单元。以 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split` / `merged` / `dropped`）存储，并通过 `plan_ok`、`job`、`gate`、`conflict` 属性投影为细粒度展示阶段（`draft`、`planning`、`plan_review`、`plan_gate`、`ready`、`developing`、`dev_review`、`accept`、`done`、`blocked`）。 |
-| **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。泳道分支名执行强制形态 `feature/{4位uuid}-{语义词段}`（`lane.claim` 与 `git.worktree_claim` 两条入口同规则，非法名可读拒绝；默认名生成机制已删除）——契约细节见 DESIGN §2.4。 |
+| **Persistent Lane Pool（`lane-1..4`，持久化泳道池）** | 一个有界池，最多 4 个可复用的 Git worktree（`~/tmp/worktrees/<repo>-lane-<k>`）。认领泳道时将其分支重置为 `HEAD` 但不删除未跟踪的构建缓存（`target/`、`node_modules/`）；释放泳道时将其停放在 detached `HEAD` 上，从而永不锁死分支。泳道分支名执行强制形态 `feature/{4位uuid}-{语义词段}`（`lane.claim` 与 `git.worktree_claim` 两条入口同规则，非法名可读拒绝；默认名生成机制已删除）——契约细节见 DESIGN §2.10。 |
 | **Proposal（`p1..pM`，提案）** | 由执行者子代理针对特定 `(req_id, rev, stage)` 元组产出的不可变交付提交（`proposal.submit`），引用一个已归档的 VFS 产物（`artifacts/<req>-<stage>.md`）并绑定执行者身份（`exec=<agent_id>`）。提案在协调者串行执行 `proposal.accept` 或 `proposal.reject` 之前不会改变需求状态。 |
 | **Mandatory Gates（`plan_gate`、`accept_gate`，强制门禁）** | 每个需求的两个不可跳过的质量检查点。`plan_gate` 批准技术方案（`planning` $\to$ `ready`）并响应式地自动派发开发。`accept_gate` 要求非空产物证据（`artifacts`）与匹配的修订号（`gate_rev == req.rev`），之后才将需求标记为 `done` 并释放其泳道。 |
 | **Executor Ledger（`executor.<rN>.<stage>`，执行者台账）** | 一条自声明的审计轨迹，记录哪个子代理 ID 执行了某个需求的某个阶段（`analysis`、`plan`、`development`）。跨阶段交接或同一阶段更换为不同执行者 ID 需要显式理由（`<new_id>\|<reason>`）。占位 ID（`pi-ygg-harness`、`main`、`default`、`unregistered`）在恢复决策中被过滤掉。r3 起，台账 id 与提案的宿主 `actor=` 章在 `requirement.list` trace 上做三态互证显示（`[verified]` / `[mismatch:actor=…]` / `[unverified]`，识别不拒绝）——账本仍是权责权威，互证只是显示 join。 |
 | **Profile Registry（`profile.<handle>.*`，身份注册表）** | 一张**自报身份卡**（self-reported registry，不是凭据）：`config.set profile.<handle>.<key>` 逐键注册的 `settings.profile.*` 平铺 KV（保留键 `harness` / `session_id` / `handle` / `role` / `assignments`，自由键 `^[a-z0-9_]{1,32}$`）。回答「这个句柄是谁」（harness / 原生 session id / 角色自报分工快照）；与执行者台账**互链不冗余**（渲染层按 `handle == executor id` 字符串 join，权责仍以账本为准）。投影：`map.show full` 的 `[PROFILES]` 行与 `agent.summary` 的 `profiles` 数组（≤8 张，handle 升序）。 |
 | **In-Archive VFS（`artifacts/*`，归档内虚拟文件系统）** | `run.sqlite` 内的一张虚拟文件系统表（`vfs_files`），通过 `ygg.fs.*` 暴露给 Lua 沙箱，通过 `vfs.write` / JSON-RPC `vfs_put` 暴露给外部工具。存储方案、开发报告、演进审查与压缩交接，带 SHA-256 完整性。 |
-| **Synchronous Tool Bridge（`ygg.tool.call`，同步工具桥）** | 一个可选加入的宿主能力，允许 Mod 在同一次 dispatch 回合内同步调用白名单内的确定性宿主仪式（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`、`harness.archive_sessions`），消除多回合异步回调往返。 |
+| **Synchronous Tool Bridge（`ygg.tool.call`，同步工具桥）** | 一个可选加入的宿主能力，允许 Mod 在同一次 dispatch 回合内同步调用白名单内的确定性宿主仪式（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`），消除多回合异步回调往返。 |
 | **HarnessAction（`subagentAction`，治理引擎动作指令）** | Mod 在 `summary.jobs[i].subagentAction` 内发出的一条结构化机器可读指令（`subagent.spawn` 或 `subagent.resume`），携带渲染后的 `brief`、`deltaPrompt`、`fullFallbackBrief`、`worktreePath`、`artifactPath` 与 `submitCommand`，使任何上层治理引擎适配器都能执行泳道而无需重新实现工作流逻辑。 |
 | **Stable Checkpoint（稳定检查点）** | 一个静止的运行状态（`available == true` $\land$ `pendingTools == 0` $\land$（`gates > 0` $\lor$ `jobs == 0` $\lor$ `conflicts > 0`）），在此状态下上下文压缩与结构化交接（`artifacts/handoff-latest.md`）可以安全发生而不丢失在途子代理输出。 |
 
@@ -66,7 +66,7 @@ Yggdrasill 围绕一个统一命题设计：**一个确定性的、数据驱动�
 2. **P2 · 零硬编码 — 数据与契约驱动（`D11/D15`）**
    - 业务规则、状态迁移、叙述模板与提示节拍都归属于 Mod 脚本（`src/**`，按 core/domain/view/runtime/handlers 五层组织）与 JSON 资源（`data/*.json`），绝不硬编码在 Rust 宿主代码或 TypeScript 扩展代码中。所有提示模板、子代理 brief 与叙述行都存放在 `data/texts/` 片段（由 `mod.lua` 装配回 TEXTS）。
 3. **P3 · 契约驱动的通用宿主**
-   - Rust 宿主（`ygg-agent`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
+   - Rust 宿主（`egg`）与内核（`ygg-sandbox`）对特定 Mod 的事件名、阶段名或叙述前缀一无所知。一切都在 `pack.json`（`agent`、`inboxRoutes`、`tools`、`code`）与 `data/config.json`（`drive`、`settlement`、`allowedTools`）中声明。缺失或畸形的契约字段在加载时即失败关闭（fail closed），零回退默认值。
 4. **P4 · 少即是多 — 每个机制一条规范路径**
    - 每个能力都有唯一的规范机制。冗余的校验块、重复的 Mod 副本、或重叠的多回合异步仪式，都被合并为单源辅助函数与 1 回合内联仪式。
 5. **P5 · 单一事实来源（Single Source of Truth）**
@@ -143,7 +143,7 @@ Yggdrasill/
 | **D3** | 内核规格 | **从第 1 天起即为完整 RPG 级规则内核**（实体、属性、标签、事件总线、FSM、Lua 条件），使文字冒险通过增加内容/子系统演进为 RPG，而非重写内核。 | 已确认 |
 | **D4** | 首个里程碑策略 | **先引擎 + 手写参考 Mod（`test-adventure`）**，待内核语义得到证明后再接 AI 生成流水线（`M1`）。 | 已确认 |
 | **D6** | 游戏引擎集成 | **Godot 原生链接（`gdext`）** 排期于 M2.5（原生链接 Rust 库，无 Wasm 开销）；保持表现/逻辑分离。 | 已排期（Spike GO） |
-| **D7** | 内核语言 | **单一 Rust 实现**：编译为浏览器 Wasm（`ygg-wasm`）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（`ygg-agent` / Axum）。保证无 GC 抖动的确定性回放。 | 已确认 |
+| **D7** | 内核语言 | **单一 Rust 实现**：编译为浏览器 Wasm（`ygg-wasm`）、原生链接进 Godot（`gdext`），并在权威服务器上原生运行（`egg` / Axum；原名 `ygg-agent`，已更名）。保证无 GC 抖动的确定性回放。 | 已确认 |
 | **D8** | Web 表现技术栈 | **React + TypeScript**（`packages/client-web`），用于以文本为中心的叙事 UI 与成熟的 AI 工具生态。 | 已确认 |
 | **D9** | 平台服务（M2+） | **Rust + Axum**，与内核直接共享 `ygg-schema` 校验逻辑。 | 已计划 |
 | **D10** | 内容流水线技术栈 | **TypeScript**（`packages/pipeline`），用于 I/O 密集的 LLM 编排、结构化输出解析与重试循环。 | 已确认 |
@@ -167,7 +167,7 @@ Yggdrasill/
 | **D-MA2** | 多文件 Mod 纯度（`YGG-MOD-EFFECT`） | `pack.json` 的 `code.{entry, modules[]}` 显式枚举所有 Lua 模块。只有 `mod.lua` 可以在顶层注册处理器或改变状态；`src/**` 模块导出纯函数（`M.install(deps)`）并携带真实的 `@src/<file>.lua:line` 诊断信息。 | 已确认 |
 | **D-MA3** | 单文件 SQLite 运行存储与 VFS | 新运行默认使用 `<run-dir>/run.sqlite`（`ygg-store`），原子提交 `events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）。既有的 JSON 运行（`autosave.json` + `events.jsonl`）保持自动检测，不隐式迁移。 | 已确认 |
 | **D-MA4** | 响应式钩子与省回合压缩 | `src/core/hooks.lua`（`useMemo`、`useEffect`、`flush_effects`）在 `render()` 发出 `ygg.choice` 之前运行。实现 3 条省回合规则：① `draft -> planning` 阶段合并，② 在 `proposal.submit` 上内联 `exec=<agent_id>` 注册，③ `gate.approve(plan)` 之后的响应式 `auto_dispatch`。 | 已确认 |
-| **D-MA5** | 同步工具桥（`ygg.tool.call`） | 当 `ygg-agent` 挂载 `HostToolRunner` 时，白名单工具（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`、`harness.archive_sessions`）在 1 回合内联执行并立即把结果折叠进 KV，同时为未挂载宿主保留异步 `tool.call`/`tool.result` 回退。 | 已确认 |
+| **D-MA5** | 同步工具桥（`ygg.tool.call`） | 当 `egg` 挂载 `HostToolRunner` 时，白名单工具（`git.worktree_claim`、`git.lane_probe`、`git.worktree_release`、`fs.artifact_probe`、`gate.verify_suite`；`harness.archive_sessions` 已于 r5/D-MA21 从 Mod 工具桥退役）在 1 回合内联执行并立即把结果折叠进 KV，同时为未挂载宿主保留异步 `tool.call`/`tool.result` 回退。 | 已确认 |
 | **D-MA6** | 持久化泳道工作树池 | `worktree-claim` 管理持久化池 `<repo-parent>/worktrees/<repo>-lane-1..4`，通过 `git checkout -B <branch> HEAD` 重置分支（保留如 `target/` 的未跟踪构建缓存），并将释放的泳道停放在 `--detach HEAD` 上而非删除目录。 | 已确认 |
 | **D-MA7** | 通用治理引擎适配器（`subagentAction`） | Mod 计算 `summary.jobs[i].subagentAction`（`subagent.spawn` / `subagent.resume`），携带渲染后的 brief（`data/texts/` 模板片段）与实时的 `worktreeStatus` / `subagentStatus` / `probeStatus`，使外部执行壳（如 Claude Code / Codex / Cursor 适配器）能充当薄执行壳。 | 已确认 |
 | **D-MA8** | 活文档整合 | 将所有架构、领域与契约文档整合进 `docs/CONTEXT.md`（领域与决策）与 `docs/DESIGN.md`（系统行为与接口契约），通过子代理 brief 中的强制必读引用与最终审查时的同步检查来执行。 | 已确认 |
@@ -185,4 +185,5 @@ Yggdrasill/
 | **D-MA20** | r1 归档防护契约补记（r5 补录） | r1（主会话保护）交付时漏记台账，本批补记：宿主 `archive-sessions` 按「文件名排除 + 全文 contains(parent)」选文件，parent 回落 `"default"` 时可把主会话 rename 进 trash（合成探针三场景实证）；Mod 侧 fail-closed——缺 `run.id`/`run.parent` 凭证不发归档请求、不伪造 `remaining=0`；review 相位撤销静默自动归档，改 `[SESSIONS UNSETTLED]` 可读提示；宿主语义测试块（原 `synchronous_tool_bridge` 第 4 步）重钉为新安全契约（无 sessions 段不归档）。用户授权的有界宿主测试修改自此成为先例。 | 已确认 |
 | **D-MA21** | 提示词驱动子会话清理（r5） | 用户核心需求修正：「删除 subagent 会话记录」必须可用且**跨 harness**——动作走提示词而非宿主代码。清理提示词 beat（`[SESSIONS CLEANUP PENDING]`）指引用主会话自身环境原生能力删除本局 subagent 会话记录（仅限本局产物，主会话与无关会话绝不碰），完成后声明 `settlement.sessions`（`moved/remaining/destination`，`moved=0` 合法；缺声明 = 诚实未清理，`review.note` 保持阻断）。`harness.archive_sessions` 从 Mod 工具桥整体退役（pack.json + allowedTools 同批摘除保 superset 一致、REACTORS 条目与死代码 `auto_archive_sessions` 删除、beats 去专名）；机检护栏 = `agent_seed_semantics::beats_cleanup_prompt_carries_no_harness_literals`；宿主 builtin 的物理退役（含子串匹配危险与 dry-run 缺失）归 N2 宿主决策。 | 已确认 |
 | **D-MA22** | 集成职责再分配：执行者集成 feature→develop，主流程只做 develop→master | 原 `integration.serial-closeout` 把全部集成串行分配给主代理，且状态机无集成事件——集成退化为批次末 集中合并，需求量大时冲突集中爆发（2026-11-12 局实证：4 个 feature 批末一起合 develop）。现按用户设计意图翻转：迭代点集成（feature→develop：对齐 origin/develop → `--no-ff` 合并 → 集成态门禁 → push develop）由需求开发执行者在自己 lane 收口时完成，验收 artifacts 必带 `develop@<sha>` 集成证据；同仓库集成经 `origin/develop` 自串行（push 被拒=别人先落，重对齐重试；栈叠 lane 按基线序）；轮次收口（develop→master、用户触发）与部署仍为主代理串行职责。落地：ch2-delivery §integration 五条改写、ch3-evidence 翻转、subagent_brief 模板补集成职责行。 | 已确认 （2026-11-12 用户修订：`develop` 与 `master` 的同步一律走 `git reset --hard master` + `--force-with-lease` push，反向合并 master→develop 禁止——见 playbook `integration.round.reset-develop`。）|
+| **D-MA23** | 剧情双层重写：真状态压缩与自循环 | **4 真状态**（运行级 `live`/`retired` + 需求级 `open`/`done`，11→4；判据 = 不可逆语义 ∨ 改变全局行为，`split`/`merged`/`dropped` 降为 `closed_reason` 字段）+ **13 微状态**（运行级 立局/协调/盘点/发布 + 需求级九幕 立项/计划中/计划门禁/待开发/开发中/交付受理/验收门禁/集成/done，由 KV 标志位派生不独立存储）+ **38 事件**（+`charter.set`/`run.begin`/`integration.confirm`·`reject`/`release.confirm`·`skip`）+ **微状态判定单一来源** `run_phase()` / `req_phase()`（菜单/文案/渲染/投影全从它派生；三条打回路径统一落待开发，R6）+ **发布幕**（R-a：`review.note` 前置 = 发布已声明，`release.skip` 必填理由）+ **身份与权限不进剧情**（执行者台账/身份章/profile/票据门 = 事件准入校验与留痕，见 DESIGN §2.13）+ 内核 FSM 唯一转场 `live→retired`、`run.phase` 微状态标志；旧局存档不兼容不迁移。契约正文见 DESIGN §2（D-MA22 的执行者集成是需求级第 8 幕的职责内容）；分支 `feature/6f2a-story-rewrite`。 | 已确认 |
 

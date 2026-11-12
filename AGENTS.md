@@ -24,8 +24,9 @@ output back; synthetic data generated under `/tmp` is unrestricted.
    (`requirement.dispatch` → proposal → gate). **The verdict looks at events, not at where the bytes
    landed** — `~/tmp`, `/tmp` and the chat transcript all count as in-run output. "It is small", "it
    was quick", "the user did not ask for the process" are not exemptions.
-2. **The main agent does only three things in the coordination layer**: dispatch work, accept
-   proposals serially, pass the two mandatory gates. It never implements a lane's work itself. After
+2. **The main agent does only four things in the coordination layer**: dispatch work, accept
+   proposals serially, pass the two mandatory gates, and declare the batch release
+   (`release.confirm` / `release.skip`). It never implements a lane's work itself. After
    a requirement is filed, the first action is `requirement.dispatch`, not doing the work directly.
    - **Register the executor after dispatching** (self-declared ledger, not identity proof): once you
      have the subagent id, run `config.set executor.<rN>.<stage>=<id>` (stage ∈ analysis / plan /
@@ -295,8 +296,7 @@ plus same-turn receipt, replay idempotence, payload/allowlist shape checks, decl
 across both packs), and the active subsystem (`git.worktree_claim` binding the lane ledger +
 `git.worktree_release` freeing it, `git.lane_probe` recording the truth + the conflict radar
 blocking through `req.<i>.conflict` until `requirement.resolve`, `fs.artifact_probe` + `vfs.write`
-sharing one bounded ledger, `gate.verify_suite` green evidence only in `review`, `harness.archive_sessions`
-unblocking the settlement, declaration completeness). The all-1 playtest only covers the happy path (it
+sharing one bounded ledger, `gate.verify_suite` green evidence only in `review`, declaration completeness). The all-1 playtest only covers the happy path (it
 never takes `gate.reject` / `requirement.amend` / `proposal.reject`, and it cannot see the turn-cut
 mechanics at all); temporary probes under `/tmp` may supplement it but never replace it, and any
 scenario not covered must be declared case by case. Three-question criterion (see 7): ① which action
@@ -380,11 +380,10 @@ pinned by `data/playbook/` (`tools.reactive-effect-scope`, `subsystems.probe-is-
    `props.req_do_conflict` (the same function as the human `requirement.conflict`), so it enters
    `req_conflict_total` and blocks dispatch/closing with no extra wiring, and only
    `requirement.resolve` clears it.
-3. **Machine evidence is same-level, not stronger.** `gate.verify_suite` / `harness.archive_sessions`
-   write the very KV that `verify.submit` / `settlement.sessions` write, saving one turn; the
-   provenance keys `verify.source` / `settlement.sessions.source` must survive, and no report may
-   claim the machine path outranks a self-declaration. Both only record `passed=1` / `remaining=0`
-   and only in `review`, on the same precondition as the human path (`gate_problem() == nil`).
+3. **Machine evidence is same-level, not stronger.** `gate.verify_suite` writes the very KV that
+   `verify.submit` writes, saving one turn; the provenance key `verify.source` must survive, and no report may
+   claim the machine path outranks a self-declaration. It only records `passed=1` and only in `review`, on the
+   same precondition as the human path (`gate_problem() == nil`).
 
 Set-of-files comparisons must respect the host cap: `parse_result` returns `truncated` and writes
 `tool.<call_id>.truncated`, so the radar skips a truncated probe (a cut list can only cause a false
@@ -440,8 +439,11 @@ are git-ignored, `.ygg/mods/` is committed.
 
 ### Start
 ```bash
-.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --raw --resume --event event.start --payload '"<局级任务标题>|<一句话目标>"'
-```（启动载荷即章程：boot 直接落 coordinate；无载荷也能 boot，任务显示 (untitled task)，空局收口会被可读拒绝。）
+.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start   # ① boot：叙述三则，不转场
+A=".ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs"
+$A --resume --event charter.set --payload '"<标题>|<目标>|<成功判据>"'   # ② 立局：写章程三件套（可反复修订；run.begin 后锁定）
+$A --resume --event run.begin                                          # ③ 开工：章程齐备 → 协调微状态（[RUN BEGUN]）
+```（① boot 叙述引擎/模式/红线三则，可改带章程载荷 `--payload '"<标题>|<目标>|<成功判据>"'` 一步立局；空载荷也能 boot，立局微状态下补写章程即可。）
 
 ### Serve（只读观察台，r9 全局唯一实例）
 ```bash

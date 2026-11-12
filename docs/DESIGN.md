@@ -43,107 +43,331 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 | 层级 | 宿主环境 | 子代理执行与恢复 | 上下文遥测与压缩 | 集成机制 |
 | --- | --- | --- | --- | --- |
-| **Tier 1 · 原生扩展** | Pi Coding Agent（`ygg-pi-harness`） | 原生 `Agent({ resume })`，自动回退到 `fullFallbackBrief` | 实时 token 比例（`soft >= 60%`、`hard >= 75%`），自动 `artifacts/handoff-latest.md` + `compact()` | 持久化 `ygg-agent --daemon` stdio JSON-RPC 客户端 |
-| **Tier 2 · CLI / Hook 运行器** | Claude Code、Codex CLI、Cursor | 子进程调用或原生任务工具，消费 `subagentAction.brief` 与 `submitCommand` | 在稳定检查点由 Hook 触发的 `handoff_compact` | `ygg-agent --daemon` 或单次 `--resume --event` CLI |
+| **Tier 1 · 主会话直驱** | Pi Coding Agent 等原生 Agent 宿主 | 主会话直驱 egg CLI + 原生 `Agent` 工具（`resume`），自动回退到 `fullFallbackBrief` | 实时 token 比例（`soft >= 60%`、`hard >= 75%`），稳定检查点写 `artifacts/handoff-latest.md` | 常驻能力 = 宿主原生 `egg --daemon` / `serve` |
+| **Tier 2 · CLI / Hook 运行器** | Claude Code、Codex CLI、Cursor | 子进程调用或原生任务工具，消费 `subagentAction.brief` 与 `submitCommand` | 在稳定检查点由 Hook 触发的 `handoff_compact` | `egg --daemon` 或单次 `--resume --event` CLI |
 | **Tier 3 · 提示委派** | 通用 LLM 聊天 / 自定义 Agent 循环 | 协调者把 `subagentAction.brief` 复制进子代理上下文并转达 `proposal.submit` | 经 `vfs.write` 手动检查点交接 | 单次 CLI 回执（缺省人读文本；`--raw` 显式旗标输出单行 JSON 信封）（`narrative` + `pendingChoice`） |
 
 ### 1.2 Adapter 一致性契约（任何 harness 都必须满足的五条义务）
 
-三层架构的薄弱点在第 2 层：`subagentAction` 只是 `meta.summary` 里的**数据**，dispatcher 完全由 adapter 自行实现。于是「Mod 产出的 brief 被消费」曾只写成注释约定，离开 Pi 的 `Agent` 工具后就静默丢失。本节把这件事变成**可断言的义务**，全部落在 `.pi/extensions/ygg-pi-harness/`（与 Pi API 无关，可移植到任何 harness），每条都有纯函数、失败信号与可跑的命令。
+三层架构的薄弱点在第 2 层：`subagentAction` 只是 `meta.summary` 里的**数据**，dispatcher 完全由 adapter 自行实现，于是「Mod 产出的 brief 被消费」不能只写成注释约定。本节把它固化为**可断言的义务规范**：落点由各 harness adapter 自行实现；本仓库当前无内置 adapter（执行壳已删除，主会话直驱 egg CLI + 原生 Agent 工具）。
 
-| # | 义务 | 纯函数 / 位置 | 违反时的可见症状 |
-| --- | --- | --- | --- |
-| **C1** | 派发给 subagent 的 prompt 必须含 `Mandatory references:` 与 `Submit:` 两条**行首锚线** | `checkSubagentActionConsumption`（`orchestrator.ts`） | 回执 `[ADAPTER CONTRACT] <rN> <stage>: …`，**不 spawn**，结果进 `degraded` |
-| **C2** | `deltaPrompt` 若被单独使用，必须可判定；不可判定时**不得消费**（fail-closed） | 同 C1，策略表 `DELTA_ASSESSABLE` | `delta-unassessable`；adapter 退回 `brief` 并写 `[ADAPTER NOTE]` |
-| **C3** | 任何一次派发都必须把**实际使用的 prompt 逐字节**落进 `artifacts/<rN>-<stage>-brief.md` | `briefArtifactPathFor` + `writeBriefArtifact` | `[BRIEF REFUSED] <path>：<原因>` 进回执，并计入 `degraded` |
-| **C4** | 归档结论必须是「查过且查空」或「没有库可查」，**不得**以「工具跑过」充当 `0/0` | `analyzeArchiveVerdict`（`archive.ts`） | 见下文 §1.2.1 三态表；非证据态写 `sessions=0/0/unsettled:<kind>` |
-| **C5** | 每一份 brief 都以 `## 续跑承接（Resume Handover）` 段收尾 | `ensureResumeHandoverSection` | `brief-missing-resume-handover`；无 `agentId` 时 `resume` 无法等价 |
+| # | 义务 | 违反时的可见症状 |
+| --- | --- | --- |
+| **C1** | 派发给 subagent 的 prompt 必须含 `Mandatory references:` 与 `Submit:` 两条**行首锚线**（`^Submit:\s*\S` 要求后续非空） | 回执 `[ADAPTER CONTRACT] <rN> <stage>: …`，**不 spawn**，结果进 `degraded` |
+| **C2** | `deltaPrompt` 若被单独使用，必须可判定；不可判定时**不得消费**（fail-closed），退回完整 `brief` | `delta-unassessable`；回执写 `[ADAPTER NOTE]` |
+| **C3** | 任何一次派发都必须把**实际使用的 prompt 逐字节**落进 `artifacts/<rN>-<stage>-brief.md` | `[BRIEF REFUSED] <path>：<原因>` 进回执，并计入 `degraded` |
+| **C4** | 归档/清理结论必须诚实：「查过且查空」或「没有库可查」才算证据，不得以「工具跑过」充当 `0/0`——不知道落点时宁可说没查，不谎报查空（现由 D-MA21 提示词方案承载，声明制见 §2.6 `settlement.sessions`） | 非证据态写 `sessions=0/0/unsettled:<kind>` |
+| **C5** | 每一份 brief 都以 `## 续跑承接（Resume Handover）` 段收尾（`basis` / 前任执行者 / 未落地清单 / 硬约束 / 已归档制品） | `brief-missing-resume-handover`；无 `agentId` 时 `resume` 无法等价 |
 
-**锚线为什么必须是「行首前缀」而不是 `includes`**：`job.description` 是多行需求正文，正文里完全可能出现 `Mandatory references: …` 这几个字。用任意 `includes` 判定会被一句话绕过——那是自指类断言的经典空转（`harness.test.ts` 有一个用例专门喂这种输入）。`Submit:` 额外要求**后续非空**（`^Submit:\s*\S`），这样「有这条命令」与「命令不是空的」被同时钉住。
-
-**两条路必须同形状**：Core 的 `subagent_brief` 模板（`data/texts/` 片段装配的 TEXTS）带这两行；adapter **本地拼装**的 brief 也必须带。否则「旧 Mod 兼容路径」会自己违反 C1——`harness.test.ts` 的 `本地拼装路径也满足两条锚线` 用例咬住这一点。
-
-**`preferCoreBrief` 不是绕过开关**：`preferCoreBrief: false` 是**显式的旧 Mod 兼容降级**，不是静默默认——此时回执写 `[ADAPTER NOTE]` 且 `OrchestrationResult.degraded` 非空，让上层看见；而 Core 明明给了 `subagentAction` 却被关掉**不构成** `no-core-action` 的豁免理由（那正是本契约要消灭的路径）。
-
-**`resume` 的等价物是制品，不是这一段**：`## 续跑承接（Resume Handover）` 记录 `basis` / 前任执行者 / 未落地清单 / 硬约束 / 已归档制品，作用是让**下一个执行者**（可能是另一个 harness、另一个上下文窗口）知道上一任为什么停在门外。它本身**不是** `resume` 的等价物——等价物是 `artifacts/<rN>-<stage>.md` 加上门禁证据。`artifacts/handoff-latest.md` 的下一步会显式点名这条 `continuation` 路径。
-
-#### 1.2.1 未知 harness 下 `archive-sessions` 的行为边界
-
-会话库落点被硬编码在宿主（`agent.rs` 的 `harness_session_dirs` 只认 `pi` / `claude-code` / `codex`），`auto` 探测在含 `.pi/` 的仓库里必然判成 `pi`。因此**不知道落点时唯一诚实的做法是改判结论，而不是猜落点**。归档结论只允许以下四种，且必须可区分：
-
-| 结论 | 宿主输出 | 是否算证据 | Mod 侧 `settlement.sessions` |
-| --- | --- | --- | --- |
-| ① `swept` | `moved=N;remaining=0;dest=<本局声明的库根下>` | ✅ 是 | adapter 不写 `sessions=` 段，由 Mod 的 `[SESSIONS SETTLED]` 机证接管 |
-| ② `no-store` | `dest=generic:no-session-store:<batch>` | ❌ **不是** | `sessions=0/0/unsettled:no-store`（可收口，但台账自证「没有库」） |
-| ③ `unavailable` | 非零退出 / `builtin_usage_error` / **外域 `dest`** | ❌ 不是 | `sessions=0/0/unsettled:unavailable` |
-| ④ `unsettled` | 工具没回可判定结果（空叙事 / `remaining>0` / 三元组不全） | ❌ 不是 | `sessions=0/0/unsettled:unsettled` |
-
-**禁止第五种**：`dest` 非空但**没有任何 harness 认领**（典型形态：在 DeepSeek Harness 局里出现 `dest=~/.pi/agent/sessions-trash/<batch>`）。那条路径确实存在，但它归档的不是本局会话——把它写成「查空了」就是谎报。识别完全在扩展侧，不需要新契约：`dest` 的 trash 根必须落在**本局声明的 adapter** 对应的根下（`archive.ts` 的 `FOREIGN_SESSION_ROOTS` + 可选的 `destRoot`）。默认判据是「宁可说没查，不谎报查空了」。
-
-> **给宿主维护者的一句话**：要让 `archive-sessions` 真正覆盖未知 harness，需要在 `agent.rs` 增加第五个适配器及其会话库约定。本仓库把 `crates/ygg-sandbox/examples/agent/main.rs` 当红线，所以这里只保证**不谎报**，不自行修改宿主。
+**锚线为什么必须是「行首前缀」而不是 `includes`**：`job.description` 是多行需求正文，正文里完全可能出现 `Mandatory references: …` 这几个字，用任意 `includes` 判定会被一句话绕过——那是自指类断言的经典空转。**两条路必须同形状**：Core 的 `subagent_brief` 模板（`data/texts/` 片段装配）带这两行，adapter **本地拼装**的 brief 也必须带。**`resume` 的等价物是制品**（`artifacts/<rN>-<stage>.md` 加门禁证据），续跑承接段只是让下一个执行者（可能是另一个 harness、另一个上下文窗口）知道上一任为什么停在门外。
 
 ---
 
-## 2. 工作流状态机与行为语义
+## 2. Mod 剧情与状态机语义
 
-### 2.1 宏观 Coordinator 阶段机
+> 本章是 `agent-seed` Mod 行为语义的权威（D-MA23 剧情双层重写）。组织原则：**以剧情节点（微状态）为纲、以事件为推进货币**——每个节点的七项要素（主人 / 进入 / 幕内事件 / 退场 / 产出证据 / 拒绝 / 文案键）分布在：微状态表（主人、进入、退场、证据）、转场表（幕内与退场事件）、拒绝面矩阵（拒绝面）、beats 分组（文案键，§2.12）。两条设计目标：**压缩状态数量**（11 → 4 个真状态）与**主流程自循环**（协调 ⇄ 盘点 ⇄ 发布 → 下一批；终局只经显式退役）。
 
-Coordinator 在 3 个阶段上支配整体运行生命周期（r2 rev2 B 裁决：`intake` 阶段与 `task.intake` 事件已注销，冷启动章程由 `event.start` 启动载荷承载，boot 直落 `coordinate`）。r9 起生命周期是**常驻自循环**：`coordinate` 是常驻主态，
-`review` 是批盘点相位，`review.note` 的常态落点是**批收口**（回 `coordinate`，批计数 +1）；运行级终局
-`done` 只经**显式退役**（`config.set run.retire=true` 武装后的终局变体）可达。需求级 `done` 保留
-（accept_gate 产物，与运行退役态只是字面量同形，语义正交）：
+### 2.1 Mod 是什么（边界与纯度）
 
-| 当前阶段 | 事件 | 守卫 / 前置条件 | 下一阶段 | 行为效果 |
+Mod 是一个**纯确定性状态机**：无 IO、无时钟、无随机（P8 / D13）。与外部世界的一切交互（git、文件、进程）都经宿主中介能力（`ygg.fs` VFS、`ygg.tool.call` 同步工具桥）发生，宿主未挂载时优雅降级且不破坏状态语义。
+
+- **唯一写入口 = 事件**：`(state, event) -> state'`，全有或全无（P1）；事件之外不存在任何改状态的路径（L1 推进唯一性，§3.4）。
+- **唯一输出 = KV + 叙事 + 菜单**：每次 dispatch 产出叙述回执（`ygg.narrate`）、持久化键值（`ygg.kv`）与至多一个 `pendingChoice` 菜单（`ygg.choice`）。
+- **模块顶层纯度**（P6）：`src/**` 五层只导出纯函数与常量；处理器注册只发生在 `mod.lua` 装配入口。
+
+### 2.2 双层结构与真状态压缩
+
+状态分两层。**外层真状态**：内核 FSM 与需求状态机的持久化取值，压缩到 **4 个**。**内层微状态**（剧情节点）：由 KV 标志位经判定函数（§2.5）派生，不独立存储、不消耗转场预算。
+
+真状态判据（满足任一条才配成为真状态）：
+
+1. **跨越不可逆语义**——完成后不可回退（`done`、`retired`）；
+2. **改变其他模块的全局行为**——退役后一切业务事件拒绝（`retired`），需求关闭后退出派发队列（`done`）。
+
+| 层 | 载体 | 原状态（11 个） | 真状态（4 个） | 降级去向 |
 | --- | --- | --- | --- | --- |
-| `coordinate` | `coordinate.submit`（**批边界**） | `pendingProposals == 0` $\land$ `jobs == 0` $\land$ `conflicts == 0` $\land$ 所有叶子需求 `done`（r2 rev2 起：另需章程非空 ∧ 需求数 ≥1， 局可读拒绝） | `review` | 重置 `verify.passed = false` 并清空本轮的 `settlement.*` 键。 |
-| `review` | `verify.submit` / `gate.verify_suite` | `all_green=true`（或所有验证命令退出码为 `0`） | `review` | 锁存 `verify.passed = true`（`verify.source = "human"` 或 `"tool"`）。 |
-| `review` | `verify.submit` | 当 `gates.require_all_green == true` 时 `all_green=false` | `coordinate` | 将本批退回 `coordinate` 以返工，并重置结算注册。 |
-| `review` | `settlement.evolution` | `verify.passed == true` $\land$ 有效的候选/类别计数 | `review` | 注册演进摘要/产物，结算 `sessions=` 与 `todo=`，并触发内联 `harness.archive_sessions`。 |
-| `review` | `review.note`（未武装，常态） | `verify.passed == true` $\land$ `settlement.*` 完整 $\land$（`play.mode != "goal"` $\lor$ `goal.authorization != ""`） | `coordinate` | **批收口**：将演进记录归档进 `review.evolution.*`（滚动单槽），`run.batch` +1，复位 `verify.passed` 与 `settlement.*`，发出 `[BATCH <n> SETTLED]`（绝无 `[ENDING` 前缀）。 |
-| `review` | `review.note`（`run.retire` 武装，唯一终局） | 同上（goal 授权在每批盘点与退役前都查） | `done` | **退役**：归档 + 写入 `ending = "done"`，发出 `[ENDING · run retired]`。 |
+| 运行级 | `fsm.stage` | `coordinate` / `review` / `done` | **`live` / `retired`** | 协调/盘点/发布 → `run.phase` 微状态；`done` → `retired` |
+| 需求级 | `req.<i>.status` | `draft`/`planning`/`developing`/`done` + `split`/`merged`/`dropped` | **`open` / `done`** | 进行中各态 → 九幕微状态；旁路 → `closed_reason` 字段（R11） |
+| 提案级 | `prop.<j>.status` | 4 值 | 不变 | — |
+| 泳道级 | `lane.<k>.*` | 3 值 | 不变 | — |
 
-### 2.2 需求生命周期与强制门禁语义
+`coordinate` 与 `review` 来回切换、语义可逆——不满足任一判据，降为 `live` 的微状态；`draft` / `planning` / `developing` 同属「进行中」，降为 `open` 的微状态；`split` / `merged` / `dropped` 是**关闭原因**，降为字段（R11）。
 
-门禁裁决权随 `play.mode` 划分（硬约束，与 AGENTS.md §1.8 同源）：`guide` 模式下门禁动作只收菜单票，由**人**裁决；`goal` 模式下主代理读完整回执后自行裁决（`goal.authorization` 逐局登记，证据标准不变）。机制上表现为：`proposal.accept` / `gate.approve` 等里程碑动作在 `guide` 下拒绝非票据直发（见 §3 动作表）。
+### 2.3 运行级剧情（`live`）
 
-每个需求 `rN` 用 5 个规范状态（`draft`、`planning`、`developing`、`done`，外加终态旁路状态 `split`、`merged`、`dropped`）与正交的状态属性（`plan_ok`、`job`、`gate`、`lane`、`rev`、`conflict`、`needs_amend`）存储：
+`live` 是常驻自循环：立局 → 协调 ⇄ 盘点 ⇄ 发布 → 批结算 → 下一批，往复运行直到显式退役。**内核 FSM 唯一转场是 `live → retired`**（R1，`review.note` 武装路径经 `flow.advance` 盖章）。
 
-| 存储状态与属性 | 派生展示阶段 | 触发事件 | 目标状态与属性 | 语义契约 |
-| --- | --- | --- | --- | --- |
-| `draft` | `draft` | `requirement.dispatch` | `planning`（`job="plan"`） | **阶段合并**：直接派发 `plan` 任务，无需单独的 `analysis` 回合。 |
-| `planning`（`job="plan"`） | `planning` | `proposal.submit`（`stage="plan"`） | `planning`（`job="plan"`，待决提案 `pK`） | 子代理交付方案产物（`artifacts/rN-plan.md`）并经尾随 `exec=<agent_id>` 绑定 `executor.rN.plan`。 |
-| `planning`（待决 `pK`） | `plan_review` | `proposal.accept` | `planning`（`job=""`，`gate="plan"`，`gate_rev=rev`） | 释放任务槽并升起强制 `plan_gate`。 |
-| `planning`（`gate="plan"`） | `plan_gate` | `gate.approve` | `planning`（`gate=""`，`plan_ok=true`）$\to$ **响应式自动派发** $\to$ `developing`（`job="development"`，`lane=k`） | 批准 `plan_gate` 置 `plan_ok=true`；当该需求自身无在跑任务、无自身待决提案、无自身冲突（门禁按需求局部化判据，r12：他需的事态不再阻塞本需派发）且全局开发槽空闲时，响应式钩子立即认领 `lane-k` 并在**同一回合**派发 `development`。 |
-| `planning`（`gate="plan"`） | `plan_gate` | `gate.reject` | `planning`（`gate=""`，`plan_ok=false`，`rev=rev+1`） | 使方案失效，`rev` 递增，并返回规划队列。 |
-| `developing`（`job="development"`，`lane=k`） | `developing` | `proposal.submit`（`stage="development"`） | `developing`（待决提案 `pM`，内联 `git.lane_probe`） | 绑定 `executor.rN.development`，同步探测 `lane-k`（`commits`、`clean`、`head`、`files`），并运行跨泳道冲突雷达。 |
-| `developing`（待决 `pM`） | `dev_review` | `proposal.accept` | `developing`（`job=""`，`gate="accept"`，`gate_rev=rev`） | 释放活动任务槽并升起强制 `accept_gate`（泳道在 `accept_gate` 通过前保持绑定）。 |
-| `developing`（`gate="accept"`） | `accept` | `gate.approve` | `done`（`gate=""`，`lane=0`，内联 `git.worktree_release`） | 要求非空 `artifacts` 且 `gate_rev == rev`。在**同一回合**将需求标记为 `done` 并把 `lane-k` 停放在 detached `HEAD`。 |
-| `developing`（`gate="accept"`） | `accept` | `gate.reject` | `planning`（`gate=""`，`rev=rev+1`，保留先前的 `plan_ok`） | 若未修订（`plan_ok=true`），展示为 `ready` 重新进入开发；若已修订（`plan_ok=false`），展示为 `planning` 重新规划。 |
+```mermaid
+stateDiagram-v2
+    %% mermaid-hash: 8f3a21c4
+    state "live · 运行中" as live {
+        [*] --> 立局
+        立局 --> 协调: run.begin（章程三件套齐备）
+        协调 --> 协调: 派发/受理/门禁/冲突/立项（自环）
+        协调 --> 盘点: coordinate.submit（队列清空）
+        盘点 --> 盘点: 验证→登记→结会话→清待办（自环）
+        盘点 --> 协调: verify.submit(false)（返工）
+        盘点 --> 发布: 盘点四项齐备（自动）
+        发布 --> 发布: release.confirm / release.skip
+        发布 --> 协调: review.note（批结算，batch+1）
+    }
+    state "retired · 已退役" as retired
+    [*] --> live
+    live --> retired: review.note（run.retire 武装）
+```
 
-#### 旁路与异常迁移
-- **`requirement.amend`**：递增 `rev` 并使 `plan_ok` 失效（除非已处于 `developing`，此时保留进度）。若有门禁挂起，`gate_rev != rev` 使该门禁呈现为 `stale` 并阻塞 `gate.approve`。修订一个 `done` 需求会派生一个带 `origin=rN` 的新 `draft` 需求。
-- **`requirement.split` / `requirement.merge`**：仅当需求处于 `draft` / `analyzing` / `planning` 且无活动任务、门禁、泳道或冲突时有效。父/源需求进入终态 `split` / `merged`，而子/目标需求从 `draft` 起步。
-- **`requirement.conflict` 与冲突雷达**：在两个需求之间升起双向冲突（`req.i.conflict`、`req.i.conflict_peer`），暂停派发并关闭，直到经 `requirement.resolve`（`keep_both`、`keep_first` 或 `revise`）解决。
+**微状态表**（判定序见 §2.5；「主人=人 ⇒ 票据门」见 §2.13）：
 
-### 2.3 响应式单后继推进与效应收敛
+| 微状态 | 判据 | 主人 | 进入 | 退场 | 产出证据 |
+| --- | --- | --- | --- | --- | --- |
+| **立局** | `run.phase == "charter"` | 人（局主） | run 创建（`initial=live`，`run.phase` 初值 `charter`） | `run.begin` | 章程三件套 `task.title/goal/success` |
+| **协调** | 章程齐 ∧ `run.phase == ""` | 主代理 | `run.begin` / 批结算 | `coordinate.submit` | 需求交付物、门禁批注 |
+| **盘点** | `run.phase == "settle"` | 主代理 | `coordinate.submit` | 盘点四项齐备（自动转发布） | 验证证据、演进登记、结算声明 |
+| **发布** | `run.phase == "release"` | **主代理**（develop→master） | 盘点四项齐备 | `release.confirm` / `release.skip` → 批结算或退役 | `master@<sha>` + tag `vYYYY.MM.DD.N`，或跳过理由 |
+| 退役（终态） | `stage == "retired"` | — | `review.note`（`run.retire` 武装） | — | `ending` |
 
-在发出 `pendingChoice` 之前，Mod 按确定性的注册顺序冲刷已注册的响应式效应（`useEffect`）（最多 `MAX_PASSES = 4`；不收敛即为硬错误）。每个响应式效应必须遵守四条不变量：
+**开场序列**（R3）：`event.start` 叙述 boot 三则（引擎/模式/红线）并可携带章程载荷写入 `task.*`，**不转场**；`charter.set` 仅立局可用、可反复修订；`run.begin` 前置 = 章程三件套齐备，落点 `run.phase=""` 并发 `[RUN BEGUN]`。章程在 `run.begin` 后**锁定**（R4）：`charter.set` 在非立局微状态一律可读拒绝。
 
-1. **唯一声明后继**：迁移是确定性的，且只在一处声明。
-2. **零外部判断**：无需人类批准或未挂载的外部 I/O。
-3. **绝不绕过门禁**：里程碑放行动作（`proposal.accept`、`gate.approve`、`coordinate.submit`、`verify.submit`、`review.note`）绝不由效应触发。
-4. **无渲染的效应**：效应可改变 KV 并调用 `ygg.narrate`，但绝不调用 `render()` 或 `ygg.choice`。
+**盘点内子微状态**（线性推进；`verify.submit(false)` 使整批退回协调并清 settlement 与 release 键，R9）：
 
-### 2.4 持久化泳道池与实时进度投影
+| 子微状态 | 判据 | 只允许 | 文案键 |
+| --- | --- | --- | --- |
+| 待验证 | `verify.passed ≠ true` | `verify.submit` | `verify_green` / `verify_fail` |
+| 待登记演进 | `verify.passed` ∧ 未注册 | `settlement.evolution` | `settlement_evolution` |
+| 待结会话 | 已登记 ∧ `settlement.sessions.destination == ""` | `settlement.sessions` | `settlement_sessions` |
+| 待清待办 | 已登记 ∧ `settlement.todo.remaining ≠ 0` | `settlement.todo` | `settlement_todo` |
+| 可进发布 | 以上皆完成 | （自动转发布幕，不新增事件） | — |
 
-- **非破坏性认领（`worktree-claim`）**：分配 `<repo-parent>/worktrees/<repo>-lane-<k>`（$k \in 1..4$）。若 worktree 已存在且其已跟踪工作树是干净的，则运行 `git checkout -B <branch> HEAD`，使未跟踪构建缓存（`target/`、`node_modules/`）跨任务存活。
-- **非破坏性释放（`worktree-release`）**：验证 worktree 干净并运行 `git checkout --detach HEAD`，为 Coordinator 合并解锁 `feature/<req>` 而不删除目录。
-- **强制分支命名（`branch_problem`，r2）**：泳道分支必须满足 `feature/{4位uuid}-{语义词段}`——小写 4 位 uuid 段 + 语义词段（≥3 连续字母、非纯数字、8–16 位纯 hex 拒绝、总长 ≤48、前缀大小写敏感）。`lane.claim` 与 `git.worktree_claim` 两条入口同规则、拒绝通道不同：前者走 `flow.refuse` 可读拒绝（`reject.count/last` 留痕），后者走叙事拒绝（账本与 reject 台账不动）；自动认领不再生成默认名（未自报名 = 可读拒绝，展示层未断言分支显示 `-`）。
-- **执行者身份投影（r3）**：`requirement.list` trace 并列三态互证后缀（`[verified]` / `[mismatch:actor=…]` / `[unverified]`，判定只看 `exec=` vs 宿主 `actor=` 章）；`agent.summary.profiles` 数组（≤8 张，handle 升序）投影 profile 注册表（自报身份卡，与账本互链不冗余）。
-- **实时状态投影**：`requirement.list` 与 `summary.jobs[]` 中的每一行需求投影出三条从 KV 派生的实时状态字符串：
+**发布幕**（R-a / R10）：盘点四项齐备（验证、演进登记、会话清理、待办清理）后自动进入发布微状态（R9，效应驱动）。`release.confirm` 携带 `master@<sha>` 与批次 tag `vYYYY.MM.DD.N` 声明本批 develop→master 合并结果；`release.skip` 必填理由——本批无需发布的显式声明。两者任一成立即「发布已声明」；`review.note` 的前置即发布已声明（`run.release.master_sha ≠ ""` ∨ `run.release.skipped_reason ≠ ""`），未声明的批结算被可读拒绝。
+
+`review.note` 两个落点（R10）：**未武装（常态）= 批结算**——`run.phase=""`、清 release 键、`run.batch+1`、`[BATCH n SETTLED]`（绝无 `[ENDING` 前缀）；**`run.retire` 武装 = 退役终局**——`advance(retired)` 写 `ending`，`[ENDING · run retired]`。
+
+### 2.4 需求级剧情（`open`）
+
+每个需求在 `open` 内走过九幕（微状态），第 9 幕 `done` 即终态。三条打回路径（交付受理 `proposal.reject`、验收门禁 `gate.reject`、集成 `integration.reject`）**统一落待开发**（R6：`plan_ok` 保持、`job=""`、释放泳道）。
+
+```mermaid
+stateDiagram-v2
+    %% mermaid-hash: b7e40d92
+    state "open · 进行中" as open {
+        [*] --> 立项
+        立项 --> 计划中: requirement.dispatch
+        计划中 --> 计划门禁: proposal.submit(plan)
+        计划门禁 --> 待开发: gate.approve
+        计划门禁 --> 计划中: gate.reject
+        待开发 --> 开发中: requirement.dispatch（+ lane.claim）
+        开发中 --> 交付受理: proposal.submit(development)
+        交付受理 --> 验收门禁: proposal.accept
+        交付受理 --> 待开发: proposal.reject
+        验收门禁 --> 集成: gate.approve
+        验收门禁 --> 待开发: gate.reject
+        集成 --> 待开发: integration.reject
+        集成 --> [*]: integration.confirm
+    }
+    [*] --> open
+    open --> done: integration.confirm
+```
+
+**九幕微状态表**（判定序见 §2.5）：
+
+| # | 微状态 | 判据 | 主人 | 进入事件 | 退场事件 | 产出证据 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | **立项** | 无 job ∧ 无门禁 ∧ 无待决提案 ∧ `plan_ok=false` | 人 | `requirement.add` | `requirement.dispatch` | 需求描述 |
+| 2 | **计划中** | `job=="plan"` ∨ 有 pending plan 提案 | 执行者 | ↑ | `proposal.submit(plan)` | `artifacts/rN-plan.md` |
+| 3 | **计划门禁** | `gate=="plan"` | **人** | ↑ | `gate.approve` / `gate.reject` | 门禁批注 |
+| 4 | **待开发** | `plan_ok=true` ∧ `job==""` ∧ 无 pending | **资源**（泳道槽位） | `gate.approve` | `requirement.dispatch` | 泳道认领记录 |
+| 5 | **开发中** | `job=="development"` | 执行者 | ↑ | `proposal.submit(development)` | `artifacts/rN-development.md` + `develop@<sha>` |
+| 6 | **交付受理** | 有 pending development 提案 | 主代理 | ↑ | `proposal.accept` / `proposal.reject` | 受理记录 |
+| 7 | **验收门禁** | `gate=="accept"` | **人** | `proposal.accept` | `gate.approve` / `gate.reject` | 门禁批注（须核验 `develop@<sha>`） |
+| 8 | **集成** | `integrating=true` | 执行者 | `gate.approve` | `integration.confirm` / `integration.reject` | `develop@<sha>` 核验记录 |
+| 9 | **done**（终态） | `status=="done"` | — | `integration.confirm` | — | 集成证据；旁路关闭时为 `closed_reason` |
+
+保留「交付受理」的**不对称**（定稿 2026-11-12）：计划提案一过门禁即待开发，开发交付多一道主代理受理幕——开发交付的复核成本更高，受理幕是协调层的串行检查点。
+
+**转场表**（副作用中的键见 §2.8；三条打回行 = R6 修正版）：
+
+| 从 | 事件 | 到 | 副作用 |
+| --- | --- | --- | --- |
+| 立项 | `requirement.dispatch` | 计划中 | `job="plan"` |
+| 计划中 | `proposal.submit(plan)` | 计划门禁 | `job=""`、提案落库、`gate_rev=rev` |
+| 计划门禁 | `gate.approve` | 待开发 | `plan_ok=true`、`gate=""`；响应式自动派发可同回合续进开发中（§2.9） |
+| 计划门禁 | `gate.reject` | 计划中 | `plan_ok=false`、`rev+1`、写 `feedback` |
+| 待开发 | `requirement.dispatch` | 开发中 | `job="development"` + `lane.claim` |
+| 开发中 | `proposal.submit(development)` | 交付受理 | `job=""`、提案落库、**不释放泳道**（R7） |
+| 交付受理 | `proposal.accept` | 验收门禁 | stale 校验（`gate_rev==rev`）、复制 summary/artifacts |
+| 交付受理 | `proposal.reject` | 待开发 | 提案置 rejected、`job=""`、释放泳道 |
+| 验收门禁 | `gate.approve` | 集成 | `integrating=true`、`gate=""` |
+| 验收门禁 | `gate.reject` | 待开发 | 写 `feedback`、`rev+1`、释放泳道 |
+| 集成 | `integration.confirm` | done | 校验 `develop@<sha>`、`status="done"`、`LANES.release` |
+| 集成 | `integration.reject` | 待开发 | 写 `feedback`、`integrating=false`、`LANES.release` |
+
+**旁路与覆盖层**（不改幕，只改标志位）：`requirement.amend` 递增 `rev` 并使 `plan_ok` 失效——门禁挂起时 `gate_rev != rev` 呈现 stale、阻塞 `gate.approve`；修订 `done` 需求派生带 `origin=rN` 的新需求。`requirement.split` / `requirement.merge` 仅对开发前且无活动任务、门禁、泳道、冲突的需求有效——父/源需求落 `done` + `closed_reason`（R11）。`requirement.conflict` 在两需求间升起双向冲突（阻塞派发与收口），直到 `requirement.resolve`（`keep_both` / `keep_first` / `revise`）。`blocked`（冲突 / `needs_amend`）是 `req_display()` 叠加在 `req_phase()` 之上的**覆盖层**，不是微状态。
+
+### 2.5 微状态判定的单一来源
+
+菜单、文案、渲染、进度投影与文档全部从**两个函数**派生，任何消费方不得自带第二份状态名分支（这是「剧情读不出来」缺陷的根治——原判定散在 `requirements.lua` / `menus.lua` / `render.lua` / `review.lua` 四处）：
+
+```lua
+-- 运行级微状态（完整判定序；外层先判 stage==retired → 退役）
+function run_phase()
+  if STAGE == "retired" then return "退役" end
+  local p = str("run.phase")
+  if p == "settle"  then return "盘点" end
+  if p == "release" then return "发布" end
+  if p == "charter" then return "立局" end
+  return "协调"                       -- p == ""：章程齐 ∧ 常驻主态
+end
+```
+
+```lua
+-- 需求级微状态（判据顺序即优先级；返回 closed 时由 closed_reason 区分旁路）
+function req_phase(i)
+  if req_status(i) ~= "open"       then return "closed"   end
+  if flag(i, "integrating")        then return "集成"     end
+  if req_gate(i) == "accept"       then return "验收门禁" end
+  if has_pending(i, "development") then return "交付受理" end
+  if req_job(i) == "development"   then return "开发中"   end
+  if req_plan_ok(i)                then return "待开发"   end
+  if req_gate(i) == "plan"         then return "计划门禁" end
+  if has_pending(i, "plan") or req_job(i) == "plan" then return "计划中" end
+  return "立项"
+end
+```
+
+判定序的关键点：`integrating` 先于一切（集成幕是最近一次裁决）；**待开发先于计划门禁与计划中**——`plan_ok=true` 时即使有遗留 pending 提案也判待开发，三条打回路径的落点一致性由它保证；`closed` 不是幕名，由 `closed_reason` 区分正常交付与旁路关闭。
+
+### 2.6 事件总表（38 个，三分类）
+
+事件是唯一推进货币。三类切分：**剧情事件**（推进微状态，20 个）、**操作事件**（增删改查，8 个）、**基础设施事件**（10 个）。其中 6 个为 D-MA23 新增：`charter.set` / `run.begin` / `integration.confirm` / `integration.reject` / `release.confirm` / `release.skip`。
+
+**剧情事件**（payload 契约与微状态落点；行内管道符均为转义字面量）：
+
+| 事件 | 微状态落点 | payload |
+| --- | --- | --- |
+| `event.start` | live·立局（进入） | `""` 或 `"<title>\|<goal>\|<success>"`（可选章程载荷，R3；不转场） |
+| `charter.set` | live·立局（内） | `"<title>\|<goal>\|<success>"`（可反复修订，R4 后锁定） |
+| `run.begin` | 立局 → 协调 | `""`（前置：章程三件套齐备） |
+| `requirement.add` | open·立项（进入） | `"<title>\|<description>[#deps]"` |
+| `requirement.dispatch` | 立项 → 计划中 / 待开发 → 开发中 | `"rN"` |
+| `proposal.submit` | 计划中 → 计划门禁 / 开发中 → 交付受理 | `"<req>\|<rev>\|<stage>\|<summary>\|<artifacts>\|…"` |
+| `proposal.accept` | 交付受理 → 验收门禁 | `"pN"` |
+| `proposal.reject` | 交付受理 → 待开发 | `"<pN>\|<reason>"` |
+| `gate.approve` | 计划门禁 → 待开发 / 验收门禁 → 集成 | `"rN"` |
+| `gate.reject` | 计划门禁 → 计划中 / 验收门禁 → 待开发 | `"<rN>\|<feedback>"` |
+| `integration.confirm` | 集成 → done | `"<rN>\|develop@<sha>"` |
+| `integration.reject` | 集成 → 待开发 | `"<rN>\|<reason>"` |
+| `coordinate.submit` | 协调 → 盘点 | `""`（前置见 R8） |
+| `verify.submit` | 盘点·待验证 | `"true"` / `"all_green=false;report=…"` |
+| `settlement.evolution` | 盘点·待登记 | `"artifact\|summary[\|c=…][\|cls=…][\|sessions=…][\|todo=…]"` |
+| `settlement.sessions` | 盘点·待结会话 | `"moved\|remaining\|destination"` |
+| `settlement.todo` | 盘点·待清待办 | `"remaining\|basis"` |
+| `release.confirm` | 发布 → 批结算 | `"master@<sha>\|vYYYY.MM.DD.N"` |
+| `release.skip` | 发布 → 批结算 | `"<reason>"`（必填：本批无需发布的理由） |
+| `review.note` | 发布 → 协调（未武装）/ → retired（武装） | `"lesson\|score"` |
+
+`proposal.submit` 尾段链保留固定相对序 **`exec` → `actor` → `actor_session`**（各自可独立缺席）：`exec=<agent_id>[:<reason>]` 必须在链中 `actor=` 之前并同事务绑定执行者台账；`actor=` / `actor_session=` 由**宿主注入**（声明路由），调用方自带同名段在宿主侧即被拒（`ACTOR_FORGED`）——线协议正文见 §3.3，身份语义见 §2.13。
+
+**操作事件**（8 个，不推进任何幕）：`requirement.list` / `requirement.split` / `requirement.merge` / `requirement.amend` / `requirement.conflict` / `requirement.resolve` / `lane.claim` / `lane.release`——只改操作对象与标志位（旁路语义见 §2.4 末段，泳道语义见 §2.10）。
+
+**基础设施事件**（10 个）：`config.set` / `config.open` / `config.close` / `map.show` / `ygg.choice_selected` / `vfs.write` / `tool.call` / `tool.result` / `agent.summary` / `stage.advance`。
+
+> 与 §3.4 末注的关系：末注的 registry 口径与复算命令描述**已装载 Mod 的事实集**；本表是 D-MA23 设计目标全集（既有 32 + 新增 6 = 38）。代码落地后两者一致；运行期 registry 仍是 fail-closed 的运行时唯一事实。
+
+### 2.7 拒绝面矩阵
+
+每个微状态的**拒绝面**与拒绝理由。拒绝一律走 `flow.refuse` 可读拒绝（`[REJECTED:*]` 前缀、`reject.*` 留痕），文案键按 beats 分组命名（§2.12）：
+
+| 微状态 | 拒绝的事件 | 拒绝理由 |
+| --- | --- | --- |
+| live·立局 | 全部业务事件（requirement.*/proposal.*/gate.*/lane.*/coordinate.submit/settlement.*/review.note） | 章程未立，局不可开工（先 `charter.set` + `run.begin`） |
+| live·协调 | settlement.* / review.note / release.*；integration.*（目标需求不在集成幕时） | 结算/发布/退役属盘点与发布幕；integration.* 前置=该需求处于集成幕 |
+| live·盘点 | requirement.dispatch / proposal.* / gate.* / lane.* / coordinate.submit / release.* | 派发与门禁在盘点幕冻结（先完成盘点四项） |
+| live·发布 | requirement.dispatch / proposal.* / gate.* / lane.* / coordinate.submit / settlement.* | 发布幕只认 release.* 与 review.note；`review.note` 另要求发布已声明 |
+| live·retired | 全部业务事件 | 已退役（真状态判据②：全局行为改变） |
+| open·立项 | proposal.* / gate.* / coordinate.submit（自身） | 未派发即无提案可交 |
+| open·计划中 | proposal.accept / gate.* / 第二个 proposal.submit | 受理与门禁前置是提案已交 |
+| open·计划门禁 | requirement.dispatch / 第二个 proposal.submit | 一次一门禁：先裁决挂起门禁 |
+| open·待开发 | proposal.* / gate.* | 无在跑作业，无提案可受理 |
+| open·开发中 | proposal.accept / gate.* / 第二个 proposal.submit | 受理与门禁前置是提案已交 |
+| open·交付受理 | requirement.dispatch / gate.* | 门禁裁决以受理为前置 |
+| open·验收门禁 | requirement.dispatch / 第二个 proposal.submit | 一次一门禁：先裁决挂起门禁 |
+| open·集成 | requirement.dispatch / proposal.* / gate.* | 集成幕只认 integration.confirm / integration.reject |
+| open·done | 除 list / amend / split / merge 外全部 | 终态只读（旁路迁移除外） |
+
+### 2.8 状态存储契约
+
+| 键 | 取值 | 作用 |
+| --- | --- | --- |
+| `fsm.stage` | `live` / `retired` | **唯一真状态（运行级）**；唯一转场 `live → retired` |
+| `run.phase` | `charter` / `""` / `settle` / `release` | 运行级微状态标志（初值 `charter`，`event.start` 写入，R2） |
+| `run.release.master_sha` | string | `release.confirm` 写入的 `master@<sha>` |
+| `run.release.tag` | string | `release.confirm` 写入的批次标签 `vYYYY.MM.DD.N` |
+| `run.release.skipped_reason` | string | `release.skip` 写入的理由 |
+| `run.batch` | int（缺省 1） | 批计数 |
+| `task.title` / `task.goal` / `task.success` | string | 章程三件套（`run.begin` 后锁定） |
+| `req.<i>.status` | `open` / `done` | **唯一真状态（需求级）**；终态判定 = `status=="done"` |
+| `req.<i>.closed_reason` | `""` / `split` / `merged` / `dropped` | 关闭原因（**字段，不再是状态**，R11） |
+| `req.<i>.job` | `""` / `plan` / `development` | 在跑任务 |
+| `req.<i>.gate` | `""` / `plan` / `accept` | 门禁挂起 |
+| `req.<i>.gate_rev` | int | 门禁绑定的 rev（stale 判定） |
+| `req.<i>.plan_ok` | bool | 立项 / 待开发的分界 |
+| `req.<i>.integrating` | bool | 第 8 幕（集成） |
+| `req.<i>.develop_sha` | string | `integration.confirm` 写入的集成证据 |
+| `req.<i>.lane` / `rev` / `conflict*` / `needs_amend` / `feedback` / `artifacts` / `summary` / `hist` | 各式 | 沿用（见 §2.4 / §2.10） |
+
+**删除**（D-MA23）：`R_ANALYZING`、`PHASE`（14 名派生表）、`analysis` 提案槽、`fsm.stage` 的 `coordinate`/`review`/`done` 三值。旧局存档真状态取值变化 → 不兼容，不迁移、开新局（r9 升级纪律）。
+
+### 2.9 响应式推进契约
+
+在发出 `pendingChoice` 之前，Mod 按确定性的注册顺序冲刷已注册的响应式效应（`useEffect`）——`render()` 顶部、`flush_effects`，最多 `MAX_PASSES = 4`，不收敛即为硬错误。每个效应必须遵守四条不变量：
+
+1. **唯一声明后继**：迁移确定性且只在一处声明；`useMemo` 依赖必须是 KV 派生标量（状态/作业/待决/就绪/计数），保存重载后可复算，不依赖 Lua 内存 diff。
+2. **零外部判断**：无需人类批准或未挂载的外部 I/O（无文件读、无会话状态）。
+3. **绝不绕过门禁**：五个里程碑动作（`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note`）绝不由效应触发；效应不推进任何「主人=人」的幕。
+4. **无渲染的效应**：效应可改变 KV 并 `ygg.narrate`，但绝不调用 `render()` 或 `ygg.choice`。
+
+现行效应清单（全部满足四不变量）：`auto_dispatch`（`gate.approve(plan)` 后将刚变待开发的需求在同回合自动派发 development，条件 = 无待决提案/门禁/冲突且槽位空闲）；`tools.receipt` / `tools.reactive`（工具回执落账与结果折叠，§2.10 / §2.11）；**盘点收口效应**（R9：盘点四项齐备自动转发布幕——判据纯 KV、无外部证据、非门禁动作、不渲染，「唯一声明后继」的又一实例）。
+
+### 2.10 持久化泳道池与实时进度投影
+
+- **非破坏性认领（`worktree-claim`）**：分配 `<repo-parent>/worktrees/<repo>-lane-<k>`（`k ∈ 1..4`）。worktree 已存在且已跟踪工作树干净时 `git checkout -B <branch> HEAD`，使未跟踪构建缓存（`target/`、`node_modules/`）跨任务存活。
+- **非破坏性释放（`worktree-release`）**：验证干净后 `git checkout --detach HEAD`，解锁分支而不删除目录。
+- **强制分支命名（`branch_problem`，r2）**：泳道分支必须满足 `feature/{4位uuid}-{语义词段}`——小写 4 位 uuid 段 + 语义词段（≥3 连续字母、非纯数字、8–16 位纯 hex 拒绝、总长 ≤48、前缀大小写敏感）。`lane.claim` 与 `git.worktree_claim` 两条入口同规则、拒绝通道不同：前者走 `flow.refuse` 可读拒绝（`reject.count/last` 留痕），后者走叙事拒绝；未自报名 = 可读拒绝，不生成默认名。
+- **泳道绑定窗口（R7）**：`待开发 → 开发中` 认领；保持到 集成 confirm/reject、验收门禁 reject、交付受理 reject 或 done 才释放。`交付受理 → 验收门禁 → 集成` 三幕期间**不释放**——执行者仍需该工作树完成 feature→develop 集成（D-MA22）。
+- **执行者身份投影（r3）**：`requirement.list` trace 并列三态互证后缀（`[verified]` / `[mismatch:actor=…]` / `[unverified]`，判定只看 `exec=` vs 宿主 `actor=` 章）；`agent.summary.profiles` 数组（≤8 张，handle 升序）投影 profile 注册表（自报身份卡，与账本互链不冗余，见 §2.13）。
+- **实时状态投影**：`requirement.list` 与 `summary.jobs[]` 每行需求投影三条从 KV 派生的实时状态串：
   - `worktreeStatus`：`"n/a"` | `"pending"` | `"ready:<path>@<branch>"` | `"bound:lane-<k>@<branch>"`
   - `subagentStatus`：`"idle"` | `"pending"` | `"dispatched:<agent_id>"` | `"delivered:p<N>(<agent_id>)"`
   - `probeStatus`：`"n/a"` | `"pending"` | `"verified:commits=<N>,clean=<0|1>"`
+
+### 2.11 工具桥契约
+
+同步工具桥（`ygg.tool.call`）受**双层白名单**约束：`pack.json` `tools`（Layer 1 能力面，装载期宿主强制）与 `data/config.json` `allowedTools`（Layer 2 发布面，请求期 Mod 强制，必须为前者超集）——契约正文与诚实声明见 §3.2 / §3.4，本节不重复。反应器边界（只写 KV + 叙事、探针失败是警告不是门禁、机证与人证同级）见 mod README 的三条硬边界。
+
+### 2.12 提示词面（beats）契约
+
+叙事文案与提示词全部存放在 `data/texts/` 片段（350 个 beats 键 + core），按域分组、单一职责（P2 零硬编码；`mod.lua` 装配回 TEXTS）：
+
+| 片段 | 键数 | 职责 |
+| --- | --- | --- |
+| `beats-flow.json` | 50 | 回执版式、guide/goal 提示、拒绝文案（`rejected*` / `stage_expected`） |
+| `beats-requirements.json` | 132 | 需求族文案：派发/提案/门禁/打回/依赖校验/九幕行文 |
+| `beats-lanes.json` | 29 | 泳道账本、认领/释放、分支命名拒绝 |
+| `beats-map-guide.json` | 40 | 地图视图、菜单行、人机门禁提示 |
+| `beats-settlement.json` | 37 | 盘点四项、批结算、退役、发布幕文案 |
+| `beats-harness.json` | 62 | 配置面板、身份注册、工具桥提示、`subagent_submit_cmd` 模板 |
+| `core.json` | — | `scenes`（3）/ `endings`（1）/ `prompts`（2）/ `options`（23）/ `tuning`（8） |
+
+文案键归属随微状态走（§2.7 的拒绝文案、各幕行文键在 `beats-requirements` / `beats-settlement`）；新幕（立局/集成/发布）的文案键由后续代码任务对齐本表。
+
+### 2.13 身份与权限（不进剧情）
+
+两套身份机制 + 一套人机门禁。**定性**：它们**不改变任何微状态**——是事件的**准入校验与留痕**，落在 payload 尾段（§2.6）、进度投影（§2.10）与事件日志；剧情推进只认 §2.4 转场表。每个微状态的「主人」字段 = 人 ⇒ 该动作走票据。
+
+- **执行者台账**（`settings.executor.<rN>.<stage>`，stage ∈ `plan` / `development`）：自声明的审计轨迹，值 `<agent_id>[:<reason>]`；同一 (需求， 阶段) 换人或跨阶段交接到不同 id 必须带原因。占位 id（`main` / `default` / `unregistered`）在恢复决策中被过滤。台账是**权责权威**（谁执行了这一幕），不做身份认证。
+- **提交者身份章**（宿主注入 `actor=` / `actor_session=`）：解析链 `--actor` > `YGG_ACTOR` > daemon 请求字段；mod 侧三态互证（`exec=` vs `actor=`：`[verified]` / `[mismatch]` / `[unverified]`）**识别不拒绝**——裁决权留在人与门禁。`actor_session` 是纯审计字段，永不参与判定。诚实威胁模型：防误记与张冠李戴、让冒用可见可审计，不做密码学（D-MA12）。
+- **profile 卡**（`profile.<handle>.*`）：`config.set` 逐键注册的自报身份卡（`harness` / `session_id` / `role` / `assignments`），回答「这个句柄是谁」；与台账互链不冗余（渲染层字符串 join，权责仍以台账为准）。
+- **人机门禁**（`HUMAN.ACTIONS`，5 个，维持不动，R5）：`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note`。`guide` 模式下**只收菜单票**（`ygg.choice_selected` 回复索引），直发一律拒绝；`goal` 模式下主代理读完整回执后自行派发（`goal.authorization` 逐局登记，证据标准不变）。新事件（`charter.set` / `run.begin` / `release.*` / `integration.*`）不进票据门：`integration.*` 由执行者发（执行者结构上无菜单），`release.*` 由主代理直发（与 `settlement.*` 同口径）。
 
 ---
 
@@ -218,7 +442,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 | --- | --- | --- | --- | --- |
 | **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 32 个事件名（全集见本节末注，payload 位次见 §3.3；`guide.show` 已随 r1 注销、`task.intake` 已随 r2 rev2 注销） | Mod（`.ygg/mods/agent-seed/src/**`（core/domain/view/runtime/handlers 五层）、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
 | **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/egg.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
-| **L3 `action`** | `ygg_session` 工具的 `action` 参数（`StringEnum`） | `kickoff` / `dispatch` / `approve_gate` / `reject_gate` / `vfs_write` / `vfs_read` / `vfs_list` / `handoff_compact` / `settle_close`（9 个） | Layer 2 适配器（`.pi/extensions/ygg-pi-harness`） | **面向模型/人的语义入口**：它只决定「用哪个动词说出意图、由谁拼 payload」，**不决定状态**。值域随适配器可变，**不是**跨 harness 契约。 |
+| **L3 `action`** | `ygg_session` 工具的 `action` 参数（`StringEnum`） | `kickoff` / `dispatch` / `approve_gate` / `reject_gate` / `vfs_write` / `vfs_read` / `vfs_list` / `handoff_compact` / `settle_close`（9 个） | 各 harness 适配器（本仓库无内置，执行壳已删除）；L3 由各 harness 自行定义，值域随适配器可变，不是跨 harness 契约 | **面向模型/人的语义入口**：它只决定「用哪个动词说出意图、由谁拼 payload」，**不决定状态**。值域随适配器可变，**不是**跨 harness 契约。 |
 
 一句话边界：**`event` 决定状态能不能变；`op` 决定旁路能力能不能用；`action` 只决定模型怎么用一句话说出它想干什么。** 因此 `action` 的值域永远可以变，`event` 与 `op` 的值域基本不能变——重叠发生在哪一层，就只在哪一层可能是冗余。
 
@@ -277,11 +501,11 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 > `op` 面的 8 个操作是状态推进之外的旁路端口；`op=vfs_put` 与 `event=vfs.write` 的语义差异（阶段守卫 / 内容上限 / 台账）见 §3.4。
 
-#### 单次 CLI 与内置工具参数（`ygg-agent`）
-- **运行执行**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] [--raw] --event <event> [--payload <json>]`
+#### 单次 CLI 与内置工具参数（`egg`）
+- **运行执行**：`.ygg/bin/egg --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] [--raw] --event <event> [--payload <json>]`
   - **回执渲染口径（r5）**：缺省为人读文本渲染；`--raw` = 单行 JSON 机器契约（与历史缺省逐字节一致）；解析链 `--raw` > `YGG_FORMAT`（text\|json）> 缺省 text；不改字段契约、退出码与 daemon 协议面。脚本 / CI 解析单发 stdout 必须加 `--raw`（或环境级 `export YGG_FORMAT=json`）。
 - **单发派发的未注册事件（fail-closed，r11）**：`--event <name>`（或省略时的 `entryEvent`）不在 Mod registry 内时，派发在**零副作用**下拒绝（不进回放日志、不耗燃料、不动状态基线）：回执 `ok:false` + `error.code=VALIDATION`，`message` 三要素（事件名原样 + 已注册计数 + 已注册全集字典序），退出码 1，审计行 `ok=false` 照写。`ygg.*` 保留事件同样只认 registry（宿主不持事件名白名单）；空/空白事件名仍走参数面（usage / DAEMON 层），与本语义分层。
-- **结算**：`.ygg/bin/ygg-agent --mod <mod_dir> --run-id <id> --runs-root .ygg/runs --settle`
+- **结算**：`.ygg/bin/egg --mod <mod_dir> --run-id <id> --runs-root .ygg/runs --settle`
 - **内置宿主工具（`--builtin-tool <op>`）**：
   - `worktree-claim --lane <1..4> --req <rN> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;req=<rN>;branch=<br>;base=<sha>;clean=1;path=<wt_path>`
   - `lane-probe --lane <1..4> --base <sha> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;commits=<N>;clean=<0|1>;head=<sha>;files=<csv>`
@@ -411,11 +635,6 @@ egg [--runs-root <目录>]… serve [--port <1..65535>] [--panel-dir <目录>] [
 | 二级：mod 实例列表 | egg 原生 | `#/mods/<key>`；该 mod 的 runs 枚举 | 同上（前端按 key 过滤） |
 | 三级：局详情 | egg 原生 | `#/runs/<id>`；存档折叠段 + 投影区（见下注） | `ygg_store::observe` 只读观察面 |
 | 四级：存档视图 | **mod 自行维护** | mod 自带 UI（详情页存档折叠段内 iframe 入口） | 存档数据 API（裸数据） |
-=======
-| 一级：正在运行的游戏 | egg 原生 | runs 枚举 | **多根扫描**（行带 `root` 标识）+ 存储探针 |
-| 二级：局内存档 | egg 原生 | 该 run 的存档列表 | `ygg_store::observe` 只读观察面 |
-| 三级：存档视图 | **mod 自行维护** | mod 自带 UI | 存档数据 API（裸数据） |
->>>>>>> ae8978c (docs(serve): §3.7 契约同步多根/全局唯一实例（CLI 形态+API roots/root/errors/409+SSE root 字段+探针安全边界）+ CONTEXT D21 台账 + AGENTS.md 安装链修正（陈旧 agent 产物名）与 serve 全局唯一口径)
 
 > **默认视图 = 最新局详情（内置页展示投影，只读；裁决见 CONTEXT `D-MA17`）**：`#/` 与空 hash
 > 渲染 `/api/runs` 首行的局详情——局头条（宏观阶段/会话活性/批次/模式/退役徽章）、
@@ -423,6 +642,8 @@ egg [--runs-root <目录>]… serve [--port <1..65535>] [--panel-dir <目录>] [
 > 被拒灰显）、近期决策时间线（尾窗 500 内、决策事件族、倒序前 20）、本局存档折叠段。
 > 投影数据源全部是既有只读端点：`/saves/latest`（KV 键族）+ `/events`（尾窗两步取）+ `/artifacts`；
 > 对无 `req.*` 键族的 mod 无害退化为通用摘要（判据见 D-MA17）。
+>
+> **已知限制（裁决 R14）**：内置面板徽章的 `stageByStatus` 映射按旧状态名建档，D-MA23 剧情双层重写后旧名不再出现，徽章将退化为默认样式——接受为已知外观限制（宿主资产 `assets/panel` 是宿主代码红线，本轮不改），宿主侧跟进归后续决策。
 
 宿主服务面对第四级**仅托管静态文件 + 裸数据 API**，零解析零渲染任何 mod 领域语义（P11 字面边界不动）；展示投影只发生在内置页前端资产层。
 
