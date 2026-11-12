@@ -17,7 +17,7 @@
 | §2.3 运行级剧情（live） | [design/run-story.md](design/run-story.md) |
 | §2.4 需求级剧情（open） | [design/requirement-story.md](design/requirement-story.md) |
 | §2.5 微状态判定的单一来源 | [design/state-machine.md](design/state-machine.md) |
-| §2.6 事件总表（38 口径） | [design/events.md](design/events.md) |
+| §2.6 事件总表（39 口径） | [design/events.md](design/events.md) |
 | §2.7 拒绝面矩阵 | [design/state-surface.md](design/state-surface.md) |
 | §2.8 状态存储契约 | [design/state-surface.md](design/state-surface.md) |
 | §2.9 响应式推进契约 | [design/state-machine.md](design/state-machine.md) |
@@ -38,4 +38,4 @@
 ## 旧引用解析注记
 
 - 决策表行、crates 注释与测试断言中的 `docs/DESIGN.md §N` 引用（如 §3.2 → [mod-package.md](design/mod-package.md)、§3.7 → [serve.md](design/serve.md)、§3.4 → [action-faces.md](design/action-faces.md)、§3.5 → [cli-daemon.md](design/cli-daemon.md)）经本表解析，持续有效——方案 A 裁决下 `crates/**` 零改动。
-- §2.6 的 38 口径与 §3.4 末注的 registry 33/34 口径**有意并存**（前者 = D-MA23 设计目标全集，后者 = 已装载 Mod 事实集），拆分后分居 [events.md](design/events.md) 与 [action-faces.md](design/action-faces.md) 并互链，不得合并。
+- §2.6 的 39 口径（r1 起，含 lane.pool）与 §3.4 末注的 registry 33/34 口径**并存**（前者 = 设计目标全集，后者 = r1 时尚未递增的已装载事实集口径，递增滞后已在 r2 集成时登记），拆分后分居 [events.md](design/events.md) 与 [action-faces.md](design/action-faces.md) 并互链，不得合并。

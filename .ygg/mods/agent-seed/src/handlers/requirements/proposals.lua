@@ -11,6 +11,7 @@ local config = require("src.core.config")
 local executor = require("src.domain.executor")
 local flow = require("src.runtime.flow")
 local choice = require("src.handlers.operate.choice")
+local lanes = require("src.domain.lanes")
 local props = require("src.domain.proposals")
 local render_mod = require("src.view.render")
 local reqs = require("src.domain.requirements")
@@ -34,6 +35,7 @@ local release_lane_with_worktree =
   tools.release_lane_with_worktree
 local RUN_PHASE, req_gate, req_id, req_index_of, req_job, req_key, req_lane, req_phase, req_push_history, req_rev, req_sync_conflicts =
   reqs.RUN_PHASE, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_phase, reqs.req_push_history, reqs.req_rev, reqs.req_sync_conflicts
+local req_lane_pool = lanes.LANES.req_pool
 local cut, fill, trim =
   util.cut, util.fill, util.trim
 local parse_proposal =
@@ -159,7 +161,7 @@ function M.install(deps)
     if spec.stage == "development" then
       local lane_idx = req_lane(index)
       if lane_idx > 0 then
-        tools.auto_probe_lane(lane_idx)
+        tools.auto_probe_lane(req_lane_pool(index), lane_idx)
       end
     end
     local summarize = spec.summary

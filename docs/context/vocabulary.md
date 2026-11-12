@@ -14,7 +14,8 @@
 | `Run` | 运行实例（常驻自循环：立局 → 批循环 → 显式退役） |
 | `stage`（Run Stage） | 运行级真状态（`live` / `retired`）；协调 / 盘点 / 发布为 `run.phase` 微状态 |
 | `Requirement`（`r1..rN`） | 需求（交付单元） |
-| `Lane`（Persistent Lane Pool） | 持久化泳道工作树池 |
+| `Lane`（Persistent Lane Pool） | 持久化泳道工作树池。r1（D-MA24）起按**池**组织：默认池（""，运行仓自己的池，键形 `lane.<k>.*` 沿旧）+ 具名池（`lane.<label>.<k>.*`，`lane.pool "label\|path"` 注册本地检出路径），并行度按池计（每池 k ∈ 1..job_capacity）；多仓需求 = 注册 + 预挂牌 |
+| `Lane Pool Registry`（`lane.pools` / `lane.pool.<label>.path`） | 具名池注册表（r1，D-MA24）：label 形状 `^[a-z][a-z0-9-]{0,23}$`（保留字 seq/pools），path 是传给宿主 `--repo` 的本地检出路径（仅形状校验，不验是否 git 仓——首次 claim 由宿主可读回传） |
 | `Proposal`（`p1..pM`） | 提案（不可变交付提交） |
 | `Gate`（`plan_gate` / `accept_gate`） | 强制门禁 |
 | `Executor Ledger` | 执行者台账 |

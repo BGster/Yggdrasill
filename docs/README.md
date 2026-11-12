@@ -48,7 +48,7 @@ docs/
 | [principles.md](context/principles.md) | P1–P11 工程原则与 PLAY 家族注记 | §3 |
 | [topology.md](context/topology.md) | 仓库目录拓扑与 4 条硬性依赖不变量 | §4 |
 | [decisions-engine.md](context/decisions-engine.md) | 引擎与平台架构决策台账 D1–D21 | §5 引言 + §5.1 |
-| [decisions-agent.md](context/decisions-agent.md) | Agent 治理架构决策台账 D-MA1–23 | §5 引言 + §5.2 |
+| [decisions-agent.md](context/decisions-agent.md) | Agent 治理架构决策台账 D-MA1–24 | §5 引言 + §5.2 |
 
 ## 导航表 · 系统设计（design/）
 
@@ -58,7 +58,7 @@ docs/
 | [state-machine.md](design/state-machine.md) | Mod 纯度、双层真状态压缩、微状态判定单一来源、响应式推进 | §2 章首 + §2.1/2.2/2.5/2.9 |
 | [run-story.md](design/run-story.md) | 运行级剧情：微状态表、盘点子微状态、发布幕 | §2.3 |
 | [requirement-story.md](design/requirement-story.md) | 需求九幕、转场表、旁路/覆盖层 | §2.4 |
-| [events.md](design/events.md) | 38 事件三分类与 payload 落点（设计目标全集口径） | §2.6 |
+| [events.md](design/events.md) | 39 事件三分类与 payload 落点（设计目标全集口径，r1 +lane.pool） | §2.6 |
 | [state-surface.md](design/state-surface.md) | 状态存储键契约与拒绝面矩阵 | §2.7 + §2.8 |
 | [lanes.md](design/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
 | [tool-bridge.md](design/tool-bridge.md) | 同步工具桥双层白名单指针 | §2.11 |

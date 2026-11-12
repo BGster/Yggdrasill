@@ -1,13 +1,13 @@
-# Yggdrasill · 事件总表（38 口径）
+# Yggdrasill · 事件总表（39 口径）
 
-> **定位**：剧情/操作/基础设施三类 38 个事件与 payload 落点（D-MA23 设计目标全集口径；与 action-faces 的 registry 口径并存互链）。
+> **定位**：剧情/操作/基础设施三类 39 个事件与 payload 落点（D-MA23 基础上 r1/D-MA24 增 lane.pool；与 action-faces 的 registry 口径并存互链）。
 > **replaces**：DESIGN §2.6（L248–284）（搬运基线 `3a2536f`）
 > **上游**：[docs/README.md](../README.md) · **相关**：[wire-protocol.md](wire-protocol.md) · [action-faces.md](action-faces.md)
 > **搬运**：以下正文自 DESIGN.md L248–L284 逐字迁移，不重写语义。
 
-### 2.6 事件总表（38 个，三分类）
+### 2.6 事件总表（39 个，三分类）
 
-事件是唯一推进货币。三类切分：**剧情事件**（推进微状态，20 个）、**操作事件**（增删改查，8 个）、**基础设施事件**（10 个）。其中 6 个为 D-MA23 新增：`charter.set` / `run.begin` / `integration.confirm` / `integration.reject` / `release.confirm` / `release.skip`。
+事件是唯一推进货币。三类切分：**剧情事件**（推进微状态，20 个）、**操作事件**（增删改查，9 个）、**基础设施事件**（10 个）。其中 6 个为 D-MA23 新增：`charter.set` / `run.begin` / `integration.confirm` / `integration.reject` / `release.confirm` / `release.skip`；1 个为 r1（D-MA24）新增：`lane.pool`（分池注册表动作）。注册面另含 `ygg.narrative.goto`（node:render 渲染事件）= 40 个已注册 handler（语义哨兵测试计数口径）。
 
 **剧情事件**（payload 契约与微状态落点；行内管道符均为转义字面量）：
 
@@ -36,7 +36,7 @@
 
 `proposal.submit` 尾段链保留固定相对序 **`exec` → `actor` → `actor_session`**（各自可独立缺席）：`exec=<agent_id>[:<reason>]` 必须在链中 `actor=` 之前并同事务绑定执行者台账；`actor=` / `actor_session=` 由**宿主注入**（声明路由），调用方自带同名段在宿主侧即被拒（`ACTOR_FORGED`）——线协议正文见 §3.3，身份语义见 §2.13。
 
-**操作事件**（8 个，不推进任何幕）：`requirement.list` / `requirement.split` / `requirement.merge` / `requirement.amend` / `requirement.conflict` / `requirement.resolve` / `lane.claim` / `lane.release`——只改操作对象与标志位（旁路语义见 §2.4 末段，泳道语义见 §2.10）。
+**操作事件**（9 个，不推进任何幕）：`requirement.list` / `requirement.split` / `requirement.merge` / `requirement.amend` / `requirement.conflict` / `requirement.resolve` / `lane.pool` / `lane.claim` / `lane.release`——只改操作对象与标志位（旁路语义见 §2.4 末段，泳道语义见 §2.10）。
 
 **基础设施事件**（10 个）：`config.set` / `config.open` / `config.close` / `map.show` / `ygg.choice_selected` / `vfs.write` / `tool.call` / `tool.result` / `agent.summary` / `stage.advance`。
 

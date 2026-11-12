@@ -27,7 +27,7 @@
 8. **P8 · 可选加入的能力降级（Wasm 纯度 vs 本地宿主能力）**
    - Lua 沙箱默认严格隔离（无 I/O、无时钟、确定性 PRNG、指令燃料上限），使 Mod 在浏览器 Wasm 中运行结果完全一致。本地宿主能力（`ygg.fs` VFS 与 `ygg.tool.call` 同步工具运行器）通过可选的宿主 trait 注入；当未挂载时，Mod 优雅降级而不破坏状态语义。
 9. **P9 · 保留构建缓存的持久化泳道工作区**
-   - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（`<repo>-lane-1..4`）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
+   - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（r1/D-MA24 起按池：`<pool-root>/<repo>-lane-<k>`，默认池 + `lane.pool` 注册的具名池）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
 10. **P10 · 数据红线与显式的每运行目标授权**
     - **数据红线**：读取、列出、stat、或复制真实业务数据（`*.xlsx`、`*.xls`、`*.csv`，或诸如 `/Volumes/WenshuSpace/**` 的涉密挂载）在提示层与扩展 `tool_call` 防火墙层都被严格禁止。
     - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在**每批盘点结算与退役**（常驻下 review.note 每批都走）之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。

@@ -17,7 +17,7 @@
 | §4 Monorepo 模块拓扑与依赖白名单 | [context/topology.md](context/topology.md) | 目录树 + 4 条硬性依赖不变量 |
 | §5 引言（台账维护规则） | [context/decisions-engine.md](context/decisions-engine.md) 与 [context/decisions-agent.md](context/decisions-agent.md) | 刻意双份（两表同规则） |
 | §5.1 核心引擎与平台决策 | [context/decisions-engine.md](context/decisions-engine.md) | D1–D21 表（19 行，无 D2/D5） |
-| §5.2 Agent 治理决策 | [context/decisions-agent.md](context/decisions-agent.md) | D-MA1–23 表 |
+| §5.2 Agent 治理决策 | [context/decisions-agent.md](context/decisions-agent.md) | D-MA1–24 表 |
 
 ## 旧引用解析注记
 

@@ -62,7 +62,9 @@ local function dispatch_one(index)
     if claimed > 0 then
       lane = claimed
     else
-      local free = free_lanes()
+      -- r1 分池：自动派活只从默认池取道（多仓需求由主 Agent 先 lane.pool 注册 +
+      -- lane.claim 预挂牌，派发沿用预挂牌）；未预挂牌 = 默认池语义不变。
+      local free = free_lanes("")
       if #free == 0 then
         return false
       end
@@ -74,15 +76,15 @@ local function dispatch_one(index)
     -- D-MA23：真状态不再随派活推进（open 恒定；微状态由 job 派生）——只写 job，
     -- 认领与引导照旧。
     if claimed == 0 then
-      LANES.bind(lane, index)
+      LANES.bind("", lane, index)
     end
     if lane > 0 then
-      tools.auto_claim_worktree(lane, index)
+      tools.auto_claim_worktree("", lane, index)
       -- E4（r2 rev2）：泳道无自报分支时给可读引导（手动与自动派发共用此出口；
       -- 工作树认领由 auto_claim_worktree 在空分支时拒绝并发起可读拒绝叙事）。
-      if LANES.branch_of(lane) == "" then
+      if LANES.branch_of("", lane) == "" then
         ygg.narrate(fill(TEXTS.beats.lane_branch_hint, {
-          k = tostring(lane),
+          lane = LANES.label("", lane),
           id = req_id(index),
         }))
       end
