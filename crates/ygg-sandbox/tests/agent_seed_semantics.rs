@@ -2012,8 +2012,9 @@ fn seed_layout_is_single_source_agent_seed() {
 /// r6 The mod architecture is **fragments + five layers**: 27 code modules all under
 /// `src/{{core,domain,view,runtime,handlers}}/` (D-MA23 added the charter / integration /
 /// release handlers), texts split into 7 fragments (core + 6 beats groups) whose beat keys
-/// are pairwise disjoint (the `mod.lua` assembly contract), the playbook split into 12
-/// chapter fragments, no monolith survives, and tuning living in `data/texts/core.json`.
+/// are pairwise disjoint (the `mod.lua` assembly contract), the playbook split into 9
+/// chapter fragments (r5: head + ch1..ch5 + the four ch4- domain fragments; the former
+/// seven-fragment `harness` chapter is abolished), no monolith survives, and tuning living in `data/texts/core.json`.
 #[test]
 fn mod_architecture_is_fragments_plus_five_layers() {
     let project = project_mod_dir();
@@ -2077,7 +2078,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         .iter()
         .filter(|path| path.starts_with("data/playbook/"))
         .count();
-    assert_eq!(playbook, 12, "playbook = head + 11 chapter fragments");
+    assert_eq!(playbook, 9, "playbook = head + 8 chapter fragments (r5)");
     for path in &pack_entry_paths {
         assert!(
             project.join(path).is_file(),
@@ -2125,6 +2126,81 @@ fn mod_architecture_is_fragments_plus_five_layers() {
             core["tuning"][key].as_u64().is_some(),
             "core.json tuning.{key} must be an unsigned integer"
         );
+    }
+}
+
+/// r5 The playbook is reachable: every chapter id in `guide.lua`'s STAGE_GUIDE must resolve to
+/// an assembled section carrying at least one rule (a mapped-but-missing or mapped-but-empty
+/// chapter would make the per-phase hint narrate nothing). Forward direction only — chapters
+/// outside the mapping are a pre-existing gap, not this contract.
+#[test]
+fn stage_guide_maps_existing_nonempty_sections() {
+    let project = project_mod_dir();
+    let guide_src =
+        std::fs::read_to_string(project.join("src/view/guide.lua")).expect("read guide.lua");
+    let start = guide_src
+        .find("local STAGE_GUIDE = {")
+        .expect("STAGE_GUIDE table must exist in guide.lua");
+    let end = guide_src[start..].find("\n}").expect("STAGE_GUIDE table must close");
+    let block = &guide_src[start..start + end];
+    // odd indices of a `"` split are exactly the quoted fragments inside the table
+    let mapped: std::collections::BTreeSet<String> = block
+        .split('"')
+        .enumerate()
+        .filter(|(index, _)| index % 2 == 1)
+        .map(|(_, part)| part.to_owned())
+        .collect();
+    assert_eq!(
+        mapped.len(),
+        15,
+        "the r5 STAGE_GUIDE maps exactly 15 distinct chapters: {mapped:?}"
+    );
+
+    // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
+    let pack = read_json(&project.join("pack.json"));
+    let mut sections: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    let mut assembly_order: Vec<String> = Vec::new();
+    for entry in pack["entries"].as_array().expect("pack entries") {
+        let path = entry["path"].as_str().expect("entry path");
+        let Some(rel) = path.strip_prefix("data/playbook/") else {
+            continue;
+        };
+        if rel == "head.json" {
+            continue;
+        }
+        let fragment = read_json(&project.join(path));
+        for section in fragment["sections"].as_array().expect("sections") {
+            let id = section["id"].as_str().expect("section id").to_owned();
+            let rules = section["rules"].as_array().expect("rules").len();
+            match sections.get_mut(&id) {
+                Some(count) => {
+                    assert_eq!(
+                        assembly_order.last().map(String::as_str),
+                        Some(id.as_str()),
+                        "mod.lua merges only ADJACENT same-id sections; `{id}` reappears after another id"
+                    );
+                    *count += rules;
+                }
+                None => {
+                    sections.insert(id.clone(), rules);
+                    assembly_order.push(id);
+                }
+            }
+        }
+    }
+    assert_eq!(
+        sections.len(),
+        21,
+        "r5 assembles 21 chapters (14 legacy + 7 new): {sections:?}"
+    );
+    for id in &mapped {
+        let rules = sections.get(id).unwrap_or_else(|| {
+            panic!(
+                "STAGE_GUIDE maps `{id}` but no playbook section carries that id"
+            )
+        });
+        assert!(*rules >= 1, "STAGE_GUIDE maps `{id}` but the section is empty");
     }
 }
 

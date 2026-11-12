@@ -3,8 +3,10 @@
 > This file carries exactly two things: the constraints you may not violate, and how to start /
 > continue / pause / settle a run. The mechanics (state machine / action protocol / async inbox /
 > progress views / run artifacts / Mod maintenance / host contract) live in
-> `.ygg/mods/agent-seed/README.md` and the `harness` chapter of the playbook; fetch field rules by
-> chapter with `guide.show <section_id>`. `CLAUDE.md` is a symlink to this file.
+> `.ygg/mods/agent-seed/README.md` and the playbook chapters under
+> `.ygg/mods/agent-seed/data/playbook/`; read the chapter whose section id matches your question
+> (the STAGE_GUIDE table in `src/view/guide.lua` maps run phases to chapters). `CLAUDE.md` is a
+> symlink to this file.
 
 ## 1. Non-negotiable constraints
 
@@ -64,8 +66,12 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 3. **Render receipts in full; never parse-and-truncate**: no `narrative[0][:N]`, no "first line
    only", no line filtering with `startswith`, no stuffing a receipt into `grep` / `python` to read
    just a summary. Every dispatch prints **all narrative lines** into the conversation and hands the
-   raw `pendingChoice` to the user. If you need a rule, fetch the whole chapter with
-   `guide.show <section_id>` instead of trusting memory.
+   raw `pendingChoice` to the user. If you need a rule, read the chapter directly under
+   `.ygg/mods/agent-seed/data/playbook/` (each fragment's `sections[].id` names the chapter) instead
+   of trusting memory; the STAGE_GUIDE table in `.ygg/mods/agent-seed/src/view/guide.lua` maps
+   chapters to run phases — charter: repository · coordinate: run_machine, actions, drive, inbox,
+   dispatch, lanes, integration · settle: evolution, gates, run_artifacts, evidence,
+   mod_engineering, host_contract · release: integration · retired: pointers.
 4. **Single-shot dispatching is not compliance**: batching `--event` flags only hides state from the
    script guard; it does not replace the `requirement.dispatch` → proposal → gate chain. Never edit
    `autosave.json` / `events.jsonl` by hand. **Dispatching directly under `goal` mode is a legal
@@ -288,7 +294,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 Changing `.ygg/mods/agent-seed/src/**` (state machine, gates, render layer, tool bridge),
 `.ygg/mods/agent-seed/mod.lua` or the map wording in `data/texts/` requires, besides lint and
 the all-1 playtest:
-`cargo test -p ygg-sandbox --test agent_seed_semantics` (36 cases: stage merge + `analysis` compat,
+`cargo test -p ygg-sandbox --test agent_seed_semantics` (53 cases: stage merge + `analysis` compat,
 accept-gate reject, accept-gate approval releasing the lane, accept-gate amend → stale, plan-gate
 reject, reactive auto-dispatch in the same turn (plus `useMemo` invalidation), gate independence
 (other requirements' pending proposals / running jobs do not block a gate approval — approve starts
@@ -469,7 +475,6 @@ $A --resume --drive stdin                                     # interactive: the
 $A --resume --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
 $A --resume --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)
 $A --resume --drive none                                      # look at the situation, do not advance
-$A --resume --event guide.show --payload '"harness"'          # fetch a rule chapter by id (harness / credentials / gates …)
 $A --resume --event map.show                                  # current node + out-edges; add --payload '"full"' for the whole design map
 .ygg/bin/egg --run-id <run-name> --runs-root .ygg/runs --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
 ```
