@@ -36,8 +36,8 @@ local reset_settlement =
   render_mod.reset_settlement
 local reset_release =
   release_mod.reset_release
-local RUN_PHASE, req_count, run_phase, stage =
-  reqs.RUN_PHASE, reqs.req_count, reqs.run_phase, reqs.stage
+local RUN_PHASE, req_append, req_capacity, req_closed_reason, req_count, req_id, req_key, req_open_total, req_status, req_title, reqs_R_OPEN, run_phase, stage =
+  reqs.RUN_PHASE, reqs.req_append, reqs.req_capacity, reqs.req_closed_reason, reqs.req_count, reqs.req_id, reqs.req_key, reqs.req_open_total, reqs.req_status, reqs.req_title, reqs.R_OPEN, reqs.run_phase, reqs.stage
 local cut, fill, split, trim =
   util.cut, util.fill, util.split, util.trim
 local probe_payload_ok =
@@ -78,6 +78,46 @@ local function settle_four_ready()
     return false
   end
   return true
+end
+
+-- r3 / D-MA25：批结算尾部自动追加下一批的「维护更新 docs wiki」需求（draft 态，进
+-- 入派发队列，由主代理在下一批协调幕 requirement.dispatch——draft 行永不带 mark，
+-- auto_dispatch 不碰它）。防重复：注册表里存在 open ∧ 无 closed_reason ∧（maintenance
+-- 标记 ∨ 标题精确等于规范标题）的行则跳过——closed_reason 过滤保证 done / split /
+-- merged / dropped 的历史维护行不压制新批追加。尽力而为：去重命中或容量满只发可读
+-- 叙事（前缀非拒绝前缀，不计失败步），绝不使批结算本身失败。退役路径不调用（本函数
+-- 只挂在未武装批结算尾部）。
+local function append_maintenance_req(batch)
+  for i = 1, req_count() do
+    if req_status(i) == reqs_R_OPEN
+      and req_closed_reason(i) == ""
+      and (
+        ygg.kv.get(req_key(i, "maintenance"))
+        or req_title(i) == TEXTS.beats.maintenance_req_title
+      )
+    then
+      ygg.narrate(fill(TEXTS.beats.maintenance_req_skipped_dedup, { id = req_id(i) }))
+      return
+    end
+  end
+  if req_open_total() >= req_capacity() then
+    ygg.narrate(fill(TEXTS.beats.maintenance_req_skipped_full, { cap = tostring(req_capacity()) }))
+    return
+  end
+  local index = req_append(
+    TEXTS.beats.maintenance_req_title,
+    TEXTS.beats.maintenance_req_desc,
+    "",
+    {},
+    ""
+  )
+  ygg.kv.set(req_key(index, "maintenance"), "1")
+  ygg.kv.set("run.maintenance.last", req_id(index))
+  ygg.narrate(fill(TEXTS.beats.maintenance_req_added, {
+    id = req_id(index),
+    title = TEXTS.beats.maintenance_req_title,
+    batch = tostring(batch),
+  }))
 end
 
 function M.install(deps)
@@ -399,6 +439,10 @@ function M.install(deps)
       score = tostring(score),
       lesson = lesson,
     }))
+    -- r3 / D-MA25：追加发生在全部结算检查之后——本批再无任何 gate_problem 读点，
+    -- 不阻塞本批；新需求落在下一批协调幕的派发队列（§9.1 四条件：handler 事务内
+    -- 普通派生写，非 effect）。
+    append_maintenance_req(batch)
     render()
   end)
 end

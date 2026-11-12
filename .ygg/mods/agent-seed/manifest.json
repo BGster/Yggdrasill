@@ -76,9 +76,9 @@
       "sha256": "f6f79e07101987e574888d8e85e83adaec7fa2c45b992ee87115938cb0ea02e6"
     },
     {
-      "byteLength": 17032,
+      "byteLength": 19270,
       "path": "src/handlers/operate/review.lua",
-      "sha256": "79b6e8d134815ad90680b63633ae3516f8ca6253c9beab5580d94eabfec43483"
+      "sha256": "e84099c24bc17b665efa8cfc2b585c4e1bb7d78f9aaddb7211dca121792d5f22"
     },
     {
       "byteLength": 7635,
@@ -178,12 +178,12 @@
       "sha256": "2b6fc42d0021b3829482aa9067ff4b5eb8b45efe9eae775c1b8f2fbfa3ab106c"
     },
     {
-      "byteLength": 7757,
+      "byteLength": 9060,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "0cd1a3550143714a824de28e96e838750ad901638b95f9640dbe93845508e4cd"
+      "sha256": "5378bb2508242f67cbd75e13022eef28db9ab86cc6f71304d94436269e796ad2"
     },
     {
       "byteLength": 9573,
@@ -234,12 +234,12 @@
       "sha256": "a1d0adede1b209283e7a5e54504181d83a5c351a23559ff110f98d678db3acc8"
     },
     {
-      "byteLength": 9728,
+      "byteLength": 11027,
       "id": "ygg:agent/playbook/ch4-run-machine",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-run-machine.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "1c1ac206d5e605743568cc8f1c217e4ba25f2ed8a452695a66d4c720f09b1048"
+      "sha256": "1cf94523822a3a5ff919b9bf1498f08eb0a58185a518fb37bc02cc53f0d79eba"
     },
     {
       "byteLength": 16099,

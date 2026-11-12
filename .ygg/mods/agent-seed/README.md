@@ -131,7 +131,8 @@ Mod 内部结构。
 ## 一、协调器（`fsm.stage`，单机单事件 `stage.advance`）
 
 r9 起运行生命周期是**常驻自循环**：需求级 done 保留（accept_gate 产物），运行级终局不再由
-review.note 自动触发——review.note 的常态落点是**批收口**（回 coordinate，批计数 +1），
+review.note 自动触发——review.note 的常态落点是**批收口**（回 coordinate，批计数 +1；
+批结算尾部自动追加下一批的 docs 维护需求，D-MA25），
 `done` 只经**显式退役**（`config.set run.retire=true` 武装后）可达：
 
 ```text
