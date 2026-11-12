@@ -506,7 +506,10 @@ is a **batch settle** (back to `coordinate`, `run.batch`+1, never an ending). Op
    requirements are merged into the integration branches, push `develop` and `master` and tag the
    integration merge `vYYYY.MM.DD.N` (N = same-day sequence, e.g. `v2026.11.12.2`). Pushing and
    tagging stay user-triggered; this line only fixes the cadence so it no longer lives in a
-   handoff document.
+   handoff document. **`develop` syncs to `master` by reset, never by reverse merge** (user
+   correction 2026-11-12): after the round merge — and equally after any direct master commit —
+   align `develop` with `git reset --hard master` + `git push --force-with-lease origin develop`
+   (playbook `integration.round.reset-develop`).
 7. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
    before ending this run; never carry a finished run's tasks into the next one.
 

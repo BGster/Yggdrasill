@@ -141,7 +141,7 @@
         {
           "id": "integration.round.reset-develop",
           "modality": "must",
-          "text": "Right after the merge, `git reset --hard master` on `develop` so `develop` equals `master` as the clean baseline for the next round; push both branches — for `develop` the reset makes it `git push --force-with-lease origin develop`.",
+          "text": "`develop` syncs to `master` exclusively by reset — after the round merge, and equally after any direct master commit (hotfixes, standalone fixes): `git reset --hard master` on `develop` so `develop` equals `master` as the clean baseline for the next round, then `git push --force-with-lease origin develop`. Merging `master` into `develop` (a reverse merge) is forbidden: it pollutes develop's topology with merge edges against the designed flow feature → develop → master and duplicates master content as meaningless merge nodes.",
           "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
