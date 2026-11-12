@@ -447,7 +447,11 @@ are git-ignored, `.ygg/mods/` is committed.
   `docs/design/*` (three-layer architecture, lane lifecycle, and `harnessActions[]` contracts; the
   former two monoliths remain as thin index shells) — before proposing or editing; during
   settle-phase settlement (`settlement.evolution`), the wiki must be checked and updated whenever
-  domain concepts or architectural contracts changed.
+  domain concepts or architectural contracts changed. Machine-side closure (D-MA25, r3): every
+  unarmed `review.note` batch settle auto-appends one open/draft docs-maintenance requirement into
+  the next batch's dispatch queue (dedup by the `req.<i>.maintenance` marker + canonical title; the
+  retired path appends nothing) — it blocks the next `coordinate.submit` until done, so the
+  per-batch docs pass is enforced by the state machine.
 
 ### Start
 ```bash

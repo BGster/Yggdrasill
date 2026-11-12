@@ -54,3 +54,5 @@ stateDiagram-v2
 
 `review.note` 两个落点（R10）：**未武装（常态）= 批结算**——`run.phase=""`、清 release 键、`run.batch+1`、`[BATCH n SETTLED]`（绝无 `[ENDING` 前缀）；**`run.retire` 武装 = 退役终局**——`advance(retired)` 写 `ending`，`[ENDING · run retired]`。
 
+**批结算自动维护追加（D-MA25，r3）**：未武装批结算在 `[BATCH n SETTLED]` 之后、同 handler 事务内自动 `req_append` 一条 draft 态「维护更新 docs wiki（上批收口）」需求（description 携 r2 wiki 树分文件指引，见 `beats-settlement.json` `maintenance_req_desc`）。防重复：注册表已存在 open ∧ 无 closed_reason ∧（`req.<i>.maintenance` 标记 ∨ 规范标题）的行则跳过；容量满同样跳过——追加尽力而为，只叙事不拒绝，绝不使批结算失败。退役路径不追加。追加行永不带 mark（draft 不被 auto_dispatch 推进），由主代理在下一批协调幕 `requirement.dispatch`，未 done 前阻塞下一批 `coordinate.submit`——每批一轮的文档维护节奏由此强制。
+

@@ -36,6 +36,7 @@
 | `run.release.tag` | string | `release.confirm` 写入的批次标签 `vYYYY.MM.DD.N` |
 | `run.release.skipped_reason` | string | `release.skip` 写入的理由 |
 | `run.batch` | int（缺省 1） | 批计数 |
+| `run.maintenance.last` | 需求 id（string） | 最近一次批结算自动追加的维护需求（观测指针，D-MA25；不参与判定） |
 | `task.title` / `task.goal` / `task.success` | string | 章程三件套（`run.begin` 后锁定） |
 | `req.<i>.status` | `open` / `done` | **唯一真状态（需求级）**；终态判定 = `status=="done"` |
 | `req.<i>.closed_reason` | `""` / `split` / `merged` / `dropped` | 关闭原因（**字段，不再是状态**，R11） |
@@ -45,6 +46,7 @@
 | `req.<i>.plan_ok` | bool | 立项 / 待开发的分界 |
 | `req.<i>.integrating` | bool | 第 8 幕（集成） |
 | `req.<i>.develop_sha` | string | `integration.confirm` 写入的集成证据 |
+| `req.<i>.maintenance` | `"1"` | 批结算自动追加标记（防重复判据，D-MA25） |
 | `req.<i>.lane` / `rev` / `conflict*` / `needs_amend` / `feedback` / `artifacts` / `summary` / `hist` | 各式 | 沿用（见 §2.4 / §2.10） |
 
 **删除**（D-MA23）：`R_ANALYZING`、`PHASE`（14 名派生表）、`analysis` 提案槽、`fsm.stage` 的 `coordinate`/`review`/`done` 三值。旧局存档真状态取值变化 → 不兼容，不迁移、开新局（r9 升级纪律）。
