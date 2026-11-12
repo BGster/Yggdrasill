@@ -72,7 +72,9 @@ local MAX_ARTIFACT_CHECKS = 4        -- 一次 `proposal.submit` 最多同步核
 local MAX_RADAR_FILES = 32           -- 一次雷达最多比几个文件（防 O(n·m) 爆炸）
 local SHA_DISPLAY = 12               -- 叙事里显示 sha256 的前多少位
 local VERIFY_TOOL_SOURCE = "tool:gate.verify_suite"
-local SESSIONS_TOOL_SOURCE = "tool:harness.archive_sessions"
+-- r5（D-MA21）：harness.archive_sessions 从 Mod 工具桥整体退役——子会话清理改为
+-- 提示词驱动（beats 清理文案 + settlement.sessions 声明制），宿主 builtin 的物理
+-- 退役归 N2 宿主决策。SESSIONS_TOOL_SOURCE 与 REACTORS 条目随工具一并摘除。
 
 -- `tool.<保留字>.*` 与计数键同名会撞车（`tool.count` 既是计数前缀又是行前缀）。
 local RESERVED = { count = true, pending = true, last = true, notified = true }
@@ -835,31 +837,6 @@ REACTORS["gate.verify_suite"] = function(pairs)
   return true
 end
 
-REACTORS["harness.archive_sessions"] = function(pairs)
-  local dest = trim(pairs.dest or "")
-  if stage() ~= STAGE.review then
-    ygg.narrate(fill(TEXTS.beats.sessions_archive_refused, {
-      remaining = (pairs.remaining ~= nil and pairs.remaining ~= "") and pairs.remaining or "?",
-      dest = TEXTS.beats.lane_field_none,
-    }))
-    return false
-  end
-  if pairs.remaining ~= "0" or dest == "" then
-    ygg.narrate(fill(TEXTS.beats.sessions_archive_refused, {
-      remaining = (pairs.remaining ~= nil and pairs.remaining ~= "") and pairs.remaining or "?",
-      dest = (dest ~= "" and dest) or TEXTS.beats.lane_field_none,
-    }))
-    return false
-  end
-  local moved = whole_at(pairs, "moved") or 0
-  ygg.kv.set("settlement.sessions.moved", moved)
-  ygg.kv.set("settlement.sessions.remaining", 0)
-  ygg.kv.set("settlement.sessions.destination", dest)
-  ygg.kv.set("settlement.sessions.source", SESSIONS_TOOL_SOURCE)
-  ygg.narrate(fill(TEXTS.beats.sessions_archived, { moved = tostring(moved), dest = dest }))
-  return true
-end
-
 local function reactive_tool_ids()
   local ids = {}
   for id in next, REACTORS do
@@ -1174,34 +1151,6 @@ local function auto_release_worktree(lane)
   return try_sync_call("git.worktree_release", args_map, raw_args, "", "")
 end
 
-local function auto_archive_sessions()
-  if not contains(allowed(), "harness.archive_sessions") then
-    return nil
-  end
-  if tostring(ygg.kv.get("settlement.sessions.remaining") or "") == "0" then
-    return nil
-  end
-  -- r1 rev1 fail-closed：run.id / run.parent 未登记时不伪造主会话身份、不发归档请求。
-  -- 宿主按子串匹配选文件，伪造 parent（如回落 "default"）可能把主会话一起 rename 进 trash。
-  -- 这里只给可读叙事说明缺什么为何停，绝不写伪造的 remaining=0；安全路径由用户显式决定
-  -- （带已核验 parent/batch 的显式 harness.archive_sessions，或登记 settlement.sessions）。
-  local batch = text_of("run.id", "")
-  local parent = text_of("run.parent", "")
-  if batch == "" or parent == "" then
-    ygg.narrate(fill(TEXTS.beats.sessions_archive_held, {
-      batch = (batch ~= "" and batch) or TEXTS.beats.lane_field_none,
-      parent = (parent ~= "" and parent) or TEXTS.beats.lane_field_none,
-    }))
-    return nil
-  end
-  local args_map = {
-    parent = parent,
-    batch = batch,
-  }
-  local raw_args = "parent=" .. parent .. ";batch=" .. batch
-  return try_sync_call("harness.archive_sessions", args_map, raw_args, "", "")
-end
-
 -- ───────────────────────────── 装配面 ─────────────────────────────
 
 function M.install(deps)
@@ -1354,7 +1303,6 @@ M.allowed_text = allowed_text
 M.apply_result = apply_result
 M.args_table = args_table
 M.artifact_path_ok = artifact_path_ok
-M.auto_archive_sessions = auto_archive_sessions
 M.auto_claim_worktree = auto_claim_worktree
 M.auto_probe_lane = auto_probe_lane
 M.auto_release_worktree = auto_release_worktree
