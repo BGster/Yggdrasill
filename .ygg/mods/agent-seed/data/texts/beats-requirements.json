@@ -48,7 +48,7 @@
     "req_dispatch_ok": "[DISPATCH] {{count}}: {{items}} | jobs {{jobs}}/{{cap}}",
     "req_dispatch_auto": "[AUTO-DISPATCH] {{count}} (declared single successor, reactive): {{items}} | jobs {{jobs}}/{{cap}}",
     "req_dispatch_noop_blocked": "[DISPATCH] 0 candidates: jobs {{jobs}}/{{cap}} is full, or development candidates are not ready / lanes are taken ({{lanes}}). Reasons: {{reasons}}",
-    "req_prop_usage": "proposal.submit \"req_id|revision|analysis|plan|development|summary|artifacts[|changes][|external_id][|exec=<agent_id>[:<reason>]]\"",
+    "req_prop_usage": "proposal.submit \"req_id|rev|stage(plan|development)|summary|artifacts[|changes][|external_id][|exec=<agent_id>[:<reason>]]\"",
     "req_prop_ok": "[PROPOSAL RECEIVED] {{id}}: {{req}} / {{stage}} rev {{rev}} — {{summary}} ({{pending}} pending)",
     "req_prop_replayed": "[REPLAY:PROPOSAL] external_id `{{ext}}` already exists ({{id}}) — idempotent return.",
     "req_prop_stage_mismatch": "{{id}} is currently {{status}}; it cannot accept a {{stage}} proposal (stage and state do not match).",
