@@ -95,7 +95,7 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      self-written checker that you will bypass in the same way. Scripts may only perform **read-only
      queries** (`requirement.list`, `map.show`, read-only statistics over `events.jsonl`) and **may
      not become the carrier of a constraint**.
-   - **Never patch the ygg-agent CLI source** (`crates/ygg-sandbox/examples/egg.rs` and the host
+   - **Never patch the egg CLI source** (`crates/ygg-sandbox/examples/egg.rs` and the host
      contract). The CLI is a non-negotiable host, not an implementation surface of this repository.
      If a capability gap genuinely must be solved in the host, describe the symptom and the
      reproduction and hand it to the user; never patch it yourself.
@@ -415,7 +415,8 @@ are git-ignored, `.ygg/mods/` is committed.
 ### Start
 ```bash
 .ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start
-```
+.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --raw --resume --event task.intake --payload '"<局级任务标题>|<一句话目标>"'
+```（第二步把局推进 coordinate——收官动作都在那之后才可用。）
 
 ### Serve（只读观察台，r9 全局唯一实例）
 ```bash
@@ -424,7 +425,7 @@ scripts/install-egg.sh                                                          
 egg serve                                                                          # 全局命令裸起：根集来自 ~/.config/ygg/serve.json（{"roots":["/abs/…"]}）
 .ygg/bin/egg serve --port 7801 --poll-ms 300                                     # --port = 显式逃生门（不进全局唯一语义）；--poll-ms 加快变更检测
 # 单实例语义：同端口已有自家实例 = 幂等复用退出 0（打印面板 URL）；根不被覆盖/旧版单根实例 = 退出 1。
-# 面板：http://127.0.0.1:7800/（一级 runs 列表带根标识 → #/runs/<id> 二级存档列表 → mod 面板 iframe）
+# 面板：http://127.0.0.1:7800/（默认=最新局详情：主流程状态条+需求卡+决策时间线；#/runs=mod 分组历史局 → #/mods/<key> 实例 → #/runs/<id> 局详情；存档折叠段内 mod 面板 iframe）
 # 契约与安全边界见 docs/DESIGN.md §3.7；serve 只读：gate/accept 类人类门禁不在线上，仍走 CLI 票据。
 ```
 
@@ -474,83 +475,18 @@ is a **batch settle** (back to `coordinate`, `run.batch`+1, never an ending). Op
 5. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
    before ending this run; never carry a finished run's tasks into the next one.
 
-## 3. Upper layer: the pi extension `.pi/extensions/ygg-pi-harness`
+## 3. Upper layer: none（执行壳已删除）
 
-The CLI above is the host contract; typing its `--event` sequences by hand is not the intended
-interface. `.pi/extensions/ygg-pi-harness` is the **upper level**: it never replaces the state
-machine, it only speaks to it through `daemon.dispatch` → `ygg.on(...)` handlers.
+The pi extension (`.pi/extensions/ygg-pi-harness`) was **removed** (2026-11-12; the standing
+requirement predates this session — the r1-era restore was a misread of 4acc3a4 and is
+superseded by this deletion). Consequences, stated as facts:
 
-| File | Job |
-| --- | --- |
-| `firewall.ts` | `tool_call` gate: the data red line (`*.xlsx` / `*.xls` / `*.csv`, `/Volumes/WenshuSpace/**`) and the batch-entrypoint prohibition (`--events`, shell `for/while … do … ygg-agent`, `xargs ygg-agent`). Pure [`checkToolCallFirewall`](.pi/extensions/ygg-pi-harness/firewall.ts), directly unit-tested. |
-| `daemon.ts` | Persistent `ygg-agent --daemon` client: line JSON-RPC, id matching, serialized request queue, 30s timeout, respawn after an unexpected exit, and a **single-shot CLI fallback** when the host predates `--daemon` (the summary then reports `available=false` instead of guessing jobs/gates). |
-| `orchestrator.ts` | Lane lifecycle for active jobs: [`buildSubagentBrief`](.pi/extensions/ygg-pi-harness/orchestrator.ts) builds a self-contained brief; [`orchestrateActiveJobs`](.pi/extensions/ygg-pi-harness/orchestrator.ts) claims the worktree, runs subagents concurrently, archives into the run VFS, probes the lane, submits and accepts the proposal — landing the requirement at `plan_gate` / `accept_gate`. It also owns the **subagent create + resume** lifecycle (real `agent_id` written into `exec=`, `resume` on a gate reject / `plan → development`, one self-heal on a stream error and one on a dirty lane probe) and the **context brake** (hard = spawn nothing and hand off first, soft = land the wave, then hand off). |
-| `compaction.ts` | Context pressure monitor + stable-node predicate + structured handoff. [`evaluateContextPressure`](.pi/extensions/ygg-pi-harness/compaction.ts) (soft 0.60 / hard 0.75; unknown token counts never brake), [`isStableCheckpoint`](.pi/extensions/ygg-pi-harness/compaction.ts) (`available` ∧ no pending tools ∧ (gate ∨ no jobs ∨ conflict)), [`buildHandoffMarkdown`](.pi/extensions/ygg-pi-harness/compaction.ts) → `artifacts/handoff-latest.md` through [`writeHandoffToVfs`](.pi/extensions/ygg-pi-harness/compaction.ts) (with the additive §6 watchdog section), plus the resume-message and compact-instruction builders. No npm deps and erasable TypeScript only, so `node --experimental-strip-types` loads it directly. |
-| `watchdog.ts` | Auto-collect watchdog (r1, D-MA16): pure core ([`nextAutoAction`](.pi/extensions/ygg-pi-harness/watchdog.ts) collectible predicate, `recordWaveOutcome` failure budget: per `(req,rev,stage)` 2-strike park + 3-wave global self-off) + thin IO shell ([`AutoWatchdog`](.pi/extensions/ygg-pi-harness/watchdog.ts): injectable clock, `YGG_AUTO_INTERVAL_MS` clamped 1s–60s, hard-watermark suppression, idle-gate + wave-ticket single-flight). Spike-proven degraded path: `ctx.executeTool` is `undefined` outside a turn, so the watchdog wakes the **main agent** via `pi.sendMessage(triggerTurn:true)` and the wake turn runs `ygg_run_lanes`; `goal`-only gate wake-up needs `YGG_AUTO_WAKE=on`. Contract: `docs/DESIGN.md` §3.5. |
-| `index.ts` | Wiring: session lifecycle hooks, the `tool_call` firewall, `/ygg status` / `/ygg auto on\|off\|status` / `/ygg stop`, the tools `ygg_session` (`kickoff` / `dispatch` / gate / `vfs_*` / `handoff_compact` / `settle_close`) and `ygg_run_lanes` (consumes the watchdog's wave ticket → writes `artifacts/auto-wave-<NNNN>.md` with the full receipts and settles the failure budget), the compaction hooks (`session_before_compact` / `session_compact` / `session_compact_failed`), and the footer status line (`auto:on(波次=N)`). |
-
-What the extension deliberately does **not** do:
-
-- **It never approves a gate.** `ygg_run_lanes` stops at `plan_gate` / `accept_gate`; approving is the
-  one thing only the coordinator does. An auto-approved gate is the same as no gate.
-- **The watchdog never approves a gate either (r1).** Its entire wake surface is one custom message
-  (`ygg-auto-wave`, `triggerTurn:true`) telling the main agent to run `ygg_run_lanes`; the
-  `goal`-mode gate wake-up (`YGG_AUTO_WAKE=on`) only announces a pending gate and hands the decision
-  back — in `guide` mode it never wakes at all. The watchdog also never retries a `delivered:*`
-  job (a refused accept is the designed stop point, not a retry target) and is not a third
-  compaction entry (hard watermarks only suppress wave dispatch; `YGG_AUTO_INTERVAL_MS` clamps
-  1s–60s and the loop is in-process — no shell polling).
-- **It never advances past a conflict** (`summary.conflicts` non-empty) and never retries a refused
-  receipt as if it had passed: rejections are surfaced verbatim.
-- **It never truncates a receipt.** Every `narrative` line reaches the conversation, and
-  `pendingChoice` is handed over raw.
-- **It never compacts mid-flight.** `maybeHandoffAndCompact` requires a stable node
-  (`isStableCheckpoint`) unless the caller forces it (`handoff_compact`, or a brake the orchestrator
-  already took); compacting while a wave is in the air would fold that wave into prose instead of
-  landing it on a gate.
-- **`dispatch` never compacts.** Its contract is "one dispatch = one turn = one complete receipt", and
-  `ctx.compact()` aborts the turn, so the receipt would not reach the model. The `dispatch` branch
-  runs `maybeHandoffAndCompact` in `reportOnly` mode (watermark and stable-node facts only) and points
-  at `handoff_compact`. Compaction has exactly two explicit entries: `action=handoff_compact` (forced)
-  and the `ygg_run_lanes` orchestration brake. See `docs/DESIGN.md` §3.4.
-- **It never resumes a guessed id.** `extractAgentId` returns `undefined` rather than synthesising
-  one, and `runSubagent` only retries when it knows who to resume — a fabricated id would silently
-  become a fresh agent with no memory of the rejected proposal.
-
-### 3.1 Context pressure, checkpoint handoff and auto-resume
-
-| Piece | Rule |
-| --- | --- |
-| Watermarks | `ratio >= 0.60` → `soft_brake`, `>= 0.75` → `hard_brake` (both inclusive, both override via `evaluateContextPressure` args). Unknown usage (`null` / `NaN` / non-positive) → `normal`: “I don't know” is not grounds for a destructive action. |
-| Stable node | `available` ∧ `pendingTools === 0` ∧ (a pending gate ∨ no running job ∨ an unresolved conflict). Running jobs with no gate and no conflict is *no* stable node — that is exactly the half-way point where compaction loses subagent output. |
-| Handoff artifact | `artifacts/handoff-latest.md`, rewritten at every checkpoint: run id, stage, `used / window (xx.x%)`, timestamp, jobs table (including the `executor` / `planExecutor` ledger columns), pending gates, unresolved conflicts, VFS artifacts, and the exact `ygg_session` / `ygg_run_lanes` call to run next. |
-| Self-triggered compaction | `ctx.compact({ customInstructions })` with the state block marked “keep verbatim”; `onComplete` sends a `ygg-handoff-resume` custom message with `triggerTurn: true`. The tool call that triggered it is usually aborted (compact aborts the turn), so that message has to carry the whole position. |
-| External compaction (`/compact`, threshold, overflow) | `session_before_compact` writes the artifact first (survives even if the summary is bad), and `session_compact` re-injects the same state block with `triggerTurn: false` — an external `/compact` must not spontaneously start a new turn. |
-| Subagent lifecycle | `resume = job.executor` (gate reject → same stage, `rev+1`); `resume = job.planExecutor` only when `resumePlanAgent` is on and the stage is `development`; retry once on `ok === false` (stream drop) and once when the lane probe reports `commits=0` / `clean=0` (the subagent forgot to commit; the nudge prompt is `COMMIT_NUDGE_TEXT` and the probe is re-run afterwards). |
-| Ledger honesty | `proposal.submit`'s `exec=` segment carries the returned `agent_id` (falling back to `opts.actorId`), so the next re-dispatch has somebody to resume. An unreadable probe verdict never triggers a retry. |
-
-Verification (no external dependencies, so it runs in any checkout):
-
-```bash
-node --experimental-strip-types --test .pi/extensions/ygg-pi-harness/harness.test.ts
-```
-
-The suite covers both sides of every firewall rule (blocked **and** allowed), brief self-containment
-(workspace boundary / requirement text kept line by line / verification gates / return format), the
-whole orchestration chain (claim before dispatch, concurrency, `vfs_put`, probe, proposal payload
-positions, landing at the right gate), and the daemon line protocol (id matching, serialization,
-fallback, and `.env` exposing only `YGG_SUBAGENT_MODEL` / `YGG_SUBAGENT_THINKING`).
-
-It also covers the checkpoint path: the watermarks (normal / soft at exactly 60% / hard at exactly
-75% / overflow / unknown tokens / non-positive window / inverted custom watermarks), the stable-node
-predicate (gate, idle boundary and conflict → true; pending tools, mid-flight jobs and an unavailable
-summary → false), the handoff document (usage line, `executor` / `planExecutor` columns, `|`
-escaping, the empty-summary warning, the exact next-step commands) and its single `vfsPut` at
-`artifacts/handoff-latest.md`, the resume message and compact instructions, `extractAgentId`
-(`details` first, `Agent ID:` text fallback, never invented), `resolveResumeId` (gate reject /
-`plan → development` / fresh spawn), the three self-heal paths (stream error → one resume, dirty
-probe → nudge commit → re-probe → re-archive, unknown verdict → no retry), the real `agent_id` in the
-`exec=` segment, and both brake levels at the orchestration layer (hard spawns nothing and claims no
-worktree; soft lands the wave and only then writes the handoff). Four mutation probes confirm the
-assertions bite: forcing `resolveResumeId` to `""`, `laneProbeNeedsCommit` to `false`, dropping the
-hard brake, or hard-coding `actorId` in `exec=` each turns exactly the matching cases red.
+- Coordination is driven by the **main session directly through the egg CLI** (`--event` chain);
+  the daemon-resident capability is the **host-native `--daemon` / `serve`** modes (r9), not an
+  orchestrator extension.
+- The batch-entrypoint prohibition (§1.4) remains a **discipline rule**; its extension-side
+  enforcement layer (firewall.ts) is gone with the directory. Do not reintroduce it without a
+  new decision entry.
+- Brief submission templates live in the Mod (`beats-harness.json` `subagent_submit_cmd`);
+  worktree/lane rituals live in the playbook (`ch2-delivery.json` §integration) and the
+  「开发循环仪式」 section above.

@@ -16,7 +16,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ Layer 2 · Presentation & Harness Adapter Shell                             │
 │   - Game Clients: Web Browser (React + ygg-wasm), Godot 4 (gdext)          │
-│   - Agent Adapters: Pi Extension (.pi/extensions/ygg-pi-harness),          │
+│   - Agent Adapters: 无内置执行壳（扩展层已删除，主会话直驱 egg CLI）      │
 │     CLI Daemon Consumers (Claude Code / Codex / Cursor hooks)              │
 │   Responsibilities: UI rendering, subagent process spawning/resuming,      │
 │   context window telemetry & compaction, data red-line firewall.           │
@@ -219,7 +219,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 | 层 | 载体 | 值域 | 权威来源 | 职责边界 |
 | --- | --- | --- | --- | --- |
 | **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 33 个事件名（全集见本节末注，payload 位次见 §3.3；`guide.show` 已随 r1 注销） | Mod（`.ygg/mods/agent-seed/src/**`（core/domain/view/runtime/handlers 五层）、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
-| **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/agent.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
+| **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/egg.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
 | **L3 `action`** | `ygg_session` 工具的 `action` 参数（`StringEnum`） | `kickoff` / `dispatch` / `approve_gate` / `reject_gate` / `vfs_write` / `vfs_read` / `vfs_list` / `handoff_compact` / `settle_close`（9 个） | Layer 2 适配器（`.pi/extensions/ygg-pi-harness`） | **面向模型/人的语义入口**：它只决定「用哪个动词说出意图、由谁拼 payload」，**不决定状态**。值域随适配器可变，**不是**跨 harness 契约。 |
 
 一句话边界：**`event` 决定状态能不能变；`op` 决定旁路能力能不能用；`action` 只决定模型怎么用一句话说出它想干什么。** 因此 `action` 的值域永远可以变，`event` 与 `op` 的值域基本不能变——重叠发生在哪一层，就只在哪一层可能是冗余。
@@ -354,34 +354,7 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 }
 ```
 
-#### r1 自动收波看门狗契约（D-MA16）
-
-> 实体：`.pi/extensions/ygg-pi-harness/watchdog.ts`（纯核 + 薄 IO 壳）+ `index.ts` 接线。
-> 触发与边界一句话：进程内定时器轮询 `op=summary`，可收波则拉起**确定性自唤醒回合**
-> 复用 `ygg_run_lanes` 全链；永不批门禁、永不越过冲突、不是第三个压缩入口。宿主零改动。
-
-- **触发面（spike 实证后的降级路径）**：`ctx.executeTool` 只存在于工具 `execute()` 的
-  `ExtensionToolContext`，回合外的 handler ctx 上是 `undefined`（`--mode rpc` 空闲探针实测）；
-  看门狗因此经工厂级 `pi.sendMessage({customType:"ygg-auto-wave", triggerTurn:true})` 拉起主代理
-  回合，由它调 `ygg_run_lanes`——事件链与回执与手发逐字节同构，代价是每波多耗一个模型回合。
-  定时器是进程内的（批量入口禁令下的唯一合法形态）；`YGG_AUTO_INTERVAL_MS` 钳位 1s–60s，缺省 5s。
-- **可收波谓词（纯函数 `nextAutoAction`，进测试面）**：`summary.available ∧
-  lifecycle=="resident" ∧ conflicts==[] ∧ ∃ job ∈ collectibleJobs(summary):
-  stage∈{plan,development} ∧ ¬subagentStatus.startsWith("delivered") ∧ ¬parked`。
-  `delivered:*` 排除 = guide 模式 accept 被票拒即权威停点（拒绝即设计停点，不重试）；
-  `lifecycle` 缺失（旧 mod）保守不收。
-- **单飞互斥**：看门狗与手发共享同一把「会话闸」——`ctx.isIdle()`（回合内的一切都让它为
-  false）+ 波票闩（一张票未消费前不再发新波，fail-closed 防自唤醒回合不遵指令时的无限重发）。
-- **预算**：per `(req,rev,stage)` 连续 2 次整波失败 → 停车（rev 变化自动复位）；全局连续 3 波
-  全败 → 自关（fail-closed，`/ygg auto status` 可见）。空波（无作业落地）不算全败。
-- **回执面**：每波 `artifacts/auto-wave-<NNNN>.md`（`ygg_run_lanes` 消费波票后写，narrative 全量
-  不截断）+ 交接单重写（§3.6 交接产物新增第 6 节看门狗段：状态/最近波次/停车表）+ 会话追加一条
-  紧凑状态块（`triggerTurn:false`，不替用户开回合）。
-- **在场唤醒（goal 限定 opt-in）**：`YGG_AUTO_WAKE=on` 且 `summary.play=="goal"` 且有待审门禁时，
-  发一次唤醒消息让主代理裁决；guide 模式永不唤醒（门禁只能人点菜单）。
-- **daemon 存活**：每 tick 一次 `op=summary` 既是轮询数据源也是心跳；传输失败由 daemon 客户端
-  既有单次重启重试自愈（`kill -9` 后下一 tick 内恢复）。诚实边界：pi 会话退出则 daemon 随之退
-  （stdin EOF 自尽，无孤儿）；`/ygg auto on\|off\|status` 是运行时 kill-switch。
+> ~~r1 自动收波看门狗契约（D-MA16）~~ 已废弃：扩展层删除（2026-11-12），看门狗随层移除；daemon 常驻由宿主 `--daemon`/`serve` 原生承担。
 
 ### 3.6 上下文压缩与检查点交接契约
 
