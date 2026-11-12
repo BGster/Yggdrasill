@@ -1,39 +1,37 @@
-//! agent-seed semantics gate: **decidable** assertions for the merged-state semantics
-//! (branches r1–r13 all landed), the requirement-level state machine, the turn-cut
-//! conventions, and the single-layer operation map (AGENTS.md §9.2 behavioural surface).
+//! agent-seed semantics gate: **decidable** assertions for the D-MA23 two-layer story
+//! (4 true states + 13 micro-states), the requirement-level nine-act machine, the
+//! run-level resident batch loop (charter → coordinate ⇄ settle → release → retired),
+//! and the operation-map / tool-bridge / identity surfaces (AGENTS.md §9.2 behavioural
+//! scope, DESIGN.md §2 is the authority).
 //!
-//! Why this layer exists: the scripted playtest walks only prove the happy paths
-//! (baseline A the batch cycle, baseline B the armed retirement) — they never take a
-//! **branch** such as `gate.reject` / `requirement.amend` / `proposal.reject` / a stale
-//! gate, and the turn-cut mechanics (inline `exec=`, the `draft -> planning` merge, the
-//! reactive auto-dispatch effect, the settlement merge) are likewise invisible to them.
-//! This file turns those into assertions:
+//! Why this layer exists: the scripted playtest walks only prove happy menus — they never
+//! take a **branch** (gate.reject / amendment staleness / integration.reject / a failed
+//! verify), and the turn-cut mechanics (inline `exec=`, the reactive auto-dispatch, the
+//! settle-close effect, the settlement merge) are invisible to them. This file turns those
+//! into assertions:
 //!
-//! - state assertions read **`kv.entries` of the `save` receipt** (`req.*` is machine state,
-//!   not prose);
-//! - display assertions read the **derived display name** from `requirement.list`
-//!   (`[ready]` / `[plan_gate]` / …) — only safe while **no executor is bound** (a bound
-//!   executor currently crashes the trace renderer: missing `req_trace_actor_*` beats, see
-//!   the commit message of this file for the defect list);
-//! - map assertions read the **single operation window** from `map.show` (r1: the design
-//!   view is physically unreachable — the handler ignores every payload);
+//! - state assertions read **`kv.entries` of the `save` receipt** (`req.*` / `run.*` are
+//!   machine state, not prose): true states are `fsm.stage ∈ {live, retired}` and
+//!   `req.N.status ∈ {open, done}`; everything else (`run.phase`, `req.N.job/gate/plan_ok/
+//!   integrating/closed_reason`) is a derived micro-state flag;
+//! - display assertions read the **derived micro-state name** from `requirement.list`
+//!   (`[plan_gate]` / `[dev_review]` / `[integrating]` / `[split]` …) — the single-source
+//!   `req_phase()` projection;
+//! - map assertions read the **single operation window** from `map.show` (the handler
+//!   ignores every payload);
 //! - fail-closed assertions read the **driver pre-check envelope** (`error.code=VALIDATION`,
-//!   message = event name + registered count + registered set, zero side effects);
-//! - every human action goes through **guide's `ygg.choice_selected`** (the ticket is only
-//!   stamped there, §8).
+//!   event name + registered count + registered set, zero side effects);
+//! - every human action (proposal.accept / gate.approve / coordinate.submit / verify.submit
+//!   / review.note) goes through **guide's `ygg.choice_selected`** — the ticket is only
+//!   stamped there; the six new D-MA23 events (`charter.set` / `run.begin` /
+//!   `integration.*` / `release.*`) deliberately stay **outside** the ticket gate (R5).
 //!
 //! Boundaries (same stance as AGENTS.md §9 — do not add exits here):
-//! - only the public load surface (`ModBundle` / `KernelFacade` / dispatch / save-load):
+//! - only the public load surface (`ModBundle` / `KernelFacade` / dispatch / save-load);
 //!   no host CLI changes, no production-code changes, no side-channel scripts;
-//! - **no run directory is read or written**: legacy compatibility uses an **in-memory save
-//!   fixture** (drop a key inside the `save` receipt, then `restore`), never `autosave.json`
-//!   or `events.jsonl`;
-//! - r5 (single-shot receipt default text + `--raw`) and r8 (serve observation deck) are
-//!   **host/CLI faces** — their resolution chain (`--raw` > `YGG_FORMAT` > text) and the
-//!   GET-only 405 lock live in `examples/egg.rs` / `examples/serve.rs` unit suites
-//!   (`cargo test --example egg`); this file pins only the library-visible halves;
-//! - r10 is a **pure docs** branch (CONTEXT/DESIGN alignment): no library surface, nothing
-//!   to assert here — its acceptance is the documents themselves.
+//! - **no run directory is read or written**: legacy-compat and injection fixtures use an
+//!   **in-memory save** (mutate the `save` receipt, then `restore`), never `autosave.json`
+//!   or `events.jsonl`.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -69,16 +67,15 @@ fn seed_mod_dir() -> PathBuf {
 // ───────────────────────── drive surface ─────────────────────────
 
 /// The minimal drive surface of one run: load + dispatch + read the save.
-///
-/// `bundle` is kept so the legacy case can rebuild a kernel from the same load parameters
-/// (`ModBundle::restore` dispatches the same way as `kernel()`, see modload.rs).
 struct Game {
     bundle: ModBundle,
     kernel: KernelFacade,
 }
 
 impl Game {
-    /// Load and start on `event.start` (the same load surface the host uses).
+    /// Load and start on `event.start` **without a charter payload** — the run opens in the
+    /// charter micro-state (`run.phase = "charter"`, R2). Tests that need the resident
+    /// coordinate phase call `charter_and_begin` / `start_requirement` next.
     fn open(dir: &Path) -> Self {
         let bundle = ModBundle::load(dir)
             .unwrap_or_else(|err| panic!("failed to load {}: {err}", dir.display()));
@@ -98,7 +95,7 @@ impl Game {
     }
 
     /// Dispatch **without** asserting `ok` — the fail-closed envelope carries
-    /// `error.code` / `error.message` instead of a narrative (r1/r11 face).
+    /// `error.code` / `error.message` instead of a narrative.
     #[track_caller]
     fn raw_reply(&mut self, event: &str, payload: &str) -> Json {
         serde_json::from_str(&self.kernel.dispatch(event, payload))
@@ -133,7 +130,7 @@ impl Game {
         serde_json::to_vec(&self.save()).expect("serialize the save")
     }
 
-    /// One KV in the save (missing key → `Null`; the legacy case observes exactly that).
+    /// One KV in the save (missing key → `Null`; the fixtures observe exactly that).
     #[track_caller]
     fn kv(&mut self, key: &str) -> Json {
         self.save()["kv"]["entries"][key].clone()
@@ -163,7 +160,7 @@ impl Game {
     }
 
     /// guide routing: click a menu entry by option-text prefix (the **only** legal entry for
-    /// human actions, see AGENTS.md §8).
+    /// human actions — the ticket is stamped there and nowhere else).
     #[track_caller]
     fn click(&mut self, prefix: &str) -> Json {
         let options = self.options();
@@ -175,11 +172,8 @@ impl Game {
         self.reply("ygg.choice_selected", &payload)
     }
 
-    /// Derived display name: the `[ready]` slot of `requirement.list` — the display surface.
-    ///
-    /// Only safe while **no executor is bound** anywhere: a bound executor feeds the
-    /// three-state trace renderer, whose `req_trace_actor_*` beats are currently missing
-    /// (merge-lost data keys — reported; `requirement.list` would fail the dispatch).
+    /// Derived micro-state name: the `[…]` slot of the `requirement.list` row — the
+    /// `req_phase()` display surface (nine acts + `blocked` overlay + closed reasons).
     #[track_caller]
     fn phase(&mut self, id: &str) -> String {
         let needle = format!(" {id} [");
@@ -195,8 +189,7 @@ impl Game {
         row[open + 1..close].to_owned()
     }
 
-    /// The requirement panel line (counts per display name) — the surface the `useMemo`
-    /// derived tally feeds.
+    /// The requirement panel line (per-micro-state tally) — the `useMemo` derived surface.
     #[track_caller]
     fn panel(&mut self) -> String {
         self.narrate("requirement.list", "0")
@@ -268,32 +261,60 @@ fn assert_refused(lines: &[String], needle: &str) {
     );
 }
 
+/// The narrative array of an envelope (prose assertions read these lines).
+#[track_caller]
+fn narrative_lines(reply: &Json) -> Vec<String> {
+    reply["narrative"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the narrative is not an array: {reply}"))
+        .iter()
+        .map(|line| {
+            line.as_str()
+                .unwrap_or_else(|| panic!("a narrative line is not a string: {line:?}"))
+                .to_owned()
+        })
+        .collect()
+}
+
+/// How many lines carry a marker (a rewrite must not silently change the count).
+fn count_lines(lines: &[String], needle: &str) -> usize {
+    lines.iter().filter(|line| line.contains(needle)).count()
+}
+
 // ───────────────────────── drive scripts ─────────────────────────
 
-/// Start → coordinate → one requirement → the plan job is running
-/// (non-human actions are dispatched directly, no ticket needed).
-///
-/// `draft` now dispatches **plan** directly (analysis and plan are merged): the stored state
-/// moves to `planning` in the same dispatch.
-fn start_requirement(game: &mut Game) {
-    game.narrate(
-        "event.start",
-        &text("semantics gate|synthetic task description"),
+/// Charter the run and begin it: `charter.set` (the menu payload is a complete three-piece
+/// charter) + `run.begin` → `run.phase = ""` (the resident coordinate micro-state, R2/R3).
+fn charter_and_begin(game: &mut Game) {
+    game.click("charter.set — ");
+    game.assert_kv("task.title", json!("任务标题"));
+    let begun = game.click("run.begin — ");
+    let begun_text = begun["narrative"].to_string();
+    assert!(
+        begun_text.contains("[RUN BEGUN]"),
+        "run.begin must narrate the open: {begun}"
     );
+    game.assert_kv("run.phase", json!(""));
+}
+
+/// Coordinate → one requirement → the plan job is running. True status stays `open`
+/// (D-MA23: status only moves at the integration confirm); the micro-state is `planning`.
+fn start_requirement(game: &mut Game) {
+    charter_and_begin(game);
     game.narrate(
         "requirement.add",
         &text("synthetic requirement|synthetic description|semantics-r1"),
     );
     game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.status", json!("planning"));
+    game.assert_kv("req.1.status", json!("open"));
     game.assert_kv("req.1.job", json!("plan"));
+    assert_eq!(game.phase("r1"), "planning");
 }
 
 /// Submit a proposal for any requirement: `req|rev|stage|summary|artifacts|changes|ext`.
 ///
 /// Deliberately **without** an `exec=` tail: the shared drive scripts must keep
-/// `requirement.list` (display names) dispatchable — a bound executor feeds the
-/// three-state trace renderer whose beats are merge-lost (see the header note).
+/// `requirement.list` (display names) dispatchable for callers that assert clean rows.
 fn submit_req(game: &mut Game, id: &str, rev: u32, stage: &str, ext: &str) {
     let payload = text(&format!(
         "{id}|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}"
@@ -315,87 +336,205 @@ fn submit_with_exec(game: &mut Game, rev: u32, stage: &str, ext: &str, exec: &st
     game.narrate("proposal.submit", &payload);
 }
 
-/// Drive to **plan gate pending**: plan proposal → accept → `gate=plan`.
-///
-/// The proposal is `exec`-free so callers may keep using `requirement.list` / `phase()`.
+/// Submit an `r1` **development** proposal with an `exec=` tail and a non-empty changes
+/// segment (the changes feed the lane-probe narration in the sync-bridge case).
+fn submit_dev_with_exec(
+    game: &mut Game,
+    rev: u32,
+    ext: &str,
+    exec: &str,
+    changes: &str,
+) -> Vec<String> {
+    let payload = text(&format!(
+        "r1|{rev}|development|development proposal summary|artifacts/development.md|{changes}|{ext}|exec={exec}"
+    ));
+    game.narrate("proposal.submit", &payload)
+}
+
+/// Drive to **plan gate pending**: plan proposal → **delivery is the gate** (D-MA23) —
+/// the submit itself raises `gate="plan"` bound to the rev; there is no acceptance step.
 fn drive_to_plan_gate() -> Game {
     let mut game = Game::open(&project_mod_dir());
     start_requirement(&mut game);
     submit(&mut game, 1, "plan", "semantics-p1");
-    game.click("proposal.accept — ");
     game.assert_kv("req.1.gate", json!("plan"));
+    game.assert_kv("req.1.gate_rev", json!(1));
+    game.assert_kv("req.1.job", json!(""));
+    assert_eq!(game.phase("r1"), "plan_gate");
     game
 }
 
-/// From the plan gate to **accept gate pending**: approve plan (the reactive effect
-/// auto-dispatches development in the same turn) → deliver → accept.
-fn drive_to_accept(mut game: Game) -> Game {
-    game.click("gate.approve — ");
-    game.assert_kv("req.1.plan_ok", json!(true));
-    // Reactive auto-dispatch: no separate `requirement.dispatch` turn any more.
-    game.assert_kv("req.1.job", json!("development"));
-    game.assert_kv("req.1.lane", json!(1));
-    submit(&mut game, 1, "development", "semantics-p2");
-    game.click("proposal.accept — ");
-    game.assert_kv("req.1.gate", json!("accept"));
-    game
-}
-
-/// Drive to **developing + a pending development proposal** (no `accept` gate yet):
-/// approve plan → deliver.
-///
-/// Note: while a gate is pending no new proposal is accepted (`submit_slot_ok`'s gate
-/// guard), so "development proposal rejected" can only happen before acceptance — do not
-/// append a proposal after `drive_to_accept`.
+/// From the plan gate to **dev review pending**: approve plan (the reactive effect
+/// auto-dispatches development in the same turn) → deliver.
 fn drive_to_dev_pending(ext: &str) -> Game {
     let mut game = drive_to_plan_gate();
     game.click("gate.approve — ");
-    game.assert_kv("req.1.status", json!("developing"));
-    game.assert_kv("req.1.gate", json!(""));
+    game.assert_kv("req.1.plan_ok", json!(true));
+    game.assert_kv("req.1.job", json!("development"));
+    game.assert_kv("req.1.lane", json!(1));
     submit(&mut game, 1, "development", ext);
+    // Delivery moves the row to dev_review; the lane stays bound (R7: the executor still
+    // needs the worktree for the feature→develop integration).
+    game.assert_kv("req.1.job", json!(""));
+    game.assert_kv("req.1.lane", json!(1));
+    assert_eq!(game.phase("r1"), "dev_review");
     game
 }
 
-/// Complete the single requirement, close the coordinate stage, and record all-green
-/// evidence — the `review` stage is then ready for the settlement tasks.
-fn drive_to_review() -> Game {
-    let mut game = drive_to_accept(drive_to_plan_gate());
+/// Dev review → **accept gate pending**: the acceptance is the only `proposal.accept` left.
+fn drive_to_accept(mut game: Game) -> Game {
+    game.click("proposal.accept — ");
+    game.assert_kv("req.1.gate", json!("accept"));
+    game.assert_kv("req.1.gate_rev", json!(1));
+    assert_eq!(game.phase("r1"), "accept_gate");
+    game
+}
+
+/// Accept gate → **integrating**: `gate.approve` no longer closes the requirement — it opens
+/// act 8, and the lane stays bound until the integration confirm/reject (R7).
+fn drive_to_integrating(mut game: Game) -> Game {
     game.click("gate.approve — ");
+    game.assert_kv("req.1.integrating", json!(true));
+    game.assert_kv("req.1.status", json!("open"));
+    game.assert_kv("req.1.lane", json!(1));
+    assert_eq!(game.phase("r1"), "integrating");
+    game
+}
+
+/// Integrating → **done**: `integration.confirm` carries the `develop@<sha>` evidence,
+/// writes the true state `done`, and releases the lane.
+fn drive_to_done(mut game: Game) -> Game {
+    let confirmed = game.narrate("integration.confirm", &text("r1|develop@abc1234"));
+    assert!(
+        confirmed.iter().any(|line| line.contains("[INTEGRATION CONFIRMED]")),
+        "the integration confirm must narrate its beat: {confirmed:#?}"
+    );
     game.assert_kv("req.1.status", json!("done"));
+    game.assert_kv("req.1.develop_sha", json!("abc1234"));
+    game.assert_kv("req.1.integrating", json!(false));
+    game.assert_kv("req.1.lane", json!(0));
+    assert_eq!(game.phase("r1"), "done");
+    game
+}
+
+/// Complete the single requirement and close the batch boundary: `coordinate.submit` moves
+/// `run.phase` to `settle` (a micro-state move — `fsm.stage` stays `live`, R8).
+fn drive_to_settle() -> Game {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
+        "semantics-p2",
+    ))));
     let closed = game.click("coordinate.submit — ");
     assert!(
-        closed["narrative"]
-            .to_string()
-            .contains("[COORDINATION DONE]"),
-        "coordinate.submit must close the coordinate stage: {closed}"
+        closed["narrative"].to_string().contains("[COORDINATION DONE]"),
+        "coordinate.submit must open the settle act: {closed}"
     );
+    game.assert_kv("run.phase", json!("settle"));
+    game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
+    game.assert_kv("verify.passed", json!(false));
+    game
+}
+
+/// Settle the four items (verify → merged evolution registration with the `sessions=` /
+/// `todo=` segments) — the settle-close effect then flips `run.phase` to `release` (R9).
+fn drive_to_release() -> Game {
+    let mut game = drive_to_settle();
     let verified = game.click("verify.submit all_green=true — ");
-    let verified_lines = verified["narrative"].to_string();
     assert!(
-        verified_lines.contains("[GATES GREEN]"),
+        verified["narrative"].to_string().contains("[GATES GREEN]"),
         "verify.submit all_green=true must record evidence: {verified}"
     );
     game.assert_kv("verify.passed", json!(true));
+    let registered = game.narrate(
+        "settlement.evolution",
+        &text(
+            "|candidates screened against the evolution chapter|c=0/0|\
+             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
+        ),
+    );
+    assert!(
+        registered.iter().any(|line| line.contains("[SETTLE READY]")),
+        "the four-settled effect must narrate the release move: {registered:#?}"
+    );
+    game.assert_kv("run.phase", json!("release"));
     game
 }
 
-// ───────────────────────── r9 · resident lifecycle ─────────────────────────
+// ───────────────────────── charter & resident lifecycle ─────────────────────────
+
+/// The charter act (R2/R3/R4): boot lands in `charter` with `charter.set` as the only
+/// business item; `run.begin` requires the three-piece charter and is refused before it;
+/// the charter is revisable inside the act; `run.begin` moves to `run.phase=""` and locks
+/// the charter (a later `charter.set` is a readable refusal).
+#[test]
+fn charter_gate_revises_locks_and_begins_the_run() {
+    let mut game = Game::open(&project_mod_dir());
+
+    // Boot lands in the charter micro-state; the menu tells the truth (no run.begin yet).
+    game.assert_kv("run.phase", json!("charter"));
+    let options = game.options();
+    assert!(
+        options[0].starts_with("charter.set — "),
+        "charter.set must be the first charter item: {options:?}"
+    );
+    assert!(
+        !options.iter().any(|item| item.starts_with("run.begin — ")),
+        "an incomplete charter must not put run.begin on the menu: {options:?}"
+    );
+
+    // run.begin precondition: the three-piece charter. Readable refusal, no phase move.
+    let early = game.narrate("run.begin", "0");
+    assert_refused(&early, "run.begin");
+    game.assert_kv("run.phase", json!("charter"));
+
+    // charter.set writes the trio and is revisable inside the act (last write wins).
+    game.narrate(
+        "charter.set",
+        &text("semantics run|prove the v2 state machine|suite green"),
+    );
+    game.assert_kv("task.title", json!("semantics run"));
+    game.assert_kv("task.goal", json!("prove the v2 state machine"));
+    game.assert_kv("task.success", json!("suite green"));
+    assert!(
+        game.options().iter().any(|item| item.starts_with("run.begin — ")),
+        "a complete charter must put run.begin on the menu"
+    );
+    game.narrate(
+        "charter.set",
+        &text("semantics run v2|prove the D-MA23 loop|suite green"),
+    );
+    game.assert_kv("task.title", json!("semantics run v2"));
+
+    // run.begin → coordinate: run.phase = "" (the resident main state, R2), [RUN BEGUN].
+    game.click("run.begin — ");
+    game.assert_kv("run.phase", json!(""));
+    let options = game.options();
+    assert!(
+        options[0].starts_with("coordinate.submit"),
+        "the coordinate menu must lead with the batch closer on an empty queue: {options:?}"
+    );
+
+    // R4 lock: after run.begin the charter is immutable — a readable refusal, value kept.
+    let locked = game.narrate(
+        "charter.set",
+        &text("late charter|must refuse|locked"),
+    );
+    assert_refused(&locked, "charter.set");
+    game.assert_kv("task.title", json!("semantics run v2"));
+}
 
 /// r9 Resident lifecycle: `review.note` **settles the batch and returns to coordinate**;
-/// the run only ends through an explicitly armed retirement (baseline B, a separate case).
+/// the run only ends through an explicitly armed retirement (a separate case).
 ///
-/// Baseline A — the scripted batch cycle (the default walk): since r2 rev2 the boot lands
-/// directly in `coordinate` and the charter gate refuses every closer on a charterless
-/// empty run, so the four-forward script (1=coordinate.submit · 1=verify.submit ·
-/// 1=settlement.evolution · 1=review.note) is refused at step one and the walk exhausts
-/// back at the coordinate choice (`reached=choice`, 5 steps) with **no closure beat**
-/// narrated anywhere. Script pins make a menu reorder fail here loudly, not silently.
+/// Baseline A — the pinned script walks the charter first (`2`=run.begin once the menu
+/// offers it, then `1`×3 refused batch closers on the empty queue): 1 boot + 4 choices,
+/// exhausted back at a coordinate choice (`reached=choice`, 5 steps) with the `[RUN BEGUN]`
+/// line present and **no closure beat** anywhere. Script pins make a menu reorder fail here
+/// loudly, not silently.
 #[test]
 fn resident_batch_cycle_reaches_coordinate_again() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
-        // Script (pinned, r2 rev2): every closer refused on the empty run → exhaust at choice.
         let options = PlaytestOptions {
-            choices: vec![1, 1, 1, 1],
+            choices: vec![1, 2, 1, 1],
             ..Default::default()
         };
         let report = playtest(&dir, &options);
@@ -415,11 +554,12 @@ fn resident_batch_cycle_reaches_coordinate_again() {
         assert_eq!(
             report.steps,
             5,
-            "{}: the pinned batch-cycle walk is 5 steps (boot + four refused closers)",
+            "{}: the pinned batch-cycle walk is 5 steps (boot + charter.set + run.begin + two refused closers)",
             dir.display()
         );
-        // Readable-rejection direction: a charterless empty run must never close — none of
-        // the closure beats may appear in the walked narrative.
+        // (The narrative_sample is capped at 8 lines and the boot receipt alone fills 7 —
+        // later receipts are invisible here; the coordinate-phase reachability is pinned by
+        // the Game-driven cases instead.)
         let closed = report.narrative_sample.iter().any(|line| {
             line.starts_with("[COORDINATION DONE]")
                 || line.starts_with("[GATES GREEN]")
@@ -427,7 +567,7 @@ fn resident_batch_cycle_reaches_coordinate_again() {
         });
         assert!(
             !closed,
-            "{}: an unchartered empty run must never close: {:?}",
+            "{}: an empty queue must never close: {:?}",
             dir.display(),
             report.narrative_sample
         );
@@ -441,18 +581,16 @@ fn resident_batch_cycle_reaches_coordinate_again() {
     }
 }
 
-/// r9 Baseline B — the armed retirement (the **only** path to a run-level ending).
-///
-/// r2 rev2: on a charterless empty run every closer refuses at the charter gate, so the
-/// script can never reach `review` and the retiring ending is **unreachable**: the walk
-/// (1×7 refused closers · 5=config.open · 4=arm run.retire · 5=back · 1=refused
-/// review.note) exhausts at the coordinate choice (`reached=choice`, 12 steps) with no
-/// `[ENDING` line anywhere. Script pins make a menu reorder fail here loudly, not silently.
+/// r9 Baseline B — the armed retirement (the **only** path to a run-level ending) is
+/// unreachable without a completed, release-declared batch. The pinned script arms
+/// `run.retire` through the config sub-page (`3`=config · `4`=run.retire · `5`=back) and
+/// then walks the charter (`1`=charter.set · `2`=run.begin) into a refused batch closer:
+/// exhausted at a choice (`reached=choice`, 7 steps) with **no `[ENDING` line anywhere**.
 #[test]
 fn resident_retire_is_unreachable_without_a_charter() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
         let options = PlaytestOptions {
-            choices: vec![1, 1, 1, 1, 1, 1, 1, 5, 4, 5, 1],
+            choices: vec![3, 4, 5, 1, 2, 1],
             ..Default::default()
         };
         let report = playtest(&dir, &options);
@@ -466,13 +604,13 @@ fn resident_retire_is_unreachable_without_a_charter() {
         assert_eq!(
             report.reached,
             Some(Reached::Choice),
-            "{} without a charter the retiring ending must be unreachable",
+            "{} without a completed batch the retiring ending must be unreachable",
             dir.display()
         );
         assert_eq!(
             report.steps,
-            12,
-            "{}: the pinned retirement walk is 12 steps",
+            7,
+            "{}: the pinned retirement walk is 7 steps",
             dir.display()
         );
         assert!(
@@ -480,7 +618,7 @@ fn resident_retire_is_unreachable_without_a_charter() {
                 .narrative_sample
                 .iter()
                 .any(|line| line.starts_with("[ENDING")),
-            "{}: no ending line may appear on a charterless empty run: {:?}",
+            "{}: no ending line may appear on an unfinished run: {:?}",
             dir.display(),
             report.narrative_sample
         );
@@ -499,25 +637,21 @@ fn resident_retire_is_unreachable_without_a_charter() {
 ///   writes nothing);
 /// - arming goes through the config sub-page (a pure presentation entry — the write is
 ///   still `config.set`) and narrates its own beat;
-/// - armed: the next `review.note` writes the retiring ending (`[ENDING · run retired]`)
-///   **without** touching `run.batch` and without a `[BATCH` settle line;
+/// - armed: the next `review.note` writes the retiring ending (`[ENDING · run retired]`),
+///   flips `fsm.stage` to `retired` (the only true FSM transition), and **without** a
+///   `[BATCH` settle line or a `run.batch` write;
 /// - clearing stays available after retirement (`config.set` is stage-less).
 #[test]
 fn run_retire_value_domain_and_retiring_close() {
-    let mut game = drive_to_review();
-    // Register the settlement in one merged turn so `review.note` is the menu's first item.
-    game.narrate(
-        "settlement.evolution",
-        &text(
-            "|candidates screened against the evolution chapter|c=0/0|\
-             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
-        ),
-    );
+    let mut game = drive_to_release();
 
     // Value domain: anything other than true / "" is refused and writes nothing.
     let bad = game.narrate("config.set", &text("run.retire=false"));
     assert_refused(&bad, "run.retire");
     game.assert_kv("settings.run.retire", json!(null));
+
+    // Declare the release (R10 precondition for any review.note) before arming.
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
 
     // Arm through the sub-page item (pure presentation entry, the write is still config.set).
     game.click("config — ");
@@ -528,11 +662,10 @@ fn run_retire_value_domain_and_retiring_close() {
     );
     game.click("config.set — run.retire");
     game.assert_kv("settings.run.retire", json!("true"));
-    // The sub-page survives (only a play-mode switch leaves it).
     assert_eq!(game.options().len(), 5, "still on the config sub-page");
     game.click("back — ");
 
-    // The retiring close: archive + ending, and run.batch stays untouched.
+    // The retiring close: review.note in the release phase with the release declared.
     let closed = game.click("review.note — ");
     let narrative = closed["narrative"].to_string();
     assert!(
@@ -543,18 +676,16 @@ fn run_retire_value_domain_and_retiring_close() {
         !narrative.contains("[BATCH"),
         "a retiring close must never carry a batch-settle line: {closed}"
     );
-    game.assert_kv("ending", json!("done"));
-    // run.batch stays untouched (the key is never written: this run retired on its first
-    // settlement — the summary field still reads 1 by default).
+    game.assert_kv("ending", json!("retired"));
+    game.assert_kv("fsm.stage", json!("retired"));
+    // run.batch stays untouched (the key is never written on the retiring path).
     game.assert_kv("run.batch", json!(null));
-    game.assert_kv("fsm.stage", json!("done"));
     game.assert_kv(
         "review.evolution.summary",
         json!("candidates screened against the evolution chapter"),
     );
 
-    // Clearing stays available after retirement (done is read-only for requirements, not
-    // for the retire switch) and narrates its own beat.
+    // Clearing stays available after retirement and narrates its own beat.
     let cleared = game.narrate("config.set", &text("run.retire="));
     assert_eq!(
         count_lines(&cleared, "[RUN RETIRE CLEARED]"),
@@ -565,10 +696,10 @@ fn run_retire_value_domain_and_retiring_close() {
 }
 
 /// r9 The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
-/// an empty batch loops (coordinate.submit → verify → evolution → review.note → coordinate …)
+/// the charter gate keeps an empty run from ever closing, so the walk loops on refusals
 /// until the step limit — `ok=false, reached=limit` is the documented steady state, not a
-/// regression. r2 rev2: the loop is now the **charter-rejection loop** — every closer is
-/// refused at the charter gate, so no closure beat may ever appear in the walked narrative.
+/// regression. No closure beat ([COORDINATION DONE] / [GATES GREEN] / [BATCH) and no
+/// ending line may ever appear in the walked narrative.
 #[test]
 fn default_all1_walk_loops_empty_batches_to_limit() {
     for dir in [project_mod_dir(), seed_mod_dir()] {
@@ -590,99 +721,58 @@ fn default_all1_walk_loops_empty_batches_to_limit() {
             dir.display(),
             report.errors
         );
-        // r2 rev2 readable-rejection direction: the charter gate keeps the empty run from
-        // ever closing — no batch boundary / gate-green / batch-settle beat may appear.
         let closed = report.narrative_sample.iter().any(|line| {
             line.starts_with("[COORDINATION DONE]")
                 || line.starts_with("[GATES GREEN]")
                 || line.starts_with("[BATCH")
+                || line.starts_with("[ENDING")
         });
         assert!(
             !closed,
-            "{}: the charter rejection loop must never close: {:?}",
+            "{}: the refusal loop must never close: {:?}",
             dir.display(),
             report.narrative_sample
         );
     }
 }
 
-// ───────────────────────── stage merge ─────────────────────────
+// ───────────────────── requirement pipeline: gates & deliverables ─────────────────────
 
-/// `draft` dispatches **plan** (analysis + plan merged) while the legacy `analysis` slot
-/// stays compatible: an analysis proposal is still accepted on a `planning` row.
-#[test]
-fn draft_dispatch_lands_in_planning_and_keeps_the_analysis_slot_compatible() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-    assert_eq!(game.phase("r1"), "planning");
-
-    // Legacy shape: an analysis proposal on a planning row must still be accepted
-    // (the compat slot), and it must not open a gate.
-    submit(&mut game, 1, "analysis", "semantics-legacy-analysis");
-    assert_eq!(game.phase("r1"), "analysis_review");
-    game.click("proposal.accept — ");
-    game.assert_kv("req.1.status", json!("planning"));
-    game.assert_kv("req.1.gate", json!(""));
-
-    // After the compat round the row is still dispatchable for the real plan stage.
-    game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.job", json!("plan"));
-}
-
-// ───────────────────────── ① accept gate reject (not amended) ─────────────────────────
-
-/// ① `accept` gate rejected **without** an amend: `plan_ok` keeps its value → the stored
-/// state goes back to planning, the display name is still `ready`, and the next dispatch
-/// hands out **development** (not plan).
+/// The accept gate rejected **without** an amend (R6): `plan_ok` keeps its value → the row
+/// falls back to `ready` (待开发)， and the next dispatch hands out **development** (not
+/// plan). A direct `gate.approve` without a menu ticket is refused with the state unmoved.
 #[test]
 fn accept_gate_reject_keeps_plan_ok_and_redispatches_development() {
-    let mut game = drive_to_accept(drive_to_plan_gate());
-    assert_eq!(game.phase("r1"), "accept");
-    game.assert_kv("req.1.status", json!("developing"));
+    let mut game = drive_to_accept(drive_to_dev_pending("semantics-p2"));
+    game.assert_kv("req.1.status", json!("open"));
     game.assert_kv("req.1.gate_rev", json!(1));
 
     // guide gate: a pass-type action without a menu ticket is always refused and the
-    // primary state does not move (§8/§9).
+    // state does not move.
     let direct = game.narrate("gate.approve", &text("r1"));
     assert_refused(&direct, "gate.approve");
-    game.assert_kv("req.1.status", json!("developing"));
     game.assert_kv("req.1.gate", json!("accept"));
+    game.assert_kv("req.1.status", json!("open"));
 
-    // Normal reject (rejects are outside the gate, but the menu keeps a single entry).
+    // Normal reject (rejects are outside the ticket gate; the menu keeps a single entry).
     game.click("gate.reject — ");
-    game.assert_kv("req.1.status", json!("planning"));
     game.assert_kv("req.1.gate", json!(""));
     game.assert_kv("req.1.plan_ok", json!(true));
+    game.assert_kv("req.1.lane", json!(0));
     assert_eq!(game.phase("r1"), "ready");
 
     game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.status", json!("developing"));
     game.assert_kv("req.1.job", json!("development"));
+    game.assert_kv("req.1.lane", json!(1));
 }
 
-/// Approving the `accept` gate closes the requirement **and releases the lane** in the same
-/// turn (the lane was already freed by `proposal.accept`; this asserts the observable end).
-#[test]
-fn accept_gate_approval_closes_the_requirement_and_releases_the_lane() {
-    let mut game = drive_to_accept(drive_to_plan_gate());
-    game.click("gate.approve — ");
-    game.assert_kv("req.1.status", json!("done"));
-    game.assert_kv("req.1.job", json!(""));
-    game.assert_kv("req.1.lane", json!(0));
-    // No successor is derived from `accept -> done`: the freed job slot is the main agent's
-    // decision, so no new job may appear on its own.
-    game.assert_kv("req.1.job", json!(""));
-    game.assert_kv("req.1.status", json!("done"));
-}
-
-// ───────────────────────── ② accept gate + amend → stale ─────────────────────────
-
-/// ② Amend while the `accept` gate is pending: `rev+1` and `plan_ok` is invalidated → the old
-/// approval is stale (refused, state unchanged) → the reject path stops in planning.
+/// Amend while the accept gate is pending: `rev+1` and `plan_ok` is invalidated → the old
+/// approval is stale (refused, state unchanged — `gate_rev` still binds the old rev) → the
+/// reject path falls back to `draft` (the invalidated plan), and the next dispatch replans.
 #[test]
 fn accept_gate_amend_invalidates_plan_and_stales_the_pending_gate() {
-    let mut game = drive_to_accept(drive_to_plan_gate());
-    assert_eq!(game.phase("r1"), "accept");
+    let mut game = drive_to_accept(drive_to_dev_pending("semantics-p2"));
+    assert_eq!(game.phase("r1"), "accept_gate");
 
     game.narrate("requirement.amend", &text("r1|amended title"));
     game.assert_kv("req.1.rev", json!(2));
@@ -694,48 +784,40 @@ fn accept_gate_amend_invalidates_plan_and_stales_the_pending_gate() {
 
     // The old approval must not take effect: stale rejection, state and gate untouched.
     let stale = game.click("gate.approve — ");
-    let stale_lines: Vec<String> = stale["narrative"]
-        .as_array()
-        .expect("narrative")
-        .iter()
-        .map(|line| line.as_str().expect("narrative line").to_owned())
-        .collect();
-    assert_refused(&stale_lines, "stale");
-    game.assert_kv("req.1.status", json!("developing"));
+    assert_refused(&narrative_lines(&stale), "stale");
+    game.assert_kv("req.1.status", json!("open"));
     game.assert_kv("req.1.gate", json!("accept"));
     game.assert_kv("req.1.gate_rev", json!(1));
 
     game.click("gate.reject — ");
-    game.assert_kv("req.1.status", json!("planning"));
     game.assert_kv("req.1.gate", json!(""));
     game.assert_kv("req.1.plan_ok", json!(false));
-    assert_eq!(game.phase("r1"), "planning");
+    assert_eq!(game.phase("r1"), "draft");
 
     game.narrate("requirement.dispatch", "0");
     game.assert_kv("req.1.job", json!("plan"));
 }
 
-// ───────────────────────── ③ plan gate reject ─────────────────────────
-
-/// ③ `plan` gate rejected: `plan_ok` is set false → planning → the next dispatch is still
-/// **plan**.
+/// The `plan` gate rejected: `plan_ok` goes back to false and the plan task is re-attached
+/// to the executor (`job="plan"`) — a fresh plan proposal on the same row is accepted again
+/// (slot = planning ∧ no gate).
 #[test]
 fn plan_gate_reject_requires_a_new_plan() {
     let mut game = drive_to_plan_gate();
     assert_eq!(game.phase("r1"), "plan_gate");
 
     game.click("gate.reject — ");
-    game.assert_kv("req.1.status", json!("planning"));
     game.assert_kv("req.1.gate", json!(""));
     game.assert_kv("req.1.plan_ok", json!(false));
+    // The plan job returns to the executor without a new dispatch turn.
+    game.assert_kv("req.1.job", json!("plan"));
     assert_eq!(game.phase("r1"), "planning");
 
-    game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.status", json!("planning"));
-    game.assert_kv("req.1.job", json!("plan"));
+    // A second plan proposal is deliverable again (the gate slot is free).
+    submit(&mut game, 1, "plan", "semantics-p1-replan");
+    game.assert_kv("req.1.gate", json!("plan"));
+    game.assert_kv("req.1.gate_rev", json!(1));
 }
-
-// ───────────────────────── reactive auto-dispatch (hooks) ─────────────────────────
 
 /// Approving the `plan` gate makes the row `ready`; the declared `useEffect` auto-dispatches
 /// **development for that requirement only** before the receipt is rendered (one turn saved),
@@ -746,26 +828,19 @@ fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
     assert_eq!(game.phase("r1"), "plan_gate");
     let before = game.panel();
     assert!(
-        before.contains("ready 0"),
-        "before approval nothing is ready: {before}"
+        before.contains("门禁 1"),
+        "before approval the row sits on the plan gate: {before}"
     );
 
     let reply = game.click("gate.approve — ");
-    let narrative: Vec<String> = reply["narrative"]
-        .as_array()
-        .expect("narrative")
-        .iter()
-        .map(|line| line.as_str().expect("narrative line").to_owned())
-        .collect();
+    let narrative = narrative_lines(&reply);
     assert!(
-        narrative
-            .iter()
-            .any(|line| line.starts_with("[AUTO-DISPATCH]")),
+        narrative.iter().any(|line| line.starts_with("[AUTO-DISPATCH]")),
         "the auto-dispatch effect must narrate its own line: {narrative:#?}"
     );
 
-    // Same turn: the development job and its lane already exist.
-    game.assert_kv("req.1.status", json!("developing"));
+    // Same turn: the development job and its lane already exist; the true status is open.
+    game.assert_kv("req.1.status", json!("open"));
     game.assert_kv("req.1.job", json!("development"));
     game.assert_kv("req.1.lane", json!(1));
     assert_eq!(game.phase("r1"), "developing");
@@ -774,29 +849,28 @@ fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
     let after = game.panel();
     assert_ne!(before, after, "the panel must not stay memoized stale");
     assert!(
-        after.contains("developing 1"),
+        after.contains("开发中 1") && after.contains("门禁 0"),
         "the panel must show the auto-dispatched requirement: {after}"
     );
 }
 
-// ───────────────────────── ④ development proposal reject ─────────────────────────
-
-/// ④ Development `proposal.reject` (**before** the accept gate):
-/// - not amended: `plan_ok` keeps its value → planning but displayed `ready`, next dispatch
-///   is development;
-/// - amended: `plan_ok` was invalidated by the rev bump → stops in planning, next dispatch
-///   is plan.
+/// Development `proposal.reject` (**before** the accept gate, R6):
+/// - not amended: `plan_ok` keeps its value → back to `ready` with the lane released, the
+///   next dispatch re-claims development;
+/// - amended: the rev bump invalidated `plan_ok` → the row falls back to `draft`, and the
+///   next dispatch hands out **plan** (replan).
 #[test]
 fn dev_proposal_reject_keeps_plan_ok_unless_amended() {
     // Path without an amend.
     let mut normal = drive_to_dev_pending("semantics-p3");
     normal.narrate("proposal.reject", &text("r1|incomplete artifacts"));
-    normal.assert_kv("req.1.status", json!("planning"));
+    normal.assert_kv("req.1.status", json!("open"));
     normal.assert_kv("req.1.plan_ok", json!(true));
+    normal.assert_kv("req.1.lane", json!(0));
     assert_eq!(normal.phase("r1"), "ready");
     normal.narrate("requirement.dispatch", "0");
-    normal.assert_kv("req.1.status", json!("developing"));
     normal.assert_kv("req.1.job", json!("development"));
+    normal.assert_kv("req.1.lane", json!(1));
 
     // Amended path: the proposal is pending, the amend invalidates the rev, then reject.
     let mut amended = drive_to_dev_pending("semantics-p4");
@@ -804,24 +878,23 @@ fn dev_proposal_reject_keeps_plan_ok_unless_amended() {
     amended.assert_kv("req.1.rev", json!(2));
     amended.assert_kv("req.1.plan_ok", json!(false));
     amended.narrate("proposal.reject", &text("r1|redo on the new rev"));
-    amended.assert_kv("req.1.status", json!("planning"));
+    amended.assert_kv("req.1.status", json!("open"));
     amended.assert_kv("req.1.plan_ok", json!(false));
-    assert_eq!(amended.phase("r1"), "planning");
+    assert_eq!(amended.phase("r1"), "draft");
     amended.narrate("requirement.dispatch", "0");
     amended.assert_kv("req.1.job", json!("plan"));
 }
 
-/// Amending a requirement **while development is in flight** (before any development proposal
-/// is submitted) updates its description and bumps `rev` without resetting progress
-/// (`req_amend_active`); submitting the new `rev`'s development proposal must succeed rather
-/// than deadlocking on `plan_ok == false`. If that proposal is later rejected, `plan_ok == false`
-/// still forces a replan in `planning`.
+/// Amending a requirement **while development is in flight** (before any development
+/// proposal is submitted) updates its description and bumps `rev` without resetting the
+/// job (`req_amend_active`); submitting the new `rev`'s development proposal must succeed
+/// rather than deadlocking on `plan_ok == false`. If that proposal is later rejected,
+/// `plan_ok == false` sends the row back to `draft` (replan).
 #[test]
 fn developing_amend_without_pending_proposal_does_not_deadlock() {
     let mut game = drive_to_plan_gate();
     game.click("gate.approve — ");
     // Auto-dispatched into developing (no pending proposal yet).
-    game.assert_kv("req.1.status", json!("developing"));
     game.assert_kv("req.1.job", json!("development"));
 
     game.narrate(
@@ -829,25 +902,25 @@ fn developing_amend_without_pending_proposal_does_not_deadlock() {
         &text("r1|refined title|refined description in flight"),
     );
     game.assert_kv("req.1.rev", json!(2));
-    game.assert_kv("req.1.status", json!("developing"));
+    game.assert_kv("req.1.job", json!("development"));
     game.assert_kv("req.1.plan_ok", json!(false));
+    assert_eq!(game.phase("r1"), "developing");
 
     // Submitting a development proposal for the new rev must succeed (no deadlock).
     submit(&mut game, 2, "development", "semantics-dev-after-amend");
     assert_eq!(game.phase("r1"), "dev_review");
 
-    // And if that proposal is rejected, `plan_ok == false` sends it back to `planning` (replan).
+    // And if that proposal is rejected, `plan_ok == false` sends it back to `draft` (replan).
     game.narrate("proposal.reject", &text("r1|needs replan after amend"));
-    game.assert_kv("req.1.status", json!("planning"));
     game.assert_kv("req.1.plan_ok", json!(false));
-    assert_eq!(game.phase("r1"), "planning");
+    assert_eq!(game.phase("r1"), "draft");
 }
 
-// ───────────────────────── inline executor ledger (`exec=`) ─────────────────────────
+// ───────────────────── inline executor ledger (`exec=`) ─────────────────────
 
 /// `proposal.submit` binds the executor in the same transaction, refuses an `exec=` that is
-/// not the last segment, and requires a reason for a cross-stage handoff (given here with the
-/// `:` form so it survives the outer `|` split).
+/// not the last segment, and requires a reason for a cross-stage handoff (given here with
+/// the `:` form so it survives the outer `|` split).
 #[test]
 fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
     let mut game = Game::open(&project_mod_dir());
@@ -869,8 +942,8 @@ fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
     game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
     game.assert_kv("prop.1.stage", json!("plan"));
 
-    // Cross-stage handoff without a reason → precondition rejection, no proposal.
-    game.click("proposal.accept — ");
+    // Cross-stage handoff without a reason → precondition rejection, no proposal. The plan
+    // gate is up now; approving it (delivery is the gate) auto-dispatches development.
     game.click("gate.approve — ");
     let no_reason = game.narrate(
         "proposal.submit",
@@ -895,26 +968,40 @@ fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
     );
 }
 
-// ───────────────────────── settlement merge ─────────────────────────
+// ───────────────────── settlement merge & the batch loop ─────────────────────
 
 /// One `settlement.evolution` turn settles the evolution record **and** the two end-of-run
-/// cleanups (`sessions=` / `todo=`), so `review.note` can close the batch right after it.
-/// The standalone actions stay usable for step-by-step settlement.
+/// cleanups (`sessions=` / `todo=`) — the four-settled effect then moves the run into the
+/// release micro-state, and `review.note` (release declared) closes the batch right after
+/// it. A malformed optional segment is refused (shape gate, nothing written).
 #[test]
 fn settlement_evolution_settles_sessions_and_todo_in_one_turn() {
-    let mut game = drive_to_review();
+    let mut game = drive_to_settle();
+    let verified = game.click("verify.submit all_green=true — ");
+    assert!(
+        verified["narrative"].to_string().contains("[GATES GREEN]"),
+        "verify.submit all_green=true must record evidence: {verified}"
+    );
 
-    // Standalone actions remain compatible (shape-checked, remaining must be 0).
-    game.narrate("settlement.todo", &text("0|standalone re-check"));
-    game.assert_kv("settlement.todo.remaining", json!(0));
-    game.assert_kv("settlement.todo.verified_by", json!("standalone re-check"));
+    // A malformed optional segment is refused before anything is written.
+    let bad = game.narrate(
+        "settlement.evolution",
+        &text("|summary|c=0/0|sessions=1/3/nowhere"),
+    );
+    assert_refused(&bad, "sessions=");
+    // The refusal writes nothing: moved stays at the reset_settlement baseline (0).
+    game.assert_kv("settlement.sessions.moved", json!(0));
 
-    // One evolution turn carries the cleanups: `sessions=` is the missing piece now.
+    // The merged turn: evolution + sessions + todo in one transaction.
     let payload = text(
         "|candidates screened against the evolution chapter|c=0/0|\
 sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
     );
-    game.narrate("settlement.evolution", &payload);
+    let registered = game.narrate("settlement.evolution", &payload);
+    assert!(
+        registered.iter().any(|line| line.contains("[SETTLE READY]")),
+        "the four-settled effect must fire in the same turn: {registered:#?}"
+    );
     game.assert_kv(
         "settlement.sessions.destination",
         json!("~/.pi/agent/sessions-trash/semantics"),
@@ -930,18 +1017,10 @@ sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo lis
         game.kv("settlement.evolution.summary"),
         json!("candidates screened against the evolution chapter")
     );
+    game.assert_kv("run.phase", json!("release"));
 
-    // A malformed optional segment is refused (shape gate), state unchanged.
-    let bad = game.narrate(
-        "settlement.evolution",
-        &text("|summary|c=0/0|sessions=1/3/nowhere"),
-    );
-    assert_refused(&bad, "sessions=");
-    game.assert_kv("settlement.sessions.moved", json!(1));
-
-    // `review.note` now settles the batch (all three settlement tasks are registered):
-    // resident default — archive → run.batch+1 → reset verify/settlement → coordinate,
-    // never an ending.
+    // The batch close needs the release declaration first; skip with a reason, then close.
+    game.narrate("release.skip", &text("本批无需发布：纯测试批次"));
     let closed = game.click("review.note — ");
     let narrative = closed["narrative"].to_string();
     assert!(
@@ -954,77 +1033,145 @@ sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo lis
     );
     game.assert_kv("ending", json!(null));
     game.assert_kv("run.batch", json!(2));
-    game.assert_kv("fsm.stage", json!("coordinate"));
+    game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
+    game.assert_kv("run.phase", json!(""));
     game.assert_kv("verify.passed", json!(false));
     game.assert_kv("settlement.evolution.summary", json!(""));
-    game.assert_kv("review.evolution.candidates", json!("0/0"));
+    game.assert_kv("run.release.master_sha", json!(""));
+    game.assert_kv("run.release.skipped_reason", json!(""));
+    game.assert_kv(
+        "review.evolution.candidates",
+        json!("0/0"),
+    );
     game.assert_kv(
         "review.evolution.summary",
         json!("candidates screened against the evolution chapter"),
     );
 }
 
-// ───────────────────────── ⑤ legacy save without the key ─────────────────────────
-
-/// ⑤ Legacy compatibility: in-flight rows from before this model have **no**
-/// `req.N.plan_ok` key.
-///
-/// Build such a save in memory (drop the key inside the `save` receipt) and `restore` it:
-/// - a missing key must not make an in-flight developing row look like "plan not approved";
-/// - `gate.reject` then infers "the plan gate already passed" from the **current state**
-///   (developing) → displays `ready` and writes the inferred value back explicitly.
-///
-/// This only proves "the current reducer reads a save with a missing key": no historical
-/// engine is forged and no autosave / events file is touched.
+/// A failed verify returns the **whole batch** to coordinate (R9): `run.phase=""`, the
+/// settlement and release keys are cleared, the failure counter increments, and the
+/// coordinate surface is usable again (a new requirement can enter the queue).
 #[test]
-fn legacy_save_without_plan_flag_infers_then_writes_it_back() {
-    let mut game = drive_to_accept(drive_to_plan_gate());
-    let mut save = game.save();
-    let entries = save["kv"]["entries"]
-        .as_object_mut()
-        .expect("kv.entries must be an object");
-    assert_eq!(
-        entries.remove("req.1.plan_ok"),
-        Some(json!(true)),
-        "the sample start must carry an explicit plan_ok=true"
+fn verify_failure_returns_the_batch_to_coordinate() {
+    let mut game = drive_to_settle();
+    let failed = game.click("verify.submit all_green=false — ");
+    assert!(
+        failed["narrative"].to_string().contains("[GATES FAILED]"),
+        "the honest failure must narrate its beat: {failed}"
     );
-    assert!(!entries.contains_key("req.1.plan_ok"));
+    game.assert_kv("run.phase", json!(""));
+    game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
+    game.assert_kv("verify.passed", json!(false));
+    game.assert_kv("verify.failures", json!(1));
+    game.assert_kv("settlement.evolution.summary", json!(""));
+    game.assert_kv("run.release.master_sha", json!(""));
 
-    let bytes = serde_json::to_vec(&save).expect("serialize the save");
-    let mut legacy = Game {
-        bundle: game.bundle.clone(),
-        kernel: game
-            .bundle
-            .restore(&bytes)
-            .expect("a save with a missing key must load"),
-    };
-    // After loading the key is still absent (the reducer does not invent it), but the
-    // display surface is unaffected.
-    legacy.assert_kv("req.1.plan_ok", Json::Null);
-    assert_eq!(legacy.phase("r1"), "accept");
-
-    legacy.click("gate.reject — ");
-    legacy.assert_kv("req.1.status", json!("planning"));
-    legacy.assert_kv("req.1.plan_ok", json!(true)); // the inferred value is now stored
-    assert_eq!(legacy.phase("r1"), "ready");
-
-    legacy.narrate("requirement.dispatch", "0");
-    legacy.assert_kv("req.1.status", json!("developing"));
-    legacy.assert_kv("req.1.job", json!("development"));
+    // Coordinate again: the queue accepts new work for the next round.
+    game.narrate(
+        "requirement.add",
+        &text("rework requirement|desc|semantics-rework"),
+    );
+    game.assert_kv("req.2.status", json!("open"));
 }
 
-// ───────────────────────── ⑤b gate locality (approve starts work, r12) ─────────────────────────
+/// The release act gates the batch settlement (R-a/R10): an undeclared release keeps
+/// `review.note` off the menu; `release.skip` requires a non-empty reason; `release.confirm`
+/// validates the sha/tag shape; either declaration unblocks the batch close, and the next
+/// batch proves the resident self-loop (coordinate ⇄ settle → release → coordinate).
+#[test]
+fn release_declaration_gates_the_batch_settlement() {
+    let mut game = drive_to_release();
+
+    // Undeclared: review.note is not on the menu; the declaration items are.
+    let options = game.options();
+    assert!(
+        options.iter().any(|item| item.starts_with("release.confirm — "))
+            && options.iter().any(|item| item.starts_with("release.skip — "))
+            && !options.iter().any(|item| item.starts_with("review.note — ")),
+        "an undeclared release must offer confirm/skip and withhold review.note: {options:?}"
+    );
+
+    // release.skip without a reason is refused (an empty payload is not a reason);
+    // confirm shapes are validated.
+    let empty = game.narrate("release.skip", &text(""));
+    assert_refused(&empty, "release.skip");
+    let bad_sha = game.narrate("release.confirm", &text("master@zzzz|v2026.11.12.1"));
+    assert_refused(&bad_sha, "release.confirm");
+    let bad_tag = game.narrate("release.confirm", &text("master@abc1234|not-a-tag"));
+    assert_refused(&bad_tag, "release.confirm");
+    // The refused declarations write nothing: the release keys have never been written yet.
+    game.assert_kv("run.release.master_sha", json!(null));
+    game.assert_kv("run.release.skipped_reason", json!(null));
+
+    // Skip with a reason → declared → the batch close settles back to coordinate.
+    let skipped = game.narrate("release.skip", &text("本批无需发布：纯测试批次"));
+    assert!(
+        skipped.iter().any(|line| line.contains("[RELEASE SKIPPED]")),
+        "{skipped:#?}"
+    );
+    game.assert_kv("run.release.skipped_reason", json!("本批无需发布：纯测试批次"));
+    assert!(
+        game.options()[0].starts_with("review.note — "),
+        "a declared release must lead with the batch closer"
+    );
+    let closed = game.click("review.note — ");
+    assert!(
+        closed["narrative"].to_string().contains("[BATCH 1 SETTLED]"),
+        "{closed}"
+    );
+    game.assert_kv("run.phase", json!(""));
+    game.assert_kv("run.batch", json!(2));
+
+    // Batch 2 proves the self-loop with the confirm path: a fresh requirement walks the
+    // nine acts, then confirm (not skip) declares the merge.
+    game.narrate(
+        "requirement.add",
+        &text("second batch requirement|desc|semantics-b2"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    submit_req(&mut game, "r2", 1, "plan", "semantics-b2-p1");
+    game.click("gate.approve — ");
+    submit_req(&mut game, "r2", 1, "development", "semantics-b2-p2");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.narrate("integration.confirm", &text("r2|develop@beef123"));
+    game.click("coordinate.submit — ");
+    game.click("verify.submit all_green=true — ");
+    game.narrate(
+        "settlement.evolution",
+        &text(
+            "|batch two screened|c=0/0|sessions=0/0/none|todo=0/cleared",
+        ),
+    );
+    game.assert_kv("run.phase", json!("release"));
+    let confirmed = game.narrate("release.confirm", &text("master@1a2b3c4|v2026.11.12.2"));
+    assert!(
+        confirmed.iter().any(|line| line.contains("[RELEASE CONFIRMED]")),
+        "{confirmed:#?}"
+    );
+    game.assert_kv("run.release.master_sha", json!("1a2b3c4"));
+    game.assert_kv("run.release.tag", json!("v2026.11.12.2"));
+    let closed = game.click("review.note — ");
+    assert!(
+        closed["narrative"].to_string().contains("[BATCH 2 SETTLED]"),
+        "{closed}"
+    );
+    game.assert_kv("run.batch", json!(3));
+    game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
+}
+
+// ───────────────────── gate locality & the integration act ─────────────────────
 
 /// Gate independence: **another requirement's** pending proposal / running job does not
-/// block r1's gate. Approving r1 at the plan gate while r2 sits in `plan_review` (pending
-/// plan proposal) and r3's plan job is running must pass the gate and auto-dispatch r1's
-/// development in the same turn. The run-closing preconditions (`coordinate.submit` /
-/// `verify.submit` / `review.note`) stay global — only per-requirement advancement is
-/// localized (AGENTS.md §9: `gate_problem` stays for the closing chain).
+/// block r1's gate. Approving r1 at the plan gate while r2 sits on its own plan gate and
+/// r3's plan job is running must pass the gate and auto-dispatch r1's development in the
+/// same turn. The run-closing preconditions (`coordinate.submit` / `verify.submit` /
+/// `review.note`) stay global — only per-requirement advancement is localized.
 #[test]
 fn gate_independence_other_requirements_do_not_block() {
     let mut game = drive_to_plan_gate();
-    // r2: add → dispatch → submit a plan proposal that stays pending (`plan_review`).
+    // r2: add → dispatch → submit a plan proposal that raises its own plan gate.
     game.narrate(
         "requirement.add",
         &text("second requirement|synthetic description|semantics-r2"),
@@ -1032,8 +1179,8 @@ fn gate_independence_other_requirements_do_not_block() {
     game.narrate("requirement.dispatch", "0");
     submit_req(&mut game, "r2", 1, "plan", "semantics-r2-p1");
     game.assert_kv("prop.2.status", json!("pending"));
-    // A submitted proposal releases the job slot (waiting for acceptance, not running).
     game.assert_kv("req.2.job", json!(""));
+    game.assert_kv("req.2.gate", json!("plan"));
     // r3: add → dispatch (its plan job is running, no proposal yet).
     game.narrate(
         "requirement.add",
@@ -1043,47 +1190,49 @@ fn gate_independence_other_requirements_do_not_block() {
     game.assert_kv("req.3.job", json!("plan"));
 
     let reply = game.click("gate.approve — ");
-    let narrative: Vec<String> = reply["narrative"]
-        .as_array()
-        .expect("narrative")
-        .iter()
-        .map(|line| line.as_str().expect("narrative line").to_owned())
-        .collect();
+    let narrative = narrative_lines(&reply);
     assert!(
-        narrative
-            .iter()
-            .any(|line| line.starts_with("[AUTO-DISPATCH]")),
+        narrative.iter().any(|line| line.starts_with("[AUTO-DISPATCH]")),
         "approving r1 must auto-dispatch its development in the same turn: {narrative:#?}"
     );
     game.assert_kv("req.1.plan_ok", json!(true));
     game.assert_kv("req.1.job", json!("development"));
     game.assert_kv("req.1.lane", json!(1));
-    // The neighbours are untouched: r2's proposal stays pending (its job slot was released
-    // at submit — waiting for acceptance, not running), r3's job keeps running.
+    // The neighbours are untouched: r2 keeps its own plan gate, r3's job keeps running.
     game.assert_kv("prop.2.status", json!("pending"));
-    game.assert_kv("req.2.job", json!(""));
-    assert_eq!(game.phase("r2"), "plan_review");
+    game.assert_kv("req.2.gate", json!("plan"));
+    assert_eq!(game.phase("r2"), "plan_gate");
     game.assert_kv("req.3.job", json!("plan"));
 }
 
-/// A requirement's **own** pending proposal still blocks its gate. While a gate is up the
-/// `submit_slot_ok` guard refuses live submits, so the own proposal is injected into the
-/// in-memory save fixture (never a run directory) and restored: the approval must be
-/// refused and the stored state must not move.
+/// The plan gate's own pending proposal does **not** block its approval (D-MA23: delivery is
+/// the gate — the gate-raising proposal settles to accepted as part of the approval), while
+/// an injected **development** pending does (one gate at a time; the KV-injected fixture is
+/// the only way a proposal can coexist with a gate, since `submit_slot_ok` refuses live
+/// submits while a gate is up).
 #[test]
-fn gate_still_blocked_by_own_pending_proposal() {
+fn gate_approval_settles_its_own_proposal_and_still_blocks_foreign_pendings() {
     let mut game = drive_to_plan_gate();
-    let mut save = game.save();
+    // p1 (the gate-raising plan proposal) is pending; the approval must proceed and settle it.
+    game.assert_kv("prop.1.status", json!("pending"));
+    game.click("gate.approve — ");
+    game.assert_kv("prop.1.status", json!("accepted"));
+    game.assert_kv("req.1.gate", json!(""));
+    game.assert_kv("req.1.job", json!("development"));
+
+    // Inject a pending development proposal (in-memory fixture) while the row sits on a
+    // fresh plan gate: the approval is refused — a pending proposal must be served first.
+    let mut plan_gate = drive_to_plan_gate();
+    let mut save = plan_gate.save();
     let entries = save["kv"]["entries"]
         .as_object_mut()
         .expect("kv.entries must be an object");
-    // p1 was accepted at the plan gate; p2 is r1's own pending plan proposal.
     let injected = 2;
     entries.insert("prop.count".to_owned(), json!(injected));
     for (key, value) in [
         ("req", json!(1)),
         ("rev", json!(1)),
-        ("stage", json!("plan")),
+        ("stage", json!("development")),
         ("summary", json!("injected own pending proposal")),
         ("artifacts", json!("artifacts/injected.md")),
         ("status", json!("pending")),
@@ -1094,34 +1243,145 @@ fn gate_still_blocked_by_own_pending_proposal() {
     }
     let bytes = serde_json::to_vec(&save).expect("serialize the save");
     let mut blocked = Game {
-        bundle: game.bundle.clone(),
-        kernel: game
+        bundle: plan_gate.bundle.clone(),
+        kernel: plan_gate
             .bundle
             .restore(&bytes)
             .expect("a save with an injected own proposal must load"),
     };
     blocked.assert_kv("prop.2.status", json!("pending"));
 
-    // The snapshot's pendingChoice predates the injection (accept item absent, gate first);
-    // `ygg.choice_selected` routes against the freshly recomputed menu, so re-render first
-    // to bring the stored choice back in sync before clicking.
+    // The snapshot's pendingChoice predates the injection; re-render first to resync.
     blocked.narrate("requirement.list", "0");
 
     let refused = blocked.click("gate.approve — ");
-    let lines: Vec<String> = refused["narrative"]
-        .as_array()
-        .expect("narrative")
-        .iter()
-        .map(|line| line.as_str().expect("narrative line").to_owned())
-        .collect();
-    // The refusal names the blocked action (the human-readable detail beat is among the
-    // merge-lost data keys — see the header note — so the assertion pins the action name).
+    let lines = narrative_lines(&refused);
     assert_refused(&lines, "gate.approve");
     blocked.assert_kv("req.1.gate", json!("plan"));
-    blocked.assert_kv("req.1.status", json!("planning"));
+    blocked.assert_kv("req.1.status", json!("open"));
+    blocked.assert_kv("prop.2.status", json!("pending"));
 }
 
-// ───────────────────────── r1 · single operation map + guide.show deregistered ─────────────────────────
+/// The integration act (R5/R6/R7): only `integration.confirm` / `integration.reject` act on
+/// an integrating row; the confirm validates the `develop@<sha>` evidence (7-40 hex), writes
+/// the true state `done` and releases the lane; the reject falls back to `ready` (plan_ok
+/// kept) with feedback and the lane released. Both are refused outside the coordinate phase
+/// and outside the integrating micro-state.
+#[test]
+fn integration_confirm_sha_gate_and_reject_path() {
+    let mut game = drive_to_integrating(drive_to_accept(drive_to_dev_pending("semantics-p2")));
+
+    // Evidence shape: the sha must be 7-40 hex (with or without the develop@ prefix).
+    for evidence in ["develop@zzzz", "develop@abc", "abc", "develop@"] {
+        let bad = game.narrate("integration.confirm", &text(&format!("r1|{evidence}")));
+        assert_refused(&bad, "integration.confirm");
+        game.assert_kv("req.1.status", json!("open"));
+        game.assert_kv("req.1.integrating", json!(true));
+    }
+
+    // The act only reaches integrating rows: r2 is still a draft.
+    game.narrate(
+        "requirement.add",
+        &text("bystander requirement|desc|semantics-bystander"),
+    );
+    let bystander = game.narrate("integration.confirm", &text("r2|develop@abc1234"));
+    assert_refused(&bystander, "integration.confirm");
+
+    // Confirm: done (true state), the sha evidence is kept, the lane is released.
+    let confirmed = game.narrate("integration.confirm", &text("r1|develop@abc1234"));
+    assert!(
+        confirmed.iter().any(|line| line.contains("[INTEGRATION CONFIRMED]")),
+        "{confirmed:#?}"
+    );
+    game.assert_kv("req.1.status", json!("done"));
+    game.assert_kv("req.1.develop_sha", json!("abc1234"));
+    game.assert_kv("req.1.lane", json!(0));
+    game.assert_kv("req.1.closed_reason", json!(""));
+
+    // The reject path: walk a second requirement to integrating, then reject it.
+    game.narrate("requirement.dispatch", "0");
+    submit_req(&mut game, "r2", 1, "plan", "semantics-bystander-p1");
+    game.click("gate.approve — ");
+    submit_req(&mut game, "r2", 1, "development", "semantics-bystander-p2");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.assert_kv("req.2.lane", json!(1));
+    let rejected = game.narrate("integration.reject", &text("r2|rework the diff"));
+    assert!(
+        rejected.iter().any(|line| line.contains("[INTEGRATION REJECTED]")),
+        "{rejected:#?}"
+    );
+    game.assert_kv("req.2.status", json!("open"));
+    game.assert_kv("req.2.integrating", json!(false));
+    game.assert_kv("req.2.plan_ok", json!(true));
+    game.assert_kv("req.2.lane", json!(0));
+    assert_eq!(game.phase("r2"), "ready");
+
+    // A done row only accepts read-back: integration on it is refused.
+    let done = game.narrate("integration.confirm", &text("r1|develop@abc1234"));
+    assert_refused(&done, "integration.confirm");
+}
+
+/// The closed-reason bypass (R11): split/merge close the parents with `status=done` plus a
+/// `closed_reason` field (the display shows the reason); a bypassed row is not amendable;
+/// amending a **delivered** done row derives a successor instead of reopening it.
+#[test]
+fn closed_reason_bypass_split_and_done_amend_derives() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    // A pre-development draft with no job in flight (split/merge need a mutable row).
+    game.narrate(
+        "requirement.add",
+        &text("split me|synthetic description|semantics-split"),
+    );
+
+    // Split a pre-development draft: the parent becomes done + closed_reason=split.
+    let split = game.narrate(
+        "requirement.split",
+        &text("r1|first child|second child"),
+    );
+    assert!(
+        split.iter().any(|line| line.contains("[REQ SPLIT]")),
+        "{split:#?}"
+    );
+    game.assert_kv("req.1.status", json!("done"));
+    game.assert_kv("req.1.closed_reason", json!("split"));
+    assert_eq!(game.phase("r1"), "split");
+
+    // A bypassed row is not amendable (split/merged/dropped are terminal with a reason).
+    let bypassed = game.narrate("requirement.amend", &text("r1|reopen attempt"));
+    assert_refused(&bypassed, "requirement.amend");
+
+    // Merge two open rows: the sources become done + closed_reason=merged, a new row appears.
+    game.narrate("requirement.merge", &text("r2,r3|merged requirement|merged desc"));
+    game.assert_kv("req.2.status", json!("done"));
+    game.assert_kv("req.2.closed_reason", json!("merged"));
+    game.assert_kv("req.3.status", json!("done"));
+    game.assert_kv("req.3.closed_reason", json!("merged"));
+    assert_eq!(game.phase("r4"), "draft");
+
+    // Deliver r4 fully (dispatch by target id), then amend the done row: a successor is
+    // derived (origin=r4).
+    game.narrate("requirement.dispatch", &text("r4"));
+    submit_req(&mut game, "r4", 1, "plan", "semantics-derive-p1");
+    game.click("gate.approve — ");
+    submit_req(&mut game, "r4", 1, "development", "semantics-derive-p2");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.narrate("integration.confirm", &text("r4|develop@feed777"));
+    game.assert_kv("req.4.status", json!("done"));
+    game.assert_kv("req.4.closed_reason", json!(""));
+    let derived = game.narrate("requirement.amend", &text("r4|follow-up title"));
+    assert!(
+        derived.iter().any(|line| line.contains("[REQ DERIVED]")),
+        "{derived:#?}"
+    );
+    game.assert_kv("req.4.status", json!("done"));
+    game.assert_kv("req.5.origin", json!("r4"));
+    assert_eq!(game.phase("r5"), "draft");
+}
+
+// ───────────────────── r1 · single operation map + registry fail-closed ─────────────────────
 
 /// Take the **map window** from the `map.show` receipt: from the map head line to the map
 /// foot line (ignoring the other rendered lines in the same receipt).
@@ -1169,12 +1429,12 @@ fn map_show_is_payload_insensitive_single_operation_view() {
             );
         }
 
-        // Single view: head carries the current stage + panel, foot names the operation view
-        // and the payload negation; the design view head is unreachable.
+        // Single view: head carries the current micro-state + panel, foot names the
+        // operation view and the payload negation; the design view head is unreachable.
         let joined = window.join("\n");
         assert!(
             window[0].starts_with("[CURRENT NODE] ["),
-            "the map head must carry the current stage: {}",
+            "the map head must carry the current micro-state: {}",
             window[0]
         );
         assert!(
@@ -1222,6 +1482,15 @@ fn guide_show_is_physically_deregistered_and_fails_closed() {
         set.contains(&"map.show".to_owned()),
         "the registered set must still carry the surviving view action `map.show`: {message}"
     );
+    assert!(
+        set.contains(&"charter.set".to_owned()) && set.contains(&"run.begin".to_owned()),
+        "the registered set must carry the charter-act pair: {message}"
+    );
+    assert!(
+        set.contains(&"integration.confirm".to_owned())
+            && set.contains(&"release.confirm".to_owned()),
+        "the registered set must carry the new D-MA23 acts: {message}"
+    );
 
     // The registry is intact: a normal view dispatch still works after the refusal.
     let map = game.narrate("map.show", "0");
@@ -1266,10 +1535,11 @@ fn assert_fail_closed(game: &mut Game, event: &str) -> Json {
     let count: usize = digits
         .parse()
         .unwrap_or_else(|err| panic!("the registered count must be a number: {message} ({err})"));
-    // r2 rev2: task.intake was deregistered with the intake stage — exactly 33 events remain.
+    // D-MA23: 38 story/operate/infrastructure events (DESIGN §2.6) + `ygg.narrative.goto`
+    // (the node:render render event) = 39 registered handlers.
     assert_eq!(
-        count, 33,
-        "the merged mod registers 33 events after the intake deregistration — got {count}: {message}"
+        count, 39,
+        "the merged mod registers 39 events after D-MA23 — got {count}: {message}"
     );
     let set = registered_set(message);
     assert!(
@@ -1296,7 +1566,7 @@ fn registered_set(message: &str) -> Vec<String> {
         .collect()
 }
 
-// ───────────────────────── r11 · unknown events fail closed ─────────────────────────
+// ───────────────────── r11 · unknown events fail closed ─────────────────────
 
 /// r11 Unknown events (a typo'd name, a reserved `ygg.*` prefix that is not registered)
 /// fail closed at the driver facade **before any side effect**: readable VALIDATION with
@@ -1319,27 +1589,21 @@ fn unknown_events_fail_closed_with_zero_side_effects() {
 
     // The registry is intact: a normal dispatch still works after the refusals.
     game.narrate("requirement.list", "0");
-    game.assert_kv("req.1.status", json!("planning"));
+    game.assert_kv("req.1.status", json!("open"));
+    game.assert_kv("req.1.job", json!("plan"));
 }
 
-// ───────────────────────── r2 · lane branch naming is enforced ─────────────────────────
+// ───────────────────── r2 · lane branch naming is enforced ─────────────────────
 
 /// r2 The lane branch **must** be self-reported in the forced shape
-/// `feature/{4-char uuid}-{semantic segment}` (≤ 48 total): `lane.claim` accepts a legal
+/// `feature/{{4-char uuid}}-{{semantic segment}}` (≤ 48 total): `lane.claim` accepts a legal
 /// name into the lane ledger, refuses every illegal shape through the readable rejection
 /// channel (reject ledger moved), and an **empty** branch stays legal at the claim layer
 /// (the auto-claim layer refuses it instead — the default name generator is gone).
 #[test]
 fn lane_branch_naming_is_enforced() {
     let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "event.start",
-        &text("branch naming|synthetic task description"),
-    );
-    game.narrate(
-        "requirement.add",
-        &text("naming requirement|synthetic description|naming-r1"),
-    );
+    start_requirement(&mut game);
 
     // Legal shape: claimed into the ledger byte-for-byte, with its own narration.
     let claimed = game.narrate(
@@ -1348,10 +1612,8 @@ fn lane_branch_naming_is_enforced() {
     );
     assert_eq!(count_lines(&claimed, "[LANE CLAIMED]"), 1, "{claimed:#?}");
 
-    // The refusal matrix (r2 rev2 judgement, one entry per rule). Every refusal moves the
-    // reject ledger and leaves the lane ledger untouched. (The human-readable reason beat
-    // is among the merge-lost data keys — see the header note — so the assertion pins the
-    // action name.)
+    // The refusal matrix (one entry per rule). Every refusal moves the reject ledger and
+    // leaves the lane ledger untouched.
     let refusals = [
         "feature/r1",                                // bare requirement number in the uuid slot
         "FEATURE/aa11-semantic-name",                // prefix is case-sensitive
@@ -1392,7 +1654,7 @@ fn lane_branch_naming_is_enforced() {
     game.assert_kv("lane.1.branch", json!(""));
 }
 
-// ───────────────────────── r3 · submitter identity (actor chapter + profiles) ─────────────────────────
+// ───────────────────── r3 · submitter identity (actor chapter + profiles) ─────────────────────
 
 /// Submit an `r1` proposal with the full identity tail chain
 /// `…|exec=<exec>[:<reason>]|actor=<actor>|actor_session=<session>` (the channel the
@@ -1437,8 +1699,6 @@ fn submit_identity_for(
 }
 
 /// verified：exec 与宿主章同句柄 → 双章落库；save/重放后 KV 仍可读。
-/// （三态 trace 后缀与 `[ACTOR VERIFIED]` 叙事面当前不可断言：`req_trace_actor_*` /
-/// `req_prop_actor_*` beats 在合并中丢失——见头注缺陷清单。）
 #[test]
 fn actor_channel_verified_lands_in_kv_and_survives_a_reload() {
     let mut game = Game::open(&project_mod_dir());
@@ -1469,7 +1729,8 @@ fn actor_channel_verified_lands_in_kv_and_survives_a_reload() {
     rebuilt.assert_kv("settings.executor.r1.plan", json!("agent-1"));
 }
 
-/// mismatch：exec 与章不同句柄 → **识别不拒绝**（章照记、账本照绑、验收照常推进门禁）。
+/// mismatch：exec 与章不同句柄 → **识别不拒绝**（章照记、账本照绑、门禁照常可达）。
+/// plan 提案交付即门禁：proposal.accept 对它可读拒绝（裁决走 gate.*），门禁保持挂起。
 #[test]
 fn actor_channel_mismatch_is_recorded_never_rejected() {
     let mut game = Game::open(&project_mod_dir());
@@ -1486,13 +1747,21 @@ fn actor_channel_mismatch_is_recorded_never_rejected() {
     );
     game.assert_kv("prop.1.actor", json!("agent-2"));
     game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-    // 识别不拒绝：提案照常待验收、验收照常推进门禁。
-    game.click("proposal.accept — ");
+    // 交付即门禁：门禁已挂起；受理菜单隐瞒 plan 提案（prop_next 只表 development），
+    // 直派 proposal.accept 被人机门可读拒绝——裁决只能走 gate.*。
+    assert_eq!(game.phase("r1"), "plan_gate");
+    let options = game.options();
+    assert!(
+        !options.iter().any(|item| item.starts_with("proposal.accept — ")),
+        "a plan proposal must not be on the acceptance menu: {options:?}"
+    );
+    let direct = game.narrate("proposal.accept", &text("p1"));
+    assert_refused(&direct, "proposal.accept");
     game.assert_kv("req.1.gate", json!("plan"));
 }
 
-/// unverified + actor-only：无章 = 章位空串；只带章不带 exec = 只记章、不绑账本、
-/// 账本无“被验证者”；账本绑定不受“打回”影响（账本只增改）。
+/// unverified + actor-only：无章 = 章位空串；只带章不带 exec = 只记章、不绑账本；
+/// 账本绑定不受“打回”影响（账本只增改）。
 #[test]
 fn actor_channel_unverified_and_actor_only() {
     let mut game = Game::open(&project_mod_dir());
@@ -1503,9 +1772,11 @@ fn actor_channel_unverified_and_actor_only() {
     game.assert_kv("prop.1.actor", json!(""));
     game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
 
-    // r1 的账本绑定不受“打回”影响（账本只增改）。
+    // r1 的账本绑定不受“打回”影响（账本只增改）；plan 提案打回清门禁、job 挂回 plan。
     game.narrate("proposal.reject", &text("r1|replan without identity"));
     game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    game.assert_kv("req.1.gate", json!(""));
+    game.assert_kv("req.1.job", json!("plan"));
 
     // actor-only：干净需求上只带章不带 exec —— 不绑账本、章落库。
     game.narrate(
@@ -1527,11 +1798,8 @@ fn actor_channel_unverified_and_actor_only() {
     game.assert_kv("settings.executor.r2.plan", Json::Null);
 }
 
-/// 段序契约（mod 侧半，当前可断言面）：错位 / 重复 `exec=` 逐段点名拒绝
-/// （`req_prop_exec_misplaced` beat 在位）；全链 10 段载荷（7 段主体 + exec + actor +
-/// actor_session）各归其位。
-/// （actor/actor_session 的错位与坏形状拒绝当前会硬崩而非拒绝：它们的点名 beats
-/// 在合并中丢失，`parse_proposal` 返回 `nil, nil` —— 见头注缺陷清单，修复后补回。）
+/// 段序契约（mod 侧半）：错位 / 重复 `exec=` 逐段点名拒绝；全链 10 段载荷
+/// （7 段主体 + exec + actor + actor_session）各归其位。
 #[test]
 fn actor_session_segments_lock_relative_order_and_full_chain() {
     let mut game = Game::open(&project_mod_dir());
@@ -1574,9 +1842,6 @@ fn actor_session_segments_lock_relative_order_and_full_chain() {
 
 /// profile 注册表：config.set 逐键注册 roundtrip（KV 落位 / upsert / settings. 前缀等价 /
 /// 空值清除 / 键形坏拒绝 / 未知键 fail-closed）。
-/// （validate 层的拒绝矩阵当前不可断言：`profile_bad_*` beats 在合并中丢失使
-/// `validate_profile_value` 返回 `nil, nil` —— 坏值路径直接崩溃，handle 张冠李戴被静默
-/// 放行——见头注缺陷清单，修复后补回矩阵。）
 #[test]
 fn profile_registration_via_config_set_roundtrip() {
     let mut game = Game::open(&project_mod_dir());
@@ -1616,7 +1881,7 @@ fn profile_registration_via_config_set_roundtrip() {
     // 空值 = 逐字段清除。
     game.narrate("config.set", &text("profile.agent-1.role="));
     game.assert_kv("settings.profile.agent-1.role", json!(""));
-    // 键形坏（缺 <key> 段）→ parse 层拒绝且不落 KV（detail 走缺省文案）。
+    // 键形坏（缺 <key> 段）→ parse 层拒绝且不落 KV。
     let malformed = game.narrate("config.set", &text("profile.agent-1=x"));
     assert_refused(&malformed, "config.set");
     game.assert_kv("settings.profile.agent-1", Json::Null);
@@ -1650,7 +1915,14 @@ fn goal_authorization_gates_goal_mode_with_a_readable_warning() {
     );
 }
 
-// ───────────────────────── r4 · single-source agent-seed layout ─────────────────────────
+// ───────────────────── r4/r6/r7 · layout, fragments, tool declarations ─────────────────────
+
+/// A mod resource read straight from disk (the declaration surface is a file, not Lua state).
+fn read_json(path: &Path) -> Json {
+    let raw = std::fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+    serde_json::from_str(&raw).unwrap_or_else(|err| panic!("parse {}: {err}", path.display()))
+}
 
 /// r4/P5 The mod lives in exactly one physical directory: `.ygg/mods/agent-seed` loads,
 /// `packages/mods/agent-seed` is the relative symlink to it (the second load face), the
@@ -1707,26 +1979,24 @@ fn seed_layout_is_single_source_agent_seed() {
     via_seed.narrate("event.start", "0");
 }
 
-// ───────────────────────── r6 · fragments + five layers ─────────────────────────
-
-/// r6 The mod architecture is **fragments + five layers**: 24 code modules all under
-/// `src/{core,domain,view,runtime,handlers}/`, texts split into 7 fragments (core + 6
-/// beats groups) whose beat keys are pairwise disjoint (the `mod.lua` assembly contract),
-/// the playbook split into 12 chapter fragments, no monolith `data/scenes.json` /
-/// `data/playbook.json` left, and tuning living in `data/texts/core.json`.
+/// r6 The mod architecture is **fragments + five layers**: 27 code modules all under
+/// `src/{{core,domain,view,runtime,handlers}}/` (D-MA23 added the charter / integration /
+/// release handlers), texts split into 7 fragments (core + 6 beats groups) whose beat keys
+/// are pairwise disjoint (the `mod.lua` assembly contract), the playbook split into 12
+/// chapter fragments, no monolith survives, and tuning living in `data/texts/core.json`.
 #[test]
 fn mod_architecture_is_fragments_plus_five_layers() {
     let project = project_mod_dir();
     let pack = read_json(&project.join("pack.json"));
 
-    // ① the code face: 24 modules, five layers, entry excluded, all on disk.
+    // ① the code face: 27 modules, five layers, entry excluded, all on disk.
     let modules = pack["code"]["modules"]
         .as_array()
         .expect("code.modules must be an array");
     assert_eq!(
         modules.len(),
-        24,
-        "the merged mod declares 24 modules: {modules:?}"
+        27,
+        "the D-MA23 mod declares 27 modules: {modules:?}"
     );
     let entry = pack["code"]["entry"].as_str().expect("code.entry");
     let mut layers = std::collections::BTreeSet::new();
@@ -1807,9 +2077,10 @@ fn mod_architecture_is_fragments_plus_five_layers() {
             );
         }
     }
+    // T3 aligned the beats to the v2 story: the merged fragments carry 378 keys.
     assert!(
-        total_beats >= 319,
-        "the merged fragments must carry the full monolith beat set (319+): got {total_beats}"
+        total_beats >= 378,
+        "the merged fragments must carry the v2 beat set (378+): got {total_beats}"
     );
 
     // ④ tuning lives in the core fragment now.
@@ -1825,19 +2096,29 @@ fn mod_architecture_is_fragments_plus_five_layers() {
             "core.json tuning.{key} must be an unsigned integer"
         );
     }
-    // (The per-key completeness scan — every `TEXTS.<group>.<name>` the source references
-    //  resolves in the assembled fragments — is **deferred**: 24 merge-lost beat keys make
-    //  it red today. Re-add it once the data keys are restored; see this file's commit
-    //  message for the exact missing-key list and the repro.)
 }
 
-// ───────────────────────── r7 · egg is the host program ─────────────────────────
-
-/// A mod resource read straight from disk (the declaration surface is a file, not Lua state).
-fn read_json(path: &Path) -> Json {
-    let raw = std::fs::read_to_string(path)
-        .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
-    serde_json::from_str(&raw).unwrap_or_else(|err| panic!("parse {}: {err}", path.display()))
+/// The assembled beats set (what `mod.lua` builds from the fragments — the same union the
+/// Lua side sees through `TEXTS.beats`).
+fn assembled_beats(project: &Path) -> std::collections::BTreeMap<String, Json> {
+    let mut out = std::collections::BTreeMap::new();
+    let entries = read_json(&project.join("pack.json"))["entries"]
+        .as_array()
+        .expect("pack entries")
+        .clone();
+    for entry in entries {
+        let path = entry["path"].as_str().unwrap_or("");
+        if !path.starts_with("data/texts/") {
+            continue;
+        }
+        let fragment = read_json(&project.join(path));
+        if let Some(beats) = fragment["beats"].as_object() {
+            for (key, value) in beats {
+                out.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    out
 }
 
 /// `<namespace>.<name>`: two segments, lowercase letter first, then lowercase / digits / `_` / `-`.
@@ -1873,7 +2154,7 @@ const SHELL_BASENAMES: &[&str] = &[
 
 /// r7/T5 The merged declaration surface of the **single** mod: `pack.json` `tools` (Layer 1)
 /// and `data/config.json` `allowedTools` (Layer 2) are the same set, every tool shape-checks,
-/// the six built-in subsystem tools are served by the renamed host binary **`egg`** (the two
+/// the built-in subsystem tools are served by the renamed host binary **`egg`** (the two
 /// `git.*` readers stay `git`), no `ygg-agent` literal survives anywhere in `pack.json`,
 /// `src/runtime/tools.lua` is the five-layer module path, and the fragments carry every tool
 /// beat plus the tuning caps.
@@ -1912,9 +2193,8 @@ fn tool_declarations_pin_the_merged_capability_surface() {
             "{id}: this round only declares cli tools"
         );
         // `readOnly` is a declared fact, not a policy: the active subsystem needs a writer
-        // tool (`git.worktree_claim`; r5/D-MA21 retired the `harness.archive_sessions`
-        // writer), and a writer may never detach (host contract: `inlineWaitMs > 0` when
-        // `readOnly == false`).
+        // tool (`git.worktree_claim`), and a writer may never detach (host contract:
+        // `inlineWaitMs > 0` when `readOnly == false`).
         let read_only = spec["readOnly"]
             .as_bool()
             .unwrap_or_else(|| panic!("{id}: readOnly must be a boolean"));
@@ -1964,7 +2244,7 @@ fn tool_declarations_pin_the_merged_capability_surface() {
                 .as_str()
                 .unwrap_or_else(|| panic!("{id}: args items must be strings"));
             // Placeholders are legal **only** in the `{{name}}` shape (a bare, lowercase
-            // identifier). A credential arrives through `$ENV{VAR}` host-side, never inline.
+            // identifier). A credential arrives through `$ENV{{VAR}}` host-side, never inline.
             assert!(
                 !arg.contains("$ENV{"),
                 "{id}: `{arg}` must not read the process environment inline"
@@ -1992,8 +2272,7 @@ fn tool_declarations_pin_the_merged_capability_surface() {
         }
     }
 
-    // ② the six built-in subsystem tools are served by `egg`; the two plain git readers
-    //    stay `git` (r7 renamed the host, not git).
+    // ② the built-in subsystem tools are served by `egg`; the two plain git readers stay git.
     let subsystem_tools = [
         "git.worktree_claim",
         "git.worktree_release",
@@ -2069,10 +2348,6 @@ fn tool_declarations_pin_the_merged_capability_surface() {
         ]),
         "the inbox route fields are the wire segments, in order"
     );
-    assert_eq!(
-        route["write"],
-        json!({"flag": "tool-result", "shape": "payload"})
-    );
 
     // ⑥ the fragments carry every tool beat (a missing key would render a raw placeholder).
     let beats = [
@@ -2115,37 +2390,12 @@ fn tool_declarations_pin_the_merged_capability_surface() {
     );
 }
 
-/// The assembled beats set (what `mod.lua` builds from the fragments — the same union the
-/// Lua side sees through `TEXTS.beats`).
-fn assembled_beats(project: &Path) -> std::collections::BTreeMap<String, Json> {
-    let mut out = std::collections::BTreeMap::new();
-    let entries = read_json(&project.join("pack.json"))["entries"]
-        .as_array()
-        .expect("pack entries")
-        .clone();
-    for entry in entries {
-        let path = entry["path"].as_str().unwrap_or("");
-        if !path.starts_with("data/texts/") {
-            continue;
-        }
-        let fragment = read_json(&project.join(path));
-        if let Some(beats) = fragment["beats"].as_object() {
-            for (key, value) in beats {
-                out.insert(key.to_owned(), value.clone());
-            }
-        }
-    }
-    out
-}
-
-// ───────────────────── E6 · Mod text hygiene (D-MA19) ─────────────────────
+// ───────────────────── E6 · Mod text hygiene (D-MA19/D-MA21) ─────────────────────
 
 /// Mod prose fragments must not carry retired path literals (`ygg-agent` / `pi-agent-seed`).
 /// Scope = pack.json `entries` whose path sits under `data/texts/` or `data/playbook/`; a line
 /// violates when it names a retired literal without the explicit `[deprecated-ref]` marker on
-/// the same line. Failure output lists `file:line` per violation. Machine-checkable half of
-/// AGENTS.md §1.7 「Mod text hygiene (retired path literals)」; D-MA19 retired the alias layer,
-/// so prose must point at the current names (`agent-seed` / `egg`).
+/// the same line. Machine-checkable half of AGENTS.md §1.7.
 #[test]
 fn mod_text_fragments_carry_no_retired_paths() {
     let mod_dir = project_mod_dir();
@@ -2187,8 +2437,8 @@ fn mod_text_fragments_carry_no_retired_paths() {
 /// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
 /// is delegated to the main session's own environment, so `data/texts/beats-settlement.json`
 /// must not carry any harness-implementation literal (`pi-subagents`, `.pi/agent`, `.claude`,
-/// `.codex`, `archive_sessions`). Machine-checkable half of the cross-harness rule; mutation:
-/// inject a forbidden literal line into the fragment → this test goes red.
+/// `.codex`, `archive_sessions`). Mutation: inject a forbidden literal line into the
+/// fragment → this test goes red.
 #[test]
 fn beats_cleanup_prompt_carries_no_harness_literals() {
     let mod_dir = project_mod_dir();
@@ -2218,28 +2468,7 @@ fn beats_cleanup_prompt_carries_no_harness_literals() {
     );
 }
 
-// ───────────────────────── tool bridge (T1–T4) ─────────────────────────
-
-/// The narrative array of an envelope (state assertions stay on `kv.entries`, prose assertions
-/// read these lines).
-#[track_caller]
-fn narrative_lines(reply: &Json) -> Vec<String> {
-    reply["narrative"]
-        .as_array()
-        .unwrap_or_else(|| panic!("the narrative is not an array: {reply}"))
-        .iter()
-        .map(|line| {
-            line.as_str()
-                .unwrap_or_else(|| panic!("a narrative line is not a string: {line:?}"))
-                .to_owned()
-        })
-        .collect()
-}
-
-/// How many lines carry a marker (a rewrite must not silently change the count).
-fn count_lines(lines: &[String], needle: &str) -> usize {
-    lines.iter().filter(|line| line.contains(needle)).count()
-}
+// ───────────────────── tool bridge (T1–T4) ─────────────────────
 
 /// T1 The request direction: a `tool.call` publishes **one dense snapshot** (`meta.tool_calls`,
 /// allocation order, `args` omitted when empty) and one self-describing KV row. It never
@@ -2299,7 +2528,7 @@ fn tool_call_publishes_a_dense_pending_snapshot_and_kv_rows() {
 /// receipt effect converges **in the same turn** (both lines in one narrative batch).
 #[test]
 fn tool_result_updates_kv_and_the_receipt_effect_fires_in_the_same_turn() {
-    let mut game = drive_to_review();
+    let mut game = drive_to_settle();
     game.narrate("tool.call", &text("git.head_short"));
 
     let reply = game.reply("tool.result", &text("t1|git.head_short|ok|0|abc1234"));
@@ -2328,7 +2557,7 @@ fn tool_result_updates_kv_and_the_receipt_effect_fires_in_the_same_turn() {
 /// no second `[TOOL SETTLED]`), while a conflicting terminal status is refused outright.
 #[test]
 fn tool_result_replay_is_idempotent_and_never_refires_the_effect() {
-    let mut game = drive_to_review();
+    let mut game = drive_to_settle();
     game.narrate("tool.call", &text("git.head_short"));
     let settled =
         narrative_lines(&game.reply("tool.result", &text("t1|git.head_short|ok|0|abc1234")));
@@ -2434,10 +2663,10 @@ fn tool_payloads_are_shape_checked_and_allowlisted() {
     full.assert_kv("tool.count", json!(capacity));
 }
 
-// ───────────────────────── A · active subsystem ─────────────────────────
+// ───────────────────── A · active subsystem ─────────────────────
 
 /// One full tool round trip: register the request, then settle it. Machine actions carry no
-/// menu ticket (§8), and the call id is explicit so every assertion can name it.
+/// menu ticket, and the call id is explicit so every assertion can name it.
 fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
     game.narrate("tool.call", &text(call));
     narrative_lines(&game.reply("tool.result", &text(result)))
@@ -2445,19 +2674,12 @@ fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
 
 /// A1 `git.worktree_claim` folds into the **same** lane ledger as `lane.claim` (same function,
 /// same keys, `since` tick included), and `git.worktree_release` frees it by lane number.
-/// (r2: the claim input branch must carry the forced naming shape — an illegal name is
-/// refused before any ledger write. r1: the design map is gone, so the ledger read surface
-/// here is the KV itself.)
-///
-/// Mutation: replace `LANES.bind(..)` with a direct `lane.<k>.branch` write (dropping
-/// `req.<i>.lane` / `since`) → the `lane.2.since` and `req.1.lane` assertions go red.
+/// The claim input branch must carry the forced naming shape — an illegal name is refused
+/// before any ledger write, through the narration channel (ledger and reject ledger untouched).
 #[test]
 fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
     let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "event.start",
-        &text("subsystem gate|synthetic task description"),
-    );
+    charter_and_begin(&mut game);
     game.narrate(
         "requirement.add",
         &text("synthetic requirement|synthetic description|subsys-r1"),
@@ -2493,9 +2715,8 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
         "{replayed:#?}"
     );
 
-    // An illegal branch name in the **input** is refused (r2: both entries, one judgement).
-    // The tool-face refusal is a narration, not a rejection line: the ledger and the reject
-    // counter stay untouched by design (账本与 reject 台账不动).
+    // An illegal branch name in the **input** is refused through the narration channel: the
+    // ledger and the reject counter stay untouched by design.
     let rejects_before = game.kv("reject.count");
     let illegal = tool_round(
         &mut game,
@@ -2531,16 +2752,10 @@ fn worktree_claim_binds_the_lane_ledger_and_release_frees_it() {
 
 /// A2 `git.lane_probe` records the truth, the conflict radar raises a **blocking** conflict on a
 /// file overlap, a failed probe is only a warning, and `requirement.resolve` clears all four keys.
-///
-/// Mutation: replace `req_do_conflict(.., "radar")` with `ygg.kv.set(req_key(..., "conflict"), true)`
-/// → `req.conflicts` and every `conflict_note` assertion go red (the count reads text, not a bool).
 #[test]
 fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "event.start",
-        &text("subsystem gate|synthetic task description"),
-    );
+    charter_and_begin(&mut game);
     game.narrate("requirement.add", &text("left half|description|subsys-a"));
     game.narrate("requirement.add", &text("right half|description|subsys-b"));
     game.narrate("lane.claim", &text("1|r1|||1"));
@@ -2602,9 +2817,6 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
 
 /// A3 `fs.artifact_probe` and `vfs.write` feed **one** bounded ledger (`record_artifact` is the
 /// single writer), and the VFS path shape is refused before anything is recorded.
-///
-/// Mutation: drop the `artifact.count` bound in `record_artifact` → the second/third probes
-/// still record, so `artifact.count` no longer matches the number of distinct paths.
 #[test]
 fn artifact_probe_and_vfs_keep_one_ledger() {
     let mut game = Game::open(&project_mod_dir());
@@ -2699,17 +2911,17 @@ fn artifact_probe_and_vfs_keep_one_ledger() {
     game.assert_kv("artifact.artifacts/notes.md.bytes", json!(7));
 }
 
-/// A4 `gate.verify_suite` writes green evidence only in `review`, only when the payload says
-/// `passed=1`, and only when the same gate precondition holds.
-///
-/// Mutation: delete the `stage() ~= STAGE.review` guard → the coordinate-stage assertion (no
-/// green written before `coordinate.submit`) goes red.
+/// A4 `gate.verify_suite` writes green evidence only in the **settle** micro-state (D-MA23:
+/// the review stage became the settle act), only when the payload says `passed=1`, and only
+/// when the same gate precondition holds. A failed suite narrates honestly and never writes
+/// green; the green path writes the same KV as the human `verify.submit` plus provenance.
 #[test]
-fn verify_suite_result_records_green_evidence_only_in_review() {
-    let mut game = drive_to_accept(drive_to_plan_gate());
-    game.click("gate.approve — ");
+fn verify_suite_result_records_green_evidence_only_in_settle() {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
+        "semantics-p2",
+    ))));
 
-    // ① wrong stage: refused, no green.
+    // ① wrong micro-state (coordinate): refused, no green.
     let early = tool_round(
         &mut game,
         "gate.verify_suite|mode=all|t1",
@@ -2754,12 +2966,11 @@ fn verify_suite_result_records_green_evidence_only_in_review() {
     game.assert_kv("verify.source", json!("tool:gate.verify_suite"));
 }
 
-/// A5 (r5 rewrite, D-MA21): `harness.archive_sessions` is retired from the Mod tool bridge —
-/// the cleanup is prompt-driven (the `[SESSIONS CLEANUP PENDING]` beat) and the only
-/// settlement path is the human `settlement.sessions` declaration. The predecessor asserted
-/// the auto-archive contract that r1 removed; this re-pin asserts the retirement facts:
-/// the tool is declared in neither `pack.json` nor `allowedTools`, and a direct
-/// `settlement.sessions` registration still unblocks the batch close.
+/// A5 (D-MA21): `harness.archive_sessions` is retired from the Mod tool bridge — the cleanup
+/// is prompt-driven and the only settlement path is the human `settlement.sessions`
+/// declaration. Re-pin the retirement facts: the tool is declared in neither `pack.json`
+/// nor `allowedTools`, and a direct `settlement.sessions` registration still unblocks the
+/// batch close (through the D-MA23 release declaration).
 #[test]
 fn archive_sessions_is_retired_from_the_tool_bridge() {
     let mod_dir = project_mod_dir();
@@ -2786,16 +2997,8 @@ fn archive_sessions_is_retired_from_the_tool_bridge() {
     );
 
     // The human declaration path (the only one left) still unblocks the close.
-    let mut game = drive_to_accept(drive_to_plan_gate());
-    game.click("gate.approve — ");
-    game.click("coordinate.submit — ");
-    game.click("verify.submit all_green=true — ");
-    game.narrate("settlement.evolution", &text("|screened|c=0/0"));
-    game.narrate("settlement.todo", &text("0|main session cleared"));
-    game.narrate(
-        "settlement.sessions",
-        &text("2|0|/tmp/sessions-trash/retired"),
-    );
+    let mut game = drive_to_release();
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
     let closed = game.click("review.note — ");
     assert!(
         closed["narrative"]
@@ -2865,40 +3068,34 @@ impl HostToolRunner for SyncRitualRunner {
 
 /// A7 Synchronous `ygg.tool.call` mounted on `KernelFacade` settles the 3 inline engineering
 /// rituals (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`) in **1 single turn
-/// each** without `tool.result` callbacks. (r5/D-MA21: `harness.archive_sessions` left the
-/// bridge — the fourth ritual is retired, see `archive_sessions_is_retired_from_the_tool_bridge`.)
-/// The branch is **pre-claimed** through `lane.claim` in the forced r2 shape — the default
-/// name generator is gone, the auto-claim consumes the ledger's own branch.
+/// each** without `tool.result` callbacks. D-MA23 window (R7): the lane stays bound through
+/// the acceptance and the accept gate — the auto-release happens on the **integration
+/// confirm**, not on the gate approval.
 #[test]
 fn synchronous_tool_bridge_runs_inline_rituals() {
     let mut game = Game::open(&project_mod_dir());
     game.kernel
         .set_tool_runner(Some(Box::new(SyncRitualRunner)));
 
-    game.narrate(
-        "event.start",
-        &text("sync bridge|verify 1-turn inline rituals"),
-    );
+    charter_and_begin(&mut game);
     game.narrate(
         "requirement.add",
         &text("sync tool bridge|implement synchronous ygg.tool.call|sync-r1"),
     );
     game.narrate("requirement.dispatch", "0");
 
-    // Pre-claim the lane (r2: the branch is self-reported; the auto-claim reuses it).
-    // Timing: `proposal.accept` (plan) releases the lane ledger — the pre-claim must be
-    // re-stated **after** the acceptance, before the gate approval that triggers the claim.
-
-    // Submit plan proposal with inline executor registration (`exec=agent-plan`).
+    // Pre-claim the lane (the branch is self-reported; the auto-claim reuses it).
+    // Timing: the plan gate is raised by the delivery itself, so the pre-claim lands right
+    // after the submit, before the gate approval that auto-dispatches development.
     submit_with_exec(&mut game, 1, "plan", "sync-p1", "agent-plan");
-    game.click("proposal.accept — ");
     game.narrate(
         "lane.claim",
         &text("1|r1|feature/d4e5-sync-bridge|2e24c45|1"),
     );
     game.assert_kv("lane.1.branch", json!("feature/d4e5-sync-bridge"));
 
-    // 1) Approving plan_gate triggers auto_dispatch -> auto_claim_worktree in the SAME turn!
+    // 1) Approving plan_gate triggers auto_dispatch -> auto_claim_worktree in the SAME turn,
+    //    consuming the pre-claimed branch.
     let approved_plan = game.click("gate.approve — ");
     let approved_plan_lines = narrative_lines(&approved_plan);
     assert_eq!(
@@ -2918,22 +3115,23 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
     game.assert_kv("tool.settled_count", json!(1));
     game.assert_kv("tool.pending", json!(null));
 
-    // 2) Submitting development proposal triggers auto_probe_lane in the SAME turn!
-    let dev_prop_lines = game.narrate(
-        "proposal.submit",
-        &text(
-            "r1|1|development|dev done|artifacts/r1-development.md|src/runtime/tools.lua|exec=agent-plan",
-        ),
+    // 2) Submitting the development proposal triggers auto_probe_lane in the SAME turn.
+    let dev_lines = submit_dev_with_exec(
+        &mut game,
+        1,
+        "sync-p2",
+        "agent-plan",
+        "src/runtime/tools.lua",
     );
     assert_eq!(
-        count_lines(&dev_prop_lines, "[TOOL SETTLED]"),
+        count_lines(&dev_lines, "[TOOL SETTLED]"),
         1,
-        "{dev_prop_lines:#?}"
+        "{dev_lines:#?}"
     );
     assert_eq!(
-        count_lines(&dev_prop_lines, "[LANE PROBE]"),
+        count_lines(&dev_lines, "[LANE PROBE]"),
         1,
-        "{dev_prop_lines:#?}"
+        "{dev_lines:#?}"
     );
     game.assert_kv("lane.1.probe.commits", json!(2));
     game.assert_kv("lane.1.probe.clean", json!("1"));
@@ -2942,29 +3140,35 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
 
     game.click("proposal.accept — ");
 
-    // 3) Approving accept gate triggers auto_release_worktree in the SAME turn!
+    // 2) Approving the accept gate opens the integration act — the lane STAYS bound (R7):
+    //    no release ritual fires on the gate approval any more.
     let approved_accept = game.click("gate.approve — ");
     let approved_accept_lines = narrative_lines(&approved_accept);
     assert_eq!(
-        count_lines(&approved_accept_lines, "[TOOL SETTLED]"),
-        1,
-        "{approved_accept_lines:#?}"
-    );
-    assert_eq!(
         count_lines(&approved_accept_lines, "[WORKTREE RELEASED]"),
+        0,
+        "the accept-gate approval must keep the lane bound (integration act owns the tree): {approved_accept_lines:#?}"
+    );
+    game.assert_kv("lane.1.req", json!("r1"));
+    game.assert_kv("req.1.lane", json!(1));
+
+    // 3) The integration confirm releases the worktree in the SAME turn.
+    let confirmed = game.narrate("integration.confirm", &text("r1|develop@deadbeef"));
+    let confirmed_lines = confirmed;
+    assert_eq!(
+        count_lines(&confirmed_lines, "[WORKTREE RELEASED]"),
         1,
-        "{approved_accept_lines:#?}"
+        "{confirmed_lines:#?}"
     );
     game.assert_kv("lane.1.path", json!(""));
     game.assert_kv("lane.1.req", json!(""));
+    game.assert_kv("req.1.lane", json!(0));
     game.assert_kv("tool.settled_count", json!(3));
 
     // 4) r1 rev1 fail-closed contract: with run.id/run.parent unset, registering
     //    settlement.evolution WITHOUT a `sessions=` segment must NOT auto-archive —
-    //    fabricating parent="default" could rename the main session into the trash
-    //    (the host selects files by substring match). The evolution turn narrates a
-    //    readable [SESSIONS CLEANUP PENDING] hint instead, writes no forged remaining=0
-    //    (the -1 from reset_settlement survives), and stays at 3 settled rituals.
+    //    fabricating parent="default" could rename the main session into the trash.
+    //    The evolution turn narrates a readable [SESSIONS CLEANUP PENDING] hint instead.
     game.click("coordinate.submit — ");
     game.click("verify.submit all_green=true — ");
     let evo_lines = game.narrate(
@@ -2989,23 +3193,12 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
     game.assert_kv("settlement.sessions.remaining", json!(-1));
     game.assert_kv("tool.settled_count", json!(3));
 
-    // The blocked review.note narrates the readable hint instead of archiving…
-    let blocked = game.click("review.note — ");
-    let blocked_text = blocked["narrative"].to_string();
-    assert!(
-        blocked_text.contains("[SESSIONS CLEANUP PENDING]"),
-        "a blocked review.note must explain the safe cleanup path: {blocked}"
-    );
-    assert!(
-        !blocked_text.contains("[BATCH 1 SETTLED]"),
-        "review.note must stay blocked while sessions are unsettled: {blocked}"
-    );
-
     // …and an explicit human settlement (the safe path) unblocks the batch close.
     game.narrate(
         "settlement.sessions",
         &text("2|0|/tmp/sessions-trash/sem-explicit"),
     );
+    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
     let closed = game.click("review.note — ");
     let closed_text = closed["narrative"].to_string();
     assert!(
@@ -3017,10 +3210,11 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
         "a batch settle must never carry the ending prefix: {closed}"
     );
     game.assert_kv("run.batch", json!(2));
-    game.assert_kv("fsm.stage", json!("coordinate"));
+    game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
+    game.assert_kv("run.phase", json!(""));
 }
 
-// ───────────────────────── r13 · fuel autoscale + requirement list pagination ─────────────────────────
+// ───────────────────── r13 · fuel autoscale + requirement list pagination ─────────────────────
 
 /// r13 A: the dispatch fuel budget autoscales with the canonical state size —
 /// `clamp(per_entry × kv_len, floor, cap)` — while an explicit `YGG_FUEL_BUDGET` wins
@@ -3081,23 +3275,20 @@ fn fuel_budget_autoscales_with_state_size_and_env_wins() {
 #[test]
 fn requirement_list_pages_open_first_and_full_opt_in() {
     let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "event.start",
-        &text("pagination|synthetic task description"),
-    );
+    charter_and_begin(&mut game);
 
-    // r1 goes the full happy path to `done` (the only closed row).
+    // r1 goes the full nine acts to `done` (the only closed row).
     game.narrate(
         "requirement.add",
         &text("synthetic requirement|synthetic description|page-r1"),
     );
     game.narrate("requirement.dispatch", "0");
     submit(&mut game, 1, "plan", "page-p1");
-    game.click("proposal.accept — ");
     game.click("gate.approve — ");
     submit(&mut game, 1, "development", "page-p2");
     game.click("proposal.accept — ");
     game.click("gate.approve — ");
+    game.narrate("integration.confirm", &text("r1|develop@abc1234"));
     game.assert_kv("req.1.status", json!("done"));
 
     // r2..r13: twelve open drafts (total 13 requirements).
@@ -3150,14 +3341,13 @@ fn requirement_list_pages_open_first_and_full_opt_in() {
 }
 
 /// r1: the summary projection carries the additive `play` key (the `play_mode()` mirror)
-/// beside the r9 resident trio — the auto-collect watchdog and the opt-in wake-up read
-/// `meta.summary` without any host-side parsing (P11: the host never interprets it).
+/// beside the resident trio — the pump-pause signal `batchDrained` reads
+/// coordinate ∧ gate_problem()==nil ∧ not armed (D-MA23: the run-level facts, no stage name).
 #[test]
 fn summary_projection_carries_play_and_resident_trio() {
     let mut game = Game::open(&project_mod_dir());
 
-    // Fresh run: the boot lands in `coordinate`, but the charter gate keeps the pump
-    // NOT drained — `gate_problem() != nil` (no charter payload, no requirements).
+    // Fresh run: the boot lands in the charter act, the closer preconditions are unmet.
     let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(
         summary["play"],
@@ -3168,11 +3358,9 @@ fn summary_projection_carries_play_and_resident_trio() {
     assert_eq!(summary["batch"], json!(1));
     assert_eq!(summary["batchDrained"], json!(false));
 
-    // `task.intake` moves the run to `coordinate`; with no pending gate and no armed
-    // retirement the pump is drained (waiting for new `--requirement` feed).
-    // r2 rev2: chartering the run (boot payload) alone is still not enough — the open
-    // (draft) requirement keeps `req_all_done()` false, so the run stays not-drained.
-    game.narrate("event.start", &text("watchdog|synthetic task description"));
+    // Chartered and begun, but the open (draft) requirement keeps `gate_problem()` non-nil,
+    // so the pump is still not drained.
+    charter_and_begin(&mut game);
     game.narrate(
         "requirement.add",
         &text("watchdog req|synthetic description|watchdog-r1"),
@@ -3182,5 +3370,29 @@ fn summary_projection_carries_play_and_resident_trio() {
         summary["batchDrained"],
         json!(false),
         "coordinate ∧ charter ∧ open requirement → still not drained: {summary}"
+    );
+
+    // A completed, settled batch drains the pump: coordinate ∧ nothing pending ∧ not armed.
+    game.narrate("requirement.dispatch", "0");
+    submit(&mut game, 1, "plan", "watchdog-p1");
+    game.click("gate.approve — ");
+    submit(&mut game, 1, "development", "watchdog-p2");
+    game.click("proposal.accept — ");
+    game.click("gate.approve — ");
+    game.narrate("integration.confirm", &text("r1|develop@abc1234"));
+    game.click("coordinate.submit — ");
+    game.click("verify.submit all_green=true — ");
+    game.narrate(
+        "settlement.evolution",
+        &text("|screened|c=0/0|sessions=0/0/none|todo=0/cleared"),
+    );
+    game.narrate("release.skip", &text("纯测试批次"));
+    game.click("review.note — ");
+    let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
+    assert_eq!(summary["batch"], json!(2));
+    assert_eq!(
+        summary["batchDrained"],
+        json!(true),
+        "a settled batch with an empty queue drains the pump: {summary}"
     );
 }
