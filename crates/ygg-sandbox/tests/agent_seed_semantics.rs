@@ -1316,7 +1316,9 @@ fn maintenance_requirement_walks_nine_acts_and_gates_next_boundary() {
     let mut game = drive_to_release();
     game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
     let closed = game.click("review.note — ");
-    assert!(closed["narrative"].to_string().contains("[MAINTENANCE REQ ADDED]"));
+    assert!(closed["narrative"]
+        .to_string()
+        .contains("[MAINTENANCE REQ ADDED]"));
     // Batch 2: the open/draft maintenance row withholds the boundary item — menu data
     // does not lie, and the drained queue is what brings `coordinate.submit` back.
     assert!(
