@@ -73,6 +73,12 @@
           "modality": "must",
           "text": "The closeout criteria = `req_all_done()` (including successors of split/merged being all done) + 0 pending proposals + 0 running jobs + 0 conflicts.",
           "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "machine.batch-maintenance",
+          "modality": "must",
+          "text": "An unarmed batch settle (`review.note`) **auto-appends the next batch's docs-maintenance requirement**: after the `[BATCH n SETTLED]` narration, the same handler transaction adds one open/draft requirement (canonical title 「维护更新 docs wiki（上批收口）」) whose description carries the per-file wiki update guidance over the r2 doc tree (`docs/README.md` index; `docs/context/*` decisions/vocabulary; `docs/design/*` topic files per the batch's touched surface; the two thin-shell maps; wiki-governance's three duties). Dedup: skip the append when the register already holds an open, non-bypassed row carrying the `req.<i>.maintenance` marker or the exact canonical title; a full register also skips. The append is best-effort and **never fails the settlement** — it narrates (`[MAINTENANCE REQ SKIP]`), it never refuses. The retired path (`run.retire` armed → `[ENDING`) appends nothing. The appended draft is never auto-dispatched (draft rows carry no mark) — the main agent dispatches it in the next coordinate phase, and it blocks the next `coordinate.submit` until done: the per-batch docs cadence.",
+          "basis": "requirement r3 (D-MA25, 2026-11-12)"
         }
       ]
     }

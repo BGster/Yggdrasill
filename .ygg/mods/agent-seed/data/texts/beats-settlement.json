@@ -41,6 +41,11 @@
     "release_usage": "release.confirm 载荷：\"master@<sha>|v年.月.日.序号\"——sha 为 7-40 位十六进制，标签 v 开头四段数字点分",
     "release_skip_usage": "release.skip 载荷 = 非空理由（本批无需发布的显式声明）",
     "release_confirm_payload": "master@1a2b3c4d|v2026.11.12.1",
-    "release_skip_payload": "本批无需发布：纯文档/测试批次，无 develop→master 合并"
+    "release_skip_payload": "本批无需发布：纯文档/测试批次，无 develop→master 合并",
+    "maintenance_req_title": "维护更新 docs wiki（上批收口）",
+    "maintenance_req_desc": "依 wiki-governance 三职责复核上批全部需求的 plan 与 develop 验收结果是否已落 docs wiki：决策与词汇 → docs/context/decisions-agent.md 台账行、vocabulary.md 词条；行为与契约 → docs/design/ 对应主题文件（按本批触碰面：state-machine/events/state-surface/run-story/requirement-story 等）；结构变化 → docs/README.md 索引与 CONTEXT.md/DESIGN.md 两薄壳映射表；纪律：每主题一文件 ≤300 行、头部定位/replaces/上下游、双向链接；纯缺陷修复与措辞调整不触碰文档。",
+    "maintenance_req_added": "[MAINTENANCE REQ ADDED] {{id}} \"{{title}}\" — batch {{batch}} closeout appended next batch's docs-maintenance requirement (open/draft); dispatch it in coordinate — it gates the next boundary until done.",
+    "maintenance_req_skipped_dedup": "[MAINTENANCE REQ SKIP] {{id}} already carries an open docs-maintenance requirement (maintenance marker / canonical title) — dedup hit, the batch settles without a second one.",
+    "maintenance_req_skipped_full": "[MAINTENANCE REQ SKIP] requirement register is full ({{cap}} open) — docs-maintenance append deferred; the batch settles regardless."
   }
 }
