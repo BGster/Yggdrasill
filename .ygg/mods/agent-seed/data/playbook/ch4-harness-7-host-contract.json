@@ -67,7 +67,7 @@
         {
           "id": "harness.living-docs-closed-loop",
           "modality": "must",
-          "text": "`docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.",
+          "text": "The docs wiki indexed by `docs/README.md` — `docs/context/*` (domain invariants and vocabulary) and `docs/design/*` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) — are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.",
           "basis": "AGENTS.md §1.7 + docs/{CONTEXT,DESIGN}.md closed loop"
         }
       ]

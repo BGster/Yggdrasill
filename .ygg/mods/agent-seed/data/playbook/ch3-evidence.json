@@ -183,7 +183,7 @@
         {
           "id": "hard.decision-change-backfill",
           "modality": "must",
-          "text": "A decision change must be written back into the `docs/CONTEXT.md` decision table; when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
+          "text": "A decision change must be written back into the decision ledger (`docs/context/decisions-engine.md` / `docs/context/decisions-agent.md`); when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
           "basis": "AGENTS.md §10 item 7"
         }
       ]
