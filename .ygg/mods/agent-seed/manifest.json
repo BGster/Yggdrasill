@@ -131,9 +131,9 @@
       "sha256": "e59040bd146aa6b9ff74ac4cfaae1ce901976fed134d35e5828d234e98256cd2"
     },
     {
-      "byteLength": 44100,
+      "byteLength": 44246,
       "path": "src/view/render.lua",
-      "sha256": "469da8ff809cb86c792331d42b81e86dd7841f3b90c1899c0c0a2cadc8595fb6"
+      "sha256": "c58477eff57248c53d5740640ebf7a31fd60bfc0ece2f3b9b6733a605a6c6ceb"
     }
   ],
   "entries": [
@@ -162,12 +162,12 @@
       "sha256": "af58944a356e4bc967f1fdc82b4f047e7df842eddc8f387931f2a63c0f482649"
     },
     {
-      "byteLength": 3390,
+      "byteLength": 4395,
       "id": "ygg:scene/beats/lanes",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-lanes.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "b6efd38d4f980354ffe9c39458bb220452df08b8ebe522f898dfd0b83817ab5b"
+      "sha256": "7dc2a07fa043c0cf690f9ede2648d620ee400ce7860a68775030cfa691c4b9e6"
     },
     {
       "byteLength": 3658,

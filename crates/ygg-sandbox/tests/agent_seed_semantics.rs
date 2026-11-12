@@ -1563,10 +1563,11 @@ fn assert_fail_closed(game: &mut Game, event: &str) -> Json {
         .parse()
         .unwrap_or_else(|err| panic!("the registered count must be a number: {message} ({err})"));
     // D-MA23: 38 story/operate/infrastructure events (DESIGN §2.6) + `ygg.narrative.goto`
-    // (the node:render render event) = 39 registered handlers.
+    // (the node:render render event) = 39 registered handlers; r1 (D-MA24) adds
+    // `lane.pool` (the named-pool registry action) = 40 registered handlers.
     assert_eq!(
-        count, 39,
-        "the merged mod registers 39 events after D-MA23 — got {count}: {message}"
+        count, 40,
+        "the merged mod registers 40 events after r1 lane.pool — got {count}: {message}"
     );
     let set = registered_set(message);
     assert!(
