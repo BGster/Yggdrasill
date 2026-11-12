@@ -1985,7 +1985,7 @@ mod tool_contract_tests {
 // §inbox 路由的身份段声明（`actor` / `actor_session` 两布尔）
 //
 // 声明承重：没声明的动作没有身份段（宿主不注入也不拦截）。这里只碰纯 JSON，
-// 不建 Mod 目录（运行期注入/拦截在 `examples/agent.rs` 的宿主通道用例里测）。
+// 不建 Mod 目录（运行期注入/拦截在 `examples/egg.rs` 的宿主通道用例里测）。
 // ============================================================================
 #[cfg(test)]
 mod inbox_route_actor_tests {

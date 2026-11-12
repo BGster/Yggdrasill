@@ -203,12 +203,12 @@
       "sha256": "c2741c6ff3f37318c20371a77dc583436145d9a7cf3c082ce1f05c86b7ec9959"
     },
     {
-      "byteLength": 16405,
+      "byteLength": 16399,
       "id": "ygg:agent/playbook/ch2-delivery",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch2-delivery.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "9242ba4621bf10caf77508e821e0eb65e9c3e8f1d3993e67710c4b04570dd5c9"
+      "sha256": "75fbeba41b3e6c2c7693a51344b52dca40b464f986bf0cec2034e1a0e87dd671"
     },
     {
       "byteLength": 8729,
