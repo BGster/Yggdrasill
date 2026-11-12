@@ -31,8 +31,8 @@ local render =
   render_mod.receipt
 local release_lane_with_worktree =
   tools.release_lane_with_worktree
-local RUN_PHASE, req_gate, req_id, req_index_of, req_key, req_phase, req_plan_ok, req_push_history, req_rev, req_sync_conflicts =
-  reqs.RUN_PHASE, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase, reqs.req_plan_ok, reqs.req_push_history, reqs.req_rev, reqs.req_sync_conflicts
+local RUN_PHASE, req_bump_rev, req_id, req_index_of, req_key, req_phase, req_plan_ok, req_push_history, req_rev, req_sync_conflicts =
+  reqs.RUN_PHASE, reqs.req_bump_rev, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_phase, reqs.req_plan_ok, reqs.req_push_history, reqs.req_rev, reqs.req_sync_conflicts
 local props = require("src.domain.proposals")
 local P_PENDING, P_ACCEPTED, P_REJECTED, prop_count, prop_key, prop_req, prop_stage, prop_status =
   props.P_PENDING, props.P_ACCEPTED, props.P_REJECTED, props.prop_count, props.prop_key, props.prop_req, props.prop_stage, props.prop_status
@@ -91,14 +91,14 @@ function M.install(deps)
     if evidence ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", evidence)
     end
-    -- 单需求门禁判据（批准即开工的前半）：rN 的门禁只被 rN 自身事态阻塞——其它需求的
-    -- pending 提案 / 在跑 job / 冲突不进本判定。gate.reject 不加判据（纠错通道保持畅通）。
+    -- 升起本门禁的 plan 提案随裁决先落定（approved）——提前到自身 pending 判据之前，
+    -- 否则交付即门禁语义下门禁被自己的提案永远自缚（T4 缺陷 3）；
+    -- 判定不过时 refuse 走宿主事务回滚，落定同步撤销；外来 pending 仍照常阻塞。
+    settle_prop(index, "plan", P_ACCEPTED)
     local problem = gate_problem_for(index)
     if problem ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", problem)
     end
-    -- 升起本门禁的 plan 提案随裁决落定（approved）；accept 门禁的 dev 提案在受理时已 accepted。
-    settle_prop(index, "plan", P_ACCEPTED)
     ygg.kv.set(req_key(index, "gate"), "")
     if kind == "plan" then
       -- 计划门禁批准 → 待开发：plan_ok 置真（ready）；job 槽已空（提交时已清）。

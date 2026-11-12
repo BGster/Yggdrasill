@@ -250,7 +250,8 @@ local function run_phase()
   if stage() == STAGE.retired then
     return RUN_PHASE.retired
   end
-  local p = text_of("run.phase", RUN_PHASE.charter)
+  local p = text_of("run.phase", "") -- 回退用空串：R2 语义中 "" = 协调常驻主态，
+  -- 若回退到 charter 会把合法空串吞进立局相位（T4 缺陷 1：协调相位不可达）。
   if p == RUN_PHASE.settle then
     return RUN_PHASE.settle
   end

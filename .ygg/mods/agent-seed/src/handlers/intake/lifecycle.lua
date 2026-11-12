@@ -30,8 +30,9 @@ local parse_intake =
 function M.install(deps)
   TEXTS = deps.texts
   ygg.on("event.start", function(payload)
-    -- R2：run.phase 初值 charter（只在缺席时写入——重放不把已开工的局拉回立局）。
-    if trim(tostring(ygg.kv.get("run.phase") or "")) == "" then
+    -- R2：run.phase 初值 charter（只在真缺席时写入——重放不把已开工的局拉回立局）。
+    -- 判缺席用 nil：合法的 ""（= 协调，run.begin 写入）不能被重放拉回 charter（T4 缺陷 2）。
+    if ygg.kv.get("run.phase") == nil then
       ygg.kv.set("run.phase", "charter")
     end
     -- boot 三则：引擎 / 模式 / 红线（R3：只叙述，不转场）。

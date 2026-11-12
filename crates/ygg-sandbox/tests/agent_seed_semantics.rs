@@ -406,7 +406,9 @@ fn drive_to_integrating(mut game: Game) -> Game {
 fn drive_to_done(mut game: Game) -> Game {
     let confirmed = game.narrate("integration.confirm", &text("r1|develop@abc1234"));
     assert!(
-        confirmed.iter().any(|line| line.contains("[INTEGRATION CONFIRMED]")),
+        confirmed
+            .iter()
+            .any(|line| line.contains("[INTEGRATION CONFIRMED]")),
         "the integration confirm must narrate its beat: {confirmed:#?}"
     );
     game.assert_kv("req.1.status", json!("done"));
@@ -425,7 +427,9 @@ fn drive_to_settle() -> Game {
     ))));
     let closed = game.click("coordinate.submit — ");
     assert!(
-        closed["narrative"].to_string().contains("[COORDINATION DONE]"),
+        closed["narrative"]
+            .to_string()
+            .contains("[COORDINATION DONE]"),
         "coordinate.submit must open the settle act: {closed}"
     );
     game.assert_kv("run.phase", json!("settle"));
@@ -452,7 +456,9 @@ fn drive_to_release() -> Game {
         ),
     );
     assert!(
-        registered.iter().any(|line| line.contains("[SETTLE READY]")),
+        registered
+            .iter()
+            .any(|line| line.contains("[SETTLE READY]")),
         "the four-settled effect must narrate the release move: {registered:#?}"
     );
     game.assert_kv("run.phase", json!("release"));
@@ -495,7 +501,9 @@ fn charter_gate_revises_locks_and_begins_the_run() {
     game.assert_kv("task.goal", json!("prove the v2 state machine"));
     game.assert_kv("task.success", json!("suite green"));
     assert!(
-        game.options().iter().any(|item| item.starts_with("run.begin — ")),
+        game.options()
+            .iter()
+            .any(|item| item.starts_with("run.begin — ")),
         "a complete charter must put run.begin on the menu"
     );
     game.narrate(
@@ -514,10 +522,7 @@ fn charter_gate_revises_locks_and_begins_the_run() {
     );
 
     // R4 lock: after run.begin the charter is immutable — a readable refusal, value kept.
-    let locked = game.narrate(
-        "charter.set",
-        &text("late charter|must refuse|locked"),
-    );
+    let locked = game.narrate("charter.set", &text("late charter|must refuse|locked"));
     assert_refused(&locked, "charter.set");
     game.assert_kv("task.title", json!("semantics run v2"));
 }
@@ -835,7 +840,9 @@ fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
     let reply = game.click("gate.approve — ");
     let narrative = narrative_lines(&reply);
     assert!(
-        narrative.iter().any(|line| line.starts_with("[AUTO-DISPATCH]")),
+        narrative
+            .iter()
+            .any(|line| line.starts_with("[AUTO-DISPATCH]")),
         "the auto-dispatch effect must narrate its own line: {narrative:#?}"
     );
 
@@ -999,7 +1006,9 @@ sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo lis
     );
     let registered = game.narrate("settlement.evolution", &payload);
     assert!(
-        registered.iter().any(|line| line.contains("[SETTLE READY]")),
+        registered
+            .iter()
+            .any(|line| line.contains("[SETTLE READY]")),
         "the four-settled effect must fire in the same turn: {registered:#?}"
     );
     game.assert_kv(
@@ -1039,10 +1048,7 @@ sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo lis
     game.assert_kv("settlement.evolution.summary", json!(""));
     game.assert_kv("run.release.master_sha", json!(""));
     game.assert_kv("run.release.skipped_reason", json!(""));
-    game.assert_kv(
-        "review.evolution.candidates",
-        json!("0/0"),
-    );
+    game.assert_kv("review.evolution.candidates", json!("0/0"));
     game.assert_kv(
         "review.evolution.summary",
         json!("candidates screened against the evolution chapter"),
@@ -1086,9 +1092,15 @@ fn release_declaration_gates_the_batch_settlement() {
     // Undeclared: review.note is not on the menu; the declaration items are.
     let options = game.options();
     assert!(
-        options.iter().any(|item| item.starts_with("release.confirm — "))
-            && options.iter().any(|item| item.starts_with("release.skip — "))
-            && !options.iter().any(|item| item.starts_with("review.note — ")),
+        options
+            .iter()
+            .any(|item| item.starts_with("release.confirm — "))
+            && options
+                .iter()
+                .any(|item| item.starts_with("release.skip — "))
+            && !options
+                .iter()
+                .any(|item| item.starts_with("review.note — ")),
         "an undeclared release must offer confirm/skip and withhold review.note: {options:?}"
     );
 
@@ -1107,17 +1119,24 @@ fn release_declaration_gates_the_batch_settlement() {
     // Skip with a reason → declared → the batch close settles back to coordinate.
     let skipped = game.narrate("release.skip", &text("本批无需发布：纯测试批次"));
     assert!(
-        skipped.iter().any(|line| line.contains("[RELEASE SKIPPED]")),
+        skipped
+            .iter()
+            .any(|line| line.contains("[RELEASE SKIPPED]")),
         "{skipped:#?}"
     );
-    game.assert_kv("run.release.skipped_reason", json!("本批无需发布：纯测试批次"));
+    game.assert_kv(
+        "run.release.skipped_reason",
+        json!("本批无需发布：纯测试批次"),
+    );
     assert!(
         game.options()[0].starts_with("review.note — "),
         "a declared release must lead with the batch closer"
     );
     let closed = game.click("review.note — ");
     assert!(
-        closed["narrative"].to_string().contains("[BATCH 1 SETTLED]"),
+        closed["narrative"]
+            .to_string()
+            .contains("[BATCH 1 SETTLED]"),
         "{closed}"
     );
     game.assert_kv("run.phase", json!(""));
@@ -1140,21 +1159,23 @@ fn release_declaration_gates_the_batch_settlement() {
     game.click("verify.submit all_green=true — ");
     game.narrate(
         "settlement.evolution",
-        &text(
-            "|batch two screened|c=0/0|sessions=0/0/none|todo=0/cleared",
-        ),
+        &text("|batch two screened|c=0/0|sessions=0/0/none|todo=0/cleared"),
     );
     game.assert_kv("run.phase", json!("release"));
     let confirmed = game.narrate("release.confirm", &text("master@1a2b3c4|v2026.11.12.2"));
     assert!(
-        confirmed.iter().any(|line| line.contains("[RELEASE CONFIRMED]")),
+        confirmed
+            .iter()
+            .any(|line| line.contains("[RELEASE CONFIRMED]")),
         "{confirmed:#?}"
     );
     game.assert_kv("run.release.master_sha", json!("1a2b3c4"));
     game.assert_kv("run.release.tag", json!("v2026.11.12.2"));
     let closed = game.click("review.note — ");
     assert!(
-        closed["narrative"].to_string().contains("[BATCH 2 SETTLED]"),
+        closed["narrative"]
+            .to_string()
+            .contains("[BATCH 2 SETTLED]"),
         "{closed}"
     );
     game.assert_kv("run.batch", json!(3));
@@ -1192,7 +1213,9 @@ fn gate_independence_other_requirements_do_not_block() {
     let reply = game.click("gate.approve — ");
     let narrative = narrative_lines(&reply);
     assert!(
-        narrative.iter().any(|line| line.starts_with("[AUTO-DISPATCH]")),
+        narrative
+            .iter()
+            .any(|line| line.starts_with("[AUTO-DISPATCH]")),
         "approving r1 must auto-dispatch its development in the same turn: {narrative:#?}"
     );
     game.assert_kv("req.1.plan_ok", json!(true));
@@ -1290,7 +1313,9 @@ fn integration_confirm_sha_gate_and_reject_path() {
     // Confirm: done (true state), the sha evidence is kept, the lane is released.
     let confirmed = game.narrate("integration.confirm", &text("r1|develop@abc1234"));
     assert!(
-        confirmed.iter().any(|line| line.contains("[INTEGRATION CONFIRMED]")),
+        confirmed
+            .iter()
+            .any(|line| line.contains("[INTEGRATION CONFIRMED]")),
         "{confirmed:#?}"
     );
     game.assert_kv("req.1.status", json!("done"));
@@ -1308,7 +1333,9 @@ fn integration_confirm_sha_gate_and_reject_path() {
     game.assert_kv("req.2.lane", json!(1));
     let rejected = game.narrate("integration.reject", &text("r2|rework the diff"));
     assert!(
-        rejected.iter().any(|line| line.contains("[INTEGRATION REJECTED]")),
+        rejected
+            .iter()
+            .any(|line| line.contains("[INTEGRATION REJECTED]")),
         "{rejected:#?}"
     );
     game.assert_kv("req.2.status", json!("open"));
@@ -1336,10 +1363,7 @@ fn closed_reason_bypass_split_and_done_amend_derives() {
     );
 
     // Split a pre-development draft: the parent becomes done + closed_reason=split.
-    let split = game.narrate(
-        "requirement.split",
-        &text("r1|first child|second child"),
-    );
+    let split = game.narrate("requirement.split", &text("r1|first child|second child"));
     assert!(
         split.iter().any(|line| line.contains("[REQ SPLIT]")),
         "{split:#?}"
@@ -1353,7 +1377,10 @@ fn closed_reason_bypass_split_and_done_amend_derives() {
     assert_refused(&bypassed, "requirement.amend");
 
     // Merge two open rows: the sources become done + closed_reason=merged, a new row appears.
-    game.narrate("requirement.merge", &text("r2,r3|merged requirement|merged desc"));
+    game.narrate(
+        "requirement.merge",
+        &text("r2,r3|merged requirement|merged desc"),
+    );
     game.assert_kv("req.2.status", json!("done"));
     game.assert_kv("req.2.closed_reason", json!("merged"));
     game.assert_kv("req.3.status", json!("done"));
@@ -1752,7 +1779,9 @@ fn actor_channel_mismatch_is_recorded_never_rejected() {
     assert_eq!(game.phase("r1"), "plan_gate");
     let options = game.options();
     assert!(
-        !options.iter().any(|item| item.starts_with("proposal.accept — ")),
+        !options
+            .iter()
+            .any(|item| item.starts_with("proposal.accept — ")),
         "a plan proposal must not be on the acceptance menu: {options:?}"
     );
     let direct = game.narrate("proposal.accept", &text("p1"));
@@ -3128,11 +3157,7 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
         1,
         "{dev_lines:#?}"
     );
-    assert_eq!(
-        count_lines(&dev_lines, "[LANE PROBE]"),
-        1,
-        "{dev_lines:#?}"
-    );
+    assert_eq!(count_lines(&dev_lines, "[LANE PROBE]"), 1, "{dev_lines:#?}");
     game.assert_kv("lane.1.probe.commits", json!(2));
     game.assert_kv("lane.1.probe.clean", json!("1"));
     game.assert_kv("lane.1.probe.head", json!("deadbeef1234"));
