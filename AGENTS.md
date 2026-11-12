@@ -187,10 +187,13 @@ output back; synthetic data generated under `/tmp` is unrestricted.
 - **Preconditions for closing** (`coordinate.submit` / `verify.submit=true` / `review.note` share
   them): zero pending proposals ∧ zero running jobs ∧ zero unresolved conflicts ∧ every requirement
   in a terminal state (`done`, or split / merged / dropped whose successors are all `done`).
-- `coordinate.submit` only works in the `coordinate` stage; on success it moves to `review`, sets
+- `coordinate.submit` only works in the `coordinate` phase; on success it moves to the settle
+  phase (`run.phase="settle"`), sets
   `verify.passed=false`, and clears this round's
   `settlement.evolution.{artifact,summary,candidates,classes}` (settings pre-registrations survive).
-  `verify.submit` records all-green in `review` (`all_green=false` sends the run back to `coordinate`
+  After the four settle items are done the R9 effect auto-advances to the release phase
+  (`release.confirm` / `release.skip` declare the batch's develop→master outcome).
+  `verify.submit` records all-green in the settle phase (`all_green=false` sends the run back to `coordinate`
   when `gates.require_all_green=true`, and also clears the settlement keys).
   `settlement.evolution` is registered only after verify is green; its payload is
   `artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]`.
@@ -202,10 +205,12 @@ output back; synthetic data generated under `/tmp` is unrestricted.
   is the guide pre-registration surface (shape checked per key; cross-field completeness is checked
   only at registration). `review.note` accepts only `lesson|score` (the legacy ev/c/cls segments are
   refused); it first runs `gates.settlement_problem()`, then archives this round's settlement keys
-  single-source into `review.evolution.*`, writes `review.lesson` / `review.score` / `ending` and
-  enters `done` (the **[ENDING** line). **Runtime `goal` runs** additionally require a non-empty
+  single-source into `review.evolution.*`, writes `review.lesson` / `review.score`, and either
+  settles the batch back to `coordinate` (`run.batch`+1, `[BATCH n SETTLED]`) or — with `run.retire`
+  armed — writes the `ending` and enters `retired` (the **[ENDING** line). **Runtime `goal` runs**
+  additionally require a non-empty
   `settings.goal.authorization` (missing → narrative block; a static default is not checked, see §8).
-- The host decides "the next step is the retiring close" from `agent.summary`'s `nextEndsRun`: in `review`,
+- The host decides "the next step is the retiring close" from `agent.summary`'s `nextEndsRun`: in the settle phase,
   the first item is `settlement.evolution` (after verify passed and nothing is registered) and
   `review.note` afterwards; with no pre-registration the default is an empty artifact + a neutral
   summary + `c=0/0`, so the scripted default path can run "register zero candidates → review.note".
@@ -296,7 +301,7 @@ plus same-turn receipt, replay idempotence, payload/allowlist shape checks, decl
 across both packs), and the active subsystem (`git.worktree_claim` binding the lane ledger +
 `git.worktree_release` freeing it, `git.lane_probe` recording the truth + the conflict radar
 blocking through `req.<i>.conflict` until `requirement.resolve`, `fs.artifact_probe` + `vfs.write`
-sharing one bounded ledger, `gate.verify_suite` green evidence only in `review`, declaration completeness). The all-1 playtest only covers the happy path (it
+sharing one bounded ledger, `gate.verify_suite` green evidence only in the settle phase, declaration completeness). The all-1 playtest only covers the happy path (it
 never takes `gate.reject` / `requirement.amend` / `proposal.reject`, and it cannot see the turn-cut
 mechanics at all); temporary probes under `/tmp` may supplement it but never replace it, and any
 scenario not covered must be declared case by case. Three-question criterion (see 7): ① which action
@@ -382,7 +387,7 @@ pinned by `data/playbook/` (`tools.reactive-effect-scope`, `subsystems.probe-is-
    `requirement.resolve` clears it.
 3. **Machine evidence is same-level, not stronger.** `gate.verify_suite` writes the very KV that
    `verify.submit` writes, saving one turn; the provenance key `verify.source` must survive, and no report may
-   claim the machine path outranks a self-declaration. It only records `passed=1` and only in `review`, on the
+   claim the machine path outranks a self-declaration. It only records `passed=1` and only in the settle phase, on the
    same precondition as the human path (`gate_problem() == nil`).
 
 Set-of-files comparisons must respect the host cap: `parse_result` returns `truncated` and writes
@@ -434,7 +439,7 @@ are git-ignored, `.ygg/mods/` is committed.
 - **`docs/CONTEXT.md` + `docs/DESIGN.md` closed loop**: every `plan` and `development` subagent brief
   mandates reading `docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md`
   (three-layer architecture, lane lifecycle, and `harnessActions[]` contracts) before proposing or
-  editing; during `review` settlement (`settlement.evolution`), both documents must be checked and
+  editing; during settle-phase settlement (`settlement.evolution`), both documents must be checked and
   updated whenever domain concepts or architectural contracts changed.
 
 ### Start

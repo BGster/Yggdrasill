@@ -7,68 +7,68 @@
         {
           "id": "harness.requirement-list",
           "modality": "must",
-          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before `review.note` closes: a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the all-1 smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
-          "basis": "user decision 2026-11-01 (E2 ruling: the closing check covers runtime goal only; a static default does not block)"
+          "text": "requirement.list (\"\" / \"0\" / \"full\") is read-only: the requirement graph row by row (status + deps + rev + lane + job + conflict/stale traces), the pending-proposal list, the lane ledger and the legend.",
+          "basis": "AGENTS.md §6 (pre-migration)"
         },
         {
           "id": "harness.map-show",
           "modality": "must",
-          "text": "The coordinator has a three-state chain: coordinate ──coordinate.submit──▶ review ──review.note──▶ done (boot lands in coordinate; the event.start payload IS the charter); inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "map.show prints the two-layer map: the coordinator's 4-state node graph + the requirement pipeline (including both gates) + the job / lane ledger; each lane row reads `lane-<k> ← <requirement> | branch | base | since #N | clean` (an unset field shows `-`).",
+          "basis": "AGENTS.md §6 (pre-migration)"
         },
         {
           "id": "harness.pending-choice-order",
           "modality": "must",
-          "text": "There is one requirement pipeline per requirement (`req.<i>.status`, 5 stored states): draft ──dispatch──▶ planning (job=plan) ──proposal → proposal.accept──▶ planning+gate=plan ──gate.approve(plan)──▶ planning+plan_ok ──dispatch (reactive auto-dispatch)──▶ developing (lane) ──proposal → proposal.accept──▶ developing+gate=accept ──gate.approve(accept)──▶ done. Display names are derived from status + job / pending proposal / gate / plan_ok (analysis_review / plan_review / plan_gate / ready / dev_review / accept) and are never stored. `analyzing` survives only as a compatibility state: legacy saves, and an explicit `analysis` proposal accepted on a planning row.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "pendingChoice order: resolve conflict (if any) → main forward action (proposal.accept > gate.approve > requirement.dispatch > coordinate.submit) → guide.show → map.show → requirement.list → requirement.add → config (inside the sub-page: play.mode → evolution.mode → gates + back).",
+          "basis": "AGENTS.md §6 (pre-migration)"
         },
         {
           "id": "harness.run-autosave",
           "modality": "must",
-          "text": "There are also the traceable terminal states split / merged / dropped, plus the two marker states blocked (conflict) and stale (a proposal whose rev is outdated).",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "`autosave.json` is the per-step automatic save (entity table + KV + pending choice) and can be fed to `load` directly.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-events",
           "modality": "must",
-          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and close with the final review (verify.submit → settlement.evolution → review.note); it never carries development itself and may never bypass a gate.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "`events.jsonl` holds one line per dispatch: `{seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-runjson",
           "modality": "must",
-          "text": "Requirement granularity: adjacent work with the same goal, the same subsystem, a small change, or that can share one plan and one acceptance evidence set belongs in the same requirement; create a new one only for an independent delivery + acceptance, a cross-repository or cross-lane change, or risk isolation. A new adjacent requirement must state in its description why it cannot be merged (no reason = treat as mergeable). Three-question criterion: ① the blocked action is filing through requirement.add / --requirement; ② the visible symptom of a violation is that the adjacent requirement is pointed out as \"just part of the previous one\" while its description has no cannot-merge reason; ③ confirm it next time by walking `requirement.list` and checking that every new requirement's description carries that reason.",
-          "basis": "user decision 2026-11-02 (r3 requirement-merge decision)"
+          "text": "`run.json` = `{run_id, mod, mod_signature, started_at, updated_at}`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-settlement",
           "modality": "must",
-          "text": "The plan gate (`req.gate=plan`) fires after a plan proposal is accepted; approve → `plan_ok` is set (the former `ready`, the only state that may dispatch into development); reject → back to planning for rework; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
-          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+          "text": "`settlement.json` is the end-of-run settlement and is written only by `--settle`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-inbox",
           "modality": "must",
-          "text": "The accept gate (`req.gate=accept`) fires after a development proposal is accepted (the executor delivered); approve → done; reject → the stored state returns to planning and `plan_ok` keeps its value (not amended → the former ready, back into the development queue; amended → `plan_ok` was already invalidated → it stops in planning and must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
-          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+          "text": "`inbox.jsonl` is the async operation queue (append-only, consumed by the running side); `inbox.cursor` is the consumed line count (it only advances after a successful dispatch plus save).",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-coordination",
           "modality": "must",
-          "text": "accept means the executor self-checked and delivered; it does not mean the main agent has accepted. Only gate.approve is the verification.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "`coordination.json` is the cross-process protocol `{phase, writers, owner_pid, heartbeat_at}` (running / closing / finalized); `coordination.lock` is the short critical-section mutex (create_new, taken over by mtime when stale, so a crash cannot wedge it).",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
         },
         {
           "id": "harness.run-decide-input",
           "modality": "must",
-          "text": "A requirement sitting on the plan / accept gate (`req.gate ~= \"\"`) cannot be dispatched, accepts no new proposal and cannot be skipped; even automatic advancement (`--drive cmd:…`) runs one `gate.approve` per gate — only the index comes from the external decision command.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "`decide-input.json` is the input of an external decision command: under `--drive cmd:` the full current receipt is written there before the command is invoked, on every pending choice.",
+          "basis": "AGENTS.md §3 / §7 (pre-migration)"
         },
         {
           "id": "harness.settle-ok",
           "modality": "must",
-          "text": "Cold start of a run (one step, payload = charter): `.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --raw --resume --event event.start --payload '\"<task title>|<one-line goal>\"'`.",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "`settle`'s `ok` = the event log is non-empty ∧ no failed step ∧ an ending narrative line appeared ∧ the inbox has no unconsumed line (the switches come from the Mod contract's `settlement` section); the exit code mirrors `ok`; with unconsumed lines the report says \"N unconsumed inbox lines after the ending — a new run is required\" and `ok=false`.",
+          "basis": "AGENTS.md §7 (pre-migration)"
         }
       ]
     }

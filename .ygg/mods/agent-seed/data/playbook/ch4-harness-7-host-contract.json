@@ -7,68 +7,68 @@
         {
           "id": "harness.contract-required",
           "modality": "must",
-          "text": "goal authorization is a **run-level self-declared record**: `config.set goal.authorization=<one-line note>` writes `settings.goal.authorization` (trimmed, ≤ 200 characters, no newline; an empty value clears it explicitly). Only runs that entered goal **at runtime** (`settings.play.mode=goal`) are checked before `review.note` closes: a missing record blocks with a narrative line, writes no `ending` and does not advance; a static `goal` preset in `data/config.json` is the repository owner's standing configuration and is **out of scope** (otherwise the all-1 smoke walk would break). Switching back to guide is not checked, and resume keeps the record. The record only proves \"a sentence was registered\", not that the user said it — never claim it as identity proof, and it never enters `agent.summary`.",
-          "basis": "user decision 2026-11-01 (E2 ruling: the closing check covers runtime goal only; a static default does not block)"
+          "text": "The generic tooling (`crates/ygg-sandbox/examples/agent.rs`, `src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.",
+          "basis": "AGENTS.md §9 (pre-migration)"
         },
         {
           "id": "harness.contract-agent-seg",
           "modality": "must",
-          "text": "The coordinator has a three-state chain: coordinate ──coordinate.submit──▶ review ──review.note──▶ done (boot lands in coordinate; the event.start payload IS the charter); inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The `agent` section of `pack.json` has eight fields: entryEvent / choiceEvent / summaryEvent / endingPrefix / metaKey / rejectionPrefixes (at least one) / replayPrefix / defaultPayload.",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
         },
         {
           "id": "harness.contract-inbox-seg",
           "modality": "must",
-          "text": "There is one requirement pipeline per requirement (`req.<i>.status`, 5 stored states): draft ──dispatch──▶ planning (job=plan) ──proposal → proposal.accept──▶ planning+gate=plan ──gate.approve(plan)──▶ planning+plan_ok ──dispatch (reactive auto-dispatch)──▶ developing (lane) ──proposal → proposal.accept──▶ developing+gate=accept ──gate.approve(accept)──▶ done. Display names are derived from status + job / pending proposal / gate / plan_ok (analysis_review / plan_review / plan_gate / ready / dev_review / accept) and are never stored. `analyzing` survives only as a compatibility state: legacy saves, and an explicit `analysis` proposal accepted on a planning row.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The `inboxRoutes` section of `pack.json`: reserved keys externalIdField / payloadField / extMarker plus `<kind>` → `{action, fields[, write]}` (zero kinds is legal).",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
         },
         {
           "id": "harness.contract-settlement-seg",
           "modality": "must",
-          "text": "There are also the traceable terminal states split / merged / dropped, plus the two marker states blocked (conflict) and stale (a proposal whose rev is outdated).",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The `settlement` section (in `<config.json>`): requireEvents / requireNoFailedSteps / requireEnding / requireInboxConsumed.",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
         },
         {
           "id": "harness.contract-drive-seg",
           "modality": "must",
-          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and close with the final review (verify.submit → settlement.evolution → review.note); it never carries development itself and may never bypass a gate.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The `drive` section (in `<config.json>`): maxSteps / stallLimit / stepsPerRequirement (positive integers).",
+          "basis": "AGENTS.md §9 (contract table, pre-migration)"
         },
         {
           "id": "harness.contract-config-path",
           "modality": "must",
-          "text": "Requirement granularity: adjacent work with the same goal, the same subsystem, a small change, or that can share one plan and one acceptance evidence set belongs in the same requirement; create a new one only for an independent delivery + acceptance, a cross-repository or cross-lane change, or risk isolation. A new adjacent requirement must state in its description why it cannot be merged (no reason = treat as mergeable). Three-question criterion: ① the blocked action is filing through requirement.add / --requirement; ② the visible symptom of a violation is that the adjacent requirement is pointed out as \"just part of the previous one\" while its description has no cannot-merge reason; ③ confirm it next time by walking `requirement.list` and checking that every new requirement's description carries that reason.",
-          "basis": "user decision 2026-11-02 (r3 requirement-merge decision)"
+          "text": "`<config.json>` is the path declared by the `ygg:agent/config` entry in `pack.json` (`data/config.json` for the seed Mod).",
+          "basis": "AGENTS.md §9 (pre-migration)"
         },
         {
           "id": "harness.contract-upgrade",
           "modality": "must",
-          "text": "The plan gate (`req.gate=plan`) fires after a plan proposal is accepted; approve → `plan_ok` is set (the former `ready`, the only state that may dispatch into development); reject → back to planning for rework; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
-          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+          "text": "Upgrading an old Mod means filling in the four sections (two in `pack.json`, two in `config.json`); `cargo run --example pack -- <mod dir>` validates their shape at pack time (only what is declared is validated).",
+          "basis": "AGENTS.md §9 (pre-migration)"
         },
         {
           "id": "harness.host-vs-contract",
           "modality": "must",
-          "text": "The accept gate (`req.gate=accept`) fires after a development proposal is accepted (the executor delivered); approve → done; reject → the stored state returns to planning and `plan_ok` keeps its value (not amended → the former ready, back into the development queue; amended → `plan_ok` was already invalidated → it stops in planning and must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
-          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+          "text": "Ownership boundary: event names / ending prefix / summary key / rejection and replay prefixes / inbox fields and routes / settlement switches / advancement thresholds belong to the contract and must be declared by the Mod; what the host may keep as literals is the run-directory file names, the coordination phase names running / closing / finalized, the decision-command timeout (`DECIDE_TIMEOUT`) and poll interval (`DECIDE_POLL_INTERVAL`), the three `--drive` modes, the five-file set (`pack.json` / `manifest.json` / `mod.lua` / `schemas/` / `data/`), and the kernel seams (`save` / `load` / `state`, and the reserved `ygg.choice_selected` route). Criterion: would this literal change with another Mod? If yes, it belongs to the contract.",
+          "basis": "AGENTS.md §9 (ownership boundary, pre-migration)"
         },
         {
           "id": "harness.literal-ownership",
           "modality": "must-not",
-          "text": "accept means the executor self-checked and delivered; it does not mean the main agent has accepted. Only gate.approve is the verification.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "Only applications bound to a specific Mod and the generator side may keep event-name / ending-prefix literals, and every such file declares \"bound\" or \"generator-side\" in its header: adventure.rs, clients/godot/rust/src/logic.rs, clients/godot/project/main.gd|session.gd, spike/godot/**, packages/client-web/src/{kernel,session,kernel-wasm}.ts and crates/ygg-wasm/smoke.mjs are bound to `packages/mods/test-adventure`; packages/pipeline/src/{prompt,types,pack}.ts and scripts-dev/mock-llm-stub.mjs are generator-side; the generic tooling of crates/ygg-sandbox|ygg-lint and the test fixtures under tests/ may not add literals, and `ygg.choice_selected` is the reserved event name checked by the kernel domain (the contract's `choiceEvent` must use it).",
+          "basis": "AGENTS.md §9 (literal-ownership table, pre-migration)"
         },
         {
           "id": "harness.choice-payload-type",
           "modality": "must",
-          "text": "A requirement sitting on the plan / accept gate (`req.gate ~= \"\"`) cannot be dispatched, accepts no new proposal and cannot be skipped; even automatic advancement (`--drive cmd:…`) runs one `gate.approve` per gate — only the index comes from the external decision command.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The payload of `ygg.choice_selected` must be a **JSON number** (`--payload '1'`); sending it as a string (`--payload '\"1\"'`) is rejected by the kernel domain as VALIDATION \"option does not exist\". Every other action's payload is a string. Menu selection is the **only** passing channel for the human-action gate — dispatching `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` directly through `--event` is always refused (the receipt's first line is `[REJECTED:ACTION]`).",
+          "basis": "guide.show harness"
         },
         {
           "id": "harness.living-docs-closed-loop",
           "modality": "must",
-          "text": "Cold start of a run (one step, payload = charter): `.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --raw --resume --event event.start --payload '\"<task title>|<one-line goal>\"'`.",
-          "basis": "AGENTS.md §3 (pre-migration)"
+          "text": "`docs/CONTEXT.md` (domain invariants and vocabulary) and `docs/DESIGN.md` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.",
+          "basis": "AGENTS.md §1.7 + docs/{CONTEXT,DESIGN}.md closed loop"
         }
       ]
     }

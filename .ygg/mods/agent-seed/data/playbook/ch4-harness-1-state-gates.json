@@ -17,26 +17,26 @@
         {
           "id": "harness.coordinator-chain",
           "modality": "must",
-          "text": "The coordinator has a three-state chain: coordinate ──coordinate.submit──▶ review ──review.note──▶ done (boot lands in coordinate; the event.start payload IS the charter); inside review, `verify.submit=false` sends the run back to coordinate (a failing gate sends it back).",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The coordinator is a **live self-loop** — the kernel FSM has exactly one true transition, `live → retired` (R1): the run opens in the charter act (`run.phase==\"charter\"`, charter trio via `charter.set`) → `run.begin` opens the standing coordinate act (`run.phase==\"\"`, self-loop: dispatch / serial acceptance / both gates / conflicts) → `coordinate.submit` (queue drained) enters the settle act (`run.phase==\"settle\"`, four items linearly: `verify.submit` → `settlement.evolution` → `settlement.sessions` → `settlement.todo`) → four items complete auto-advances to the release act (`run.phase==\"release\"`, R9 effect, no event spent) → `release.confirm` / `release.skip` declare the batch's develop→master outcome → `review.note` settles the batch (`run.phase=\"\"`, `run.batch+1`, back to coordinate) or, with `run.retire` armed, stamps the one true transition to `retired`. `verify.submit=false` sends the whole batch back to coordinate (settlement and release keys cleared).",
+          "basis": "docs/DESIGN.md §2 (D-MA23, 2026-11-12)"
         },
         {
           "id": "harness.pipeline-states",
           "modality": "must",
-          "text": "There is one requirement pipeline per requirement (`req.<i>.status`, 5 stored states): draft ──dispatch──▶ planning (job=plan) ──proposal → proposal.accept──▶ planning+gate=plan ──gate.approve(plan)──▶ planning+plan_ok ──dispatch (reactive auto-dispatch)──▶ developing (lane) ──proposal → proposal.accept──▶ developing+gate=accept ──gate.approve(accept)──▶ done. Display names are derived from status + job / pending proposal / gate / plan_ok (analysis_review / plan_review / plan_gate / ready / dev_review / accept) and are never stored. `analyzing` survives only as a compatibility state: legacy saves, and an explicit `analysis` proposal accepted on a planning row.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "There is one requirement pipeline per requirement. Stored truth is exactly **2 states** (`req.<i>.status`): `open` / `done` — everything else is derived, never stored; `split` / `merged` / `dropped` are values of the `closed_reason` field (R11), not states. Inside `open` the requirement walks nine micro-states derived by the single-source judge `req_phase()` (menus / render / beats legend all read it — no second copy anywhere): draft(立项) → planning(计划中) ──proposal.submit(plan)──▶ plan_gate(计划门禁) ──gate.approve──▶ ready(待开发) ──requirement.dispatch(+lane)──▶ developing(开发中) ──proposal.submit(development)──▶ dev_review(交付受理) ──proposal.accept──▶ accept_gate(验收门禁) ──gate.approve──▶ integrating(集成) ──integration.confirm──▶ done(完成, terminal). Three push-back paths (`proposal.reject` on a development delivery / `gate.reject` on the accept gate / `integration.reject`) land uniformly in ready (R6: `plan_ok` kept, `job=\"\"`, lane released); `gate.reject` on the plan gate returns to planning with `plan_ok=false`. The two overlay markers (`blocked` / `stale`) stack on top of the phase display and are not states; `analyzing` survives only as a legacy-save compatibility value.",
+          "basis": "docs/DESIGN.md §2.4/§2.5 (D-MA23, 2026-11-12)"
         },
         {
           "id": "harness.terminal-states",
           "modality": "must",
-          "text": "There are also the traceable terminal states split / merged / dropped, plus the two marker states blocked (conflict) and stale (a proposal whose rev is outdated).",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The old side states are demoted (D-MA23): `split` / `merged` / `dropped` are now values of the `closed_reason` field on a closed (`done`) row (R11 — a closed reason, not a state); the two marker overlays stay display-only: `blocked` (unresolved conflict or needs_amend, cleared by `requirement.resolve` / `requirement.amend`) and `stale` (a proposal whose rev is outdated, cleared automatically once a rebase proposal lands).",
+          "basis": "docs/DESIGN.md §2.2/§2.4 (D-MA23, 2026-11-12)"
         },
         {
           "id": "harness.coordinator-scope",
           "modality": "must",
-          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and close with the final review (verify.submit → settlement.evolution → review.note); it never carries development itself and may never bypass a gate.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and walk each batch boundary (coordinate.submit → the settle act's four items → release.confirm / release.skip → review.note batch settle or retire); it never carries development itself — the feature→develop integration of a requirement belongs to its development executor (`integration.confirm` / `integration.reject`) — and it may never bypass a gate.",
+          "basis": "AGENTS.md §2 (pre-migration) + docs/DESIGN.md §2 (D-MA23, 2026-11-12)"
         },
         {
           "id": "harness.requirement-granularity",
@@ -47,14 +47,14 @@
         {
           "id": "harness.plan-gate",
           "modality": "must",
-          "text": "The plan gate (`req.gate=plan`) fires after a plan proposal is accepted; approve → `plan_ok` is set (the former `ready`, the only state that may dispatch into development); reject → back to planning for rework; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
-          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+          "text": "The plan gate (`req.gate=plan`) fires when a plan proposal is submitted (D-MA23: gate-on-submit — the plan side has no proposal.accept hop); approve → `plan_ok=true` (the ready act, the only phase that may dispatch into development; the reactive auto-dispatch may continue into developing in the same turn); reject → back to planning with `plan_ok=false`, `rev+1` and the feedback written; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
+          "basis": "AGENTS.md §2 (gate table, pre-migration) + D-MA23 gate-on-submit (2026-11-12)"
         },
         {
           "id": "harness.accept-gate",
           "modality": "must",
-          "text": "The accept gate (`req.gate=accept`) fires after a development proposal is accepted (the executor delivered); approve → done; reject → the stored state returns to planning and `plan_ok` keeps its value (not amended → the former ready, back into the development queue; amended → `plan_ok` was already invalidated → it stops in planning and must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
-          "basis": "AGENTS.md §2 (gate table, pre-migration)"
+          "text": "The accept gate (`req.gate=accept`) fires after the main agent accepts the development proposal (the executor delivered); approve → the integrating act (`integrating=true`, gate cleared) — done is NOT granted here, the executor still has to land `integration.confirm` with `develop@<sha>` evidence; reject → the ready act (`plan_ok` keeps its value: not amended → back into the development queue; amended → `plan_ok` was already invalidated → planning, must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
+          "basis": "AGENTS.md §2 (gate table, pre-migration) + docs/DESIGN.md §2.4 acts 7-8 (D-MA23, 2026-11-12)"
         },
         {
           "id": "harness.accept-vs-gate",
