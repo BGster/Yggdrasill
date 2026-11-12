@@ -72,7 +72,8 @@ end)
 ygg.on("event.loop", function()
   while true do end
 end)
--- 击杀后的恢复步派发 event.start（同 LOOP_MOD 先例：fail-closed 后未注册名会被拒）。
+-- 击杀步后的还原验证需要一次后续 dispatch（③）：注册一个 no-op 事件作探针
+--（同 LOOP_MOD 先例：fail-closed 后未注册名会被拒）。
 ygg.on("event.start", function() end)
 "#;
 

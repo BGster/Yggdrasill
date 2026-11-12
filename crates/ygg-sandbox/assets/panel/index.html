@@ -1,7 +1,10 @@
 <!doctype html>
-<!-- Yggdrasill · 内置两级列表页（无构建；宿主 include_dir! 编译期嵌入）。
-     三级形态：本页只承载 ① runs 列表与 ② 局内存档列表（egg 原生）；
-     第三级（mod 自带 UI）以 iframe 托管，宿主零解析零渲染（P11 宿主零语义）。 -->
+<!-- Yggdrasill · 内置面板页（无构建；宿主 include_dir! 编译期嵌入）。
+     形态：① 默认视图=最新局详情（#/ 与空 hash，含阶段条/需求卡/决策时间线/折叠存档段）
+     ② 历史局列表（#/runs，mod 分组）③ mod 实例列表（#/mods/<key>）④ 局详情（#/runs/<id>）
+     —— 前三级 egg 原生；mod 自带 UI 以 iframe 托管，宿主零解析零渲染（P11；
+     内置页对 agent-seed 只读展示投影的裁决见 CONTEXT D-MA17：投影失败必须无害退化）。
+     hash 路由与返回导航（#nav-back 空容器 + 常驻历史局入口，由前端按路由推导）都是纯前端逻辑。 -->
 <html lang="zh">
 <head>
   <meta charset="utf-8" />
@@ -12,10 +15,10 @@
 <body>
   <header>
     <h1>Yggdrasill · runs 观察台</h1>
-    <span id="runs-root" title="观察目标 runs-root">…</span>
+    <span id="roots" title="观察目标 runs 根集">…</span>
     <span id="version"></span>
     <span id="sse-state" class="sse sse-init">连接中</span>
-    <nav><a href="#/">← 一级列表</a></nav>
+    <nav id="nav-back"></nav>
   </header>
   <main id="view"><p class="hint">加载中…</p></main>
   <script type="module" src="/assets/app.js"></script>

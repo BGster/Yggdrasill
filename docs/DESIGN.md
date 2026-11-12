@@ -308,6 +308,7 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
   "lifecycle": "resident",
   "batch": 1,
   "batchDrained": false,
+  "play": "guide",
   "pendingProposals": 0,
   "requirementCount": 1,
   "pendingTools": 0,
@@ -346,12 +347,41 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
         "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/CONTEXT.md (domain invariants) and docs/DESIGN.md (architecture & contracts) before proposing or editing.\n...",
         "deltaPrompt": "Resume r1 (rev 1) for stage `development` in worktree `...`; write `artifacts/r1-development.md` and submit.",
         "fullFallbackBrief": "Requirement r1 ...\nResume context: prior executor `agent-plan-1`.",
-        "submitCommand": ".ygg/bin/ygg-agent --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
+        "submitCommand": ".ygg/bin/egg --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
       }
     }
   ]
 }
 ```
+
+#### r1 自动收波看门狗契约（D-MA16）
+
+> 实体：`.pi/extensions/ygg-pi-harness/watchdog.ts`（纯核 + 薄 IO 壳）+ `index.ts` 接线。
+> 触发与边界一句话：进程内定时器轮询 `op=summary`，可收波则拉起**确定性自唤醒回合**
+> 复用 `ygg_run_lanes` 全链；永不批门禁、永不越过冲突、不是第三个压缩入口。宿主零改动。
+
+- **触发面（spike 实证后的降级路径）**：`ctx.executeTool` 只存在于工具 `execute()` 的
+  `ExtensionToolContext`，回合外的 handler ctx 上是 `undefined`（`--mode rpc` 空闲探针实测）；
+  看门狗因此经工厂级 `pi.sendMessage({customType:"ygg-auto-wave", triggerTurn:true})` 拉起主代理
+  回合，由它调 `ygg_run_lanes`——事件链与回执与手发逐字节同构，代价是每波多耗一个模型回合。
+  定时器是进程内的（批量入口禁令下的唯一合法形态）；`YGG_AUTO_INTERVAL_MS` 钳位 1s–60s，缺省 5s。
+- **可收波谓词（纯函数 `nextAutoAction`，进测试面）**：`summary.available ∧
+  lifecycle=="resident" ∧ conflicts==[] ∧ ∃ job ∈ collectibleJobs(summary):
+  stage∈{plan,development} ∧ ¬subagentStatus.startsWith("delivered") ∧ ¬parked`。
+  `delivered:*` 排除 = guide 模式 accept 被票拒即权威停点（拒绝即设计停点，不重试）；
+  `lifecycle` 缺失（旧 mod）保守不收。
+- **单飞互斥**：看门狗与手发共享同一把「会话闸」——`ctx.isIdle()`（回合内的一切都让它为
+  false）+ 波票闩（一张票未消费前不再发新波，fail-closed 防自唤醒回合不遵指令时的无限重发）。
+- **预算**：per `(req,rev,stage)` 连续 2 次整波失败 → 停车（rev 变化自动复位）；全局连续 3 波
+  全败 → 自关（fail-closed，`/ygg auto status` 可见）。空波（无作业落地）不算全败。
+- **回执面**：每波 `artifacts/auto-wave-<NNNN>.md`（`ygg_run_lanes` 消费波票后写，narrative 全量
+  不截断）+ 交接单重写（§3.6 交接产物新增第 6 节看门狗段：状态/最近波次/停车表）+ 会话追加一条
+  紧凑状态块（`triggerTurn:false`，不替用户开回合）。
+- **在场唤醒（goal 限定 opt-in）**：`YGG_AUTO_WAKE=on` 且 `summary.play=="goal"` 且有待审门禁时，
+  发一次唤醒消息让主代理裁决；guide 模式永不唤醒（门禁只能人点菜单）。
+- **daemon 存活**：每 tick 一次 `op=summary` 既是轮询数据源也是心跳；传输失败由 daemon 客户端
+  既有单次重启重试自愈（`kill -9` 后下一 tick 内恢复）。诚实边界：pi 会话退出则 daemon 随之退
+  （stdin EOF 自尽，无孤儿）；`/ygg auto on\|off\|status` 是运行时 kill-switch。
 
 ### 3.6 上下文压缩与检查点交接契约
 
@@ -369,10 +399,11 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 ---
 
-### 3.7 serve 观察面契约（只读观察台 + 两级列表 + mod 面板 iframe 托管）
+### 3.7 serve 观察面契约（只读观察台 + 多根一级列表 + 内置面板页 + mod 面板 iframe 托管）
 
-> r8 · rev2。`serve` 是继单发 `--event` / 交互 / `--daemon` 之后的**第四模式**（加性）。
-> 不改既有单发 CLI 与 daemon 的任何行为；面板默认只读，gate/accept 类人类门禁
+> r9 · rev1。`serve` 是继单发 `--event` / 交互 / `--daemon` 之后的**第四模式**（加性）。
+> r9 起为**多根观察 + 全局唯一实例**：可重复 `--runs-root`、`~/.config/ygg/serve.json`
+> 配置、启动前只读探针幂等复用（零锁文件）。面板默认只读，gate/accept 类人类门禁
 > （`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note`）
 > 在 serve 面上**不存在写路径**——路由表只登记 GET，非 GET 一律 `405`（物理不可绕过），
 > 人类门禁仍走 CLI 票据 / 适配器路径。
@@ -380,35 +411,59 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 #### 3.7.1 CLI 形态
 
 ```text
-agent [--runs-root <目录>] serve [--port <1..65535>] [--panel-dir <目录>] [--poll-ms <ms>]
+egg [--runs-root <目录>]… serve [--port <1..65535>] [--panel-dir <目录>] [--poll-ms <ms>]
 ```
 
-- `--runs-root` 缺省 `runs`；目录不存在 → 报错退出 1（fail-closed，不自动创建）。
-- `--port` 缺省 7800；恒绑定 **`127.0.0.1` 常量**（无旗标）；被占用 → 报错退出 1（不自动递增）。
+- `--runs-root` **可重复**（`--runs-root A --runs-root B` = 同时观察两根；单次出现与
+  r8 语义逐字节一致）。根集解析链：**旗标 > `~/.config/ygg/serve.json` > `./runs`**；
+  配置格式 `{"roots":["/abs/…",…]}`，畸形 / 未知键 / 相对路径 = 用法错误**退出 2**
+  （`~/` 前缀展开；按 canonicalize 去重）；**拒绝文件系统爬扫**——根集只来自显式声明
+  （D21）。目录不存在 → 报错退出 1（fail-closed，不自动创建）。
+- `--port` 缺省 7800；恒绑定 **`127.0.0.1` 常量**（无旗标）；被占用 → 报错退出 1（不自动
+  递增）。单实例语义**按端口**成立：7800 是全局唯一缺省实例，显式换端口 = 显式逃生门。
 - `--poll-ms` 缺省 700，钳制 [200, 5000]（watcher 变更检测周期）。
 - `--panel-dir`：内置两级列表页的盘上覆盖（开发期改 HTML 刷新即生效；缺失文件 404）。
 - 与其它全部模式互斥（`usage_error`，退出 2）；`--run-id` / `--mod` / `--store` 不存在
-  （观察单位 = runs-root，不绑定单局、不装 Mod）。
+  （观察单位 = runs 根集，不绑定单局、不装 Mod）。
+- **单实例探针（零锁文件，端口即事实）**：启动前手写只读 `GET /api/runs`（1s 超时）——
+  自家实例且请求根 ⊆ 在役根 → 幂等复用（打印面板 URL **退出 0**，nohup 脚本安全）；
+  请求根不被覆盖 → **退出 1**（在役实例不热改根）；旧代单根实例（响应含 `runsRoot`）
+  → **退出 1** + 重启指引；无自家实例 → 照常 bind（探针↔bind 竞态由 bind 失败路径兑住）。
 - 先起 serve 再开局**合法**（一级列表动态出现新局）；局收口后继续提供终局数据；
   run 目录被外部删除 → 相关 API 404 + watcher 摘除，serve 不退出。
 
-#### 3.7.2 三级形态与宿主/mod 边界
+#### 3.7.2 四级形态与宿主/mod 边界
 
 | 级 | 归属 | 内容 | 数据源 |
 | --- | --- | --- | --- |
-| 一级：正在运行的游戏 | egg 原生 | runs 枚举 | runs-root 扫描 + 存储探针 |
+| 一级：历史局（mod 分组列表） | egg 原生 | `#/runs`；按 `meta.mod` 分组的实例枚举（组按组内最新 `updated_at` 降序） | **多根扫描**（行带 `root` 标识）+ 存储探针（前端对 `/api/runs` 分组推导，serve 零改动） |
+| 二级：mod 实例列表 | egg 原生 | `#/mods/<key>`；该 mod 的 runs 枚举 | 同上（前端按 key 过滤） |
+| 三级：局详情 | egg 原生 | `#/runs/<id>`；存档折叠段 + 投影区（见下注） | `ygg_store::observe` 只读观察面 |
+| 四级：存档视图 | **mod 自行维护** | mod 自带 UI（详情页存档折叠段内 iframe 入口） | 存档数据 API（裸数据） |
+=======
+| 一级：正在运行的游戏 | egg 原生 | runs 枚举 | **多根扫描**（行带 `root` 标识）+ 存储探针 |
 | 二级：局内存档 | egg 原生 | 该 run 的存档列表 | `ygg_store::observe` 只读观察面 |
 | 三级：存档视图 | **mod 自行维护** | mod 自带 UI | 存档数据 API（裸数据） |
+>>>>>>> ae8978c (docs(serve): §3.7 契约同步多根/全局唯一实例（CLI 形态+API roots/root/errors/409+SSE root 字段+探针安全边界）+ CONTEXT D21 台账 + AGENTS.md 安装链修正（陈旧 agent 产物名）与 serve 全局唯一口径)
 
-宿主对第三级**仅托管静态文件 + 裸数据 API**，零解析零渲染任何 mod 领域语义（P11）。
+> **默认视图 = 最新局详情（内置页展示投影，只读；裁决见 CONTEXT `D-MA17`）**：`#/` 与空 hash
+> 渲染 `/api/runs` 首行的局详情——局头条（宏观阶段/会话活性/批次/模式/退役徽章）、
+> `intake → coordinate ⇄ review(批 n) → done` 四节点主流程状态条、需求卡（分 stage 决策产物行、
+> 被拒灰显）、近期决策时间线（尾窗 500 内、决策事件族、倒序前 20）、本局存档折叠段。
+> 投影数据源全部是既有只读端点：`/saves/latest`（KV 键族）+ `/events`（尾窗两步取）+ `/artifacts`；
+> 对无 `req.*` 键族的 mod 无害退化为通用摘要（判据见 D-MA17）。
+
+宿主服务面对第四级**仅托管静态文件 + 裸数据 API**，零解析零渲染任何 mod 领域语义（P11 字面边界不动）；展示投影只发生在内置页前端资产层。
+
+hash 路由（纯前端，URL=状态、可收藏可刷新）：`#/`（与空 hash）= 最新局详情（默认视图，SSE/轮询重取时自动跟随新最新局）；`#/runs` = 历史局列表；`#/mods/<encodeURIComponent(meta.mod)>` = 实例列表；`#/runs/<id>` = 指定局详情（与默认视图共用同一渲染器；非最新局显示「← 最新局」返回）。返回导航由前端按当前路由推导（`#nav-back` 空容器 + 常驻「历史局」入口；历史局自身不渲染任何入口，防 no-op；局详情父级解析失败——截断/已删——降级为「← mod 列表」），不由点击历史推导——渲染即有意义，结构上不可能 no-op。`meta.mod` 缺失/解析失败的行归键 `-` 的「未知 mod」组，诚实呈现、不做客户端别名合并（别名归宿主 serve 侧，只服务面板托管，不服务分组）。
 
 #### 3.7.3 API 契约总表（全部 GET；非 GET → 405；未知路径 → 404）
 
 | 路由 | 语义 | 响应形状（关键字段） |
 | --- | --- | --- |
-| `GET /` | 内置两级列表页 `index.html` | text/html |
+| `GET /` | 内置面板页 `index.html`（默认视图=最新局详情，见 §3.7.2 注） | text/html |
 | `GET /assets/<name>` | 内置页静态资产（白名单 `app.js` / `style.css`） | 按扩展名映射 + nosniff |
-| `GET /api/runs` | **第一级**：runs 枚举 | `{version, generatedAt, runsRoot, truncated?, runs:[{runId, meta:<run.json 原样>, coord:<原样\|null>, backend, probe:{generation,latestId,latestCreatedAt,count}, panel:{available,url?,reason?}, metaError?}]}`（updated_at 降序；封顶 200） |
+| `GET /api/runs` | **第一级**：runs 枚举（多根） | `{version, generatedAt, roots:[<canonical 绝对路径>], truncated?, errors?:[{root,message}], runs:[{runId, root:<绝对路径>, meta:<run.json 原样>, coord:<原样\|null>, backend, probe:{…}, panel:{available,url?,reason?}, metaError?}]}`（updated_at 降序；封顶 200；个别根不可读 → `errors` 记录、其余根照常出行，整体仍 200） |
 | `GET /api/runs/<id>/saves?limit=` | **第二级**：存档列表 | `{runId, backend, generation, saves:[{id,generation,seq,createdAt,bytes,latest}], panel:{available,url?}}`（limit 缺省 50 封顶 200；JSON 局恒单行 `latest`——单档后端的物理事实） |
 | `GET /api/runs/<id>/saves/<sid>` | **存档数据 API**：原始快照字节 | `200 application/json` + `X-Ygg-Run/X-Ygg-Save-Id/X-Ygg-Generation/X-Ygg-Seq/X-Ygg-Created-At/X-Ygg-Bytes`；body = 存档原字节（零包装零重序）；`sid` ∈ `latest \| [0-9]+`（否则 400） |
 | `GET /api/runs/<id>/events?since=&limit=` | 事件日志分页（seq 升序） | `{runId, generation, latest, since, records:[{seq,event,payload,ok,timestamp,ending}]}`；`limit` 缺省 200 封顶 500；`payload` 原文透传（`actor=`/`actor_session=` 段随 r3 自动出现） |
@@ -416,6 +471,11 @@ agent [--runs-root <目录>] serve [--port <1..65535>] [--panel-dir <目录>] [-
 | `GET /api/runs/<id>/artifacts/<path..>` | 制品原文 | 原字节（`validate_artifact_path` 门复用；读侧封顶 1 MiB → 413） |
 | `GET /api/stream` | SSE 变更流 | `text/event-stream`（§3.7.5） |
 | `GET /panel/<run-id>/[rel]` | mod 面板托管 | 文件字节（§3.7.4；未声明/不可达 → 404 JSON 带 reason） |
+
+run 寻址统一跨根定位 `locate_run`：0 命中 → 404（数据端点 `run_not_found` / `/panel`
+`panel_unavailable`，既有文案不变）；1 命中 → 服务；**>1 命中（跨根撞名）→ 409
+`run_id_ambiguous`**，error 对象内附 `roots` 列表（不静默任选一份）。run-id 语法门不动，
+不把根编码进 id；显式根寻址（`?root=`）留作增量接口。
 
 错误统一 `{"ok":false,"error":{"code":…,"message":…}}`；响应一律 `Cache-Control: no-store` +
 `X-Content-Type-Options: nosniff`。
@@ -445,7 +505,9 @@ kv:{entries,revision}, pending_choice}`。mod 自己的状态在 `kv.entries`；
 
 - 单一端点 `/api/stream`；watcher 是唯一变更源（轮询 runs-root：名单比对 + 每 run 的
   run.json/coordination.json stat + `save_probe`）。检测到变更 → 全局 `version += 1` → 广播。
-- 帧：`event: change` + `data: {"version":<n>,"run":"<runId>"}`（根级变更 `"run":null`）。
+- 帧：`event: change` + `data: {"version":<n>,"run":"<runId>","root":"<绝对路径\|null>"}`
+  （r9 加性 `root` 字段点名变更局所属根；根级变更 `"run":null` 且 `root` 指明变化的根；
+  单根时代语义不变——root 恒为该根）。
   **没有数据载荷**——客户端收帧后重取自己正在看的端点；每 poll 每 run 至多一帧（天然合流）。
 - 保活：`: ping` 每 15s；断线自动重连 + `onerror` 降级 2s 轮询（同一批 API）。无
   `Last-Event-ID`（变更帧无连续性语义）。通知 ≤ 一个 poll 周期（最终一致通知，读恒为当下事实）。
@@ -453,6 +515,9 @@ kv:{entries,revision}, pending_choice}`。mod 自己的状态在 `kv.entries`；
 #### 3.7.6 安全边界与线程模型
 
 - 绑定 `127.0.0.1` 常量（单测断言字面量）；GET-only（非 GET → 405，请求体不读）；无凭据面；
+  **单实例探针 = 只读 GET**（启动前 `GET /api/runs` 一次，1s 超时；**零锁文件**——端口即事实，
+  无盘上状态，复用/拒绝判定见 §3.7.1）；**零写不变式跨多根成立**：watcher 多根扫描仍是
+  纯 stat + `save_probe`（指纹键 = (根, 局) 对），409/404/复用路径零盘上副作用；
   解析健壮性（32 KiB 头上限 / 5s 超时 / 64 连接封顶超出 503 / 路径白名单 / query 数值钳制 /
   run-id 语法门）；无 CORS 头；`/panel` 双守卫 + nosniff；观察面零写（`query_only` + 无 migrate +
   先探测后连接，`observe_creates_nothing` / `observe_writes_nothing` 测试锁）。

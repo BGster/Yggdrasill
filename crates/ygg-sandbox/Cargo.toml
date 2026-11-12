@@ -3,15 +3,8 @@ name = "ygg-sandbox"
 version.workspace = true
 edition.workspace = true
 
-# 示例目标显式声明（修复 r8 合并遗留的双目标编译炸点）：examples/serve.rs 是
-# egg.rs 的模块文件（`mod serve;`），Cargo 自动发现把它同时编译成独立示例目标，
-# `use crate::Args` 即 E0432。autoexamples=false + 显式 [[example]] egg 后，
-# serve.rs 只作为 egg 的模块参与编译，workspace 回到绿。
-autoexamples = false
-
-[[example]]
-name = "egg"
-path = "examples/egg.rs"
+# 示例双目标炸点已由 examples/serve/mod.rs 目录化根治（r2）：子目录模块
+# 不会被自动发现为独立 example，autoexamples 保持默认值即绿。
 
 # 依赖纪律（白名单制，逐 slice 填充）：
 # - S7 填充：mlua git pin（features = ["lua54", "vendored"]；wasm32 支持未进 crates.io，

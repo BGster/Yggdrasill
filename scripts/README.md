@@ -5,6 +5,7 @@
 | 脚本 | 作用 |
 | --- | --- |
 | `build-wasm.sh` | 构建 wasm 目标产物（WASI SDK 探测器；`crates/ygg-wasm/*.mjs` 冒烟与确定性校验的构建前置） |
+| `install-egg.sh` | 一键构建 + 安装副本（`.ygg/bin/egg`）+ 全局软链（`~/.local/bin/egg`）；重建后重跑即同步（幂等；D21 链式软链的唯一更新路径） |
 | `sync-seed-mod.sh` | 同步 seed 模板与项目实例的**骨架文件**（`mod.lua` + `schemas/`）并重算两侧 manifest（见下） |
 
 ---

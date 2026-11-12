@@ -132,11 +132,11 @@ Yggdrasill/
 
 ---
 
-## 5. 关键架构决策台账（`D1–D20` 与 `M-Agent` 演进）
+## 5. 关键架构决策台账（`D1–D21` 与 `M-Agent` 演进）
 
 > 任何新的项目级架构决策，或对既有决策的修订，都必须在实现它的同一次提交中记录到本表。
 
-### 5.1 核心引擎与平台决策（`D1–D20`）
+### 5.1 核心引擎与平台决策（`D1–D21`）
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
@@ -158,6 +158,7 @@ Yggdrasill/
 | **D18** | LLM 提供方抽象 | **双协议适配器（`openai-chat` 默认 + `anthropic-messages` 回退）**，严格通过 git-ignored 的 `.env` 键（`YGG_LLM_*`）配置。 | 已确认 |
 | **D19** | 试玩验证契约 | `playtest` 产出的**机器可读 8 键 JSON 报告**（贪心 option-1 遍历、自定义 `--choices`、`--max-steps`），通过 Mod 声明的 `agent.endingPrefix` 将结局归类为 `ending` / `choice` / `limit` / `deadend`。 | 已确认 |
 | **D20** | 资源模板单一来源 | **`scene-texts.json` 与 `agent-config.json` 的 Schema 规范地存放于 `packages/schema/schemas/`**；LLM 填充数据实例，绝不自创 Schema 定义。 | 已确认 |
+| **D21** | egg 全局化与全局唯一 serve | **链式软链**：`~/.local/bin/egg` → `<repo>/.ygg/bin/egg`（安装副本为唯一事实源，重建后重跑 `scripts/install-egg.sh` 即同步；cargo clean 无感、免 sudo、零墓碑）；**单实例按端口成立**：启动前只读探针 `GET /api/runs`（零锁文件）——自家实例幂等复用退出 0 / 根不被覆盖拒绝退出 1（不热改根）/ 旧代单根实例拒绝并提示重启 / 外姓占用由 bind 失败兑住；**根集三层显式解析链**：可重复 `--runs-root` > `~/.config/ygg/serve.json` > `./runs`，**拒绝文件系统爬扫**（根集随文件系统静默漂移违反 P10 显式声明边界；面板不得出现未声明过的根）。 | 已确认 |
 
 ### 5.2 Agent 治理（`M-Agent`）架构决策
 
@@ -178,4 +179,6 @@ Yggdrasill/
 | **D-MA13** | 种子 Mod 更名 `agent-seed`（r4） | 物理目录 `.ygg/mods/pi-agent-seed` → `.ygg/mods/agent-seed`，`packages/mods/agent-seed` 相对软链重建（单一事实源不变，见 P5）；宿主内置 legacy 别名（存在性优先）翻译旧路径，服务存量局续局——更名不承诺旧路径永续，只保证干净的翻译层与可读报错。 | 已确认 |
 | **D-MA14** | CLI 回执文本渲染（r5 v3） | 单发回执**缺省人读文本**（自然语言版式），`--raw` 为唯一机器旗标（输出单行 JSON 信封，与历史缺省逐字节一致）；解析链 `--raw` > `YGG_FORMAT`（text\|json）> 缺省 text，非法 env 值 fail-closed；字段契约、退出码与 daemon 协议面零改动。人读缺省是原则，机器面由显式旗标保护（PLAY4）。 | 已确认 |
 | **D-MA15** | Mod 片段化与 src 五层（r6） | 大 JSON 按域拆片：`data/texts/`（scene-texts-fragment 若干片，`mod.lua` 装配回 TEXTS）与 `data/playbook/`（agent-playbook-fragment 若干片），`pack.json` `entries` 数组逐片声明；`src/**` 重组为 core/domain/view/runtime/handlers 五层（24 模块纯移动）。宿主不感知 Mod 内部布局——拆分是 Mod 自由度，不是内核契约（P11）。 | 已确认 |
+| **D-MA16** | 自动收波看门狗（r1） | 触发 = 扩展内进程内定时器轮询 daemon `summary`（`YGG_AUTO_INTERVAL_MS` 钳位 1s–60s，缺省 5s；批量入口禁令下唯一合法形态）；落点 = 每波原样复用 `ygg_run_lanes` 全链，天然停在门禁/待决提案（可收波谓词：available ∧ `lifecycle=="resident"` ∧ 无冲突 ∧ ∃ plan/development 作业未 `delivered:*` 未停车）；回执 = 事件账与手发同构 + `artifacts/auto-wave-<NNNN>.md` 波次日志（narrative 全量不截断）+ 交接单重写；保活 = 每 tick 一次 `summary()` 心跳，意外退出由 daemon 客户端既有单次重启自愈（spike 实证：`ctx.executeTool` 在回合外 handler ctx 上不可用 → 降级为 `pi.sendMessage(triggerTurn:true)` 确定性自唤醒回合，主代理代跑 `ygg_run_lanes`，每波多耗一个模型回合，语义与回执不变）；预算 = per `(req,rev,stage)` 连续 2 次整波失败停车（rev 变化自动复位）+ 全局 3 波全败自关（fail-closed）；在场唤醒 = goal 模式限定 opt-in（`YGG_AUTO_WAKE=on`），guide 模式永不唤醒；压缩边界 = 看门狗不是第三个压缩入口（硬水位只抑制派波）。宿主零改动；mod 仅 `summary_fields` 加性 `play` 投影。契约正文见 `docs/DESIGN.md` §3.5。 | 已确认 |
+| **D-MA17** | 观察台展示投影（面板默认局详情视图） | 内置面板页允许对 agent-seed 工作流做**只读展示投影**：Rust 服务面保持零语义（零新端点、零解析——P11 字面边界不动），领域词汇（`fsm.stage`/`req.*`/`prop.*`/`lane.*` 键族、`req_phase_name` 派生名、决策事件族）的解析只发生在 `assets/panel` 展示层，且对无 `req.*` 键族的 mod **无害退化**（详情退化为通用摘要、零报错）。理由：面板=纯前端资产是「同 r3」需求约束，mod 侧自建 panel 违反该约束且引入第二套 UI（违 P4）；投影不限制 mod 自由度——任何 mod 的局仍可被观察，r8 的「宿主解析限制 mod 自由度」担忧只落在 Rust 面。判据=投影失败必须无害退化（字段缺失显「—」、非 seed 局只显摘要段）；权威仍是 mod 回执/CLI，面板仅为投影。 | 已确认 |
 
