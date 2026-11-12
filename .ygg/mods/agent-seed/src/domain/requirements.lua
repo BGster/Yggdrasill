@@ -466,6 +466,11 @@ local function req_lane(index)
   return num(req_key(index, "lane"), 0)
 end
 
+-- 需求侧池绑定（r1 D-MA24）："" = 默认池（与 `lane.<k>` 旧键同池）。
+local function req_lane_pool(index)
+  return text_of(req_key(index, "lane_pool"), "")
+end
+
 local function job_total()
   local total = 0
   for i = 1, req_count() do
@@ -516,6 +521,9 @@ local function req_append(title, description, ext, deps, origin)
   ygg.kv.set(req_key(index, "develop_sha"), "")
   ygg.kv.set(req_key(index, "job"), "")
   ygg.kv.set(req_key(index, "lane"), 0)
+  ygg.kv.set(req_key(index, "lane_pool"), "")
+  ygg.kv.set(req_key(index, "last_lane"), 0)
+  ygg.kv.set(req_key(index, "last_lane_pool"), "")
   ygg.kv.set(req_key(index, "artifacts"), "")
   ygg.kv.set(req_key(index, "summary"), "")
   ygg.kv.set(req_key(index, "children"), "")
@@ -643,6 +651,7 @@ M.req_job = req_job
 M.req_job_stage = req_job_stage
 M.req_key = req_key
 M.req_lane = req_lane
+M.req_lane_pool = req_lane_pool
 M.req_needs_amend = req_needs_amend
 M.req_open_total = req_open_total
 M.req_phase = req_phase
