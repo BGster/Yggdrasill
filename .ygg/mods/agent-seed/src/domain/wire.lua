@@ -74,24 +74,52 @@ local function valid_ext(ext)
   return raw:find("%s") == nil
 end
 
-local function parse_intake(payload) -- [deprecated-ref] name kept: r2 rev2 spec reuses this parser for the event.start charter
+-- 章程解析（D-MA23 三段）：`<title>|<goal>|<success>`。
+-- `parse_intake`（宽松，event.start 启动载荷用）：空段回退默认文案，不拒绝——
+-- 保留旧「照常 boot」语义；`parse_charter`（严格，charter.set 用）：三段必须全部非空，
+-- 否则可读拒绝（章程是可判定的验收面，不允许占位符冒充）。
+local function parse_intake(payload)
   if type(payload) ~= "string" then
-    return nil, nil, fill(TEXTS.beats.bad_payload, { action = "event.start" })
+    return nil, nil, nil, fill(TEXTS.beats.bad_payload, { action = "event.start" })
   end
   local raw = trim(payload)
   if raw == "" then
-    return TEXTS.beats.default_task_title, TEXTS.beats.default_task_desc, nil
+    return TEXTS.beats.default_task_title, TEXTS.beats.default_task_goal, TEXTS.beats.default_task_success, nil
   end
-  local title, description = cut(raw, "|")
+  local title, rest = cut(raw, "|")
+  local goal, success = cut(trim(rest or ""), "|")
   title = trim(title)
-  description = trim(description or "")
+  goal = trim(goal or "")
+  success = trim(success or "")
   if title == "" then
     title = TEXTS.beats.default_task_title
   end
-  if description == "" then
-    description = TEXTS.beats.default_task_desc
+  if goal == "" then
+    goal = TEXTS.beats.default_task_goal
   end
-  return title, description, nil
+  if success == "" then
+    success = TEXTS.beats.default_task_success
+  end
+  return title, goal, success, nil
+end
+
+local function parse_charter(payload)
+  if type(payload) ~= "string" then
+    return nil, nil, nil, fill(TEXTS.beats.bad_payload, { action = "charter.set" })
+  end
+  local raw = trim(payload)
+  if raw == "" then
+    return nil, nil, nil, TEXTS.beats.charter_usage
+  end
+  local title, rest = cut(raw, "|")
+  local goal, success = cut(trim(rest or ""), "|")
+  title = trim(title)
+  goal = trim(goal or "")
+  success = trim(success or "")
+  if title == "" or goal == "" or success == "" then
+    return nil, nil, nil, TEXTS.beats.charter_usage
+  end
+  return title, goal, success, nil
 end
 
 local function parse_deps(raw)
@@ -368,7 +396,7 @@ local function parse_proposal(payload)
   local req_id_text = trim(parts[1])
   local rev = tonumber(trim(parts[2] or ""))
   local stage_name = trim(parts[3] or "")
-  if rev == nil or not contains({ "analysis", "plan", "development" }, stage_name) then
+  if rev == nil or not contains({ "plan", "development" }, stage_name) then
     return nil, TEXTS.beats.req_prop_usage
   end
   return {
@@ -828,7 +856,7 @@ end
 -- 两个都是**自声明**：状态机只能校形状与「换人必给原因」，读不到会话，也不验证 id 真伪。
 -- 落点：`settings.goal.authorization` / `settings.executor.<rN>.<stage>`（`settings.*` 唯一写方 = config.set）。
 -- ============================================================================
-local EXECUTOR_STAGES = { "analysis", "plan", "development" }
+local EXECUTOR_STAGES = { "plan", "development" } -- R12：只剩两个活跃阶段，analysis 槽位删除
 
 local GOAL_AUTH_MAX = 200
 
@@ -939,6 +967,7 @@ M.parse_amend = parse_amend
 M.parse_conflict = parse_conflict
 M.parse_deps = parse_deps
 M.parse_dispatch = parse_dispatch
+M.parse_charter = parse_charter
 M.parse_intake = parse_intake
 M.parse_merge = parse_merge
 M.parse_proposal = parse_proposal

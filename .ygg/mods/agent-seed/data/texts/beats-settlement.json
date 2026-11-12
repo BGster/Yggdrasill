@@ -36,6 +36,13 @@
     "settlement_artifact_no_vfs": "artifact {{artifact}} cannot be verified: the host VFS is not mounted — non-empty registration refused (no settlement written, no archive side effects)",
     "settlement_artifact_absent": "artifact {{artifact}} does not exist in the mounted VFS — registration refused (no settlement written, no archive side effects)",
     "settlement_artifact_empty": "artifact {{artifact}} is empty in the mounted VFS — registration refused (no settlement written, no archive side effects)",
-    "settlement_artifact_read_error": "artifact {{artifact}} probe failed — registration refused (no settlement written, no archive side effects)"
+    "settlement_artifact_read_error": "artifact {{artifact}} probe failed — registration refused (no settlement written, no archive side effects)",
+    "release_confirmed": "[RELEASE CONFIRMED] 第 {{batch}} 批合并已声明：master@{{sha}} tag {{tag}}——review.note 可批结算/退役",
+    "release_skipped": "[RELEASE SKIPPED] 第 {{batch}} 批无需发布：{{reason}}——review.note 可批结算/退役",
+    "release_required": "发布未声明：先 release.confirm（master@<sha> + 批次 tag）或 release.skip（跳过理由），review.note 才能收口本批",
+    "release_usage": "release.confirm 载荷：\"master@<sha>|v年.月.日.序号\"——sha 为 7-40 位十六进制，标签 v 开头四段数字点分",
+    "release_skip_usage": "release.skip 载荷 = 非空理由（本批无需发布的显式声明）",
+    "release_confirm_payload": "master@1a2b3c4d|v2026.11.12.1",
+    "release_skip_payload": "本批无需发布：纯文档/测试批次，无 develop→master 合并"
   }
 }

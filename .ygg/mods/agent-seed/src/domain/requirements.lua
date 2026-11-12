@@ -18,63 +18,45 @@ local fill, join, split, trim =
   util.fill, util.join, util.split, util.trim
 
 local STAGE = {
-  coordinate = "coordinate",
-  review = "review",
-  done = "done",
+  live = "live",
+  retired = "retired",
 }
 
 local function stage()
   local value = ygg.kv.get("fsm.stage")
-  if type(value) ~= "string" then
-    return STAGE.coordinate
+  if type(value) ~= "string" or value == "" then
+    return STAGE.live
   end
   return value
 end
 
--- 存储态只有 5 个 + 3 个终态标记（split / merged / dropped 不并入 done）。
--- 旧的 14 名（analysis_review / plan_review / plan_gate / ready / dev_review / accept）
--- 不再落存储，改为 `req_phase_name()` 由「存储态 + job / pending 提案 / gate / plan_ok」派生，
--- 让回执、图例与面板数字逐字保持原口径。
-local R_DRAFT = "draft"
-
-local R_ANALYZING = "analyzing"
-
-local R_PLANNING = "planning"
-
-local R_DEVELOPING = "developing"
+-- D-MA23 双层剧情：需求真状态只有 `open` / `done` 两个；`split / merged / dropped`
+-- 降为 `closed_reason` 字段（R11），终态判定 = `status=="done"`。
+local R_OPEN = "open"
 
 local R_DONE = "done"
 
--- 展示名（14 个旧名，只出现在渲染面）：PHASE 是唯一来源，render 的字形表以它为键。
+-- 微状态英文标识符（唯一来源；menus / render / beats 图例全部读它）：
+-- draft / planning / plan_gate / ready / developing / dev_review / accept_gate /
+-- integrating / done / closed（closed 由 closed_reason 区分旁路）。
 local PHASE = {
   draft = "draft",
-  analyzing = "analyzing",
-  analysis_review = "analysis_review",
   planning = "planning",
-  plan_review = "plan_review",
   plan_gate = "plan_gate",
   ready = "ready",
   developing = "developing",
   dev_review = "dev_review",
-  accept = "accept",
+  accept_gate = "accept_gate",
+  integrating = "integrating",
   done = "done",
-  split = "split",
-  merged = "merged",
-  dropped = "dropped",
+  closed = "closed",
 }
 
-local R_SPLIT = "split"
+local CLOSED_SPLIT = "split"
 
-local R_MERGED = "merged"
+local CLOSED_MERGED = "merged"
 
-local R_DROPPED = "dropped"
-
-local R_TERMINAL = {
-  [R_DONE] = true,
-  [R_SPLIT] = true,
-  [R_MERGED] = true,
-  [R_DROPPED] = true,
-}
+local CLOSED_DROPPED = "dropped"
 
 local function req_count()
   return num("req.count", 0)
@@ -172,26 +154,11 @@ local function req_gate(index)
   return ""
 end
 
--- plan_ok 三态读取：`true` / `false` = 显式写入（新模型），`nil` = **字段缺席**（本模型之前创建的
--- 在途行，旧版从不写这个键）。升级时两者的区别是判别性的：把缺席当 false 会让升级前就在
--- developing 的需求永久卡住（提交 development 提案被拒）。
-local function req_plan_flag(index)
-  local value = ygg.kv.get(req_key(index, "plan_ok"))
-  if value == true or value == false then
-    return value
-  end
-  return nil
-end
-
--- 逻辑判定（推进路径用）：显式值优先；缺席时按状态推断——旧模型下能进 developing 或
--- 已经 done 的行，必定已过 plan 门禁。draft / analyzing / planning 视为未批准。
+-- plan_ok 逻辑判定（推进路径用）：显式值优先；字段缺席（旧存档兼容）视为 false——
+-- 双层剧情下 status 不再区分进行中各态，缺席推断的旧链路（developing/done 视为已过门）
+-- 随旧存档不兼容声明（r9 升级纪律：旧局不开、不迁移）一并退役。
 local function req_plan_ok(index)
-  local flag = req_plan_flag(index)
-  if flag ~= nil then
-    return flag
-  end
-  local status = req_status(index)
-  return status == R_DEVELOPING or status == R_DONE
+  return ygg.kv.get(req_key(index, "plan_ok")) == true
 end
 
 local function req_job(index)
@@ -214,53 +181,99 @@ local function req_has_pending(index, stage_name)
   return false
 end
 
--- 派生展示名（14 个旧名之一）；不含 blocked 覆盖层（那是 req_display 的事）。
-local function req_phase_name(index)
-  local status = req_status(index)
-  if status == R_DRAFT then
-    return PHASE.draft
+-- 关闭原因（R11：split / merged / dropped 降为字段，不再是状态）。
+local function req_closed_reason(index)
+  return text_of(req_key(index, "closed_reason"), "")
+end
+
+-- 需求级微状态判定（单一来源，DESIGN §2.5 判据顺序即优先级）：
+--   closed ← status ~= open（closed_reason=="" → done（第9幕），否则 closed（旁路））；
+--   integrating → 集成；gate==accept → 验收门禁；pending development → 交付受理；
+--   job==development → 开发中；plan_ok → 待开发；gate==plan → 计划门禁；
+--   pending plan 或 job==plan → 计划中；否则立项。
+-- 关键点：待开发先于计划门禁与计划中（plan_ok=true 时遗留 pending 也判待开发，
+-- 保证三条打回路径落点一致）；closed 不是幕名，由 closed_reason 区分。
+local function req_phase(index)
+  if req_status(index) ~= R_OPEN then
+    if req_closed_reason(index) == "" then
+      return PHASE.done
+    end
+    return PHASE.closed
   end
-  if status == R_ANALYZING then
-    if req_has_pending(index, "analysis") then
-      return PHASE.analysis_review
-    end
-    return PHASE.analyzing
+  if ygg.kv.get(req_key(index, "integrating")) == true then
+    return PHASE.integrating
   end
-  if status == R_PLANNING then
-    if req_gate(index) == "plan" then
-      return PHASE.plan_gate
-    end
-    -- 兼容槽位：planning 态下仍然可以收 legacy 的 analysis 提案（门禁与 plan_ok 都未落），
-    -- 它得先在面板上显示成「待验收分析」而不是「规划中」。
-    if req_has_pending(index, "analysis") then
-      return PHASE.analysis_review
-    end
-    if req_plan_ok(index) then
-      return PHASE.ready
-    end
-    if req_has_pending(index, "plan") then
-      return PHASE.plan_review
-    end
-    return PHASE.planning
+  if req_gate(index) == "accept" then
+    return PHASE.accept_gate
   end
-  if status == R_DEVELOPING then
-    if req_gate(index) == "accept" then
-      return PHASE.accept
-    end
-    if req_has_pending(index, "development") then
-      return PHASE.dev_review
-    end
+  if req_has_pending(index, "development") then
+    return PHASE.dev_review
+  end
+  if req_job(index) == "development" then
     return PHASE.developing
   end
-  return status
+  if req_plan_ok(index) then
+    return PHASE.ready
+  end
+  if req_gate(index) == "plan" then
+    return PHASE.plan_gate
+  end
+  if req_has_pending(index, "plan") or req_job(index) == "plan" then
+    return PHASE.planning
+  end
+  return PHASE.draft
+end
+
+-- 运行级微状态标识（单一来源；menus / render / choice / beats 全部读它）：
+-- charter 立局 / coordinate 协调 / settle 盘点 / release 发布 / retired 退役。
+-- KV 上的 `run.phase` 取值 "charter"/""/"settle"/"release"（"" = 常驻主态协调，R2）；
+-- 标识层把 "" 规范化为 coordinate——空串不能当菜单与渲染的表键。
+local RUN_PHASE = {
+  charter = "charter",
+  coordinate = "coordinate",
+  settle = "settle",
+  release = "release",
+  retired = "retired",
+}
+
+-- 微状态中文名（文案面专用：拒绝文案 / 图例里的「微状态用中文名」）：
+-- 代码标识符 → 展示名，仅作 fill 文案用，不参与任何判定。
+local RUN_PHASE_LABEL = {
+  [RUN_PHASE.charter] = "立局",
+  [RUN_PHASE.coordinate] = "协调",
+  [RUN_PHASE.settle] = "盘点",
+  [RUN_PHASE.release] = "发布",
+  [RUN_PHASE.retired] = "退役",
+}
+
+local function run_phase()
+  if stage() == STAGE.retired then
+    return RUN_PHASE.retired
+  end
+  local p = text_of("run.phase", RUN_PHASE.charter)
+  if p == RUN_PHASE.settle then
+    return RUN_PHASE.settle
+  end
+  if p == RUN_PHASE.release then
+    return RUN_PHASE.release
+  end
+  if p == RUN_PHASE.charter then
+    return RUN_PHASE.charter
+  end
+  -- "" 与一切未知取值 → 协调（常驻主态；fail-visible 但不崩溃）。
+  return RUN_PHASE.coordinate
+end
+
+local function run_phase_label(phase_id)
+  return RUN_PHASE_LABEL[phase_id] or phase_id
 end
 
 local function req_successors(index)
-  local status = req_status(index)
+  local reason = req_closed_reason(index)
   local raw = ""
-  if status == R_SPLIT then
+  if reason == CLOSED_SPLIT then
     raw = text_of(req_key(index, "children"), "")
-  elseif status == R_MERGED then
+  elseif reason == CLOSED_MERGED then
     raw = text_of(req_key(index, "into"), "")
   end
   local out = {}
@@ -281,10 +294,13 @@ req_satisfied = function(index, visiting)
     return false
   end
   local status = req_status(index)
-  if status == R_DONE or status == R_DROPPED then
-    return true
+  if status ~= R_DONE then
+    return false
   end
-  if status == R_SPLIT or status == R_MERGED then
+  -- R11：req_satisfied 按 closed_reason 走 successor 闭包——done（交付）与 dropped 直接满足；
+  -- split / merged 必须全部后继需求满足才满足（无后继 = 不满足）。
+  local reason = req_closed_reason(index)
+  if reason == CLOSED_SPLIT or reason == CLOSED_MERGED then
     local successors = req_successors(index)
     if #successors == 0 then
       return false
@@ -301,7 +317,7 @@ req_satisfied = function(index, visiting)
     visiting[index] = nil
     return ok
   end
-  return false
+  return true
 end
 
 local function req_deps_ok(index)
@@ -347,9 +363,13 @@ local function req_dev_blocked_text()
   return join(parts, TEXTS.beats.req_why_sep)
 end
 
+-- 开发就绪 = 待开发微状态 ∧ 无冲突 ∧ 无 needs_amend ∧ 依赖已满足。
 local function req_dev_ready(index)
-  return req_status(index) == R_PLANNING
+  return req_status(index) == R_OPEN
     and req_plan_ok(index)
+    and req_gate(index) == ""
+    and req_job(index) == ""
+    and not req_has_pending(index)
     and req_conflict(index) == ""
     and not req_needs_amend(index)
     and req_deps_ok(index)
@@ -360,24 +380,30 @@ local function req_display(index)
   if status == "" then
     return "?"
   end
+  -- blocked（冲突 / needs_amend）是叠加在 req_phase 之上的覆盖层，不是微状态。
   if req_conflict(index) ~= "" or req_needs_amend(index) then
-    if status ~= R_DONE and status ~= R_SPLIT and status ~= R_MERGED and status ~= R_DROPPED then
+    if status == R_OPEN then
       return "blocked"
     end
   end
-  return req_phase_name(index)
+  -- 旁路关闭的展示名 = 关闭原因（split / merged / dropped，R11）；正常交付 = done。
+  local phase = req_phase(index)
+  if phase == PHASE.closed then
+    return req_closed_reason(index)
+  end
+  return phase
 end
 
+-- 终态判定 = status=="done"（真状态，不再数 split/merged/dropped——它们都是 done）。
 local function req_closed(index)
-  return R_TERMINAL[req_status(index)] == true
+  return req_status(index) == R_DONE
 end
 
--- 计数口径 = 派生展示名（旧 14 名）：analysis_review 归 analyzing、plan_review/plan_gate/ready
--- 各算各的，与合并前 `req_tally(A) + req_tally(B)` 的求和逐字一致。
+-- 计数口径 = 微状态（10 相位）：panel_tally 直接按 req_phase 计。
 local function req_tally(phase_name)
   local total = 0
   for i = 1, req_count() do
-    if req_phase_name(i) == phase_name then
+    if req_phase(i) == phase_name then
       total = total + 1
     end
   end
@@ -422,26 +448,15 @@ local function req_all_done()
   return true
 end
 
--- 可派活的阶段；nil = 不可派。两个「不可派」的来源必须都在这里表达：
---   ① 门禁待批（gate ~= ""）——5 态下 planning 同时覆盖 plan 阶段与 plan_gate，
---      缺这条守卫会把门禁待批的需求当成 plan 候选派出去；
---   ② analyzing 不返回 analysis——与旧版一致（分析 job 一旦提交提案就不再重派，
---      避免「重定基」被派活路径绕过）。
+-- 可派活的阶段（微状态口径）；nil = 不可派：立项 → plan；待开发 → development。
+-- 门禁待批 / 有 pending 提案 / integrating / 已闭环的需求一律不返（结构上不可派）。
 local function req_job_stage(index)
-  local status = req_status(index)
-  if status == R_DRAFT then
-    -- analysis + plan 已合并：draft 直接派 plan（存储态同时推进到 planning）。
-    -- `analyzing` 降级为兼容槽位（legacy 存档 / 显式 analysis 提案），不再由派活路径产生。
+  local phase = req_phase(index)
+  if phase == PHASE.draft then
     return "plan"
   end
-  if status == R_PLANNING then
-    if req_gate(index) ~= "" then
-      return nil
-    end
-    if req_plan_ok(index) then
-      return "development"
-    end
-    return "plan"
+  if phase == PHASE.ready then
+    return "development"
   end
   return nil
 end
@@ -481,7 +496,8 @@ local function req_append(title, description, ext, deps, origin)
   ygg.kv.set("req.count", index)
   ygg.kv.set(req_key(index, "title"), title)
   ygg.kv.set(req_key(index, "description"), description)
-  ygg.kv.set(req_key(index, "status"), R_DRAFT)
+  ygg.kv.set(req_key(index, "status"), R_OPEN)
+  ygg.kv.set(req_key(index, "closed_reason"), "")
   ygg.kv.set(req_key(index, "ext"), ext or "")
   ygg.kv.set(req_key(index, "deps"), join(deps or {}, ","))
   ygg.kv.set(req_key(index, "rev"), 1)
@@ -495,6 +511,8 @@ local function req_append(title, description, ext, deps, origin)
   ygg.kv.set(req_key(index, "gate"), "")
   ygg.kv.set(req_key(index, "gate_rev"), 0)
   ygg.kv.set(req_key(index, "plan_ok"), false)
+  ygg.kv.set(req_key(index, "integrating"), false)
+  ygg.kv.set(req_key(index, "develop_sha"), "")
   ygg.kv.set(req_key(index, "job"), "")
   ygg.kv.set(req_key(index, "lane"), 0)
   ygg.kv.set(req_key(index, "artifacts"), "")
@@ -574,31 +592,8 @@ local function req_validate_deps(index, ids)
   return nil
 end
 
--- 验收后推进：analysis → planning；plan → planning + gate="plan"；development → developing + gate="accept"。
--- 门禁绑定 revision 也在这里写（`req.*` 只有本模块写），待批期间 amend → gate_rev ≠ rev → 不得批准。
-local function req_advance_after_accept(index, stage_name)
-  local next_status, next_gate
-  if stage_name == "analysis" then
-    next_status, next_gate = R_PLANNING, ""
-  elseif stage_name == "plan" then
-    -- plan 完成 ≠ 可以开发：落 plan 门禁，主 Agent 批了才置 plan_ok。
-    next_status, next_gate = R_PLANNING, "plan"
-  elseif stage_name == "development" then
-    -- 执行方交付 ≠ 已验收：落 accept 门禁。
-    next_status, next_gate = R_DEVELOPING, "accept"
-  else
-    return nil
-  end
-  ygg.kv.set(req_key(index, "status"), next_status)
-  ygg.kv.set(req_key(index, "gate"), next_gate)
-  ygg.kv.set(req_key(index, "gate_rev"), next_gate ~= "" and req_rev(index) or 0)
-  ygg.kv.set(req_key(index, "job"), "")
-  if next_status == R_DEVELOPING then
-    -- 交付后释放泳道（连同 branch/base/since/clean 一起清）；重做时重新分配（不长期占位）。
-    LANES.release(index)
-  end
-  return next_status
-end
+-- D-MA23：`req_advance_after_accept` 已删除——真状态不再因受理改变（受理只升门禁，
+-- 落点改写全部在 handlers 层直接写 gate / gate_rev / job；见 proposals.lua / gate_actions.lua）。
 
 local function req_release(index)
   ygg.kv.set(req_key(index, "job"), "")
@@ -612,24 +607,22 @@ function M.install(deps)
 end
 
 M.PHASE = PHASE
-M.R_ANALYZING = R_ANALYZING
-M.R_DEVELOPING = R_DEVELOPING
+M.RUN_PHASE = RUN_PHASE
+M.RUN_PHASE_LABEL = RUN_PHASE_LABEL
+M.CLOSED_DROPPED = CLOSED_DROPPED
+M.CLOSED_MERGED = CLOSED_MERGED
+M.CLOSED_SPLIT = CLOSED_SPLIT
 M.R_DONE = R_DONE
-M.R_DRAFT = R_DRAFT
-M.R_DROPPED = R_DROPPED
-M.R_MERGED = R_MERGED
-M.R_PLANNING = R_PLANNING
-M.R_SPLIT = R_SPLIT
-M.R_TERMINAL = R_TERMINAL
+M.R_OPEN = R_OPEN
 M.STAGE = STAGE
 M.job_capacity = job_capacity
 M.job_total = job_total
-M.req_advance_after_accept = req_advance_after_accept
 M.req_all_done = req_all_done
 M.req_append = req_append
 M.req_bump_rev = req_bump_rev
 M.req_capacity = req_capacity
 M.req_closed = req_closed
+M.req_closed_reason = req_closed_reason
 M.req_conflict = req_conflict
 M.req_conflict_peer = req_conflict_peer
 M.req_conflict_source = req_conflict_source
@@ -651,8 +644,7 @@ M.req_key = req_key
 M.req_lane = req_lane
 M.req_needs_amend = req_needs_amend
 M.req_open_total = req_open_total
-M.req_phase_name = req_phase_name
-M.req_plan_flag = req_plan_flag
+M.req_phase = req_phase
 M.req_plan_ok = req_plan_ok
 M.req_push_history = req_push_history
 M.req_reaches = req_reaches
@@ -667,6 +659,8 @@ M.req_title = req_title
 M.req_unmet_deps = req_unmet_deps
 M.req_satisfied = req_satisfied
 M.req_validate_deps = req_validate_deps
+M.run_phase = run_phase
+M.run_phase_label = run_phase_label
 M.stage = stage
 
 return M

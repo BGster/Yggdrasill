@@ -236,6 +236,15 @@ end
 
 判定序的关键点：`integrating` 先于一切（集成幕是最近一次裁决）；**待开发先于计划门禁与计划中**——`plan_ok=true` 时即使有遗留 pending 提案也判待开发，三条打回路径的落点一致性由它保证；`closed` 不是幕名，由 `closed_reason` 区分正常交付与旁路关闭。
 
+**中文名 ↔ 代码标识符映射（落地实现口径）**：两个判定函数在代码里返回**英文标识符**（菜单键 /
+渲染键 / 摘要 `phase` 字段需要非空稳定键；`run.phase` 存储值 `""` 规范化为 `coordinate`），
+文案面（拒绝理由 / 图例）经 `run_phase_label()` 换中文名。判定序与上两段伪码逐字一致：
+
+| 层 | 代码标识符（判定函数返回） | 中文名（文案面） |
+| --- | --- | --- |
+| 运行级 | `retired` / `charter` / `coordinate` / `settle` / `release` | 退役 / 立局 / 协调 / 盘点 / 发布 |
+| 需求级 | `draft` / `planning` / `plan_gate` / `ready` / `developing` / `dev_review` / `accept_gate` / `integrating` / `done` / `closed` | 立项 / 计划中 / 计划门禁 / 待开发 / 开发中 / 交付受理 / 验收门禁 / 集成 / 完成 / 旁路关闭（由 `closed_reason` 细分 `split` / `merged` / `dropped`） |
+
 ### 2.6 事件总表（38 个，三分类）
 
 事件是唯一推进货币。三类切分：**剧情事件**（推进微状态，20 个）、**操作事件**（增删改查，8 个）、**基础设施事件**（10 个）。其中 6 个为 D-MA23 新增：`charter.set` / `run.begin` / `integration.confirm` / `integration.reject` / `release.confirm` / `release.skip`。

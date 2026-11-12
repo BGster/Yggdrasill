@@ -105,7 +105,7 @@ end
 -- rN 的门禁只被 rN 自身事态阻塞——其它需求的 pending 提案 / 在跑 job / 冲突不进本判定。
 -- 依序返回第一个命中（人类可读细节），否则 nil：
 --   1) 自身 pending 提案（防御性：正常流被 submit_slot_ok 的 gate 守卫 + req_prop_busy 挡住）
---   2) 自身在跑 job（防御性：门禁升起时 req_advance_after_accept 已释放 job）
+--   2) 自身在跑 job（防御性：提案提交时已清 job——plan 交付即门禁，dev 落受理幕）
 --   3) 自身未解决冲突 / needs_amend（唯一真实可共存：冲突雷达 / resolve revise 可在待批期落）
 -- 显式不含：stale / gate_rev 失配（gate.approve 的 gate_rev_ok 已查，避免双报）、
 -- req_all_done / req_open_total（收口专用）与一切全局计数。

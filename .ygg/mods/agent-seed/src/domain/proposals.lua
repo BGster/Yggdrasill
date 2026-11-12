@@ -13,8 +13,8 @@ local TEXTS
 
 local num, text_of =
   config.num, config.text_of
-local R_MERGED, R_SPLIT, req_append, req_deps, req_id, req_index_of, req_key, req_push_history =
-  reqs.R_MERGED, reqs.R_SPLIT, reqs.req_append, reqs.req_deps, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_push_history
+local R_DONE, CLOSED_MERGED, CLOSED_SPLIT, req_append, req_deps, req_id, req_index_of, req_key, req_push_history =
+  reqs.R_DONE, reqs.CLOSED_MERGED, reqs.CLOSED_SPLIT, reqs.req_append, reqs.req_deps, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_push_history
 local cut, fill, join, split, trim =
   util.cut, util.fill, util.join, util.split, util.trim
 
@@ -94,10 +94,13 @@ local function prop_pending_total()
   return total
 end
 
+-- 「下一个待受理提案」（D-MA23 口径）：只认 **development** 阶段的 pending 提案——
+-- 受理幕（交付受理）只服务开发交付；plan 提案的裁决走 gate.approve / gate.reject
+-- （提交即门禁），不经 proposal.accept。排序：最低 req 序 → 同 req 最低提案序。
 local function prop_next()
   local best = nil
   for i = 1, prop_count() do
-    if prop_status(i) == P_PENDING then
+    if prop_status(i) == P_PENDING and prop_stage(i) == "development" then
       if best == nil then
         best = i
       else
@@ -165,7 +168,9 @@ local function req_do_split(parent, children)
     local child = req_append(children[i], fill(TEXTS.beats.req_split_desc, { id = req_id(parent) }), "", deps, req_id(parent))
     ids[#ids + 1] = req_id(child)
   end
-  ygg.kv.set(req_key(parent, "status"), R_SPLIT)
+  -- R11：split / merged / dropped 是关闭原因（closed_reason），不再是状态；status 同步写 done。
+  ygg.kv.set(req_key(parent, "status"), R_DONE)
+  ygg.kv.set(req_key(parent, "closed_reason"), CLOSED_SPLIT)
   ygg.kv.set(req_key(parent, "children"), join(ids, ","))
   -- 拆分的父需求进终态：已批准的计划随之作废（子需求各自从头走 plan 门禁）。
   ygg.kv.set(req_key(parent, "plan_ok"), false)
@@ -209,7 +214,8 @@ local function req_do_merge(sources, title, description)
   local target = req_append(next_title, next_desc, "", dep_order, "")
   for i = 1, #sources do
     local index = sources[i]
-    ygg.kv.set(req_key(index, "status"), R_MERGED)
+    ygg.kv.set(req_key(index, "status"), R_DONE)
+    ygg.kv.set(req_key(index, "closed_reason"), CLOSED_MERGED)
     ygg.kv.set(req_key(index, "into"), req_id(target))
     ygg.kv.set(req_key(index, "conflict"), "")
     ygg.kv.set(req_key(index, "conflict_peer"), "")

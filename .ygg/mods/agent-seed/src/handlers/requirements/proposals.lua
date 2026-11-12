@@ -2,13 +2,14 @@
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
+-- D-MA23：plan 提案**交付即门禁**（落库后 gate="plan"，裁决权在人）；
+-- development 提案落交付受理（主代理串行复核幕）；泳道保持到集成才释放（R7）。
 
 local M = {}
 
 local config = require("src.core.config")
 local executor = require("src.domain.executor")
 local flow = require("src.runtime.flow")
-local hooks = require("src.core.hooks")
 local choice = require("src.handlers.operate.choice")
 local props = require("src.domain.proposals")
 local render_mod = require("src.view.render")
@@ -21,57 +22,40 @@ local TEXTS
 
 local text_of =
   config.text_of
-local refuse, reject, reject_payload =
-  flow.refuse, flow.reject, flow.reject_payload
+local phase_guard, refuse, reject_payload =
+  flow.phase_guard, flow.refuse, flow.reject_payload
 local HUMAN =
   choice.HUMAN
 local P_ACCEPTED, P_PENDING, P_REJECTED, P_STALE, apply_changes, prop_append, prop_by_ext, prop_count, prop_id, prop_key, prop_next, prop_pending_total, prop_req, prop_rev, prop_stage, prop_status =
   props.P_ACCEPTED, props.P_PENDING, props.P_REJECTED, props.P_STALE, props.apply_changes, props.prop_append, props.prop_by_ext, props.prop_count, props.prop_id, props.prop_key, props.prop_next, props.prop_pending_total, props.prop_req, props.prop_rev, props.prop_stage, props.prop_status
 local render =
   render_mod.receipt
-local R_ANALYZING, R_DEVELOPING, R_DRAFT, R_PLANNING, STAGE, req_advance_after_accept, req_gate, req_id, req_index_of, req_key, req_lane, req_phase_name, req_plan_flag, req_push_history, req_release, req_rev, req_status, req_sync_conflicts, stage =
-  reqs.R_ANALYZING, reqs.R_DEVELOPING, reqs.R_DRAFT, reqs.R_PLANNING, reqs.STAGE, reqs.req_advance_after_accept, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_key, reqs.req_lane, reqs.req_phase_name, reqs.req_plan_flag, reqs.req_push_history, reqs.req_release, reqs.req_rev, reqs.req_status, reqs.req_sync_conflicts, reqs.stage
-local cut, contains, fill, trim =
-  util.cut, util.contains, util.fill, util.trim
+local release_lane_with_worktree =
+  tools.release_lane_with_worktree
+local RUN_PHASE, req_gate, req_id, req_index_of, req_job, req_key, req_lane, req_phase, req_push_history, req_rev, req_sync_conflicts =
+  reqs.RUN_PHASE, reqs.req_gate, reqs.req_id, reqs.req_index_of, reqs.req_job, reqs.req_key, reqs.req_lane, reqs.req_phase, reqs.req_push_history, reqs.req_rev, reqs.req_sync_conflicts
+local cut, fill, trim =
+  util.cut, util.fill, util.trim
 local parse_proposal =
   wire.parse_proposal
 
--- 阶段槽位（5 态）：旧的 working / review 两态已合并成同一个存储态，
--- 槽位只判「这个阶段现在能不能收提案」；「重定基 vs 被占用」由 pending 提案表判。
--- 数组形：draft 直接派 plan 之后，`analysis` 降级为兼容槽位（legacy analyzing 行，以及
--- planning 态里仍按旧剧本提上来的分析提案）——它不再是派活路径产生的阶段。
-local WORKING_STATUS = {
-  analysis = { R_ANALYZING, R_PLANNING },
-  plan = { R_PLANNING },
-  development = { R_DEVELOPING },
-}
-
--- 返回 (ok, reason)：reason ∈ "status" / "gate" / "plan_on" / "plan_off"（ok 时为 nil）。
--- reason 必须区分开：把「计划未批准」报成「阶段与状态不匹配」会把排错人引到错方向。
+-- 槽位判定（微状态口径，§2.4/§2.7）：plan 提案只收「计划中」（job=="plan"）；
+-- development 提案只收「开发中」（job=="development"）。门禁挂起期间一律不收
+-- （一次一门禁）；「重定基 vs 被占用」由 pending 提案表判（第二个 proposal.submit 拒）。
+-- 返回 (ok, reason)：reason ∈ "gate" / "status"（ok 时为 nil）。
 local function submit_slot_ok(index, stage_name)
-  if not contains(WORKING_STATUS[stage_name], req_status(index)) then
-    return false, "status"
-  end
-  -- 门禁待批期间不得再收提案（plan 门禁落在 planning、accept 门禁落在 developing）。
   if req_gate(index) ~= "" then
     return false, "gate"
   end
-  -- plan 槽位：**只认显式 true**。字段缺席（升级前的在途行）不得当成已批准，
-  -- 否则升级瞬间卡在 planning 的行会连 plan 提案都收不进来。
-  if stage_name == "plan" then
-    if req_plan_flag(index) == true then
-      return false, "plan_on"
-    end
+  local job = req_job(index)
+  if stage_name == "plan" and job == "plan" then
     return true, nil
   end
-  -- development 槽位：能进入 R_DEVELOPING 的唯一入口是 requirement.dispatch（已验过
-  -- req_dev_ready，即 plan_ok=true）。若施工途中（无 pending 提案、无 gate）发生
-  -- requirement.amend，契约是「只更新标题/描述，进度不重置」（req_amend_active），必须允许
-  -- 按新 rev 提交 development 提案；若此后被 proposal.reject / gate.reject 打回，因
-  -- amend 已将 plan_ok 置 false，打回后会停在 planning 强制重做 plan。这里若再判
-  -- not req_plan_ok 就会把施工中 amend 的需求永久死锁在 developing（无提案可 reject、
-  -- 无门禁可 reject、也交不了新提案）。
-  return true, nil
+  if stage_name == "development" and job == "development" then
+    -- 施工中 requirement.amend 只更新标题/描述（进度不重置），必须允许按新 rev 提案。
+    return true, nil
+  end
+  return false, "status"
 end
 
 local function pick_prop(target, allow_pending_only)
@@ -108,8 +92,8 @@ end
 function M.install(deps)
   TEXTS = deps.texts
   ygg.on("proposal.submit", function(payload)
-    if stage() == STAGE.done then
-      return reject("proposal.submit", TEXTS.beats.req_after_done)
+    if not phase_guard("proposal.submit", { RUN_PHASE.coordinate }) then
+      return
     end
     local spec, problem = parse_proposal(payload)
     if problem ~= nil then
@@ -125,20 +109,21 @@ function M.install(deps)
     if index == nil then
       return reject_payload("proposal.submit", fill(TEXTS.beats.req_unknown, { id = tostring(spec.req) }))
     end
-    -- 阶段槽位（5 态）：旧的 working / review 两态合并成同一个存储态，槽位只判阶段可达性。
+    -- 槽位：微状态口径（计划中收 plan、开发中收 development；门禁挂起不收）。
     local slot_ok, slot_reason = submit_slot_ok(index, spec.stage)
     if not slot_ok then
       local detail
-      if slot_reason == "plan_off" then
-        detail = fill(TEXTS.beats.req_prop_plan_missing, {
+      if slot_reason == "gate" then
+        detail = fill(TEXTS.beats.req_prop_stage_mismatch, {
           id = req_id(index),
-          status = req_phase_name(index),
+          stage = spec.stage,
+          status = req_phase(index),
         })
       else
         detail = fill(TEXTS.beats.req_prop_stage_mismatch, {
           id = req_id(index),
           stage = spec.stage,
-          status = req_phase_name(index),
+          status = req_phase(index),
         })
       end
       return reject_payload("proposal.submit", detail)
@@ -205,24 +190,45 @@ function M.install(deps)
     if spec.artifacts ~= "" then
       tools.verify_artifacts(spec.artifacts)
     end
-    -- 状态不变（5 态下「等验收」由 pending 提案表表达）；只释放 job 槽位。
+    -- 只释放 job 槽位；状态保持 open（真状态不因交付改变）。
     ygg.kv.set(req_key(index, "job"), "")
-    ygg.narrate(fill(TEXTS.beats.req_prop_ok, {
-      id = prop_id(prop_index),
-      req = req_id(index),
-      stage = spec.stage,
-      rev = tostring(spec.rev),
-      summary = summarize,
-      pending = tostring(prop_pending_total()),
-    }))
+    if spec.stage == "plan" then
+      -- D-MA23：plan 提案交付即门禁——落库后立刻升起 plan 门禁（裁决权在人），
+      -- gate_rev 绑定 rev（待批期间 amend → gate_rev ≠ rev → stale，不得批准）。
+      ygg.kv.set(req_key(index, "gate"), "plan")
+      ygg.kv.set(req_key(index, "gate_rev"), spec.rev)
+      ygg.narrate(fill(TEXTS.beats.req_prop_ok, {
+        id = prop_id(prop_index),
+        req = req_id(index),
+        stage = spec.stage,
+        rev = tostring(spec.rev),
+        summary = summarize,
+        pending = tostring(prop_pending_total()),
+      }))
+      ygg.narrate(fill(TEXTS.beats.req_prop_plan_gate, {
+        id = req_id(index),
+        rev = tostring(spec.rev),
+      }))
+    else
+      -- development 提案落交付受理（pending 表达幕）；**不释放泳道**（R7：执行者
+      -- 仍需该工作树完成 feature→develop 集成）。
+      ygg.narrate(fill(TEXTS.beats.req_prop_ok, {
+        id = prop_id(prop_index),
+        req = req_id(index),
+        stage = spec.stage,
+        rev = tostring(spec.rev),
+        summary = summarize,
+        pending = tostring(prop_pending_total()),
+      }))
+    end
     render()
   end)
   ygg.on("proposal.accept", function(payload)
     if not HUMAN.gated("proposal.accept") then
       return
     end
-    if stage() == STAGE.done then
-      return reject("proposal.accept", TEXTS.beats.req_after_done)
+    if not phase_guard("proposal.accept", { RUN_PHASE.coordinate }) then
+      return
     end
     local prop_index = pick_prop(payload, true)
     if prop_index == nil then
@@ -230,6 +236,13 @@ function M.install(deps)
     end
     local index = prop_req(prop_index)
     local stage_name = prop_stage(prop_index)
+    if stage_name == "plan" then
+      -- plan 提案的裁决走 gate.approve / gate.reject（提交即门禁）；受理不是它的出口。
+      return refuse(TEXTS.beats.req_wait_rejected, "proposal.accept", fill(TEXTS.beats.req_accept_plan, {
+        id = prop_id(prop_index),
+        req = req_id(index),
+      }))
+    end
     -- 串行验收 + stale 判定：提案绑定 revision，旧 rev 不得覆盖新决定。
     if prop_rev(prop_index) ~= req_rev(index) then
       ygg.kv.set(prop_key(prop_index, "status"), P_STALE)
@@ -241,32 +254,29 @@ function M.install(deps)
         want = tostring(req_rev(index)),
       }))
     end
+    -- 交付受理 → 验收门禁：复制 summary/artifacts、应用 changes、升起 accept 门禁。
+    -- 泳道保持绑定（R7）；真状态不变（open）。
     ygg.kv.set(req_key(index, "summary"), text_of(prop_key(prop_index, "summary"), ""))
     ygg.kv.set(req_key(index, "artifacts"), text_of(prop_key(prop_index, "artifacts"), ""))
     ygg.kv.set(prop_key(prop_index, "status"), P_ACCEPTED)
     local change_note = apply_changes(index, text_of(prop_key(prop_index, "changes"), ""))
-    req_release(index)
-    local next_status = req_advance_after_accept(index, stage_name)
+    ygg.kv.set(req_key(index, "gate"), "accept")
+    ygg.kv.set(req_key(index, "gate_rev"), req_rev(index))
     req_push_history(index, fill(TEXTS.beats.req_accept_hist, { id = prop_id(prop_index), stage = stage_name }))
     req_sync_conflicts()
     ygg.narrate(fill(TEXTS.beats.req_accept_ok, {
       id = prop_id(prop_index),
       req = req_id(index),
       stage = stage_name,
-      status = next_status ~= nil and req_phase_name(index) or req_status(index),
+      status = req_phase(index),
       change = change_note,
       pending = tostring(prop_pending_total()),
     }))
-    -- 唯一后继自动推进走响应式：分析验收后 plan 槽必然打开，打标后由 render() 入口的
-    -- hooks.flush_effects 在产出 choice 之前同步收敛（不能在这里 emit/render 两次）。
-    if stage_name == "analysis" then
-      hooks.mark_auto_dispatch(index)
-    end
     render()
   end)
   ygg.on("proposal.reject", function(payload)
-    if stage() == STAGE.done then
-      return reject("proposal.reject", TEXTS.beats.req_after_done)
+    if not phase_guard("proposal.reject", { RUN_PHASE.coordinate }) then
+      return
     end
     local target, reason = cut(trim(payload), "|")
     local prop_index = pick_prop(target, true)
@@ -276,17 +286,22 @@ function M.install(deps)
     local index = prop_req(prop_index)
     local stage_name = prop_stage(prop_index)
     ygg.kv.set(prop_key(prop_index, "status"), P_REJECTED)
-    -- 5 态下三路回退只有两个落点：analysis → draft；plan / development → planning（展示名由
-    -- plan_ok 派生而不落存储）：development 回退沿用原值——未 amend 即「旧 ready」，amend 过
-    -- 则 req_bump_rev 早已把它置假，落回 planning；plan 回退时 plan_ok 仍为假。
-    local back = { analysis = R_DRAFT, plan = R_PLANNING, development = R_PLANNING }
-    req_release(index)
-    ygg.kv.set(req_key(index, "status"), back[stage_name] or R_DRAFT)
+    if stage_name == "plan" then
+      -- plan 提案打回：清门禁回计划中（job 重新挂回 plan——计划任务回到执行者手上重做；
+      -- plan_ok 本就为假，rev 不动）。
+      ygg.kv.set(req_key(index, "gate"), "")
+      ygg.kv.set(req_key(index, "gate_rev"), 0)
+      ygg.kv.set(req_key(index, "job"), "plan")
+    else
+      -- development 提案打回（R6 三条打回之一）：统一落待开发——plan_ok 保持、
+      -- 释放泳道（连工作树）；rev 不动（执行方下一轮提案仍用当前 rev）。
+      release_lane_with_worktree(index)
+    end
     req_push_history(index, fill(TEXTS.beats.req_reject_hist, { id = prop_id(prop_index) }))
     ygg.narrate(fill(TEXTS.beats.req_reject_ok, {
       id = prop_id(prop_index),
       req = req_id(index),
-      status = req_phase_name(index),
+      status = req_phase(index),
       reason = trim(reason or "") ~= "" and trim(reason) or TEXTS.beats.req_reject_default,
     }))
     render()

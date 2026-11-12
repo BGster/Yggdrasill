@@ -106,8 +106,12 @@ local function task_title()
   return text_of("task.title", TEXTS.beats.default_task_title)
 end
 
-local function task_desc()
-  return text_of("task.description", TEXTS.beats.default_task_desc)
+local function task_goal()
+  return text_of("task.goal", TEXTS.beats.default_task_goal)
+end
+
+local function task_success()
+  return text_of("task.success", TEXTS.beats.default_task_success)
 end
 
 -- E2 登记面读取（写入方：src/handlers/system/config.lua）。两者都是自声明，不是身份凭据。
@@ -154,7 +158,8 @@ M.play_mode = play_mode
 M.run_retire_armed = run_retire_armed
 M.static = static
 M.strict_gates = strict_gates
-M.task_desc = task_desc
+M.task_goal = task_goal
+M.task_success = task_success
 M.task_title = task_title
 M.text_of = text_of
 

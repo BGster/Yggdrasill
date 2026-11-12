@@ -22,8 +22,8 @@ local CONFIG_UI, menu =
   menus.CONFIG_UI, menus.menu
 local render =
   render_mod.receipt
-local stage =
-  reqs.stage
+local run_phase =
+  reqs.run_phase
 local fill, trim =
   util.fill, util.trim
 
@@ -73,7 +73,7 @@ end
 function M.install(deps)
   TEXTS = deps.texts
   ygg.on("ygg.choice_selected", function(index)
-    local current = stage()
+    local current = run_phase()
     local items = menu(current)
     if items == nil then
       ygg.narrate(fill(TEXTS.beats.unknown_choice, { stage = current }))

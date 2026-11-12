@@ -39,6 +39,10 @@
     "map_note_batch_settle": "(batch settle: archive -> run.batch+1 -> back to coordinate; resident)",
     "map_note_retire": "(run retired - the only terminal edge, reachable only when run.retire is armed)",
     "map_note_profiles": "[PROFILES] {{list}} (self-reported registry; the executor ledger stays the authority)",
-    "map_note_profiles_more": "+{{count}} more"
+    "map_note_profiles_more": "+{{count}} more",
+    "map_note_run_begin": "(章程三件套齐备才开工；run.begin 后章程锁定)",
+    "map_note_settle_ready": "(盘点四项齐备自动转发布——效应驱动，不是事件边)",
+    "map_note_plan_submit": "(plan 提案交付即门禁：提交后立刻升起计划门禁)",
+    "map_note_integration": "(集成幕：核验 develop@<sha> 后 confirm 落完成；reject 落待开发)"
   }
 }
