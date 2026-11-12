@@ -54,6 +54,12 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      "new" requirement is just part of the previous one while the description has no
      cannot-merge reason); ③ how do you confirm it next time? (walk `requirement.list` and check that
      every new requirement's description carries that reason).
+   - **Decision-ID preallocation (r4)**: a genuinely new architectural decision gets its `D-MAx`
+     number allocated serially by the main session **at dispatch time** and written into the
+     requirement description and the subagent brief; an existing decision reuses its number.
+     Executors never self-allocate `max+1` — two lanes picking `max+1` from the same base is how
+     `D-MA16` was double-claimed (docs/CONTEXT.md history `d0b4a7c` / `6848138`); IDs beyond the
+     brief are not self-served, return to the coordinator.
 3. **Render receipts in full; never parse-and-truncate**: no `narrative[0][:N]`, no "first line
    only", no line filtering with `startswith`, no stuffing a receipt into `grep` / `python` to read
    just a summary. Every dispatch prints **all narrative lines** into the conversation and hands the
@@ -339,6 +345,12 @@ The second one cannot be skipped: Cargo's `--workspace` **does not compile the e
 tests**, so the assertions inside `crates/ygg-sandbox/examples/egg.rs` (persistence atomicity,
 reset semantics, hot reload, settlement policy) **never execute** when you only run the workspace,
 and the gate still prints `failed=0`.
+**Literal execution only (r4)**: the three-suite green is claimed only by running the three
+commands verbatim, each recorded with its real exit code and test counts. A member-equivalent or
+fast substitute is evidence of that substitute only — never of the suite green: `cargo check`,
+`verify-suite --mode fast`, filtered runs (`cargo test <name>`), single-test selections, and any
+`YGG_VERIFY_COMMANDS` override keep their legitimate uses but none of them substitutes for the
+literal three-suite evidence of this repository.
 Three-question criterion (see 7): ① which action does it block? ("run only `cargo test --workspace`
 after touching the kernel or the host and call the gate green"); ② what does a violation look like?
 (the pass counts of `--workspace` and of `--example egg` do not match — the former always lacks the
