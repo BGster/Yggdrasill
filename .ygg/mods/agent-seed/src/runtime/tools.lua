@@ -677,10 +677,18 @@ end
 -- 原因文案复用既有 beat（`lane_*` / `req_unknown`），不新增第二套措辞。
 local REACTORS = {}
 
--- r1 分池：repo 段反查池。默认工具不带 repo = 默认池（""）；池化工具必须能反查到
--- 已注册池，否则拒绝且账本不动（fail-closed，返回 nil 池 + 可读原因）。
-local function pool_of_pairs(pairs)
+-- r1 分池：池归属从**请求快照**（`tool.<call_id>.args` 的 repo= 段）反查——宿主输出行
+-- 不携带 --repo（claim/release/probe 的输出键序是冻结的宿主契约），请求行才有；
+-- 同步路径 try_sync_call 也写同一 args KV，两路同源。默认工具（无 repo 段）= 默认池
+-- ("")；带 repo 段但反查不到已注册池 = fail-closed 拒绝（返回 nil 池 + 可读原因）。
+local function pool_of_call(pairs, call_id)
   local repo = trim(pairs.repo or "")
+  if repo == "" then
+    local args = args_table(call_id)
+    if args ~= nil then
+      repo = trim(args.repo or "")
+    end
+  end
   if repo == "" then
     return "", nil
   end
@@ -691,12 +699,12 @@ local function pool_of_pairs(pairs)
   return pool, nil
 end
 
-REACTORS["git.worktree_claim"] = function(pairs)
+REACTORS["git.worktree_claim"] = function(pairs, call_id)
   local k = whole_at(pairs, "lane")
   local index = req_index_of(pairs.req)
   local branch = trim(pairs.branch or "")
   local branch_problem = LANES.branch_problem(branch)
-  local pool, pool_problem = pool_of_pairs(pairs)
+  local pool, pool_problem = pool_of_call(pairs, call_id)
   local reason = nil
   if k == nil or k < 1 or k > job_capacity() then
     reason = fill(TEXTS.beats.lane_bad_k, { k = tostring(pairs.lane or "?"), max = tostring(job_capacity()) })
@@ -739,7 +747,7 @@ REACTORS["git.worktree_claim"] = function(pairs)
   return true
 end
 
-REACTORS["git.worktree_release"] = function(pairs)
+REACTORS["git.worktree_release"] = function(pairs, call_id)
   local k = whole_at(pairs, "lane")
   if k == nil or k < 1 or k > job_capacity() then
     ygg.narrate(fill(TEXTS.beats.worktree_release_refused, {
@@ -747,7 +755,7 @@ REACTORS["git.worktree_release"] = function(pairs)
     }))
     return false
   end
-  local pool, pool_problem = pool_of_pairs(pairs)
+  local pool, pool_problem = pool_of_call(pairs, call_id)
   if pool_problem ~= nil then
     ygg.narrate(fill(TEXTS.beats.worktree_release_refused, { reason = pool_problem }))
     return false
@@ -775,7 +783,7 @@ REACTORS["git.lane_probe"] = function(pairs, call_id)
     }))
     return false
   end
-  local pool, pool_problem = pool_of_pairs(pairs)
+  local pool, pool_problem = pool_of_call(pairs, call_id)
   if pool_problem ~= nil then
     ygg.narrate(fill(TEXTS.beats.worktree_release_refused, { reason = pool_problem }))
     return false
@@ -809,6 +817,12 @@ REACTORS["git.lane_probe"] = function(pairs, call_id)
   radar_raise(pool, k, pairs.files or "")
   return true
 end
+
+-- r1 分池：池化工具与默认工具共用同一折叠语义（池归属由请求 repo 段反查，见
+-- pool_of_call）——只是同函数别名注册，不写第二套实现。
+REACTORS["git.worktree_claim_pool"] = REACTORS["git.worktree_claim"]
+REACTORS["git.worktree_release_pool"] = REACTORS["git.worktree_release"]
+REACTORS["git.lane_probe_pool"] = REACTORS["git.lane_probe"]
 
 REACTORS["fs.artifact_probe"] = function(pairs)
   local path = trim(pairs.path or "")

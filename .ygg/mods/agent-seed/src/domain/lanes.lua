@@ -29,12 +29,13 @@ local fill, join, split, trim =
 
 local LANES = {}
 
-local POOL_LABEL_PATTERN = "^[a-z][a-z0-9%-]{0,23}$"
 local POOL_RESERVED = { seq = true, pools = true }
 
 -- ── 池模型（r1 D-MA24）─────────────────────────────────────────────────────────────
 
--- label 形状守门：^[a-z][a-z0-9-]{0,23}$ 且 ∉ {seq, pools}。返回 true = 合法。
+-- label 形状守门：^[a-z][a-z0-9-]{0,23}$ 且 ∉ {seq, pools}。Lua 模式无 {n,m} 有界量词
+-- （{ } 是字面量），总长上限用 #label 判（首字符字母 + 无界类 + ≤24 = 同一形状）。
+-- 返回 true = 合法。
 function LANES.pool_ok(label)
   if type(label) ~= "string" then
     return false
@@ -42,7 +43,10 @@ function LANES.pool_ok(label)
   if POOL_RESERVED[label] then
     return false
   end
-  return label:match(POOL_LABEL_PATTERN) ~= nil
+  if #label > 24 then
+    return false
+  end
+  return label:match("^[a-z][a-z0-9%-]*$") ~= nil
 end
 
 -- 已注册池的 label 列表（`lane.pools` 逗号串，插入序；默认池 "" 不在其列）。

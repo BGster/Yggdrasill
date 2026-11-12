@@ -2845,6 +2845,298 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     assert_eq!(game.phase("r1"), "draft");
 }
 
+/// r1 (D-MA24) lane pools: `lane.pool "label|path"` registers named pools and the same lane
+/// number k hosts **different requirements in different pools** (the multi-repo case that a
+/// flat `lane.<k>` ledger could never express). Registration is an idempotent upsert with a
+/// shape gate (label regex + reserved words; path without `|` `;` newline or edge spaces).
+#[test]
+fn lane_pool_registry_and_multi_repo_parallel_claims() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("requirement.add", &text("alpha side|description|subsys-a"));
+    game.narrate("requirement.add", &text("beta side|description|subsys-b"));
+
+    // ① registration is an idempotent upsert: re-registering `alpha` updates in place.
+    let first = game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    assert_eq!(count_lines(&first, "[LANE POOL]"), 1, "{first:#?}");
+    game.narrate("lane.pool", &text("beta|/tmp/checkout-beta"));
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.assert_kv("lane.pools", json!("alpha,beta"));
+    game.assert_kv("lane.pool.alpha.path", json!("/tmp/checkout-alpha"));
+
+    // ② THE multi-repo case: the same k=1 in two pools holds two requirements at once.
+    let a = game.narrate("lane.claim", &text("1|r1|feature/aa11-alpha|abc1234|1|alpha"));
+    assert_eq!(count_lines(&a, "[LANE CLAIMED]"), 1, "{a:#?}");
+    assert!(
+        a.iter().any(|line| line.contains("lane-alpha-1")),
+        "a named-pool claim is labelled lane-<pool>-<k>: {a:#?}"
+    );
+    let b = game.narrate("lane.claim", &text("1|r2|feature/aa11-beta|abc1234|1|beta"));
+    assert_eq!(count_lines(&b, "[LANE CLAIMED]"), 1, "{b:#?}");
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+    game.assert_kv("lane.beta.1.req", json!("r2"));
+    game.assert_kv("lane.1.req", Json::Null); // the default pool's k=1 stays untouched
+    game.assert_kv("req.1.lane", json!(1));
+    game.assert_kv("req.1.lane_pool", json!("alpha"));
+    game.assert_kv("req.2.lane_pool", json!("beta"));
+
+    // ③ registration shape gate: bad label / reserved word / dirty path segments are refused
+    // (payload-face rejections move the reject ledger) and register nothing.
+    let rejects_before = game.kv("reject.count");
+    for payload in [
+        "Alpha|/tmp/x",                     // label must be lowercase
+        "seq|/tmp/x",                       // reserved word
+        "pools|/tmp/x",                     // reserved word
+        "alpha| /tmp/x ",                   // leading/trailing spaces in path
+        "alpha|/tmp/a;b",                   // `;` would corrupt the args wire
+        "alpha|",                           // empty path
+    ] {
+        let lines = game.narrate("lane.pool", &text(payload));
+        assert_refused(&lines, "lane.pool");
+    }
+    assert_ne!(
+        game.kv("reject.count"), rejects_before,
+        "the registration refusals must move the reject ledger"
+    );
+    game.assert_kv("lane.pools", json!("alpha,beta"));
+
+    // ④ a claim naming an unregistered pool is refused, ledger untouched.
+    let rejects_before = game.kv("reject.count");
+    let unknown = game.narrate("lane.claim", &text("2|r1|feature/aa11-gamma|abc1234|1|gamma"));
+    assert_refused(&unknown, "lane.claim");
+    assert_ne!(game.kv("reject.count"), rejects_before);
+    game.assert_kv("lane.gamma.2.req", Json::Null);
+}
+
+/// r1 (D-MA24) parallelism is counted **per pool** (k ∈ 1..job_capacity inside one pool),
+/// occupancy and the one-lane-per-requirement bound are (pool, k)-scoped, and a different
+/// pool's same k never counts as occupied.
+#[test]
+fn same_pool_parallelism_and_occupancy_scoped() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.narrate("requirement.add", &text("first|description|subsys-a"));
+    game.narrate("requirement.add", &text("second|description|subsys-b"));
+    game.narrate("requirement.add", &text("third|description|subsys-c"));
+
+    // ① two parallel lanes inside one named pool.
+    game.narrate("lane.claim", &text("1|r1|feature/aa11-one|abc1234|1|alpha"));
+    game.narrate("lane.claim", &text("2|r2|feature/aa11-two|abc1234|1|alpha"));
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+    game.assert_kv("lane.alpha.2.req", json!("r2"));
+
+    // ② k beyond the per-pool capacity is refused (job_capacity = 4).
+    let over = game.narrate("lane.claim", &text("5|r3|feature/aa11-five|abc1234|1|alpha"));
+    assert_refused(&over, "lane.claim");
+
+    // ③ occupancy is (pool, k)-scoped: r3 cannot take alpha-1 (held by r1), and r1 cannot
+    // hold a second lane in the same pool — but r3 CAN take default-1 while alpha-1 is held.
+    let occupied = game.narrate("lane.claim", &text("1|r3|feature/aa11-three|abc1234|1|alpha"));
+    assert_refused(&occupied, "lane.claim");
+    let bound = game.narrate("lane.claim", &text("2|r1|feature/aa11-one-b|abc1234|1|alpha"));
+    assert_refused(&bound, "lane.claim");
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+    game.assert_kv("lane.alpha.2.req", json!("r2"));
+    let cross = game.narrate("lane.claim", &text("1|r3|feature/aa11-def|abc1234|1"));
+    assert_eq!(count_lines(&cross, "[LANE CLAIMED]"), 1, "{cross:#?}");
+    game.assert_kv("lane.1.req", json!("r3"));
+    game.assert_kv("req.3.lane_pool", json!(""));
+
+    // ④ the pool-scoped lane labels flow through the panel surface (`lane_text` rides the
+    // requirement.list head): the default pool keeps the byte-stable `lane-<k>` labels and
+    // the named pool adds `lane-<pool>-<k>` rows.
+    let list = game.narrate("requirement.list", "0");
+    let joined = list.iter().cloned().collect::<Vec<_>>().join("\n");
+    assert!(
+        joined.contains("lane-1 `r3`(open)"),
+        "the default pool keeps the byte-stable label: {joined}"
+    );
+    assert!(
+        joined.contains("lane-alpha-1 `r1`(open)") && joined.contains("lane-alpha-2 `r2`(open)"),
+        "named-pool rows use the lane-<pool>-<k> label: {joined}"
+    );
+}
+
+/// r1 (D-MA24) release is (pool, k)-scoped: releasing one pool's lane never touches another
+/// pool's same-k lane, the requirement-side binding (lane + lane_pool) clears together, and
+/// the tool-face pooled release resolves the pool from the **request** repo argument.
+#[test]
+fn release_paths_are_pool_scoped() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.narrate("lane.pool", &text("beta|/tmp/checkout-beta"));
+    game.narrate("requirement.add", &text("first|description|subsys-a"));
+    game.narrate("requirement.add", &text("second|description|subsys-b"));
+    game.narrate("requirement.add", &text("third|description|subsys-c"));
+    game.narrate("lane.claim", &text("1|r1|feature/aa11-one|abc1234|1|alpha"));
+    game.narrate("lane.claim", &text("1|r2|feature/aa11-two|abc1234|1|beta"));
+    game.narrate("lane.claim", &text("1|r3|feature/aa11-three|abc1234|1"));
+
+    // ① releasing beta-1 leaves alpha-1 and default-1 (same k!) untouched.
+    let rel = game.narrate("lane.release", &text("1|beta"));
+    assert_eq!(count_lines(&rel, "[LANE RELEASED]"), 1, "{rel:#?}");
+    assert!(
+        rel.iter().any(|line| line.contains("lane-beta-1")),
+        "the release names the pool-scoped label: {rel:#?}"
+    );
+    game.assert_kv("lane.beta.1.req", json!(""));
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+    game.assert_kv("lane.1.req", json!("r3"));
+    game.assert_kv("req.2.lane", json!(0));
+    game.assert_kv("req.2.lane_pool", json!(""));
+
+    // ② re-releasing the now-empty pool lane is idle, narrated, and moves nothing.
+    let idle = game.narrate("lane.release", &text("1|beta"));
+    assert_eq!(count_lines(&idle, "[LANE RELEASED]"), 1, "{idle:#?}");
+    assert!(
+        idle.iter().any(|line| line.contains("none (it was already free)")),
+        "{idle:#?}"
+    );
+
+    // ③ the default-pool release path is untouched by the pool segments.
+    game.narrate("lane.release", &text("1"));
+    game.assert_kv("lane.1.req", json!(""));
+    game.assert_kv("lane.alpha.1.req", json!("r1"));
+
+    // ④ the pooled release tool resolves the pool from the request repo and clears the
+    // requirement side (lane + lane_pool) in the same fold.
+    let released = tool_round(
+        &mut game,
+        "git.worktree_release_pool|lane=1;repo=/tmp/checkout-alpha|t5",
+        "t5|git.worktree_release_pool|ok|0|lane=1;released=1;parked=1;path=/tmp/checkout-alpha-lane-1",
+    );
+    assert_eq!(count_lines(&released, "[WORKTREE RELEASED]"), 1, "{released:#?}");
+    game.assert_kv("lane.alpha.1.req", json!(""));
+    game.assert_kv("lane.alpha.1.path", json!(""));
+    game.assert_kv("req.1.lane", json!(0));
+    game.assert_kv("req.1.lane_pool", json!(""));
+
+    // ⑤ a repo that resolves to no registered pool is refused; the ledger stays untouched.
+    let refused = tool_round(
+        &mut game,
+        "git.worktree_release_pool|lane=2;repo=/tmp/ghost|t6",
+        "t6|git.worktree_release_pool|ok|0|lane=2;released=1;parked=0;path=/tmp/ghost-lane-2",
+    );
+    assert_eq!(count_lines(&refused, "[WORKTREE RELEASE REFUSED]"), 1, "{refused:#?}");
+    game.assert_kv("lane.alpha.2.req", Json::Null);
+}
+
+/// r1 (D-MA24) the conflict radar compares probes **within one pool only**: the same file
+/// list in two different pools raises nothing (different repos, unrelated file trees), while
+/// the same overlap inside one pool still blocks through the human-path writer.
+#[test]
+fn conflict_radar_compares_within_pool_only() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.narrate("requirement.add", &text("left half|description|subsys-a"));
+    game.narrate("requirement.add", &text("right half|description|subsys-b"));
+    game.narrate("requirement.add", &text("other repo|description|subsys-c"));
+    game.narrate("lane.claim", &text("1|r1|||1|alpha"));
+    game.narrate("lane.claim", &text("2|r2|||1|alpha"));
+    game.narrate("lane.claim", &text("1|r3|||1"));
+
+    // ① probe alpha-1: the facts land in the pool-scoped probe keys.
+    tool_round(
+        &mut game,
+        "git.lane_probe_pool|lane=1;base=abc;branch=feature/aa11-left;repo=/tmp/checkout-alpha|t1",
+        "t1|git.lane_probe_pool|ok|0|lane=1;branch=feature/aa11-left;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
+    );
+    game.assert_kv("lane.alpha.1.probe.commits", json!(2));
+    game.assert_kv("lane.alpha.1.probe.files", json!("src/a.lua,src/b.lua"));
+
+    // ② the SAME file list in a different pool (default lane-1) raises no conflict —
+    // the flat ledger would have false-positived here. (`req.conflicts` is created
+    // lazily by the conflict writer, so assert the per-requirement fields instead.)
+    tool_round(
+        &mut game,
+        "git.lane_probe|lane=1;base=abc;branch=feature/aa11-other|t2",
+        "t2|git.lane_probe|ok|0|lane=1;branch=feature/aa11-other;base=abc;head=3333333;commits=1;clean=1;files=src/a.lua",
+    );
+    game.assert_kv("req.1.conflict", json!(""));
+    game.assert_kv("req.3.conflict", json!(""));
+
+    // ③ the same overlap inside one pool still blocks, labelled with pool-scoped names.
+    let radar = tool_round(
+        &mut game,
+        "git.lane_probe_pool|lane=2;base=abc;branch=feature/aa11-right;repo=/tmp/checkout-alpha|t3",
+        "t3|git.lane_probe_pool|ok|0|lane=2;branch=feature/aa11-right;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
+    );
+    assert_eq!(count_lines(&radar, "[CONFLICT RADAR]"), 1, "{radar:#?}");
+    assert!(
+        radar.iter().any(|line| line.contains("lane-alpha-1") && line.contains("lane-alpha-2")),
+        "the radar names both pool-scoped lanes: {radar:#?}"
+    );
+    game.assert_kv("req.conflicts", json!(2));
+    game.assert_kv("req.1.conflict", json!("overlapping file: src/b.lua"));
+    game.assert_kv("req.3.conflict", json!(""));
+
+    // ④ `requirement.resolve` remains the only way out.
+    game.narrate("requirement.resolve", &text("r1,r2|keep_both|re-checked"));
+    game.assert_kv("req.conflicts", json!(0));
+    game.assert_kv("req.1.conflict", json!(""));
+}
+
+/// r1 (D-MA24) the pooled tool bridge folds into the pool ledger via the **request** repo
+/// argument (the host output line does not carry `--repo`): a pooled claim binds
+/// `lane.<pool>.<k>.*`, the default tool still binds the flat legacy keys, and an
+/// unregistered repo is refused without touching the ledger or the reject counter.
+#[test]
+fn pooled_tool_bridge_folds_and_refuses() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
+    game.narrate("requirement.add", &text("pooled req|description|subsys-a"));
+    game.narrate("requirement.add", &text("default req|description|subsys-b"));
+    game.narrate("lane.claim", &text("2|r1|feature/aa11-pool|abc1234|1|alpha"));
+
+    // ① the pooled claim folds into `lane.alpha.2.*` with the host-reported worktree path.
+    let claimed = tool_round(
+        &mut game,
+        "git.worktree_claim_pool|lane=2;req=r1;branch=feature/aa11-pool;repo=/tmp/checkout-alpha|t1",
+        "t1|git.worktree_claim_pool|ok|0|lane=2;req=r1;branch=feature/aa11-pool;base=abc1234;clean=1;reused=0;path=/tmp/checkout-alpha-lane-2",
+    );
+    assert_eq!(count_lines(&claimed, "[WORKTREE CLAIMED]"), 1, "{claimed:#?}");
+    assert!(
+        claimed.iter().any(|line| line.contains("lane-alpha-2 <- r1")),
+        "the narration names the pool-scoped lane: {claimed:#?}"
+    );
+    game.assert_kv("lane.alpha.2.req", json!("r1"));
+    game.assert_kv("lane.alpha.2.path", json!("/tmp/checkout-alpha-lane-2"));
+    // tick 1 = the pre-claim, tick 2 = this tool round's re-bind (same fold, fresh since).
+    game.assert_kv("lane.alpha.2.since", json!(2));
+    game.assert_kv("req.1.lane", json!(2));
+    game.assert_kv("req.1.lane_pool", json!("alpha"));
+
+    // ② the default tool still folds into the flat legacy keys — both pools coexist at k=2.
+    let default_claim = tool_round(
+        &mut game,
+        "git.worktree_claim|lane=2;req=r2;branch=feature/aa11-def|t2",
+        "t2|git.worktree_claim|ok|0|lane=2;req=r2;branch=feature/aa11-def;base=abc1234;clean=1;reused=0;path=/tmp/wt-default-2",
+    );
+    assert_eq!(count_lines(&default_claim, "[WORKTREE CLAIMED]"), 1, "{default_claim:#?}");
+    game.assert_kv("lane.2.req", json!("r2"));
+    game.assert_kv("lane.alpha.2.req", json!("r1"));
+
+    // ③ a repo that resolves to no registered pool is refused before any ledger write, and
+    // the tool-face refusal does not move the reject ledger (same face as the legacy path).
+    let rejects_before = game.kv("reject.count");
+    let ghost = tool_round(
+        &mut game,
+        "git.worktree_claim_pool|lane=3;req=r1;branch=feature/aa11-ghost;repo=/tmp/ghost|t3",
+        "t3|git.worktree_claim_pool|ok|0|lane=3;req=r1;branch=feature/aa11-ghost;base=abc1234;clean=1;reused=0;path=/tmp/ghost-lane-3",
+    );
+    assert_eq!(count_lines(&ghost, "[WORKTREE CLAIM REFUSED]"), 1, "{ghost:#?}");
+    game.assert_kv("lane.alpha.3.req", Json::Null);
+    game.assert_kv("lane.3.req", Json::Null);
+    assert_eq!(
+        game.kv("reject.count"), rejects_before,
+        "the tool-face refusal must not move the reject ledger"
+    );
+}
+
 /// A3 `fs.artifact_probe` and `vfs.write` feed **one** bounded ledger (`record_artifact` is the
 /// single writer), and the VFS path shape is refused before anything is recorded.
 #[test]
