@@ -2141,7 +2141,9 @@ fn stage_guide_maps_existing_nonempty_sections() {
     let start = guide_src
         .find("local STAGE_GUIDE = {")
         .expect("STAGE_GUIDE table must exist in guide.lua");
-    let end = guide_src[start..].find("\n}").expect("STAGE_GUIDE table must close");
+    let end = guide_src[start..]
+        .find("\n}")
+        .expect("STAGE_GUIDE table must close");
     let block = &guide_src[start..start + end];
     // odd indices of a `"` split are exactly the quoted fragments inside the table
     let mapped: std::collections::BTreeSet<String> = block
@@ -2158,8 +2160,7 @@ fn stage_guide_maps_existing_nonempty_sections() {
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
     let pack = read_json(&project.join("pack.json"));
-    let mut sections: std::collections::BTreeMap<String, usize> =
-        std::collections::BTreeMap::new();
+    let mut sections: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     let mut assembly_order: Vec<String> = Vec::new();
     for entry in pack["entries"].as_array().expect("pack entries") {
         let path = entry["path"].as_str().expect("entry path");
@@ -2196,11 +2197,12 @@ fn stage_guide_maps_existing_nonempty_sections() {
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
-            panic!(
-                "STAGE_GUIDE maps `{id}` but no playbook section carries that id"
-            )
+            panic!("STAGE_GUIDE maps `{id}` but no playbook section carries that id")
         });
-        assert!(*rules >= 1, "STAGE_GUIDE maps `{id}` but the section is empty");
+        assert!(
+            *rules >= 1,
+            "STAGE_GUIDE maps `{id}` but the section is empty"
+        );
     }
 }
 

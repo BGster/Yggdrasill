@@ -2015,9 +2015,13 @@ mod inbox_route_actor_tests {
 
     #[test]
     fn actor_bools_default_false_and_old_pack_is_unchanged() {
-        let routes = InboxRoutes::from_pack(&routes_pack(legacy_route())).expect("旧 pack 必须放行");
+        let routes =
+            InboxRoutes::from_pack(&routes_pack(legacy_route())).expect("旧 pack 必须放行");
         let route = routes.get("proposal").expect("按 kind 取路由");
-        assert!(!route.actor && !route.actor_session, "缺省 = false（功能关闭）");
+        assert!(
+            !route.actor && !route.actor_session,
+            "缺省 = false（功能关闭）"
+        );
         // 反查：未声明布尔的动作 → (false, false)
         assert_eq!(routes.actor_flags_for("proposal.submit"), (false, false));
         // 反查：不在表内的动作 → (false, false)（宿主不注入也不拦截）
