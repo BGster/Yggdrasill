@@ -1,0 +1,168 @@
+{
+  "sections": [
+    {
+      "id": "inbox",
+      "order": 19,
+      "title": "19. Async inbox · cross-process coordination",
+      "summary": "The JSONL inbox and its async command table, the drain points and the idempotent cursor; the coordination lock / writers / closing / finalized protocol with crash recovery; the hard settlement gates over unconsumed lines.",
+      "source": "AGENTS.md §5 (text before the 2026-10-31 condensation)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "inbox.file",
+          "modality": "must",
+          "text": "The inbox is JSONL: `<runs-root>/<run-id>/inbox.jsonl`, one object per line `{external_id, kind, title, description, payload, created_at}` with kind ∈ add/amend/split/merge/conflict/resolve/proposal.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "inbox.commands",
+          "modality": "must",
+          "text": "Async command table: `--requirement 'title|description'` (add) / `--proposal 'rN|rev|stage|summary|artifacts[|changes]'` (proposal; the external_id is appended automatically as the 7th segment) / `--amend 'rN|new title|new description|deps'` (rev+1) / `--split 'rN|child A|child B'` / `--merge 'r2,r3|title|description'` / `--conflict 'r1,r2|note'` / `--resolve 'r1,r2|keep_both'`.",
+          "basis": "AGENTS.md §5 (command table, pre-migration)"
+        },
+        {
+          "id": "inbox.no-mod",
+          "modality": "must",
+          "text": "The async commands only append to the inbox (`OpenOptions::append`); they never read or write the autosave, so `--mod` is not needed and they may run concurrently with a live run.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "inbox.drain",
+          "modality": "must",
+          "text": "Consumption points: before every automatic advancement under `cmd`, before every prompt under `stdin`, and before every single-shot dispatch — new lines are drained and dispatched by kind; a line that arrived while the run was live must never be missed.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "coordination.lock",
+          "modality": "must",
+          "text": "The cross-process protocol is protocol-level mutual exclusion (not \"read the file one more time\"): `coordination.lock` in the run directory (create_new exclusion, a stale lock is taken over after 2s by mtime) plus `coordination.json` `{phase, writers, owner_pid, heartbeat_at}` with phase ∈ running / closing / finalized.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "coordination.writer",
+          "modality": "must",
+          "text": "A write command registers first: phase=running → it counts as a writer until its line is on disk; phase=closing (heartbeat not expired) → the command itself fails non-zero (exit 3); phase=finalized → non-zero refusal (exit 3, a new run is required).",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "coordination.closing",
+          "modality": "must",
+          "text": "Before dispatching the final `review.note`, automatic advancement switches phase to closing, waits until the in-flight writers reach zero, and then does one last drain under the same protection: when a new requirement exists and is not done → lift closing and continue the loop (no ending); when nothing new arrived → finish `review.note` + settle under the same protection and set phase=finalized. So \"the write command succeeded but the run already crossed the last drain\" is impossible by protocol.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "coordination.recovery",
+          "modality": "must",
+          "text": "Stale lines and crash recovery: closing keeps itself alive with a heartbeat (expires after 10s); once expired, a write command or `--resume` declares it dead and returns the phase to running; the lock is taken over by mtime as well — neither can wedge forever after a process crash.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "coordination.settle-under-closing",
+          "modality": "must",
+          "text": "A standalone `--settle` also goes through closing: with unconsumed lines it returns `ok=false` and reverts to running (a resume can consume them); when already finalized it returns the old report idempotently and rewrites nothing.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "inbox.idempotent",
+          "modality": "must",
+          "text": "The cursor (`{consumed:N}` in `inbox.cursor`) only advances after a dispatch succeeded and its save is on disk; replay relies on `external_id`: add / proposal → the Mod checks per-entity ext duplicates (`[REPLAY:REQ]` / `[REPLAY:PROPOSAL]`); amend / split / merge / conflict / resolve → a trailing `@ext=` on the payload plus `inbox.last` de-duplication (`[REPLAY:ASYNC]`).",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "inbox.bad-line-skip",
+          "modality": "must",
+          "text": "A malformed line is skipped and the cursor advances past it (otherwise it would block forever).",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "inbox.settle-gate",
+          "modality": "must",
+          "text": "Hard settlement gate: if `--settle` finds an unconsumed line it returns `ok=false` and a non-zero exit (it re-checks after writing: a line that arrives during settlement invalidates the report) — so \"deliver after the ending\" can never silently succeed; a new run is required.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        },
+        {
+          "id": "inbox.timing",
+          "modality": "should",
+          "text": "Delivery after the process exited belongs to a new run: the inbox keeps the lines for the next run to consume, and settlement reports an error.",
+          "basis": "AGENTS.md §5 (pre-migration)"
+        }
+      ]
+    },
+    {
+      "id": "run_artifacts",
+      "order": 20,
+      "title": "20. Run directory · receipt summary · settlement",
+      "summary": "The run-directory files (autosave, events, run.json, settlement.json, inbox, coordination, decide-input), the `ygg.meta` summary channel the host reads — and its transience, meta never enters the state hash — plus the settle `ok` predicate.",
+      "source": "AGENTS.md §4/§7 (text before the 2026-10-31 condensation)",
+      "priority": "standard",
+      "rules": [
+        {
+          "id": "artifacts.agent-summary",
+          "modality": "must",
+          "text": "The summary travels through the kernel's structured receipt channel `ygg.meta(\"summary\", {…})` and lands in the receipt envelope at `meta.summary` (stage / ending / verifyPassed / nextEndsRun / pendingProposals / requirementCount / conflicts / awaiting / evolution{artifact,summary,candidates,classes}); the host only reads that field, so writing the same content into the narrative cannot be misread; a payload of \"0\" is read-only.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "artifacts.no-private-kv-reading",
+          "modality": "must-not",
+          "text": "The host never reads a Mod's private KV: with a Mod that has no `agent.summary`, the host reports \"unknown\" and pauses safely instead of falling back to `ending` / `fsm.stage` / `prop.*` / `req.*`.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "artifacts.meta-not-persisted",
+          "modality": "must",
+          "text": "`meta` is a transient receipt surface: it never enters the save, the canonical snapshot or the state hash — the same event sequence yields the same `state_hash` whether or not `ygg.meta` is called.",
+          "basis": "AGENTS.md §4 (pre-migration)"
+        },
+        {
+          "id": "artifacts.run-autosave",
+          "modality": "must",
+          "text": "`autosave.json` is the per-step automatic save (entity table + KV + pending choice) and can be fed to `load` directly.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "artifacts.run-events",
+          "modality": "must",
+          "text": "`events.jsonl` holds one line per dispatch: `{seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "artifacts.run-runjson",
+          "modality": "must",
+          "text": "`run.json` = `{run_id, mod, mod_signature, started_at, updated_at}`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "artifacts.run-settlement",
+          "modality": "must",
+          "text": "`settlement.json` is the end-of-run settlement and is written only by `--settle`.",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "artifacts.run-inbox",
+          "modality": "must",
+          "text": "`inbox.jsonl` is the async operation queue (append-only, consumed by the running side); `inbox.cursor` is the consumed line count (it only advances after a successful dispatch plus save).",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "artifacts.run-coordination",
+          "modality": "must",
+          "text": "`coordination.json` is the cross-process protocol `{phase, writers, owner_pid, heartbeat_at}` (running / closing / finalized); `coordination.lock` is the short critical-section mutex (create_new, taken over by mtime when stale, so a crash cannot wedge it).",
+          "basis": "AGENTS.md §7 (artifacts table, pre-migration)"
+        },
+        {
+          "id": "artifacts.run-decide-input",
+          "modality": "must",
+          "text": "`decide-input.json` is the input of an external decision command: under `--drive cmd:` the full current receipt is written there before the command is invoked, on every pending choice.",
+          "basis": "AGENTS.md §3 / §7 (pre-migration)"
+        },
+        {
+          "id": "artifacts.settle-ok",
+          "modality": "must",
+          "text": "`settle`'s `ok` = the event log is non-empty ∧ no failed step ∧ an ending narrative line appeared ∧ the inbox has no unconsumed line (the switches come from the Mod contract's `settlement` section); the exit code mirrors `ok`; with unconsumed lines the report says \"N unconsumed inbox lines after the ending — a new run is required\" and `ok=false`.",
+          "basis": "AGENTS.md §7 (pre-migration)"
+        }
+      ]
+    }
+  ]
+}
