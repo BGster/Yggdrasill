@@ -2858,7 +2858,12 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
     game.assert_kv("lane.1.req", json!(""));
     game.assert_kv("tool.settled_count", json!(3));
 
-    // 4) Entering review and registering settlement.evolution triggers auto_archive_sessions in 1 turn!
+    // 4) r1 rev1 fail-closed contract: with run.id/run.parent unset, registering
+    //    settlement.evolution WITHOUT a `sessions=` segment must NOT auto-archive —
+    //    fabricating parent="default" could rename the main session into the trash
+    //    (the host selects files by substring match). The evolution turn narrates a
+    //    readable [SESSIONS UNSETTLED] hint instead, writes no forged remaining=0
+    //    (the -1 from reset_settlement survives), and stays at 3 settled rituals.
     game.click("coordinate.submit — ");
     game.click("verify.submit all_green=true — ");
     let evo_lines = game.narrate(
@@ -2867,27 +2872,44 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
     );
     assert_eq!(
         count_lines(&evo_lines, "[TOOL SETTLED]"),
-        1,
+        0,
         "{evo_lines:#?}"
     );
     assert_eq!(
         count_lines(&evo_lines, "[SESSIONS ARCHIVED]"),
+        0,
+        "{evo_lines:#?}"
+    );
+    assert_eq!(
+        count_lines(&evo_lines, "[SESSIONS UNSETTLED]"),
         1,
         "{evo_lines:#?}"
     );
-    game.assert_kv("settlement.sessions.remaining", json!(0));
-    game.assert_kv("settlement.sessions.moved", json!(2));
-    game.assert_kv(
-        "settlement.sessions.destination",
-        json!("/tmp/sessions-trash/default"),
-    );
-    game.assert_kv("tool.settled_count", json!(4));
+    game.assert_kv("settlement.sessions.remaining", json!(-1));
+    game.assert_kv("tool.settled_count", json!(3));
 
+    // The blocked review.note narrates the readable hint instead of archiving…
+    let blocked = game.click("review.note — ");
+    let blocked_text = blocked["narrative"].to_string();
+    assert!(
+        blocked_text.contains("[SESSIONS UNSETTLED]"),
+        "a blocked review.note must explain the safe cleanup path: {blocked}"
+    );
+    assert!(
+        !blocked_text.contains("[BATCH 1 SETTLED]"),
+        "review.note must stay blocked while sessions are unsettled: {blocked}"
+    );
+
+    // …and an explicit human settlement (the safe path) unblocks the batch close.
+    game.narrate(
+        "settlement.sessions",
+        &text("2|0|/tmp/sessions-trash/sem-explicit"),
+    );
     let closed = game.click("review.note — ");
     let closed_text = closed["narrative"].to_string();
     assert!(
         closed_text.contains("[BATCH 1 SETTLED]"),
-        "review.note must settle the batch after inline session archiving: {closed}"
+        "review.note must settle the batch after explicit session registration: {closed}"
     );
     assert!(
         !closed_text.contains("[ENDING"),

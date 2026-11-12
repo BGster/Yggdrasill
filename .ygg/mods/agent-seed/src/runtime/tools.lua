@@ -1181,13 +1181,18 @@ local function auto_archive_sessions()
   if tostring(ygg.kv.get("settlement.sessions.remaining") or "") == "0" then
     return nil
   end
-  local batch = text_of("run.id", "default")
-  if batch == "" then
-    batch = "default"
-  end
-  local parent = text_of("run.parent", batch)
-  if parent == "" then
-    parent = batch
+  -- r1 rev1 fail-closed：run.id / run.parent 未登记时不伪造主会话身份、不发归档请求。
+  -- 宿主按子串匹配选文件，伪造 parent（如回落 "default"）可能把主会话一起 rename 进 trash。
+  -- 这里只给可读叙事说明缺什么为何停，绝不写伪造的 remaining=0；安全路径由用户显式决定
+  -- （带已核验 parent/batch 的显式 harness.archive_sessions，或登记 settlement.sessions）。
+  local batch = text_of("run.id", "")
+  local parent = text_of("run.parent", "")
+  if batch == "" or parent == "" then
+    ygg.narrate(fill(TEXTS.beats.sessions_archive_held, {
+      batch = (batch ~= "" and batch) or TEXTS.beats.lane_field_none,
+      parent = (parent ~= "" and parent) or TEXTS.beats.lane_field_none,
+    }))
+    return nil
   end
   local args_map = {
     parent = parent,
