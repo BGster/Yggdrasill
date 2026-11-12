@@ -50,15 +50,15 @@
       "id": "integration",
       "order": 6,
       "title": "4. Develop → integrate → merge → deploy",
-      "summary": "Three closing levels: the iteration point (feature → develop) → the round (develop → master, user-triggered) → deployment; integration, merging and deployment are always done serially by the main agent.",
+      "summary": "Three closing levels: the iteration point (feature → develop, executed by the requirement's development executor inside its own lane at closeout) → the round (develop → master, executed by the main agent, user-triggered) → deployment; iteration-level integration never lags behind a completed requirement and is never batched at round closeout.",
       "source": "AGENTS.md §4",
       "priority": "standard",
       "rules": [
         {
           "id": "integration.serial-closeout",
           "modality": "must",
-          "text": "Integration, merging and deployment are executed serially by the main agent (the main session); lane subagents only develop, pass their gates and push their feature branch — a subagent never merges into `develop`, never pushes `develop`, and never rebases another lane's branch.",
-          "basis": "AGENTS.md §4 (serial closeout)"
+          "text": "Iteration-level integration (feature → develop) is executed by the requirement's development executor inside its own lane at closeout — the main agent never performs an iteration-level integration. Integration serializes per repo through `origin/develop` itself: re-align before merging; a rejected develop push means another lane landed first — re-align and retry; stacked lanes integrate base-first. Round-level (develop → master) and deployment remain serial main-agent duties.",
+          "basis": "user decision (D-MA22): executor integrates feature→develop, main flow only develop→master"
         },
         {
           "id": "integration.iter.fetch",
@@ -99,7 +99,7 @@
         {
           "id": "integration.iter.merge-ritual",
           "modality": "must",
-          "text": "In the main checkout, merge the feature branch into `develop` using the local ref — `git merge --no-ff <feature>` — then push `develop`; deleting the remote feature branch stays optional.",
+          "text": "Integration runs inside the executor's own lane workspace, never the main checkout: `git fetch origin`, align local `develop` with `origin/develop` (`--ff-only`), merge the local feature ref with `git merge --no-ff <feature>`, then push `develop`; deleting the remote feature branch stays optional.",
           "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
@@ -111,13 +111,13 @@
         {
           "id": "integration.iter.test-after-integrate",
           "modality": "must",
-          "text": "After a feature lands in `develop`, re-run the gates and E2E on the integrated state in the main checkout; the feature-branch admission green never carries over — an iteration point closes on integrated-state evidence.",
+          "text": "The executor proves the integrated state inside the integration worktree before pushing `develop`: the feature-branch admission green never carries over — an iteration point closes on integrated-state evidence.",
           "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
           "id": "integration.iter.no-partial-closeout",
           "modality": "must-not",
-          "text": "Pushing the feature branch alone is not a closeout: a requirement closes only after it is merged into `develop` and tested on the integrated state — `develop` must never lag behind completed features.",
+          "text": "Pushing the feature branch alone is not a closeout: a requirement closes only after it is merged into `develop` and proven on the integrated state — the acceptance artifacts must carry the develop merge SHA (`develop@<sha>`) as integration evidence, and `develop` must never lag behind a completed requirement.",
           "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {

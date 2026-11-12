@@ -177,7 +177,7 @@
         {
           "id": "hard.no-subagent-closeout",
           "modality": "must-not",
-          "text": "Never let a subagent integrate, merge or deploy — the closeout is always executed serially by the main agent (details in the integration chapter).",
+          "text": "The iteration-level integration (feature → develop) is the development executor's own closeout duty inside its lane; the main agent verifies the integration evidence (`develop@<sha>`) at the accept gate and executes only the round-level develop → master (details in the integration chapter).",
           "basis": "AGENTS.md §10 item 6"
         },
         {

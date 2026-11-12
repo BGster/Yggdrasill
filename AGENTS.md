@@ -494,15 +494,20 @@ is a **batch settle** (back to `coordinate`, `run.batch`+1, never an ending). Op
    `settlement.json` (four switches: events non-empty / no failed step / an ending line exists / the
    inbox was consumed). Pre-running `--settle` on an open resident run is harmless but settles
    nothing (`reached=open, ok=false`, back to running).
-4. **Batch boundary = restart point**: upgrades (mod evolution or host binary) land after a batch
+4. **Integration division (D-MA22)**: the development executor integrates its own feature → develop at
+   requirement closeout (align `origin/develop` → `git merge --no-ff` → integrated-state gates → push
+   `develop`; evidence `develop@<sha>` in the acceptance artifacts); the main flow only does the round-level
+   develop → master, reset-develop and batch tag — iteration-level integration is never batched at round
+   closeout.
+5. **Batch boundary = restart point**: upgrades (mod evolution or host binary) land after a batch
    settles, then open a **new run-id**; old run directories are never migrated or adopted (a load
    failure opens a new run).
-5. **Post-batch integration cadence (standing user process, r5 recorded)**: after a batch's
+6. **Post-batch integration cadence (standing user process, r5 recorded)**: after a batch's
    requirements are merged into the integration branches, push `develop` and `master` and tag the
    integration merge `vYYYY.MM.DD.N` (N = same-day sequence, e.g. `v2026.11.12.2`). Pushing and
    tagging stay user-triggered; this line only fixes the cadence so it no longer lives in a
    handoff document.
-6. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
+7. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
    before ending this run; never carry a finished run's tasks into the next one.
 
 ## 3. Upper layer: none（执行壳已删除）

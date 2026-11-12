@@ -171,12 +171,12 @@
       "sha256": "c479926166c4e635e4e1f59aa16e4a01c4928eac522579f96711d98fe40b6376"
     },
     {
-      "byteLength": 7935,
+      "byteLength": 8253,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "d38f0745c495e821eb59a5e906047b79ba00f0ee905ae73015ac70af955c0319"
+      "sha256": "e9d5b0683bef020d42acd888b935e4fbb85f0670efacb4f27d8ddf2e812f5351"
     },
     {
       "byteLength": 722,
@@ -203,20 +203,20 @@
       "sha256": "c2741c6ff3f37318c20371a77dc583436145d9a7cf3c082ce1f05c86b7ec9959"
     },
     {
-      "byteLength": 17879,
+      "byteLength": 18500,
       "id": "ygg:agent/playbook/ch2-delivery",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch2-delivery.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "08d3b59dccdf35e522f7ef7e496a75896eb3c93d5eaaf455bbed915c88d1234d"
+      "sha256": "316e8461773c82f19caa9de633e9e5345dd44eb797e4393069f1f6a47f3c33b3"
     },
     {
-      "byteLength": 8729,
+      "byteLength": 8875,
       "id": "ygg:agent/playbook/ch3-evidence",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch3-evidence.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "525931f4b4c68f5697a4dc898351dbfba9b0169698c85eb370af3df5b64f9e3b"
+      "sha256": "ca0b9c0b74eb7df13d7fe733930ca7f4ee5b9c0d534ec25ec9c07d3b21a69098"
     },
     {
       "byteLength": 6953,
