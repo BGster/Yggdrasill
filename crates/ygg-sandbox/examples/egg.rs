@@ -1774,10 +1774,10 @@ impl Session {
 
     /// 开局（带模式）：`Attach` = 只观察/附着（open 与 `--wait-tools` 共用）。
     fn open_mode(args: &Args, mode: OpenMode) -> Result<Self, String> {
-        let Some(requested) = args.mod_dir.clone() else {
-            return Err("缺少 --mod <mod目录>".to_owned());
-        };
         let run_dir = args.run_root.clone();
+        // open 的 --mod 可省略：run.json 记录的本局 mod 路径是唯一回退事实
+        // （resolve_mod_dir = 旗标 > run.json > 可读拒绝）。
+        let requested = resolve_mod_dir(args, &run_dir)?;
         let run_id = run_dir
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -10484,6 +10484,67 @@ end)
     }
 
     /// R10b：`--store json` 仍是回退通道——空目录上写 JSON 产物、不建库。
+    /// r1 `--at` 跨代回退（sqlite）：g0 推进两步 → New+force 重置为 g1（旧代归档）→
+    /// open --at g0 = 取 g0 末快照建新代 g2 续跑；状态 = g0 末（stage=started），
+    /// 旧代证据全留库（savepoints 三代可查），新代事件从空起步。
+    #[test]
+    fn rollback_to_earlier_generation_restores_save_and_archives() {
+        let dir = case_dir("rollback");
+        let (mod_dir, runs_root) = (dir.join("mod"), dir.join("runs"));
+        write_probe_mod(&mod_dir);
+        let run_id = "rb1";
+        // g0：开局 + event.start（stage=started）。
+        let mut session =
+            Session::open(&probe_args_default_store(&mod_dir, &runs_root, run_id, false))
+                .expect("g0 开局");
+        let receipt = session.dispatch_event("event.start", "0");
+        assert_eq!(receipt["ok"], serde_json::json!(true));
+        drop(session);
+        // g1：显式新局重置（New+force；旧代归档留库）+ 推进一步（有步才归档，
+        // 零步代重置不推新代——sqlite reset 既有语义）。
+        let mut session = Session::open(&probe_args_default_store(&mod_dir, &runs_root, run_id, false))
+            .expect("g1 重置");
+        let receipt = session.dispatch_event("event.start", "0");
+        assert_eq!(receipt["ok"], serde_json::json!(true));
+        let points = session.store.savepoints().expect("存档点清单");
+        assert_eq!(points.len(), 2, "重置后应有 g0/g1 两代：{points:?}");
+        assert!(points[1].current);
+        drop(session);
+        // open --at g0：回退到 g0 末快照（stage=started），新代 g2 续跑。
+        let args = Args {
+            open_style: Some(crate::OpenStyle::Open),
+            at: Some(0),
+            ..probe_args_default_store(&mod_dir, &runs_root, run_id, true)
+        };
+        let mut session = Session::open(&args).expect("--at g0 回退必须成功");
+        assert!(session.resumed, "回退按附着计");
+        assert!(
+            session
+                .notices
+                .iter()
+                .any(|notice| notice.contains("已回退到存档点 g0")),
+            "必须有回退提示：{:?}",
+            session.notices
+        );
+        let save: serde_json::Value = serde_json::from_slice(&session.current_save().expect("现态存档"))
+            .expect("存档是 JSON");
+        assert_eq!(
+            save["kv"]["entries"]["stage"],
+            serde_json::json!("started"),
+            "状态必须回到 g0 末（stage=started）"
+        );
+        let points = session.store.savepoints().expect("回退后清单");
+        assert_eq!(points.len(), 3, "回退后 g0/g1/g2 三代都在库：{points:?}");
+        assert!(points[2].current, "新代是当前代");
+        // 越界代：可读错误点名可用存档点。
+        let bad = Args {
+            at: Some(99),
+            ..args
+        };
+        expect_open_failure(&bad, &["g99", "可用存档点"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn r10b_json_flag_new_run_writes_json_files() {
         let dir = case_dir("r10b");

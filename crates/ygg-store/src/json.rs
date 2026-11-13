@@ -574,9 +574,15 @@ mod tests {
         let dir = case_dir("savepoints-refused");
         let store = JsonFileStore::open(&dir).expect("打开");
         let err = store.savepoints().expect_err("JSON 不支持存档点清单");
-        assert!(err.to_string().contains("sqlite"), "文案须指向 sqlite: {err}");
+        assert!(
+            err.to_string().contains("sqlite"),
+            "文案须指向 sqlite: {err}"
+        );
         let err = store.save_at(1).expect_err("JSON 不支持按代取档");
-        assert!(err.to_string().contains("sqlite"), "文案须指向 sqlite: {err}");
+        assert!(
+            err.to_string().contains("sqlite"),
+            "文案须指向 sqlite: {err}"
+        );
     }
 
     /// put → get → list：`artifacts/` 目录树按 path 升序，字节保真。

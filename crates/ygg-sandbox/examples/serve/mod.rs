@@ -479,7 +479,9 @@ fn watcher_loop(shared: &ServeShared, shutdown: &AtomicBool, poll_ms: u64) {
                 let fp = fingerprint(&root.path.join(name));
                 if known.get(&key) != Some(&fp) {
                     known.insert(key, fp);
-                    shared.broadcaster.bump(Some(name), Some(root.path.as_path()));
+                    shared
+                        .broadcaster
+                        .bump(Some(name), Some(root.path.as_path()));
                 }
             }
         }
@@ -560,20 +562,22 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
     let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
     let mut buf: Vec<u8> = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
-    loop {
+    // 头终止符的位置（不是 ends_with：POST 的头与体常同包到达，体在终止符之后，
+    // 若等 ends_with 会把同包体字节拖进下一轮空读直至超时——实测注册面 400 空包）。
+    let split = loop {
         if buf.len() > MAX_HEADER_BYTES {
             return Ok(None);
+        }
+        if let Some(split) = buf.windows(4).position(|window| window == b"\r\n\r\n") {
+            break split;
         }
         let n = stream.read(&mut chunk)?;
         if n == 0 {
             return Ok(None); // 客户端直接断开
         }
         buf.extend_from_slice(&chunk[..n]);
-        if buf.ends_with(b"\r\n\r\n") {
-            break;
-        }
-    }
-    let head = String::from_utf8_lossy(&buf).into_owned();
+    };
+    let head = String::from_utf8_lossy(&buf[..split]).into_owned();
     let Some(mut request) = parse_request_from_head(&head) else {
         return Ok(None);
     };
@@ -591,7 +595,8 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
     if content_length > 8 * 1024 {
         return Ok(None);
     }
-    let mut body = Vec::with_capacity(content_length);
+    // 同包已到的体字节先用掉，再读剩余部分。
+    let mut body = buf[split + 4..].to_vec();
     while body.len() < content_length {
         let n = stream.read(&mut chunk)?;
         if n == 0 {
@@ -599,6 +604,7 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
         }
         body.extend_from_slice(&chunk[..n]);
     }
+    body.truncate(content_length);
     request.body = body;
     Ok(Some(request))
 }
@@ -755,13 +761,7 @@ fn write_sse(stream: &mut TcpStream, frame: &str) -> std::io::Result<()> {
 // §路由（表里只有**结构名**，无一个 mod 事件名——P2/P3 的落点）
 // ============================================================================
 
-fn route(
-    shared: &ServeShared,
-    method: &str,
-    raw_path: &str,
-    query: &str,
-    body: &[u8],
-) -> Outcome {
+fn route(shared: &ServeShared, method: &str, raw_path: &str, query: &str, body: &[u8]) -> Outcome {
     // 方法白名单（物理边界）：数据面 GET-only；唯一例外 = /api/roots 注册面
     // （POST 注册 / DELETE 注销——进程内观察配置，不写局状态）。
     let path = percent_decode(raw_path);
@@ -930,9 +930,7 @@ fn handle_runs(shared: &ServeShared) -> Response {
             match std::fs::read_dir(&root.path) {
                 Ok(entries) => entries
                     .flatten()
-                    .filter(|entry| {
-                        entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false)
-                    })
+                    .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
                     .map(|entry| entry.path())
                     .collect(),
                 Err(err) => {
@@ -990,7 +988,10 @@ fn handle_runs(shared: &ServeShared) -> Response {
                     row["probe"] = json!({"generation": null, "latestId": null, "latestCreatedAt": 0, "count": 0});
                 }
             }
-            row["panel"] = panel_json(&run_id, run_mod_dir(&meta, Some(root.path.as_path())).as_deref());
+            row["panel"] = panel_json(
+                &run_id,
+                run_mod_dir(&meta, Some(root.path.as_path())).as_deref(),
+            );
             rows.push((updated_at, row));
         }
     }
@@ -2669,7 +2670,10 @@ end)
         assert_eq!(response.status, 404);
         assert!(!missing.exists(), "注册失败不得创建目录");
         // 注册表仍为空。
-        assert_eq!(body_json(&http(&shared, "GET", "/api/roots"))["roots"], json!([]));
+        assert_eq!(
+            body_json(&http(&shared, "GET", "/api/roots"))["roots"],
+            json!([])
+        );
     }
 
     /// POST 注册幂等 + DELETE 注销幂等 + 单局根归类 + 盘上零写。
@@ -2703,8 +2707,14 @@ end)
         assert_eq!(runs["runs"].as_array().expect("runs").len(), 2);
         // 注销：removed:true；再注销 removed:false（幂等）。
         let target = format!("/api/roots?root={}", single.display());
-        assert_eq!(body_json(&http(&shared, "DELETE", &target))["removed"], json!(true));
-        assert_eq!(body_json(&http(&shared, "DELETE", &target))["removed"], json!(false));
+        assert_eq!(
+            body_json(&http(&shared, "DELETE", &target))["removed"],
+            json!(true)
+        );
+        assert_eq!(
+            body_json(&http(&shared, "DELETE", &target))["removed"],
+            json!(false)
+        );
         // 注销后单局行消失，父目录行仍在。
         let runs = body_json(&http(&shared, "GET", "/api/runs"));
         assert_eq!(runs["runs"].as_array().expect("runs").len(), 1);
