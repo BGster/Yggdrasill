@@ -169,6 +169,17 @@
 - **必做动作**：**人**过验收——`gate.approve`（须核验 `develop@<sha>` 证据与 artifacts 非空）或 `gate.reject`（打回待开发，plan_ok 保持）；gate_rev==req.rev 的 stale 校验同样适用。
 - **出口判据**：approve → 集成幕（`integrating=true`）；reject → 待开发。
 - **本幕关联阅读**：[copy-contract.md](copy-contract.md)（`req_gate_ok` / `req_gate_no_artifacts` / `req_gate_no_evidence` / `req_gate_stale` 句式）；[../design/state-surface.md](../design/state-surface.md)（验收证据键）。
+- **场景化证据清单**（按需求类型选列核验，避免“看过就算”）：
+
+  | 需求类型 | 必须亲测的证据 |
+  | --- | --- |
+  | 跨仓库同步（mod/CLI/文档搬运） | 源↔目标 `diff -rq` 为空；二进制 `sha256` 双侧一致；目标仓 boot 三件套实测；docs 闭包 ok=1；数据红线零触碰；子模块指针未动 |
+  | Mod 代码/文案改动 | `sync-seed-mod.sh --check`；`ygg-lint` 0/0；`agent_seed_semantics` 全绿（含新增用例）；all-1 playtest |
+  | 宿主 crates 改动 | 字面三件套（`cargo test --workspace` ∧ `--example egg` ∧ `agent_seed_semantics`），记录真实退出码与计数 |
+  | 纯文档/规则修改 | `docs-consistency` ok=1；受影响的键数/枚举实测对齐；语义测试不变红 |
+  | 需求图/台账操作 | `requirement.list` 终态数对得上；分支模型/注册项存在性实测 |
+
+  清单是三问的一环：① 本需求属于哪类？② 该类的每项证据跑了吗（贴末行/输出）？③ 没跑的那项为何不适用（写明）。
 
 ### 8. 集成（integrating）
 

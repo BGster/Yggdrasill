@@ -28,6 +28,8 @@ source .env.local  # 若文件不存在，先确认是否需要创建（含 YGG_
 
 ## 3. 必读材料纪律（Mandatory references）
 
+**跨仓库同步的源基线（r5 实证）**：当需求是「从 A 仓同步到 B 仓」时，源仓可能在实施期间前进（主会话并发提交他需求）。brief 里的 `base=<sha>` 只钉住**目标仓**基线；对源仓，要么写「取实施时最新 HEAD」（可变基线），要么写「pin 在 `<sha>`」并声明源仓冻结。默认取**可变基线**——计划稿里的「源基线变化就停机」条件只适用于显式 pin 的场景，否则会因无关提交误停。
+
 在提议或编辑之前，先读 docs wiki：`docs/README.md`（索引）→ `docs/context/*`（领域不变量、原则、决策台账）→ `docs/design/*`（架构与契约）。读完再动手；plan 阶段在 plan artifact 中声明本次变更触碰哪些 wiki 主题文件（Doc sync 职责见 [../wiki-governance.md](../wiki-governance.md)）。
 
 ## 4. 工件纪律（Artifact）

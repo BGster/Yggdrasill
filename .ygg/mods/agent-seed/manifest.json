@@ -242,12 +242,12 @@
       "sha256": "1cf94523822a3a5ff919b9bf1498f08eb0a58185a518fb37bc02cc53f0d79eba"
     },
     {
-      "byteLength": 16898,
+      "byteLength": 17540,
       "id": "ygg:agent/playbook/ch4-protocol",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-protocol.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "3b513b20af6aa0a11f45fa7e774727893abfbca552c4b6b80debd59698aacaf7"
+      "sha256": "988b147569a0b2995bd99084f2a6a0917371958298ab9c7e41132b0fedb3a12e"
     },
     {
       "byteLength": 10831,
