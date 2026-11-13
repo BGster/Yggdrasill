@@ -97,6 +97,12 @@
           "basis": "docs/design/events.md event table (ex-DESIGN §2.6; D-MA23, 2026-11-12); AGENTS.md §4 (pre-migration)"
         },
         {
+          "id": "action.rev-from-receipt",
+          "modality": "must",
+          "text": "The `rev` in a proposal payload must be read from the requirement receipt (`requirement.list` / `map.show`), never guessed from memory or inferred from a previous submission: a wrong rev is refused as stale (`req_gate_stale` / `req_accept_stale` print the actual current rev in `{{want}}`), and each guess costs a full dispatch round-trip. Same for `id`: take the exact requirement id the receipt shows.",
+          "basis": "requirement r5 (batch-2 debt cleanup, 2026-11-13); observed twice (two lanes each guessed rev wrongly)"
+        },
+        {
           "id": "action.dispatch-idempotent",
           "modality": "must",
           "text": "requirement.dispatch dispatches by readiness order (draft → plan; ready → development·lane, development deps all done), with a job cap of 4; no candidate or a full slot set is a normal `[DISPATCH] 0 candidates` receipt (idempotent, never counted as a failed step).",

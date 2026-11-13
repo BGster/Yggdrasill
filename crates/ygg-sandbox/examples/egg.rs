@@ -1102,6 +1102,8 @@ fn usage(code: i32) -> ! {
   egg open <run-root> --daemon                                 常驻守护模式（JSON-RPC over stdio）
   egg open <run-root> --wait-tools [--tool-timeout <ms>]        等在飞工具落地后 drain 一次 inbox
   egg open <run-root> --artifact-put <artifacts/名>=<源文件>    制品写入本局制品面
+                                                                （载荷含 `=` 与 `/`，shell 里必须整段加单引号：
+                                                                 '--artifact-put artifacts/x.md=/tmp/y.md'）
   egg open <run-root> --artifact-get <artifacts/名>             制品原文直出 stdout
   egg serve [--port <端口>] [--panel-dir <目录>] [--poll-ms <ms>]
                                                                 常驻只读观察台（空根启动，默认 127.0.0.1:7800）
@@ -1153,6 +1155,9 @@ fn usage(code: i32) -> ! {
                      把源文件写进本局后端的制品面（内容寻址，≤256 KiB），
                      stdout 打印 {\"ok\":true,\"path\":…,\"bytes\":…,\"sha256\":…}
                      （不新造 run：本局必须已存在；不推进状态）
+                     **shell 引号陷阱**：载荷含 `=`，不加引号会被当成位置参数而
+                     报「需要恰好一个位置参数」——整段加单引号：
+                     '--artifact-put artifacts/x.md=/tmp/y.md'
   --artifact-get <artifacts/名>
                      把制品原文直出 stdout（**不补换行**；缺失 = 退出 1，stdout 保持空）
    --settle           读本局后端的状态事实写 settlement.json（json 局 = autosave.json + events.jsonl）。
