@@ -11,7 +11,7 @@
         {
           "id": "drive.start-command",
           "modality": "must",
-          "text": "Cold start of a run: `.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start` — boot narrates the three opening lines and lands the charter act; the payload may carry the charter (`\"title|goal|success\"`) to set it in the same step, and `run.begin` then opens the coordinate act.",
+          "text": "Cold start of a run: `.ygg/bin/egg new --mod .ygg/mods/agent-seed --in .ygg/runs --event event.start` (auto run-id; receipt last line = `run-root: <path>`; subsequent dispatches: `.ygg/bin/egg open <run-root> --event ...`) — boot narrates the three opening lines and lands the charter act; the payload may carry the charter (`\"title|goal|success\"`) to set it in the same step, and `run.begin` then opens the coordinate act.",
           "basis": "AGENTS.md §2 Start (D-MA23 charter sequence, 2026-11-12)"
         },
         {

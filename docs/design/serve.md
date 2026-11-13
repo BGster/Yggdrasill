@@ -5,44 +5,53 @@
 > **上游**：[docs/README.md](../README.md) · **相关**：[mod-package.md](mod-package.md) · [cli-daemon.md](cli-daemon.md)
 > **搬运**：以下正文自 DESIGN.md L606–L732 逐字迁移，不重写语义。
 
-### 3.7 serve 观察面契约（只读观察台 + 多根一级列表 + 内置面板页 + mod 面板 iframe 托管）
+### 3.7 serve 观察面契约（只读观察台 + 注册表化观察根 + 内置面板页 + mod 面板 iframe 托管）
 
-> r9 · rev1。`serve` 是继单发 `--event` / 交互 / `--daemon` 之后的**第四模式**（加性）。
-> r9 起为**多根观察 + 全局唯一实例**：可重复 `--runs-root`、`~/.config/ygg/serve.json`
-> 配置、启动前只读探针幂等复用（零锁文件）。面板默认只读，gate/accept 类人类门禁
-> （`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note`）
-> 在 serve 面上**不存在写路径**——路由表只登记 GET，非 GET 一律 `405`（物理不可绕过），
-> 人类门禁仍走 CLI 票据 / 适配器路径。
+> r1 · rev2（注册表化）。`serve` 是继单发 `--event` / 交互 / `--daemon` 之后的**第四模式**。
+> r1 起为**空根启动 + 运行时 API 注册**：`--runs-root` 旗标与 `~/.config/ygg/serve.json`
+> 根集链退役；观察根经 `POST /api/roots` 注册（runs 父目录或单个 run-root 均可）、
+> `DELETE /api/roots` 注销，注册表仅进程内有效（重启为空）。面板默认只读，
+> gate/accept 类人类门禁（`proposal.accept` / `gate.approve` / `coordinate.submit` /
+> `verify.submit` / `review.note`）在 serve 面上**不存在写路径**——数据端点只登记 GET，
+> 唯一例外 = `/api/roots` 注册面（POST/DELETE；**进程内观察配置**，不写存档、不写
+> mod KV、不写 run.json/coordination、不建目录——与局状态写严格对象分离，AGENTS §0b）。
 
-#### 3.7.1 CLI 形态
+#### 3.7.1 CLI 形态与观察根注册表
 
 ```text
-egg [--runs-root <目录>]… serve [--port <1..65535>] [--panel-dir <目录>] [--poll-ms <ms>]
+egg serve [--port <1..65535>] [--panel-dir <目录>] [--poll-ms <ms>]
 ```
 
-- `--runs-root` **可重复**（`--runs-root A --runs-root B` = 同时观察两根；单次出现与
-  r8 语义逐字节一致）。根集解析链：**旗标 > `~/.config/ygg/serve.json` > `./runs`**；
-  配置格式 `{"roots":["/abs/…",…]}`，畸形 / 未知键 / 相对路径 = 用法错误**退出 2**
-  （`~/` 前缀展开；按 canonicalize 去重）；**拒绝文件系统爬扫**——根集只来自显式声明
-  （D21）。目录不存在 → 报错退出 1（fail-closed，不自动创建）。
+- **空根启动**：不携带任何观察根；`--runs-root` 旗标已退役（用法错误退出 2，
+  文案指向 POST 注册）。`~/.config/ygg/serve.json` 存在时启动打印迁移指引
+  （列出旧 roots 与对应注册命令，**不自动导入**——「面板在观察什么」必须显式注册）。
+- **观察根注册表**（进程内 `RwLock<Vec<RootEntry>>`；重启为空）：
+
+  | 端点 | 载荷 | 语义 |
+  | --- | --- | --- |
+  | `POST /api/roots` | `{"root": "/abs/…"}` | 注册。**形状校验**：绝对路径（相对/`~` = 400）、`is_dir` 必须为真（404，零创建）、上限 32 根（409 `registry_full`）。**幂等**：同一 canonical 根重复注册 = `added:false`。注册时按 `<root>/run.json` 存在性归类：`singleRun=true`（单局根，只观察该局）或父目录根（枚举其子目录各局）。成功 → 根级 SSE 变更帧 |
+  | `DELETE /api/roots?root=<绝对路径>` | query | 注销。**幂等**：缺席 = `removed:false`。只从注册表摘除（不删盘上任何字节）→ 根级变更帧 |
+  | `GET /api/roots` | — | `{"roots":[{"root","singleRun"}], "cap":32}`（单实例探针的正面证据面） |
+
 - `--port` 缺省 7800；恒绑定 **`127.0.0.1` 常量**（无旗标）；被占用 → 报错退出 1（不自动
-  递增）。单实例语义**按端口**成立：7800 是全局唯一缺省实例，显式换端口 = 显式逃生门。
+  递增）。单实例语义**按端口**成立：7800 是全局唯一缺省实例，显式换端口 = 显式逃生门
+  （独立实例独立注册表）。
 - `--poll-ms` 缺省 700，钳制 [200, 5000]（watcher 变更检测周期）。
 - `--panel-dir`：内置两级列表页的盘上覆盖（开发期改 HTML 刷新即生效；缺失文件 404）。
-- 与其它全部模式互斥（`usage_error`，退出 2）；`--run-id` / `--mod` / `--store` 不存在
-  （观察单位 = runs 根集，不绑定单局、不装 Mod）。
-- **单实例探针（零锁文件，端口即事实）**：启动前手写只读 `GET /api/runs`（1s 超时）——
-  自家实例且请求根 ⊆ 在役根 → 幂等复用（打印面板 URL **退出 0**，nohup 脚本安全）；
-  请求根不被覆盖 → **退出 1**（在役实例不热改根）；旧代单根实例（响应含 `runsRoot`）
-  → **退出 1** + 重启指引；无自家实例 → 照常 bind（探针↔bind 竞态由 bind 失败路径兑住）。
-- 先起 serve 再开局**合法**（一级列表动态出现新局）；局收口后继续提供终局数据；
+- 与其它全部模式互斥（`usage_error`，退出 2）；不接受位置参数 / new / open。
+- **单实例探针（零锁文件，端口即事实）**：启动前手写只读 `GET /api/roots`（1s 超时）——
+  自家实例（应答含 `roots` 数组）→ 幂等复用（打印面板 URL **退出 0**，nohup 脚本安全；
+  **不再比较根集**——注册表由调用方 POST 扩容，启动面无根集可比较）；旧代实例
+  （无 `/api/roots` 端点，404/405）→ **退出 1** + 重启指引；无自家实例 → 照常 bind
+  （探针↔bind 竞态由 bind 失败路径兑住）。
+- 先起 serve 再注册再开局**合法**（一级列表动态出现新局）；局收口后继续提供终局数据；
   run 目录被外部删除 → 相关 API 404 + watcher 摘除，serve 不退出。
 
 #### 3.7.2 四级形态与宿主/mod 边界
 
 | 级 | 归属 | 内容 | 数据源 |
 | --- | --- | --- | --- |
-| 一级：历史局（mod 分组列表） | egg 原生 | `#/runs`；按 `meta.mod` 分组的实例枚举（组按组内最新 `updated_at` 降序） | **多根扫描**（行带 `root` 标识）+ 存储探针（前端对 `/api/runs` 分组推导，serve 零改动） |
+| 一级：历史局（mod 分组列表） | egg 原生 | `#/runs`；按 `meta.mod` 分组的实例枚举（组按组内最新 `updated_at` 降序） | **注册表扫描**（行带 `root` 标识）+ 存储探针（前端对 `/api/runs` 分组推导，serve 零改动） |
 | 二级：mod 实例列表 | egg 原生 | `#/mods/<key>`；该 mod 的 runs 枚举 | 同上（前端按 key 过滤） |
 | 三级：局详情 | egg 原生 | `#/runs/<id>`；存档折叠段 + 投影区（见下注） | `ygg_store::observe` 只读观察面 |
 | 四级：存档视图 | **mod 自行维护** | mod 自带 UI（详情页存档折叠段内 iframe 入口） | 存档数据 API（裸数据） |
@@ -60,7 +69,7 @@ egg [--runs-root <目录>]… serve [--port <1..65535>] [--panel-dir <目录>] [
 
 hash 路由（纯前端，URL=状态、可收藏可刷新）：`#/`（与空 hash）= 最新局详情（默认视图，SSE/轮询重取时自动跟随新最新局）；`#/runs` = 历史局列表；`#/mods/<encodeURIComponent(meta.mod)>` = 实例列表；`#/runs/<id>` = 指定局详情（与默认视图共用同一渲染器；非最新局显示「← 最新局」返回）。返回导航由前端按当前路由推导（`#nav-back` 空容器 + 常驻「历史局」入口；历史局自身不渲染任何入口，防 no-op；局详情父级解析失败——截断/已删——降级为「← mod 列表」），不由点击历史推导——渲染即有意义，结构上不可能 no-op。`meta.mod` 缺失/解析失败的行归键 `-` 的「未知 mod」组，诚实呈现、不做客户端别名合并（别名归宿主 serve 侧，只服务面板托管，不服务分组）。
 
-#### 3.7.3 API 契约总表（全部 GET；非 GET → 405；未知路径 → 404）
+#### 3.7.3 API 契约总表（数据面全部 GET；/api/roots 白名单 POST/DELETE；未知路径 → 404）
 
 | 路由 | 语义 | 响应形状（关键字段） |
 | --- | --- | --- |
@@ -73,6 +82,9 @@ hash 路由（纯前端，URL=状态、可收藏可刷新）：`#/`（与空 has
 | `GET /api/runs/<id>/artifacts` | 当前代制品元信息 | `{artifacts:[{path,bytes,sha256,updatedAt}]}`（path 升序） |
 | `GET /api/runs/<id>/artifacts/<path..>` | 制品原文 | 原字节（`validate_artifact_path` 门复用；读侧封顶 1 MiB → 413） |
 | `GET /api/stream` | SSE 变更流 | `text/event-stream`（§3.7.5） |
+| `POST /api/roots` | **注册观察根**（唯一写面例外：进程内观察配置，非局状态） | `{"ok":true,"added":<bool>,"root","singleRun","roots":[…]}`（幂等；400 形状 / 404 不存在 / 409 满） |
+| `DELETE /api/roots?root=` | 注销观察根 | `{"ok":true,"removed":<bool>,"roots":[…]}`（幂等；不删盘上字节） |
+| `GET /api/roots` | 注册表自描述 | `{"roots":[{"root","singleRun"}],"cap":32}` |
 | `GET /panel/<run-id>/[rel]` | mod 面板托管 | 文件字节（§3.7.4；未声明/不可达 → 404 JSON 带 reason） |
 
 run 寻址统一跨根定位 `locate_run`：0 命中 → 404（数据端点 `run_not_found` / `/panel`
@@ -117,18 +129,22 @@ kv:{entries,revision}, pending_choice}`。mod 自己的状态在 `kv.entries`；
 
 #### 3.7.6 安全边界与线程模型
 
-- 绑定 `127.0.0.1` 常量（单测断言字面量）；GET-only（非 GET → 405，请求体不读）；无凭据面；
-  **单实例探针 = 只读 GET**（启动前 `GET /api/runs` 一次，1s 超时；**零锁文件**——端口即事实，
-  无盘上状态，复用/拒绝判定见 §3.7.1）；**零写不变式跨多根成立**：watcher 多根扫描仍是
-  纯 stat + `save_probe`（指纹键 = (根, 局) 对），409/404/复用路径零盘上副作用；
-  解析健壮性（32 KiB 头上限 / 5s 超时 / 64 连接封顶超出 503 / 路径白名单 / query 数值钳制 /
-  run-id 语法门）；无 CORS 头；`/panel` 双守卫 + nosniff；观察面零写（`query_only` + 无 migrate +
-  先探测后连接，`observe_creates_nothing` / `observe_writes_nothing` 测试锁）。
+- 绑定 `127.0.0.1` 常量（单测断言字面量）；**方法白名单**：数据面 GET-only（非 GET → 405），
+  唯一例外 `/api/roots` 的 POST/DELETE（注册表维护；请求体封顶 8 KiB）；无凭据面；
+  **单实例探针 = 只读 GET**（启动前 `GET /api/roots` 一次，1s 超时；**零锁文件**——端口即事实，
+  无盘上状态，复用/拒绝判定见 §3.7.1）；**零写不变式跨注册面成立**：注册/注销只改进程内
+  `RwLock` 注册表，`registry_writes_nothing_on_disk` 测试锁（操作前后目录树逐字节一致）；
+  watcher 注册表扫描仍是纯 stat + `save_probe`（指纹键 = (根, 局) 对），409/404/复用路径
+  零盘上副作用；解析健壮性（32 KiB 头上限 / 5s 超时 / 64 连接封顶超出 503 / 路径白名单 /
+  query 数值钳制 / run-id 语法门）；无 CORS 头；`/panel` 双守卫 + nosniff；观察面零写
+  （`query_only` + 无 migrate + 先探测后连接，`observe_creates_nothing` /
+  `observe_writes_nothing` 测试锁）。
 - **零内核**：serve 不装载 ModBundle/kernel/mlua、不构造 `Session`——数据面只剩文件 stat 与轻量
   SQL（毫秒级），发布/订阅快照机制失去存在理由；mlua 非 Send 约束以「进程无 Lua」最强成立。
   物理锁：`serve_source_has_no_write_path`（生产面源扫描禁写路径）。
 - 线程编排：主线程 accept（每连接一线程，封顶 64）；watcher 线程纯变更检测；SSE 每连接
-  `wait_timeout` 等广播。唯一共享可变状态 = `version` 广播对（Mutex + Condvar）。
+  `wait_timeout` 等广播。共享可变状态 = `version` 广播对（Mutex + Condvar）+ `roots`
+  注册表（RwLock，读多写少；锁不跨 IO——先克隆快照再扫盘）。
 
 ---
 

@@ -16,11 +16,16 @@ directories (`ls` / `stat` / `find` / `du` / `wc` — row counts, column names a
 classified as the values). Verifications that need real data are run by the user, who pastes the
 output back; synthetic data generated under `/tmp` is unrestricted.
 
-0b. **serve is read-only**: the `serve` mode (r8) exposes exactly the GET-only HTTP
-    observation plane (`docs/design/serve.md`, ex-DESIGN §3.7). It must never gain a write endpoint — the
-    human gates (`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit`
-    / `review.note`) have **no online path** and are still ticketed through the CLI/daemon.
-    All state writes go exclusively through the single-shot CLI / interactive / daemon modes.
+0b. **serve is read-only**: the `serve` mode (r1) exposes a GET-only HTTP observation
+    plane for **run data** (`docs/design/serve.md`, ex-DESIGN §3.7). It must never gain a
+    run-state write endpoint — the human gates (`proposal.accept` / `gate.approve` /
+    `coordinate.submit` / `verify.submit` / `review.note`) have **no online path** and are
+    still ticketed through the CLI/daemon. All state writes go exclusively through the
+    single-shot CLI / interactive / daemon modes. **Sole exception**: `POST`/`DELETE
+    `/api/roots` maintains the in-process **observation-root registry** (which directories
+    the panel watches) — observation-plane configuration, not run state: it writes no save,
+    no mod KV, no run.json/coordination, creates no directory, and is volatile per process
+    (empty on restart). `~/.config/ygg/serve.json` and the `--runs-root` flag are retired.
 1. **Every in-run artifact must be carried by an event first**: before writing a file, changing code
    or producing a deliverable with a command, an event must bring it into the state machine
    (`requirement.dispatch` → proposal → gate). **The verdict looks at events, not at where the bytes
@@ -455,32 +460,35 @@ are git-ignored, `.ygg/mods/` is committed.
 
 ### Start
 ```bash
-.ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs --event event.start   # ① boot：叙述三则，不转场
-A=".ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs"
-$A --resume --event charter.set --payload '"<标题>|<目标>|<成功判据>"'   # ② 立局：写章程三件套（可反复修订；run.begin 后锁定）
-$A --resume --event run.begin                                          # ③ 开工：章程齐备 → 协调微状态（[RUN BEGUN]）
-```（① boot 叙述引擎/模式/红线三则，可改带章程载荷 `--payload '"<标题>|<目标>|<成功判据>"'` 一步立局；空载荷也能 boot，立局微状态下补写章程即可。）
+ROOT="$(.ygg/bin/egg new --mod .ygg/mods/agent-seed --in .ygg/runs --event event.start | tail -1 | sed 's/^run-root: //')"   # ① boot：新局（自动 run-id），叙述三则，不转场
+A=".ygg/bin/egg open $ROOT"
+$A --event charter.set --payload '"<标题>|<目标>|<成功判据>"'   # ② 立局：写章程三件套（可反复修订；run.begin 后锁定）
+$A --event run.begin                                          # ③ 开工：章程齐备 → 协调微状态（[RUN BEGUN]）
+```（① boot 叙述引擎/模式/红线三则，可改带章程载荷 `--payload '"<标题>|<目标>|<成功判据>"'` 一步立局；空载荷也能 boot，立局微状态下补写章程即可。`new` 回执末行固定 `run-root: <path>`，raw 模式取 `run_root` 字段。）
 
-### Serve（只读观察台，r9 全局唯一实例）
+### Serve（只读观察台，r1 空根启动 + 运行时注册）
 ```bash
 scripts/install-egg.sh                                                             # 构建+安装（含全局 egg 软链）
-.ygg/bin/egg --runs-root .ygg/runs serve                                          # 起服/加入全局唯一实例（默认 127.0.0.1:7800；Ctrl-C 停服）
-egg serve                                                                          # 全局命令裸起：根集来自 ~/.config/ygg/serve.json（{"roots":["/abs/…"]}）
-.ygg/bin/egg serve --port 7801 --poll-ms 300                                     # --port = 显式逃生门（不进全局唯一语义）；--poll-ms 加快变更检测
-# 单实例语义：同端口已有自家实例 = 幂等复用退出 0（打印面板 URL）；根不被覆盖/旧版单根实例 = 退出 1。
-# 面板：http://127.0.0.1:7800/（默认=最新局详情：主流程状态条+需求卡+决策时间线；#/runs=mod 分组历史局 → #/mods/<key> 实例 → #/runs/<id> 局详情；存档折叠段内 mod 面板 iframe）
+.ygg/bin/egg serve                                                                 # 空根起服/加入全局唯一实例（默认 127.0.0.1:7800；Ctrl-C 停服）
+curl -X POST http://127.0.0.1:7800/api/roots -H 'Content-Type: application/json' -d '{"root": "<repo 绝对路径>/.ygg/runs"}'
+                                                                                   # 注册观察根（runs 父目录或单个 run-root 均可；幂等）
+.ygg/bin/egg serve --port 7801 --poll-ms 300                                       # --port = 显式逃生门（独立实例独立注册表）；--poll-ms 加快变更检测
+# 注销：curl -X DELETE 'http://127.0.0.1:7800/api/roots?root=<绝对路径>'（幂等，不删盘上任何字节）
+# 注册表仅进程内有效（重启为空需重新注册）；~/.config/ygg/serve.json 与 --runs-root 已退役（启动给迁移指引）。
+# 单实例语义：同端口已有自家实例 = 幂等复用退出 0（打印面板 URL）；旧版无 /api/roots 端点实例 = 退出 1 提示重启。
+# 面板：http://127.0.0.1:7800/（默认=最新局详情：主流程状态条+需求卡+决策时间线；#/runs=mod 分组历史局 → #/mods/<key> 实例 → #/runs/<id> 局详情；存档折叠段内 mod 面板 iframe；页头「观察根」折叠段可注册/注销）
 # 契约与安全边界见 docs/design/serve.md（原 DESIGN §3.7）；serve 只读：gate/accept 类人类门禁不在线上，仍走 CLI 票据。
 ```
 
 ### Continue
 ```bash
-A=".ygg/bin/egg --mod .ygg/mods/agent-seed --run-id <run-name> --runs-root .ygg/runs"
-$A --resume --drive stdin                                     # interactive: the human chooses (default)
-$A --resume --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
-$A --resume --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)
-$A --resume --drive none                                      # look at the situation, do not advance
-$A --resume --event map.show                                  # current node + out-edges; add --payload '"full"' for the whole design map
-.ygg/bin/egg --run-id <run-name> --runs-root .ygg/runs --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
+A=".ygg/bin/egg open <run-root>"                     # run-root = new 回执的存档目录（存档目录即身份）
+$A --drive stdin                                     # interactive: the human chooses (default)
+$A --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
+$A --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)
+$A --drive none                                      # look at the situation, do not advance
+$A --event map.show                                  # current node + out-edges; add --payload '"full"' for the whole design map
+.ygg/bin/egg open <run-root> --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
 ```
 
 ### Pause

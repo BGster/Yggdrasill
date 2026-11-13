@@ -53,7 +53,7 @@
         {
           "id": "coordination.recovery",
           "modality": "must",
-          "text": "Stale lines and crash recovery: closing keeps itself alive with a heartbeat (expires after 10s); once expired, a write command or `--resume` declares it dead and returns the phase to running; the lock is taken over by mtime as well — neither can wedge forever after a process crash.",
+          "text": "Stale lines and crash recovery: closing keeps itself alive with a heartbeat (expires after 10s); once expired, a write command or `open` (attach) declares it dead and returns the phase to running; the lock is taken over by mtime as well — neither can wedge forever after a process crash.",
           "basis": "AGENTS.md §5 (pre-migration)"
         },
         {

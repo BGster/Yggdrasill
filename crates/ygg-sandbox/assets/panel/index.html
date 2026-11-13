@@ -20,6 +20,19 @@
     <span id="sse-state" class="sse sse-init">连接中</span>
     <nav id="nav-back"></nav>
   </header>
+  <!-- 观察根注册表（r1：进程内配置，重启为空；不写局状态） -->
+  <details id="roots-panel">
+    <summary id="roots-summary">观察根（加载中…）</summary>
+    <div class="roots-body">
+      <p class="hint">注册表仅在当前 serve 进程内有效（重启为空）；runs 父目录或单个 run-root 均可注册。</p>
+      <form id="root-form">
+        <input id="root-input" type="text" placeholder="/abs/path/.ygg/runs 或 /abs/path/.ygg/runs/<run-id>" size="60" />
+        <button type="submit">注册</button>
+      </form>
+      <p id="root-error" class="error" hidden></p>
+      <ul id="roots-list"></ul>
+    </div>
+  </details>
   <main id="view"><p class="hint">加载中…</p></main>
   <script type="module" src="/assets/app.js"></script>
 </body>

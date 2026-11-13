@@ -192,6 +192,20 @@ impl RunStore for JsonFileStore {
         self.write_compact(&self.autosave, save)
     }
 
+    fn savepoints(&self) -> Result<Vec<crate::SavepointInfo>, StoreError> {
+        Err(StoreError::Misconfigured {
+            detail: "JSON 后端无代（generation）概念：reset 归档旧 autosave 后不可恢复，\
+                     存档点回退（--at）仅 sqlite 局可用"
+                .to_owned(),
+        })
+    }
+
+    fn save_at(&self, _generation: i64) -> Result<Option<Vec<u8>>, StoreError> {
+        Err(StoreError::Misconfigured {
+            detail: "JSON 后端不支持按代取档（--at 仅 sqlite 局可用）".to_owned(),
+        })
+    }
+
     fn steps(&self) -> Result<StepLog, StoreError> {
         let mut log = StepLog::default();
         let Ok(text) = fs::read_to_string(&self.events) else {
@@ -552,6 +566,23 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("建临时 run 目录");
         dir
+    }
+
+    /// JSON 后端无代概念：savepoints / save_at 必须明确拒绝（不是静默空清单）。
+    #[test]
+    fn savepoints_refused_on_json_backend() {
+        let dir = case_dir("savepoints-refused");
+        let store = JsonFileStore::open(&dir).expect("打开");
+        let err = store.savepoints().expect_err("JSON 不支持存档点清单");
+        assert!(
+            err.to_string().contains("sqlite"),
+            "文案须指向 sqlite: {err}"
+        );
+        let err = store.save_at(1).expect_err("JSON 不支持按代取档");
+        assert!(
+            err.to_string().contains("sqlite"),
+            "文案须指向 sqlite: {err}"
+        );
     }
 
     /// put → get → list：`artifacts/` 目录树按 path 升序，字节保真。

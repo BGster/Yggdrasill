@@ -625,9 +625,10 @@ cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1
 cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1   # 前缀钉
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
-#   .ygg/bin/egg --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
-#   .ygg/bin/egg --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
-#   .ygg/bin/egg --mod .ygg/mods/agent-seed --run-id t --runs-root .ygg/runs --resume
+#   .ygg/bin/egg new --mod .ygg/mods/agent-seed --in .ygg/runs --event event.start   # 新局（回执末行 run-root）
+#   .ygg/bin/egg open .ygg/runs/t --requirement '需求A|描述'
+#   .ygg/bin/egg open .ygg/runs/t --proposal 'r1|1|analysis|结论|a.md'
+#   .ygg/bin/egg open .ygg/runs/t                                                  # 附着续跑（自动取最新存档点）
 
 # 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
 cargo run --example pack -- .ygg/mods/agent-seed
