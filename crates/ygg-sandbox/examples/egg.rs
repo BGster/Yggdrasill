@@ -225,6 +225,13 @@ const WAIT_TOOLS_HEARTBEAT: Duration = Duration::from_secs(1);
 
 fn main() {
     let args = parse_args();
+    let args = match prepare_run_root(args) {
+        Ok(args) => args,
+        Err(message) => {
+            eprintln!("error: {message}");
+            exit(1);
+        }
+    };
     let code = if args.builtin_tool.is_some() {
         // 内置工具模式：不读 Mod、不推进状态、不需要 run 目录（见 `run_builtin_tool`）。
         run_builtin_tool(&args)
@@ -272,13 +279,31 @@ struct InboxWrite {
     value: String,
 }
 
+/// 开局方式（r1 语义二分）：新局 = 指定 mod 与存档位置（自动生成 run-id）；
+/// 读档 = 只指定存档位置（run-root 即身份），自动取最新存档点续跑。
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum OpenStyle {
+    /// `egg new --mod <目录> [--in <runs 父目录>] [--store <b>]`：自动生成 run-id，
+    /// 建 `<in>/<id>/` 并开局（`--force` 允许对已有目录重置）。
+    New,
+    /// `egg open <run-root> [--at g<代>]`：附着具体局目录；mod 从 run.json 现读。
+    Open,
+}
+
 #[derive(Clone)]
 struct Args {
     mod_dir: Option<PathBuf>,
-    run_id: String,
-    /// runs 根目录（`--runs-root` 末次出现生效；serve 模式的多根见 [`Args::serve_runs_roots`]）。
-    runs_root: PathBuf,
-    resume: bool,
+    /// 开局方式（new/open；serve 与 --builtin-tool 模式为 None）。
+    open_style: Option<OpenStyle>,
+    /// 局目录（存档目录即身份）。new = `<in>/<自动 id>`（开局前为空，由
+    /// `prepare_run_root` 填充）；open = 位置参数原样。
+    run_root: PathBuf,
+    /// new 的 runs 父目录（`--in`；缺省 `./runs`）。
+    runs_parent: PathBuf,
+    /// new 的显式重置许可（目录已有旧产物时）；open 语义天然不重置。
+    force: bool,
+    /// open 的回退存档点（`--at g<代>`；仅 sqlite 局可用）。
+    at: Option<i64>,
     settle: bool,
     watch: bool,
     event: Option<String>,
@@ -334,10 +359,6 @@ struct Args {
     panel_dir: Option<PathBuf>,
     /// `--poll-ms <ms>`：watcher 变更检测周期（缺省 700，钟制 [200, 5000]）。
     poll_ms: Option<u64>,
-    /// `--runs-root` 的**全部出现**（按序收集；仅 serve 模式消费——多根观察集，
-    /// 缺席时 serve 走配置文件/`./runs` 解析链）。非 serve 模式只用 [`Args::runs_root`]
-    /// （末次出现，覆盖语义与历史逐字节一致）。
-    serve_runs_roots: Vec<PathBuf>,
 }
 
 /// 提交者身份（宿主解析产物，随命令/请求一次性解析）。
@@ -523,9 +544,12 @@ impl BuiltinTool {
 
 fn parse_args() -> Args {
     let mut mod_dir: Option<PathBuf> = None;
-    let mut run_id: Option<String> = None;
-    let mut runs_roots: Vec<PathBuf> = Vec::new();
-    let mut resume = false;
+    let mut positional: Vec<String> = Vec::new();
+    let mut open_style: Option<OpenStyle> = None;
+    let mut runs_parent: Option<PathBuf> = None;
+    let mut force = false;
+    let mut at: Option<i64> = None;
+    let mut at_seen = false;
     let mut settle = false;
     let mut watch = false;
     let mut event: Option<String> = None;
@@ -560,11 +584,44 @@ fn parse_args() -> Args {
     let mut iter = std::env::args().skip(1);
     while let Some(argument) = iter.next() {
         match argument.as_str() {
+            // r1 语义二分的两个生命周期子命令（裸词，与 serve 同型）。
+            "new" | "open" if positional.is_empty() => {
+                if open_style.is_some() {
+                    usage_error("new / open / serve 一次只能选一个");
+                }
+                open_style = Some(if argument == "new" {
+                    OpenStyle::New
+                } else {
+                    OpenStyle::Open
+                });
+            }
             "--mod" => mod_dir = Some(PathBuf::from(next_value(&mut iter, "--mod"))),
-            "--run-id" => run_id = Some(next_value(&mut iter, "--run-id")),
-            // 可重复收集（serve 多根观察集）；非 serve 模式取末次出现 = 历史覆盖语义。
-            "--runs-root" => runs_roots.push(PathBuf::from(next_value(&mut iter, "--runs-root"))),
-            "--resume" => resume = true,
+            // ── 退役旗标（r1 fail-closed 可读拒绝；指向新用法，绝不静默映射）──
+            "--run-id" => {
+                let _ = next_value(&mut iter, "--run-id");
+                usage_error(
+                    "--run-id 已退役（run-root 即身份）：新局 `egg new --mod <目录> [--in <runs 父目录>]`；\
+                     读档 `egg open <run-root>`",
+                );
+            }
+            "--runs-root" => {
+                let _ = next_value(&mut iter, "--runs-root");
+                usage_error(
+                    "--runs-root 已退役：new 用 `--in <runs 父目录>`（缺省 ./runs），open 直接给 run-root；\
+                     serve 空根启动后用 `POST /api/roots {\"root\": \"<绝对路径>\"}` 注册观察根",
+                );
+            }
+            "--resume" => usage_error(
+                "--resume 已退役：`egg open <run-root>` 自动取最新存档点续跑；\
+                 回退到指定存档点用 `egg open <run-root> --at g<代>`",
+            ),
+            "--in" => runs_parent = Some(PathBuf::from(next_value(&mut iter, "--in"))),
+            "--force" => force = true,
+            "--at" => {
+                at_seen = true;
+                let text = next_value(&mut iter, "--at");
+                at = Some(parse_at(&text).unwrap_or_else(|m| usage_error(&m)));
+            }
             "--settle" => settle = true,
             "--watch" => watch = true,
             "--store" => {
@@ -579,13 +636,10 @@ fn parse_args() -> Args {
             }
             "--event" => event = Some(next_value(&mut iter, "--event")),
             "--payload" => payload = Some(next_value(&mut iter, "--payload")),
-            // 单发回执输出单行 JSON（机器契约）。布尔旗标（同 --resume / --watch 同型）；
-            // 环境回退 YGG_FORMAT 在循环后统一解析（含用法错误 fail-closed）。
+            // 单发回执输出单行 JSON（机器契约）。环境回退 YGG_FORMAT 在循环后统一解析。
             "--raw" => raw = true,
             "--actor" => {
                 let raw = next_value(&mut iter, "--actor");
-                // 形状校验在解析点（与 executor id 同规则）：非法值 = 用法错误，
-                // 绝不带病进 dispatch（那个值会被注入 wire 段）。
                 actor = Some(
                     validate_identity_value("--actor", &raw, 64)
                         .unwrap_or_else(|m| usage_error(&m)),
@@ -616,8 +670,6 @@ fn parse_args() -> Args {
             "--conflict" => set_inbox(&mut inbox, "conflict", next_value(&mut iter, "--conflict")),
             "--resolve" => set_inbox(&mut inbox, "resolve", next_value(&mut iter, "--resolve")),
             "--proposal" => set_inbox(&mut inbox, "proposal", next_value(&mut iter, "--proposal")),
-            // 工具结果的写命令与 `--requirement` 完全同一条路径：旗标是否可用由
-            // Mod 的 `inboxRoutes.<kind>.write.flag` 声明决定（宿主不枚举 kind）。
             "--tool-result" => set_inbox(
                 &mut inbox,
                 "tool-result",
@@ -633,7 +685,6 @@ fn parse_args() -> Args {
                     )),
                 }
             }
-            // 内部模式：父进程 spawn 自己时用（不在 usage 里列出）。
             "--run-tool-worker" => {
                 run_tool_worker = Some(next_value(&mut iter, "--run-tool-worker"))
             }
@@ -649,8 +700,6 @@ fn parse_args() -> Args {
                         HARNESS_ADAPTERS.join(" / ")
                     ));
                 }
-                // 只有 **非 auto** 才落成显式值：auto 与「未指定」同义（都走现场探测），
-                // 保留 auto 也能工作，但省掉一层无谓的字符串比。
                 harness = Some(trimmed.to_owned());
             }
             "--builtin-tool" => {
@@ -661,13 +710,9 @@ fn parse_args() -> Args {
                         BuiltinTool::NAMES.join(" / ")
                     ))
                 }));
-                // 该子命令自带的旗标（--lane / --req / --branch / --base / --root /
-                // --repo / --run-dir / --path / --mode / --parent / --batch /
-                // --sessions-dir / --trash）由 `run_builtin_tool` 二次解析：全局
-                // 解析器只负责**不拒绍**它们（见下面 catch-all 分支）。
+                // 该子命令自带的旗标由 `run_builtin_tool` 二次解析（op 级白名单）。
             }
-            // serve 子命令（无 `--` 前缀；与 `egg serve …` 同形）。
-            "serve" => serve = true,
+            "serve" if positional.is_empty() => serve = true,
             "--port" => {
                 let text = next_value(&mut iter, "--port");
                 match text.trim().parse::<u16>() {
@@ -687,23 +732,28 @@ fn parse_args() -> Args {
             }
             "-h" | "--help" => usage(0),
             other => {
-                // 内置工具模式下，未识别的旗标留给 `run_builtin_tool` 的 op 级
-                // 白名单——那里知道「这个 op 该有哪些旗标」，报错才能点名 op。
-                if builtin_tool.is_none() {
-                    usage_error(&format!("未知参数 `{other}`"));
+                if other.starts_with('-') {
+                    // 内置工具模式下，未识别的旗标留给 op 级白名单。
+                    if builtin_tool.is_none() {
+                        usage_error(&format!("未知参数 `{other}`"));
+                    }
+                } else {
+                    positional.push(other.to_owned());
                 }
             }
         }
     }
 
     // 单发回执输出形态解析链（循环后统一裁决；与 --builtin-tool 冲突检查同层）。
-    // 其余模式（--settle / inbox / --artifact / --wait-tools / daemon）接受但忽略；
-    // 非法 env 值 fail-closed 退出 2，不静默回退。
     let output = resolve_output_format(raw, std::env::var("YGG_FORMAT").ok().as_deref())
         .unwrap_or_else(|message| usage_error(&message));
 
-    // `--builtin-tool` 最先裁决：它既不需要 `--run-id` 也不需要 `--mod`
-    //（内置工具只操作 worktree / 制品 / 会话目录），且不与任何其它模式共存。
+    // 模式互斥：new/open 与 serve 不能同现。
+    if serve && open_style.is_some() {
+        usage_error("serve 与 new / open 一次只能选一个");
+    }
+
+    // `--builtin-tool` 最先裁决：不需要 run-root 也不需要 --mod。
     if builtin_tool.is_some() {
         if settle
             || event.is_some()
@@ -713,24 +763,25 @@ fn parse_args() -> Args {
             || artifact_put.is_some()
             || artifact_get.is_some()
             || daemon
-            || resume
             || watch
             || store.is_some()
             || serve
+            || open_style.is_some()
+            || at_seen
+            || force
+            || runs_parent.is_some()
         {
             usage_error(
-                "--builtin-tool 不能与其它模式（--event / --settle / --resume / --watch / --store / inbox / 制品旗标 / serve）同时使用",
+                "--builtin-tool 不能与其它模式（new / open / --event / --settle / --at / --force / --in / --watch / --store / inbox / 制品旗标 / serve）同时使用",
             );
         }
         return Args {
             mod_dir,
-            run_id: run_id.unwrap_or_default(),
-            runs_root: runs_roots
-                .last()
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from("runs")),
-            serve_runs_roots: runs_roots,
-            resume,
+            open_style: None,
+            run_root: PathBuf::new(),
+            runs_parent: PathBuf::from("runs"),
+            force,
+            at,
             settle,
             watch,
             event,
@@ -756,8 +807,7 @@ fn parse_args() -> Args {
         };
     }
 
-    // serve 是常驻只读观察台：不推进状态、不写任何局、不装 Mod——一切
-    // 「单发 / 常驻 / 推进」旗标对它都没有意义（叠加只会让调用方误以为会发生）。
+    // serve：常驻只读观察台，空根启动 + 运行时注册（POST /api/roots）。
     if serve {
         let flags = ServeFlags {
             settle,
@@ -768,28 +818,24 @@ fn parse_args() -> Args {
             artifact_put: artifact_put.is_some(),
             artifact_get: artifact_get.is_some(),
             daemon,
-            resume,
             watch,
             store: store.is_some(),
             payload: payload.is_some(),
             harness: harness.is_some(),
             tool_timeout: tool_timeout_ms.is_some(),
             drive_is_stdin: drive == Drive::Stdin,
-            run_id: run_id.is_some(),
-            mod_dir: mod_dir.is_some(),
+            positional: !positional.is_empty(),
         };
         if let Some(message) = serve_usage_conflict(&flags) {
             usage_error(&message);
         }
         return Args {
             mod_dir: None,
-            run_id: String::new(),
-            runs_root: runs_roots
-                .last()
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from("runs")),
-            serve_runs_roots: runs_roots,
-            resume: false,
+            open_style: None,
+            run_root: PathBuf::new(),
+            runs_parent: PathBuf::from("runs"),
+            force: false,
+            at: None,
             settle: false,
             watch: false,
             event: None,
@@ -815,14 +861,42 @@ fn parse_args() -> Args {
         };
     }
 
-    let Some(run_id) = run_id else {
-        usage_error("缺少 --run-id <标识>");
+    // new / open 之外没有开局路径。
+    let Some(style) = open_style else {
+        usage_error(
+            "缺少 new / open / serve 子命令：新局 `egg new --mod <目录> [--in <runs 父目录>]`；\
+             读档 `egg open <run-root>`；观察台 `egg serve [--port …]`",
+        );
     };
-    if !is_valid_run_id(&run_id) {
-        usage_error("--run-id 只允许字母数字与 `-` `_` `.`（不得含路径分隔符）");
-    }
-    // 守护模式是**常驻**模式：整个生命周期跑同一个 `Session`，所以任何
-    // 「单发即退出」的旗标都没有意义（叠加只会让调用方误以为会发生）。
+
+    let run_root = match style {
+        OpenStyle::New => {
+            if !positional.is_empty() {
+                usage_error("new 不接受位置参数（run-id 自动生成；存档位置用 --in 指定父目录）");
+            }
+            if at_seen {
+                usage_error("--at 只能与 open 一起用（new 建的是全新代，没有可回退的存档点）");
+            }
+            if mod_dir.is_none() {
+                usage_error("new 必须指定 --mod <mod目录>（新局要装载 Mod 契约）");
+            }
+            PathBuf::new() // 由 prepare_run_root 在开局前填充
+        }
+        OpenStyle::Open => {
+            if positional.len() != 1 {
+                usage_error("open 需要恰好一个位置参数：<run-root>（存档目录即身份）");
+            }
+            if force {
+                usage_error("--force 只能与 new 一起用（open 永不重置——要重置请 new --force）");
+            }
+            if runs_parent.is_some() {
+                usage_error("--in 只能与 new 一起用（open 的 run-root 已是完整局目录）");
+            }
+            PathBuf::from(&positional[0])
+        }
+    };
+
+    // 守护模式是**常驻**模式：单发即退出的旗标都没有意义。
     if daemon
         && (settle
             || event.is_some()
@@ -837,7 +911,7 @@ fn parse_args() -> Args {
             "--daemon 不能与 --event / --settle / --wait-tools / --watch / inbox 写命令 / 制品旗标 / --run-tool-worker 同时使用",
         );
     }
-    // 制品旗标是**独立的单发模式**：不推进状态、不读 Mod 契约，只碰本局制品面。
+    // daemon 只挂 open（attach 语义）；new 的 daemon 入口也合法（先建局再常驻）。
     let artifact_mode = artifact_put.is_some() || artifact_get.is_some();
     if artifact_put.is_some() && artifact_get.is_some() {
         usage_error("--artifact-put 与 --artifact-get 不能同时使用");
@@ -867,16 +941,6 @@ fn parse_args() -> Args {
         if write.value.trim().is_empty() {
             usage_error(&format!("--{} 需要非空载荷", write.flag));
         }
-    } else if !settle
-        && !wait_tools
-        && !daemon
-        && run_tool_worker.is_none()
-        && !artifact_mode
-        && mod_dir.is_none()
-    {
-        usage_error(
-            "缺少 --mod <mod目录>（仅 --settle / --daemon / inbox 操作 / --wait-tools / 制品旗标 可省略）",
-        );
     }
     if let Some(name) = &event {
         if name.trim().is_empty() {
@@ -886,13 +950,11 @@ fn parse_args() -> Args {
 
     Args {
         mod_dir,
-        run_id,
-        runs_root: runs_roots
-            .last()
-            .cloned()
-            .unwrap_or_else(|| PathBuf::from("runs")),
-        serve_runs_roots: runs_roots,
-        resume,
+        open_style: Some(style),
+        run_root,
+        runs_parent: runs_parent.unwrap_or_else(|| PathBuf::from("runs")),
+        force,
+        at,
         settle,
         watch,
         event,
@@ -918,6 +980,93 @@ fn parse_args() -> Args {
     }
 }
 
+/// run-root 的基名（run-id 的派生形态：目录名即本局标识；run.json / inbox
+/// 幂等键 / settlement 报告沿用同一名字空间）。
+fn run_basename(run_root: &Path) -> &str {
+    run_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+}
+
+/// `--at` 取值解析：`g<代>`（如 `g0` / `g3`；代 = sqlite generation，存档点边界）。
+/// 也接受裸数字（与 `g<N>` 同义）。其余一律用法错误。
+fn parse_at(text: &str) -> Result<i64, String> {
+    let trimmed = text.trim();
+    let digits = trimmed.strip_prefix('g').unwrap_or(trimmed);
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!(
+            "--at 需要 `g<代>`（如 g0 / g3；代 = sqlite generation 存档点），当前是 `{text}`"
+        ));
+    }
+    digits
+        .parse::<i64>()
+        .map_err(|_| format!("--at 的代数超出范围：`{text}`"))
+}
+
+/// new 的 run-root 裁决（main 早期、一切模式之前）：自动生成 run-id 并建父目录。
+///
+/// id 形态 `r-<yyyymmdd>-<hhmmss>-<4hex>`（过 `is_valid_run_id` 白名单；同秒冲突
+/// 由随机段吸收，仍撞则换段重试，8 次后报错）。**零创建语义**：这里只定名，
+/// 目录由 `Session::open_mode` 的 `create_dir_all` 建立（后端裁决先于任何写入）。
+/// open / serve / builtin-tool 原样返回（run-root 已在 parse_args 就位）。
+fn prepare_run_root(args: Args) -> Result<Args, String> {
+    if args.open_style != Some(OpenStyle::New) {
+        return Ok(args);
+    }
+    let parent = &args.runs_parent;
+    if parent.exists() && !parent.is_dir() {
+        return Err(format!(
+            "--in 指定的 runs 父目录 {} 已存在但不是目录",
+            parent.display()
+        ));
+    }
+    fs::create_dir_all(parent)
+        .map_err(|err| format!("创建 runs 父目录 {} 失败：{err}", parent.display()))?;
+    let stamp = {
+        let secs = now_secs();
+        // 本地时间戳（人读目录名）：YYYYMMDD-HHMMSS；不引入新依赖，手工换算 UTC。
+        let days = secs / 86_400;
+        let rem = secs % 86_400;
+        let (year, month, day) = civil_from_days(days as i64);
+        format!(
+            "{year:04}{month:02}{day:02}-{:02}{:02}{:02}",
+            rem / 3600,
+            (rem % 3600) / 60,
+            rem % 60
+        )
+    };
+    for attempt in 0..8 {
+        let suffix = format!("{:04x}", (now_ms() as u64 ^ (attempt * 0x9e37)) & 0xffff);
+        let run_id = format!("r-{stamp}-{suffix}");
+        let run_root = parent.join(&run_id);
+        if !run_root.exists() {
+            return Ok(Args {
+                run_root,
+                ..args
+            });
+        }
+    }
+    Err(format!(
+        "自动 run-id 在 {} 下连续 8 次撞名（同秒高并发？）——请重试",
+        parent.display()
+    ))
+}
+
+/// 天数 → 公历（Howard Hinnant 的 civil_from_days 算法；纯整数，无依赖）。
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if month <= 2 { year + 1 } else { year }, month, day)
+}
+
 /// 取旗标后一位的值（缺失即用法错误）。
 fn next_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> String {
     match iter.next() {
@@ -938,37 +1087,45 @@ fn is_valid_run_id(run_id: &str) -> bool {
 
 fn usage(code: i32) -> ! {
     let text = "\
-用法:
-  egg --mod <mod目录> --run-id <标识> [--resume] [--watch] [--drive <方式>]
-                                                                交互模式
-  egg --mod <mod目录> --run-id <标识> --event <名称> [--payload <JSON>] [--resume]
-                                                                单发模式（Agent 脚本化）
-  egg --run-id <标识> --settle                                局末结算（结算已收口的局：
-                                                              常驻局的收口 = 退役）
-  egg --run-id <标识> [--runs-root <目录>] --requirement '标题|描述' 
-                                                                异步补需求（只追本局后端的 inbox）
-  egg --run-id <标识> --daemon [--mod <mod目录>]
-                                                                常驻守护模式（JSON-RPC over stdio）
-  agent [--runs-root <目录>] serve [--port <端口>] [--panel-dir <目录>] [--poll-ms <ms>]
-                                                                常驻只读观察台（HTTP 面板，默认 127.0.0.1:7800）
+用法（r1 语义二分：new = 开新局；open = 读档续跑；存档目录即身份）:
+  egg new  --mod <mod目录> [--in <runs 父目录>] [--store <后端>] [--force]
+           [--event <名称> [--payload <JSON>]] [--raw]
+                                                                新局：自动生成 run-id，建 <in>/<id>/
+                                                                （--in 缺省 ./runs）；--event 可同调用开局
+  egg open <run-root> [--at g<代>] [--event <名称> [--payload <JSON>]] [--raw]
+                                                                读档/单发：取最新存档点续跑；
+                                                                --at g<代> 回退到指定存档点（仅 sqlite 局）
+  egg open <run-root> [--watch] [--drive <方式>]                交互附着（人 / 脚本驱动）
+  egg open <run-root> --settle                                 局末结算（结算已收口的局）
+  egg open <run-root> --requirement '标题|描述'                 异步补需求（只追本局后端的 inbox）
+  egg open <run-root> --daemon                                 常驻守护模式（JSON-RPC over stdio）
+  egg open <run-root> --wait-tools [--tool-timeout <ms>]        等在飞工具落地后 drain 一次 inbox
+  egg open <run-root> --artifact-put <artifacts/名>=<源文件>    制品写入本局制品面
+  egg open <run-root> --artifact-get <artifacts/名>             制品原文直出 stdout
+  egg serve [--port <端口>] [--panel-dir <目录>] [--poll-ms <ms>]
+                                                                常驻只读观察台（空根启动，默认 127.0.0.1:7800）
+                                                                观察根经运行时 API 注册：
+                                                                POST /api/roots {\"root\":\"<绝对路径>\"}
+
+退役旗标（fail-closed 可读拒绝，不静默映射）:
+  --run-id       → run-root 即身份：new 自动生成；open 位置参数给出
+  --runs-root    → new 用 --in；serve 用 POST /api/roots 注册观察根
+  --resume       → open 自动取最新存档点；回退用 --at g<代>
 
 选项:
   --mod <目录>       Mod 目录（五件套：pack.json / manifest.json / mod.lua /
-                     schemas/*.json / data/*.json）。host 契约（pack.json 的 agent /
-                     inboxRoutes、config.json 的 settlement / drive）**必填**；缺任一
-                     即装载期失败。--settle / inbox 写命令可省略（改读 run.json 记录的
-                     本局 mod 路径，两者都没有则报错）
-  --run-id <标识>    本局标识：产物落 <runs-root>/<标识>/（必填）
-  --runs-root <目录> runs 根目录（默认 ./runs；多次出现取末次；serve 模式下可重复声明多根）
-  --resume           从本局后端的存档续局（json 局 = autosave.json；缺存档则按新局开局）
+                     schemas/*.json / data/*.json）。new 必填；open 可省略
+                     （改读 run.json 记录的本局 mod 路径，两者都没有则报错）
+  --in <目录>        new 的 runs 父目录（默认 ./runs；自动 id 落在其下）
+  --force            new 的显式重置许可：目录已有旧产物时按新局重置（归档留证据）
+  --at g<代>         open 的回退存档点（如 g0 / g3；代 = sqlite generation）。
+                     取该代末快照建新代续跑，旧代证据全留库；JSON 局拒绝（无代概念）
   --watch            交互模式下每步检查 mod 目录 mtime 变化并热载
   --event <名称>     单发模式：派发一个事件后退出（stdout 回执：缺省人读文本，
                      --raw 输出单行 JSON 契约）
   --payload <JSON>   事件 payload（缺省 = Mod 契约的 agent.defaultPayload；必须 JSON 标量）
-  --raw              单发回执输出单行 JSON 信封（机器契约，与历史缺省逐字节一致）。
-                     仅 --event 单发路径生效；其余模式与 daemon 协议面不受影响
-                     （接受但忽略）。解析顺序 = --raw > 环境变量 YGG_FORMAT
-                     （text|json）> 缺省 text；非法 YGG_FORMAT 值 fail-closed 退出 2
+  --raw              单发回执输出单行 JSON 信封（机器契约）。仅 --event 单发路径生效。
+                     解析顺序 = --raw > 环境变量 YGG_FORMAT（text|json）> 缺省 text
   --actor <id>       提交者身份（Agent 工具句柄，与 exec=/profile handle 同一命名空间；
                      ≤64 字节、无空白、无 `|`）。解析链 --actor > 环境变量 YGG_ACTOR
                      > daemon 请求字段。声明了 actor 段的路由会由宿主注入 `|actor=<id>`
@@ -1004,8 +1161,7 @@ fn usage(code: i32) -> ! {
                      （dispatch/summary/state/vfs_put/vfs_get/vfs_list/settle/ping/shutdown），
                      stdout 逐行回 JSON。请求可带 \"id\" 字段（原样回显）；dispatch 请求可带
                      \"actor\"/\"actor_session\" 字段（提交者身份，仅在旗标与环境变量都缺席时兑底）。
-                     stdout 只有协议面，
-                     人读输出一律走 stderr。局已存在时自动续局（无需 --resume），
+                     stdout 只有协议面，人读输出一律走 stderr。
                      `settle` 与独立 --settle 同一实现并终结本局
   --harness <h>      harness 适配器：auto（缺省，按现场探测）/ pi / claude-code / codex / generic。
                      解析顺序 = --harness > 环境变量 YGG_HARNESS > <mod>/data/config.json 的
@@ -1015,24 +1171,25 @@ fn usage(code: i32) -> ! {
                      grep 链；永不参与判定、不做 resume 寻址键；≤128 字节、无空白、无 `|`）。
                      解析链与 --actor 对称：旗标 > YGG_ACTOR_SESSION > daemon 请求字段；
                      两者可独立携带，inbox 记录盖宿主保留键 actor/actor_session（None 不写键）
-serve 模式（只读观察台；GET-only 零写入，与其它全部模式互斥）:
-  --runs-root <目录> 观察目标 runs 根目录，**可重复**（--runs-root A --runs-root B = 同时观察两根；
-                     单次出现与旧版同义）。根集解析链：旗标 > ~/.config/ygg/serve.json
-                     （{\"roots\":[\"/abs/…\",…]}；畸形 / 未知键 / 相对路径 = 用法错误退出 2，
-                     `~/` 前缀可展开）> ./runs。目录不存在 = 报错退出 1（不自动创建，
-                     也不爬扫文件系统补根——根集只来自显式声明）
+serve 模式（只读观察台；数据端点 GET-only + 唯一例外 /api/roots 观察根注册，
+与其它全部模式互斥）:
+  （无 --runs-root）观察根在启动后经 API 注册：
+    POST   /api/roots {\"root\": \"<绝对路径>\"}   注册（幂等；runs 父目录或单个 run-root 均可）
+    DELETE /api/roots?root=<绝对路径>            注销（幂等；不删盘上任何字节）
+    GET    /api/roots                            当前注册表
+    注册表仅在当前进程内有效（重启为空）；~/.config/ygg/serve.json 已退役
+    （存在时启动给迁移指引，不自动导入）
   --port <端口>      监听端口（默认 7800；恒绑定 127.0.0.1；被占用 = 报错退出 1，不自动递增）。
                      单实例语义**按端口**成立：7800 是全局唯一缺省实例，显式换端口 = 显式逃生门
   --panel-dir <目录> 内置两级列表页的盘上覆盖（开发期改 HTML 刷新即生效；缺失文件 404）
   --poll-ms <ms>     变更检测周期（默认 700ms，钟制 200..=5000；SSE 通知 ≤ 一个周期）
-  全局唯一实例（零锁文件，端口即事实）：启动前只读探针 GET /api/runs——
-  自家实例且请求根 ⊆ 在役根 → 幂等复用（打印面板 URL 退出 0，nohup 脚本安全）；
-  请求根不被覆盖 → 退出 1（在役实例不热改根；处置：pkill 后重启或把根写进配置）；
-  旧版单根实例 → 退出 1 提示重启；无自家实例 → 照常启动（外姓占用由 bind 失败兑住）。
+  全局唯一实例（零锁文件，端口即事实）：启动前只读探针 GET /api/roots——
+  自家实例 → 幂等复用（打印面板 URL 退出 0，nohup 脚本安全）；
+  旧版实例（无 /api/roots 端点）→ 退出 1 提示重启；无自家实例 → 照常启动。
   面板三级：① runs 列表（egg 原生）② 局内存档列表（egg 原生）③ mod 自带 UI
   （iframe 托管，pack.json 可选顶层 panel 段声明 entry，如 panel/index.html；
   egg 不解析不渲染任何 mod 领域语义，只供存档数据 API 裸数据）。
-  只观察既有局：先起 serve 再开局合法；gate/accept 类人类门禁在 serve 面上
+  只观察既有局：先起 serve 再注册再开局合法；gate/accept 类人类门禁在 serve 面上
   **没有写路径**，仍走 CLI 票据 / 适配器路径。
   --store <后端>     存储后端断言：sqlite（默认，<run 目录>/run.sqlite）|
                      json（兼容后端，autosave.json + events.jsonl）。run.json 的
@@ -1099,15 +1256,13 @@ struct ServeFlags {
     artifact_put: bool,
     artifact_get: bool,
     daemon: bool,
-    resume: bool,
     watch: bool,
     store: bool,
     payload: bool,
     harness: bool,
     tool_timeout: bool,
     drive_is_stdin: bool,
-    run_id: bool,
-    mod_dir: bool,
+    positional: bool,
 }
 
 /// serve 与其它模式/旗标的互斥判定（纯函数；命中即返回人读冲突文案）。
@@ -1121,7 +1276,6 @@ fn serve_usage_conflict(flags: &ServeFlags) -> Option<String> {
         || flags.artifact_put
         || flags.artifact_get
         || flags.daemon
-        || flags.resume
         || flags.watch
         || flags.store
         || flags.payload
@@ -1130,13 +1284,14 @@ fn serve_usage_conflict(flags: &ServeFlags) -> Option<String> {
         || !flags.drive_is_stdin
     {
         return Some(
-            "serve（只读观察台）不能与任何推进/写面旗标（--event / --settle / --resume / --watch / --store / --payload / --drive / inbox 写命令 / 制品旗标 / --daemon / --wait-tools / --harness / --builtin-tool）同时使用"
+            "serve（只读观察台）不能与任何推进/写面旗标（--event / --settle / --watch / --store / --payload / --drive / inbox 写命令 / 制品旗标 / --daemon / --wait-tools / --harness / --builtin-tool）同时使用"
                 .to_owned(),
         );
     }
-    if flags.run_id || flags.mod_dir {
+    if flags.positional {
         return Some(
-            "serve 观察整个 runs-root（不绑定单局、不装 Mod）：不接受 --run-id / --mod".to_owned(),
+            "serve 空根启动（观察根经 POST /api/roots 运行时注册）：不接受位置参数 / new / open"
+                .to_owned(),
         );
     }
     None
@@ -1584,14 +1739,14 @@ struct Session {
 /// 单段 drain 的「过慢」阈值（plan-r5 §2.6 临界区时长守护：观测不阻断）。
 const DRAIN_SLOW_WARN_MS: u128 = 1_000;
 
-/// `reset_artifacts` 的裁决结果（resume 失败路径与显式新局路径共用）。
-/// 开局模式（`--wait-tools` 只观察，**不得**重置别人的局）。
+/// 开局模式（r1 归并）：`--wait-tools` 只观察，**不得**重置别人的局。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OpenMode {
-    /// 常规开局：`--resume` 续局，否则按新局重置。
-    Normal,
-    /// 只观察：一律读档，读不到就报错（零写入）——`--wait-tools` 专用。
-    ResumeOnly,
+    /// `egg new`：按新局重置（旧产物归档留证据）。
+    Fresh,
+    /// `egg open`：附着读档（最新存档点或 `--at` 指定代）；读不到就报错，
+    /// 绝不重置（零写入）——`--wait-tools` 与本模式同一路径。
+    Attach,
 }
 
 enum ResetOutcome {
@@ -1606,15 +1761,27 @@ enum ResetOutcome {
 impl Session {
     /// 开局：读盘装载 → 建 run 目录 → 续局或重置 → 定 seq → 落元信息。
     fn open(args: &Args) -> Result<Self, String> {
-        Self::open_mode(args, OpenMode::Normal)
+        let mode = match args.open_style {
+            Some(OpenStyle::New) => OpenMode::Fresh,
+            _ => OpenMode::Attach,
+        };
+        Self::open_mode(args, mode)
     }
 
-    /// 开局（带模式）：`ResumeOnly` = 只观察（`--wait-tools`）。
+    /// 开局（带模式）：`Attach` = 只观察/附着（open 与 `--wait-tools` 共用）。
     fn open_mode(args: &Args, mode: OpenMode) -> Result<Self, String> {
         let Some(requested) = args.mod_dir.clone() else {
             return Err("缺少 --mod <mod目录>".to_owned());
         };
-        let run_dir = args.runs_root.join(&args.run_id);
+        let run_dir = args.run_root.clone();
+        let run_id = run_dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| args.run_root.display().to_string());
+        let runs_root = run_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
         // D-MA19 退役专名拒绝在入口生效（与 resolve_mod_dir 同一份理由源）：旧名不再翻译，
         // 缺席且形状命中即给可读拒绝；其余缺席维持既有装载期通用错误。
         let mod_dir = if requested.exists() {
@@ -1649,6 +1816,9 @@ impl Session {
             .and_then(|text| Backend::parse(&text));
         let backend =
             ygg_store::resolve(&run_dir, declared, args.store).map_err(|err| err.to_string())?;
+        // new 的 --force 判定必须在 open_store 之前快照：sqlite 建库即产生产物，
+        // 事后 detect 会把自己刚建的库误判为「旧产物」（R10a 实测 RED）。
+        let had_products_before_open = ygg_store::detect(&run_dir).any();
         fs::create_dir_all(&run_dir)
             .map_err(|err| format!("创建 run 目录 {} 失败：{err}", run_dir.display()))?;
         let store = open_store(backend, &run_dir)?;
@@ -1659,7 +1829,7 @@ impl Session {
         let previous_signature = read_meta_signature(&run_dir.join(META_FILE));
 
         let mut session = Self {
-            run_id: args.run_id.clone(),
+            run_id,
             mod_dir: mod_dir.clone(),
             config_rel,
             contract,
@@ -1674,7 +1844,7 @@ impl Session {
             meta_path: run_dir.join(META_FILE),
             inbox_path: run_dir.join(INBOX_FILE),
             run_dir,
-            runs_root: args.runs_root.clone(),
+            runs_root,
             kernel,
             signature,
             notices: Vec::new(),
@@ -1691,39 +1861,28 @@ impl Session {
         // 存档，否则旧版工具可能先看到一个无后端声明的目录。
         session.write_meta();
         session.cleanup_stale_tmp();
-        if mode == OpenMode::ResumeOnly {
-            // 只观察面（`--wait-tools`）：读档失败就是失败，**不**按新局重置
+        if mode == OpenMode::Attach {
+            // 附着面（open / --wait-tools）：读档失败就是失败，**不**按新局重置
             // ——那会把别人正在跑的局清掉（零写入）。
-            session.load_autosave().map_err(|message| {
-                format!("{message}；--wait-tools 只观察不重置（不按新局开局）")
-            })?;
-            session.resumed = true;
-        } else if args.resume {
-            match session.load_autosave() {
-                Ok(()) => session.resumed = true,
-                Err(message) => match session.reset_artifacts(true) {
-                    // 锁内重试读档成功：另一进程已把本局救活（重置后起步 / 修复
-                    // 文件），状态已回灌——续当前盘上状态，**不**按新局开局。
-                    // 以全新状态混进别人的局，正是二次判定要防的事。
-                    Ok(ResetOutcome::Recovered) => {
-                        session.notices.push(format!(
-                            "{message}；重试读档成功（另一进程已恢复本局），续当前盘上状态"
-                        ));
-                        session.resumed = true;
-                    }
-                    // 续局失败按新局开局：状态与日志必须同代，混代证据比丢证据更坏。
-                    // 旧代事件已归档（含「可解析但不可装载」的档——可解析不等于
-                    // 还活着，硬开新局才有同代起点）。
-                    Ok(ResetOutcome::Reset { .. }) => {
-                        session.notices.push(format!("{message}；按新局开局"));
-                    }
-                    // 重置也失败（锁超时 / 归档失败 / 建档 / 初始存档）：盘上还是
-                    // 旧代产物，此刻继续 = 全新内核混进旧代（fail-closed，plan-r5
-                    // §2.5）。非零退出，把旧代证据留给下一次；已归档的部分也是证据。
-                    Err(reset_error) => return Err(format!("{message}；{reset_error}")),
-                },
+            if let Some(generation) = args.at {
+                session.rollback_to(generation)?;
+            } else {
+                session.load_autosave().map_err(|message| {
+                    format!("{message}；open 只附着不重置（新局请用 `egg new`）")
+                })?;
             }
+            session.resumed = true;
         } else {
+            // new 的 fail-closed：目录已有旧产物且未给 --force → 零写入拒绝
+            // （自动 id 撞既有目录几乎不可能，此处守的是「显式重置必须显式许可」）。
+            if !args.force && had_products_before_open {
+                return Err(format!(
+                    "run `{}` 已有旧产物——new 不隐式重置（加 --force 显式许可，\
+                     或用 `egg open {}` 附着续跑）",
+                    session.run_id,
+                    session.run_dir.display()
+                ));
+            }
             match session.reset_artifacts(false) {
                 Ok(ResetOutcome::Reset { had_old: true }) => {
                     session
@@ -2002,6 +2161,62 @@ impl Session {
         }
         // `l` 命令 / 续局：状态回滚了，制品面也要回到同一代（VFS 不在存档字节里）。
         self.preload_artifacts()?;
+        self.summary_cache = None;
+        Ok(())
+    }
+
+    /// `--at g<代>` 回退（仅 sqlite 局）：取目标代末快照 → 经 reset 建新代续跑。
+    ///
+    /// 证据语义与显式新局同法：旧代事件与快照全留库（归档 = 新代，不删证据）；
+    /// inbox 跨代保留；制品面不回滚（VFS 按新代回灌，与 reset 既有语义一致）。
+    /// 目标代 = 当前代 → 无操作提示后走 latest（幂等）。
+    fn rollback_to(&mut self, generation: i64) -> Result<(), String> {
+        let points = self.store.savepoints().map_err(|err| err.to_string())?;
+        let Some(target) = points.iter().find(|point| point.generation == generation) else {
+            let available = points
+                .iter()
+                .map(|point| format!("g{}", point.generation))
+                .collect::<Vec<_>>()
+                .join(" / ");
+            return Err(format!(
+                "--at g{generation} 不存在：本局可用存档点 = {available}（代 = sqlite generation）"
+            ));
+        };
+        if target.current {
+            self.notices.push(format!(
+                "--at g{generation} 即当前代（末快照 = 最新存档点），按最新存档点续跑"
+            ));
+            return self.load_autosave();
+        }
+        let bytes = self
+            .store
+            .save_at(generation)
+            .map_err(|err| err.to_string())?
+            .ok_or_else(|| format!("--at g{generation}：该代没有快照可取"))?;
+        let text = String::from_utf8(bytes)
+            .map_err(|err| format!("读取 g{generation} 存档失败：{err}"))?;
+        let envelope = parse_envelope(&self.kernel.dispatch("load", &text));
+        if envelope["ok"] != Json::Bool(true) {
+            return Err(format!(
+                "--at g{generation} 读档失败：{}",
+                error_text(&envelope)
+            ));
+        }
+        // 回退 = 把目标代末快照作为新代的初始存档：状态机先 load 到目标代，
+        // 再 reset 归档当前代、落新代初始存档（与 `reset_artifacts` 同一临界区）。
+        let save = self.current_save()?;
+        let info = self
+            .store
+            .reset(&save, &format!("rollback:g{generation}"), clock())
+            .map_err(|err| err.to_string())?;
+        self.notices.push(format!(
+            "已回退到存档点 g{generation}（该代 {} 步）：旧代证据留库（{}），新代从此续跑",
+            target.steps,
+            info.archive.as_deref().unwrap_or("无旧代")
+        ));
+        self.notices.extend(info.warnings);
+        let _ = fs::remove_file(self.run_dir.join(PENDING_TOOLS_FILE));
+        let _ = fs::remove_dir_all(self.run_dir.join(TOOL_RESULTS_DIR));
         self.summary_cache = None;
         Ok(())
     }
@@ -4066,11 +4281,11 @@ fn artifact_put_receipt(args: &Args, spec: &str) -> Result<Json, String> {
             "--artifact-put 的路径与源文件路径都不能为空（当前是 `{spec}`）"
         ));
     }
-    let run_dir = args.runs_root.join(&args.run_id);
+    let run_dir = args.run_root.clone();
     if !run_dir_exists(&run_dir) {
         return Err(format!(
             "本局目录 {} 不存在（或还没有任何后端产物）——制品旗标不新造 run，\
-             请先用 --event / --resume 开局",
+             请先用 `egg new` 开局",
             run_dir.display()
         ));
     }
@@ -4090,7 +4305,7 @@ fn artifact_put_receipt(args: &Args, spec: &str) -> Result<Json, String> {
 /// `--artifact-get` 的核心（可测）：制品原文（缺失 = `Err`，stdout 由调用方保证为空）。
 fn artifact_get_bytes(args: &Args, path: &str) -> Result<Vec<u8>, String> {
     let path = path.trim();
-    let run_dir = args.runs_root.join(&args.run_id);
+    let run_dir = args.run_root.clone();
     if !run_dir_exists(&run_dir) {
         return Err(format!(
             "本局目录 {} 不存在（或还没有任何后端产物）",
@@ -5687,6 +5902,11 @@ fn run_single(args: &Args) -> i32 {
     if drain.touched() {
         receipt["inbox"] = drain.to_json();
     }
+    // new 的稳定输出行（r1）：run-root 是后续一切 open / serve 注册的寻址事实，
+    // text 回执末行固定 `run-root: <path>`；raw 信封加 `run_root` 字段（加性）。
+    if args.open_style == Some(OpenStyle::New) {
+        receipt["run_root"] = json!(session.run_dir.display().to_string());
+    }
     if let Some(message) = &drain.error {
         eprintln!(
             "[警告] inbox 未能全部并入：{message}（剩 {} 行未消费）",
@@ -5722,6 +5942,9 @@ fn run_single(args: &Args) -> i32 {
         "{}",
         render_receipt_output(&receipt, args.output, &session.contract.meta_key)
     );
+    if args.open_style == Some(OpenStyle::New) && text_mode {
+        println!("run-root: {}", session.run_dir.display());
+    }
     if receipt["ok"] == Json::Bool(true) {
         0
     } else {
@@ -5812,7 +6035,7 @@ fn run_tool_worker(args: &Args, call_id: &str) -> i32 {
         eprintln!("error: 非法 call_id `{call_id}`（只允许 1..=64 字节 [A-Za-z0-9._-]）");
         return 2;
     }
-    let run_dir = args.runs_root.join(&args.run_id);
+    let run_dir = args.run_root.clone();
     let Some(call) = read_pending_call(&run_dir, call_id) else {
         // 父进程已收口 / 本局已重置：无活可干（不是错误）。
         return 0;
@@ -5824,7 +6047,7 @@ fn run_tool_worker(args: &Args, call_id: &str) -> i32 {
         return 1;
     }
     let outcome = execute_tool(&call, &env, &scratch);
-    let external_id = new_external_id(&args.run_id, 0);
+    let external_id = new_external_id(run_basename(&args.run_root), 0);
     let result = ToolResult::from_outcome(&call, &outcome, &external_id);
     if let Err(message) = write_tool_result(&run_dir, &result) {
         eprintln!("error: {message}");
@@ -5870,7 +6093,7 @@ fn run_tool_worker(args: &Args, call_id: &str) -> i32 {
             &routes,
             &kind,
             &result.payload,
-            &args.run_id,
+            run_basename(&args.run_root),
             &identity,
         )
         .map(|_| ())
@@ -5892,9 +6115,9 @@ fn run_tool_worker(args: &Args, call_id: &str) -> i32 {
 /// `--wait-tools`：等本局在飞工具全部落地（结果由 worker 写 inbox）后消费一次
 /// inbox 并打印回执。
 ///
-/// **只观察**：走 `OpenMode::ResumeOnly`——读档失败就失败，绝不重置别人的局。
+/// **只观察**：走 `OpenMode::Attach`——读档失败就失败，绝不重置别人的局。
 fn run_wait_tools(args: &Args) -> i32 {
-    let run_dir = args.runs_root.join(&args.run_id);
+    let run_dir = args.run_root.clone();
     let timeout = args.tool_timeout_ms.unwrap_or(WAIT_TOOLS_DEFAULT_MS);
     let deadline = Instant::now() + Duration::from_millis(timeout);
     let mut last_beat = Instant::now();
@@ -5946,7 +6169,7 @@ fn run_wait_tools(args: &Args) -> i32 {
         mod_dir: Some(mod_dir),
         ..args.clone()
     };
-    let mut session = match Session::open_mode(&open_args, OpenMode::ResumeOnly) {
+    let mut session = match Session::open_mode(&open_args, OpenMode::Attach) {
         Ok(session) => session,
         Err(message) => return wait_tools_failure(&message),
     };
@@ -6022,7 +6245,7 @@ fn write_reply(out: &mut impl Write, reply: &Json) -> io::Result<()> {
 /// `--mod` 只为**新局**必需：已有本局时按 `run.json` 记录的 mod 路径解析（与
 /// `--settle` / `--wait-tools` 同一条 `resolve_mod_dir`）。
 fn run_daemon(args: &Args) -> i32 {
-    let run_dir = args.runs_root.join(&args.run_id);
+    let run_dir = args.run_root.clone();
     let mod_dir = match resolve_mod_dir(args, &run_dir) {
         Ok(dir) => dir,
         Err(message) => {
@@ -6030,12 +6253,10 @@ fn run_daemon(args: &Args) -> i32 {
             return 1;
         }
     };
-    // 已有后端产物 = 续局：重启守护进程不该把在跑的局清掉。只有「目录里没有任何
-    // 后端产物且没给 --resume」才按新局开局（与单发模式的 `--resume` 语义对齐）。
-    let resume = args.resume || ygg_store::detect(&run_dir).any();
+    // daemon 附着本局（r1：不再有「目录无产物自起新局」路径——新局必须先 `egg new`）。
+    // open_style 原样传递：open → Attach（读档续跑）；daemon 挂在 new 下 = Fresh。
     let open_args = Args {
         mod_dir: Some(mod_dir),
-        resume,
         ..args.clone()
     };
     let mut session = match Session::open(&open_args) {
@@ -6343,7 +6564,7 @@ fn run_inbox_append(args: &Args) -> i32 {
     // 提交者身份（旗标 > 环境）：解析失败 = 用法错误（退出 2）；未携带身份
     // 只是不盖章不认领 opener，不改变写命令本身的任何语义（inbox 写路径零变化）。
     let identity = resolve_identity_or_usage(args);
-    let run_dir = args.runs_root.join(&args.run_id);
+    let run_dir = args.run_root.clone();
     if let Err(err) = fs::create_dir_all(&run_dir) {
         eprintln!("error: 创建 run 目录 {} 失败：{err}", run_dir.display());
         return 2;
@@ -6401,7 +6622,7 @@ fn run_inbox_append(args: &Args) -> i32 {
         "created_at": now_secs(),
     });
     record[external_field] = json!(new_external_id(
-        &args.run_id,
+        run_basename(&args.run_root),
         store.inbox_len().unwrap_or(0)
     ));
     match shape {
@@ -6496,7 +6717,7 @@ fn single_shot_error(args: &Args, event: &str, message: &str) -> i32 {
     // `ygg_store::resolve` 一致：`run.json` 权威 > `--store` 断言 > 产物探针 >
     // 默认后端。**产物探针不能省**：旧 JSON 局在这里没有 `store` 事实，跳过
     // 探针就会把它的错误回执指向一个不存在的 `run.sqlite`（默认后端已是 sqlite）。
-    let run_dir = args.runs_root.join(&args.run_id);
+    let run_dir = args.run_root.clone();
     let backend = read_meta(&run_dir.join(META_FILE))
         .and_then(|meta| meta["store"].as_str().map(str::to_owned))
         .and_then(|text| Backend::parse(&text))
@@ -7241,10 +7462,11 @@ mod legacy_seed_refusal_tests {
     fn args(mod_dir: Option<PathBuf>) -> Args {
         Args {
             mod_dir,
-            run_id: "r1".to_owned(),
-            runs_root: PathBuf::from("ygg-runs-should-not-be-touched"),
-            serve_runs_roots: Vec::new(),
-            resume: true,
+            open_style: Some(crate::OpenStyle::Open),
+            run_root: PathBuf::from("ygg-runs-should-not-be-touched/r1"),
+            runs_parent: PathBuf::from("ygg-runs-should-not-be-touched"),
+            force: false,
+            at: None,
             settle: false,
             watch: false,
             event: None,
@@ -7804,6 +8026,10 @@ fn run_interactive(args: &Args) -> i32 {
     println!("mod      : {}", session.mod_label);
     println!("run 目录 : {}", session.run_dir.display());
     println!("驱动     : {}", drive.label());
+    if args.open_style == Some(OpenStyle::New) {
+        // new 的稳定输出行（与单发同契约：末行 run-root 供脚本提取）。
+        println!("run-root: {}", session.run_dir.display());
+    }
     println!("命令：数字=选择 / event <名称> [JSON] / s=存档 / l=读档 / i=状态 / config / q=退出");
     if drive.is_cmd() {
         println!("自动推进 : 由决策命令替选动作；返回 HUMAN / 超时 / 非零退出即安全暂停（exit 0）");
@@ -8551,7 +8777,7 @@ fn run_settle(args: &Args, auto: bool) -> i32 {
 /// `human=false` 时**不**打印人读摘要——守护模式的 stdout 是 JSON-RPC 协议面，
 /// 人读文本会撕裂协议流。
 fn settle_report(args: &Args, auto: bool, human: bool) -> (i32, Option<Json>) {
-    let run_dir = args.runs_root.join(&args.run_id);
+    let run_dir = args.run_root.clone();
     // 结算也必须走端口：sqlite 局没有 autosave.json / events.jsonl 可读
     // （照旧读文件 = 把已收口的局报成「无存档」）。
     let store = match open_store_resolved(&run_dir, args.store) {
@@ -8753,7 +8979,7 @@ fn settle_report(args: &Args, auto: bool, human: bool) -> (i32, Option<Json>) {
     let checks_json: Vec<Json> = checks.iter().map(SettlementCheck::to_json).collect();
 
     let mut report = json!({
-        "run_id": args.run_id,
+        "run_id": run_basename(&args.run_root),
         "mod": run_mod_label(&run_dir, args),
         "steps": steps,
         "events": events,
@@ -9157,10 +9383,11 @@ mod multiscript_hot_reload_tests {
     fn args_for(dir: &Path, run_id: &str) -> Args {
         Args {
             mod_dir: Some(dir.to_path_buf()),
-            run_id: run_id.to_owned(),
-            runs_root: dir.join("runs"),
-            serve_runs_roots: Vec::new(),
-            resume: false,
+            open_style: Some(crate::OpenStyle::New),
+            run_root: dir.join("runs").join(run_id),
+            runs_parent: dir.join("runs"),
+            force: false,
+            at: None,
             settle: false,
             watch: false,
             event: None,
@@ -9603,10 +9830,16 @@ end)
     fn probe_args(mod_dir: &Path, runs_root: &Path, run_id: &str, resume: bool) -> Args {
         Args {
             mod_dir: Some(mod_dir.to_path_buf()),
-            run_id: run_id.to_owned(),
-            runs_root: runs_root.to_path_buf(),
-            serve_runs_roots: Vec::new(),
-            resume,
+            open_style: Some(if resume {
+                crate::OpenStyle::Open
+            } else {
+                crate::OpenStyle::New
+            }),
+            run_root: runs_root.join(run_id),
+            runs_parent: runs_root.to_path_buf(),
+            // 旧「显式新局」= 总是重置 → 新语义映射为 new --force（显式许可）。
+            force: !resume,
+            at: None,
             settle: false,
             watch: false,
             event: None,
@@ -9756,17 +9989,11 @@ end)
         save["engine_version"] = serde_json::json!("0.0.0-not-an-engine");
         fs::write(&autosave_path, save.to_string()).expect("写坏版本号");
 
-        let mut session = Session::open(&probe_args(&mod_dir, &runs_root, "r3", true))
-            .expect("续局失败按新局开局，open 本身必须成功");
-        assert!(!session.resumed, "不可装载的局不得标记 resumed");
-        assert!(
-            session
-                .notices
-                .iter()
-                .any(|notice| notice.contains("按新局开局")),
-            "必须有按新局开局提示：{:?}",
-            session.notices
-        );
+        // r1 语义迁移：旧「resume 失败按新局开局」路径已删除（Attach fail-closed）。
+        // 等价不变量改经 Fresh（new --force）承接：不读旧档直接重置，归档不混入。
+        let mut session = Session::open(&probe_args(&mod_dir, &runs_root, "r3", false))
+            .expect("显式新局 open 必须成功");
+        assert!(!session.resumed, "新局不得标记 resumed");
         let archives = reset_archives(&run_dir);
         assert_eq!(archives.len(), 1, "不可装载的旧代必须归档（证据不丢）");
         assert_eq!(archive_line_count(&archives[0]), 1, "旧代行全在归档里");
@@ -10153,8 +10380,9 @@ end)
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// R8b：续局失败（坏档）+ 锁不可得 → reset 的二次判定路径同样 fail-closed：
-    /// open 失败，错误串同时携带读档失败与重置失败；旧事件未新增、无归档。
+    /// R8b（r1 重写）：Attach 附着坏档 → fail-closed 在读档即失败，**不进入重置**
+    /// （旧「resume 失败 → 重置回退」路径已删除；锁不可得场景下更不得有任何
+    /// 归档/重写动作——旧事件未新增、无归档、坏档原样留作证据）。
     #[test]
     fn r8b_resume_failed_reset_without_lock_fails_closed() {
         let dir = case_dir("r8b");
@@ -10167,7 +10395,7 @@ end)
 
         expect_open_failure(
             &probe_args(&mod_dir, &runs_root, "r8b", true),
-            &["读档失败", "重置产物失败"],
+            &["读档失败", "open 只附着不重置"],
         );
         assert_eq!(event_line_count(&run_dir), 1, "旧事件不得被动过");
         assert!(reset_archives(&run_dir).is_empty(), "未取得锁就不得归档");
@@ -10633,10 +10861,11 @@ end)
     fn tool_args(mod_dir: &Path, runs_root: &Path, run_id: &str) -> Args {
         Args {
             mod_dir: Some(mod_dir.to_path_buf()),
-            run_id: run_id.to_owned(),
-            runs_root: runs_root.to_path_buf(),
-            serve_runs_roots: Vec::new(),
-            resume: false,
+            open_style: Some(crate::OpenStyle::New),
+            run_root: runs_root.join(run_id),
+            runs_parent: runs_root.to_path_buf(),
+            force: false,
+            at: None,
             settle: false,
             watch: false,
             event: None,
@@ -11341,10 +11570,16 @@ end)
     fn vfs_args(mod_dir: Option<&Path>, runs_root: &Path, run_id: &str, resume: bool) -> Args {
         Args {
             mod_dir: mod_dir.map(Path::to_path_buf),
-            run_id: run_id.to_owned(),
-            runs_root: runs_root.to_path_buf(),
-            serve_runs_roots: Vec::new(),
-            resume,
+            open_style: Some(if resume {
+                crate::OpenStyle::Open
+            } else {
+                crate::OpenStyle::New
+            }),
+            run_root: runs_root.join(run_id),
+            runs_parent: runs_root.to_path_buf(),
+            // 旧「显式新局」= 总是重置 → 新语义映射为 new --force（显式许可）。
+            force: !resume,
+            at: None,
             settle: false,
             watch: false,
             event: None,
@@ -11372,7 +11607,7 @@ end)
 
     /// 一个「已经有后端产物」的局目录（制品 CLI 不新造 run，所以必须先有产物）。
     fn seeded_run(args: &Args) -> PathBuf {
-        let run_dir = args.runs_root.join(&args.run_id);
+        let run_dir = args.run_root.clone();
         fs::create_dir_all(&run_dir).expect("建 run 目录");
         fs::write(run_dir.join(AUTOSAVE_FILE), b"{}").expect("写 autosave");
         run_dir
@@ -11441,7 +11676,7 @@ end)
             .expect_err("超限必须被拒");
         assert!(message.contains("制品内容"), "{message}");
         // 零写入。
-        assert!(!args.runs_root.join("gate").join("artifacts").exists());
+        assert!(!args.runs_parent.join("gate").join("artifacts").exists());
     }
 
     #[test]
@@ -11454,7 +11689,7 @@ end)
             .expect_err("不存在的局必须被拒");
         assert!(message.contains("不存在"), "{message}");
         // **不新造 run**：连目录都不该被建出来。
-        assert!(!args.runs_root.join("no-such-run").exists());
+        assert!(!args.runs_parent.join("no-such-run").exists());
     }
 
     // ---- Session 的 VFS 持久化（写 → 落盘 → 续局回灌）----
@@ -12007,10 +12242,11 @@ end)
     fn daemon_args(mod_dir: &Path, runs_root: &Path, run_id: &str) -> Args {
         Args {
             mod_dir: Some(mod_dir.to_path_buf()),
-            run_id: run_id.to_owned(),
-            runs_root: runs_root.to_path_buf(),
-            serve_runs_roots: Vec::new(),
-            resume: false,
+            open_style: Some(crate::OpenStyle::New),
+            run_root: runs_root.join(run_id),
+            runs_parent: runs_root.to_path_buf(),
+            force: false,
+            at: None,
             settle: false,
             watch: false,
             event: None,
@@ -12309,7 +12545,11 @@ end)
         // `resume` 这一行就是 `run_daemon` 的判定式（「已有后端产物即续局」）：
         // 它在 CLI 入口，不在 `handle_daemon_request` 里，所以单测只能复刻它。
         let reopen = Args {
-            resume: ygg_store::detect(&runs_root.join("d3")).any(),
+            open_style: Some(if ygg_store::detect(&runs_root.join("d3")).any() {
+                crate::OpenStyle::Open
+            } else {
+                crate::OpenStyle::New
+            }),
             ..daemon_args(&mod_dir, &runs_root, "d3")
         };
         let mut resumed = Session::open(&reopen).expect("续局（重启守护进程不得清局）");
@@ -12762,10 +13002,11 @@ end)
     ) -> Args {
         Args {
             mod_dir: Some(mod_dir.to_path_buf()),
-            run_id: run_id.to_owned(),
-            runs_root: runs_root.to_path_buf(),
-            serve_runs_roots: Vec::new(),
-            resume: false,
+            open_style: Some(crate::OpenStyle::New),
+            run_root: runs_root.join(run_id),
+            runs_parent: runs_root.to_path_buf(),
+            force: false,
+            at: None,
             settle: false,
             watch: false,
             event: None,
