@@ -4191,7 +4191,12 @@ impl HostToolRunner for HarnessRunner {
                 out.insert("trash".to_owned(), "1".to_owned());
                 out.insert(
                     "ok".to_owned(),
-                    if self.sessions_matching == 0 { "1" } else { "0" }.to_owned(),
+                    if self.sessions_matching == 0 {
+                        "1"
+                    } else {
+                        "0"
+                    }
+                    .to_owned(),
                 );
                 Ok(out)
             }
@@ -4255,7 +4260,10 @@ fn settlement_machine_agreement_passes_and_records_provenance() {
         "machine agreement must narrate the check pass: {todo_lines:#?}"
     );
     game.assert_kv("settlement.todo.remaining", json!(0));
-    game.assert_kv("settlement.todo.source", json!("machine:harness.todo-check"));
+    game.assert_kv(
+        "settlement.todo.source",
+        json!("machine:harness.todo-check"),
+    );
     let sess_lines = game.narrate(
         "settlement.sessions",
         &text("1|0|~/.pi/agent/sessions-trash/semantics"),
@@ -4267,6 +4275,6 @@ fn settlement_machine_agreement_passes_and_records_provenance() {
     game.assert_kv("settlement.sessions.remaining", json!(0));
     game.assert_kv(
         "settlement.sessions.source",
-        json!("machine:harness.sessions-count")
+        json!("machine:harness.sessions-count"),
     );
 }
