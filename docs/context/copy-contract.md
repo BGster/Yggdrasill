@@ -71,7 +71,7 @@
 | `settle_common` | 盘点幕四项：verify.submit 先全绿 → settlement.evolution 登记演进（可并入会话/待办可选段）→ settlement.sessions → settlement.todo；四项齐备自动转发布幕（不占事件）。 | — | 叙述 |
 | `settle_ready` | [SETTLE READY] 盘点四项齐备（验证/演进登记/会话清理/待办清理）——自动进入发布幕 | — | 叙述 |
 | `stage_expected` | 该动作只在微状态「{{expected}}」可用 | expected | 叙述 |
-| `stage_prompt_missing` | (the prompt for this node is missing: check <node>_common in data/texts/beats-flow.json) | — | 叙述 |
+| `stage_prompt_missing` | (the prompt for this node is missing: check <node>_common in data/texts/beats-flow.json and docs/context/workflow-acts.md) | — | 叙述 |
 | `unknown_choice` | [RUN-CLOSED] {{stage}} has no pending choices. | stage | 叙述 |
 | `unknown_stage` | Unknown stage `{{stage}}`. | stage | 叙述 |
 | `verify_fail` | [GATES FAILED] #{{failures}}: sent back to coordinate for rework. | failures | 叙述 |
