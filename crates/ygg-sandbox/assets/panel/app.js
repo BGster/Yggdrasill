@@ -947,6 +947,81 @@ function setSseState(kind) {
   node.textContent = { stream: "SSE 实时", poll: "轮询 2s", reconnect: "重连中…", init: "连接中" }[kind] || kind;
 }
 
+// ---- 观察根注册表（r1：进程内配置；POST/DELETE /api/roots，不写局状态）----
+
+async function renderRootsPanel() {
+  const summary = $("#roots-summary");
+  const list = $("#roots-list");
+  let body;
+  try {
+    body = await fetchJson("/api/roots");
+  } catch (err) {
+    summary.textContent = `观察根（读取失败：${err.message}）`;
+    return;
+  }
+  const roots = body.roots || [];
+  summary.textContent = `观察根（${roots.length}）`;
+  // 空根引导：面板默认展开 + 空态文案（新启动的 serve 第一眼就知道下一步）。
+  $("#roots-panel").open = roots.length === 0;
+  list.replaceChildren(
+    ...roots.map((entry) =>
+      el(
+        "li",
+        {},
+        el("code", {}, entry.root || "—"),
+        entry.singleRun ? el("span", { class: "hint" }, "（单局）") : "",
+        el(
+          "button",
+          {
+            type: "button",
+            onclick: async () => {
+              $("#root-error").hidden = true;
+              try {
+                const res = await fetch(`/api/roots?root=${enc(entry.root)}`, { method: "DELETE" });
+                const result = await res.json();
+                if (!res.ok) throw new Error(result?.error?.message || `HTTP ${res.status}`);
+                await renderRootsPanel();
+                void refresh();
+              } catch (err) {
+                const node = $("#root-error");
+                node.textContent = `注销失败：${err.message}`;
+                node.hidden = false;
+              }
+            },
+          },
+          "注销",
+        ),
+      ),
+    ),
+  );
+  if (roots.length === 0) {
+    list.replaceChildren(el("li", { class: "hint" }, "尚未注册观察根——粘贴 run-root 或 runs 目录的绝对路径注册。"));
+  }
+}
+
+$("#root-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("#root-error").hidden = true;
+  const root = $("#root-input").value.trim();
+  if (!root) return;
+  try {
+    const res = await fetch("/api/roots", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result?.error?.message || `HTTP ${res.status}`);
+    $("#root-input").value = "";
+    await renderRootsPanel();
+    void refresh();
+  } catch (err) {
+    const node = $("#root-error");
+    node.textContent = `注册失败：${err.message}`;
+    node.hidden = false;
+  }
+});
+
 let pollTimer = null;
 
 function startPolling() {
@@ -981,4 +1056,5 @@ function startStream() {
 
 setSseState("init");
 void refresh().then(startStream);
+void renderRootsPanel();
 window.addEventListener("hashchange", () => void refresh());

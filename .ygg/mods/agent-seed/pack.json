@@ -402,6 +402,56 @@
       "maxOutputBytes": 4096,
       "readOnly": true,
       "resultEvent": "tool.result"
+    },
+    "harness.todo-check": {
+      "kind": "cli",
+      "program": ".pi/tools/todo-check.sh",
+      "args": [
+        "--session",
+        "{{session}}",
+        "--sessions-root",
+        "{{sessions_root}}"
+      ],
+      "timeoutMs": 10000,
+      "inlineWaitMs": 3000,
+      "maxOutputBytes": 512,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
+    "harness.sessions-count": {
+      "kind": "cli",
+      "program": ".pi/tools/sessions-count.sh",
+      "args": [
+        "--parent",
+        "{{parent}}",
+        "--sessions-root",
+        "{{sessions_root}}"
+      ],
+      "timeoutMs": 10000,
+      "inlineWaitMs": 3000,
+      "maxOutputBytes": 512,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
+    "harness.manifest-verify": {
+      "kind": "cli",
+      "program": ".pi/tools/manifest-verify.sh",
+      "args": [],
+      "timeoutMs": 10000,
+      "inlineWaitMs": 3000,
+      "maxOutputBytes": 512,
+      "readOnly": true,
+      "resultEvent": "tool.result"
+    },
+    "harness.docs-consistency": {
+      "kind": "cli",
+      "program": ".pi/tools/docs-consistency.sh",
+      "args": [],
+      "timeoutMs": 10000,
+      "inlineWaitMs": 3000,
+      "maxOutputBytes": 512,
+      "readOnly": true,
+      "resultEvent": "tool.result"
     }
   },
   "code": {

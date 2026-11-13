@@ -40,8 +40,8 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 
 | 层级 | 宿主环境 | 子代理执行与恢复 | 上下文遥测与压缩 | 集成机制 |
 | --- | --- | --- | --- | --- |
-| **Tier 1 · 主会话直驱** | Pi Coding Agent 等原生 Agent 宿主 | 主会话直驱 egg CLI + 原生 `Agent` 工具（`resume`），自动回退到 `fullFallbackBrief` | 实时 token 比例（`soft >= 60%`、`hard >= 75%`），稳定检查点写 `artifacts/handoff-latest.md` | 常驻能力 = 宿主原生 `egg --daemon` / `serve` |
-| **Tier 2 · CLI / Hook 运行器** | Claude Code、Codex CLI、Cursor | 子进程调用或原生任务工具，消费 `subagentAction.brief` 与 `submitCommand` | 在稳定检查点由 Hook 触发的 `handoff_compact` | `egg --daemon` 或单次 `--resume --event` CLI |
+| **Tier 1 · 主会话直驱** | Pi Coding Agent 等原生 Agent 宿主 | 主会话直驱 egg CLI + 原生 `Agent` 工具（`resume`），自动回退到 `fullFallbackBrief` | 实时 token 比例（`soft >= 60%`、`hard >= 75%`），稳定检查点写 `artifacts/handoff-latest.md` | 常驻能力 = 宿主原生 `egg open <run-root> --daemon` / `egg serve` |
+| **Tier 2 · CLI / Hook 运行器** | Claude Code、Codex CLI、Cursor | 子进程调用或原生任务工具，消费 `subagentAction.brief` 与 `submitCommand` | 在稳定检查点由 Hook 触发的 `handoff_compact` | `egg open <run-root> --daemon` 或单次 `egg open <run-root> --event` CLI |
 | **Tier 3 · 提示委派** | 通用 LLM 聊天 / 自定义 Agent 循环 | 协调者把 `subagentAction.brief` 复制进子代理上下文并转达 `proposal.submit` | 经 `vfs.write` 手动检查点交接 | 单次 CLI 回执（缺省人读文本；`--raw` 显式旗标输出单行 JSON 信封）（`narrative` + `pendingChoice`） |
 
 ### 1.2 Adapter 一致性契约（任何 harness 都必须满足的五条义务）

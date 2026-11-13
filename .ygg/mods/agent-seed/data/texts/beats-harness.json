@@ -4,7 +4,7 @@
     "config_opened": "[CONFIG MENU] play mode / evolution preference / gates — picking one applies it and stays on this page; pick \"back\" to return to the stage menu. Note: switching play mode leaves this page (the driver changed, so the sub-page context is stale). Evolution pre-registration does not use the menu: write settings with `config.set review.evolution.artifact|summary|candidates|classes=<value>`; after verify passes the settlement.evolution menu builds the payload and validates it in one place.",
     "config_closed": "[BACK] returned to the {{stage}} stage menu.",
     "config_open_usage": "config.open [] / config.close []",
-    "config_keys": "play.mode / goal.authorization / executor.<rN>.<analysis|plan|development> / evolution.mode / evolution.max_per_run / gates.require_all_green / review.evolution.artifact / review.evolution.summary / review.evolution.candidates / review.evolution.classes",
+    "config_keys": "play.mode / goal.authorization / executor.<rN>.<analysis|plan|development> / evolution.mode / evolution.max_per_run / gates.require_all_green / review.evolution.artifact / review.evolution.summary / review.evolution.candidates / review.evolution.classes / tools.root / tools.<name>",
     "bad_config_key": "unknown config key `{{key}}` (available: {{allowed}})",
     "bad_config_value": "`{{key}}` does not accept `{{value}}` (available: {{allowed}})",
     "goal_auth_registered": "[GOAL AUTH REGISTERED] {{auth}} (self-declared, not identity proof; the closing check applies only to runs that entered goal at runtime)",
@@ -54,13 +54,20 @@
     "verify_suite_passed": "[VERIFY SUITE PASSED] {{summary}}",
     "verify_suite_failed": "[VERIFY SUITE FAILED] {{summary}}",
     "verify_suite_blocked": "[VERIFY SUITE BLOCKED] {{reason}}",
-    "subagent_submit_cmd": ".ygg/bin/egg --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"{{id}}|{{rev}}|{{stage}}|<summary>|{{artifact}}||exec=<agent_id>\"'",
+    "subagent_submit_cmd": ".ygg/bin/egg open <run-root> --event proposal.submit --payload '\"{{id}}|{{rev}}|{{stage}}|<summary>|{{artifact}}||exec=<agent_id>\"'",
     "subagent_brief": "Requirement {{id}} (rev {{rev}}, stage={{stage}}): {{title}}\nDescription: {{desc}}\nMandatory references: read docs/README.md (wiki index) first, then docs/context/* (domain invariants) and docs/design/* (architecture & contracts) before proposing or editing.\nWorktree: {{worktree}} (branch={{branch}}, base={{base}})\nArtifact: {{artifact}} — deliver through the harness archive, never as a stray file in a checkout: return the full content in your final report (or write it under /tmp) and the main session records it into the run archive with `--artifact-put artifacts/<name>.md`. All artifacts of a run live only in that run's archive (`<run-dir>/artifacts/`); do not write artifact files into any checkout's `artifacts/` — that path is a git-ignored scratch area, not the authoritative copy.\nSubmit: {{submit}}\nIntegration (development stage only): at closeout you integrate your feature branch into `develop` yourself — align `origin/develop`, `git merge --no-ff`, integrated-state gates green, push `develop`, and record the develop merge SHA (`develop@<sha>`) in the artifact. Never touch `master` or another lane's branch.\nDoc sync (when applicable): the docs wiki — docs/README.md (index) with docs/context/* (domain vocabulary, principles, decision ledger) and docs/design/* (system behaviour, interface contracts) — is the always-current authority of the whole repository — never a changelog, history lives in git and settlement artifacts. If your change alters how any subsystem works or is meant to work (kernel crates / egg CLI / Mod / serve / tooling): at the plan stage declare in your artifact which wiki files it touches; at the development stage update those files in place on your feature branch (decisions/vocabulary -> the matching decisions-*/vocabulary entry in docs/context/ for the D-MAx in this brief; behaviour/contracts -> the matching docs/design/ chapter for that subsystem). Pure fixes and rewording touch neither.",
     "subagent_delta": "Resume {{id}} (rev {{rev}}) for stage `{{stage}}` in worktree `{{worktree}}`; write `{{artifact}}` and submit.",
     "subagent_fallback_note": "\nResume context: prior executor `{{resume_id}}`.",
     "reactive_malformed": "[PROBE MALFORMED] {{call_id}} ({{tool_id}}): the output is not a `k=v;...` map - nothing was applied",
     "artifact_path_rejected": "[ARTIFACT PATH REFUSED] {{path}}: the ledger only accepts artifacts/<name>.md (no `..`, no whitespace, at most {{max}} bytes) | nothing was recorded",
     "executor_bad_actor": "an actor id must be non-empty after trim, <= 64 chars, with no whitespace and no quote/backslash (the host injects `actor=`; self-carried segments are rejected).",
-    "executor_bad_actor_session": "an actor_session id must be non-empty after trim, <= 128 chars, with no whitespace and no quote/backslash (the host injects `actor_session=`; self-carried segments are rejected)."
+    "executor_bad_actor_session": "an actor_session id must be non-empty after trim, <= 128 chars, with no whitespace and no quote/backslash (the host injects `actor_session=`; self-carried segments are rejected).",
+    "tools_root_registered": "[TOOLS ROOT REGISTERED] {{root}} (self-declared; settlement machine cross-checks enabled when this is set)",
+    "tools_root_cleared": "[TOOLS ROOT CLEARED] settlement checks fall back to human attestation.",
+    "tools_root_bad": "tools.root must be a directory path: non-empty after trim (empty clears), <= 240 chars, no `..` segment, no `|` or control characters.",
+    "tools_relpath_bad": "tools.<name> value must be a script path relative to the root: `.sh` suffix, <= 240 chars, no `..`, no `|` or control characters (empty clears the override).",
+    "tools_name_registered": "[TOOLS NAME REGISTERED] {{name}} -> {{path}} (override for the default <name>.sh; empty path clears it)",
+    "tools_param_registered": "[TOOLS PARAM REGISTERED] {{name}} = {{value}} (reserved parameter for the settlement cross-check argv)",
+    "tools_param_bad": "tools parameter value must be non-empty after trim (empty clears), <= 240 chars, no `..` segment, no `|` or control characters."
   }
 }

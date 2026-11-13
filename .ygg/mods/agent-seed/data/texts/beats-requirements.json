@@ -2,7 +2,7 @@
   "beats": {
     "req_deps_none": "(no deps)",
     "req_deps_have": "(deps {{ids}})",
-    "req_after_done": "This run is closed: requirements need a new run (another --run-id).",
+    "req_after_done": "This run is closed: requirements need a new run (`egg new`).",
     "req_unknown": "no requirement `{{id}}` (run requirement.list first).",
     "req_bad_dep": "dependency `{{id}}` does not exist.",
     "req_self_dep": "requirement `{{id}}` cannot depend on itself.",

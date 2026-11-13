@@ -2764,6 +2764,89 @@ fn mod_text_fragments_carry_no_retired_paths() {
     );
 }
 
+/// r2 (mod 职责再分工): 23 个剧情/策略键收缩为「状态行 + 指针」后，凡 beat/core 文本值携带
+/// `docs/context/` 指针，其锚点文件必须真实存在于仓库 `docs/context/`——指针漂移（指向不存在的
+/// 文件）会让「无 egg 读 context 自洽」的承诺失效。同时核销：六个 `<node>_common` 键与 core 的
+/// scenes/prompts 必须携带指针（防收缩被意外回退）。Mutation：删掉某个锚点文件或把某指针改成
+/// 不存在的路径 → 本用例转红。
+#[test]
+fn narrative_pointer_anchors_exist_in_docs_context() {
+    let repo = repo_dir();
+    let mod_dir = project_mod_dir();
+    let context_dir = repo.join("docs/context");
+    let mut pointer_count = 0usize;
+    let mut violations: Vec<String> = Vec::new();
+    let mut check = |ns: &str, key: &str, value: &str| {
+        // 每个 `docs/context/<file>.md` 出现都核一次锚点。
+        let mut rest = value;
+        while let Some(pos) = rest.find("docs/context/") {
+            let tail = &rest[pos + "docs/context/".len()..];
+            let file: String = tail
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
+                .collect();
+            if file.ends_with(".md") {
+                pointer_count += 1;
+                if !context_dir.join(&file).is_file() {
+                    violations.push(format!("{ns}.{key} -> docs/context/{file} (missing)"));
+                }
+            }
+            rest = &tail[file.len().min(tail.len())..];
+        }
+    };
+    for f in [
+        "beats-flow.json",
+        "beats-harness.json",
+        "beats-lanes.json",
+        "beats-map-guide.json",
+        "beats-requirements.json",
+        "beats-settlement.json",
+    ] {
+        let fragment = read_json(&mod_dir.join(format!("data/texts/{f}")));
+        if let Some(beats) = fragment["beats"].as_object() {
+            for (key, value) in beats {
+                if let Some(text) = value.as_str() {
+                    check(f, key, text);
+                }
+            }
+        }
+    }
+    let core = read_json(&mod_dir.join("data/texts/core.json"));
+    for ns in ["scenes", "prompts"] {
+        for (key, value) in core[ns].as_object().expect("core ns object") {
+            if let Some(text) = value.as_str() {
+                check(ns, key, text);
+            }
+        }
+    }
+    // 23 个收缩键必须携带指针（6 个 <node>_common + scenes 5 + prompts 5 + harness 3 + map-guide 2
+    // + settlement 2 = 23；settlement_todo_segment 亦含指针）。
+    let flow = read_json(&mod_dir.join("data/texts/beats-flow.json"));
+    for key in [
+        "prologue_common",
+        "charter_common",
+        "coordinate_common",
+        "settle_common",
+        "release_common",
+        "retired_common",
+    ] {
+        let value = flow["beats"][key].as_str().expect("common beat string");
+        assert!(
+            value.contains("docs/context/"),
+            "shrunk beat `{key}` must carry a docs/context pointer"
+        );
+    }
+    assert!(
+        pointer_count >= 23,
+        "expected at least 23 docs/context pointers across the shrunk keys, got {pointer_count}"
+    );
+    assert!(
+        violations.is_empty(),
+        "narrative pointer anchors missing under docs/context/: {}",
+        violations.join(", ")
+    );
+}
+
 /// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
 /// is delegated to the main session's own environment, so `data/texts/beats-settlement.json`
 /// must not carry any harness-implementation literal (`pi-subagents`, `.pi/agent`, `.claude`,
@@ -4071,5 +4154,127 @@ fn summary_projection_carries_play_and_resident_trio() {
         summary["batchDrained"],
         json!(true),
         "a settled batch drains the pump once the maintenance row is done: {summary}"
+    );
+}
+
+// ───────────────────────── harness tools 机证 cross-check（r3 / D-MA26）─────────────────────────
+
+/// 注入 harness 工具 runner：按 tool_id 返回 controlled 输出（k=v 对的 BTreeMap 形式，
+/// 与 InProcessToolRunner.parse_kv_output 的产物同形）。用于机证 cross-check 的矛盾/一致两路。
+struct HarnessRunner {
+    todo_remaining: i32,
+    sessions_matching: i32,
+}
+
+impl HostToolRunner for HarnessRunner {
+    fn call(
+        &mut self,
+        tool_id: &str,
+        _args: &std::collections::BTreeMap<String, String>,
+    ) -> Result<std::collections::BTreeMap<String, String>, String> {
+        let mut out = std::collections::BTreeMap::new();
+        match tool_id {
+            "harness.todo-check" => {
+                out.insert("found".to_owned(), "1".to_owned());
+                out.insert("total".to_owned(), "3".to_owned());
+                out.insert("remaining".to_owned(), self.todo_remaining.to_string());
+                out.insert("active".to_owned(), "1".to_owned());
+                out.insert(
+                    "ok".to_owned(),
+                    if self.todo_remaining == 0 { "1" } else { "0" }.to_owned(),
+                );
+                Ok(out)
+            }
+            "harness.sessions-count" => {
+                out.insert("total".to_owned(), "4".to_owned());
+                out.insert("matching".to_owned(), self.sessions_matching.to_string());
+                out.insert("trash".to_owned(), "1".to_owned());
+                out.insert(
+                    "ok".to_owned(),
+                    if self.sessions_matching == 0 {
+                        "1"
+                    } else {
+                        "0"
+                    }
+                    .to_owned(),
+                );
+                Ok(out)
+            }
+            other => Err(format!("unexpected tool_id: {other}")),
+        }
+    }
+}
+
+/// 未注册 tools.root：coordinate.submit 进入结算时给一次性 [TOOLS UNREGISTERED] 提醒；
+/// settlement.todo 走人证旧路径 + [TOOLS ROOT MISSING] 提示，写 source=human。
+#[test]
+fn settlement_todo_unregistered_falls_back_to_human_attestation() {
+    let mut game = drive_to_settle();
+    // 未注册 tools.root（drive_to_settle 内的 coordinate.submit 已发一次性提醒）。
+    game.assert_kv("settings.tools.root", json!(null));
+    // 独立 settlement.todo 动作：人证路径（无工具挂载也无注册，回退）。
+    let lines = game.narrate("settlement.todo", &text("0|re-checked the todo list"));
+    assert!(
+        lines.iter().any(|l| l.contains("[TOOLS ROOT MISSING]")),
+        "unregistered settlement.todo must hint the missing tools.root: {lines:#?}"
+    );
+    game.assert_kv("settlement.todo.remaining", json!(0));
+    game.assert_kv("settlement.todo.source", json!("human"));
+}
+
+/// 注册 tools.root + 挂载 harness runner：机证 remaining>0 与人证 remaining=0 矛盾 →
+/// settlement.todo 被拒（拒绝前缀 + 零状态写入，remaining 保持 reset_settlement 基线）。
+#[test]
+fn settlement_todo_machine_contradiction_is_refused_with_zero_writes() {
+    let mut game = drive_to_settle();
+    game.kernel.set_tool_runner(Some(Box::new(HarnessRunner {
+        todo_remaining: 2,
+        sessions_matching: 0,
+    })));
+    // 注册 tools.root + 主会话 session id（mod 沙箱读不到进程环境，参数只能来自 KV）。
+    game.narrate("config.set", &text("tools.root=/tmp/ygg-tools"));
+    game.narrate("config.set", &text("tools.session=semantics-parent-uuid"));
+    game.assert_kv("settings.tools.root", json!("/tmp/ygg-tools"));
+    let lines = game.narrate("settlement.todo", &text("0|re-checked the todo list"));
+    assert_refused(&lines, "machine remaining=2");
+    // 拒绝 = 零状态写入：settlement.todo.remaining 未被本动作登记（仍 reset 基线）。
+    game.assert_kv("settlement.todo.source", json!(null));
+    game.assert_kv("settlement.todo.verified_by", json!(""));
+}
+
+/// 注册 + 机证一致（remaining=0 / matching=0）：settlement.todo 与 settlement.sessions
+/// 均通过并写 source=machine:* 溯源键。
+#[test]
+fn settlement_machine_agreement_passes_and_records_provenance() {
+    let mut game = drive_to_settle();
+    game.kernel.set_tool_runner(Some(Box::new(HarnessRunner {
+        todo_remaining: 0,
+        sessions_matching: 0,
+    })));
+    game.narrate("config.set", &text("tools.root=/tmp/ygg-tools"));
+    game.narrate("config.set", &text("tools.session=semantics-parent-uuid"));
+    game.narrate("config.set", &text("tools.sessions_root=/tmp/ygg-sessions"));
+    let todo_lines = game.narrate("settlement.todo", &text("0|re-checked the todo list"));
+    assert!(
+        todo_lines.iter().any(|l| l.contains("[TOOLS CHECK OK]")),
+        "machine agreement must narrate the check pass: {todo_lines:#?}"
+    );
+    game.assert_kv("settlement.todo.remaining", json!(0));
+    game.assert_kv(
+        "settlement.todo.source",
+        json!("machine:harness.todo-check"),
+    );
+    let sess_lines = game.narrate(
+        "settlement.sessions",
+        &text("1|0|~/.pi/agent/sessions-trash/semantics"),
+    );
+    assert!(
+        sess_lines.iter().any(|l| l.contains("[TOOLS CHECK OK]")),
+        "sessions machine agreement must narrate the pass: {sess_lines:#?}"
+    );
+    game.assert_kv("settlement.sessions.remaining", json!(0));
+    game.assert_kv(
+        "settlement.sessions.source",
+        json!("machine:harness.sessions-count"),
     );
 }

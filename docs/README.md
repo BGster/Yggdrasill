@@ -18,7 +18,11 @@ docs/
 │   ├── principles.md        # 架构与运营原则 P1–P11
 │   ├── topology.md          # Monorepo 拓扑与依赖白名单
 │   ├── decisions-engine.md  # 决策台账 D1–D21
-│   └── decisions-agent.md   # 决策台账 D-MA1–23
+│   ├── decisions-agent.md   # 决策台账 D-MA1–23
+│   ├── workflow-acts.md     # 五幕进行时台词 + 无 egg 执行章（r2 新增）
+│   ├── dispatch-ritual.md   # 派发仪式正文（r2 新增）
+│   ├── cleanup-policy.md    # 盘点清理政策（r2 新增）
+│   └── copy-contract.md     # mod 文案契约：413 键句式表（r2 新增，知识权威源）
 └── design/              # 系统设计树
     ├── system-boundaries.md     # 三层边界 + 协商矩阵 + Adapter 五义务
     ├── state-machine.md         # 状态机语义与微状态判定
@@ -28,6 +32,7 @@ docs/
     ├── state-surface.md         # 状态面：存储键契约 + 拒绝面矩阵
     ├── lanes.md                 # 持久化泳道池与进度投影
     ├── tool-bridge.md           # 同步工具桥
+    ├── harness-tools.md         # .pi/tools 检测机制（纯命令行契约 + 三层调用方）
     ├── prompt-surface.md        # beats 提示词面
     ├── identity.md              # 身份与权限
     ├── lua-api.md               # ygg.* 宿主 API
@@ -49,6 +54,10 @@ docs/
 | [topology.md](context/topology.md) | 仓库目录拓扑与 4 条硬性依赖不变量 | §4 |
 | [decisions-engine.md](context/decisions-engine.md) | 引擎与平台架构决策台账 D1–D21 | §5 引言 + §5.1 |
 | [decisions-agent.md](context/decisions-agent.md) | Agent 治理架构决策台账 D-MA1–24 | §5 引言 + §5.2 |
+| [workflow-acts.md](context/workflow-acts.md) | 主流程五幕 + 需求级九幕进行时指引（台词/动作/关联阅读）+ 无 egg 执行章（r2 新增） | mod scenes/prompts/`*_common` 叙事正文 |
+| [dispatch-ritual.md](context/dispatch-ritual.md) | 派发仪式正文：必读纪律 / 工件 / submit / 集成 / Doc sync（r2 新增） | mod subagent_brief 策略段 |
+| [cleanup-policy.md](context/cleanup-policy.md) | 盘点清理政策：会话清理边界与判据 / 待办清理（r2 新增） | mod settlement_sessions_unsetted_hint 正文 |
+| [copy-contract.md](context/copy-contract.md) | mod 文案契约：413 键句式模板 + 协议前缀归属（r2 新增，知识权威源） | mod data/texts 全部状态行文键 |
 
 ## 导航表 · 系统设计（design/）
 
@@ -62,6 +71,7 @@ docs/
 | [state-surface.md](design/state-surface.md) | 状态存储键契约与拒绝面矩阵 | §2.7 + §2.8 |
 | [lanes.md](design/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
 | [tool-bridge.md](design/tool-bridge.md) | 同步工具桥双层白名单指针 | §2.11 |
+| [harness-tools.md](design/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | D-MA26 |
 | [prompt-surface.md](design/prompt-surface.md) | 7 片段 × 378 beats 键职责表 | §2.12 |
 | [identity.md](design/identity.md) | 台账/身份章/profile/票据门（不进剧情） | §2.13 |
 | [lua-api.md](design/lua-api.md) | ygg.* 全 API 面与副作用类别 | §3 章题 + §3.1 |

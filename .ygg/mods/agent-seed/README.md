@@ -5,6 +5,15 @@ M-Agent 泳道的 seed mod：把「一次完整的 Agent 工作」配置成一�
 即可开工，**零定制**。怎么玩（构建 / 开局 / 单发 / 异步 / 结算）见仓库根 `AGENTS.md`；本文件只说
 Mod 内部结构。
 
+**职责边界（r2「mod 剧情提示词迁出」）**：本 mod 只做三件事——**状态管理**（五幕/九幕/门禁/台账）、
+**需求看板**（map/requirement.list 渲染与进度投影）、**CONTEXT 索引提示**（指针行文）。文案的
+**知识权威**在 `docs/context/` 运行流程层四件（`workflow-acts.md` 幕台词 / `dispatch-ritual.md`
+派发仪式 / `cleanup-policy.md` 清理政策 / `copy-contract.md` 413 键句式契约表）；`data/texts/`
+是其运行时投影，不承担文案解释权。改文案先改 context 权威文件再同步 mod（单向同步纪律，见
+`docs/wiki-governance.md`）；23 处剧情/策略键已收缩为「状态前缀 + docs/context 指针」，其余
+413 键原文留守（宿主无文案缺省机制，运行时物理必须）。不装 egg 时按 `docs/context/workflow-acts.md`
+的「无 egg 执行本章」人工执行同一工作流。
+
 ## 零、host 契约（**必填；宿主不含任何默认值**）
 
 宿主（`crates/ygg-sandbox/examples/egg.rs`、`src/playtest.rs`）不含任何事件名字面量与回退默认值：
@@ -625,9 +634,10 @@ cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1
 cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1   # 前缀钉
 
 # 多需求 multi-stage（外部提案；host 不再生成任何占位提案）：
-#   .ygg/bin/egg --run-id t --runs-root .ygg/runs --requirement '需求A|描述'
-#   .ygg/bin/egg --run-id t --runs-root .ygg/runs --proposal 'r1|1|analysis|结论|a.md'
-#   .ygg/bin/egg --mod .ygg/mods/agent-seed --run-id t --runs-root .ygg/runs --resume
+#   .ygg/bin/egg new --mod .ygg/mods/agent-seed --in .ygg/runs --event event.start   # 新局（回执末行 run-root）
+#   .ygg/bin/egg open .ygg/runs/t --requirement '需求A|描述'
+#   .ygg/bin/egg open .ygg/runs/t --proposal 'r1|1|analysis|结论|a.md'
+#   .ygg/bin/egg open .ygg/runs/t                                                  # 附着续跑（自动取最新存档点）
 
 # 改完 data/ 或 schemas/ 必跑（manifest 内容寻址）
 cargo run --example pack -- .ygg/mods/agent-seed

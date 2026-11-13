@@ -100,3 +100,11 @@ h2 { font-size: 14px; margin: 18px 0 8px; }
 .saves-details summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
 .saves-details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
 pre.cmd { background: #f4f4f8; border: 1px solid var(--line); padding: 8px 10px; font-size: 12px; overflow-x: auto; }
+#roots-panel { background: #fff; border: 1px solid var(--line); padding: 4px 12px; margin-bottom: 12px; }
+#roots-panel summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
+#roots-panel[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.roots-body { padding-bottom: 8px; }
+#root-form { display: flex; gap: 8px; margin: 6px 0; }
+#root-input { flex: 1; font-family: monospace; font-size: 12px; padding: 4px 6px; }
+#roots-list { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+#roots-list li { display: flex; align-items: center; gap: 8px; font-size: 12px; }

@@ -189,6 +189,19 @@ pub struct ResetInfo {
     pub warnings: Vec<String>,
 }
 
+/// 存档点清单条目（`savepoints()`）：sqlite = 库内各代（含当前代与已归档代）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavepointInfo {
+    /// 代标识（sqlite = `generation`）。
+    pub generation: i64,
+    /// 该代已提交步数（`step` 行数；0 = 只有初始存档）。
+    pub steps: u64,
+    /// 该代末份快照的落盘时刻（秒）。
+    pub latest_created_at: u64,
+    /// 是否当前代（`--at` 对当前代 = 无操作提示）。
+    pub current: bool,
+}
+
 /// 事件日志的读取结果。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StepLog {
@@ -635,6 +648,18 @@ pub trait RunStore {
     /// sqlite 实现**绝不**触碰 `-wal` / `-shm` / `-journal`：那是库的活文件，
     /// 「清理」在语义上等于破坏事务。
     fn cleanup_stale(&mut self, stale_ms: u128) -> Vec<String>;
+
+    // ── 存档点面（sqlite 代回退；JSON 无代概念 → 明确拒绝）┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+    /// 全部存档点（sqlite = 各代清单，按代升序；JSON = 不支持，`Misconfigured`）。
+    ///
+    /// 「最新存档点」= [`RunStore::latest_save`]（当前代末快照）；「回退存档点」
+    /// = 本清单 + [`RunStore::save_at`] 取目标代末快照，交由调用方 `reset` 建新代
+    /// ——端口不提供「直接切代」原语，回退必须经 reset 留证据。
+    fn savepoints(&self) -> Result<Vec<SavepointInfo>, StoreError>;
+
+    /// 指定代的末份快照（sqlite；代不存在 → `Ok(None)`；JSON = 不支持）。
+    fn save_at(&self, generation: i64) -> Result<Option<Vec<u8>>, StoreError>;
 
     // ── 制品面（in-archive artifact VFS）┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
     // 两个后端都必须实现——**不设默认实现**，否则新后端会静默「没有制品」而

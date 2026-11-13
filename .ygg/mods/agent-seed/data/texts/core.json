@@ -1,20 +1,20 @@
 {
   "scenes": {
-    "prologue": "[BOOT · 引擎就绪] ygg 世界已装载（引擎 {{engine}}），当前相位 {{stage}}，演进偏好 {{mode}}（仅叙述——资源从不被自动改写）。这是双层代理元工作流：协调层只派发、串行受理、过两道门禁；每个需求走九幕（立项→计划中→计划门禁→待开发→开发中→交付受理→验收门禁→集成→完成）。",
-    "charter": "[立局 · 第 {{batch}} 批前] 章程：「{{title}}」｜目标：{{goal}}｜成功判据：{{success}}。charter.set 可反复修订；三件套齐备后 run.begin 开工（章程随之锁定）。",
-    "coordinate": "[协调] 任务「{{title}}」：{{goal}} | {{count}} 条需求（{{open}} 条进行中）| {{pending}} 条待受理提案。这一层你只做三件事：派发、串行受理、过两道门禁；其余需求的分析/计划/开发可异步并行。",
-    "settle": "[盘点] 任务「{{title}}」：{{count}} 条需求（{{done}} 条已终态）| require_all_green {{gates}}。四项齐备（验证、演进登记、会话清理、待办清理）自动进发布幕。",
-    "release": "[发布] 第 {{batch}} 批 · 任务「{{title}}」{{declared}}。声明本批 develop→master 合并结果（release.confirm / release.skip）；已声明即可 review.note 批结算（未武装）或退役（run.retire 武装）。"
+    "prologue": "[BOOT · 引擎就绪] 引擎 {{engine}}，相位 {{stage}}，演进偏好 {{mode}}（仅叙述）。双层元工作流叙事正文见 docs/context/workflow-acts.md（序幕节）。",
+    "charter": "[立局 · 第 {{batch}} 批前] 章程：「{{title}}」｜目标：{{goal}}｜成功判据：{{success}}。幕台词正文见 docs/context/workflow-acts.md（立局幕节）。",
+    "coordinate": "[协调] 任务「{{title}}」：{{goal}} | {{count}} 条需求（{{open}} 进行中）| {{pending}} 条待受理。协调层三事（派发/受理/门禁）正文见 docs/context/workflow-acts.md（协调幕节）。",
+    "settle": "[盘点] 任务「{{title}}」：{{count}} 条需求（{{done}} 终态）| require_all_green {{gates}}。四项齐备自动进发布幕；正文见 docs/context/workflow-acts.md（盘点幕节）。",
+    "release": "[发布] 第 {{batch}} 批 · 任务「{{title}}」{{declared}}。声明本批结果后 review.note 批结算/退役；正文见 docs/context/workflow-acts.md（发布幕节）。"
   },
   "endings": {
     "done": "[ENDING · run retired] 任务「{{title}}」——{{count}} 条需求（{{done}} 条终态），{{batch}} 个已结算批次；复盘评分 {{score}}/5，演进候选 {{candidates}}（保留/筛除）。一句话教训：{{lesson}}"
   },
   "prompts": {
-    "charter": "下一步：修订章程（charter.set），三件套齐备后开工（run.begin）？",
-    "coordinate": "下一步：受理提案、过门禁、派发，还是收口进盘点（coordinate.submit）？",
-    "settle": "盘点：门禁全绿了吗？依次验证 → 演进登记 → 会话 → 待办；四项齐备自动进发布幕。",
-    "release": "发布：声明本批结果（release.confirm / release.skip）后 review.note 批结算；run.retire 武装时它是终局。",
-    "retired": "本局已退役：只读查询（map / requirement.list）。"
+    "charter": "下一步：修订章程（charter.set），三件套齐备后开工（run.begin）？（幕语义：docs/context/workflow-acts.md）",
+    "coordinate": "下一步：受理提案、过门禁、派发，还是收口进盘点（coordinate.submit）？（幕语义：docs/context/workflow-acts.md）",
+    "settle": "盘点：门禁全绿了吗？依次验证 → 演进登记 → 会话 → 待办。（幕语义：docs/context/workflow-acts.md）",
+    "release": "发布：声明本批结果（release.confirm / release.skip）后 review.note 批结算；run.retire 武装时它是终局。（幕语义：docs/context/workflow-acts.md）",
+    "retired": "本局已退役：只读查询（map / requirement.list）。（幕语义：docs/context/workflow-acts.md）"
   },
   "options": {
     "dispatch": "requirement.dispatch — dispatch by readiness order ({{count}} candidates, jobs {{jobs}}/{{cap}}, head {{id}})",

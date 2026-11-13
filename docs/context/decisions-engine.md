@@ -31,5 +31,5 @@
 | **D18** | LLM 提供方抽象 | **双协议适配器（`openai-chat` 默认 + `anthropic-messages` 回退）**，严格通过 git-ignored 的 `.env` 键（`YGG_LLM_*`）配置。 | 已确认 |
 | **D19** | 试玩验证契约 | `playtest` 产出的**机器可读 8 键 JSON 报告**（贪心 option-1 遍历、自定义 `--choices`、`--max-steps`），通过 Mod 声明的 `agent.endingPrefix` 将结局归类为 `ending` / `choice` / `limit` / `deadend`。 | 已确认 |
 | **D20** | 资源模板单一来源 | **`scene-texts.json` 与 `agent-config.json` 的 Schema 规范地存放于 `packages/schema/schemas/`**；LLM 填充数据实例，绝不自创 Schema 定义。 | 已确认 |
-| **D21** | egg 全局化与全局唯一 serve | **链式软链**：`~/.local/bin/egg` → `<repo>/.ygg/bin/egg`（安装副本为唯一事实源，重建后重跑 `scripts/install-egg.sh` 即同步；cargo clean 无感、免 sudo、零墓碑）；**单实例按端口成立**：启动前只读探针 `GET /api/runs`（零锁文件）——自家实例幂等复用退出 0 / 根不被覆盖拒绝退出 1（不热改根）/ 旧代单根实例拒绝并提示重启 / 外姓占用由 bind 失败兑住；**根集三层显式解析链**：可重复 `--runs-root` > `~/.config/ygg/serve.json` > `./runs`，**拒绝文件系统爬扫**（根集随文件系统静默漂移违反 P10 显式声明边界；面板不得出现未声明过的根）。 | 已确认 |
+| **D21** | egg 全局化与全局唯一 serve | **链式软链**：`~/.local/bin/egg` → `<repo>/.ygg/bin/egg`（安装副本为唯一事实源，重建后重跑 `scripts/install-egg.sh` 即同步；cargo clean 无感、免 sudo、零墓碑）；**单实例按端口成立**（r1 修订）：启动前只读探针 `GET /api/roots`（零锁文件）——自家实例幂等复用退出 0 / 旧代无端点实例拒绝并提示重启 / 外姓占用由 bind 失败兑住；**根集 = 进程内注册表**（r1 修订）：空根启动，`POST/DELETE /api/roots` 运行时注册/注销（runs 父目录或单个 run-root；重启为空；`--runs-root` 与 serve.json 退役），**拒绝文件系统爬扫**（面板不得出现未注册过的根；注册 = 观察配置非局状态写）。 | 已确认 |
 
