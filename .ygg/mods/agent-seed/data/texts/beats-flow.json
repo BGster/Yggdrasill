@@ -35,9 +35,9 @@
     "default_req_payload": "add a requirement|write the title and description here, pipe-separated (third segment = external idempotency id, fourth segment = deps r1,r2)",
     "handover_goal": "[DECISION HANDOVER] play.mode = goal: the main agent reads the full receipt and then dispatches by itself (never the default first option, never a script); acceptance and both gates still take one real action and one validation each, evidence standards unchanged. The closing review must account for the delegated scope.",
     "handover_guide": "[DECISION HANDOVER] play.mode = guide: every following step is confirmed by a human (reply with the index); milestone actions still need the menu ticket.",
-    "prologue_common": "shared by both modes: acceptance and both gates still take one real action and one validation each, never skipped; requirements can be added asynchronously (--requirement / --proposal).",
-    "coordinate_common": "accept proposals first (proposal.accept), then pass gates (gate.approve/reject), then dispatch (requirement.dispatch), finally coordinate.submit.",
-    "stage_prompt_missing": "(the prompt for this node is missing: check <node>_common in data/texts/beats-flow.json)",
+    "prologue_common": "序幕：受理与两道门禁各需一次真实动作与核验，永不跳过；需求可异步追加。叙事与策略正文见 docs/context/workflow-acts.md（序幕节）。",
+    "coordinate_common": "协调幕：受理提案 → 过门禁 → 派发 → coordinate.submit。正文与人机门禁说明见 docs/context/workflow-acts.md（协调幕节）。",
+    "stage_prompt_missing": "(the prompt for this node is missing: check <node>_common in data/texts/beats-flow.json and docs/context/workflow-acts.md)",
     "evolution_auto": "evolution auto: preference marker only (cap {{cap}}, paths {{paths}}) — no auto-rewrite, no revision requests registered; suggestions still go through the separate settlement.evolution registration.",
     "evolution_none": "0/0",
     "evolution_artifact_none": "(empty)",
@@ -59,9 +59,9 @@
     "default_task_success": "（未设成功判据）",
     "phase_expected": "该动作需要微状态「{{expected}}」（当前「{{current}}」）",
     "settle_ready": "[SETTLE READY] 盘点四项齐备（验证/演进登记/会话清理/待办清理）——自动进入发布幕",
-    "charter_common": "立局幕：章程三件套（标题/目标/成功判据）立好才可开工；charter.set 在立局内可反复修订，run.begin 后章程锁定。",
-    "settle_common": "盘点幕四项：verify.submit 先全绿 → settlement.evolution 登记演进（可并入会话/待办可选段）→ settlement.sessions → settlement.todo；四项齐备自动转发布幕（不占事件）。",
-    "release_common": "发布幕：release.confirm 声明 master@<sha> 与批次 tag（v年.月.日.序号），或 release.skip 声明跳过理由；任一成立即「发布已声明」，review.note 才可批结算/退役。",
-    "retired_common": "退役终态：业务事件全拒；map.show / requirement.list 只读查询仍可用。"
+    "charter_common": "立局幕：三件套齐备后 run.begin 开工（章程随之锁定）。正文见 docs/context/workflow-acts.md（立局幕节）。",
+    "settle_common": "盘点幕四项：验证 → 演进登记 → 会话清理 → 待办清理，齐备自动转发布幕。正文见 docs/context/workflow-acts.md（盘点幕节）；清理政策见 docs/context/cleanup-policy.md。",
+    "release_common": "发布幕：release.confirm（master@<sha>|批次 tag）或 release.skip（理由），已声明即可 review.note 批结算/退役。正文见 docs/context/workflow-acts.md（发布幕节）。",
+    "retired_common": "退役终态：业务事件全拒；map.show / requirement.list 只读查询仍可用。正文见 docs/context/workflow-acts.md（退役终态节）。"
   }
 }
