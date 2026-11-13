@@ -22,8 +22,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::Value as Json;
 
 use crate::{
-    ArtifactMeta, ArtifactRecord, Backend, Committed, ResetInfo, RunStore, StepDraft, StepLog,
-    StepRecord, StoreError, Tick,
+    ArtifactMeta, ArtifactRecord, Backend, Committed, ResetInfo, RunStore, SavepointInfo,
+    StepDraft, StepLog, StepRecord, StoreError, Tick,
 };
 
 /// 库文件名（建库 / 后端探测与混用检测的识别点）。
@@ -243,6 +243,52 @@ impl RunStore for SqliteStore {
         // commit_step 的 seq 相容（updated_at 靠 id 递增定序，不靠 seq）。
         let seq = self.next_seq_in(self.generation)?;
         self.insert_save(save, seq, tick.secs)
+    }
+
+    fn savepoints(&self) -> Result<Vec<SavepointInfo>, StoreError> {
+        // 以 snapshot 表为事实源：每代至少一份初始存档（reset 事务保证），
+        // 无 snapshot 的 generation 行（不应存在）不会凭空出现。
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT generation, \
+                        (SELECT COUNT(*) FROM step WHERE step.generation = snapshot.generation), \
+                        MAX(created_at) \
+                 FROM snapshot GROUP BY generation ORDER BY generation",
+            )
+            .map_err(|err| db_error(&self.db_path, "准备存档点查询", err))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?.max(0) as u64,
+                    row.get::<_, i64>(2)?.max(0) as u64,
+                ))
+            })
+            .map_err(|err| db_error(&self.db_path, "读取存档点", err))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (generation, steps, latest_created_at) =
+                row.map_err(|err| db_error(&self.db_path, "读取存档点", err))?;
+            out.push(SavepointInfo {
+                generation,
+                steps,
+                latest_created_at,
+                current: generation == self.generation,
+            });
+        }
+        Ok(out)
+    }
+
+    fn save_at(&self, generation: i64) -> Result<Option<Vec<u8>>, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT save FROM snapshot WHERE generation = ?1 ORDER BY id DESC LIMIT 1",
+                params![generation],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(|err| db_error(&self.db_path, "读取指定代存档", err))
     }
 
     fn steps(&self) -> Result<StepLog, StoreError> {
@@ -623,6 +669,51 @@ mod tests {
             ending_line: None,
             save,
         }
+    }
+
+    /// 存档点面：savepoints 列各代（当前代标记）、save_at 取指定代末快照；
+    /// reset 建新代后旧代仍可取（回退的事实基础）。
+    #[test]
+    fn savepoints_and_save_at_cover_archived_generations() {
+        let dir = case_dir("savepoints");
+        let mut store = SqliteStore::open(&dir, TICK).expect("打开库");
+        store
+            .commit_step(draft(Some(b"{\"v\":1}"), true))
+            .expect("g1 第一步");
+        store
+            .commit_step(draft(Some(b"{\"v\":2}"), true))
+            .expect("g1 第二步");
+        // g1 → g2：reset 归档旧代，写 g2 初始存档。
+        store.reset(b"{\"v\":0}", "test-reset", TICK).expect("重置");
+        store
+            .commit_step(draft(Some(b"{\"v\":3}"), true))
+            .expect("g2 第一步");
+
+        let points = store.savepoints().expect("存档点清单");
+        assert_eq!(points.len(), 2, "两代都应列出：{points:?}");
+        // 首开即建代 0（migrate 写初始存档）；reset 后当前代 = 1。
+        assert_eq!(points[0].generation, 0);
+        assert_eq!(points[0].steps, 2);
+        assert!(!points[0].current);
+        assert_eq!(points[1].generation, 1);
+        assert_eq!(points[1].steps, 1);
+        assert!(points[1].current);
+
+        // save_at：g0 末快照 = v2；g1 末快照 = v3；不存在的代 = None。
+        assert_eq!(
+            store.save_at(0).expect("g0 存档").as_deref(),
+            Some(&b"{\"v\":2}"[..])
+        );
+        assert_eq!(
+            store.save_at(1).expect("g1 存档").as_deref(),
+            Some(&b"{\"v\":3}"[..])
+        );
+        assert_eq!(store.save_at(99).expect("不存在的代"), None);
+        // latest_save 仍是当前代（save_at 不影响现态）。
+        assert_eq!(
+            store.latest_save().expect("latest").as_deref(),
+            Some(&b"{\"v\":3}"[..])
+        );
     }
 
     /// 强承诺之一：事务**中途**失败（step 已插入、snapshot 写不进去）→ 整体回滚。
