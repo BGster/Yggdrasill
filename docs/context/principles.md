@@ -31,6 +31,7 @@
 10. **P10 · 数据红线与显式的每运行目标授权**
     - **数据红线**：读取、列出、stat、或复制真实业务数据（`*.xlsx`、`*.xls`、`*.csv`，或诸如 `/Volumes/WenshuSpace/**` 的涉密挂载）在提示层与扩展 `tool_call` 防火墙层都被严格禁止。
     - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在**每批盘点结算与退役**（常驻下 review.note 每批都走）之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。
+    - **注册纪律（用前注册）**：凡「用前注册」参数——`executor.<rN>.<stage>`（执行者台账）、`profile.<handle>.*`（身份卡）、`goal.authorization`（目标授权）、`lane.pool`（泳道池）、`tools.root`/`tools.session`/`tools.sessions_root`（harness 工具，D-MA26）——一律经 `config.set`（或专用注册动作）在使用前写入；未注册 = 消费点可读拒绝或提示（`[GOAL AUTH PENDING]` / `[TOOLS UNREGISTERED]` / `lane_pool_unknown` 等），**绝不静默假成功**。mod 在相关剧情节点给提醒（beats 提示行），context 文档写明「哪些键、何时注册、未注册的可读行为」。
 11. **P11 · 宿主零语义（引擎/壳分界）**
     - 宿主（内核与 CLI/服务壳）不持有、不解析任何 Mod 领域概念；跨 Mod 复用的只有通用机制
       （存储、事件、路由、裸数据服务）。领域概念出现在宿主面即层次错位。

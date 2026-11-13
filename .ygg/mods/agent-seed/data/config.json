@@ -39,6 +39,10 @@
     "git.worktree_release_pool",
     "git.lane_probe_pool",
     "fs.artifact_probe",
-    "gate.verify_suite"
+    "gate.verify_suite",
+    "harness.todo-check",
+    "harness.sessions-count",
+    "harness.manifest-verify",
+    "harness.docs-consistency"
   ]
 }

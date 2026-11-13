@@ -4156,3 +4156,117 @@ fn summary_projection_carries_play_and_resident_trio() {
         "a settled batch drains the pump once the maintenance row is done: {summary}"
     );
 }
+
+// ───────────────────────── harness tools 机证 cross-check（r3 / D-MA26）─────────────────────────
+
+/// 注入 harness 工具 runner：按 tool_id 返回 controlled 输出（k=v 对的 BTreeMap 形式，
+/// 与 InProcessToolRunner.parse_kv_output 的产物同形）。用于机证 cross-check 的矛盾/一致两路。
+struct HarnessRunner {
+    todo_remaining: i32,
+    sessions_matching: i32,
+}
+
+impl HostToolRunner for HarnessRunner {
+    fn call(
+        &mut self,
+        tool_id: &str,
+        _args: &std::collections::BTreeMap<String, String>,
+    ) -> Result<std::collections::BTreeMap<String, String>, String> {
+        let mut out = std::collections::BTreeMap::new();
+        match tool_id {
+            "harness.todo-check" => {
+                out.insert("found".to_owned(), "1".to_owned());
+                out.insert("total".to_owned(), "3".to_owned());
+                out.insert("remaining".to_owned(), self.todo_remaining.to_string());
+                out.insert("active".to_owned(), "1".to_owned());
+                out.insert(
+                    "ok".to_owned(),
+                    if self.todo_remaining == 0 { "1" } else { "0" }.to_owned(),
+                );
+                Ok(out)
+            }
+            "harness.sessions-count" => {
+                out.insert("total".to_owned(), "4".to_owned());
+                out.insert("matching".to_owned(), self.sessions_matching.to_string());
+                out.insert("trash".to_owned(), "1".to_owned());
+                out.insert(
+                    "ok".to_owned(),
+                    if self.sessions_matching == 0 { "1" } else { "0" }.to_owned(),
+                );
+                Ok(out)
+            }
+            other => Err(format!("unexpected tool_id: {other}")),
+        }
+    }
+}
+
+/// 未注册 tools.root：coordinate.submit 进入结算时给一次性 [TOOLS UNREGISTERED] 提醒；
+/// settlement.todo 走人证旧路径 + [TOOLS ROOT MISSING] 提示，写 source=human。
+#[test]
+fn settlement_todo_unregistered_falls_back_to_human_attestation() {
+    let mut game = drive_to_settle();
+    // 未注册 tools.root（drive_to_settle 内的 coordinate.submit 已发一次性提醒）。
+    game.assert_kv("settings.tools.root", json!(null));
+    // 独立 settlement.todo 动作：人证路径（无工具挂载也无注册，回退）。
+    let lines = game.narrate("settlement.todo", &text("0|re-checked the todo list"));
+    assert!(
+        lines.iter().any(|l| l.contains("[TOOLS ROOT MISSING]")),
+        "unregistered settlement.todo must hint the missing tools.root: {lines:#?}"
+    );
+    game.assert_kv("settlement.todo.remaining", json!(0));
+    game.assert_kv("settlement.todo.source", json!("human"));
+}
+
+/// 注册 tools.root + 挂载 harness runner：机证 remaining>0 与人证 remaining=0 矛盾 →
+/// settlement.todo 被拒（拒绝前缀 + 零状态写入，remaining 保持 reset_settlement 基线）。
+#[test]
+fn settlement_todo_machine_contradiction_is_refused_with_zero_writes() {
+    let mut game = drive_to_settle();
+    game.kernel.set_tool_runner(Some(Box::new(HarnessRunner {
+        todo_remaining: 2,
+        sessions_matching: 0,
+    })));
+    // 注册 tools.root + 主会话 session id（mod 沙箱读不到进程环境，参数只能来自 KV）。
+    game.narrate("config.set", &text("tools.root=/tmp/ygg-tools"));
+    game.narrate("config.set", &text("tools.session=semantics-parent-uuid"));
+    game.assert_kv("settings.tools.root", json!("/tmp/ygg-tools"));
+    let lines = game.narrate("settlement.todo", &text("0|re-checked the todo list"));
+    assert_refused(&lines, "machine remaining=2");
+    // 拒绝 = 零状态写入：settlement.todo.remaining 未被本动作登记（仍 reset 基线）。
+    game.assert_kv("settlement.todo.source", json!(null));
+    game.assert_kv("settlement.todo.verified_by", json!(""));
+}
+
+/// 注册 + 机证一致（remaining=0 / matching=0）：settlement.todo 与 settlement.sessions
+/// 均通过并写 source=machine:* 溯源键。
+#[test]
+fn settlement_machine_agreement_passes_and_records_provenance() {
+    let mut game = drive_to_settle();
+    game.kernel.set_tool_runner(Some(Box::new(HarnessRunner {
+        todo_remaining: 0,
+        sessions_matching: 0,
+    })));
+    game.narrate("config.set", &text("tools.root=/tmp/ygg-tools"));
+    game.narrate("config.set", &text("tools.session=semantics-parent-uuid"));
+    game.narrate("config.set", &text("tools.sessions_root=/tmp/ygg-sessions"));
+    let todo_lines = game.narrate("settlement.todo", &text("0|re-checked the todo list"));
+    assert!(
+        todo_lines.iter().any(|l| l.contains("[TOOLS CHECK OK]")),
+        "machine agreement must narrate the check pass: {todo_lines:#?}"
+    );
+    game.assert_kv("settlement.todo.remaining", json!(0));
+    game.assert_kv("settlement.todo.source", json!("machine:harness.todo-check"));
+    let sess_lines = game.narrate(
+        "settlement.sessions",
+        &text("1|0|~/.pi/agent/sessions-trash/semantics"),
+    );
+    assert!(
+        sess_lines.iter().any(|l| l.contains("[TOOLS CHECK OK]")),
+        "sessions machine agreement must narrate the pass: {sess_lines:#?}"
+    );
+    game.assert_kv("settlement.sessions.remaining", json!(0));
+    game.assert_kv(
+        "settlement.sessions.source",
+        json!("machine:harness.sessions-count")
+    );
+}

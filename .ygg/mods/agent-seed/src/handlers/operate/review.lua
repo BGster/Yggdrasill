@@ -43,6 +43,121 @@ local cut, fill, split, trim =
 local probe_payload_ok =
   wire.probe_payload_ok
 
+-- ============================================================================
+-- harness 机证 cross-check（r3 / D-MA26）
+-- 与 settlement.evolution 的 artifact-probe 同构：机证与人证同级不越权（§9.2c）。
+-- 未注册 tools.root / 参数缺 / 脚本不可执行 → 人证旧路径 + 可读提示，绝不拒绝结算。
+-- 机证与人证矛盾 → reject_payload（零状态写入）。mod 沙箱读不到进程环境，
+-- 参数只能来自局 KV（config.set tools.session / tools.sessions_root）。
+-- ============================================================================
+
+-- tools.root 是否已注册（机证启用开关）。
+local function tools_registered()
+  return trim(text_of("settings.tools.root", "")) ~= ""
+end
+
+-- settle 相位进入时的一次性提醒（coordinate.submit 尾部调用）。
+local function tools_unregistered_hint()
+  if not tools_registered() then
+    ygg.narrate(TEXTS.beats.tools_unregistered_hint)
+  end
+end
+
+-- 会话参数三元组：session（主会话 id = todo 的 session / sessions 的 parent）、sessions_root。
+local function tools_session_params()
+  local session = trim(text_of("settings.tools.session", ""))
+  local sessions_root = trim(text_of("settings.tools.sessions_root", ""))
+  return session, sessions_root
+end
+
+-- 读取同步调用的输出 k=v 对；工具未挂载/失败返回 nil + 问题文案键。
+local function harness_output(call_id)
+  if call_id == nil or call_id == "" then
+    return nil, "unmounted"
+  end
+  if tools.status_of(call_id) ~= "ok" then
+    return nil, "failed"
+  end
+  return tools.output_pairs(tools.output_of(call_id)), nil
+end
+
+-- todo 机证：与人证 remaining=0 比对。返回 problem（nil = 通过或回退）。
+-- 通过时写 source=machine 并叙事；回退时写 source=human 由调用方决定。
+local function cross_check_todo()
+  if not tools_registered() then
+    ygg.narrate(fill(TEXTS.beats.tools_root_missing, { item = "todo" }))
+    return nil, "human"
+  end
+  local session, sessions_root = tools_session_params()
+  if session == "" then
+    ygg.narrate(TEXTS.beats.todo_session_missing)
+    return nil, "human"
+  end
+  local call_id = tools.try_sync_call(
+    "harness.todo-check",
+    { session = session, sessions_root = sessions_root },
+    "session=" .. session,
+    "",
+    ""
+  )
+  local pairs_map, err = harness_output(call_id)
+  if pairs_map == nil then
+    ygg.narrate(fill(TEXTS.beats.tools_script_missing, { item = "todo", detail = tostring(err) }))
+    return nil, "human"
+  end
+  local remaining = tonumber(pairs_map.remaining)
+  if remaining == nil then
+    ygg.narrate(fill(TEXTS.beats.tools_script_missing, { item = "todo", detail = "no remaining key" }))
+    return nil, "human"
+  end
+  if remaining > 0 then
+    return fill(TEXTS.beats.tools_check_refused, {
+      item = "todo",
+      detail = "machine remaining=" .. tostring(remaining) .. " but declared 0",
+    }), nil
+  end
+  ygg.narrate(fill(TEXTS.beats.tools_check_passed, { item = "todo", detail = "remaining=0" }))
+  return nil, "machine"
+end
+
+-- sessions 机证：与人证 remaining=0（即全部归档，matching=0）比对。
+local function cross_check_sessions()
+  if not tools_registered() then
+    ygg.narrate(fill(TEXTS.beats.tools_root_missing, { item = "sessions" }))
+    return nil, "human"
+  end
+  local session, sessions_root = tools_session_params()
+  if session == "" then
+    ygg.narrate(TEXTS.beats.sessions_parent_missing)
+    return nil, "human"
+  end
+  local call_id = tools.try_sync_call(
+    "harness.sessions-count",
+    { parent = session, sessions_root = sessions_root },
+    "parent=" .. session,
+    "",
+    ""
+  )
+  local pairs_map, err = harness_output(call_id)
+  if pairs_map == nil then
+    ygg.narrate(fill(TEXTS.beats.tools_script_missing, { item = "sessions", detail = tostring(err) }))
+    return nil, "human"
+  end
+  local matching = tonumber(pairs_map.matching)
+  if matching == nil then
+    ygg.narrate(fill(TEXTS.beats.tools_script_missing, { item = "sessions", detail = "no matching key" }))
+    return nil, "human"
+  end
+  if matching > 0 then
+    return fill(TEXTS.beats.tools_check_refused, {
+      item = "sessions",
+      detail = "machine matching=" .. tostring(matching) .. " but declared 0",
+    }), nil
+  end
+  ygg.narrate(fill(TEXTS.beats.tools_check_passed, { item = "sessions", detail = "matching=0" }))
+  return nil, "machine"
+end
+
 -- 局末两项清理的落库（独立动作与 settlement.evolution 可选段共用）：写 KV + 叙事，不 render。
 local function apply_sessions(moved, remaining, destination)
   ygg.kv.set("settlement.sessions.moved", moved)
@@ -165,6 +280,8 @@ function M.install(deps)
       count = tostring(req_count()),
       batch = tostring(num("run.batch", 1)),
     }))
+    -- r3 / D-MA26：进入结算时若未注册 tools.root，给一次性机证提醒（非门禁、不阻塞）。
+    tools_unregistered_hint()
     render()
   end)
   ygg.on("verify.submit", function(payload)
@@ -325,7 +442,14 @@ function M.install(deps)
     if sessions == nil then
       return reject_payload("settlement.sessions", sessions_problem)
     end
+    -- r3 / D-MA26：机证 cross-check（与人证同级）。矛盾 → 拒（零状态写入）；
+    -- 未注册/参数缺/脚本不可执行 → 人证旧路径 + 提示（handler 内已叙事）。
+    local cc_problem, cc_source = cross_check_sessions()
+    if cc_problem ~= nil then
+      return reject_payload("settlement.sessions", cc_problem)
+    end
     apply_sessions(sessions.moved, sessions.remaining, sessions.destination)
+    ygg.kv.set("settlement.sessions.source", cc_source == "machine" and "machine:harness.sessions-count" or "human")
     render()
   end)
   ygg.on("settlement.todo", function(payload)
@@ -338,7 +462,14 @@ function M.install(deps)
     if todo == nil then
       return reject_payload("settlement.todo", todo_problem)
     end
+    -- r3 / D-MA26：机证 cross-check（与人证同级）。矛盾 → 拒（零状态写入）；
+    -- 未注册/参数缺/脚本不可执行 → 人证旧路径 + 提示（handler 内已叙事）。
+    local cc_problem, cc_source = cross_check_todo()
+    if cc_problem ~= nil then
+      return reject_payload("settlement.todo", cc_problem)
+    end
     apply_todo(todo.remaining, todo.verified_by)
+    ygg.kv.set("settlement.todo.source", cc_source == "machine" and "machine:harness.todo-check" or "human")
     render()
   end)
   ygg.on("review.note", function(payload)

@@ -150,6 +150,46 @@ function M.install(deps)
       return executor_set(key, value)
     elseif key:sub(1, 8) == "profile." then
       return profile_set(key, value)
+    elseif key == "tools.root" then
+      -- harness tools 注册根（r3 / D-MA26）：目录路径，形状校验（无 `..`/`|`/控制字符，≤240）。
+      -- 只校形状不读文件（Mod 无 IO）；空值 = 显式清除（机证回退人证）。
+      if not wire.tools_root_ok(value) then
+        return reject_payload("config.set", TEXTS.beats.tools_root_bad)
+      end
+      ygg.kv.set("settings.tools.root", trim(value))
+      if trim(value) == "" then
+        ygg.narrate(TEXTS.beats.tools_root_cleared)
+      else
+        ygg.narrate(fill(TEXTS.beats.tools_root_registered, { root = trim(value) }))
+      end
+      render()
+      return
+    elseif key:sub(1, 6) == "tools." then
+      -- tools.<name> 分两类（r3 / D-MA26）：
+      --   保留参数键 tools.session / tools.sessions_root = 自由值（会话 id / 会话库路径），
+      --     供结算 cross-check 拼 argv（mod 沙箱读不到进程环境，参数只能来自 KV）。
+      --   脚本覆盖键 tools.<name>=<relpath> = 覆盖缺省 `<name>.sh`（`.sh` 结尾）。
+      local name = wire.parse_tools_key(key)
+      if name == nil then
+        return reject_payload("config.set", fill(TEXTS.beats.bad_config_key, { key = key, allowed = TEXTS.beats.config_keys }))
+      end
+      if name == "session" or name == "sessions_root" then
+        -- 自由值：禁 `|`/控制字符，≤240；空 = 清除。session 是标识符，sessions_root 是路径。
+        if not wire.tools_root_ok(value) then
+          return reject_payload("config.set", TEXTS.beats.tools_param_bad)
+        end
+        ygg.kv.set("settings.tools." .. name, trim(value))
+        ygg.narrate(fill(TEXTS.beats.tools_param_registered, { name = name, value = trim(value) }))
+        render()
+        return
+      end
+      if not wire.tools_relpath_ok(value) then
+        return reject_payload("config.set", TEXTS.beats.tools_relpath_bad)
+      end
+      ygg.kv.set("settings.tools." .. name, trim(value))
+      ygg.narrate(fill(TEXTS.beats.tools_name_registered, { name = name, path = trim(value) }))
+      render()
+      return
     elseif key == "evolution.mode" then
       if not contains(MODES, value) then
         problem = fill(TEXTS.beats.bad_config_value, { key = key, value = value, allowed = join(MODES, " / ") })

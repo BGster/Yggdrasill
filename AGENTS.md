@@ -491,6 +491,9 @@ A=".ygg/bin/egg open <run-root>"                     # run-root = new 回执的�
 $A --drive stdin                                     # interactive: the human chooses (default)
 $A --event config.set --payload '"goal.authorization=the user authorized goal mode for this run"'   # register the run-level authorization first
 $A --event config.set --payload '"play.mode=goal"'   # take the decision yourself: read the full receipt, then dispatch (switch back any time)
+$A --event config.set --payload '"tools.root=<checkout>/.pi/tools"'        # 机证启用开关（脚本根目录）
+$A --event config.set --payload '"tools.session=<main-session-id>"'         # 主会话 id（= todo --session / sessions --parent）
+$A --event config.set --payload '"tools.sessions_root=<session-store-dir>"' # 会话库路径（--sessions-root）；无 egg 环境参数约定见 docs/design/harness-tools.md
 $A --drive none                                      # look at the situation, do not advance
 $A --event map.show                                  # current node + out-edges; add --payload '"full"' for the whole design map
 .ygg/bin/egg open <run-root> --requirement '<title>|<description>'   # append a requirement/proposal asynchronously (inbox only, safe while a run is live)
