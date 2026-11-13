@@ -35,7 +35,7 @@
         {
           "id": "dispatch.params-from-env-local",
           "modality": "must",
-          "text": "Before dispatching, read the repository-root `.env.local` (git-ignored, never committed): `YGG_SUBAGENT_MODEL` (the subagent model, e.g. `sonnet` / `provider/model-id`) and `YGG_SUBAGENT_THINKING` (`off|minimal|low|medium|high|xhigh|max`); when unset, pass nothing explicitly and use the harness default.",
+          "text": "Before dispatching, **must `source .env.local`** (the repository-root, git-ignored, never committed) to load the environment variables (git-ignored, never committed): `YGG_SUBAGENT_MODEL` (the subagent model, e.g. `sonnet` / `provider/model-id`) and `YGG_SUBAGENT_THINKING` (`off|minimal|low|medium|high|xhigh|max`); when unset, pass nothing explicitly and use the harness default.",
           "basis": "AGENTS.md §3 (dispatch discipline 2)"
         },
         {
