@@ -32,6 +32,7 @@ docs/
     ├── state-surface.md         # 状态面：存储键契约 + 拒绝面矩阵
     ├── lanes.md                 # 持久化泳道池与进度投影
     ├── tool-bridge.md           # 同步工具桥
+    ├── harness-tools.md         # .pi/tools 检测机制（纯命令行契约 + 三层调用方）
     ├── prompt-surface.md        # beats 提示词面
     ├── identity.md              # 身份与权限
     ├── lua-api.md               # ygg.* 宿主 API
@@ -70,6 +71,7 @@ docs/
 | [state-surface.md](design/state-surface.md) | 状态存储键契约与拒绝面矩阵 | §2.7 + §2.8 |
 | [lanes.md](design/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
 | [tool-bridge.md](design/tool-bridge.md) | 同步工具桥双层白名单指针 | §2.11 |
+| [harness-tools.md](design/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | D-MA26 |
 | [prompt-surface.md](design/prompt-surface.md) | 7 片段 × 378 beats 键职责表 | §2.12 |
 | [identity.md](design/identity.md) | 台账/身份章/profile/票据门（不进剧情） | §2.13 |
 | [lua-api.md](design/lua-api.md) | ygg.* 全 API 面与副作用类别 | §3 章题 + §3.1 |

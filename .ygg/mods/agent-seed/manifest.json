@@ -242,12 +242,12 @@
       "sha256": "1cf94523822a3a5ff919b9bf1498f08eb0a58185a518fb37bc02cc53f0d79eba"
     },
     {
-      "byteLength": 16197,
+      "byteLength": 16898,
       "id": "ygg:agent/playbook/ch4-protocol",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-protocol.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "1ceae35495491e10225cb7cfa7e05f0e19d162cd74e6a26e3afd5c9bb2d293c4"
+      "sha256": "3b513b20af6aa0a11f45fa7e774727893abfbca552c4b6b80debd59698aacaf7"
     },
     {
       "byteLength": 10831,
@@ -266,12 +266,12 @@
       "sha256": "c93e9be19ae05a8c5da2ceb2d1bca284595755dea3fba0201a1cfb4ee33da5cc"
     },
     {
-      "byteLength": 12801,
+      "byteLength": 14025,
       "id": "ygg:agent/playbook/ch5-evolution-tools",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch5-evolution-tools.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "e2ffb225ca6e7b5b5cf831aecaf2f5982857b408ca00783ae2a61d79b02b6857"
+      "sha256": "e7f5be8214d0f21fd4c9e1063cd195667b84ff95a6cd4e2f9ddc7a073164cdea"
     }
   ],
   "schemaVersion": 1

@@ -131,6 +131,12 @@
           "modality": "must",
           "text": "A conflict raised by the conflict radar must go through `proposal.req_do_conflict` (the very same function as the human `requirement.conflict`), so it automatically lands in `req_conflict_total` and blocks both dispatch and closing. Only `requirement.resolve` clears it.",
           "basis": "src/tools.lua `radar_raise()` + `src/proposals.lua req_do_conflict()`"
+        },
+        {
+          "id": "tools.harness-settlement-crosscheck",
+          "modality": "must",
+          "text": "Settlement machine cross-check (D-MA26): the settlement.todo / settlement.sessions handlers synchronously call the harness tools (`harness.todo-check` / `harness.sessions-count`) before applying, reusing the artifact-probe precedent. The Mod composes the argv from the registered KV (`settings.tools.session` / `settings.tools.sessions_root`) because the sandbox cannot read the process environment. A machine/human contradiction is refused with zero state writes; an unregistered tools.root, a missing parameter, or an unexecutable script falls back to the human-attestation path with a readable hint and never blocks the settlement. A pass writes `settlement.<item>.source=machine:harness.*` (human writes `human`) — machine evidence is same-level, not stronger (AGENTS.md §9.2c). The scripts under `.pi/tools/` are a pure argv/env contract (no config, no run KV, no egg), so a no-egg agent can run them directly per docs/design/harness-tools.md.",
+          "basis": "src/handlers/operate/review.lua `cross_check_todo` / `cross_check_sessions` + .pi/tools/*.sh + docs/design/harness-tools.md"
         }
       ]
     }
