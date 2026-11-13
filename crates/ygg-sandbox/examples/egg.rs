@@ -12,23 +12,27 @@
 //!   `ending` / `fsm.stage` / `prop.*` / `req.*` 等 Mod 私有 KV 键，
 //!   也不从人读叙事里剖数据（旧「`【摘要】` 前缀 + JSON」契约已删除）。
 //!
-//! 三种形态：
+//! 形态（r1 语义二分：new = 开新局；open = 读档续跑；存档目录即身份）：
 //!
 //! ```bash
-//! # ① 交互模式（人 / 脚本驱动）
-//! cargo run -p ygg-sandbox --example egg -- --mod packages/mods/test-adventure --run-id my-task
+//! # ① 新局（自动 run-id；回执末行 run-root: <path>；--event 可同调用 boot）
+//! cargo run -p ygg-sandbox --example egg -- new --mod packages/mods/test-adventure \
+//!   --in .ygg/runs --event event.start
 //!
-//! # ② 单发模式（Agent 脚本化调用：动作 → JSON 回执 → 退出）
-//! cargo run -p ygg-sandbox --example egg -- --mod <目录> --run-id my-task \
-//!   --resume --event <Mod 的 choiceEvent> --payload '1'
+//! # ② 单发模式（Agent 脚本化调用：动作 → JSON 回执 → 退出；附着取最新存档点）
+//! cargo run -p ygg-sandbox --example egg -- open .ygg/runs/<run-id> \
+//!   --event <Mod 的 choiceEvent> --payload '1'
 //!
 //! # ③ 局末结算（读本局后端的状态事实 → settlement.json；json 局 = autosave + events.jsonl）
-//! cargo run -p ygg-sandbox --example egg -- --run-id my-task --settle
+//! cargo run -p ygg-sandbox --example egg -- open .ygg/runs/<run-id> --settle
 //!
 //! # ④ 异步补需求（只追本局后端的 inbox 后退出；不碰 autosave，故可在另一进程跑
 //! #    本局的同时安全调用）
-//! cargo run -p ygg-sandbox --example egg -- --run-id my-task --runs-root .ygg/runs \
+//! cargo run -p ygg-sandbox --example egg -- open .ygg/runs/<run-id> \
 //!   --requirement '补一条门禁日志|把 verify 的失败原因写进 events.jsonl'
+//!
+//! # ⑤ 回退到指定存档点（仅 sqlite 局；代 = generation，旧代证据留库）
+//! cargo run -p ygg-sandbox --example egg -- open .ygg/runs/<run-id> --at g0 --event map.show
 //! ```
 //!
 //! ## host 契约（**必填、无默认值**；宿主代码不含任何事件名与叙事约定字面量）

@@ -59,7 +59,7 @@
         {
           "id": "mod.hot-reload",
           "modality": "must",
-          "text": "Hot reload: single-shot mode loads from disk in every new process; a `--resume` receipt with `hotReload.source=\"resume\"` proves the change is in effect.",
+          "text": "Hot reload: single-shot mode loads from disk in every new process; an `open` (attach) receipt with `hotReload.source=\"resume\"` proves the change is in effect.",
           "basis": "AGENTS.md §8 (pre-migration)"
         },
         {

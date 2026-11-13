@@ -10,10 +10,10 @@
 > `op` 面的 8 个操作是状态推进之外的旁路端口；`op=vfs_put` 与 `event=vfs.write` 的语义差异（阶段守卫 / 内容上限 / 台账）见 §3.4。
 
 #### 单次 CLI 与内置工具参数（`egg`）
-- **运行执行**：`.ygg/bin/egg --mod <mod_dir> --run-id <id> --runs-root .ygg/runs [--resume] [--raw] --event <event> [--payload <json>]`
+- **运行执行**：新局 `.ygg/bin/egg new --mod <mod_dir> [--in .ygg/runs] [--raw] [--event <event> [--payload <json>]]`（自动 run-id，回执末行 run-root）；续跑 `.ygg/bin/egg open <run-root> [--at g<代>] [--raw] --event <event> [--payload <json>]`
   - **回执渲染口径（r5）**：缺省为人读文本渲染；`--raw` = 单行 JSON 机器契约（与历史缺省逐字节一致）；解析链 `--raw` > `YGG_FORMAT`（text\|json）> 缺省 text；不改字段契约、退出码与 daemon 协议面。脚本 / CI 解析单发 stdout 必须加 `--raw`（或环境级 `export YGG_FORMAT=json`）。
 - **单发派发的未注册事件（fail-closed，r11）**：`--event <name>`（或省略时的 `entryEvent`）不在 Mod registry 内时，派发在**零副作用**下拒绝（不进回放日志、不耗燃料、不动状态基线）：回执 `ok:false` + `error.code=VALIDATION`，`message` 三要素（事件名原样 + 已注册计数 + 已注册全集字典序），退出码 1，审计行 `ok=false` 照写。`ygg.*` 保留事件同样只认 registry（宿主不持事件名白名单）；空/空白事件名仍走参数面（usage / DAEMON 层），与本语义分层。
-- **结算**：`.ygg/bin/egg --mod <mod_dir> --run-id <id> --runs-root .ygg/runs --settle`
+- **结算**：`.ygg/bin/egg open <run-root> --settle`
 - **内置宿主工具（`--builtin-tool <op>`）**：
   - `worktree-claim --lane <1..4> --req <rN> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;req=<rN>;branch=<br>;base=<sha>;clean=1;path=<wt_path>`（r1 分池：`--repo` 指向非运行仓的本地检出时，目录落位 `<pool-root>/<检出basename>-lane-<k>` —— Mod 侧经 `git.worktree_claim_pool` 池化工具声明携带该参）
   - `lane-probe --lane <1..4> --base <sha> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;commits=<N>;clean=<0|1>;head=<sha>;files=<csv>`（同上，`git.lane_probe_pool` 携带 `--repo`）
@@ -77,7 +77,7 @@
         "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/README.md (wiki index) first, then docs/context/* (domain invariants) and docs/design/* (architecture & contracts) before proposing or editing.\n...",
         "deltaPrompt": "Resume r1 (rev 1) for stage `development` in worktree `...`; write `artifacts/r1-development.md` and submit.",
         "fullFallbackBrief": "Requirement r1 ...\nResume context: prior executor `agent-plan-1`.",
-        "submitCommand": ".ygg/bin/egg --mod .ygg/mods/agent-seed --runs-root .ygg/runs --resume --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
+        "submitCommand": ".ygg/bin/egg open <run-root> --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
       }
     }
   ]
