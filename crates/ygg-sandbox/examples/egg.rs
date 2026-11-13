@@ -1045,10 +1045,7 @@ fn prepare_run_root(args: Args) -> Result<Args, String> {
         let run_id = format!("r-{stamp}-{suffix}");
         let run_root = parent.join(&run_id);
         if !run_root.exists() {
-            return Ok(Args {
-                run_root,
-                ..args
-            });
+            return Ok(Args { run_root, ..args });
         }
     }
     Err(format!(
@@ -10494,16 +10491,19 @@ end)
         write_probe_mod(&mod_dir);
         let run_id = "rb1";
         // g0：开局 + event.start（stage=started）。
-        let mut session =
-            Session::open(&probe_args_default_store(&mod_dir, &runs_root, run_id, false))
-                .expect("g0 开局");
+        let mut session = Session::open(&probe_args_default_store(
+            &mod_dir, &runs_root, run_id, false,
+        ))
+        .expect("g0 开局");
         let receipt = session.dispatch_event("event.start", "0");
         assert_eq!(receipt["ok"], serde_json::json!(true));
         drop(session);
         // g1：显式新局重置（New+force；旧代归档留库）+ 推进一步（有步才归档，
         // 零步代重置不推新代——sqlite reset 既有语义）。
-        let mut session = Session::open(&probe_args_default_store(&mod_dir, &runs_root, run_id, false))
-            .expect("g1 重置");
+        let mut session = Session::open(&probe_args_default_store(
+            &mod_dir, &runs_root, run_id, false,
+        ))
+        .expect("g1 重置");
         let receipt = session.dispatch_event("event.start", "0");
         assert_eq!(receipt["ok"], serde_json::json!(true));
         let points = session.store.savepoints().expect("存档点清单");
@@ -10526,8 +10526,9 @@ end)
             "必须有回退提示：{:?}",
             session.notices
         );
-        let save: serde_json::Value = serde_json::from_slice(&session.current_save().expect("现态存档"))
-            .expect("存档是 JSON");
+        let save: serde_json::Value =
+            serde_json::from_slice(&session.current_save().expect("现态存档"))
+                .expect("存档是 JSON");
         assert_eq!(
             save["kv"]["entries"]["stage"],
             serde_json::json!("started"),
