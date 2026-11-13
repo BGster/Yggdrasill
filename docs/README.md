@@ -53,7 +53,7 @@ docs/
 | [topology.md](context/topology.md) | 仓库目录拓扑与 4 条硬性依赖不变量 | §4 |
 | [decisions-engine.md](context/decisions-engine.md) | 引擎与平台架构决策台账 D1–D21 | §5 引言 + §5.1 |
 | [decisions-agent.md](context/decisions-agent.md) | Agent 治理架构决策台账 D-MA1–24 | §5 引言 + §5.2 |
-| [workflow-acts.md](context/workflow-acts.md) | 五幕进行时台词 + 入口/必做/出口 + 无 egg 执行章（r2 新增） | mod scenes/prompts/`*_common` 叙事正文 |
+| [workflow-acts.md](context/workflow-acts.md) | 主流程五幕 + 需求级九幕进行时指引（台词/动作/关联阅读）+ 无 egg 执行章（r2 新增） | mod scenes/prompts/`*_common` 叙事正文 |
 | [dispatch-ritual.md](context/dispatch-ritual.md) | 派发仪式正文：必读纪律 / 工件 / submit / 集成 / Doc sync（r2 新增） | mod subagent_brief 策略段 |
 | [cleanup-policy.md](context/cleanup-policy.md) | 盘点清理政策：会话清理边界与判据 / 待办清理（r2 新增） | mod settlement_sessions_unsetted_hint 正文 |
 | [copy-contract.md](context/copy-contract.md) | mod 文案契约：413 键句式模板 + 协议前缀归属（r2 新增，知识权威源） | mod data/texts 全部状态行文键 |
