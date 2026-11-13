@@ -40,3 +40,16 @@
 
 ---
 
+## 运行时台词与文案契约索引（r2 新增）
+
+P2（零硬编码）的文档面投影：mod 的叙事与文案**知识权威**在 context 运行流程层四件，mod `data/texts/` 仅为运行时投影——
+
+- [workflow-acts.md](workflow-acts.md)：五幕进行时台词（`scenes`/`prompts`/`<node>_common` 正文）+ 无 egg 执行章；
+- [dispatch-ritual.md](dispatch-ritual.md)：派发仪式（`subagent_brief` 策略段、`config_opened` 面板语义）；
+- [cleanup-policy.md](cleanup-policy.md)：盘点清理政策（会话/待办清理正文）；
+- [copy-contract.md](copy-contract.md)：413 键句式契约表（错误码/回执/台账模板 + 协议前缀归属）。
+
+改文案**先改上述文件再同步 mod**（单向同步纪律，见 [../wiki-governance.md](../wiki-governance.md)）；本节只放指针不搬正文，防双源漂移。
+
+---
+

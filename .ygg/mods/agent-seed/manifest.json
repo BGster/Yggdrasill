@@ -138,20 +138,20 @@
   ],
   "entries": [
     {
-      "byteLength": 5646,
+      "byteLength": 5529,
       "id": "ygg:scene/texts",
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "fddce71fc82ca6b5e6bf65db4fdce2eeef69db3312ead35b2bace73584917ed5"
+      "sha256": "5a51d4e2139e57b0a895ad36ade65c89c32ea5893acb2d58db1d533bcb65e024"
     },
     {
-      "byteLength": 7384,
+      "byteLength": 7459,
       "id": "ygg:scene/beats/flow",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-flow.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "1ba5ff6daabfb8049b0e25ab09af49d0a17ab5b9337267c550b60fe85880c49a"
+      "sha256": "2a55f89d5c117946c58d7979f020e84e572855e73d8a31f481e025306b63a53d"
     },
     {
       "byteLength": 13913,
@@ -170,20 +170,20 @@
       "sha256": "7dc2a07fa043c0cf690f9ede2648d620ee400ce7860a68775030cfa691c4b9e6"
     },
     {
-      "byteLength": 3687,
+      "byteLength": 3723,
       "id": "ygg:scene/beats/map-guide",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-map-guide.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "2b6fc42d0021b3829482aa9067ff4b5eb8b45efe9eae775c1b8f2fbfa3ab106c"
+      "sha256": "163c900c057952785e0e20f29a4324fab688a93e081de0f38d1599459791e2e7"
     },
     {
-      "byteLength": 9060,
+      "byteLength": 8504,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "5378bb2508242f67cbd75e13022eef28db9ab86cc6f71304d94436269e796ad2"
+      "sha256": "151b52faebe9783002ce2fdc7e350ef4d904c93b87f946d0aaa890749d8b8695"
     },
     {
       "byteLength": 9531,

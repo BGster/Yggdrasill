@@ -2764,6 +2764,89 @@ fn mod_text_fragments_carry_no_retired_paths() {
     );
 }
 
+/// r2 (mod 职责再分工): 23 个剧情/策略键收缩为「状态行 + 指针」后，凡 beat/core 文本值携带
+/// `docs/context/` 指针，其锚点文件必须真实存在于仓库 `docs/context/`——指针漂移（指向不存在的
+/// 文件）会让「无 egg 读 context 自洽」的承诺失效。同时核销：六个 `<node>_common` 键与 core 的
+/// scenes/prompts 必须携带指针（防收缩被意外回退）。Mutation：删掉某个锚点文件或把某指针改成
+/// 不存在的路径 → 本用例转红。
+#[test]
+fn narrative_pointer_anchors_exist_in_docs_context() {
+    let repo = repo_dir();
+    let mod_dir = project_mod_dir();
+    let context_dir = repo.join("docs/context");
+    let mut pointer_count = 0usize;
+    let mut violations: Vec<String> = Vec::new();
+    let mut check = |ns: &str, key: &str, value: &str| {
+        // 每个 `docs/context/<file>.md` 出现都核一次锚点。
+        let mut rest = value;
+        while let Some(pos) = rest.find("docs/context/") {
+            let tail = &rest[pos + "docs/context/".len()..];
+            let file: String = tail
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
+                .collect();
+            if file.ends_with(".md") {
+                pointer_count += 1;
+                if !context_dir.join(&file).is_file() {
+                    violations.push(format!("{ns}.{key} -> docs/context/{file} (missing)"));
+                }
+            }
+            rest = &tail[file.len().min(tail.len())..];
+        }
+    };
+    for f in [
+        "beats-flow.json",
+        "beats-harness.json",
+        "beats-lanes.json",
+        "beats-map-guide.json",
+        "beats-requirements.json",
+        "beats-settlement.json",
+    ] {
+        let fragment = read_json(&mod_dir.join(format!("data/texts/{f}")));
+        if let Some(beats) = fragment["beats"].as_object() {
+            for (key, value) in beats {
+                if let Some(text) = value.as_str() {
+                    check(f, key, text);
+                }
+            }
+        }
+    }
+    let core = read_json(&mod_dir.join("data/texts/core.json"));
+    for ns in ["scenes", "prompts"] {
+        for (key, value) in core[ns].as_object().expect("core ns object") {
+            if let Some(text) = value.as_str() {
+                check(ns, key, text);
+            }
+        }
+    }
+    // 23 个收缩键必须携带指针（6 个 <node>_common + scenes 5 + prompts 5 + harness 3 + map-guide 2
+    // + settlement 2 = 23；settlement_todo_segment 亦含指针）。
+    let flow = read_json(&mod_dir.join("data/texts/beats-flow.json"));
+    for key in [
+        "prologue_common",
+        "charter_common",
+        "coordinate_common",
+        "settle_common",
+        "release_common",
+        "retired_common",
+    ] {
+        let value = flow["beats"][key].as_str().expect("common beat string");
+        assert!(
+            value.contains("docs/context/"),
+            "shrunk beat `{key}` must carry a docs/context pointer"
+        );
+    }
+    assert!(
+        pointer_count >= 23,
+        "expected at least 23 docs/context pointers across the shrunk keys, got {pointer_count}"
+    );
+    assert!(
+        violations.is_empty(),
+        "narrative pointer anchors missing under docs/context/: {}",
+        violations.join(", ")
+    );
+}
+
 /// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
 /// is delegated to the main session's own environment, so `data/texts/beats-settlement.json`
 /// must not carry any harness-implementation literal (`pi-subagents`, `.pi/agent`, `.claude`,

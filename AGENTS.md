@@ -77,6 +77,11 @@ output back; synthetic data generated under `/tmp` is unrestricted.
    chapters to run phases — charter: repository · coordinate: run_machine, actions, drive, inbox,
    dispatch, lanes, integration · settle: evolution, gates, run_artifacts, evidence,
    mod_engineering, host_contract · release: integration · retired: pointers.
+   - **无 mod 降级路径（r2）**：不装 egg/mod 时工作流仍可运行——`docs/context/` 是自洽工作流底座：
+     幕台词与每幕入口/必做/出口见 `docs/context/workflow-acts.md`（含「无 egg 执行本章」），派发仪式见
+     `docs/context/dispatch-ritual.md`，清理政策见 `docs/context/cleanup-policy.md`，每个动作的文案行为
+     （句式模板与协议前缀）查 `docs/context/copy-contract.md`。无 egg 缺的只是工具监控状态、记录历史、
+     强制流程合规三样（由会话与 git 承担），流程语义与证据标准不降级。
 4. **Single-shot dispatching is not compliance**: batching `--event` flags only hides state from the
    script guard; it does not replace the `requirement.dispatch` → proposal → gate chain. Never edit
    `autosave.json` / `events.jsonl` by hand. **Dispatching directly under `goal` mode is a legal
