@@ -41,9 +41,9 @@
       "sha256": "24a63bad72c668b4a339caf9bfaf705378521c511e0923629361f7411ccd5b76"
     },
     {
-      "byteLength": 34552,
+      "byteLength": 36909,
       "path": "src/domain/wire.lua",
-      "sha256": "8bdb894a7f6d251540100d1a9e6de44d9adbddf6f0aa411afa7e3ca5e6e80ff4"
+      "sha256": "d6bf1ef40a9cd63eb5b5b611584fa48947de5923480201abe138738da5ae9cdf"
     },
     {
       "byteLength": 11376,
@@ -76,9 +76,9 @@
       "sha256": "f6f79e07101987e574888d8e85e83adaec7fa2c45b992ee87115938cb0ea02e6"
     },
     {
-      "byteLength": 19270,
+      "byteLength": 24778,
       "path": "src/handlers/operate/review.lua",
-      "sha256": "e84099c24bc17b665efa8cfc2b585c4e1bb7d78f9aaddb7211dca121792d5f22"
+      "sha256": "be556fe917bc1a9b299310b62f841fdecabce220719dbba31f1193ffc7219c9f"
     },
     {
       "byteLength": 7635,
@@ -101,9 +101,9 @@
       "sha256": "e7e020d146871cc99d3807f9e1347c345799722d240741ecd8d0a42aedd958ca"
     },
     {
-      "byteLength": 10268,
+      "byteLength": 12371,
       "path": "src/handlers/system/config.lua",
-      "sha256": "552b74ff395e659a00e5e2be2f3130e591360de0904a04000daab33c108ed172"
+      "sha256": "e725e5cef837253514121c12c9fd2e356d9bb0d650d05c67967e938aff0275af"
     },
     {
       "byteLength": 1033,
@@ -178,28 +178,28 @@
       "sha256": "163c900c057952785e0e20f29a4324fab688a93e081de0f38d1599459791e2e7"
     },
     {
-      "byteLength": 8504,
+      "byteLength": 10267,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "151b52faebe9783002ce2fdc7e350ef4d904c93b87f946d0aaa890749d8b8695"
+      "sha256": "56722f4b5972cb2894dcb1cb0cc66f63978c654d2071479f22e7f979fac9823d"
     },
     {
-      "byteLength": 9531,
+      "byteLength": 10570,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "8f36981ae001f683152efa56deac2e2ad107345c7fe9773da7a666e47c0afe8d"
+      "sha256": "b5c0808c6ab4f8070e4d9b9926e70779d0dedcaa0c8e7a312eb1abead783dcf3"
     },
     {
-      "byteLength": 813,
+      "byteLength": 932,
       "id": "ygg:agent/config",
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "dfb4b04d0a8385806423fecb18e1839f3c2928870797e5764b7b2a993f2d1bd3"
+      "sha256": "74d52bd7150bd2ca70cf3377ae31db35e0be7b2dd17e918868826f7818db79fb"
     },
     {
       "byteLength": 1923,

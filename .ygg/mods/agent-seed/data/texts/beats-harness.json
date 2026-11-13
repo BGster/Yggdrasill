@@ -4,7 +4,7 @@
     "config_opened": "[CONFIG MENU] play mode / evolution preference / gates — picking one applies it and stays on this page; pick \"back\" to return to the stage menu. Note: switching play mode leaves this page (the driver changed, so the sub-page context is stale). Evolution pre-registration does not use the menu: write settings with `config.set review.evolution.artifact|summary|candidates|classes=<value>`; after verify passes the settlement.evolution menu builds the payload and validates it in one place.",
     "config_closed": "[BACK] returned to the {{stage}} stage menu.",
     "config_open_usage": "config.open [] / config.close []",
-    "config_keys": "play.mode / goal.authorization / executor.<rN>.<analysis|plan|development> / evolution.mode / evolution.max_per_run / gates.require_all_green / review.evolution.artifact / review.evolution.summary / review.evolution.candidates / review.evolution.classes",
+    "config_keys": "play.mode / goal.authorization / executor.<rN>.<analysis|plan|development> / evolution.mode / evolution.max_per_run / gates.require_all_green / review.evolution.artifact / review.evolution.summary / review.evolution.candidates / review.evolution.classes / tools.root / tools.<name>",
     "bad_config_key": "unknown config key `{{key}}` (available: {{allowed}})",
     "bad_config_value": "`{{key}}` does not accept `{{value}}` (available: {{allowed}})",
     "goal_auth_registered": "[GOAL AUTH REGISTERED] {{auth}} (self-declared, not identity proof; the closing check applies only to runs that entered goal at runtime)",
@@ -61,6 +61,13 @@
     "reactive_malformed": "[PROBE MALFORMED] {{call_id}} ({{tool_id}}): the output is not a `k=v;...` map - nothing was applied",
     "artifact_path_rejected": "[ARTIFACT PATH REFUSED] {{path}}: the ledger only accepts artifacts/<name>.md (no `..`, no whitespace, at most {{max}} bytes) | nothing was recorded",
     "executor_bad_actor": "an actor id must be non-empty after trim, <= 64 chars, with no whitespace and no quote/backslash (the host injects `actor=`; self-carried segments are rejected).",
-    "executor_bad_actor_session": "an actor_session id must be non-empty after trim, <= 128 chars, with no whitespace and no quote/backslash (the host injects `actor_session=`; self-carried segments are rejected)."
+    "executor_bad_actor_session": "an actor_session id must be non-empty after trim, <= 128 chars, with no whitespace and no quote/backslash (the host injects `actor_session=`; self-carried segments are rejected).",
+    "tools_root_registered": "[TOOLS ROOT REGISTERED] {{root}} (self-declared; settlement machine cross-checks enabled when this is set)",
+    "tools_root_cleared": "[TOOLS ROOT CLEARED] settlement checks fall back to human attestation.",
+    "tools_root_bad": "tools.root must be a directory path: non-empty after trim (empty clears), <= 240 chars, no `..` segment, no `|` or control characters.",
+    "tools_relpath_bad": "tools.<name> value must be a script path relative to the root: `.sh` suffix, <= 240 chars, no `..`, no `|` or control characters (empty clears the override).",
+    "tools_name_registered": "[TOOLS NAME REGISTERED] {{name}} -> {{path}} (override for the default <name>.sh; empty path clears it)",
+    "tools_param_registered": "[TOOLS PARAM REGISTERED] {{name}} = {{value}} (reserved parameter for the settlement cross-check argv)",
+    "tools_param_bad": "tools parameter value must be non-empty after trim (empty clears), <= 240 chars, no `..` segment, no `|` or control characters."
   }
 }

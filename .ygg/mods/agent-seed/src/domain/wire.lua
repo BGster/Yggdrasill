@@ -235,6 +235,80 @@ local function parse_profile_key(key)
   return handle, field
 end
 
+-- ============================================================================
+-- harness tools 注册面（r3 / D-MA26）：config.set tools.root / tools.<name>
+-- 只校形状，不读文件（Mod 无 IO；存在性由首次调用时宿主可读回传）。
+-- ============================================================================
+
+-- tools.root 值：目录路径。非空、≤240、无 `|`/换行/控制字符、无 `..` 段；空值 = 显式清除。
+-- 允许绝对与相对路径（相对 = 相对 checkout 根，与 pack.json program 同约定）。
+local function tools_root_ok(path)
+  if type(path) ~= "string" then
+    return false
+  end
+  local raw = trim(path)
+  if raw == "" then
+    return true -- 空 = 清除
+  end
+  if #raw > 240 then
+    return false
+  end
+  if raw:find("|", 1, true) ~= nil or raw:find("[%c]") ~= nil then
+    return false
+  end
+  -- 禁 `..` 路径段（目录穿越）
+  for segment in raw:gmatch("[^/]+") do
+    if segment == ".." then
+      return false
+    end
+  end
+  return true
+end
+
+-- tools.<name> 覆盖值：相对 root 的脚本路径，必须 `.sh` 结尾、无 `..`、无 `|`/控制字符。
+local function tools_relpath_ok(path)
+  if type(path) ~= "string" then
+    return false
+  end
+  local raw = trim(path)
+  if raw == "" then
+    return true -- 空 = 清除（回落缺省 <name>.sh）
+  end
+  if #raw > 240 or raw:sub(-3) ~= ".sh" then
+    return false
+  end
+  if raw:find("|", 1, true) ~= nil or raw:find("[%c]") ~= nil then
+    return false
+  end
+  if raw:find("..", 1, true) ~= nil then
+    return false
+  end
+  return true
+end
+
+-- tools.<name> 的 name 段形状：`^[a-z][a-z0-9-]{0,63}$`（与工具 id 尾段同规则）。
+local function tools_name_ok(name)
+  if type(name) ~= "string" or #name < 1 or #name > 64 then
+    return false
+  end
+  return name:match("^[a-z][a-z0-9%-]*$") ~= nil
+end
+
+-- 解析 `tools.<name>` 键（root 之外的覆盖键）：返回 name 或 nil。
+local function parse_tools_key(key)
+  if type(key) ~= "string" then
+    return nil
+  end
+  local name = key:match("^tools%.([a-z][a-z0-9%-]*)$")
+  if name == nil or name == "root" then
+    return nil
+  end
+  if #name > 64 then
+    return nil
+  end
+  return name
+end
+
 -- assignments token 化：逗号分隔 `r<n>[:<stage>]`，≤16 个、总长 ≤512；空串 = 空
 -- 清单（清除字段）。编排层要机器解析，形状必须够硬。
 local function parse_assignments(raw)
@@ -959,6 +1033,10 @@ M.parse_todo_payload = parse_todo_payload
 M.parse_todo_segment = parse_todo_segment
 M.sessions_shape_ok = sessions_shape_ok
 M.todo_shape_ok = todo_shape_ok
+M.parse_tools_key = parse_tools_key
+M.tools_name_ok = tools_name_ok
+M.tools_relpath_ok = tools_relpath_ok
+M.tools_root_ok = tools_root_ok
 
 M.RESOLVE_MODES = RESOLVE_MODES
 M.inbox_mark = inbox_mark
