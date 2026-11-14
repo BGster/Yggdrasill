@@ -15,15 +15,13 @@ local fill =
 
 local SECTIONS = {}
 
--- 相位→规则章节索引（微状态口径）：立局看仓库形态；协调看机器/协议/驱动/异步/派发/泳道/集成；
--- 盘点看演进/门禁/运行产物/证据/Mod 工程/宿主契约；发布看集成章（develop→integrate→merge→deploy）；退役看指引。
--- r5（D-MA 规则大迁移）：harness 盲区章废除，81 条按域迁入 run_machine/drive/actions/inbox/
--- run_artifacts/mod_engineering/host_contract 七新章；每个映射章存在且非空由语义用例钉死。
+-- 相位→规则章节索引（微状态口径）：每相位播全部候选章，不再让首章遮蔽后续章节。
+-- 未映射章同样是死资产：21 章必须至少在一条 phase-entry 路由上出现；map.show 另播全局索引。
 local STAGE_GUIDE = {
-  charter = { "repository" },
-  coordinate = { "run_machine", "actions", "drive", "inbox", "dispatch", "lanes", "integration" },
-  settle = { "evolution", "gates", "run_artifacts", "evidence", "mod_engineering", "host_contract" },
-  release = { "integration" },
+  charter = { "repository", "credentials", "hard_constraints", "output" },
+  coordinate = { "run_machine", "actions", "drive", "inbox", "dispatch", "lanes", "branches", "integration" },
+  settle = { "evolution", "gates", "run_artifacts", "evidence", "live_evidence", "mod_engineering", "host_contract", "tools" },
+  release = { "integration", "branches" },
   retired = { "pointers" },
 }
 
@@ -39,13 +37,32 @@ local function guide_section(st)
   return section
 end
 
-local function narrate_stage_guide(st)
-  local section = guide_section(st)
+local function narrate_guide_entry(section)
   ygg.narrate(fill(TEXTS.beats.guide_hint, {
     title = section.title,
     summary = section.summary,
     count = tostring(#section.rules),
   }))
+end
+
+local function narrate_stage_guide(st)
+  local candidates = STAGE_GUIDE[st]
+  if candidates == nil or #candidates == 0 then
+    narrate_guide_entry(PLAYBOOK.sections[1])
+    return
+  end
+  for i = 1, #candidates do
+    local section = SECTIONS[candidates[i]]
+    if section ~= nil then
+      narrate_guide_entry(section)
+    end
+  end
+end
+
+local function narrate_guide_index()
+  for i = 1, #PLAYBOOK.sections do
+    narrate_guide_entry(PLAYBOOK.sections[i])
+  end
 end
 
 function M.install(deps)
@@ -59,5 +76,6 @@ end
 
 M.guide_section = guide_section
 M.narrate_stage_guide = narrate_stage_guide
+M.narrate_guide_index = narrate_guide_index
 
 return M

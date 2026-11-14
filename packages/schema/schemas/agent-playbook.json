@@ -57,7 +57,7 @@
             "enum": ["must", "must-not", "should"]
         },
         "source": {
-            "description": "章节来源锚（形如 `AGENTS.md §三`）。",
+            "description": "章节来源锚（形如 `docs/design/<topic>.md §<section>` 或 `historical AGENTS.md (pre-migration; see git history)`）。",
             "type": "string",
             "minLength": 1
         },

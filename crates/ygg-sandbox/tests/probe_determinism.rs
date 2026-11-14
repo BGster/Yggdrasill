@@ -39,7 +39,7 @@
 //! 把本探针的 golden-vector 四元组（同一份 fixture 文件）在 node + wasm 内核上
 //! 双跑重放，以壳导出 `YggKernel::state_hash()`（= `ygg_sandbox::hash::state_hash`
 //! 同一函数）比对 `expected_state_hash`（实证：三哈希一致，a994030a…c850）——
-//! 随 `scripts/build-wasm.sh` 构建 + smoke 后运行，门禁口径见 AGENTS.md §五。
+//! 随 `scripts/build-wasm.sh` 构建 + smoke 后运行，门禁口径见 playbook `gates.no-wasm-pack`。
 //! 残余缺口：`wasm-bindgen-test` 浏览器泳道（真实浏览器 wasm 实例重放同一
 //! 断言）仍未实现，不得静默吸收。
 

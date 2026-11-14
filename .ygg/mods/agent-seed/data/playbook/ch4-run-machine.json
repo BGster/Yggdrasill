@@ -5,7 +5,7 @@
       "order": 16,
       "title": "16. Run machine · requirement pipeline · decision gates",
       "summary": "The coordinator is a live self-loop across five acts (charter → coordinate → settle → release → retired); stored truth is a 2-state requirement pipeline with nine derived micro-states; the two mandatory gates (plan / accept) can never be bypassed, and each batch boundary has hard closeout criteria. This chapter answers \"where am I in the machine and which gate is next\".",
-      "source": "AGENTS.md §2/§4 (text before the 2026-10-31 condensation) + docs/design/state-machine.md + docs/design/requirement-story.md (D-MA23)",
+      "source": "historical AGENTS.md (pre-migration; see git history) (text before the 2026-10-31 condensation) + docs/design/state-machine.md + docs/design/requirement-story.md (D-MA23)",
       "priority": "standard",
       "rules": [
         {
@@ -36,49 +36,55 @@
           "id": "machine.coordinator-scope",
           "modality": "must",
           "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and walk each batch boundary (coordinate.submit → the settle act's four items → release.confirm / release.skip → review.note batch settle or retire); it never carries development itself — the feature→develop integration of a requirement belongs to its development executor (`integration.confirm` / `integration.reject`) — and it may never bypass a gate.",
-          "basis": "AGENTS.md §2 (pre-migration) + docs/design/state-machine.md (ex-DESIGN §2; D-MA23, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/design/state-machine.md (ex-DESIGN §2; D-MA23, 2026-11-12)"
         },
         {
           "id": "machine.requirement-granularity",
           "modality": "must",
-          "text": "Requirement granularity: adjacent work with the same goal, the same subsystem, a small change, or that can share one plan and one acceptance evidence set belongs in the same requirement; create a new one only for an independent delivery + acceptance, a cross-repository or cross-lane change, or risk isolation. A new adjacent requirement must state in its description why it cannot be merged (no reason = treat as mergeable). Three-question criterion: ① the blocked action is filing through requirement.add / --requirement; ② the visible symptom of a violation is that the adjacent requirement is pointed out as \"just part of the previous one\" while its description has no cannot-merge reason; ③ confirm it next time by walking `requirement.list` and checking that every new requirement's description carries that reason.",
+          "text": "Runtime pointer: `docs/context/workflow-acts.md` act 1 owns requirement granularity — merge adjacent work first, the three exceptions, the cannot-merge description reason and the three-question check. Do not file a new adjacent requirement from this summary alone.",
           "basis": "user decision 2026-11-02 (r3 requirement-merge decision)"
         },
         {
           "id": "machine.plan-gate",
           "modality": "must",
           "text": "The plan gate (`req.gate=plan`) fires when a plan proposal is submitted (D-MA23: gate-on-submit — the plan side has no proposal.accept hop); approve → `plan_ok=true` (the ready act, the only phase that may dispatch into development; the reactive auto-dispatch may continue into developing in the same turn); reject → back to planning with `plan_ok=false`, `rev+1` and the feedback written; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
-          "basis": "AGENTS.md §2 (gate table, pre-migration) + D-MA23 gate-on-submit (2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (gate table, pre-migration) + D-MA23 gate-on-submit (2026-11-12)"
         },
         {
           "id": "machine.accept-gate",
           "modality": "must",
           "text": "The accept gate (`req.gate=accept`) fires after the main agent accepts the development proposal (the executor delivered); approve → the integrating act (`integrating=true`, gate cleared) — done is NOT granted here, the executor still has to land `integration.confirm` with `develop@<sha>` evidence; reject → the ready act (`plan_ok` keeps its value: not amended → back into the development queue; amended → `plan_ok` was already invalidated → planning, must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
-          "basis": "AGENTS.md §2 (gate table, pre-migration) + docs/design/requirement-story.md acts 7-8 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (gate table, pre-migration) + docs/design/requirement-story.md acts 7-8 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
         },
         {
           "id": "machine.accept-vs-gate",
           "modality": "must",
           "text": "accept means the executor self-checked and delivered; it does not mean the main agent has accepted. Only gate.approve is the verification.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "machine.gate-not-skippable",
           "modality": "must-not",
           "text": "A requirement sitting on the plan / accept gate (`req.gate ~= \"\"`) cannot be dispatched, accepts no new proposal and cannot be skipped; even automatic advancement (`--drive cmd:…`) runs one `gate.approve` per gate — only the index comes from the external decision command.",
-          "basis": "AGENTS.md §2 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "machine.closeout-criteria",
           "modality": "must",
           "text": "The closeout criteria = `req_all_done()` (including successors of split/merged being all done) + 0 pending proposals + 0 running jobs + 0 conflicts.",
-          "basis": "AGENTS.md §4 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "machine.batch-maintenance",
           "modality": "must",
           "text": "An unarmed batch settle (`review.note`) **auto-appends the next batch's docs-maintenance requirement**: after the `[BATCH n SETTLED]` narration, the same handler transaction adds one open/draft requirement (canonical title 「维护更新 docs wiki（上批收口）」) whose description carries the per-file wiki update guidance over the r2 doc tree (`docs/README.md` index; `docs/context/*` decisions/vocabulary; `docs/design/*` topic files per the batch's touched surface; the two thin-shell maps; wiki-governance's three duties). Dedup: skip the append when the register already holds an open, non-bypassed row carrying the `req.<i>.maintenance` marker or the exact canonical title; a full register also skips. The append is best-effort and **never fails the settlement** — it narrates (`[MAINTENANCE REQ SKIP]`), it never refuses. The retired path (`run.retire` armed → `[ENDING`) appends nothing. The appended draft is never auto-dispatched (draft rows carry no mark) — the main agent dispatches it in the next coordinate phase, and it blocks the next `coordinate.submit` until done: the per-batch docs cadence.",
           "basis": "requirement r3 (D-MA25, 2026-11-12)"
+        },
+        {
+          "id": "machine.turn-cut",
+          "modality": "must-not",
+          "text": "Runtime projection of `docs/design/state-machine.md` §2.9: do not add an effect that renders or chooses, needs external evidence, or passes a human gate; do not bypass the declared draft→planning merge or the fixed exec/actor tail order. The specification owns the full protocol and refusal checks; violating it produces rejected payloads, nondeterministic replay, or a second decision bypass.",
+          "basis": "docs/design/state-machine.md §2.9 (runtime projection)"
         }
       ]
     }

@@ -5,8 +5,8 @@
 # setjmp/longjmp），wasm-bindgen 0.2.129 对含 EH 指令的模块生成 catch wrappers
 # 时强制要求 externref 表，该表由其 CLI 旗 `--reference-types` 开启的 externref
 # pass 创建；wasm-pack 0.15 不透传 bindgen 旗——故为两步链（cargo 出裸 wasm，
-# 再调 wasm-bindgen CLI）。AGENTS.md §五 的 wasm-pack 门禁命令以本脚本替代
-# （决策待回填 AGENTS.md）。
+# 再调 wasm-bindgen CLI）。playbook `gates.no-wasm-pack` 的门禁以本脚本为唯一入口
+# （决策正文见 docs/context/decisions-engine.md，勿恢复 wasm-pack 旁路）。
 #
 # 前置：
 #   1. rustup target add wasm32-unknown-unknown
