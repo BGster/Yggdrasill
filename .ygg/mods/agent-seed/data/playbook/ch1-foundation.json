@@ -179,10 +179,10 @@
           "basis": "AGENTS.md §3 (push discipline)"
         },
         {
-          "id": "branches.pr-and-merge-user-triggered",
+          "id": "branches.merge-follows-play-mode",
           "modality": "must-not",
-          "text": "Opening a PR and merging into master are triggered explicitly by the user; the agent never starts them on its own.",
-          "basis": "AGENTS.md §3 (push discipline)"
+          "text": "Merging is a **normal workflow step**, not an exceptional action — who triggers it follows `play.mode`: under `guide` the human confirms it through the gate/menu tickets (the main agent never merges on its own initiative); under `goal` the main agent executes the merge itself as part of its dispatch authority. In both modes a merge is only performed when its preconditions hold (gates green, evidence recorded) — the mode decides the trigger, not whether the step happens. Opening a PR against a team repo remains user-triggered in both modes.",
+          "basis": "r5 batch-3 debt cleanup (merge-state never finalized twice: mt-fde 428ec77 and mxbc 75c2448 left unmerged); user correction 2026-11-13: merging is a normal step — guide = human trigger, goal = agent trigger"
         }
       ]
     },
