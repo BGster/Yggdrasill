@@ -2351,10 +2351,10 @@ fn mod_architecture_is_fragments_plus_five_layers() {
     }
 }
 
-/// r5 The playbook is reachable: every chapter id in `guide.lua`'s STAGE_GUIDE must resolve to
-/// an assembled section carrying at least one rule (a mapped-but-missing or mapped-but-empty
-/// chapter would make the per-phase hint narrate nothing). Forward direction only — chapters
-/// outside the mapping are a pre-existing gap, not this contract.
+/// The playbook is reachable in both directions: every assembled chapter id occurs in `guide.lua`'s
+/// STAGE_GUIDE, and every mapped id resolves to a non-empty section. A chapter outside the mapping
+/// is dead at phase-entry; a mapped-but-missing or mapped-but-empty chapter makes its hint narrate
+/// nothing. The behavioural receipt probe below separately proves that all candidates are narrated.
 #[test]
 fn stage_guide_maps_existing_nonempty_sections() {
     let project = project_mod_dir();
@@ -2376,8 +2376,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        15,
-        "the r5 STAGE_GUIDE maps exactly 15 distinct chapters: {mapped:?}"
+        21,
+        "STAGE_GUIDE must route all 21 distinct chapters: {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -2426,6 +2426,100 @@ fn stage_guide_maps_existing_nonempty_sections() {
             "STAGE_GUIDE maps `{id}` but the section is empty"
         );
     }
+    let assembled: std::collections::BTreeSet<String> = sections.keys().cloned().collect();
+    assert_eq!(
+        mapped, assembled,
+        "phase-entry routing and the assembled playbook must be the same chapter set"
+    );
+}
+
+/// Phase-entry consumption is behavioural, not just a static mapping: `map.show` contributes one
+/// global-index line for every chapter and the following render contributes one additional line for
+/// each chapter mapped to the current phase. Therefore every chapter must occur once, and a current
+/// phase chapter exactly twice. This catches both the old unmapped-six gap and the old first-candidate
+/// shadowing without adding a payload-driven section selector back to `map.show`.
+#[test]
+fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
+    let project = project_mod_dir();
+    let pack = read_json(&project.join("pack.json"));
+    let mut chapters: Vec<(String, String)> = Vec::new();
+    for entry in pack["entries"].as_array().expect("pack entries") {
+        let path = entry["path"].as_str().expect("entry path");
+        if !path.starts_with("data/playbook/") || path.ends_with("head.json") {
+            continue;
+        }
+        let fragment = read_json(&project.join(path));
+        for section in fragment["sections"].as_array().expect("sections") {
+            chapters.push((
+                section["id"].as_str().expect("section id").to_owned(),
+                section["title"].as_str().expect("section title").to_owned(),
+            ));
+        }
+    }
+    assert_eq!(
+        chapters.len(),
+        21,
+        "chapter inventory changed: {chapters:?}"
+    );
+
+    let assert_receipt = |game: &mut Game, current: &[&str]| {
+        let lines = game.narrate("map.show", "0");
+        for (id, title) in &chapters {
+            let needle = format!("field rules · {title}:");
+            let expected = if current.contains(&id.as_str()) { 2 } else { 1 };
+            assert_eq!(
+                count_lines(&lines, &needle),
+                expected,
+                "chapter `{id}` must have one map-index line plus its current-phase line: {lines:#?}"
+            );
+        }
+    };
+
+    let mut charter = Game::open(&project);
+    charter.narrate("event.start", "0");
+    assert_receipt(
+        &mut charter,
+        &["repository", "credentials", "hard_constraints", "output"],
+    );
+    charter_and_begin(&mut charter);
+    assert_receipt(
+        &mut charter,
+        &[
+            "run_machine",
+            "actions",
+            "drive",
+            "inbox",
+            "dispatch",
+            "lanes",
+            "branches",
+            "integration",
+        ],
+    );
+
+    let mut settle = drive_to_settle();
+    assert_receipt(
+        &mut settle,
+        &[
+            "evolution",
+            "gates",
+            "run_artifacts",
+            "evidence",
+            "live_evidence",
+            "mod_engineering",
+            "host_contract",
+            "tools",
+        ],
+    );
+    let mut release = drive_to_release();
+    assert_receipt(&mut release, &["integration", "branches"]);
+
+    release.narrate("release.skip", &text("playbook receipt probe"));
+    release.click("config — ");
+    release.click("config.set — run.retire");
+    release.click("back — ");
+    release.click("review.note — ");
+    release.assert_kv("fsm.stage", json!("retired"));
+    assert_receipt(&mut release, &["pointers"]);
 }
 
 /// The assembled beats set (what `mod.lua` builds from the fragments — the same union the

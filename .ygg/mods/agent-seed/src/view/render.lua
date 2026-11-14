@@ -819,6 +819,7 @@ RENDER[RUN_PHASE.release] = function()
 end
 
 RENDER[RUN_PHASE.retired] = function()
+  local current = run_phase()
   -- r9/D-MA23：retired = 退役终态（仅 run.retire 武装后的 review.note 可达）。
   ygg.narrate(fill(TEXTS.endings.done, {
     title = task_title(),
@@ -832,6 +833,7 @@ RENDER[RUN_PHASE.retired] = function()
   if play_mode() == "goal" then
     ygg.narrate(TEXTS.beats.play_done_goal)
   end
+  narrate_stage_guide(current)
   ygg.choice(TEXTS.prompts.retired, option_texts(menu(RUN_PHASE.retired)))
 end
 

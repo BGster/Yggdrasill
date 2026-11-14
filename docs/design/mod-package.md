@@ -22,3 +22,9 @@
 3. **`manifest.json`（内容寻址完整性锁）**：
    - 依据 `packages/schema/schemas/manifest.json` 校验。为每个代码文件与数据资源记录 `{ path, sha256, byteLength }`。经 `./scripts/sync-seed-mod.sh` 维护。
 
+### Playbook 消费契约（phase-entry + 全局索引）
+
+`src/view/guide.lua` 的 `STAGE_GUIDE` 必须覆盖装配后的全部章 id；每个相位渲染播出**全部候选章**，不是只播首章。`map.show` 保持单一操作视图且忽略 payload，但在 `render()` 产生 choice 之前额外播出 21 章全局索引；因此当前相位章在一次 `map.show` 回执中出现两次，其余章出现一次。退役幕同样播 `pointers`，不留只在全局索引可见的死角。
+
+规范陈述的执行核验是 `agent_seed_semantics` 的静态章集合相等断言与逐相位回执探针；增删章、改章 id/title、改映射或改渲染序必须在同批更新该探针并重算 manifest。违反时测试红，未接线的章不得被宣称为 phase-entry 可达。负责人 = 修改 playbook/guide/render 的执行者；触发 = 任一上述变更；检查 = `cargo test -p ygg-sandbox --test agent_seed_semantics` 与 playtest。
+
