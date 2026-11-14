@@ -50,7 +50,7 @@
       "id": "integration",
       "order": 6,
       "title": "4. Develop → integrate → merge → deploy",
-      "summary": "Three closing levels: the iteration point (feature → develop, executed by the requirement's development executor inside its own lane at closeout) → the round (develop → master, executed by the main agent, user-triggered) → deployment; iteration-level integration never lags behind a completed requirement and is never batched at round closeout.",
+      "summary": "Three closing levels: the iteration point (feature → develop, executed by the requirement's development executor inside its own lane at closeout) → the round (develop → master, executed by the main agent — human-triggered under guide, agent-triggered under goal) → deployment; iteration-level integration never lags behind a completed requirement and is never batched at round closeout.",
       "source": "AGENTS.md §4",
       "priority": "standard",
       "rules": [
@@ -135,7 +135,7 @@
         {
           "id": "integration.round.merge-ritual",
           "modality": "must",
-          "text": "The `develop` → `master` merge is triggered by the user, or executed by the main agent after the user approves it: `git fetch origin`, then divergence-check `master` and `develop` separately and align each with `--ff-only`, then in the main checkout `git merge --no-ff develop`, then `git push origin master` — the merge is not complete until the trunk is pushed; rebasing `develop` is absolutely forbidden — the merge topology is the rollback history.",
+          "text": "The `develop` → `master` merge is a normal round-closeout step; the trigger follows `play.mode` — under `guide` the human approves it through the gate ticket, under `goal` the main agent executes it as part of its dispatch authority. The ritual itself is identical: `git fetch origin`, then divergence-check `master` and `develop` separately and align each with `--ff-only`, then in the main checkout `git merge --no-ff develop`, then `git push origin master` — the merge is not complete until the trunk is pushed; rebasing `develop` is absolutely forbidden — the merge topology is the rollback history.",
           "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {

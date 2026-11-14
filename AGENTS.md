@@ -537,9 +537,13 @@ is a **batch settle** (back to `coordinate`, `run.batch`+1, never an ending). Op
    failure opens a new run).
 6. **Post-batch integration cadence (standing user process, r5 recorded)**: after a batch's
    requirements are merged into the integration branches, push `develop` and `master` and tag the
-   integration merge `vYYYY.MM.DD.N` (N = same-day sequence, e.g. `v2026.11.12.2`). Pushing and
-   tagging stay user-triggered; this line only fixes the cadence so it no longer lives in a
-   handoff document. **`develop` syncs to `master` by reset, never by reverse merge** (user
+   integration merge `vYYYY.MM.DD.N` (N = same-day sequence, e.g. `v2026.11.12.2`). **Merging is a
+   normal workflow step, not an exceptional action** — its trigger follows `play.mode`: under `guide`
+   the human confirms the merge through the gate/menu ticket, under `goal` the main agent executes it
+   itself as part of its dispatch authority. A merge only happens when its preconditions hold (gates
+   green, evidence recorded); the mode decides **who triggers**, never whether the step happens.
+   This line fixes the cadence so it no longer lives in a handoff document. **`develop` syncs to
+   `master` by reset, never by reverse merge** (user
    correction 2026-11-12): after the round merge — and equally after any direct master commit —
    align `develop` with `git reset --hard master` + `git push --force-with-lease origin develop`
    (playbook `integration.round.reset-develop`).
