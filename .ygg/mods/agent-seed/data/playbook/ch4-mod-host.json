@@ -137,6 +137,12 @@
           "modality": "must",
           "text": "The payload of `ygg.choice_selected` must be a **JSON number** (`--payload '1'`); sending it as a string (`--payload '\"1\"'`) is rejected by the kernel domain as VALIDATION \"option does not exist\". Every other action's payload is a string. Menu selection is the **only** passing channel for the human-action gate — dispatching `proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` directly through `--event` is always refused (the receipt's first line is `[REJECTED:ACTION]`).",
           "basis": "guide.show harness"
+        },
+        {
+          "id": "contract.serve-read-only",
+          "modality": "must-not",
+          "text": "Runtime projection of `docs/design/serve.md` §3.7.6: never add a run-state write endpoint to serve; human gates remain CLI/daemon-ticketed. POST/DELETE `/api/roots` is only volatile observation configuration and must write no save, mod KV, run.json/coordination or directory; the zero-disk-write tests pin the boundary.",
+          "basis": "docs/design/serve.md §3.7.6 (runtime projection)"
         }
       ]
     }

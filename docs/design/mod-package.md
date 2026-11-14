@@ -28,3 +28,15 @@
 
 规范陈述的执行核验是 `agent_seed_semantics` 的静态章集合相等断言与逐相位回执探针；增删章、改章 id/title、改映射或改渲染序必须在同批更新该探针并重算 manifest。违反时测试红，未接线的章不得被宣称为 phase-entry 可达。负责人 = 修改 playbook/guide/render 的执行者；触发 = 任一上述变更；检查 = `cargo test -p ygg-sandbox --test agent_seed_semantics` 与 playtest。
 
+### Mod 文案路径卫生（retired path literals）
+
+`data/texts/**` 与 `data/playbook/**` 的散文不得含退休路径字面量 `ygg-agent` 或 `pi-agent-seed`；必须使用当前 `agent-seed` / `egg`，避免执行者被文案引到不存在的路径。宿主兼容层是旧名唯一合法消费者，且只能在 `crates/**`，不能在 Mod 文案。确实需要历史引用时，该行必须带字面标记 `[deprecated-ref]`，其余出现均违规。
+
+① 阻止任何把旧 mod/CLI 路径重新引入 Mod texts、brief 或 playbook 的编辑；② 症状是执行者对不存在的 `…/mods/pi-agent-seed` 或 `ygg-agent` 执行门禁而 fail-closed，或 serve 面板解析陈旧别名；③ 仓库根运行以下命令，空输出为通过：
+
+```bash
+grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ .ygg/mods/agent-seed/data/playbook/ | grep -v '\[deprecated-ref\]'
+```
+
+任何幸存行都必须加历史标记或改为当前名称。维护责任 = Mod 文案编辑者；触发 = 每个 texts/playbook 文案 commit；机器复核 = `agent_seed_semantics::mod_text_fragments_carry_no_retired_paths`。违规文案不得发布，因为它会把执行者导向 fail-closed 路径。
+

@@ -210,20 +210,20 @@
       "sha256": "686ba6a8e8a518ffc88e09064fe104a24e37aff86ba157684631b8f2b0150708"
     },
     {
-      "byteLength": 13976,
+      "byteLength": 14535,
       "id": "ygg:agent/playbook/ch1-foundation",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch1-foundation.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "c761fd371c460192d8bad6aeea752f9f3417bbd231d97bff766cdcd006b81aac"
+      "sha256": "3904ce9bd3e5bd1c84c443db65a453ccb31854f6a8ad52628894c255141ef654"
     },
     {
-      "byteLength": 19116,
+      "byteLength": 18186,
       "id": "ygg:agent/playbook/ch2-delivery",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch2-delivery.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "b4a05ccd2790d8370a651f507d1c139b13d3841a76053fbd43e712c60840bf5d"
+      "sha256": "a065bcdbdb4a8f3fbb991e061299be3e249e02db2bee0175e9629e70f708cc88"
     },
     {
       "byteLength": 8931,
@@ -234,12 +234,12 @@
       "sha256": "a1d0adede1b209283e7a5e54504181d83a5c351a23559ff110f98d678db3acc8"
     },
     {
-      "byteLength": 11027,
+      "byteLength": 11613,
       "id": "ygg:agent/playbook/ch4-run-machine",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-run-machine.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "1cf94523822a3a5ff919b9bf1498f08eb0a58185a518fb37bc02cc53f0d79eba"
+      "sha256": "f19338899ce0285a0834de584fa5c6e0afd6d15d504a1063af3e17b7175da7a3"
     },
     {
       "byteLength": 17540,
@@ -258,12 +258,12 @@
       "sha256": "b994ee5ba1aba6a84e75b4623c4fa9d795fd7e8c78709cfd9f8fb6af7176cd58"
     },
     {
-      "byteLength": 13460,
+      "byteLength": 13972,
       "id": "ygg:agent/playbook/ch4-mod-host",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-mod-host.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "c93e9be19ae05a8c5da2ceb2d1bca284595755dea3fba0201a1cfb4ee33da5cc"
+      "sha256": "af5d62fa62efe3359e77bc315fcab6cacc5ee3e44f750c55144b2ba6cc416736"
     },
     {
       "byteLength": 14025,

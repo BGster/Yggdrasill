@@ -131,6 +131,12 @@
           "modality": "must",
           "text": "The docs wiki indexed by `docs/README.md` — `docs/context/*` (domain invariants and vocabulary) and `docs/design/*` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) — are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.",
           "basis": "AGENTS.md §1.7 + docs/{CONTEXT,DESIGN}.md closed loop"
+        },
+        {
+          "id": "repository.mod-text-hygiene",
+          "modality": "must-not",
+          "text": "Runtime projection of `docs/design/mod-package.md` (Mod text hygiene): never reintroduce retired mod/CLI path literals into `data/texts/**` or `data/playbook/**`; only a same-line `[deprecated-ref]` marks a genuine historical reference. Run the specification's grep probe (empty output required) or the semantic test goes red and executors follow a fail-closed path.",
+          "basis": "docs/design/mod-package.md (runtime projection)"
         }
       ]
     },
