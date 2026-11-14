@@ -11,13 +11,13 @@
         {
           "id": "dispatch.executor-ledger",
           "modality": "must",
-          "text": "After dispatching you must register the executor (a **self-declared ledger**, not identity proof): `config.set executor.<rN>.<stage>=<agent_id>`, live stage ∈ plan / development (analysis is a legacy compatibility slot only — never a live stage, never registered for new work); when one subagent covers both live stages, register the same id stage by stage. Replacing the executor for the same (req, stage) with a different id **requires** a reason (`=<new_id>|<reason>`); a **cross-stage handoff** (a development id different from the plan id) equally requires a reason and may never be silently overwritten as a \"first binding for that stage\". A successful handoff writes `id|reason` and appends one entry to `req.<i>.hist` (reusing the rolling cap; no separate history/handoff key); a clean first binding writes no history. The ledger carries no rev: `amend` does not change the binding and `split` / `merge` do not inherit it. `proposal.submit` performs no hard check — an unregistered executor only shows as \"unregistered\" in `requirement.list` and never blocks external proposals or same-ext replays.",
+          "text": "Runtime projection of `docs/context/dispatch-ritual.md` §5: after dispatch, register `config.set executor.<rN>.<stage>=<agent_id>` (analysis / plan / development; analysis only for explicit compatibility work). The ritual owns replacement/handoff reasons, amend and split/merge non-inheritance, and the unregistered display semantics; this rule is not a second ledger contract.",
           "basis": "user decision 2026-11-01 (E2 ruling: reuse config.set, bind no rev, no hard submit gate, a cross-stage handoff must give a reason)"
         },
         {
           "id": "dispatch.decision-id-preallocation",
           "modality": "must",
-          "text": "A genuinely new architectural decision gets its `D-MAx` number allocated serially by the main session at dispatch time and written into the requirement description and the subagent brief; an existing decision reuses its existing number. An executor never self-allocates `max+1`: two lanes picking `max+1` from the same base double-claimed `D-MA16` (see docs/CONTEXT.md history `d0b4a7c` / `6848138`). IDs beyond the brief are not self-served — return to the coordinator.",
+          "text": "Runtime projection of `docs/context/workflow-acts.md` act 1: the coordinator preallocates every new D-MAx at dispatch and writes it into the requirement and brief; executors reuse existing ids and return any id beyond the brief instead of self-allocating max+1. The act owns the collision example and verification.",
           "basis": "user decision 2026-11-12 (E9: parallel-lane D-MA16 collision)"
         },
         {
@@ -56,8 +56,8 @@
       "id": "integration",
       "order": 6,
       "title": "4. Develop → integrate → merge → deploy",
-      "summary": "Three closing levels: the iteration point (feature → develop, executed by the requirement's development executor inside its own lane at closeout) → the round (develop → master, executed by the main agent — human-triggered under guide, agent-triggered under goal) → deployment; iteration-level integration never lags behind a completed requirement and is never batched at round closeout.",
-      "source": "historical AGENTS.md (pre-migration; see git history)",
+      "summary": "Iteration and round integration plus deployment. Operational authority: docs/context/dispatch-ritual.md §6 for feature→develop and docs/context/workflow-acts.md release for develop→master, reset-develop, tags and merge triggers.",
+      "source": "Runtime projection of docs/context/dispatch-ritual.md §6 and docs/context/workflow-acts.md release; historical integration rulings remain in git history",
       "priority": "standard",
       "rules": [
         {
@@ -141,13 +141,13 @@
         {
           "id": "integration.round.merge-ritual",
           "modality": "must",
-          "text": "The `develop` → `master` merge is a normal round-closeout step; the trigger follows `play.mode` — under `guide` the human approves it through the gate ticket, under `goal` the main agent executes it as part of its dispatch authority. The ritual itself is identical: `git fetch origin`, then divergence-check `master` and `develop` separately and align each with `--ff-only`, then in the main checkout `git merge --no-ff develop`, then `git push origin master` — the merge is not complete until the trunk is pushed; rebasing `develop` is absolutely forbidden — the merge topology is the rollback history.",
+          "text": "Runtime pointer: `docs/context/workflow-acts.md` (release) owns the develop→master ritual and who triggers it under guide/goal. Do not infer merge authority or preconditions from this chapter; read that act before merging.",
           "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
           "id": "integration.round.reset-develop",
           "modality": "must",
-          "text": "`develop` syncs to `master` exclusively by reset — after the round merge, and equally after any direct master commit (hotfixes, standalone fixes): `git reset --hard master` on `develop` so `develop` equals `master` as the clean baseline for the next round, then `git push --force-with-lease origin develop`. Merging `master` into `develop` (a reverse merge) is forbidden: it pollutes develop's topology with merge edges against the designed flow feature → develop → master and duplicates master content as meaningless merge nodes.",
+          "text": "Runtime pointer: `docs/context/workflow-acts.md` (release) owns the exact reset-develop and force-with-lease commands after a round merge or direct master commit. Reverse master→develop merges remain forbidden; this chapter does not carry a second command sequence.",
           "basis": "user decision (r2): develop-normalized git integration workflow"
         },
         {
@@ -193,7 +193,7 @@
         {
           "id": "gates.three-suite-literal-evidence",
           "modality": "must",
-          "text": "Runtime projection of `docs/design/state-machine.md` §2.11: three-suite green is claimed only by running `cargo test --workspace`, `cargo test --example egg -p ygg-sandbox`, and `cargo test -p ygg-sandbox --test agent_seed_semantics` verbatim and recording each real exit code and test count. `cargo check`, filtered or single-test runs, `verify-suite --mode fast`, and `YGG_VERIFY_COMMANDS` overrides are evidence of the substitute only; using one as the literal gate is a fake green.",
+          "text": "Runtime pointer: before touching crates, read `docs/design/state-machine.md` §2.11 and run its three literal suites with real exit codes and counts. No filtered run, fast mode, cargo check or environment override substitutes for that specification's evidence.",
           "basis": "docs/design/state-machine.md §2.11 (runtime projection); user decision 2026-11-12 (E7)"
         },
         {

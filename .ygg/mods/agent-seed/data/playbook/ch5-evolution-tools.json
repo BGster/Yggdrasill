@@ -5,7 +5,7 @@
       "order": 14,
       "title": "14. How to propose an evolution (candidate screening · review · scenario first)",
       "summary": "An end-of-run suggestion passes four gates before it may enter the backlog: long-term priority, a root cause for an unused existing capability, an independent review per item, and scenario before technique; after verify is green, `settlement.evolution` registers the summary and the candidate declaration, and `review.note` only archives it single-source — the state machine checks the declaration's shape, never the quality of the suggestion.",
-      "source": "user decision 2026-11-01 (game-1101-1 settlement review E1)",
+      "source": "Runtime projection of docs/context/workflow-acts.md settle for candidate screening and declaration; this chapter additionally owns the six-class candidate taxonomy. Historical user decision 2026-11-01 (E1)",
       "priority": "standard",
       "rules": [
         {
