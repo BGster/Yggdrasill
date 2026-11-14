@@ -106,13 +106,16 @@ output back; synthetic data generated under `/tmp` is unrestricted.
    launders a violation into a compliant-looking record.
 6. **Credentials live only in `.env` / `.env.local`**: Mod resources, configuration and reports
    mention key names only, never values.
-7. **Self-evolution has exactly two exits: `AGENTS.md` or the Mod — no side scripts, no CLI source
+7. **Self-evolution has exactly two decision/enforcement exits: `AGENTS.md` or the Mod — no side scripts, no CLI source
    changes**:
-   - When a discipline was not followed and you want to "evolve yourself", the only legal landing
-     spots are this file (written as a decidable criterion) and `.ygg/mods/agent-seed/` (gate logic
+   - When a discipline was not followed and you want to "evolve yourself", choose exactly one owner:
+     this file for a cold-start ruling, or `.ygg/mods/agent-seed/` for machine enforcement (gate logic
      in `src/runtime/flow.lua` and `src/handlers/**`, prompts and scripts in `data/*.json`;
-     `mod.lua` is assembly only and carries no business logic). Both may change together, but
-     **no third carrier may be added**.
+     `mod.lua` is assembly only and carries no business logic). Both may change together, but **no
+     third decision/enforcement entrypoint may be added**. When the lifecycle rule below routes the
+     operating procedure or subsystem specification into `docs/**`, that document is the indexed
+     elaboration of the chosen ruling, not a third place to originate a constraint; update it in the
+     same commit and keep the route explicit.
    - **Never write a checker script / wrapper / hook as a patch**: no "check-*.py", no
      "pre-*-hook" that "helps you keep the discipline" — that only outsources discipline to a
      self-written checker that you will bypass in the same way. Scripts may only perform **read-only
@@ -157,6 +160,38 @@ output back; synthetic data generated under `/tmp` is unrestricted.
      `grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ .ygg/mods/agent-seed/data/playbook/ | grep -v '\[deprecated-ref\]'`
      — any surviving line must add the marker (genuinely historical reference) or be rewritten to
      the current names.
+
+8. **Every prompt-surface edit must account for the full producer/consumer lifecycle.** A normative
+   rule has exactly one authoritative carrier. Every other carrier is either a pointer or an explicitly
+   identified runtime projection naming that authority, never a second competing statement. Before
+   adding, editing or moving any line of `AGENTS.md`, `docs/**` or
+   `.ygg/mods/agent-seed/data/**`, answer three questions in the same commit:
+
+   - **Q1 — Consumer moment.** At which concrete moment must this line reach the reader? Use exactly
+     one: `cold-start` · `phase-entry` (name the run phase or requirement act) · `before-action`
+     (name the action) · `subsystem-touch` (name the subsystem) · `archive`. Importance or topic is
+     not an answer; an unanswerable Q1 means it is not a rule yet.
+   - **Q2 — Cost of missing it.** Name the observable damage using exactly one: `irreversible`
+     (data loss, secret exposure, forced push over another's work, a fabricated record) ·
+     `hard-refusal` · `silent-drift` · `none`.
+   - **Q3 — Producer.** Name the owner, the action/gate/commit that forces a rewrite, and the check
+     that catches a missed rewrite. No trigger means certain drift: add one or delete the line.
+
+   **Mechanical placement rule:** `AGENTS.md` keeps only Q1=`cold-start` with
+   Q2∈{`irreversible`,`hard-refusal`}, plus verbatim cold-start commands whose omission would cause
+   `silent-drift`. Q1=`phase-entry` goes to `docs/context/workflow-acts.md` at that act and the
+   matching playbook chapter; Q1=`before-action` goes to `dispatch-ritual.md`, `cleanup-policy.md`
+   or the relevant playbook chapter; Q1=`subsystem-touch` goes to `docs/design/<subsystem>.md`;
+   Q1=`archive` goes to `docs/context/decisions-*.md`, `vision.md` or `principles.md`. Decision
+   rationale stays in the ledger as ID/domain/one-line ruling/status/pointer while operating steps
+   move to the specification. One-line "when touching X read Y" routes may remain here.
+
+   This rule blocks any commit that adds or moves a rule without Q1–Q3 or leaves competing normative
+   copies. Its symptoms are duplicated rulings, cold-start text with Q2=`none`, and hard-coded facts
+   without a rewrite trigger. Confirm with a distinctive-phrase search over `AGENTS.md`,
+   `docs/context/*.md`, `docs/design/*.md` and `.ygg/mods/agent-seed/data/playbook/*.json`: one
+   authority, all others pointers or labelled projections. Owner = the editor of the touched surface;
+   trigger = every prompt-surface commit; check = the migration matrix and `docs-consistency.sh`.
 
 ### 8. `goal` / `guide`: who holds the decision
 
@@ -550,7 +585,27 @@ is a **batch settle** (back to `coordinate`, `run.batch`+1, never an ending). Op
 7. **Clear the main session's todo list** (`todo clear`, including completed and historical items)
    before ending this run; never carry a finished run's tasks into the next one.
 
-## 3. Upper layer: none（执行壳已删除）
+## 3. Prompt-surface index
+
+Start from the consumer moment, not from the file you happen to have open. Each route below names the
+authoritative elaboration; `AGENTS.md` does not reproduce it.
+
+| Consumer moment | Authoritative surface |
+| --- | --- |
+| Cold start / irreversible constraints | This file; vocabulary: `docs/context/vocabulary.md` |
+| Phase-entry: charter / coordinate / settle / release / retired | `docs/context/workflow-acts.md`; playbook `repository` / `run_machine` / `evolution` / `integration` / `pointers` |
+| Coordinate actions and decisions | Playbook `actions`, `drive`, `inbox`, `dispatch`, `lanes`; credentials and repository-wide prohibitions: `credentials`, `hard_constraints`, `output` |
+| Before dispatch / submit / integration | `docs/context/dispatch-ritual.md`; playbook `branches`, `integration` |
+| Before verification / evidence / settlement | `docs/context/cleanup-policy.md`; playbook `gates`, `live_evidence`, `evidence`, `run_artifacts` |
+| Mod / host / tool subsystem touch | `docs/design/state-machine.md`, `mod-package.md`, `tool-bridge.md`; playbook `mod_engineering`, `host_contract`, `tools` |
+| Runtime copy and protocol wording | `docs/context/copy-contract.md`; `docs/design/prompt-surface.md` |
+| Why a past ruling exists | `docs/context/decisions-engine.md`, `decisions-agent.md`, `vision.md`, `principles.md` |
+| Dependency and repository topology | `docs/context/topology.md`; `docs/design/system-boundaries.md` |
+
+The complete document map is `docs/README.md`; playbook fragments declare their chapter ids in
+`sections[].id`, and `map.show` plus each phase receipt provides the runtime route to them.
+
+### Upper layer: none（执行壳已删除，archive）
 
 The pi extension (`.pi/extensions/ygg-pi-harness`) was **removed** (2026-11-12; the standing
 requirement predates this session — the r1-era restore was a misread of 4acc3a4 and is
