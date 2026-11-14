@@ -17,7 +17,7 @@
 | `req_accept_plan` | {{id}}（{{req}} 的 plan 提案）的裁决走 gate.approve / gate.reject（交付即门禁）；proposal.accept 只受理 development 提案 | id, req | 叙述 |
 | `req_accept_stale` | proposal {{id}} is bound to rev {{got}} while requirement {{req}} is already rev {{want}} — judged stale; rebase and resubmit (an old proposal must not override a newer decision). | id, got, req, want | 叙述 |
 | `req_added` | [REQ ADDED] {{id}} "{{title}}" {{deps}} — {{counts}} | id, title, deps, counts | 叙述 |
-| `req_after_done` | This run is closed: requirements need a new run (another --run-id). | — | 叙述 |
+| `req_after_done` | This run is closed: requirements need a new run (`egg new`). | — | 叙述 |
 | `req_amend_active` | [REQ AMENDED] {{id}} is developing: title/description updated → rev {{rev}} (progress kept) | id, rev | 叙述 |
 | `req_amend_closed` | {{id}} is {{status}} — amend its successor requirement instead. | id, status | 叙述 |
 | `req_amend_deps_active` | {{id}} is developing — the title/description may change, the deps may not. | id | 叙述 |

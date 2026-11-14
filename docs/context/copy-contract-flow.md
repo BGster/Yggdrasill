@@ -11,13 +11,13 @@
 | `bad_payload` | the payload for `{{action}}` is malformed. | action | 叙述 |
 | `bad_score` | Score must be an integer 1-5, got `{{got}}`. | got | 叙述 |
 | `charter_begun` | 局已开工：run.begin 只在立局微状态可用（当前「{{phase}}」） | phase | 叙述 |
-| `charter_common` | 立局幕：章程三件套（标题/目标/成功判据）立好才可开工；charter.set 在立局内可反复修订，run.begin 后章程锁定。 | — | 叙述 |
+| `charter_common` | 立局幕：三件套齐备后 run.begin 开工（章程随之锁定）。正文见 docs/context/workflow-acts.md（立局幕节）。 | — | 叙述 |
 | `charter_locked` | 章程在 run.begin 后锁定：当前微状态「{{phase}}」不可再改章程 | phase | 叙述 |
 | `charter_missing` | 章程三件套未齐备（task.title / task.goal / task.success 任一为空）：先 charter.set 补齐再 run.begin | — | 叙述 |
 | `charter_ok` | [CHARTER SET] 章程已立（立局内可反复修订）：「{{title}}」｜目标：{{goal}}｜成功判据：{{success}} | title, goal, success | 叙述 |
 | `charter_payload` | 任务标题\|要达成的一句话目标\|可判定的成功标准 | — | 叙述 |
 | `charter_usage` | 章程三段："标题\|目标\|成功判据"——三段都必须非空 | — | 叙述 |
-| `coordinate_common` | accept proposals first (proposal.accept), then pass gates (gate.approve/reject), then dispatch (requirement.dispatch), finally coordinate.submit. | — | 叙述 |
+| `coordinate_common` | 协调幕：受理提案 → 过门禁 → 派发 → coordinate.submit。正文与人机门禁说明见 docs/context/workflow-acts.md（协调幕节）。 | — | 叙述 |
 | `coordinate_ok` | [COORDINATION DONE] {{count}} 条需求全部终态——批边界，进入盘点幕（run.batch={{batch}}） | count, batch | 叙述 |
 | `coordinate_usage` | coordinate.submit [] | — | 叙述 |
 | `default_gate_report` | gate failed (placeholder report) | — | 叙述 |
@@ -49,17 +49,17 @@
 | `profile_bad_value` | invalid profile value for this key (harness <= 32, session_id <= 128: no whitespace / no `\|` / no quotes; role <= 64 single line; free keys `^[a-z0-9_]{1,32}$` with single-line values <= 256). | — | 叙述 |
 | `profile_cleared` | [PROFILE CLEARED] {{handle}}.{{field}} (self-reported registry card only). | handle, field | 叙述 |
 | `profile_registered` | [PROFILE REGISTERED] {{handle}}.{{field}} (self-reported, not identity proof; the executor ledger stays the authority for accountability). | handle, field | 叙述 |
-| `prologue_common` | shared by both modes: acceptance and both gates still take one real action and one validation each, never skipped; requirements can be added asynchronously (--requirement / --proposal). | — | 叙述 |
+| `prologue_common` | 序幕：受理与两道门禁各需一次真实动作与核验，永不跳过；需求可异步追加。叙事与策略正文见 docs/context/workflow-acts.md（序幕节）。 | — | 叙述 |
 | `rejected` | [REJECTED:ACTION] `{{action}}` is not available in stage {{stage}}. Allowed actions: {{allowed}}. Reason: {{detail}} | action, stage, allowed, detail | REJECTED:ACTION/PAYLOAD |
 | `rejected_default` | (no reason given) | — | REJECTED:ACTION/PAYLOAD |
 | `rejected_payload` | [REJECTED:PAYLOAD] the payload for `{{action}}` cannot be accepted: {{detail}} Primary state unchanged. | action, detail | REJECTED:ACTION/PAYLOAD |
-| `release_common` | 发布幕：release.confirm 声明 master@<sha> 与批次 tag（v年.月.日.序号），或 release.skip 声明跳过理由；任一成立即「发布已声明」，review.note 才可批结算/退役。 | — | 叙述 |
-| `retired_common` | 退役终态：业务事件全拒；map.show / requirement.list 只读查询仍可用。 | — | 叙述 |
+| `release_common` | 发布幕：release.confirm（master@<sha>\|批次 tag）或 release.skip（理由），已声明即可 review.note 批结算/退役。正文见 docs/context/workflow-acts.md（发布幕节）。 | — | 叙述 |
+| `retired_common` | 退役终态：业务事件全拒；map.show / requirement.list 只读查询仍可用。正文见 docs/context/workflow-acts.md（退役终态节）。 | — | 叙述 |
 | `run_begun` | [RUN BEGUN] 章程锁定，任务「{{title}}」开工（{{count}} 条需求在册）→ 协调幕 | title, count | 叙述 |
 | `run_retire_armed` | [RUN RETIRE ARMED] the next review.note becomes the retiring close: the run settles and ends ([ENDING · run retired]). Clear it with `config.set run.retire=""`. | — | 叙述 |
 | `run_retire_cleared` | [RUN RETIRE CLEARED] review.note is back to the batch settle (resident run continues; no ending). | — | 叙述 |
 | `secret_redline` | Red line: credentials live only in .env / .env.local; Mod resources, config and reports expose key names only. | — | 叙述 |
-| `settle_common` | 盘点幕四项：verify.submit 先全绿 → settlement.evolution 登记演进（可并入会话/待办可选段）→ settlement.sessions → settlement.todo；四项齐备自动转发布幕（不占事件）。 | — | 叙述 |
+| `settle_common` | 盘点幕四项：验证 → 演进登记 → 会话清理 → 待办清理，齐备自动转发布幕。正文见 docs/context/workflow-acts.md（盘点幕节）；清理政策见 docs/context/cleanup-policy.md。 | — | 叙述 |
 | `settle_ready` | [SETTLE READY] 盘点四项齐备（验证/演进登记/会话清理/待办清理）——自动进入发布幕 | — | 叙述 |
 | `stage_expected` | 该动作只在微状态「{{expected}}」可用 | expected | 叙述 |
 | `stage_prompt_missing` | (the prompt for this node is missing: check <node>_common in data/texts/beats-flow.json and docs/context/workflow-acts.md) | — | 叙述 |

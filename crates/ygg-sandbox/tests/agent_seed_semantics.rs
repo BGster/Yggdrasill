@@ -2859,9 +2859,9 @@ fn mod_text_fragments_carry_no_retired_paths() {
 }
 
 /// The copy contract is split by the existing text-consumer domains, not by arbitrary line counts.
-/// Every domain table must cover exactly its JSON fragment's key set; core is read before §H because
-/// the 23 pointer-shell rows are a subset, not additional keys. Mutation: delete a row, move it to
-/// another domain, or hard-code a different total -> this test goes red.
+/// Every domain table must cover exactly its JSON fragment's key set and template values; core is
+/// read before §H because the 23 pointer-shell rows are a subset, not additional keys. Mutation:
+/// delete a row, move it to another domain, alter a template, or hard-code a different total -> red.
 #[test]
 fn copy_contract_domain_fragments_cover_every_text_key() {
     let repo = repo_dir();
@@ -2886,6 +2886,15 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
             .cloned()
             .collect();
         assert_eq!(documented, actual, "{doc} must exactly cover {fragment}");
+        let templates = markdown_template_map(&text);
+        for (key, value) in fragment_json["beats"].as_object().expect("beats object") {
+            let expected = value.as_str().expect("beat template string");
+            assert_eq!(
+                templates.get(key).map(String::as_str),
+                Some(expected),
+                "{doc} `{key}` must be the exact runtime template from {fragment}"
+            );
+        }
         total += documented.len();
     }
     let core_text = std::fs::read_to_string(repo.join("docs/context/copy-contract-core.md"))
@@ -2894,9 +2903,21 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     let documented = markdown_key_set(core_tables);
     let core = read_json(&mod_dir.join("data/texts/core.json"));
     let mut actual = std::collections::BTreeSet::new();
+    let core_templates = markdown_template_map(core_tables);
     for namespace in ["options", "tuning", "endings"] {
-        for key in core[namespace].as_object().expect("core namespace").keys() {
-            actual.insert(format!("{namespace}.{key}"));
+        for (key, value) in core[namespace].as_object().expect("core namespace") {
+            let full_key = format!("{namespace}.{key}");
+            let expected = if let Some(text) = value.as_str() {
+                text.to_owned()
+            } else {
+                value.to_string()
+            };
+            assert_eq!(
+                core_templates.get(&full_key),
+                Some(&expected),
+                "core copy table `{full_key}` must match the runtime value"
+            );
+            actual.insert(full_key);
         }
     }
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
@@ -2914,6 +2935,25 @@ fn markdown_key_set(text: &str) -> std::collections::BTreeSet<String> {
         .filter_map(|line| line.strip_prefix("| `"))
         .filter_map(|tail| tail.split('`').next().map(str::to_owned))
         .collect()
+}
+
+fn markdown_template_map(text: &str) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for line in text.lines().filter(|line| line.starts_with("| `")) {
+        let mut cells = line.rsplitn(3, " | ");
+        let _protocol = cells.next();
+        let _variables = cells.next();
+        let Some(head) = cells.next() else {
+            panic!("malformed copy-contract row: {line}")
+        };
+        let rest = head.strip_prefix("| `").expect("row key prefix");
+        let (key, template) = rest.split_once("` | ").expect("row key/template split");
+        out.insert(
+            key.to_owned(),
+            template.replace("\\|", "|").replace("\\n", "\n"),
+        );
+    }
+    out
 }
 
 /// r2 (mod 职责再分工): 23 个剧情/策略键收缩为「状态行 + 指针」后，凡 beat/core 文本值携带
