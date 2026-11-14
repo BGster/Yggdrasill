@@ -21,6 +21,7 @@
    - 声明 `play.mode`（`"guide"` | `"goal"`）、`evolution`（`mode`、`allow_paths`、`max_per_run`）、`gates.require_all_green`、`drive`（`maxSteps`、`stagnationLimit`、`decideTimeoutMs`）、`settlement`（`requireNonEmptyEvents`、`requireZeroFailedSteps`、`requireEnding`、`requireInboxConsumed`）、`allowedTools`（**Layer 2 发布白名单**，必须是 `pack.json` `tools` 键的超集），以及可选的 `harness` 适配器元数据。
 3. **`manifest.json`（内容寻址完整性锁）**：
    - 依据 `packages/schema/schemas/manifest.json` 校验。为每个代码文件与数据资源记录 `{ path, sha256, byteLength }`。经 `./scripts/sync-seed-mod.sh` 维护。
+   - `.ygg/mods/agent-seed` 是唯一事实源，`packages/mods/agent-seed -> ../../.ygg/mods/agent-seed` 是相对软链；`./scripts/sync-seed-mod.sh` 重算 manifest，`./scripts/sync-seed-mod.sh --check` 同时核验软链与漂移。绕开单源在软链另一端独立修改会造成双源漂移，禁止验收。
 
 ### Playbook 消费契约（phase-entry + 全局索引）
 

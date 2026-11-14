@@ -7,7 +7,7 @@
 ## 内核源选择
 
 - 默认：**真实 wasm**（`src/kernel-wasm.ts` → `crates/ygg-wasm`，构建产物
-  `pkg/` 不入 git，先跑 `./scripts/build-wasm.sh`，见仓库根 AGENTS.md §五）；
+  `pkg/` 不入 git，先跑 `./scripts/build-wasm.sh`，门禁见 playbook `gates.no-wasm-pack`）；
 - wasm 装载失败：自动降级 **回放内核**（`ReplayKernel`，逐字回放
   `src/fixtures/adventure-transcript.json`），页面顶部落可见横幅；
 - `?mock=1`：强制回放模式（离线开发 / 确定性验证）。

@@ -68,7 +68,7 @@
 - 未注册 / 参数缺 / 脚本不可执行 → **人证旧路径 + 可读提示**，绝不拒绝结算；
 - 通过 → 写 `settlement.todo.source=machine:harness.todo-check` / `settlement.sessions.source=machine:harness.sessions-count`（人证写 `human`）。
 
-**机证与人证同级不越权**（AGENTS.md §9.2c）：`settlement_problem()` 保持纯 KV 断言、零改动；机证只是「脚本跑过 + 输出与人证一致」的证据，不高于人证。
+**机证与人证同级不越权**（[state-machine.md](state-machine.md) §2.9.2）：`settlement_problem()` 保持纯 KV 断言、零改动；机证只是「脚本跑过 + 输出与人证一致」的证据，不高于人证。
 
 ### 3.3 未注册提醒落点
 

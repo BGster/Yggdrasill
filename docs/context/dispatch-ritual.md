@@ -2,7 +2,7 @@
 
 > **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
-> **上游**：[../README.md](../README.md) · **相关**：[workflow-acts.md](workflow-acts.md) · [copy-contract.md](copy-contract.md)（submit 命令模板等句式契约） · [../wiki-governance.md](../wiki-governance.md)
+> **上游**：[../README.md](../README.md) · **相关**：[workflow-acts.md](workflow-acts.md) · [copy-contract-harness.md](copy-contract-harness.md)（submit 命令模板等句式契约） · [../wiki-governance.md](../wiki-governance.md)
 
 ## 1. brief 结构（事实头 + 策略正文）
 
@@ -30,7 +30,12 @@ source .env.local  # 若文件不存在，先确认是否需要创建（含 YGG_
 
 **跨仓库同步的源基线（r5 实证）**：当需求是「从 A 仓同步到 B 仓」时，源仓可能在实施期间前进（主会话并发提交他需求）。brief 里的 `base=<sha>` 只钉住**目标仓**基线；对源仓，要么写「取实施时最新 HEAD」（可变基线），要么写「pin 在 `<sha>`」并声明源仓冻结。默认取**可变基线**——计划稿里的「源基线变化就停机」条件只适用于显式 pin 的场景，否则会因无关提交误停。
 
-在提议或编辑之前，先读 docs wiki：`docs/README.md`（索引）→ `docs/context/*`（领域不变量、原则、决策台账）→ `docs/design/*`（架构与契约）。读完再动手；plan 阶段在 plan artifact 中声明本次变更触碰哪些 wiki 主题文件（Doc sync 职责见 [../wiki-governance.md](../wiki-governance.md)）。
+在提议或编辑之前，先读 `docs/README.md`（索引）、[workflow-acts.md](workflow-acts.md)（当前幕的入口/必做/出口）与本文（派发/提交/集成仪式），再读需求点名的 `docs/design/<subsystem>.md`。不得只泛读目录后就开始动手。
+
+- **plan**：对照 playbook `run_machine` 与 `actions`，在 plan artifact 声明触碰的 wiki 主题文件和验收证据。
+- **development**：除上述文件外，对照 playbook `gates`、`live_evidence` 与触碰子系统章；在同一特性分支就地更新对应 wiki（Doc sync 见 [../wiki-governance.md](../wiki-governance.md)）。
+
+若 brief 未点名具体 subsystem 文件，先沿 `docs/README.md` 的设计导航定位并在计划中写清选择；找不到落点属于 brief 缺口，应返回协调者，不得自行发明新契约文件。
 
 ## 4. 工件纪律（Artifact）
 
@@ -38,17 +43,17 @@ source .env.local  # 若文件不存在，先确认是否需要创建（含 YGG_
 
 ## 5. 提交仪式（Submit）
 
-- 子代理用 `subagent_submit_cmd` 模板提交 `proposal.submit`（模板句式见 [copy-contract.md](copy-contract.md) harness 节），payload 尾段携带 `exec=<agent_id>`（内联执行者注册）与身份段（宿主在声明路由上盖 `actor=` / `actor_session=` 章）。
-- 执行者台账：主会话在拿到子代理 id 后 `config.set executor.<rN>.<stage>=<id>`；同一 (req, stage) 换人或跨阶段移交须带原因（`=<id>|<reason>`）。
-- 自报 profile 卡：`config.set profile.<handle>.<key>=…`（每键一次 config.set）；profile 是自报声明不是凭据，问责以执行者台账为准。
+- 子代理用 `subagent_submit_cmd` 模板提交 `proposal.submit`（模板句式见 [copy-contract-harness.md](copy-contract-harness.md)），payload 尾段携带 `exec=<agent_id>`（内联执行者注册）与身份段（宿主在声明路由上盖 `actor=` / `actor_session=` 章）。
+- 执行者台账：主会话在拿到子代理 id 后 `config.set executor.<rN>.<stage>=<id>`（stage ∈ analysis / plan / development）。同一 (req, stage) 换人或跨阶段移交不同 id 必须带原因（`=<id>|<reason>`）；amend 不改绑定，split/merge 不继承。`proposal.submit` 不硬查台账，未注册只在 `requirement.list` 显示 unregistered，因此它是自声明审计轨迹而非身份凭证。
+- 自报 profile 卡：`config.set profile.<handle>.<key>=…`（每键一次 config.set）；profile 是自报声明不是凭据，问责以执行者台账为准。宿主身份段、三态互证与 opener 契约见 [../design/identity.md](../design/identity.md)，本节不复制。
 
 ## 6. 集成纪律（development 阶段收口时）
 
-子代理自己把功能分支集成进 `develop`：对齐 `origin/develop` → `git merge --no-ff` → 集成态门禁全绿 → push `develop` → 在工件中记录 `develop@<sha>`。**永不触碰 `master` 或他人泳道分支**。轮次级 develop→master、reset-develop 与批次 tag 由主流程负责（D-MA22）。
+子代理自己把功能分支集成进 `develop`：对齐 `origin/develop` → `git merge --no-ff` → 集成态门禁全绿 → push `develop` → 在工件中记录 `develop@<sha>`。**永不触碰 `master` 或他人泳道分支**。轮次级 develop→master、reset-develop 与批次 tag 的操作权威见 [workflow-acts.md](workflow-acts.md) 发布幕（D-MA22 只保存裁决与指针）。
 
 ## 7. 文档同步（Doc sync，适用时）
 
-docs wiki 是全仓始终最新的权威——不是变更日志，历史归 git 与结算产物。若变更改变任何子系统的工作方式（内核 crates / egg CLI / Mod / serve / 工具链）：plan 阶段声明触碰面；development 阶段在同一特性分支就地更新对应文件（决策/词汇 → `docs/context/` 对应台账行或词条；行为/契约 → `docs/design/` 对应主题文件；幕台词/仪式/文案句式 → `docs/context/` 的 [workflow-acts.md](workflow-acts.md) / 本文 / [copy-contract.md](copy-contract.md)）。纯缺陷修复与措辞调整不触碰文档。
+docs wiki 是全仓始终最新的权威——不是变更日志，历史归 git 与结算产物。若变更改变任何子系统的工作方式（内核 crates / egg CLI / Mod / serve / 工具链）：plan 阶段声明触碰面；development 阶段在同一特性分支就地更新对应文件（决策/词汇 → `docs/context/` 对应台账行或词条；行为/契约 → `docs/design/` 对应主题文件；幕台词/仪式/文案句式 → `docs/context/` 的 [workflow-acts.md](workflow-acts.md) / 本文 / [copy-contract.md](copy-contract.md) 七域索引）。纯缺陷修复与措辞调整不触碰文档。
 
 ## 8. 配置面板语义（config_opened 正文的知识权威）
 

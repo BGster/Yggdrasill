@@ -1,8 +1,8 @@
 //! agent-seed semantics gate: **decidable** assertions for the D-MA23 two-layer story
 //! (4 true states + 13 micro-states), the requirement-level nine-act machine, the
 //! run-level resident batch loop (charter → coordinate ⇄ settle → release → retired),
-//! and the operation-map / tool-bridge / identity surfaces (AGENTS.md §9.2 behavioural
-//! scope, DESIGN.md §2 is the authority).
+//! and the operation-map / tool-bridge / identity surfaces (docs/design/state-machine.md §2.10
+//! behavioural scope, DESIGN.md §2 remains the thin-shell route).
 //!
 //! Why this layer exists: the scripted playtest walks only prove happy menus — they never
 //! take a **branch** (gate.reject / amendment staleness / integration.reject / a failed
@@ -26,7 +26,7 @@
 //!   stamped there; the six new D-MA23 events (`charter.set` / `run.begin` /
 //!   `integration.*` / `release.*`) deliberately stay **outside** the ticket gate (R5).
 //!
-//! Boundaries (same stance as AGENTS.md §9 — do not add exits here):
+//! Boundaries (same stance as docs/context/workflow-acts.md coordinate/settle — no added exits):
 //! - only the public load surface (`ModBundle` / `KernelFacade` / dispatch / save-load);
 //!   no host CLI changes, no production-code changes, no side-channel scripts;
 //! - **no run directory is read or written**: legacy-compat and injection fixtures use an
@@ -2819,7 +2819,7 @@ fn tool_declarations_pin_the_merged_capability_surface() {
 /// Mod prose fragments must not carry retired path literals (`ygg-agent` / `pi-agent-seed`).
 /// Scope = pack.json `entries` whose path sits under `data/texts/` or `data/playbook/`; a line
 /// violates when it names a retired literal without the explicit `[deprecated-ref]` marker on
-/// the same line. Machine-checkable half of AGENTS.md §1.7.
+/// the same line. Machine-checkable half of docs/design/mod-package.md (Mod text hygiene).
 #[test]
 fn mod_text_fragments_carry_no_retired_paths() {
     let mod_dir = project_mod_dir();
@@ -2856,6 +2856,64 @@ fn mod_text_fragments_carry_no_retired_paths() {
          `[deprecated-ref]`): {}",
         violations.join(", ")
     );
+}
+
+/// The copy contract is split by the existing text-consumer domains, not by arbitrary line counts.
+/// Every domain table must cover exactly its JSON fragment's key set; core is read before §H because
+/// the 23 pointer-shell rows are a subset, not additional keys. Mutation: delete a row, move it to
+/// another domain, or hard-code a different total -> this test goes red.
+#[test]
+fn copy_contract_domain_fragments_cover_every_text_key() {
+    let repo = repo_dir();
+    let mod_dir = project_mod_dir();
+    let mut total = 0usize;
+    for (doc, fragment) in [
+        ("copy-contract-flow.md", "beats-flow.json"),
+        ("copy-contract-harness.md", "beats-harness.json"),
+        ("copy-contract-lanes.md", "beats-lanes.json"),
+        ("copy-contract-map-guide.md", "beats-map-guide.json"),
+        ("copy-contract-requirements.md", "beats-requirements.json"),
+        ("copy-contract-settlement.md", "beats-settlement.json"),
+    ] {
+        let text = std::fs::read_to_string(repo.join("docs/context").join(doc))
+            .unwrap_or_else(|err| panic!("read {doc}: {err}"));
+        let documented = markdown_key_set(&text);
+        let fragment_json = read_json(&mod_dir.join(format!("data/texts/{fragment}")));
+        let actual: std::collections::BTreeSet<String> = fragment_json["beats"]
+            .as_object()
+            .expect("beats object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(documented, actual, "{doc} must exactly cover {fragment}");
+        total += documented.len();
+    }
+    let core_text = std::fs::read_to_string(repo.join("docs/context/copy-contract-core.md"))
+        .expect("read core copy contract");
+    let core_tables = core_text.split("## H.").next().expect("core tables");
+    let documented = markdown_key_set(core_tables);
+    let core = read_json(&mod_dir.join("data/texts/core.json"));
+    let mut actual = std::collections::BTreeSet::new();
+    for namespace in ["options", "tuning", "endings"] {
+        for key in core[namespace].as_object().expect("core namespace").keys() {
+            actual.insert(format!("{namespace}.{key}"));
+        }
+    }
+    assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
+    assert_eq!(documented, actual, "core copy table must cover core.json");
+    total += documented.len();
+    assert_eq!(total, 440, "404 beats + 36 core keys; §H adds no keys");
+    assert!(
+        core_text.contains("440 个唯一键") && core_text.contains("不得再次相加"),
+        "the global ledger must explain why the 23 pointer shells are not added again"
+    );
+}
+
+fn markdown_key_set(text: &str) -> std::collections::BTreeSet<String> {
+    text.lines()
+        .filter_map(|line| line.strip_prefix("| `"))
+        .filter_map(|tail| tail.split('`').next().map(str::to_owned))
+        .collect()
 }
 
 /// r2 (mod 职责再分工): 23 个剧情/策略键收缩为「状态行 + 指针」后，凡 beat/core 文本值携带

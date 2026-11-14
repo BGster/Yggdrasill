@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 # B1 实装：wasm-bindgen 导出面（YggKernel wrapping KernelFacade）。
-# [lib] crate-type：wasm-pack 门禁（AGENTS.md §五）要求 cdylib 出 wasm 产物；
+# [lib] crate-type：playbook `gates.no-wasm-pack` 要求 cdylib 出 wasm 产物；
 # rlib 并存使 cargo test --workspace 仍可在 host 上对壳（解析/编解码/信封
 # 透传面）收集单测——wasm-bindgen 在 host 目标同构编译，分配器等 wasm 专属
 # 面 cfg(target_arch = "wasm32") 门控。

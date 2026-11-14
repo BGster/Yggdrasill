@@ -5,7 +5,7 @@
       "order": 5,
       "title": "3c. Subagent dispatch discipline",
       "summary": "Background dispatch never blocks the main session; the model and thinking level come from `.env.local`, are used as dispatch parameters only, and are never printed or committed.",
-      "source": "AGENTS.md §3 (subagent dispatch discipline)",
+      "source": "historical AGENTS.md (pre-migration; see git history) (subagent dispatch discipline)",
       "priority": "standard",
       "rules": [
         {
@@ -24,25 +24,25 @@
           "id": "dispatch.background-only",
           "modality": "must",
           "text": "Every subagent task runs in the background; the main session never waits in place — keep advancing other lanes, verifications or planning while it runs, and verify and merge once the completion notice arrives.",
-          "basis": "AGENTS.md §3 (dispatch discipline 1)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (dispatch discipline 1)"
         },
         {
           "id": "dispatch.sync-wait-exception",
           "modality": "should",
           "text": "Synchronous waiting is allowed only when the next action strictly depends on the result and nothing else can progress in parallel; even then, spend the waiting time on other lanes first.",
-          "basis": "AGENTS.md §3 (dispatch discipline 1)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (dispatch discipline 1)"
         },
         {
           "id": "dispatch.params-from-env-local",
           "modality": "must",
           "text": "Before dispatching, **must `source .env.local`** (the repository-root, git-ignored, never committed) to load the environment variables (git-ignored, never committed): `YGG_SUBAGENT_MODEL` (the subagent model, e.g. `sonnet` / `provider/model-id`) and `YGG_SUBAGENT_THINKING` (`off|minimal|low|medium|high|xhigh|max`); when unset, pass nothing explicitly and use the harness default.",
-          "basis": "AGENTS.md §3 (dispatch discipline 2)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (dispatch discipline 2)"
         },
         {
           "id": "dispatch.params-not-disclosed",
           "modality": "must-not",
           "text": "These two values are dispatch parameters only — never printed, never written into documentation, never committed.",
-          "basis": "AGENTS.md §3 (dispatch discipline 2)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (dispatch discipline 2)"
         },
         {
           "id": "dispatch.submitter-identity",
@@ -57,7 +57,7 @@
       "order": 6,
       "title": "4. Develop → integrate → merge → deploy",
       "summary": "Three closing levels: the iteration point (feature → develop, executed by the requirement's development executor inside its own lane at closeout) → the round (develop → master, executed by the main agent — human-triggered under guide, agent-triggered under goal) → deployment; iteration-level integration never lags behind a completed requirement and is never batched at round closeout.",
-      "source": "AGENTS.md §4",
+      "source": "historical AGENTS.md (pre-migration; see git history)",
       "priority": "standard",
       "rules": [
         {
@@ -70,13 +70,13 @@
           "id": "integration.iter.fetch",
           "modality": "must",
           "text": "First step of an iteration closeout: `git fetch origin`.",
-          "basis": "AGENTS.md §4 (1)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (1)"
         },
         {
           "id": "integration.iter.gates-green-first",
           "modality": "must",
           "text": "All gates must be green on the feature branch itself before integration starts (see the gates chapter) — this admission check is purely branch-local evidence, and it never carries over: after the feature lands in `develop` the integrated state is tested again (`integration.iter.test-after-integrate`).",
-          "basis": "AGENTS.md §4 (1)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (1)"
         },
         {
           "id": "integration.iter.align-develop",
@@ -130,7 +130,7 @@
           "id": "integration.round.e2e-acceptance",
           "modality": "must",
           "text": "A round-level closeout first passes end-to-end acceptance on the `develop` integrated state once every in-round feature has landed: the example game completed end to end plus save/load verification; after M1 this adds the AI-generated → playable loop — the precondition for merging into `master`.",
-          "basis": "AGENTS.md §4 (2)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (2)"
         },
         {
           "id": "integration.round.stages-separated",
@@ -154,25 +154,25 @@
           "id": "integration.round.batch-tag",
           "modality": "must",
           "text": "Once acceptance passes, tag the batch `v<YYYY.MM.DD>.<n>` — the no-FF merge node is the rollback anchor.",
-          "basis": "AGENTS.md §4 (2)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (2)"
         },
         {
           "id": "integration.round.changelog",
           "modality": "should",
           "text": "A batch closeout updates the CHANGELOG / report when one exists.",
-          "basis": "AGENTS.md §4 (2)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (2)"
         },
         {
           "id": "integration.deploy.master-only",
           "modality": "must-not",
           "text": "Anything deployed through any channel must already be merged into master: a non-master ref is refused outright, with no exception switch.",
-          "basis": "AGENTS.md §4 (3)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (3)"
         },
         {
           "id": "integration.deploy.requires-approval",
           "modality": "must",
           "text": "Deployment is a write operation: report it to the user and get approval before every deployment.",
-          "basis": "AGENTS.md §4 (3)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (3)"
         }
       ]
     },
@@ -181,14 +181,14 @@
       "order": 7,
       "title": "5. Verification-command gates",
       "summary": "The gate baseline is a snapshot: the acceptance standard is \"introduce no new failure\"; a module whose gate is not wired up must be declared uncovered explicitly.",
-      "source": "AGENTS.md §5",
+      "source": "historical AGENTS.md (pre-migration; see git history)",
       "priority": "standard",
       "rules": [
         {
           "id": "gates.baseline-snapshot",
           "modality": "must",
           "text": "The gate baseline is a snapshot that grows with each iteration, and the acceptance standard is \"introduce no new failure\" — historical debt does not have to be zero, but no new failure may appear.",
-          "basis": "AGENTS.md §5"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "gates.three-suite-literal-evidence",
@@ -200,13 +200,13 @@
           "id": "gates.core-purity-review",
           "modality": "must",
           "text": "The dependency list in `ygg-core`'s `Cargo.toml` is part of the review: a rendering, platform or IO dependency is a violation with no exception mechanism.",
-          "basis": "AGENTS.md §5 (kernel purity check)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (kernel purity check)"
         },
         {
           "id": "gates.uncovered-declaration",
           "modality": "must",
           "text": "A module whose gate is not wired up yet (no tests exist) must be declared \"gate not covered\" in the report; it never passes by default.",
-          "basis": "AGENTS.md §5"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "gates.mod-semantics-matrix",
@@ -218,25 +218,25 @@
           "id": "gates.no-wasm-pack",
           "modality": "must-not",
           "text": "Never build the wasm bindings with wasm-pack: the exception-handling module needs `wasm-bindgen --reference-types` and wasm-pack does not pass that flag through; the build chain is fixed to `scripts/build-wasm.sh` (cargo plus the wasm-bindgen CLI, two steps).",
-          "basis": "AGENTS.md §5 (wasm binding note); .cargo/config.toml header note"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (wasm binding note); .cargo/config.toml header note"
         },
         {
           "id": "gates.no-silent-baseline-edit",
           "modality": "must-not",
           "text": "When the FR-9 dual-run state hashes differ, never silently edit the fixture baseline — a mismatch is a determinism breach between platforms, and a baseline change requires an explicit decision plus a record.",
-          "basis": "AGENTS.md §5 (FR-9 note)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (FR-9 note)"
         },
         {
           "id": "gates.fr9-browser-lane-gap",
           "modality": "must",
           "text": "Before claiming full FR-9 compliance, add the wasm-bindgen-test browser lane (replay the same assertions in a real browser wasm instance) or take an explicit waiver decision; today the node lane covers native/wasm dual-run equivalence, and the browser lane does not exist.",
-          "basis": "AGENTS.md §5 (FR-9 residual-gap note)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (FR-9 residual-gap note)"
         },
         {
           "id": "gates.contract-parity",
           "modality": "must",
           "text": "Contract parity criterion: the same Mod sample must produce identical results through ajv and through the jsonschema crate; the CI script does not exist yet, so until it lands that surface is declared \"gate not covered\".",
-          "basis": "AGENTS.md §5 (contract parity)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (contract parity)"
         }
       ]
     }

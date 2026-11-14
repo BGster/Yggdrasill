@@ -5,32 +5,32 @@
       "order": 21,
       "title": "21. Mod engineering · toolchain · purity",
       "summary": "The mod-change trio (pack / lint / playtest), the content-addressed manifest, the multi-file purity and KV-prefix-ownership contracts, error location by real file, hot reload, and the single-source two-mods layering.",
-      "source": "AGENTS.md §8/§1.9 (text before the 2026-10-31 condensation) + docs/design/mod-package.md",
+      "source": "historical AGENTS.md (pre-migration; see git history) (text before the 2026-10-31 condensation) + docs/design/mod-package.md",
       "priority": "standard",
       "rules": [
         {
           "id": "mod.pack",
           "modality": "must",
           "text": "After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/agent-seed`.",
-          "basis": "AGENTS.md §8 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "mod.lint",
           "modality": "must",
           "text": "Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.",
-          "basis": "AGENTS.md §8 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "mod.playtest",
           "modality": "must",
           "text": "Smoke walk: `cargo run --example playtest -- .ygg/mods/agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).",
-          "basis": "AGENTS.md §1.9 (behavioural acceptance); gates.mod-semantics-matrix"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (behavioural acceptance); gates.mod-semantics-matrix"
         },
         {
           "id": "mod.manifest-content-addressed",
           "modality": "must",
           "text": "The manifest is content-addressed (sha256 + byteLength): editing `data/*.json` without recomputing the pack makes loading fail with a content-hash mismatch.",
-          "basis": "AGENTS.md §8 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "mod.multi-script-load",
@@ -60,13 +60,13 @@
           "id": "mod.hot-reload",
           "modality": "must",
           "text": "Hot reload: single-shot mode loads from disk in every new process; an `open` (attach) receipt with `hotReload.source=\"resume\"` proves the change is in effect.",
-          "basis": "AGENTS.md §8 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "mod.two-mods-layering",
           "modality": "must",
           "text": "The two mod paths are one Mod, not two copies: `.ygg/mods/agent-seed` is the single source of truth (the installed instance), and `packages/mods/agent-seed` is a git-tracked relative symlink to `../../.ygg/mods/agent-seed` — the stable packages-side entry, never an independent copy. `scripts/sync-seed-mod.sh` verifies the link target and the schema single-source (`packages/schema/schemas/`) and recomputes the content-addressed `manifest.json` (`--check` = read-only); the CI skeleton guard in `check.yml` still runs its diffs, but through the symlink they now compare the same files with themselves. The playbook is assembled, not duplicated: nine fragments under `data/playbook/` (a head plus eight chapter files) are joined by `mod.lua` in fixed order into 21 chapters — one fragment carries one to five chapters, section ids are globally unique across fragments, and this rule lives in the assembled `mod_engineering` chapter.",
-          "basis": "AGENTS.md §8 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         }
       ]
     },
@@ -75,62 +75,62 @@
       "order": 22,
       "title": "22. Host contract · literal ownership",
       "summary": "The contract sections a Mod must declare (`agent` / `inboxRoutes` in pack.json, `settlement` / `drive` in config.json), the ownership boundary between contract and host literals, the choice payload type, and the fail-closed loading rule.",
-      "source": "AGENTS.md §9 (text before the 2026-10-31 condensation)",
+      "source": "historical AGENTS.md (pre-migration; see git history) (text before the 2026-10-31 condensation)",
       "priority": "standard",
       "rules": [
         {
           "id": "contract.required",
           "modality": "must",
           "text": "The generic tooling (`src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.",
-          "basis": "AGENTS.md §9 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "contract.agent-seg",
           "modality": "must",
           "text": "The `agent` section of `pack.json` has eight fields: entryEvent / choiceEvent / summaryEvent / endingPrefix / metaKey / rejectionPrefixes (at least one) / replayPrefix / defaultPayload.",
-          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (contract table, pre-migration)"
         },
         {
           "id": "contract.inbox-seg",
           "modality": "must",
           "text": "The `inboxRoutes` section of `pack.json`: reserved keys externalIdField / payloadField / extMarker plus `<kind>` → `{action, fields[, write]}` (zero kinds is legal).",
-          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (contract table, pre-migration)"
         },
         {
           "id": "contract.settlement-seg",
           "modality": "must",
           "text": "The `settlement` section (in `<config.json>`): requireEvents / requireNoFailedSteps / requireEnding / requireInboxConsumed.",
-          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (contract table, pre-migration)"
         },
         {
           "id": "contract.drive-seg",
           "modality": "must",
           "text": "The `drive` section (in `<config.json>`): maxSteps / stallLimit / stepsPerRequirement (positive integers).",
-          "basis": "AGENTS.md §9 (contract table, pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (contract table, pre-migration)"
         },
         {
           "id": "contract.config-path",
           "modality": "must",
           "text": "`<config.json>` is the path declared by the `ygg:agent/config` entry in `pack.json` (`data/config.json` for the seed Mod).",
-          "basis": "AGENTS.md §9 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "contract.upgrade",
           "modality": "must",
           "text": "Upgrading an old Mod means filling in the four sections (two in `pack.json`, two in `config.json`); `cargo run --example pack -- <mod dir>` validates their shape at pack time (only what is declared is validated).",
-          "basis": "AGENTS.md §9 (pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "contract.host-vs-contract",
           "modality": "must",
           "text": "Ownership boundary: event names / ending prefix / summary key / rejection and replay prefixes / inbox fields and routes / settlement switches / advancement thresholds belong to the contract and must be declared by the Mod; what the host may keep as literals is the run-directory file names, the coordination phase names running / closing / finalized, the decision-command timeout (`DECIDE_TIMEOUT`) and poll interval (`DECIDE_POLL_INTERVAL`), the three `--drive` modes, the five-file set (`pack.json` / `manifest.json` / `mod.lua` / `schemas/` / `data/`), and the kernel seams (`save` / `load` / `state`, and the reserved `ygg.choice_selected` route). Criterion: would this literal change with another Mod? If yes, it belongs to the contract.",
-          "basis": "AGENTS.md §9 (ownership boundary, pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (ownership boundary, pre-migration)"
         },
         {
           "id": "contract.literal-ownership",
           "modality": "must-not",
           "text": "Only applications bound to a specific Mod and the generator side may keep event-name / ending-prefix literals, and every such file declares \"bound\" or \"generator-side\" in its header: adventure.rs, clients/godot/rust/src/logic.rs, clients/godot/project/main.gd|session.gd, spike/godot/**, packages/client-web/src/{kernel,session,kernel-wasm}.ts and crates/ygg-wasm/smoke.mjs are bound to `packages/mods/test-adventure`; packages/pipeline/src/{prompt,types,pack}.ts and scripts-dev/mock-llm-stub.mjs are generator-side; the generic tooling of crates/ygg-sandbox|ygg-lint and the test fixtures under tests/ may not add literals, and `ygg.choice_selected` is the reserved event name checked by the kernel domain (the contract's `choiceEvent` must use it).",
-          "basis": "AGENTS.md §9 (literal-ownership table, pre-migration)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (literal-ownership table, pre-migration)"
         },
         {
           "id": "contract.choice-payload-type",
