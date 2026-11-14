@@ -176,5 +176,5 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 | Repository topology | `docs/context/topology.md` + `docs/design/system-boundaries.md` |
 
 Every playbook chapter has a phase-entry route; `map.show` additionally prints the complete chapter index.
-Each phase receipt names its chapter ids/titles, summaries and rule counts. Read the fragment whose
+Each phase receipt names its chapter titles, summaries and rule counts. Read the fragment whose
 `sections[].id` matches the route rather than quoting a summary as the full rule.
