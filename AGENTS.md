@@ -31,8 +31,9 @@ The user runs real-data verification and pastes the output; synthetic data under
    `startswith` filtering, or grep/python summaries. Every dispatch prints all narrative lines and hands
    raw `pendingChoice` to the user. Read rules from the playbook chapter instead of memory; the phase map
    is in `src/view/guide.lua`. Without egg/mod, `docs/context/workflow-acts.md`, `dispatch-ritual.md`,
-   `cleanup-policy.md` and `copy-contract.md` are the self-contained workflow base; only tool monitoring,
-   recorded history and machine enforcement are absent — semantics and evidence do not degrade.
+   `cleanup-policy.md` and the seven-domain `copy-contract.md` index are the self-contained workflow
+   base; only tool monitoring, recorded history and machine enforcement are absent — semantics and
+   evidence do not degrade.
 
 4. **Single-shot dispatching is not compliance**: batching `--event` flags only hides state from the
    guard; it does not replace `requirement.dispatch` → proposal → gate. Never edit `autosave.json` or
