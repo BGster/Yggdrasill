@@ -11,20 +11,28 @@ mod 运行时发出的 brief = **事实头**（留 mod，带状态变量）+ **�
 - 事实头：`Requirement {{id}} (rev {{rev}}, stage={{stage}}): {{title}}` / `Description: {{desc}}` / `Worktree: {{worktree}} (branch={{branch}}, base={{base}})` / `Artifact: {{artifact}}` / `Submit: {{submit}}`。
 - 策略正文（以下 §3–§7）随 brief 指针给出，各项目可在自己的 context 副本中本地化改写。
 
-## 2. 派发前环境准备（必须 source .env.local）
+## 2. 派发前环境准备（必须 source .env.local，并将结果用于创建）
 
-在派发任何 subagent（plan / development / analysis）**之前**，主会话必须 `source .env.local`（仓库根目录，git-ignored 不入库）读取环境变量，用于辅助创建 subagent：
+在派发任何 subagent（plan / development / analysis）**之前**，主会话必须 `source .env.local`（仓库根目录，git-ignored 不入库）读取环境变量，用于辅助创建 subagent。完整闭环是 **读取 → 使用 → 校验**，只有 `source` 而没有传入创建参数不算遵循流程。
 
 ```bash
-# 派发前必做：加载环境变量（模型/思考级别等 dispatch 参数）
-source .env.local  # 若文件不存在，先确认是否需要创建（含 YGG_SUBAGENT_MODEL / YGG_SUBAGENT_THINKING 等键）
+# 派发前必做：在同一 shell 进程加载环境变量（模型/思考级别等 dispatch 参数）
+set -a
+source .env.local
+set +a
+# 随后在同一进程创建 subagent：
+# Agent(model=${YGG_SUBAGENT_MODEL:+$YGG_SUBAGENT_MODEL}, thinking=${YGG_SUBAGENT_THINKING:+$YGG_SUBAGENT_THINKING}, ...)
+# 仅展示调用骨架；工具调用由主会话实际生成，不把变量值写进 brief/文档/提交。
 ```
 
 **纪律**：
 - `YGG_SUBAGENT_MODEL`（子代理模型，如 `sonnet` / `provider/model-id`）与 `YGG_SUBAGENT_THINKING`（`off|minimal|low|medium|high|xhigh|max`）从 `.env.local` 读取；未设置时用缺省（不打印值、不写入文档、不 commit）
+- **读取后必须使用**：Agent 工具创建调用须把两个变量实际映射到 `model` / `thinking` 参数；键未设则省略参数并使用 harness 缺省。**不能只 `source`、检查长度，然后仍用工具默认值创建**
+- **派发前校验**：在同一 shell 进程验证 `.env.local` 加载成功、变量类型合法、模型引用格式与 thinking 枚举合法；仅输出 `set`/`unset` 状态，绝不输出变量值或含值的完整工具参数。工具返回中可见的参数对象须实际包含目标字段
+- **失败可读**：不得用 `2>/dev/null` 掩盖 source 失败；文件缺失/不可读、变量类型不合法时先暂停派发并显式处理。若 `.env.local` 合法但相关键未设，按缺省语义继续，并在主会话内部确认「本次使用缺省」
 - 这两个值是 **dispatch 参数**——只在创建 subagent 时使用，**绝不打印、不写入 brief、不进台账**
-- 若 `.env.local` 缺失或键未设：按 playbook `dispatch.params-from-env-local` 的缺省语义处理，但**source 动作本身不可省略**（确保后续新增键时被正确加载）
-- 无 egg 环境：同样先 source .env.local 再按本文动作清单人工派发
+- 无 egg 环境：同样先 source .env.local 再按本文动作清单人工派发，使用同一套创建参数
+- 允许后续新增键时沿用同一闭环：先加载、再按创建工具的实际参数面映射、最后校验生效，不把「读到环境变量」误当「参数已生效」
 
 ## 3. 必读材料纪律（Mandatory references）
 

@@ -35,7 +35,7 @@
         {
           "id": "dispatch.params-from-env-local",
           "modality": "must",
-          "text": "Before dispatching, **must `source .env.local`** (the repository-root, git-ignored, never committed) to load the environment variables (git-ignored, never committed): `YGG_SUBAGENT_MODEL` (the subagent model, e.g. `sonnet` / `provider/model-id`) and `YGG_SUBAGENT_THINKING` (`off|minimal|low|medium|high|xhigh|max`); when unset, pass nothing explicitly and use the harness default.",
+          "text": "Before dispatching, **must `source .env.local`** (the repository-root, git-ignored, never committed) in the same shell process that creates the subagent: `YGG_SUBAGENT_MODEL` (e.g. `sonnet` / `provider/model-id`) and `YGG_SUBAGENT_THINKING` (`off|minimal|low|medium|high|xhigh|max`). Loading is not enough: the values **must be mapped to the creation tool's actual `model` and `thinking` arguments**, or omitted only when unset so the harness default applies. Never merely source the file or check value lengths and then create with defaults. Before the Agent call, verify in that same process that the source succeeded and the values are of the expected shape (report set/unset only, never the values); do not hide a failed source with `2>/dev/null`. The creation payload must actually contain the target fields when set.",
           "basis": "AGENTS.md §3 (dispatch discipline 2)"
         },
         {
