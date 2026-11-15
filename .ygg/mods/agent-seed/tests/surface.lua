@@ -547,3 +547,15 @@ test("texts 与 src 的 docs/context 指针：逐来源账 34 守恒 + 锚点全
   assert_eq(total, 34, ("docs/context 指针总数漂移：期望 34，实得 %d"):format(total))
   assert_eq(#violations, 0, "docs/context 指针锚点不存在：" .. table.concat(violations, ", "))
 end)
+
+test("goal 授权门：无授权给可读警告，登记后放行", function()
+  fresh()
+  reset()
+  fire("config.set", "play.mode=goal")
+  assert_eq(count_marker("[GOAL AUTH PENDING]"), 1, "无授权时切 goal 必须给可读警告")
+
+  fire("config.set", "goal.authorization=authorized for this run")
+  reset()
+  fire("config.set", "play.mode=goal")
+  assert_eq(count_marker("[GOAL AUTH PENDING]"), 0, "登记授权后不再警告")
+end)

@@ -279,16 +279,6 @@ test("tool.call 发布密集待决快照：分配序、args 省略、meta 不拖
   assert_eq(kv("tool.t2.status"), "pending", "第二行状态")
 end)
 
-local function count_marker(marker)
-  local n = 0
-  for _, line in ipairs(narrated()) do
-    if line:find(marker, 1, true) then
-      n = n + 1
-    end
-  end
-  return n
-end
-
 test("tool.result：同回合回执收敛 + 重放幂等 + 终态冲突拒绝", function()
   -- ① 同回合收敛：结果落库，回执效应在唯一选择产出前就绪。
   drive_to_settle()

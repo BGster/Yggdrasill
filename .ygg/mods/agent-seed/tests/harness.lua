@@ -656,3 +656,14 @@ function list_files(dir, ext)
   pipe:close()
   return out
 end
+
+--- 统计本回合叙述里包含某个字面标记的行数（用于 `[TOOL RESULT]` 之类的计数断言）。
+function count_marker(marker)
+  local n = 0
+  for _, line in ipairs(narrated()) do
+    if line:find(marker, 1, true) then
+      n = n + 1
+    end
+  end
+  return n
+end

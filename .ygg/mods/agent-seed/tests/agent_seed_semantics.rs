@@ -1756,30 +1756,6 @@ fn read_gate_ticket_degrades_to_coverage_only() {
     game.assert_kv("req.1.gate", json!(""));
 }
 
-/// P10 决策归属的守门线：`play.mode=goal` 在 `goal.authorization` 注册之前会发出可读
-/// 警告（`[GOAL AUTH PENDING]`）；注册后再切不再警告。
-#[test]
-fn goal_authorization_gates_goal_mode_with_a_readable_warning() {
-    let mut game = Game::open(&project_mod_dir());
-
-    let goal_without_auth = game.narrate("config.set", &text("play.mode=goal"));
-    assert_eq!(
-        count_lines(&goal_without_auth, "[GOAL AUTH PENDING]"),
-        1,
-        "{goal_without_auth:#?}"
-    );
-    game.narrate(
-        "config.set",
-        &text("goal.authorization=authorized for this run"),
-    );
-    let goal_with_auth = game.narrate("config.set", &text("play.mode=goal"));
-    assert_eq!(
-        count_lines(&goal_with_auth, "[GOAL AUTH PENDING]"),
-        0,
-        "{goal_with_auth:#?}"
-    );
-}
-
 // ───────────────────── r4/r6/r7 · layout, fragments, tool declarations ─────────────────────
 
 /// A mod resource read straight from disk (the declaration surface is a file, not Lua state).
