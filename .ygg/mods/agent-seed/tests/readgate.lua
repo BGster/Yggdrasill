@@ -145,3 +145,30 @@ test("actor 侧键随签名同生共死（清除 / 换人 / 边界销票）", fu
   assert_eq(kv("settings.read_actor.acts/coordinate"), "", "and the side key")
   assert_eq(kv("settings.read_index"), "", "and the index")
 end)
+
+test("批边界无身份载体：降级为覆盖检查，不退化成硬拒", function()
+  drive_to_dev_pending("semantics-batch-no-carrier")
+  drive_to_accept()
+  drive_to_integrating()
+  drive_to_done()
+
+  -- 直派路只在 goal 模式可达（guide 会先被人类门禁拒掉，走不到读签）。
+  fire("config.set", "play.mode=goal")
+
+  reset()
+  fire_direct("coordinate.submit", "0")
+  assert_true(narrated_contains("no-carrier"), "the boundary narrates the missing carrier")
+  assert_true(
+    narrated_contains("attribution is structurally unavailable"),
+    "it explains why per-person attribution cannot be computed"
+  )
+  assert_true(
+    not narrated_contains("read-gate/no-identity"),
+    "no-carrier must not degrade into a hard no-identity refusal"
+  )
+  -- 覆盖维仍然生效：结算幕文档未签，因此仍被拦。
+  assert_true(
+    narrated_contains("read-gate/missing"),
+    "coverage is still enforced after the identity dimension degrades"
+  )
+end)

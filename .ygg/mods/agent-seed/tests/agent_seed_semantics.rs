@@ -2268,35 +2268,6 @@ fn read_gate_blocks_and_releases_the_batch_boundary() {
     game.assert_kv("run.phase", json!("settle"));
 }
 
-/// ⑩ 批边界的身份载体缺失：`coordinate.submit` 只收空载荷 / "0" / "full"，宿主无处追加
-/// `|actor=`，因此按人判定在这个动作上**结构不可满足**。直派路必须降级为覆盖检查并另立
-/// 叙事告明原因——否则 goal 模式的批边界永远跳不过去。
-/// 这条用例补的正是 r9 的缺口：既有批边界用例走菜单点击的**票据路**，覆盖不到直派路。
-#[test]
-fn batch_boundary_degrades_when_identity_has_no_carrier() {
-    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
-        "semantics-batch-no-carrier",
-    ))));
-    // 直派路只在 goal 模式可达（guide 会先被人机门禁拒，走不到读签）。
-    game.narrate("config.set", &text("play.mode=goal"));
-    let lines = game.narrate("coordinate.submit", "0");
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("no-carrier") && joined.contains("attribution is structurally unavailable"),
-        "the batch boundary must narrate the missing identity carrier: {joined}"
-    );
-    assert!(
-        !joined.contains("read-gate/no-identity"),
-        "no-carrier must not degrade into a hard no-identity refusal: {joined}"
-    );
-    // 本次仍会因未签结算幕文档被**覆盖维**拦下（acts/settle / rituals/cleanup 未签）——
-    // 降级只放弃「按人」，不放弃其余维度。goal 模式端到端能否收批由真实运行验证。
-    assert!(
-        joined.contains("read-gate/missing"),
-        "coverage must still be enforced after the identity dimension degrades: {joined}"
-    );
-}
-
 /// ⑪ ⑩ 的反证：降级只让「按人」这一维失效，**覆盖维仍然生效**——没签就照拒。
 #[test]
 fn batch_boundary_still_enforces_coverage_without_identity_carrier() {

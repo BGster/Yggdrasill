@@ -221,6 +221,12 @@ function fire(name, payload)
   return deliver(name, payload)
 end
 
+--- 单发直派：**不**盖 actor 章（模拟 `--event` 直派路，无宿主身份段）。
+function fire_direct(name, payload)
+  assert_true(HANDLERS[name] ~= nil, ("handler not registered: %s"):format(name))
+  return HANDLERS[name](payload)
+end
+
 function kv(key)
   return KV[key]
 end
