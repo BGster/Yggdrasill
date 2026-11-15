@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-settlement
 > **id** copy/settlement · **幕** all · **触发** 改 `beats-settlement.json` 前
 > **读不到代价** silent-drift
-> **ver** 2e7c6c
+> **ver** 9fb537
 
 > **定位**：`beats-settlement.json` 54 键的句式知识权威：盘点四项、批结算、退役、发布与 tools 机证。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-settlement.json`
@@ -10,7 +10,7 @@
 | 键 | 句式模板（逐字） | 变量 | 协议归属 |
 |---|---|---|---|
 | `maintenance_req_added` | [MAINTENANCE REQ ADDED] {{id}} "{{title}}" — batch {{batch}} closeout appended next batch's docs-maintenance requirement (open/draft); dispatch it in coordinate — it gates the next boundary until done. | id, title, batch | 叙述 |
-| `maintenance_req_desc` | 依 wiki-governance 三职责复核上批全部需求的 plan 与 develop 验收结果是否已落 docs wiki：决策与词汇 → docs/context/decisions-agent.md 台账行、vocabulary.md 词条；行为与契约 → docs/design/ 对应主题文件（按本批触碰面：state-machine/events/state-surface/run-story/requirement-story 等）；结构变化 → docs/README.md 索引与 CONTEXT.md/DESIGN.md 两薄壳映射表；纪律：每主题一文件 ≤300 行、头部定位/replaces/上下游、双向链接；纯缺陷修复与措辞调整不触碰文档。 | — | 叙述 |
+| `maintenance_req_desc` | 依 wiki-governance 三职责复核上批全部需求的 plan 与 develop 验收结果是否已落 docs wiki：决策与词汇 → docs/context/archive/decisions-agent.md 台账行、vocabulary.md 词条；行为与契约 → docs/design/ 对应主题文件（按本批触碰面：state-machine/events/state-surface/run-story/requirement-story 等）；结构变化 → docs/README.md 索引与 CONTEXT.md/DESIGN.md 两薄壳映射表；纪律：每主题一文件 ≤300 行、头部定位/replaces/上下游、双向链接；纯缺陷修复与措辞调整不触碰文档。 | — | 叙述 |
 | `maintenance_req_skipped_dedup` | [MAINTENANCE REQ SKIP] {{id}} already carries an open docs-maintenance requirement (maintenance marker / canonical title) — dedup hit, the batch settles without a second one. | id | 叙述 |
 | `maintenance_req_skipped_full` | [MAINTENANCE REQ SKIP] requirement register is full ({{cap}} open) — docs-maintenance append deferred; the batch settles regardless. | cap | 叙述 |
 | `maintenance_req_title` | 维护更新 docs wiki（上批收口） | — | 叙述 |
@@ -48,12 +48,12 @@
 | `settlement_sessions_payload` | 0\|0\|<your-destination>/<batch> | — | 叙述 |
 | `settlement_sessions_segment` | sessions=0/0/<your-destination>/<batch> | — | 叙述 |
 | `settlement_sessions_segment_bad` | the settlement.evolution sessions= segment must be `<moved>/<remaining>/<destination>`: moved a non-negative integer, remaining exactly 0, destination non-empty (slashes inside the destination are kept). | — | 叙述 |
-| `settlement_sessions_unsetted_hint` | [SESSIONS CLEANUP PENDING] subagent sessions remaining={{remaining}} — review.note stays blocked. Cleanup policy (scope strictly this run, never main/unrelated sessions, moved=0 legal, success = gone from your session history) is the authority of docs/context/cleanup-policy.md §1. Declare via settlement.sessions (moved\|remaining\|destination) or the settlement.evolution sessions= segment; remaining must be 0. Missing declaration stays honestly unsettled. | remaining | 叙述 |
+| `settlement_sessions_unsetted_hint` | [SESSIONS CLEANUP PENDING] subagent sessions remaining={{remaining}} — review.note stays blocked. Cleanup policy (scope strictly this run, never main/unrelated sessions, moved=0 legal, success = gone from your session history) is the authority of docs/context/rituals/cleanup.md §1. Declare via settlement.sessions (moved\|remaining\|destination) or the settlement.evolution sessions= segment; remaining must be 0. Missing declaration stays honestly unsettled. | remaining | 叙述 |
 | `settlement_sessions_usage` | settlement.sessions payload "moved\|remaining\|destination": moved a non-negative integer, remaining exactly 0, destination non-empty (e.g. <your-destination>/<batch>); all three segments are required. | — | 叙述 |
 | `settlement_todo_missing` | the main-session todo list is not settled (settlement.todo, remaining must be 0) | — | 叙述 |
 | `settlement_todo_ok` | main-session todo list cleared: re-checked to 0 items (basis: {{verified_by}}). | verified_by | 叙述 |
 | `settlement_todo_payload` | 0\|main session todo list re-checked to 0 items (done + historical included) | — | 叙述 |
-| `settlement_todo_segment` | todo=0/<verified_by：主会话 todo 复核为 0 项（含完成与历史）；政策见 docs/context/cleanup-policy.md §2> | — | 叙述 |
+| `settlement_todo_segment` | todo=0/<verified_by：主会话 todo 复核为 0 项（含完成与历史）；政策见 docs/context/rituals/cleanup.md §2> | — | 叙述 |
 | `settlement_todo_segment_bad` | the settlement.evolution todo= segment must be `<remaining>/<verified_by>`: remaining exactly 0, verified_by non-empty and <= 120 chars. | — | 叙述 |
 | `settlement_todo_usage` | settlement.todo payload "remaining\|verified_by": exactly two segments, remaining exactly 0, verified_by non-empty and <= 120 chars. | — | 叙述 |
 | `settlement_verify_first` | record all-green evidence with verify.submit first, then register the three settlement tasks (all of them in the review stage). | — | 叙述 |

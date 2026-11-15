@@ -41,7 +41,7 @@
         {
           "id": "machine.requirement-granularity",
           "modality": "must",
-          "text": "Runtime pointer: `docs/context/workflow-acts.md` act 1 owns requirement granularity — merge adjacent work first, the three exceptions, the cannot-merge description reason and the three-question check. Do not file a new adjacent requirement from this summary alone.",
+          "text": "Runtime pointer: `docs/context/acts/coordinate.md` act 1 owns requirement granularity — merge adjacent work first, the three exceptions, the cannot-merge description reason and the three-question check. Do not file a new adjacent requirement from this summary alone.",
           "basis": "user decision 2026-11-02 (r3 requirement-merge decision)"
         },
         {

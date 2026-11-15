@@ -103,7 +103,7 @@ The user runs real-data verification and pastes the output; synthetic data under
      rewrite. No trigger means certain drift: add one or delete the line.
    Mechanical placement: keep a line here only for Q1=`cold-start` with Q2∈{`irreversible`,`hard-refusal`},
    or a verbatim cold-start command whose omission causes `silent-drift`. `phase-entry` → the matching act
-   in `workflow-acts.md` + playbook; `before-action` → `dispatch-ritual.md`, `cleanup-policy.md` or the
+   in `acts/` + playbook; `before-action` → `rituals/dispatch.md`, `rituals/cleanup.md` or the
    action's playbook chapter; `subsystem-touch` → `docs/design/<subsystem>.md`; `archive` → decisions /
    vision / principles, never this file. Decision rationale keeps ID/domain/one-line ruling/status/pointer;
    operating steps move to the specification. One-line "when touching X read Y" routes may remain here.
@@ -204,9 +204,11 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 | Archive: why a ruling exists | `docs/context/archive/decisions-engine.md`, `archive/decisions-agent.md`, `cold-start/vision.md`, `cold-start/principles.md` |
 | Repository topology | `docs/context/cold-start/topology.md` + `docs/design/system-boundaries.md` |
 
-Retired flat paths under `docs/context/` (e.g. `workflow-acts.md`, `dispatch-ritual.md`, `copy-contract-*.md`) are
-**compat shims for frozen consumers** (mod pointers, crates semantic tests) — never the authority. Read the
-tree; the shim list and its exit condition (r5) live in `docs/context/README.md`.
+The flat `docs/context/` paths retired by r1 (`workflow-acts.md`, `dispatch-ritual.md`, `copy-contract-*.md` 等 15 条)
+were **compat shims for then-frozen consumers**; r5 rewrote every mod pointer and crates test path onto the
+authoritative files and deleted them, so they no longer exist and must not be reintroduced. The migration record
+lives in `docs/context/README.md`; history and the original ruling (D-MA29 two-way split + mandatory exit
+condition) live in git and `docs/context/archive/decisions-*.md`, never here.
 
 Every playbook chapter has a phase-entry route; `map.show` additionally prints the complete chapter index.
 Each phase receipt names its chapter titles, summaries and rule counts. Read the fragment whose
