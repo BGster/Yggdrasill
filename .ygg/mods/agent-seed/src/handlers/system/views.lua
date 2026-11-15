@@ -8,11 +8,14 @@ local M = {}
 local menus = require("src.view.menus")
 local render_mod = require("src.view.render")
 local reqs = require("src.domain.requirements")
+local guide = require("src.view.guide")
 local util = require("src.core.util")
 
 
 local narrate_map, render, stage_prompt, prompt_vars =
   render_mod.narrate_map, render_mod.receipt, render_mod.stage_prompt, render_mod.prompt_vars
+local narrate_guide_index =
+  guide.narrate_guide_index
 local menu =
   menus.menu
 local run_phase =
@@ -28,6 +31,7 @@ function M.install(_)
     local current = run_phase()
     narrate_map(current, false, menu(current),
       fill(stage_prompt(current), prompt_vars()))
+    narrate_guide_index()
     render()
   end)
 end

@@ -5,7 +5,7 @@
       "order": 14,
       "title": "14. How to propose an evolution (candidate screening · review · scenario first)",
       "summary": "An end-of-run suggestion passes four gates before it may enter the backlog: long-term priority, a root cause for an unused existing capability, an independent review per item, and scenario before technique; after verify is green, `settlement.evolution` registers the summary and the candidate declaration, and `review.note` only archives it single-source — the state machine checks the declaration's shape, never the quality of the suggestion.",
-      "source": "user decision 2026-11-01 (game-1101-1 settlement review E1)",
+      "source": "Runtime projection of docs/context/workflow-acts.md settle for candidate screening and declaration; this chapter additionally owns the six-class candidate taxonomy. Historical user decision 2026-11-01 (E1)",
       "priority": "standard",
       "rules": [
         {
@@ -53,14 +53,14 @@
         {
           "id": "evolution.no-new-carrier",
           "modality": "must-not",
-          "text": "Never add a second registration entry point, an external checker script or a host change for the evolution flow: the only registration action is `settlement.evolution`, and the only allowed carriers remain AGENTS.md and the Mod resources (`src/**` and `data/*.json`). Read-only queries may be used to check a declaration but may never become the carrier of a constraint.",
-          "basis": "AGENTS.md §1.7"
+          "text": "Never add a second decision/enforcement entrypoint, an external checker script or a host change for the evolution flow: the only registration action is `settlement.evolution`, and the only decision/enforcement owners remain AGENTS.md and the Mod resources (`src/**` and `data/*.json`). Indexed docs may carry their operating/specification elaboration, never an unindexed third ruling. Read-only queries may check a declaration but may never become the carrier of a constraint.",
+          "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "evolution.living-docs-sync",
           "modality": "must",
           "text": "Whenever a run evolves domain concepts, state-machine rules, persistent lane semantics, or architectural contracts, the docs wiki (`docs/context/*` and `docs/design/*`, indexed by `docs/README.md`) must be reviewed and updated before `settlement.evolution` and `review.note` close the run.",
-          "basis": "AGENTS.md §2 + docs/{CONTEXT,DESIGN}.md closed loop"
+          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/README.md + docs/wiki-governance.md closed loop"
         }
       ]
     },
@@ -69,7 +69,7 @@
       "order": 15,
       "title": "15. External tools (two-layer allowlist)",
       "summary": "A tool call is a request, never a side effect: the Mod publishes a pending queue in meta.tool_calls, the host executes, and the result comes back as an ordinary tool.result event.",
-      "source": "AGENTS.md §9.1 receipt effect + §9.2 wire contract",
+      "source": "docs/design/state-machine.md §2.9.2 receipt effect + docs/design/tool-bridge.md wire contract",
       "priority": "standard",
       "rules": [
         {
@@ -94,13 +94,13 @@
           "id": "tools.receipt-effect-bounded",
           "modality": "must-not",
           "text": "The `tools.receipt` effect (`receipt_effect`) may only latch `tool.notified.<call_id>` and narrate one line; it must never render, choose, or touch requirement / proposal / gate / lane / stage state. Domain folding belongs to the separate `tools.reactive` effect (`tools.reactive-effect-scope`).",
-          "basis": "AGENTS.md §9.1 + src/tools.lua `receipt_effect()`"
+          "basis": "docs/design/state-machine.md §2.9.2 + src/runtime/tools.lua `receipt_effect()`"
         },
         {
           "id": "tools.no-inline-secrets",
           "modality": "must",
           "text": "Never inline a credential in a tool declaration or a request: `$ENV{VAR}` placeholders are resolved host-side from the process environment, `<mod_dir>/.env.local` and `<mod_dir>/.env`, and the resolved value never enters a payload, a receipt or a notice — error text names the variable only.",
-          "basis": "AGENTS.md (credentials chapter) + the host `$ENV{}` resolution order"
+          "basis": "docs/design/tool-bridge.md (credentials and two-layer allowlist) + the host `$ENV{}` resolution order"
         },
         {
           "id": "tools.reactive-effect-scope",
@@ -135,7 +135,7 @@
         {
           "id": "tools.harness-settlement-crosscheck",
           "modality": "must",
-          "text": "Settlement machine cross-check (D-MA26): the settlement.todo / settlement.sessions handlers synchronously call the harness tools (`harness.todo-check` / `harness.sessions-count`) before applying, reusing the artifact-probe precedent. The Mod composes the argv from the registered KV (`settings.tools.session` / `settings.tools.sessions_root`) because the sandbox cannot read the process environment. A machine/human contradiction is refused with zero state writes; an unregistered tools.root, a missing parameter, or an unexecutable script falls back to the human-attestation path with a readable hint and never blocks the settlement. A pass writes `settlement.<item>.source=machine:harness.*` (human writes `human`) — machine evidence is same-level, not stronger (AGENTS.md §9.2c). The scripts under `.pi/tools/` are a pure argv/env contract (no config, no run KV, no egg), so a no-egg agent can run them directly per docs/design/harness-tools.md.",
+          "text": "Settlement machine cross-check (D-MA26): the settlement.todo / settlement.sessions handlers synchronously call the harness tools (`harness.todo-check` / `harness.sessions-count`) before applying, reusing the artifact-probe precedent. The Mod composes the argv from the registered KV (`settings.tools.session` / `settings.tools.sessions_root`) because the sandbox cannot read the process environment. A machine/human contradiction is refused with zero state writes; an unregistered tools.root, a missing parameter, or an unexecutable script falls back to the human-attestation path with a readable hint and never blocks the settlement. A pass writes `settlement.<item>.source=machine:harness.*` (human writes `human`) — machine evidence is same-level, not stronger (historical AGENTS.md (pre-migration; see git history)). The scripts under `.pi/tools/` are a pure argv/env contract (no config, no run KV, no egg), so a no-egg agent can run them directly per docs/design/harness-tools.md.",
           "basis": "src/handlers/operate/review.lua `cross_check_todo` / `cross_check_sessions` + .pi/tools/*.sh + docs/design/harness-tools.md"
         }
       ]

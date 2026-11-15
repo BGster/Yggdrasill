@@ -1,0 +1,62 @@
+# Yggdrasill · mod 文案契约 · beats-settlement
+
+> **定位**：`beats-settlement.json` 54 键的句式知识权威：盘点四项、批结算、退役、发布与 tools 机证。
+> **上游**：[copy-contract.md](copy-contract.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-settlement.json`
+> **维护**：改文案先改本表再同步 mod；键增删/改域触发索引、prompt-surface 与键数同批更新。
+
+| 键 | 句式模板（逐字） | 变量 | 协议归属 |
+|---|---|---|---|
+| `maintenance_req_added` | [MAINTENANCE REQ ADDED] {{id}} "{{title}}" — batch {{batch}} closeout appended next batch's docs-maintenance requirement (open/draft); dispatch it in coordinate — it gates the next boundary until done. | id, title, batch | 叙述 |
+| `maintenance_req_desc` | 依 wiki-governance 三职责复核上批全部需求的 plan 与 develop 验收结果是否已落 docs wiki：决策与词汇 → docs/context/decisions-agent.md 台账行、vocabulary.md 词条；行为与契约 → docs/design/ 对应主题文件（按本批触碰面：state-machine/events/state-surface/run-story/requirement-story 等）；结构变化 → docs/README.md 索引与 CONTEXT.md/DESIGN.md 两薄壳映射表；纪律：每主题一文件 ≤300 行、头部定位/replaces/上下游、双向链接；纯缺陷修复与措辞调整不触碰文档。 | — | 叙述 |
+| `maintenance_req_skipped_dedup` | [MAINTENANCE REQ SKIP] {{id}} already carries an open docs-maintenance requirement (maintenance marker / canonical title) — dedup hit, the batch settles without a second one. | id | 叙述 |
+| `maintenance_req_skipped_full` | [MAINTENANCE REQ SKIP] requirement register is full ({{cap}} open) — docs-maintenance append deferred; the batch settles regardless. | cap | 叙述 |
+| `maintenance_req_title` | 维护更新 docs wiki（上批收口） | — | 叙述 |
+| `release_confirm_payload` | master@1a2b3c4d\|v2026.11.12.1 | — | 叙述 |
+| `release_confirmed` | [RELEASE CONFIRMED] 第 {{batch}} 批合并已声明：master@{{sha}} tag {{tag}}——review.note 可批结算/退役 | batch, sha, tag | 叙述 |
+| `release_required` | 发布未声明：先 release.confirm（master@<sha> + 批次 tag）或 release.skip（跳过理由），review.note 才能收口本批 | — | 叙述 |
+| `release_skip_payload` | 本批无需发布：纯文档/测试批次，无 develop→master 合并 | — | 叙述 |
+| `release_skip_usage` | release.skip 载荷 = 非空理由（本批无需发布的显式声明） | — | 叙述 |
+| `release_skipped` | [RELEASE SKIPPED] 第 {{batch}} 批无需发布：{{reason}}——review.note 可批结算/退役 | batch, reason | 叙述 |
+| `release_usage` | release.confirm 载荷："master@<sha>\|v年.月.日.序号"——sha 为 7-40 位十六进制，标签 v 开头四段数字点分 | — | 叙述 |
+| `review_batch_ok` | [BATCH {{batch}} SETTLED] score {{score}}/5 — {{lesson}}; evolution archived to the rolling slot; batch counter -> {{next}}; back to coordinate — the resident run waits for the next batch. | batch, score, lesson, next | 叙述 |
+| `review_evolution_bad_candidates` | invalid evolution candidate count: `c=<kept>/<screened>`, two non-negative integers with kept <= screened. | — | 叙述 |
+| `review_evolution_bad_classes` | invalid evolution candidate classes: `cls=<kind>:<n>,...`, kind must be one of the six classes, counts non-negative and unique. | — | 叙述 |
+| `review_evolution_bad_path` | invalid evolution artifact path: must be `artifacts/<file>.md`, no `..` and no whitespace. | — | 叙述 |
+| `review_evolution_mismatch` | the evolution declaration is not self-consistent: the cls counts must sum to screened, and the kept classes (long_term + unused + redundant) must sum to kept. | — | 叙述 |
+| `review_evolution_need_artifact` | with candidates (screened > 0) the first segment of settlement.evolution must be `artifacts/<file>.md` — every screened candidate needs a review record, not only the kept ones. | — | 叙述 |
+| `review_evolution_need_classes` | with candidates (screened > 0) you must provide per-class root-cause counts: cls=<kind>:<n>,... (the six classes sum to screened, the kept classes sum to kept). | — | 叙述 |
+| `review_note_legacy_evolution` | review.note no longer accepts ev= / c= / cls= segments; register with settlement.evolution first, then close with lesson\|score. | — | 叙述 |
+| `review_note_usage` | review.note accepts only lesson\|score; the evolution record must be registered through settlement.evolution first — this action only archives it single-source. | — | 叙述 |
+| `review_ok` | [REVIEW RECORDED] {{score}}/5 — {{lesson}} | score, lesson | 叙述 |
+| `sessions_parent_missing` | [SESSIONS PARENT MISSING] settlement.sessions: no parent session id supplied — the machine cross-check needs it. Append the optional 4th segment `\|parent=<session_id>` to the settlement.sessions payload, or register the parent via context and run sessions-count.sh manually (docs/design/harness-tools.md). | — | 叙述 |
+| `settlement_artifact_absent` | artifact {{artifact}} does not exist in the mounted VFS — registration refused (no settlement written, no archive side effects) | artifact | 叙述 |
+| `settlement_artifact_empty` | artifact {{artifact}} is empty in the mounted VFS — registration refused (no settlement written, no archive side effects) | artifact | 叙述 |
+| `settlement_artifact_no_vfs` | artifact {{artifact}} cannot be verified: the host VFS is not mounted — non-empty registration refused (no settlement written, no archive side effects) | artifact | 叙述 |
+| `settlement_artifact_read_error` | artifact {{artifact}} probe failed — registration refused (no settlement written, no archive side effects) | artifact | 叙述 |
+| `settlement_evolution_bad_segment` | settlement.evolution does not accept the segment `{{segment}}`: the optional segments are c=, cls=, sessions= and todo=; legacy ev= and unknown segments are refused. | segment | 叙述 |
+| `settlement_evolution_default_summary` | candidates screened against the evolution chapter | — | 叙述 |
+| `settlement_evolution_duplicate_segment` | the c= / cls= / sessions= / todo= segments must not repeat. | — | 叙述 |
+| `settlement_evolution_missing` | evolution registration is missing: run settlement.evolution first; summary must be non-empty after trim (artifact may stay empty when c=0/0). | — | 叙述 |
+| `settlement_evolution_need_summary` | the settlement.evolution summary must be non-empty after trim; with zero candidates you may register the neutral summary and c=0/0 with an empty artifact. | — | 叙述 |
+| `settlement_evolution_ok` | [EVOLUTION REGISTERED] {{summary}} \| candidates {{candidates}} (kept/screened) \| classes {{classes}}. Sessions and todo are settled in the same transaction when their segments are present; review.note archives single-source and closes the run. | summary, candidates, classes | 叙述 |
+| `settlement_evolution_usage` | settlement.evolution payload: artifact\|summary[\|c=<kept>/<screened>[\|cls=<kind>:<n>,...]][\|sessions=<moved>/<remaining>/<destination>][\|todo=<remaining>/<verified_by>]; summary is required after trim and must not contain \|; the only optional segments are c=, cls=, sessions= and todo= — ev=, duplicates and unknown segments are refused. | — | 叙述 |
+| `settlement_sessions_missing` | subagent sessions are not settled (settlement.sessions, remaining must be 0) | — | 叙述 |
+| `settlement_sessions_ok` | subagent sessions settled: moved {{moved}} to {{destination}} (files renamed into the trash directory — not a permanent deletion; no per-file guarantee about which sessions were spared: verify the destination yourself). | moved, destination | 叙述 |
+| `settlement_sessions_payload` | 0\|0\|<your-destination>/<batch> | — | 叙述 |
+| `settlement_sessions_segment` | sessions=0/0/<your-destination>/<batch> | — | 叙述 |
+| `settlement_sessions_segment_bad` | the settlement.evolution sessions= segment must be `<moved>/<remaining>/<destination>`: moved a non-negative integer, remaining exactly 0, destination non-empty (slashes inside the destination are kept). | — | 叙述 |
+| `settlement_sessions_unsetted_hint` | [SESSIONS CLEANUP PENDING] subagent sessions remaining={{remaining}} — review.note stays blocked. Cleanup policy (scope strictly this run, never main/unrelated sessions, moved=0 legal, success = gone from your session history) is the authority of docs/context/cleanup-policy.md §1. Declare via settlement.sessions (moved\|remaining\|destination) or the settlement.evolution sessions= segment; remaining must be 0. Missing declaration stays honestly unsettled. | remaining | 叙述 |
+| `settlement_sessions_usage` | settlement.sessions payload "moved\|remaining\|destination": moved a non-negative integer, remaining exactly 0, destination non-empty (e.g. <your-destination>/<batch>); all three segments are required. | — | 叙述 |
+| `settlement_todo_missing` | the main-session todo list is not settled (settlement.todo, remaining must be 0) | — | 叙述 |
+| `settlement_todo_ok` | main-session todo list cleared: re-checked to 0 items (basis: {{verified_by}}). | verified_by | 叙述 |
+| `settlement_todo_payload` | 0\|main session todo list re-checked to 0 items (done + historical included) | — | 叙述 |
+| `settlement_todo_segment` | todo=0/<verified_by：主会话 todo 复核为 0 项（含完成与历史）；政策见 docs/context/cleanup-policy.md §2> | — | 叙述 |
+| `settlement_todo_segment_bad` | the settlement.evolution todo= segment must be `<remaining>/<verified_by>`: remaining exactly 0, verified_by non-empty and <= 120 chars. | — | 叙述 |
+| `settlement_todo_usage` | settlement.todo payload "remaining\|verified_by": exactly two segments, remaining exactly 0, verified_by non-empty and <= 120 chars. | — | 叙述 |
+| `settlement_verify_first` | record all-green evidence with verify.submit first, then register the three settlement tasks (all of them in the review stage). | — | 叙述 |
+| `todo_session_missing` | [TODO SESSION MISSING] settlement.todo: no session id resolvable (PI_SESSION_ID unset) — falling back to human attestation. Export PI_SESSION_ID for the main session, or run todo-check.sh --session <id> manually (docs/design/harness-tools.md). | — | 叙述 |
+| `tools_check_passed` | [TOOLS CHECK OK] settlement.{{item}}: machine cross-check agrees with the declaration ({{detail}}). | item, detail | 叙述 |
+| `tools_check_refused` | settlement.{{item}}: the machine cross-check contradicts the declaration ({{detail}}). Reconcile the actual state before declaring; the registration was not written. | item, detail | 叙述 |
+| `tools_root_missing` | [TOOLS ROOT MISSING] settlement.{{item}}: tools.root is not registered — falling back to human attestation. Register `config.set tools.root=<dir>` to enable the machine cross-check. | item | 叙述 |
+| `tools_script_missing` | [TOOLS SCRIPT MISSING] settlement.{{item}}: the harness script could not be resolved or executed ({{detail}}) — falling back to human attestation. Check that the registered tools.root points at a checkout containing .pi/tools/. | item, detail | 叙述 |
+| `tools_unregistered_hint` | [TOOLS UNREGISTERED] settlement checks are running on human attestation. Register `config.set tools.root=<dir>` (e.g. the checkout's .pi/tools) to enable machine cross-checks via harness.todo-check / harness.sessions-count. Without an egg environment, run the scripts manually per docs/design/harness-tools.md. | — | 叙述 |

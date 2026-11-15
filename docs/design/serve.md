@@ -14,7 +14,7 @@
 > gate/accept 类人类门禁（`proposal.accept` / `gate.approve` / `coordinate.submit` /
 > `verify.submit` / `review.note`）在 serve 面上**不存在写路径**——数据端点只登记 GET，
 > 唯一例外 = `/api/roots` 注册面（POST/DELETE；**进程内观察配置**，不写存档、不写
-> mod KV、不写 run.json/coordination、不建目录——与局状态写严格对象分离，AGENTS §0b）。
+> mod KV、不写 run.json/coordination、不建目录——与局状态写严格对象分离，§3.7.6）。
 
 #### 3.7.1 CLI 形态与观察根注册表
 
@@ -145,6 +145,11 @@ kv:{entries,revision}, pending_choice}`。mod 自己的状态在 `kv.entries`；
 - 线程编排：主线程 accept（每连接一线程，封顶 64）；watcher 线程纯变更检测；SSE 每连接
   `wait_timeout` 等广播。共享可变状态 = `version` 广播对（Mutex + Condvar）+ `roots`
   注册表（RwLock，读多写少；锁不跨 IO——先克隆快照再扫盘）。
+
+维护责任 = serve/API/面板安全边界修改者；触发 = 新增端点、改变方法白名单或观察根语义；检查 =
+`registry_writes_nothing_on_disk`、`observe_creates_nothing`、`observe_writes_nothing`、
+`serve_source_has_no_write_path` 与 `query_only` 相关测试。任何 run-state 写端点上线即违反只读红线；
+`/api/roots` 若写存档、KV、协调文件或创建目录，也不再属于唯一例外，必须拒绝验收。
 
 ---
 

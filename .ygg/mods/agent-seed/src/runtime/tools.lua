@@ -962,7 +962,7 @@ end
 
 -- ───────────────────────────── 回执 effect（只推进闩锁 + 一行叙事） ─────────────────────────────
 
--- 依赖全是 KV 派生标量（AGENTS.md §9.1）：装载 / 读档 / 重启后签名一致，结果确定。
+-- 依赖全是 KV 派生标量（docs/design/state-machine.md §2.9）：装载 / 读档 / 重启后签名一致，结果确定。
 local function receipt_deps()
   local last = ygg.kv.get("tool.last")
   if type(last) ~= "string" or last == "" then
@@ -979,7 +979,7 @@ local function receipt_deps()
 end
 
 -- 一次性闩锁 → 天然幂等：重放结果不会第二次说出 `[TOOL SETTLED]`。
--- 绝不改 `req.*` / `prop.*` / gate / lane / stage，也不 render() / ygg.choice()（AGENTS.md §9.1）。
+-- 绝不改 `req.*` / `prop.*` / gate / lane / stage，也不 render() / ygg.choice()（docs/design/state-machine.md §2.9.2）。
 local function receipt_effect()
   local last = ygg.kv.get("tool.last")
   if type(last) ~= "string" or last == "" then
@@ -1300,7 +1300,7 @@ local function handle_call(payload)
 end
 
 function M.register()
-  -- 机器动作（外部派发），不是人类里程碑动作：不进菜单、不占票据（AGENTS.md §8）。
+  -- 机器动作（外部派发），不是人类里程碑动作：不进菜单、不占票据（docs/context/workflow-acts.md 协调幕）。
   ygg.on("tool.call", handle_call)
   ygg.on("tool.result", function(payload)
     if stage() == STAGE.retired then

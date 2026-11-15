@@ -84,7 +84,50 @@ end
 1. **唯一声明后继**：迁移确定性且只在一处声明；`useMemo` 依赖必须是 KV 派生标量（状态/作业/待决/就绪/计数），保存重载后可复算，不依赖 Lua 内存 diff。
 2. **零外部判断**：无需人类批准或未挂载的外部 I/O（无文件读、无会话状态）。
 3. **绝不绕过门禁**：五个里程碑动作（`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note`）绝不由效应触发；效应不推进任何「主人=人」的幕。
-4. **无渲染的效应**：效应可改变 KV 并 `ygg.narrate`，但绝不调用 `render()` 或 `ygg.choice`。
+4. **无渲染的效应**：效应可改变 KV 并 `ygg.narrate`，但绝不调用 `render()` 或 `ygg.choice`——choice 一旦产生，内核会丢弃队列余部（`transition.rs`）。
 
-现行效应清单（全部满足四不变量）：`auto_dispatch`（`gate.approve(plan)` 后将刚变待开发的需求在同回合自动派发 development，条件 = 无待决提案/门禁/冲突且槽位空闲）；`tools.receipt` / `tools.reactive`（工具回执落账与结果折叠，§2.10 / §2.11）；**盘点收口效应**（R9：盘点四项齐备自动转发布幕——判据纯 KV、无外部证据、非门禁动作、不渲染，「唯一声明后继」的又一实例）。
+#### 2.9.1 省回合动作与尾段协议
+
+- **内联执行者台账**：`proposal.submit` 的保留尾段允许 `exec=<agent_id>[:<reason>]`，在提案入库前、同一事务内通过与 `config.set executor.*` 相同的 `src/domain/executor.lua` 实现登记。登记失败则整个载荷被拒绝且不产生提案。固定相对顺序为 `…|exec=<id>[:<reason>]|actor=<actor>|actor_session=<session>`；三段各自可省略、总计至多三段。reason 内使用 `:`（如 `exec=agent2:handoff`），因为外层按 `|` 切分。
+- **宿主身份段不可伪造**：`actor=` / `actor_session=` 只能由宿主在 `inboxRoutes.<kind>.actor / .actor_session` 声明路由上注入；调用方自带则宿主以 `ACTOR_FORGED` 拒绝，不 dispatch、不持久化。尾段位置错误由 Mod 分别以 `req_prop_exec_misplaced` / `req_prop_actor_misplaced` / `req_prop_actor_session_misplaced` 拒绝；宿主会把短于声明七字段的载荷补位，因此中段错位不能静默吞掉。三态互证只比较 `exec=` 与宿主 `actor=`；`actor_session` 纯审计，永不参与判定。首条带身份的成功写先到先得认领不可变 `run.json opener_actor`，失败/拒绝不写，同一 actor 重写为 no-op；身份模型正文见 [identity.md](identity.md)。
+- **阶段合并**：`requirement.dispatch` 遇到 `draft` 行时直接派发 plan 并写入 `planning`，默认管线没有 analysis 回合。`analyzing` 仅为旧存档兼容态，以及 `planning` 行显式提交并接受 analysis 提案时的兼容态；`R_ANALYZING` 与读者保留，但不新增迁移代码。
+
+#### 2.9.2 现行效应及折叠边界
+
+- **`auto_dispatch`**：`proposal.accept(analysis)` 或 `gate.approve(plan)` 的 handler 用 `hooks.mark_auto_dispatch(index)` 只标记刚就绪的需求；效应仅在本回合无待决提案、无待决门禁、无冲突且有空闲 job 槽时派发这一条。`requirement.add` 的 draft 永不自动派发；`gate.reject` / `proposal.reject` 不派生；`gate.approve(accept) -> done` 不派生，释放槽位由主代理决定。不得新增 `derive.auto` 开关形成第二旁路。
+- **`tools.receipt`**：`src/runtime/tools.lua` 在 `tool.result` 到达后只 latch `tool.notified.<call_id>` 并叙述一次，不触碰 `req.*` / `prop.*` / 门禁 / 泳道 / 阶段状态。KV 标量依赖与 latch 幂等保证 replay 两次内收敛，绝不出现第二条 `[TOOL SETTLED]`。
+- **`tools.reactive`**：成功 `tool.result`（`status ok`、`code 0`）由紧随 receipt 注册的第二个效应折叠进领域 KV；它与 receipt 共享同一 `flush_effects`，但不共享职责。反应器只能写 KV 与叙述，不得 render/choice、改阶段或提案/门禁状态，也不得 `flow.refuse`——拒绝前缀会被宿主计为失败步，使事实探针伪装成 Mod 拒绝。`vfs.write` 是真实事件处理器而非反应器，故可使用 `reject_payload`。
+- **失败探针是警告，不是门禁**：`[LANE PROBE FAILED]`（`commits=0` 或 `clean=0`）只叙述并留下 `lane.<k>.probe.*` 查询面；接入 `gates.gate_problem()` 会让一棵脏树永久死锁 `coordinate.submit` / `review.note`，且没有「撤销探针」动作。冲突雷达是唯一例外：它经 `props.req_do_conflict` 写 `req.<i>.conflict`，进入 `req_conflict_total` 并阻塞派发/收口，只有 `requirement.resolve` 清除。
+- **机证与人证同级**：`gate.verify_suite` 与 `verify.submit` 写同一 KV、省一回合，但不更高级；必须保留 `verify.source`，且只能在 settle 相位、`gate_problem() == nil` 时记录 `passed=1`。报告不得把机器路径描述为高于人工声明。
+- **截断与降级必须诚实**：集合比较尊重宿主输出上限；`parse_result` 返回 `truncated` 并写 `tool.<call_id>.truncated` 时雷达跳过，因为截断名单会造成假阴性，而继续比对会制造假冲突。`vfs.write` 无 `ygg.fs` 时只记同一台账并叙述 `[VFS LEDGER ONLY]`，不得声称已写盘；两种宿主形态下 KV 与叙述必须一致。
+
+现行效应还包括**盘点收口效应**（R9：盘点四项齐备自动转发布幕——判据纯 KV、无外部证据、非门禁动作、不渲染）。所有效应都满足上述四不变量。
+
+### 2.10 Mod 行为验收（触源码或场景措辞时）
+
+修改 `.ygg/mods/agent-seed/src/**`、`.ygg/mods/agent-seed/mod.lua` 或 `data/texts/` 的地图措辞，除 lint 与 playtest 外，必须运行：
+
+```bash
+cargo test -p ygg-sandbox --test agent_seed_semantics
+```
+
+该套件覆盖阶段合并与 analysis 兼容、plan/accept 门禁通过与打回、stale/amend、同回响应式派发与 useMemo 失效、门禁独立性、自身 pending 阻塞、development 提案打回、内联 exec 尾段、settlement 合并段、旧存档缺 `plan_ok`、双 pack 操作/设计地图契约、工具桥请求/结果/replay/声明奇偶、泳道工具与冲突雷达、VFS 台账、settle 机证以及声明完整性。测试计数以当次命令真实输出为准，不在文档硬编码；新增行为必须新增或修改对应用例。
+
+all-1 playtest 只覆盖 happy path，不会走 `gate.reject` / `requirement.amend` / `proposal.reject`，也看不见省回合机制；`/tmp` 临时探针只能补充，不能替代语义套件，未覆盖场景必须逐项声明。三问判据：① 阻止「改 Mod/地图后只跑 lint+playtest 就称验收」；② 症状是分支语义或地图措辞静默回归而门面检查仍绿；③ 除上述命令外做变异探针——暂时恢复旧语义，相关测试必须转红，再恢复实现并复绿。
+
+维护责任 = 触碰上述路径的执行者；触发 = 每个相关 commit；检查 = lint、playtest、语义套件与变异探针真实输出。缺任一项不得声称行为验收完成。
+
+### 2.11 内核/宿主字面三件套
+
+修改 `crates/**`（状态机、driver、宿主持久化面）必须逐字运行并分别记录真实退出码与测试计数：
+
+```bash
+cargo test --workspace
+cargo test --example egg -p ygg-sandbox
+cargo test -p ygg-sandbox --test agent_seed_semantics
+```
+
+第二条不可省：Cargo 的 `--workspace` 不编译 example target 的单元测试，`crates/ygg-sandbox/examples/egg.rs` 中持久化原子性、reset、热载与结算策略断言不会因只跑 workspace 而执行。`cargo check`、`verify-suite --mode fast`、过滤测试、单测选择或 `YGG_VERIFY_COMMANDS` 覆盖各有合法用途，但只能证明其自身，不能替代字面三件套。
+
+三问判据：① 阻止「触内核/宿主后只跑 workspace 就称门禁绿」；② 可见症状是 workspace 与 example egg 的 `test result` 批次数不同，前者缺 example 批；③ 用 `cargo test --workspace | grep -c '^test result'` 与 `cargo test --example egg -p ygg-sandbox | grep -c '^test result'` 对比并保存两条原生命令的末行。维护责任 = crates 变更执行者；触发 = 每个 crates diff；漏跑或替代命令 = 假绿，不得验收。
 

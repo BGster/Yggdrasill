@@ -2,7 +2,7 @@
 
 > **定位**：盘点幕两项清理（子代理会话清理 / 主会话待办清理）的政策正文知识权威。mod 的 `beats-settlement.settlement_sessions_unsetted_hint` 与 `settlement_todo_segment` 是本文的运行时投影（判据短句 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-settlement.json` 的清理政策正文。
-> **上游**：[../README.md](../README.md) · **相关**：[workflow-acts.md](workflow-acts.md)（盘点幕） · [copy-contract.md](copy-contract.md)（清理相关句式契约）
+> **上游**：[../README.md](../README.md) · **相关**：[workflow-acts.md](workflow-acts.md)（盘点幕） · [copy-contract-settlement.md](copy-contract-settlement.md)（清理相关句式契约）
 
 ## 1. 子代理会话清理（settlement.sessions）
 

@@ -221,7 +221,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# wasm-pack 构建产物（AGENTS.md §五 wasm 门禁；产物不入 git）
+# wasm 构建产物（playbook `gates.no-wasm-pack`；产物不入 git）
 crates/ygg-wasm/pkg/
 .lane
 

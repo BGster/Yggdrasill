@@ -1,8 +1,8 @@
 //! agent-seed semantics gate: **decidable** assertions for the D-MA23 two-layer story
 //! (4 true states + 13 micro-states), the requirement-level nine-act machine, the
 //! run-level resident batch loop (charter → coordinate ⇄ settle → release → retired),
-//! and the operation-map / tool-bridge / identity surfaces (AGENTS.md §9.2 behavioural
-//! scope, DESIGN.md §2 is the authority).
+//! and the operation-map / tool-bridge / identity surfaces (docs/design/state-machine.md §2.10
+//! behavioural scope, DESIGN.md §2 remains the thin-shell route).
 //!
 //! Why this layer exists: the scripted playtest walks only prove happy menus — they never
 //! take a **branch** (gate.reject / amendment staleness / integration.reject / a failed
@@ -26,7 +26,7 @@
 //!   stamped there; the six new D-MA23 events (`charter.set` / `run.begin` /
 //!   `integration.*` / `release.*`) deliberately stay **outside** the ticket gate (R5).
 //!
-//! Boundaries (same stance as AGENTS.md §9 — do not add exits here):
+//! Boundaries (same stance as docs/context/workflow-acts.md coordinate/settle — no added exits):
 //! - only the public load surface (`ModBundle` / `KernelFacade` / dispatch / save-load);
 //!   no host CLI changes, no production-code changes, no side-channel scripts;
 //! - **no run directory is read or written**: legacy-compat and injection fixtures use an
@@ -2351,10 +2351,10 @@ fn mod_architecture_is_fragments_plus_five_layers() {
     }
 }
 
-/// r5 The playbook is reachable: every chapter id in `guide.lua`'s STAGE_GUIDE must resolve to
-/// an assembled section carrying at least one rule (a mapped-but-missing or mapped-but-empty
-/// chapter would make the per-phase hint narrate nothing). Forward direction only — chapters
-/// outside the mapping are a pre-existing gap, not this contract.
+/// The playbook is reachable in both directions: every assembled chapter id occurs in `guide.lua`'s
+/// STAGE_GUIDE, and every mapped id resolves to a non-empty section. A chapter outside the mapping
+/// is dead at phase-entry; a mapped-but-missing or mapped-but-empty chapter makes its hint narrate
+/// nothing. The behavioural receipt probe below separately proves that all candidates are narrated.
 #[test]
 fn stage_guide_maps_existing_nonempty_sections() {
     let project = project_mod_dir();
@@ -2376,8 +2376,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        15,
-        "the r5 STAGE_GUIDE maps exactly 15 distinct chapters: {mapped:?}"
+        21,
+        "STAGE_GUIDE must route all 21 distinct chapters: {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -2426,6 +2426,100 @@ fn stage_guide_maps_existing_nonempty_sections() {
             "STAGE_GUIDE maps `{id}` but the section is empty"
         );
     }
+    let assembled: std::collections::BTreeSet<String> = sections.keys().cloned().collect();
+    assert_eq!(
+        mapped, assembled,
+        "phase-entry routing and the assembled playbook must be the same chapter set"
+    );
+}
+
+/// Phase-entry consumption is behavioural, not just a static mapping: `map.show` contributes one
+/// global-index line for every chapter and the following render contributes one additional line for
+/// each chapter mapped to the current phase. Therefore every chapter must occur once, and a current
+/// phase chapter exactly twice. This catches both the old unmapped-six gap and the old first-candidate
+/// shadowing without adding a payload-driven section selector back to `map.show`.
+#[test]
+fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
+    let project = project_mod_dir();
+    let pack = read_json(&project.join("pack.json"));
+    let mut chapters: Vec<(String, String)> = Vec::new();
+    for entry in pack["entries"].as_array().expect("pack entries") {
+        let path = entry["path"].as_str().expect("entry path");
+        if !path.starts_with("data/playbook/") || path.ends_with("head.json") {
+            continue;
+        }
+        let fragment = read_json(&project.join(path));
+        for section in fragment["sections"].as_array().expect("sections") {
+            chapters.push((
+                section["id"].as_str().expect("section id").to_owned(),
+                section["title"].as_str().expect("section title").to_owned(),
+            ));
+        }
+    }
+    assert_eq!(
+        chapters.len(),
+        21,
+        "chapter inventory changed: {chapters:?}"
+    );
+
+    let assert_receipt = |game: &mut Game, current: &[&str]| {
+        let lines = game.narrate("map.show", "0");
+        for (id, title) in &chapters {
+            let needle = format!("field rules · {title}:");
+            let expected = if current.contains(&id.as_str()) { 2 } else { 1 };
+            assert_eq!(
+                count_lines(&lines, &needle),
+                expected,
+                "chapter `{id}` must have one map-index line plus its current-phase line: {lines:#?}"
+            );
+        }
+    };
+
+    let mut charter = Game::open(&project);
+    charter.narrate("event.start", "0");
+    assert_receipt(
+        &mut charter,
+        &["repository", "credentials", "hard_constraints", "output"],
+    );
+    charter_and_begin(&mut charter);
+    assert_receipt(
+        &mut charter,
+        &[
+            "run_machine",
+            "actions",
+            "drive",
+            "inbox",
+            "dispatch",
+            "lanes",
+            "branches",
+            "integration",
+        ],
+    );
+
+    let mut settle = drive_to_settle();
+    assert_receipt(
+        &mut settle,
+        &[
+            "evolution",
+            "gates",
+            "run_artifacts",
+            "evidence",
+            "live_evidence",
+            "mod_engineering",
+            "host_contract",
+            "tools",
+        ],
+    );
+    let mut release = drive_to_release();
+    assert_receipt(&mut release, &["integration", "branches"]);
+
+    release.narrate("release.skip", &text("playbook receipt probe"));
+    release.click("config — ");
+    release.click("config.set — run.retire");
+    release.click("back — ");
+    release.click("review.note — ");
+    release.assert_kv("fsm.stage", json!("retired"));
+    assert_receipt(&mut release, &["pointers"]);
 }
 
 /// The assembled beats set (what `mod.lua` builds from the fragments — the same union the
@@ -2725,7 +2819,7 @@ fn tool_declarations_pin_the_merged_capability_surface() {
 /// Mod prose fragments must not carry retired path literals (`ygg-agent` / `pi-agent-seed`).
 /// Scope = pack.json `entries` whose path sits under `data/texts/` or `data/playbook/`; a line
 /// violates when it names a retired literal without the explicit `[deprecated-ref]` marker on
-/// the same line. Machine-checkable half of AGENTS.md §1.7.
+/// the same line. Machine-checkable half of docs/design/mod-package.md (Mod text hygiene).
 #[test]
 fn mod_text_fragments_carry_no_retired_paths() {
     let mod_dir = project_mod_dir();
@@ -2762,6 +2856,104 @@ fn mod_text_fragments_carry_no_retired_paths() {
          `[deprecated-ref]`): {}",
         violations.join(", ")
     );
+}
+
+/// The copy contract is split by the existing text-consumer domains, not by arbitrary line counts.
+/// Every domain table must cover exactly its JSON fragment's key set and template values; core is
+/// read before §H because the 23 pointer-shell rows are a subset, not additional keys. Mutation:
+/// delete a row, move it to another domain, alter a template, or hard-code a different total -> red.
+#[test]
+fn copy_contract_domain_fragments_cover_every_text_key() {
+    let repo = repo_dir();
+    let mod_dir = project_mod_dir();
+    let mut total = 0usize;
+    for (doc, fragment) in [
+        ("copy-contract-flow.md", "beats-flow.json"),
+        ("copy-contract-harness.md", "beats-harness.json"),
+        ("copy-contract-lanes.md", "beats-lanes.json"),
+        ("copy-contract-map-guide.md", "beats-map-guide.json"),
+        ("copy-contract-requirements.md", "beats-requirements.json"),
+        ("copy-contract-settlement.md", "beats-settlement.json"),
+    ] {
+        let text = std::fs::read_to_string(repo.join("docs/context").join(doc))
+            .unwrap_or_else(|err| panic!("read {doc}: {err}"));
+        let documented = markdown_key_set(&text);
+        let fragment_json = read_json(&mod_dir.join(format!("data/texts/{fragment}")));
+        let actual: std::collections::BTreeSet<String> = fragment_json["beats"]
+            .as_object()
+            .expect("beats object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(documented, actual, "{doc} must exactly cover {fragment}");
+        let templates = markdown_template_map(&text);
+        for (key, value) in fragment_json["beats"].as_object().expect("beats object") {
+            let expected = value.as_str().expect("beat template string");
+            assert_eq!(
+                templates.get(key).map(String::as_str),
+                Some(expected),
+                "{doc} `{key}` must be the exact runtime template from {fragment}"
+            );
+        }
+        total += documented.len();
+    }
+    let core_text = std::fs::read_to_string(repo.join("docs/context/copy-contract-core.md"))
+        .expect("read core copy contract");
+    let core_tables = core_text.split("## H.").next().expect("core tables");
+    let documented = markdown_key_set(core_tables);
+    let core = read_json(&mod_dir.join("data/texts/core.json"));
+    let mut actual = std::collections::BTreeSet::new();
+    let core_templates = markdown_template_map(core_tables);
+    for namespace in ["options", "tuning", "endings"] {
+        for (key, value) in core[namespace].as_object().expect("core namespace") {
+            let full_key = format!("{namespace}.{key}");
+            let expected = if let Some(text) = value.as_str() {
+                text.to_owned()
+            } else {
+                value.to_string()
+            };
+            assert_eq!(
+                core_templates.get(&full_key),
+                Some(&expected),
+                "core copy table `{full_key}` must match the runtime value"
+            );
+            actual.insert(full_key);
+        }
+    }
+    assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
+    assert_eq!(documented, actual, "core copy table must cover core.json");
+    total += documented.len();
+    assert_eq!(total, 440, "404 beats + 36 core keys; §H adds no keys");
+    assert!(
+        core_text.contains("440 个唯一键") && core_text.contains("不得再次相加"),
+        "the global ledger must explain why the 23 pointer shells are not added again"
+    );
+}
+
+fn markdown_key_set(text: &str) -> std::collections::BTreeSet<String> {
+    text.lines()
+        .filter_map(|line| line.strip_prefix("| `"))
+        .filter_map(|tail| tail.split('`').next().map(str::to_owned))
+        .collect()
+}
+
+fn markdown_template_map(text: &str) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for line in text.lines().filter(|line| line.starts_with("| `")) {
+        let mut cells = line.rsplitn(3, " | ");
+        let _protocol = cells.next();
+        let _variables = cells.next();
+        let Some(head) = cells.next() else {
+            panic!("malformed copy-contract row: {line}")
+        };
+        let rest = head.strip_prefix("| `").expect("row key prefix");
+        let (key, template) = rest.split_once("` | ").expect("row key/template split");
+        out.insert(
+            key.to_owned(),
+            template.replace("\\|", "|").replace("\\n", "\n"),
+        );
+    }
+    out
 }
 
 /// r2 (mod 职责再分工): 23 个剧情/策略键收缩为「状态行 + 指针」后，凡 beat/core 文本值携带

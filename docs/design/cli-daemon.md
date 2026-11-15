@@ -14,6 +14,7 @@
   - **回执渲染口径（r5）**：缺省为人读文本渲染；`--raw` = 单行 JSON 机器契约（与历史缺省逐字节一致）；解析链 `--raw` > `YGG_FORMAT`（text\|json）> 缺省 text；不改字段契约、退出码与 daemon 协议面。脚本 / CI 解析单发 stdout 必须加 `--raw`（或环境级 `export YGG_FORMAT=json`）。
 - **单发派发的未注册事件（fail-closed，r11）**：`--event <name>`（或省略时的 `entryEvent`）不在 Mod registry 内时，派发在**零副作用**下拒绝（不进回放日志、不耗燃料、不动状态基线）：回执 `ok:false` + `error.code=VALIDATION`，`message` 三要素（事件名原样 + 已注册计数 + 已注册全集字典序），退出码 1，审计行 `ok=false` 照写。`ygg.*` 保留事件同样只认 registry（宿主不持事件名白名单）；空/空白事件名仍走参数面（usage / DAEMON 层），与本语义分层。
 - **结算**：`.ygg/bin/egg open <run-root> --settle`
+- **存储选择与版本硬门**：默认 build 启用 `store-sqlite`（`crates/ygg-sandbox/Cargo.toml` `default=["store-sqlite"]`），新局默认 `<run-dir>/run.sqlite`。带 `autosave.json` / `events.jsonl` 的旧局自动检测并留在 JSON 后端，不迁移；`--store json` 仅为新局显式回退。`run.json` 的 `store` 一旦写入即权威，`--store` 只是开局断言，不匹配 fail-closed 且零写入。host 与 Mod 版本不匹配时装载立即失败，错误点名缺失字段与期望形状，绝不静默降级。`.ygg/bin/*`、`.ygg/runs/*` git-ignore，`.ygg/mods/` 入仓。
 - **内置宿主工具（`--builtin-tool <op>`）**：
   - `worktree-claim --lane <1..4> --req <rN> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;req=<rN>;branch=<br>;base=<sha>;clean=1;path=<wt_path>`（r1 分池：`--repo` 指向非运行仓的本地检出时，目录落位 `<pool-root>/<检出basename>-lane-<k>` —— Mod 侧经 `git.worktree_claim_pool` 池化工具声明携带该参）
   - `lane-probe --lane <1..4> --base <sha> --branch <branch> [--repo <path>]` $\to$ `lane=<k>;commits=<N>;clean=<0|1>;head=<sha>;files=<csv>`（同上，`git.lane_probe_pool` 携带 `--repo`）
@@ -74,7 +75,7 @@
         "resumeAgentId": "agent-plan-1",
         "worktreePath": "/Users/.../tmp/worktrees/Yggdrasill-lane-1",
         "artifactPath": "artifacts/r1-development.md",
-        "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/README.md (wiki index) first, then docs/context/* (domain invariants) and docs/design/* (architecture & contracts) before proposing or editing.\n...",
+        "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/README.md, docs/context/workflow-acts.md, docs/context/dispatch-ritual.md, and the requirement's named docs/design/<subsystem>.md before proposing or editing. Plan: follow playbook run_machine + actions and declare touched wiki files. Development: also follow gates + live_evidence and the touched subsystem chapter.\n...",
         "deltaPrompt": "Resume r1 (rev 1) for stage `development` in worktree `...`; write `artifacts/r1-development.md` and submit.",
         "fullFallbackBrief": "Requirement r1 ...\nResume context: prior executor `agent-plan-1`.",
         "submitCommand": ".ygg/bin/egg open <run-root> --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"
