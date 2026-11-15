@@ -754,3 +754,47 @@ test("map.show 单视图且对载荷不敏感（含措辞红线）", function()
     "操作视图不得担保 no extra condition：" .. baseline
   )
 end)
+
+test("泳道分支命名：合法形状即记账 / 八条拒绝矩阵 / 空名 claim 层合法", function()
+  fresh()
+  start_requirement()
+
+  -- 合法形状：逐字记账，带自己的叙述。
+  reset()
+  fire("lane.claim", "1|r1|feature/aa11-semantic-name|abc1234|1")
+  assert_eq(count_marker("[LANE CLAIMED]"), 1, "合法分支必须叙述")
+
+  -- 拒绝矩阵（每条规则一例）。每条拒绝都要移动 reject 账，且一件都不绑。
+  local refusals = {
+    "feature/r1",                           -- uuid 槽里是裸需求号
+    "FEATURE/aa11-semantic-name",           -- 前缀大小写敏感
+    "feature/aa11-x",                       -- uuid 槽必须恰好 4 位
+    "feature/aa1-semantic-name",            -- 3 位 uuid
+    "feature/aa11-deadbeef",                -- 8 位纯十六进制语义段非法
+    "feature/aa11-12345",                   -- 纯数字语义段
+    "feature/aa11-",                        -- 空语义段
+    "feature/aa11-" .. string.rep("a", 37), -- 总长超过 48
+  }
+  local rejects_before = kv("reject.count")
+  for _, branch in ipairs(refusals) do
+    reset()
+    fire("lane.claim", ("2|r1|%s|abc1234|1"):format(branch))
+    assert_true(
+      narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+      ("分支 `%s` 必须被拒："):format(branch) .. table.concat(narrated(), " | ")
+    )
+    assert_nil(kv("lane.2.branch"), "被拒的分支不得绑定泳道：" .. branch)
+  end
+  assert_true(kv("reject.count") ~= rejects_before, "拒绝必须移动 reject 账")
+
+  -- 原认领不受这些拒绝影响。
+  assert_eq(kv("lane.1.branch"), "feature/aa11-semantic-name", "台账保留原认领")
+  assert_eq(kv("lane.1.req"), "r1", "需求绑定保留")
+
+  -- 空分支在 claim 层**仍然合法**：形状由自动认领层拒，不是这一层。
+  fire("lane.release", "1")
+  reset()
+  fire("lane.claim", "1|r1|||1")
+  assert_eq(count_marker("[LANE CLAIMED]"), 1, "空分支在 claim 层合法")
+  assert_eq(kv("lane.1.branch"), "", "分支记为空串")
+end)

@@ -1002,65 +1002,6 @@ fn registered_set(message: &str) -> Vec<String> {
 
 // ───────────────────── r2 · lane branch naming is enforced ─────────────────────
 
-/// r2 The lane branch **must** be self-reported in the forced shape
-/// `feature/{{4-char uuid}}-{{semantic segment}}` (≤ 48 total): `lane.claim` accepts a legal
-/// name into the lane ledger, refuses every illegal shape through the readable rejection
-/// channel (reject ledger moved), and an **empty** branch stays legal at the claim layer
-/// (the auto-claim layer refuses it instead — the default name generator is gone).
-#[test]
-fn lane_branch_naming_is_enforced() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    // Legal shape: claimed into the ledger byte-for-byte, with its own narration.
-    let claimed = game.narrate(
-        "lane.claim",
-        &text("1|r1|feature/aa11-semantic-name|abc1234|1"),
-    );
-    assert_eq!(count_lines(&claimed, "[LANE CLAIMED]"), 1, "{claimed:#?}");
-
-    // The refusal matrix (one entry per rule). Every refusal moves the reject ledger and
-    // leaves the lane ledger untouched.
-    let refusals = [
-        "feature/r1",                                // bare requirement number in the uuid slot
-        "FEATURE/aa11-semantic-name",                // prefix is case-sensitive
-        "feature/aa11-x",                            // uuid slot must be exactly 4 chars
-        "feature/aa1-semantic-name",                 // 3-char uuid slot
-        "feature/aa11-deadbeef",                     // 8-char pure hex semantic segment is illegal
-        "feature/aa11-12345",                        // pure-digit semantic segment
-        "feature/aa11-",                             // empty semantic segment
-        &format!("feature/aa11-{}", "a".repeat(37)), // 48+11 > 48 total
-    ];
-    let rejects_before = game.kv("reject.count");
-    for branch in refusals {
-        let lines = game.narrate("lane.claim", &text(&format!("2|r1|{branch}|abc1234|1")));
-        assert_refused(&lines, "lane.claim");
-        assert!(
-            game.kv("lane.2.branch") == Json::Null,
-            "the refused branch `{branch}` must not bind a lane"
-        );
-    }
-    let rejects_after = game.kv("reject.count");
-    assert_ne!(
-        rejects_before, rejects_after,
-        "the refusals must move the reject ledger"
-    );
-    // The lane ledger keeps its original claim (the refusals bind nothing new).
-    game.assert_kv("lane.1.branch", json!("feature/aa11-semantic-name"));
-    game.assert_kv("lane.1.req", json!("r1"));
-
-    // An empty branch is still legal at the claim layer (the lane.claim entry does not
-    // assert the shape; the auto-claim layer refuses the empty name instead).
-    game.narrate("lane.release", &text("1"));
-    let unclaimed = game.narrate("lane.claim", &text("1|r1|||1"));
-    assert_eq!(
-        count_lines(&unclaimed, "[LANE CLAIMED]"),
-        1,
-        "{unclaimed:#?}"
-    );
-    game.assert_kv("lane.1.branch", json!(""));
-}
-
 // ───────────────────── r3 · submitter identity (actor chapter + profiles) ─────────────────────
 
 // ───────────────────── r4 · read-gate: the four dimensions ─────────────────────
