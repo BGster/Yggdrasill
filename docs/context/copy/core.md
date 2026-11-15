@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · core 与全局键账
 > **id** copy/core · **幕** all · **触发** 改 `core.json` 前
 > **读不到代价** silent-drift
-> **ver** 6b88be
+> **ver** 20fcb5
 
 > **定位**：`core.json` 的 options 27 / tuning 8 / endings 1（共 36 键），以及跨域指针壳与全局键数核对。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/core.json`
@@ -9,7 +9,7 @@
 
 ## core.json（options 27 / tuning 8 / endings 1 = 36 键；scenes/prompts 散文见 §H）
 
-### options · 菜单措辞（mod 运行时渲染选择面；语义对照见 workflow-acts.md 各幕）
+### options · 菜单措辞（mod 运行时渲染选择面；语义对照见 acts/ 各幕）
 
 | 键 | 值/句式（逐字） | 变量 | 协议归属 |
 |---|---|---|---|
@@ -66,19 +66,19 @@
 
 | 键 | 收缩后形态（指向） |
 |---|---|
-| `prologue_common` | docs/context/workflow-acts.md#序幕 |
-| `charter_common` | docs/context/workflow-acts.md#立局幕 |
-| `coordinate_common` | docs/context/workflow-acts.md#协调幕 |
-| `settle_common` | docs/context/workflow-acts.md#盘点幕 |
-| `release_common` | docs/context/workflow-acts.md#发布幕 |
-| `retired_common` | docs/context/workflow-acts.md#退役终态 |
-| `subagent_brief` | docs/context/dispatch-ritual.md（§2–§7 策略正文） |
-| `config_opened` | docs/context/dispatch-ritual.md#8 |
-| `subagent_fallback_note` | docs/context/dispatch-ritual.md#9 |
-| `guide_human_blocked` | docs/context/workflow-acts.md#协调幕（人机门禁） |
-| `guide_hint` | docs/context/workflow-acts.md#协调幕（field rules） |
-| `settlement_sessions_unsetted_hint` | docs/context/cleanup-policy.md#1 |
-| `settlement_todo_segment` | docs/context/cleanup-policy.md#2 |
+| `prologue_common` | docs/context/acts/prologue.md |
+| `charter_common` | docs/context/acts/charter.md |
+| `coordinate_common` | docs/context/acts/coordinate.md |
+| `settle_common` | docs/context/acts/settle.md |
+| `release_common` | docs/context/acts/release.md |
+| `retired_common` | docs/context/acts/retired.md |
+| `subagent_brief` | docs/context/rituals/dispatch.md（§1–§5 策略正文） |
+| `config_opened` | docs/context/rituals/dispatch.md#6 |
+| `subagent_fallback_note` | docs/context/rituals/fallback.md |
+| `guide_human_blocked` | docs/context/acts/coordinate.md（人机门禁） |
+| `guide_hint` | docs/context/acts/coordinate.md（field rules） |
+| `settlement_sessions_unsetted_hint` | docs/context/rituals/cleanup.md#1 |
+| `settlement_todo_segment` | docs/context/rituals/cleanup.md#2 |
 | `scenes.*` | docs/context/acts/*.md 各幕正文（值 = 台词 + **脚本生成的 [READ FIRST] 必读块**） |
 | `prompts.*` | docs/context/acts/*.md 各幕 prompts 语义 |
 

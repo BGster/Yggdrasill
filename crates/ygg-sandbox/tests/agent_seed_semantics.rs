@@ -26,7 +26,7 @@
 //!   stamped there; the six new D-MA23 events (`charter.set` / `run.begin` /
 //!   `integration.*` / `release.*`) deliberately stay **outside** the ticket gate (R5).
 //!
-//! Boundaries (same stance as docs/context/workflow-acts.md coordinate/settle — no added exits):
+//! Boundaries (same stance as docs/context/acts/coordinate.md / acts/settle.md — no added exits):
 //! - only the public load surface (`ModBundle` / `KernelFacade` / dispatch / save-load);
 //!   no host CLI changes, no production-code changes, no side-channel scripts;
 //! - **no run directory is read or written**: legacy-compat and injection fixtures use an
@@ -1432,9 +1432,14 @@ fn batch_settle_auto_appends_maintenance_requirement() {
     );
     assert!(
         desc.contains("docs/README.md")
-            && desc.contains("docs/context/decisions-agent.md")
+            && desc.contains("docs/context/archive/decisions-agent.md")
             && desc.contains("docs/design/"),
         "description must carry the per-file wiki guidance: {desc}"
+    );
+    // r5: 平台平铺旧路径已退役——台账指针必须走 archive/ 下的权威文件。
+    assert!(
+        !desc.contains("docs/context/decisions-agent.md"),
+        "the maintenance brief must not cite the retired flat decisions-agent path: {desc}"
     );
 }
 
@@ -3673,15 +3678,15 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     let mod_dir = project_mod_dir();
     let mut total = 0usize;
     for (doc, fragment) in [
-        ("copy-contract-flow.md", "beats-flow.json"),
-        ("copy-contract-harness.md", "beats-harness.json"),
-        ("copy-contract-lanes.md", "beats-lanes.json"),
-        ("copy-contract-map-guide.md", "beats-map-guide.json"),
-        ("copy-contract-requirements.md", "beats-requirements.json"),
-        ("copy-contract-settlement.md", "beats-settlement.json"),
+        ("flow.md", "beats-flow.json"),
+        ("harness.md", "beats-harness.json"),
+        ("lanes.md", "beats-lanes.json"),
+        ("map-guide.md", "beats-map-guide.json"),
+        ("requirements.md", "beats-requirements.json"),
+        ("settlement.md", "beats-settlement.json"),
     ] {
-        let text = std::fs::read_to_string(repo.join("docs/context").join(doc))
-            .unwrap_or_else(|err| panic!("read {doc}: {err}"));
+        let text = std::fs::read_to_string(repo.join("docs/context").join("copy").join(doc))
+            .unwrap_or_else(|err| panic!("read docs/context/copy/{doc}: {err}"));
         let documented = markdown_key_set(&text);
         let fragment_json = read_json(&mod_dir.join(format!("data/texts/{fragment}")));
         let actual: std::collections::BTreeSet<String> = fragment_json["beats"]
@@ -3702,7 +3707,7 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
         }
         total += documented.len();
     }
-    let core_text = std::fs::read_to_string(repo.join("docs/context/copy-contract-core.md"))
+    let core_text = std::fs::read_to_string(repo.join("docs/context/copy/core.md"))
         .expect("read core copy contract");
     let core_tables = core_text.split("## H.").next().expect("core tables");
     let documented = markdown_key_set(core_tables);
@@ -3877,11 +3882,19 @@ fn narrative_pointer_anchors_exist_in_docs_context() {
             "shrunk beat `{key}` must carry a docs/context pointer"
         );
     }
-    // r5 指针账（子目录化后）：flow 7 + harness 2 + map-guide 2 + settlement 3 + core 10 = 24。
+    // r5 指针账（子目录化 + 解析器修好后实测）：
+    //   flow 6 个 <node>_common      = 7（settle_common 两处：正文 + 清理政策）
+    //   harness.subagent_brief       = 2（coordinate + rituals/dispatch）
+    //   map-guide 2 键               = 2
+    //   settlement 3 键              = 3
+    //   core.scenes 5 键             = 13（幕台词基行各 1 + [READ FIRST] 块内每条必读 1）
+    //   core.prompts 5 键             = 5
+    // 合计 32。注意：块内的必读指针（如 `cold-start/vocabulary.md`）都是子目录形，旧解析器
+    // 一并静默跳过——所以此数从旧实装口径的 25 直接跳到 32，正是漏检被补上的尺度。
     // `stage_prompt_missing` 指向 `docs/context/acts/`（目录指针，不是 .md，不计入）。
-    assert!(
-        pointer_count >= 24,
-        "expected at least 24 docs/context pointers, got {pointer_count}"
+    assert_eq!(
+        pointer_count, 32,
+        "docs/context pointer ledger drifted: expected 32, got {pointer_count}"
     );
     assert!(
         violations.is_empty(),

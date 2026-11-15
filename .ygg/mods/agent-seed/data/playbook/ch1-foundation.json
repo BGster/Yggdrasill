@@ -36,7 +36,7 @@
           "id": "credentials.secret-values-local-only",
           "modality": "must",
           "text": "Sensitive values — LLM API keys, tokens, database/object-storage connection strings, subagent model parameters (`YGG_SUBAGENT_*`) — live only in the local `.env` / `.env.local` (both git-ignored) and in no other file.",
-          "basis": "user decision 2026-10-29 (s1 addition); historical AGENTS.md (pre-migration; see git history) + docs/context/dispatch-ritual.md §2"
+          "basis": "user decision 2026-10-29 (s1 addition); historical AGENTS.md (pre-migration; see git history) + docs/context/rituals/dispatch.md §2"
         },
         {
           "id": "credentials.mod-and-report-keys-only",
@@ -145,7 +145,7 @@
       "order": 3,
       "title": "3. Branch management",
       "summary": "master accepts merges only; all development happens on feature branches that integrate through the standing `develop` branch (feature → develop → master); every merge is no-FF.",
-      "source": "Runtime projection of docs/context/workflow-acts.md (release) and docs/design/lanes.md; historical branch rulings remain in git history",
+      "source": "Runtime projection of docs/context/acts/release.md and docs/design/lanes.md; historical branch rulings remain in git history",
       "priority": "standard",
       "rules": [
         {
@@ -187,7 +187,7 @@
         {
           "id": "branches.merge-follows-play-mode",
           "modality": "must-not",
-          "text": "Runtime pointer: before any round merge, follow `docs/context/workflow-acts.md` (release). That act alone owns the guide/goal trigger, green-evidence precondition and merge cadence; do not treat this chapter as a second merge policy.",
+          "text": "Runtime pointer: before any round merge, follow `docs/context/acts/release.md`. That act alone owns the guide/goal trigger, green-evidence precondition and merge cadence; do not treat this chapter as a second merge policy.",
           "basis": "r5 batch-3 debt cleanup (merge-state never finalized twice: mt-fde 428ec77 and mxbc 75c2448 left unmerged); user correction 2026-11-13: merging is a normal step — guide = human trigger, goal = agent trigger"
         }
       ]

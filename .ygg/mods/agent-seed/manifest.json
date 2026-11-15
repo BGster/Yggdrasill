@@ -153,20 +153,20 @@
   ],
   "entries": [
     {
-      "byteLength": 7207,
+      "byteLength": 7115,
       "id": "ygg:scene/texts",
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "28670de1a033ebd6c1eac7eb82c6e74e7db9da992d9f435ebef78fee9c848311"
+      "sha256": "ff22066c91c8298a444147812bd295c3278a276c09a2dd7d779033d3ff3cd218"
     },
     {
-      "byteLength": 7459,
+      "byteLength": 7338,
       "id": "ygg:scene/beats/flow",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-flow.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "2a55f89d5c117946c58d7979f020e84e572855e73d8a31f481e025306b63a53d"
+      "sha256": "130c904e9692fa9297059747165927cccd90b30865da92157ceb51b2888a568f"
     },
     {
       "byteLength": 13913,
@@ -185,28 +185,28 @@
       "sha256": "7dc2a07fa043c0cf690f9ede2648d620ee400ce7860a68775030cfa691c4b9e6"
     },
     {
-      "byteLength": 3723,
+      "byteLength": 3727,
       "id": "ygg:scene/beats/map-guide",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-map-guide.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "163c900c057952785e0e20f29a4324fab688a93e081de0f38d1599459791e2e7"
+      "sha256": "e38bbcd677c1f179f7642b335c58d438659de5cf0b5ce07226f84785c7c46f74"
     },
     {
-      "byteLength": 10267,
+      "byteLength": 10277,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "56722f4b5972cb2894dcb1cb0cc66f63978c654d2071479f22e7f979fac9823d"
+      "sha256": "cbc5f621ffb430ea26aeedada4c7f314f4e3716a25fbf8a7fceb242fe12c0b4e"
     },
     {
-      "byteLength": 12758,
+      "byteLength": 12761,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "2456c8c0271500d88a06f4c6c9b60d875ed2b792f1e98158d0d0b64b062ef5d3"
+      "sha256": "7fe3cb5a816fcac46a2ebfbb4100581c73eb572d6f147dd8a6364e9f10975c0e"
     },
     {
       "byteLength": 1918,
@@ -225,12 +225,12 @@
       "sha256": "ee576c5e1951932f3abdef820f0f4194788df27da71bdcaf1d6459525942b5f5"
     },
     {
-      "byteLength": 15525,
+      "byteLength": 15504,
       "id": "ygg:agent/playbook/ch1-foundation",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch1-foundation.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "025a4013bb20f802ac3bcff87e95416a0c9c55b39cd7a0d600f85324a07185f2"
+      "sha256": "dc17b00ec53962ea247168373c3dcd9610f52f796cb601d0cc88074dafb17572"
     },
     {
       "byteLength": 19557,
@@ -249,12 +249,12 @@
       "sha256": "9e8394dc297b0c4314347531ce61dcde01deb0f62674d53dd79ed47aa6d3e0a3"
     },
     {
-      "byteLength": 11262,
+      "byteLength": 11264,
       "id": "ygg:agent/playbook/ch4-run-machine",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-run-machine.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "1f5bb1fb7b43db11017be54aa69ae532c670b5676c868c99838757d28c8d156f"
+      "sha256": "1749df855841d6f2959e07fb65cda93d0435c38b04e4dc989dadc92f6ca0014e"
     },
     {
       "byteLength": 18306,
@@ -281,12 +281,12 @@
       "sha256": "8873767fdf055650b39b94c5edc9a7340e46dfaa0f0570176e852194e3d72c11"
     },
     {
-      "byteLength": 14512,
+      "byteLength": 14503,
       "id": "ygg:agent/playbook/ch5-evolution-tools",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch5-evolution-tools.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "e6bbd96cfe553b2f4bf42e96f1ea9f04899cb4678af528e5888eb5c023908c18"
+      "sha256": "5d55b9f65b411d7de957261c086128cbbc0f46bed7e79cba5b8535858dbaaed4"
     }
   ],
   "schemaVersion": 1
