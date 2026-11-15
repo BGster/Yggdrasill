@@ -559,3 +559,72 @@ test("goal 授权门：无授权给可读警告，登记后放行", function()
   fire("config.set", "play.mode=goal")
   assert_eq(count_marker("[GOAL AUTH PENDING]"), 0, "登记授权后不再警告")
 end)
+
+--- 从叙述里抽需求行：第 2 个 token 形如 `r<digits>`、第 3 个以 `[` 开头。
+local function req_rows(lines)
+  local rows = {}
+  for _, line in ipairs(lines) do
+    local tokens = {}
+    for tok in line:gmatch("%S+") do
+      tokens[#tokens + 1] = tok
+    end
+    local id, status = tokens[2], tokens[3]
+    if id ~= nil and status ~= nil then
+      if id:match("^r%d+$") ~= nil and status:sub(1, 1) == "[" then
+        rows[#rows + 1] = { id = id, status = status:sub(2) }
+      end
+    end
+  end
+  return rows
+end
+
+test("requirement.list 分页：默认只翻开放行，full 才含已关闭", function()
+  fresh()
+  charter_and_begin()
+
+  -- r1 走完整链路到 done（唯一关闭的行）。
+  fire("requirement.add", "synthetic requirement|synthetic description|page-r1")
+  fire("requirement.dispatch", "0")
+  submit(1, "plan", "page-p1")
+  click("gate.approve — ")
+  submit(1, "development", "page-p2")
+  click("proposal.accept — ")
+  click("gate.approve — ")
+  fire("integration.confirm", "r1|develop@abc1234")
+  assert_eq(kv("req.1.status"), "done", "r1 已关闭")
+
+  -- r2..r13：十二条开放草稿（共 13 条需求）。
+  for i = 2, 13 do
+    fire("requirement.add", ("page requirement %d|synthetic description|page-r%d"):format(i, i))
+  end
+
+  -- 默认视图：恰好 12 条**开放**行，关闭的 r1 被折出。
+  reset()
+  fire("requirement.list", "0")
+  local default_lines = narrated()
+  local rows = req_rows(default_lines)
+  assert_eq(#rows, 12, "默认视图必须翻 12 行")
+  for _, row in ipairs(rows) do
+    assert_true(row.id ~= "r1", "关闭的 r1 不得占开放页：" .. row.id)
+  end
+  assert_true(
+    default_lines[1] ~= nil and default_lines[1]:sub(1, 11) == "[REQ GRAPH]",
+    "翻页必须保留图头"
+  )
+
+  -- full 选项渲染全部：13 行，关闭的 r1 在末尾。
+  reset()
+  fire("requirement.list", "full")
+  local full_lines = narrated()
+  local full_rows = req_rows(full_lines)
+  assert_eq(#full_rows, 13, "full 必须渲染每一条需求")
+  assert_eq(
+    full_rows[#full_rows].id,
+    "r1",
+    "唯一关闭的行收在 full 页末（开放在前、关闭最新到最旧）"
+  )
+  assert_true(
+    full_lines[1] ~= nil and full_lines[1]:sub(1, 11) == "[REQ GRAPH]",
+    "full 视图同样保留图头"
+  )
+end)
