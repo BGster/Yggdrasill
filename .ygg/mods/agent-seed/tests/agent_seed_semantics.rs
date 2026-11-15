@@ -1172,55 +1172,6 @@ fn lane_branch_naming_is_enforced() {
 
 // ───────────────────── r3 · submitter identity (actor chapter + profiles) ─────────────────────
 
-/// Submit an `r1` proposal with the full identity tail chain
-/// `…|exec=<exec>[:<reason>]|actor=<actor>|actor_session=<session>` (the channel the
-/// host stamps on declared routes; here dispatched straight at the kernel).
-#[track_caller]
-fn submit_with_identity(
-    game: &mut Game,
-    rev: u32,
-    stage: &str,
-    ext: &str,
-    exec: Option<&str>,
-    actor: Option<&str>,
-    session: Option<&str>,
-) -> Vec<String> {
-    submit_identity_for(game, "r1", rev, stage, ext, exec, actor, session)
-}
-
-/// 同上，但需求 id 可指定（actor-only 用例在无账本绑定的干净需求上验证）。
-#[track_caller]
-fn submit_identity_for(
-    game: &mut Game,
-    req: &str,
-    rev: u32,
-    stage: &str,
-    ext: &str,
-    exec: Option<&str>,
-    actor: Option<&str>,
-    session: Option<&str>,
-) -> Vec<String> {
-    let mut payload =
-        format!("{req}|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}");
-    if let Some(exec) = exec {
-        payload.push_str(&format!("|exec={exec}"));
-    }
-    if let Some(actor) = actor {
-        payload.push_str(&format!("|actor={actor}"));
-    }
-    if let Some(session) = session {
-        payload.push_str(&format!("|actor_session={session}"));
-    }
-    // r9：**签名与提交同身份**——调用方声明的 actor 就是本步的执行者，补签也必须以它签，
-    // 否则按人门禁会把「自己签的」看成「别人签的」（传 None = 老宿主无章，补签也不盖章）。
-    let previous = game.stamp_actor.clone();
-    game.as_actor(actor);
-    game.ensure_reads("proposal.submit", Some(stage), req_index(req));
-    let lines = game.narrate("proposal.submit", &text(&payload));
-    game.stamp_actor = previous;
-    lines
-}
-
 /// 覆盖面 k/n：`readPlan` 在场时按本幕清单计算（计划外的 doc 不进分子），
 /// 不在场时降级。清单是**装资源的静态值**，改它必须重算 manifest（`reseal`）。
 #[test]
