@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 集成（req-acts/integration）
 > **id** req-acts/integration · **幕** req: accept_gate/integrating/done · **触发** 验收门禁前 / 集成核验前
 > **读不到代价** hard-refusal（证据清单漏项 → 验收被拒；SHA 不符 → `integration_bad_sha` 打回）
-> **ver** 08e40b
+> **ver** 44ef6e
 
 ## 7. 验收门禁（accept_gate）
 
@@ -9,7 +9,7 @@
 - **入口条件**：development 提案已受理（`gate=="accept"`）。
 - **必做动作**：**人**过验收——`gate.approve`（须核验 `develop@<sha>` 证据与 artifacts 非空）或 `gate.reject`（打回待开发，plan_ok 保持）；gate_rev==req.rev 的 stale 校验同样适用。
 - **出口判据**：approve → 集成幕（`integrating=true`）；reject → 待开发。
-- **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_gate_ok` / `req_gate_no_artifacts` / `req_gate_no_evidence` / `req_gate_stale` 句式）；[../../design/state-surface.md](../../design/kernel/state-surface.md)（验收证据键）。
+- **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_gate_ok` / `req_gate_no_artifacts` / `req_gate_no_evidence` / `req_gate_stale` 句式）；[../../design/kernel/state-surface.md](../../design/kernel/state-surface.md)（验收证据键）。
 - **场景化证据清单**（按需求类型选列核验，避免“看过就算”）：
 
   | 需求类型 | 必须亲测的证据 |
@@ -37,4 +37,4 @@
 - **入口条件**：`integration.confirm` 成功；旁路关闭（split/merge/dropped）时为 `closed_reason`。
 - **必做动作**：无（终态）；泳道已释放，证据在册。
 - **出口判据**：无（终态）。
-- **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_amend_derive_hist` / `req_after_done` / `req_resolve_*` 句式）；旁路语义见 [../../design/requirement-story.md](../story/requirement-story.md)（覆盖层：split/merge/conflict/resolve）。
+- **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_amend_derive_hist` / `req_after_done` / `req_resolve_*` 句式）；旁路语义见 [../story/requirement-story.md](../story/requirement-story.md)（覆盖层：split/merge/conflict/resolve）。

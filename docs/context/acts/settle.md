@@ -1,7 +1,7 @@
 # 盘点幕 · settle
 > **id** acts/settle · **幕** settle · **触发** `coordinate.submit` 成功（进入 settle 相位）
 > **读不到代价** hard-refusal（载荷形状错、`c=`/`cls=` 计数不自洽被拒）
-> **ver** 10dde9
+> **ver** e5a134
 
 **场景台词（知识权威）**：任务「{{title}}」：{{count}} 条需求（{{done}} 条已终态）｜require_all_green {{gates}}。四项齐备（验证、演进登记、会话清理、待办清理）自动进发布幕。
 
@@ -19,4 +19,4 @@
 
 **prompts.settle 语义**：「门禁全绿了吗？依次验证 → 演进登记 → 会话 → 待办；四项齐备自动进发布幕。」
 
-**本幕关联阅读**：[rituals/cleanup.md](../rituals/cleanup.md)（会话/待办清理政策）；[copy/settlement.md](../copy/settlement.md)（`verify_*` / `settlement_*` / `review_*` 句式）；[../../design/state-surface.md](../../design/kernel/state-surface.md)（`verify.*` / `settlement.*` / `review.evolution.*` 存储键契约）；演进筛选的运行时投影见 playbook evolution 章。
+**本幕关联阅读**：[rituals/cleanup.md](../rituals/cleanup.md)（会话/待办清理政策）；[copy/settlement.md](../copy/settlement.md)（`verify_*` / `settlement_*` / `review_*` 句式）；[../../design/kernel/state-surface.md](../../design/kernel/state-surface.md)（`verify.*` / `settlement.*` / `review.evolution.*` 存储键契约）；演进筛选的运行时投影见 playbook evolution 章。

@@ -1,11 +1,11 @@
 # Yggdrasill · Monorepo 模块拓扑与依赖白名单
 > **id** cold-start/topology · **幕** cold-start · **触发** 冷启动 / 改仓库结构前
 > **读不到代价** irreversible（依赖白名单误改）
-> **ver** 895739
+> **ver** 44fc0c
 
 > **定位**：仓库目录拓扑全景与 4 条硬性依赖不变量的唯一清单。
 > **replaces**：CONTEXT §4（L97–133）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../../README.md) · **相关**：[principles.md](principles.md) · [../design/mod-package.md](../../design/mod/mod-package.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[principles.md](principles.md) · [../../design/mod/mod-package.md](../../design/mod/mod-package.md)
 > **搬运**：以下正文自 CONTEXT.md L97–L133 逐字迁移，不重写语义。
 
 ## 4. Monorepo 模块拓扑与依赖白名单

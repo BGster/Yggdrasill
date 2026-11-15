@@ -10,29 +10,29 @@
 
 | 旧章节 | 新文件 |
 | --- | --- |
-| §1 产品形态与三层系统边界（含 1.1 协商矩阵、1.2 Adapter 五义务） | [design/system-boundaries.md](context/cold-start/system-boundaries.md) |
-| §2 章首（组织原则） | [design/state-machine.md](design/kernel/state-machine.md) |
-| §2.1 Mod 是什么（边界与纯度） | [design/state-machine.md](design/kernel/state-machine.md) |
-| §2.2 双层结构与真状态压缩 | [design/state-machine.md](design/kernel/state-machine.md) |
-| §2.3 运行级剧情（live） | [design/run-story.md](context/story/run-story.md) |
-| §2.4 需求级剧情（open） | [design/requirement-story.md](context/story/requirement-story.md) |
-| §2.5 微状态判定的单一来源 | [design/state-machine.md](design/kernel/state-machine.md) |
-| §2.6 事件总表（39 口径） | [design/events.md](design/kernel/events.md) |
-| §2.7 拒绝面矩阵 | [design/state-surface.md](design/kernel/state-surface.md) |
-| §2.8 状态存储契约 | [design/state-surface.md](design/kernel/state-surface.md) |
-| §2.9 响应式推进契约 | [design/state-machine.md](design/kernel/state-machine.md) |
-| §2.10 持久化泳道池与实时进度投影 | [design/lanes.md](design/host/lanes.md) |
-| §2.11 工具桥契约 | [design/tool-bridge.md](design/mod/tool-bridge.md) |
-| §2.12 提示词面（beats）契约 | [design/prompt-surface.md](design/mod/prompt-surface.md) |
-| §2.13 身份与权限（不进剧情） | [design/identity.md](design/mod/identity.md) |
-| §3 章题 | [design/lua-api.md](design/kernel/lua-api.md) |
-| §3.1 Lua 沙箱宿主 API 契约 | [design/lua-api.md](design/kernel/lua-api.md) |
-| §3.2 Mod 包与多文件纯度契约 | [design/mod-package.md](design/mod/mod-package.md) |
-| §3.3 事件 Payload 线协议契约 | [design/wire-protocol.md](design/kernel/wire-protocol.md) |
-| §3.4 三层动作面契约（含 registry 末注 33/34 口径） | [design/action-faces.md](design/mod/action-faces.md) |
-| §3.5 宿主 CLI 与 Daemon JSON-RPC 线协议 | [design/cli-daemon.md](design/host/cli-daemon.md) |
-| §3.6 上下文压缩与检查点交接契约 | [design/compaction.md](design/kernel/compaction.md) |
-| §3.7 serve 观察面契约 | [design/serve.md](design/host/serve.md) |
+| §1 产品形态与三层系统边界（含 1.1 协商矩阵、1.2 Adapter 五义务） | [context/cold-start/system-boundaries.md](context/cold-start/system-boundaries.md) |
+| §2 章首（组织原则） | [design/kernel/state-machine.md](design/kernel/state-machine.md) |
+| §2.1 Mod 是什么（边界与纯度） | [design/kernel/state-machine.md](design/kernel/state-machine.md) |
+| §2.2 双层结构与真状态压缩 | [design/kernel/state-machine.md](design/kernel/state-machine.md) |
+| §2.3 运行级剧情（live） | [context/story/run-story.md](context/story/run-story.md) |
+| §2.4 需求级剧情（open） | [context/story/requirement-story.md](context/story/requirement-story.md) |
+| §2.5 微状态判定的单一来源 | [design/kernel/state-machine.md](design/kernel/state-machine.md) |
+| §2.6 事件总表（39 口径） | [design/kernel/events.md](design/kernel/events.md) |
+| §2.7 拒绝面矩阵 | [design/kernel/state-surface.md](design/kernel/state-surface.md) |
+| §2.8 状态存储契约 | [design/kernel/state-surface.md](design/kernel/state-surface.md) |
+| §2.9 响应式推进契约 | [design/kernel/state-machine.md](design/kernel/state-machine.md) |
+| §2.10 持久化泳道池与实时进度投影 | [design/host/lanes.md](design/host/lanes.md) |
+| §2.11 工具桥契约 | [design/mod/tool-bridge.md](design/mod/tool-bridge.md) |
+| §2.12 提示词面（beats）契约 | [design/mod/prompt-surface.md](design/mod/prompt-surface.md) |
+| §2.13 身份与权限（不进剧情） | [design/mod/identity.md](design/mod/identity.md) |
+| §3 章题 | [design/kernel/lua-api.md](design/kernel/lua-api.md) |
+| §3.1 Lua 沙箱宿主 API 契约 | [design/kernel/lua-api.md](design/kernel/lua-api.md) |
+| §3.2 Mod 包与多文件纯度契约 | [design/mod/mod-package.md](design/mod/mod-package.md) |
+| §3.3 事件 Payload 线协议契约 | [design/kernel/wire-protocol.md](design/kernel/wire-protocol.md) |
+| §3.4 三层动作面契约（含 registry 末注 33/34 口径） | [design/mod/action-faces.md](design/mod/action-faces.md) |
+| §3.5 宿主 CLI 与 Daemon JSON-RPC 线协议 | [design/host/cli-daemon.md](design/host/cli-daemon.md) |
+| §3.6 上下文压缩与检查点交接契约 | [design/kernel/compaction.md](design/kernel/compaction.md) |
+| §3.7 serve 观察面契约 | [design/host/serve.md](design/host/serve.md) |
 | §4 活文档闭环 | [wiki-governance.md](wiki-governance.md)（载体指称已改述，三职责语义保留） |
 
 ## 旧引用解析注记

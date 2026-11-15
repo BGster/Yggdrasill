@@ -158,7 +158,7 @@
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "a70bb82a9553be39c183d1cafaad50899b0cb59df29727ef279d2a4dd469b5a1"
+      "sha256": "da83dbf31af67c8bb151f1195d575e5a1f0900110f5c4828d98eb54731393839"
     },
     {
       "byteLength": 7338,
@@ -214,7 +214,7 @@
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "2cb60218457e9640b457861b547c4dc6f127cbd5ce663259ad49e83cc968e641"
+      "sha256": "07ad9c5acc9b9b046aa0f2371cb0cad9a6a05007d3fe8c911f7203ec7335c97a"
     },
     {
       "byteLength": 1943,
