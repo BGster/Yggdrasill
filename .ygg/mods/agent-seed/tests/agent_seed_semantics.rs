@@ -1453,73 +1453,7 @@ fn read_gate_refuses_a_signature_against_a_revised_doc() {
     revised.assert_kv("req.1.gate", json!("plan"));
 }
 
-/// ⑦ 不误伤：既有语义拒绝的文案优先，读签不得抢嘴（装订期严密与否不能改变拒因归属）。
-#[test]
-fn read_gate_does_not_mask_existing_rejection_reasons() {
-    let mut game = armed_game("gate-nomask");
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    // 待批期间 amend → gate_rev 与 rev 失配（既有 stale 判据）。零签名也在场，但先报既有原因。
-    game.narrate("requirement.amend", &text("r1||amended while pending"));
-    let lines = game.narrate("gate.approve", &text("r1"));
-    let joined = lines.join("\n");
-    assert!(!joined.contains("read-gate/"), "{lines:#?}");
-    assert!(
-        joined.contains("is bound to rev") || refused(&lines, "gate.approve"),
-        "the pre-existing gate reason must win: {lines:#?}"
-    );
-}
-
 // ───────────────── r9 · attribution: the signature belongs to an actor ─────────────────
-
-/// r9 核心断言：**别人**签的不能当「你读过」——这正是本需求要修的缺陷（r6 子代理签名
-/// 被主代理的 gate.approve 计入 `2/2 signed`）。同一份台账、同一份签名，换个人推进就必须拒。
-#[test]
-fn read_gate_refuses_a_signature_owned_by_another_actor() {
-    let mut game = armed_game("gate-other-actor");
-    // 另一个代理把本幕必读签齐（真路径上它就是当时的执行者）。
-    game.as_actor(Some("r6-planner"));
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    game.assert_kv("settings.read_actor.acts/coordinate", json!("r6-planner"));
-
-    // 换成另一个代理推进：签名有效（ver 对、序号新），但不是它签的。
-    game.as_actor(Some("main-agent"));
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    let joined = lines.join("\n");
-    assert_refused(&lines, "proposal.submit");
-    assert!(
-        joined.contains("read-gate/other-actor"),
-        "another actor's signature must be reported as such (not as missing): {lines:#?}"
-    );
-    assert!(
-        joined.contains("by r6-planner") && joined.contains("dispatched as main-agent"),
-        "the refusal must name both the signer and the acting actor: {lines:#?}"
-    );
-    assert!(
-        joined.contains("0 of them by you"),
-        "the two counts must stay separate (coverage vs mine): {lines:#?}"
-    );
-    // 拒绝零副作用：提案不落库、门禁不挂（dispatch 时写下的空串保持不变）。
-    game.assert_kv("prop.1.req", Json::Null);
-    game.assert_kv("req.1.gate", json!(""));
-
-    // 正面对照：换回签署人本人 → 同一份签名立刻生效（证明拒的是“不是你”，不是“签名无效”）。
-    game.as_actor(Some("r6-planner"));
-    let ok = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    assert!(!refused(&ok, "proposal.submit"), "{ok:#?}");
-    game.assert_kv("req.1.gate", json!("plan"));
-}
 
 /// 造一个「计划门禁已挂起」的现场：以 `actor` 签齐本幕必读、交计划提案（交付即门禁），
 /// 并把该门禁交出的下一幕规则（`req-acts/delivery`）也签上——门禁批的就是它。

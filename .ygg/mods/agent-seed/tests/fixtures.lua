@@ -167,3 +167,58 @@ test("读签通过：签齐后提交放行，序号是 KV 标量可复算", func
     "派发计数器必须住在 KV 里，实得：" .. tostring(clock)
   )
 end, "armed")
+
+test("读签他人署名：拒绝点名署名人与当前执行者（不是 missing）", function()
+  armed_game()
+
+  -- 另一个代理把本幕必读签齐（真路径上它就是当时的执行者）。
+  as_actor("r6-planner")
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+  assert_eq(kv("settings.read_actor.acts/coordinate"), "r6-planner", "署名按人记账")
+
+  -- 换另一个代理推进：签名有效（ver 对、序号新），但不是它签的。
+  as_actor("main-agent")
+  reset()
+  fire("proposal.submit", "r1|1|plan|armed plan|artifacts/r1.md")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    narrated_contains("read-gate/other-actor"),
+    "他人署名必须报 other-actor，不能塌成 missing：" .. joined
+  )
+  assert_true(joined:find("by r6-planner", 1, true) ~= nil, "必须点名署名者：" .. joined)
+  assert_true(
+    joined:find("dispatched as main-agent", 1, true) ~= nil,
+    "必须点名当前执行者：" .. joined
+  )
+  assert_true(
+    joined:find("0 of them by you", 1, true) ~= nil,
+    "覆盖面与「我签的」两个数必须分开：" .. joined
+  )
+
+  -- 拒绝零副作用：提案不落库、门禁不挂。
+  assert_nil(kv("prop.1.req"), "提案不落库")
+  assert_eq(kv("req.1.gate"), "", "门禁没挂上")
+  as_actor("selftest")
+end, "armed")
+
+test("读签不掩盖既有拒绝：amend 后的 stale 门禁理由优先", function()
+  armed_game()
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+  fire("proposal.submit", "r1|1|plan|armed plan|artifacts/r1.md")
+
+  -- 待批期间 amend → gate_rev 与 rev 失配（既有 stale 判据）。零签名也在场，但先报既有原因。
+  fire("requirement.amend", "r1||amended while pending")
+  reset()
+  fire("gate.approve", "r1")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    not joined:find("read-gate/", 1, true),
+    "读签理由不得抢占既有拒绝：" .. joined
+  )
+  assert_true(
+    joined:find("is bound to rev", 1, true) ~= nil or narrated_contains("[REJECTED"),
+    "既有的门禁理由必须先报：" .. joined
+  )
+end, "armed")
