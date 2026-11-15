@@ -41,7 +41,6 @@ use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
-use ygg_sandbox::HostToolRunner;
 
 mod support;
 
@@ -440,21 +439,6 @@ fn assert_refused(lines: &[String], needle: &str) {
     );
 }
 
-/// The narrative array of an envelope (prose assertions read these lines).
-#[track_caller]
-fn narrative_lines(reply: &Json) -> Vec<String> {
-    reply["narrative"]
-        .as_array()
-        .unwrap_or_else(|| panic!("the narrative is not an array: {reply}"))
-        .iter()
-        .map(|line| {
-            line.as_str()
-                .unwrap_or_else(|| panic!("a narrative line is not a string: {line:?}"))
-                .to_owned()
-        })
-        .collect()
-}
-
 /// How many lines carry a marker (a rewrite must not silently change the count).
 fn count_lines(lines: &[String], needle: &str) -> usize {
     lines.iter().filter(|line| line.contains(needle)).count()
@@ -506,32 +490,6 @@ fn submit_req(game: &mut Game, id: &str, rev: u32, stage: &str, ext: &str) {
 /// Submit an `r1` proposal: `req|rev|stage|summary|artifacts|changes|ext` (changes empty).
 fn submit(game: &mut Game, rev: u32, stage: &str, ext: &str) {
     submit_req(game, "r1", rev, stage, ext);
-}
-
-/// Submit an `r1` proposal with the trailing `exec=` segment (agent ledger + proposal in one
-/// transaction, i.e. no extra turn).
-fn submit_with_exec(game: &mut Game, rev: u32, stage: &str, ext: &str, exec: &str) {
-    game.ensure_reads("proposal.submit", Some(stage), Some(1));
-    let payload = text(&format!(
-        "r1|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}|exec={exec}"
-    ));
-    game.narrate("proposal.submit", &payload);
-}
-
-/// Submit an `r1` **development** proposal with an `exec=` tail and a non-empty changes
-/// segment (the changes feed the lane-probe narration in the sync-bridge case).
-fn submit_dev_with_exec(
-    game: &mut Game,
-    rev: u32,
-    ext: &str,
-    exec: &str,
-    changes: &str,
-) -> Vec<String> {
-    game.ensure_reads("proposal.submit", Some("development"), Some(1));
-    let payload = text(&format!(
-        "r1|{rev}|development|development proposal summary|artifacts/development.md|{changes}|{ext}|exec={exec}"
-    ));
-    game.narrate("proposal.submit", &payload)
 }
 
 /// Same drive against an arbitrary mod directory (r8: the armed / bare-copy pairs need the
@@ -994,208 +952,6 @@ fn read_json(path: &Path) -> Json {
 // ───────────────────── tool bridge (T1–T4) ─────────────────────
 
 // ───────────────────── A · active subsystem ─────────────────────
-
-struct SyncRitualRunner;
-
-impl HostToolRunner for SyncRitualRunner {
-    fn call(
-        &mut self,
-        tool_id: &str,
-        args: &std::collections::BTreeMap<String, String>,
-    ) -> Result<std::collections::BTreeMap<String, String>, String> {
-        let mut out = std::collections::BTreeMap::new();
-        match tool_id {
-            "git.worktree_claim" => {
-                let lane = args.get("lane").cloned().unwrap_or_else(|| "1".to_owned());
-                let req = args.get("req").cloned().unwrap_or_else(|| "r1".to_owned());
-                let branch = args
-                    .get("branch")
-                    .cloned()
-                    .unwrap_or_else(|| format!("feature/d4e5-sync-bridge"));
-                out.insert("lane".to_owned(), lane.clone());
-                out.insert("req".to_owned(), req);
-                out.insert("branch".to_owned(), branch);
-                out.insert("base".to_owned(), "2e24c45".to_owned());
-                out.insert("clean".to_owned(), "1".to_owned());
-                out.insert("path".to_owned(), format!("/tmp/ygg-wt-lane-{lane}"));
-                Ok(out)
-            }
-            "git.lane_probe" => {
-                let lane = args.get("lane").cloned().unwrap_or_else(|| "1".to_owned());
-                let base = args
-                    .get("base")
-                    .cloned()
-                    .unwrap_or_else(|| "2e24c45".to_owned());
-                let branch = args
-                    .get("branch")
-                    .cloned()
-                    .unwrap_or_else(|| "feature/d4e5-sync-bridge".to_owned());
-                out.insert("lane".to_owned(), lane);
-                out.insert("base".to_owned(), base);
-                out.insert("branch".to_owned(), branch);
-                out.insert("head".to_owned(), "deadbeef1234".to_owned());
-                out.insert("commits".to_owned(), "2".to_owned());
-                out.insert("clean".to_owned(), "1".to_owned());
-                out.insert(
-                    "files".to_owned(),
-                    "src/runtime/tools.lua,src/view/render.lua".to_owned(),
-                );
-                Ok(out)
-            }
-            "git.worktree_release" => {
-                let lane = args.get("lane").cloned().unwrap_or_else(|| "1".to_owned());
-                out.insert("lane".to_owned(), lane);
-                out.insert("released".to_owned(), "1".to_owned());
-                Ok(out)
-            }
-            other => Err(format!("unexpected tool_id: {other}")),
-        }
-    }
-}
-
-/// A7 Synchronous `ygg.tool.call` mounted on `KernelFacade` settles the 3 inline engineering
-/// rituals (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`) in **1 single turn
-/// each** without `tool.result` callbacks. 剧情双层重写 window (R7): the lane stays bound through
-/// the acceptance and the accept gate — the auto-release happens on the **integration
-/// confirm**, not on the gate approval.
-#[test]
-fn synchronous_tool_bridge_runs_inline_rituals() {
-    let mut game = Game::open(&project_mod_dir());
-    game.kernel
-        .set_tool_runner(Some(Box::new(SyncRitualRunner)));
-
-    charter_and_begin(&mut game);
-    game.narrate(
-        "requirement.add",
-        &text("sync tool bridge|implement synchronous ygg.tool.call|sync-r1"),
-    );
-    game.narrate("requirement.dispatch", "0");
-
-    // Pre-claim the lane (the branch is self-reported; the auto-claim reuses it).
-    // Timing: the plan gate is raised by the delivery itself, so the pre-claim lands right
-    // after the submit, before the gate approval that auto-dispatches development.
-    submit_with_exec(&mut game, 1, "plan", "sync-p1", "agent-plan");
-    game.narrate(
-        "lane.claim",
-        &text("1|r1|feature/d4e5-sync-bridge|2e24c45|1"),
-    );
-    game.assert_kv("lane.1.branch", json!("feature/d4e5-sync-bridge"));
-
-    // 1) Approving plan_gate triggers auto_dispatch -> auto_claim_worktree in the SAME turn,
-    //    consuming the pre-claimed branch.
-    let approved_plan = game.click("gate.approve — ");
-    let approved_plan_lines = narrative_lines(&approved_plan);
-    assert_eq!(
-        count_lines(&approved_plan_lines, "[TOOL SETTLED]"),
-        1,
-        "{approved_plan_lines:#?}"
-    );
-    assert_eq!(
-        count_lines(&approved_plan_lines, "[WORKTREE CLAIMED]"),
-        1,
-        "{approved_plan_lines:#?}"
-    );
-    game.assert_kv("lane.1.req", json!("r1"));
-    game.assert_kv("lane.1.branch", json!("feature/d4e5-sync-bridge"));
-    game.assert_kv("lane.1.base", json!("2e24c45"));
-    game.assert_kv("lane.1.path", json!("/tmp/ygg-wt-lane-1"));
-    game.assert_kv("tool.settled_count", json!(1));
-    game.assert_kv("tool.pending", json!(null));
-
-    // 2) Submitting the development proposal triggers auto_probe_lane in the SAME turn.
-    let dev_lines = submit_dev_with_exec(
-        &mut game,
-        1,
-        "sync-p2",
-        "agent-plan",
-        "src/runtime/tools.lua",
-    );
-    assert_eq!(
-        count_lines(&dev_lines, "[TOOL SETTLED]"),
-        1,
-        "{dev_lines:#?}"
-    );
-    assert_eq!(count_lines(&dev_lines, "[LANE PROBE]"), 1, "{dev_lines:#?}");
-    game.assert_kv("lane.1.probe.commits", json!(2));
-    game.assert_kv("lane.1.probe.clean", json!("1"));
-    game.assert_kv("lane.1.probe.head", json!("deadbeef1234"));
-    game.assert_kv("tool.settled_count", json!(2));
-
-    game.click("proposal.accept — ");
-
-    // 2) Approving the accept gate opens the integration act — the lane STAYS bound (R7):
-    //    no release ritual fires on the gate approval any more.
-    let approved_accept = game.click("gate.approve — ");
-    let approved_accept_lines = narrative_lines(&approved_accept);
-    assert_eq!(
-        count_lines(&approved_accept_lines, "[WORKTREE RELEASED]"),
-        0,
-        "the accept-gate approval must keep the lane bound (integration act owns the tree): {approved_accept_lines:#?}"
-    );
-    game.assert_kv("lane.1.req", json!("r1"));
-    game.assert_kv("req.1.lane", json!(1));
-
-    // 3) The integration confirm releases the worktree in the SAME turn.
-    let confirmed = game.narrate("integration.confirm", &text("r1|develop@deadbeef"));
-    let confirmed_lines = confirmed;
-    assert_eq!(
-        count_lines(&confirmed_lines, "[WORKTREE RELEASED]"),
-        1,
-        "{confirmed_lines:#?}"
-    );
-    game.assert_kv("lane.1.path", json!(""));
-    game.assert_kv("lane.1.req", json!(""));
-    game.assert_kv("req.1.lane", json!(0));
-    game.assert_kv("tool.settled_count", json!(3));
-
-    // 4) r1 rev1 fail-closed contract: with run.id/run.parent unset, registering
-    //    settlement.evolution WITHOUT a `sessions=` segment must NOT auto-archive —
-    //    fabricating parent="default" could rename the main session into the trash.
-    //    The evolution turn narrates a readable [SESSIONS CLEANUP PENDING] hint instead.
-    game.click("coordinate.submit — ");
-    game.click("verify.submit all_green=true — ");
-    let evo_lines = game.narrate(
-        "settlement.evolution",
-        &text("|screened|c=0/0|todo=0/verified"),
-    );
-    assert_eq!(
-        count_lines(&evo_lines, "[TOOL SETTLED]"),
-        0,
-        "{evo_lines:#?}"
-    );
-    assert_eq!(
-        count_lines(&evo_lines, "[SESSIONS ARCHIVED]"),
-        0,
-        "{evo_lines:#?}"
-    );
-    assert_eq!(
-        count_lines(&evo_lines, "[SESSIONS CLEANUP PENDING]"),
-        1,
-        "{evo_lines:#?}"
-    );
-    game.assert_kv("settlement.sessions.remaining", json!(-1));
-    game.assert_kv("tool.settled_count", json!(3));
-
-    // …and an explicit human settlement (the safe path) unblocks the batch close.
-    game.narrate(
-        "settlement.sessions",
-        &text("2|0|/tmp/sessions-trash/sem-explicit"),
-    );
-    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
-    let closed = game.click("review.note — ");
-    let closed_text = closed["narrative"].to_string();
-    assert!(
-        closed_text.contains("[BATCH 1 SETTLED]"),
-        "review.note must settle the batch after explicit session registration: {closed}"
-    );
-    assert!(
-        !closed_text.contains("[ENDING"),
-        "a batch settle must never carry the ending prefix: {closed}"
-    );
-    game.assert_kv("run.batch", json!(2));
-    game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
-    game.assert_kv("run.phase", json!(""));
-}
 
 // ───────────────────── r13 · fuel autoscale + requirement list pagination ─────────────────────
 

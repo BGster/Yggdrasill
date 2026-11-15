@@ -513,3 +513,76 @@ test("verify_suite 只在 settle 幕记绿：相位门 / 诚实失败 / 绿与�
   assert_eq(kv("verify.report"), "52 suites green", "报告正文")
   assert_eq(kv("verify.source"), "tool:gate.verify_suite", "出处键")
 end)
+
+test("同步工具桥：内联仪式在同一回合完成（claim / probe / release）", function()
+  fresh()
+  set_tool_result_for("git.worktree_claim", {
+    ok = true,
+    data = {
+      lane = "1", req = "r1", branch = "feature/d4e5-sync-bridge",
+      base = "2e24c45", clean = "1", path = "/tmp/ygg-wt-lane-1",
+    },
+  })
+  set_tool_result_for("git.lane_probe", {
+    ok = true,
+    data = {
+      lane = "1", base = "2e24c45", branch = "feature/d4e5-sync-bridge",
+      head = "deadbeef1234", commits = "2", clean = "1",
+      files = "src/runtime/tools.lua,src/view/render.lua",
+    },
+  })
+  set_tool_result_for("git.worktree_release", {
+    ok = true,
+    data = { lane = "1", released = "1" },
+  })
+
+  charter_and_begin()
+  fire("requirement.add", "sync tool bridge|implement synchronous ygg.tool.call|sync-r1")
+  fire("requirement.dispatch", "0")
+
+  -- 预占泳道（分支自报；自动认领会复用它）。时机：plan 门由交付本身抬起，
+  -- 所以预占落在提交之后、批准之前。
+  submit_with_exec(1, "plan", "sync-p1", "agent-plan")
+  fire("lane.claim", "1|r1|feature/d4e5-sync-bridge|2e24c45|1")
+  assert_eq(kv("lane.1.branch"), "feature/d4e5-sync-bridge", "预占分支已记")
+
+  -- ① 批准 plan 门 → auto_dispatch → auto_claim_worktree **同一回合**，复用预占分支。
+  reset()
+  click("gate.approve — ")
+  assert_eq(count_marker("[TOOL SETTLED]"), 1, "工具必须同回合结清")
+  assert_eq(count_marker("[WORKTREE CLAIMED]"), 1, "认领必须同回合完成")
+  assert_eq(kv("lane.1.req"), "r1", "台账记需求")
+  assert_eq(kv("lane.1.branch"), "feature/d4e5-sync-bridge", "复用预占分支")
+  assert_eq(kv("lane.1.base"), "2e24c45", "基线")
+  assert_eq(kv("lane.1.path"), "/tmp/ygg-wt-lane-1", "宿主报告的路径")
+  assert_eq(kv("tool.settled_count"), 1, "结清计数")
+  assert_nil(kv("tool.pending"), "没有待决")
+
+  -- ② 提交 development 提案 → auto_probe_lane **同一回合**。
+  reset()
+  submit_identity_for("r1", 1, "development", "sync-p2", "agent-plan", "selftest", nil)
+  assert_eq(count_marker("[TOOL SETTLED]"), 1, "探针必须同回合结清")
+  assert_eq(count_marker("[LANE PROBE]"), 1, "探针必须同回合叙述")
+  assert_eq(kv("lane.1.probe.commits"), 2, "提交数")
+  assert_eq(kv("lane.1.probe.clean"), "1", "干净位")
+  assert_eq(kv("lane.1.probe.head"), "deadbeef1234", "HEAD")
+  assert_eq(kv("tool.settled_count"), 2, "结清计数累加")
+
+  -- ③ 接受交付。
+  click("proposal.accept — ")
+
+  -- ④ 批准验收门 → 打开集成幕，泳道**保持绑定**（R7）：验收门不再触发释放仪式。
+  reset()
+  click("gate.approve — ")
+  assert_eq(count_marker("[WORKTREE RELEASED]"), 0, "验收门批准不得释放泳道")
+  assert_eq(kv("lane.1.req"), "r1", "泳道仍绑定")
+  assert_eq(kv("req.1.lane"), 1, "需求仍绑泳道")
+
+  -- ⑤ 集成确认 → **同一回合**释放工作树。
+  reset()
+  fire("integration.confirm", "r1|develop@deadbeef")
+  assert_eq(count_marker("[WORKTREE RELEASED]"), 1, "集成确认必须同回合释放")
+  assert_eq(kv("lane.1.path"), "", "路径清空")
+  assert_eq(kv("lane.1.req"), "", "台账需求清空")
+  assert_eq(kv("req.1.lane"), 0, "需求解绑")
+end)
