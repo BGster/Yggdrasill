@@ -136,9 +136,9 @@
       "sha256": "de0d78545b20f53ef20160a74f9f31487d33803ec9ccda97279fde03212b5968"
     },
     {
-      "byteLength": 2294,
+      "byteLength": 2285,
       "path": "src/view/guide.lua",
-      "sha256": "2f561a39e3bee133444a998c2d8b0a2898a8d3d160c44c1b20b869e3b4bf0b5c"
+      "sha256": "7cf7f1014d9883bc1add78ec73755af2a0fcbb7af6ccda37540802ccc74e0db5"
     },
     {
       "byteLength": 15806,
@@ -225,12 +225,12 @@
       "sha256": "ee576c5e1951932f3abdef820f0f4194788df27da71bdcaf1d6459525942b5f5"
     },
     {
-      "byteLength": 15685,
+      "byteLength": 13163,
       "id": "ygg:agent/playbook/ch1-foundation",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch1-foundation.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "840983b6add062fcdf25cdd651f876a875ed9a1062107ec146a1646695840ac8"
+      "sha256": "1936a86ce8ca1029c936b53a6bc582fe0b2baaeb43d212ec4729bc2c017b3272"
     },
     {
       "byteLength": 6057,
