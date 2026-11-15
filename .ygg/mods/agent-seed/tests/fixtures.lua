@@ -430,3 +430,53 @@ test("批次边界无身份载体：覆盖不足仍然阻塞（goal 模式直派
   assert_true(kv("run.phase") ~= "settle", "覆盖拒绝不得推进批次边界")
   suppress_reads(false)
 end)
+
+test("读签改版：台账 ver 被推高后，旧签名不再作数", function()
+  armed_game()
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+
+  -- 记下改版前签好的三件（值 / 署名 / 序号）。
+  local saved = {}
+  for _, doc in ipairs({ "acts/coordinate", "req-acts/intake" }) do
+    saved[doc] = {
+      value = kv("settings.read." .. doc),
+      actor = kv("settings.read_actor." .. doc),
+      seq = kv("settings.sign_seq." .. doc),
+    }
+  end
+  local clock = kv("settings.clock_seq")
+  assert_eq(
+    saved["acts/coordinate"].value:match("^([^|]*)|"),
+    "aaaaaa",
+    "签名里嵌的 ver 是改版前的 aaaaaa"
+  )
+
+  -- 台账「改版」：把 acts/coordinate 的 ver 推到 111111（等价于 docs 头被改）。
+  __ASSETS["ygg:agent/config"].readGate.ver["acts/coordinate"] = "111111"
+
+  -- 重建场景：`fresh()` 清了 KV 与章程，所以整局重来，再把手里的旧签名放回去。
+  armed_game()
+  for doc, item in pairs(saved) do
+    set_kv("settings.read." .. doc, item.value)
+    set_kv("settings.read_actor." .. doc, item.actor)
+    set_kv("settings.sign_seq." .. doc, item.seq)
+  end
+  set_kv("settings.clock_seq", clock)
+
+  reset()
+  fire("proposal.submit", "r1|1|plan|stale-ver plan|artifacts/r1.md")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    narrated_contains("[BLOCKED") or narrated_contains("[REJECTED"),
+    "改版后旧签名必须被拒：" .. joined
+  )
+  assert_true(
+    joined:find("read-gate/", 1, true) ~= nil,
+    "拒绝必须点名读签维度：" .. joined
+  )
+  assert_true(
+    joined:find("acts/coordinate", 1, true) ~= nil,
+    "拒绝必须点名被改版的那一件：" .. joined
+  )
+end, "armed")

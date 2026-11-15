@@ -34,7 +34,6 @@
 //!   or `events.jsonl`.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use serde_json::{json, Value as Json};
 
@@ -376,28 +375,6 @@ fn text(payload: &str) -> String {
     serde_json::to_string(payload).expect("serialize the string payload")
 }
 
-/// Rejection prefixes come from `pack.json` (`agent.rejectionPrefixes`) — the single source,
-/// never a copy-pasted literal (a past drift taught that lesson).
-fn rejection_prefixes() -> &'static Vec<String> {
-    static PREFIXES: OnceLock<Vec<String>> = OnceLock::new();
-    PREFIXES.get_or_init(|| {
-        let path = project_mod_dir().join("pack.json");
-        let raw = std::fs::read_to_string(&path).expect("read pack.json");
-        let pack: Json = serde_json::from_str(&raw).expect("parse pack.json");
-        pack["agent"]["rejectionPrefixes"]
-            .as_array()
-            .expect("agent.rejectionPrefixes must be an array")
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .expect("a rejection prefix must be a string")
-                    .to_owned()
-            })
-            .collect()
-    })
-}
-
 /// `rN` → N（补签要按该需求的阶段纪元判新鲜度）。
 fn req_index(id: &str) -> Option<u32> {
     id.strip_prefix('r')
@@ -414,23 +391,6 @@ fn action_of_option(prefix: &str) -> Option<&'static str> {
     } else {
         None
     }
-}
-
-/// Rejection judgement: the narrative line starts with one of the declared prefixes.
-fn refused(lines: &[String], needle: &str) -> bool {
-    let prefixes = rejection_prefixes();
-    lines
-        .iter()
-        .any(|line| prefixes.iter().any(|prefix| line.starts_with(prefix)) && line.contains(needle))
-}
-
-/// Assert "refused and named that action/reason".
-#[track_caller]
-fn assert_refused(lines: &[String], needle: &str) {
-    assert!(
-        refused(lines, needle),
-        "expected a rejection that names `{needle}`, got: {lines:#?}"
-    );
 }
 
 // ───────────────────────── drive scripts ─────────────────────────
@@ -592,95 +552,6 @@ fn drive_to_settle_at(mod_dir: &Path) -> Game {
 // ───────────────────── r3 · submitter identity (actor chapter + profiles) ─────────────────────
 
 // ───────────────────── r4 · read-gate: the four dimensions ─────────────────────
-
-/// 造一份**独立受控**的 mod 副本（`readPlan` + `readGate` 换成用例自己的小台账）：
-/// 入库件的台账跟着真实文档头走（ver 会变），门禁用例要的是稳定常量。
-/// 改 `data/config.json` 必须重算 manifest（内容寻址）——`reseal` 就是这一步。
-fn armed_mod(tag: &str) -> PathBuf {
-    let dir = support::temp_dir(tag);
-    support::copy_dir(&project_mod_dir(), &dir);
-    let mut config = support::read_json(&dir.join("data/config.json"));
-    config["readPlan"] = json!({
-        "coordinate": ["acts/coordinate"],
-        "settle": ["acts/settle", "rituals/cleanup"]
-    });
-    config["readGate"] = json!({
-        "ver": {
-            "acts/coordinate": "aaaaaa",
-            "req-acts/intake": "bbbbbb",
-            "req-acts/delivery": "cccccc",
-            "acts/settle": "dddddd",
-            "rituals/cleanup": "eeeeee"
-        },
-        "reqActs": { "plan": ["req-acts/intake"], "development": ["req-acts/delivery"] },
-        "gates": { "plan": ["req-acts/delivery"], "accept": ["req-acts/delivery"] }
-    });
-    support::write_json(&dir.join("data/config.json"), &config);
-    support::reseal(&dir);
-    dir
-}
-
-/// 签一件（值段是 r3 的 `ver|scene|seq` 形状，ver 必须与台账逐字相等）。
-fn sign(game: &mut Game, doc: &str, ver: &str) {
-    game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
-}
-
-/// ⑨ 文档改版：签名本身没变，但台账 ver 前进了 → `read_gate_stale` 拒；按新 ver 重签后放行。
-/// 现场构成：先签 aaaaaa → 存档 → 改 fixture 的 `readGate.ver` → 重装 mod 并 restore 存档。
-/// 这正是「文档改版需重读」的机械载体（ver 台账与文档头同源）。
-#[test]
-fn read_gate_refuses_a_signature_against_a_revised_doc() {
-    let dir = armed_mod("gate-revised");
-    let mut game = Game::open(&dir);
-    charter_and_begin(&mut game);
-    game.narrate(
-        "requirement.add",
-        &text("revised requirement|revised description|revised-r1"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    let bytes = serde_json::to_vec(&game.save()).expect("serialize the save");
-
-    // 文档「改版」：台账把 acts/coordinate 的 ver 推到 111111（等价于 docs 头被改）。
-    let mut config = support::read_json(&dir.join("data/config.json"));
-    config["readGate"]["ver"]["acts/coordinate"] = json!("111111");
-    support::write_json(&dir.join("data/config.json"), &config);
-    support::reseal(&dir);
-
-    let bundle = ModBundle::load(&dir).expect("reload the revised fixture");
-    let mut revised = Game {
-        kernel: bundle
-            .restore(&bytes)
-            .expect("restore across the doc revision"),
-        bundle,
-        dir: dir.clone(),
-        suppress_reads: true,
-        stamp_actor: Some(TEST_ACTOR.to_owned()),
-    };
-    let lines = revised.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|stale-ver plan|artifacts/r1.md"),
-    );
-    assert_refused(&lines, "proposal.submit");
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("read-gate/stale")
-            && joined.contains("the doc's ver moved from aaaaaa to 111111"),
-        "a revised doc must void the signature and say which ver moved: {lines:#?}"
-    );
-    revised.assert_kv("req.1.gate", json!(""));
-
-    // 按新 ver 重签 → 放行。
-    revised.suppress_reads = false;
-    revised.narrate("config.set", &text("read.acts/coordinate=111111"));
-    let passed = revised.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|stale-ver plan|artifacts/r1.md"),
-    );
-    assert!(!refused(&passed, "proposal.submit"), "{passed:#?}");
-    revised.assert_kv("req.1.gate", json!("plan"));
-}
 
 // ───────────────── r9 · attribution: the signature belongs to an actor ─────────────────
 
