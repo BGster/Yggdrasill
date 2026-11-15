@@ -1838,21 +1838,6 @@ fn collect_files_with(dir: &std::path::Path, suffix: &str, out: &mut Vec<PathBuf
     }
 }
 
-/// 词法归一化：消 `./` 与 `..` 段（不碰磁盘）。
-fn normalize_repo_path(path: &str) -> String {
-    let mut out: Vec<&str> = Vec::new();
-    for segment in path.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                out.pop();
-            }
-            other => out.push(other),
-        }
-    }
-    out.join("/")
-}
-
 /// r6：`scenes.json` 的 `reference` 段——**登记但不拦门禁**，且默认值被负向断言钉死。
 ///
 /// ① 三个 id 都能解析到 `docs/context/<id>.md`，且文件头 `id` 与表中值逐字相等；
