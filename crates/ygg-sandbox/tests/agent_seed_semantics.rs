@@ -228,7 +228,12 @@ impl Game {
     }
 
     /// 该动作的必读集 + 每件的台账 ver（读不到 ver 的件不补签，交给判据叙事告警）。
-    fn bearing(&mut self, action: &str, stage: Option<&str>, req: Option<u32>) -> Vec<(String, String)> {
+    fn bearing(
+        &mut self,
+        action: &str,
+        stage: Option<&str>,
+        req: Option<u32>,
+    ) -> Vec<(String, String)> {
         let config = self.mod_config();
         let plan = config["readPlan"].clone();
         let gate = config["readGate"].clone();
@@ -258,7 +263,11 @@ impl Game {
                     None => self.pending_gate().map(|(index, _)| index),
                 };
                 if let Some(index) = index {
-                    if let Some(kind) = self.kv(&format!("req.{index}.gate")).as_str().map(str::to_owned) {
+                    if let Some(kind) = self
+                        .kv(&format!("req.{index}.gate"))
+                        .as_str()
+                        .map(str::to_owned)
+                    {
                         push(&gate["gates"][kind.as_str()]);
                     }
                 }
@@ -276,10 +285,7 @@ impl Game {
 
     /// 本动作的作用域进入 seq：幕纪元与该需求阶段纪元取最大者（与 `gates` 的 scope_epoch_of 同口径）。
     fn scope_epoch(&mut self, req: Option<u32>) -> u64 {
-        let mut epoch = self
-            .kv("settings.epoch.act.seq")
-            .as_u64()
-            .unwrap_or(0);
+        let mut epoch = self.kv("settings.epoch.act.seq").as_u64().unwrap_or(0);
         if let Some(index) = req {
             let stage = self
                 .kv(&format!("settings.epoch.req.{index}.stage.seq"))
@@ -292,7 +298,10 @@ impl Game {
 
     /// 签名序号：值段第三段（r3 形状 `ver|scene|seq`），为 0 时回落 `settings.sign_seq.<doc>`。
     fn sign_seq_of(&mut self, doc: &str, value: &str) -> u64 {
-        let third = value.split('|').nth(2).and_then(|part| part.parse::<u64>().ok());
+        let third = value
+            .split('|')
+            .nth(2)
+            .and_then(|part| part.parse::<u64>().ok());
         match third {
             Some(seq) if seq > 0 => seq,
             _ => self
@@ -311,10 +320,7 @@ impl Game {
         let docs = self.bearing(action, stage, req);
         let epoch = self.scope_epoch(req);
         let now = self.kv("settings.clock_seq").as_u64().unwrap_or(0);
-        let window = self
-            .kv("settings.readGate.window")
-            .as_u64()
-            .unwrap_or(80);
+        let window = self.kv("settings.readGate.window").as_u64().unwrap_or(80);
         for (doc, ver) in docs {
             if ver.is_empty() {
                 continue;
@@ -409,7 +415,8 @@ fn rejection_prefixes() -> &'static Vec<String> {
 
 /// `rN` → N（补签要按该需求的阶段纪元判新鲜度）。
 fn req_index(id: &str) -> Option<u32> {
-    id.strip_prefix('r').and_then(|rest| rest.parse::<u32>().ok())
+    id.strip_prefix('r')
+        .and_then(|rest| rest.parse::<u32>().ok())
 }
 
 /// r4 读签门禁的受控动作：菜单项前缀 → 动作名（其余菜单项返回 None = 不补签）。
@@ -2499,10 +2506,7 @@ fn read_scope_boundary_wipes_every_signature() {
         json!("acts/coordinate,coordinate/dispatch"),
     );
     let amended = game.narrate("requirement.amend", &text("r1||amended description"));
-    assert!(
-        !refused(&amended, "requirement.amend"),
-        "{amended:#?}"
-    );
+    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
     game.assert_kv("settings.read.acts/coordinate", json!(""));
     game.assert_kv("settings.read.coordinate/dispatch", json!(""));
     game.assert_kv("settings.read_index", json!(""));
@@ -2892,7 +2896,9 @@ fn read_gate_refuses_a_signature_against_a_revised_doc() {
 
     let bundle = ModBundle::load(&dir).expect("reload the revised fixture");
     let mut revised = Game {
-        kernel: bundle.restore(&bytes).expect("restore across the doc revision"),
+        kernel: bundle
+            .restore(&bytes)
+            .expect("restore across the doc revision"),
         bundle,
         dir: dir.clone(),
         suppress_reads: true,
