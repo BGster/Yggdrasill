@@ -178,6 +178,11 @@ YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"
 # mkdir -p ~/.local/bin && ln -sfn "$YGGDRASILL_ROOT/.ygg/bin/egg" ~/.local/bin/egg
 ```
 
+**On macOS the installed copy must be ad-hoc signed, or the kernel kills it on first exec** (`exit 137`,
+no error text — it looks like a broken build): run `codesign --sign - --force .ygg/bin/egg` after the
+install. `scripts/install-egg.sh` does this itself (skipped when `codesign` is absent); if you copy the
+binary by hand, sign **the copy** — a signature on `target/release/examples/egg` does not survive `cp`.
+
 `egg` resolves through `~/.local/bin/egg` to `<repo>/.ygg/bin/egg`; rerun the installer after rebuild,
 or remove the global symlink to roll back. `.ygg/mods/agent-seed` is the single Mod source;
 `./scripts/sync-seed-mod.sh` recalculates its manifest and `--check` verifies it plus the package symlink.
