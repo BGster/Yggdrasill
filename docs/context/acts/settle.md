@@ -1,7 +1,7 @@
 # 盘点幕 · settle
 > **id** acts/settle · **幕** settle · **触发** `coordinate.submit` 成功（进入 settle 相位）
 > **读不到代价** hard-refusal（载荷形状错、`c=`/`cls=` 计数不自洽被拒）
-> **ver** 000000
+> **ver** 97f4ce
 
 **场景台词（知识权威）**：任务「{{title}}」：{{count}} 条需求（{{done}} 条已终态）｜require_all_green {{gates}}。四项齐备（验证、演进登记、会话清理、待办清理）自动进发布幕。
 

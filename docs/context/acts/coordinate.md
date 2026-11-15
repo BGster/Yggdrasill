@@ -1,7 +1,7 @@
 # 协调幕 · coordinate
 > **id** acts/coordinate · **幕** coordinate · **触发** 进入协调幕 / 每次派发前
 > **读不到代价** hard-refusal（载荷形状错、rev stale 被拒）
-> **ver** 000000
+> **ver** a50977
 
 **场景台词（知识权威）**：任务「{{title}}」：{{goal}}｜{{count}} 条需求（{{open}} 条进行中）｜{{pending}} 条待受理提案。这一层你只做三件事：**派发、串行受理、过两道门禁**；其余需求的分析/计划/开发可异步并行。
 

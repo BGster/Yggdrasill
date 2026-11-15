@@ -1,7 +1,7 @@
 # 退役终态 · retired
 > **id** acts/retired · **幕** retired · **触发** `run.retire` 武装后的最后一次 `review.note`
 > **读不到代价** silent-drift（终态只读，误读不会推进也不会损坏状态）
-> **ver** 000000
+> **ver** c7f2a3
 
 **场景台词（知识权威）**：本局已退役。
 

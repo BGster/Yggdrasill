@@ -1,7 +1,7 @@
 # 立局幕 · charter
 > **id** acts/charter · **幕** charter · **触发** 进入立局幕 / `charter.set` / `run.begin`
 > **读不到代价** hard-refusal（三件套不齐则 `coordinate.submit` 被 `gate_charter_first` 拒）
-> **ver** 000000
+> **ver** 3187d8
 
 **场景台词（知识权威）**：立局 · 第 {{batch}} 批前。章程：「{{title}}」｜目标：{{goal}}｜成功判据：{{success}}。`charter.set` 在立局内可反复修订；三件套齐备后 `run.begin` 开工（章程随之锁定）。
 

@@ -1,7 +1,7 @@
 # Yggdrasill · 架构决策台账 · 核心引擎与平台（D1–D21）
 > **id** archive/decisions-engine · **幕** archive · **触发** 查 D1–D21 裁决
 > **读不到代价** silent-drift
-> **ver** 000000
+> **ver** b672c8
 
 > **定位**：引擎与平台层架构决策的权威台账（含台账维护规则，与 decisions-agent 共用同一段引言）。
 > **replaces**：CONTEXT §5 引言 + §5.1（L134–161）（搬运基线 `3a2536f`）

@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-flow
 > **id** copy/flow · **幕** all · **触发** 改 `beats-flow.json` 前
 > **读不到代价** silent-drift
-> **ver** 000000
+> **ver** 4066bc
 
 > **定位**：`beats-flow.json` 63 键的句式知识权威：回执版式、模式提示、拒绝、章程与幕转场。
 > **上游**：[copy/README.md](README.md)（总索引与协议读法） · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-flow.json`

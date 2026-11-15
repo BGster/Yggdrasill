@@ -1,7 +1,7 @@
 # Yggdrasill · Monorepo 模块拓扑与依赖白名单
 > **id** cold-start/topology · **幕** cold-start · **触发** 冷启动 / 改仓库结构前
 > **读不到代价** irreversible（依赖白名单误改）
-> **ver** 000000
+> **ver** f17329
 
 > **定位**：仓库目录拓扑全景与 4 条硬性依赖不变量的唯一清单。
 > **replaces**：CONTEXT §4（L97–133）（搬运基线 `3a2536f`）

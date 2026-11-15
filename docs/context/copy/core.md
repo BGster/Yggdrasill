@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · core 与全局键账
 > **id** copy/core · **幕** all · **触发** 改 `core.json` 前
 > **读不到代价** silent-drift
-> **ver** 000000
+> **ver** c0b732
 
 > **定位**：`core.json` 的 options 27 / tuning 8 / endings 1（共 36 键），以及跨域指针壳与全局键数核对。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/core.json`

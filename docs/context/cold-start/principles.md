@@ -1,7 +1,7 @@
 # Yggdrasill · 架构与运营原则（P 列表）
 > **id** cold-start/principles · **幕** cold-start · **触发** 冷启动 / 设计取舍前
 > **读不到代价** hard-refusal
-> **ver** 000000
+> **ver** 4703e1
 
 > **定位**：P1–P11 工程原则与 PLAY 家族注记，约束一切实现、评审与文档组织。
 > **replaces**：CONTEXT §3（L62–96）（搬运基线 `3a2536f`）

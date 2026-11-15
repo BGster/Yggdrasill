@@ -1,7 +1,7 @@
 # Yggdrasill · 盘点清理政策（cleanup-policy）
 > **id** rituals/cleanup · **幕** settle · **触发** `review.note` 批结算 / 退役前
 > **读不到代价** hard-refusal（未清理则 `[SESSIONS CLEANUP PENDING]` 阻塞收口；误触他人会话是越界）
-> **ver** 000000
+> **ver** 9326e8
 
 **定位**：盘点幕两项清理（子代理会话清理 / 主会话待办清理）的政策正文知识权威。mod 的 `beats-settlement.settlement_sessions_unsetted_hint` 与 `settlement_todo_segment` 是本文的运行时投影（判据短句 + 指针）。
 

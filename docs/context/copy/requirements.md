@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-requirements
 > **id** copy/requirements · **幕** all · **触发** 改 `beats-requirements.json` 前
 > **读不到代价** silent-drift
-> **ver** 000000
+> **ver** dce26a
 
 > **定位**：`beats-requirements.json` 144 键的句式知识权威：派发、提案、门禁、修订、拆分合并与台账面板。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-requirements.json`

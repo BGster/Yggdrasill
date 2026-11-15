@@ -1,7 +1,7 @@
 # Yggdrasill · 架构决策台账 · Agent 治理（D-MA1–26）
 > **id** archive/decisions-agent · **幕** archive · **触发** 查 D-MA1–29 / 取决策号前
 > **读不到代价** silent-drift
-> **ver** 000000
+> **ver** 28ab0e
 
 > **定位**：Agent 治理（M-Agent）架构决策的权威台账（含台账维护规则，与 decisions-engine 共用同一段引言）。
 > **replaces**：CONTEXT §5 引言 + §5.2（L134–137, L162–189）（搬运基线 `3a2536f`）

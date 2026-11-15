@@ -1,7 +1,7 @@
 # Yggdrasill · 产品愿景与双重身份
 > **id** cold-start/vision · **幕** cold-start · **触发** 冷启动 / 判断产品身份
 > **读不到代价** silent-drift
-> **ver** 000000
+> **ver** a7b0f8
 
 > **定位**：Yggdrasill 的统一命题与两种产品身份（游戏与互动小说平台 / Agent 工作流治理平台），产品形态决策的领域起点。
 > **replaces**：CONTEXT §1（L25–42）（搬运基线 `3a2536f`）

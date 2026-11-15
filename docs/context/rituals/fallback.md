@@ -1,7 +1,7 @@
 # 无 egg 执行本章（无 mod 降级路径）
 > **id** rituals/fallback · **幕** all（无 egg 环境） · **触发** 未安装 egg / mod 时的每一次推进
 > **读不到代价** silent-drift（无机器 fail-closed 拦截，纪律靠人与会话自律；漏读即静默降级）
-> **ver** 000000
+> **ver** 04c7b8
 
 不安装 egg / mod 时，本工作流仍可运行——**context 树（含本文）就是完整的工作流底座**：
 

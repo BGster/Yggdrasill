@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-map-guide
 > **id** copy/map-guide · **幕** all · **触发** 改 `beats-map-guide.json` 前
 > **读不到代价** silent-drift
-> **ver** 000000
+> **ver** a8c999
 
 > **定位**：`beats-map-guide.json` 38 键的句式知识权威：地图视图、菜单行、人机门禁与节点注记。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-map-guide.json`

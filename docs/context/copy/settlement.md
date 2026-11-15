@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-settlement
 > **id** copy/settlement · **幕** all · **触发** 改 `beats-settlement.json` 前
 > **读不到代价** silent-drift
-> **ver** 000000
+> **ver** 2e7c6c
 
 > **定位**：`beats-settlement.json` 54 键的句式知识权威：盘点四项、批结算、退役、发布与 tools 机证。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-settlement.json`
