@@ -14,7 +14,7 @@ The user runs real-data verification and pastes the output; synthetic data under
 
 0b. **serve is read-only**: it must never gain a run-state write endpoint; human gates stay on the
     CLI/daemon ticket path. The sole observation-root registry exception and its zero-disk-write proof
-    are specified in `docs/design/serve.md` §3.7.6; read it before touching serve.
+    are specified in `docs/design/host/serve.md` §3.7.6; read it before touching serve.
 
 0c. **Scene gate — read the authoritative body before acting in any scene.** Before executing any action
     of a scene (prologue / charter / coordinate / settle / release / retired, or a requirement stage),
@@ -49,7 +49,7 @@ The user runs real-data verification and pastes the output; synthetic data under
    pass the two mandatory gates, and declare batch release (`release.confirm` / `release.skip`). It never
    implements lane work. After filing a requirement, its first action is `requirement.dispatch`.
    Executor registration, identity, requirement granularity and decision-ID allocation are routed by
-   `docs/context/req-acts/intake.md` and `docs/context/rituals/dispatch.md`; identity semantics: `docs/design/identity.md`.
+   `docs/context/req-acts/intake.md` and `docs/context/rituals/dispatch.md`; identity semantics: `docs/design/mod/identity.md`.
 
 3. **Render receipts in full; never parse-and-truncate**: no sliced narratives, first-line-only reads,
    `startswith` filtering, or grep/python summaries. Every dispatch prints all narrative lines and hands
@@ -77,7 +77,7 @@ The user runs real-data verification and pastes the output; synthetic data under
    the process first — back-filling launders a violation into a compliant-looking record.
 
 6. **Credentials live only in `.env` / `.env.local`**: resources, configuration and reports name keys only,
-   never values. Runtime credential resolution: `docs/design/tool-bridge.md`.
+   never values. Runtime credential resolution: `docs/design/mod/tool-bridge.md`.
 
 7. **Self-evolution has exactly two decision/enforcement exits: `AGENTS.md` or the Mod — no side scripts,
    no CLI source changes**. Choose this file for a cold-start ruling or `.ygg/mods/agent-seed/` for machine
@@ -89,7 +89,7 @@ The user runs real-data verification and pastes the output; synthetic data under
    - Every evolution needs all three: ① the specific action blocked; ② the visible violation symptom;
      ③ one runnable confirmation. Fewer than three means it is not written. A verbal promise is unhandled.
    - Candidate screening and declaration limits: `docs/context/acts/settle.md` + playbook
-     `evolution`. Mod text path hygiene: `docs/design/mod-package.md`.
+     `evolution`. Mod text path hygiene: `docs/design/mod/mod-package.md`.
 
 8. **Every prompt-surface edit must account for the full producer/consumer lifecycle.** A normative rule
    has exactly one authoritative carrier. Other carriers are pointers or explicitly labelled runtime
@@ -128,7 +128,7 @@ YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"
 `egg` resolves through `~/.local/bin/egg` to `<repo>/.ygg/bin/egg`; rerun the installer after rebuild,
 or remove the global symlink to roll back. `.ygg/mods/agent-seed` is the single Mod source;
 `./scripts/sync-seed-mod.sh` recalculates its manifest and `--check` verifies it plus the package symlink.
-Storage/version compatibility and fail-closed details: `docs/design/cli-daemon.md`.
+Storage/version compatibility and fail-closed details: `docs/design/host/cli-daemon.md`.
 
 ### Start
 
@@ -150,7 +150,7 @@ curl -X POST http://127.0.0.1:7800/api/roots -H 'Content-Type: application/json'
 .ygg/bin/egg serve --port 7801 --poll-ms 300  # explicit separate instance / faster polling
 ```
 
-Registry lifecycle, DELETE, panel routes and single-instance behavior: `docs/design/serve.md`.
+Registry lifecycle, DELETE, panel routes and single-instance behavior: `docs/design/host/serve.md`.
 
 ### Continue
 
@@ -171,7 +171,7 @@ $A --event map.show                                  # operation view + all-chap
 
 Type `q` or end stdin. External-drive `HUMAN[:reason]`, timeout, non-zero exit, invalid output or an
 out-of-range index pauses safely without advancing or falling back to option 1; `goal` is independent of
-that channel. Re-run Continue to resume. Lane reuse/parking: `docs/design/lanes.md`.
+that channel. Re-run Continue to resume. Lane reuse/parking: `docs/design/host/lanes.md`.
 
 ### Settle and finish cadence
 
@@ -198,17 +198,26 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 | Dispatch / submit / integration ritual | `docs/context/rituals/dispatch.md`; playbook `branches`, `integration` |
 | Verification / evidence / cleanup | `docs/context/acts/settle.md` + `docs/context/rituals/cleanup.md`; playbook `gates`, `live_evidence`, `evidence`, `run_artifacts` |
 | No egg / no mod fallback | `docs/context/rituals/fallback.md` |
-| Mod / host / tool touch | `docs/design/state-machine.md`, `mod-package.md`, `tool-bridge.md`; playbook `mod_engineering`, `host_contract`, `tools` |
-| serve / lanes / CLI / identity touch | `docs/design/serve.md`, `lanes.md`, `cli-daemon.md`, `identity.md` |
-| Runtime copy / protocol wording | `docs/context/copy/README.md` (seven-domain index) + `docs/design/prompt-surface.md` |
+| Entry — which design file for this surface | `docs/design/README.md` (module → file → recall moment) |
+| Mod / host / tool touch | `docs/design/kernel/state-machine.md`, `docs/design/mod/mod-package.md`, `docs/design/mod/tool-bridge.md`; playbook `mod_engineering`, `host_contract`, `tools` |
+| serve / lanes / CLI / identity touch | `docs/design/host/serve.md`, `docs/design/host/lanes.md`, `docs/design/host/cli-daemon.md`, `docs/design/mod/identity.md` |
+| Kernel semantics / storage surface touch | `docs/design/kernel/state-machine.md`, `docs/design/kernel/events.md`, `docs/design/kernel/state-surface.md`, `docs/design/kernel/wire-protocol.md` |
+| Runtime copy / protocol wording | `docs/context/copy/README.md` (seven-domain index) + `docs/design/mod/prompt-surface.md` |
 | Archive: why a ruling exists | `docs/context/archive/decisions-engine.md`, `archive/decisions-agent.md`, `cold-start/vision.md`, `cold-start/principles.md` |
-| Repository topology | `docs/context/cold-start/topology.md` + `docs/design/system-boundaries.md` |
+| Repository topology | `docs/context/cold-start/topology.md` + `docs/context/cold-start/system-boundaries.md` |
+| Whole-run / requirement walk-through | `docs/context/story/run-story.md`, `docs/context/story/requirement-story.md` |
 
 The flat `docs/context/` paths retired by r1 (`workflow-acts.md`, `dispatch-ritual.md`, `copy-contract-*.md` 等 15 条)
 were **compat shims for then-frozen consumers**; r5 rewrote every mod pointer and crates test path onto the
 authoritative files and deleted them, so they no longer exist and must not be reintroduced. The migration record
 lives in `docs/context/README.md`; history and the original ruling (D-MA29 two-way split + mandatory exit
 condition) live in git and `docs/context/archive/decisions-*.md`, never here.
+
+The flat `docs/design/` paths (`<topic>.md`) retired by r6, for the same reason: they became `kernel/ host/ mod/`
+(entry `docs/design/README.md`) and **no shim was left** — `docs/design/*.md` may contain only `README.md`, which
+`design_tree_index_is_complete_and_ids_match_paths` asserts. The three behaviour narratives (`run-story`,
+`requirement-story`, `system-boundaries`) moved to `docs/context/` (`story/`, `cold-start/`) because they have no
+code consumer — the design/context criterion is written once in `docs/wiki-governance.md`.
 
 Every playbook chapter has a phase-entry route; `map.show` additionally prints the complete chapter index.
 Each phase receipt names its chapter titles, summaries and rule counts. Read the fragment whose

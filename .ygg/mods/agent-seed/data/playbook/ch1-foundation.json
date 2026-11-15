@@ -5,7 +5,7 @@
       "order": 1,
       "title": "1. Credentials and the data red line",
       "summary": "Highest priority, non-negotiable: credentials never enter the repository or any conversation artifact; the committed surface (game settings / playbook / experience-growth Mod / evolution output) is equally off limits for sensitive values, and every example uses synthetic data.",
-      "source": "Runtime projection of AGENTS.md data red line and docs/design/tool-bridge.md (credential resolution); not an independent authority",
+      "source": "Runtime projection of AGENTS.md data red line and docs/design/mod/tool-bridge.md (credential resolution); not an independent authority",
       "priority": "critical",
       "rules": [
         {
@@ -30,7 +30,7 @@
           "id": "credentials.settings-not-a-secret-vault",
           "modality": "must",
           "text": "The runtime KV family `settings.*` is no exception for sensitive values: the static defaults (`data/config.json`) and the dynamic overrides (`settings.*` written by `config.set`) only ever hold non-sensitive behavior switches, numbers and experience text (such as `evolution.mode` / `gates.require_all_green` / `evolution.max_per_run`).",
-          "basis": "docs/context/decisions-engine.md + docs/context/decisions-agent.md (ex-CONTEXT §5; user decision added 2026-10-29)"
+          "basis": "docs/context/archive/decisions-engine.md + docs/context/archive/decisions-agent.md (ex-CONTEXT §5; user decision added 2026-10-29)"
         },
         {
           "id": "credentials.secret-values-local-only",
@@ -87,7 +87,7 @@
         {
           "id": "repository.vision-single-source",
           "modality": "must",
-          "text": "The decision tables in `docs/context/decisions-engine.md` and `docs/context/decisions-agent.md` are the single source of truth for project decisions; any new decision produced by a design discussion (D11+) must be written back into those tables.",
+          "text": "The decision tables in `docs/context/archive/decisions-engine.md` and `docs/context/archive/decisions-agent.md` are the single source of truth for project decisions; any new decision produced by a design discussion (D11+) must be written back into those tables.",
           "basis": "historical AGENTS.md (pre-migration; see git history) (constraint 1)"
         },
         {
@@ -100,7 +100,7 @@
           "id": "repository.schema-single-source",
           "modality": "must",
           "text": "Resource format contracts live only in `packages/schema/schemas/` (D15): the TS side (ajv) and the Rust side (jsonschema crate) read the same file, and neither side may keep an inline copy.",
-          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 2; docs/context/decisions-engine.md D15/D20"
+          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 2; docs/context/archive/decisions-engine.md D15/D20"
         },
         {
           "id": "repository.schema-does-not-constrain-lua",
@@ -112,19 +112,19 @@
           "id": "repository.core-purity",
           "modality": "must-not",
           "text": "`crates/ygg-core` has a zero-dependency invariant: no internal module, no DOM/platform API, no rendering library; the allowlist is serde / serde_json / thiserror only.",
-          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 3; docs/context/principles.md & docs/context/topology.md"
+          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 3; docs/context/cold-start/principles.md & docs/context/cold-start/topology.md"
         },
         {
           "id": "repository.vm-dependency-location",
           "modality": "must",
           "text": "VM dependencies such as mlua may appear only in `crates/ygg-sandbox` (D12).",
-          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 3; docs/context/decisions-engine.md D12"
+          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 3; docs/context/archive/decisions-engine.md D12"
         },
         {
           "id": "repository.dependency-direction",
           "modality": "must",
           "text": "Dependency direction is one-way: `ygg-sandbox` → `ygg-core` + `ygg-schema`; `ygg-wasm` → `ygg-sandbox`; `ygg-lint` has no ygg-* kernel dependency; `ygg-schema` and `ygg-core` have no code dependency edge.",
-          "basis": "docs/context/topology.md (inter-module dependency constraints); the Cargo.toml header note of each crate"
+          "basis": "docs/context/cold-start/topology.md (inter-module dependency constraints); the Cargo.toml header note of each crate"
         },
         {
           "id": "repository.living-docs-closed-loop",
@@ -135,8 +135,8 @@
         {
           "id": "repository.mod-text-hygiene",
           "modality": "must-not",
-          "text": "Runtime projection of `docs/design/mod-package.md` (Mod text hygiene): never reintroduce retired mod/CLI path literals into `data/texts/**` or `data/playbook/**`; only a same-line `[deprecated-ref]` marks a genuine historical reference. Run the specification's grep probe (empty output required) or the semantic test goes red and executors follow a fail-closed path.",
-          "basis": "docs/design/mod-package.md (runtime projection)"
+          "text": "Runtime projection of `docs/design/mod/mod-package.md` (Mod text hygiene): never reintroduce retired mod/CLI path literals into `data/texts/**` or `data/playbook/**`; only a same-line `[deprecated-ref]` marks a genuine historical reference. Run the specification's grep probe (empty output required) or the semantic test goes red and executors follow a fail-closed path.",
+          "basis": "docs/design/mod/mod-package.md (runtime projection)"
         }
       ]
     },
@@ -145,7 +145,7 @@
       "order": 3,
       "title": "3. Branch management",
       "summary": "master accepts merges only; all development happens on feature branches that integrate through the standing `develop` branch (feature → develop → master); every merge is no-FF.",
-      "source": "Runtime projection of docs/context/acts/release.md and docs/design/lanes.md; historical branch rulings remain in git history",
+      "source": "Runtime projection of docs/context/acts/release.md and docs/design/host/lanes.md; historical branch rulings remain in git history",
       "priority": "standard",
       "rules": [
         {

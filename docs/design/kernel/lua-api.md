@@ -1,8 +1,10 @@
 # Yggdrasill · Lua 沙箱宿主 API 契约（ygg.*）
+> **id** kernel/lua-api · **模块** ① ygg 内核 · **触发** 新增或修改 ygg.* 宿主 API 之前
+> **读不到代价** hard-refusal（未白名单 API 在加载或调用时被拒）
 
 > **定位**：ygg.* 全 API 面签名、返回契约与副作用类别（含接口契约章题与章内导航）。
 > **replaces**：DESIGN §3 章题 + §3.1（L383–402）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[mod-package.md](mod-package.md) · [action-faces.md](action-faces.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[mod-package.md](../mod/mod-package.md) · [action-faces.md](../mod/action-faces.md)
 > **搬运**：以下正文自 DESIGN.md L383–L384 + DESIGN.md L385–L402 逐字迁移，不重写语义。
 
 ## 3. 接口契约（规范线协议与 API 面）

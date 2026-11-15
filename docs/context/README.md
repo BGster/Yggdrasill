@@ -1,13 +1,16 @@
 # Yggdrasill · Context 召回树（docs/context）
 > **id** readme · **幕** all · **触发** 任何时刻 / 进树第一读
 > **读不到代价** silent-drift（迷路后从记忆推进，是 §1.0c scene gate 的首要失效来源）
-> **ver** cab193
+> **ver** 2375a1
 
 > **定位**：五幕（立局/协调/盘点/发布/退役）的「进行时台词」知识权威——场景叙事、阶段策略、每幕入口/必做/出口动作清单，以及**无 egg 环境的人工执行法**。mod 的 `scenes` / `prompts` / 六个 `<node>_common` 键是本文的运行时投影（状态前缀 + 指针）；语义以本文为准。本文件是这棵树的召回入口（时点 → 文件见下表）。
 > **replaces**：r2「mod 剧情提示词迁出」前散置于 `.ygg/mods/agent-seed/data/texts/core.json`（scenes/prompts）与 `beats-flow.json`（`*_common`）的幕叙事正文。
-> **上游**：[../README.md](../README.md) · **相关**：[rituals/dispatch.md](rituals/dispatch.md) · [rituals/cleanup.md](rituals/cleanup.md) · [copy/README.md](copy/README.md)（七域索引） · [../design/run-story.md](../design/run-story.md)（微状态机契约，语义不重复讲述）
+> **上游**：[../README.md](../README.md) · **相关**：[rituals/dispatch.md](rituals/dispatch.md) · [rituals/cleanup.md](rituals/cleanup.md) · [copy/README.md](copy/README.md)（七域索引） · [story/run-story.md](story/run-story.md)（微状态机契约，语义不重复讲述）
+> **判据**：本树收的是**无代码消费者的行为面**；`docs/design/` 收的是有代码消费者的契约面——二分判据见 [../wiki-governance.md](../wiki-governance.md)。
 
 ## 我在哪个时点 → 读哪个文件
+
+### 必读（拦门禁：进 `[READ FIRST]` 块，须 `config.set read.<id>=<ver>` 签名）
 
 | 时点 | 必读 | id |
 | --- | --- | --- |
@@ -24,6 +27,18 @@
 | 查裁决 / 取决策号 | [archive/decisions-engine.md](archive/decisions-engine.md) · [archive/decisions-agent.md](archive/decisions-agent.md) | `archive/*` |
 | 无 egg / 无 mod | [rituals/fallback.md](rituals/fallback.md) | `rituals/fallback` |
 
+### 理解性阅读（**不拦门禁**）
+
+这三份**没有代码消费者**，按 [../wiki-governance.md](../wiki-governance.md) 的「design / context 二分判据」归本树。
+它们登记在 [scenes.json](scenes.json) 的 `reference` 段，**不进 `readPlan`**、不出 `[READ FIRST]` 块、不产生签名义务
+（负向断言见 `crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的 `context_scene_reference_ids_resolve`）。
+
+| 时点 | 读 | id |
+| --- | --- | --- |
+| 理解「一整局怎么跑」/ 改运行级转场 | [story/run-story.md](story/run-story.md) | `story/run-story` |
+| 理解「一条需求走九幕」/ 改需求级转场与门禁判定 | [story/requirement-story.md](story/requirement-story.md) | `story/requirement-story` |
+| 冷启动 / 「系统由哪几层构成」/ 改三层边界与 Adapter 义务 | [cold-start/system-boundaries.md](cold-start/system-boundaries.md) | `cold-start/system-boundaries` |
+
 ## 目录树
 
 ```text
@@ -32,6 +47,10 @@ docs/context/
 ├── scenes.json          # 场景 / 需求阶段 → 文档 id 加载表（r2 消费）
 ├── cold-start/          # 冷启动底座（原样迁入）
 │   ├── vision.md  vocabulary.md  topology.md  principles.md
+│   └── system-boundaries.md   # 三层架构与产品定位（r6 从 design 归位）
+├── story/               # 行为叙事（理解性，不拦门禁）
+│   ├── run-story.md            # 运行级剧情（r6 从 design 归位）
+│   └── requirement-story.md    # 需求级九幕（r6 从 design 归位）
 ├── acts/                # 主流程五幕 + 退役终态，1:1 一文件（每份 ≤40 行）
 │   ├── prologue.md  charter.md  coordinate.md
 │   ├── settle.md    release.md  retired.md
@@ -69,11 +88,15 @@ docs/context/
 - 菜单措辞（core `options` 27 键）由 mod 运行时渲染；本树只在各幕「菜单语义对照」小节解释每个菜单项的语义，不复制键值（键值契约见 [copy/core.md](copy/core.md) options 节）。
 - **每份文件头部 4 行是机读契约**：`id`（本文件在树内的唯一标识，同时也是签名 `read.<id>=<ver>` 的键）、`幕`、`触发`、`读不到代价`（四值域 `irreversible` / `hard-refusal` / `silent-drift` / `none`）、`ver`（内容指纹）。
 
-## 兼容层已退役（r5 完成）
+## 兼容层已退役（r5 完成，2026-11-15；**本节仅为历史追溯**）
 
 r1 重切文件边界时曾保留 **15 个旧路径**（13 软链 + 2 薄壳）给当时的冻结消费者：
 `.ygg/mods/agent-seed/**` 的文案指针与 `crates/ygg-sandbox/tests/agent_seed_semantics.rs` 按路径读取的 copy 表。
 r5 已把两侧引用全部改指权威文件，兼容层随之删除——**现在树里只有权威文件，没有第二入口**。
+
+> **下表是历史记录，不是入口也不是迁移指引**：这些旧路径**已不存在**，任何按表复活的尝试都会被指针机检判红
+> （`design/pointer` 锚点用例 + `design_tree_index_is_complete_and_ids_match_paths`）。要查当时的理由看
+> `archive/decisions-*.md` 与 git 历史，不要照表改路径。
 
 | 已删除的旧路径 | 形态 | 现在的权威 |
 | --- | --- | --- |
@@ -92,6 +115,9 @@ r5 已把两侧引用全部改指权威文件，兼容层随之删除——**现
 - **核验命令**：`ls -l docs/context/*.md | grep -- '->' | wc -l` 应为 **0**；
   `bash scripts/docs-ver.sh --check` 应 `ok=1`；`bash .pi/tools/docs-consistency.sh --repo .` 应 `ok=1`。
 - **已真删**（更早一轮）：`vision.md`、`vocabulary.md` —— 权威在 `cold-start/` 下，引用已全部改写。
+- **r6 新增归位（不是兼容层，是搬家）**：`docs/design/` 的 `run-story` / `requirement-story` / `system-boundaries`
+  三份因**无代码消费者**（判据见 [../wiki-governance.md](../wiki-governance.md)）移居本树
+  （`story/` 与 `cold-start/`）；它们在 design 的旧路径同批退役且**不留软链**。
 - 旧路径不再作为可执行指针存在；历史与当时理由只在 git 与 `archive/decisions-*.md` 里。
 
 ## 维护闭环

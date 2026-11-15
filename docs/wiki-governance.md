@@ -15,3 +15,26 @@
 **文案单向同步纪律（r2「mod 剧情提示词迁出」新增；r1 重切为召回树）**：mod 文案（叙事台词 / 仪式正文 / 句式模板）的**知识权威源**在 `docs/context/` 运行流程层（`context/acts/` + `context/req-acts/` / `context/rituals/` / `context/copy/README.md` 及其七个消费域文件），mod `data/texts/*.json` 是其运行时投影。任何文案改动**先改 context 对应文件，再同步 mod 键值**；对应域契约表的句式模板列与 mod 键值必须逐字一致（允许 `{{变量}}` 原样保留），验收与每批 D-MA25 维护需求复核该一致性（双向核对无多无缺）。context 流程层（台词/仪式/句式）与 design 契约层（状态机/事件/线协议）语义不重复讲述，以双向链接互指。
 
 **方案呈报纪律（top-down layering）**：凡向人类呈报方案（计划审批卡、架构提案、需求澄清），一律自上而下四层展开，读者可在一层停住而不失完整图景——① **业务背景**（为什么需要：现状的痛与触发场景，一段话）；② **业务逻辑设计**（新世界里操作与规则怎么运转，不含实现词）；③ **架构设计**（职责如何分界、机制如何成立、与既有系统的接缝）；④ **模块设计**（落到文件/接口/测试的改动面，仅在读者继续追问时展开）。与 playbook `proposal.plan-presentation` 规则同源：summary 是裁决面，技术细节归 artifacts；四层顺序不可倒置——先结论后细节是给执行者的 brief，先图景后细节才是给裁决者的呈报。
+
+## design / context 二分判据（D-MA27 的可判定形式；r6）
+
+`docs/` 的两棵树不是按「主题」分的，而是按**读者的使用方式**分的。一处内容该进哪棵树，看下面这条判据，不看它「像不像设计」。
+
+- **`docs/design/` = 改之前必须遵守的契约。** 判据：**有代码消费者**——playbook JSON 的 `basis`/`source`、`.ygg/mods/agent-seed/src/**` 的注释、`crates/**` 的测试与注释会**按路径引用它**（断言它存在，或让执行者照着它改代码）。断了会有人照着空路径动手。
+- **`docs/context/` = 我要理解 / 执行这个工作流。** 判据：**无代码消费者**——只有文档读者（人，以及按 brief 读 wiki 的 agent）会打开它；没有任何 JSON / Lua / Rust 按路径指向它。
+
+**判定方法（三步，全部可机械复核）**
+
+1. `grep -rn 'docs/design/<name>\.md' .ygg/mods crates`——有命中 → 契约面，留 `design/`。
+2. 只有 `docs/**` 与 `AGENTS.md` 命中 → 行为面，归 `context/`。
+3. 两边都不命中 → 先问「这份东西该不该存在」；**不许**把它塞进任何一边充数。
+
+「按路径引用」要分清：playbook 是**提示词素材**（读它的是人与 agent 的知识面），crates 测试里 `read_to_string("docs/…")` 才是**代码消费者**。前者不构成留在 design 的理由。
+
+**反例（r6 计划被驳回的形态）**：`docs/design/narrative/`。它不为任何召回时点服务，只为「剩下三份放哪」服务——这就是**残余桶**。残余桶的识别特征：**目录名回答的是存放者的困难，而不是读者的时点**。按判据，`run-story` / `requirement-story`（幕文档的行为走查）与 `system-boundaries`（冷启动的产品定位）没有代码消费者，已归位到 `docs/context/story/` 与 `docs/context/cold-start/`；`docs/design/` 只剩 `kernel/`（ygg 内核）、`host/`（egg CLI 与 host）、`mod/`（agent-seed mod）三模块。
+
+**机检（不是口号）**：`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的三例把这条判据钉在状态里——
+`design_pointer_anchors_exist_under_docs_design`（33 处指针可达 + 逐来源硬账）、
+`design_tree_index_is_complete_and_ids_match_paths`（索引集合双向相等 + `docs/design/*.md` 只允许 `README.md` + 一级子目录恰好三模块）、
+`agents_design_routes_resolve`（`AGENTS.md §3` 每条 design 路由可解析）。
+把行为面搬回 design、或在 design 里留兼容壳、或新增第四目录，都会转红。

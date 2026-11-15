@@ -1,8 +1,10 @@
 # Yggdrasill · 事件总表（39 口径）
+> **id** kernel/events · **模块** ① ygg 内核 · **触发** 增删事件 / 改事件分类口径之前
+> **读不到代价** hard-refusal（事件名或 payload 形状对不上 → 派发被拒）
 
 > **定位**：剧情/操作/基础设施三类 39 个事件与 payload 落点（D-MA23 基础上 r1/D-MA24 增 lane.pool；与 action-faces 的 registry 口径并存互链）。
 > **replaces**：DESIGN §2.6（L248–284）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[wire-protocol.md](wire-protocol.md) · [action-faces.md](action-faces.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[wire-protocol.md](wire-protocol.md) · [action-faces.md](../mod/action-faces.md)
 > **搬运**：以下正文自 DESIGN.md L248–L284 逐字迁移，不重写语义。
 
 ### 2.6 事件总表（39 个，三分类）
@@ -40,5 +42,5 @@
 
 **基础设施事件**（10 个）：`config.set` / `config.open` / `config.close` / `map.show` / `ygg.choice_selected` / `vfs.write` / `tool.call` / `tool.result` / `agent.summary` / `stage.advance`。
 
-> 与 §3.4 末注的关系：末注的 registry 口径与复算命令描述**已装载 Mod 的事实集**；本表是 D-MA23 设计目标全集（既有 32 + 新增 6 = 38）。代码落地后两者一致；运行期 registry 仍是 fail-closed 的运行时唯一事实。
+> 与 §3.4 末注的关系：末注的 registry 口径与复算命令描述**已装载 Mod 的事实集**；本表是 D-MA23 设计目标全集（既有 33 + 新增 6 = 39）。代码落地后两者一致；运行期 registry 仍是 fail-closed 的运行时唯一事实。
 
