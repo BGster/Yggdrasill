@@ -89,3 +89,31 @@
 
 > ~~r1 自动收波看门狗契约（自动收波（已废弃））~~ 已废弃：扩展层删除（2026-11-12），看门狗随层移除；daemon 常驻由宿主 `--daemon`/`serve` 原生承担。
 
+#### 收件箱（inbox）与跨进程协调协议
+
+**文件**：`<runs-root>/<run-id>/inbox.jsonl`，一行一个对象 `{external_id, kind, title, description, payload, created_at}`，`kind ∈ add/amend/split/merge/conflict/resolve/proposal`。
+
+**异步命令表**（只追加、不读写 autosave，因此不需要 `--mod`，可与活跃局并发执行）：
+
+- `--requirement 'title|description'`（add）
+- `--proposal 'rN|rev|stage|summary|artifacts[|changes]'`（proposal；external_id 自动作为第 7 段追加）
+- `--amend 'rN|new title|new description|deps'`（rev+1）
+- `--split 'rN|child A|child B'`
+- `--merge 'r2,r3|title|description'`
+- `--conflict 'r1,r2|note'`
+- `--resolve 'r1,r2|keep_both'`
+
+**消费点**：`cmd` 下每次自动推进前、`stdin` 下每次提示前、每次 single-shot dispatch 前——新行按 kind 排空并派发；**在局活跃期间到达的行永不可漏**。
+
+**跨进程互斥（协议级，不是「再看一眼文件」）**：
+
+- `coordination.lock`（`create_new` 排他；陈旧锁按 mtime 2s 接管）＋ `coordination.json` `{phase, writers, owner_pid, heartbeat_at}`，`phase ∈ running / closing / finalized`。
+- **写命令先注册**：`running` → 在它的行落盘前算一个 writer；`closing`（心跳未过期）→ 命令自身失败退出 3；`finalized` → 非零拒绝（退出 3，需要新局）。
+- **closing 协议**：自动推进在派发最终 `review.note` 前把 phase 置 `closing`，等在途 writer 归零，再在同一保护下做最后一次 drain——若有新的未 done 需求则撤销 closing 继续循环（不写 ending）；若没有新行则在同一保护下完成 `review.note` + settle 并置 `finalized`。因此「写命令成功了但局已越过最后一次 drain」在协议上不可能发生。
+- **陈旧与崩溃恢复**：closing 用心跳（10s 过期）自保；过期后写命令或 `open`（attach）宣布它死亡并把 phase 拉回 `running`；锁同样按 mtime 接管——两者都不会因进程崩溃永久卡死。
+- **`--settle` 在 closing 下同样走协议**：有未消费行时返回 `ok=false` 并回退 `running`（resume 可消费）；已经 `finalized` 时幂等返回旧报告，不改写任何东西。
+
+**幂等与游标**：游标（`inbox.cursor` 的 `{consumed:N}`）只在派发成功且存档落盘之后推进；重放靠 `external_id`——add / proposal 由 Mod 按实体 ext 去重（`[REPLAY:REQ]` / `[REPLAY:PROPOSAL]`），amend / split / merge / conflict / resolve 用载荷尾部 `@ext=` 加 `inbox.last` 去重（`[REPLAY:ASYNC]`）。
+
+**坏行与结算闸**：畸形行跳过并让游标越过它（否则会永久阻塞）。**硬结算闸**：`--settle` 发现未消费行即返回 `ok=false` + 非零退出（写完后会复查：结算期间到达的行会使报告作废）——「ending 之后才投递」永不会静默成功，必须开新局。进程退出之后的投递属于**新局**：inbox 保留这些行给下一局消费，结算报错。
+
