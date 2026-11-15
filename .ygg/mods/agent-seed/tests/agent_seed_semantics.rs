@@ -1221,40 +1221,6 @@ fn submit_identity_for(
     lines
 }
 
-/// verified：exec 与宿主章同句柄 → 双章落库；save/重放后 KV 仍可读。
-#[test]
-fn actor_channel_verified_lands_in_kv_and_survives_a_reload() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    submit_with_identity(
-        &mut game,
-        1,
-        "plan",
-        "id-verified",
-        Some("agent-1"),
-        Some("agent-1"),
-        Some("s-plan-1"),
-    );
-    game.assert_kv("prop.1.actor", json!("agent-1"));
-    game.assert_kv("prop.1.actor_session", json!("s-plan-1"));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-
-    // save → rebuild → the identity chapters survive a reload.
-    let save = game.save();
-    let bytes = serde_json::to_vec(&save).expect("serialize the save");
-    let mut rebuilt = Game {
-        bundle: game.bundle.clone(),
-        kernel: game.bundle.restore(&bytes).expect("restore from save"),
-        dir: game.dir.clone(),
-        suppress_reads: false,
-        stamp_actor: Some(TEST_ACTOR.to_owned()),
-    };
-    rebuilt.assert_kv("prop.1.actor", json!("agent-1"));
-    rebuilt.assert_kv("prop.1.actor_session", json!("s-plan-1"));
-    rebuilt.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-}
-
 /// mismatch：exec 与章不同句柄 → **识别不拒绝**（章照记、账本照绑、门禁照常可达）。
 /// plan 提案交付即门禁：proposal.accept 对它可读拒绝（裁决走 gate.*），门禁保持挂起。
 #[test]

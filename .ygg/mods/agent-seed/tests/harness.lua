@@ -597,3 +597,26 @@ function panel()
   end
   error("requirement.list must start with the graph header")
 end
+
+--- 带 exec / actor / actor_session 三段的提案提交（模拟宿主盖章的完整尾链）。
+function submit_with_identity(rev, stage, ext, exec, actor, session)
+  -- 读签按人（r9）：宿主盖的 actor 章决定门禁查谁的签名，所以签名也必须换成同一个人。
+  local prev = ACTOR
+  if actor then
+    as_actor(actor)
+  end
+  ensure_reads("proposal.submit", stage, 1)
+  local payload = ("r1|%d|%s|%s proposal summary|artifacts/%s.md||%s"):format(rev, stage, stage, stage, ext)
+  if exec then
+    payload = payload .. "|exec=" .. exec
+  end
+  if actor then
+    payload = payload .. "|actor=" .. actor
+  end
+  if session then
+    payload = payload .. "|actor_session=" .. session
+  end
+  local ret = fire("proposal.submit", payload)
+  ACTOR = prev
+  return ret
+end

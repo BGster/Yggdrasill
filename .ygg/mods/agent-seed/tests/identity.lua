@@ -49,3 +49,17 @@ test("profile 卡：注册 / upsert / 多键 / 空值清除 / 坏键拒绝", fun
   )
   assert_eq(kv("settings.profile_index"), "agent-1", "the index is untouched")
 end)
+
+test("actor 通道 verified：三段身份落到提案与台账", function()
+  fresh()
+  start_requirement()
+
+  submit_with_identity(1, "plan", "id-verified", "agent-1", "agent-1", "s-plan-1")
+  assert_eq(kv("prop.1.stage"), "plan", "the proposal lands")
+  assert_eq(kv("prop.1.actor"), "agent-1", "the actor stamp lands on the proposal")
+  assert_eq(kv("prop.1.actor_session"), "s-plan-1", "the session stamp lands")
+  assert_eq(kv("settings.executor.r1.plan"), "agent-1", "the executor ledger binds in the same call")
+
+  -- 注：原用例后半段是「save → restore 后三段仍存活」，属 driver 层的 save/receipt
+  -- 缺口（testing-strategy.md §3 第 3 条），纯 Lua 自检无 restore 语义，故不迁。
+end)
