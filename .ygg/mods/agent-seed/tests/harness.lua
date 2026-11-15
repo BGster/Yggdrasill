@@ -44,6 +44,18 @@ local function apply_fsm(name, payload)
 end
 
 --- 投递一个事件到 handler，按路由语义决定是否盖 actor 章。
+--- 深拷贝（只处理表/数组；标量与非表值直接返回）。
+local function deep_copy(value)
+  if type(value) ~= "table" then
+    return value
+  end
+  local out = {}
+  for k, v in pairs(value) do
+    out[k] = deep_copy(v)
+  end
+  return out
+end
+
 local function deliver(name, payload)
   local fn = HANDLERS[name]
   if fn == nil then
@@ -106,7 +118,10 @@ ygg = {
     HANDLERS[name] = fn
   end,
   data = function(id)
-    return __ASSETS[id]
+    -- 与真实宿主对齐：`ygg.data` 每次返回**新表**，Mod 对返回值的写入
+    -- 不得回灌到宿主注入的资产表（mod.lua 会把 6 个 beats 片段合并进 TEXTS，
+    -- 直接返回本体就会污染 __ASSETS，让读资产的断言看到合并后的假象）。
+    return deep_copy(__ASSETS[id])
   end,
   choice = function(prompt, options)
     __SELFTEST.lastChoice = { prompt = prompt, options = options }
@@ -626,4 +641,18 @@ end
 --- r1 的便捷包装（迁移用例里绝大多数是 r1）。
 function submit_with_identity(rev, stage, ext, exec, actor, session)
   return submit_identity_for("r1", rev, stage, ext, exec, actor, session)
+end
+
+--- 递归列出目录下指定后缀的文件（绝对路径，按路径排序）。
+function list_files(dir, ext)
+  local out = {}
+  local pipe = io.popen(('find "%s" -type f -name "*.%s" 2>/dev/null | LC_ALL=C sort'):format(dir, ext))
+  if pipe == nil then
+    return out
+  end
+  for line in pipe:lines() do
+    out[#out + 1] = line
+  end
+  pipe:close()
+  return out
 end

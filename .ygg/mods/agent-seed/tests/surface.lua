@@ -137,3 +137,117 @@ test("解析器漏检防线：子目录被识别、缺失锚点转红、`..` 穿
   local escape = pointer_violations("t", "escape", "docs/context/acts/../README.md")
   assert_eq(#escape.violations, 1, "`..` 穿越必须违规：" .. table.concat(escape.violations, ", "))
 end)
+
+local DESIGN_DIR = __REPO_ROOT .. "/docs/design"
+
+--- 指向 `docs/design/` 的文件指针（允许多级子目录；尾部多余的点与斜杠被 trim 掉）。
+local function design_pointer_paths(value)
+  local out = {}
+  local at = 1
+  local prefix = "docs/design/"
+  while true do
+    local s = value:find(prefix, at, true)
+    if s == nil then
+      break
+    end
+    local tail_start = s + #prefix
+    local tail = value:sub(tail_start)
+    local run = tail:match("^[A-Za-z0-9_%./%-]*")
+    at = tail_start + #run
+    local file = run:gsub("[%./]+$", "")
+    if file:sub(-3) == ".md" then
+      out[#out + 1] = file
+    end
+  end
+  return out
+end
+
+local function design_pointer_violations(acc, ns, key, value)
+  for _, file in ipairs(design_pointer_paths(value)) do
+    acc.count = acc.count + 1
+    local illegal = false
+    for seg in (file .. "/"):gmatch("([^/]*)/") do
+      if seg == "" or seg == ".." then
+        illegal = true
+        break
+      end
+    end
+    if illegal then
+      acc.violations[#acc.violations + 1] =
+        ("%s.%s -> docs/design/%s (illegal path segment)"):format(ns, key, file)
+    elseif not exists(DESIGN_DIR .. "/" .. file) then
+      acc.violations[#acc.violations + 1] =
+        ("%s.%s -> docs/design/%s (missing)"):format(ns, key, file)
+    end
+  end
+end
+
+test("叙述面与源码的 docs/design 指针：逐来源账守恒 + 锚点全部存在", function()
+  local items = {}
+
+  -- ① 文案（texts/*.json）：beats + scenes/prompts 两命名空间。
+  for _, asset in ipairs({
+    "ygg:scene/texts", "ygg:scene/beats/flow", "ygg:scene/beats/harness",
+    "ygg:scene/beats/lanes", "ygg:scene/beats/map-guide",
+    "ygg:scene/beats/requirements", "ygg:scene/beats/settlement",
+  }) do
+    local frag = __ASSETS[asset]
+    local name = asset:match("([^/]+)$")
+    local fname = ({ ["texts"] = "core.json" })[name] or ("beats-" .. name .. ".json")
+    if frag.beats ~= nil then
+      for key, value in pairs(frag.beats) do
+        if type(value) == "string" then
+          items[#items + 1] = { fname, key, value }
+        end
+      end
+    end
+    for _, ns in ipairs({ "scenes", "prompts" }) do
+      if frag[ns] ~= nil then
+        for key, value in pairs(frag[ns]) do
+          if type(value) == "string" then
+            items[#items + 1] = { fname, ns .. "." .. key, value }
+          end
+        end
+      end
+    end
+  end
+
+  -- ② Lua 源码（src/**/*.lua）整文件当值扫。
+  for _, path in ipairs(list_files(__MOD_DIR .. "/src", "lua")) do
+    local name = path:match("([^/]+)$")
+    items[#items + 1] = { name, "source", read_file(path) }
+  end
+
+  local ledger, total, violations = {}, 0, {}
+  for _, item in ipairs(items) do
+    local acc = { count = 0, violations = {} }
+    design_pointer_violations(acc, item[1], item[2], item[3])
+    for _, v in ipairs(acc.violations) do
+      violations[#violations + 1] = v
+    end
+    if acc.count > 0 then
+      total = total + acc.count
+      ledger[item[1]] = (ledger[item[1]] or 0) + acc.count
+    end
+  end
+
+  local expected = { ["beats-settlement.json"] = 3, ["tools.lua"] = 2 }
+  local keys = {}
+  for k in pairs(ledger) do
+    keys[#keys + 1] = k
+  end
+  table.sort(keys)
+  local ek = {}
+  for k in pairs(expected) do
+    ek[#ek + 1] = k
+  end
+  table.sort(ek)
+  assert_eq(#keys, #ek, "docs/design 指针账漂移（来源数）：实得 " .. table.concat(keys, ","))
+  for i = 1, #ek do
+    assert_eq(keys[i], ek[i], "docs/design 指针账漂移（来源名）")
+    assert_eq(ledger[keys[i]], expected[ek[i]],
+      ("来源 `%s` 的指针数漂移"):format(ek[i]))
+  end
+  assert_eq(total, 5, ("docs/design 指针总数漂移：期望 5，实得 %d"):format(total))
+  assert_eq(#violations, 0, "docs/design 指针锚点不存在：" .. table.concat(violations, ", "))
+end)
