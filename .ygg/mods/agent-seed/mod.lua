@@ -22,7 +22,7 @@ local CONFIG = ygg.data("ygg:agent/config")
 local PLAYBOOK = ygg.data("ygg:agent/playbook")    -- head：schemaVersion/title/summary/source
 PLAYBOOK.sections = {}
 for _, id in ipairs({
-  "ch1-foundation", "ch2-delivery", "ch3-evidence",
+  "ch1-foundation", "ch3-evidence",
   "ch4-run-machine", "ch4-protocol", "ch4-async", "ch4-mod-host",
 }) do
   local fragment = ygg.data("ygg:agent/playbook/" .. id)

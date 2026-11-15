@@ -62,12 +62,6 @@
       "path": "data/playbook/ch1-foundation.json"
     },
     {
-      "id": "ygg:agent/playbook/ch2-delivery",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch2-delivery.json"
-    },
-    {
       "id": "ygg:agent/playbook/ch3-evidence",
       "kind": "agent-playbook-fragment",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
