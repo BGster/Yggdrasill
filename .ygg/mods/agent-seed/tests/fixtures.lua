@@ -283,3 +283,48 @@ test("读签票据降级：菜单路径只核覆盖率，并明说不区分署�
   assert_eq(kv("req.1.gate"), "", "门禁清空")
   as_actor("selftest")
 end, "armed")
+
+-- [armed-case] read_gate_ships_armed_and_a_bare_copy_stays_inert
+-- armed 键 `readPlan` / `readGate` 的两半断言：生效态（台账 == 文档头）与退让态（inert 副本静默）。
+test("读签上膛：原版台账逐条等于文档头（单一事实源）", function()
+  local cfg = __ASSETS["ygg:agent/config"]
+  local plan = cfg.readPlan
+  assert_true(plan ~= nil and next(plan) ~= nil, "原版必须带 readPlan（仓库里闸是上膛的）")
+  assert_true(
+    plan.coordinate ~= nil and plan.settle ~= nil,
+    "readPlan 必须覆盖门禁守的幕：coordinate / settle"
+  )
+
+  local ledger = cfg.readGate.ver
+  assert_true(ledger ~= nil, "原版必须带 readGate.ver")
+  local n = 0
+  for doc, ver in pairs(ledger) do
+    n = n + 1
+    local text = read_file(__REPO_ROOT .. "/docs/context/" .. doc .. ".md")
+    local declared = nil
+    for line in text:gmatch("[^\n]+") do
+      if line:find("**ver**", 1, true) then
+        declared = line:gsub("^.-%*%*ver%*%*", ""):match("^%s*(%S+)")
+        break
+      end
+    end
+    assert_true(declared ~= nil, doc .. " 缺 `**ver**` 头")
+    assert_eq(ver, declared, "readGate.ver." .. doc .. " 必须等于文档头（同一批文件头生成）")
+  end
+  assert_true(n >= 5, "台账必须覆盖门禁守的文档，实得 " .. n .. " 条")
+end)
+
+test("读签惰性：删掉 readGate/readPlan 的副本既不放行也不出声", function()
+  fresh()
+  charter_and_begin()
+  fire("requirement.add", "inert requirement|inert description|inert-r1")
+  fire("requirement.dispatch", "0")
+
+  reset()
+  fire("proposal.submit", "r1|1|plan|inert plan|artifacts/r1.md")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(not narrated_contains("[REJECTED"), "缺失 readset 不得拒绝：" .. joined)
+  assert_true(not joined:find("read-gate/", 1, true), "缺失 readset 必须静默：" .. joined)
+  assert_true(not joined:find("[READ GATE]", 1, true), "缺失 readset 不得出声：" .. joined)
+  assert_eq(kv("req.1.gate"), "plan", "但提案照常受理")
+end, "inert")

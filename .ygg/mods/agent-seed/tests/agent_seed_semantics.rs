@@ -1271,73 +1271,6 @@ fn read_gate_handles_a_signature_taken_before_a_new_requirement_without_a_subjec
     );
 }
 
-/// ⑥ 入库态双断言：① 生成区**已开闸**（readPlan / readGate 真实存在，且 ver 台账与
-/// 文档头逐件相等）；② 把生成区整体剥掉的副本仍然 **inert**（不拦、不叙事）——
-/// 「缺席即安全阀」这条路径不能因为开闸而失去回归保护。
-#[test]
-fn read_gate_ships_armed_and_a_bare_copy_stays_inert() {
-    let config = support::read_json(&project_mod_dir().join("data/config.json"));
-    let plan = config["readPlan"]
-        .as_object()
-        .expect("the shipped config must carry readPlan (the gate is armed in the repo)");
-    assert!(
-        !plan.is_empty() && plan.contains_key("coordinate") && plan.contains_key("settle"),
-        "readPlan must cover the acts the gate guards: {plan:?}"
-    );
-    let ledger = config["readGate"]["ver"]
-        .as_object()
-        .expect("the shipped config must carry readGate.ver");
-    assert!(
-        ledger.len() >= 5,
-        "the version ledger must cover the guarded docs: {ledger:?}"
-    );
-    // 台账 == 文档头（单一事实源：generator 从同一批文件头产出）。
-    for (doc, ver) in ledger {
-        let path = repo_dir().join("docs/context").join(format!("{doc}.md"));
-        let head = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {doc}: {err}"));
-        let declared = head
-            .lines()
-            .find(|line| line.contains("**ver**"))
-            .and_then(|line| line.split("**ver**").nth(1))
-            .and_then(|tail| tail.split_whitespace().next())
-            .unwrap_or_else(|| panic!("{doc}: no ver header"));
-        assert_eq!(
-            declared,
-            ver.as_str().expect("ver string"),
-            "readGate.ver.{doc} must equal the doc header (one source, generated)"
-        );
-    }
-
-    // 剥掉生成区的副本：判据 inert 且静默。
-    let bare_dir = support::temp_dir("read-gate-inert");
-    support::copy_dir(&project_mod_dir(), &bare_dir);
-    let mut bare_config = support::read_json(&bare_dir.join("data/config.json"));
-    let bare_object = bare_config.as_object_mut().expect("config object");
-    bare_object.remove("readGate");
-    bare_object.remove("readPlan");
-    support::write_json(&bare_dir.join("data/config.json"), &bare_config);
-    support::reseal(&bare_dir);
-
-    let mut game = Game::open(&bare_dir);
-    charter_and_begin(&mut game);
-    game.narrate(
-        "requirement.add",
-        &text("inert requirement|inert description|inert-r1"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|inert plan|artifacts/r1.md"),
-    );
-    let joined = lines.join("\n");
-    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
-    assert!(
-        !joined.contains("read-gate/") && !joined.contains("[READ GATE]"),
-        "an absent readset must be silent as well as inert: {lines:#?}"
-    );
-    game.assert_kv("req.1.gate", json!("plan"));
-}
-
 /// ⑧ 批边界（`coordinate.submit`）的端到端：未签被拒且**状态未推进**，补签后放行。
 /// 必读集 = 结算幕清单（`acts/settle` + `rituals/cleanup`，由生成器写在 `readPlan.settle`）。
 #[test]
@@ -2826,8 +2759,26 @@ fn armed_features_ship_armed_with_a_semantics_case() {
     // 因此不能假设它在 <manifest>/tests/ 下。
     let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../.ygg/mods/agent-seed/tests/agent_seed_semantics.rs");
-    let source = std::fs::read_to_string(&source_path)
+    let mut source = std::fs::read_to_string(&source_path)
         .unwrap_or_else(|err| panic!("read {}: {err}", source_path.display()));
+    // 迁移期：断言可能已经搬到 Lua 侧（`tests/*.lua`）。把 Lua 用例一并纳入扫描，
+    // 否则「armed 键必须有断言」这条规则会在迁移中途变成假绿——Rust 侧删了、Lua 侧加了，
+    // 元用例却只读 Rust 文件，于是要么误报缺失、要么（若放宽）彻底失效。
+    if let Some(tests_dir) = source_path.parent() {
+        if let Ok(entries) = std::fs::read_dir(tests_dir) {
+            let mut lua: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("lua"))
+                .collect();
+            lua.sort();
+            for path in lua {
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    source.push('\n');
+                    source.push_str(&text);
+                }
+            }
+        }
+    }
 
     let armed: Vec<&ConfigKey> = CONFIG_SURFACE
         .iter()
@@ -2867,10 +2818,13 @@ fn armed_features_ship_armed_with_a_semantics_case() {
 
         // ② 同文件里有 ships_armed 用例：生效态 + 退让路径（R3）由那条用例承担。
         //    针要求行首 `fn `（Rust 顶层项 = 列 0）：注释里提到用例名不能冒充用例本体。
-        let needle = format!("\nfn {slug}_ships_armed");
+        // Rust 顶层项（行首 `fn `）或 Lua 侧的显式锚点 `-- [armed-case] <slug>_ships_armed`。
+        let rust_needle = format!("\nfn {slug}_ships_armed");
+        let lua_needle = format!("\n-- [armed-case] {slug}_ships_armed");
         assert!(
-            source.contains(&needle),
-            "the armed switch {:?} (slug {slug}) has no `fn {slug}_ships_armed*` case: an armed \
+            source.contains(&rust_needle) || source.contains(&lua_needle),
+            "the armed switch {:?} (slug {slug}) has no `fn {slug}_ships_armed*` case or \
+             `-- [armed-case] {slug}_ships_armed` anchor: an armed \
              config key without an assertion on BOTH halves (armed behaviour + the disabled \
              fallback) is the silence this rule exists to remove",
             entry.path

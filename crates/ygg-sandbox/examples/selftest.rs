@@ -345,6 +345,20 @@ fn prepare_fixture(src: &Path, tag: &str) -> Result<PathBuf, String> {
             std::fs::write(&cfg_path, out)
                 .map_err(|e| format!("write config.json: {e}"))?;
         }
+        // 惰性副本：剥掉 readGate 与 readPlan（等价于「没开闸的第三方拷贝」）。
+        "inert" => {
+            let text = std::fs::read_to_string(&cfg_path)
+                .map_err(|e| format!("read config.json: {e}"))?;
+            let mut cfg: Json =
+                serde_json::from_str(&text).map_err(|e| format!("parse config.json: {e}"))?;
+            if let Some(obj) = cfg.as_object_mut() {
+                obj.remove("readGate");
+                obj.remove("readPlan");
+            }
+            let out = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+            std::fs::write(&cfg_path, out)
+                .map_err(|e| format!("write config.json: {e}"))?;
+        }
         other => return Err(format!("未知 fixture tag：{other}")),
     }
     Ok(dir)
