@@ -1222,59 +1222,6 @@ sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo lis
 
 // ───────────────────── batch-maintenance auto-append (r3 / 批结算自动维护) ─────────────────────
 
-/// An unarmed batch settle **auto-appends the next batch's docs-maintenance requirement**
-/// (批结算自动维护): the `[BATCH 1 SETTLED]` receipt is followed by `[MAINTENANCE REQ ADDED]` in
-/// the same transaction — one new open/draft row carrying the `req.<i>.maintenance` marker,
-/// 未武装批结算在尾部登记**文档维护义务**（用户 2026-11-15 裁定：CONTEXT / DESIGN 的维护是
-/// 主会话自办工作，不再派生可派发的需求——subagent 缺跨批次上下文，r11 / r12 两次实测的产出
-/// 仍需主会话逐条复核）。义务落在 `docs.maintenance.due`，并把下一次 `coordinate.submit`
-/// 硬阻塞住，直到主会话做完复核、用 `config.set docs.maintenance.done=<batch>` 解除。
-#[test]
-fn batch_settle_marks_docs_maintenance_due_and_blocks_the_next_boundary() {
-    let mut game = drive_to_release();
-    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
-    let closed = game.click("review.note — ");
-    let narrative = closed["narrative"].to_string();
-    assert!(
-        narrative.contains("[BATCH 1 SETTLED]"),
-        "review.note must settle the batch: {closed}"
-    );
-    assert!(
-        narrative.contains("[DOCS MAINTENANCE DUE]"),
-        "the batch settle must register the docs-maintenance obligation: {closed}"
-    );
-    assert!(
-        !narrative.contains("[ENDING"),
-        "a batch settle must never carry the ending prefix: {closed}"
-    );
-    game.assert_kv("run.batch", json!(2));
-    game.assert_kv("run.phase", json!(""));
-    game.assert_kv("docs.maintenance.due", json!("1"));
-    // 不再派生需求行：注册表里仍是那一条（已终态）——维护不是可派发的工作。
-    game.assert_kv("req.count", json!(1));
-
-    // 义务未解除 → 批边界直接拒，并给出解除命令（走菜单点击，绕开 guide 的人类门禁）。
-    let blocked = narrative_lines(&game.click("coordinate.submit — "));
-    let joined = blocked.join("\n");
-    assert!(
-        joined.contains("docs-maintenance/due") && joined.contains("docs.maintenance.done=1"),
-        "the boundary must be blocked with the clearing command: {joined}"
-    );
-    game.assert_kv("run.phase", json!(""));
-
-    // 解除 → 批边界放行。
-    let cleared = game.narrate("config.set", &text("docs.maintenance.done=1"));
-    assert!(
-        cleared
-            .iter()
-            .any(|l| l.contains("[DOCS MAINTENANCE CLEARED]")),
-        "{cleared:#?}"
-    );
-    game.assert_kv("docs.maintenance.due", json!(""));
-    game.click("coordinate.submit — ");
-    game.assert_kv("run.phase", json!("settle"));
-}
-
 /// The dedup boundary (③「未终态」语义): a **terminal** same-title maintenance requirement
 /// does **not** suppress the auto-append. A manual same-title add during the settle act is
 /// legal (requirement.add admits settle), but it re-arms the global gate: all-green verify

@@ -103,3 +103,33 @@ test("发布声明门：未声明不给 review.note；坏形状零写入；声�
   click("review.note — ")
   assert_true(narrated_contains("[BATCH 2 SETTLED]"), "the batch-2 close narrates its line")
 end)
+
+test("批结算登记维护义务并硬阻塞下一次批边界（解除后放行）", function()
+  drive_to_release()
+  fire("release.skip", "纯测试批次，无 develop→master 合并")
+
+  reset()
+  click("review.note — ")
+  assert_true(narrated_contains("[BATCH 1 SETTLED]"), "review.note settles the batch")
+  assert_true(narrated_contains("[DOCS MAINTENANCE DUE]"), "the settle registers the obligation")
+  assert_true(not narrated_contains("[ENDING"), "a batch settle never carries the ending prefix")
+  assert_eq(kv("run.batch"), 2, "the batch counter advances")
+  assert_eq(kv("run.phase"), "", "back to coordinate")
+  assert_eq(kv("docs.maintenance.due"), "1", "the obligation is pinned to batch 1")
+  assert_eq(kv("req.count"), 1, "maintenance derives no requirement row")
+
+  -- 义务未解除 → 批边界被拒，并给出解除命令。
+  reset()
+  click("coordinate.submit — ")
+  assert_true(narrated_contains("docs-maintenance/due"), "the boundary names the blocking reason")
+  assert_true(narrated_contains("docs.maintenance.done=1"), "and prints the clearing command")
+  assert_eq(kv("run.phase"), "", "the phase does not move while blocked")
+
+  -- 解除 → 放行。
+  reset()
+  fire("config.set", "docs.maintenance.done=1")
+  assert_true(narrated_contains("[DOCS MAINTENANCE CLEARED]"), "the obligation is cleared")
+  assert_eq(kv("docs.maintenance.due"), "", "the obligation empties")
+  click("coordinate.submit — ")
+  assert_eq(kv("run.phase"), "settle", "the boundary is released")
+end)
