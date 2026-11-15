@@ -104,11 +104,6 @@ impl Game {
         game
     }
 
-    /// 本步以谁的身份提交（模拟 `--actor`；`None` = 不盖章）。
-    fn as_actor(&mut self, actor: Option<&str>) {
-        self.stamp_actor = actor.map(str::to_owned);
-    }
-
     /// 派发前按声明路由盖身份段（宿主 `inject_identity_segments` 的同形模拟）。
     /// 只盖四个真声明了 `actor` 的动作；已自带 `actor=` / `actor_session=` 尾段的载荷原样透传。
     fn stamped(&self, event: &str, payload: &str) -> String {
@@ -1454,23 +1449,6 @@ fn read_gate_refuses_a_signature_against_a_revised_doc() {
 }
 
 // ───────────────── r9 · attribution: the signature belongs to an actor ─────────────────
-
-/// 造一个「计划门禁已挂起」的现场：以 `actor` 签齐本幕必读、交计划提案（交付即门禁），
-/// 并把该门禁交出的下一幕规则（`req-acts/delivery`）也签上——门禁批的就是它。
-fn armed_plan_gate(tag: &str, actor: &str) -> Game {
-    let mut game = armed_game(tag);
-    game.as_actor(Some(actor));
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    sign(&mut game, "req-acts/delivery", "cccccc");
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
-    assert_eq!(game.phase("r1"), "plan_gate");
-    game
-}
 
 // ───────────────────── r4/r6/r7 · layout, fragments, tool declarations ─────────────────────
 
