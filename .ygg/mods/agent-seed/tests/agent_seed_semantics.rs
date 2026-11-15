@@ -1196,79 +1196,9 @@ fn armed_mod(tag: &str) -> PathBuf {
     dir
 }
 
-/// 一份已立局、已挂一条需求并派发（`job=plan`）的局：r4 三动作的共同起跑线。
-fn armed_game(tag: &str) -> Game {
-    let mut game = Game::open(&armed_mod(tag));
-    charter_and_begin(&mut game);
-    game.narrate(
-        "requirement.add",
-        &text("armed requirement|armed description|armed-r1"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    game
-}
-
 /// 签一件（值段是 r3 的 `ver|scene|seq` 形状，ver 必须与台账逐字相等）。
 fn sign(game: &mut Game, doc: &str, ver: &str) {
     game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
-}
-
-/// **r11 的证据**：amend 推进 rev 时 r3 的销票制先把签名全抹掉，所以下一次推进动作报的是
-/// **覆盖维** `read-gate/missing`（分层而非重复报错）。
-/// 这条用例是「主体维退役」的机械依据：rev 一变签名已不存在，「签名早于新 rev」永远轮不到
-/// 判定——所以主体维（`read-gate/subject`）测不到 amend，它是假保护。
-#[test]
-fn read_gate_amendment_loses_signatures_through_the_clear_not_a_subject_dimension() {
-    let mut game = armed_game("gate-amend");
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    // amend 推进 rev：销票制先抹掉全部签名，所以此后报覆盖（missing）——不双报、不错报。
-    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
-    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
-    game.assert_kv("settings.read_index", json!(""));
-    let after = game.narrate(
-        "proposal.submit",
-        &text("r1|2|plan|replanned|artifacts/r1.md"),
-    );
-    let joined = after.join("\n");
-    assert!(
-        refused(&after, "proposal.submit") && joined.contains("read-gate/missing"),
-        "an amendment wipes signatures through r3's clear(), so the refusal is coverage: {after:#?}"
-    );
-    assert!(
-        !joined.contains("read-gate/subject"),
-        "r11: the amend path must report coverage only — the subject dimension is retired: {after:#?}"
-    );
-}
-
-/// **r11 守护（可证伪）**：主体维已退役。复刻它当年「唯一可达」的路径——先签名，再
-/// `requirement.add` 一条新需求（该需求的 rev/stage 纪元因此晚于签名）——现在必须**绝不出现**
-/// `read-gate/subject`；同一场景由**新鲜维** `read-gate/stale` 接管（新需求的阶段纪元晚于签名），
-/// 所以删掉主体维并没有开口子。
-/// 变异探针：把主体维分支加回 `gates.read_problem`，这条立刻转红。
-#[test]
-fn read_gate_handles_a_signature_taken_before_a_new_requirement_without_a_subject_dimension() {
-    let mut game = armed_game("gate-no-subject");
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    game.narrate(
-        "requirement.add",
-        &text("second requirement|second description|armed-r2"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r2|1|plan|r2 plan|artifacts/r2.md"),
-    );
-    let joined = lines.join("\n");
-    assert!(
-        !joined.contains("read-gate/subject"),
-        "r11: the subject dimension is retired — no refusal may carry it: {lines:#?}"
-    );
-    assert!(
-        refused(&lines, "proposal.submit") && joined.contains("read-gate/stale"),
-        "the freshness dimension must take over the old subject scenario: {lines:#?}"
-    );
 }
 
 /// ⑧ 批边界（`coordinate.submit`）的端到端：未签被拒且**状态未推进**，补签后放行。

@@ -328,3 +328,55 @@ test("读签惰性：删掉 readGate/readPlan 的副本既不放行也不出声"
   assert_true(not joined:find("[READ GATE]", 1, true), "缺失 readset 不得出声：" .. joined)
   assert_eq(kv("req.1.gate"), "plan", "但提案照常受理")
 end, "inert")
+
+test("读签 amend 清票：只报覆盖（missing），不报已退役的 subject 维度", function()
+  armed_game()
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+
+  -- amend 推进 rev：销票制先抹掉全部签名，所以此后报覆盖（missing）——不双报、不错报。
+  reset()
+  fire("requirement.amend", "r1||amended description")
+  assert_true(not narrated_contains("[REJECTED"), "amend 本身不得被拒")
+  assert_eq(kv("settings.read_index"), "", "签名索引被清空")
+
+  reset()
+  fire("proposal.submit", "r1|2|plan|replanned|artifacts/r1.md")
+  local joined = table.concat(narrated(), "\n")
+  -- 读签阻塞走的是 `refuse` 的 `[BLOCKED:...]` 前缀，不是 `[REJECTED:...]`——两者都是拒绝。
+  assert_true(
+    narrated_contains("[BLOCKED") or narrated_contains("[REJECTED"),
+    "提交必须被拒：" .. joined
+  )
+  assert_true(
+    narrated_contains("read-gate/missing"),
+    "amend 抹签后报的必须是覆盖（missing）：" .. joined
+  )
+  assert_true(
+    not joined:find("read-gate/subject", 1, true),
+    "r11：subject 维度已退役，不得出现：" .. joined
+  )
+end, "armed")
+
+test("读签新需求前的签名：由新鲜度（stale）接管，subject 维度已退役", function()
+  armed_game()
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+
+  -- 新需求进来并派发：派发推进了纪元，之前取的签名随之失效。
+  fire("requirement.add", "second requirement|second description|armed-r2")
+  fire("requirement.dispatch", "0")
+
+  reset()
+  fire("proposal.submit", "r2|1|plan|r2 plan|artifacts/r2.md")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    not joined:find("read-gate/subject", 1, true),
+    "r11：subject 维度已退役，任何拒绝都不得携带它：" .. joined
+  )
+  assert_true(
+    (narrated_contains("[BLOCKED") or narrated_contains("[REJECTED"))
+      and narrated_contains("read-gate/stale"),
+    "旧的 subject 场景必须由新鲜度维度接管：" .. joined
+  )
+end, "armed")
