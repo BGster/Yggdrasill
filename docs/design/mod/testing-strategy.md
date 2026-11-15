@@ -53,8 +53,23 @@
 - 每个用例开头 `fresh()`：清空 KV 与收集面后重放 `event.start`（等价于 Rust 侧新建一个 `Game`）。
 - 不要依赖执行顺序：同一文件内的用例共享一个 Lua 状态，`fresh()` 是唯一重置手段。
 
-## 5. 迁移期约定（临时）
+## 5. 迁移已完成（对照 Rust 套件已删除）
 
-Rust 对照套件仍在 `examples/selftest.rs`（纯 manifest 登记 → `.ygg/mods/agent-seed/tests/selftest.rs`）。
-每迁一个域：Lua 例数 = 从 Rust 删除的例数，两侧同时跑绿后再提交。
-全部迁完后，删除该 `.rs` 与 `examples/selftest.rs/`，本节的「迁移期约定」一并移除。
+Mod 的行为断言**全部**在 `.ygg/mods/agent-seed/tests/*.lua`（`harness.lua` + 10 个域文件），
+由宿主的 `crates/ygg-sandbox/examples/selftest.rs` 执行：
+
+```bash
+cargo run -q --example selftest -- --mod .ygg/mods/agent-seed            # 默认用例
+cargo run -q --example selftest -- --mod .ygg/mods/agent-seed --fixture armed   # 开闸副本
+# 另四个 tag：bare / plan2 / inert / nostrict
+```
+
+`--fixture <tag>` 由宿主复制 mod 到 `$TMPDIR/ygg-selftest-<tag>` 并改写 `data/config.json`；
+用例侧 `test(name, fn, fixture)` 的第三参决定它只在哪个 tag 下执行。**一次运行只跑一个 tag**，
+所以「全绿」= 无 fixture 一次 + 每个 tag 各一次。
+
+Rust 侧只留一个**门禁薄壳**（`crates/agent-seed-tests/tests/agent_seed_semantics.rs`）：它不重复
+任何行为断言，只断言 Lua 套件仍存在且非空——因为宿主三套门禁的第三条被硬编码成
+`cargo test -p ygg-sandbox --test agent_seed_semantics`（见 `examples/egg.rs` 的 `verify_gates`），
+而 egg.rs 是 non-negotiable host。**注意**：那条命令的包名与实际所属包（`agent-seed-tests`）不符，
+是既有缺陷，需宿主侧一行修复（详见 goal 文档的收口记录）。
