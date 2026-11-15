@@ -93,3 +93,47 @@ test("叙述面的 docs/context 指针：锚点全部存在，且指针账守恒
     "docs/context 下的叙述指针锚点缺失：" .. table.concat(acc.violations, ", ")
   )
 end)
+
+--- 公开包装：核一个值并返回 { count, violations }（漏检防线用例用）。
+function pointer_violations(ns, key, value)
+  local acc = { count = 0, violations = {} }
+  check_pointer(acc, ns, key, value)
+  return acc
+end
+
+test("解析器漏检防线：子目录被识别、缺失锚点转红、`..` 穿越违规", function()
+  -- ① 子目录指针必须被识别为 1 条（旧实现：0 条）。
+  local one = context_pointer_paths("正文见 docs/context/acts/charter.md（立局幕）。")
+  assert_eq(#one, 1, "子目录指针必须被识别")
+  assert_eq(one[1], "acts/charter.md", "路径原样")
+
+  -- ② 两层子目录 + 紧邻中文标点 / `§` / `；` 不得吞掉路径。
+  local two = context_pointer_paths(
+    "政策见 docs/context/rituals/cleanup.md §2；叙事 docs/context/story/run-story.md。"
+  )
+  assert_eq(#two, 2, "两个子目录指针")
+  assert_eq(two[1], "rituals/cleanup.md", "第一个")
+  assert_eq(two[2], "story/run-story.md", "第二个")
+
+  -- ③ 目录指针 / 通配不算文件指针。
+  local none = context_pointer_paths("见 docs/context/acts/ 与 docs/context/acts/*.md")
+  assert_eq(#none, 0, "目录指针与通配都不算文件指针")
+
+  -- ④ 存在的子目录锚点：计数 1、零违规。
+  local ok = pointer_violations("t", "ok", "docs/context/acts/charter.md")
+  assert_eq(ok.count, 1, "子目录指针必须计入 pointer_count")
+  assert_eq(#ok.violations, 0, "存在的锚点零违规")
+
+  -- ⑤ 不存在的子目录锚点：必须计数 1 且产生 1 条 violation（旧实现：0 条 = 漏检）。
+  local missing = pointer_violations("t", "missing", "docs/context/acts/definitely-no-such-doc.md")
+  assert_eq(missing.count, 1, "缺失锚点也必须计数")
+  assert_eq(#missing.violations, 1, "指向不存在子目录文件的指针必须转红")
+  assert_true(
+    missing.violations[1]:find("missing", 1, true) ~= nil,
+    "违规行必须点名键：" .. tostring(missing.violations[1])
+  )
+
+  -- ⑥ `..` 穿越必须判违规。
+  local escape = pointer_violations("t", "escape", "docs/context/acts/../README.md")
+  assert_eq(#escape.violations, 1, "`..` 穿越必须违规：" .. table.concat(escape.violations, ", "))
+end)
