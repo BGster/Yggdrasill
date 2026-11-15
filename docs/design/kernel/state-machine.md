@@ -83,7 +83,7 @@ end
 
 在发出 `pendingChoice` 之前，Mod 按确定性的注册顺序冲刷已注册的响应式效应（`useEffect`）——`render()` 顶部、`flush_effects`，最多 `MAX_PASSES = 4`，不收敛即为硬错误。每个效应必须遵守四条不变量：
 
-1. **唯一声明后继**：迁移确定性且只在一处声明；`useMemo` 依赖必须是 KV 派生标量（状态/作业/待决/就绪/计数），保存重载后可复算，不依赖 Lua 内存 diff。
+1. **唯一声明后继**：迁移确定性且只在一处声明；`useMemo` 依赖必须是 KV 派生标量（状态/作业/待决/就绪/计数），保存重载后可复算，不依赖 Lua 内存 diff。（宿主时钟不可读：`kvRevision` 无读面且语义非单调、`ygg.ticks()` 生产恒 0——四格清单与逐条证据见 [state-surface.md](state-surface.md) 的「沙箱时序源」节。）
 2. **零外部判断**：无需人类批准或未挂载的外部 I/O（无文件读、无会话状态）。
 3. **绝不绕过门禁**：五个里程碑动作（`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note`）绝不由效应触发；效应不推进任何「主人=人」的幕。
 4. **无渲染的效应**：效应可改变 KV 并 `ygg.narrate`，但绝不调用 `render()` 或 `ygg.choice`——choice 一旦产生，内核会丢弃队列余部（`transition.rs`）。
