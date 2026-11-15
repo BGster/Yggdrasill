@@ -38,4 +38,4 @@
 ## 旧引用解析注记
 
 - 决策表行、crates 注释与测试断言中的 `docs/DESIGN.md §N` 引用（如 §3.2 → [mod-package.md](design/mod/mod-package.md)、§3.7 → [serve.md](design/host/serve.md)、§3.4 → [action-faces.md](design/mod/action-faces.md)、§3.5 → [cli-daemon.md](design/host/cli-daemon.md)）经本表解析，持续有效——方案 A 裁决下 `crates/**` 零改动。
-- §2.6 的 39 口径（r1 起，含 lane.pool）与 §3.4 末注的 registry 33/34 口径**并存**（前者 = 设计目标全集，后者 = r1 时尚未递增的已装载事实集口径，递增滞后已在 r2 集成时登记），拆分后分居 [events.md](design/kernel/events.md) 与 [action-faces.md](design/mod/action-faces.md) 并互链，不得合并。
+- §2.6 的 39 口径（r1 起，含 lane.pool）与 §3.4 末注的 registry 计数同源：r1 时末注记 33 / registry 34描述的是尚未递增的已装载事实集，r2 集成交付时登记了滞后；r6 复核（38 个 `ygg.on` + `stage.advance` = 39）后已装载集与设计目标全集追平，两处数字一致。拆分后分居 [events.md](design/kernel/events.md) 与 [action-faces.md](design/mod/action-faces.md) 并互链，不得合并。

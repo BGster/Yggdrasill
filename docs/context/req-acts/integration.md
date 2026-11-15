@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 集成（req-acts/integration）
 > **id** req-acts/integration · **幕** req: accept_gate/integrating/done · **触发** 验收门禁前 / 集成核验前
 > **读不到代价** hard-refusal（证据清单漏项 → 验收被拒；SHA 不符 → `integration_bad_sha` 打回）
-> **ver** 74bf53
+> **ver** 08e40b
 
 ## 7. 验收门禁（accept_gate）
 
@@ -15,7 +15,7 @@
   | 需求类型 | 必须亲测的证据 |
   | --- | --- |
   | 跨仓库同步（mod/CLI/文档搬运） | 源↔目标 `diff -rq` 为空；二进制 `sha256` 双侧一致；目标仓 boot 三件套实测；docs 闭包 ok=1；数据红线零触碰；子模块指针未动 |
-  | Mod 代码/文案改动 | `sync-seed-mod.sh --check`；`ygg-lint` 0/0；`agent_seed_semantics` 全绿（含新增用例）；all-1 playtest |
+  | Mod 代码/文案改动 | `scripts/sync-seed-mod.sh --check`；`cargo run -p ygg-lint -- --pack .ygg/mods/agent-seed`（期望 `0 error(s), 0 warning(s)`）；`cargo test -p ygg-sandbox --test agent_seed_semantics` 全绿（含新增用例）；`cargo run --example playtest -- .ygg/mods/agent-seed` 的 all-1 走到 `[ENDING` |
   | 宿主 crates 改动 | 字面三件套（`cargo test --workspace` ∧ `--example egg` ∧ `agent_seed_semantics`），记录真实退出码与计数 |
   | 纯文档/规则修改 | `docs-consistency` ok=1；受影响的键数/枚举实测对齐；语义测试不变红 |
   | 需求图/台账操作 | `requirement.list` 终态数对得上；分支模型/注册项存在性实测 |

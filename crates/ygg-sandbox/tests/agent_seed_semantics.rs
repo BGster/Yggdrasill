@@ -3886,15 +3886,16 @@ fn narrative_pointer_anchors_exist_in_docs_context() {
     //   flow 6 个 <node>_common      = 7（settle_common 两处：正文 + 清理政策）
     //   harness.subagent_brief       = 2（coordinate + rituals/dispatch）
     //   map-guide 2 键               = 2
-    //   settlement 3 键              = 3
+    //   settlement 4 键              = 4（r5 为 3；r6 的 maintenance_req_desc 增一处
+    //                                  `docs/context/cold-start/system-boundaries.md`，因该份已从 design 归位）
     //   core.scenes 5 键             = 13（幕台词基行各 1 + [READ FIRST] 块内每条必读 1）
     //   core.prompts 5 键             = 5
-    // 合计 32。注意：块内的必读指针（如 `cold-start/vocabulary.md`）都是子目录形，旧解析器
+    // 合计 33（r5 为 32；r6 的 settlement 增了 1 处，见上）。注意：块内的必读指针（如 `cold-start/vocabulary.md`）都是子目录形，旧解析器
     // 一并静默跳过——所以此数从旧实装口径的 25 直接跳到 32，正是漏检被补上的尺度。
     // `stage_prompt_missing` 指向 `docs/context/acts/`（目录指针，不是 .md，不计入）。
     assert_eq!(
-        pointer_count, 32,
-        "docs/context pointer ledger drifted: expected 32, got {pointer_count}"
+        pointer_count, 33,
+        "docs/context pointer ledger drifted: expected 33, got {pointer_count}"
     );
     assert!(
         violations.is_empty(),
@@ -3972,19 +3973,19 @@ fn context_pointer_parser_accepts_subdirectories_and_flags_missing_anchors() {
 
 // ──────────────── r6: docs/design 契约树的指针 / 索引机检 ────────────────
 
-/// 解析一段文本里所有指向 `docs/design/` 的文件指针（**允许多级子目录**）。
+/// 通用「树内指针」解析器：在 `prefix`（形如 `docs/design/`）之后取字符集内的最长串。
 ///
-/// 字符集 `[A-Za-z0-9._/-]`（与 `context_pointer_paths` 同集）：遇空白、`§`、`；`、中文标点即止，
+/// 字符集 `[A-Za-z0-9._/-]`：遇空白、`§`、`；`、中文标点即止，
 /// 所以占位 `docs/design/<module>/<topic>.md`、通配 `docs/design/*.md`、目录指针
 /// `docs/design/kernel/` 都不会被当成文件指针。
 ///
 /// r6 比 r5 的实现多做一步：把尾部的 `.` 与 `/` 剥掉再判 `.md`——
 /// `…/harness-tools.md.` 这类「句末点多写一个」的写法在只认 `.md` 结尾的解析器里会被整条吞掉（漏检不是通过）。
-fn design_pointer_paths(value: &str) -> Vec<String> {
+fn pointer_paths(value: &str, prefix: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = value;
-    while let Some(pos) = rest.find("docs/design/") {
-        let tail = &rest[pos + "docs/design/".len()..];
+    while let Some(pos) = rest.find(prefix) {
+        let tail = &rest[pos + prefix.len()..];
         let run: String = tail
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
@@ -3996,6 +3997,11 @@ fn design_pointer_paths(value: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// 指向 `docs/design/` 的文件指针（**允许多级子目录**）。
+fn design_pointer_paths(value: &str) -> Vec<String> {
+    pointer_paths(value, "docs/design/")
 }
 
 /// 核一个键值的全部 design 指针：累加 `count` 并返回违规清单（锚点缺失 / 非法路径段）。
@@ -4539,6 +4545,137 @@ fn context_scene_reference_ids_resolve() {
             "{id} 不得出现在 data/config.json 的 readPlan 里（默认不拦门禁）"
         );
     }
+}
+
+/// r6：playbook / texts / core / `src/**` 里的 `docs/context/` 指针必须逐个可达。
+///
+/// 这是 r5 盲区的补丁：r5 的锚点用例（`narrative_pointer_anchors_exist_in_docs_context`）
+/// 只扫 `data/texts/**` 与 `core.scenes/prompts`，**从不打开 `data/playbook/**` 与 `src/**`**，
+/// 于是 11 处 playbook 指针 + 1 处 `src/runtime/tools.lua` 注释在 r5 之后仍指向已删除的文件
+/// （**死链全绿**）。本用例把这两个入口纳入，并钉住 56 处逐来源硬账。
+///
+/// Mutation：把任一处改回 `docs/context/decisions-engine.md`（已移入 `archive/`）→ 本用例转红。
+#[test]
+fn playbook_and_src_context_pointers_resolve() {
+    let repo = repo_dir();
+    let mod_dir = project_mod_dir();
+    let context_dir = repo.join("docs/context");
+
+    let mut items: Vec<(String, String, String)> = Vec::new();
+    let mut playbook: Vec<PathBuf> = Vec::new();
+    collect_files_with(&mod_dir.join("data/playbook"), "json", &mut playbook);
+    for path in &playbook {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("playbook file name")
+            .to_owned();
+        let fragment = read_json(path);
+        let Some(sections) = fragment["sections"].as_array() else {
+            continue; // `head.json` 是章首投影，没有 sections
+        };
+        for section in sections {
+            let id = section["id"].as_str().unwrap_or("?").to_owned();
+            for key in ["source", "summary"] {
+                if let Some(text) = section[key].as_str() {
+                    items.push((name.clone(), format!("{id}.{key}"), text.to_owned()));
+                }
+            }
+            for rule in section["rules"].as_array().expect("rules") {
+                let rid = rule["id"].as_str().unwrap_or("?").to_owned();
+                for key in ["text", "basis"] {
+                    if let Some(text) = rule[key].as_str() {
+                        items.push((name.clone(), format!("{rid}.{key}"), text.to_owned()));
+                    }
+                }
+            }
+        }
+    }
+    let mut texts: Vec<PathBuf> = Vec::new();
+    collect_files_with(&mod_dir.join("data/texts"), "json", &mut texts);
+    for path in &texts {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("texts file name")
+            .to_owned();
+        let fragment = read_json(path);
+        if let Some(beats) = fragment["beats"].as_object() {
+            for (key, value) in beats {
+                if let Some(text) = value.as_str() {
+                    items.push((name.clone(), key.clone(), text.to_owned()));
+                }
+            }
+        }
+        for ns in ["scenes", "prompts"] {
+            if let Some(map) = fragment[ns].as_object() {
+                for (key, value) in map {
+                    if let Some(text) = value.as_str() {
+                        items.push((name.clone(), format!("{ns}.{key}"), text.to_owned()));
+                    }
+                }
+            }
+        }
+    }
+    let mut lua: Vec<PathBuf> = Vec::new();
+    collect_files_with(&mod_dir.join("src"), "lua", &mut lua);
+    for path in &lua {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("lua file name")
+            .to_owned();
+        let text = std::fs::read_to_string(path).expect("read lua source");
+        items.push((name, "source".to_owned(), text));
+    }
+
+    let mut ledger: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut violations: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    for (source, key, value) in &items {
+        for file in pointer_paths(value, "docs/context/") {
+            total += 1;
+            *ledger.entry(source.clone()).or_insert(0) += 1;
+            if file.split('/').any(|seg| seg.is_empty() || seg == "..") {
+                violations.push(format!("{source}.{key} -> docs/context/{file} (illegal)"));
+            } else if !context_dir.join(&file).is_file() {
+                violations.push(format!("{source}.{key} -> docs/context/{file} (missing)"));
+            }
+        }
+    }
+
+    let expected: std::collections::BTreeMap<String, usize> = [
+        ("beats-flow.json", 7usize),
+        ("beats-harness.json", 2),
+        ("beats-map-guide.json", 2),
+        ("beats-settlement.json", 4),
+        ("ch1-foundation.json", 12),
+        ("ch3-evidence.json", 2),
+        ("ch4-mod-host.json", 0),
+        ("ch4-protocol.json", 2),
+        ("ch4-run-machine.json", 5),
+        ("ch5-evolution-tools.json", 1),
+        ("core.json", 18),
+        ("tools.lua", 1),
+    ]
+    .into_iter()
+    .filter(|(_, count)| *count > 0)
+    .map(|(name, count)| (name.to_owned(), count))
+    .collect();
+
+    assert_eq!(
+        ledger, expected,
+        "docs/context 指针账漂移（playbook + texts + src）：{ledger:?}"
+    );
+    assert_eq!(
+        total, 56,
+        "docs/context 指针总数漂移：期望 56，实得 {total}"
+    );
+    assert!(
+        violations.is_empty(),
+        "docs/context 指针锚点不存在：{}",
+        violations.join(", ")
+    );
 }
 
 /// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup

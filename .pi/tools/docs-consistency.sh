@@ -307,6 +307,11 @@ required = [
     'docs/context/cold-start/principles.md',
     'docs/context/archive/decisions-agent.md',
     'docs/context/archive/decisions-engine.md',
+    # r6：设计契约树的树入口（三模块的枚举由 agent_seed_semantics 的索引集合相等用例负责，
+    # 那处才是权威；这里只登记入口，避免两处清单互相追平）
+    'docs/design/README.md',
+    # r6：行为叙事归位后的代表文件（理解性，不拦门禁；其余两份由 scenes.json 的 reference 段机检）
+    'docs/context/story/requirement-story.md',
 ]
 for rel in required:
     fp = os.path.join(repo, rel)

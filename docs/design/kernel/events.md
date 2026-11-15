@@ -42,5 +42,5 @@
 
 **基础设施事件**（10 个）：`config.set` / `config.open` / `config.close` / `map.show` / `ygg.choice_selected` / `vfs.write` / `tool.call` / `tool.result` / `agent.summary` / `stage.advance`。
 
-> 与 §3.4 末注的关系：末注的 registry 口径与复算命令描述**已装载 Mod 的事实集**；本表是 D-MA23 设计目标全集（既有 32 + 新增 6 = 38）。代码落地后两者一致；运行期 registry 仍是 fail-closed 的运行时唯一事实。
+> 与 §3.4 末注的关系：末注的 registry 口径与复算命令描述**已装载 Mod 的事实集**；本表是 D-MA23 设计目标全集（既有 33 + 新增 6 = 39）。代码落地后两者一致；运行期 registry 仍是 fail-closed 的运行时唯一事实。
 
