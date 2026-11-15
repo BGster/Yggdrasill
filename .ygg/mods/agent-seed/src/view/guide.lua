@@ -20,7 +20,7 @@ local SECTIONS = {}
 local STAGE_GUIDE = {
   charter = { "repository", "credentials", "hard_constraints" },
   coordinate = { "branches" },
-  settle = { "mod_engineering", "host_contract" },
+  settle = { "host_contract" },
   release = { "branches" },
 }
 

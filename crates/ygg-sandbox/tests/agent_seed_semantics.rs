@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        6,
-        "STAGE_GUIDE must route all 6 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
+        5,
+        "STAGE_GUIDE must route all 5 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        6,
-        "r5 assembles 6 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
+        5,
+        "r5 assembles 5 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        6,
+        5,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3527,7 +3527,6 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     assert_receipt(
         &mut settle,
         &[
-            "mod_engineering",
             "host_contract",
         ],
     );
@@ -4383,7 +4382,7 @@ fn design_pointer_anchors_exist_under_docs_design() {
 
     let expected: std::collections::BTreeMap<String, usize> = [
         ("ch1-foundation.json", 4usize),
-        ("ch4-mod-host.json", 8),
+        ("ch4-mod-host.json", 2),
         ("beats-settlement.json", 3),
         ("tools.lua", 2),
     ]
@@ -4395,7 +4394,7 @@ fn design_pointer_anchors_exist_under_docs_design() {
         ledger, expected,
         "docs/design 指针账漂移（逐来源）：{ledger:?}"
     );
-    assert_eq!(total, 17, "docs/design 指针总数漂移：期望 17，实得 {total}");
+    assert_eq!(total, 11, "docs/design 指针总数漂移：期望 11，实得 {total}");
     assert!(
         violations.is_empty(),
         "docs/design 指针锚点不存在：{}",
