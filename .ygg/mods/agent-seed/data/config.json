@@ -68,15 +68,15 @@
   "readGate": {
     "ver": {
       "cold-start/vocabulary": "16b47f",
-      "acts/charter": "82b473",
-      "acts/coordinate": "e4ae66",
-      "req-acts/intake": "c1b3d3",
-      "acts/settle": "27865f",
-      "rituals/cleanup": "9d3352",
-      "acts/release": "a40ded",
-      "acts/retired": "c155e2",
-      "req-acts/delivery": "de0268",
-      "req-acts/integration": "c4cfec"
+      "acts/charter": "daf05b",
+      "acts/coordinate": "94346e",
+      "req-acts/intake": "c8584b",
+      "acts/settle": "124a0d",
+      "rituals/cleanup": "677201",
+      "acts/release": "b7bced",
+      "acts/retired": "ed4b6a",
+      "req-acts/delivery": "045d55",
+      "req-acts/integration": "cc9a7a"
     },
     "reqActs": {
       "plan": [

@@ -1,11 +1,11 @@
 # Yggdrasill · 派发仪式（rituals/dispatch）
 > **id** rituals/dispatch · **幕** coordinate（派发前） · **触发** 派发任何 subagent（plan / development / analysis）前
 > **读不到代价** hard-refusal（`.env.local` 未 source 即派发、工件落检出、submit 缺 `exec=` 均不合规）
-> **ver** 14d64e
+> **ver** 039e55
 
 > **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
-> **上游**：[../../README.md](../../README.md) · **相关**：[../acts/](../acts/) · [../scenes/harness.md](../scenes/harness.md)（submit 命令模板等句式契约） · [../../wiki-governance.md](../../wiki-governance.md)
+> **上游**：[../../README.md](../../README.md) · **相关**：[../acts/](../acts/) · [scenes/README.md](../scenes/README.md)（submit 命令模板等句式契约） · [../../wiki-governance.md](../../wiki-governance.md)
 
 ## 1. brief 结构（事实头 + 策略正文）
 
@@ -75,7 +75,7 @@ set +a
 
 ## 5. 提交仪式（Submit）
 
-- 子代理用 `subagent_submit_cmd` 模板提交 `proposal.submit`（模板句式见 [../scenes/harness.md](../scenes/harness.md)），payload 尾段携带 `exec=<agent_id>`（内联执行者注册）与身份段（宿主在声明路由上盖 `actor=` / `actor_session=` 章）。
+- 子代理用 `subagent_submit_cmd` 模板提交 `proposal.submit`（模板句式见 [scenes/README.md](../scenes/README.md)），payload 尾段携带 `exec=<agent_id>`（内联执行者注册）与身份段（宿主在声明路由上盖 `actor=` / `actor_session=` 章）。
 - 执行者台账：主会话在拿到子代理 id 后 `config.set executor.<rN>.<stage>=<id>`，live stage ∈ **plan / development**（`analysis` 是旧版兼容槽位，永不作为 live 阶段、也不为新工作登记）；一个子代理覆盖两个 live 阶段时逐阶段登记同一 id。同一 (req, stage) 换人为不同 id、或**跨阶段移交**（development 的 id 不同于 plan 的 id）**必须带原因**（`=<id>|<reason>`），不得当作「该阶段首次绑定」静默覆盖；成功移交写 `id|reason` 并向 `req.<i>.hist` 追加一条（复用滚动上限，无独立 history/handoff 键），干净的首次绑定不写历史。台账不带 rev：`amend` 不改绑定，`split` / `merge` 不继承。`proposal.submit` 不硬查台账，未注册只在 `requirement.list` 显示 unregistered，因此它是自声明审计轨迹而非身份凭证。
 - 自报 profile 卡：`config.set profile.<handle>.<key>=…`（每键一次 config.set）；profile 是自报声明不是凭据，问责以执行者台账为准。宿主身份段、三态互证与 opener 契约见 [../../design/mod/identity.md](../../design/mod/identity.md)，本节不复制。
 - **交付洁净度自检（提交 `proposal.submit` 之前必跑）**：`sh .pi/tools/git-delivery-check.sh --repo <checkout> --text` 必须 `ok=1`（`dirty` / `unpushed` / `stash` / `conflict_debris` / `fmt` 五项计数全 0）。**回执里贴这一行的原文**——「工作树 clean」这句话不再是证据，证据是这一行输出（五项与修法见 §7）。

@@ -79,7 +79,7 @@ grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ | grep -v '
 ### pack / config 契约四段（原 playbook `host_contract` 章，2026-11-15 原样归位）
 
 > 逐条自 原 playbook 章 `ch4-mod-host.json`（已删除） 搬入，**未改写**（保真优先）。
-> `contract.serve-read-only` 的正文权威在 [host/serve.md](host/serve.md) §3.7.6。
+> `contract.serve-read-only` 的正文权威在 [host/serve.md](../host/serve.md) §3.7.6。
 
 - **`contract.required`**（must）：The generic tooling (`src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.
 - **`contract.agent-seg`**（must）：The `agent` section of `pack.json` has eight fields: entryEvent / choiceEvent / summaryEvent / endingPrefix / metaKey / rejectionPrefixes (at least one) / replayPrefix / defaultPayload.

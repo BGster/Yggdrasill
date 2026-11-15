@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 交付（req-acts/delivery）
 > **id** req-acts/delivery · **幕** req: ready/developing/accept/accept_gate · **触发** 派发 development / 交付受理前
 > **读不到代价** hard-refusal（工件纪律漏读 → 交付被打回；`.env.local` 未 source → 派发不合规）
-> **ver** de0268
+> **ver** 045d55
 
 ## 4. 待开发（ready）
 
@@ -9,7 +9,7 @@
 - **入口条件**：`plan_ok=true`、无 job、无 pending。
 - **必做动作**：无主动作——等资源（job 槽位 / 泳道）；主会话可在槽位空出时 `requirement.dispatch` 派发开发。自动派发（declared single successor）在同回无 pending、无冲突、有空槽时触发。
 - **出口判据**：被派发进开发（认领泳道，job=development）。
-- **本幕关联阅读**：[../../design/host/lanes.md](../../design/host/lanes.md)（泳道池认领/释放）；[copy/lanes.md](../scenes/lanes.md)（`lane_claimed` / `lane_claim_*` 拒绝句式）。
+- **本幕关联阅读**：[../../design/host/lanes.md](../../design/host/lanes.md)（泳道池认领/释放）；[scenes/README.md](../scenes/README.md)（`lane_claimed` / `lane_claim_*` 拒绝句式）。
 
 ## 5. 开发中（developing）
 
@@ -17,7 +17,7 @@
 - **入口条件**：ready 且被 dispatch（泳道认领成功）。
 - **必做动作**：执行者按 brief 实现；plan 阶段声明的 wiki 触碰面在同特性分支就地更新（Doc sync）；完成后 `proposal.submit(development)` 提交，工件带验收证据（集成需求须 `develop@<sha>`）。
 - **出口判据**：development 提案 pending → 交付受理幕。
-- **本幕关联阅读**：[rituals/dispatch.md](../rituals/dispatch.md)（工件纪律 / submit / Doc sync / 集成纪律）；[copy/requirements.md](../scenes/requirements.md)（`req_amend_*` / `req_prop_*` 句式）。
+- **本幕关联阅读**：[rituals/dispatch.md](../rituals/dispatch.md)（工件纪律 / submit / Doc sync / 集成纪律）；[scenes/README.md](../scenes/README.md)（`req_amend_*` / `req_prop_*` 句式）。
 
 ## 5b. 文档同步（Doc sync，适用时）
 
@@ -29,7 +29,7 @@ docs wiki 是全仓始终最新的权威——不是变更日志，历史归 git
 - **入口条件**：有 pending development 提案。
 - **必做动作**：**主代理串行**审阅交付（一次一条，canonical order）——`proposal.accept`（受理，升入验收门禁）或 `proposal.reject`（打回待开发）。受理前核验工件齐备、证据可读。
 - **出口判据**：accept → 验收门禁（gate=accept）；reject → 待开发（plan_ok 保持，重新开发）。
-- **本幕关联阅读**：[copy/requirements.md](../scenes/requirements.md)（`req_accept_*` / `req_prop_busy` / `req_prop_no_summary` 句式）；串行受理判据见 [acts/coordinate.md](../acts/coordinate.md)。
+- **本幕关联阅读**：[scenes/README.md](../scenes/README.md)（`req_accept_*` / `req_prop_busy` / `req_prop_no_summary` 句式）；串行受理判据见 [acts/coordinate.md](../acts/coordinate.md)。
 
 ## 5c. 验证门禁与证据（gates · live · evidence）
 

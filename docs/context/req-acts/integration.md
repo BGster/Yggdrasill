@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 集成（req-acts/integration）
 > **id** req-acts/integration · **幕** req: accept_gate/integrating/done · **触发** 验收门禁前 / 集成核验前
 > **读不到代价** hard-refusal（证据清单漏项 → 验收被拒；SHA 不符 → `integration_bad_sha` 打回）
-> **ver** c4cfec
+> **ver** cc9a7a
 
 ## 7. 验收门禁（accept_gate）
 
@@ -9,7 +9,7 @@
 - **入口条件**：development 提案已受理（`gate=="accept"`）。
 - **必做动作**：**人**过验收——`gate.approve`（须核验 `develop@<sha>` 证据与 artifacts 非空）或 `gate.reject`（打回待开发，plan_ok 保持）；gate_rev==req.rev 的 stale 校验同样适用。
 - **出口判据**：approve → 集成幕（`integrating=true`）；reject → 待开发。
-- **本幕关联阅读**：[copy/requirements.md](../scenes/requirements.md)（`req_gate_ok` / `req_gate_no_artifacts` / `req_gate_no_evidence` / `req_gate_stale` 句式）；[../../design/kernel/state-surface.md](../../design/kernel/state-surface.md)（验收证据键）。
+- **本幕关联阅读**：[scenes/README.md](../scenes/README.md)（`req_gate_ok` / `req_gate_no_artifacts` / `req_gate_no_evidence` / `req_gate_stale` 句式）；[../../design/kernel/state-surface.md](../../design/kernel/state-surface.md)（验收证据键）。
 - **场景化证据清单**（按需求类型选列核验，避免“看过就算”）：
 
   **通用子句（对所有行生效）**：证据只度量「代码存在」是不合格的。凡本需求引入/依赖**开关型、feature-flag 型**能力（「缺席即失效 / 关掉即失效」的那一类），必须追加「**在真实配置下处于生效态**」的证据：`data/config.json` 里的生效值 + 对应的 `*_ships_armed_*` 用例名与结果。r4 首版交付三套门禁 473/158/77 全绿而 `readGate`/`readPlan` 根本不存在，就是这一条缺失的代价。**schema 只校形状，不校值域**：可选段可以整段缺席（r4 实况），必填键可以是 `false`（schema 合法但保护静默失效）——两形态都只能靠 armed 断言钉。
@@ -32,7 +32,7 @@
 - **入口条件**：验收门禁通过（`integrating=true`）。
 - **必做动作**：**执行者**在收口时自行集成功能分支 → `origin/develop`（对齐 → `git merge --no-ff` → 集成态门禁绿 → push develop），工件记录 `develop@<sha>`；主会话 `integration.confirm` 核验 SHA 后关需求，或 `integration.reject` 打回。
 - **出口判据**：confirm → done（`status=done`，泳道释放）；reject → 待开发（写 feedback、释放泳道）。
-- **本幕关联阅读**：[rituals/dispatch.md](../rituals/dispatch.md)（集成纪律：no-FF / 不碰 master / 不碰他人泳道）；[copy/requirements.md](../scenes/requirements.md)（`integration_*` 句式、`integration_bad_sha` 证据形状）。
+- **本幕关联阅读**：[rituals/dispatch.md](../rituals/dispatch.md)（集成纪律：no-FF / 不碰 master / 不碰他人泳道）；[scenes/README.md](../scenes/README.md)（`integration_*` 句式、`integration_bad_sha` 证据形状）。
 - **集成纪律（development 阶段收口时，全流程）**：
   1. **谁做**：由该需求的 development 执行者在**自己的泳道**内完成，主会话永不做迭代级集成。集成按仓库经 `origin/develop` 串行化——被拒的 develop push 说明别的泳道先落地，重新对齐后重试；栈叠泳道按 base-first 顺序集成。
   2. **准入**：功能分支自身门禁全绿才能开始（分支本地证据）；这份绿**不结转**，集成后必须在集成态重新验证。
@@ -51,4 +51,4 @@
 - **入口条件**：`integration.confirm` 成功；旁路关闭（split/merge/dropped）时为 `closed_reason`。
 - **必做动作**：无（终态）；泳道已释放，证据在册。
 - **出口判据**：无（终态）。
-- **本幕关联阅读**：[copy/requirements.md](../scenes/requirements.md)（`req_amend_derive_hist` / `req_after_done` / `req_resolve_*` 句式）；旁路语义见 [../story/requirement-story.md](../story/requirement-story.md)（覆盖层：split/merge/conflict/resolve）。
+- **本幕关联阅读**：[scenes/README.md](../scenes/README.md)（`req_amend_derive_hist` / `req_after_done` / `req_resolve_*` 句式）；旁路语义见 [../story/requirement-story.md](../story/requirement-story.md)（覆盖层：split/merge/conflict/resolve）。

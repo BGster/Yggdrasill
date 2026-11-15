@@ -49,14 +49,7 @@ docs/
 | [context/rituals/dispatch.md](context/rituals/dispatch.md) | 派发仪式正文：分阶段必读 / 工件 / submit / 集成 / Doc sync | mod subagent_brief 策略段 |
 | [context/rituals/cleanup.md](context/rituals/cleanup.md) | 盘点清理政策：会话清理边界与判据 / 待办清理 | mod settlement_sessions_unsetted_hint 正文 |
 | [context/rituals/fallback.md](context/rituals/fallback.md) | 无 egg 执行章 + 续作降级说明 | mod subagent_fallback_note 正文 |
-| [context/scenes/README.md](context/scenes/README.md) | 文案契约七域索引与协议前缀（417 beats + core 36 = 453 唯一键） | mod data/texts 全部状态行文键 |
-| [context/scenes/flow.md](context/scenes/flow.md) | beats-flow 63 键句式 | beats-flow.json |
-| [context/scenes/harness.md](context/scenes/harness.md) | beats-harness 69 键句式（含 tools 注册七键） | beats-harness.json |
-| [context/scenes/lanes.md](context/scenes/lanes.md) | beats-lanes 36 键句式 | beats-lanes.json |
-| [context/scenes/map-guide.md](context/scenes/map-guide.md) | beats-map-guide 38 键句式 | beats-map-guide.json |
-| [context/scenes/requirements.md](context/scenes/requirements.md) | beats-requirements 144 键句式 | beats-requirements.json |
-| [context/scenes/settlement.md](context/scenes/settlement.md) | beats-settlement 54 键句式（含 tools 机证七键） | beats-settlement.json |
-| [context/scenes/core.md](context/scenes/core.md) | core 36 键 + 23 处指针壳与 Q3 键账 | core.json |
+| [context/scenes/README.md](context/scenes/README.md) | 剧本索引：七个回执片段与「每一刻读哪份政策」；不复制回执模板（唯一副本在 mod `data/texts/`） | mod data/texts 全部回执键 |
 
 ## 导航表 · 设计契约（design/）
 
