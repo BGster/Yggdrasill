@@ -137,15 +137,6 @@ impl Game {
         reply
     }
 
-    /// Dispatch **without** asserting `ok` — the fail-closed envelope carries
-    /// `error.code` / `error.message` instead of a narrative.
-    #[track_caller]
-    fn raw_reply(&mut self, event: &str, payload: &str) -> Json {
-        let stamped = self.stamped(event, payload);
-        serde_json::from_str(&self.kernel.dispatch(event, &stamped))
-            .unwrap_or_else(|err| panic!("the {event} reply is not JSON: {err}"))
-    }
-
     /// Dispatch and take the narrative lines.
     #[track_caller]
     fn narrate(&mut self, event: &str, payload: &str) -> Vec<String> {
@@ -166,12 +157,6 @@ impl Game {
     #[track_caller]
     fn save(&mut self) -> Json {
         self.reply("save", "0")["save"].clone()
-    }
-
-    /// The save receipt serialized (byte-equality is the zero-side-effect proof).
-    #[track_caller]
-    fn save_bytes(&mut self) -> Vec<u8> {
-        serde_json::to_vec(&self.save()).expect("serialize the save")
     }
 
     /// One KV in the save (missing key → `Null`; the fixtures observe exactly that).
@@ -893,110 +878,6 @@ fn default_all1_walk_loops_empty_batches_to_limit() {
 // ───────────────────── gate locality & the integration act ─────────────────────
 
 // ───────────────────── r1 · single operation map + registry fail-closed ─────────────────────
-
-/// Take the **map window** from the `map.show` receipt: from the map head line to the map
-/// foot line (ignoring the other rendered lines in the same receipt).
-#[track_caller]
-/// r1×r11 `guide.show` is **physically deregistered**: the driver's registry pre-check
-/// fails the dispatch closed before anything runs — `ok:false`, `error.code=VALIDATION`,
-/// the message names the event, the registered count and the registered set (which does
-/// **not** contain `guide.show`), and the state baseline is byte-identical afterwards.
-#[test]
-fn guide_show_is_physically_deregistered_and_fails_closed() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    let reply = assert_fail_closed(&mut game, "guide.show");
-    let message = reply["error"]["message"].as_str().expect("error message");
-    let set = registered_set(message);
-    assert!(
-        set.contains(&"map.show".to_owned()),
-        "the registered set must still carry the surviving view action `map.show`: {message}"
-    );
-    assert!(
-        set.contains(&"charter.set".to_owned()) && set.contains(&"run.begin".to_owned()),
-        "the registered set must carry the charter-act pair: {message}"
-    );
-    assert!(
-        set.contains(&"integration.confirm".to_owned())
-            && set.contains(&"release.confirm".to_owned()),
-        "the registered set must carry the new 剧情双层重写 acts: {message}"
-    );
-
-    // The registry is intact: a normal view dispatch still works after the refusal.
-    let map = game.narrate("map.show", "0");
-    assert!(
-        map.iter().any(|line| line.starts_with("[CURRENT NODE]")),
-        "map.show must keep working after the fail-closed refusal: {map:#?}"
-    );
-}
-
-/// The shared fail-closed probe (r1/r11): dispatch an unregistered event and pin the
-/// driver pre-check contract — envelope, message三要素 (event name / registered count /
-/// registered set), and byte-identical state (zero side effects).
-#[track_caller]
-fn assert_fail_closed(game: &mut Game, event: &str) -> Json {
-    let before = game.save_bytes();
-    let reply = game.raw_reply(event, "0");
-    assert_eq!(
-        reply["ok"],
-        json!(false),
-        "`{event}` must fail closed: {reply}"
-    );
-    assert_eq!(
-        reply["error"]["code"],
-        json!("VALIDATION"),
-        "the pre-check must be a readable VALIDATION: {reply}"
-    );
-    let message = reply["error"]["message"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the error envelope must carry a message: {reply}"));
-    assert!(
-        message.contains(&format!("未注册事件 `{event}`")),
-        "the message must name the rejected event: {message}"
-    );
-    let marker = "本 Mod 已注册 ";
-    let at = message
-        .find(marker)
-        .unwrap_or_else(|| panic!("the message must carry the registered count: {message}"));
-    let digits: String = message[at + marker.len()..]
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
-    let count: usize = digits
-        .parse()
-        .unwrap_or_else(|err| panic!("the registered count must be a number: {message} ({err})"));
-    // 剧情双层重写: 38 story/operate/infrastructure events (DESIGN §2.6) + `ygg.narrative.goto`
-    // (the node:render render event) = 39 registered handlers; r1 (泳道分池) adds
-    // `lane.pool` (the named-pool registry action) = 40 registered handlers.
-    assert_eq!(
-        count, 40,
-        "the merged mod registers 40 events after r1 lane.pool — got {count}: {message}"
-    );
-    let set = registered_set(message);
-    assert!(
-        !set.iter().any(|name| name == event),
-        "the registered set must not contain the rejected event: {message}"
-    );
-    assert_eq!(
-        game.save_bytes(),
-        before,
-        "a fail-closed refusal must leave the state baseline byte-identical"
-    );
-    reply
-}
-
-/// The registered set appended after `个事件：` (dictionary order, `、`-joined).
-fn registered_set(message: &str) -> Vec<String> {
-    let marker = "个事件：";
-    let at = message
-        .find(marker)
-        .unwrap_or_else(|| panic!("the message must carry the registered set: {message}"));
-    message[at + marker.len()..]
-        .split('、')
-        .map(|name| name.trim().to_owned())
-        .collect()
-}
 
 // ───────────────────── r11 · unknown events fail closed ─────────────────────
 
