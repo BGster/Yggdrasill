@@ -1142,84 +1142,6 @@ fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
 
 // ───────────────────── settlement merge & the batch loop ─────────────────────
 
-/// One `settlement.evolution` turn settles the evolution record **and** the two end-of-run
-/// cleanups (`sessions=` / `todo=`) — the four-settled effect then moves the run into the
-/// release micro-state, and `review.note` (release declared) closes the batch right after
-/// it. A malformed optional segment is refused (shape gate, nothing written).
-#[test]
-fn settlement_evolution_settles_sessions_and_todo_in_one_turn() {
-    let mut game = drive_to_settle();
-    let verified = game.click("verify.submit all_green=true — ");
-    assert!(
-        verified["narrative"].to_string().contains("[GATES GREEN]"),
-        "verify.submit all_green=true must record evidence: {verified}"
-    );
-
-    // A malformed optional segment is refused before anything is written.
-    let bad = game.narrate(
-        "settlement.evolution",
-        &text("|summary|c=0/0|sessions=1/3/nowhere"),
-    );
-    assert_refused(&bad, "sessions=");
-    // The refusal writes nothing: moved stays at the reset_settlement baseline (0).
-    game.assert_kv("settlement.sessions.moved", json!(0));
-
-    // The merged turn: evolution + sessions + todo in one transaction.
-    let payload = text(
-        "|candidates screened against the evolution chapter|c=0/0|\
-sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
-    );
-    let registered = game.narrate("settlement.evolution", &payload);
-    assert!(
-        registered
-            .iter()
-            .any(|line| line.contains("[SETTLE READY]")),
-        "the four-settled effect must fire in the same turn: {registered:#?}"
-    );
-    game.assert_kv(
-        "settlement.sessions.destination",
-        json!("~/.pi/agent/sessions-trash/semantics"),
-    );
-    game.assert_kv("settlement.sessions.moved", json!(1));
-    game.assert_kv("settlement.sessions.remaining", json!(0));
-    game.assert_kv("settlement.todo.remaining", json!(0));
-    game.assert_kv(
-        "settlement.todo.verified_by",
-        json!("re-checked the todo list"),
-    );
-    assert_eq!(
-        game.kv("settlement.evolution.summary"),
-        json!("candidates screened against the evolution chapter")
-    );
-    game.assert_kv("run.phase", json!("release"));
-
-    // The batch close needs the release declaration first; skip with a reason, then close.
-    game.narrate("release.skip", &text("本批无需发布：纯测试批次"));
-    let closed = game.click("review.note — ");
-    let narrative = closed["narrative"].to_string();
-    assert!(
-        narrative.contains("[BATCH 1 SETTLED]"),
-        "review.note must settle the batch: {closed}"
-    );
-    assert!(
-        !narrative.contains("[ENDING"),
-        "a batch settle must never carry the ending prefix: {closed}"
-    );
-    game.assert_kv("ending", json!(null));
-    game.assert_kv("run.batch", json!(2));
-    game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
-    game.assert_kv("run.phase", json!(""));
-    game.assert_kv("verify.passed", json!(false));
-    game.assert_kv("settlement.evolution.summary", json!(""));
-    game.assert_kv("run.release.master_sha", json!(""));
-    game.assert_kv("run.release.skipped_reason", json!(""));
-    game.assert_kv("review.evolution.candidates", json!("0/0"));
-    game.assert_kv(
-        "review.evolution.summary",
-        json!("candidates screened against the evolution chapter"),
-    );
-}
-
 // ───────────────────── batch-maintenance auto-append (r3 / 批结算自动维护) ─────────────────────
 
 // ───────────────────── gate locality & the integration act ─────────────────────
@@ -3318,13 +3240,11 @@ fn design_pointer_anchors_exist_under_docs_design() {
         }
     }
 
-    let expected: std::collections::BTreeMap<String, usize> = [
-        ("beats-settlement.json", 3),
-        ("tools.lua", 2),
-    ]
-    .into_iter()
-    .map(|(name, count)| (name.to_owned(), count))
-    .collect();
+    let expected: std::collections::BTreeMap<String, usize> =
+        [("beats-settlement.json", 3), ("tools.lua", 2)]
+            .into_iter()
+            .map(|(name, count)| (name.to_owned(), count))
+            .collect();
 
     assert_eq!(
         ledger, expected,

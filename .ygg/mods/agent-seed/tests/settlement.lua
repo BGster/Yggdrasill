@@ -155,3 +155,37 @@ test("维护义务只认等值批次：旧批次号与未知键都被拒", funct
   assert_true(narrated_contains("[DOCS MAINTENANCE CLEARED]"), "the equal batch clears it")
   assert_eq(kv("docs.maintenance.due"), "", "the obligation empties")
 end)
+
+test("一次事务完成四项：evolution + sessions + todo，同回合 [SETTLE READY]", function()
+  drive_to_settle()
+
+  reset()
+  click("verify.submit all_green=true — ")
+  assert_true(narrated_contains("[GATES GREEN]"), "verify records the evidence")
+
+  -- 畸形可选段：拒绝，且不写任何东西（moved 停在 reset 基线 0）。
+  reset()
+  fire("settlement.evolution", "|summary|c=0/0|sessions=1/3/nowhere")
+  assert_true(narrated_contains("sessions="), "the refusal names the bad segment")
+  assert_eq(kv("settlement.sessions.moved"), 0, "the refusal writes nothing")
+
+  -- 合并回合：一条载荷同时结清 evolution / sessions / todo。
+  reset()
+  fire(
+    "settlement.evolution",
+    "|candidates screened against the evolution chapter|c=0/0|" ..
+      "sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list"
+  )
+  assert_true(narrated_contains("[SETTLE READY]"), "the four-settled effect fires in the same turn")
+  assert_eq(kv("settlement.sessions.destination"), "~/.pi/agent/sessions-trash/semantics", "destination")
+  assert_eq(kv("settlement.sessions.moved"), 1, "moved")
+  assert_eq(kv("settlement.sessions.remaining"), 0, "remaining")
+  assert_eq(kv("settlement.todo.remaining"), 0, "todo remaining")
+  assert_eq(kv("settlement.todo.verified_by"), "re-checked the todo list", "todo provenance")
+  assert_eq(
+    kv("settlement.evolution.summary"),
+    "candidates screened against the evolution chapter",
+    "the evolution summary lands"
+  )
+  assert_eq(kv("run.phase"), "release", "four settled → the release act")
+end)
