@@ -301,3 +301,64 @@ test("释放路径的池作用域：同 k 三池互不干扰 / 幂等 / 池化�
   assert_eq(count_marker("[WORKTREE RELEASE REFUSED]"), 1, "未知仓必须叙述为拒绝")
   assert_nil(kv("lane.alpha.2.req"), "台账不写")
 end)
+
+test("冲突雷达只在同池内比较：跨池同文件不误报", function()
+  fresh()
+  charter_and_begin()
+  fire("lane.pool", "alpha|/tmp/checkout-alpha")
+  fire("requirement.add", "left half|description|subsys-a")
+  fire("requirement.add", "right half|description|subsys-b")
+  fire("requirement.add", "other repo|description|subsys-c")
+  fire("lane.claim", "1|r1|||1|alpha")
+  fire("lane.claim", "2|r2|||1|alpha")
+  fire("lane.claim", "1|r3|||1")
+
+  -- ① 探针 alpha-1：事实落进池作用域的探针键。
+  fire(
+    "tool.call",
+    "git.lane_probe_pool|lane=1;base=abc;branch=feature/aa11-left;repo=/tmp/checkout-alpha|t1"
+  )
+  reset()
+  fire(
+    "tool.result",
+    "t1|git.lane_probe_pool|ok|0|lane=1;branch=feature/aa11-left;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua"
+  )
+  assert_eq(kv("lane.alpha.1.probe.commits"), 2, "池作用域探针键")
+  assert_eq(kv("lane.alpha.1.probe.files"), "src/a.lua,src/b.lua", "触碰文件")
+
+  -- ② 另一个池（默认 lane-1）里**相同**的文件列表 → 不产生冲突。
+  --    扁平台账会在这里误报（不同仓的同名文件根本不相干）。
+  fire("tool.call", "git.lane_probe|lane=1;base=abc;branch=feature/aa11-other|t2")
+  reset()
+  fire(
+    "tool.result",
+    "t2|git.lane_probe|ok|0|lane=1;branch=feature/aa11-other;base=abc;head=3333333;commits=1;clean=1;files=src/a.lua,src/b.lua"
+  )
+  assert_eq(kv("req.1.conflict"), "", "跨池不误报 r1")
+  assert_eq(kv("req.3.conflict"), "", "跨池不误报 r3")
+
+  -- ③ 同一池内的重叠仍然阻塞，且标签是池作用域名。
+  fire(
+    "tool.call",
+    "git.lane_probe_pool|lane=2;base=abc;branch=feature/aa11-right;repo=/tmp/checkout-alpha|t3"
+  )
+  reset()
+  fire(
+    "tool.result",
+    "t3|git.lane_probe_pool|ok|0|lane=2;branch=feature/aa11-right;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua"
+  )
+  assert_eq(count_marker("[CONFLICT RADAR]"), 1, "同池重叠必须抬冲突")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    joined:find("lane-alpha-1", 1, true) ~= nil and joined:find("lane-alpha-2", 1, true) ~= nil,
+    "雷达必须点名两条池作用域泳道：" .. joined
+  )
+  assert_eq(kv("req.conflicts"), 2, "冲突总数")
+  assert_eq(kv("req.1.conflict"), "overlapping file: src/b.lua", "冲突正文")
+  assert_eq(kv("req.3.conflict"), "", "r3 仍无冲突")
+
+  -- ④ `requirement.resolve` 仍是唯一出口。
+  fire("requirement.resolve", "r1,r2|keep_both|re-checked")
+  assert_eq(kv("req.conflicts"), 0, "冲突归零")
+  assert_eq(kv("req.1.conflict"), "", "正文清空")
+end)

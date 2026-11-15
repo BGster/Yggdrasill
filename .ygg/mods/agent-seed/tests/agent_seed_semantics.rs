@@ -1284,64 +1284,6 @@ fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
     narrative_lines(&game.reply("tool.result", &text(result)))
 }
 
-/// r1 (泳道分池) the conflict radar compares probes **within one pool only**: the same file
-/// list in two different pools raises nothing (different repos, unrelated file trees), while
-/// the same overlap inside one pool still blocks through the human-path writer.
-#[test]
-fn conflict_radar_compares_within_pool_only() {
-    let mut game = Game::open(&project_mod_dir());
-    charter_and_begin(&mut game);
-    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
-    game.narrate("requirement.add", &text("left half|description|subsys-a"));
-    game.narrate("requirement.add", &text("right half|description|subsys-b"));
-    game.narrate("requirement.add", &text("other repo|description|subsys-c"));
-    game.narrate("lane.claim", &text("1|r1|||1|alpha"));
-    game.narrate("lane.claim", &text("2|r2|||1|alpha"));
-    game.narrate("lane.claim", &text("1|r3|||1"));
-
-    // ① probe alpha-1: the facts land in the pool-scoped probe keys.
-    tool_round(
-        &mut game,
-        "git.lane_probe_pool|lane=1;base=abc;branch=feature/aa11-left;repo=/tmp/checkout-alpha|t1",
-        "t1|git.lane_probe_pool|ok|0|lane=1;branch=feature/aa11-left;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua",
-    );
-    game.assert_kv("lane.alpha.1.probe.commits", json!(2));
-    game.assert_kv("lane.alpha.1.probe.files", json!("src/a.lua,src/b.lua"));
-
-    // ② the SAME file list in a different pool (default lane-1) raises no conflict —
-    // the flat ledger would have false-positived here. (`req.conflicts` is created
-    // lazily by the conflict writer, so assert the per-requirement fields instead.)
-    tool_round(
-        &mut game,
-        "git.lane_probe|lane=1;base=abc;branch=feature/aa11-other|t2",
-        "t2|git.lane_probe|ok|0|lane=1;branch=feature/aa11-other;base=abc;head=3333333;commits=1;clean=1;files=src/a.lua",
-    );
-    game.assert_kv("req.1.conflict", json!(""));
-    game.assert_kv("req.3.conflict", json!(""));
-
-    // ③ the same overlap inside one pool still blocks, labelled with pool-scoped names.
-    let radar = tool_round(
-        &mut game,
-        "git.lane_probe_pool|lane=2;base=abc;branch=feature/aa11-right;repo=/tmp/checkout-alpha|t3",
-        "t3|git.lane_probe_pool|ok|0|lane=2;branch=feature/aa11-right;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua",
-    );
-    assert_eq!(count_lines(&radar, "[CONFLICT RADAR]"), 1, "{radar:#?}");
-    assert!(
-        radar
-            .iter()
-            .any(|line| line.contains("lane-alpha-1") && line.contains("lane-alpha-2")),
-        "the radar names both pool-scoped lanes: {radar:#?}"
-    );
-    game.assert_kv("req.conflicts", json!(2));
-    game.assert_kv("req.1.conflict", json!("overlapping file: src/b.lua"));
-    game.assert_kv("req.3.conflict", json!(""));
-
-    // ④ `requirement.resolve` remains the only way out.
-    game.narrate("requirement.resolve", &text("r1,r2|keep_both|re-checked"));
-    game.assert_kv("req.conflicts", json!(0));
-    game.assert_kv("req.1.conflict", json!(""));
-}
-
 /// r1 (泳道分池) the pooled tool bridge folds into the pool ledger via the **request** repo
 /// argument (the host output line does not carry `--repo`): a pooled claim binds
 /// `lane.<pool>.<k>.*`, the default tool still binds the flat legacy keys, and an
