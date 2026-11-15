@@ -97,3 +97,32 @@ test("门禁独立性：别人的待决提案与在跑 job 不阻塞本条门的
   assert_eq(phase_of("r2"), "plan_gate", "r2 is still on its plan gate")
   assert_eq(kv("req.3.job"), "plan", "r3's job keeps running")
 end)
+
+test("验收门 reject：保住 plan_ok、释放泳道、回 ready 并重新派发 development", function()
+  drive_to_dev_pending("semantics-p2")
+  drive_to_accept()
+  assert_eq(kv("req.1.status"), "open", "the true state stays open")
+  assert_eq(kv("req.1.gate_rev"), 1, "gate_rev pins the revision")
+
+  -- guide 门：pass-type 动作没有菜单票据时一律被拒，状态不动（单发直派路）。
+  reset()
+  fire_direct("gate.approve", "r1")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "a direct approve without a ticket must be refused"
+  )
+  assert_eq(kv("req.1.gate"), "accept", "the gate stays up")
+  assert_eq(kv("req.1.status"), "open", "the state does not move")
+
+  -- 正常 reject：reject 不受票据门限制。
+  reset()
+  click("gate.reject — ")
+  assert_eq(kv("req.1.gate"), "", "the gate slot clears")
+  assert_eq(kv("req.1.plan_ok"), true, "an accept reject keeps plan_ok")
+  assert_eq(kv("req.1.lane"), 0, "the lane is released")
+  assert_eq(phase_of("r1"), "ready", "the row is back in ready")
+
+  fire("requirement.dispatch", "0")
+  assert_eq(kv("req.1.job"), "development", "development is re-dispatched")
+  assert_eq(kv("req.1.lane"), 1, "a lane is bound again")
+end)

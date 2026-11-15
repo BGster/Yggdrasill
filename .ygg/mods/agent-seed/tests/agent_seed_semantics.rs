@@ -927,34 +927,6 @@ fn default_all1_walk_loops_empty_batches_to_limit() {
 
 // ───────────────────── requirement pipeline: gates & deliverables ─────────────────────
 
-/// The accept gate rejected **without** an amend (R6): `plan_ok` keeps its value → the row
-/// falls back to `ready` (待开发)， and the next dispatch hands out **development** (not
-/// plan). A direct `gate.approve` without a menu ticket is refused with the state unmoved.
-#[test]
-fn accept_gate_reject_keeps_plan_ok_and_redispatches_development() {
-    let mut game = drive_to_accept(drive_to_dev_pending("semantics-p2"));
-    game.assert_kv("req.1.status", json!("open"));
-    game.assert_kv("req.1.gate_rev", json!(1));
-
-    // guide gate: a pass-type action without a menu ticket is always refused and the
-    // state does not move.
-    let direct = game.narrate("gate.approve", &text("r1"));
-    assert_refused(&direct, "gate.approve");
-    game.assert_kv("req.1.gate", json!("accept"));
-    game.assert_kv("req.1.status", json!("open"));
-
-    // Normal reject (rejects are outside the ticket gate; the menu keeps a single entry).
-    game.click("gate.reject — ");
-    game.assert_kv("req.1.gate", json!(""));
-    game.assert_kv("req.1.plan_ok", json!(true));
-    game.assert_kv("req.1.lane", json!(0));
-    assert_eq!(game.phase("r1"), "ready");
-
-    game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.job", json!("development"));
-    game.assert_kv("req.1.lane", json!(1));
-}
-
 /// Amend while the accept gate is pending: `rev+1` and `plan_ok` is invalidated → the old
 /// approval is stale (refused, state unchanged — `gate_rev` still binds the old rev) → the
 /// reject path falls back to `draft` (the invalidated plan), and the next dispatch replans.
