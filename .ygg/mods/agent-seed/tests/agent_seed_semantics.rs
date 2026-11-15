@@ -1221,39 +1221,6 @@ fn submit_identity_for(
     lines
 }
 
-/// mismatch：exec 与章不同句柄 → **识别不拒绝**（章照记、账本照绑、门禁照常可达）。
-/// plan 提案交付即门禁：proposal.accept 对它可读拒绝（裁决走 gate.*），门禁保持挂起。
-#[test]
-fn actor_channel_mismatch_is_recorded_never_rejected() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    submit_with_identity(
-        &mut game,
-        1,
-        "plan",
-        "id-mismatch",
-        Some("agent-1"),
-        Some("agent-2"),
-        None,
-    );
-    game.assert_kv("prop.1.actor", json!("agent-2"));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-    // 交付即门禁：门禁已挂起；受理菜单隐瞒 plan 提案（prop_next 只表 development），
-    // 直派 proposal.accept 被人机门可读拒绝——裁决只能走 gate.*。
-    assert_eq!(game.phase("r1"), "plan_gate");
-    let options = game.options();
-    assert!(
-        !options
-            .iter()
-            .any(|item| item.starts_with("proposal.accept — ")),
-        "a plan proposal must not be on the acceptance menu: {options:?}"
-    );
-    let direct = game.narrate("proposal.accept", &text("p1"));
-    assert_refused(&direct, "proposal.accept");
-    game.assert_kv("req.1.gate", json!("plan"));
-}
-
 /// unverified + actor-only：r9 起「有 exec 无章」不再是可推进态——无身份就无法签名，
 /// 也就无法自证「执行这个动作的人读过」（拒签 + 拒绝推进，零写入）；
 /// 只带章不带 exec 仍合法（只记章、不绑账本）；账本绑定不受「打回」影响（账本只增改）。
@@ -1312,53 +1279,6 @@ fn actor_channel_unverified_and_actor_only() {
     );
     game.assert_kv("prop.2.actor", json!("agent-9"));
     game.assert_kv("settings.executor.r2.plan", Json::Null);
-}
-
-/// 段序契约（mod 侧半）：错位 / 重复 `exec=` 逐段点名拒绝；全链 10 段载荷
-/// （7 段主体 + exec + actor + actor_session）各归其位。
-#[test]
-fn actor_session_segments_lock_relative_order_and_full_chain() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    // 重复 exec= → 拒（多出的进中间段 = 错位）。
-    let duplicated = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|s|artifacts/p.md||x|exec=agent-1|exec=agent-2"),
-    );
-    assert_refused(&duplicated, "exec=");
-    game.assert_kv("prop.1.req", Json::Null);
-    game.assert_kv("settings.executor.r1.plan", Json::Null);
-
-    // exec= 在中间段 → 拒（必须最后）。
-    let misplaced = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|s|artifacts/p.md|exec=agent-1||x"),
-    );
-    assert_refused(&misplaced, "exec=");
-    game.assert_kv("prop.1.req", Json::Null);
-
-    // 全链 10 段（R5 形状锁）：字段与三个尾段各归其位。
-    // r4 开闸：本用例直派提交（不走 submit* helper），补签一行以穿读签门禁。
-    // r9：签名与提交必须**同身份**——载荷章是 agent-1，补签也必须以 agent-1 签，
-    // 否则按人门禁会把「自己签的」判成「别人签的」（other-actor 拒绝）。
-    game.as_actor(Some("agent-1"));
-    game.ensure_reads("proposal.submit", Some("plan"), Some(1));
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|full-chain summary|artifacts/plan.md|ch=1|id-full|exec=agent-1|actor=agent-1|actor_session=s-full"),
-    );
-    assert!(
-        !lines.iter().any(|line| line.contains("REJECTED")),
-        "full chain must parse: {lines:#?}"
-    );
-    game.assert_kv("prop.1.stage", json!("plan"));
-    game.assert_kv("prop.1.summary", json!("full-chain summary"));
-    game.assert_kv("prop.1.changes", json!("ch=1"));
-    game.assert_kv("prop.1.ext", json!("id-full"));
-    game.assert_kv("prop.1.actor", json!("agent-1"));
-    game.assert_kv("prop.1.actor_session", json!("s-full"));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
 }
 
 /// 覆盖面 k/n：`readPlan` 在场时按本幕清单计算（计划外的 doc 不进分子），

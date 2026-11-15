@@ -63,3 +63,70 @@ test("actor 通道 verified：三段身份落到提案与台账", function()
   -- 注：原用例后半段是「save → restore 后三段仍存活」，属 driver 层的 save/receipt
   -- 缺口（testing-strategy.md §3 第 3 条），纯 Lua 自检无 restore 语义，故不迁。
 end)
+
+test("actor 三态之一：mismatch 只记录不拒，且 plan 提案不进验收菜单", function()
+  fresh()
+  start_requirement()
+
+  submit_with_identity(1, "plan", "id-mismatch", "agent-1", "agent-2", nil)
+  assert_eq(kv("prop.1.actor"), "agent-2", "the host stamp wins the kv slot")
+  assert_eq(kv("settings.executor.r1.plan"), "agent-1", "the exec ledger keeps the exec id")
+  assert_eq(phase_of("r1"), "plan_gate", "a mismatched channel still raises the gate")
+
+  for _, item in ipairs(render_options()) do
+    assert_true(
+      item:sub(1, #"proposal.accept — ") ~= "proposal.accept — ",
+      "a plan proposal must not be on the acceptance menu: " .. item
+    )
+  end
+
+  reset()
+  fire("proposal.accept", "p1")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "a direct proposal.accept is refused"
+  )
+  assert_eq(kv("req.1.gate"), "plan", "the gate is untouched")
+end)
+
+test("尾链顺序：重复 exec / exec 错位都拒；全链解析并落六键", function()
+  fresh()
+  start_requirement()
+
+  -- 重复 exec= → 拒绝，零副作用。
+  reset()
+  fire("proposal.submit", "r1|1|plan|s|artifacts/p.md||x|exec=agent-1|exec=agent-2")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "a duplicated exec= is refused"
+  )
+  assert_nil(kv("prop.1.req"), "no proposal is created")
+  assert_nil(kv("settings.executor.r1.plan"), "no ledger row")
+
+  -- exec= 错位（不在末段）→ 拒绝。
+  reset()
+  fire("proposal.submit", "r1|1|plan|s|artifacts/p.md|exec=agent-1||x")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "a misplaced exec= is refused"
+  )
+  assert_nil(kv("prop.1.req"), "no proposal is created")
+
+  -- 全链 exec → actor → actor_session：解析成功并落六键。
+  as_actor("agent-1")
+  ensure_reads("proposal.submit", "plan", 1)
+  reset()
+  fire(
+    "proposal.submit",
+    "r1|1|plan|full-chain summary|artifacts/plan.md|ch=1|id-full|exec=agent-1|actor=agent-1|actor_session=s-full"
+  )
+  assert_true(not narrated_contains("REJECTED"), "a full chain must parse: " .. table.concat(narrated(), " | "))
+  assert_eq(kv("prop.1.stage"), "plan", "stage")
+  assert_eq(kv("prop.1.summary"), "full-chain summary", "summary")
+  assert_eq(kv("prop.1.changes"), "ch=1", "changes")
+  assert_eq(kv("prop.1.ext"), "id-full", "ext")
+  assert_eq(kv("prop.1.actor"), "agent-1", "actor")
+  assert_eq(kv("prop.1.actor_session"), "s-full", "actor_session")
+  assert_eq(kv("settings.executor.r1.plan"), "agent-1", "the ledger binds exec")
+  as_actor("selftest")
+end)
