@@ -113,3 +113,57 @@ test("覆盖面 k/n：只统计本幕覆盖了几件，与「我签了几件」�
     "计划外文档不进分子：" .. table.concat(narrated(), " | ")
   )
 end, "plan2")
+
+test("读签遗忘：窗口调到 0 时签名立刻过期，抬高窗口即解除", function()
+  armed_game()
+  fire("config.set", "readGate.window=0")
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+
+  reset()
+  fire("proposal.submit", "r1|1|plan|armed plan|artifacts/r1.md")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(narrated_contains("read-gate/forgotten"), "必须点名 forgotten 维度：" .. joined)
+  assert_true(joined:find("window 0", 1, true) ~= nil, "必须报告**配置的**窗口值：" .. joined)
+  assert_true(joined:find("dispatch(es) ago", 1, true) ~= nil, "必须报告已隔派发数：" .. joined)
+  assert_true(
+    joined:find("config.set readGate.window=", 1, true) ~= nil,
+    "必须给出解除阻塞的确切命令：" .. joined
+  )
+
+  -- 解除路径：抬高窗口 → 同一个动作通过。
+  fire("config.set", "readGate.window=80")
+  reset()
+  fire("proposal.submit", "r1|1|plan|armed plan|artifacts/r1.md")
+  assert_true(
+    not narrated_contains("[REJECTED"),
+    "抬高窗口必须解除阻塞：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("req.1.gate"), "plan", "提案抬高 plan 门")
+end, "armed")
+
+test("读签通过：签齐后提交放行，序号是 KV 标量可复算", function()
+  armed_game()
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+
+  reset()
+  fire("proposal.submit", "r1|1|plan|armed plan|artifacts/r1.md")
+  assert_true(
+    not narrated_contains("[REJECTED"),
+    "签齐后必须放行：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("req.1.gate"), "plan", "提案抬高 plan 门")
+
+  -- 序号是 KV 标量（读档可复算）：签名快照非零、派发计数单调。
+  local sign_seq = kv("settings.sign_seq.acts/coordinate")
+  assert_true(
+    type(sign_seq) == "number" and sign_seq > 0,
+    "mark_sign 必须记下真实的派发序号，实得：" .. tostring(sign_seq)
+  )
+  local clock = kv("settings.clock_seq")
+  assert_true(
+    type(clock) == "number" and clock > 0,
+    "派发计数器必须住在 KV 里，实得：" .. tostring(clock)
+  )
+end, "armed")

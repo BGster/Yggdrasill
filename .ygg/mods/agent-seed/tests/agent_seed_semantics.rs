@@ -1218,40 +1218,6 @@ fn sign(game: &mut Game, doc: &str, ver: &str) {
     game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
 }
 
-/// ③ 遗忘：窗口是**可配**的；超窗即拒，抬高窗口或重签都能解除。
-#[test]
-fn read_gate_reports_the_forget_distance_past_the_window() {
-    let mut game = armed_game("gate-forgotten");
-    game.narrate("config.set", &text("readGate.window=0"));
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    let joined = lines.join("\n");
-    assert_refused(&lines, "proposal.submit");
-    assert!(
-        joined.contains("read-gate/forgotten") && joined.contains("window 0"),
-        "the refusal must report the configured window: {lines:#?}"
-    );
-    assert!(
-        joined.contains("dispatch(es) ago") && joined.contains("config.set readGate.window="),
-        "the refusal must report the gap and the raise command: {lines:#?}"
-    );
-    // 解除路径：抬高窗口 → 同一动作通过。
-    game.narrate("config.set", &text("readGate.window=80"));
-    let ok = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    assert!(
-        !refused(&ok, "proposal.submit"),
-        "raising the window must release the blocker: {ok:#?}"
-    );
-    game.assert_kv("req.1.gate", json!("plan"));
-}
-
 /// **r11 的证据**：amend 推进 rev 时 r3 的销票制先把签名全抹掉，所以下一次推进动作报的是
 /// **覆盖维** `read-gate/missing`（分层而非重复报错）。
 /// 这条用例是「主体维退役」的机械依据：rev 一变签名已不存在，「签名早于新 rev」永远轮不到
@@ -1307,31 +1273,6 @@ fn read_gate_handles_a_signature_taken_before_a_new_requirement_without_a_subjec
     assert!(
         refused(&lines, "proposal.submit") && joined.contains("read-gate/stale"),
         "the freshness dimension must take over the old subject scenario: {lines:#?}"
-    );
-}
-
-/// ⑤ 重签后放行：拒台词给的命令原样执行即解除（证明拒绝面自带自救路径，不靠外部知识）。
-#[test]
-fn read_gate_passes_after_reading_and_resigning() {
-    let mut game = armed_game("gate-resign");
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
-    game.assert_kv("req.1.gate", json!("plan"));
-    // 序号是 KV 标量（读档可复算）：签名快照非零、派发计数单调。
-    let sign_seq = game.kv("settings.sign_seq.acts/coordinate");
-    assert!(
-        sign_seq.as_u64().unwrap_or(0) > 0,
-        "mark_sign must record a real dispatch sequence: {sign_seq}"
-    );
-    let clock = game.kv("settings.clock_seq");
-    assert!(
-        clock.as_u64().unwrap_or(0) > 0,
-        "the dispatch counter must live in KV: {clock}"
     );
 }
 
