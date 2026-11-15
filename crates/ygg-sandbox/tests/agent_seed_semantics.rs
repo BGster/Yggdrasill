@@ -2351,6 +2351,263 @@ fn read_coverage_counts_planned_docs() {
     );
 }
 
+// ───────────────────── r4 · read-gate: the four dimensions ─────────────────────
+
+/// 造一份**生成区已开**的 mod 副本（`readPlan` + `readGate`）：判据只在生成区在场时生效，
+/// 而入库件刻意不带它（否则 68 条既有用例的提交全部会被前置校验拦住）。
+/// 改`data/config.json` 必须重算 manifest（内容寻址）——`reseal` 就是这一步。
+fn armed_mod(tag: &str) -> PathBuf {
+    let dir = support::temp_dir(tag);
+    support::copy_dir(&project_mod_dir(), &dir);
+    let mut config = support::read_json(&dir.join("data/config.json"));
+    config["readPlan"] = json!({
+        "coordinate": ["acts/coordinate"],
+        "settle": ["acts/settle", "rituals/cleanup"]
+    });
+    config["readGate"] = json!({
+        "ver": {
+            "acts/coordinate": "aaaaaa",
+            "req-acts/intake": "bbbbbb",
+            "req-acts/delivery": "cccccc",
+            "acts/settle": "dddddd",
+            "rituals/cleanup": "eeeeee"
+        },
+        "reqActs": { "plan": ["req-acts/intake"], "development": ["req-acts/delivery"] },
+        "gates": { "plan": ["req-acts/delivery"], "accept": ["req-acts/delivery"] }
+    });
+    support::write_json(&dir.join("data/config.json"), &config);
+    support::reseal(&dir);
+    dir
+}
+
+/// 一份已立局、已挂一条需求并派发（`job=plan`）的局：r4 三动作的共同起跑线。
+fn armed_game(tag: &str) -> Game {
+    let mut game = Game::open(&armed_mod(tag));
+    charter_and_begin(&mut game);
+    game.narrate(
+        "requirement.add",
+        &text("armed requirement|armed description|armed-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    game
+}
+
+/// 签一件（值段是 r3 的 `ver|scene|seq` 形状，ver 必须与台账逐字相等）。
+fn sign(game: &mut Game, doc: &str, ver: &str) {
+    game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
+}
+
+/// ① 覆盖：缺签直接拒，零副作用，且拒台词自带「读什么 + 跑什么命令 + 窗口多大」。
+#[test]
+fn read_gate_missing_signature_blocks_a_proposal_with_zero_side_effects() {
+    let mut game = armed_game("gate-missing");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert_refused(&lines, "proposal.submit");
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("read-gate/missing"),
+        "the refusal must name the dimension: {lines:#?}"
+    );
+    // 三件事：确切的签名命令（逐件）、当前窗口值、已隔派发数。
+    assert!(
+        joined.contains("config.set read.acts/coordinate=aaaaaa")
+            && joined.contains("config.set read.req-acts/intake=bbbbbb"),
+        "each missing doc must come with its exact sign command: {lines:#?}"
+    );
+    assert!(
+        joined.contains("window 80") && joined.contains("dispatch(es) ago"),
+        "the refusal must report the window and the elapsed dispatches: {lines:#?}"
+    );
+    // 零副作用：门禁没升起、提案没落库、签名账本没动（派发计数器前进不算副作用）。
+    game.assert_kv("req.1.gate", json!(""));
+    game.assert_kv("req.1.job", json!("plan"));
+    game.assert_kv("prop.1.status", Json::Null);
+    game.assert_kv("settings.read_index", Json::Null);
+}
+
+/// ② 新鲜：阶段边界之后旧签名作废（跨阶段读 = 没读），拒台词报两个 seq。
+#[test]
+fn read_gate_voids_a_signature_taken_before_the_stage_edge() {
+    let mut game = armed_game("gate-stale");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    game.assert_kv("req.1.gate", json!("plan"));
+    // plan 批准把需求推进到 development 阶段：纪元前进。
+    sign(&mut game, "req-acts/delivery", "cccccc");
+    game.click("gate.approve — ");
+    game.assert_kv("req.1.plan_ok", json!(true));
+
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|development|armed dev|artifacts/r1-dev.md"),
+    );
+    let joined = lines.join("\n");
+    assert_refused(&lines, "proposal.submit");
+    assert!(
+        joined.contains("read-gate/stale") && joined.contains("stage development began at"),
+        "the refusal must name the stage edge that voided the signature: {lines:#?}"
+    );
+    assert!(
+        joined.contains("was signed at dispatch") && joined.contains("Window 80"),
+        "the refusal must report sign seq, entry seq and the window: {lines:#?}"
+    );
+}
+
+/// ③ 遗忘：窗口是**可配**的；超窗即拒，抬高窗口或重签都能解除。
+#[test]
+fn read_gate_reports_the_forget_distance_past_the_window() {
+    let mut game = armed_game("gate-forgotten");
+    game.narrate("config.set", &text("readGate.window=0"));
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    let joined = lines.join("\n");
+    assert_refused(&lines, "proposal.submit");
+    assert!(
+        joined.contains("read-gate/forgotten") && joined.contains("window 0"),
+        "the refusal must report the configured window: {lines:#?}"
+    );
+    assert!(
+        joined.contains("dispatch(es) ago") && joined.contains("config.set readGate.window="),
+        "the refusal must report the gap and the raise command: {lines:#?}"
+    );
+    // 解除路径：抬高窗口 → 同一动作通过。
+    game.narrate("config.set", &text("readGate.window=80"));
+    let ok = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert!(
+        !refused(&ok, "proposal.submit"),
+        "raising the window must release the blocker: {ok:#?}"
+    );
+    game.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// ④ 主体：签名绑定 (req, rev)。两条路径都拒：新增需求（rev 纪元晚于签名）报 `subject`；
+/// amend 推进 rev 时 r3 的销票制先把签名抹掉，于是报 `missing`（分层而非重复报错）。
+#[test]
+fn read_gate_subject_binds_a_signature_to_the_requirement_revision() {
+    let mut game = armed_game("gate-subject");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    // 签名之后才出现第二条需求：它的 rev 纪元晚于签名 → 主体维度拒。
+    game.narrate(
+        "requirement.add",
+        &text("second requirement|second description|armed-r2"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r2|1|plan|r2 plan|artifacts/r2.md"),
+    );
+    let joined = lines.join("\n");
+    assert_refused(&lines, "proposal.submit");
+    assert!(
+        joined.contains("read-gate/subject") && joined.contains("before r2 entered rev 1 at dispatch"),
+        "the refusal must name the requirement revision the signature misses: {lines:#?}"
+    );
+
+    // amend 推进 rev：销票制先抹掉全部签名，所以此处报覆盖（missing）——不双报、不错报。
+    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
+    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
+    game.assert_kv("settings.read_index", json!(""));
+    let after = game.narrate(
+        "proposal.submit",
+        &text("r1|2|plan|replanned|artifacts/r1.md"),
+    );
+    assert!(
+        refused(&after, "proposal.submit")
+            && after.join("\n").contains("read-gate/missing"),
+        "an amendment wipes signatures through r3's clear(), so the refusal is coverage: {after:#?}"
+    );
+}
+
+/// ⑤ 重签后放行：拒台词给的命令原样执行即解除（证明拒绝面自带自救路径，不靠外部知识）。
+#[test]
+fn read_gate_passes_after_reading_and_resigning() {
+    let mut game = armed_game("gate-resign");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
+    game.assert_kv("req.1.gate", json!("plan"));
+    // 序号是 KV 标量（读档可复算）：签名快照非零、派发计数单调。
+    let sign_seq = game.kv("settings.sign_seq.acts/coordinate");
+    assert!(
+        sign_seq.as_u64().unwrap_or(0) > 0,
+        "mark_sign must record a real dispatch sequence: {sign_seq}"
+    );
+    let clock = game.kv("settings.clock_seq");
+    assert!(
+        clock.as_u64().unwrap_or(0) > 0,
+        "the dispatch counter must live in KV: {clock}"
+    );
+}
+
+/// ⑥ inert：入库件**不带**生成区（readPlan / readGate 皆缺）时，判据整体不生效——
+/// 零签名也不挡任何推进动作、不喷告警。这是分阶段上线的安全阀，也是 68 条既有用例的前提。
+#[test]
+fn read_gate_is_inert_without_a_generated_readset() {
+    let config = support::read_json(&project_mod_dir().join("data/config.json"));
+    assert!(
+        config.get("readGate").is_none() && config.get("readPlan").is_none(),
+        "the shipped generator area must stay empty (68 existing cases depend on it): {config}"
+    );
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate(
+        "requirement.add",
+        &text("inert requirement|inert description|inert-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|inert plan|artifacts/r1.md"),
+    );
+    let joined = lines.join("\n");
+    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
+    assert!(
+        !joined.contains("read-gate/") && !joined.contains("[READ GATE]"),
+        "an absent readset must be silent as well as inert: {lines:#?}"
+    );
+    game.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// ⑦ 不误伤：既有语义拒绝的文案优先，读签不得抢嘴（装订期严密与否不能改变拒因归属）。
+#[test]
+fn read_gate_does_not_mask_existing_rejection_reasons() {
+    let mut game = armed_game("gate-nomask");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    // 待批期间 amend → gate_rev 与 rev 失配（既有 stale 判据）。零签名也在场，但先报既有原因。
+    game.narrate("requirement.amend", &text("r1||amended while pending"));
+    let lines = game.narrate("gate.approve", &text("r1"));
+    let joined = lines.join("\n");
+    assert!(!joined.contains("read-gate/"), "{lines:#?}");
+    assert!(
+        joined.contains("is bound to rev") || refused(&lines, "gate.approve"),
+        "the pre-existing gate reason must win: {lines:#?}"
+    );
+}
+
 /// P10 决策归属的守门线：`play.mode=goal` 在 `goal.authorization` 注册之前会发出可读
 /// 警告（`[GOAL AUTH PENDING]`）；注册后再切不再警告。
 #[test]
@@ -2456,8 +2713,8 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         .expect("code.modules must be an array");
     assert_eq!(
         modules.len(),
-        28,
-        "the D-MA23 mod declares 28 modules: {modules:?}"
+        30,
+        "the D-MA23 mod declares 30 modules: {modules:?}"
     );
     let entry = pack["code"]["entry"].as_str().expect("code.entry");
     let mut layers = std::collections::BTreeSet::new();
@@ -3131,9 +3388,9 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
     assert_eq!(documented, actual, "core copy table must cover core.json");
     total += documented.len();
-    assert_eq!(total, 445, "409 beats + 36 core keys; §H adds no keys");
+    assert_eq!(total, 450, "414 beats + 36 core keys; §H adds no keys");
     assert!(
-        core_text.contains("445 个唯一键") && core_text.contains("不得再次相加"),
+        core_text.contains("450 个唯一键") && core_text.contains("不得再次相加"),
         "the global ledger must explain why the 23 pointer shells are not added again"
     );
 }
