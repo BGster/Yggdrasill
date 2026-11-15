@@ -399,3 +399,51 @@ test("docs/design 树索引：三模块 + 16 份文件 + README 双向相等 + i
     assert_eq(declared, (rel:gsub("%.md$", "")), rel .. " 的 id 与路径不一致")
   end
 end)
+
+test("scenes 表 reference 段：4 个理解性文档可解析，且不进 scene/reqStage/readPlan", function()
+  local scenes = __SCENES
+
+  local reference = {}
+  for key, group in pairs(scenes.reference) do
+    if key ~= "note" then
+      for _, id in ipairs(group) do
+        reference[#reference + 1] = id
+      end
+    end
+  end
+  assert_eq(#reference, 4,
+    "reference 段应登记 4 个（含不进 readPlan 的规范文档）：" .. table.concat(reference, ","))
+
+  local scene_ids, stage_ids = {}, {}
+  for _, group in pairs(scenes.scene) do
+    for _, id in ipairs(group) do
+      scene_ids[id] = true
+    end
+  end
+  for _, id in pairs(scenes.reqStage) do
+    stage_ids[id] = true
+  end
+  local read_plan = read_file(__MOD_DIR .. "/data/config.json")
+
+  for _, id in ipairs(reference) do
+    local path = CONTEXT_DIR .. "/" .. id .. ".md"
+    assert_true(exists(path), "reference id 解析不到文件：docs/context/" .. id .. ".md")
+
+    local text = read_file(path)
+    local declared = nil
+    for line in text:gmatch("[^\n]+") do
+      if line:sub(1, 9) == "> **id** " then
+        declared = line:sub(10):match("^%S+")
+        break
+      end
+    end
+    assert_true(declared ~= nil, "docs/context/" .. id .. ".md 缺 `> **id**` 固定头")
+    assert_eq(declared, id, "docs/context/" .. id .. ".md 的 id 与 scenes 表不一致")
+
+    assert_true(not scene_ids[id],
+      id .. " 是理解性文档，不得进 scenes.scene（那会进 [READ FIRST] 并产生签名义务）")
+    assert_true(not stage_ids[id], id .. " 是理解性文档，不得进 scenes.reqStage")
+    assert_true(read_plan:find(id, 1, true) == nil,
+      id .. " 不得出现在 data/config.json 的 readPlan 里（默认不拦门禁）")
+  end
+end)
