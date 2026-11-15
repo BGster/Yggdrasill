@@ -380,3 +380,34 @@ test("读签新需求前的签名：由新鲜度（stale）接管，subject 维�
     "旧的 subject 场景必须由新鲜度维度接管：" .. joined
   )
 end, "armed")
+
+test("读签阻塞批次边界：点名 settle 幕要的文档，补签后放行", function()
+  drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending("semantics-batch-gate"))))
+
+  -- 关掉自动补签：这一条要的是「没签的现场」。
+  suppress_reads(true)
+  reset()
+  click("coordinate.submit — ")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    narrated_contains("[BLOCKED") or narrated_contains("[REJECTED"),
+    "批次边界必须被拒：" .. joined
+  )
+  assert_true(narrated_contains("read-gate/missing"), "必须点名 missing 维度：" .. joined)
+  assert_true(joined:find("acts/settle", 1, true) ~= nil, "必须点名 acts/settle：" .. joined)
+  assert_true(joined:find("rituals/cleanup", 1, true) ~= nil, "必须点名 rituals/cleanup：" .. joined)
+
+  -- 状态未推进、零副作用。
+  assert_eq(kv("run.phase"), "", "相位还停在协调幕")
+  assert_nil(kv("verify.passed"), "机证未被登记")
+
+  -- 恢复自动补签（走人类票据）→ 同一动作放行。
+  suppress_reads(false)
+  reset()
+  click("coordinate.submit — ")
+  assert_true(
+    not (narrated_contains("[BLOCKED") and narrated_contains("read-gate")),
+    "补签后批次边界必须放行：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("run.phase"), "settle", "相位推进到 settle")
+end)

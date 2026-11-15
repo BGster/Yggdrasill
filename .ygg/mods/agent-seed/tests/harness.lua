@@ -25,6 +25,7 @@ local STAMP_ONLY = {
   ["coordinate.submit"] = true,
 }
 local ACTOR = "selftest"
+local SUPPRESS_READS = false
 
 local FSM = nil
 
@@ -243,6 +244,11 @@ function fire(name, payload)
   return deliver(name, payload)
 end
 
+--- 关/开自动补签（默认开）。
+function suppress_reads(flag)
+  SUPPRESS_READS = flag and true or false
+end
+
 --- 单发直派：**不**盖 actor 章（模拟 `--event` 直派路，无宿主身份段）。
 function fire_direct(name, payload)
   assert_true(HANDLERS[name] ~= nil, ("handler not registered: %s"):format(name))
@@ -301,6 +307,7 @@ function fresh()
   __SELFTEST.lastChoice = nil
   __SELFTEST.meta = {}
   HANDLERS = {}
+  SUPPRESS_READS = false
   dofile(__MOD_DIR .. "/mod.lua")
   fire("event.start", "0")
 end
@@ -418,6 +425,10 @@ end
 
 --- 把该动作的必读集签成新鲜的（未签 / 跨纪元 / 超窗口 → 重签）。
 function ensure_reads(action, stage, req)
+  -- 抑制态：要的是「没签的现场」（等价 Rust 的 `game.suppress_reads = true`）。
+  if SUPPRESS_READS then
+    return
+  end
   local now = KV["settings.clock_seq"] or 0
   local window = KV["settings.readGate.window"] or 80
   local index = req or pending_gate()

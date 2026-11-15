@@ -1201,38 +1201,6 @@ fn sign(game: &mut Game, doc: &str, ver: &str) {
     game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
 }
 
-/// ⑧ 批边界（`coordinate.submit`）的端到端：未签被拒且**状态未推进**，补签后放行。
-/// 必读集 = 结算幕清单（`acts/settle` + `rituals/cleanup`，由生成器写在 `readPlan.settle`）。
-#[test]
-fn read_gate_blocks_and_releases_the_batch_boundary() {
-    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
-        "semantics-batch-gate",
-    ))));
-    // 关掉自动补签：这一条要的是「没签的现场」。
-    game.suppress_reads = true;
-    let refused_lines = narrative_lines(&game.click("coordinate.submit — "));
-    assert_refused(&refused_lines, "coordinate.submit");
-    let joined = refused_lines.join("\n");
-    assert!(
-        joined.contains("read-gate/missing")
-            && joined.contains("acts/settle")
-            && joined.contains("rituals/cleanup"),
-        "the batch boundary must name the settle-act set it wants: {refused_lines:#?}"
-    );
-    // 状态未推进、零副作用：相位还停在协调幕，机证也没被登记。
-    game.assert_kv("run.phase", json!(""));
-    game.assert_kv("verify.passed", Json::Null);
-
-    // 补签（恢复自动补签，走人类票据）→ 同一动作放行。
-    game.suppress_reads = false;
-    let passed = narrative_lines(&game.click("coordinate.submit — "));
-    assert!(
-        !refused(&passed, "coordinate.submit"),
-        "after signing the batch boundary must release: {passed:#?}"
-    );
-    game.assert_kv("run.phase", json!("settle"));
-}
-
 /// ⑪ ⑩ 的反证：降级只让「按人」这一维失效，**覆盖维仍然生效**——没签就照拒。
 #[test]
 fn batch_boundary_still_enforces_coverage_without_identity_carrier() {
