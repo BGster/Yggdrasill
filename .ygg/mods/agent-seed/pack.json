@@ -217,6 +217,32 @@
       "actor": true,
       "actor_session": true
     },
+    "config": {
+      "action": "config.set",
+      "fields": [
+        "key",
+        "value",
+        "external_id"
+      ],
+      "actor": true
+    },
+    "gate": {
+      "action": "gate.approve",
+      "fields": [
+        "req",
+        "note",
+        "external_id"
+      ],
+      "actor": true
+    },
+    "coordinate": {
+      "action": "coordinate.submit",
+      "fields": [
+        "note",
+        "external_id"
+      ],
+      "actor": true
+    },
     "tool_result": {
       "action": "tool.result",
       "fields": [

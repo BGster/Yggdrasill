@@ -39,12 +39,20 @@ HUMAN.ACTIONS = {
 
 HUMAN.ticket = nil
 
+-- 本步的入口（r9 按人读签需要）："ticket" = 人类从菜单点选（\`ygg.choice_selected\` 盖章后
+-- emit，载荷无宿主身份段），"direct" = 直接 `--event` 派发（声明路由上带 `|actor=` 章）。
+-- 判定侧据此决定「没身份」的结局：票据路降级并告明，直派路拒绝（见 gates.read_problem）。
+-- 只会在 HUMAN.needs 里改写：人机门禁动作每步都过它，所以值总是本步的。
+HUMAN.entry = "direct"
+
 function HUMAN.needs(label)
   if play_mode() ~= "guide" then
+    HUMAN.entry = "direct"
     return true
   end
   if HUMAN.ticket == label then
     HUMAN.ticket = nil
+    HUMAN.entry = "ticket"
     return true
   end
   return refuse(TEXTS.beats.guide_human_blocked, label)

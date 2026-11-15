@@ -262,6 +262,15 @@ function M.install(deps)
     if not phase_guard("coordinate.submit", { RUN_PHASE.coordinate }) then
       return
     end
+    -- r9：宿主盖章段先剥（否则 `0|actor=x` 会被 probe_payload_ok 当成非法载荷拒掉）。
+    local actor
+    do
+      local clean, stamped, _, strip_problem = wire.strip_identity_tail(payload)
+      if strip_problem ~= nil then
+        return reject_payload("coordinate.submit", strip_problem)
+      end
+      payload, actor = clean, stamped
+    end
     if not probe_payload_ok(payload) then
       return reject_payload("coordinate.submit", fill(TEXTS.beats.probe_rejected, {
         action = "coordinate.submit",
@@ -275,7 +284,12 @@ function M.install(deps)
     end
     -- r4 读签前置校验（批边界）：排在各局收口判据之后、确认转场之前。
     -- 必读集 = 结算幕必读（acts/settle + rituals/cleanup，由生成器写在 readPlan.settle）。
-    local read_block = gates.read_problem("coordinate.submit", {})
+    -- r9：批边界没有单一需求，所以没有「提案作者」可代理——票据路只能降级（无身份叙事），
+    -- 直派路必须自带 `--actor`（否则拒绝）。这里不造假来源。
+    local read_block = gates.read_problem("coordinate.submit", {
+      actor = actor,
+      entry = HUMAN.entry,
+    })
     if read_block ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", read_block)
     end
