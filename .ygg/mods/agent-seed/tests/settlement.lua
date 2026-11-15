@@ -189,3 +189,55 @@ test("一次事务完成四项：evolution + sessions + todo，同回合 [SETTLE
   )
   assert_eq(kv("run.phase"), "release", "four settled → the release act")
 end)
+
+test("集成确认：SHA 形状门 / 只作用于 integrating 行 / reject 回 ready / done 只读", function()
+  drive_to_dev_pending("semantics-p2")
+  drive_to_accept()
+  drive_to_integrating()
+
+  -- ① 证据形状：7–40 位 hex（可带 develop@ 前缀）。
+  for _, evidence in ipairs({ "develop@zzzz", "develop@abc", "abc", "develop@" }) do
+    reset()
+    fire("integration.confirm", "r1|" .. evidence)
+    assert_true(narrated_contains("[REJECTED"), "bad evidence must be refused: " .. evidence)
+    assert_eq(kv("req.1.status"), "open", "status stays open")
+    assert_eq(kv("req.1.integrating"), true, "the row is still integrating")
+  end
+
+  -- ② 只作用于 integrating 行：r2 还是 draft。
+  fire("requirement.add", "bystander requirement|desc|semantics-bystander")
+  reset()
+  fire("integration.confirm", "r2|develop@abc1234")
+  assert_true(narrated_contains("[REJECTED"), "a non-integrating row is refused")
+
+  -- ③ confirm：done + sha 证据 + 泳道释放。
+  reset()
+  fire("integration.confirm", "r1|develop@abc1234")
+  assert_true(narrated_contains("[INTEGRATION CONFIRMED]"), "confirm narrates its beat")
+  assert_eq(kv("req.1.status"), "done", "the true state moves")
+  assert_eq(kv("req.1.develop_sha"), "abc1234", "the sha evidence is kept")
+  assert_eq(kv("req.1.lane"), 0, "the lane is released")
+  assert_eq(kv("req.1.closed_reason"), "", "no bypass reason")
+
+  -- ④ reject 路径：r2 走到 integrating 后 reject → ready。
+  fire("requirement.dispatch", "0")
+  submit_req("r2", 1, "plan", "semantics-bystander-p1")
+  click("gate.approve — ")
+  submit_req("r2", 1, "development", "semantics-bystander-p2")
+  click("proposal.accept — ")
+  click("gate.approve — ")
+  assert_eq(kv("req.2.lane"), 1, "r2 binds its lane")
+  reset()
+  fire("integration.reject", "r2|rework the diff")
+  assert_true(narrated_contains("[INTEGRATION REJECTED]"), "reject narrates its beat")
+  assert_eq(kv("req.2.status"), "open", "reject keeps the true state open")
+  assert_eq(kv("req.2.integrating"), false, "the integrating flag clears")
+  assert_eq(kv("req.2.plan_ok"), true, "plan_ok survives an integration reject")
+  assert_eq(kv("req.2.lane"), 0, "the lane is released")
+  assert_eq(phase_of("r2"), "ready", "the row is back in ready")
+
+  -- ⑤ done 行只读：再 confirm 必须被拒。
+  reset()
+  fire("integration.confirm", "r1|develop@abc1234")
+  assert_true(narrated_contains("[REJECTED"), "a done row only accepts read-back")
+end)
