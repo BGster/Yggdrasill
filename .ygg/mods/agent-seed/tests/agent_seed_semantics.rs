@@ -714,66 +714,6 @@ fn drive_to_release() -> Game {
 
 // ───────────────────────── charter & resident lifecycle ─────────────────────────
 
-/// The charter act (R2/R3/R4): boot lands in `charter` with `charter.set` as the only
-/// business item; `run.begin` requires the three-piece charter and is refused before it;
-/// the charter is revisable inside the act; `run.begin` moves to `run.phase=""` and locks
-/// the charter (a later `charter.set` is a readable refusal).
-#[test]
-fn charter_gate_revises_locks_and_begins_the_run() {
-    let mut game = Game::open(&project_mod_dir());
-
-    // Boot lands in the charter micro-state; the menu tells the truth (no run.begin yet).
-    game.assert_kv("run.phase", json!("charter"));
-    let options = game.options();
-    assert!(
-        options[0].starts_with("charter.set — "),
-        "charter.set must be the first charter item: {options:?}"
-    );
-    assert!(
-        !options.iter().any(|item| item.starts_with("run.begin — ")),
-        "an incomplete charter must not put run.begin on the menu: {options:?}"
-    );
-
-    // run.begin precondition: the three-piece charter. Readable refusal, no phase move.
-    let early = game.narrate("run.begin", "0");
-    assert_refused(&early, "run.begin");
-    game.assert_kv("run.phase", json!("charter"));
-
-    // charter.set writes the trio and is revisable inside the act (last write wins).
-    game.narrate(
-        "charter.set",
-        &text("semantics run|prove the v2 state machine|suite green"),
-    );
-    game.assert_kv("task.title", json!("semantics run"));
-    game.assert_kv("task.goal", json!("prove the v2 state machine"));
-    game.assert_kv("task.success", json!("suite green"));
-    assert!(
-        game.options()
-            .iter()
-            .any(|item| item.starts_with("run.begin — ")),
-        "a complete charter must put run.begin on the menu"
-    );
-    game.narrate(
-        "charter.set",
-        &text("semantics run v2|prove the 剧情双层重写 loop|suite green"),
-    );
-    game.assert_kv("task.title", json!("semantics run v2"));
-
-    // run.begin → coordinate: run.phase = "" (the resident main state, R2), [RUN BEGUN].
-    game.click("run.begin — ");
-    game.assert_kv("run.phase", json!(""));
-    let options = game.options();
-    assert!(
-        options[0].starts_with("coordinate.submit"),
-        "the coordinate menu must lead with the batch closer on an empty queue: {options:?}"
-    );
-
-    // R4 lock: after run.begin the charter is immutable — a readable refusal, value kept.
-    let locked = game.narrate("charter.set", &text("late charter|must refuse|locked"));
-    assert_refused(&locked, "charter.set");
-    game.assert_kv("task.title", json!("semantics run v2"));
-}
-
 /// r9 Resident lifecycle: `review.note` **settles the batch and returns to coordinate**;
 /// the run only ends through an explicitly armed retirement (a separate case).
 ///

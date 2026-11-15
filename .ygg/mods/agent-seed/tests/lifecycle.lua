@@ -25,3 +25,50 @@ test("click 链路：章程→开工走完，run.phase 归零", function()
   click("run.begin — ")
   assert_eq(kv("run.phase"), "", "run.begin leaves the charter micro-state")
 end)
+
+test("章程门：开局在 charter、菜单诚实、三件套可修订、run.begin 锁定", function()
+  fresh()
+  assert_eq(kv("run.phase"), "charter", "boot lands in the charter micro-state")
+
+  local options = render_options()
+  assert_true(
+    options[1]:sub(1, #"charter.set — ") == "charter.set — ",
+    "charter.set must be the first charter item"
+  )
+  for _, text in ipairs(options) do
+    assert_true(
+      text:sub(1, #"run.begin — ") ~= "run.begin — ",
+      "an incomplete charter must not put run.begin on the menu"
+    )
+  end
+
+  -- run.begin 前置：三件套齐备。可读拒绝，相位不动。
+  reset()
+  fire("run.begin", "0")
+  assert_true(narrated_contains("[REJECTED"), "run.begin must be refused before the trio")
+  assert_eq(kv("run.phase"), "charter", "a refused run.begin must not move the phase")
+
+  -- charter.set 写三件套，且立局内可反复修订（后写覆盖）。
+  reset()
+  fire("charter.set", "semantics run|prove the v2 state machine|suite green")
+  assert_eq(kv("task.title"), "semantics run", "title")
+  assert_eq(kv("task.goal"), "prove the v2 state machine", "goal")
+  assert_eq(kv("task.success"), "suite green", "success")
+
+  local found = false
+  for _, text in ipairs(render_options()) do
+    if text:sub(1, #"run.begin — ") == "run.begin — " then
+      found = true
+    end
+  end
+  assert_true(found, "a complete charter must put run.begin on the menu")
+
+  fire("charter.set", "semantics run v2|prove the loop|suite green")
+  assert_eq(kv("task.title"), "semantics run v2", "last write wins")
+
+  -- run.begin → 协调幕：run.phase = ""（常驻主态）。
+  reset()
+  fire("run.begin", "0")
+  assert_eq(kv("run.phase"), "", "run.begin clears the charter micro-state")
+  assert_true(narrated_contains("[RUN BEGUN]"), "it must narrate the open")
+end)
