@@ -241,3 +241,36 @@ test("集成确认：SHA 形状门 / 只作用于 integrating 行 / reject 回 r
   fire("integration.confirm", "r1|develop@abc1234")
   assert_true(narrated_contains("[REJECTED"), "a done row only accepts read-back")
 end)
+
+test("settlement.todo 未注册：回退人证并提示缺 tools.root", function()
+  drive_to_settle()
+  assert_nil(kv("settings.tools.root"), "drive_to_settle 不该注册 tools.root")
+
+  reset()
+  fire("settlement.todo", "0|re-checked the todo list")
+  assert_true(
+    narrated_contains("[TOOLS ROOT MISSING]"),
+    "未注册时 settlement.todo 必须提示缺 tools.root：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("settlement.todo.remaining"), 0, "剩余条数")
+  assert_eq(kv("settlement.todo.source"), "human", "来源是人证")
+end)
+
+test("settlement.todo 机器矛盾：拒绝且零写入", function()
+  drive_to_settle()
+  set_tool_result({ ok = true, data = { remaining = "2" } })
+  fire("config.set", "tools.root=/tmp/ygg-tools")
+  fire("config.set", "tools.session=semantics-parent-uuid")
+  assert_eq(kv("settings.tools.root"), "/tmp/ygg-tools", "tools.root 已注册")
+
+  reset()
+  fire("settlement.todo", "0|re-checked the todo list")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    narrated_contains("machine remaining=2"),
+    "拒绝必须点名机器读数：" .. joined
+  )
+  -- 拒绝 = 零状态写入：本动作没登记任何东西。
+  assert_nil(kv("settlement.todo.source"), "来源未登记")
+  assert_eq(kv("settlement.todo.verified_by"), "", "verified_by 仍是空串")
+end)

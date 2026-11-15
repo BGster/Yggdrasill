@@ -26,6 +26,7 @@ local STAMP_ONLY = {
 }
 local ACTOR = "selftest"
 local SUPPRESS_READS = false
+local TOOL_RESULT = { unmounted = true }
 
 local FSM = nil
 
@@ -142,7 +143,10 @@ ygg = {
   },
   fs = {},
   tool = {
-    call = function() end,
+    -- 默认「没有挂载工具」：Mod 侧以 `res.unmounted == true` 判定回退到人证。
+    call = function(_id, _args)
+      return TOOL_RESULT
+    end,
   },
   choice_selected = function() end,
   choice_selector = function() end,
@@ -244,6 +248,11 @@ function fire(name, payload)
   return deliver(name, payload)
 end
 
+--- 指定下一次（以及之后）工具调用返回的形状：`{ ok=true, data={...} }` 或 `{ unmounted=true }`。
+function set_tool_result(result)
+  TOOL_RESULT = result or { unmounted = true }
+end
+
 --- 关/开自动补签（默认开）。
 function suppress_reads(flag)
   SUPPRESS_READS = flag and true or false
@@ -308,6 +317,7 @@ function fresh()
   __SELFTEST.meta = {}
   HANDLERS = {}
   SUPPRESS_READS = false
+  TOOL_RESULT = { unmounted = true }
   dofile(__MOD_DIR .. "/mod.lua")
   fire("event.start", "0")
 end
