@@ -3334,7 +3334,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         .iter()
         .filter(|path| path.starts_with("data/playbook/"))
         .count();
-    assert_eq!(playbook, 6, "playbook = head + 5 chapter fragments (r5; ch2/ch4-async/ch5 removed on 2026-11-15)");
+    assert_eq!(playbook, 5, "playbook = head + 4 chapter fragments (r5; ch2/ch4-async/ch4-protocol/ch5 removed on 2026-11-15)");
     for path in &pack_entry_paths {
         assert!(
             project.join(path).is_file(),
@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        8,
-        "STAGE_GUIDE must route all 8 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
+        7,
+        "STAGE_GUIDE must route all 7 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        8,
-        "r5 assembles 8 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
+        7,
+        "r5 assembles 7 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        8,
+        7,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3520,7 +3520,6 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
         &mut charter,
         &[
             "run_machine",
-            "actions",
             "branches",
         ],
     );
@@ -4386,7 +4385,6 @@ fn design_pointer_anchors_exist_under_docs_design() {
     let expected: std::collections::BTreeMap<String, usize> = [
         ("ch1-foundation.json", 4usize),
         ("ch4-mod-host.json", 8),
-        ("ch4-protocol.json", 3),
         ("ch4-run-machine.json", 7),
         ("beats-settlement.json", 3),
         ("tools.lua", 2),
@@ -4399,7 +4397,7 @@ fn design_pointer_anchors_exist_under_docs_design() {
         ledger, expected,
         "docs/design 指针账漂移（逐来源）：{ledger:?}"
     );
-    assert_eq!(total, 27, "docs/design 指针总数漂移：期望 27，实得 {total}");
+    assert_eq!(total, 24, "docs/design 指针总数漂移：期望 24，实得 {total}");
     assert!(
         violations.is_empty(),
         "docs/design 指针锚点不存在：{}",
@@ -4865,7 +4863,6 @@ fn playbook_and_src_context_pointers_resolve() {
         ("beats-settlement.json", 4),
         ("ch1-foundation.json", 6),
         ("ch4-mod-host.json", 0),
-        ("ch4-protocol.json", 2),
         ("ch4-run-machine.json", 5),
         ("core.json", 18),
         ("tools.lua", 1),
@@ -4880,8 +4877,8 @@ fn playbook_and_src_context_pointers_resolve() {
         "docs/context 指针账漂移（playbook + texts + src）：{ledger:?}"
     );
     assert_eq!(
-        total, 47,
-        "docs/context 指针总数漂移：期望 47，实得 {total}"
+        total, 45,
+        "docs/context 指针总数漂移：期望 45，实得 {total}"
     );
     assert!(
         violations.is_empty(),
