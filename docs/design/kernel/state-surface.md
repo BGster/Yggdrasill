@@ -2,7 +2,7 @@
 > **id** kernel/state-surface · **模块** ① ygg 内核 · **触发** 写新 KV 键 / 改拒绝面之前
 > **读不到代价** silent-drift（键写错或漏写拒绝面 → 存储漂移与缺口看不见）
 
-> **定位**：KV 状态存储键契约（含 D-MA23 删除清单）与各微状态的拒绝面矩阵。
+> **定位**：KV 状态存储键契约（含已删除键清单）与各微状态的拒绝面矩阵。
 > **replaces**：DESIGN §2.7 + §2.8（L285–328）（搬运基线 `3a2536f`）
 > **上游**：[docs/README.md](../../README.md) · **相关**：[state-machine.md](state-machine.md) · [run-story.md](../../context/story/run-story.md) · [requirement-story.md](../../context/story/requirement-story.md)
 > **搬运**：以下正文自 DESIGN.md L285–L305 + DESIGN.md L306–L328 逐字迁移，不重写语义。
@@ -38,7 +38,7 @@
 | `run.release.tag` | string | `release.confirm` 写入的批次标签 `vYYYY.MM.DD.N` |
 | `run.release.skipped_reason` | string | `release.skip` 写入的理由 |
 | `run.batch` | int（缺省 1） | 批计数 |
-| `run.maintenance.last` | 需求 id（string） | 最近一次批结算自动追加的维护需求（观测指针，D-MA25；不参与判定） |
+| `run.maintenance.last` | 需求 id（string） | 最近一次批结算自动追加的维护需求（观测指针，不参与判定） |
 | `task.title` / `task.goal` / `task.success` | string | 章程三件套（`run.begin` 后锁定） |
 | `req.<i>.status` | `open` / `done` | **唯一真状态（需求级）**；终态判定 = `status=="done"` |
 | `req.<i>.closed_reason` | `""` / `split` / `merged` / `dropped` | 关闭原因（**字段，不再是状态**，R11） |
@@ -48,10 +48,18 @@
 | `req.<i>.plan_ok` | bool | 立项 / 待开发的分界 |
 | `req.<i>.integrating` | bool | 第 8 幕（集成） |
 | `req.<i>.develop_sha` | string | `integration.confirm` 写入的集成证据 |
-| `req.<i>.maintenance` | `"1"` | 批结算自动追加标记（防重复判据，D-MA25） |
+| `req.<i>.maintenance` | `"1"` | 批结算自动追加标记（防重复判据） |
 | `req.<i>.lane` / `rev` / `conflict*` / `needs_amend` / `feedback` / `artifacts` / `summary` / `hist` | 各式 | 沿用（见 §2.4 / §2.10） |
 
-**删除**（D-MA23）：`R_ANALYZING`、`PHASE`（14 名派生表）、`analysis` 提案槽、`fsm.stage` 的 `coordinate`/`review`/`done` 三值。旧局存档真状态取值变化 → 不兼容，不迁移、开新局（r9 升级纪律）。
+**删除**：`R_ANALYZING`、`PHASE`（14 名派生表）、`analysis` 提案槽、`fsm.stage` 的 `coordinate`/`review`/`done` 三值（为什么删见 §2.2.1）。旧局存档真状态取值变化 → 不兼容，不迁移、开新局（升级纪律）。
+
+#### 2.8.0 设计依据（持久化权威与存储后端）
+
+**持久化状态只存在于 Rust（`ygg.kv` / `ygg.entity`）**；Lua 局部与全局变量在单次 dispatch 内是临时的，`YGG-R2` 会标记未持久化的实体句柄。**新局默认单文件 SQLite（`<run-dir>/run.sqlite`）**，`events`、`snapshots`、`inbox`、`kv_projection` 与 `vfs_files`（`artifacts/*`）在同一事务里原子提交；既有的 JSON 局（`autosave.json` + `events.jsonl`）自动检测并留在 JSON 后端，**不做隐式迁移**。
+
+**依据**：状态权威若允许存在于 Lua 边，回放就不能保证「同一事件序列 ⇒ 同一状态」，而那正是机检、接手与审计的地基；`YGG-R2` 不是风格检查，它是这条断言的执行面。存储选择单文件是为了「一局 = 一个可拷走的文件」（原子、零孤儿文件），而兼容旧 JSON 局是为了不把历史局变成只能读不能续的碎骸——但“不迁移”是硬线：升级后旧局不 adopt，开新 run-id。
+
+**判据**：① 阻断——在 Lua 边保存跨 dispatch 的状态（表、句柄、全局）；或向旧 JSON 局写入新结构、或对旧局做迁移；② 症状——回放两次 KV 不一致，或 `YGG-R2` 诊断出现，或新局 `run.json` 的 `store` 与 `--store` 不一致仍能打开；③ 确认——`cargo run -q --example playtest -- .ygg/mods/agent-seed`（回放稳定）与 `cargo test --workspace` 中 `--store` 断言、`ygg-lint` 的 `YGG-R2` 用例。
 
 ### 2.8.1 沙箱时序源：可用与不可用（时序契约）
 

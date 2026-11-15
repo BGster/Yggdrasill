@@ -2,7 +2,7 @@
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
--- D-MA23：approve(plan) → 待开发（plan_ok=true + 响应式自动派发）；
+-- 剧情双层重写：approve(plan) → 待开发（plan_ok=true + 响应式自动派发）；
 -- approve(accept) → 集成（integrating=true，不再直接 done——done 只经 integration.confirm）。
 
 local M = {}

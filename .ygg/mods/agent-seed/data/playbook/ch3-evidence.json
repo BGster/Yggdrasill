@@ -171,7 +171,7 @@
         {
           "id": "hard.no-dual-schema-write",
           "modality": "must-not",
-          "text": "Never write a schema twice: change the resource format contract only in `packages/schema/`, both the Rust and the TS side are subordinate (D11/D15; details in the repository chapter).",
+          "text": "Never write a schema twice: change the resource format contract only in `packages/schema/`, both the Rust and the TS side are subordinate (Lua 唯一可执行接口/Schema 单一来源; details in the repository chapter).",
           "basis": "historical AGENTS.md (pre-migration; see git history) item 5"
         },
         {
@@ -183,7 +183,7 @@
         {
           "id": "hard.decision-change-backfill",
           "modality": "must",
-          "text": "A decision change must be written back into the decision ledger (`docs/context/archive/decisions-engine.md` / `docs/context/archive/decisions-agent.md`); when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
+          "text": "A decision change must be written back into the decision ledger (each ruling's 「设计依据」 section in the document it governs); when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
           "basis": "historical AGENTS.md (pre-migration; see git history) item 7"
         }
       ]

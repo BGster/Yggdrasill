@@ -465,7 +465,7 @@ end
 
 local MAP_NODES = { RUN_PHASE.charter, RUN_PHASE.coordinate, RUN_PHASE.settle, RUN_PHASE.release, RUN_PHASE.retired }
 
--- D-MA23 常驻批循环图（§2.3）：live 内四幕自循环（立局→协调⇄盘点→发布→批结算）；
+-- 剧情双层重写 常驻批循环图（§2.3）：live 内四幕自循环（立局→协调⇄盘点→发布→批结算）；
 -- live→retired 是唯一真转场（review.note 武装路径经 flow.advance 盖章）。
 -- 注：本表是**展示面**（不是 FSM 转移表，mod.lua 的 ygg.fsm.define 一字未动）；
 -- to_stage 对 review.note 按武装状态二选一，让操作视图的目标相位与真实落点一致。
@@ -593,7 +593,7 @@ end
 -- 不在表里的动作（map.show / requirement.* / config.* / lane.* / release.*）= 不换相位（自环）。
 -- 特例：settle → coordinate 的打回边在表里记作 `verify.submit=false`，而菜单里的
 -- 失败项载荷是 `all_green=false;report=…`，所以要按载荷前缀补一次查找。
--- 特例二（r9/D-MA23）：review.note 有两条语义边（批收口 → 协调 / 退役 → 退役），
+-- 特例二（r9/剧情双层重写）：review.note 有两条语义边（批收口 → 协调 / 退役 → 退役），
 -- 按 run.retire 武装状态二选一，让操作视图的目标相位与真实落点一致；
 -- run.begin 是立局幕的唯一出口（→ 协调）。
 local function to_stage(action, payload)
@@ -822,7 +822,7 @@ end
 
 RENDER[RUN_PHASE.retired] = function()
   local current = run_phase()
-  -- r9/D-MA23：retired = 退役终态（仅 run.retire 武装后的 review.note 可达）。
+  -- r9/剧情双层重写：retired = 退役终态（仅 run.retire 武装后的 review.note 可达）。
   ygg.narrate(fill(TEXTS.endings.done, {
     title = task_title(),
     count = tostring(req_count()),

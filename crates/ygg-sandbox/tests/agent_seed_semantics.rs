@@ -1,4 +1,4 @@
-//! agent-seed semantics gate: **decidable** assertions for the D-MA23 two-layer story
+//! agent-seed semantics gate: **decidable** assertions for the 剧情双层重写 two-layer story
 //! (4 true states + 13 micro-states), the requirement-level nine-act machine, the
 //! run-level resident batch loop (charter → coordinate ⇄ settle → release → retired),
 //! and the operation-map / tool-bridge / identity surfaces (docs/design/kernel/state-machine.md §2.10
@@ -23,7 +23,7 @@
 //!   event name + registered count + registered set, zero side effects);
 //! - every human action (proposal.accept / gate.approve / coordinate.submit / verify.submit
 //!   / review.note) goes through **guide's `ygg.choice_selected`** — the ticket is only
-//!   stamped there; the six new D-MA23 events (`charter.set` / `run.begin` /
+//!   stamped there; the six new 剧情双层重写 events (`charter.set` / `run.begin` /
 //!   `integration.*` / `release.*`) deliberately stay **outside** the ticket gate (R5).
 //!
 //! Boundaries (same stance as docs/context/acts/coordinate.md / acts/settle.md — no added exits):
@@ -526,7 +526,7 @@ fn charter_and_begin(game: &mut Game) {
 }
 
 /// Coordinate → one requirement → the plan job is running. True status stays `open`
-/// (D-MA23: status only moves at the integration confirm); the micro-state is `planning`.
+/// (剧情双层重写: status only moves at the integration confirm); the micro-state is `planning`.
 fn start_requirement(game: &mut Game) {
     charter_and_begin(game);
     game.narrate(
@@ -583,7 +583,7 @@ fn submit_dev_with_exec(
     game.narrate("proposal.submit", &payload)
 }
 
-/// Drive to **plan gate pending**: plan proposal → **delivery is the gate** (D-MA23) —
+/// Drive to **plan gate pending**: plan proposal → **delivery is the gate** (剧情双层重写) —
 /// the submit itself raises `gate="plan"` bound to the rev; there is no acceptance step.
 fn drive_to_plan_gate() -> Game {
     drive_to_plan_gate_at(&project_mod_dir())
@@ -755,7 +755,7 @@ fn charter_gate_revises_locks_and_begins_the_run() {
     );
     game.narrate(
         "charter.set",
-        &text("semantics run v2|prove the D-MA23 loop|suite green"),
+        &text("semantics run v2|prove the 剧情双层重写 loop|suite green"),
     );
     game.assert_kv("task.title", json!("semantics run v2"));
 
@@ -1392,7 +1392,7 @@ fn release_declaration_gates_the_batch_settlement() {
     game.assert_kv("run.batch", json!(2));
 
     // Batch 2 proves the self-loop with the confirm path: the auto-appended maintenance
-    // row (r2, D-MA25) and a fresh requirement (r3) walk the pipeline side by side, then
+    // row (r2, 批结算自动维护) and a fresh requirement (r3) walk the pipeline side by side, then
     // confirm (not skip) declares the merge.
     game.narrate(
         "requirement.add",
@@ -1438,10 +1438,10 @@ fn release_declaration_gates_the_batch_settlement() {
     game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
 }
 
-// ───────────────────── batch-maintenance auto-append (r3 / D-MA25) ─────────────────────
+// ───────────────────── batch-maintenance auto-append (r3 / 批结算自动维护) ─────────────────────
 
 /// An unarmed batch settle **auto-appends the next batch's docs-maintenance requirement**
-/// (D-MA25): the `[BATCH 1 SETTLED]` receipt is followed by `[MAINTENANCE REQ ADDED]` in
+/// (批结算自动维护): the `[BATCH 1 SETTLED]` receipt is followed by `[MAINTENANCE REQ ADDED]` in
 /// the same transaction — one new open/draft row carrying the `req.<i>.maintenance` marker,
 /// the canonical title (no batch number, so the dedup title match stays exact) and the
 /// per-file wiki guidance in its description; `run.maintenance.last` points at it.
@@ -1488,7 +1488,7 @@ fn batch_settle_auto_appends_maintenance_requirement() {
     );
     assert!(
         desc.contains("docs/README.md")
-            && desc.contains("docs/context/archive/decisions-agent.md")
+            && desc.contains("docs/context/cold-start/vocabulary.md")
             && desc.contains("docs/design/"),
         "description must carry the per-file wiki guidance: {desc}"
     );
@@ -1704,7 +1704,7 @@ fn gate_independence_other_requirements_do_not_block() {
     game.assert_kv("req.3.job", json!("plan"));
 }
 
-/// The plan gate's own pending proposal does **not** block its approval (D-MA23: delivery is
+/// The plan gate's own pending proposal does **not** block its approval (剧情双层重写: delivery is
 /// the gate — the gate-raising proposal settles to accepted as part of the approval), while
 /// an injected **development** pending does (one gate at a time; the KV-injected fixture is
 /// the only way a proposal can coexist with a gate, since `submit_slot_ok` refuses live
@@ -1995,7 +1995,7 @@ fn guide_show_is_physically_deregistered_and_fails_closed() {
     assert!(
         set.contains(&"integration.confirm".to_owned())
             && set.contains(&"release.confirm".to_owned()),
-        "the registered set must carry the new D-MA23 acts: {message}"
+        "the registered set must carry the new 剧情双层重写 acts: {message}"
     );
 
     // The registry is intact: a normal view dispatch still works after the refusal.
@@ -2041,8 +2041,8 @@ fn assert_fail_closed(game: &mut Game, event: &str) -> Json {
     let count: usize = digits
         .parse()
         .unwrap_or_else(|err| panic!("the registered count must be a number: {message} ({err})"));
-    // D-MA23: 38 story/operate/infrastructure events (DESIGN §2.6) + `ygg.narrative.goto`
-    // (the node:render render event) = 39 registered handlers; r1 (D-MA24) adds
+    // 剧情双层重写: 38 story/operate/infrastructure events (DESIGN §2.6) + `ygg.narrative.goto`
+    // (the node:render render event) = 39 registered handlers; r1 (泳道分池) adds
     // `lane.pool` (the named-pool registry action) = 40 registered handlers.
     assert_eq!(
         count, 40,
@@ -3362,7 +3362,7 @@ fn seed_layout_is_single_source_agent_seed() {
 }
 
 /// r6 The mod architecture is **fragments + five layers**: 27 code modules all under
-/// `src/{{core,domain,view,runtime,handlers}}/` (D-MA23 added the charter / integration /
+/// `src/{{core,domain,view,runtime,handlers}}/` (剧情双层重写 added the charter / integration /
 /// release handlers), texts split into 7 fragments (core + 6 beats groups) whose beat keys
 /// are pairwise disjoint (the `mod.lua` assembly contract), the playbook split into 9
 /// chapter fragments (r5: head + ch1..ch5 + the four ch4- domain fragments; the former
@@ -3379,7 +3379,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
     assert_eq!(
         modules.len(),
         30,
-        "the D-MA23 mod declares 30 modules: {modules:?}"
+        "the 剧情双层重写 mod declares 30 modules: {modules:?}"
     );
     let entry = pack["code"]["entry"].as_str().expect("code.entry");
     let mut layers = std::collections::BTreeSet::new();
@@ -3944,7 +3944,7 @@ fn tool_declarations_pin_the_merged_capability_surface() {
     );
 }
 
-// ───────────────────── E6 · Mod text hygiene (D-MA19/D-MA21) ─────────────────────
+// ───────────────────── E6 · Mod text hygiene (别名退役/子会话清理) ─────────────────────
 
 /// Mod prose fragments must not carry retired path literals (`ygg-agent` / `pi-agent-seed`).
 /// Scope = pack.json `entries` whose path sits under `data/texts/` or `data/playbook/`; a line
@@ -4242,11 +4242,11 @@ fn context_pointer_parser_accepts_subdirectories_and_flags_missing_anchors() {
     // ② 两层子目录 + 紧邻中文标点 / `§` / `；` 不得吞掉路径
     assert_eq!(
         context_pointer_paths(
-            "政策见 docs/context/rituals/cleanup.md §2；台账 docs/context/archive/decisions-agent.md。"
+            "政策见 docs/context/rituals/cleanup.md §2；叙事 docs/context/story/run-story.md。"
         ),
         vec![
             "rituals/cleanup.md".to_string(),
-            "archive/decisions-agent.md".to_string()
+            "story/run-story.md".to_string()
         ]
     );
     // ③ 目录指针 / 通配不算文件指针（真实写法：`docs/context/acts/` 与 `docs/context/acts/*.md`）
@@ -4810,8 +4810,8 @@ fn context_scene_reference_ids_resolve() {
     }
     assert_eq!(
         reference.len(),
-        3,
-        "reference 段应登记 3 个理解性文档：{reference:?}"
+        4,
+        "reference 段应登记 4 个（含不进 readPlan 的规范文档）：{reference:?}"
     );
 
     let mut scene_ids: Vec<String> = Vec::new();
@@ -4872,9 +4872,9 @@ fn context_scene_reference_ids_resolve() {
 /// 这是 r5 盲区的补丁：r5 的锚点用例（`narrative_pointer_anchors_exist_in_docs_context`）
 /// 只扫 `data/texts/**` 与 `core.scenes/prompts`，**从不打开 `data/playbook/**` 与 `src/**`**，
 /// 于是 11 处 playbook 指针 + 1 处 `src/runtime/tools.lua` 注释在 r5 之后仍指向已删除的文件
-/// （**死链全绿**）。本用例把这两个入口纳入，并钉住 56 处逐来源硬账。
+/// （**死链全绿**）。本用例把这两个入口纳入，并钉住 48 处逐来源硬账。
 ///
-/// Mutation：把任一处改回 `docs/context/decisions-engine.md`（已移入 `archive/`）→ 本用例转红。
+/// Mutation：把任一处改回一个已解散的台账路径 → 本用例转红。
 #[test]
 fn playbook_and_src_context_pointers_resolve() {
     let repo = repo_dir();
@@ -4969,8 +4969,7 @@ fn playbook_and_src_context_pointers_resolve() {
         ("beats-harness.json", 2),
         ("beats-map-guide.json", 2),
         ("beats-settlement.json", 4),
-        ("ch1-foundation.json", 12),
-        ("ch3-evidence.json", 2),
+        ("ch1-foundation.json", 6),
         ("ch4-mod-host.json", 0),
         ("ch4-protocol.json", 2),
         ("ch4-run-machine.json", 5),
@@ -4988,8 +4987,8 @@ fn playbook_and_src_context_pointers_resolve() {
         "docs/context 指针账漂移（playbook + texts + src）：{ledger:?}"
     );
     assert_eq!(
-        total, 56,
-        "docs/context 指针总数漂移：期望 56，实得 {total}"
+        total, 48,
+        "docs/context 指针总数漂移：期望 48，实得 {total}"
     );
     assert!(
         violations.is_empty(),
@@ -4998,7 +4997,7 @@ fn playbook_and_src_context_pointers_resolve() {
     );
 }
 
-/// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
+/// r5 (子会话清理): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
 /// is delegated to the main session's own environment, so `data/texts/beats-settlement.json`
 /// must not carry any harness-implementation literal (`pi-subagents`, `.pi/agent`, `.claude`,
 /// `.codex`, `archive_sessions`). Mutation: inject a forbidden literal line into the
@@ -5379,7 +5378,7 @@ fn lane_probe_records_truth_and_the_radar_blocks_overlapping_lanes() {
     assert_eq!(game.phase("r1"), "draft");
 }
 
-/// r1 (D-MA24) lane pools: `lane.pool "label|path"` registers named pools and the same lane
+/// r1 (泳道分池) lane pools: `lane.pool "label|path"` registers named pools and the same lane
 /// number k hosts **different requirements in different pools** (the multi-repo case that a
 /// flat `lane.<k>` ledger could never express). Registration is an idempotent upsert with a
 /// shape gate (label regex + reserved words; path without `|` `;` newline or edge spaces).
@@ -5449,7 +5448,7 @@ fn lane_pool_registry_and_multi_repo_parallel_claims() {
     game.assert_kv("lane.gamma.2.req", Json::Null);
 }
 
-/// r1 (D-MA24) parallelism is counted **per pool** (k ∈ 1..job_capacity inside one pool),
+/// r1 (泳道分池) parallelism is counted **per pool** (k ∈ 1..job_capacity inside one pool),
 /// occupancy and the one-lane-per-requirement bound are (pool, k)-scoped, and a different
 /// pool's same k never counts as occupied.
 #[test]
@@ -5508,7 +5507,7 @@ fn same_pool_parallelism_and_occupancy_scoped() {
     );
 }
 
-/// r1 (D-MA24) release is (pool, k)-scoped: releasing one pool's lane never touches another
+/// r1 (泳道分池) release is (pool, k)-scoped: releasing one pool's lane never touches another
 /// pool's same-k lane, the requirement-side binding (lane + lane_pool) clears together, and
 /// the tool-face pooled release resolves the pool from the **request** repo argument.
 #[test]
@@ -5582,7 +5581,7 @@ fn release_paths_are_pool_scoped() {
     game.assert_kv("lane.alpha.2.req", Json::Null);
 }
 
-/// r1 (D-MA24) the conflict radar compares probes **within one pool only**: the same file
+/// r1 (泳道分池) the conflict radar compares probes **within one pool only**: the same file
 /// list in two different pools raises nothing (different repos, unrelated file trees), while
 /// the same overlap inside one pool still blocks through the human-path writer.
 #[test]
@@ -5640,7 +5639,7 @@ fn conflict_radar_compares_within_pool_only() {
     game.assert_kv("req.1.conflict", json!(""));
 }
 
-/// r1 (D-MA24) the pooled tool bridge folds into the pool ledger via the **request** repo
+/// r1 (泳道分池) the pooled tool bridge folds into the pool ledger via the **request** repo
 /// argument (the host output line does not carry `--repo`): a pooled claim binds
 /// `lane.<pool>.<k>.*`, the default tool still binds the flat legacy keys, and an
 /// unregistered repo is refused without touching the ledger or the reject counter.
@@ -5812,7 +5811,7 @@ fn artifact_probe_and_vfs_keep_one_ledger() {
     game.assert_kv("artifact.artifacts/notes.md.bytes", json!(7));
 }
 
-/// A4 `gate.verify_suite` writes green evidence only in the **settle** micro-state (D-MA23:
+/// A4 `gate.verify_suite` writes green evidence only in the **settle** micro-state (剧情双层重写:
 /// the review stage became the settle act), only when the payload says `passed=1`, and only
 /// when the same gate precondition holds. A failed suite narrates honestly and never writes
 /// green; the green path writes the same KV as the human `verify.submit` plus provenance.
@@ -5867,11 +5866,11 @@ fn verify_suite_result_records_green_evidence_only_in_settle() {
     game.assert_kv("verify.source", json!("tool:gate.verify_suite"));
 }
 
-/// A5 (D-MA21): `harness.archive_sessions` is retired from the Mod tool bridge — the cleanup
+/// A5 (子会话清理): `harness.archive_sessions` is retired from the Mod tool bridge — the cleanup
 /// is prompt-driven and the only settlement path is the human `settlement.sessions`
 /// declaration. Re-pin the retirement facts: the tool is declared in neither `pack.json`
 /// nor `allowedTools`, and a direct `settlement.sessions` registration still unblocks the
-/// batch close (through the D-MA23 release declaration).
+/// batch close (through the 剧情双层重写 release declaration).
 #[test]
 fn archive_sessions_is_retired_from_the_tool_bridge() {
     let mod_dir = project_mod_dir();
@@ -5969,7 +5968,7 @@ impl HostToolRunner for SyncRitualRunner {
 
 /// A7 Synchronous `ygg.tool.call` mounted on `KernelFacade` settles the 3 inline engineering
 /// rituals (`git.worktree_claim`, `git.lane_probe`, `git.worktree_release`) in **1 single turn
-/// each** without `tool.result` callbacks. D-MA23 window (R7): the lane stays bound through
+/// each** without `tool.result` callbacks. 剧情双层重写 window (R7): the lane stays bound through
 /// the acceptance and the accept gate — the auto-release happens on the **integration
 /// confirm**, not on the gate approval.
 #[test]
@@ -6239,7 +6238,7 @@ fn requirement_list_pages_open_first_and_full_opt_in() {
 
 /// r1: the summary projection carries the additive `play` key (the `play_mode()` mirror)
 /// beside the resident trio — the pump-pause signal `batchDrained` reads
-/// coordinate ∧ gate_problem()==nil ∧ not armed (D-MA23: the run-level facts, no stage name).
+/// coordinate ∧ gate_problem()==nil ∧ not armed (剧情双层重写: the run-level facts, no stage name).
 #[test]
 fn summary_projection_carries_play_and_resident_trio() {
     let mut game = Game::open(&project_mod_dir());
@@ -6287,7 +6286,7 @@ fn summary_projection_carries_play_and_resident_trio() {
     game.click("review.note — ");
     let summary = game.reply("agent.summary", "0")["meta"]["summary"].clone();
     assert_eq!(summary["batch"], json!(2));
-    // The auto-appended maintenance requirement (D-MA25) keeps the queue non-empty after
+    // The auto-appended maintenance requirement (批结算自动维护) keeps the queue non-empty after
     // a batch settle: the pump is NOT drained until that row is done.
     assert_eq!(summary["batchDrained"], json!(false));
     game.assert_kv("req.count", json!(2));
@@ -6308,7 +6307,7 @@ fn summary_projection_carries_play_and_resident_trio() {
     );
 }
 
-// ───────────────────────── harness tools 机证 cross-check（r3 / D-MA26）─────────────────────────
+// ───────────────────────── harness tools 机证 cross-check（r3 / harness 机证）─────────────────────────
 
 /// 注入 harness 工具 runner：按 tool_id 返回 controlled 输出（k=v 对的 BTreeMap 形式，
 /// 与 InProcessToolRunner.parse_kv_output 的产物同形）。用于机证 cross-check 的矛盾/一致两路。

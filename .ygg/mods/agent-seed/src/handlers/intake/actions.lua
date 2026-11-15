@@ -73,7 +73,7 @@ local function dispatch_one(index)
   end
   ygg.kv.set(req_key(index, "job"), stage_name)
   if stage_name == "development" then
-    -- D-MA23：真状态不再随派活推进（open 恒定；微状态由 job 派生）——只写 job，
+    -- 剧情双层重写：真状态不再随派活推进（open 恒定；微状态由 job 派生）——只写 job，
     -- 认领与引导照旧。
     if claimed == 0 then
       LANES.bind("", lane, index)

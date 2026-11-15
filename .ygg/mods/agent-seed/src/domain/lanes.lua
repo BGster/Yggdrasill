@@ -1,10 +1,10 @@
 -- src/domain/lanes.lua —— 泳道账本（r1 分池）：默认池 `lane.<k>.*`（键形沿用旧版，
--- = 运行仓 CWD toplevel 自己的池）+ 具名池 `lane.<label>.<k>.*`（D-MA24）+ 池注册表
+-- = 运行仓 CWD toplevel 自己的池）+ 具名池 `lane.<label>.<k>.*`（泳道分池）+ 池注册表
 -- `lane.pools` / `lane.pool.<label>.path` + job / 容量计数。
 -- 另承载需求迭代分支名的强制形态判定（`LANES.branch_problem`）：lane.claim 与
 -- git.worktree_claim 两个入口共用的唯一语义点，删除默认名生成机制后分支一律由调用方自报。
 --
--- 池键形约定（r1 D-MA24）：pool == ""（默认池）→ `lane.<k>.<name>`（字节级沿用旧键）；
+-- 池键形约定（r1 泳道分池）：pool == ""（默认池）→ `lane.<k>.<name>`（字节级沿用旧键）；
 -- 具名池 → `lane.<label>.<k>.<name>`，label 形状 `^[a-z][a-z0-9-]{0,23}$`（首字符字母，
 -- 与旧版纯数字 k 键空间零冲突），保留字 `seq` / `pools` 不许用。需求侧绑定双写
 -- `req.<i>.lane`（k）与 `req.<i>.lane_pool`（label，""=默认池）。
@@ -31,7 +31,7 @@ local LANES = {}
 
 local POOL_RESERVED = { seq = true, pools = true }
 
--- ── 池模型（r1 D-MA24）─────────────────────────────────────────────────────────────
+-- ── 池模型（r1 泳道分池）─────────────────────────────────────────────────────────────
 
 -- label 形状守门：^[a-z][a-z0-9-]{0,23}$ 且 ∉ {seq, pools}。Lua 模式无 {n,m} 有界量词
 -- （{ } 是字面量），总长上限用 #label 判（首字符字母 + 无界类 + ≤24 = 同一形状）。

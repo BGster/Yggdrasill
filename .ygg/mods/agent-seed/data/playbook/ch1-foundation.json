@@ -30,7 +30,7 @@
           "id": "credentials.settings-not-a-secret-vault",
           "modality": "must",
           "text": "The runtime KV family `settings.*` is no exception for sensitive values: the static defaults (`data/config.json`) and the dynamic overrides (`settings.*` written by `config.set`) only ever hold non-sensitive behavior switches, numbers and experience text (such as `evolution.mode` / `gates.require_all_green` / `evolution.max_per_run`).",
-          "basis": "docs/context/archive/decisions-engine.md + docs/context/archive/decisions-agent.md (ex-CONTEXT §5; user decision added 2026-10-29)"
+          "basis": "the in-place 「设计依据」 sections of the governing contracts (ex-CONTEXT §5; user decision added 2026-10-29)"
         },
         {
           "id": "credentials.secret-values-local-only",
@@ -87,7 +87,7 @@
         {
           "id": "repository.vision-single-source",
           "modality": "must",
-          "text": "The decision tables in `docs/context/archive/decisions-engine.md` and `docs/context/archive/decisions-agent.md` are the single source of truth for project decisions; any new decision produced by a design discussion (D11+) must be written back into those tables.",
+          "text": "The decision tables in the 「设计依据」 sections of the governing contracts are the single source of truth for project decisions; any new decision produced by a design discussion (Lua 唯一可执行接口+) must be written back into those tables.",
           "basis": "historical AGENTS.md (pre-migration; see git history) (constraint 1)"
         },
         {
@@ -99,13 +99,13 @@
         {
           "id": "repository.schema-single-source",
           "modality": "must",
-          "text": "Resource format contracts live only in `packages/schema/schemas/` (D15): the TS side (ajv) and the Rust side (jsonschema crate) read the same file, and neither side may keep an inline copy.",
-          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 2; docs/context/archive/decisions-engine.md D15/D20"
+          "text": "Resource format contracts live only in `packages/schema/schemas/` (Schema 单一来源): the TS side (ajv) and the Rust side (jsonschema crate) read the same file, and neither side may keep an inline copy.",
+          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 2; the in-place 「设计依据」 of mod/mod-package.md (schema single source)"
         },
         {
           "id": "repository.schema-does-not-constrain-lua",
           "modality": "must-not",
-          "text": "A schema constrains the resource file format, not Mod logic — the executable interface of a Mod is a Lua script (D11).",
+          "text": "A schema constrains the resource file format, not Mod logic — the executable interface of a Mod is a Lua script (Lua 唯一可执行接口).",
           "basis": "historical AGENTS.md (pre-migration; see git history) constraint 2"
         },
         {
@@ -117,8 +117,8 @@
         {
           "id": "repository.vm-dependency-location",
           "modality": "must",
-          "text": "VM dependencies such as mlua may appear only in `crates/ygg-sandbox` (D12).",
-          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 3; docs/context/archive/decisions-engine.md D12"
+          "text": "VM dependencies such as mlua may appear only in `crates/ygg-sandbox` (crate 边界).",
+          "basis": "historical AGENTS.md (pre-migration; see git history) constraint 3; the in-place 「设计依据」 of kernel/lua-api.md (crate boundary)"
         },
         {
           "id": "repository.dependency-direction",
@@ -203,7 +203,7 @@
         {
           "id": "lanes.path-convention",
           "modality": "must",
-          "text": "Lane worktrees use the conventional path `<pool-root>/<repo>-lane-<k>` (default pool-root `~/tmp/worktrees`, overridable via `--root` / `$YGG_WORKTREE_ROOT`) and sit detached at the `origin/master` head while idle. Named pools (r1, D-MA24) extend this to one pool per repo: register the local checkout once with `lane.pool \"label|path\"`, then claim inside it with `lane.claim \"lane|req_id|branch|base|clean|label\"` — the worktree lands at `<pool-root>/<checkout-basename>-lane-<k>`.",
+          "text": "Lane worktrees use the conventional path `<pool-root>/<repo>-lane-<k>` (default pool-root `~/tmp/worktrees`, overridable via `--root` / `$YGG_WORKTREE_ROOT`) and sit detached at the `origin/master` head while idle. Named pools (r1, 泳道分池) extend this to one pool per repo: register the local checkout once with `lane.pool \"label|path\"`, then claim inside it with `lane.claim \"lane|req_id|branch|base|clean|label\"` — the worktree lands at `<pool-root>/<checkout-basename>-lane-<k>`.",
           "basis": "historical AGENTS.md (pre-migration; see git history) (lane worktrees; r1 per-repo pools)"
         },
         {

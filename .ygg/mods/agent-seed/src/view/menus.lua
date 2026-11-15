@@ -357,7 +357,7 @@ MENU[RUN_PHASE.coordinate] = function()
   -- 门禁不再被「任一需求有待验收提案」整体藏起（按需求局部化：gate.approve 只看 rN 自身，
   -- gate_problem_for 在 handler 里判；跨需求阻塞改由串行验收 / 收口前置承担）。单需求下
   -- accept 与 gate 结构上不同时出现（门禁只能由受理唯一 pending 提案升起），全 1 菜单
-  -- 首项序号不变。（plan 门禁已随 D-MA23 改为提交即门禁——不再经由 proposal.accept。）
+  -- 首项序号不变。（plan 门禁已随 剧情双层重写 改为提交即门禁——不再经由 proposal.accept。）
   local accept = accept_item()
   local gates = gate_items()
   local dispatch = dispatch_item()

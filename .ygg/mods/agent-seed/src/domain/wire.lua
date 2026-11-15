@@ -73,7 +73,7 @@ local function valid_ext(ext)
   return raw:find("%s") == nil
 end
 
--- 章程解析（D-MA23 三段）：`<title>|<goal>|<success>`。
+-- 章程解析（剧情双层重写 三段）：`<title>|<goal>|<success>`。
 -- `parse_intake`（宽松，event.start 启动载荷用）：空段回退默认文案，不拒绝——
 -- 保留旧「照常 boot」语义；`parse_charter`（严格，charter.set 用）：三段必须全部非空，
 -- 否则可读拒绝（章程是可判定的验收面，不允许占位符冒充）。
@@ -331,7 +331,7 @@ local function read_ver_ok(ver)
 end
 
 -- ============================================================================
--- harness tools 注册面（r3 / D-MA26）：config.set tools.root / tools.<name>
+-- harness tools 注册面（r3 / harness 机证）：config.set tools.root / tools.<name>
 -- 只校形状，不读文件（Mod 无 IO；存在性由首次调用时宿主可读回传）。
 -- ============================================================================
 

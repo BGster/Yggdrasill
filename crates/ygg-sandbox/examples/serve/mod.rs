@@ -1416,7 +1416,7 @@ enum PanelDecl {
 /// 语法门 = 不以 `/` 开头、不含 `..`、以 `.html` 结尾；entry 文件必须真实存在
 /// 且 canonicalize 后仍在面板根内（拦 symlink 逃逸）。
 fn panel_decl(mod_dir: &Path) -> PanelDecl {
-    // 退役旧名（D-MA19）先给专名降级理由：目录缺席且形状命中时，点名规范路径
+    // 退役旧名（别名退役）先给专名降级理由：目录缺席且形状命中时，点名规范路径
     // （观察面不炸，§4.1：声明损坏 ≠ 装载错误）。
     if !mod_dir.exists() {
         if let Some(reason) = super::retired_seed_name_reason(mod_dir) {
@@ -2867,7 +2867,7 @@ end)
         let resolved = run_mod_dir(&json!({"mod": ".ygg/mods/nowhere"}), Some(&root_no_mod))
             .expect("原值兑底");
         assert_eq!(resolved, PathBuf::from(".ygg/mods/nowhere"));
-        // 旧名已退役（D-MA19）：相对旧名不再翻译——链不命中 → 原值返回；
+        // 旧名已退役（别名退役）：相对旧名不再翻译——链不命中 → 原值返回；
         // panel 面给专名降级理由，点名规范路径（观察面不炸）。
         let retired_root = dir.join("retired/runs");
         fs::create_dir_all(&retired_root).expect("建退役根");

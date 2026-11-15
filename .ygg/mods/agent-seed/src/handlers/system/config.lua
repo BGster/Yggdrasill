@@ -245,7 +245,7 @@ function M.install(deps)
         ygg.kv.set("settings.readGate.window", parsed)
       end
     elseif key == "tools.root" then
-      -- harness tools 注册根（r3 / D-MA26）：目录路径，形状校验（无 `..`/`|`/控制字符，≤240）。
+      -- harness tools 注册根（r3 / harness 机证）：目录路径，形状校验（无 `..`/`|`/控制字符，≤240）。
       -- 只校形状不读文件（Mod 无 IO）；空值 = 显式清除（机证回退人证）。
       if not wire.tools_root_ok(value) then
         return reject_payload("config.set", TEXTS.beats.tools_root_bad)
@@ -259,7 +259,7 @@ function M.install(deps)
       render()
       return
     elseif key:sub(1, 6) == "tools." then
-      -- tools.<name> 分两类（r3 / D-MA26）：
+      -- tools.<name> 分两类（r3 / harness 机证）：
       --   保留参数键 tools.session / tools.sessions_root = 自由值（会话 id / 会话库路径），
       --     供结算 cross-check 拼 argv（mod 沙箱读不到进程环境，参数只能来自 KV）。
       --   脚本覆盖键 tools.<name>=<relpath> = 覆盖缺省 `<name>.sh`（`.sh` 结尾）。

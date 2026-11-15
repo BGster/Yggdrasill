@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 集成（req-acts/integration）
 > **id** req-acts/integration · **幕** req: accept_gate/integrating/done · **触发** 验收门禁前 / 集成核验前
 > **读不到代价** hard-refusal（证据清单漏项 → 验收被拒；SHA 不符 → `integration_bad_sha` 打回）
-> **ver** 2a00f8
+> **ver** 73bc9e
 
 ## 7. 验收门禁（accept_gate）
 
@@ -33,7 +33,7 @@
 - **必做动作**：**执行者**在收口时自行集成功能分支 → `origin/develop`（对齐 → `git merge --no-ff` → 集成态门禁绿 → push develop），工件记录 `develop@<sha>`；主会话 `integration.confirm` 核验 SHA 后关需求，或 `integration.reject` 打回。
 - **出口判据**：confirm → done（`status=done`，泳道释放）；reject → 待开发（写 feedback、释放泳道）。
 - **本幕关联阅读**：[rituals/dispatch.md](../rituals/dispatch.md)（集成纪律：no-FF / 不碰 master / 不碰他人泳道）；[copy/requirements.md](../copy/requirements.md)（`integration_*` 句式、`integration_bad_sha` 证据形状）。
-- **集成纪律（development 阶段收口时）**：子代理自己把功能分支集成进 `develop`：对齐 `origin/develop` → `git merge --no-ff` → 集成态门禁全绿 → push `develop` → 在工件中记录 `develop@<sha>`。**永不触碰 `master` 或他人泳道分支**。轮次级 develop→master、reset-develop 与批次 tag 的操作权威见 [acts/release.md](../acts/release.md) 发布幕（D-MA22 只保存裁决与指针）。
+- **集成纪律（development 阶段收口时）**：子代理自己把功能分支集成进 `develop`：对齐 `origin/develop` → `git merge --no-ff` → 集成态门禁全绿 → push `develop` → 在工件中记录 `develop@<sha>`。**永不触碰 `master` 或他人泳道分支**。轮次级 develop→master、reset-develop 与批次 tag 的操作权威见 [acts/release.md](../acts/release.md) 发布幕（集成分工 只保存裁决与指针）。
 
 ## 9. done（终态）
 

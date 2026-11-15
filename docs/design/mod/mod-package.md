@@ -25,6 +25,22 @@
    - 依据 `packages/schema/schemas/manifest.json` 校验。为每个代码文件与数据资源记录 `{ path, sha256, byteLength }`。经 `./scripts/sync-seed-mod.sh` 维护。
    - `.ygg/mods/agent-seed` 是唯一事实源，`packages/mods/agent-seed -> ../../.ygg/mods/agent-seed` 是相对软链；`./scripts/sync-seed-mod.sh` 重算 manifest，`./scripts/sync-seed-mod.sh --check` 同时核验软链与漂移。绕开单源在软链另一端独立修改会造成双源漂移，禁止验收。
 
+#### 3.2.1 设计依据（Lua 为唯一可执行接口 / Schema 单一来源 / 多文件纯度）
+
+**Lua 脚本是 Mod 的唯一可执行接口**：叙事流、效果与条件一律写成 Lua，静态内容放 JSON 资源经 `ygg.data(...)` 加载。**Schema 只有一个来源**：`packages/schema/schemas/`，Rust 侧（`jsonschema`）与 TS 侧（`ajv`）必须给出完全一致的判定；`scene-texts.json` 与 `agent-config.json` 的模板也躺在同一目录，LLM 只填数据、绝不自创 Schema 定义。**多文件纯度**：`code.{entry,modules[]}` 显式枚举全部 Lua 模块，只有 `mod.lua` 可以在顶层注册处理器或改变状态，`src/**` 导出纯函数（`M.install(deps)`）并带真实 `@src/<file>.lua:line` 诊断。
+
+**依据**：反方案是声明式 JSON 条件/对话树——它把“表达力”锁在了一种固定的 schema 里，每加一种叙事花样就要改 schema，而 schema 是双语言共同产物，改动成本远高于改一段 Lua。Schema 单一来源是因为双端各写一份校验必然随时间漂移，而“同一个文件在宿主与工具链里判定不同”是最难查的一类缺陷。多文件纯度是为了让模块化不以“谁都能改状态”为代价。
+
+**判据**：① 阻断——在 `src/**` 顶层注册处理器或改 KV、在 `packages/schema/schemas/` 之外新增 Schema 定义、或新增一个未被 `modules[]` 枚举的 Lua 文件；② 症状——加载期 `YGG-MOD-EFFECT` / 模块未声明报错，或 Rust 与 TS 校验同一资源结论不同；③ 确认——`cargo test --workspace`（含 `ygg-schema` / `ygg-lint` 用例）与 `./scripts/sync-seed-mod.sh --check`。
+
+### pack 声明变更的连带义务
+
+**因 `pack.json` 声明形状变化而必须改的宿主 `#[cfg(test)]` 断言（含 `crates/ygg-sandbox/examples/egg.rs` 的测试模块）属维护，不是能力扩张**：在同一 commit 改掉，并写明是哪一条声明逼它改。其余一律仍被禁止——生产代码、新宿主能力、任何运行时行为变化。
+
+**依据**：声明与断言是同一枚硬币的两面；若“改声明”不算理由，每次声明演进都会撞上“不能改断言”的红线，只能绕道或留下过时断言（后者更贵：它把“测试绿”变成历史遗迹）。但它必须与“顺手把测试改到能过”严格区分——后者是能力扩张。
+
+**判据**：① 阻断——因修改 pack 声明而导致断言失败却不同批修断言，或借机改动生产代码 / 新增宿主能力；② 症状——`pack.json` 改了而 `--example egg` 套件变红，或 commit 里同时出现断言改动与未声明的行为改动；③ 确认——`cargo test --example egg -p ygg-sandbox` 绿，且 commit message 点名了逼它改的那条声明。
+
 ### Playbook 消费契约（phase-entry + 全局索引）
 
 `src/view/guide.lua` 的 `STAGE_GUIDE` 必须覆盖装配后的全部章 id；每个相位渲染播出**全部候选章**，不是只播首章。`map.show` 保持单一操作视图且忽略 payload，但在 `render()` 产生 choice 之前额外播出 21 章全局索引；因此当前相位章在一次 `map.show` 回执中出现两次，其余章出现一次。退役幕同样播 `pointers`，不留只在全局索引可见的死角。

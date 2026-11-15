@@ -120,7 +120,7 @@ tools.register()
 local STAGE =
   reqs.STAGE
 
--- D-MA23（R1）：内核 FSM 唯一转场 = live → retired（review.note 武装路径经 flow.advance 盖章）。
+-- 剧情双层重写（R1）：内核 FSM 唯一转场 = live → retired（review.note 武装路径经 flow.advance 盖章）。
 -- 原坐标 / review / done 三值废除；协调 / 盘点 / 发布是 run.phase 微状态（不占转场预算）。
 ygg.fsm.define({
   name = "stage",

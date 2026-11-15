@@ -1,22 +1,44 @@
-# Yggdrasill · 活文档闭环
+# Yggdrasill · 活文档闭环与文档边界治理
 
-> **定位**：docs wiki 在每次运行中作为闭环契约强制执行的三职责权威定义。
+> **定位**：docs wiki 的三职责（注入 / 同步 / 核验）、**文件边界判据**（分类轴 = 召回时点）、**design / context 二分判据**、**幕进必读与推进必签**、**ver 与兼容层**、**批结算自动维护**的权威定义。
 > **replaces**：DESIGN §4 活文档闭环（原 L733–739；r2 载体指称由两单文件改述为 wiki 树，三职责语义逐条保留）。
-> **上游**：[README.md](README.md) · **相关**：[context/archive/decisions-agent.md](context/archive/decisions-agent.md)（D-MA8 活文档整合）
+> **上游**：[README.md](README.md) · **相关**：[context/README.md](context/README.md)（召回入口） · [design/README.md](design/README.md)（契约树入口）
+> **无编号**：本文只写规则与判据。任何"某年某月某裁决"的编年史归 git 与结算产物，不进本文。
 
-`docs/` 的 LLM Wiki（顶层导航 `docs/README.md`；领域与决策在 `docs/context/*`，系统行为与接口契约在 `docs/design/*`；原两单文件 `docs/CONTEXT.md` / `docs/DESIGN.md` 为薄壳索引入口）在每次运行中都作为闭环契约强制执行：
+## 1. 工作流即 Mod（治理总纲）
+
+**软件工程协调本身被建模为一个可玩的 Mod（`agent-seed`），协调者通过事件信封逐步与状态机交互。**
+所有产物都必须先由事件带入状态机（`requirement.dispatch` → proposal → gate）——**判定看事件，不看字节落在哪里**：`~/tmp`、`/tmp`、聊天记录都算"已产出"。运行级是常驻自循环（`boot → charter → coordinate ⇄ settle → release → coordinate`，终局只有显式退役可达 `retired`），需求级走九幕（`draft → planning → plan_gate → ready → developing → dev_review → accept_gate → integrating → done`）。
+
+**依据**：agent 的失败模式不是"不会写代码"，而是"长上下文里规则漂移"——静态提示词随距离衰减，而状态机每一步都要重新读当前状态，因此规则不会因为对话变长而失效。反方案（一次性长提示词 + 人工检查）在早期迭代里反复出现"同一规则三次不同执行"。
+
+**判据**：① 阻断——跳过事件直接产出交付物（写文件、改代码、出工件而事件账里查不到对应 dispatch/proposal/gate）；② 症状——`requirement.list` 里某需求停在 `draft` 却有对应工件、或事件账与磁盘产物数量对不上；③ 确认——`<egg> open <run> --event requirement.list` 的每行状态与 `git log` 的每次提交能一一对上。
+
+## 2. 活文档三职责（闭环契约）
+
+`docs/` 的 wiki（顶层导航 [README.md](README.md)；领域与决策在 `docs/context/*`，系统行为与接口契约在 `docs/design/*`）在每次运行中都作为闭环契约强制执行：
 
 1. **执行前注入**：Mod 的 `subagent_brief` 模板向每个 `plan` 与 `development` 子代理 brief 注入强制指令：*"在提议或编辑之前，先阅读 docs wiki（`docs/README.md` 索引；`docs/context/*` 领域不变量；`docs/design/*` 架构与契约）。"* 以及 Doc sync 职责（见下）。
-2. **执行中同步（Doc sync）**：wiki 是**整个仓库始终最新的设计原则与设计方案权威**（内核 / CLI / Mod / serve / 工具链按主题分文件），不是流水账。子代理职责分阶段：`plan` 阶段在其 plan artifact 中声明本次变更触碰哪些 wiki 主题文件；`development` 阶段在同一特性分支上就地更新对应文件（决策与领域词汇 → `docs/context/archive/decisions-*.md` 台账行 / `docs/context/cold-start/vocabulary.md` 词条；行为与契约 → `docs/design/` 对应子系统主题文件），不追加任何变更叙事。纯缺陷修复与措辞调整不触碰文档。
-3. **结算前核验**：主会话在 `accept_gate` 核验文档更新已随特性分支集成（决策类需求对应 `D-MAx` 台账行、契约类需求对应主题文件），并在每批的 `review` 盘点结算（常驻局的批收口或退役）前复查 wiki 仍与当前代码一致——`settlement.evolution` 前是最后期限。机器侧闭环（D-MA25，r3）：每批 `review.note` 批结算自动追加一条 draft 态「维护更新 docs wiki」需求进入下一批派发队列（防重复按 `req.<i>.maintenance` 标记 + 规范标题），未完成前阻塞下一批批边界——每批一轮的需求化维护由状态机强制承载，人工核验期限不变。
+2. **执行中同步（Doc sync）**：wiki 是**整个仓库始终最新的设计原则与设计方案权威**（内核 / CLI / Mod / serve / 工具链按主题分文件），不是流水账。子代理职责分阶段：`plan` 阶段在其 plan artifact 中声明本次变更触碰哪些 wiki 主题文件；`development` 阶段在同一特性分支上**就地更新**对应文件——**决策写进它所治理的那份文档的「设计依据」段**（规范 + 依据 + 三问判据），词汇写进 `docs/context/cold-start/vocabulary.md` 词条，行为与契约写进 `docs/design/` 对应子系统主题文件。不追加任何变更叙事。
+3. **结算前核验**：主会话在 `accept_gate` 核验文档更新已随特性分支集成（契约类需求对应主题文件、规则类需求对应「设计依据」段），并在每批的 `review` 盘点结算（常驻局的批收口或退役）前复查 wiki 仍与当前代码一致——`settlement.evolution` 前是最后期限。机器侧闭环见 §6。
 
-**结构与维护纪律**：每主题一文件（≤300 行）、文件头部带定位 / `replaces` / 上下游索引头、双向链接；顶层导航只有 `README.md` 一处；两薄壳的映射表使旧式 `§N` 引用持续可解析（方案 A 裁决，r2）。
+**结构与维护纪律**：每主题一文件（≤300 行）、文件头部带定位 / `replaces` / 上下游索引头、双向链接；顶层导航只有 `README.md` 一处。
 
-**文案单向同步纪律（r2「mod 剧情提示词迁出」新增；r1 重切为召回树）**：mod 文案（叙事台词 / 仪式正文 / 句式模板）的**知识权威源**在 `docs/context/` 运行流程层（`context/acts/` + `context/req-acts/` / `context/rituals/` / `context/copy/README.md` 及其七个消费域文件），mod `data/texts/*.json` 是其运行时投影。任何文案改动**先改 context 对应文件，再同步 mod 键值**；对应域契约表的句式模板列与 mod 键值必须逐字一致（允许 `{{变量}}` 原样保留），验收与每批 D-MA25 维护需求复核该一致性（双向核对无多无缺）。context 流程层（台词/仪式/句式）与 design 契约层（状态机/事件/线协议）语义不重复讲述，以双向链接互指。
+## 3. 文件边界 = 召回时点边界
 
-**方案呈报纪律（top-down layering）**：凡向人类呈报方案（计划审批卡、架构提案、需求澄清），一律自上而下四层展开，读者可在一层停住而不失完整图景——① **业务背景**（为什么需要：现状的痛与触发场景，一段话）；② **业务逻辑设计**（新世界里操作与规则怎么运转，不含实现词）；③ **架构设计**（职责如何分界、机制如何成立、与既有系统的接缝）；④ **模块设计**（落到文件/接口/测试的改动面，仅在读者继续追问时展开）。与 playbook `proposal.plan-presentation` 规则同源：summary 是裁决面，技术细节归 artifacts；四层顺序不可倒置——先结论后细节是给执行者的 brief，先图景后细节才是给裁决者的呈报。
+**每个文件或目录必须先回答一个问题才能存在：谁会在运行的哪个时刻打开它？** 若答案是**内容类别**——"决策""叙事""杂项""common""utils"——那它是**残余桶**，不许创建：把内容**溶进治理它的文档**里。`触发` 头字段写成话题（"查台账""看叙事""有需要时"）而不是情境，是同一个错误换了顶帽子。
 
-## design / context 二分判据（D-MA27 的可判定形式；r6）
+**两条就地例子**（都发生在本仓，都带合格头部、都过了全部机检、都把规则与需要它的时刻分开了）：
+- `docs/context/narrative/`：按**内容类型**切（"行为叙事放一起"）→ r6 推翻，三份文件按读者时点归位到 `context/story/` 与 `context/cold-start/`。
+- `docs/context/archive/`：按"这是一个台账"切 → r12 解体，逐条裁决溶进它治理的文档。**它的召回是自指的**（"查裁决时读它"），而真正的时刻是"取决策号前"——那个时刻没有任何机制指向它，主代理连漏五次。
+
+**放不下的时候，新桶永远不是答案**：要么它属于治理它的那份文档（一条决策就写进它约束的契约），要么现有切分本身错了、必须按召回时点重切。**重切允许新建文件（时点变了就是新文件），但一个文件的正当性不能是"它是一类内容"。**
+
+**行数上限是切分判据，不是排版目标**：主流程幕 1:1 一文件（`acts/`，≤40 行），需求级九幕按共享时点聚合三份（`req-acts/intake` = 1-3、`delivery` = 4-6、`integration` = 7-9，≤45 行）。超限说明切分单元选错了（实证：`delivery` 若含第 7 幕为 51 行、超 45，故第 7 幕归 `integration`）。
+
+**判据**：① 阻断——新建目录/文件，或把"放不下的东西"停进一个新桶；② 症状——出现名为 `archive`/`misc`/`common`/`narrative` 的目录，`触发` 头写的是话题，或两个互不相关的读者时点必须打开同一份文件；③ 确认——`bash scripts/docs-ver.sh --check` 返回 `ok=1`，`wc -l docs/context/acts/*.md docs/context/req-acts/*.md` 全部落在上限内，且每个目录能用一句话说清一个情境、该情境出现在 `scenes.json` 或 `AGENTS.md §3` 的路由里。
+
+## 4. design / context 二分判据
 
 `docs/` 的两棵树不是按「主题」分的，而是按**读者的使用方式**分的。一处内容该进哪棵树，看下面这条判据，不看它「像不像设计」。
 
@@ -31,10 +53,40 @@
 
 「按路径引用」要分清：playbook 是**提示词素材**（读它的是人与 agent 的知识面），crates 测试里 `read_to_string("docs/…")` 才是**代码消费者**。前者不构成留在 design 的理由。
 
-**反例（r6 计划被驳回的形态）**：`docs/design/narrative/`。它不为任何召回时点服务，只为「剩下三份放哪」服务——这就是**残余桶**。残余桶的识别特征：**目录名回答的是存放者的困难，而不是读者的时点**。按判据，`run-story` / `requirement-story`（幕文档的行为走查）与 `system-boundaries`（冷启动的产品定位）没有代码消费者，已归位到 `docs/context/story/` 与 `docs/context/cold-start/`；`docs/design/` 只剩 `kernel/`（ygg 内核）、`host/`（egg CLI 与 host）、`mod/`（agent-seed mod）三模块。
+**机检（不是口号）**：`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的三例把这条判据钉在状态里——`design_pointer_anchors_exist_under_docs_design`（逐来源指针硬账）、`design_tree_index_is_complete_and_ids_match_paths`（索引集合双向相等 + `docs/design/*.md` 只允许 `README.md` + 一级子目录恰好三模块）、`agents_design_routes_resolve`（`AGENTS.md §3` 每条 design 路由可解析）。把行为面搬回 design、或在 design 里留兼容壳、或新增第四目录，都会转红。
 
-**机检（不是口号）**：`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的三例把这条判据钉在状态里——
-`design_pointer_anchors_exist_under_docs_design`（33 处指针可达 + 逐来源硬账）、
-`design_tree_index_is_complete_and_ids_match_paths`（索引集合双向相等 + `docs/design/*.md` 只允许 `README.md` + 一级子目录恰好三模块）、
-`agents_design_routes_resolve`（`AGENTS.md §3` 每条 design 路由可解析）。
-把行为面搬回 design、或在 design 里留兼容壳、或新增第四目录，都会转红。
+## 5. 幕进必读与推进必签（scene gate）
+
+**任何推进动作执行前，必须先读该幕的权威正文，并以 `config.set read.<doc-id>=<ver>` 就位签名。** 签名四维缺一即拒：**覆盖**（该幕必读文件未签）、**新鲜**（签的 ver ≠ 磁盘 ver）、**遗忘**（跨幕未重签，或距上次正文通读超过 `readGate.window`）、**按人**（签名者 ≠ 本动作执行者；人工菜单点击结构上无宿主章，降级为 any-signer 并在回执告明）。
+
+**依据**：摘要替代正文是首要失效模式——回执 `[READ FIRST]`、beats 文本、playbook 摘要、上一局习惯都只是**路由与摘要，永不是规则**；没有机器可验的签名，"读过"无法审计，也无法证明读的是当前版本。反方案（只靠自律核对）在多轮迭代里被证伪：漏读时门禁全绿，缺陷只在真实运行里冒出来。
+
+**判据**：① 阻断——`requirement.dispatch` / `proposal.submit` / `gate.approve` / `coordinate.submit` 在缺签或签名过期时执行；② 症状——回执 `[READ FIRST]` 的路径不存在或 ver 与磁盘不符，`--attest` 报 `forged` / `stale` 大于 0；③ 确认——`bash .pi/tools/docs-consistency.sh --attest --run <run-dir>` 返回 `claims>0` 且 `forged=0 stale=0`。
+
+**读多少由事实决定，不由习惯决定**（判定细则见 [context/rituals/read-gate.md](context/rituals/read-gate.md)）：磁盘 ver 变了 → 通读正文；ver 相同且距上次通读在窗口内 → 版本核对后签名；ver 相同但超窗口或上下文丢失（压缩 / 新会话 / 交接）→ 通读。**版本核对永不延展窗口，只有正文通读会重置它。**
+
+**这个文件不进 `readPlan`，也不产生签名义务**——它是"怎么签名"的规则，若自身成为必读并需要签名，就构成「先签名才能读到怎么签名」的自指门禁。它登记在 `scenes.json` 的 `reference` 段以便机检可达。
+
+## 6. 批结算自动维护需求（机器闭环）
+
+**未武装的 `review.note` 批结算，会在 `[BATCH n SETTLED]` 之后、同一 handler 事务内追加一条 draft 态「维护更新 docs wiki（上批收口）」需求**，description 携 wiki 树的分文件指引。去重判据 = `open` ∧ 无 `closed_reason` ∧（`req.<i>.maintenance` 标记 ∨ 规范标题）；容量满同样跳过——**尽力而为，绝不使批结算失败**；退役路径不追加。
+
+**依据**：文档闭环此前纯靠人工自觉（brief 提醒 + 结算前核验），而连续多批迭代实证每批都有文档维护诉求、各靠临时立项。把它变成需求，"每批一轮"才由状态机强制承载，而不是靠协调者记得。
+
+**判据**：① 阻断——下一批 `coordinate.submit`（上批维护需求未终态即无法关闭）；② 症状——批结算后 `req.count` 未 +1，或 `run.maintenance.last` 未指向新行；③ 确认——语义用例断言 `run.batch` 递增、`req.<n>.maintenance == "1"`、description 含 `wiki-governance` 与分文件指引。
+
+## 7. ver 定义与旧路径兼容层两分法
+
+**① `ver` = 把固定头 `> **ver** <hex6>` 的 token 换成定宽占位 `000000`（字节数不变）、其余字节原样后 `git hash-object` 取前 6 位。② 旧路径兼容层两分法：拆分型 → 薄壳（≤10 行指针壳，不自带规则）、1:1 迁移 → 软链（同字节入口）。③ 每条兼容层必须写明退场条件。**
+
+**依据**：ver 若直接哈希文件本体，则"文件含 ver、ver 由哈希决定"构成自引用循环，永不收敛；定宽占位同时保证字节长度不变（不引起行位移）。兼容层不是风格选择：当冻结消费者（mod 字面指针、crates 按路径读表）还在时直接删旧路径会让锚点校验与逐域键集断言同时转红；但薄壳与软链都不携带第二份权威，因此不违反"一条规则一个权威载体"。
+
+**判据**：① 阻断——"改了正文不改 ver"与"删旧路径但没补兼容层"两类提交；② 症状——`docs-ver --check` 报 `changed>0` / `missing_header>0`；`agent_seed_semantics` 的指针锚点用例或 `copy_contract_domain_fragments_cover_every_text_key` 转红；③ 确认——`bash scripts/docs-ver.sh --check` 连跑两次 `changed=0`、`cargo test -p ygg-sandbox --test agent_seed_semantics` 全绿、`ls -l docs/context/*.md | grep -c -- '->'` 为 0。
+
+## 8. 文案单向同步纪律
+
+mod 文案（叙事台词 / 仪式正文 / 句式模板）的**知识权威源**在 `docs/context/` 运行流程层（`context/acts/` + `context/req-acts/` / `context/rituals/` / `context/copy/README.md` 及其七个消费域文件），mod `data/texts/*.json` 是其运行时投影。任何文案改动**先改 context 对应文件，再同步 mod 键值**；对应域契约表的句式模板列与 mod 键值必须逐字一致（允许 `{{变量}}` 原样保留），验收与每批的维护需求复核该一致性（双向核对无多无缺）。context 流程层（台词/仪式/句式）与 design 契约层（状态机/事件/线协议）语义不重复讲述，以双向链接互指。
+
+## 9. 方案呈报纪律（top-down layering）
+
+凡向人类呈报方案（计划审批卡、架构提案、需求澄清），一律自上而下四层展开，读者可在一层停住而不失完整图景——① **业务背景**（为什么需要：现状的痛与触发场景，一段话）；② **业务逻辑设计**（新世界里操作与规则怎么运转，不含实现词）；③ **架构设计**（职责如何分界、机制如何成立、与既有系统的接缝）；④ **模块设计**（落到文件/接口/测试的改动面，仅在读者继续追问时展开）。与 playbook `proposal.plan-presentation` 规则同源：summary 是裁决面，技术细节归 artifacts；四层顺序不可倒置——先结论后细节是给执行者的 brief，先图景后细节才是给裁决者的呈报。

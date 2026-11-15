@@ -2,7 +2,7 @@
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
--- D-MA23：plan 提案**交付即门禁**（落库后 gate="plan"，裁决权在人）；
+-- 剧情双层重写：plan 提案**交付即门禁**（落库后 gate="plan"，裁决权在人）；
 -- development 提案落交付受理（主代理串行复核幕）；泳道保持到集成才释放（R7）。
 
 local M = {}
@@ -211,7 +211,7 @@ function M.install(deps)
     -- 只释放 job 槽位；状态保持 open（真状态不因交付改变）。
     ygg.kv.set(req_key(index, "job"), "")
     if spec.stage == "plan" then
-      -- D-MA23：plan 提案交付即门禁——落库后立刻升起 plan 门禁（裁决权在人），
+      -- 剧情双层重写：plan 提案交付即门禁——落库后立刻升起 plan 门禁（裁决权在人），
       -- gate_rev 绑定 rev（待批期间 amend → gate_rev ≠ rev → stale，不得批准）。
       ygg.kv.set(req_key(index, "gate"), "plan")
       ygg.kv.set(req_key(index, "gate_rev"), spec.rev)

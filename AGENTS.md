@@ -12,9 +12,7 @@ a classified mount) into the repository or context, and never take metadata read
 (`ls` / `stat` / `find` / `du` / `wc` — row counts, column names and enumerations are also classified).
 The user runs real-data verification and pastes the output; synthetic data under `/tmp` is unrestricted.
 
-0b. **serve is read-only**: it must never gain a run-state write endpoint; human gates stay on the
-    CLI/daemon ticket path. The sole observation-root registry exception and its zero-disk-write proof
-    are specified in `docs/design/host/serve.md` §3.7.6; read it before touching serve.
+0b. **serve is read-only — never add a run-state write endpoint.** The `/api/roots` exception and its zero-disk-write proof: `docs/design/host/serve.md` §3.7 / §3.7.6 (read it before touching serve).
 
 0c. **Scene gate — read the authoritative body before acting in any scene.** Before executing any action
     of a scene (prologue / charter / coordinate / settle / release / retired, or a requirement stage),
@@ -54,23 +52,7 @@ The user runs real-data verification and pastes the output; synthetic data under
     every scene receipt's `[READ FIRST]` block resolves to existing files, the signed version equals the
     on-disk one, and no signature predates the current scene entry.
 
-0d. **Classification axis is the recall moment, never the content type.** A new file or directory must answer one
-    question before it exists: *who opens it, and at which moment in the run?* If the answer is a content
-    category — "decisions", "narrative", "misc", "common", "utils" — it is a **residual dump** and must not
-    be created: dissolve the content into the documents that govern it instead. A `触发` header field that names
-    a topic rather than a situation ("查台账", "看叙事", "有需要时") is the same failure wearing a header.
-    - **Two live proofs in this repository**: `docs/context/narrative/` (split by content type — overturned in
-      r6) and `docs/context/archive/` (split by "this is a ledger" — dissolved in r12). Both carried proper
-      headers, both passed every machine check, and both separated a rule from the moment it is needed.
-    - **When something fits nowhere, a new bucket is never the answer.** Either it belongs beside the document
-      that governs it (a decision goes into the contract it constrains), or the existing cut is wrong and must
-      be re-cut along recall moments.
-
-    Three-question criterion (§1.7): ① which action does it block? — creating a directory/file, or parking the
-    thing that "doesn't fit" into a fresh bucket; ② symptom — a directory named archive/misc/common/narrative,
-    a header whose `触发` names a topic, or two readers arriving from unrelated moments; ③ confirm next time —
-    every directory names one situation in one sentence, that situation appears in `scenes.json` or the AGENTS §3
-    route, and no directory's justification is "it is a kind of content".
+0d. **Classification axis is the recall moment, never the content type.** One line only: before creating a directory or file, ask *who opens it, and at which moment in the run* — if the answer is a content category ("decisions", "narrative", "misc", "common"), it is a residual dump and must be dissolved into the documents that govern it. Full criterion, both live proofs (`narrative/`, `archive/`) and the three-question test: `docs/wiki-governance.md`「文件边界 = 召回时点边界」.
 
 1. **Every in-run artifact must be carried by an event first**: before writing a file, changing code or
    producing a deliverable, an event must bring it into the state machine (`requirement.dispatch` →
@@ -86,11 +68,7 @@ The user runs real-data verification and pastes the output; synthetic data under
 3. **Render receipts in full; never parse-and-truncate**: no sliced narratives, first-line-only reads,
    `startswith` filtering, or grep/python summaries. Every dispatch prints all narrative lines and hands
    raw `pendingChoice` to the user. Read rules from the playbook chapter instead of memory; the phase map
-   is in `src/view/guide.lua`. Without egg/mod, `docs/context/README.md` (the recall-tree entry),
-   `docs/context/acts/`, `docs/context/req-acts/`, `docs/context/rituals/cleanup.md` and the seven-domain
-   `docs/context/copy/README.md` index are the self-contained workflow
-   base; only tool monitoring, recorded history and machine enforcement are absent — semantics and
-   evidence do not degrade.
+   is in `src/view/guide.lua`. Without egg/mod the self-contained base is the recall tree (`docs/context/README.md` + `acts/` + `req-acts/` + `rituals/fallback.md` + `copy/README.md`); **what degrades and what never degrades is stated in `docs/context/rituals/fallback.md`**, not here — semantics and evidence never degrade.
 
 4. **Single-shot dispatching is not compliance**: batching `--event` flags only hides state from the
    guard; it does not replace `requirement.dispatch` → proposal → gate. Never edit `autosave.json` or
@@ -118,11 +96,7 @@ The user runs real-data verification and pastes the output; synthetic data under
    elaboration in the same commit, but is never a third place to originate a constraint.
    - Never write a checker, wrapper or hook as a patch. Scripts may only perform read-only queries and may
      not carry constraints. Never patch the egg CLI source; give the user the symptom and reproduction.
-     **Boundary (user ruling 2026-11-15)**: an assertion living in a host `#[cfg(test)]` module — including the
-     test module of `crates/ygg-sandbox/examples/egg.rs` — that has to change because a *pack declaration*
-     changed shape is **maintenance, not capability expansion**: update it in the same commit and name the
-     declaration that forced it. Everything else stays forbidden wherever it lives: production code, a new
-     host capability, or any runtime behaviour change.
+     **Boundary**: a host `#[cfg(test)]` assertion that has to change because a *pack declaration* changed shape is maintenance, not capability expansion — change it in the same commit and name the declaration (`docs/design/mod/mod-package.md`「pack 声明变更的连带义务」).
    - Every evolution needs all three: ① the specific action blocked; ② the visible violation symptom;
      ③ one runnable confirmation. Fewer than three means it is not written. A verbal promise is unhandled.
    - **No claim without its method — absence and counts included.** A negative claim ("this repo never had
@@ -133,12 +107,6 @@ The user runs real-data verification and pastes the output; synthetic data under
      look there", not absence — the r6 ruling that `ygg-lint` "never existed" reached a requirement
      description and an evolution artifact that way, while `crates/ygg-lint` was there all along.
 
-     | Assertion | Method that could have failed |
-     | --- | --- |
-     | PATH command absent | `command -v <tool>; echo "exit=$?"` — exit=1 only |
-     | cargo crate absent | `cargo metadata --no-deps --format-version 1`, or `ls crates/` |
-     | file / directory present | `test -e <path> && echo EXISTS` |
-     | a count (occurrences / files / lines) | one recomputable command, output pasted, denominator stated |
 
      Anti-patterns and two worked examples: `docs/context/rituals/dispatch.md` §4「取证标准」.
    - Candidate screening and declaration limits: `docs/context/acts/settle.md` + playbook
@@ -149,7 +117,7 @@ The user runs real-data verification and pastes the output; synthetic data under
    projections naming that authority, never competing statements. Before adding, editing or moving any
    line of `AGENTS.md`, `docs/**` or `.ygg/mods/agent-seed/data/**`, answer:
    - **Q1 — Consumer moment**: exactly one of `cold-start` · `phase-entry` (name the phase/act) ·
-     `before-action` (name it) · `subsystem-touch` (name it) · `archive`. Importance/topic is not an answer.
+     `before-action` (name it) · `subsystem-touch` (name it). Importance/topic is not an answer.
    - **Q2 — Cost of missing it**: exactly one of `irreversible` (data loss, secret exposure, forced push
      over another's work, fabricated record) · `hard-refusal` · `silent-drift` · `none`.
    - **Q3 — Producer**: name owner, the action/gate/commit forcing rewrite, and the check catching a missed
@@ -157,9 +125,7 @@ The user runs real-data verification and pastes the output; synthetic data under
    Mechanical placement: keep a line here only for Q1=`cold-start` with Q2∈{`irreversible`,`hard-refusal`},
    or a verbatim cold-start command whose omission causes `silent-drift`. `phase-entry` → the matching act
    in `acts/` + playbook; `before-action` → `rituals/dispatch.md`, `rituals/cleanup.md` or the
-   action's playbook chapter; `subsystem-touch` → `docs/design/<subsystem>.md`; `archive` → decisions /
-   vision / principles, never this file. Decision rationale keeps ID/domain/one-line ruling/status/pointer;
-   operating steps move to the specification. One-line "when touching X read Y" routes may remain here.
+   action's playbook chapter; `subsystem-touch` → `docs/design/<subsystem>.md`. A ruling goes **in place, into the documentary it governs** — it carries no identifier; a cold-start line that is merely "why we decided" belongs beside the rule it constrains, never here. Operating steps move to the specification. One-line "when touching X read Y" routes may remain here.
    ① Block a prompt-surface commit without Q1–Q3 or with competing normative copies; ② symptoms are
    duplicate rulings, Q2=`none` cold-start text, or a hard-coded fact with no rewrite trigger; ③ search a
    distinctive phrase across `AGENTS.md`, `docs/context/*.md`, `docs/design/*.md` and playbook JSON — one
@@ -177,6 +143,11 @@ YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"
 # mkdir -p .ygg/bin && cp target/release/examples/egg .ygg/bin/egg
 # mkdir -p ~/.local/bin && ln -sfn "$YGGDRASILL_ROOT/.ygg/bin/egg" ~/.local/bin/egg
 ```
+
+**On macOS the installed copy must be ad-hoc signed, or the kernel kills it on first exec** (`exit 137`,
+no error text — it looks like a broken build): run `codesign --sign - --force .ygg/bin/egg` after the
+install. `scripts/install-egg.sh` does this itself (skipped when `codesign` is absent); if you copy the
+binary by hand, sign **the copy** — a signature on `target/release/examples/egg` does not survive `cp`.
 
 `egg` resolves through `~/.local/bin/egg` to `<repo>/.ygg/bin/egg`; rerun the installer after rebuild,
 or remove the global symlink to roll back. `.ygg/mods/agent-seed` is the single Mod source;
@@ -203,7 +174,7 @@ curl -X POST http://127.0.0.1:7800/api/roots -H 'Content-Type: application/json'
 .ygg/bin/egg serve --port 7801 --poll-ms 300  # explicit separate instance / faster polling
 ```
 
-Registry lifecycle, DELETE, panel routes and single-instance behavior: `docs/design/host/serve.md`.
+Registry lifecycle, `DELETE`, the four panel levels, SSE frames and single-instance semantics: `docs/design/host/serve.md` §3.7.1–3.7.5 — read-only, no run-state write endpoint.
 
 ### Continue
 
@@ -228,14 +199,7 @@ that channel. Re-run Continue to resume. Lane reuse/parking: `docs/design/host/l
 
 ### Settle and finish cadence
 
-1. Per batch: drain all leaves and pending jobs/proposals/conflicts, then `coordinate.submit` →
-   `verify.submit` → `settlement.evolution` → release declaration → `review.note`.
-2. Unarmed `review.note` is a batch settle, not an ending. `config.set run.retire=true` arms the only
-   ending; after the last cycle run `--settle` and require `settlement.json ok=true`.
-3. Exact payloads, evidence standards, integration cadence and reset-develop are not repeated here:
-   read `docs/context/acts/settle.md`, `release.md` and `retired.md` before acting.
-4. Upgrade only after a batch settles, then open a new run-id; never migrate or adopt old runs.
-5. Clear the main-session todo list (`todo clear`, including completed/history) before ending the run.
+Batch cadence in one line: drain the queue → `coordinate.submit` → `verify.submit` → `settlement.evolution` → release declaration → `review.note`; unarmed `review.note` settles the batch, `config.set run.retire=true` arms the only ending. Exact payloads, evidence standards, upgrade discipline (new run-id per batch boundary, old runs never migrated or adopted) and both cleanups are stated in `docs/context/acts/settle.md`, `release.md`, `retired.md` and `rituals/cleanup.md` — not repeated here.
 
 ## 3. Prompt-surface index
 
@@ -256,15 +220,16 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 | serve / lanes / CLI / identity touch | `docs/design/host/serve.md`, `docs/design/host/lanes.md`, `docs/design/host/cli-daemon.md`, `docs/design/mod/identity.md` |
 | Kernel semantics / storage surface touch | `docs/design/kernel/state-machine.md`, `docs/design/kernel/events.md`, `docs/design/kernel/state-surface.md`, `docs/design/kernel/wire-protocol.md` |
 | Runtime copy / protocol wording | `docs/context/copy/README.md` (seven-domain index) + `docs/design/mod/prompt-surface.md` |
-| Archive: why a ruling exists | `docs/context/archive/decisions-engine.md`, `archive/decisions-agent.md`, `cold-start/vision.md`, `cold-start/principles.md` |
+| Why a ruling exists / how to add one | the 「设计依据」 section of the document the ruling governs (criterion: `docs/wiki-governance.md`; product identity: `docs/context/cold-start/vision.md`, `principles.md`) |
 | Repository topology | `docs/context/cold-start/topology.md` + `docs/context/cold-start/system-boundaries.md` |
 | Whole-run / requirement walk-through | `docs/context/story/run-story.md`, `docs/context/story/requirement-story.md` |
 
 The flat `docs/context/` paths retired by r1 (`workflow-acts.md`, `dispatch-ritual.md`, `copy-contract-*.md` 等 15 条)
 were **compat shims for then-frozen consumers**; r5 rewrote every mod pointer and crates test path onto the
 authoritative files and deleted them, so they no longer exist and must not be reintroduced. The migration record
-lives in `docs/context/README.md`; history and the original ruling (D-MA29 two-way split + mandatory exit
-condition) live in git and `docs/context/archive/decisions-*.md`, never here.
+lives in `docs/context/README.md`; the original ruling (compat-layer two-way split — a shell for a split,
+ a symlink for a 1:1 move, each with a mandatory exit condition) is stated in `docs/wiki-governance.md`
+「ver 定义与旧路径兼容层两分法」, never here.
 
 The flat `docs/design/` paths (`<topic>.md`) retired by r6, for the same reason: they became `kernel/ host/ mod/`
 (entry `docs/design/README.md`) and **no shim was left** — `docs/design/*.md` may contain only `README.md`, which
