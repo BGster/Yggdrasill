@@ -119,3 +119,20 @@ test("AGENTS §3 的 design 路由都能解析到文件", function()
     )
   end
 end)
+
+test("结算文案不含 harness 私有字面量", function()
+  local path = __MOD_DIR .. "/data/texts/beats-settlement.json"
+  local text = read_file(path)
+  local forbidden = { "pi-subagents", ".pi/agent", ".claude", ".codex", "archive_sessions" }
+  local violations = {}
+  local line_no = 0
+  for line in text:gmatch("[^\n]+") do
+    line_no = line_no + 1
+    for _, literal in ipairs(forbidden) do
+      if line:find(literal, 1, true) then
+        violations[#violations + 1] = ("%s:%d (%s)"):format(path, line_no, literal)
+      end
+    end
+  end
+  assert_eq(#violations, 0, "harness literals: " .. table.concat(violations, ", "))
+end)

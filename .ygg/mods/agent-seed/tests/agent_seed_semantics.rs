@@ -3974,40 +3974,6 @@ fn playbook_and_src_context_pointers_resolve() {
     );
 }
 
-/// r5 (子会话清理): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
-/// is delegated to the main session's own environment, so `data/texts/beats-settlement.json`
-/// must not carry any harness-implementation literal (`pi-subagents`, `.pi/agent`, `.claude`,
-/// `.codex`, `archive_sessions`). Mutation: inject a forbidden literal line into the
-/// fragment → this test goes red.
-#[test]
-fn beats_cleanup_prompt_carries_no_harness_literals() {
-    let mod_dir = project_mod_dir();
-    let fragment = mod_dir.join("data/texts/beats-settlement.json");
-    let text = std::fs::read_to_string(&fragment)
-        .unwrap_or_else(|err| panic!("read {}: {err}", fragment.display()));
-    let forbidden = [
-        "pi-subagents",
-        ".pi/agent",
-        ".claude",
-        ".codex",
-        "archive_sessions",
-    ];
-    let mut violations: Vec<String> = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        for literal in forbidden {
-            if line.contains(literal) {
-                violations.push(format!("{}:{} ({literal})", fragment.display(), index + 1));
-            }
-        }
-    }
-    assert!(
-        violations.is_empty(),
-        "harness-implementation literals in the cleanup prompt fragment (keep it \
-         harness-agnostic): {}",
-        violations.join(", ")
-    );
-}
-
 // ───────────────────── tool bridge (T1–T4) ─────────────────────
 
 /// T1 The request direction: a `tool.call` publishes **one dense snapshot** (`meta.tool_calls`,
