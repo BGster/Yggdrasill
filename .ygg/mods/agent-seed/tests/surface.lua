@@ -683,3 +683,74 @@ test("summary 投影：play/生命周期三件套 + 批结算后 drain + 维护�
   fire("requirement.add", "watchdog b2|desc|watchdog-2")
   assert_eq(kv("req.count"), 2, "解除后新需求正常入册")
 end)
+
+--- 地图窗口：从 `[CURRENT NODE]` 头到 `(operation view` 脚（含两端）。
+local function map_window(lines)
+  local head, foot
+  for i, line in ipairs(lines) do
+    if head == nil and line:sub(1, #"[CURRENT NODE]") == "[CURRENT NODE]" then
+      head = i
+    end
+    if line:sub(1, #"(operation view") == "(operation view" then
+      foot = i
+      break
+    end
+  end
+  assert_true(head ~= nil, "缺地图头 `[CURRENT NODE]`")
+  assert_true(foot ~= nil, "缺操作视图脚 `(operation view`")
+  assert_true(head < foot, "地图头必须在脚之前")
+  local out = {}
+  for i = head, foot do
+    out[#out + 1] = lines[i]
+  end
+  return out
+end
+
+test("map.show 单视图且对载荷不敏感（含措辞红线）", function()
+  fresh()
+  local function run(payload)
+    reset()
+    fire("map.show", payload)
+    return narrated()
+  end
+
+  local empty = run("0")
+  local zero = run("")
+  local full = run("full")
+  local junk = run("nonsense-payload")
+
+  -- ① 四种载荷得到**同一个**窗口（handler 完全忽略载荷）。
+  local window = map_window(empty)
+  local baseline = table.concat(window, "\n")
+  assert_eq(table.concat(map_window(zero), "\n"), baseline, "空串载荷窗口不变")
+  assert_eq(table.concat(map_window(full), "\n"), baseline, "full 载荷窗口不变")
+  assert_eq(table.concat(map_window(junk), "\n"), baseline, "无意义载荷窗口不变")
+
+  -- ② 单视图：头带当前微状态，脚否定载荷面；设计视图（`[MAP]` 头）不可达。
+  assert_true(
+    window[1]:sub(1, #"[CURRENT NODE] [") == "[CURRENT NODE] [",
+    "地图头必须带当前微状态：" .. window[1]
+  )
+  assert_true(
+    baseline:find("map.show takes no payload", 1, true) ~= nil,
+    "脚必须否定载荷面：" .. baseline
+  )
+  for _, line in ipairs(empty) do
+    assert_true(line:sub(1, 5) ~= "[MAP]", "设计视图已注销，不得渲染 [MAP] 头：" .. line)
+  end
+
+  -- ③ 措辞红线（两视图时代留下的三条）。
+  assert_true(baseline:find("selectable", 1, true) ~= nil, "每条边必须说 selectable：" .. baseline)
+  assert_true(
+    baseline:find("condition not shown", 1, true) ~= nil,
+    "缺 when 必须读作 condition not shown：" .. baseline
+  )
+  assert_true(
+    baseline:find("executable", 1, true) == nil,
+    "操作视图不得承诺 executable（选择侧没有前置条件）：" .. baseline
+  )
+  assert_true(
+    baseline:find("no extra condition", 1, true) == nil,
+    "操作视图不得担保 no extra condition：" .. baseline
+  )
+end)
