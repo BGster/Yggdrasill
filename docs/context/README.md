@@ -24,7 +24,6 @@
 | 盘点（批结算 / 退役前） | [acts/settle.md](acts/settle.md) + [rituals/cleanup.md](rituals/cleanup.md) | `acts/settle` · `rituals/cleanup` |
 | 发布声明 | [acts/release.md](acts/release.md) + [acts/retired.md](acts/retired.md) | `acts/release` · `acts/retired` |
 | 改 mod 文案 / 键面 | [copy/README.md](copy/README.md)（按域分流） | `copy/README` |
-| 查裁决 / 取决策号 | [archive/decisions-engine.md](archive/decisions-engine.md) · [archive/decisions-agent.md](archive/decisions-agent.md) | `archive/*` |
 | 无 egg / 无 mod | [rituals/fallback.md](rituals/fallback.md) | `rituals/fallback` |
 
 ### 理解性阅读（**不拦门禁**）
@@ -33,11 +32,14 @@
 它们登记在 [scenes.json](scenes.json) 的 `reference` 段，**不进 `readPlan`**、不出 `[READ FIRST]` 块、不产生签名义务
 （负向断言见 `crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的 `context_scene_reference_ids_resolve`）。
 
+`rituals/read-gate.md` 也在 `reference` 段，但**不是理解性文档**：它是推进必签的规范，只因“自身成为必读并需签名”会构成自指门禁（先签名才能读到怎么签名）才不进 `readPlan`。读它的时候是“门禁拒了我”的那一刻。
+
 | 时点 | 读 | id |
 | --- | --- | --- |
 | 理解「一整局怎么跑」/ 改运行级转场 | [story/run-story.md](story/run-story.md) | `story/run-story` |
 | 理解「一条需求走九幕」/ 改需求级转场与门禁判定 | [story/requirement-story.md](story/requirement-story.md) | `story/requirement-story` |
 | 冷启动 / 「系统由哪几层构成」/ 改三层边界与 Adapter 义务 | [cold-start/system-boundaries.md](cold-start/system-boundaries.md) | `cold-start/system-boundaries` |
+| 推进动作被门禁拒了 / 判「该通读还是只需核对版本」 | [rituals/read-gate.md](rituals/read-gate.md) | `rituals/read-gate` |
 
 ## 目录树
 
@@ -60,11 +62,10 @@ docs/context/
 │   └── integration.md   # 7-9 验收门禁 / 集成 / done（+ 证据清单、集成纪律）
 ├── rituals/             # 按动作时点的仪式与政策
 │   ├── dispatch.md  cleanup.md  fallback.md
+│   └── read-gate.md            # 推进必签的判定（reference 段登记，不进 readPlan）
 ├── copy/                # mod 文案契约（七域索引 + 七域表）
 │   ├── README.md  flow.md  harness.md  lanes.md
 │   ├── map-guide.md  requirements.md  settlement.md  core.md
-└── archive/             # 决策台账（D1-D21 / D-MA1-29）
-    ├── decisions-engine.md  decisions-agent.md
 ```
 
 ## 需求九幕一览
@@ -95,20 +96,20 @@ r1 重切文件边界时曾保留 **15 个旧路径**（13 软链 + 2 薄壳）�
 r5 已把两侧引用全部改指权威文件，兼容层随之删除——**现在树里只有权威文件，没有第二入口**。
 
 > **下表是历史记录，不是入口也不是迁移指引**：这些旧路径**已不存在**，任何按表复活的尝试都会被指针机检判红
-> （`design/pointer` 锚点用例 + `design_tree_index_is_complete_and_ids_match_paths`）。要查当时的理由看
-> `archive/decisions-*.md` 与 git 历史，不要照表改路径。
+> （`design/pointer` 锚点用例 + `design_tree_index_is_complete_and_ids_match_paths`）。要查当时的理由看 git 历史，
+> 不要照表改路径。
 
 | 已删除的旧路径 | 形态 | 现在的权威 |
 | --- | --- | --- |
 | `workflow-acts.md` | 薄壳（多目标指针） | `acts/` + `req-acts/` + `rituals/fallback.md` |
 | `dispatch-ritual.md` | 薄壳（多目标指针） | `rituals/dispatch.md` + `req-acts/integration.md` + `req-acts/delivery.md` + `rituals/fallback.md` |
 | `cleanup-policy.md` | 软链 | `rituals/cleanup.md` |
-| `decisions-engine.md` / `decisions-agent.md` | 软链 | `archive/decisions-engine.md` / `archive/decisions-agent.md` |
+| `decisions-engine.md` / `decisions-agent.md` | 软链 | 无（决策台账已解散：逐条裁决落进它治理的文档的「设计依据」段） |
 | `topology.md` / `principles.md` | 软链 | `cold-start/topology.md` / `cold-start/principles.md` |
 | `copy-contract.md` | 软链 | `copy/README.md` |
 | `copy-contract-{core,flow,harness,lanes,map-guide,requirements,settlement}.md` | 软链 | `copy/{core,flow,harness,lanes,map-guide,requirements,settlement}.md` |
 
-- **判据来源**：D-MA29（兼容层两分法 + 必须带退场条件）；退场条件在 r5 兑现。
+- **判据来源**：兼容层两分法——拆分型 → 薄壳、1:1 迁移 → 软链，且每条必须写明退场条件（规则见 [../wiki-governance.md](../wiki-governance.md)「ver 定义与旧路径兼容层两分法」）；退场条件在 r5 兑现。
 - **为什么能删**：两类冻结消费者都已改指——mod 的 23 个散文键指针（25 处路径）改指子目录权威文件，
   crates 的 7 个 copy 表读取路径改指 `docs/context/copy/*.md`；锚点用例（`narrative_pointer_anchors_exist_in_docs_context`）
   现在真的能看见子目录指针（r5 修好了只认 `[A-Za-z0-9._-]` 的旧解析器），所以「没死链」是被查出来的，不是被假设的。
@@ -118,10 +119,10 @@ r5 已把两侧引用全部改指权威文件，兼容层随之删除——**现
 - **r6 新增归位（不是兼容层，是搬家）**：`docs/design/` 的 `run-story` / `requirement-story` / `system-boundaries`
   三份因**无代码消费者**（判据见 [../wiki-governance.md](../wiki-governance.md)）移居本树
   （`story/` 与 `cold-start/`）；它们在 design 的旧路径同批退役且**不留软链**。
-- 旧路径不再作为可执行指针存在；历史与当时理由只在 git 与 `archive/decisions-*.md` 里。
+- 旧路径不再作为可执行指针存在；历史与当时理由只在 git 里。
 
 ## 维护闭环
 
-- `ver` 由 `scripts/docs-ver.sh` 生成/刷新（定宽占位归一化后取 `git hash-object` 前 6 位，D-MA29），**人不手改**；`--check` 只报告不写，并顺带做本树内的链接闭包。
+- `ver` 由 `scripts/docs-ver.sh` 生成/刷新（定宽占位归一化后取 `git hash-object` 前 6 位），**人不手改**；`--check` 只报告不写，并顺带做本树内的链接闭包。
 - 场景加载表的唯一来源是 [scenes.json](scenes.json)；`--check` 会校验「表里的每个 id 都能解析到文件，且文件头 `id` 与表中值逐字相等」。
 - 改任一文件后：`bash scripts/docs-ver.sh`（刷新）→ `bash scripts/docs-ver.sh --check`（`changed=0`）→ `bash .pi/tools/docs-consistency.sh`（`ok=1`）。

@@ -3,7 +3,7 @@
 > **读不到代价** silent-drift（机证参数错 → 结算结论静默漂移）
 
 > **定位**：`.pi/tools/` 只读检测脚本的契约、注册面、三层调用方参数来源与「无 egg 环境的参数约定」。
-> **决策**：D-MA26（docs/context/archive/decisions-agent.md）。
+> **契约属性**：只读检测脚本 + 三层参数来源；机证与人证同级不越权（§3.2）。
 > **上游**：[docs/README.md](../../README.md) · **相关**：[tool-bridge.md](../mod/tool-bridge.md) · [lua-api.md](../kernel/lua-api.md)
 
 ## 1. 契约：纯命令行接口（argv/env）
@@ -12,7 +12,7 @@
 
 - **不读 config**：不知道 `settings.tools.*` 的存在；
 - **不读局 KV**：不碰 `run.sqlite` / `autosave.json` / `events.jsonl`；
-  **唯一例外（`docs-consistency.sh --attest`，r1 / D-MA28）**：验签必须读事件日志，故该模式要求调用方显式给
+  **唯一例外（`docs-consistency.sh --attest`）**：验签必须读事件日志，故该模式要求调用方显式给
   `--run <run-dir>`（缺 = exit 2），脚本**不猜「最新局」、不读 config、不依赖 egg**，并以
   `sqlite3 'file:…?immutable=1'` 只读打开（不建 WAL、不写盘）。即例外只是「允许读调用方点名的那份事件日志」，
   不引入任何隐式局状态耦合；默认模式（索引闭包）行为一字不变。
@@ -60,7 +60,7 @@
 | --- | --- | --- |
 | `scripts/docs-ver.sh` | `[--check]` `[--links]` `[--json]` `[--root <dir>]` | `files=…;changed=…;missing_header=…;broken_links=…;first=…;ok=…`（全 0 → ok=1） |
 
-- **ver 定义**（D-MA29）：固定头 `> **ver** <hex6>` 的 token 换成定宽占位 `000000`（字节数不变）、其余字节原样后 `git hash-object` 取前 6 位——直接哈希文件本体是自引用循环。
+- **ver 定义**：固定头 `> **ver** <hex6>` 的 token 换成定宽占位 `000000`（字节数不变）、其余字节原样后 `git hash-object` 取前 6 位——直接哈希文件本体是自引用循环。规则与退场条件见 [../../wiki-governance.md](../../wiki-governance.md)「ver 定义与旧路径兼容层两分法」。
 - 不带 `--check` = 就地刷新（幂等）；`--check` = 只报告不写，并顺带跑树内链接闭包与 `scenes.json` 一致性（表内 id 必须解析到文件且与文件头 `id` 逐字相等）。
 - 软链一律跳过（兼容层不是权威内容，不参与 ver 账）。
 
@@ -132,7 +132,7 @@ exit 码与 §1 同表；**「检测发现问题」永远 exit 0 + `ok=false`**�
 
 ## 4. 无 egg 环境的参数约定
 
-无 egg 环境的 agent / 人按本节直接拼命令行。**注册值双写纪律**：`tools.root` 等值既写局 KV（config.set，机读）也写本节约定（人/agent 读），变更时两边同步（结算 docs 维护需求核对，D-MA25 通道）。
+无 egg 环境的 agent / 人按本节直接拼命令行。**注册值双写纪律**：`tools.root` 等值既写局 KV（config.set，机读）也写本节约定（人/agent 读），变更时两边同步（结算 docs 维护需求核对，见 [../../wiki-governance.md](../../wiki-governance.md)「批结算自动维护需求」）。
 
 ### 4.1 参数总表
 

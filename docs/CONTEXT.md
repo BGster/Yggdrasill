@@ -17,12 +17,12 @@
 | §2 核心领域词汇 | [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) | 12 条权威领域定义 |
 | §3 架构与运营原则 | [context/cold-start/principles.md](context/cold-start/principles.md) | P1–P11 + PLAY 注记 |
 | §4 Monorepo 模块拓扑与依赖白名单 | [context/cold-start/topology.md](context/cold-start/topology.md) | 目录树 + 4 条硬性依赖不变量 |
-| §5 引言（台账维护规则） | [context/archive/decisions-engine.md](context/archive/decisions-engine.md) 与 [context/archive/decisions-agent.md](context/archive/decisions-agent.md) | 刻意双份（两表同规则） |
-| §5.1 核心引擎与平台决策 | [context/archive/decisions-engine.md](context/archive/decisions-engine.md) | D1–D21 表（19 行，无 D2/D5） |
-| §5.2 Agent 治理决策 | [context/archive/decisions-agent.md](context/archive/decisions-agent.md) | D-MA1–29 表 |
+| §5 引言（台账维护规则） | [wiki-governance.md](wiki-governance.md) | 三职责（注入 / 同步 / 核验）——即原“台账维护规则”的现行形态 |
+| §5.1 核心引擎与平台决策 | [design/README.md](design/README.md)（模块 → 文件） | 裁决已解散：逐条落在它治理的契约文件的「设计依据」段（内核 / host / mod） |
+| §5.2 Agent 治理决策 | [wiki-governance.md](wiki-governance.md) + [design/mod/identity.md](design/mod/identity.md) | 治理法则落 wiki-governance；身份与权限落 identity.md |
 
 ## 旧引用解析注记
 
-- 决策表行内保留的旧式引用（如 D-MA9「契约正文见 `docs/DESIGN.md` §3.4」）经 [DESIGN.md](DESIGN.md) 薄壳映射表解析，仍有效。
-- git 历史引用（如 D-MA16 double-claim 证据 `d0b4a7c` / `6848138`）指向本文件的历史版本，不受拆分影响。
+- 旧式 `§N` 引用经两个薄壳的映射表解析，仍有效。
+- 决策不再有编号，也没有台账：要查“为什么这么定”就看它治理的那份文件的「设计依据」段（规范 + 依据 + 三问判据）。反例：当年两泳道从同一 base 各自取下一个号，造成双重认领（证据 `d0b4a7c` / `6848138`）——这正是“不取号”的理由。
 - 本表与 [README.md](README.md) 导航表同源（r2 Commit 2 生成）；树变化时两处同步更新（核对项见 wiki-governance）。

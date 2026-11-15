@@ -305,8 +305,7 @@ required = [
     'docs/context/scenes.json',
     'docs/context/cold-start/vocabulary.md',
     'docs/context/cold-start/principles.md',
-    'docs/context/archive/decisions-agent.md',
-    'docs/context/archive/decisions-engine.md',
+    # r12：决策台账已解散（逐条裁决落进它治理的文档的「设计依据」段），archive/ 不再存在
     # r6：设计契约树的树入口（三模块的枚举由 agent_seed_semantics 的索引集合相等用例负责，
     # 那处才是权威；这里只登记入口，避免两处清单互相追平）
     'docs/design/README.md',
