@@ -51,7 +51,7 @@ P2（零硬编码）的文档面投影：mod 的叙事与文案**知识权威**�
 - [acts/](../acts/)：五幕进行时台词（`scenes`/`prompts`/`<node>_common` 正文）+ 无 egg 执行章；
 - [rituals/dispatch.md](../rituals/dispatch.md)：派发仪式（`subagent_brief` 策略段、`config_opened` 面板语义）；
 - [rituals/cleanup.md](../rituals/cleanup.md)：盘点清理政策（会话/待办清理正文）；
-- [copy/README.md](../copy/README.md)：七域文案契约索引（404 beats + core 36 = 440 唯一键；错误码/回执/台账模板 + 协议前缀归属）。
+- [copy/README.md](../copy/README.md)：七域文案契约索引（409 beats + core 36 = 445 唯一键；错误码/回执/台账模板 + 协议前缀归属）。
 
 改文案**先改上述文件再同步 mod**（单向同步纪律，见 [../wiki-governance.md](../../wiki-governance.md)）；本节只放指针不搬正文，防双源漂移。
 

@@ -12,14 +12,14 @@
 | 消费域 | 权威文件 | 运行时片段 | 当前键数 |
 | --- | --- | --- | --- |
 | 回执版式 / 模式 / 章程与幕转场 | [flow.md](flow.md) | `beats-flow.json` | 63 |
-| 配置 / 身份 / 工具桥 / tools 注册 | [harness.md](harness.md) | `beats-harness.json` | 69 |
+| 配置 / 身份 / 工具桥 / tools 注册 | [harness.md](harness.md) | `beats-harness.json` | 74 |
 | 泳道账本 / 池 / probe | [lanes.md](lanes.md) | `beats-lanes.json` | 36 |
 | 地图 / 人机门禁 / 节点注记 | [map-guide.md](map-guide.md) | `beats-map-guide.json` | 38 |
 | 需求 / 提案 / 门禁 / 修订 | [requirements.md](requirements.md) | `beats-requirements.json` | 144 |
 | 盘点 / 批结算 / 发布 / tools 机证 | [settlement.md](settlement.md) | `beats-settlement.json` | 54 |
 | options / tuning / endings / 指针壳与总账 | [core.md](core.md) | `core.json` | 36 + §H |
 
-六个 beats 片段共 404 键，core 的 options/tuning/endings 共 36 键，合计 440 个唯一键。§H 的 23 处指针壳是子集，不额外计数；实测口径、owner、trigger 与检查见 [core §H](core.md#h-23-处散文键的指针壳句式mod-收缩后形态)。
+六个 beats 片段共 409 键，core 的 options/tuning/endings 共 36 键，合计 445 个唯一键。§H 的 23 处指针壳是子集，不额外计数；实测口径、owner、trigger 与检查见 [core §H](core.md#h-23-处散文键的指针壳句式mod-收缩后形态)。
 
 ## 通用读法与协议归属
 

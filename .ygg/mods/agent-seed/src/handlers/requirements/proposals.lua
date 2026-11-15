@@ -18,6 +18,7 @@ local reqs = require("src.domain.requirements")
 local tools = require("src.runtime.tools")
 local util = require("src.core.util")
 local wire = require("src.domain.wire")
+local readsig = require("src.domain.readsig")
 
 local TEXTS
 
@@ -299,6 +300,9 @@ function M.install(deps)
       -- 释放泳道（连工作树）；rev 不动（执行方下一轮提案仍用当前 rev）。
       release_lane_with_worktree(index)
     end
+    -- r3 销票（作用域边界）：提案打回 = 回到计划中/待开发，幕前必读签名全部作废重读。
+    -- （rev 不动的打回路径不进 req_bump_rev，所以这里必须显式清。）
+    readsig.clear()
     req_push_history(index, fill(TEXTS.beats.req_reject_hist, { id = prop_id(prop_index) }))
     ygg.narrate(fill(TEXTS.beats.req_reject_ok, {
       id = prop_id(prop_index),

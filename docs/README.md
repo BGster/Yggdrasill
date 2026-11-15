@@ -59,7 +59,7 @@ docs/
 | [context/rituals/dispatch.md](context/rituals/dispatch.md) | 派发仪式正文：分阶段必读 / 工件 / submit / 集成 / Doc sync | mod subagent_brief 策略段 |
 | [context/rituals/cleanup.md](context/rituals/cleanup.md) | 盘点清理政策：会话清理边界与判据 / 待办清理 | mod settlement_sessions_unsetted_hint 正文 |
 | [context/rituals/fallback.md](context/rituals/fallback.md) | 无 egg 执行章 + 续作降级说明 | mod subagent_fallback_note 正文 |
-| [context/copy/README.md](context/copy/README.md) | 文案契约七域索引与协议前缀（404 beats + core 36 = 440 唯一键） | mod data/texts 全部状态行文键 |
+| [context/copy/README.md](context/copy/README.md) | 文案契约七域索引与协议前缀（409 beats + core 36 = 445 唯一键） | mod data/texts 全部状态行文键 |
 | [context/copy/flow.md](context/copy/flow.md) | beats-flow 63 键句式 | beats-flow.json |
 | [context/copy/harness.md](context/copy/harness.md) | beats-harness 69 键句式（含 tools 注册七键） | beats-harness.json |
 | [context/copy/lanes.md](context/copy/lanes.md) | beats-lanes 36 键句式 | beats-lanes.json |
@@ -81,7 +81,7 @@ docs/
 | [lanes.md](design/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
 | [tool-bridge.md](design/tool-bridge.md) | 同步工具桥双层白名单指针 | §2.11 |
 | [harness-tools.md](design/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | D-MA26 |
-| [prompt-surface.md](design/prompt-surface.md) | 6 个 beats 片段 × 404 键 + core 36 键职责表 | §2.12 |
+| [prompt-surface.md](design/prompt-surface.md) | 6 个 beats 片段 × 409 键 + core 36 键职责表 | §2.12 |
 | [identity.md](design/identity.md) | 台账/身份章/profile/票据门（不进剧情） | §2.13 |
 | [lua-api.md](design/lua-api.md) | ygg.* 全 API 面与副作用类别 | §3 章题 + §3.1 |
 | [mod-package.md](design/mod-package.md) | pack.json / config.json / manifest.json 契约 | §3.2 |
