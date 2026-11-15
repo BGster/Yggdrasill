@@ -128,6 +128,15 @@
             "type": "array",
             "items": { "type": "string", "minLength": 1 },
             "maxItems": 64
+        },
+        "readPlan": {
+            "description": "幕前必读清单（**可选段**，r3 销票制的覆盖面分母）：`<幕 id>` → 该幕必读文档的 doc-id 有序清单（形如 `acts/coordinate`，与 `config.set read.<act>/<doc-id>=<ver>` 的键同一口径）。签名回执据此算出「已签 k / 清单 n」；**缺段或缺某幕时降级**（回执只报已签件数，绝不拒签）。本段只由 `docs/context/` 的生成器写入，手改会被内容寻址的 manifest 拦下（改后必须重算 manifest）；Mod 只读该段，不写任何运行期状态。",
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "maxItems": 32,
+                "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}/[a-z][a-z0-9-]{0,47}$" }
+            }
         }
     }
 }

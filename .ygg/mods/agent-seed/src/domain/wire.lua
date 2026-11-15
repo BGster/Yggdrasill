@@ -235,6 +235,42 @@ local function parse_profile_key(key)
   return handle, field
 end
 
+-- ── 幕前必读签名（r3 销票制）：`read.<act>/<doc-id>=<ver>` ───────────────
+-- 键形 `read.<scene>/<doc-id>`：scene 声明「这份文档属于哪一幕」，doc-id 是被读文档的
+-- 稳定短名（小写短横线）。**禁点号**：`src/core/config.lua` 的 effective() 用 `.` 逐段
+-- 下钻，带点的键会把「读 read.<doc>」落到错位段上，所以在入口判死而不是在读取侧写特例。
+-- scene 段不做枚举：把五幕写成白名单会 fail-closed 掉未来的需求级幕（与 harness 字段
+-- 同一取舍），非法幕段的代价只是「不计入任何一幕」，本身不危险。
+-- 值 `ver|scene|seq` 由 src/domain/readsig.lua 组装与本模块解析；这里只做纯形状判定。
+
+-- `read.<scene>/<doc-id>` → "<scene>/<doc-id>"；任何形状偏差 → nil。
+local function parse_read_key(key)
+  if type(key) ~= "string" then
+    return nil
+  end
+  local scene, doc = key:match("^read%.([a-z][a-z0-9%-]*)/([a-z][a-z0-9%-]*)$")
+  if scene == nil or #scene > 32 or #doc > 48 then
+    return nil
+  end
+  return scene .. "/" .. doc
+end
+
+-- 签名值里的 ver 段：4-40 位小写十六进制（r1 的 `git hash-object` 前缀，允许更长的
+-- 摘要方案）。空串 = 显式清除（与 tools.root / run.retire 同构）。
+local function read_ver_ok(ver)
+  if type(ver) ~= "string" then
+    return false
+  end
+  local raw = trim(ver)
+  if raw == "" then
+    return true
+  end
+  if #raw < 4 or #raw > 40 then
+    return false
+  end
+  return raw:match("^[0-9a-f]+$") ~= nil
+end
+
 -- ============================================================================
 -- harness tools 注册面（r3 / D-MA26）：config.set tools.root / tools.<name>
 -- 只校形状，不读文件（Mod 无 IO；存在性由首次调用时宿主可读回传）。
@@ -1012,6 +1048,8 @@ M.parse_executor_key = parse_executor_key
 M.parse_executor_value = parse_executor_value
 M.parse_goal_auth = parse_goal_auth
 M.parse_profile_key = parse_profile_key
+M.parse_read_key = parse_read_key
+M.read_ver_ok = read_ver_ok
 M.parse_assignments = parse_assignments
 M.validate_profile_value = validate_profile_value
 M.EVOLUTION_KEPT = EVOLUTION_KEPT

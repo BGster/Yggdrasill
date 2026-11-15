@@ -9,6 +9,7 @@ local config = require("src.core.config")
 local executor = require("src.domain.executor")
 local flow = require("src.runtime.flow")
 local menus = require("src.view.menus")
+local readsig = require("src.domain.readsig")
 local render_mod = require("src.view.render")
 local reqs = require("src.domain.requirements")
 local util = require("src.core.util")
@@ -85,7 +86,50 @@ local function profile_set(key, value)
   render()
 end
 
-
+-- 「幕前必读」签名（r3 销票制）：`read.<act>/<doc-id>=<ver>`。
+-- 值由 readsig 组装成 `ver|<签名幕>|<seq>`（seq 预留，此刻恒 0，自增由 r4 落地）；
+-- 作用域边界由 readsig.clear() 主动销票（run.begin / coordinate.submit / 进发布幕 /
+-- 回协调幕 / rev 变更 / proposal.reject），所以「键非空」= 本作用域已签，
+-- 消费者（r4）不需要时钟、不需要比较序号。
+-- 覆盖面 k/n 只在 r2 的 readPlan 已烘进 data/config.json 时才算；**缺表即降级**
+-- （回执只给件数），绝不因此拒签：签名是自声明，不是门禁。
+local function read_set(key, value)
+  local doc = wire.parse_read_key(key)
+  if doc == nil then
+    return reject_payload("config.set", fill(TEXTS.beats.read_bad_doc, { doc = key }))
+  end
+  local scene = run_phase()
+  local ver = trim(value)
+  if ver == "" then
+    -- 空值 = 显式清除该件（与 run.retire / goal.authorization 同构）。
+    readsig.forget(doc)
+    ygg.narrate(fill(TEXTS.beats.read_cleared, { doc = doc, scene = scene }))
+    render()
+    return
+  end
+  if not wire.read_ver_ok(ver) then
+    return reject_payload("config.set", fill(TEXTS.beats.read_bad_ver, { ver = ver }))
+  end
+  readsig.sign(doc, ver, scene)
+  local kept, total = readsig.coverage(scene, effective("readPlan"))
+  if total == nil then
+    ygg.narrate(fill(TEXTS.beats.read_signed_unplotted, {
+      doc = doc,
+      ver = ver,
+      k = tostring(kept),
+      scene = scene,
+    }))
+  else
+    ygg.narrate(fill(TEXTS.beats.read_signed, {
+      doc = doc,
+      ver = ver,
+      k = tostring(kept),
+      n = tostring(total),
+      scene = scene,
+    }))
+  end
+  render()
+end
 
 function M.install(deps)
   TEXTS = deps.texts
@@ -150,6 +194,8 @@ function M.install(deps)
       return executor_set(key, value)
     elseif key:sub(1, 8) == "profile." then
       return profile_set(key, value)
+    elseif key:sub(1, 5) == "read." then
+      return read_set(key, value)
     elseif key == "tools.root" then
       -- harness tools 注册根（r3 / D-MA26）：目录路径，形状校验（无 `..`/`|`/控制字符，≤240）。
       -- 只校形状不读文件（Mod 无 IO）；空值 = 显式清除（机证回退人证）。

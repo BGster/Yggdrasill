@@ -11,6 +11,7 @@ local render_mod = require("src.view.render")
 local reqs = require("src.domain.requirements")
 local util = require("src.core.util")
 local wire = require("src.domain.wire")
+local readsig = require("src.domain.readsig")
 
 local TEXTS
 
@@ -71,7 +72,9 @@ function M.install(deps)
     if not charter_complete() then
       return reject_payload("run.begin", TEXTS.beats.charter_missing)
     end
+    -- r3 销票（作用域边界）：立局幕读过的必读件不跨到协调幕——全部作废，进幕重读。
     ygg.kv.set("run.phase", "")
+    readsig.clear()
     ygg.narrate(fill(TEXTS.beats.run_begun, {
       title = charter_piece("title"),
       count = tostring(req_count()),

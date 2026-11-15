@@ -46,6 +46,8 @@ use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 use ygg_sandbox::HostToolRunner;
 
+mod support;
+
 // ───────────────────────── locating ─────────────────────────
 
 /// Repository root (`CARGO_MANIFEST_DIR` is `crates/ygg-sandbox`; two levels up).
@@ -2143,6 +2145,212 @@ fn profile_registration_via_config_set_roundtrip() {
     game.assert_kv("settings.profile_index", json!("agent-1"));
 }
 
+/// 幕前必读签名（r3 销票制）：`config.set read.<act>/<doc-id>=<ver>` 落 `settings.read.*`，
+/// 值形状 `ver|签名幕|seq`，平铺索引 `settings.read_index` 同步；同键重签是幂等 upsert。
+/// 覆盖面只有在 `readPlan` 已烘进 `data/config.json` 时才算——缺表即降级（不拒签）。
+#[test]
+fn read_signature_records_ver_scene_and_index() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game); // 协调幕（run.phase = "" → scene = coordinate）
+
+    let signed = game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    assert_eq!(
+        count_lines(&signed, "[SIGNED] acts/coordinate@9f2c1a"),
+        1,
+        "{signed:#?}"
+    );
+    game.assert_kv("settings.read.acts/coordinate", json!("9f2c1a|coordinate|0"));
+    game.assert_kv("settings.read_index", json!("acts/coordinate"));
+
+    // `settings.` 前缀写法等价；同键重签覆盖 ver，索引不重复登记。
+    game.narrate("config.set", &text("settings.read.acts/coordinate=aa11bb"));
+    game.assert_kv("settings.read.acts/coordinate", json!("aa11bb|coordinate|0"));
+    game.assert_kv("settings.read_index", json!("acts/coordinate"));
+
+    // 第二件：索引追加，两件互不覆盖。
+    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
+    game.assert_kv(
+        "settings.read.coordinate/dispatch",
+        json!("c0ffee|coordinate|0")
+    );
+    game.assert_kv(
+        "settings.read_index",
+        json!("acts/coordinate,coordinate/dispatch")
+    );
+
+    // 缺 readPlan → 降级：回执报件数、不报 k/n，且**不拒签**。
+    let unplotted = game.narrate("config.set", &text("read.acts/charter=123456"));
+    assert_eq!(
+        count_lines(&unplotted, "no read plan is baked for this act"),
+        1,
+        "{unplotted:#?}"
+    );
+    game.assert_kv("settings.read.acts/charter", json!("123456|coordinate|0"));
+}
+
+/// 非法键形 / 非法 ver 一律 `[REJECTED:PAYLOAD]` 且不落 KV；未知键仍 fail-closed
+///（白名单扩张没有把 `bad_config_key` 那条路径堵死）。
+#[test]
+fn read_signature_rejects_bad_doc_id_and_bad_ver() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+
+    let long_doc = format!("read.acts/{}=9f2c1a", "a".repeat(49));
+    let long_scene = format!("read.{}/coordinate=9f2c1a", "a".repeat(33));
+    for bad in [
+        "read.acts=9f2c1a",                  // 缺 <doc-id> 段（无斜杠）
+        "read.acts/sub/dir=9f2c1a",          // 斜杠过多（只认一段）
+        "read.acts/workflow-acts.md=9f2c1a", // 点号：effective() 会下钻错位
+        "read.Acts/Coordinate=9f2c1a",       // 大写
+        "read./coordinate=9f2c1a",           // 幕段空
+    ] {
+        let lines = game.narrate("config.set", &text(bad));
+        assert_refused(&lines, "config.set");
+    }
+    for bad in [long_doc.as_str(), long_scene.as_str()] {
+        let lines = game.narrate("config.set", &text(bad));
+        assert_refused(&lines, "config.set");
+    }
+    assert_eq!(game.kv("settings.read_index"), Json::Null);
+    assert_eq!(game.kv("settings.read.acts"), Json::Null);
+
+    for bad in [
+        "read.acts/coordinate=xyz",  // 非 hex
+        "read.acts/coordinate=9F2C1A", // 大写 hex 不收
+        "read.acts/coordinate=abc", // 短于 4
+    ] {
+        let lines = game.narrate("config.set", &text(bad));
+        assert_refused(&lines, "config.set");
+    }
+    assert_eq!(game.kv("settings.read.acts/coordinate"), Json::Null);
+
+    // 索引键不在用户面（无 read. 前缀 → 落 bad_config_key），只能由 mod 自维护。
+    let alien = game.narrate("config.set", &text("read_index=acts/coordinate"));
+    assert_refused(&alien, "config.set");
+    assert_eq!(game.kv("settings.read_index"), Json::Null);
+}
+
+/// 值 = 显式清除该件（与 run.retire / goal.authorization 同构）：值置空 + 索引摘除；
+/// 重复清除幂等（不产生拒绝行，也不留垃圾键）。
+#[test]
+fn read_signature_clears_with_an_empty_value() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
+    game.assert_kv(
+        "settings.read_index",
+        json!("acts/coordinate,coordinate/dispatch"),
+    );
+
+    let cleared = game.narrate("config.set", &text("read.acts/coordinate="));
+    assert_eq!(
+        count_lines(&cleared, "[SIGN] acts/coordinate cleared"),
+        1,
+        "{cleared:#?}"
+    );
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_index", json!("coordinate/dispatch"));
+
+    // 幂等：再清一次既不拒绝也不改索引。
+    let again = game.narrate("config.set", &text("read.acts/coordinate="));
+    assert!(
+        !again.iter().any(|line| line.contains("REJECTED")),
+        "{again:#?}"
+    );
+    game.assert_kv("settings.read_index", json!("coordinate/dispatch"));
+}
+
+/// 销票：作用域边界**主动清除**全部签名，于是「键非空」本身就等于「本作用域内已签」——
+/// 消费者（r4）不需要时钟、不需要比较序号。覆蓋三类边界：立局→协调（run.begin）、
+/// rev 推进（requirement.amend，停在 req_bump_rev）、提案打回（proposal.reject）。
+#[test]
+fn read_scope_boundary_wipes_every_signature() {
+    let mut game = Game::open(&project_mod_dir());
+
+    // ① run.begin（立局幕 → 协调幕）
+    game.narrate("config.set", &text("read.acts/charter=aaaaaa"));
+    game.assert_kv("settings.read.acts/charter", json!("aaaaaa|charter|0"));
+    charter_and_begin(&mut game);
+    game.assert_kv("settings.read.acts/charter", json!(""));
+    game.assert_kv("settings.read_index", json!(""));
+
+    // 一条在册需求（协调幕；不动 phase）
+    game.narrate(
+        "requirement.add",
+        &text("synthetic requirement|synthetic description|semantics-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+
+    // ② requirement.amend 推进 rev → 销票（amend 三条成功路径都过 req_bump_rev）
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
+    game.assert_kv(
+        "settings.read_index",
+        json!("acts/coordinate,coordinate/dispatch"),
+    );
+    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
+    assert!(
+        !refused(&amended, "requirement.amend"),
+        "{amended:#?}"
+    );
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read.coordinate/dispatch", json!(""));
+    game.assert_kv("settings.read_index", json!(""));
+
+    // ③ proposal.reject 打回（plan 分支不碰 rev，靠 handler 里的显式 clear）
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.assert_kv("settings.read_index", json!("acts/coordinate"));
+    submit(&mut game, 2, "plan", "semantics-read-plan");
+    let rejected = game.narrate("proposal.reject", &text("p1|needs rework"));
+    assert!(!refused(&rejected, "proposal.reject"), "{rejected:#?}");
+    // 成功回执带 [PROPOSAL REJECTED] 前缀（它不是拒绝行：拒绝前缀见 pack.json）。
+    assert_eq!(
+        count_lines(&rejected, "[PROPOSAL REJECTED] p1 (r1)"),
+        1,
+        "{rejected:#?}"
+    );
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_index", json!(""));
+}
+
+/// 覆盖面 k/n：`readPlan` 在场时按本幕清单计算（计划外的 doc 不进分子），
+/// 不在场时降级。清单是**装资源的静态值**，改它必须重算 manifest（`reseal`）。
+#[test]
+fn read_coverage_counts_planned_docs() {
+    let dir = support::temp_dir("read-plan");
+    support::copy_dir(&project_mod_dir(), &dir);
+    let mut config = support::read_json(&dir.join("data/config.json"));
+    config["readPlan"] = json!({
+        "coordinate": ["acts/coordinate", "coordinate/dispatch"]
+    });
+    support::write_json(&dir.join("data/config.json"), &config);
+    support::reseal(&dir);
+
+    let mut game = Game::open(&dir);
+    charter_and_begin(&mut game);
+
+    let first = game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    assert_eq!(
+        count_lines(&first, "1/2 signed in this act"),
+        1,
+        "{first:#?}"
+    );
+    let second = game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
+    assert_eq!(
+        count_lines(&second, "2/2 signed in this act"),
+        1,
+        "{second:#?}"
+    );
+    // 计划外的 doc：签名照旧成立，但不进分子（不拒签、不越界）。
+    let extra = game.narrate("config.set", &text("read.acts/charter=aaaaaa"));
+    assert_eq!(
+        count_lines(&extra, "2/2 signed in this act"),
+        1,
+        "{extra:#?}"
+    );
+}
+
 /// P10 决策归属的守门线：`play.mode=goal` 在 `goal.authorization` 注册之前会发出可读
 /// 警告（`[GOAL AUTH PENDING]`）；注册后再切不再警告。
 #[test]
@@ -2242,14 +2450,14 @@ fn mod_architecture_is_fragments_plus_five_layers() {
     let project = project_mod_dir();
     let pack = read_json(&project.join("pack.json"));
 
-    // ① the code face: 27 modules, five layers, entry excluded, all on disk.
+    // ① the code face: 28 modules, five layers, entry excluded, all on disk.
     let modules = pack["code"]["modules"]
         .as_array()
         .expect("code.modules must be an array");
     assert_eq!(
         modules.len(),
-        27,
-        "the D-MA23 mod declares 27 modules: {modules:?}"
+        28,
+        "the D-MA23 mod declares 28 modules: {modules:?}"
     );
     let entry = pack["code"]["entry"].as_str().expect("code.entry");
     let mut layers = std::collections::BTreeSet::new();
@@ -2923,9 +3131,9 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
     assert_eq!(documented, actual, "core copy table must cover core.json");
     total += documented.len();
-    assert_eq!(total, 440, "404 beats + 36 core keys; §H adds no keys");
+    assert_eq!(total, 445, "409 beats + 36 core keys; §H adds no keys");
     assert!(
-        core_text.contains("440 个唯一键") && core_text.contains("不得再次相加"),
+        core_text.contains("445 个唯一键") && core_text.contains("不得再次相加"),
         "the global ledger must explain why the 23 pointer shells are not added again"
     );
 }
