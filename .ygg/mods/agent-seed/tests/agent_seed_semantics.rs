@@ -580,12 +580,6 @@ fn drive_to_plan_gate_at(mod_dir: &Path) -> Game {
     game
 }
 
-/// From the plan gate to **dev review pending**: approve plan (the reactive effect
-/// auto-dispatches development in the same turn) → deliver.
-fn drive_to_dev_pending(ext: &str) -> Game {
-    drive_to_dev_pending_at(ext, &project_mod_dir())
-}
-
 fn drive_to_dev_pending_at(ext: &str, mod_dir: &Path) -> Game {
     let mut game = drive_to_plan_gate_at(mod_dir);
     game.click("gate.approve — ");
@@ -1276,13 +1270,6 @@ fn read_json(path: &Path) -> Json {
 // ───────────────────── tool bridge (T1–T4) ─────────────────────
 
 // ───────────────────── A · active subsystem ─────────────────────
-
-/// One full tool round trip: register the request, then settle it. Machine actions carry no
-/// menu ticket, and the call id is explicit so every assertion can name it.
-fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
-    game.narrate("tool.call", &text(call));
-    narrative_lines(&game.reply("tool.result", &text(result)))
-}
 
 struct SyncRitualRunner;
 
