@@ -10,6 +10,7 @@ local M = {}
 local config = require("src.core.config")
 local executor = require("src.domain.executor")
 local flow = require("src.runtime.flow")
+local gates = require("src.domain.gates")
 local choice = require("src.handlers.operate.choice")
 local lanes = require("src.domain.lanes")
 local props = require("src.domain.proposals")
@@ -143,6 +144,13 @@ function M.install(deps)
         id = req_id(index),
         prop = prop_id(blocking),
       }))
+    end
+    -- r4 读签前置校验（四维）：排在全部形状/状态检查之后、**首个 KV 写之前**。
+    -- 放这里的三层理由：① 形状错误与既有语义拒绝的文案优先不变；② 拒绝零副作用
+    -- （不落提案、不占槽位、不写 stale）；③ 与 gate_problem_for 同层兄弟，不叫 gate_problem。
+    local read_block = gates.read_problem("proposal.submit", { req = index, stage = spec.stage })
+    if read_block ~= nil then
+      return refuse(TEXTS.beats.req_wait_rejected, "proposal.submit", read_block)
     end
     -- 执行者登记并入提案提交（省一回合）：校验失败则整体不生效（提案不落库）。
     if spec.exec ~= nil then

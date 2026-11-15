@@ -273,6 +273,12 @@ function M.install(deps)
     if problem ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", problem)
     end
+    -- r4 读签前置校验（批边界）：排在各局收口判据之后、确认转场之前。
+    -- 必读集 = 结算幕必读（acts/settle + rituals/cleanup，由生成器写在 readPlan.settle）。
+    local read_block = gates.read_problem("coordinate.submit", {})
+    if read_block ~= nil then
+      return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", read_block)
+    end
     ygg.kv.set("verify.passed", false)
     -- 每次进入结算都重新登记三项任务，避免沿用上一轮过期证据。
     reset_settlement()
