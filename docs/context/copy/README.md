@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约（copy-contract）
 > **id** copy/README · **幕** all（改文案前） · **触发** 任一 mod 文案键变更
 > **读不到代价** silent-drift
-> **ver** 3a7999
+> **ver** b887ac
 
 > **定位**：mod 状态行文键的知识权威索引。正文按现有 beats 消费域拆为七件；mod `data/texts/` 是运行时投影，改文案先改对应域文件再同步 mod。
 > **上游**：[../README.md](../../README.md) · **相关**：[acts/](../acts/) · [../design/prompt-surface.md](../../design/prompt-surface.md)

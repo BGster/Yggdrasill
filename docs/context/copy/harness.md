@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-harness
 > **id** copy/harness · **幕** all · **触发** 改 `beats-harness.json` 前
 > **读不到代价** silent-drift
-> **ver** 776acf
+> **ver** 7f6464
 
 > **定位**：`beats-harness.json` 74 键的句式知识权威：配置面板、身份注册、工具桥、泳道工具与 tools 注册面。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-harness.json`
