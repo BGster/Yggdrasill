@@ -24,7 +24,6 @@ PLAYBOOK.sections = {}
 for _, id in ipairs({
   "ch1-foundation", "ch2-delivery", "ch3-evidence",
   "ch4-run-machine", "ch4-protocol", "ch4-async", "ch4-mod-host",
-  "ch5-evolution-tools",
 }) do
   local fragment = ygg.data("ygg:agent/playbook/" .. id)
   for _, section in ipairs(fragment.sections) do
@@ -39,7 +38,6 @@ for _, id in ipairs({
   end
 end
 
-local util = require("src.core.util")
 local config = require("src.core.config")
 local reqs = require("src.domain.requirements")
 local lanes = require("src.domain.lanes")

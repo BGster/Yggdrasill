@@ -3334,7 +3334,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         .iter()
         .filter(|path| path.starts_with("data/playbook/"))
         .count();
-    assert_eq!(playbook, 9, "playbook = head + 8 chapter fragments (r5)");
+    assert_eq!(playbook, 8, "playbook = head + 7 chapter fragments (r5; ch5 removed on 2026-11-15)");
     for path in &pack_entry_paths {
         assert!(
             project.join(path).is_file(),
@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        17,
-        "STAGE_GUIDE must route all 17 remaining chapters (dispatch/integration/lanes/tools moved to docs on 2026-11-15): {mapped:?}"
+        16,
+        "STAGE_GUIDE must route all 16 remaining chapters (dispatch/integration/lanes/tools/evolution moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        17,
-        "r5 assembles 17 chapters (14 legacy + 3 new; dispatch/integration/lanes/tools moved to docs on 2026-11-15): {sections:?}"
+        16,
+        "r5 assembles 16 chapters (14 legacy + 2 new; dispatch/integration/lanes/tools/evolution moved to docs on 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        17,
+        16,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3531,7 +3531,6 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     assert_receipt(
         &mut settle,
         &[
-            "evolution",
             "gates",
             "run_artifacts",
             "evidence",
@@ -4872,7 +4871,6 @@ fn playbook_and_src_context_pointers_resolve() {
         ("ch4-mod-host.json", 0),
         ("ch4-protocol.json", 2),
         ("ch4-run-machine.json", 5),
-        ("ch5-evolution-tools.json", 1),
         ("core.json", 18),
         ("tools.lua", 1),
     ]
@@ -4886,8 +4884,8 @@ fn playbook_and_src_context_pointers_resolve() {
         "docs/context 指针账漂移（playbook + texts + src）：{ledger:?}"
     );
     assert_eq!(
-        total, 48,
-        "docs/context 指针总数漂移：期望 48，实得 {total}"
+        total, 47,
+        "docs/context 指针总数漂移：期望 47，实得 {total}"
     );
     assert!(
         violations.is_empty(),

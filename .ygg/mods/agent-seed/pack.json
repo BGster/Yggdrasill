@@ -96,12 +96,6 @@
       "kind": "agent-playbook-fragment",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
       "path": "data/playbook/ch4-mod-host.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch5-evolution-tools",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch5-evolution-tools.json"
     }
   ],
   "schemaFiles": [
