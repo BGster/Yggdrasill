@@ -163,3 +163,80 @@ test("工具声明面：pack.tools 形状 + 两层白名单同集合 + 内建工
   assert_true(truncate_at >= max_output_cap,
     ("tuning.tool_output_max（%d）低于最大的 maxOutputBytes（%d）"):format(truncate_at, max_output_cap))
 end)
+
+test("tool.call / tool.result 载荷形状与白名单：17 个拒绝分支 + 容量", function()
+  fresh()
+  fire("event.start", "tools gate|synthetic task description")
+
+  local long_value = string.rep("v", 96)
+  local long_args = "a1=" .. long_value .. ";a2=" .. long_value .. ";a3=" .. long_value
+  local long_call_id = "t" .. string.rep("a", 32)
+
+  -- 请求侧形状：11 个分支，全部零副作用。
+  local refusals = {
+    { "gh.issue", "gh.issue" },
+    { "Git", "Git" },
+    { "no-dot", "no-dot" },
+    { "git.head_short|rev=HEAD;rev=x", "rev=" },
+    { "git.head_short|abc", "not `k=v`" },
+    { "git.head_short|a b=c", "must match" },
+    { "git.head_short|a1=1;a2=2;a3=3;a4=4;a5=5;a6=6;a7=7;a8=8;a9=9", "8" },
+    { "git.head_short|" .. long_args, "192" },
+    { "git.head_short||T1", "T1" },
+    { "git.head_short||count", "count" },
+    { "git.head_short||" .. long_call_id, "not usable" },
+  }
+  for _, item in ipairs(refusals) do
+    reset()
+    fire("tool.call", item[1])
+    assert_true(
+      narrated_contains(item[2]),
+      ("拒绝必须点名 `%s`，实际：%s"):format(item[2], table.concat(narrated(), " ⏎ "))
+    )
+    assert_nil(kv("tool.count"), "拒绝零副作用（无计数）")
+    assert_nil(kv("tool.pending"), "拒绝零副作用（无待决）")
+  end
+
+  -- 真实请求分配 `t1`；再用同一 id 被拒（重放要靠 external_id）。
+  fire("tool.call", "git.head_short")
+  assert_eq(kv("tool.count"), 1, "真实请求分配一个槽位")
+  reset()
+  fire("tool.call", "git.head_short||t1")
+  assert_true(narrated_contains("t1"), "复用同一 call id 被拒")
+  assert_eq(kv("tool.count"), 1, "计数不变")
+
+  -- 结果侧形状：6 个分支，全部保留 pending 状态。
+  local result_refusals = {
+    { "t99|git.head_short|ok|0|x", "t99" },
+    { "t1|git.status|ok|0|x", "t1" },
+    { "t1|git.head_short|maybe|0|x", "maybe" },
+    { "t1|git.head_short|ok|1.5|x", "1.5" },
+    { "t1|git.head_short|ok|0", "tool.result" },
+    { "t1|git.head_short|ok|0|x|e|extra", "tool.result" },
+  }
+  for _, item in ipairs(result_refusals) do
+    reset()
+    fire("tool.result", item[1])
+    assert_true(
+      narrated_contains(item[2]),
+      ("结果拒绝必须点名 `%s`，实际：%s"):format(item[2], table.concat(narrated(), " ⏎ "))
+    )
+    assert_eq(kv("tool.t1.status"), "pending", "拒绝后仍待决")
+    assert_eq(kv("tool.pending"), 1, "待决计数不变")
+  end
+
+  -- 容量：计数器是生命周期计数器，占满即拒。
+  local core_raw = read_file(__MOD_DIR .. "/data/texts/core.json")
+  local capacity = tonumber(core_raw:match('"tool_capacity"%s*:%s*(%d+)'))
+  assert_true(capacity ~= nil, "tuning.tool_capacity 必须是整数")
+  fresh()
+  fire("event.start", "tools gate|synthetic task description")
+  for _ = 1, capacity do
+    fire("tool.call", "git.head_short")
+  end
+  assert_eq(kv("tool.count"), capacity, "每个槽位都被占用")
+  reset()
+  fire("tool.call", "git.head_short")
+  assert_true(narrated_contains("no free tool slot"), "占满后拒绝")
+  assert_eq(kv("tool.count"), capacity, "计数不变")
+end)
