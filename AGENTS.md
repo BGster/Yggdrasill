@@ -100,6 +100,11 @@ The user runs real-data verification and pastes the output; synthetic data under
    elaboration in the same commit, but is never a third place to originate a constraint.
    - Never write a checker, wrapper or hook as a patch. Scripts may only perform read-only queries and may
      not carry constraints. Never patch the egg CLI source; give the user the symptom and reproduction.
+     **Boundary (user ruling 2026-11-15)**: an assertion living in a host `#[cfg(test)]` module — including the
+     test module of `crates/ygg-sandbox/examples/egg.rs` — that has to change because a *pack declaration*
+     changed shape is **maintenance, not capability expansion**: update it in the same commit and name the
+     declaration that forced it. Everything else stays forbidden wherever it lives: production code, a new
+     host capability, or any runtime behaviour change.
    - Every evolution needs all three: ① the specific action blocked; ② the visible violation symptom;
      ③ one runnable confirmation. Fewer than three means it is not written. A verbal promise is unhandled.
    - **No claim without its method — absence and counts included.** A negative claim ("this repo never had
