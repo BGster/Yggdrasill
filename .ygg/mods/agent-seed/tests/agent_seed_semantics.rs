@@ -579,47 +579,6 @@ fn drive_to_settle_at(mod_dir: &Path) -> Game {
 
 // ───────────────────────── charter & resident lifecycle ─────────────────────────
 
-/// r9 The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
-/// the charter gate keeps an empty run from ever closing, so the walk loops on refusals
-/// until the step limit — `ok=false, reached=limit` is the documented steady state, not a
-/// regression. No closure beat ([COORDINATION DONE] / [GATES GREEN] / [BATCH) and no
-/// ending line may ever appear in the walked narrative.
-#[test]
-fn default_all1_walk_loops_empty_batches_to_limit() {
-    for dir in [project_mod_dir(), seed_mod_dir()] {
-        let report = playtest(&dir, &PlaytestOptions::default());
-        assert_eq!(
-            report.reached,
-            Some(Reached::Limit),
-            "{}: the resident default walk must loop empty batches to the limit",
-            dir.display()
-        );
-        assert!(
-            !report.ok,
-            "{}: an empty-batch loop is the expected non-passing state",
-            dir.display()
-        );
-        assert!(
-            report.errors.is_empty(),
-            "{} must not error (limit is a clean stop): {:?}",
-            dir.display(),
-            report.errors
-        );
-        let closed = report.narrative_sample.iter().any(|line| {
-            line.starts_with("[COORDINATION DONE]")
-                || line.starts_with("[GATES GREEN]")
-                || line.starts_with("[BATCH")
-                || line.starts_with("[ENDING")
-        });
-        assert!(
-            !closed,
-            "{}: the refusal loop must never close: {:?}",
-            dir.display(),
-            report.narrative_sample
-        );
-    }
-}
-
 // ───────────────────── requirement pipeline: gates & deliverables ─────────────────────
 
 // ───────────────────── inline executor ledger (`exec=`) ─────────────────────

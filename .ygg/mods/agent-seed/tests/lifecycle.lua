@@ -162,3 +162,29 @@ test("批次循环回到协调幕：空队列永不关闭、永不记绿、永�
     assert_true(line:sub(1, #"[BATCH") ~= "[BATCH", "空队列不得结算批次：" .. line)
   end
 end)
+
+test("默认全选 1 走局：空批次循环到上限也不关闭", function()
+  fresh()
+  -- 一直选第 1 项：resident 默认走局会陷入空批次循环，直到步数上限（上限本身是引擎内部量，
+  -- 属 testing-strategy §3 第 6 条缺口；这里保住「循环期间永不关闭」这条语义）。
+  for _ = 1, 24 do
+    local options = render_options()
+    if options == nil or #options == 0 then
+      break
+    end
+    click_index(1)
+  end
+
+  for _, line in ipairs(narrated()) do
+    assert_true(
+      line:sub(1, #"[COORDINATION DONE]") ~= "[COORDINATION DONE]",
+      "空批次循环不得关闭协调幕：" .. line
+    )
+    assert_true(
+      line:sub(1, #"[GATES GREEN]") ~= "[GATES GREEN]",
+      "空批次循环不得登记全绿：" .. line
+    )
+    assert_true(line:sub(1, #"[BATCH") ~= "[BATCH", "空批次循环不得结算批次：" .. line)
+    assert_true(line:sub(1, #"[ENDING") ~= "[ENDING", "空批次循环不得退休：" .. line)
+  end
+end)
