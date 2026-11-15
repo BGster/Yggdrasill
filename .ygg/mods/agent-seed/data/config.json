@@ -73,10 +73,10 @@
       "req-acts/intake": "1b8065",
       "acts/settle": "c85c16",
       "rituals/cleanup": "e02303",
-      "acts/release": "95ea54",
+      "acts/release": "697e88",
       "acts/retired": "c7f2a3",
       "req-acts/delivery": "a0d904",
-      "req-acts/integration": "73bc9e"
+      "req-acts/integration": "325279"
     },
     "reqActs": {
       "plan": [
