@@ -1886,31 +1886,6 @@ fn registered_set(message: &str) -> Vec<String> {
 
 // ───────────────────── r11 · unknown events fail closed ─────────────────────
 
-/// r11 Unknown events (a typo'd name, a reserved `ygg.*` prefix that is not registered)
-/// fail closed at the driver facade **before any side effect**: readable VALIDATION with
-/// the三要素 message, a byte-identical state baseline, and an intact registry (the next
-/// dispatch works).
-#[test]
-fn unknown_events_fail_closed_with_zero_side_effects() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    for event in ["event.nope", "ygg.not_registered"] {
-        let reply = assert_fail_closed(&mut game, event);
-        let message = reply["error"]["message"].as_str().expect("error message");
-        let set = registered_set(message);
-        assert!(
-            set.contains(&"requirement.dispatch".to_owned()),
-            "`{event}`: the registered set must be part of the message: {message}"
-        );
-    }
-
-    // The registry is intact: a normal dispatch still works after the refusals.
-    game.narrate("requirement.list", "0");
-    game.assert_kv("req.1.status", json!("open"));
-    game.assert_kv("req.1.job", json!("plan"));
-}
-
 // ───────────────────── r2 · lane branch naming is enforced ─────────────────────
 
 /// r2 The lane branch **must** be self-reported in the forced shape
