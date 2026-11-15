@@ -15,3 +15,54 @@ test("计划门 reject：回 planning、plan_ok=false、job 重挂、提案可�
   assert_eq(kv("req.1.gate"), "plan", "a second plan proposal raises the gate again")
   assert_eq(kv("req.1.gate_rev"), 1, "gate_rev follows the revision")
 end)
+
+test("旁路关闭：split/merge 写 closed_reason、被旁路行不可 amend、done amend 派生", function()
+  fresh()
+  charter_and_begin()
+
+  -- 一条开发前草稿（无 job 在飞，可 split）。
+  fire("requirement.add", "split me|synthetic description|semantics-split")
+
+  -- ① split：父变 done + closed_reason=split。
+  reset()
+  fire("requirement.split", "r1|first child|second child")
+  assert_true(narrated_contains("[REQ SPLIT]"), "split narrates its beat")
+  assert_eq(kv("req.1.status"), "done", "the parent is done")
+  assert_eq(kv("req.1.closed_reason"), "split", "closed with a reason")
+  assert_eq(phase_of("r1"), "split", "the display name is split")
+
+  -- ② 被旁路的行不可 amend。
+  reset()
+  fire("requirement.amend", "r1|reopen attempt")
+  -- 注意：这条拒绝走 `[BLOCKED:TODO]`（前置未满足），不是 `[REJECTED:*]`。
+  assert_true(
+    narrated_contains("[BLOCKED") or narrated_contains("[REJECTED"),
+    "a bypassed row is not amendable"
+  )
+
+  -- ③ merge 两个 open 行：源变 done + merged，新行出现。
+  fire("requirement.merge", "r2,r3|merged requirement|merged desc")
+  assert_eq(kv("req.2.status"), "done", "source 1 done")
+  assert_eq(kv("req.2.closed_reason"), "merged", "source 1 merged")
+  assert_eq(kv("req.3.status"), "done", "source 2 done")
+  assert_eq(kv("req.3.closed_reason"), "merged", "source 2 merged")
+  assert_eq(phase_of("r4"), "draft", "the merged row is a fresh draft")
+
+  -- ④ 走完 r4，再 amend 这条 done 行 → 派生后继。
+  fire("requirement.dispatch", "r4")
+  submit_req("r4", 1, "plan", "semantics-derive-p1")
+  click("gate.approve — ")
+  submit_req("r4", 1, "development", "semantics-derive-p2")
+  click("proposal.accept — ")
+  click("gate.approve — ")
+  fire("integration.confirm", "r4|develop@feed777")
+  assert_eq(kv("req.4.status"), "done", "r4 is done")
+  assert_eq(kv("req.4.closed_reason"), "", "no bypass reason")
+
+  reset()
+  fire("requirement.amend", "r4|follow-up title")
+  assert_true(narrated_contains("[REQ DERIVED]"), "amending a done row derives a successor")
+  assert_eq(kv("req.4.status"), "done", "the original stays done")
+  assert_eq(kv("req.5.origin"), "r4", "the successor records its origin")
+  assert_eq(phase_of("r5"), "draft", "the successor is a draft")
+end)

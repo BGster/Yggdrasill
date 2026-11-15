@@ -1250,65 +1250,6 @@ fn gate_approval_settles_its_own_proposal_and_still_blocks_foreign_pendings() {
     blocked.assert_kv("prop.2.status", json!("pending"));
 }
 
-/// The closed-reason bypass (R11): split/merge close the parents with `status=done` plus a
-/// `closed_reason` field (the display shows the reason); a bypassed row is not amendable;
-/// amending a **delivered** done row derives a successor instead of reopening it.
-#[test]
-fn closed_reason_bypass_split_and_done_amend_derives() {
-    let mut game = Game::open(&project_mod_dir());
-    charter_and_begin(&mut game);
-    // A pre-development draft with no job in flight (split/merge need a mutable row).
-    game.narrate(
-        "requirement.add",
-        &text("split me|synthetic description|semantics-split"),
-    );
-
-    // Split a pre-development draft: the parent becomes done + closed_reason=split.
-    let split = game.narrate("requirement.split", &text("r1|first child|second child"));
-    assert!(
-        split.iter().any(|line| line.contains("[REQ SPLIT]")),
-        "{split:#?}"
-    );
-    game.assert_kv("req.1.status", json!("done"));
-    game.assert_kv("req.1.closed_reason", json!("split"));
-    assert_eq!(game.phase("r1"), "split");
-
-    // A bypassed row is not amendable (split/merged/dropped are terminal with a reason).
-    let bypassed = game.narrate("requirement.amend", &text("r1|reopen attempt"));
-    assert_refused(&bypassed, "requirement.amend");
-
-    // Merge two open rows: the sources become done + closed_reason=merged, a new row appears.
-    game.narrate(
-        "requirement.merge",
-        &text("r2,r3|merged requirement|merged desc"),
-    );
-    game.assert_kv("req.2.status", json!("done"));
-    game.assert_kv("req.2.closed_reason", json!("merged"));
-    game.assert_kv("req.3.status", json!("done"));
-    game.assert_kv("req.3.closed_reason", json!("merged"));
-    assert_eq!(game.phase("r4"), "draft");
-
-    // Deliver r4 fully (dispatch by target id), then amend the done row: a successor is
-    // derived (origin=r4).
-    game.narrate("requirement.dispatch", &text("r4"));
-    submit_req(&mut game, "r4", 1, "plan", "semantics-derive-p1");
-    game.click("gate.approve — ");
-    submit_req(&mut game, "r4", 1, "development", "semantics-derive-p2");
-    game.click("proposal.accept — ");
-    game.click("gate.approve — ");
-    game.narrate("integration.confirm", &text("r4|develop@feed777"));
-    game.assert_kv("req.4.status", json!("done"));
-    game.assert_kv("req.4.closed_reason", json!(""));
-    let derived = game.narrate("requirement.amend", &text("r4|follow-up title"));
-    assert!(
-        derived.iter().any(|line| line.contains("[REQ DERIVED]")),
-        "{derived:#?}"
-    );
-    game.assert_kv("req.4.status", json!("done"));
-    game.assert_kv("req.5.origin", json!("r4"));
-    assert_eq!(game.phase("r5"), "draft");
-}
-
 // ───────────────────── r1 · single operation map + registry fail-closed ─────────────────────
 
 /// Take the **map window** from the `map.show` receipt: from the map head line to the map
