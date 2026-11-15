@@ -132,17 +132,25 @@ end
 -- 这里管 run 级结算（进化复核 / subagent 会话 / 主会话 Todo）。全部通过才允许 review.note。
 -- Lua 沙箱没有文件、会话与 Todo API：本函数只校登记断言，不证明实际复核或清理发生过。
 -- ============================================================================
--- 读签四维判据（r4）：`gate_problem` 的**同层兄弟**，不是它的一部分。
+-- 读签判据（r4；r11 起 = 三维 + 按人）：`gate_problem` 的**同层兄弟**，不是它的一部分。
 --
 -- 为什么必须分开：`gate_problem` 是局收口判据，被 coordinate.submit / verify.submit(true)
 -- / review.note 共用；把读签塞进去会连带拦住退役终局（武装后的 review.note），而那是唯一
 -- 出口——死锁。这里按**动作**定必读集，只影响三个推进动作，收口语义一字不动。
 --
--- 四维（无时钟，全用事件序号与 KV 版本；序号由 src/core/clock.lua 落 KV）：
+-- 三维 + 按人（无时钟，全用事件序号与 KV 版本；序号由 src/core/clock.lua 落 KV）：
 --   ① 覆盖  —— 必读集内每件都有签名，且签名 ver == 台账 ver（文档改版 ⇒ 视为未签）
---   ② 主体  —— 签名晚于「该需求当前 rev」的进入 seq（amend / 打回推进 rev ⇒ 作废）
---   ③ 新鲜  —— 签名晚于本幕 / 本阶段纪元的进入 seq（跨幕、跨阶段 ⇒ 作废）
---   ④ 遗忘  —— now - sign ≤ window（窗口可配，缺省 80）
+--   ② 新鲜  —— 签名晚于本幕 / 本阶段纪元的进入 seq（跨幕、跨阶段 ⇒ 作废）
+--   ③ 遗忘  —— now - sign ≤ window（窗口可配，缺省 80）
+--   ＋ 按人  —— 签名属于**执行本动作的人**（r9）：无身份直派拒，人工票据降级为仅覆盖
+--
+-- **amend 由销票覆盖，不再单设主体维（r11 退役）**：`req_bump_rev` 是 rev 的唯一写口，
+-- 它在同一事务里 `readsig.clear()`（src/domain/requirements.lua 的 req_bump_rev），所以
+-- 「签名早于新 rev」在任何 amend / 两路打回路径上都**不可达**——还没轮到本判据，签名已被抹光，
+-- 报的是覆盖维 read-gate/missing。旧的「主体维」（read-gate/subject）因此是从未生效的假保护，
+-- r11 删除它并留下守护用例 `read_gate_handles_a_signature_taken_before_a_new_requirement_without_a_subject_dimension`
+-- （把这一维加回去，该用例立刻转红）。不要为「更严格」把主体维加回来：它测不到 amend，
+-- 只能测到「签名后立了新需求」，那是坐标系错位而不是人没读。
 -- 每条拒绝都必须自解除：报「隔了多少派发」「当前窗口」「确切命令」。
 -- 生成区缺席（必读集为空）⇒ 直接放行，不叙事：判据 inert 是分阶段上线的安全阀。
 
@@ -165,27 +173,18 @@ local function raise_command(window)
   return "config.set readGate.window=" .. tostring(target)
 end
 
--- 本动作的「作用域进入点」：幕与阶段取最大者（rev 单列为主体维度，不混进来）。
+-- 本动作的「作用域进入点」：幕与阶段取最大者。
 -- 返回整个纪元条目，而不只是 seq——拒绝文案里「什么时候开始的」必须报**真正赢得比较那个**
 -- 纪元的名字（幕还是阶段），否则会出现「说 scene 却指向阶段边界」的错报。
 local function scope_epoch_of(epochs)
   local best = nil
   for i = 1, #epochs do
     local epoch = epochs[i]
-    if epoch.kind ~= "rev" and (best == nil or epoch.seq > best.seq) then
+    if best == nil or epoch.seq > best.seq then
       best = epoch
     end
   end
   return best
-end
-
-local function rev_epoch_of(epochs)
-  for i = 1, #epochs do
-    if epochs[i].kind == "rev" then
-      return epochs[i]
-    end
-  end
-  return nil
 end
 
 local function read_problem(action, ctx)
@@ -291,9 +290,8 @@ local function read_problem(action, ctx)
     })
   end
 
-  -- ②③④ 逐件判序（主体优先于新鲜，新鲜优先于遗忘：越具体越先报）。
+  -- ②③ 逐件判序（新鲜优先于遗忘：越具体越先报）。
   local entry = scope_epoch ~= nil and scope_epoch.seq or 0
-  local rev_epoch = rev_epoch_of(epochs)
   for i = 1, #docs do
     local doc = docs[i]
     local signed_ver, _, value_seq = readsig.signed(doc)
@@ -320,19 +318,6 @@ local function read_problem(action, ctx)
     -- 序号未知（r3 时代签的存档 / 只读局）⇒ 该件不判序，只保留「签过」这一事实。
     if sign > 0 then
       local command = sign_command(doc, want)
-      if rev_epoch ~= nil and rev_epoch.seq > sign then
-        return fill(TEXTS.beats.read_gate_subject, {
-          doc = doc,
-          sign = tostring(sign),
-          req = tostring(rev_epoch.req),
-          rev = tostring(rev_epoch.rev),
-          entry = tostring(rev_epoch.seq),
-          gap = tostring(rev_epoch.seq - sign),
-          window = tostring(window),
-          command = command,
-          raise = raise,
-        })
-      end
       if entry > sign then
         return fill(TEXTS.beats.read_gate_stale, {
           doc = doc,

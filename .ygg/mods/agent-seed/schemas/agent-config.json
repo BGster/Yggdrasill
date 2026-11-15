@@ -139,7 +139,7 @@
             }
         },
         "readGate": {
-            "description": "推进动作的必读集与版本台账（**可选段**，r4 四维判据的数据源）：`ver` = doc-id → 文档头 ver 台账（文档改版 ⇒ 旧签名作废，这是「改版需重读」的唯一机械载体）；`reqActs` = 提案 stage（plan / development）→ 该阶段要求先读的 doc-id 清单；`gates` = 门禁种类（plan / accept）→ 该门禁交出下一幕的 req-acts；`window` = 遗忘窗口（缺省 80，运行期可用 `config.set readGate.window=<n>` 覆盖）。与 `readPlan` 同一批由 `docs/context/` 的生成器产出（`scripts/gen-scene-readfirst.py --readset`），手改会被内容寻址的 manifest 拦下。**整段缺席 ⇒ 判据 inert**（不拦任何动作），这是分阶段上线的安全阀。",
+            "description": "推进动作的必读集与版本台账（**可选段**，读签判据（覆盖 / 新鲜 / 遗忘 + 按人）的数据源）：`ver` = doc-id → 文档头 ver 台账（文档改版 ⇒ 旧签名作废，这是「改版需重读」的唯一机械载体）；`reqActs` = 提案 stage（plan / development）→ 该阶段要求先读的 doc-id 清单；`gates` = 门禁种类（plan / accept）→ 该门禁交出下一幕的 req-acts；`window` = 遗忘窗口（缺省 80，运行期可用 `config.set readGate.window=<n>` 覆盖）。与 `readPlan` 同一批由 `docs/context/` 的生成器产出（`scripts/gen-scene-readfirst.py --readset`），手改会被内容寻址的 manifest 拦下。**整段缺席 ⇒ 判据 inert**（不拦任何动作），这是分阶段上线的安全阀。",
             "type": "object",
             "additionalProperties": false,
             "properties": {

@@ -2809,14 +2809,44 @@ fn read_gate_reports_the_forget_distance_past_the_window() {
     game.assert_kv("req.1.gate", json!("plan"));
 }
 
-/// ④ 主体：签名绑定 (req, rev)。两条路径都拒：新增需求（rev 纪元晚于签名）报 `subject`；
-/// amend 推进 rev 时 r3 的销票制先把签名抹掉，于是报 `missing`（分层而非重复报错）。
+/// **r11 的证据**：amend 推进 rev 时 r3 的销票制先把签名全抹掉，所以下一次推进动作报的是
+/// **覆盖维** `read-gate/missing`（分层而非重复报错）。
+/// 这条用例是「主体维退役」的机械依据：rev 一变签名已不存在，「签名早于新 rev」永远轮不到
+/// 判定——所以主体维（`read-gate/subject`）测不到 amend，它是假保护。
 #[test]
-fn read_gate_subject_binds_a_signature_to_the_requirement_revision() {
-    let mut game = armed_game("gate-subject");
+fn read_gate_amendment_loses_signatures_through_the_clear_not_a_subject_dimension() {
+    let mut game = armed_game("gate-amend");
     sign(&mut game, "acts/coordinate", "aaaaaa");
     sign(&mut game, "req-acts/intake", "bbbbbb");
-    // 签名之后才出现第二条需求：它的 rev 纪元晚于签名 → 主体维度拒。
+    // amend 推进 rev：销票制先抹掉全部签名，所以此后报覆盖（missing）——不双报、不错报。
+    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
+    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
+    game.assert_kv("settings.read_index", json!(""));
+    let after = game.narrate(
+        "proposal.submit",
+        &text("r1|2|plan|replanned|artifacts/r1.md"),
+    );
+    let joined = after.join("\n");
+    assert!(
+        refused(&after, "proposal.submit") && joined.contains("read-gate/missing"),
+        "an amendment wipes signatures through r3's clear(), so the refusal is coverage: {after:#?}"
+    );
+    assert!(
+        !joined.contains("read-gate/subject"),
+        "r11: the amend path must report coverage only — the subject dimension is retired: {after:#?}"
+    );
+}
+
+/// **r11 守护（可证伪）**：主体维已退役。复刻它当年「唯一可达」的路径——先签名，再
+/// `requirement.add` 一条新需求（该需求的 rev/stage 纪元因此晚于签名）——现在必须**绝不出现**
+/// `read-gate/subject`；同一场景由**新鲜维** `read-gate/stale` 接管（新需求的阶段纪元晚于签名），
+/// 所以删掉主体维并没有开口子。
+/// 变异探针：把主体维分支加回 `gates.read_problem`，这条立刻转红。
+#[test]
+fn read_gate_handles_a_signature_taken_before_a_new_requirement_without_a_subject_dimension() {
+    let mut game = armed_game("gate-no-subject");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
     game.narrate(
         "requirement.add",
         &text("second requirement|second description|armed-r2"),
@@ -2827,25 +2857,13 @@ fn read_gate_subject_binds_a_signature_to_the_requirement_revision() {
         &text("r2|1|plan|r2 plan|artifacts/r2.md"),
     );
     let joined = lines.join("\n");
-    assert_refused(&lines, "proposal.submit");
     assert!(
-        joined.contains("read-gate/subject")
-            && joined.contains("before r2 entered rev 1 at dispatch"),
-        "the refusal must name the requirement revision the signature misses: {lines:#?}"
-    );
-
-    // amend 推进 rev：销票制先抹掉全部签名，所以此处报覆盖（missing）——不双报、不错报。
-    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
-    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
-    game.assert_kv("settings.read_index", json!(""));
-    let after = game.narrate(
-        "proposal.submit",
-        &text("r1|2|plan|replanned|artifacts/r1.md"),
+        !joined.contains("read-gate/subject"),
+        "r11: the subject dimension is retired — no refusal may carry it: {lines:#?}"
     );
     assert!(
-        refused(&after, "proposal.submit")
-            && after.join("\n").contains("read-gate/missing"),
-        "an amendment wipes signatures through r3's clear(), so the refusal is coverage: {after:#?}"
+        refused(&lines, "proposal.submit") && joined.contains("read-gate/stale"),
+        "the freshness dimension must take over the old subject scenario: {lines:#?}"
     );
 }
 
@@ -3985,9 +4003,9 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
     assert_eq!(documented, actual, "core copy table must cover core.json");
     total += documented.len();
-    assert_eq!(total, 454, "418 beats + 36 core keys; §H adds no keys");
+    assert_eq!(total, 453, "417 beats + 36 core keys; §H adds no keys");
     assert!(
-        core_text.contains("454 个唯一键") && core_text.contains("不得再次相加"),
+        core_text.contains("453 个唯一键") && core_text.contains("不得再次相加"),
         "the global ledger must explain why the 23 pointer shells are not added again"
     );
 }

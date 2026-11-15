@@ -26,9 +26,9 @@
       "sha256": "892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
     },
     {
-      "byteLength": 15761,
+      "byteLength": 15884,
       "path": "src/domain/gates.lua",
-      "sha256": "4fa98412f0cf9e161fea27e4f53f95a264dd20b9f1ebc990b29873c0ff2e10c0"
+      "sha256": "600279d49ecc91b60be8980f4c5c3d5894f2324f7928026894e0d592cae4b225"
     },
     {
       "byteLength": 12478,
@@ -41,9 +41,9 @@
       "sha256": "1d6712ee1ffb9c58b699d7064ceda7f94c9baa08dcb6e5ddfe893d6879ae31b6"
     },
     {
-      "byteLength": 7542,
+      "byteLength": 7498,
       "path": "src/domain/readset.lua",
-      "sha256": "274e53cc4376c14b49671b059a524e2ee109859a4a6285fdb4f218b3118f2cfa"
+      "sha256": "b0324022fe2412cb1402340f48855b281dd0e6b96d4a62f1c10958567f54a915"
     },
     {
       "byteLength": 8733,
@@ -106,9 +106,9 @@
       "sha256": "a70506ba126f783958cd413fe46644af8c0bc5d36a212deb7e52626ab12752a5"
     },
     {
-      "byteLength": 14298,
+      "byteLength": 14325,
       "path": "src/handlers/requirements/proposals.lua",
-      "sha256": "d4d25070df74d74a9173466f2237cfd9a8b5aed69c8121c972d6f37187387be1"
+      "sha256": "4590082559b6504da562f09f1b8feef923863019ccaf5cbd6e227ef313fe5a12"
     },
     {
       "byteLength": 15799,
@@ -118,7 +118,7 @@
     {
       "byteLength": 16515,
       "path": "src/handlers/system/config.lua",
-      "sha256": "c65207d5e9b862b70d29c23d49d80a1af7faaacf36e9805f1c5575490c5975cb"
+      "sha256": "ec30e9945f69846e48dc1ac79d560da56adb79c8473f36d2583c6e2c8ed4ec29"
     },
     {
       "byteLength": 1155,
@@ -201,12 +201,12 @@
       "sha256": "019019913147c506b667f0eb08853ea2748cf67faae299ad77dfe497dac63199"
     },
     {
-      "byteLength": 13999,
+      "byteLength": 13659,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "5395da82bca08f432cff18fe5f7b726e2d9ff397be557763cd328a80f250561a"
+      "sha256": "413131dd9ccedf4632d22b0cad7ca17c7e33a299249b19e9accf041054e544f5"
     },
     {
       "byteLength": 1918,

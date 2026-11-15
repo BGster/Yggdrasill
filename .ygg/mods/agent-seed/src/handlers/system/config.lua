@@ -224,8 +224,8 @@ function M.install(deps)
     elseif key:sub(1, 5) == "read." then
       return read_set(key, value, actor)
     elseif key == "readGate.window" then
-      -- 遗忘窗口（r4 四维之一）：整数，缺省 80，越界夹紧到 [0, MAX]。
-      -- 调窗是**自解除的第二个杆杆**（第一杆是重读重签）：四维拒台词里逐条报当前值与抬高命令。
+      -- 遗忘窗口（r4 读签一维）：整数，缺省 80，越界夹紧到 [0, MAX]。
+      -- 调窗是**自解除的第二个杆杆**（第一杆是重读重签）：读签拒台词里逐条报当前值与抬高命令。
       -- 回执走通用 config_changed（`effective("readGate.window")` 此刻已是夹紧后的值）——不新开文案键。
       local parsed = tonumber(value)
       if parsed == nil then

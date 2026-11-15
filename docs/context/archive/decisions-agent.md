@@ -1,7 +1,7 @@
 # Yggdrasill · 架构决策台账 · Agent 治理（D-MA1–29）
 > **id** archive/decisions-agent · **幕** archive · **触发** 查 D-MA1–29 / 取决策号前
 > **读不到代价** silent-drift
-> **ver** 9dc190
+> **ver** 50d604
 
 > **定位**：Agent 治理（M-Agent）架构决策的权威台账（含台账维护规则，与 decisions-engine 共用同一段引言）。
 > **replaces**：CONTEXT §5 引言 + §5.2（L134–137, L162–189）（搬运基线 `3a2536f`）
@@ -20,7 +20,7 @@
 | --- | --- | --- | --- | --- |
 | **D-MA22** | 集成职责 | 执行者集成 feature→develop；主流程负责 develop→master、reset-develop 与批次 tag，合并触发方随 play.mode。 | 已确认（含 2026-11-12 reset-develop 用户修订） | [rituals/dispatch.md](../rituals/dispatch.md) §6 · [acts/release.md](../acts/release.md) 发布幕 · playbook `integration.round.reset-develop` |
 | **D-MA27** | 文件边界 | `docs/context` 按「谁在什么时点需要」切分，不按主题或章节切分；主流程幕 1:1 一文件，需求级九幕按共享时点聚合三份。 | 已确认（2026-11-15，r1） | 本文件 §D-MA27 · [../README.md](../README.md)（召回入口） · [../scenes.json](../scenes.json) |
-| **D-MA28** | scene gate | 幕转场必列必读清单（脚本从文件头生成，零漂移）；推进剧情必须签名 `read.<doc-id>=<ver>`；四维失效（覆盖/新鲜/遗忘/主体）。 | 已确认（2026-11-15，分期 r1→r5） | 本文件 §D-MA28 · [../README.md](../README.md) · [../../design/host/harness-tools.md](../../design/host/harness-tools.md) |
+| **D-MA28** | scene gate | 幕转场必列必读清单（脚本从文件头生成，零漂移）；推进剧情必须签名 `read.<doc-id>=<ver>`；四维失效（覆盖/新鲜/遗忘/主体；**主体维已于 r11 退役**——amend 由 r3 销票覆盖，见 [../../design/mod/identity.md](../../design/mod/identity.md)）。 | 已确认（2026-11-15，分期 r1→r5） | 本文件 §D-MA28 · [../README.md](../README.md) · [../../design/host/harness-tools.md](../../design/host/harness-tools.md) |
 | **D-MA29** | ver 与兼容层 | `ver` = 定宽占位归一化后取 `git hash-object` 前 6 位；兼容层「拆分型→薄壳、1:1 迁移→软链」两分法，必须带退场条件。 | 已确认（2026-11-15，r1） | 本文件 §D-MA29 · `scripts/docs-ver.sh` · [../../design/host/harness-tools.md](../../design/host/harness-tools.md) |
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
@@ -61,7 +61,7 @@
 
 ## D-MA28 — scene gate：幕转场必列必读 + 推进必签名（2026-11-15）
 
-**决定**：① 幕转场回执必须列出该幕的必读清单，清单由脚本从文件固定头生成（`scenes.json` + `id`/`ver`），**零漂移**、人不手写；② 推进剧情的动作（`requirement.dispatch` / `proposal.submit` / `gate.approve` / `coordinate.submit`）必须携带 `config.set read.<doc-id>=<ver>` 签名；③ 四维失效：**覆盖**（该幕文件没签）、**新鲜**（签的 ver ≠ 磁盘 ver）、**遗忘**（跨幕未重签）、**主体**（签名主体与该动作的执行者不一致）。分期：r1 docs 拆分（本批）→ r2 必读推送 → r3 签名落地 → r4 门禁四维校验 → r5 兼容层退场。
+**决定**：① 幕转场回执必须列出该幕的必读清单，清单由脚本从文件固定头生成（`scenes.json` + `id`/`ver`），**零漂移**、人不手写；② 推进剧情的动作（`requirement.dispatch` / `proposal.submit` / `gate.approve` / `coordinate.submit`）必须携带 `config.set read.<doc-id>=<ver>` 签名；③ 四维失效：**覆盖**（该幕文件没签）、**新鲜**（签的 ver ≠ 磁盘 ver）、**遗忘**（跨幕未重签）、**主体**（签名主体与该动作的执行者不一致）。分期：r1 docs 拆分（本批）→ r2 必读推送 → r3 签名落地 → r4 门禁四维校验 → r5 兼容层退场。 **r11 追补**：③ 的「主体」一维退役（`req_bump_rev` 同事务 `readsig.clear()`，「签名早于新 rev」在 amend / 两路打回上结构性不可达；该场景现由新鲜维 `read-gate/stale` 接管），现行判据为 **覆盖 / 新鲜 / 遗忘 + 按人**。
 
 **依据**：摘要替代正文是已被 AGENTS §1.0c 点名的首要失效模式（回执 `[READ FIRST]`、beats 文本、playbook 摘要、上一局习惯都是「路由与摘要，never the rule」）；没有机器可验的签名时，「读过」无法审计，也无法证明读的是当前版本。r1 之前连指针都只能指向一个 240 行的平铺文件，所以清单必须先有可寻址的粒度（D-MA27）才可能零漂移。
 
