@@ -251,3 +251,49 @@ test("叙述面与源码的 docs/design 指针：逐来源账守恒 + 锚点全�
   assert_eq(total, 5, ("docs/design 指针总数漂移：期望 5，实得 %d"):format(total))
   assert_eq(#violations, 0, "docs/design 指针锚点不存在：" .. table.concat(violations, ", "))
 end)
+
+--- 公开包装：design 指针解析与核销（漏检防线用例用）。
+function design_ptr_paths(value)
+  return design_pointer_paths(value)
+end
+
+function design_ptr_violations(ns, key, value)
+  local acc = { count = 0, violations = {} }
+  design_pointer_violations(acc, ns, key, value)
+  return acc
+end
+
+test("design 解析器漏检防线：子目录 / 句末点 / 通配 / `..` 六段", function()
+  -- ① 一层子目录。
+  local one = design_ptr_paths("见 docs/design/kernel/state-machine.md（状态机）。")
+  assert_eq(#one, 1, "子目录指针必须识别")
+  assert_eq(one[1], "kernel/state-machine.md", "路径原样")
+
+  -- ② 句末多点一个也不吞；紧邻中文标点 / `；` 不吞路径。
+  local two = design_ptr_paths(
+    "改 harness-tools 前读 docs/design/host/harness-tools.md. 再看 docs/design/mod/tool-bridge.md；"
+  )
+  assert_eq(#two, 2, "两个指针")
+  assert_eq(two[1], "host/harness-tools.md", "句末多余的点被 trim")
+  assert_eq(two[2], "mod/tool-bridge.md", "紧邻中文标点不吞")
+
+  -- ③ 目录指针 / 通配 / 占位都不算文件指针。
+  local none = design_ptr_paths(
+    "目录 docs/design/kernel/ 与通配 docs/design/*.md 与占位 docs/design/<module>/<topic>.md"
+  )
+  assert_eq(#none, 0, "目录、通配、占位都不算文件指针")
+
+  -- ④ 存在的子目录锚点：计数 1、零违规。
+  local ok = design_ptr_violations("t", "ok", "docs/design/kernel/state-machine.md")
+  assert_eq(ok.count, 1, "子目录指针必须计入 pointer_count")
+  assert_eq(#ok.violations, 0, "存在的锚点零违规")
+
+  -- ⑤ 不存在的子目录锚点：计数 1 且 1 条违规。
+  local missing = design_ptr_violations("t", "missing", "docs/design/kernel/definitely-no-such-doc.md")
+  assert_eq(missing.count, 1, "缺失锚点也计数")
+  assert_eq(#missing.violations, 1, "指向不存在子目录文件的指针必须转红")
+
+  -- ⑥ `..` 穿越必须违规。
+  local escape = design_ptr_violations("t", "escape", "docs/design/kernel/../README.md")
+  assert_eq(#escape.violations, 1, "`..` 穿越必须违规：" .. table.concat(escape.violations, ", "))
+end)
