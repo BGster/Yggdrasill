@@ -1222,39 +1222,6 @@ sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo lis
 
 // ───────────────────── batch-maintenance auto-append (r3 / 批结算自动维护) ─────────────────────
 
-/// The dedup boundary (③「未终态」语义): a **terminal** same-title maintenance requirement
-/// does **not** suppress the auto-append. A manual same-title add during the settle act is
-/// legal (requirement.add admits settle), but it re-arms the global gate: all-green verify
-/// is refused (the row is open), the batch falls back to coordinate, the manual row walks
-/// the pipeline like any requirement, and when the batch finally closes it appends a
-/// fresh round's row (r3) — a terminal same-title row does not suppress it. (The failed
-/// verify never completed the close, so `run.batch` stays 1: this IS batch 1's close.)
-/// 解除只认**等值批次**：拿旧批次号清不掉新义务，未知 docs 键直接拒；空值才是显式放弃。
-#[test]
-fn docs_maintenance_clear_requires_the_outstanding_batch() {
-    let mut game = drive_to_release();
-    game.narrate("release.skip", &text("纯测试批次"));
-    game.click("review.note — ");
-    game.assert_kv("docs.maintenance.due", json!("1"));
-
-    let stale = game.narrate("config.set", &text("docs.maintenance.done=0"));
-    assert_refused(&stale, "config.set");
-    game.assert_kv("docs.maintenance.due", json!("1"));
-
-    let unknown = game.narrate("config.set", &text("docs.maintenance.other=1"));
-    assert_refused(&unknown, "config.set");
-    game.assert_kv("docs.maintenance.due", json!("1"));
-
-    let cleared = game.narrate("config.set", &text("docs.maintenance.done=1"));
-    assert!(
-        cleared
-            .iter()
-            .any(|l| l.contains("[DOCS MAINTENANCE CLEARED]")),
-        "{cleared:#?}"
-    );
-    game.assert_kv("docs.maintenance.due", json!(""));
-}
-
 // ───────────────────── gate locality & the integration act ─────────────────────
 
 /// Gate independence: **another requirement's** pending proposal / running job does not

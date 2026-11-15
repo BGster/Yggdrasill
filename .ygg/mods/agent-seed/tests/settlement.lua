@@ -133,3 +133,25 @@ test("批结算登记维护义务并硬阻塞下一次批边界（解除后放�
   click("coordinate.submit — ")
   assert_eq(kv("run.phase"), "settle", "the boundary is released")
 end)
+
+test("维护义务只认等值批次：旧批次号与未知键都被拒", function()
+  drive_to_release()
+  fire("release.skip", "纯测试批次")
+  click("review.note — ")
+  assert_eq(kv("docs.maintenance.due"), "1", "the settle pins the obligation to batch 1")
+
+  reset()
+  fire("config.set", "docs.maintenance.done=0")
+  assert_true(narrated_contains("[REJECTED"), "a stale batch number cannot clear a newer obligation")
+  assert_eq(kv("docs.maintenance.due"), "1", "the obligation survives the stale clear")
+
+  reset()
+  fire("config.set", "docs.maintenance.other=1")
+  assert_true(narrated_contains("[REJECTED"), "an unknown docs key is refused")
+  assert_eq(kv("docs.maintenance.due"), "1", "the obligation survives the unknown key")
+
+  reset()
+  fire("config.set", "docs.maintenance.done=1")
+  assert_true(narrated_contains("[DOCS MAINTENANCE CLEARED]"), "the equal batch clears it")
+  assert_eq(kv("docs.maintenance.due"), "", "the obligation empties")
+end)
