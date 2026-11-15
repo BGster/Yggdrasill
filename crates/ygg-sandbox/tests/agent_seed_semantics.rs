@@ -3334,7 +3334,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         .iter()
         .filter(|path| path.starts_with("data/playbook/"))
         .count();
-    assert_eq!(playbook, 4, "playbook = head + 3 chapter fragments (r5; only ch1/ch3/ch4-mod-host remain, 2026-11-15)");
+    assert_eq!(playbook, 3, "playbook = head + 2 chapter fragments (r5; only ch1/ch3 remain, 2026-11-15)");
     for path in &pack_entry_paths {
         assert!(
             project.join(path).is_file(),
@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        5,
-        "STAGE_GUIDE must route all 5 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
+        4,
+        "STAGE_GUIDE must route all 4 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        5,
-        "r5 assembles 5 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
+        4,
+        "r5 assembles 4 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        5,
+        4,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3526,9 +3526,8 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     let mut settle = drive_to_settle();
     assert_receipt(
         &mut settle,
-        &[
-            "host_contract",
-        ],
+        // settle 相位已无规则章节映射，guide_section 回退到装配后的第一章
+        &[chapters[0].0.as_str()],
     );
     let mut release = drive_to_release();
     assert_receipt(&mut release, &["branches"]);
@@ -4382,7 +4381,6 @@ fn design_pointer_anchors_exist_under_docs_design() {
 
     let expected: std::collections::BTreeMap<String, usize> = [
         ("ch1-foundation.json", 4usize),
-        ("ch4-mod-host.json", 2),
         ("beats-settlement.json", 3),
         ("tools.lua", 2),
     ]
@@ -4394,7 +4392,7 @@ fn design_pointer_anchors_exist_under_docs_design() {
         ledger, expected,
         "docs/design 指针账漂移（逐来源）：{ledger:?}"
     );
-    assert_eq!(total, 11, "docs/design 指针总数漂移：期望 11，实得 {total}");
+    assert_eq!(total, 9, "docs/design 指针总数漂移：期望 9，实得 {total}");
     assert!(
         violations.is_empty(),
         "docs/design 指针锚点不存在：{}",

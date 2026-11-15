@@ -66,12 +66,6 @@
       "kind": "agent-playbook-fragment",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
       "path": "data/playbook/ch3-evidence.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch4-mod-host",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-mod-host.json"
     }
   ],
   "schemaFiles": [
