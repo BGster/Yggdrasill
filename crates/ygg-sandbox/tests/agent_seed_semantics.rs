@@ -3909,8 +3909,8 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
         ("requirements.md", "beats-requirements.json"),
         ("settlement.md", "beats-settlement.json"),
     ] {
-        let text = std::fs::read_to_string(repo.join("docs/context").join("copy").join(doc))
-            .unwrap_or_else(|err| panic!("read docs/context/copy/{doc}: {err}"));
+        let text = std::fs::read_to_string(repo.join("docs/context").join("scenes").join(doc))
+            .unwrap_or_else(|err| panic!("read docs/context/scenes/{doc}: {err}"));
         let documented = markdown_key_set(&text);
         let fragment_json = read_json(&mod_dir.join(format!("data/texts/{fragment}")));
         let actual: std::collections::BTreeSet<String> = fragment_json["beats"]
@@ -3931,7 +3931,7 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
         }
         total += documented.len();
     }
-    let core_text = std::fs::read_to_string(repo.join("docs/context/copy/core.md"))
+    let core_text = std::fs::read_to_string(repo.join("docs/context/scenes/core.md"))
         .expect("read core copy contract");
     let core_tables = core_text.split("## H.").next().expect("core tables");
     let documented = markdown_key_set(core_tables);
