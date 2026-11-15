@@ -26,9 +26,9 @@
       "sha256": "892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
     },
     {
-      "byteLength": 12439,
+      "byteLength": 12952,
       "path": "src/domain/gates.lua",
-      "sha256": "56e4b1f696b387f68fb73f65aab82f611e3c45e60764e2dd1641274a92833dcf"
+      "sha256": "2fd38c72a83a00736636b92669a15893785646f4570468ec8728e95872141b27"
     },
     {
       "byteLength": 12478,
@@ -201,20 +201,20 @@
       "sha256": "56722f4b5972cb2894dcb1cb0cc66f63978c654d2071479f22e7f979fac9823d"
     },
     {
-      "byteLength": 12798,
+      "byteLength": 12758,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "3fce38736815381c7d0192aa4154bc5cbc30eef63e4145c4a29ef97ac1e42cc9"
+      "sha256": "2456c8c0271500d88a06f4c6c9b60d875ed2b792f1e98158d0d0b64b062ef5d3"
     },
     {
-      "byteLength": 932,
+      "byteLength": 1918,
       "id": "ygg:agent/config",
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "74d52bd7150bd2ca70cf3377ae31db35e0be7b2dd17e918868826f7818db79fb"
+      "sha256": "3cc94339a4c83e33464f45863c9c8b132065fb65ca07d659ea6783d751e25aff"
     },
     {
       "byteLength": 1943,
