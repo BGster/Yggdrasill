@@ -394,21 +394,6 @@ impl Game {
     /// The requirement panel line (per-micro-state tally) — the `useMemo` derived surface.
     /// The requirement **rows** of a `requirement.list` receipt (`mark rN [status] title`).
     #[track_caller]
-    fn req_rows(lines: &[String]) -> Vec<(String, String)> {
-        lines
-            .iter()
-            .filter_map(|line| {
-                let tokens: Vec<&str> = line.split_whitespace().collect();
-                let id = *tokens.get(1)?;
-                let status = *tokens.get(2)?;
-                let id = id.strip_prefix('r')?;
-                if !id.chars().all(|c| c.is_ascii_digit()) || !status.starts_with('[') {
-                    return None;
-                }
-                Some((format!("r{id}"), status.trim_start_matches('[').to_owned()))
-            })
-            .collect()
-    }
 }
 
 /// Rust string → JSON string payload (a dispatch payload must be valid JSON).
