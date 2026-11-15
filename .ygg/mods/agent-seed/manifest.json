@@ -143,12 +143,12 @@
   ],
   "entries": [
     {
-      "byteLength": 5529,
+      "byteLength": 7207,
       "id": "ygg:scene/texts",
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "5a51d4e2139e57b0a895ad36ade65c89c32ea5893acb2d58db1d533bcb65e024"
+      "sha256": "28670de1a033ebd6c1eac7eb82c6e74e7db9da992d9f435ebef78fee9c848311"
     },
     {
       "byteLength": 7459,
