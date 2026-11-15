@@ -278,3 +278,51 @@ test("tool.call 发布密集待决快照：分配序、args 省略、meta 不拖
   assert_eq(kv("tool.pending"), 2, "待决计数")
   assert_eq(kv("tool.t2.status"), "pending", "第二行状态")
 end)
+
+local function count_marker(marker)
+  local n = 0
+  for _, line in ipairs(narrated()) do
+    if line:find(marker, 1, true) then
+      n = n + 1
+    end
+  end
+  return n
+end
+
+test("tool.result：同回合回执收敛 + 重放幂等 + 终态冲突拒绝", function()
+  -- ① 同回合收敛：结果落库，回执效应在唯一选择产出前就绪。
+  drive_to_settle()
+  fire("tool.call", "git.head_short")
+  reset()
+  fire("tool.result", "t1|git.head_short|ok|0|abc1234")
+  assert_eq(count_marker("[TOOL RESULT]"), 1, "结果行恰好一次")
+  assert_eq(count_marker("[TOOL SETTLED]"), 1, "回执效应必须在唯一选择产出前收敛")
+
+  assert_eq(kv("tool.t1.status"), "ok", "行状态")
+  assert_eq(kv("tool.t1.code"), 0, "code")
+  assert_eq(kv("tool.t1.output"), "abc1234", "输出")
+  assert_eq(kv("tool.pending"), 0, "队列清空")
+  assert_eq(kv("tool.last"), "t1", "last 指向最后结清的 call")
+  assert_eq(kv("tool.notified.t1"), true, "回执闩锁")
+  assert_eq(#__SELFTEST.meta.tool_calls, 0, "已结清的 call 留下空队列（不是缺键）")
+
+  -- ② 新 external_id 只填幂等键。
+  reset()
+  fire("tool.result", "t1|git.head_short|ok|0|abc1234|ext-1")
+  assert_eq(kv("tool.t1.res_ext"), "ext-1", "外部 id 落幂等键")
+
+  -- ③ 同 external_id = 重放：无 RESULT、无第二次 SETTLED。
+  reset()
+  fire("tool.result", "t1|git.head_short|ok|0|abc1234|ext-1")
+  assert_eq(count_marker("[REPLAY:TOOL]"), 1, "重放行恰好一次")
+  assert_eq(count_marker("[TOOL RESULT]"), 0, "重放不得再写结果行")
+  assert_eq(count_marker("[TOOL SETTLED]"), 0, "重放不得再触发回执")
+  assert_eq(kv("tool.pending"), 0, "待决计数不变")
+
+  -- ④ 不同终态 = 冲突，不是覆盖。
+  reset()
+  fire("tool.result", "t1|git.head_short|err|1|boom|ext-2")
+  assert_true(narrated_contains("t1"), "冲突必须点名 call id：" .. table.concat(narrated(), " | "))
+  assert_eq(kv("tool.t1.status"), "ok", "终态不被覆盖")
+  assert_eq(kv("tool.t1.output"), "abc1234", "输出不被覆盖")
+end)

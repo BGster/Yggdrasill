@@ -2602,64 +2602,6 @@ fn playbook_and_src_context_pointers_resolve() {
 
 // ───────────────────── tool bridge (T1–T4) ─────────────────────
 
-/// T2 The result direction: `tool.result` writes the row, drops the call from the queue, and the
-/// receipt effect converges **in the same turn** (both lines in one narrative batch).
-#[test]
-fn tool_result_updates_kv_and_the_receipt_effect_fires_in_the_same_turn() {
-    let mut game = drive_to_settle();
-    game.narrate("tool.call", &text("git.head_short"));
-
-    let reply = game.reply("tool.result", &text("t1|git.head_short|ok|0|abc1234"));
-    let lines = narrative_lines(&reply);
-    assert_eq!(count_lines(&lines, "[TOOL RESULT]"), 1, "{lines:#?}");
-    assert_eq!(
-        count_lines(&lines, "[TOOL SETTLED]"),
-        1,
-        "the receipt effect must converge before the single choice is produced: {lines:#?}"
-    );
-
-    game.assert_kv("tool.t1.status", json!("ok"));
-    game.assert_kv("tool.t1.code", json!(0));
-    game.assert_kv("tool.t1.output", json!("abc1234"));
-    game.assert_kv("tool.pending", json!(0));
-    game.assert_kv("tool.last", json!("t1"));
-    game.assert_kv("tool.notified.t1", json!(true));
-    assert_eq!(
-        reply["meta"]["tool_calls"],
-        json!([]),
-        "a settled call leaves an empty (not missing) queue: {reply}"
-    );
-}
-
-/// T3 Replay safety: an already-applied `external_id` is an idempotent return (no state change,
-/// no second `[TOOL SETTLED]`), while a conflicting terminal status is refused outright.
-#[test]
-fn tool_result_replay_is_idempotent_and_never_refires_the_effect() {
-    let mut game = drive_to_settle();
-    game.narrate("tool.call", &text("git.head_short"));
-    let settled =
-        narrative_lines(&game.reply("tool.result", &text("t1|git.head_short|ok|0|abc1234")));
-    assert_eq!(count_lines(&settled, "[TOOL SETTLED]"), 1, "{settled:#?}");
-
-    // ① applying the same result again under a fresh external_id only fills the idempotency key.
-    game.narrate("tool.result", &text("t1|git.head_short|ok|0|abc1234|ext-1"));
-    game.assert_kv("tool.t1.res_ext", json!("ext-1"));
-
-    // ② the same external_id again is a replay: no `[TOOL RESULT]`, no second `[TOOL SETTLED]`.
-    let replay =
-        narrative_lines(&game.reply("tool.result", &text("t1|git.head_short|ok|0|abc1234|ext-1")));
-    assert_eq!(count_lines(&replay, "[REPLAY:TOOL]"), 1, "{replay:#?}");
-    assert_eq!(count_lines(&replay, "[TOOL RESULT]"), 0, "{replay:#?}");
-    assert_eq!(count_lines(&replay, "[TOOL SETTLED]"), 0, "{replay:#?}");
-    game.assert_kv("tool.pending", json!(0));
-
-    // ③ a different terminal status is a conflict, not an overwrite.
-    let conflict = game.narrate("tool.result", &text("t1|git.head_short|err|1|boom|ext-2"));
-    assert_refused(&conflict, "t1");
-    game.assert_kv("tool.t1.status", json!("ok"));
-    game.assert_kv("tool.t1.output", json!("abc1234"));
-}
-
 // ───────────────────── A · active subsystem ─────────────────────
 
 /// One full tool round trip: register the request, then settle it. Machine actions carry no
