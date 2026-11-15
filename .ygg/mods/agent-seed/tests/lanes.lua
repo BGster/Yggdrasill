@@ -109,3 +109,68 @@ test("lane_probe 记真相 / 冲突雷达阻塞 / 失败只警告 / resolve 是�
   assert_eq(kv("req.2.conflict_source"), "", "反向来源清空")
   assert_eq(phase_of("r1"), "draft", "回到 draft")
 end)
+
+test("lane.pool 注册表 / 多仓同名 k 并行 / 注册与未注册池的形状门", function()
+  fresh()
+  charter_and_begin()
+  fire("requirement.add", "alpha side|description|subsys-a")
+  fire("requirement.add", "beta side|description|subsys-b")
+
+  -- ① 注册是幂等 upsert：重复注册 alpha 原地更新。
+  reset()
+  fire("lane.pool", "alpha|/tmp/checkout-alpha")
+  assert_eq(count_marker("[LANE POOL]"), 1, "注册必须叙述")
+  fire("lane.pool", "beta|/tmp/checkout-beta")
+  fire("lane.pool", "alpha|/tmp/checkout-alpha")
+  assert_eq(kv("lane.pools"), "alpha,beta", "池清单")
+  assert_eq(kv("lane.pool.alpha.path"), "/tmp/checkout-alpha", "池路径")
+
+  -- ② 多仓：两个池里同一个 k=1 可以同时各持一条需求。
+  reset()
+  fire("lane.claim", "1|r1|feature/aa11-alpha|abc1234|1|alpha")
+  assert_eq(count_marker("[LANE CLAIMED]"), 1, "alpha 认领必须叙述")
+  assert_true(
+    narrated_contains("lane-alpha-1"),
+    "命名池的标签形如 lane-<pool>-<k>：" .. table.concat(narrated(), " | ")
+  )
+  reset()
+  fire("lane.claim", "1|r2|feature/aa11-beta|abc1234|1|beta")
+  assert_eq(count_marker("[LANE CLAIMED]"), 1, "beta 认领必须叙述")
+  assert_eq(kv("lane.alpha.1.req"), "r1", "alpha 池 k=1")
+  assert_eq(kv("lane.beta.1.req"), "r2", "beta 池 k=1")
+  assert_nil(kv("lane.1.req"), "默认池的 k=1 保持未动")
+  assert_eq(kv("req.1.lane"), 1, "需求 1 的泳道号")
+  assert_eq(kv("req.1.lane_pool"), "alpha", "需求 1 的池")
+  assert_eq(kv("req.2.lane_pool"), "beta", "需求 2 的池")
+
+  -- ③ 注册形状门：坏标签 / 保留字 / 脏路径段一律拒，且一件都不注册。
+  local rejects_before = kv("reject.count")
+  for _, payload in ipairs({
+    "Alpha|/tmp/x",   -- 标签必须小写
+    "seq|/tmp/x",     -- 保留字
+    "pools|/tmp/x",   -- 保留字
+    "alpha| /tmp/x ", -- 路径首尾空格
+    "alpha|/tmp/a;b", -- `;` 会破坏 args wire
+    "alpha|",         -- 空路径
+  }) do
+    reset()
+    fire("lane.pool", payload)
+    assert_true(
+      narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+      ("注册形状门必须拒绝 `%s`：%s"):format(payload, table.concat(narrated(), " | "))
+    )
+  end
+  assert_true(kv("reject.count") ~= rejects_before, "注册拒绝必须移动 reject 账")
+  assert_eq(kv("lane.pools"), "alpha,beta", "池清单不变")
+
+  -- ④ 认领一个未注册的池：被拒且不落台账。
+  local before2 = kv("reject.count")
+  reset()
+  fire("lane.claim", "2|r1|feature/aa11-gamma|abc1234|1|gamma")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "未注册池必须被拒：" .. table.concat(narrated(), " | ")
+  )
+  assert_true(kv("reject.count") ~= before2, "认领拒绝必须移动 reject 账")
+  assert_nil(kv("lane.gamma.2.req"), "不得注册")
+end)
