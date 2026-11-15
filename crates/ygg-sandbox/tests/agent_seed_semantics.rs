@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        13,
-        "STAGE_GUIDE must route all 13 remaining chapters (6 moved to docs on 2026-11-15): {mapped:?}"
+        11,
+        "STAGE_GUIDE must route all 11 remaining chapters (8 moved/deleted on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        13,
-        "r5 assembles 13 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
+        11,
+        "r5 assembles 11 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        13,
+        11,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3513,7 +3513,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     charter.narrate("event.start", "0");
     assert_receipt(
         &mut charter,
-        &["repository", "credentials", "hard_constraints", "output"],
+        &["repository", "credentials", "hard_constraints"],
     );
     charter_and_begin(&mut charter);
     assert_receipt(
@@ -3545,7 +3545,9 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     release.click("back — ");
     release.click("review.note — ");
     release.assert_kv("fsm.stage", json!("retired"));
-    assert_receipt(&mut release, &["pointers"]);
+    // retired 相位已无规则章节映射（pointers 已归位 cold-start/principles.md），
+    // guide_section 回退到装配后的第一章——因此当前相位行落在 chapters[0] 上。
+    assert_receipt(&mut release, &[chapters[0].0.as_str()]);
 }
 
 /// The assembled beats set (what `mod.lua` builds from the fragments — the same union the
