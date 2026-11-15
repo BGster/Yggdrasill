@@ -23,11 +23,25 @@ The user runs real-data verification and pastes the output; synthetic data under
     summaries, a previous run's habit and this session's earlier impression are **routes and digests, never
     the rule** — substituting a digest for the body is a violation, and so is acting from memory when the
     body is one read away.
-    - **Read again, every time**: re-entering the same scene, a rejected-and-replanned requirement, and a new
-      batch each require a fresh read and a fresh signature. "I read it last time" is not an exemption — the
-      document may have changed since, and memory drifts on its own.
-    - **Only the current version counts**: a signature carries the document's current version token; a
-      signature made against an older one is expired, never reusable.
+    - **Read again, every time — the decidable form.** Re-entering the same scene, a rejected-and-replanned
+      requirement and a new batch each require a **fresh signature by the person doing the action**; a
+      signature older than the scope entry is expired and never reusable. What that fresh signature must
+      *consume* is decided by two facts, not by habit:
+
+      | Situation | Required | Compliant when |
+      | --- | --- | --- |
+      | on-disk `ver` differs from the `ver` you last read | **body read** — the whole document, then sign | you can name what changed |
+      | same `ver`, gap since your last **body read** ≤ `readGate.window` (default 80 dispatches), no context loss | **version check** — confirm the on-disk `ver` equals the signed one, then sign | the report carries `was=<ver> now=<ver>`; this is **not** a violation |
+      | same `ver`, gap > window, or context lost (compaction / new session / handoff) | **body read**, then sign | the read is in this session's transcript |
+
+      **A version check never extends the window: only a body read resets it.** `ver` *is* the content
+      identity (`scripts/docs-ver.sh` hashes the body with the ver token blanked to `000000`, keeping 6 hex
+      digits), so "the document may have changed since" is fully covered by a version check — an unchanged
+      `ver` means a byte-identical body apart from that token (a 24-bit prefix: a change detector, not an
+      integrity proof). What a version check cannot cover is your own recall decaying, which tracks distance
+      and context loss — exactly what the window and the context-loss trigger measure. The mechanism checks
+      `ver` / epoch / window only: a signature attests "signed", never "read" — report it as a declaration
+      (§1.7), never as proof.
     - **Unreadable = stop**: a missing path, a moved file, or a body that contradicts the index is a
       stop-and-report — never a licence to proceed from memory.
     - **Read whole**: never claim a read from the first few lines or a single `grep` hit (same origin as §1's
@@ -88,6 +102,22 @@ The user runs real-data verification and pastes the output; synthetic data under
      not carry constraints. Never patch the egg CLI source; give the user the symptom and reproduction.
    - Every evolution needs all three: ① the specific action blocked; ② the visible violation symptom;
      ③ one runnable confirmation. Fewer than three means it is not written. A verbal promise is unhandled.
+   - **No claim without its method — absence and counts included.** A negative claim ("this repo never had
+     X") and a quantity claim ("16 occurrences") are assertions: unproven until a method that *could have
+     returned the opposite* produced them. Before either enters a requirement description, a plan or
+     development artifact, a `proposal.submit` summary or an evolution artifact, run the method, paste its
+     output and name the method beside the conclusion. An unsupported "does not exist" reports "I did not
+     look there", not absence — the r6 ruling that `ygg-lint` "never existed" reached a requirement
+     description and an evolution artifact that way, while `crates/ygg-lint` was there all along.
+
+     | Assertion | Method that could have failed |
+     | --- | --- |
+     | PATH command absent | `command -v <tool>; echo "exit=$?"` — exit=1 only |
+     | cargo crate absent | `cargo metadata --no-deps --format-version 1`, or `ls crates/` |
+     | file / directory present | `test -e <path> && echo EXISTS` |
+     | a count (occurrences / files / lines) | one recomputable command, output pasted, denominator stated |
+
+     Anti-patterns and two worked examples: `docs/context/rituals/dispatch.md` §4「取证标准」.
    - Candidate screening and declaration limits: `docs/context/acts/settle.md` + playbook
      `evolution`. Mod text path hygiene: `docs/design/mod/mod-package.md`.
 

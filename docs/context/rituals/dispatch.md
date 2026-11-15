@@ -1,7 +1,7 @@
 # Yggdrasill · 派发仪式（rituals/dispatch）
 > **id** rituals/dispatch · **幕** coordinate（派发前） · **触发** 派发任何 subagent（plan / development / analysis）前
 > **读不到代价** hard-refusal（`.env.local` 未 source 即派发、工件落检出、submit 缺 `exec=` 均不合规）
-> **ver** eb96ed
+> **ver** 2617d1
 
 > **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
@@ -51,6 +51,21 @@ set +a
 ## 4. 工件纪律（Artifact）
 
 交付物通过 harness 存档，**绝不作为散文件落在任何检出里**：子代理在最终汇报中返回全文（或写到 /tmp 下），主会话用 `--artifact-put artifacts/<name>.md` 记入本局存档。一局的所有工件只活在该局存档（`<run-dir>/artifacts/`）；任何检出内的 `artifacts/` 是 git 忽略的草稿区，不是权威副本。
+
+**取证标准（Falsifiable assertions）**——`AGENTS.md §1.7` 该条的**操作面细化**（判定权威在 §1.7，本节只多给一列反例形态与两条实录）：工件里的**否定性断言**（“X 不存在 / 本仓从未有 Y”）与**数量断言**（“16 处”）必须先跑一条**本来可能给出反例**的方法并贴原始输出，结论旁写明方法名。方法必须与断言对象的**形态**匹配——
+
+| 断言形态 | 方法（会失败的那种） | 反例（看着像取证、其实不可能给出“存在”） |
+| --- | --- | --- |
+| PATH 上的命令不存在 | `command -v <tool>; echo "exit=$?"`（exit=1 才算不存在） | `which <tool>`（同 PATH，换名不换语义）；`ls scripts/*<tool>*`（只扫本仓脚本目录，对 cargo crate / 全局命令恒空） |
+| cargo crate 不存在 | `cargo metadata --no-deps --format-version 1`（取 `packages[].name`，或直接 `ls crates/`） | `command -v ygg-lint`（crate 不是 PATH 命令，恒空 → 假否定） |
+| 文件 / 目录存在性 | `test -e <path> && echo EXISTS` | `ls <glob>`（通配不匹配时不报错，易读成“没有”） |
+| 数量 N（出现次数 / 文件数 / 行数） | 一条可复算命令 + 贴原始输出；写清分母（口径） | 目测、抽样、只数一屏、换口径不声明（16 vs 23 键 24 处） |
+
+**断言“不存在”时必须写明「我用什么方法找过」**——未写方法的否定结论视同“我没往那儿看”，不得作为证据；数量断言必须可被第三方用同一条命令复算同一个数。
+
+实录一（假否定，r6）：需求描述写「`req-acts/integration.md` 证据清单里的 `ygg-lint` 本仓从未存在」，取证用的是 `command -v ygg-lint` 与 `ls scripts/*lint*`——两者都不适用于 cargo crate；实测 `crates/ygg-lint` 存在，`cargo run -q -p ygg-lint -- --pack .ygg/mods/agent-seed` → `0 error(s), 0 warning(s)`。
+
+实录二（数量口径，r5）：指针数报“16 处”，实为 23 键 24 处（`prop.10` 更正）——差的是分母口径与扫描范围，不是抄写错。
 
 ## 5. 提交仪式（Submit）
 
