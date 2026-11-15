@@ -172,6 +172,11 @@ fn install_assets(lua: &Lua, mod_dir: &Path) -> Result<usize, String> {
     lua.globals()
         .set("__ASSETS", assets)
         .map_err(|e| e.to_string())?;
+    // pack.json 本身也注入：结构类断言（模块表、entries、tools 声明）要读它。
+    let pack_lua = json_to_lua(lua, &pack).map_err(|e| e.to_string())?;
+    lua.globals()
+        .set("__PACK", pack_lua)
+        .map_err(|e| e.to_string())?;
     Ok(count)
 }
 
