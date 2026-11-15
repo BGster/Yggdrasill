@@ -128,6 +128,51 @@
             "type": "array",
             "items": { "type": "string", "minLength": 1 },
             "maxItems": 64
+        },
+        "readPlan": {
+            "description": "幕前必读清单（**可选段**，r3 销票制的覆盖面分母）：`<幕 id>` → 该幕必读文档的 doc-id 有序清单（形如 `acts/coordinate`，与 `config.set read.<act>/<doc-id>=<ver>` 的键同一口径）。签名回执据此算出「已签 k / 清单 n」；**缺段或缺某幕时降级**（回执只报已签件数，绝不拒签）。本段只由 `docs/context/` 的生成器写入，手改会被内容寻址的 manifest 拦下（改后必须重算 manifest）；Mod 只读该段，不写任何运行期状态。",
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "maxItems": 32,
+                "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}/[a-z][a-z0-9-]{0,47}$" }
+            }
+        },
+        "readGate": {
+            "description": "推进动作的必读集与版本台账（**可选段**，r4 四维判据的数据源）：`ver` = doc-id → 文档头 ver 台账（文档改版 ⇒ 旧签名作废，这是「改版需重读」的唯一机械载体）；`reqActs` = 提案 stage（plan / development）→ 该阶段要求先读的 doc-id 清单；`gates` = 门禁种类（plan / accept）→ 该门禁交出下一幕的 req-acts；`window` = 遗忘窗口（缺省 80，运行期可用 `config.set readGate.window=<n>` 覆盖）。与 `readPlan` 同一批由 `docs/context/` 的生成器产出（`scripts/gen-scene-readfirst.py --readset`），手改会被内容寻址的 manifest 拦下。**整段缺席 ⇒ 判据 inert**（不拦任何动作），这是分阶段上线的安全阀。",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "ver": {
+                    "description": "版本台账：doc-id → 该文档文件头的 6 位 hex ver（与 `> **ver** <6hex>` 逐字相等）。缺席 ⇒ 版本维度降级为「签过即算」并叙事一条 [READ GATE] 告警。",
+                    "type": "object",
+                    "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{4,40}$" }
+                },
+                "reqActs": {
+                    "description": "需求阶段维度：提案 stage（plan / development）→ 该阶段要求先读的 doc-id 有序清单。",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "maxItems": 32,
+                        "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}/[a-z][a-z0-9-]{0,47}$" }
+                    }
+                },
+                "gates": {
+                    "description": "门禁维度：门禁种类（plan / accept）→ 批准后接手的下一幕 req-acts 清单。",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "maxItems": 32,
+                        "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}/[a-z][a-z0-9-]{0,47}$" }
+                    }
+                },
+                "window": {
+                    "description": "遗忘窗口（派发事件数）：签名早于 now-window 即失效。运行期覆盖键 = settings.readGate.window；缺省 80（Lua 侧 DEFAULT_WINDOW）。",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000
+                }
+            }
         }
     }
 }

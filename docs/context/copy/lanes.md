@@ -1,7 +1,10 @@
 # Yggdrasill · mod 文案契约 · beats-lanes
+> **id** copy/lanes · **幕** all · **触发** 改 `beats-lanes.json` 前
+> **读不到代价** silent-drift
+> **ver** c0aeb4
 
 > **定位**：`beats-lanes.json` 36 键的句式知识权威：泳道账本、池注册、认领释放与 probe。
-> **上游**：[copy-contract.md](copy-contract.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-lanes.json`
+> **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-lanes.json`
 > **维护**：改文案先改本表再同步 mod；键增删/改域触发索引、prompt-surface 与键数同批更新。
 
 | 键 | 句式模板（逐字） | 变量 | 协议归属 |

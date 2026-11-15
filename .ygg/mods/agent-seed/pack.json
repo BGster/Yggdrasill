@@ -459,6 +459,9 @@
     "modules": [
       "src/core/util.lua",
       "src/core/config.lua",
+      "src/core/clock.lua",
+      "src/domain/readsig.lua",
+      "src/domain/readset.lua",
       "src/domain/requirements.lua",
       "src/domain/lanes.lua",
       "src/domain/proposals.lua",

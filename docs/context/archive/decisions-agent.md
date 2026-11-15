@@ -1,8 +1,11 @@
-# Yggdrasill · 架构决策台账 · Agent 治理（D-MA1–26）
+# Yggdrasill · 架构决策台账 · Agent 治理（D-MA1–29）
+> **id** archive/decisions-agent · **幕** archive · **触发** 查 D-MA1–29 / 取决策号前
+> **读不到代价** silent-drift
+> **ver** 408b4e
 
 > **定位**：Agent 治理（M-Agent）架构决策的权威台账（含台账维护规则，与 decisions-engine 共用同一段引言）。
 > **replaces**：CONTEXT §5 引言 + §5.2（L134–137, L162–189）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[decisions-engine.md](decisions-engine.md) · [../design/state-machine.md](../design/state-machine.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[decisions-engine.md](decisions-engine.md) · [../design/state-machine.md](../../design/state-machine.md)
 > **搬运**：以下正文自 CONTEXT.md L134–L137 + CONTEXT.md L162–L189 逐字迁移，不重写语义。
 
 ## 5. 关键架构决策台账（`D1–D21` 与 `M-Agent` 演进）
@@ -11,11 +14,14 @@
 
 ### 5.2 Agent 治理（`M-Agent`）架构决策
 
-新/修订决策采用「ID / 领域 / 一句话裁决 / 状态 / 指针」五列；本批仅以 D-MA22 试点，其余历史行原样保留，操作细节始终由指针目标维护。
+新/修订决策采用「ID / 领域 / 一句话裁决 / 状态 / 指针」五列；本批以 D-MA22 试点，D-MA27–29 续用同形态（表行 = 索引，正文见下方同名小节），其余历史行原样保留，操作细节始终由指针目标维护。
 
 | ID | 领域 | 一句话裁决 | 状态 | 指针 |
 | --- | --- | --- | --- | --- |
-| **D-MA22** | 集成职责 | 执行者集成 feature→develop；主流程负责 develop→master、reset-develop 与批次 tag，合并触发方随 play.mode。 | 已确认（含 2026-11-12 reset-develop 用户修订） | [dispatch-ritual.md](dispatch-ritual.md) §6 · [workflow-acts.md](workflow-acts.md) 发布幕 · playbook `integration.round.reset-develop` |
+| **D-MA22** | 集成职责 | 执行者集成 feature→develop；主流程负责 develop→master、reset-develop 与批次 tag，合并触发方随 play.mode。 | 已确认（含 2026-11-12 reset-develop 用户修订） | [rituals/dispatch.md](../rituals/dispatch.md) §6 · [acts/release.md](../acts/release.md) 发布幕 · playbook `integration.round.reset-develop` |
+| **D-MA27** | 文件边界 | `docs/context` 按「谁在什么时点需要」切分，不按主题或章节切分；主流程幕 1:1 一文件，需求级九幕按共享时点聚合三份。 | 已确认（2026-11-15，r1） | 本文件 §D-MA27 · [../README.md](../README.md)（召回入口） · [../scenes.json](../scenes.json) |
+| **D-MA28** | scene gate | 幕转场必列必读清单（脚本从文件头生成，零漂移）；推进剧情必须签名 `read.<doc-id>=<ver>`；四维失效（覆盖/新鲜/遗忘/主体）。 | 已确认（2026-11-15，分期 r1→r5） | 本文件 §D-MA28 · [../README.md](../README.md) · [../../design/harness-tools.md](../../design/harness-tools.md) |
+| **D-MA29** | ver 与兼容层 | `ver` = 定宽占位归一化后取 `git hash-object` 前 6 位；兼容层「拆分型→薄壳、1:1 迁移→软链」两分法，必须带退场条件。 | 已确认（2026-11-15，r1） | 本文件 §D-MA29 · `scripts/docs-ver.sh` · [../../design/harness-tools.md](../../design/harness-tools.md) |
 
 | ID | 决策领域 | 裁决与理由 | 状态 |
 | --- | --- | --- | --- |
@@ -37,11 +43,35 @@
 | **D-MA16** | 自动收波看门狗（r1） | 触发 = 扩展内进程内定时器轮询 daemon `summary`（`YGG_AUTO_INTERVAL_MS` 钳位 1s–60s，缺省 5s；批量入口禁令下唯一合法形态）；落点 = 每波原样复用 `ygg_run_lanes` 全链，天然停在门禁/待决提案（可收波谓词：available ∧ `lifecycle=="resident"` ∧ 无冲突 ∧ ∃ plan/development 作业未 `delivered:*` 未停车）；回执 = 事件账与手发同构 + `artifacts/auto-wave-<NNNN>.md` 波次日志（narrative 全量不截断）+ 交接单重写；保活 = 每 tick 一次 `summary()` 心跳，意外退出由 daemon 客户端既有单次重启自愈（spike 实证：`ctx.executeTool` 在回合外 handler ctx 上不可用 → 降级为 `pi.sendMessage(triggerTurn:true)` 确定性自唤醒回合，主代理代跑 `ygg_run_lanes`，每波多耗一个模型回合，语义与回执不变）；预算 = per `(req,rev,stage)` 连续 2 次整波失败停车（rev 变化自动复位）+ 全局 3 波全败自关（fail-closed）；在场唤醒 = goal 模式限定 opt-in（`YGG_AUTO_WAKE=on`），guide 模式永不唤醒；压缩边界 = 看门狗不是第三个压缩入口（硬水位只抑制派波）。宿主零改动；mod 仅 `summary_fields` 加性 `play` 投影。契约正文见 `docs/DESIGN.md` §3.5。 | **已废弃**（扩展层删除 2026-11-12，看门狗随层移除；daemon 常驻由宿主原生承担） |
 | **D-MA17** | 观察台展示投影（面板默认局详情视图） | 内置面板页允许对 agent-seed 工作流做**只读展示投影**：Rust 服务面保持零语义（零新端点、零解析——P11 字面边界不动），领域词汇（`fsm.stage`/`req.*`/`prop.*`/`lane.*` 键族、`req_phase_name` 派生名、决策事件族）的解析只发生在 `assets/panel` 展示层，且对无 `req.*` 键族的 mod **无害退化**（详情退化为通用摘要、零报错）。理由：面板=纯前端资产是「同 r3」需求约束，mod 侧自建 panel 违反该约束且引入第二套 UI（违 P4）；投影不限制 mod 自由度——任何 mod 的局仍可被观察，r8 的「宿主解析限制 mod 自由度」担忧只落在 Rust 面。判据=投影失败必须无害退化（字段缺失显「—」、非 seed 局只显摘要段）；权威仍是 mod 回执/CLI，面板仅为投影。 | 已确认 |
 | **D-MA18** | intake 阶段注销与章程载荷化（r2 rev2 B 裁决） | 注销 `intake` 宏观阶段与 `task.intake` 事件（零残留：菜单/渲染/地图/文案/playbook 链句全清；裁决时事件全集 33→32，D-MA23 后全集为 38 见 DESIGN §2.4）；冷启动章程改由 `event.start` 启动载荷承载（`title\|description`，复用 `parse_intake` 校验；`""`/`"0"` 同判无载荷；coordinate 内再带载荷 = 幂等补写不过段）； 局保护：`gate_problem` 增两条款（章程非空 ∧ 需求数 ≥1），`coordinate.submit`/`verify.submit`/`review.note` 共用可读拒绝，同时堵 `req_all_done` 0 需求空真洞。理由：冷启动两步仪式是 E3 筛查确认的隐藏出边——intake 阶段可立案后直接派活、 局可空收口，治理面外泄；载荷化后 boot 一步落 coordinate，章程与收口前置由状态机强制。判据=全 Mod grep intake 除 `[deprecated-ref]`/`parse_intake` 标识符/pack 钉死路径外归零；变异（重注册 task.intake）下 VALIDATION 拒绝集与事件计数断言必红。 | 已确认 |
-| **D-MA19** | 旧名别名机制退役（r3 rev1，用户裁决放行） | `pi-agent-seed` → `agent-seed` 的双向别名翻译层（D-MA13 的 `legacy_seed_alias`/`with_legacy_seed_alias`，含 main 入口归一与 serve 调用点）整体删除，解析单义化：`resolve_mod_dir` 仅对「路径缺席 ∧ 父目录名 `mods` ∧ 末段精确 `pi-agent-seed`」给专名拒绝（点名同父规范路径、宣布退役日期、历史 run.json **不迁移**——开新 run-id 新局）；其余缺席维持通用缺路径错误；serve 面板对同形状缺席给专名降级理由（观察面不炸，§4.1）。断点：D-MA13 的翻译承诺就此终止，存量局 fail-closed + 可读指引；机检护栏 = [../design/mod-package.md](../design/mod-package.md)「Mod 文案路径卫生」+ `agent_seed_semantics::mod_text_fragments_carry_no_retired_paths`。 | 已确认 |
+| **D-MA19** | 旧名别名机制退役（r3 rev1，用户裁决放行） | `pi-agent-seed` → `agent-seed` 的双向别名翻译层（D-MA13 的 `legacy_seed_alias`/`with_legacy_seed_alias`，含 main 入口归一与 serve 调用点）整体删除，解析单义化：`resolve_mod_dir` 仅对「路径缺席 ∧ 父目录名 `mods` ∧ 末段精确 `pi-agent-seed`」给专名拒绝（点名同父规范路径、宣布退役日期、历史 run.json **不迁移**——开新 run-id 新局）；其余缺席维持通用缺路径错误；serve 面板对同形状缺席给专名降级理由（观察面不炸，§4.1）。断点：D-MA13 的翻译承诺就此终止，存量局 fail-closed + 可读指引；机检护栏 = [../design/mod-package.md](../../design/mod-package.md)「Mod 文案路径卫生」+ `agent_seed_semantics::mod_text_fragments_carry_no_retired_paths`。 | 已确认 |
 | **D-MA20** | r1 归档防护契约补记（r5 补录） | r1（主会话保护）交付时漏记台账，本批补记：宿主 `archive-sessions` 按「文件名排除 + 全文 contains(parent)」选文件，parent 回落 `"default"` 时可把主会话 rename 进 trash（合成探针三场景实证）；Mod 侧 fail-closed——缺 `run.id`/`run.parent` 凭证不发归档请求、不伪造 `remaining=0`；review 相位撤销静默自动归档，改 `[SESSIONS UNSETTLED]` 可读提示；宿主语义测试块（原 `synchronous_tool_bridge` 第 4 步）重钉为新安全契约（无 sessions 段不归档）。用户授权的有界宿主测试修改自此成为先例。 | 已确认 |
 | **D-MA21** | 提示词驱动子会话清理（r5） | 用户核心需求修正：「删除 subagent 会话记录」必须可用且**跨 harness**——动作走提示词而非宿主代码。清理提示词 beat（`[SESSIONS CLEANUP PENDING]`）指引用主会话自身环境原生能力删除本局 subagent 会话记录（仅限本局产物，主会话与无关会话绝不碰），完成后声明 `settlement.sessions`（`moved/remaining/destination`，`moved=0` 合法；缺声明 = 诚实未清理，`review.note` 保持阻断）。`harness.archive_sessions` 从 Mod 工具桥整体退役（pack.json + allowedTools 同批摘除保 superset 一致、REACTORS 条目与死代码 `auto_archive_sessions` 删除、beats 去专名）；机检护栏 = `agent_seed_semantics::beats_cleanup_prompt_carries_no_harness_literals`；宿主 builtin 的物理退役（含子串匹配危险与 dry-run 缺失）归 N2 宿主决策。 | 已确认 |
 | **D-MA23** | 剧情双层重写：真状态压缩与自循环 | **4 真状态**（运行级 `live`/`retired` + 需求级 `open`/`done`，11→4；判据 = 不可逆语义 ∨ 改变全局行为，`split`/`merged`/`dropped` 降为 `closed_reason` 字段）+ **13 微状态**（运行级 立局/协调/盘点/发布 + 需求级九幕 立项/计划中/计划门禁/待开发/开发中/交付受理/验收门禁/集成/done，由 KV 标志位派生不独立存储）+ **38 事件**（+`charter.set`/`run.begin`/`integration.confirm`·`reject`/`release.confirm`·`skip`）+ **微状态判定单一来源** `run_phase()` / `req_phase()`（菜单/文案/渲染/投影全从它派生；三条打回路径统一落待开发，R6）+ **发布幕**（R-a：`review.note` 前置 = 发布已声明，`release.skip` 必填理由）+ **身份与权限不进剧情**（执行者台账/身份章/profile/票据门 = 事件准入校验与留痕，见 DESIGN §2.13）+ 内核 FSM 唯一转场 `live→retired`、`run.phase` 微状态标志；旧局存档不兼容不迁移。契约正文见 DESIGN §2（D-MA22 的执行者集成是需求级第 8 幕的职责内容）；分支 `feature/6f2a-story-rewrite`。 | 已确认 |
 | **D-MA24** | 泳道分池：按仓库×并行度粒度组织泳道（r1） | 原台账平铺 `lane.<k>.*` 单键空间，主仓与 submodule 需求共用同一池：不同仓需求无法同时持同一 k（目录与台账双重瓶颈）。现按池组织：默认池（""，运行仓 CWD toplevel，键形字节沿旧）+ 具名池（`lane.<label>.<k>.*`，label `^[a-z][a-z0-9-]{0,23}$`，保留 seq/pools），`lane.pool "label\|path"` 幂等注册本地检出路径；`lane.claim`/`lane.release` 载荷尾部可选池段；需求侧双写 `req.<i>.lane` + `lane_pool`；并行度按池计（每池 k ∈ 1..job_capacity），自动派活仍只取默认池；工具桥新增三个 `*_pool` 声明（固定 `--repo` 尾参，池归属从**请求快照** `tool.<id>.args` 反查——宿主输出键序冻结不携带 repo，反查失败 fail-closed）；冲突雷达只比同池对（修跨池同名文件误报）。宿主零改动（`worktree-claim/release/lane-probe` 早已支持 `--repo`，目录落位 `<root>/<basename>-lane-<k>`）；已知限制：池前缀是派生 basename（同名 basename 检出共享池目录）、`--repo` 只收本地路径。分支 `feature/b7e2-lane-pool`。 | 已确认 |
 | **D-MA25** | 批结算自动维护需求：收尾自动派发文档维护（r3） | wiki 活文档闭环此前纯靠人工自觉（AGENTS 提醒 + `settlement.evolution` 前人工核验），无机器强制，而 r4/r5/r6 迭代实证每批都有文档维护诉求、各靠临时立项。现 `review.note` 未武装批结算在 `[BATCH n SETTLED]` 后同 handler 事务 `req_append` 一条 draft 态维护需求（规范标题「维护更新 docs wiki（上批收口）」，description 携 r2 wiki 树分文件指引）；防重复 = open ∧ 无 closed_reason ∧（`req.<i>.maintenance` 标记 ∨ 规范标题）则跳过，容量满同样跳过——尽力而为，绝不使批结算失败；退役路径不追加。触发点裁决：`coordinate.submit` 边界尾部否决（verify.submit 全绿路径重查 `gate_problem()`→draft 不可推进→同批死锁）；settle 幕第五步骤否决（动四项契约且语义错位）。追加行永不带 mark（auto_dispatch 不碰 draft），由主代理下一批协调幕派发，未 done 阻塞下一批批边界。分支 `feature/c9e4-auto-maint`。 | 已确认 |
 | **D-MA26** | harness tools 检测机制：`.pi/tools` 门禁前检测项脚本化（r3） | 结算的 todo/子会话清理此前靠人工核验+主会话自觉，无脚本化工具。现落地「纯命令行契约 + 调用方拼参三层」：① `.pi/tools/` 四只读脚本（todo-check 状态重放机 / sessions-count 布尔盘点 / manifest-verify 只读 sha256 比对 / docs-consistency 闭包），**三禁**=不读 config、不读局 KV、不依赖 egg（无 egg 环境 agent 可 `sh` 直调），输出 k=v 缺省 + `--json` 备选，exit 0=正常（结论在 ok 键）/2=用法错/3=环境缺失/4=资源不可读，检测发现问题恒 exit 0+ok=0；② **宿主零改动**——pack.json 以相对路径 `program:".pi/tools/<name>.sh"`（shebang+可执行位由内核直接 exec，不过 shell 解释器，Layer-1「不经 shell」边界字面与语义均满足）注册四条 `harness.*`，`allowedTools` 同步放行；③ **config.set 注册面**（与 executor/profile/goal.authorization 同构）：`tools.root`（机证启用开关）+ `tools.session`/`tools.sessions_root`（保留参数键：主会话 id/会话库路径——mod 沙箱读不到进程环境，参数只能来自 KV）+ `tools.<name>` 脚本覆盖，全落 `settings.tools.*`；④ **结算 cross-check**（复刻 artifact-probe 先例）：settlement.todo/sessions 两 handler apply 前同步调 harness 工具，机证与人证矛盾→reject（零写入），未注册/参数缺/脚本不可执行→人证旧路径+提示绝不拒绝结算，通过写 `source=machine:harness.*`（人证写 human，机证与人证同级不越权 §9.2c）；⑤ **三层调用方**：L1 mod 从 KV 拼 argv / L2 宿主只执行 argv / L3 无 egg agent 按 docs/design/harness-tools.md 参数约定拼命令行——argv 是唯一跨层事实。修订轨迹：rev1（宿主 tools-root）→rev2（config.set+宿主 sh 端口）→rev3（纯命令行+调用方拼参）→实施期收敛（撤销 `--run-harness` 宿主子命令，相对路径 program 达成零改动）。`settlement_problem()` 与 verify_gates 零改动。分支 `feature/c5d3-harness-tools`。 | 已确认 |
+
+## D-MA27 — 文件边界 = 召回时点边界（2026-11-15）
+
+**决定**：`docs/context` 按「谁在什么时点需要」切分，不按主题或章节切分。主流程幕 1:1 一文件（`acts/`，6 份，每份 ≤40 行）；需求级九幕按共享时点聚合三份（`req-acts/intake` = 1-3、`delivery` = 4-6、`integration` = 7-9，每份 ≤45 行）；冷启动 → `cold-start/`，按动作时点的仪式 → `rituals/`，文案域 → `copy/`，裁决档案 → `archive/`。每份真文件带固定头 4 行（`id` / `幕` / `触发` / `读不到代价` / `ver`），场景加载表唯一来源是 `scenes.json`。
+
+**依据**：r1 之前的平铺形态 17 文件 1169 行里，`workflow-acts.md` 一份 240 行同时承担主流程六幕、需求级九幕与无 egg 降级三件事——按章节切会变成「读 240 行找 20 行」，按主题切会横跨幕与需求级两个时点。时点切分让每个时点的必读量收敛到一屏（AGENTS §1.0c「Read whole」的可执行前提）。行数上限是切分判据而不是排版目标：超限说明切分单元选错了（本批实证：`delivery` 若含第 7 幕为 51 行、超 45，故第 7 幕归 `integration`）。
+
+**三问判据**：① 阻断——`requirement.dispatch` / `proposal.submit` / `gate.approve` / `coordinate.submit` 在未读本时点文件的情况下执行；② 症状——任一 `acts/*` 超 40 行或 `req-acts/*` 超 45 行（说明切分单元不是时点），或同一时点要读四份以上文件；③ 确认——`bash scripts/docs-ver.sh --check` 返回 `ok=1`，且 `wc -l docs/context/acts/*.md docs/context/req-acts/*.md` 全部落在上限内。
+
+## D-MA28 — scene gate：幕转场必列必读 + 推进必签名（2026-11-15）
+
+**决定**：① 幕转场回执必须列出该幕的必读清单，清单由脚本从文件固定头生成（`scenes.json` + `id`/`ver`），**零漂移**、人不手写；② 推进剧情的动作（`requirement.dispatch` / `proposal.submit` / `gate.approve` / `coordinate.submit`）必须携带 `config.set read.<doc-id>=<ver>` 签名；③ 四维失效：**覆盖**（该幕文件没签）、**新鲜**（签的 ver ≠ 磁盘 ver）、**遗忘**（跨幕未重签）、**主体**（签名主体与该动作的执行者不一致）。分期：r1 docs 拆分（本批）→ r2 必读推送 → r3 签名落地 → r4 门禁四维校验 → r5 兼容层退场。
+
+**依据**：摘要替代正文是已被 AGENTS §1.0c 点名的首要失效模式（回执 `[READ FIRST]`、beats 文本、playbook 摘要、上一局习惯都是「路由与摘要，never the rule」）；没有机器可验的签名时，「读过」无法审计，也无法证明读的是当前版本。r1 之前连指针都只能指向一个 240 行的平铺文件，所以清单必须先有可寻址的粒度（D-MA27）才可能零漂移。
+
+**三问判据**：① 阻断——上述推进动作在缺签或签名过期时执行（r4 起由门禁 fail-closed）；② 症状——回执 `[READ FIRST]` 的路径不存在或 ver 与磁盘不符，`--attest` 报 `forged` / `stale` 大于 0；③ 确认——`bash .pi/tools/docs-consistency.sh --attest --run <run-dir>` 返回 `claims>0` 且 `forged=0 stale=0`（r3 落地后的常态）。
+
+## D-MA29 — ver 定义与旧路径兼容层两分法（2026-11-15）
+
+**决定**：① `ver` = 把固定头 `> **ver** <hex6>` 的 token 换成定宽占位 `000000`（字节数不变）、其余字节原样后 `git hash-object` 取前 6 位；② 旧路径兼容层两分法——**拆分型 → 薄壳**（≤10 行指针壳，不自带规则）、**1:1 迁移 → 软链**（同字节入口）；③ 每条兼容层必须写明退场条件（本批全部 = 「r2 落地后由 r5 删除」）。
+
+**依据**：ver 定义若直接哈希文件本体，则「文件含 ver、ver 由哈希决定」构成自引用循环，永远不收敛；定宽占位同时保证字节长度不变（不引起行位移）。兼容层不是风格选择：本批硬约束是零 mod / 零 crates 改动，而 `.ygg/mods/agent-seed/**` 有 45 处 `docs/context/<file>.md` 字面指针、`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 按路径读取 7 个 copy-contract 表并逐键解析——直接删旧路径会让锚点校验与逐域键集断言同时转红。薄壳与软链都不携带第二份权威，因此不违反「一条规则一个权威载体」（AGENTS §1.8）。
+
+**三问判据**：① 阻断——「改了正文不改 ver」与「删旧路径但没补兼容层」两类提交；② 症状——`docs-ver --check` 报 `changed>0` / `missing_header>0`；`agent_seed_semantics` 的 `narrative_pointer_anchors_exist_in_docs_context` 或 `copy_contract_domain_fragments_cover_every_text_key` 转红；③ 确认——`bash scripts/docs-ver.sh --check` 连跑两次 `changed=0`、`cargo test -p ygg-sandbox --test agent_seed_semantics` 全绿、`ls -l docs/context/*.md | grep -c -- '->'` = 13。
 

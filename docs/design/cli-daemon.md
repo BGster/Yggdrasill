@@ -75,7 +75,7 @@
         "resumeAgentId": "agent-plan-1",
         "worktreePath": "/Users/.../tmp/worktrees/Yggdrasill-lane-1",
         "artifactPath": "artifacts/r1-development.md",
-        "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/README.md, docs/context/workflow-acts.md, docs/context/dispatch-ritual.md, and the requirement's named docs/design/<subsystem>.md before proposing or editing. Plan: follow playbook run_machine + actions and declare touched wiki files. Development: also follow gates + live_evidence and the touched subsystem chapter.\n...",
+        "brief": "Requirement r1 (rev 1, stage=development): ...\nMandatory references: read docs/README.md, docs/context/acts/coordinate.md, docs/context/rituals/dispatch.md, and the requirement's named docs/design/<subsystem>.md before proposing or editing. Plan: follow playbook run_machine + actions and declare touched wiki files. Development: also follow gates + live_evidence and the touched subsystem chapter.\n...",
         "deltaPrompt": "Resume r1 (rev 1) for stage `development` in worktree `...`; write `artifacts/r1-development.md` and submit.",
         "fullFallbackBrief": "Requirement r1 ...\nResume context: prior executor `agent-plan-1`.",
         "submitCommand": ".ygg/bin/egg open <run-root> --event proposal.submit --payload '\"r1|1|development|<summary>|artifacts/r1-development.md||exec=<agent_id>\"'"

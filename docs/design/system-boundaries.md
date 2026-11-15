@@ -2,7 +2,7 @@
 
 > **定位**：三层架构图、跨治理引擎能力协商矩阵（Tier 1–3）与 Adapter 一致性契约五义务（C1–C5）。
 > **replaces**：DESIGN §1（L11–65）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[../context/vision.md](../context/vision.md) · [cli-daemon.md](cli-daemon.md)
+> **上游**：[docs/README.md](../README.md) · **相关**：[../context/cold-start/vision.md](../context/cold-start/vision.md) · [cli-daemon.md](cli-daemon.md)
 > **搬运**：以下正文自 DESIGN.md L11–L65 逐字迁移，不重写语义。
 
 ## 1. 产品形态与三层系统边界

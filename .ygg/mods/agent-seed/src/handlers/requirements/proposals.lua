@@ -10,6 +10,7 @@ local M = {}
 local config = require("src.core.config")
 local executor = require("src.domain.executor")
 local flow = require("src.runtime.flow")
+local gates = require("src.domain.gates")
 local choice = require("src.handlers.operate.choice")
 local lanes = require("src.domain.lanes")
 local props = require("src.domain.proposals")
@@ -18,6 +19,7 @@ local reqs = require("src.domain.requirements")
 local tools = require("src.runtime.tools")
 local util = require("src.core.util")
 local wire = require("src.domain.wire")
+local readsig = require("src.domain.readsig")
 
 local TEXTS
 
@@ -142,6 +144,13 @@ function M.install(deps)
         id = req_id(index),
         prop = prop_id(blocking),
       }))
+    end
+    -- r4 读签前置校验（四维）：排在全部形状/状态检查之后、**首个 KV 写之前**。
+    -- 放这里的三层理由：① 形状错误与既有语义拒绝的文案优先不变；② 拒绝零副作用
+    -- （不落提案、不占槽位、不写 stale）；③ 与 gate_problem_for 同层兄弟，不叫 gate_problem。
+    local read_block = gates.read_problem("proposal.submit", { req = index, stage = spec.stage })
+    if read_block ~= nil then
+      return refuse(TEXTS.beats.req_wait_rejected, "proposal.submit", read_block)
     end
     -- 执行者登记并入提案提交（省一回合）：校验失败则整体不生效（提案不落库）。
     if spec.exec ~= nil then
@@ -299,6 +308,9 @@ function M.install(deps)
       -- 释放泳道（连工作树）；rev 不动（执行方下一轮提案仍用当前 rev）。
       release_lane_with_worktree(index)
     end
+    -- r3 销票（作用域边界）：提案打回 = 回到计划中/待开发，幕前必读签名全部作废重读。
+    -- （rev 不动的打回路径不进 req_bump_rev，所以这里必须显式清。）
+    readsig.clear()
     req_push_history(index, fill(TEXTS.beats.req_reject_hist, { id = prop_id(prop_index) }))
     ygg.narrate(fill(TEXTS.beats.req_reject_ok, {
       id = prop_id(prop_index),

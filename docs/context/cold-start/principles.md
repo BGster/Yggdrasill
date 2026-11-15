@@ -1,8 +1,11 @@
 # Yggdrasill · 架构与运营原则（P 列表）
+> **id** cold-start/principles · **幕** cold-start · **触发** 冷启动 / 设计取舍前
+> **读不到代价** hard-refusal
+> **ver** 0e0b50
 
 > **定位**：P1–P11 工程原则与 PLAY 家族注记，约束一切实现、评审与文档组织。
 > **replaces**：CONTEXT §3（L62–96）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[topology.md](topology.md) · [../design/system-boundaries.md](../design/system-boundaries.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[topology.md](topology.md) · [../design/system-boundaries.md](../../design/system-boundaries.md)
 > **搬运**：以下正文自 CONTEXT.md L62–L96 逐字迁移，不重写语义。
 
 ## 3. 架构与运营原则（工程面 P 列表 + 游玩面 PLAY 节）
@@ -30,7 +33,7 @@
    - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（r1/D-MA24 起按池：`<pool-root>/<repo>-lane-<k>`，默认池 + `lane.pool` 注册的具名池）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
 10. **P10 · 数据红线与显式的每运行目标授权**
     - **数据红线**：权威正文见仓库根 `AGENTS.md` 数据红线；真实业务数据及其目录元信息一律不得由 agent 读取，需真实数据的验证由用户运行并贴回。本原则只保留指针，不复制扩展 tool_firewall 的已退役实现叙事。
-    - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在**每批盘点结算与退役**（常驻下 review.note 每批都走）之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。操作正文见 [workflow-acts.md](workflow-acts.md) 协调幕。
+    - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在**每批盘点结算与退役**（常驻下 review.note 每批都走）之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。操作正文见 [acts/coordinate.md](../acts/coordinate.md) 协调幕。
     - **注册纪律（用前注册）**：凡「用前注册」参数——`executor.<rN>.<stage>`（执行者台账）、`profile.<handle>.*`（身份卡）、`goal.authorization`（目标授权）、`lane.pool`（泳道池）、`tools.root`/`tools.session`/`tools.sessions_root`（harness 工具，D-MA26）——一律经 `config.set`（或专用注册动作）在使用前写入；未注册 = 消费点可读拒绝或提示（`[GOAL AUTH PENDING]` / `[TOOLS UNREGISTERED]` / `lane_pool_unknown` 等），**绝不静默假成功**。mod 在相关剧情节点给提醒（beats 提示行），context 文档写明「哪些键、何时注册、未注册的可读行为」。
 11. **P11 · 宿主零语义（引擎/壳分界）**
     - 宿主（内核与 CLI/服务壳）不持有、不解析任何 Mod 领域概念；跨 Mod 复用的只有通用机制
@@ -45,12 +48,12 @@
 
 P2（零硬编码）的文档面投影：mod 的叙事与文案**知识权威**在 context 运行流程层四件，mod `data/texts/` 仅为运行时投影——
 
-- [workflow-acts.md](workflow-acts.md)：五幕进行时台词（`scenes`/`prompts`/`<node>_common` 正文）+ 无 egg 执行章；
-- [dispatch-ritual.md](dispatch-ritual.md)：派发仪式（`subagent_brief` 策略段、`config_opened` 面板语义）；
-- [cleanup-policy.md](cleanup-policy.md)：盘点清理政策（会话/待办清理正文）；
-- [copy-contract.md](copy-contract.md)：七域文案契约索引（404 beats + core 36 = 440 唯一键；错误码/回执/台账模板 + 协议前缀归属）。
+- [acts/](../acts/)：五幕进行时台词（`scenes`/`prompts`/`<node>_common` 正文）+ 无 egg 执行章；
+- [rituals/dispatch.md](../rituals/dispatch.md)：派发仪式（`subagent_brief` 策略段、`config_opened` 面板语义）；
+- [rituals/cleanup.md](../rituals/cleanup.md)：盘点清理政策（会话/待办清理正文）；
+- [copy/README.md](../copy/README.md)：七域文案契约索引（409 beats + core 36 = 445 唯一键；错误码/回执/台账模板 + 协议前缀归属）。
 
-改文案**先改上述文件再同步 mod**（单向同步纪律，见 [../wiki-governance.md](../wiki-governance.md)）；本节只放指针不搬正文，防双源漂移。
+改文案**先改上述文件再同步 mod**（单向同步纪律，见 [../wiki-governance.md](../../wiki-governance.md)）；本节只放指针不搬正文，防双源漂移。
 
 ---
 

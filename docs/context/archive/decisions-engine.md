@@ -1,8 +1,11 @@
 # Yggdrasill · 架构决策台账 · 核心引擎与平台（D1–D21）
+> **id** archive/decisions-engine · **幕** archive · **触发** 查 D1–D21 裁决
+> **读不到代价** silent-drift
+> **ver** b672c8
 
 > **定位**：引擎与平台层架构决策的权威台账（含台账维护规则，与 decisions-agent 共用同一段引言）。
 > **replaces**：CONTEXT §5 引言 + §5.1（L134–161）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[decisions-agent.md](decisions-agent.md) · [principles.md](principles.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[decisions-agent.md](decisions-agent.md) · [cold-start/principles.md](../cold-start/principles.md)
 > **搬运**：以下正文自 CONTEXT.md L134–L137 + CONTEXT.md L138–L161 逐字迁移，不重写语义。
 
 ## 5. 关键架构决策台账（`D1–D21` 与 `M-Agent` 演进）

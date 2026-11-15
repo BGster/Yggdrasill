@@ -26,7 +26,7 @@
 //!   stamped there; the six new D-MA23 events (`charter.set` / `run.begin` /
 //!   `integration.*` / `release.*`) deliberately stay **outside** the ticket gate (R5).
 //!
-//! Boundaries (same stance as docs/context/workflow-acts.md coordinate/settle — no added exits):
+//! Boundaries (same stance as docs/context/acts/coordinate.md / acts/settle.md — no added exits):
 //! - only the public load surface (`ModBundle` / `KernelFacade` / dispatch / save-load);
 //!   no host CLI changes, no production-code changes, no side-channel scripts;
 //! - **no run directory is read or written**: legacy-compat and injection fixtures use an
@@ -45,6 +45,8 @@ use ygg_sandbox::fuel::{
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 use ygg_sandbox::HostToolRunner;
+
+mod support;
 
 // ───────────────────────── locating ─────────────────────────
 
@@ -70,6 +72,10 @@ fn seed_mod_dir() -> PathBuf {
 struct Game {
     bundle: ModBundle,
     kernel: KernelFacade,
+    /// 被测 mod 目录：补签 helper 要读它的生成区（`data/config.json` 的 `readGate` / `readPlan`）。
+    dir: PathBuf,
+    /// 关掉自动补签（只给读签门禁自己的用例用：它们要「不签」的现场）。
+    suppress_reads: bool,
 }
 
 impl Game {
@@ -80,7 +86,12 @@ impl Game {
         let bundle = ModBundle::load(dir)
             .unwrap_or_else(|err| panic!("failed to load {}: {err}", dir.display()));
         let kernel = bundle.kernel().expect("kernel construction");
-        let mut game = Self { bundle, kernel };
+        let mut game = Self {
+            bundle,
+            kernel,
+            dir: dir.to_path_buf(),
+            suppress_reads: false,
+        };
         game.narrate("event.start", "0");
         game
     }
@@ -161,8 +172,16 @@ impl Game {
 
     /// guide routing: click a menu entry by option-text prefix (the **only** legal entry for
     /// human actions — the ticket is stamped there and nowhere else).
+    ///
+    /// r4 开闸后的补签：`gate.approve` / `coordinate.submit` 是读签门禁的受控动作，
+    /// 这里在派发票据前把该动作的必读集补签齐（见 `auto_sign`）。补签只动 `settings.read.*`，
+    /// 不改菜单结构，所以不移动选项下标。
     #[track_caller]
     fn click(&mut self, prefix: &str) -> Json {
+        if let Some(action) = action_of_option(prefix) {
+            let req = self.pending_gate().map(|(index, _)| index);
+            self.ensure_reads(action, None, req);
+        }
         let options = self.options();
         let index = options
             .iter()
@@ -172,7 +191,157 @@ impl Game {
         self.reply("ygg.choice_selected", &payload)
     }
 
+    // ── r4 读签门禁的测试侧补签（开闸后既有用例靠它保持绿）──────────────────
+    //
+    // 口径镜像 `src/domain/readset.lua` 的 `bearing()`：幕维度取 `readPlan.<scene>`，
+    // 阶段维度取 `readGate.reqActs.<stage>`，门禁维度取 `readGate.gates.<kind>`，
+    // 批边界取 `readPlan.settle`；ver 一律从 `readGate.ver` 台账读，**不硬编码**。
+    // 镜像逻辑由「未签必拒 / 签后必放行 / 台账未登记 ver 不补签」几条用例反向铉住。
+
+    /// 被测 mod 的静态配置（生成区就在里面）。
+    fn mod_config(&self) -> Json {
+        read_json(&self.dir.join("data/config.json"))
+    }
+
+    /// 运行幕（微状态口径，与 `requirements.run_phase()` 同义：`""` = coordinate）。
+    fn scene(&mut self) -> String {
+        match self.kv("run.phase") {
+            Json::String(value) if !value.is_empty() => value,
+            _ => "coordinate".to_owned(),
+        }
+    }
+
+    /// 待批门禁：`gate_actions.pick_gate` 取第一个非空 `req.N.gate`。
+    fn pending_gate(&mut self) -> Option<(u32, String)> {
+        for i in 1..=64 {
+            let kind = self.kv(&format!("req.{i}.gate"));
+            if let Some(text) = kind.as_str() {
+                if !text.is_empty() {
+                    return Some((i, text.to_owned()));
+                }
+            }
+            if self.kv(&format!("req.{i}.status")) == Json::Null {
+                break;
+            }
+        }
+        None
+    }
+
+    /// 该动作的必读集 + 每件的台账 ver（读不到 ver 的件不补签，交给判据叙事告警）。
+    fn bearing(
+        &mut self,
+        action: &str,
+        stage: Option<&str>,
+        req: Option<u32>,
+    ) -> Vec<(String, String)> {
+        let config = self.mod_config();
+        let plan = config["readPlan"].clone();
+        let gate = config["readGate"].clone();
+        let scene = self.scene();
+        let mut docs: Vec<String> = Vec::new();
+        let mut push = |group: &Json| {
+            if let Some(items) = group.as_array() {
+                for item in items {
+                    if let Some(doc) = item.as_str() {
+                        if !docs.iter().any(|existing| existing == doc) {
+                            docs.push(doc.to_owned());
+                        }
+                    }
+                }
+            }
+        };
+        match action {
+            "proposal.submit" => {
+                push(&plan[scene.as_str()]);
+                if let Some(stage) = stage {
+                    push(&gate["reqActs"][stage]);
+                }
+            }
+            "gate.approve" => {
+                let index = match req {
+                    Some(index) => Some(index),
+                    None => self.pending_gate().map(|(index, _)| index),
+                };
+                if let Some(index) = index {
+                    if let Some(kind) = self
+                        .kv(&format!("req.{index}.gate"))
+                        .as_str()
+                        .map(str::to_owned)
+                    {
+                        push(&gate["gates"][kind.as_str()]);
+                    }
+                }
+            }
+            "coordinate.submit" => push(&plan["settle"]),
+            _ => {}
+        }
+        docs.into_iter()
+            .map(|doc| {
+                let ver = gate["ver"][doc.as_str()].as_str().unwrap_or("").to_owned();
+                (doc, ver)
+            })
+            .collect()
+    }
+
+    /// 本动作的作用域进入 seq：幕纪元与该需求阶段纪元取最大者（与 `gates` 的 scope_epoch_of 同口径）。
+    fn scope_epoch(&mut self, req: Option<u32>) -> u64 {
+        let mut epoch = self.kv("settings.epoch.act.seq").as_u64().unwrap_or(0);
+        if let Some(index) = req {
+            let stage = self
+                .kv(&format!("settings.epoch.req.{index}.stage.seq"))
+                .as_u64()
+                .unwrap_or(0);
+            epoch = epoch.max(stage);
+        }
+        epoch
+    }
+
+    /// 签名序号：值段第三段（r3 形状 `ver|scene|seq`），为 0 时回落 `settings.sign_seq.<doc>`。
+    fn sign_seq_of(&mut self, doc: &str, value: &str) -> u64 {
+        let third = value
+            .split('|')
+            .nth(2)
+            .and_then(|part| part.parse::<u64>().ok());
+        match third {
+            Some(seq) if seq > 0 => seq,
+            _ => self
+                .kv(&format!("settings.sign_seq.{doc}"))
+                .as_u64()
+                .unwrap_or(0),
+        }
+    }
+
+    /// 把该动作的必读集**签成新鲜的**：未签、跨了纪元（过期）、或超出窗口的件重签一遍。
+    /// 「已签」不等于「还有效」——阶段边界会作废旧签名，所以这里按判据同一口径复核。
+    fn ensure_reads(&mut self, action: &str, stage: Option<&str>, req: Option<u32>) {
+        if self.suppress_reads {
+            return;
+        }
+        let docs = self.bearing(action, stage, req);
+        let epoch = self.scope_epoch(req);
+        let now = self.kv("settings.clock_seq").as_u64().unwrap_or(0);
+        let window = self.kv("settings.readGate.window").as_u64().unwrap_or(80);
+        for (doc, ver) in docs {
+            if ver.is_empty() {
+                continue;
+            }
+            let signed = self.kv(&format!("settings.read.{doc}"));
+            if let Some(value) = signed.as_str() {
+                if !value.is_empty() {
+                    let seq = self.sign_seq_of(&doc, value);
+                    // 版本也对：文档改版（台账 ver ≠ 签名 ver）同样算过期。
+                    let same_ver = value.split('|').next() == Some(ver.as_str());
+                    if same_ver && seq > epoch && now.saturating_sub(seq) <= window {
+                        continue;
+                    }
+                }
+            }
+            self.narrate("config.set", &text(&format!("read.{doc}={ver}")));
+        }
+    }
+
     /// Derived micro-state name: the `[…]` slot of the `requirement.list` row — the
+    /// `req_phase()` display surface (nine acts + `blocked` overlay + closed reasons).
     /// `req_phase()` display surface (nine acts + `blocked` overlay + closed reasons).
     #[track_caller]
     fn phase(&mut self, id: &str) -> String {
@@ -242,6 +411,24 @@ fn rejection_prefixes() -> &'static Vec<String> {
             })
             .collect()
     })
+}
+
+/// `rN` → N（补签要按该需求的阶段纪元判新鲜度）。
+fn req_index(id: &str) -> Option<u32> {
+    id.strip_prefix('r')
+        .and_then(|rest| rest.parse::<u32>().ok())
+}
+
+/// r4 读签门禁的受控动作：菜单项前缀 → 动作名（其余菜单项返回 None = 不补签）。
+/// 三个动作与 `src/domain/readset.lua` 的 `bearing()` 分支一一对应。
+fn action_of_option(prefix: &str) -> Option<&'static str> {
+    if prefix.starts_with("gate.approve") {
+        Some("gate.approve")
+    } else if prefix.starts_with("coordinate.submit") {
+        Some("coordinate.submit")
+    } else {
+        None
+    }
 }
 
 /// Rejection judgement: the narrative line starts with one of the declared prefixes.
@@ -316,6 +503,8 @@ fn start_requirement(game: &mut Game) {
 /// Deliberately **without** an `exec=` tail: the shared drive scripts must keep
 /// `requirement.list` (display names) dispatchable for callers that assert clean rows.
 fn submit_req(game: &mut Game, id: &str, rev: u32, stage: &str, ext: &str) {
+    // r4 开闸：提交前把该动作的必读集签成新鲜的（模拟「执行者读过才提交」）。
+    game.ensure_reads("proposal.submit", Some(stage), req_index(id));
     let payload = text(&format!(
         "{id}|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}"
     ));
@@ -330,6 +519,7 @@ fn submit(game: &mut Game, rev: u32, stage: &str, ext: &str) {
 /// Submit an `r1` proposal with the trailing `exec=` segment (agent ledger + proposal in one
 /// transaction, i.e. no extra turn).
 fn submit_with_exec(game: &mut Game, rev: u32, stage: &str, ext: &str, exec: &str) {
+    game.ensure_reads("proposal.submit", Some(stage), Some(1));
     let payload = text(&format!(
         "r1|{rev}|{stage}|{stage} proposal summary|artifacts/{stage}.md||{ext}|exec={exec}"
     ));
@@ -345,6 +535,7 @@ fn submit_dev_with_exec(
     exec: &str,
     changes: &str,
 ) -> Vec<String> {
+    game.ensure_reads("proposal.submit", Some("development"), Some(1));
     let payload = text(&format!(
         "r1|{rev}|development|development proposal summary|artifacts/development.md|{changes}|{ext}|exec={exec}"
     ));
@@ -952,6 +1143,8 @@ fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
     // Cross-stage handoff without a reason → precondition rejection, no proposal. The plan
     // gate is up now; approving it (delivery is the gate) auto-dispatches development.
     game.click("gate.approve — ");
+    // r4 开闸：门禁批准跨了阶段边界，旧签名随之作废——直派提交前按判据口径重签。
+    game.ensure_reads("proposal.submit", Some("development"), Some(1));
     let no_reason = game.narrate(
         "proposal.submit",
         &text("r1|1|development|summary|artifacts/development.md||semantics-p2|exec=agent-2"),
@@ -1239,9 +1432,14 @@ fn batch_settle_auto_appends_maintenance_requirement() {
     );
     assert!(
         desc.contains("docs/README.md")
-            && desc.contains("docs/context/decisions-agent.md")
+            && desc.contains("docs/context/archive/decisions-agent.md")
             && desc.contains("docs/design/"),
         "description must carry the per-file wiki guidance: {desc}"
+    );
+    // r5: 平台平铺旧路径已退役——台账指针必须走 archive/ 下的权威文件。
+    assert!(
+        !desc.contains("docs/context/decisions-agent.md"),
+        "the maintenance brief must not cite the retired flat decisions-agent path: {desc}"
     );
 }
 
@@ -1493,6 +1691,8 @@ fn gate_approval_settles_its_own_proposal_and_still_blocks_foreign_pendings() {
             .bundle
             .restore(&bytes)
             .expect("a save with an injected own proposal must load"),
+        dir: plan_gate.dir.clone(),
+        suppress_reads: false,
     };
     blocked.assert_kv("prop.2.status", json!("pending"));
 
@@ -1945,6 +2145,7 @@ fn submit_identity_for(
     if let Some(session) = session {
         payload.push_str(&format!("|actor_session={session}"));
     }
+    game.ensure_reads("proposal.submit", Some(stage), req_index(req));
     game.narrate("proposal.submit", &text(&payload))
 }
 
@@ -1973,6 +2174,8 @@ fn actor_channel_verified_lands_in_kv_and_survives_a_reload() {
     let mut rebuilt = Game {
         bundle: game.bundle.clone(),
         kernel: game.bundle.restore(&bytes).expect("restore from save"),
+        dir: game.dir.clone(),
+        suppress_reads: false,
     };
     rebuilt.assert_kv("prop.1.actor", json!("agent-1"));
     rebuilt.assert_kv("prop.1.actor_session", json!("s-plan-1"));
@@ -2075,6 +2278,8 @@ fn actor_session_segments_lock_relative_order_and_full_chain() {
     game.assert_kv("prop.1.req", Json::Null);
 
     // 全链 10 段（R5 形状锁）：字段与三个尾段各归其位。
+    // r4 开闸：本用例直派提交（不走 submit* helper），补签一行以穿读签门禁。
+    game.ensure_reads("proposal.submit", Some("plan"), Some(1));
     let lines = game.narrate(
         "proposal.submit",
         &text("r1|1|plan|full-chain summary|artifacts/plan.md|ch=1|id-full|exec=agent-1|actor=agent-1|actor_session=s-full"),
@@ -2141,6 +2346,611 @@ fn profile_registration_via_config_set_roundtrip() {
     let alien = game.narrate("config.set", &text("profile_index=agent-x"));
     assert_refused(&alien, "config.set");
     game.assert_kv("settings.profile_index", json!("agent-1"));
+}
+
+/// 幕前必读签名（r3 销票制）：`config.set read.<act>/<doc-id>=<ver>` 落 `settings.read.*`，
+/// 值形状 `ver|签名幕|seq`，平铺索引 `settings.read_index` 同步；同键重签是幂等 upsert。
+/// 覆盖面只有在 `readPlan` 已烘进 `data/config.json` 时才算——缺表即降级（不拒签）。
+#[test]
+fn read_signature_records_ver_scene_and_index() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game); // 协调幕（run.phase = "" → scene = coordinate）
+
+    let signed = game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    assert_eq!(
+        count_lines(&signed, "[SIGNED] acts/coordinate@9f2c1a"),
+        1,
+        "{signed:#?}"
+    );
+    game.assert_kv(
+        "settings.read.acts/coordinate",
+        json!("9f2c1a|coordinate|0"),
+    );
+    game.assert_kv("settings.read_index", json!("acts/coordinate"));
+
+    // `settings.` 前缀写法等价；同键重签覆盖 ver，索引不重复登记。
+    game.narrate("config.set", &text("settings.read.acts/coordinate=aa11bb"));
+    game.assert_kv(
+        "settings.read.acts/coordinate",
+        json!("aa11bb|coordinate|0"),
+    );
+    game.assert_kv("settings.read_index", json!("acts/coordinate"));
+
+    // 第二件：索引追加，两件互不覆盖。
+    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
+    game.assert_kv(
+        "settings.read.coordinate/dispatch",
+        json!("c0ffee|coordinate|0"),
+    );
+    game.assert_kv(
+        "settings.read_index",
+        json!("acts/coordinate,coordinate/dispatch"),
+    );
+
+    // 缺 readPlan → 降级：回执报件数、不报 k/n，且**不拒签**。
+    // 开闸后入库件带 readPlan，故这条降级路径在「剥掉 readPlan」的副本上验。
+    let bare_dir = support::temp_dir("read-unplotted");
+    support::copy_dir(&project_mod_dir(), &bare_dir);
+    let mut bare_config = support::read_json(&bare_dir.join("data/config.json"));
+    bare_config
+        .as_object_mut()
+        .expect("config object")
+        .remove("readPlan");
+    support::write_json(&bare_dir.join("data/config.json"), &bare_config);
+    support::reseal(&bare_dir);
+    let mut bare = Game::open(&bare_dir);
+    charter_and_begin(&mut bare);
+    let unplotted = bare.narrate("config.set", &text("read.acts/charter=123456"));
+    assert_eq!(
+        count_lines(&unplotted, "no read plan is baked for this act"),
+        1,
+        "{unplotted:#?}"
+    );
+    bare.assert_kv("settings.read.acts/charter", json!("123456|coordinate|0"));
+}
+
+/// 非法键形 / 非法 ver 一律 `[REJECTED:PAYLOAD]` 且不落 KV；未知键仍 fail-closed
+///（白名单扩张没有把 `bad_config_key` 那条路径堵死）。
+#[test]
+fn read_signature_rejects_bad_doc_id_and_bad_ver() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+
+    let long_doc = format!("read.acts/{}=9f2c1a", "a".repeat(49));
+    let long_scene = format!("read.{}/coordinate=9f2c1a", "a".repeat(33));
+    for bad in [
+        "read.acts=9f2c1a",            // 缺 <doc-id> 段（无斜杠）
+        "read.acts/sub/dir=9f2c1a",    // 斜杠过多（只认一段）
+        "read.acts/charter.md=9f2c1a", // 点号：effective() 会下钻错位（合成键形，非真实 doc-id）
+        "read.Acts/Coordinate=9f2c1a", // 大写
+        "read./coordinate=9f2c1a",     // 幕段空
+    ] {
+        let lines = game.narrate("config.set", &text(bad));
+        assert_refused(&lines, "config.set");
+    }
+    for bad in [long_doc.as_str(), long_scene.as_str()] {
+        let lines = game.narrate("config.set", &text(bad));
+        assert_refused(&lines, "config.set");
+    }
+    assert_eq!(game.kv("settings.read_index"), Json::Null);
+    assert_eq!(game.kv("settings.read.acts"), Json::Null);
+
+    for bad in [
+        "read.acts/coordinate=xyz",    // 非 hex
+        "read.acts/coordinate=9F2C1A", // 大写 hex 不收
+        "read.acts/coordinate=abc",    // 短于 4
+    ] {
+        let lines = game.narrate("config.set", &text(bad));
+        assert_refused(&lines, "config.set");
+    }
+    assert_eq!(game.kv("settings.read.acts/coordinate"), Json::Null);
+
+    // 索引键不在用户面（无 read. 前缀 → 落 bad_config_key），只能由 mod 自维护。
+    let alien = game.narrate("config.set", &text("read_index=acts/coordinate"));
+    assert_refused(&alien, "config.set");
+    assert_eq!(game.kv("settings.read_index"), Json::Null);
+}
+
+/// 值 = 显式清除该件（与 run.retire / goal.authorization 同构）：值置空 + 索引摘除；
+/// 重复清除幂等（不产生拒绝行，也不留垃圾键）。
+#[test]
+fn read_signature_clears_with_an_empty_value() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
+    game.assert_kv(
+        "settings.read_index",
+        json!("acts/coordinate,coordinate/dispatch"),
+    );
+
+    let cleared = game.narrate("config.set", &text("read.acts/coordinate="));
+    assert_eq!(
+        count_lines(&cleared, "[SIGN] acts/coordinate cleared"),
+        1,
+        "{cleared:#?}"
+    );
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_index", json!("coordinate/dispatch"));
+
+    // 幂等：再清一次既不拒绝也不改索引。
+    let again = game.narrate("config.set", &text("read.acts/coordinate="));
+    assert!(
+        !again.iter().any(|line| line.contains("REJECTED")),
+        "{again:#?}"
+    );
+    game.assert_kv("settings.read_index", json!("coordinate/dispatch"));
+}
+
+/// 销票：作用域边界**主动清除**全部签名，于是「键非空」本身就等于「本作用域内已签」——
+/// 消费者（r4）不需要时钟、不需要比较序号。覆蓋三类边界：立局→协调（run.begin）、
+/// rev 推进（requirement.amend，停在 req_bump_rev）、提案打回（proposal.reject）。
+#[test]
+fn read_scope_boundary_wipes_every_signature() {
+    let mut game = Game::open(&project_mod_dir());
+
+    // ① run.begin（立局幕 → 协调幕）
+    game.narrate("config.set", &text("read.acts/charter=aaaaaa"));
+    game.assert_kv("settings.read.acts/charter", json!("aaaaaa|charter|0"));
+    charter_and_begin(&mut game);
+    game.assert_kv("settings.read.acts/charter", json!(""));
+    game.assert_kv("settings.read_index", json!(""));
+
+    // 一条在册需求（协调幕；不动 phase）
+    game.narrate(
+        "requirement.add",
+        &text("synthetic requirement|synthetic description|semantics-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+
+    // ② requirement.amend 推进 rev → 销票（amend 三条成功路径都过 req_bump_rev）
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
+    game.assert_kv(
+        "settings.read_index",
+        json!("acts/coordinate,coordinate/dispatch"),
+    );
+    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
+    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read.coordinate/dispatch", json!(""));
+    game.assert_kv("settings.read_index", json!(""));
+
+    // ③ proposal.reject 打回（plan 分支不碰 rev，靠 handler 里的显式 clear）
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.assert_kv("settings.read_index", json!("acts/coordinate"));
+    submit(&mut game, 2, "plan", "semantics-read-plan");
+    let rejected = game.narrate("proposal.reject", &text("p1|needs rework"));
+    assert!(!refused(&rejected, "proposal.reject"), "{rejected:#?}");
+    // 成功回执带 [PROPOSAL REJECTED] 前缀（它不是拒绝行：拒绝前缀见 pack.json）。
+    assert_eq!(
+        count_lines(&rejected, "[PROPOSAL REJECTED] p1 (r1)"),
+        1,
+        "{rejected:#?}"
+    );
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_index", json!(""));
+}
+
+/// 覆盖面 k/n：`readPlan` 在场时按本幕清单计算（计划外的 doc 不进分子），
+/// 不在场时降级。清单是**装资源的静态值**，改它必须重算 manifest（`reseal`）。
+#[test]
+fn read_coverage_counts_planned_docs() {
+    let dir = support::temp_dir("read-plan");
+    support::copy_dir(&project_mod_dir(), &dir);
+    let mut config = support::read_json(&dir.join("data/config.json"));
+    config["readPlan"] = json!({
+        "coordinate": ["acts/coordinate", "coordinate/dispatch"]
+    });
+    support::write_json(&dir.join("data/config.json"), &config);
+    support::reseal(&dir);
+
+    let mut game = Game::open(&dir);
+    charter_and_begin(&mut game);
+
+    let first = game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    assert_eq!(
+        count_lines(&first, "1/2 signed in this act"),
+        1,
+        "{first:#?}"
+    );
+    let second = game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
+    assert_eq!(
+        count_lines(&second, "2/2 signed in this act"),
+        1,
+        "{second:#?}"
+    );
+    // 计划外的 doc：签名照旧成立，但不进分子（不拒签、不越界）。
+    let extra = game.narrate("config.set", &text("read.acts/charter=aaaaaa"));
+    assert_eq!(
+        count_lines(&extra, "2/2 signed in this act"),
+        1,
+        "{extra:#?}"
+    );
+}
+
+// ───────────────────── r4 · read-gate: the four dimensions ─────────────────────
+
+/// 造一份**独立受控**的 mod 副本（`readPlan` + `readGate` 换成用例自己的小台账）：
+/// 入库件的台账跟着真实文档头走（ver 会变），门禁用例要的是稳定常量。
+/// 改 `data/config.json` 必须重算 manifest（内容寻址）——`reseal` 就是这一步。
+fn armed_mod(tag: &str) -> PathBuf {
+    let dir = support::temp_dir(tag);
+    support::copy_dir(&project_mod_dir(), &dir);
+    let mut config = support::read_json(&dir.join("data/config.json"));
+    config["readPlan"] = json!({
+        "coordinate": ["acts/coordinate"],
+        "settle": ["acts/settle", "rituals/cleanup"]
+    });
+    config["readGate"] = json!({
+        "ver": {
+            "acts/coordinate": "aaaaaa",
+            "req-acts/intake": "bbbbbb",
+            "req-acts/delivery": "cccccc",
+            "acts/settle": "dddddd",
+            "rituals/cleanup": "eeeeee"
+        },
+        "reqActs": { "plan": ["req-acts/intake"], "development": ["req-acts/delivery"] },
+        "gates": { "plan": ["req-acts/delivery"], "accept": ["req-acts/delivery"] }
+    });
+    support::write_json(&dir.join("data/config.json"), &config);
+    support::reseal(&dir);
+    dir
+}
+
+/// 一份已立局、已挂一条需求并派发（`job=plan`）的局：r4 三动作的共同起跑线。
+fn armed_game(tag: &str) -> Game {
+    let mut game = Game::open(&armed_mod(tag));
+    charter_and_begin(&mut game);
+    game.narrate(
+        "requirement.add",
+        &text("armed requirement|armed description|armed-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    game
+}
+
+/// 签一件（值段是 r3 的 `ver|scene|seq` 形状，ver 必须与台账逐字相等）。
+fn sign(game: &mut Game, doc: &str, ver: &str) {
+    game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
+}
+
+/// ① 覆盖：缺签直接拒，零副作用，且拒台词自带「读什么 + 跑什么命令 + 窗口多大」。
+#[test]
+fn read_gate_missing_signature_blocks_a_proposal_with_zero_side_effects() {
+    let mut game = armed_game("gate-missing");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert_refused(&lines, "proposal.submit");
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("read-gate/missing"),
+        "the refusal must name the dimension: {lines:#?}"
+    );
+    // 三件事：确切的签名命令（逐件）、当前窗口值、已隔派发数。
+    assert!(
+        joined.contains("config.set read.acts/coordinate=aaaaaa")
+            && joined.contains("config.set read.req-acts/intake=bbbbbb"),
+        "each missing doc must come with its exact sign command: {lines:#?}"
+    );
+    assert!(
+        joined.contains("window 80") && joined.contains("dispatch(es) ago"),
+        "the refusal must report the window and the elapsed dispatches: {lines:#?}"
+    );
+    // 零副作用：门禁没升起、提案没落库、签名账本没动（派发计数器前进不算副作用）。
+    game.assert_kv("req.1.gate", json!(""));
+    game.assert_kv("req.1.job", json!("plan"));
+    game.assert_kv("prop.1.status", Json::Null);
+    game.assert_kv("settings.read_index", Json::Null);
+}
+
+/// ② 新鲜：阶段边界之后旧签名作废（跨阶段读 = 没读），拒台词报两个 seq。
+#[test]
+fn read_gate_voids_a_signature_taken_before_the_stage_edge() {
+    let mut game = armed_game("gate-stale");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    game.assert_kv("req.1.gate", json!("plan"));
+    // plan 批准把需求推进到 development 阶段：纪元前进。
+    sign(&mut game, "req-acts/delivery", "cccccc");
+    game.click("gate.approve — ");
+    game.assert_kv("req.1.plan_ok", json!(true));
+
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|development|armed dev|artifacts/r1-dev.md"),
+    );
+    let joined = lines.join("\n");
+    assert_refused(&lines, "proposal.submit");
+    assert!(
+        joined.contains("read-gate/stale") && joined.contains("stage development began at"),
+        "the refusal must name the stage edge that voided the signature: {lines:#?}"
+    );
+    assert!(
+        joined.contains("was signed at dispatch") && joined.contains("Window 80"),
+        "the refusal must report sign seq, entry seq and the window: {lines:#?}"
+    );
+}
+
+/// ③ 遗忘：窗口是**可配**的；超窗即拒，抬高窗口或重签都能解除。
+#[test]
+fn read_gate_reports_the_forget_distance_past_the_window() {
+    let mut game = armed_game("gate-forgotten");
+    game.narrate("config.set", &text("readGate.window=0"));
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    let joined = lines.join("\n");
+    assert_refused(&lines, "proposal.submit");
+    assert!(
+        joined.contains("read-gate/forgotten") && joined.contains("window 0"),
+        "the refusal must report the configured window: {lines:#?}"
+    );
+    assert!(
+        joined.contains("dispatch(es) ago") && joined.contains("config.set readGate.window="),
+        "the refusal must report the gap and the raise command: {lines:#?}"
+    );
+    // 解除路径：抬高窗口 → 同一动作通过。
+    game.narrate("config.set", &text("readGate.window=80"));
+    let ok = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert!(
+        !refused(&ok, "proposal.submit"),
+        "raising the window must release the blocker: {ok:#?}"
+    );
+    game.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// ④ 主体：签名绑定 (req, rev)。两条路径都拒：新增需求（rev 纪元晚于签名）报 `subject`；
+/// amend 推进 rev 时 r3 的销票制先把签名抹掉，于是报 `missing`（分层而非重复报错）。
+#[test]
+fn read_gate_subject_binds_a_signature_to_the_requirement_revision() {
+    let mut game = armed_game("gate-subject");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    // 签名之后才出现第二条需求：它的 rev 纪元晚于签名 → 主体维度拒。
+    game.narrate(
+        "requirement.add",
+        &text("second requirement|second description|armed-r2"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r2|1|plan|r2 plan|artifacts/r2.md"),
+    );
+    let joined = lines.join("\n");
+    assert_refused(&lines, "proposal.submit");
+    assert!(
+        joined.contains("read-gate/subject")
+            && joined.contains("before r2 entered rev 1 at dispatch"),
+        "the refusal must name the requirement revision the signature misses: {lines:#?}"
+    );
+
+    // amend 推进 rev：销票制先抹掉全部签名，所以此处报覆盖（missing）——不双报、不错报。
+    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
+    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
+    game.assert_kv("settings.read_index", json!(""));
+    let after = game.narrate(
+        "proposal.submit",
+        &text("r1|2|plan|replanned|artifacts/r1.md"),
+    );
+    assert!(
+        refused(&after, "proposal.submit")
+            && after.join("\n").contains("read-gate/missing"),
+        "an amendment wipes signatures through r3's clear(), so the refusal is coverage: {after:#?}"
+    );
+}
+
+/// ⑤ 重签后放行：拒台词给的命令原样执行即解除（证明拒绝面自带自救路径，不靠外部知识）。
+#[test]
+fn read_gate_passes_after_reading_and_resigning() {
+    let mut game = armed_game("gate-resign");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
+    game.assert_kv("req.1.gate", json!("plan"));
+    // 序号是 KV 标量（读档可复算）：签名快照非零、派发计数单调。
+    let sign_seq = game.kv("settings.sign_seq.acts/coordinate");
+    assert!(
+        sign_seq.as_u64().unwrap_or(0) > 0,
+        "mark_sign must record a real dispatch sequence: {sign_seq}"
+    );
+    let clock = game.kv("settings.clock_seq");
+    assert!(
+        clock.as_u64().unwrap_or(0) > 0,
+        "the dispatch counter must live in KV: {clock}"
+    );
+}
+
+/// ⑥ 入库态双断言：① 生成区**已开闸**（readPlan / readGate 真实存在，且 ver 台账与
+/// 文档头逐件相等）；② 把生成区整体剥掉的副本仍然 **inert**（不拦、不叙事）——
+/// 「缺席即安全阀」这条路径不能因为开闸而失去回归保护。
+#[test]
+fn read_gate_ships_armed_and_a_bare_copy_stays_inert() {
+    let config = support::read_json(&project_mod_dir().join("data/config.json"));
+    let plan = config["readPlan"]
+        .as_object()
+        .expect("the shipped config must carry readPlan (the gate is armed in the repo)");
+    assert!(
+        !plan.is_empty() && plan.contains_key("coordinate") && plan.contains_key("settle"),
+        "readPlan must cover the acts the gate guards: {plan:?}"
+    );
+    let ledger = config["readGate"]["ver"]
+        .as_object()
+        .expect("the shipped config must carry readGate.ver");
+    assert!(
+        ledger.len() >= 5,
+        "the version ledger must cover the guarded docs: {ledger:?}"
+    );
+    // 台账 == 文档头（单一事实源：generator 从同一批文件头产出）。
+    for (doc, ver) in ledger {
+        let path = repo_dir().join("docs/context").join(format!("{doc}.md"));
+        let head = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {doc}: {err}"));
+        let declared = head
+            .lines()
+            .find(|line| line.contains("**ver**"))
+            .and_then(|line| line.split("**ver**").nth(1))
+            .and_then(|tail| tail.split_whitespace().next())
+            .unwrap_or_else(|| panic!("{doc}: no ver header"));
+        assert_eq!(
+            declared,
+            ver.as_str().expect("ver string"),
+            "readGate.ver.{doc} must equal the doc header (one source, generated)"
+        );
+    }
+
+    // 剥掉生成区的副本：判据 inert 且静默。
+    let bare_dir = support::temp_dir("read-gate-inert");
+    support::copy_dir(&project_mod_dir(), &bare_dir);
+    let mut bare_config = support::read_json(&bare_dir.join("data/config.json"));
+    let bare_object = bare_config.as_object_mut().expect("config object");
+    bare_object.remove("readGate");
+    bare_object.remove("readPlan");
+    support::write_json(&bare_dir.join("data/config.json"), &bare_config);
+    support::reseal(&bare_dir);
+
+    let mut game = Game::open(&bare_dir);
+    charter_and_begin(&mut game);
+    game.narrate(
+        "requirement.add",
+        &text("inert requirement|inert description|inert-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|inert plan|artifacts/r1.md"),
+    );
+    let joined = lines.join("\n");
+    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
+    assert!(
+        !joined.contains("read-gate/") && !joined.contains("[READ GATE]"),
+        "an absent readset must be silent as well as inert: {lines:#?}"
+    );
+    game.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// ⑧ 批边界（`coordinate.submit`）的端到端：未签被拒且**状态未推进**，补签后放行。
+/// 必读集 = 结算幕清单（`acts/settle` + `rituals/cleanup`，由生成器写在 `readPlan.settle`）。
+#[test]
+fn read_gate_blocks_and_releases_the_batch_boundary() {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
+        "semantics-batch-gate",
+    ))));
+    // 关掉自动补签：这一条要的是「没签的现场」。
+    game.suppress_reads = true;
+    let refused_lines = narrative_lines(&game.click("coordinate.submit — "));
+    assert_refused(&refused_lines, "coordinate.submit");
+    let joined = refused_lines.join("\n");
+    assert!(
+        joined.contains("read-gate/missing")
+            && joined.contains("acts/settle")
+            && joined.contains("rituals/cleanup"),
+        "the batch boundary must name the settle-act set it wants: {refused_lines:#?}"
+    );
+    // 状态未推进、零副作用：相位还停在协调幕，机证也没被登记。
+    game.assert_kv("run.phase", json!(""));
+    game.assert_kv("verify.passed", Json::Null);
+
+    // 补签（恢复自动补签，走人类票据）→ 同一动作放行。
+    game.suppress_reads = false;
+    let passed = narrative_lines(&game.click("coordinate.submit — "));
+    assert!(
+        !refused(&passed, "coordinate.submit"),
+        "after signing the batch boundary must release: {passed:#?}"
+    );
+    game.assert_kv("run.phase", json!("settle"));
+}
+
+/// ⑨ 文档改版：签名本身没变，但台账 ver 前进了 → `read_gate_stale` 拒；按新 ver 重签后放行。
+/// 现场构成：先签 aaaaaa → 存档 → 改 fixture 的 `readGate.ver` → 重装 mod 并 restore 存档。
+/// 这正是「文档改版需重读」的机械载体（ver 台账与文档头同源）。
+#[test]
+fn read_gate_refuses_a_signature_against_a_revised_doc() {
+    let dir = armed_mod("gate-revised");
+    let mut game = Game::open(&dir);
+    charter_and_begin(&mut game);
+    game.narrate(
+        "requirement.add",
+        &text("revised requirement|revised description|revised-r1"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    let bytes = serde_json::to_vec(&game.save()).expect("serialize the save");
+
+    // 文档「改版」：台账把 acts/coordinate 的 ver 推到 111111（等价于 docs 头被改）。
+    let mut config = support::read_json(&dir.join("data/config.json"));
+    config["readGate"]["ver"]["acts/coordinate"] = json!("111111");
+    support::write_json(&dir.join("data/config.json"), &config);
+    support::reseal(&dir);
+
+    let bundle = ModBundle::load(&dir).expect("reload the revised fixture");
+    let mut revised = Game {
+        kernel: bundle
+            .restore(&bytes)
+            .expect("restore across the doc revision"),
+        bundle,
+        dir: dir.clone(),
+        suppress_reads: true,
+    };
+    let lines = revised.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|stale-ver plan|artifacts/r1.md"),
+    );
+    assert_refused(&lines, "proposal.submit");
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("read-gate/stale")
+            && joined.contains("the doc's ver moved from aaaaaa to 111111"),
+        "a revised doc must void the signature and say which ver moved: {lines:#?}"
+    );
+    revised.assert_kv("req.1.gate", json!(""));
+
+    // 按新 ver 重签 → 放行。
+    revised.suppress_reads = false;
+    revised.narrate("config.set", &text("read.acts/coordinate=111111"));
+    let passed = revised.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|stale-ver plan|artifacts/r1.md"),
+    );
+    assert!(!refused(&passed, "proposal.submit"), "{passed:#?}");
+    revised.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// ⑦ 不误伤：既有语义拒绝的文案优先，读签不得抢嘴（装订期严密与否不能改变拒因归属）。
+#[test]
+fn read_gate_does_not_mask_existing_rejection_reasons() {
+    let mut game = armed_game("gate-nomask");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    // 待批期间 amend → gate_rev 与 rev 失配（既有 stale 判据）。零签名也在场，但先报既有原因。
+    game.narrate("requirement.amend", &text("r1||amended while pending"));
+    let lines = game.narrate("gate.approve", &text("r1"));
+    let joined = lines.join("\n");
+    assert!(!joined.contains("read-gate/"), "{lines:#?}");
+    assert!(
+        joined.contains("is bound to rev") || refused(&lines, "gate.approve"),
+        "the pre-existing gate reason must win: {lines:#?}"
+    );
 }
 
 /// P10 决策归属的守门线：`play.mode=goal` 在 `goal.authorization` 注册之前会发出可读
@@ -2242,14 +3052,14 @@ fn mod_architecture_is_fragments_plus_five_layers() {
     let project = project_mod_dir();
     let pack = read_json(&project.join("pack.json"));
 
-    // ① the code face: 27 modules, five layers, entry excluded, all on disk.
+    // ① the code face: 28 modules, five layers, entry excluded, all on disk.
     let modules = pack["code"]["modules"]
         .as_array()
         .expect("code.modules must be an array");
     assert_eq!(
         modules.len(),
-        27,
-        "the D-MA23 mod declares 27 modules: {modules:?}"
+        30,
+        "the D-MA23 mod declares 30 modules: {modules:?}"
     );
     let entry = pack["code"]["entry"].as_str().expect("code.entry");
     let mut layers = std::collections::BTreeSet::new();
@@ -2868,15 +3678,15 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     let mod_dir = project_mod_dir();
     let mut total = 0usize;
     for (doc, fragment) in [
-        ("copy-contract-flow.md", "beats-flow.json"),
-        ("copy-contract-harness.md", "beats-harness.json"),
-        ("copy-contract-lanes.md", "beats-lanes.json"),
-        ("copy-contract-map-guide.md", "beats-map-guide.json"),
-        ("copy-contract-requirements.md", "beats-requirements.json"),
-        ("copy-contract-settlement.md", "beats-settlement.json"),
+        ("flow.md", "beats-flow.json"),
+        ("harness.md", "beats-harness.json"),
+        ("lanes.md", "beats-lanes.json"),
+        ("map-guide.md", "beats-map-guide.json"),
+        ("requirements.md", "beats-requirements.json"),
+        ("settlement.md", "beats-settlement.json"),
     ] {
-        let text = std::fs::read_to_string(repo.join("docs/context").join(doc))
-            .unwrap_or_else(|err| panic!("read {doc}: {err}"));
+        let text = std::fs::read_to_string(repo.join("docs/context").join("copy").join(doc))
+            .unwrap_or_else(|err| panic!("read docs/context/copy/{doc}: {err}"));
         let documented = markdown_key_set(&text);
         let fragment_json = read_json(&mod_dir.join(format!("data/texts/{fragment}")));
         let actual: std::collections::BTreeSet<String> = fragment_json["beats"]
@@ -2897,7 +3707,7 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
         }
         total += documented.len();
     }
-    let core_text = std::fs::read_to_string(repo.join("docs/context/copy-contract-core.md"))
+    let core_text = std::fs::read_to_string(repo.join("docs/context/copy/core.md"))
         .expect("read core copy contract");
     let core_tables = core_text.split("## H.").next().expect("core tables");
     let documented = markdown_key_set(core_tables);
@@ -2923,9 +3733,9 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
     assert_eq!(documented, actual, "core copy table must cover core.json");
     total += documented.len();
-    assert_eq!(total, 440, "404 beats + 36 core keys; §H adds no keys");
+    assert_eq!(total, 450, "414 beats + 36 core keys; §H adds no keys");
     assert!(
-        core_text.contains("440 个唯一键") && core_text.contains("不得再次相加"),
+        core_text.contains("450 个唯一键") && core_text.contains("不得再次相加"),
         "the global ledger must explain why the 23 pointer shells are not added again"
     );
 }
@@ -2956,11 +3766,64 @@ fn markdown_template_map(text: &str) -> std::collections::BTreeMap<String, Strin
     out
 }
 
+/// 从一个文案值里取出所有 `docs/context/<相对路径>.md` 指针（r5）。
+///
+/// 旧实现只收 `[A-Za-z0-9._-]`，于是 `docs/context/acts/charter.md` 被截成 `acts`、不以
+/// `.md` 结尾 → **静默跳过**（既不计数也不报违规）。r1 把权威文件切进子目录之后，整张锚点账
+/// 从那天起就是假绿。现在允许 `/`，仍然要求 `.md` 结尾：目录指针 `acts/`、通配 `acts/*.md`
+/// 与空串一律不算文件指针。
+fn context_pointer_paths(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some(pos) = rest.find("docs/context/") {
+        let tail = &rest[pos + "docs/context/".len()..];
+        let file: String = tail
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+            .collect();
+        rest = &tail[file.len().min(tail.len())..];
+        if file.ends_with(".md") {
+            out.push(file);
+        }
+    }
+    out
+}
+
+/// 核一个键值的全部指针：累加 `count` 并返回违规清单（锚点缺失 / 非法路径段）。
+///
+/// `..` 与空段一律判违规——`docs/context/acts/../AGENTS.md` 这类写法能骗过存在性检查，
+/// 却把读者带出 context 树。
+fn context_pointer_violations(
+    context_dir: &std::path::Path,
+    ns: &str,
+    key: &str,
+    value: &str,
+    count: &mut usize,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    for file in context_pointer_paths(value) {
+        *count += 1;
+        if file.split('/').any(|seg| seg.is_empty() || seg == "..") {
+            violations.push(format!(
+                "{ns}.{key} -> docs/context/{file} (illegal path segment)"
+            ));
+            continue;
+        }
+        if !context_dir.join(&file).is_file() {
+            violations.push(format!("{ns}.{key} -> docs/context/{file} (missing)"));
+        }
+    }
+    violations
+}
+
 /// r2 (mod 职责再分工): 23 个剧情/策略键收缩为「状态行 + 指针」后，凡 beat/core 文本值携带
 /// `docs/context/` 指针，其锚点文件必须真实存在于仓库 `docs/context/`——指针漂移（指向不存在的
 /// 文件）会让「无 egg 读 context 自洽」的承诺失效。同时核销：六个 `<node>_common` 键与 core 的
 /// scenes/prompts 必须携带指针（防收缩被意外回退）。Mutation：删掉某个锚点文件或把某指针改成
 /// 不存在的路径 → 本用例转红。
+///
+/// r5：解析改走 `context_pointer_paths`（允许子目录）。反面证据见
+/// `context_pointer_parser_accepts_subdirectories_and_flags_missing_anchors`。
 #[test]
 fn narrative_pointer_anchors_exist_in_docs_context() {
     let repo = repo_dir();
@@ -2969,22 +3832,13 @@ fn narrative_pointer_anchors_exist_in_docs_context() {
     let mut pointer_count = 0usize;
     let mut violations: Vec<String> = Vec::new();
     let mut check = |ns: &str, key: &str, value: &str| {
-        // 每个 `docs/context/<file>.md` 出现都核一次锚点。
-        let mut rest = value;
-        while let Some(pos) = rest.find("docs/context/") {
-            let tail = &rest[pos + "docs/context/".len()..];
-            let file: String = tail
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
-                .collect();
-            if file.ends_with(".md") {
-                pointer_count += 1;
-                if !context_dir.join(&file).is_file() {
-                    violations.push(format!("{ns}.{key} -> docs/context/{file} (missing)"));
-                }
-            }
-            rest = &tail[file.len().min(tail.len())..];
-        }
+        violations.extend(context_pointer_violations(
+            &context_dir,
+            ns,
+            key,
+            value,
+            &mut pointer_count,
+        ));
     };
     for f in [
         "beats-flow.json",
@@ -3028,15 +3882,92 @@ fn narrative_pointer_anchors_exist_in_docs_context() {
             "shrunk beat `{key}` must carry a docs/context pointer"
         );
     }
-    assert!(
-        pointer_count >= 23,
-        "expected at least 23 docs/context pointers across the shrunk keys, got {pointer_count}"
+    // r5 指针账（子目录化 + 解析器修好后实测）：
+    //   flow 6 个 <node>_common      = 7（settle_common 两处：正文 + 清理政策）
+    //   harness.subagent_brief       = 2（coordinate + rituals/dispatch）
+    //   map-guide 2 键               = 2
+    //   settlement 3 键              = 3
+    //   core.scenes 5 键             = 13（幕台词基行各 1 + [READ FIRST] 块内每条必读 1）
+    //   core.prompts 5 键             = 5
+    // 合计 32。注意：块内的必读指针（如 `cold-start/vocabulary.md`）都是子目录形，旧解析器
+    // 一并静默跳过——所以此数从旧实装口径的 25 直接跳到 32，正是漏检被补上的尺度。
+    // `stage_prompt_missing` 指向 `docs/context/acts/`（目录指针，不是 .md，不计入）。
+    assert_eq!(
+        pointer_count, 32,
+        "docs/context pointer ledger drifted: expected 32, got {pointer_count}"
     );
     assert!(
         violations.is_empty(),
         "narrative pointer anchors missing under docs/context/: {}",
         violations.join(", ")
     );
+}
+
+/// r5 反向断言（漏检防线）：旧解析器对子目录指针**静默跳过**——
+/// `docs/context/acts/charter.md` 被截成 `acts`、不以 `.md` 结尾，于是 pointer_count 不增、
+/// violations 不报，用例照样绿。这就是「漏检不是通过」。本用例把三件事钉死：
+/// ① 子目录指针必须被识别并计数；② 指向不存在的子目录文件必须产生 violation；
+/// ③ `..` 穿越必须判违规。Mutation：把 `context_pointer_paths` 的字符集退回
+/// `[A-Za-z0-9._-]`（去掉 `/`）→ ①②两条断言立即转红。
+#[test]
+fn context_pointer_parser_accepts_subdirectories_and_flags_missing_anchors() {
+    let context_dir = repo_dir().join("docs/context");
+
+    // ① 子目录指针必须被识别为 1 条（旧实现：0 条）
+    assert_eq!(
+        context_pointer_paths("正文见 docs/context/acts/charter.md（立局幕）。"),
+        vec!["acts/charter.md".to_string()]
+    );
+    // ② 两层子目录 + 紧邻中文标点 / `§` / `；` 不得吞掉路径
+    assert_eq!(
+        context_pointer_paths(
+            "政策见 docs/context/rituals/cleanup.md §2；台账 docs/context/archive/decisions-agent.md。"
+        ),
+        vec![
+            "rituals/cleanup.md".to_string(),
+            "archive/decisions-agent.md".to_string()
+        ]
+    );
+    // ③ 目录指针 / 通配不算文件指针（真实写法：`docs/context/acts/` 与 `docs/context/acts/*.md`）
+    assert!(context_pointer_paths("见 docs/context/acts/ 与 docs/context/acts/*.md").is_empty());
+
+    // ④ 存在的子目录锚点：计数 1、零违规
+    let mut n = 0;
+    assert!(context_pointer_violations(
+        &context_dir,
+        "t",
+        "ok",
+        "docs/context/acts/charter.md",
+        &mut n
+    )
+    .is_empty());
+    assert_eq!(n, 1, "子目录指针必须计入 pointer_count");
+
+    // ⑤ 不存在的子目录锚点：必须计数 1 且产生 1 条 violation（旧实现：0 条 = 漏检）
+    let mut n = 0;
+    let violations = context_pointer_violations(
+        &context_dir,
+        "t",
+        "missing",
+        "docs/context/acts/definitely-no-such-doc.md",
+        &mut n,
+    );
+    assert_eq!(
+        (n, violations.len()),
+        (1, 1),
+        "指向不存在子目录文件的指针必须转红：{violations:?}"
+    );
+
+    // ⑥ `..` 穿越必须判违规
+    let mut n = 0;
+    let violations = context_pointer_violations(
+        &context_dir,
+        "t",
+        "escape",
+        "docs/context/acts/../README.md",
+        &mut n,
+    );
+    assert_eq!(violations.len(), 1, "`..` 穿越必须违规：{violations:?}");
 }
 
 /// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup

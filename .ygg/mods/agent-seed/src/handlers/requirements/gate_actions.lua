@@ -91,6 +91,11 @@ function M.install(deps)
     if evidence ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", evidence)
     end
+    -- r4 读签前置校验：排在 stale / 证据两条既有拒绝之后、**首个 KV 写之前**。
+    local read_block = gates.read_problem("gate.approve", { req = index, kind = kind })
+    if read_block ~= nil then
+      return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", read_block)
+    end
     -- 升起本门禁的 plan 提案随裁决先落定（approved）——提前到自身 pending 判据之前，
     -- 否则交付即门禁语义下门禁被自己的提案永远自缚（T4 缺陷 3）；
     -- 判定不过时 refuse 走宿主事务回滚，落定同步撤销；外来 pending 仍照常阻塞。

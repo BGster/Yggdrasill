@@ -19,6 +19,7 @@ local reqs = require("src.domain.requirements")
 local tools = require("src.runtime.tools")
 local util = require("src.core.util")
 local wire = require("src.domain.wire")
+local readsig = require("src.domain.readsig")
 
 local TEXTS
 
@@ -249,6 +250,8 @@ function M.install(deps)
       return false
     end
     ygg.kv.set("run.phase", "release")
+    -- r3 销票：进发布幕 = 作用域边界，盘点幕的必读签名全部作废。
+    readsig.clear()
     ygg.narrate(TEXTS.beats.settle_ready)
     return true
   end)
@@ -270,12 +273,20 @@ function M.install(deps)
     if problem ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", problem)
     end
+    -- r4 读签前置校验（批边界）：排在各局收口判据之后、确认转场之前。
+    -- 必读集 = 结算幕必读（acts/settle + rituals/cleanup，由生成器写在 readPlan.settle）。
+    local read_block = gates.read_problem("coordinate.submit", {})
+    if read_block ~= nil then
+      return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", read_block)
+    end
     ygg.kv.set("verify.passed", false)
     -- 每次进入结算都重新登记三项任务，避免沿用上一轮过期证据。
     reset_settlement()
     -- r9 / R8 批语义：coordinate.submit 是**批边界**（不是「走向终局的第一步」）；
     -- settle 是 run.phase 微状态，内核 FSM 不转场。
     ygg.kv.set("run.phase", "settle")
+    -- r3 销票：进盘点幕（批边界）= 作用域边界，协调幕的必读签名全部作废。
+    readsig.clear()
     ygg.narrate(fill(TEXTS.beats.coordinate_ok, {
       count = tostring(req_count()),
       batch = tostring(num("run.batch", 1)),
@@ -340,6 +351,8 @@ function M.install(deps)
     reset_settlement()
     reset_release()
     ygg.kv.set("run.phase", "")
+    -- r3 销票：打回协调幕（整批退回）= 作用域边界，盘点幕的必读签名全部作废。
+    readsig.clear()
     local failures = num("verify.failures", 0) + 1
     ygg.kv.set("verify.failures", failures)
     ygg.kv.set("verify.last", report ~= "" and report or TEXTS.beats.verify_failed_record)
@@ -564,6 +577,8 @@ function M.install(deps)
     ygg.kv.set("verify.passed", false)
     reset_settlement()
     ygg.kv.set("run.phase", "")
+    -- r3 销票：批翻页（回协调幕，run.batch+1）= 作用域边界，上一批的必读签名全部作废。
+    readsig.clear()
     ygg.narrate(fill(TEXTS.beats.review_batch_ok, {
       batch = tostring(batch),
       next = tostring(batch + 1),

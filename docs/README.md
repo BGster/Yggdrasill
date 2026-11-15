@@ -12,24 +12,15 @@ docs/
 ├── wiki-governance.md   # 活文档闭环：执行前注入 / 执行中同步 / 结算前核验
 ├── CONTEXT.md           # 薄壳索引：领域/决策树入口 + 旧 §N 映射表
 ├── DESIGN.md            # 薄壳索引：系统设计树入口 + 旧 §N 映射表
-├── context/             # 领域语境树
-│   ├── vision.md            # 产品愿景与双重身份
-│   ├── vocabulary.md        # 术语速览与核心领域词汇
-│   ├── principles.md        # 架构与运营原则 P1–P11
-│   ├── topology.md          # Monorepo 拓扑与依赖白名单
-│   ├── decisions-engine.md  # 决策台账 D1–D21
-│   ├── decisions-agent.md   # 决策台账 D-MA1–26
-│   ├── workflow-acts.md     # 五幕进行时台词 + 无 egg 执行章（phase-entry 知识权威）
-│   ├── dispatch-ritual.md   # 派发仪式正文（before-action 知识权威）
-│   ├── cleanup-policy.md    # 盘点清理政策
-│   ├── copy-contract.md     # 文案契约七域索引（404 beats + core 36 = 440 键）
-│   ├── copy-contract-flow.md        # beats-flow 63 键
-│   ├── copy-contract-harness.md     # beats-harness 69 键
-│   ├── copy-contract-lanes.md       # beats-lanes 36 键
-│   ├── copy-contract-map-guide.md   # beats-map-guide 38 键
-│   ├── copy-contract-requirements.md # beats-requirements 144 键
-│   ├── copy-contract-settlement.md  # beats-settlement 54 键
-│   └── copy-contract-core.md        # core 36 键 + 指针壳与全局键账
+├── context/             # 领域语境树（按「召回时点」切分，入口 context/README.md；D-MA27）
+│   ├── README.md            # 召回入口：我在哪个时点 → 读哪个文件（含九幕一览 + compat 层清单）
+│   ├── scenes.json          # 场景 / 需求阶段 → 文档 id 加载表（r2 消费）
+│   ├── cold-start/          # 冷启动底座：vision / vocabulary / topology / principles
+│   ├── acts/                # 主流程幕 1:1 一文件：prologue / charter / coordinate / settle / release / retired
+│   ├── req-acts/            # 需求级九幕聚合三份：intake(1-3) / delivery(4-6) / integration(7-9)
+│   ├── rituals/             # 按动作时点：dispatch / cleanup / fallback
+│   ├── copy/                # 文案契约：README + flow / harness / lanes / map-guide / requirements / settlement / core
+│   └── archive/             # 决策台账：decisions-engine(D1-D21) / decisions-agent(D-MA1-29)
 └── design/              # 系统设计树
     ├── system-boundaries.md     # 三层边界 + 协商矩阵 + Adapter 五义务
     ├── state-machine.md         # 状态机语义与微状态判定
@@ -55,23 +46,27 @@ docs/
 
 | 文件 | 一句话定位 | replaces（原 CONTEXT.md） |
 | --- | --- | --- |
-| [vision.md](context/vision.md) | 统一命题与双重产品身份 | §1 |
-| [vocabulary.md](context/vocabulary.md) | 术语速查表 + 12 条权威领域词汇定义 | 术语速览 + §2 |
-| [principles.md](context/principles.md) | P1–P11 工程原则与 PLAY 家族注记 | §3 |
-| [topology.md](context/topology.md) | 仓库目录拓扑与 4 条硬性依赖不变量 | §4 |
-| [decisions-engine.md](context/decisions-engine.md) | 引擎与平台架构决策台账 D1–D21 | §5 引言 + §5.1 |
-| [decisions-agent.md](context/decisions-agent.md) | Agent 治理架构决策台账 D-MA1–26 | §5 引言 + §5.2 |
-| [workflow-acts.md](context/workflow-acts.md) | 主流程五幕 + 需求级九幕进行时指引（入口/必做/出口/关联阅读）+ 无 egg 执行章 | mod scenes/prompts/`*_common` 叙事正文 |
-| [dispatch-ritual.md](context/dispatch-ritual.md) | 派发仪式正文：分阶段必读 / 工件 / submit / 集成 / Doc sync | mod subagent_brief 策略段 |
-| [cleanup-policy.md](context/cleanup-policy.md) | 盘点清理政策：会话清理边界与判据 / 待办清理 | mod settlement_sessions_unsetted_hint 正文 |
-| [copy-contract.md](context/copy-contract.md) | 文案契约七域索引与协议前缀（404 beats + core 36 = 440 唯一键） | mod data/texts 全部状态行文键 |
-| [copy-contract-flow.md](context/copy-contract-flow.md) | beats-flow 63 键句式 | beats-flow.json |
-| [copy-contract-harness.md](context/copy-contract-harness.md) | beats-harness 69 键句式（含 tools 注册七键） | beats-harness.json |
-| [copy-contract-lanes.md](context/copy-contract-lanes.md) | beats-lanes 36 键句式 | beats-lanes.json |
-| [copy-contract-map-guide.md](context/copy-contract-map-guide.md) | beats-map-guide 38 键句式 | beats-map-guide.json |
-| [copy-contract-requirements.md](context/copy-contract-requirements.md) | beats-requirements 144 键句式 | beats-requirements.json |
-| [copy-contract-settlement.md](context/copy-contract-settlement.md) | beats-settlement 54 键句式（含 tools 机证七键） | beats-settlement.json |
-| [copy-contract-core.md](context/copy-contract-core.md) | core 36 键 + 23 处指针壳与 Q3 键账 | core.json |
+| [context/README.md](context/README.md) | 召回入口：时点 → 文件（含九幕一览 + compat 层清单） | 原平铺 17 文件的唯一入口 |
+| [context/scenes.json](context/scenes.json) | 场景 / 需求阶段 → 文档 id 加载表（r2 消费） | — |
+| [context/cold-start/vision.md](context/cold-start/vision.md) | 统一命题与双重产品身份 | §1 |
+| [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) | 术语速查表 + 12 条权威领域词汇定义 | 术语速览 + §2 |
+| [context/cold-start/principles.md](context/cold-start/principles.md) | P1–P11 工程原则与 PLAY 家族注记 | §3 |
+| [context/cold-start/topology.md](context/cold-start/topology.md) | 仓库目录拓扑与 4 条硬性依赖不变量 | §4 |
+| [context/archive/decisions-engine.md](context/archive/decisions-engine.md) | 引擎与平台架构决策台账 D1–D21 | §5 引言 + §5.1 |
+| [context/archive/decisions-agent.md](context/archive/decisions-agent.md) | Agent 治理架构决策台账 D-MA1–29 | §5 引言 + §5.2 |
+| [context/acts/](context/acts/) | 主流程幕 1:1 一文件（prologue / charter / coordinate / settle / release / retired，每份 ≤40 行） | mod scenes/prompts/`*_common` 叙事正文 |
+| [context/req-acts/](context/req-acts/) | 需求级九幕聚合三份（intake 1-3 / delivery 4-6 / integration 7-9，每份 ≤45 行） | 同上（需求级台词与动作清单） |
+| [context/rituals/dispatch.md](context/rituals/dispatch.md) | 派发仪式正文：分阶段必读 / 工件 / submit / 集成 / Doc sync | mod subagent_brief 策略段 |
+| [context/rituals/cleanup.md](context/rituals/cleanup.md) | 盘点清理政策：会话清理边界与判据 / 待办清理 | mod settlement_sessions_unsetted_hint 正文 |
+| [context/rituals/fallback.md](context/rituals/fallback.md) | 无 egg 执行章 + 续作降级说明 | mod subagent_fallback_note 正文 |
+| [context/copy/README.md](context/copy/README.md) | 文案契约七域索引与协议前缀（409 beats + core 36 = 445 唯一键） | mod data/texts 全部状态行文键 |
+| [context/copy/flow.md](context/copy/flow.md) | beats-flow 63 键句式 | beats-flow.json |
+| [context/copy/harness.md](context/copy/harness.md) | beats-harness 69 键句式（含 tools 注册七键） | beats-harness.json |
+| [context/copy/lanes.md](context/copy/lanes.md) | beats-lanes 36 键句式 | beats-lanes.json |
+| [context/copy/map-guide.md](context/copy/map-guide.md) | beats-map-guide 38 键句式 | beats-map-guide.json |
+| [context/copy/requirements.md](context/copy/requirements.md) | beats-requirements 144 键句式 | beats-requirements.json |
+| [context/copy/settlement.md](context/copy/settlement.md) | beats-settlement 54 键句式（含 tools 机证七键） | beats-settlement.json |
+| [context/copy/core.md](context/copy/core.md) | core 36 键 + 23 处指针壳与 Q3 键账 | core.json |
 
 ## 导航表 · 系统设计（design/）
 
@@ -86,7 +81,7 @@ docs/
 | [lanes.md](design/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
 | [tool-bridge.md](design/tool-bridge.md) | 同步工具桥双层白名单指针 | §2.11 |
 | [harness-tools.md](design/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | D-MA26 |
-| [prompt-surface.md](design/prompt-surface.md) | 6 个 beats 片段 × 404 键 + core 36 键职责表 | §2.12 |
+| [prompt-surface.md](design/prompt-surface.md) | 6 个 beats 片段 × 409 键 + core 36 键职责表 | §2.12 |
 | [identity.md](design/identity.md) | 台账/身份章/profile/票据门（不进剧情） | §2.13 |
 | [lua-api.md](design/lua-api.md) | ygg.* 全 API 面与副作用类别 | §3 章题 + §3.1 |
 | [mod-package.md](design/mod-package.md) | pack.json / config.json / manifest.json 契约 | §3.2 |
@@ -106,9 +101,9 @@ docs/
 
 ## 阅读路径
 
-- **新执行者（plan/development 前）**：[CONTEXT.md](CONTEXT.md)（壳）→ [vocabulary.md](context/vocabulary.md) → [workflow-acts.md](context/workflow-acts.md) → [dispatch-ritual.md](context/dispatch-ritual.md) → 本需求触碰的子系统主题文件（见 brief 的 `Mandatory references:` 行；plan 对照 playbook run_machine/actions，development 再对照 gates/live_evidence）。
-- **决策检索**：D1–D21 → [decisions-engine.md](context/decisions-engine.md)；D-MAx → [decisions-agent.md](context/decisions-agent.md)。
-- **门禁核验**：[requirement-story.md](design/requirement-story.md)（九幕/转场）+ [state-surface.md](design/state-surface.md)（拒绝面）+ [decisions-agent.md](context/decisions-agent.md)（D-MA22 集成职责）。
+- **新执行者（plan/development 前）**：[CONTEXT.md](CONTEXT.md)（壳）→ [context/README.md](context/README.md)（召回入口：时点 → 文件）→ [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) → 当前幕对应的 `context/acts/<act>.md` 与 `context/req-acts/<stage>.md` → [context/rituals/dispatch.md](context/rituals/dispatch.md) → 本需求触碰的子系统主题文件（见 brief 的 `Mandatory references:` 行；plan 对照 playbook run_machine/actions，development 再对照 gates/live_evidence）。
+- **决策检索**：D1–D21 → [context/archive/decisions-engine.md](context/archive/decisions-engine.md)；D-MAx → [context/archive/decisions-agent.md](context/archive/decisions-agent.md)。
+- **门禁核验**：[requirement-story.md](design/requirement-story.md)（九幕/转场）+ [state-surface.md](design/state-surface.md)（拒绝面）+ [context/archive/decisions-agent.md](context/archive/decisions-agent.md)（D-MA22 集成职责）。
 - **CLI/契约/serve 开发**：[cli-daemon.md](design/cli-daemon.md)、[action-faces.md](design/action-faces.md)、[wire-protocol.md](design/wire-protocol.md)、[serve.md](design/serve.md)。
 
 ## 旧式引用解析
