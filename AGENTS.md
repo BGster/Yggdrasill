@@ -227,8 +227,9 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 The flat `docs/context/` paths retired by r1 (`workflow-acts.md`, `dispatch-ritual.md`, `copy-contract-*.md` 等 15 条)
 were **compat shims for then-frozen consumers**; r5 rewrote every mod pointer and crates test path onto the
 authoritative files and deleted them, so they no longer exist and must not be reintroduced. The migration record
-lives in `docs/context/README.md`; history and the original ruling (D-MA29 two-way split + mandatory exit
-condition) live in git and `docs/context/archive/decisions-*.md`, never here.
+lives in `docs/context/README.md`; the original ruling (compat-layer two-way split — a shell for a split,
+ a symlink for a 1:1 move, each with a mandatory exit condition) is stated in `docs/wiki-governance.md`
+「ver 定义与旧路径兼容层两分法」, never here.
 
 The flat `docs/design/` paths (`<topic>.md`) retired by r6, for the same reason: they became `kernel/ host/ mod/`
 (entry `docs/design/README.md`) and **no shim was left** — `docs/design/*.md` may contain only `README.md`, which
