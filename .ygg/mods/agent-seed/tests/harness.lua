@@ -26,6 +26,23 @@ local STAMP_ONLY = {
 }
 local ACTOR = "selftest"
 
+local FSM = nil
+
+--- 最小 FSM：`ygg.fsm.define` 的 transitions 里 from/to/when 匹配即推进 `fsm.stage`。
+local function apply_fsm(name, payload)
+  if FSM == nil or name ~= FSM.event then
+    return false
+  end
+  local from = KV["fsm.stage"] or FSM.initial
+  for _, tr in ipairs(FSM.transitions or {}) do
+    if tr.from == from and tr.to == payload and (tr.when == nil or tr.when(payload)) then
+      KV["fsm.stage"] = tr.to
+      return true
+    end
+  end
+  return false
+end
+
 --- 投递一个事件到 handler，按路由语义决定是否盖 actor 章。
 local function deliver(name, payload)
   local fn = HANDLERS[name]
@@ -72,6 +89,16 @@ ygg = {
   -- 这里用同步队列复刻同一语义（否则 `choice_selected` 发出的动作会悬空）。
   emit = function(name, payload)
     EMITTED[#EMITTED + 1] = { name = name, payload = payload }
+    if apply_fsm(name, payload) then
+      -- 真转场后必须重新渲染：`[ENDING ...]` 一类叙述由 RENDER[retired] 在渲染时产生，
+      -- 不是 handler 直接 narrate 的。mock 里 render 的唯一可达入口是 agent.summary。
+      __SELFTEST.lastChoice = nil
+      local summary = HANDLERS["agent.summary"]
+      if summary ~= nil then
+        summary("")
+      end
+      return
+    end
     QUEUE[#QUEUE + 1] = { name = name, payload = payload }
     drain()
   end,
@@ -94,6 +121,7 @@ ygg = {
   fsm = {
     define = function(def)
       __SELFTEST.fsm = def
+      FSM = def
     end,
   },
   fs = {},
@@ -387,10 +415,13 @@ end
 
 --- 重新渲染并取菜单项（mock 的 ygg.choice 收集面）。
 function render_options()
-  -- 选项由「最近一次 handler 末尾的 ygg.choice」产生（沙箱里渲染是 handler 的副作用）。
-  -- `node:render` 只是叙事节点，不是 handler——别去 fire 它。
+  -- 必须**重新渲染**再读：`ensure_reads` 补签时会 fire `config.set`，把菜单缓存改成
+  -- 配置页的选项。Rust 侧 `options()` 用宿主的 `state` 命令重新查询，这里用
+  -- `agent.summary`（唯一会把 render() 走一遍的 handler）等价复刻。
+  __SELFTEST.lastChoice = nil
+  fire("agent.summary", "")
   local choice = __SELFTEST.lastChoice
-  assert_true(choice ~= nil, "no pending choice: call fresh() first")
+  assert_true(choice ~= nil, "no pending choice after agent.summary render")
   return choice.options
 end
 
@@ -471,4 +502,66 @@ function phase_of(id)
     end
   end
   error("no " .. id .. " in the requirement list")
+end
+
+--- 计划门 → 开发交付待受理（Rust 的 drive_to_dev_pending）。
+function drive_to_dev_pending(ext)
+  drive_to_plan_gate()
+  click("gate.approve — ")
+  assert_eq(kv("req.1.plan_ok"), true, "approving the plan gate sets plan_ok")
+  assert_eq(kv("req.1.job"), "development", "the development job starts in the same turn")
+  assert_eq(kv("req.1.lane"), 1, "the lane is bound")
+  submit(1, "development", ext or "semantics-p2")
+end
+
+--- 受理交付 → 验收门（Rust 的 drive_to_accept）。
+function drive_to_accept()
+  click("proposal.accept — ")
+  assert_eq(kv("req.1.gate"), "accept", "the accept gate is up")
+  assert_eq(kv("req.1.gate_rev"), 1, "gate_rev pins the revision")
+  assert_eq(phase_of("r1"), "accept_gate", "the row sits on the accept gate")
+end
+
+--- 验收门 → 集成中（lane 仍绑定，R7）。
+function drive_to_integrating()
+  click("gate.approve — ")
+  assert_eq(kv("req.1.integrating"), true, "approving the accept gate opens act 8")
+  assert_eq(kv("req.1.status"), "open", "true status only moves at the integration confirm")
+  assert_eq(kv("req.1.lane"), 1, "the lane stays bound through acceptance")
+  assert_eq(phase_of("r1"), "integrating", "the row is integrating")
+end
+
+--- 集成中 → done（integration.confirm 携带 develop@<sha>）。
+function drive_to_done()
+  reset()
+  fire("integration.confirm", "r1|develop@abc1234")
+  assert_true(narrated_contains("[INTEGRATION CONFIRMED]"), "the confirm must narrate its beat")
+  assert_eq(kv("req.1.status"), "done", "the true state moves to done")
+  assert_eq(kv("req.1.develop_sha"), "abc1234", "the develop sha is recorded")
+  assert_eq(kv("req.1.integrating"), false, "the integrating flag clears")
+  assert_eq(kv("req.1.lane"), 0, "the lane is released")
+  assert_eq(phase_of("r1"), "done", "the row is done")
+end
+
+--- 走到盘点幕（Rust 的 drive_to_settle）。
+function drive_to_settle()
+  drive_to_dev_pending("semantics-p2")
+  drive_to_accept()
+  drive_to_integrating()
+  drive_to_done()
+  reset()
+  click("coordinate.submit — ")
+  assert_eq(kv("run.phase"), "settle", "coordinate.submit opens the settle act")
+end
+
+--- 走到发布幕（Rust 的 drive_to_release）。
+function drive_to_release()
+  drive_to_settle()
+  click("verify.submit all_green=true — ")
+  assert_eq(kv("verify.passed"), true, "verify.submit all_green=true records the evidence")
+  fire(
+    "settlement.evolution",
+    "|candidates screened against the evolution chapter|c=0/0|" ..
+      "sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list"
+  )
 end

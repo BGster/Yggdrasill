@@ -1442,33 +1442,6 @@ fn docs_maintenance_clear_requires_the_outstanding_batch() {
     game.assert_kv("docs.maintenance.due", json!(""));
 }
 
-/// The **retired path appends nothing**: an armed `review.note` writes the ending and
-/// leaves the register (and the pointer) untouched — no maintenance row for a closed run.
-#[test]
-fn retire_appends_no_maintenance_requirement() {
-    let mut game = drive_to_release();
-    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
-    game.narrate("config.set", &text("run.retire=true"));
-    game.assert_kv("settings.run.retire", json!("true"));
-    let closed = game.click("review.note — ");
-    let narrative = closed["narrative"].to_string();
-    assert!(
-        narrative.contains("[ENDING · run retired]"),
-        "armed review.note must retire the run: {closed}"
-    );
-    assert!(
-        !narrative.contains("[MAINTENANCE REQ"),
-        "the retired path must not append a maintenance row: {closed}"
-    );
-    assert!(
-        !narrative.contains("[BATCH"),
-        "a retiring close must never carry a batch-settle line: {closed}"
-    );
-    game.assert_kv("req.count", json!(1));
-    game.assert_kv("run.maintenance.last", json!(null));
-    game.assert_kv("ending", json!("retired"));
-}
-
 // ───────────────────── gate locality & the integration act ─────────────────────
 
 /// Gate independence: **another requirement's** pending proposal / running job does not
