@@ -1263,38 +1263,6 @@ fn sign(game: &mut Game, doc: &str, ver: &str) {
     game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
 }
 
-/// ② 新鲜：阶段边界之后旧签名作废（跨阶段读 = 没读），拒台词报两个 seq。
-#[test]
-fn read_gate_voids_a_signature_taken_before_the_stage_edge() {
-    let mut game = armed_game("gate-stale");
-    sign(&mut game, "acts/coordinate", "aaaaaa");
-    sign(&mut game, "req-acts/intake", "bbbbbb");
-    game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    game.assert_kv("req.1.gate", json!("plan"));
-    // plan 批准把需求推进到 development 阶段：纪元前进。
-    sign(&mut game, "req-acts/delivery", "cccccc");
-    game.click("gate.approve — ");
-    game.assert_kv("req.1.plan_ok", json!(true));
-
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|development|armed dev|artifacts/r1-dev.md"),
-    );
-    let joined = lines.join("\n");
-    assert_refused(&lines, "proposal.submit");
-    assert!(
-        joined.contains("read-gate/stale") && joined.contains("stage development began at"),
-        "the refusal must name the stage edge that voided the signature: {lines:#?}"
-    );
-    assert!(
-        joined.contains("was signed at dispatch") && joined.contains("Window 80"),
-        "the refusal must report sign seq, entry seq and the window: {lines:#?}"
-    );
-}
-
 /// ③ 遗忘：窗口是**可配**的；超窗即拒，抬高窗口或重签都能解除。
 #[test]
 fn read_gate_reports_the_forget_distance_past_the_window() {

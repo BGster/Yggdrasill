@@ -674,3 +674,8 @@ function count_marker(marker)
   end
   return n
 end
+
+--- 签一件文档（值段是 r3 的 `ver|scene|seq` 形状，ver 必须与台账逐字相等）。
+function sign(doc, ver)
+  return fire("config.set", "read." .. doc .. "=" .. ver)
+end

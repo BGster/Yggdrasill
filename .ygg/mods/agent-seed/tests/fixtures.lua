@@ -51,3 +51,30 @@ test("读签缺签：提交被拒且零副作用，拒台词自带命令/窗口/
   assert_nil(kv("prop.1.status"), "提案没落库")
   assert_nil(kv("settings.read_index"), "签名账本没动")
 end, "armed")
+
+test("读签纪元：阶段边界之前取的签名会作废（stale）", function()
+  armed_game()
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+  fire("proposal.submit", "r1|1|plan|armed plan|artifacts/r1.md")
+  assert_eq(kv("req.1.gate"), "plan", "提案抬高了 plan 门")
+
+  -- plan 批准把需求推进到 development 阶段：纪元前进。
+  sign("req-acts/delivery", "cccccc")
+  click("gate.approve — ")
+  assert_eq(kv("req.1.plan_ok"), true, "plan 批准生效")
+
+  reset()
+  fire("proposal.submit", "r1|1|development|armed dev|artifacts/r1-dev.md")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(narrated_contains("read-gate/stale"), "拒绝必须点名 stale 维度：" .. joined)
+  assert_true(
+    joined:find("stage development began at", 1, true) ~= nil,
+    "必须点名作废它的那个阶段边界：" .. joined
+  )
+  assert_true(
+    joined:find("was signed at dispatch", 1, true) ~= nil,
+    "必须报告签名的时序（在第几个派发签的）：" .. joined
+  )
+  assert_true(joined:find("Window 80", 1, true) ~= nil, "必须报告窗口：" .. joined)
+end, "armed")
