@@ -274,3 +274,30 @@ test("settlement.todo 机器矛盾：拒绝且零写入", function()
   assert_nil(kv("settlement.todo.source"), "来源未登记")
   assert_eq(kv("settlement.todo.verified_by"), "", "verified_by 仍是空串")
 end)
+
+test("settlement 机器一致：通过并登记来源（todo + sessions）", function()
+  drive_to_settle()
+  set_tool_result_for("harness.todo-check", { ok = true, data = { remaining = "0" } })
+  set_tool_result_for("harness.sessions-count", { ok = true, data = { matching = "0" } })
+  fire("config.set", "tools.root=/tmp/ygg-tools")
+  fire("config.set", "tools.session=semantics-parent-uuid")
+  fire("config.set", "tools.sessions_root=/tmp/ygg-sessions")
+
+  reset()
+  fire("settlement.todo", "0|re-checked the todo list")
+  assert_true(
+    narrated_contains("[TOOLS CHECK OK]"),
+    "机器一致必须叙述检查通过：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("settlement.todo.remaining"), 0, "剩余条数")
+  assert_eq(kv("settlement.todo.source"), "machine:harness.todo-check", "来源是机器")
+
+  reset()
+  fire("settlement.sessions", "1|0|~/.pi/agent/sessions-trash/semantics")
+  assert_true(
+    narrated_contains("[TOOLS CHECK OK]"),
+    "sessions 机器一致必须叙述通过：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("settlement.sessions.remaining"), 0, "剩余")
+  assert_eq(kv("settlement.sessions.source"), "machine:harness.sessions-count", "来源是机器")
+end)

@@ -2311,43 +2311,6 @@ impl HostToolRunner for HarnessRunner {
     }
 }
 
-/// 注册 + 机证一致（remaining=0 / matching=0）：settlement.todo 与 settlement.sessions
-/// 均通过并写 source=machine:* 溯源键。
-#[test]
-fn settlement_machine_agreement_passes_and_records_provenance() {
-    let mut game = drive_to_settle();
-    game.kernel.set_tool_runner(Some(Box::new(HarnessRunner {
-        todo_remaining: 0,
-        sessions_matching: 0,
-    })));
-    game.narrate("config.set", &text("tools.root=/tmp/ygg-tools"));
-    game.narrate("config.set", &text("tools.session=semantics-parent-uuid"));
-    game.narrate("config.set", &text("tools.sessions_root=/tmp/ygg-sessions"));
-    let todo_lines = game.narrate("settlement.todo", &text("0|re-checked the todo list"));
-    assert!(
-        todo_lines.iter().any(|l| l.contains("[TOOLS CHECK OK]")),
-        "machine agreement must narrate the check pass: {todo_lines:#?}"
-    );
-    game.assert_kv("settlement.todo.remaining", json!(0));
-    game.assert_kv(
-        "settlement.todo.source",
-        json!("machine:harness.todo-check"),
-    );
-    let sess_lines = game.narrate(
-        "settlement.sessions",
-        &text("1|0|~/.pi/agent/sessions-trash/semantics"),
-    );
-    assert!(
-        sess_lines.iter().any(|l| l.contains("[TOOLS CHECK OK]")),
-        "sessions machine agreement must narrate the pass: {sess_lines:#?}"
-    );
-    game.assert_kv("settlement.sessions.remaining", json!(0));
-    game.assert_kv(
-        "settlement.sessions.source",
-        json!("machine:harness.sessions-count"),
-    );
-}
-
 // ───────────────────── r8 · E3: the armed surface ─────────────────────
 //
 // 命题：证据清单过去只度量「代码存在」。r4 首版交付代码完整、10 条用例、三套门禁 473/158/77
