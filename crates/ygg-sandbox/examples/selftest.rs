@@ -323,6 +323,28 @@ fn prepare_fixture(src: &Path, tag: &str) -> Result<PathBuf, String> {
             std::fs::write(&cfg_path, out)
                 .map_err(|e| format!("write config.json: {e}"))?;
         }
+        // 覆盖面 k/n：一幕计划两件文档，用来把「本幕覆盖了几件」与「我签了几件」分开。
+        "plan2" => {
+            let text = std::fs::read_to_string(&cfg_path)
+                .map_err(|e| format!("read config.json: {e}"))?;
+            let mut cfg: Json =
+                serde_json::from_str(&text).map_err(|e| format!("parse config.json: {e}"))?;
+            cfg["readPlan"] = serde_json::json!({
+                "coordinate": ["acts/coordinate", "coordinate/dispatch"]
+            });
+            cfg["readGate"] = serde_json::json!({
+                "ver": {
+                    "acts/coordinate": "9f2c1a",
+                    "coordinate/dispatch": "c0ffee",
+                    "acts/charter": "aaaaaa"
+                },
+                "reqActs": {},
+                "gates": {}
+            });
+            let out = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+            std::fs::write(&cfg_path, out)
+                .map_err(|e| format!("write config.json: {e}"))?;
+        }
         other => return Err(format!("未知 fixture tag：{other}")),
     }
     Ok(dir)

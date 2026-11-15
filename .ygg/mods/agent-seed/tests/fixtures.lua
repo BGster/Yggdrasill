@@ -78,3 +78,38 @@ test("读签纪元：阶段边界之前取的签名会作废（stale）", functi
   )
   assert_true(joined:find("Window 80", 1, true) ~= nil, "必须报告窗口：" .. joined)
 end, "armed")
+
+test("覆盖面 k/n：只统计本幕覆盖了几件，与「我签了几件」两个口径分开", function()
+  fresh()
+  charter_and_begin()
+
+  -- ① 只签计划的第 1 件 → 本幕 1/2，其中「我签的」1 件。
+  reset()
+  sign("acts/coordinate", "9f2c1a")
+  assert_eq(
+    count_marker("this act has 1/2 docs signed, 1 of them by you"),
+    1,
+    "覆盖面 k 只数本幕：" .. table.concat(narrated(), " | ")
+  )
+
+  -- ② 另一个代理签下第 2 件 → 覆盖面升到 2/2，但「我签的」仍是 1 件。
+  as_actor("other-agent")
+  reset()
+  sign("coordinate/dispatch", "c0ffee")
+  assert_eq(
+    count_marker("this act has 2/2 docs signed, 1 of them by you"),
+    1,
+    "覆盖面与署名数必须分得开：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("settings.read_actor.coordinate/dispatch"), "other-agent", "署名按人记账")
+
+  -- ③ 计划外的 doc：签名照旧成立，但不进分子（不拒签、不越界）。
+  as_actor("selftest")
+  reset()
+  sign("acts/charter", "aaaaaa")
+  assert_eq(
+    count_marker("this act has 2/2 docs signed, 1 of them by you"),
+    1,
+    "计划外文档不进分子：" .. table.concat(narrated(), " | ")
+  )
+end, "plan2")

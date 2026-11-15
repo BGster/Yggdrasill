@@ -1172,51 +1172,6 @@ fn lane_branch_naming_is_enforced() {
 
 // ───────────────────── r3 · submitter identity (actor chapter + profiles) ─────────────────────
 
-/// 覆盖面 k/n：`readPlan` 在场时按本幕清单计算（计划外的 doc 不进分子），
-/// 不在场时降级。清单是**装资源的静态值**，改它必须重算 manifest（`reseal`）。
-#[test]
-fn read_coverage_counts_planned_docs() {
-    let dir = support::temp_dir("read-plan");
-    support::copy_dir(&project_mod_dir(), &dir);
-    let mut config = support::read_json(&dir.join("data/config.json"));
-    config["readPlan"] = json!({
-        "coordinate": ["acts/coordinate", "coordinate/dispatch"]
-    });
-    support::write_json(&dir.join("data/config.json"), &config);
-    support::reseal(&dir);
-
-    let mut game = Game::open(&dir);
-    charter_and_begin(&mut game);
-
-    let first = game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
-    assert_eq!(
-        count_lines(&first, "this act has 1/2 docs signed, 1 of them by you"),
-        1,
-        "{first:#?}"
-    );
-    // r9：另一个代理签下第二件 —— 覆盖面 k 上升，但「我签的」不动。两个口径必须分得开：
-    // 旧文案的 `2/2` 读起来像「我已签全」，而它从来只统计「本幕覆盖了几件」。
-    game.as_actor(Some("other-agent"));
-    let second = game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
-    assert_eq!(
-        count_lines(&second, "this act has 2/2 docs signed, 1 of them by you"),
-        1,
-        "{second:#?}"
-    );
-    game.assert_kv(
-        "settings.read_actor.coordinate/dispatch",
-        json!("other-agent"),
-    );
-    // 计划外的 doc：签名照旧成立，但不进分子（不拒签、不越界）。
-    game.as_actor(Some(TEST_ACTOR));
-    let extra = game.narrate("config.set", &text("read.acts/charter=aaaaaa"));
-    assert_eq!(
-        count_lines(&extra, "this act has 2/2 docs signed, 1 of them by you"),
-        1,
-        "{extra:#?}"
-    );
-}
-
 // ───────────────────── r4 · read-gate: the four dimensions ─────────────────────
 
 /// 造一份**独立受控**的 mod 副本（`readPlan` + `readGate` 换成用例自己的小台账）：
