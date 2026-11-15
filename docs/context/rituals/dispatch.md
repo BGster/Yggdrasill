@@ -1,7 +1,7 @@
 # Yggdrasill · 派发仪式（rituals/dispatch）
 > **id** rituals/dispatch · **幕** coordinate（派发前） · **触发** 派发任何 subagent（plan / development / analysis）前
 > **读不到代价** hard-refusal（`.env.local` 未 source 即派发、工件落检出、submit 缺 `exec=` 均不合规）
-> **ver** f3bf4e
+> **ver** e61aa3
 
 > **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
@@ -13,6 +13,10 @@ mod 运行时发出的 brief = **事实头**（留 mod，带状态变量）+ **�
 
 - 事实头：`Requirement {{id}} (rev {{rev}}, stage={{stage}}): {{title}}` / `Description: {{desc}}` / `Worktree: {{worktree}} (branch={{branch}}, base={{base}})` / `Artifact: {{artifact}}` / `Submit: {{submit}}`。
 - 策略正文（以下 §3–§6）随 brief 指针给出，各项目可在自己的 context 副本中本地化改写。
+- **中断预算（实现类任务必写）**：执行环境在 ≈68k token 处会被上游打断——r11（68,376 token / 129 次调用）与 r12（68,303 token / 76 次调用）**两次**实测同一量级，且两次都在崩溃时留下大量已改未提交的改动（12 文件 / 2 文件），全靠 resume 抢救。因此实现类 brief 必须写明：
+  - **每完成一块立即提交**，任何时刻未提交改动 ≤ ~200 行；
+  - 被打断时的损失上限是「一块」，不是「整轮」。
+  判据：交付回执的 `git log` 是多个提交而非一个巨型提交；若只有一个提交且 diff 很大，说明中断预算没生效。
 
 ## 2. 派发前环境准备（必须 source .env.local，并将结果用于创建）
 
