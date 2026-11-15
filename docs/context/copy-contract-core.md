@@ -81,6 +81,6 @@
 
 ---
 
-**键数核对（Q3 已绑定）**：六个 beats 片段共 **404** 键（flow 63 + harness 69 + lanes 36 + map-guide 38 + requirements 144 + settlement 54），core 的 options/tuning/endings 共 **36** 键，合计 **440 个唯一键**。§H 的 23 处指针壳全部是这 440 键的子集（beats 13 + core scenes 5 + prompts 5），**不得再次相加**；旧文「beats 390 / A–G 426 / 加 H=436」同时漏算了 14 个 tools 键并重复计算指针壳。
+**键数核对（Q3 已绑定）**：六个 beats 片段共 **409** 键（flow 63 + harness 74 + lanes 36 + map-guide 38 + requirements 144 + settlement 54），core 的 options/tuning/endings 共 **36** 键，合计 **445 个唯一键**。§H 的 23 处指针壳全部是这 445 键的子集（beats 13 + core scenes 5 + prompts 5），**不得再次相加**；旧文「beats 390 / A–G 426 / 加 H=436」同时漏算了 14 个 tools 键并重复计算指针壳。
 
 **Producer / trigger / check**：owner = 修改 `data/texts/*.json` 或本契约的执行者；trigger = 任一键新增、删除、改名、跨域移动，或 scenes/prompts 指针范围变化；同 commit 必须更新本段、[../design/prompt-surface.md](../design/prompt-surface.md)、[../README.md](../README.md) 与受影响域文件。check = `agent_seed_semantics` 的逐域键集断言、`narrative_pointer_anchors_exist_in_docs_context` 与 `docs-consistency.sh`；任何一键缺失或计数漂移都使验收失败，不得靠手改数字放行。
