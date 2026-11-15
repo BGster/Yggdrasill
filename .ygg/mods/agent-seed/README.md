@@ -132,7 +132,7 @@ Mod 内部结构。
 - 缺失 / 非数组 / 元素非法 = **一个也不放行**（fail-closed）；逐项按集合语义处理，重复项允许。
 - 必须 **⊇** `pack.json` 的 `tools` 键（宿主装载期硬校验，缺一个即拒绝装载）。
 - Mod **读不到** `pack.json`（`ygg.data` 只读 `entries` 声明的资源），所以本 Mod 只认这一层；
-  跨层一致性由 `agent_seed_semantics` 的声明一致性用例钉住（两侧 `tools` 深相等、`allowedTools` 与
+  跨层一致性由 `selftest` 的声明一致性用例钉住（两侧 `tools` 深相等、`allowedTools` 与
   `tools` 同集合、19 个 `tool_*` beat 齐全）。
 - **不是**安全边界，而是**防漂移**门禁：能改 `data/config.json` 的人也能改 `pack.json`；真正的边界是
   宿主的 Layer 1 校验（程序白名单 / 无 shell / 无绝对路径 / 无 `..`）加上沙箱本身没有 IO。

@@ -55,6 +55,6 @@
 
 ## 5. 迁移期约定（临时）
 
-Rust 对照套件仍在 `crates/agent-seed-tests`（纯 manifest 登记 → `.ygg/mods/agent-seed/tests/agent_seed_semantics.rs`）。
+Rust 对照套件仍在 `examples/selftest.rs`（纯 manifest 登记 → `.ygg/mods/agent-seed/tests/selftest.rs`）。
 每迁一个域：Lua 例数 = 从 Rust 删除的例数，两侧同时跑绿后再提交。
-全部迁完后，删除该 `.rs` 与 `crates/agent-seed-tests/`，本节的「迁移期约定」一并移除。
+全部迁完后，删除该 `.rs` 与 `examples/selftest.rs/`，本节的「迁移期约定」一并移除。

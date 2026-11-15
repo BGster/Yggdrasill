@@ -50,5 +50,5 @@
 
 **依据**：墓碑兼容（收下旧名、静默当作新名）会把“我调用错了”变成“它恰好也能跑”，错误被推迟到语义层才暴露；而精确拒绝（`VALIDATION`）让调用点立刻可见。章程载荷化是因为 `intake` 只装了一件事（写三件套），独立阶段只换来一次多余转场与一套多余拒绝面。
 
-**判据**：① 阻断——新增未在 registry 声明的事件、为已注销事件保留兼容分支、或让 `map.show` 按 payload 分岔视图；② 症状——单发派发旧事件名得到 `ok:true`，或事件全集计数与本表不符、`map.show` 两个 payload 的叙事不一致；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics`（未注册事件拒绝、`map.show` payload 无关性、registry 计数）与 `cargo run -q --example playtest -- .ygg/mods/agent-seed`。
+**判据**：① 阻断——新增未在 registry 声明的事件、为已注销事件保留兼容分支、或让 `map.show` 按 payload 分岔视图；② 症状——单发派发旧事件名得到 `ok:true`，或事件全集计数与本表不符、`map.show` 两个 payload 的叙事不一致；③ 确认——`cargo test -p ygg-sandbox --test selftest`（未注册事件拒绝、`map.show` payload 无关性、registry 计数）与 `cargo run -q --example playtest -- .ygg/mods/agent-seed`。
 

@@ -76,7 +76,7 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 **依据**：全收敛会逼 `action` 变成 `event` 的镜像，于是每加一个 `event` 都要同步加一个 `action`，而 `action` 的消费者是模型可读的语义面，不是状态机——两边同步只会制造二份真相。反过来，`action` 若不携带 Mod 的实时状态（就绪序、泳道、探针），适配器就必须自己重建一份工作流知识，那是真正的第二个状态机。把指令做成结构化的 `subagentAction`，适配器只需执行、不需理解。
 
-**判据**：① 阻断——给一个答不出“能防哪类具体 payload 错位”的 `action` 新增别名、或让 `action` 直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`；② 症状——`action` 清单与 `event` 清单逐渐对齐（同义重复），或适配器里出现第二套状态判定；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的三层动作面契约用例与 `summary.jobs[].subagentAction` 形状用例。
+**判据**：① 阻断——给一个答不出“能防哪类具体 payload 错位”的 `action` 新增别名、或让 `action` 直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`；② 症状——`action` 清单与 `event` 清单逐渐对齐（同义重复），或适配器里出现第二套状态判定；③ 确认——`cargo test -p ygg-sandbox --test selftest` 的三层动作面契约用例与 `summary.jobs[].subagentAction` 形状用例。
 
 
 ### 动作载荷与语义细节（原 playbook `actions` 章，2026-11-15 归位）

@@ -75,8 +75,8 @@
       "rituals/cleanup": "677201",
       "acts/release": "b7bced",
       "acts/retired": "ed4b6a",
-      "req-acts/delivery": "045d55",
-      "req-acts/integration": "cc9a7a"
+      "req-acts/delivery": "18f2d3",
+      "req-acts/integration": "279117"
     },
     "reqActs": {
       "plan": [

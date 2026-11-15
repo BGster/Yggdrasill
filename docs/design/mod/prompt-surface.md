@@ -34,5 +34,5 @@ mod 职责收缩为「状态管理 + 需求看板 + CONTEXT 索引提示」后�
 | 派发仪式（3 键） | `subagent_brief`、`config_opened`、`subagent_fallback_note` | [../../context/rituals/dispatch.md](../../context/rituals/dispatch.md)（+ `rituals/fallback.md`） | 事实头留 mod + 指针 |
 | 清理政策（2 键） | `settlement_sessions_unsetted_hint`、`settlement_todo_segment` | [../../context/rituals/cleanup.md](../../context/rituals/cleanup.md) | 判据短句 + 指针 |
 
-单向同步纪律（[../wiki-governance.md](../../wiki-governance.md)）：改文案先改 context 权威域文件再同步 mod 键值；指针锚点存在性由 `agent_seed_semantics` 的 `narrative_pointer_anchors_exist_in_docs_context` 用例机器闭环，逐域键集由 `copy_contract_domain_fragments_cover_every_text_key` 用例闭环。owner = texts/契约编辑者；trigger = 任一键或指针变化；检查失败 = 缺键、死链或计数漂移，不得验收。
+单向同步纪律（[../wiki-governance.md](../../wiki-governance.md)）：改文案先改 context 权威域文件再同步 mod 键值；指针锚点存在性由 `selftest` 的 `narrative_pointer_anchors_exist_in_docs_context` 用例机器闭环，逐域键集由 `copy_contract_domain_fragments_cover_every_text_key` 用例闭环。owner = texts/契约编辑者；trigger = 任一键或指针变化；检查失败 = 缺键、死链或计数漂移，不得验收。
 

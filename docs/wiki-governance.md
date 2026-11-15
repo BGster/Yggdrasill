@@ -93,7 +93,7 @@
 
 `docs/context/scenes/` 曾按此目的留在 context（用户明确：这是刻意设计，不是归档失误）。2026-11-15 更名为 `scenes/`——`copy` 是「文案」直译、无业务含义，而这里装的是**剧本**：每一刻该发生什么、操作者该做什么、判据在哪。逐字回执仍归 mod 单副本（4.1）。
 
-**机检（不是口号）**：`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的三例把这条判据钉在状态里——`design_pointer_anchors_exist_under_docs_design`（逐来源指针硬账）、`design_tree_index_is_complete_and_ids_match_paths`（索引集合双向相等 + `docs/design/*.md` 只允许 `README.md` + 一级子目录恰好三模块）、`agents_design_routes_resolve`（`AGENTS.md §3` 每条 design 路由可解析）。把行为面搬回 design、或在 design 里留兼容壳、或新增第四目录，都会转红。
+**机检（不是口号）**：`.ygg/mods/agent-seed/tests/` 的三例把这条判据钉在状态里——`design_pointer_anchors_exist_under_docs_design`（逐来源指针硬账）、`design_tree_index_is_complete_and_ids_match_paths`（索引集合双向相等 + `docs/design/*.md` 只允许 `README.md` + 一级子目录恰好三模块）、`agents_design_routes_resolve`（`AGENTS.md §3` 每条 design 路由可解析）。把行为面搬回 design、或在 design 里留兼容壳、或新增第四目录，都会转红。
 
 ## 5. 幕进必读与推进必签（scene gate）
 
@@ -124,7 +124,7 @@
 
 **依据**：ver 若直接哈希文件本体，则"文件含 ver、ver 由哈希决定"构成自引用循环，永不收敛；定宽占位同时保证字节长度不变（不引起行位移）。兼容层不是风格选择：当冻结消费者（mod 字面指针、crates 按路径读表）还在时直接删旧路径会让锚点校验与逐域键集断言同时转红；但薄壳与软链都不携带第二份权威，因此不违反"一条规则一个权威载体"。
 
-**判据**：① 阻断——"改了正文不改 ver"与"删旧路径但没补兼容层"两类提交；② 症状——`docs-ver --check` 报 `changed>0` / `missing_header>0`；`agent_seed_semantics` 的指针锚点用例或 `copy_contract_domain_fragments_cover_every_text_key` 转红；③ 确认——`bash scripts/docs-ver.sh --check` 连跑两次 `changed=0`、`cargo test -p ygg-sandbox --test agent_seed_semantics` 全绿、`ls -l docs/context/*.md | grep -c -- '->'` 为 0。
+**判据**：① 阻断——"改了正文不改 ver"与"删旧路径但没补兼容层"两类提交；② 症状——`docs-ver --check` 报 `changed>0` / `missing_header>0`；`selftest` 的指针锚点用例或 `copy_contract_domain_fragments_cover_every_text_key` 转红；③ 确认——`bash scripts/docs-ver.sh --check` 连跑两次 `changed=0`、`cargo test -p ygg-sandbox --test selftest` 全绿、`ls -l docs/context/*.md | grep -c -- '->'` 为 0。
 
 ## 8. 文案单向同步纪律
 

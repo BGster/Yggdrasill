@@ -2,7 +2,7 @@
 > **定位**：`docs/design/` 是**「改之前必须遵守的契约」**——判据是**有代码消费者**（playbook JSON 的 `basis`/`source`、`src/**` 注释、crates 测试与注释按路径引用它）。行为叙事与产品定位不在此树，见 [../context/README.md](../context/README.md)。
 > **replaces**：r6 前的 18 文件平铺形态（`docs/design/<topic>.md`）。平铺路径已退役，**不留软链**；历史与理由在 git。
 > **判据**：[../wiki-governance.md](../wiki-governance.md)「design / context 二分判据」——本文件只是它的导航投影，不复制正文。
-> **上游**：[../README.md](../README.md)（顶层索引） · **机检**：`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的 `design_pointer_anchors_exist_under_docs_design` / `design_tree_index_is_complete_and_ids_match_paths` / `agents_design_routes_resolve`
+> **上游**：[../README.md](../README.md)（顶层索引） · **机检**：`.ygg/mods/agent-seed/tests/` 的 `design_pointer_anchors_exist_under_docs_design` / `design_tree_index_is_complete_and_ids_match_paths` / `agents_design_routes_resolve`
 
 ## 目录树
 

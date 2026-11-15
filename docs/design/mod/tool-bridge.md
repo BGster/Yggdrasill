@@ -19,7 +19,7 @@
 | Layer 2 | `data/config.json` → `allowedTools` | 请求时，Mod | 本局发布清单：Mod 可请求哪些已声明工具 |
 
 - `allowedTools` 必须是 `tools` 键的超集，否则宿主拒绝装载；段缺失 = 全部禁止（fail-closed），复制来的 Mod 不能突然执行 `git`。
-- Mod 不能读 `pack.json`：`ygg.data` 只解析 `entries` 声明的资源，因此 Mod 只执行 Layer 2。跨层一致性由 `agent_seed_semantics` declaration-parity 用例钉死（双 pack 的 `tools` 深等、`allowedTools` 集合相等、每个 `tool_*` beat 存在），不能靠两个文件碰巧一致。
+- Mod 不能读 `pack.json`：`ygg.data` 只解析 `entries` 声明的资源，因此 Mod 只执行 Layer 2。跨层一致性由 `selftest` declaration-parity 用例钉死（双 pack 的 `tools` 深等、`allowedTools` 集合相等、每个 `tool_*` beat 存在），不能靠两个文件碰巧一致。
 - Layer 2 是**漂移门而非安全边界**：能改 `data/config.json` 的人也能改 `pack.json`。真正边界是宿主 Layer 1 校验（程序白名单、不经 shell、禁绝对路径与 `..`）加沙箱无 IO。
 - 凭据不进任一层文本： `$ENV{VAR}` 由宿主从进程环境、`<mod_dir>/.env.local`、`<mod_dir>/.env` 解析；解析值绝不进入 payload、回执或通知，错误只点名变量。
 
@@ -37,7 +37,7 @@
 
 **依据**：每次工具调用走一次异步往返还意味着“探测 → 决策”跨回合，而回合间状态可能已变（另一泳道推进了同一个需求）——内联把“读到的就是判断依据”变回恒真。双协议适配器是因为两种 messages 形状的差异集中在适配层而不在业务层，反过来（业务层分支提供商）会把提供商细节泄到状态机。凭据只走 `.env`：环境的凭据一旦进入 payload / 回执 / 通知，就无法回收。
 
-**判据**：① 阻断——把凭据值写进 payload / 回执 / 通知 / 文档，或在业务层按提供商分岔；② 症状——回执里出现密钥形态字符串，或同一工具结果在不同宿主形态下产生不同 KV；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的工具桥与 declaration-parity 用例，加一次 `grep -rn 'YGG_LLM' <检出的交付面>`（应只在 `.env` 样例与文档键名处）。
+**判据**：① 阻断——把凭据值写进 payload / 回执 / 通知 / 文档，或在业务层按提供商分岔；② 症状——回执里出现密钥形态字符串，或同一工具结果在不同宿主形态下产生不同 KV；③ 确认——`cargo test -p ygg-sandbox --test selftest` 的工具桥与 declaration-parity 用例，加一次 `grep -rn 'YGG_LLM' <检出的交付面>`（应只在 `.env` 样例与文档键名处）。
 
 维护责任 = 修改工具声明、配置、线协议或反应器的执行者；触发 = 任一相关 commit；检查 = declaration-parity、payload/allowlist、receipt/replay 与 subsystem 语义用例。缺一层同步或把 Layer 2 当安全边界，均不得验收。
 

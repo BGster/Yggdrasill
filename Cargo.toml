@@ -6,7 +6,6 @@ members = [
     "crates/ygg-schema",
     "crates/ygg-modules",
     "crates/ygg-sandbox",
-    "crates/agent-seed-tests",
     "crates/ygg-lint",
     "crates/ygg-wasm",
     "crates/ygg-store",

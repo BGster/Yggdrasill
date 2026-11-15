@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 交付（req-acts/delivery）
 > **id** req-acts/delivery · **幕** req: ready/developing/accept/accept_gate · **触发** 派发 development / 交付受理前
 > **读不到代价** hard-refusal（工件纪律漏读 → 交付被打回；`.env.local` 未 source → 派发不合规）
-> **ver** 045d55
+> **ver** 18f2d3
 
 ## 4. 待开发（ready）
 
@@ -37,11 +37,11 @@ docs wiki 是全仓始终最新的权威——不是变更日志，历史归 git
 
 ### 三件套：字面证据才算绿
 
-本仓的三件套绿**只能**以逐字运行并记录真实退出码与用例数的证据声称：`cargo test --workspace` ∧ `cargo test --example egg -p ygg-sandbox` ∧ `cargo test -p ygg-sandbox --test agent_seed_semantics`。成员等价跑法（`cargo check`、单测选择、过滤跑）、`verify-suite --mode fast`、任何 `YGG_VERIFY_COMMANDS` 覆盖，**只能证明那个替代物**，永远不算三件套绿。
+本仓的三件套绿**只能**以逐字运行并记录真实退出码与用例数的证据声称：`cargo test --workspace` ∧ `cargo test --example egg -p ygg-sandbox` ∧ `cargo test -p ygg-sandbox --test selftest`。成员等价跑法（`cargo check`、单测选择、过滤跑）、`verify-suite --mode fast`、任何 `YGG_VERIFY_COMMANDS` 覆盖，**只能证明那个替代物**，永远不算三件套绿。
 
 ### Mod 语义矩阵
 
-改动 `.ygg/mods/agent-seed/src/**`（状态机 / 门禁 / 渲染层）、`mod.lua` 或地图措辞时，门禁清单在 lint 与 all-1 playtest 之外**追加** `cargo test -p ygg-sandbox --test agent_seed_semantics`。**all-1 playtest 只覆盖 happy path**——它从不走 `gate.reject` / `requirement.amend` / `proposal.reject`，也看不到回合切割机制；`/tmp` 下的临时探针只能补充、永不替代；每个未覆盖场景必须在报告里**逐条声明**。
+改动 `.ygg/mods/agent-seed/src/**`（状态机 / 门禁 / 渲染层）、`mod.lua` 或地图措辞时，门禁清单在 lint 与 all-1 playtest 之外**追加** `cargo test -p ygg-sandbox --test selftest`。**all-1 playtest 只覆盖 happy path**——它从不走 `gate.reject` / `requirement.amend` / `proposal.reject`，也看不到回合切割机制；`/tmp` 下的临时探针只能补充、永不替代；每个未覆盖场景必须在报告里**逐条声明**。
 
 三问判据：① 它挡住「改了 Mod 源码或地图措辞，只跑 lint + all-1 就称验收」；② 违规的可见症状是分支语义与地图措辞静默回退而所有门禁仍绿，缺陷只在真实跑局里才现形；③ 下次怎么确认——该命令（当前 96 例）加一次变异探针（把旧语义放回去 → 必须转红），证明断言非空转。
 

@@ -45,7 +45,7 @@
 
 `src/view/guide.lua` 的 `STAGE_GUIDE` 必须覆盖装配后的全部章 id；每个相位渲染播出**全部候选章**，不是只播首章。`map.show` 保持单一操作视图且忽略 payload，但在 `render()` 产生 choice 之前额外播出 21 章全局索引；因此当前相位章在一次 `map.show` 回执中出现两次，其余章出现一次。退役幕同样播 `pointers`，不留只在全局索引可见的死角。
 
-规范陈述的执行核验是 `agent_seed_semantics` 的静态章集合相等断言与逐相位回执探针；增删章、改章 id/title、改映射或改渲染序必须在同批更新该探针并重算 manifest。违反时测试红，未接线的章不得被宣称为 phase-entry 可达。负责人 = 修改 playbook/guide/render 的执行者；触发 = 任一上述变更；检查 = `cargo test -p ygg-sandbox --test agent_seed_semantics` 与 playtest。
+规范陈述的执行核验是 `selftest` 的静态章集合相等断言与逐相位回执探针；增删章、改章 id/title、改映射或改渲染序必须在同批更新该探针并重算 manifest。违反时测试红，未接线的章不得被宣称为 phase-entry 可达。负责人 = 修改 playbook/guide/render 的执行者；触发 = 任一上述变更；检查 = `cargo test -p ygg-sandbox --test selftest` 与 playtest。
 
 ### Mod 文案路径卫生（retired path literals）
 
@@ -57,7 +57,7 @@
 grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ | grep -v '\[deprecated-ref\]'
 ```
 
-任何幸存行都必须加历史标记或改为当前名称。维护责任 = Mod 文案编辑者；触发 = 每个 texts/playbook 文案 commit；机器复核 = `agent_seed_semantics::mod_text_fragments_carry_no_retired_paths`。违规文案不得发布，因为它会把执行者导向 fail-closed 路径。
+任何幸存行都必须加历史标记或改为当前名称。维护责任 = Mod 文案编辑者；触发 = 每个 texts/playbook 文案 commit；机器复核 = `selftest::mod_text_fragments_carry_no_retired_paths`。违规文案不得发布，因为它会把执行者导向 fail-closed 路径。
 
 
 ### 工程命令与多文件约束（原 playbook `mod_engineering` 章，2026-11-15 原样归位）
@@ -67,7 +67,7 @@ grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ | grep -v '
 
 - **`mod.pack`**（must）：After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/agent-seed`.
 - **`mod.lint`**（must）：Lua static checks: `cargo run -p ygg-lint -- --pack .ygg/mods/agent-seed` (whole-pack mode, which also validates the `code.modules` declarations) or `cargo run -p ygg-lint -- .ygg/mods/agent-seed/mod.lua` (single-file mode); the result must be 0 errors / 0 warnings.
-- **`mod.playtest`**（must）：Smoke walk: `cargo run --example playtest -- .ygg/mods/agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test agent_seed_semantics`).
+- **`mod.playtest`**（must）：Smoke walk: `cargo run --example playtest -- .ygg/mods/agent-seed` (the all-1 walk must reach `[ENDING`). All-1 covers the happy path only — the acceptance standard for branches and map wording is `gates.mod-semantics-matrix` (`cargo test -p ygg-sandbox --test selftest`).
 - **`mod.manifest-content-addressed`**（must）：The manifest is content-addressed (sha256 + byteLength): editing `data/*.json` without recomputing the pack makes loading fail with a content-hash mismatch.
 - **`mod.multi-script-load`**（must）：A multi-file Mod is registered only in the `code` section of `pack.json`: `entry` is not registered as a module, `modules` enumerates every file explicitly (no glob), and a missing `code` section means a single-file Mod (no migration needed for existing Mods). `require` works both at load time and at runtime (inside a handler) — `host.seal` only seals `ygg.on`, so a pure library may be loaded lazily; the price is that a module's top level may be a pure export surface only (see `mod.pure-export`). After changing any module file you must rerun pack (content-addressed: a byte-count or hash mismatch fails loading).
 - **`mod.pure-export`**（must）：A multi-file Mod's module chunk performs pure exports only (function and constant definitions) and does nothing with side effects: registration / state writes / output all live in the entry `mod.lua`. A module exposes registration as a function (`function M.install(deps)`) that the entry calls explicitly in order; touching `ygg.on` / `ygg.emit` / `ygg.narrate` / `ygg.choice` / `ygg.meta` / `ygg.kv.set` / `ygg.entity.spawn` / `ygg.entity.set_attribute` / `ygg.entity.add_tag` / `ygg.entity.remove_tag` / `ygg.fsm.define` / `ygg.narrative.node` / `ygg.narrative["goto"]` at a module's top level is refused (the static `YGG-MOD-EFFECT` rule and the runtime shadow table share the single list `ygg_modules::effects`); at the top level only pure reads are allowed (`ygg.data` / `ygg.ticks` / `ygg.kv.get` / `ygg.entity.has_tag` / `ygg.entity.get_attribute`); the entry chunk is exempt (it is the assembly manifest). Why: a handler's dispatch order equals the `ygg.on` registration order — letting a module register itself means "how the files are split / who is required first" decides runtime behavior, so splitting a file or reordering a `require` would change the dispatch order and refactoring would not preserve behavior. `require` is therefore usable at any time (including lazy-loading a pure library inside a handler), but lazy loading never relaxes the boundary: a lazily loaded module's top level is still pure exports. See `docs/design/mod/mod-package.md` (ex-DESIGN §3.2 "Mod Package & Multi-File Purity Contract").
