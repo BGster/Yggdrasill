@@ -2,7 +2,8 @@
 -- 迁移期只搬「不需要复杂前置状态」的骨架断言；完整分支随各域迁入时补齐。
 
 test("event.start：开局落在 charter 微状态", function()
-  fire("event.start", "0")
+  -- 必须走 fresh()：用例共享一个 Lua 状态，前一个文件可能已经把局推进过。
+  fresh()
   assert_eq(kv("run.phase"), "charter", "boot lands in the charter micro-state")
 end)
 
