@@ -397,14 +397,6 @@ impl Game {
     }
 
     /// The requirement panel line (per-micro-state tally) — the `useMemo` derived surface.
-    #[track_caller]
-    fn panel(&mut self) -> String {
-        self.narrate("requirement.list", "0")
-            .into_iter()
-            .find(|line| line.starts_with("[REQ GRAPH]"))
-            .expect("requirement.list must start with the graph header")
-    }
-
     /// The requirement **rows** of a `requirement.list` receipt (`mark rN [status] title`).
     #[track_caller]
     fn req_rows(lines: &[String]) -> Vec<(String, String)> {
@@ -578,12 +570,6 @@ fn submit_dev_with_exec(
         "r1|{rev}|development|development proposal summary|artifacts/development.md|{changes}|{ext}|exec={exec}"
     ));
     game.narrate("proposal.submit", &payload)
-}
-
-/// Drive to **plan gate pending**: plan proposal → **delivery is the gate** (剧情双层重写) —
-/// the submit itself raises `gate="plan"` bound to the rev; there is no acceptance step.
-fn drive_to_plan_gate() -> Game {
-    drive_to_plan_gate_at(&project_mod_dir())
 }
 
 /// Same drive against an arbitrary mod directory (r8: the armed / bare-copy pairs need the
