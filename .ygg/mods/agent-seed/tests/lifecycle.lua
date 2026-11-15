@@ -89,3 +89,56 @@ test("未完成批次时退休不可达：走完选择序列也不出现 [ENDING
     )
   end
 end)
+
+test("run.retire 值域与退役收口：子页装配 / 退休结束行 / 清除", function()
+  drive_to_release()
+
+  -- ① 值域：除 `true` / `""` 之外一律拒，且不落键。
+  reset()
+  fire("config.set", "run.retire=false")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "非法值必须被拒：" .. table.concat(narrated(), " | ")
+  )
+  assert_nil(kv("settings.run.retire"), "不得落键")
+
+  -- ② 先声明发布（任何 review.note 的前置）。
+  fire("release.skip", "纯测试批次，无 develop→master 合并")
+
+  -- ③ 经由子页装配：纯展示入口，写入仍是 config.set。
+  click("config — ")
+  local sub = render_options()
+  assert_eq(#sub, 5, "配置子页必须是 5 项")
+  assert_true(
+    sub[4]:sub(1, #"config.set — run.retire") == "config.set — run.retire",
+    "子页第 4 项必须是 run.retire：" .. sub[4]
+  )
+  click("config.set — run.retire")
+  assert_eq(kv("settings.run.retire"), "true", "已上膛")
+  assert_eq(#render_options(), 5, "点完仍停在配置子页")
+  click("back — ")
+
+  -- ④ 退休收口。
+  reset()
+  click("review.note — ")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    joined:find("[ENDING · run retired]", 1, true) ~= nil,
+    "上膛后的 review.note 必须退休：" .. joined
+  )
+  assert_true(joined:find("[BATCH", 1, true) == nil, "退休收口永不带批次结算行：" .. joined)
+  assert_eq(kv("ending"), "retired", "ending 键")
+  assert_eq(kv("fsm.stage"), "retired", "FSM 阶段")
+  assert_nil(kv("run.batch"), "退休路径不写 run.batch")
+  assert_eq(
+    kv("review.evolution.summary"),
+    "candidates screened against the evolution chapter",
+    "evolution 摘要被归档"
+  )
+
+  -- ⑤ 退休后仍可清除，并叙述自己的 beat。
+  reset()
+  fire("config.set", "run.retire=")
+  assert_eq(count_marker("[RUN RETIRE CLEARED]"), 1, "清除必须叙述")
+  assert_eq(kv("settings.run.retire"), "", "键置为空串")
+end)

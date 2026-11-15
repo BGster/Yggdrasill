@@ -439,11 +439,6 @@ fn assert_refused(lines: &[String], needle: &str) {
     );
 }
 
-/// How many lines carry a marker (a rewrite must not silently change the count).
-fn count_lines(lines: &[String], needle: &str) -> usize {
-    lines.iter().filter(|line| line.contains(needle)).count()
-}
-
 // ───────────────────────── drive scripts ─────────────────────────
 
 /// Charter the run and begin it: `charter.set` (the menu payload is a complete three-piece
@@ -582,33 +577,6 @@ fn drive_to_settle_at(mod_dir: &Path) -> Game {
     game
 }
 
-/// Settle the four items (verify → merged evolution registration with the `sessions=` /
-/// `todo=` segments) — the settle-close effect then flips `run.phase` to `release` (R9).
-fn drive_to_release() -> Game {
-    let mut game = drive_to_settle();
-    let verified = game.click("verify.submit all_green=true — ");
-    assert!(
-        verified["narrative"].to_string().contains("[GATES GREEN]"),
-        "verify.submit all_green=true must record evidence: {verified}"
-    );
-    game.assert_kv("verify.passed", json!(true));
-    let registered = game.narrate(
-        "settlement.evolution",
-        &text(
-            "|candidates screened against the evolution chapter|c=0/0|\
-             sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list",
-        ),
-    );
-    assert!(
-        registered
-            .iter()
-            .any(|line| line.contains("[SETTLE READY]")),
-        "the four-settled effect must narrate the release move: {registered:#?}"
-    );
-    game.assert_kv("run.phase", json!("release"));
-    game
-}
-
 // ───────────────────────── charter & resident lifecycle ─────────────────────────
 
 /// r9 Resident lifecycle: `review.note` **settles the batch and returns to coordinate**;
@@ -668,69 +636,6 @@ fn resident_batch_cycle_reaches_coordinate_again() {
             report.errors
         );
     }
-}
-
-/// r9 The retire value domain and the retiring close (the R2 two-direction lock):
-/// - `run.retire` only accepts `true` / `""` (anything else is a payload rejection that
-///   writes nothing);
-/// - arming goes through the config sub-page (a pure presentation entry — the write is
-///   still `config.set`) and narrates its own beat;
-/// - armed: the next `review.note` writes the retiring ending (`[ENDING · run retired]`),
-///   flips `fsm.stage` to `retired` (the only true FSM transition), and **without** a
-///   `[BATCH` settle line or a `run.batch` write;
-/// - clearing stays available after retirement (`config.set` is stage-less).
-#[test]
-fn run_retire_value_domain_and_retiring_close() {
-    let mut game = drive_to_release();
-
-    // Value domain: anything other than true / "" is refused and writes nothing.
-    let bad = game.narrate("config.set", &text("run.retire=false"));
-    assert_refused(&bad, "run.retire");
-    game.assert_kv("settings.run.retire", json!(null));
-
-    // Declare the release (R10 precondition for any review.note) before arming.
-    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
-
-    // Arm through the sub-page item (pure presentation entry, the write is still config.set).
-    game.click("config — ");
-    let sub_page = game.options();
-    assert!(
-        sub_page.len() == 5 && sub_page[3].starts_with("config.set — run.retire"),
-        "the sub-page must offer run.retire as its 4th item: {sub_page:?}"
-    );
-    game.click("config.set — run.retire");
-    game.assert_kv("settings.run.retire", json!("true"));
-    assert_eq!(game.options().len(), 5, "still on the config sub-page");
-    game.click("back — ");
-
-    // The retiring close: review.note in the release phase with the release declared.
-    let closed = game.click("review.note — ");
-    let narrative = closed["narrative"].to_string();
-    assert!(
-        narrative.contains("[ENDING · run retired]"),
-        "armed review.note must retire the run: {closed}"
-    );
-    assert!(
-        !narrative.contains("[BATCH"),
-        "a retiring close must never carry a batch-settle line: {closed}"
-    );
-    game.assert_kv("ending", json!("retired"));
-    game.assert_kv("fsm.stage", json!("retired"));
-    // run.batch stays untouched (the key is never written on the retiring path).
-    game.assert_kv("run.batch", json!(null));
-    game.assert_kv(
-        "review.evolution.summary",
-        json!("candidates screened against the evolution chapter"),
-    );
-
-    // Clearing stays available after retirement and narrates its own beat.
-    let cleared = game.narrate("config.set", &text("run.retire="));
-    assert_eq!(
-        count_lines(&cleared, "[RUN RETIRE CLEARED]"),
-        1,
-        "{cleared:#?}"
-    );
-    game.assert_kv("settings.run.retire", json!(""));
 }
 
 /// r9 The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
