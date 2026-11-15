@@ -70,3 +70,11 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 计数口径（可复核，r6 实测复核）：`grep -rho 'ygg\.on("[a-z._]*"' .ygg/mods/agent-seed | sed 's/.*ygg\.on("//;s/"//' | sort -u` 得到 **38** 项；`stage.advance` 由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，`mod.lua` 里声明 `event = "stage.advance"`，不在 `ygg.on` 的字面出现处——38 + 1 = **39**，与 `events.md` 的 39 设计目标全集一致。r1 时代的 33 / registry 34 两数只描述当时尚未递增的已装载事实集（滞后已在 r2 集成交付时登记）；r6 复核后已装载集与设计目标全集追平，不再有两个口径。这 39 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 39 个之外还有别的状态转换」。registry 之外的事件名（含拼错的名字与未注册的 `ygg.*`）派发一律 **fail-closed**——外部名在门面预检零副作用拒绝（可读 VALIDATION，文案带已注册全集），派生名（handler `ygg.emit`）使整次转换失败回滚。registry 是运行时唯一事实，宿主不持任何事件名白名单。
 
+#### 设计依据（部分收敛 / 适配器为什么只是“薄壳”）
+
+**三层不做完全收敛，而是部分收敛**：`event` 是推进的唯一货币（全集不以字面硬编码，口径与复算命令见上节），`op` 是状态之外的宿主端口（8 个），`action` 是适配器的语义入口（值域随 harness 可变）。**禁止把 `action` 当作 `event` 的第二份清单**：9 个 `action` 里只有 `approve_gate` / `reject_gate` 与 `event` 重叠，且是有意保留的**位次正确性别名**（`reqId` 必填可防“批错需求”）。**Mod 自带适配器指令**：`summary.jobs[i].subagentAction`（`subagent.spawn` / `subagent.resume`）携带渲染后的 brief、`worktreeStatus` / `subagentStatus` / `probeStatus` 与提交命令，使任何上层执行壳（Claude Code / Codex / Cursor 适配器）能当**薄执行壳**。
+
+**依据**：全收敛会逼 `action` 变成 `event` 的镜像，于是每加一个 `event` 都要同步加一个 `action`，而 `action` 的消费者是模型可读的语义面，不是状态机——两边同步只会制造二份真相。反过来，`action` 若不携带 Mod 的实时状态（就绪序、泳道、探针），适配器就必须自己重建一份工作流知识，那是真正的第二个状态机。把指令做成结构化的 `subagentAction`，适配器只需执行、不需理解。
+
+**判据**：① 阻断——给一个答不出“能防哪类具体 payload 错位”的 `action` 新增别名、或让 `action` 直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`；② 症状——`action` 清单与 `event` 清单逐渐对齐（同义重复），或适配器里出现第二套状态判定；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的三层动作面契约用例与 `summary.jobs[].subagentAction` 形状用例。
+

@@ -25,5 +25,13 @@
 
 反应器边界（只写 KV + 叙事、探针失败是警告不是门禁、机证与人证同级）正文见 [state-machine.md](../kernel/state-machine.md) §2.9.2；本节不复制。
 
+#### 2.11.1 设计依据（为什么是一回合内联 + 双层白名单）
+
+**当宿主挂载了工具运行器时，白名单工具在同一次 dispatch 回合内内联执行，结果立即折叠进 KV**；未挂载的宿主保留异步 `tool.call` / `tool.result` 回退。**LLM 提供方只能是双协议适配器**（`openai-chat` 缺省 + `anthropic-messages` 回退），且严格只从 git-ignored 的 `.env` 键（`YGG_LLM_*`）配置。
+
+**依据**：每次工具调用走一次异步往返还意味着“探测 → 决策”跨回合，而回合间状态可能已变（另一泳道推进了同一个需求）——内联把“读到的就是判断依据”变回恒真。双协议适配器是因为两种 messages 形状的差异集中在适配层而不在业务层，反过来（业务层分支提供商）会把提供商细节泄到状态机。凭据只走 `.env`：环境的凭据一旦进入 payload / 回执 / 通知，就无法回收。
+
+**判据**：① 阻断——把凭据值写进 payload / 回执 / 通知 / 文档，或在业务层按提供商分岔；② 症状——回执里出现密钥形态字符串，或同一工具结果在不同宿主形态下产生不同 KV；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的工具桥与 declaration-parity 用例，加一次 `grep -rn 'YGG_LLM' <检出的交付面>`（应只在 `.env` 样例与文档键名处）。
+
 维护责任 = 修改工具声明、配置、线协议或反应器的执行者；触发 = 任一相关 commit；检查 = declaration-parity、payload/allowlist、receipt/replay 与 subsystem 语义用例。缺一层同步或把 Layer 2 当安全边界，均不得验收。
 
