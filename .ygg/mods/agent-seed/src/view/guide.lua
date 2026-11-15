@@ -18,10 +18,10 @@ local SECTIONS = {}
 -- 相位→规则章节索引（微状态口径）：每相位播全部候选章，不再让首章遮蔽后续章节。
 -- 未映射章同样是死资产：21 章必须至少在一条 phase-entry 路由上出现；map.show 另播全局索引。
 local STAGE_GUIDE = {
-  charter = { "repository", "credentials", "hard_constraints" },
-  coordinate = { "branches" },
+  charter = { "credentials", "hard_constraints" },
+  coordinate = { },
   settle = { },
-  release = { "branches" },
+  release = { },
 }
 
 local function guide_section(st)
