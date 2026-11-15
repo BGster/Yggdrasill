@@ -43,6 +43,8 @@ set +a
 
 在提议或编辑之前，先读 `docs/README.md`（索引）、[acts/](../acts/)（当前幕的入口/必做/出口）与本文（派发/提交/集成仪式），再读需求点名的 `docs/design/<subsystem>.md`。不得只泛读目录后就开始动手。
 
+**推进动作的读签判定不在本文**：本文只管「派发前读什么」，而「签名该消费正文还是只需核对版本、窗口怎么算」由 [read-gate.md](read-gate.md) 给出（支配协调者自己的推进动作，不限于派发）。两文不互抄规则。
+
 - **plan**：对照 playbook `run_machine` 与 `actions`，在 plan artifact 声明触碰的 wiki 主题文件和验收证据。
 - **development**：除上述文件外，对照 playbook `gates`、`live_evidence` 与触碰子系统章；在同一特性分支就地更新对应 wiki（Doc sync 见 [../../wiki-governance.md](../../wiki-governance.md)）。
 
