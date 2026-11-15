@@ -17,7 +17,7 @@
 #   --readset  额外把 readPlan / readGate（ver 台账 + reqActs + gates）写进 data/config.json 的生成区
 #              （r4 必读集的机器可读形；与 scenes 块**同一批**产出，ver 单源在文档头）
 # 输出：
-#   scenes=<n>;blocks=<k>;missing=[...];stale=<s>;drift=<d>;readset=<absent|ok|drift>;ok=<0|1>
+#   scenes=<n>;blocks=<k>;missing=[...];stale=<s>;drift=<d>;readset=<absent|present|drift>;ok=<0|1>
 # 退出码：0 = ok（或 write 模式成功）／1 = --check 发现漂移或缺件／2 = 用法错／4 = 输入不可读
 
 import json
@@ -378,9 +378,9 @@ def main(argv: list[str]) -> int:
                 key_drift.extend(diff_keys(readset.get(key, {}), current_config.get(key, {}), key))
     readset_state = "absent"
     if present:
-        readset_state = "drift" if key_drift else "ok"
+        readset_state = "drift" if key_drift else "present"
     elif readset_flag and not check:
-        readset_state = "ok"
+        readset_state = "present"
 
     ok = 1 if (not drift and not key_drift and not missing) else 0
     print(
