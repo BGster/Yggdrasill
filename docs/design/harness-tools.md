@@ -1,7 +1,7 @@
 # Yggdrasill · Harness Tools 检测机制（`.pi/tools`）
 
 > **定位**：`.pi/tools/` 只读检测脚本的契约、注册面、三层调用方参数来源与「无 egg 环境的参数约定」。
-> **决策**：D-MA26（docs/context/decisions-agent.md）。
+> **决策**：D-MA26（docs/context/archive/decisions-agent.md）。
 > **上游**：[docs/README.md](../README.md) · **相关**：[tool-bridge.md](tool-bridge.md) · [lua-api.md](lua-api.md)
 
 ## 1. 契约：纯命令行接口（argv/env）
@@ -10,6 +10,10 @@
 
 - **不读 config**：不知道 `settings.tools.*` 的存在；
 - **不读局 KV**：不碰 `run.sqlite` / `autosave.json` / `events.jsonl`；
+  **唯一例外（`docs-consistency.sh --attest`，r1 / D-MA28）**：验签必须读事件日志，故该模式要求调用方显式给
+  `--run <run-dir>`（缺 = exit 2），脚本**不猜「最新局」、不读 config、不依赖 egg**，并以
+  `sqlite3 'file:…?immutable=1'` 只读打开（不建 WAL、不写盘）。即例外只是「允许读调用方点名的那份事件日志」，
+  不引入任何隐式局状态耦合；默认模式（索引闭包）行为一字不变。
 - **不依赖 egg**：`sh <script> <args>` 即可运行，无 egg 环境的 agent 直接调用。
 
 **输入面** = argv（具名旗标，主）+ 进程环境（位置性缺省，次）。**输出面** = 缺省单行 `k=v;k=v`（与现役工具同方言），`--json` 输出同信息集的单行 JSON（服务无 egg 环境的程序化消费，不进 tool.result wire）。
@@ -35,7 +39,19 @@
 | `todo-check.sh` | `[--session <id>]`（缺省 `$YGG_SESSION_ID`→`$PI_SESSION_ID`）`[--sessions-root <dir>]` `[--json]` | `found=…;total=…;remaining=…;active=…;ok=…;approx=…`（remaining=0 → ok=1） |
 | `sessions-count.sh` | `--parent <id>`\* `[--sessions-root <dir>]` `[--trash-root <dir>]` `[--json]` | `total=…;matching=…;trash=…;ok=…`（matching=0 → ok=1；结算不变式） |
 | `manifest-verify.sh` | `[--repo <dir>]`（缺省 git toplevel）`[--mod <dir>]`（缺省 `<repo>/.ygg/mods/agent-seed`）`[--json]` | `files=…;drift=…;first=…;ok=…`（drift=0 → ok=1） |
-| `docs-consistency.sh` | `[--repo <dir>]` `[--index <file>]`（缺省 `<repo>/docs/README.md`）`[--json]` | `links=…;broken=…;first=…;ok=…`（broken=0 → ok=1） |
+| `docs-consistency.sh` | `[--repo <dir>]` `[--index <file>]`（缺省 `<repo>/docs/README.md`）`[--json]`；`--attest --run <dir>`\* `[--max-history <n>]` | `links=…;broken=…;first=…;ok=…`（broken=0 → ok=1）；`--attest` → `claims=…;forged=…;stale=…;first=…;ok=…`（claims>0 且 forged=stale=0 → ok=1） |
+
+### 2.1 仓库级文档工具（`scripts/`，不在 mod 工具面内）
+
+`scripts/docs-ver.sh` 是 docs/context 召回树的身体检查，**不注册为 mod 工具**（pack.json 不声明，避免改 mod）：
+
+| 脚本 | argv（必填 `*`） | 输出（exit 0，k=v 缺省） |
+| --- | --- | --- |
+| `scripts/docs-ver.sh` | `[--check]` `[--links]` `[--json]` `[--root <dir>]` | `files=…;changed=…;missing_header=…;broken_links=…;first=…;ok=…`（全 0 → ok=1） |
+
+- **ver 定义**（D-MA29）：固定头 `> **ver** <hex6>` 的 token 换成定宽占位 `000000`（字节数不变）、其余字节原样后 `git hash-object` 取前 6 位——直接哈希文件本体是自引用循环。
+- 不带 `--check` = 就地刷新（幂等）；`--check` = 只报告不写，并顺带跑树内链接闭包与 `scenes.json` 一致性（表内 id 必须解析到文件且与文件头 `id` 逐字相等）。
+- 软链一律跳过（兼容层不是权威内容，不参与 ver 账）。
 
 `todo-check` 是**状态重放机**：按转录内 `create`（建清单）→ `update`（按 id 改状态）→ `delete` → `clear` 全序列重放，算最终 `total`/`remaining`（`pending`/`in_progress`/`open`/`blocked` 计未完成）。`sessions-count` 用 `find -print0 | xargs -0 grep -lF` 做布尔 contains(parent) 匹配（macOS BSD grep 兼容，内容零回显）。
 
@@ -112,6 +128,13 @@ sh .pi/tools/manifest-verify.sh --repo "$(git rev-parse --show-toplevel)"
 
 # docs wiki 闭包（broken=0 即无断链）
 sh .pi/tools/docs-consistency.sh --repo "$(git rev-parse --show-toplevel)"
+
+# docs/context ver 验真 + 链接闭包（changed=missing_header=broken_links=0 → ok=1）
+bash scripts/docs-ver.sh --check
+
+# 推进签名验真（claims>0 且无 forged/stale → ok=1；--run 必填，脚本不猜最新局）
+bash .pi/tools/docs-consistency.sh --repo "$(git rev-parse --show-toplevel)" \
+  --attest --run "$(git rev-parse --show-toplevel)/.ygg/runs/<run-id>"
 
 # 任一脚本加 --json 得单行 JSON（程序化消费）
 sh .pi/tools/sessions-count.sh --parent "$PI_SESSION_ID" --sessions-root <dir> --json

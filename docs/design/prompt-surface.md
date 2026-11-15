@@ -1,13 +1,13 @@
 # Yggdrasill · 提示词面（beats）契约
 
-> **定位**：6 个 beats 片段（404 键）+ `core.json`（options/tuning/endings 36 键）的职责归属与文案键分组表。
+> **定位**：6 个 beats 片段（409 键）+ `core.json`（options/tuning/endings 36 键）的职责归属与文案键分组表。
 > **replaces**：DESIGN §2.12（L356–371）（搬运基线 `3a2536f`）
 > **上游**：[docs/README.md](../README.md) · **相关**：[identity.md](identity.md)
 > **搬运**：以下正文自 DESIGN.md L356–L371 逐字迁移，不重写语义。
 
 ### 2.12 提示词面（beats）契约
 
-叙事文案与提示词全部存放在 `data/texts/` 片段（404 个 beats 键 + core 的 options/tuning/endings 36 键，共 440 个唯一键），按域分组、单一职责（P2 零硬编码；`mod.lua` 装配回 TEXTS）：
+叙事文案与提示词全部存放在 `data/texts/` 片段（409 个 beats 键 + core 的 options/tuning/endings 36 键，共 445 个唯一键），按域分组、单一职责（P2 零硬编码；`mod.lua` 装配回 TEXTS）：
 
 | 片段 | 键数 | 职责 |
 | --- | --- | --- |
@@ -23,14 +23,14 @@
 
 ### 正文归属列（r2「mod 剧情提示词迁出」新增）
 
-mod 职责收缩为「状态管理 + 需求看板 + CONTEXT 索引提示」后，文案的**知识权威**在 `docs/context/` 运行流程层，mod `data/texts/` 是运行时投影（404 beats + core 36；宿主零改动）：
+mod 职责收缩为「状态管理 + 需求看板 + CONTEXT 索引提示」后，文案的**知识权威**在 `docs/context/` 运行流程层，mod `data/texts/` 是运行时投影（409 beats + core 36；宿主零改动）：
 
 | 知识形态 | 键范围 | 正文权威 | mod 侧形态 |
 | --- | --- | --- | --- |
-| 状态行文（错误码/回执/台账/面板/菜单，440 个唯一键） | 全部 beats 键 + core options/tuning/endings（23 处指针壳为子集） | [../context/copy-contract.md](../context/copy-contract.md)（七域索引；逐域句式表） | 原文留 mod（宿主无文案缺省机制，运行时物理必须） |
-| 幕台词与阶段策略（6 `*_common` + scenes 5 + prompts 5 + guide 2） | `prologue/charter/coordinate/settle/release/retired_common`、`scenes.*`、`prompts.*`、`guide_human_blocked`、`guide_hint` | [../context/workflow-acts.md](../context/workflow-acts.md) | 收缩为「状态前缀/{{变量}}头 + docs/context 指针」 |
-| 派发仪式（3 键） | `subagent_brief`、`config_opened`、`subagent_fallback_note` | [../context/dispatch-ritual.md](../context/dispatch-ritual.md) | 事实头留 mod + 指针 |
-| 清理政策（2 键） | `settlement_sessions_unsetted_hint`、`settlement_todo_segment` | [../context/cleanup-policy.md](../context/cleanup-policy.md) | 判据短句 + 指针 |
+| 状态行文（错误码/回执/台账/面板/菜单，445 个唯一键） | 全部 beats 键 + core options/tuning/endings（23 处指针壳为子集） | [../context/copy/README.md](../context/copy/README.md)（七域索引；逐域句式表） | 原文留 mod（宿主无文案缺省机制，运行时物理必须） |
+| 幕台词与阶段策略（6 `*_common` + scenes 5 + prompts 5 + guide 2） | `prologue/charter/coordinate/settle/release/retired_common`、`scenes.*`、`prompts.*`、`guide_human_blocked`、`guide_hint` | [../context/acts/](../context/acts/) + [../context/req-acts/](../context/req-acts/)（幕 1:1 一文件 + 需求级三份） | 收缩为「状态前缀/{{变量}}头 + docs/context 指针」 |
+| 派发仪式（3 键） | `subagent_brief`、`config_opened`、`subagent_fallback_note` | [../context/rituals/dispatch.md](../context/rituals/dispatch.md)（+ `rituals/fallback.md`） | 事实头留 mod + 指针 |
+| 清理政策（2 键） | `settlement_sessions_unsetted_hint`、`settlement_todo_segment` | [../context/rituals/cleanup.md](../context/rituals/cleanup.md) | 判据短句 + 指针 |
 
 单向同步纪律（[../wiki-governance.md](../wiki-governance.md)）：改文案先改 context 权威域文件再同步 mod 键值；指针锚点存在性由 `agent_seed_semantics` 的 `narrative_pointer_anchors_exist_in_docs_context` 用例机器闭环，逐域键集由 `copy_contract_domain_fragments_cover_every_text_key` 用例闭环。owner = texts/契约编辑者；trigger = 任一键或指针变化；检查失败 = 缺键、死链或计数漂移，不得验收。
 

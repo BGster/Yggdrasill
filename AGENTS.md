@@ -16,6 +16,30 @@ The user runs real-data verification and pastes the output; synthetic data under
     CLI/daemon ticket path. The sole observation-root registry exception and its zero-disk-write proof
     are specified in `docs/design/serve.md` §3.7.6; read it before touching serve.
 
+0c. **Scene gate — read the authoritative body before acting in any scene.** Before executing any action
+    of a scene (prologue / charter / coordinate / settle / release / retired, or a requirement stage),
+    read that scene's authoritative body in `docs/context/` as routed by §3. **Authority order**: the
+    `docs/context/**` body *is* the rule; the mod receipt's `[READ FIRST]` block, beats text, playbook
+    summaries, a previous run's habit and this session's earlier impression are **routes and digests, never
+    the rule** — substituting a digest for the body is a violation, and so is acting from memory when the
+    body is one read away.
+    - **Read again, every time**: re-entering the same scene, a rejected-and-replanned requirement, and a new
+      batch each require a fresh read and a fresh signature. "I read it last time" is not an exemption — the
+      document may have changed since, and memory drifts on its own.
+    - **Only the current version counts**: a signature carries the document's current version token; a
+      signature made against an older one is expired, never reusable.
+    - **Unreadable = stop**: a missing path, a moved file, or a body that contradicts the index is a
+      stop-and-report — never a licence to proceed from memory.
+    - **Read whole**: never claim a read from the first few lines or a single `grep` hit (same origin as §1's
+      no-parse-and-truncate rule).
+
+    Three-question criterion (§1.7): ① which action does it block? — `requirement.dispatch` /
+    `proposal.submit` / `gate.approve` / `coordinate.submit` executed from a digest, a memory, or a
+    last-batch version of a rule; ② symptom — a missing or expired signature, a receipt whose `[READ FIRST]`
+    paths or versions no longer resolve, behaviour that follows a retired wording; ③ confirm next time —
+    every scene receipt's `[READ FIRST]` block resolves to existing files, the signed version equals the
+    on-disk one, and no signature predates the current scene entry.
+
 1. **Every in-run artifact must be carried by an event first**: before writing a file, changing code or
    producing a deliverable, an event must bring it into the state machine (`requirement.dispatch` →
    proposal → gate). The verdict looks at events, not where bytes landed — `~/tmp`, `/tmp` and chat all
@@ -25,13 +49,14 @@ The user runs real-data verification and pastes the output; synthetic data under
    pass the two mandatory gates, and declare batch release (`release.confirm` / `release.skip`). It never
    implements lane work. After filing a requirement, its first action is `requirement.dispatch`.
    Executor registration, identity, requirement granularity and decision-ID allocation are routed by
-   `docs/context/workflow-acts.md` and `dispatch-ritual.md`; identity semantics: `docs/design/identity.md`.
+   `docs/context/req-acts/intake.md` and `docs/context/rituals/dispatch.md`; identity semantics: `docs/design/identity.md`.
 
 3. **Render receipts in full; never parse-and-truncate**: no sliced narratives, first-line-only reads,
    `startswith` filtering, or grep/python summaries. Every dispatch prints all narrative lines and hands
    raw `pendingChoice` to the user. Read rules from the playbook chapter instead of memory; the phase map
-   is in `src/view/guide.lua`. Without egg/mod, `docs/context/workflow-acts.md`, `dispatch-ritual.md`,
-   `cleanup-policy.md` and the seven-domain `copy-contract.md` index are the self-contained workflow
+   is in `src/view/guide.lua`. Without egg/mod, `docs/context/README.md` (the recall-tree entry),
+   `docs/context/acts/`, `docs/context/req-acts/`, `docs/context/rituals/cleanup.md` and the seven-domain
+   `docs/context/copy/README.md` index are the self-contained workflow
    base; only tool monitoring, recorded history and machine enforcement are absent — semantics and
    evidence do not degrade.
 
@@ -63,7 +88,7 @@ The user runs real-data verification and pastes the output; synthetic data under
      not carry constraints. Never patch the egg CLI source; give the user the symptom and reproduction.
    - Every evolution needs all three: ① the specific action blocked; ② the visible violation symptom;
      ③ one runnable confirmation. Fewer than three means it is not written. A verbal promise is unhandled.
-   - Candidate screening and declaration limits: `docs/context/workflow-acts.md` settle + playbook
+   - Candidate screening and declaration limits: `docs/context/acts/settle.md` + playbook
      `evolution`. Mod text path hygiene: `docs/design/mod-package.md`.
 
 8. **Every prompt-surface edit must account for the full producer/consumer lifecycle.** A normative rule
@@ -115,7 +140,7 @@ $A --event run.begin
 ```
 
 Boot may carry the charter payload directly; `new` ends with `run-root: <path>` (`run_root` in raw mode).
-`charter.set` is editable until `run.begin`; see `docs/context/workflow-acts.md` charter.
+`charter.set` is editable until `run.begin`; see `docs/context/acts/charter.md`.
 
 ### Serve (read-only observation)
 
@@ -155,7 +180,7 @@ that channel. Re-run Continue to resume. Lane reuse/parking: `docs/design/lanes.
 2. Unarmed `review.note` is a batch settle, not an ending. `config.set run.retire=true` arms the only
    ending; after the last cycle run `--settle` and require `settlement.json ok=true`.
 3. Exact payloads, evidence standards, integration cadence and reset-develop are not repeated here:
-   read `docs/context/workflow-acts.md` settle/release/retired before acting.
+   read `docs/context/acts/settle.md`, `release.md` and `retired.md` before acting.
 4. Upgrade only after a batch settles, then open a new run-id; never migrate or adopt old runs.
 5. Clear the main-session todo list (`todo clear`, including completed/history) before ending the run.
 
@@ -165,16 +190,23 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 
 | Moment | Authoritative route |
 | --- | --- |
-| Cold-start vocabulary / irreversible constraints | This file + `docs/context/vocabulary.md` |
-| Charter / coordinate / settle / release / retired | `docs/context/workflow-acts.md`; playbook `repository`, `run_machine`, `evolution`, `integration`, `pointers` |
+| Entry — which file for this moment | `docs/context/README.md` (time-point → file) + `docs/context/scenes.json` |
+| Cold-start vocabulary / irreversible constraints | This file + `docs/context/cold-start/vocabulary.md`, `topology.md`, `principles.md` |
+| Charter / coordinate / settle / release / retired | `docs/context/acts/<act>.md`; playbook `repository`, `run_machine`, `evolution`, `integration`, `pointers` |
+| Requirement stage (draft → done) | `docs/context/req-acts/intake.md` (1-3) / `delivery.md` (4-6) / `integration.md` (7-9) |
 | Coordinate action and decision | Playbook `actions`, `drive`, `inbox`, `dispatch`, `lanes`; cold-start expansions `credentials`, `hard_constraints`, `output` |
-| Dispatch / submit / integration | `docs/context/dispatch-ritual.md`; playbook `branches`, `integration` |
-| Verification / evidence / cleanup | `docs/context/cleanup-policy.md`; playbook `gates`, `live_evidence`, `evidence`, `run_artifacts` |
+| Dispatch / submit / integration ritual | `docs/context/rituals/dispatch.md`; playbook `branches`, `integration` |
+| Verification / evidence / cleanup | `docs/context/acts/settle.md` + `docs/context/rituals/cleanup.md`; playbook `gates`, `live_evidence`, `evidence`, `run_artifacts` |
+| No egg / no mod fallback | `docs/context/rituals/fallback.md` |
 | Mod / host / tool touch | `docs/design/state-machine.md`, `mod-package.md`, `tool-bridge.md`; playbook `mod_engineering`, `host_contract`, `tools` |
 | serve / lanes / CLI / identity touch | `docs/design/serve.md`, `lanes.md`, `cli-daemon.md`, `identity.md` |
-| Runtime copy / protocol wording | `docs/context/copy-contract.md` (seven-domain index) + `docs/design/prompt-surface.md` |
-| Archive: why a ruling exists | `docs/context/decisions-engine.md`, `decisions-agent.md`, `vision.md`, `principles.md` |
-| Repository topology | `docs/context/topology.md` + `docs/design/system-boundaries.md` |
+| Runtime copy / protocol wording | `docs/context/copy/README.md` (seven-domain index) + `docs/design/prompt-surface.md` |
+| Archive: why a ruling exists | `docs/context/archive/decisions-engine.md`, `archive/decisions-agent.md`, `cold-start/vision.md`, `cold-start/principles.md` |
+| Repository topology | `docs/context/cold-start/topology.md` + `docs/design/system-boundaries.md` |
+
+Retired flat paths under `docs/context/` (e.g. `workflow-acts.md`, `dispatch-ritual.md`, `copy-contract-*.md`) are
+**compat shims for frozen consumers** (mod pointers, crates semantic tests) — never the authority. Read the
+tree; the shim list and its exit condition (r5) live in `docs/context/README.md`.
 
 Every playbook chapter has a phase-entry route; `map.show` additionally prints the complete chapter index.
 Each phase receipt names its chapter titles, summaries and rule counts. Read the fragment whose
