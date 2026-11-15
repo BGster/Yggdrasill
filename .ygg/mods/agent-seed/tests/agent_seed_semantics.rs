@@ -2341,56 +2341,6 @@ fn profile_registration_via_config_set_roundtrip() {
     game.assert_kv("settings.profile_index", json!("agent-1"));
 }
 
-/// 销票：作用域边界**主动清除**全部签名，于是「键非空」本身就等于「本作用域内已签」——
-/// 消费者（r4）不需要时钟、不需要比较序号。覆蓋三类边界：立局→协调（run.begin）、
-/// rev 推进（requirement.amend，停在 req_bump_rev）、提案打回（proposal.reject）。
-#[test]
-fn read_scope_boundary_wipes_every_signature() {
-    let mut game = Game::open(&project_mod_dir());
-
-    // ① run.begin（立局幕 → 协调幕）
-    game.narrate("config.set", &text("read.acts/charter=aaaaaa"));
-    game.assert_kv("settings.read.acts/charter", json!("aaaaaa|charter|0"));
-    charter_and_begin(&mut game);
-    game.assert_kv("settings.read.acts/charter", json!(""));
-    game.assert_kv("settings.read_index", json!(""));
-
-    // 一条在册需求（协调幕；不动 phase）
-    game.narrate(
-        "requirement.add",
-        &text("synthetic requirement|synthetic description|semantics-r1"),
-    );
-    game.narrate("requirement.dispatch", "0");
-
-    // ② requirement.amend 推进 rev → 销票（amend 三条成功路径都过 req_bump_rev）
-    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
-    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
-    game.assert_kv(
-        "settings.read_index",
-        json!("acts/coordinate,coordinate/dispatch"),
-    );
-    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
-    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
-    game.assert_kv("settings.read.acts/coordinate", json!(""));
-    game.assert_kv("settings.read.coordinate/dispatch", json!(""));
-    game.assert_kv("settings.read_index", json!(""));
-
-    // ③ proposal.reject 打回（plan 分支不碰 rev，靠 handler 里的显式 clear）
-    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
-    game.assert_kv("settings.read_index", json!("acts/coordinate"));
-    submit(&mut game, 2, "plan", "semantics-read-plan");
-    let rejected = game.narrate("proposal.reject", &text("p1|needs rework"));
-    assert!(!refused(&rejected, "proposal.reject"), "{rejected:#?}");
-    // 成功回执带 [PROPOSAL REJECTED] 前缀（它不是拒绝行：拒绝前缀见 pack.json）。
-    assert_eq!(
-        count_lines(&rejected, "[PROPOSAL REJECTED] p1 (r1)"),
-        1,
-        "{rejected:#?}"
-    );
-    game.assert_kv("settings.read.acts/coordinate", json!(""));
-    game.assert_kv("settings.read_index", json!(""));
-}
-
 /// 覆盖面 k/n：`readPlan` 在场时按本幕清单计算（计划外的 doc 不进分子），
 /// 不在场时降级。清单是**装资源的静态值**，改它必须重算 manifest（`reseal`）。
 #[test]

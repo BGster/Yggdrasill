@@ -80,3 +80,39 @@ test("空值清除签名：值置空 + 索引摘除，重复清除幂等", funct
   assert_true(not narrated_contains("REJECTED"), "a repeated clear must not be rejected")
   assert_eq(kv("settings.read_index"), "coordinate/dispatch", "a repeated clear leaves the index alone")
 end)
+
+test("作用域边界销票：run.begin / amend / proposal.reject 都清空签名", function()
+  fresh()
+
+  -- ① run.begin（立局幕 → 协调幕）
+  fire("config.set", "read.acts/charter=aaaaaa")
+  assert_eq(kv("settings.read.acts/charter"), "aaaaaa|charter|0", "signed in the charter act")
+  charter_and_begin()
+  assert_eq(kv("settings.read.acts/charter"), "", "run.begin wipes signatures")
+  assert_eq(kv("settings.read_index"), "", "the index is cleared too")
+
+  -- 一条在册需求（协调幕；不动 phase）
+  fire("requirement.add", "synthetic requirement|synthetic description|semantics-r1")
+  fire("requirement.dispatch", "0")
+
+  -- ② amendment 推进 rev → 销票
+  fire("config.set", "read.acts/coordinate=9f2c1a")
+  fire("config.set", "read.coordinate/dispatch=c0ffee")
+  assert_eq(kv("settings.read_index"), "acts/coordinate,coordinate/dispatch", "two docs signed")
+  reset()
+  fire("requirement.amend", "r1||amended description")
+  assert_true(not narrated_contains("[REJECTED"), "amend must succeed")
+  assert_eq(kv("settings.read.acts/coordinate"), "", "amend wipes the act doc")
+  assert_eq(kv("settings.read.coordinate/dispatch"), "", "amend wipes the stage doc")
+  assert_eq(kv("settings.read_index"), "", "amend clears the index")
+
+  -- ③ proposal.reject 打回（plan 分支不碰 rev，靠 handler 的显式 clear）
+  fire("config.set", "read.acts/coordinate=9f2c1a")
+  assert_eq(kv("settings.read_index"), "acts/coordinate", "re-signed before submitting")
+  submit(2, "plan", "semantics-read-plan")
+  reset()
+  fire("proposal.reject", "p1|needs rework")
+  assert_true(narrated_contains("[PROPOSAL REJECTED] p1 (r1)"), "the receipt must name the proposal")
+  assert_eq(kv("settings.read.acts/coordinate"), "", "a reject wipes signatures")
+  assert_eq(kv("settings.read_index"), "", "the index is cleared")
+end)

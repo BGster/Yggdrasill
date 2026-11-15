@@ -417,3 +417,10 @@ function charter_and_begin()
   click("charter.set — ")
   click("run.begin — ")
 end
+
+--- 提交 r1 的提案（先按 stage 补签，再发 7 段载荷）。
+function submit(rev, stage, ext)
+  ensure_reads("proposal.submit", stage, 1)
+  local payload = ("r1|%d|%s|%s proposal summary|artifacts/%s.md||%s"):format(rev, stage, stage, stage, ext)
+  return fire("proposal.submit", payload)
+end
