@@ -40,7 +40,6 @@ use serde_json::{json, Value as Json};
 
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::modload::ModBundle;
-use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 
 mod support;
 
@@ -60,11 +59,6 @@ fn repo_dir() -> PathBuf {
 /// `data/texts/*` fragments and `data/playbook/*` fragments are this project's field surface).
 fn project_mod_dir() -> PathBuf {
     repo_dir().join(".ygg/mods/agent-seed")
-}
-
-/// The seed template that ships to users (P5: a relative symlink to the project mod).
-fn seed_mod_dir() -> PathBuf {
-    repo_dir().join("packages/mods/agent-seed")
 }
 
 // ───────────────────────── drive surface ─────────────────────────
