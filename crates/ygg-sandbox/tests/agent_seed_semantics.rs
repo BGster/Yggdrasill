@@ -2419,11 +2419,11 @@ fn read_signature_rejects_bad_doc_id_and_bad_ver() {
     let long_doc = format!("read.acts/{}=9f2c1a", "a".repeat(49));
     let long_scene = format!("read.{}/coordinate=9f2c1a", "a".repeat(33));
     for bad in [
-        "read.acts=9f2c1a",                  // 缺 <doc-id> 段（无斜杠）
-        "read.acts/sub/dir=9f2c1a",          // 斜杠过多（只认一段）
-        "read.acts/charter.md=9f2c1a",    // 点号：effective() 会下钻错位（合成键形，非真实 doc-id）
-        "read.Acts/Coordinate=9f2c1a",       // 大写
-        "read./coordinate=9f2c1a",           // 幕段空
+        "read.acts=9f2c1a",            // 缺 <doc-id> 段（无斜杠）
+        "read.acts/sub/dir=9f2c1a",    // 斜杠过多（只认一段）
+        "read.acts/charter.md=9f2c1a", // 点号：effective() 会下钻错位（合成键形，非真实 doc-id）
+        "read.Acts/Coordinate=9f2c1a", // 大写
+        "read./coordinate=9f2c1a",     // 幕段空
     ] {
         let lines = game.narrate("config.set", &text(bad));
         assert_refused(&lines, "config.set");
