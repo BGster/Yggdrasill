@@ -208,18 +208,13 @@ local function read_problem(action, ctx)
     }))
   end
 
-  -- ① 覆盖：未签 + 版本漂移（台账 ver ≠ 签名 ver）都算「没有有效签名」。
+  -- ① 覆盖：**完全没签**的件（签了但 ver 旧走新鲜维度——文档改版是「旧了」而不是「没签」）。
   local missing, commands = {}, {}
   for i = 1, #docs do
     local doc = docs[i]
-    local want = readset.doc_ver(doc)
-    local got = readsig.signed(doc)
-    if got == nil then
+    if readsig.signed(doc) == nil then
       missing[#missing + 1] = doc
-      commands[#commands + 1] = sign_command(doc, want)
-    elseif want ~= "" and got ~= want then
-      missing[#missing + 1] = doc .. " (signed " .. got .. ", now " .. want .. ")"
-      commands[#commands + 1] = sign_command(doc, want)
+      commands[#commands + 1] = sign_command(doc, readset.doc_ver(doc))
     end
   end
   if #missing > 0 then
@@ -244,16 +239,30 @@ local function read_problem(action, ctx)
   local rev_epoch = rev_epoch_of(epochs)
   for i = 1, #docs do
     local doc = docs[i]
-    local _, _, value_seq = readsig.signed(doc)
+    local signed_ver, _, value_seq = readsig.signed(doc)
     local sign = 0
     if value_seq ~= nil and value_seq > 0 then
       sign = value_seq
     else
       sign = clock.sign_seq(doc)
     end
+    local want = readset.doc_ver(doc)
+    -- 新鲜之一：文档改版（台账 ver ≠ 签名 ver）。此维不看序号，先于跨边界比较——
+    -- 「你读的是旧版」比「你在旧幕读的」更根因；即便 seq 未知（旧存档）也能成立。
+    if want ~= "" and signed_ver ~= nil and signed_ver ~= want then
+      return fill(TEXTS.beats.read_gate_stale, {
+        doc = doc,
+        sign = tostring(sign),
+        gap = tostring(now_seq - sign),
+        reason = "the doc's ver moved from " .. signed_ver .. " to " .. want,
+        window = tostring(window),
+        command = sign_command(doc, want),
+        raise = raise,
+      })
+    end
     -- 序号未知（r3 时代签的存档 / 只读局）⇒ 该件不判序，只保留「签过」这一事实。
     if sign > 0 then
-      local command = sign_command(doc, readset.doc_ver(doc))
+      local command = sign_command(doc, want)
       if rev_epoch ~= nil and rev_epoch.seq > sign then
         return fill(TEXTS.beats.read_gate_subject, {
           doc = doc,
@@ -271,9 +280,8 @@ local function read_problem(action, ctx)
         return fill(TEXTS.beats.read_gate_stale, {
           doc = doc,
           sign = tostring(sign),
-          scope = scope,
-          entry = tostring(entry),
           gap = tostring(entry - sign),
+          reason = "the scope moved on: " .. scope .. " began at dispatch " .. tostring(entry),
           window = tostring(window),
           command = command,
           raise = raise,
