@@ -1819,38 +1819,6 @@ fn pointer_paths(value: &str, prefix: &str) -> Vec<String> {
     out
 }
 
-/// 指向 `docs/design/` 的文件指针（**允许多级子目录**）。
-fn design_pointer_paths(value: &str) -> Vec<String> {
-    pointer_paths(value, "docs/design/")
-}
-
-/// 核一个键值的全部 design 指针：累加 `count` 并返回违规清单（锚点缺失 / 非法路径段）。
-///
-/// `..` 与空段一律判违规——`docs/design/kernel/../../AGENTS.md` 能骗过存在性检查，
-/// 却把读者带出契约树。
-fn design_pointer_violations(
-    design_dir: &std::path::Path,
-    ns: &str,
-    key: &str,
-    value: &str,
-    count: &mut usize,
-) -> Vec<String> {
-    let mut violations = Vec::new();
-    for file in design_pointer_paths(value) {
-        *count += 1;
-        if file.split('/').any(|seg| seg.is_empty() || seg == "..") {
-            violations.push(format!(
-                "{ns}.{key} -> docs/design/{file} (illegal path segment)"
-            ));
-            continue;
-        }
-        if !design_dir.join(&file).is_file() {
-            violations.push(format!("{ns}.{key} -> docs/design/{file} (missing)"));
-        }
-    }
-    violations
-}
-
 /// 递归收集目录下按后缀过滤的文件（不引 `walkdir`：`ygg-sandbox` 的 dev-dependencies 只有 `ygg-store`）。
 fn collect_files_with(dir: &std::path::Path, suffix: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
