@@ -6,7 +6,6 @@
 local M = {}
 
 local config = require("src.core.config")
-local reqs = require("src.domain.requirements")
 local util = require("src.core.util")
 
 local TEXTS
@@ -211,6 +210,66 @@ local function identity_segment_value(segment, max, bad_beat)
     return nil, TEXTS.beats[bad_beat]
   end
   return value, nil
+end
+
+-- ── stamp-only 路由的盖章段剥离（r9，按人读签）───────────────────────────
+-- `config.set` / `gate.approve` / `coordinate.submit` 在 `pack.json` 里声明了 `actor: true`
+-- 但**不带 write**（stamp-only）：宿主为直接 `--event` 通道在载荷末尾注入 `|actor=<id>`，
+-- 这两段**不是业务载荷**——不剥掉会污染 `key=value` 的 value（config.set）与被 `cut` 切开的
+-- note 段（门禁）。
+--
+-- 剥离面严格限定：只认**末尾连续**的 `actor_session` → `actor`（相对顺序与注入面一致），
+-- 值走 identity_segment_value 同一形状尺（非法 = 可读拒绝，不让一份“身份”蒙进存档）。
+-- 余下段里再出现保留段 = 错位（宿主只从末尾盖章）——与 parse_proposal 的 misplaced 同纪律，
+-- 不静默重排（AGENTS §9.1 的 req_prop_*_misplaced 教训）。
+--
+-- 返回 payload, actor, actor_session, problem：无盖章段时原样返回且两个身份为 nil
+--（旧路径 / 测试直派 / 票据路径逐字节不变）。
+local function strip_identity_tail(payload)
+  if type(payload) ~= "string" then
+    return payload, nil, nil, nil
+  end
+  local parts = split(trim(payload), "|")
+  local last = #parts
+  if last < 2 then
+    return payload, nil, nil, nil
+  end
+  local actor, actor_session = nil, nil
+  local cut_from = last + 1
+  local item = tail_segment_of(trim(parts[last]))
+  if item ~= nil and item.name == "actor_session" then
+    local value, problem = identity_segment_value(trim(parts[last]), 128, "executor_bad_actor_session")
+    if problem ~= nil then
+      return nil, nil, nil, problem
+    end
+    actor_session = value
+    cut_from = last
+    last = last - 1
+    item = last >= 1 and tail_segment_of(trim(parts[last])) or nil
+  end
+  if item ~= nil and item.name == "actor" then
+    local value, problem = identity_segment_value(trim(parts[last]), 64, "executor_bad_actor")
+    if problem ~= nil then
+      return nil, nil, nil, problem
+    end
+    actor = value
+    cut_from = last
+    last = last - 1
+  end
+  if actor == nil and actor_session == nil then
+    return payload, nil, nil, nil
+  end
+  for i = 1, last do
+    local stray = tail_segment_of(trim(parts[i]))
+    if stray ~= nil then
+      return nil, nil, nil, TEXTS.beats[stray.beat]
+    end
+  end
+  local kept = {}
+  for i = 1, cut_from - 1 do
+    kept[#kept + 1] = parts[i]
+  end
+  return join(kept, "|"), actor, actor_session, nil
 end
 
 -- ── profile 注册表（r3，自报身份卡：声明面不是凭据）─────────────────────────
@@ -1092,6 +1151,7 @@ M.parse_resolve = parse_resolve
 M.parse_split = parse_split
 M.probe_payload_ok = probe_payload_ok
 M.strip_ext = strip_ext
+M.strip_identity_tail = strip_identity_tail
 M.valid_ext = valid_ext
 
 return M
