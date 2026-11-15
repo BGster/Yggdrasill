@@ -237,3 +237,67 @@ test("同池并行与占用作用域：容量 / 占用 / 跨池互不干扰 + pa
     "命名池行用 lane-<pool>-<k>：" .. joined
   )
 end)
+
+test("释放路径的池作用域：同 k 三池互不干扰 / 幂等 / 池化工具 / 未知仓拒绝", function()
+  fresh()
+  charter_and_begin()
+  fire("lane.pool", "alpha|/tmp/checkout-alpha")
+  fire("lane.pool", "beta|/tmp/checkout-beta")
+  fire("requirement.add", "first|description|subsys-a")
+  fire("requirement.add", "second|description|subsys-b")
+  fire("requirement.add", "third|description|subsys-c")
+  fire("lane.claim", "1|r1|feature/aa11-one|abc1234|1|alpha")
+  fire("lane.claim", "1|r2|feature/aa11-two|abc1234|1|beta")
+  fire("lane.claim", "1|r3|feature/aa11-three|abc1234|1")
+
+  -- ① 释放 beta-1 不动 alpha-1 与 default-1（三者是同一个 k！）。
+  reset()
+  fire("lane.release", "1|beta")
+  assert_eq(count_marker("[LANE RELEASED]"), 1, "释放必须叙述")
+  assert_true(
+    narrated_contains("lane-beta-1"),
+    "释放要点名池作用域标签：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("lane.beta.1.req"), "", "beta-1 清空")
+  assert_eq(kv("lane.alpha.1.req"), "r1", "alpha-1 不动")
+  assert_eq(kv("lane.1.req"), "r3", "default-1 不动")
+  assert_eq(kv("req.2.lane"), 0, "需求 2 解绑")
+  assert_eq(kv("req.2.lane_pool"), "", "需求 2 的池清空")
+
+  -- ② 重复释放已空的池泳道：幂等、仍叙述、不动任何东西。
+  reset()
+  fire("lane.release", "1|beta")
+  assert_eq(count_marker("[LANE RELEASED]"), 1, "幂等释放仍叙述一次")
+  assert_true(
+    narrated_contains("none (it was already free)"),
+    "必须说明它本来就不在占用：" .. table.concat(narrated(), " | ")
+  )
+
+  -- ③ 默认池的释放路径不受池段影响。
+  fire("lane.release", "1")
+  assert_eq(kv("lane.1.req"), "", "default-1 清空")
+  assert_eq(kv("lane.alpha.1.req"), "r1", "alpha-1 仍不动")
+
+  -- ④ 池化释放工具：从请求仓解析池，并在同一次折叠里清需求侧。
+  fire("tool.call", "git.worktree_release_pool|lane=1;repo=/tmp/checkout-alpha|t5")
+  reset()
+  fire(
+    "tool.result",
+    "t5|git.worktree_release_pool|ok|0|lane=1;released=1;parked=1;path=/tmp/checkout-alpha-lane-1"
+  )
+  assert_eq(count_marker("[WORKTREE RELEASED]"), 1, "池化释放必须叙述")
+  assert_eq(kv("lane.alpha.1.req"), "", "alpha-1 清空")
+  assert_eq(kv("lane.alpha.1.path"), "", "路径清空")
+  assert_eq(kv("req.1.lane"), 0, "需求 1 解绑")
+  assert_eq(kv("req.1.lane_pool"), "", "需求 1 的池清空")
+
+  -- ⑤ 解析不到注册池的仓 → 拒绝，台账不动。
+  fire("tool.call", "git.worktree_release_pool|lane=2;repo=/tmp/ghost|t6")
+  reset()
+  fire(
+    "tool.result",
+    "t6|git.worktree_release_pool|ok|0|lane=2;released=1;parked=0;path=/tmp/ghost-lane-2"
+  )
+  assert_eq(count_marker("[WORKTREE RELEASE REFUSED]"), 1, "未知仓必须叙述为拒绝")
+  assert_nil(kv("lane.alpha.2.req"), "台账不写")
+end)
