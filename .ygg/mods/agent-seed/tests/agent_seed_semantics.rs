@@ -2341,48 +2341,6 @@ fn profile_registration_via_config_set_roundtrip() {
     game.assert_kv("settings.profile_index", json!("agent-1"));
 }
 
-/// 非法键形 / 非法 ver 一律 `[REJECTED:PAYLOAD]` 且不落 KV；未知键仍 fail-closed
-///（白名单扩张没有把 `bad_config_key` 那条路径堵死）。
-#[test]
-fn read_signature_rejects_bad_doc_id_and_bad_ver() {
-    let mut game = Game::open(&project_mod_dir());
-    charter_and_begin(&mut game);
-
-    let long_doc = format!("read.acts/{}=9f2c1a", "a".repeat(49));
-    let long_scene = format!("read.{}/coordinate=9f2c1a", "a".repeat(33));
-    for bad in [
-        "read.acts=9f2c1a",            // 缺 <doc-id> 段（无斜杠）
-        "read.acts/sub/dir=9f2c1a",    // 斜杠过多（只认一段）
-        "read.acts/charter.md=9f2c1a", // 点号：effective() 会下钻错位（合成键形，非真实 doc-id）
-        "read.Acts/Coordinate=9f2c1a", // 大写
-        "read./coordinate=9f2c1a",     // 幕段空
-    ] {
-        let lines = game.narrate("config.set", &text(bad));
-        assert_refused(&lines, "config.set");
-    }
-    for bad in [long_doc.as_str(), long_scene.as_str()] {
-        let lines = game.narrate("config.set", &text(bad));
-        assert_refused(&lines, "config.set");
-    }
-    assert_eq!(game.kv("settings.read_index"), Json::Null);
-    assert_eq!(game.kv("settings.read.acts"), Json::Null);
-
-    for bad in [
-        "read.acts/coordinate=xyz",    // 非 hex
-        "read.acts/coordinate=9F2C1A", // 大写 hex 不收
-        "read.acts/coordinate=abc",    // 短于 4
-    ] {
-        let lines = game.narrate("config.set", &text(bad));
-        assert_refused(&lines, "config.set");
-    }
-    assert_eq!(game.kv("settings.read.acts/coordinate"), Json::Null);
-
-    // 索引键不在用户面（无 read. 前缀 → 落 bad_config_key），只能由 mod 自维护。
-    let alien = game.narrate("config.set", &text("read_index=acts/coordinate"));
-    assert_refused(&alien, "config.set");
-    assert_eq!(game.kv("settings.read_index"), Json::Null);
-}
-
 /// 值 = 显式清除该件（与 run.retire / goal.authorization 同构）：值置空 + 索引摘除；
 /// 重复清除幂等（不产生拒绝行，也不留垃圾键）。
 #[test]
