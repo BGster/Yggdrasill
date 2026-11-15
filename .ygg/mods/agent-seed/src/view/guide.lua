@@ -19,7 +19,7 @@ local SECTIONS = {}
 -- 未映射章同样是死资产：21 章必须至少在一条 phase-entry 路由上出现；map.show 另播全局索引。
 local STAGE_GUIDE = {
   charter = { "repository", "credentials", "hard_constraints", "output" },
-  coordinate = { "run_machine", "actions", "drive", "inbox", "dispatch", "lanes", "branches", "integration" },
+  coordinate = { "run_machine", "actions", "drive", "inbox", "lanes", "branches", "integration" },
   settle = { "evolution", "gates", "run_artifacts", "evidence", "live_evidence", "mod_engineering", "host_contract", "tools" },
   release = { "integration", "branches" },
   retired = { "pointers" },

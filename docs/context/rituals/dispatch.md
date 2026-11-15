@@ -1,18 +1,18 @@
 # Yggdrasill · 派发仪式（rituals/dispatch）
 > **id** rituals/dispatch · **幕** coordinate（派发前） · **触发** 派发任何 subagent（plan / development / analysis）前
 > **读不到代价** hard-refusal（`.env.local` 未 source 即派发、工件落检出、submit 缺 `exec=` 均不合规）
-> **ver** e61aa3
+> **ver** 14d64e
 
 > **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
-> **上游**：[../../README.md](../../README.md) · **相关**：[../acts/](../acts/) · [../copy/harness.md](../copy/harness.md)（submit 命令模板等句式契约） · [../../wiki-governance.md](../../wiki-governance.md)
+> **上游**：[../../README.md](../../README.md) · **相关**：[../acts/](../acts/) · [../scenes/harness.md](../scenes/harness.md)（submit 命令模板等句式契约） · [../../wiki-governance.md](../../wiki-governance.md)
 
 ## 1. brief 结构（事实头 + 策略正文）
 
 mod 运行时发出的 brief = **事实头**（留 mod，带状态变量）+ **策略正文**（知识权威在本文）：
 
 - 事实头：`Requirement {{id}} (rev {{rev}}, stage={{stage}}): {{title}}` / `Description: {{desc}}` / `Worktree: {{worktree}} (branch={{branch}}, base={{base}})` / `Artifact: {{artifact}}` / `Submit: {{submit}}`。
-- 策略正文（以下 §3–§6）随 brief 指针给出，各项目可在自己的 context 副本中本地化改写。
+- 策略正文（以下 §3–§9）随 brief 指针给出，各项目可在自己的 context 副本中本地化改写。
 - **中断预算（实现类任务必写）**：执行环境在 ≈68k token 处会被上游打断——r11（68,376 token / 129 次调用）与 r12（68,303 token / 76 次调用）**两次**实测同一量级，且两次都在崩溃时留下大量已改未提交的改动（12 文件 / 2 文件），全靠 resume 抢救。因此实现类 brief 必须写明：
   - **每完成一块立即提交**，任何时刻未提交改动 ≤ ~200 行；
   - 被打断时的损失上限是「一块」，不是「整轮」。
@@ -75,8 +75,8 @@ set +a
 
 ## 5. 提交仪式（Submit）
 
-- 子代理用 `subagent_submit_cmd` 模板提交 `proposal.submit`（模板句式见 [../copy/harness.md](../copy/harness.md)），payload 尾段携带 `exec=<agent_id>`（内联执行者注册）与身份段（宿主在声明路由上盖 `actor=` / `actor_session=` 章）。
-- 执行者台账：主会话在拿到子代理 id 后 `config.set executor.<rN>.<stage>=<id>`（stage ∈ analysis / plan / development）。同一 (req, stage) 换人或跨阶段移交不同 id 必须带原因（`=<id>|<reason>`）；amend 不改绑定，split/merge 不继承。`proposal.submit` 不硬查台账，未注册只在 `requirement.list` 显示 unregistered，因此它是自声明审计轨迹而非身份凭证。
+- 子代理用 `subagent_submit_cmd` 模板提交 `proposal.submit`（模板句式见 [../scenes/harness.md](../scenes/harness.md)），payload 尾段携带 `exec=<agent_id>`（内联执行者注册）与身份段（宿主在声明路由上盖 `actor=` / `actor_session=` 章）。
+- 执行者台账：主会话在拿到子代理 id 后 `config.set executor.<rN>.<stage>=<id>`，live stage ∈ **plan / development**（`analysis` 是旧版兼容槽位，永不作为 live 阶段、也不为新工作登记）；一个子代理覆盖两个 live 阶段时逐阶段登记同一 id。同一 (req, stage) 换人为不同 id、或**跨阶段移交**（development 的 id 不同于 plan 的 id）**必须带原因**（`=<id>|<reason>`），不得当作「该阶段首次绑定」静默覆盖；成功移交写 `id|reason` 并向 `req.<i>.hist` 追加一条（复用滚动上限，无独立 history/handoff 键），干净的首次绑定不写历史。台账不带 rev：`amend` 不改绑定，`split` / `merge` 不继承。`proposal.submit` 不硬查台账，未注册只在 `requirement.list` 显示 unregistered，因此它是自声明审计轨迹而非身份凭证。
 - 自报 profile 卡：`config.set profile.<handle>.<key>=…`（每键一次 config.set）；profile 是自报声明不是凭据，问责以执行者台账为准。宿主身份段、三态互证与 opener 契约见 [../../design/mod/identity.md](../../design/mod/identity.md)，本节不复制。
 - **交付洁净度自检（提交 `proposal.submit` 之前必跑）**：`sh .pi/tools/git-delivery-check.sh --repo <checkout> --text` 必须 `ok=1`（`dirty` / `unpushed` / `stash` / `conflict_debris` / `fmt` 五项计数全 0）。**回执里贴这一行的原文**——「工作树 clean」这句话不再是证据，证据是这一行输出（五项与修法见 §7）。
 
@@ -104,3 +104,14 @@ set +a
 - **它不是门禁**：本检查不进 `gates.gate_problem()`，不改任何 KV。红灯由执行者修，**不阻塞其他需求**（同 `lane_probe` 的「警告不是门禁」先例）。
 - **`unpushed` 记 `-1` 是刻意的**：`0` 表示「比过了、一致」，`-1` 表示「没法比」——r3/r4/r5 那种「本地干净、远端没有」的半交付只能靠这两个值可分辨才抓得到。分支尚未 push 但想与 develop 比时用 `--upstream origin/develop`。
 - **脚本只读**：不改 refs / index / worktree，不 push、不 reset、不 stash；契约见 [../../design/host/harness-tools.md](../../design/host/harness-tools.md) §2.2。
+
+## 8. 决策就地落档（不编号、不建台账）
+
+一条真正新的架构决策**不携带编号**：在实现它的**同一个提交**里，就地写进它所治理文档的「设计依据」段（规则 + 依据 + 三问判据），需求描述与 subagent brief 只点名那个文件与段。两条泳道触及同一决策时就地并入既有段落。不编号、不建台账、没有需要自分配或回交协调者的标识符。
+
+**历史依据**：协调层曾用「预分配编号」协调决策，两条泳道从同一基线各自取下一个号，导致同一编号被双重认领（git `d0b4a7c` / `6848138`）——**标识符不是协调机制，锚点才是**。现行判据：文档里以段标题/锚点定位决策，编号制度已退役（全仓 `D-MA` 残留 0）。
+
+## 9. 后台执行与同步等待例外
+
+- 每个 subagent 任务都在**后台**运行；主会话**不在原地等待**——继续推进其他泳道、验证或规划，完成通知到达后再核验与合并。
+- **同步等待只在一种情况下允许**：下一个动作**严格依赖**该结果，且没有其他事可并行推进；即便如此，也先把等待时间花在其他泳道上。

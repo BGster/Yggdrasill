@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        21,
-        "STAGE_GUIDE must route all 21 distinct chapters: {mapped:?}"
+        20,
+        "STAGE_GUIDE must route all 20 remaining chapters (`dispatch` moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        21,
-        "r5 assembles 21 chapters (14 legacy + 7 new): {sections:?}"
+        20,
+        "r5 assembles 20 chapters (14 legacy + 6 new; `dispatch` moved to docs/context/rituals/dispatch.md on 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        21,
+        20,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3523,7 +3523,6 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
             "actions",
             "drive",
             "inbox",
-            "dispatch",
             "lanes",
             "branches",
             "integration",
