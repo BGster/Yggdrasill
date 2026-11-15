@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · core 与全局键账
 > **id** copy/core · **幕** all · **触发** 改 `core.json` 前
 > **读不到代价** silent-drift
-> **ver** 1c11fb
+> **ver** cfec75
 
 > **定位**：`core.json` 的 options 27 / tuning 8 / endings 1（共 36 键），以及跨域指针壳与全局键数核对。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/core.json`
@@ -84,7 +84,7 @@
 
 ---
 
-**键数核对（Q3 已绑定）**：六个 beats 片段共 **418** 键（flow 63 + harness 83 + lanes 36 + map-guide 38 + requirements 144 + settlement 54），core 的 options/tuning/endings 共 **36** 键，合计 **454 个唯一键**。§H 的 23 处指针壳全部是这 454 键的子集（beats 13 + core scenes 5 + prompts 5），**不得再次相加**；旧文「beats 390 / A–G 426 / 加 H=436」同时漏算了 14 个 tools 键并重复计算指针壳。
+**键数核对（Q3 已绑定）**：六个 beats 片段共 **418** 键（flow 63 + harness 83 + lanes 36 + map-guide 38 + requirements 144 + settlement 54），core 的 options/tuning/endings 共 **36** 键，合计 **453 个唯一键**。§H 的 23 处指针壳全部是这 454 键的子集（beats 13 + core scenes 5 + prompts 5），**不得再次相加**；旧文「beats 390 / A–G 426 / 加 H=436」同时漏算了 14 个 tools 键并重复计算指针壳。
 
 **Producer / trigger / check**：owner = 修改 `data/texts/*.json` 或本契约的执行者；trigger = 任一键新增、删除、改名、跨域移动，或 scenes/prompts 指针范围变化，或 `scenes.*` 的 [READ FIRST] 块内容变化；同 commit 必须更新本段、[../../design/mod/prompt-surface.md](../../design/mod/prompt-surface.md)、[../README.md](../../README.md) 与受影响域文件。check = `agent_seed_semantics` 的逐域键集断言、`narrative_pointer_anchors_exist_in_docs_context`、`docs-consistency.sh` 与 `scripts/sync-seed-mod.sh --check`（后者含 [READ FIRST] 块零漂移）；任何一键缺失或计数漂移都使验收失败，不得靠手改数字放行。
 

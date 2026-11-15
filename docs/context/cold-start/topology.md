@@ -1,7 +1,7 @@
 # Yggdrasill · Monorepo 模块拓扑与依赖白名单
 > **id** cold-start/topology · **幕** cold-start · **触发** 冷启动 / 改仓库结构前
 > **读不到代价** irreversible（依赖白名单误改）
-> **ver** 840495
+> **ver** 1dfdfd
 
 > **定位**：仓库目录拓扑全景与 4 条硬性依赖不变量的唯一清单。
 > **replaces**：CONTEXT §4（L97–133）（搬运基线 `3a2536f`）
@@ -52,7 +52,7 @@ Yggdrasill/
 
 ## 仓库形状与分支政策（原 playbook `repository` / `branches` 章，2026-11-15 原样归位）
 
-> 逐条自 `data/playbook/ch1-foundation.json` 搬入，**未改写**（保真优先）。
+> 逐条自 原 playbook 章 `ch1-foundation.json`（已删除） 搬入，**未改写**（保真优先）。
 > 轮次合并的触发方与 cadence 见 [../acts/release.md](../acts/release.md)；泳道分支命名见
 > [../../design/host/lanes.md](../../design/host/lanes.md)。
 
@@ -64,7 +64,7 @@ Yggdrasill/
 - **`repository.vm-dependency-location`**（must）：VM dependencies such as mlua may appear only in `crates/ygg-sandbox` (crate 边界).
 - **`repository.dependency-direction`**（must）：Dependency direction is one-way: `ygg-sandbox` → `ygg-core` + `ygg-schema`; `ygg-wasm` → `ygg-sandbox`; `ygg-lint` has no ygg-* kernel dependency; `ygg-schema` and `ygg-core` have no code dependency edge.
 - **`repository.living-docs-closed-loop`**（must）：The docs wiki indexed by `docs/README.md` — `docs/context/*` (domain invariants and vocabulary) and `docs/design/*` (three-layer architecture, persistent lane lifecycle, and `harnessActions[]` contracts) — are mandatory references during `plan` and `development` — every subagent brief includes them, and executors must consult them before proposing or editing.
-- **`repository.mod-text-hygiene`**（must-not）：Runtime projection of `docs/design/mod/mod-package.md` (Mod text hygiene): never reintroduce retired mod/CLI path literals into `data/texts/**` or `data/playbook/**`; only a same-line `[deprecated-ref]` marks a genuine historical reference. Run the specification's grep probe (empty output required) or the semantic test goes red and executors follow a fail-closed path.
+- **`repository.mod-text-hygiene`**（must-not）：Runtime projection of `docs/design/mod/mod-package.md` (Mod text hygiene): never reintroduce retired mod/CLI path literals into `data/texts/**` or `原 playbook 目录（已删除）**`; only a same-line `[deprecated-ref]` marks a genuine historical reference. Run the specification's grep probe (empty output required) or the semantic test goes red and executors follow a fail-closed path.
 - **`branches.no-direct-master-work`**（must-not）：Never develop directly on master; master accepts merges only.
 - **`branches.feature-naming`**（must）：All work (documentation included) happens on a feature branch named `feature/<topic>` or `docs/<topic>`.
 - **`branches.no-ff-merge`**（must）：Every branch merge (feature → develop → master) uses `git merge --no-ff`; fast-forward is forbidden on every hop.

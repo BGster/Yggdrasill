@@ -14,7 +14,7 @@
 1. **`pack.json`（编写与宿主契约声明）**：
    - `id`、`version`、`engineVersion`（semver 范围）、`seed`、`limits`（`maxFuelPerDispatch`、`maxCascadeDepth`、`maxMemoryBytes`）。
    - `code`（可选）：`{ "entry": "mod.lua", "modules": ["src/core/util.lua", ...] }`。当存在时，`entry` 不得出现在 `modules` 中，且每个模块 chunk 顶层由 `ygg_modules::effects` 强制为纯。
-   - `entries`：声明式资源清单（数组，每项 `{ id, kind, schema, path }`），逻辑资源按域拆片声明：一个 `agent-config`（`data/config.json`）+ 若干 `scene-texts-fragment`（`data/texts/*.json`，由 `mod.lua` 装配回 TEXTS）+ 若干 `agent-playbook-fragment`（`data/playbook/*.json`）；片段数随内容演进，以 `pack.json` 为准。
+   - `entries`：声明式资源清单（数组，每项 `{ id, kind, schema, path }`），逻辑资源按域拆片声明：一个 `agent-config`（`data/config.json`）+ 若干 `scene-texts-fragment`（`data/texts/*.json`，由 `mod.lua` 装配回 TEXTS）+ 若干 `agent-playbook-fragment`（`原 playbook 目录（已删除）*.json`）；片段数随内容演进，以 `pack.json` 为准。
    - `agent`：8 个必填字段（`entryEvent`、`choiceEvent`、`summaryEvent`、`endingPrefix`、`metaKey`、`rejectionPrefixes`、`replayPrefix`、`defaultPayload`）。
    - `inboxRoutes`：声明 `idField`、`externalIdField`、`kindField`，以及每 kind 的 `{ event, fields[] }` 映射，用于异步 JSONL 收件箱摄入；需要宿主注入提交者身份的动作可声明 `actor` / `actor_session` 布尔（r3，缺省 false = 功能关闭）。
    - `tools`（可选，**Layer 1 能力白名单**）：将 `<namespace>.<name>` 映射到 `{ kind: "cli" | "http", program, args[], timeoutMs, maxOutputBytes, readOnly, resultEvent }`。占位符用 `{{arg}}` 表示调用参数，用 `$ENV{VAR}` 表示宿主侧密钥解析。
@@ -49,12 +49,12 @@
 
 ### Mod 文案路径卫生（retired path literals）
 
-`data/texts/**` 与 `data/playbook/**` 的散文不得含退休路径字面量 `ygg-agent` 或 `pi-agent-seed`；必须使用当前 `agent-seed` / `egg`，避免执行者被文案引到不存在的路径。宿主兼容层是旧名唯一合法消费者，且只能在 `crates/**`，不能在 Mod 文案。确实需要历史引用时，该行必须带字面标记 `[deprecated-ref]`，其余出现均违规。
+`data/texts/**` 的散文不得含退休路径字面量 `ygg-agent` 或 `pi-agent-seed`；必须使用当前 `agent-seed` / `egg`，避免执行者被文案引到不存在的路径。宿主兼容层是旧名唯一合法消费者，且只能在 `crates/**`，不能在 Mod 文案。确实需要历史引用时，该行必须带字面标记 `[deprecated-ref]`，其余出现均违规。
 
 ① 阻止任何把旧 mod/CLI 路径重新引入 Mod texts、brief 或 playbook 的编辑；② 症状是执行者对不存在的 `…/mods/pi-agent-seed` 或 `ygg-agent` 执行门禁而 fail-closed，或 serve 面板解析陈旧别名；③ 仓库根运行以下命令，空输出为通过：
 
 ```bash
-grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ .ygg/mods/agent-seed/data/playbook/ | grep -v '\[deprecated-ref\]'
+grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ | grep -v '\[deprecated-ref\]'
 ```
 
 任何幸存行都必须加历史标记或改为当前名称。维护责任 = Mod 文案编辑者；触发 = 每个 texts/playbook 文案 commit；机器复核 = `agent_seed_semantics::mod_text_fragments_carry_no_retired_paths`。违规文案不得发布，因为它会把执行者导向 fail-closed 路径。
@@ -62,7 +62,7 @@ grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ .ygg/mods/a
 
 ### 工程命令与多文件约束（原 playbook `mod_engineering` 章，2026-11-15 原样归位）
 
-> 逐条自 `data/playbook/ch4-mod-host.json` 搬入，**未改写**（保真优先）。
+> 逐条自 原 playbook 章 `ch4-mod-host.json`（已删除） 搬入，**未改写**（保真优先）。
 > 其中 `mod.pack` / `mod.manifest-content-addressed` 的操作面已在上一节「pack 声明变更的连带义务」。
 
 - **`mod.pack`**（must）：After touching `data/` or `schemas/` you must run: `cargo run --example pack -- .ygg/mods/agent-seed`.
@@ -74,11 +74,11 @@ grep -rn 'ygg-agent\|pi-agent-seed' .ygg/mods/agent-seed/data/texts/ .ygg/mods/a
 - **`mod.kv-prefix-owner`**（must）：In a multi-file Mod the KV prefixes are partitioned by ownership and each prefix has exactly one writer (a documentation convention; loading does not validate it): `fsm.*` is written only by the stdlib `ygg.fsm` and read-only for the Mod; `settings.*` is written only by `config.set`; `req.*` = the requirement table, `prop.*` = the proposal table, `lane.*` = the lane ledger, `ui.*` = presentation only (never in the summary, never affecting dispatch), and `task.*` / `verify.*` / `review.*` / `inbox.*` plus the bare key `ending` each have their own single writer. Two modules writing one prefix is implicit coupling — share through a module's return value instead.
 - **`mod.error-locates`**（must-not）：Never "glue a multi-file Mod back into one file and then report errors": a module chunk name must carry the real file (`@src/core/util.lua`), a refusal the loader decides itself must carry the call site (`src/a.lua:3: <reason>`) and the require chain, and static checks must parse each module independently (a module's `local` never spans chunks, so gluing would invent a shared scope that does not exist at load time). A diagnostic whose line number does not match the real file is a defect.
 - **`mod.hot-reload`**（must）：Hot reload: single-shot mode loads from disk in every new process; an `open` (attach) receipt with `hotReload.source="resume"` proves the change is in effect.
-- **`mod.two-mods-layering`**（must）：The two mod paths are one Mod, not two copies: `.ygg/mods/agent-seed` is the single source of truth (the installed instance), and `packages/mods/agent-seed` is a git-tracked relative symlink to `../../.ygg/mods/agent-seed` — the stable packages-side entry, never an independent copy. `scripts/sync-seed-mod.sh` verifies the link target and the schema single-source (`packages/schema/schemas/`) and recomputes the content-addressed `manifest.json` (`--check` = read-only); the CI skeleton guard in `check.yml` still runs its diffs, but through the symlink they now compare the same files with themselves. The playbook is assembled, not duplicated: nine fragments under `data/playbook/` (a head plus eight chapter files) are joined by `mod.lua` in fixed order into 21 chapters — one fragment carries one to five chapters, section ids are globally unique across fragments, and this rule lives in the assembled `mod_engineering` chapter.
+- **`mod.two-mods-layering`**（must）：The two mod paths are one Mod, not two copies: `.ygg/mods/agent-seed` is the single source of truth (the installed instance), and `packages/mods/agent-seed` is a git-tracked relative symlink to `../../.ygg/mods/agent-seed` — the stable packages-side entry, never an independent copy. `scripts/sync-seed-mod.sh` verifies the link target and the schema single-source (`packages/schema/schemas/`) and recomputes the content-addressed `manifest.json` (`--check` = read-only); the CI skeleton guard in `check.yml` still runs its diffs, but through the symlink they now compare the same files with themselves. The playbook is assembled, not duplicated: nine fragments under 原 playbook 目录（已删除） (a head plus eight chapter files) are joined by `mod.lua` in fixed order into 21 chapters — one fragment carries one to five chapters, section ids are globally unique across fragments, and this rule lives in the assembled `mod_engineering` chapter.
 
 ### pack / config 契约四段（原 playbook `host_contract` 章，2026-11-15 原样归位）
 
-> 逐条自 `data/playbook/ch4-mod-host.json` 搬入，**未改写**（保真优先）。
+> 逐条自 原 playbook 章 `ch4-mod-host.json`（已删除） 搬入，**未改写**（保真优先）。
 > `contract.serve-read-only` 的正文权威在 [host/serve.md](host/serve.md) §3.7.6。
 
 - **`contract.required`**（must）：The generic tooling (`src/playtest.rs`) hard-codes no event name / narrative prefix / summary key / entry payload / inbox field name / settlement switch / advancement threshold — it always reads the contract of the loaded Mod. The contract is mandatory: a missing section, a missing field, a wrong type or a non-positive integer fails loading (non-zero exit or `ok=false`); that is the deliberate fail-closed choice.

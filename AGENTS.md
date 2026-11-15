@@ -2,7 +2,7 @@
 
 > This file carries only non-negotiable cold-start constraints, verbatim run commands and the
 > consumer-moment index. Operating rituals live in `docs/context/`; subsystem contracts live in
-> `docs/design/`; runtime field rules live in `.ygg/mods/agent-seed/data/playbook/`. `CLAUDE.md`
+> `docs/design/`; runtime field rules were retired into `docs/context/**` on 2026-11-15 (the Mod carries no rules). `CLAUDE.md`
 > is a symlink to this file. Read the index before treating any other surface as authoritative.
 
 ## 1. Non-negotiable constraints

@@ -3334,7 +3334,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         .iter()
         .filter(|path| path.starts_with("data/playbook/"))
         .count();
-    assert_eq!(playbook, 3, "playbook = head + 2 chapter fragments (r5; only ch1/ch3 remain, 2026-11-15)");
+    assert_eq!(playbook, 0, "playbook retired on 2026-11-15: rules live in docs/context + docs/design");
     for path in &pack_entry_paths {
         assert!(
             project.join(path).is_file(),
@@ -3383,164 +3383,6 @@ fn mod_architecture_is_fragments_plus_five_layers() {
             "core.json tuning.{key} must be an unsigned integer"
         );
     }
-}
-
-/// The playbook is reachable in both directions: every assembled chapter id occurs in `guide.lua`'s
-/// STAGE_GUIDE, and every mapped id resolves to a non-empty section. A chapter outside the mapping
-/// is dead at phase-entry; a mapped-but-missing or mapped-but-empty chapter makes its hint narrate
-/// nothing. The behavioural receipt probe below separately proves that all candidates are narrated.
-#[test]
-fn stage_guide_maps_existing_nonempty_sections() {
-    let project = project_mod_dir();
-    let guide_src =
-        std::fs::read_to_string(project.join("src/view/guide.lua")).expect("read guide.lua");
-    let start = guide_src
-        .find("local STAGE_GUIDE = {")
-        .expect("STAGE_GUIDE table must exist in guide.lua");
-    let end = guide_src[start..]
-        .find("\n}")
-        .expect("STAGE_GUIDE table must close");
-    let block = &guide_src[start..start + end];
-    // odd indices of a `"` split are exactly the quoted fragments inside the table
-    let mapped: std::collections::BTreeSet<String> = block
-        .split('"')
-        .enumerate()
-        .filter(|(index, _)| index % 2 == 1)
-        .map(|(_, part)| part.to_owned())
-        .collect();
-    assert_eq!(
-        mapped.len(),
-        2,
-        "STAGE_GUIDE must route all 2 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
-    );
-
-    // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
-    let pack = read_json(&project.join("pack.json"));
-    let mut sections: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    let mut assembly_order: Vec<String> = Vec::new();
-    for entry in pack["entries"].as_array().expect("pack entries") {
-        let path = entry["path"].as_str().expect("entry path");
-        let Some(rel) = path.strip_prefix("data/playbook/") else {
-            continue;
-        };
-        if rel == "head.json" {
-            continue;
-        }
-        let fragment = read_json(&project.join(path));
-        for section in fragment["sections"].as_array().expect("sections") {
-            let id = section["id"].as_str().expect("section id").to_owned();
-            let rules = section["rules"].as_array().expect("rules").len();
-            match sections.get_mut(&id) {
-                Some(count) => {
-                    assert_eq!(
-                        assembly_order.last().map(String::as_str),
-                        Some(id.as_str()),
-                        "mod.lua merges only ADJACENT same-id sections; `{id}` reappears after another id"
-                    );
-                    *count += rules;
-                }
-                None => {
-                    sections.insert(id.clone(), rules);
-                    assembly_order.push(id);
-                }
-            }
-        }
-    }
-    assert_eq!(
-        sections.len(),
-        2,
-        "r5 assembles 2 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
-    );
-    for id in &mapped {
-        let rules = sections.get(id).unwrap_or_else(|| {
-            panic!("STAGE_GUIDE maps `{id}` but no playbook section carries that id")
-        });
-        assert!(
-            *rules >= 1,
-            "STAGE_GUIDE maps `{id}` but the section is empty"
-        );
-    }
-    let assembled: std::collections::BTreeSet<String> = sections.keys().cloned().collect();
-    assert_eq!(
-        mapped, assembled,
-        "phase-entry routing and the assembled playbook must be the same chapter set"
-    );
-}
-
-/// Phase-entry consumption is behavioural, not just a static mapping: `map.show` contributes one
-/// global-index line for every chapter and the following render contributes one additional line for
-/// each chapter mapped to the current phase. Therefore every chapter must occur once, and a current
-/// phase chapter exactly twice. This catches both the old unmapped-six gap and the old first-candidate
-/// shadowing without adding a payload-driven section selector back to `map.show`.
-#[test]
-fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
-    let project = project_mod_dir();
-    let pack = read_json(&project.join("pack.json"));
-    let mut chapters: Vec<(String, String)> = Vec::new();
-    for entry in pack["entries"].as_array().expect("pack entries") {
-        let path = entry["path"].as_str().expect("entry path");
-        if !path.starts_with("data/playbook/") || path.ends_with("head.json") {
-            continue;
-        }
-        let fragment = read_json(&project.join(path));
-        for section in fragment["sections"].as_array().expect("sections") {
-            chapters.push((
-                section["id"].as_str().expect("section id").to_owned(),
-                section["title"].as_str().expect("section title").to_owned(),
-            ));
-        }
-    }
-    assert_eq!(
-        chapters.len(),
-        2,
-        "chapter inventory changed: {chapters:?}"
-    );
-
-    let assert_receipt = |game: &mut Game, current: &[&str]| {
-        let lines = game.narrate("map.show", "0");
-        for (id, title) in &chapters {
-            let needle = format!("field rules · {title}:");
-            let expected = if current.contains(&id.as_str()) { 2 } else { 1 };
-            assert_eq!(
-                count_lines(&lines, &needle),
-                expected,
-                "chapter `{id}` must have one map-index line plus its current-phase line: {lines:#?}"
-            );
-        }
-    };
-
-    let mut charter = Game::open(&project);
-    charter.narrate("event.start", "0");
-    assert_receipt(
-        &mut charter,
-        &["credentials", "hard_constraints"],
-    );
-    charter_and_begin(&mut charter);
-    assert_receipt(
-        &mut charter,
-        // coordinate 相位已无规则章节映射，guide_section 回退到装配后的第一章
-        &[chapters[0].0.as_str()],
-    );
-
-    let mut settle = drive_to_settle();
-    assert_receipt(
-        &mut settle,
-        // settle 相位已无规则章节映射，guide_section 回退到装配后的第一章
-        &[chapters[0].0.as_str()],
-    );
-    let mut release = drive_to_release();
-    // release 相位已无规则章节映射，guide_section 回退到装配后的第一章
-    assert_receipt(&mut release, &[chapters[0].0.as_str()]);
-
-    release.narrate("release.skip", &text("playbook receipt probe"));
-    release.click("config — ");
-    release.click("config.set — run.retire");
-    release.click("back — ");
-    release.click("review.note — ");
-    release.assert_kv("fsm.stage", json!("retired"));
-    // retired 相位已无规则章节映射（pointers 已归位 cold-start/principles.md），
-    // guide_section 回退到装配后的第一章——因此当前相位行落在 chapters[0] 上。
-    assert_receipt(&mut release, &[chapters[0].0.as_str()]);
 }
 
 /// The assembled beats set (what `mod.lua` builds from the fragments — the same union the
@@ -3944,9 +3786,9 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
     assert_eq!(documented, actual, "core copy table must cover core.json");
     total += documented.len();
-    assert_eq!(total, 454, "418 beats + 36 core keys; §H adds no keys");
+    assert_eq!(total, 453, "417 beats + 36 core keys; §H adds no keys");
     assert!(
-        core_text.contains("454 个唯一键") && core_text.contains("不得再次相加"),
+        core_text.contains("453 个唯一键") && core_text.contains("不得再次相加"),
         "the global ledger must explain why the 23 pointer shells are not added again"
     );
 }
@@ -4105,8 +3947,8 @@ fn narrative_pointer_anchors_exist_in_docs_context() {
     // 一并静默跳过——所以此数从旧实装口径的 25 直接跳到 32，正是漏检被补上的尺度。
     // `stage_prompt_missing` 指向 `docs/context/acts/`（目录指针，不是 .md，不计入）。
     assert_eq!(
-        pointer_count, 33,
-        "docs/context pointer ledger drifted: expected 33, got {pointer_count}"
+        pointer_count, 32,
+        "docs/context pointer ledger drifted: expected 32, got {pointer_count}"
     );
     assert!(
         violations.is_empty(),
@@ -4380,7 +4222,6 @@ fn design_pointer_anchors_exist_under_docs_design() {
     }
 
     let expected: std::collections::BTreeMap<String, usize> = [
-        ("ch1-foundation.json", 1usize),
         ("beats-settlement.json", 3),
         ("tools.lua", 2),
     ]
@@ -4392,7 +4233,7 @@ fn design_pointer_anchors_exist_under_docs_design() {
         ledger, expected,
         "docs/design 指针账漂移（逐来源）：{ledger:?}"
     );
-    assert_eq!(total, 6, "docs/design 指针总数漂移：期望 6，实得 {total}");
+    assert_eq!(total, 5, "docs/design 指针总数漂移：期望 5，实得 {total}");
     assert!(
         violations.is_empty(),
         "docs/design 指针锚点不存在：{}",
@@ -4854,9 +4695,8 @@ fn playbook_and_src_context_pointers_resolve() {
     let expected: std::collections::BTreeMap<String, usize> = [
         ("beats-flow.json", 7usize),
         ("beats-harness.json", 2),
-        ("beats-map-guide.json", 2),
+        ("beats-map-guide.json", 1),
         ("beats-settlement.json", 4),
-        ("ch1-foundation.json", 1),
         ("ch4-mod-host.json", 0),
         ("core.json", 18),
         ("tools.lua", 1),
@@ -4871,8 +4711,8 @@ fn playbook_and_src_context_pointers_resolve() {
         "docs/context 指针账漂移（playbook + texts + src）：{ledger:?}"
     );
     assert_eq!(
-        total, 35,
-        "docs/context 指针总数漂移：期望 35，实得 {total}"
+        total, 33,
+        "docs/context 指针总数漂移：期望 33，实得 {total}"
     );
     assert!(
         violations.is_empty(),

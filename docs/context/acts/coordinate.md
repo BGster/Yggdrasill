@@ -1,7 +1,7 @@
 # 协调幕 · coordinate
 > **id** acts/coordinate · **幕** coordinate · **触发** 进入协调幕 / 每次派发前
 > **读不到代价** hard-refusal（载荷形状错、rev stale 被拒）
-> **ver** e4116e
+> **ver** e4ae66
 
 **场景台词（知识权威）**：任务「{{title}}」：{{goal}}｜{{count}} 条需求（{{open}} 条进行中）｜{{pending}} 条待受理提案。这一层你只做三件事：**派发、串行受理、过两道门禁**；其余需求的分析/计划/开发可异步并行。
 
@@ -32,7 +32,7 @@
 
 ## 协调层语义（原 playbook `run_machine` 章，2026-11-15 原样归位）
 
-> 本节自 Mod 的 `data/playbook/ch4-run-machine.json` 逐条搬入，**未改写**——保真优先。
+> 本节自 Mod 的 原 playbook 章 `ch4-run-machine.json`（已删除） 逐条搬入，**未改写**——保真优先。
 > 其中 `machine.turn-cut` / `machine.pipeline-states` 的实现依据见
 > [../../design/kernel/state-machine.md](../../design/kernel/state-machine.md) §2.9。
 

@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-map-guide
 > **id** copy/map-guide · **幕** all · **触发** 改 `beats-map-guide.json` 前
 > **读不到代价** silent-drift
-> **ver** b2480f
+> **ver** 537681
 
 > **定位**：`beats-map-guide.json` 38 键的句式知识权威：地图视图、菜单行、人机门禁与节点注记。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-map-guide.json`
@@ -9,7 +9,6 @@
 
 | 键 | 句式模板（逐字） | 变量 | 协议归属 |
 |---|---|---|---|
-| `guide_hint` | field rules · {{title}}: {{summary}} ({{count}} rules; 正文见 docs/context/; act narration: docs/context/acts/coordinate.md) | title, summary, count | 叙述 |
 | `guide_human_blocked` | [REJECTED:ACTION] `{{action}}` is a pass-type action protected by the human-action gate (proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note): in guide mode only a human may pick it from the menu (reply with the index → ygg.choice_selected); direct single-shot dispatch is refused, primary state unchanged. Hand the full pendingChoice to the user and wait. Authority: docs/context/acts/coordinate.md (coordinate, human-gate). | action | REJECTED:ACTION/PAYLOAD |
 | `map_branch_first` | ├─ | — | 叙述 |
 | `map_branch_last` | └─ | — | 叙述 |

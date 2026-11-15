@@ -136,9 +136,9 @@
       "sha256": "de0d78545b20f53ef20160a74f9f31487d33803ec9ccda97279fde03212b5968"
     },
     {
-      "byteLength": 2055,
+      "byteLength": 1875,
       "path": "src/view/guide.lua",
-      "sha256": "2c4deddb6f5a24ddccee312ffd91a348cfa14f13f9a317620b88ce3774168bba"
+      "sha256": "96a816d8897425354b6a2ce849b756d2d2c10f93f1f5dc2496db018b5d95fe57"
     },
     {
       "byteLength": 15806,
@@ -158,7 +158,7 @@
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "c07142a92503aca7ffe779daa21ec17acf6a27250db1c7bc98b1588a017d5c1c"
+      "sha256": "a785e34366fe007f7b7c90c6b4e48e964484ab13b1526170783ca3af40230d74"
     },
     {
       "byteLength": 7338,
@@ -185,12 +185,12 @@
       "sha256": "7dc2a07fa043c0cf690f9ede2648d620ee400ce7860a68775030cfa691c4b9e6"
     },
     {
-      "byteLength": 3704,
+      "byteLength": 3554,
       "id": "ygg:scene/beats/map-guide",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-map-guide.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "50f5d2eed07fdbcb4fc43dbadef0e955025acc64555e30831d5d7e118091bd85"
+      "sha256": "d44b413c978f2c903f0c54a6727a2e397be01a2cb6e6ed8e43d42eefa84ef8f3"
     },
     {
       "byteLength": 10299,
@@ -214,31 +214,7 @@
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "e16654955bb42f4ee99a6bf9fad8cf5826b00282673f84508b91e97bee5e8dfc"
-    },
-    {
-      "byteLength": 1943,
-      "id": "ygg:agent/playbook",
-      "kind": "agent-playbook-fragment",
-      "path": "data/playbook/head.json",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "ee576c5e1951932f3abdef820f0f4194788df27da71bdcaf1d6459525942b5f5"
-    },
-    {
-      "byteLength": 5220,
-      "id": "ygg:agent/playbook/ch1-foundation",
-      "kind": "agent-playbook-fragment",
-      "path": "data/playbook/ch1-foundation.json",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "5eef1dbca0140ab3325e0eaf06c8003da85d07f7d21b46545439a067fd3f99f2"
-    },
-    {
-      "byteLength": 3394,
-      "id": "ygg:agent/playbook/ch3-evidence",
-      "kind": "agent-playbook-fragment",
-      "path": "data/playbook/ch3-evidence.json",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "386f6abc2a7d3ef26ecbc7e28360c780de4cd50778d48d4e4a7570aec8ace2e7"
+      "sha256": "70b2b67e9c82e9195504e5ed260f11a7ff5a08bf2609924e520396c33e9c9023"
     }
   ],
   "schemaVersion": 1

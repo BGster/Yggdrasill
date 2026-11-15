@@ -1,7 +1,6 @@
 {
   "beats": {
     "guide_human_blocked": "[REJECTED:ACTION] `{{action}}` is a pass-type action protected by the human-action gate (proposal.accept / gate.approve / coordinate.submit / verify.submit / review.note): in guide mode only a human may pick it from the menu (reply with the index → ygg.choice_selected); direct single-shot dispatch is refused, primary state unchanged. Hand the full pendingChoice to the user and wait. Authority: docs/context/acts/coordinate.md (coordinate, human-gate).",
-    "guide_hint": "field rules · {{title}}: {{summary}} ({{count}} rules; 正文见 docs/context/; act narration: docs/context/acts/coordinate.md)",
     "map_head": "[MAP] coordinator >> [{{stage}}] << ← you are here | {{panel}}",
     "map_row": "{{mark}}{{node}} {{branch}}{{action}}──▶ {{target}}{{note}}",
     "map_row_leaf": "{{mark}}{{node}} {{branch}}{{text}}",
