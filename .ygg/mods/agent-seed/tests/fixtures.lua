@@ -480,3 +480,27 @@ test("读签改版：台账 ver 被推高后，旧签名不再作数", function(
     "拒绝必须点名被改版的那一件：" .. joined
   )
 end, "armed")
+
+-- [armed-case] gates_strict_ships_armed_and_a_bare_copy_bypasses_a_red_verify
+-- armed 键 `gates.require_all_green` 的两半断言：生效态（红盘退回协调）与退让态（旁路且明说）。
+test("gates.require_all_green 入库即生效：红盘如实退回协调", function()
+  drive_to_settle()
+  reset()
+  click("verify.submit all_green=false — ")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(joined:find("[GATES FAILED]", 1, true) ~= nil, "红盘必须如实记失败：" .. joined)
+  assert_eq(kv("verify.passed"), false, "不得记绿")
+  assert_eq(kv("run.phase"), "", "整批退回协调")
+  assert_eq(kv("verify.failures"), 1, "失败条数")
+end)
+
+test("gates.require_all_green 关掉后：同一条路径走退让分支并明说", function()
+  drive_to_settle()
+  reset()
+  click("verify.submit all_green=false — ")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(joined:find("[GATES BYPASSED]", 1, true) ~= nil, "关闸必须叙述旁路，不能静默通过：" .. joined)
+  -- 退让路径的语义就是「红盘被记成绿」——这正是关闸的代价，断言要写明白。
+  assert_eq(kv("verify.passed"), true, "被记成绿")
+  assert_eq(kv("verify.failures"), 1, "失败条数照记")
+end, "nostrict")
