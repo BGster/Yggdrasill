@@ -3761,11 +3761,64 @@ fn markdown_template_map(text: &str) -> std::collections::BTreeMap<String, Strin
     out
 }
 
+/// 从一个文案值里取出所有 `docs/context/<相对路径>.md` 指针（r5）。
+///
+/// 旧实现只收 `[A-Za-z0-9._-]`，于是 `docs/context/acts/charter.md` 被截成 `acts`、不以
+/// `.md` 结尾 → **静默跳过**（既不计数也不报违规）。r1 把权威文件切进子目录之后，整张锚点账
+/// 从那天起就是假绿。现在允许 `/`，仍然要求 `.md` 结尾：目录指针 `acts/`、通配 `acts/*.md`
+/// 与空串一律不算文件指针。
+fn context_pointer_paths(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some(pos) = rest.find("docs/context/") {
+        let tail = &rest[pos + "docs/context/".len()..];
+        let file: String = tail
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+            .collect();
+        rest = &tail[file.len().min(tail.len())..];
+        if file.ends_with(".md") {
+            out.push(file);
+        }
+    }
+    out
+}
+
+/// 核一个键值的全部指针：累加 `count` 并返回违规清单（锚点缺失 / 非法路径段）。
+///
+/// `..` 与空段一律判违规——`docs/context/acts/../AGENTS.md` 这类写法能骗过存在性检查，
+/// 却把读者带出 context 树。
+fn context_pointer_violations(
+    context_dir: &std::path::Path,
+    ns: &str,
+    key: &str,
+    value: &str,
+    count: &mut usize,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    for file in context_pointer_paths(value) {
+        *count += 1;
+        if file.split('/').any(|seg| seg.is_empty() || seg == "..") {
+            violations.push(format!(
+                "{ns}.{key} -> docs/context/{file} (illegal path segment)"
+            ));
+            continue;
+        }
+        if !context_dir.join(&file).is_file() {
+            violations.push(format!("{ns}.{key} -> docs/context/{file} (missing)"));
+        }
+    }
+    violations
+}
+
 /// r2 (mod 职责再分工): 23 个剧情/策略键收缩为「状态行 + 指针」后，凡 beat/core 文本值携带
 /// `docs/context/` 指针，其锚点文件必须真实存在于仓库 `docs/context/`——指针漂移（指向不存在的
 /// 文件）会让「无 egg 读 context 自洽」的承诺失效。同时核销：六个 `<node>_common` 键与 core 的
 /// scenes/prompts 必须携带指针（防收缩被意外回退）。Mutation：删掉某个锚点文件或把某指针改成
 /// 不存在的路径 → 本用例转红。
+///
+/// r5：解析改走 `context_pointer_paths`（允许子目录）。反面证据见
+/// `context_pointer_parser_accepts_subdirectories_and_flags_missing_anchors`。
 #[test]
 fn narrative_pointer_anchors_exist_in_docs_context() {
     let repo = repo_dir();
@@ -3774,22 +3827,13 @@ fn narrative_pointer_anchors_exist_in_docs_context() {
     let mut pointer_count = 0usize;
     let mut violations: Vec<String> = Vec::new();
     let mut check = |ns: &str, key: &str, value: &str| {
-        // 每个 `docs/context/<file>.md` 出现都核一次锚点。
-        let mut rest = value;
-        while let Some(pos) = rest.find("docs/context/") {
-            let tail = &rest[pos + "docs/context/".len()..];
-            let file: String = tail
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
-                .collect();
-            if file.ends_with(".md") {
-                pointer_count += 1;
-                if !context_dir.join(&file).is_file() {
-                    violations.push(format!("{ns}.{key} -> docs/context/{file} (missing)"));
-                }
-            }
-            rest = &tail[file.len().min(tail.len())..];
-        }
+        violations.extend(context_pointer_violations(
+            &context_dir,
+            ns,
+            key,
+            value,
+            &mut pointer_count,
+        ));
     };
     for f in [
         "beats-flow.json",
@@ -3833,15 +3877,84 @@ fn narrative_pointer_anchors_exist_in_docs_context() {
             "shrunk beat `{key}` must carry a docs/context pointer"
         );
     }
+    // r5 指针账（子目录化后）：flow 7 + harness 2 + map-guide 2 + settlement 3 + core 10 = 24。
+    // `stage_prompt_missing` 指向 `docs/context/acts/`（目录指针，不是 .md，不计入）。
     assert!(
-        pointer_count >= 23,
-        "expected at least 23 docs/context pointers across the shrunk keys, got {pointer_count}"
+        pointer_count >= 24,
+        "expected at least 24 docs/context pointers, got {pointer_count}"
     );
     assert!(
         violations.is_empty(),
         "narrative pointer anchors missing under docs/context/: {}",
         violations.join(", ")
     );
+}
+
+/// r5 反向断言（漏检防线）：旧解析器对子目录指针**静默跳过**——
+/// `docs/context/acts/charter.md` 被截成 `acts`、不以 `.md` 结尾，于是 pointer_count 不增、
+/// violations 不报，用例照样绿。这就是「漏检不是通过」。本用例把三件事钉死：
+/// ① 子目录指针必须被识别并计数；② 指向不存在的子目录文件必须产生 violation；
+/// ③ `..` 穿越必须判违规。Mutation：把 `context_pointer_paths` 的字符集退回
+/// `[A-Za-z0-9._-]`（去掉 `/`）→ ①②两条断言立即转红。
+#[test]
+fn context_pointer_parser_accepts_subdirectories_and_flags_missing_anchors() {
+    let context_dir = repo_dir().join("docs/context");
+
+    // ① 子目录指针必须被识别为 1 条（旧实现：0 条）
+    assert_eq!(
+        context_pointer_paths("正文见 docs/context/acts/charter.md（立局幕）。"),
+        vec!["acts/charter.md".to_string()]
+    );
+    // ② 两层子目录 + 紧邻中文标点 / `§` / `；` 不得吞掉路径
+    assert_eq!(
+        context_pointer_paths(
+            "政策见 docs/context/rituals/cleanup.md §2；台账 docs/context/archive/decisions-agent.md。"
+        ),
+        vec![
+            "rituals/cleanup.md".to_string(),
+            "archive/decisions-agent.md".to_string()
+        ]
+    );
+    // ③ 目录指针 / 通配不算文件指针（真实写法：`docs/context/acts/` 与 `docs/context/acts/*.md`）
+    assert!(context_pointer_paths("见 docs/context/acts/ 与 docs/context/acts/*.md").is_empty());
+
+    // ④ 存在的子目录锚点：计数 1、零违规
+    let mut n = 0;
+    assert!(context_pointer_violations(
+        &context_dir,
+        "t",
+        "ok",
+        "docs/context/acts/charter.md",
+        &mut n
+    )
+    .is_empty());
+    assert_eq!(n, 1, "子目录指针必须计入 pointer_count");
+
+    // ⑤ 不存在的子目录锚点：必须计数 1 且产生 1 条 violation（旧实现：0 条 = 漏检）
+    let mut n = 0;
+    let violations = context_pointer_violations(
+        &context_dir,
+        "t",
+        "missing",
+        "docs/context/acts/definitely-no-such-doc.md",
+        &mut n,
+    );
+    assert_eq!(
+        (n, violations.len()),
+        (1, 1),
+        "指向不存在子目录文件的指针必须转红：{violations:?}"
+    );
+
+    // ⑥ `..` 穿越必须判违规
+    let mut n = 0;
+    let violations = context_pointer_violations(
+        &context_dir,
+        "t",
+        "escape",
+        "docs/context/acts/../README.md",
+        &mut n,
+    );
+    assert_eq!(violations.len(), 1, "`..` 穿越必须违规：{violations:?}");
 }
 
 /// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
