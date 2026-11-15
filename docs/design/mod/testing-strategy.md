@@ -37,6 +37,7 @@
 | 3 | **save receipt 结构 / `state_hash`** | `save` 信封与状态哈希是 driver 产物 | `egg open <run> --event save` 的 `kv.entries` 与 `state_hash`；跨机同序比对 |
 | 4 | **事件路由 fail-closed**（未知事件不产生副作用） | 路由表在宿主，Lua 只按名字注册 handler | 发一个未声明事件，确认 `ok=false` 且 `save` 无变更 |
 | 5 | **双装载面**（项目目录与 `packages/mods/agent-seed` 软链都能装载） | 自检只装载一次，且走普通 Lua 而非 `ModBundle` | `egg new --mod packages/mods/agent-seed/` 能正常起局 |
+| 6 | **`playtest` 引擎的内部量**（`report.steps` / `reached` / `warnings` / `errors`） | 这些是宿主自动走局引擎自身的计量，Lua 侧只能手动发 `choice_selected`，没有「第几步、停在哪个微状态、引擎报了什么警告」这些量 | `cargo run -q --example playtest -- .ygg/mods/agent-seed` 的 `steps` 与 `warnings: []`；走局边界语义仍由 Lua 用例承担（如「未完成批次 ⇒ 退休不可达」查行首 `[ENDING`） |
 
 **纪律**：新增用例时若发现断言的是上表某一类，**不要写进 Lua**（它会恒绿或无法表达），
 而是回到这里补一条观测点。
