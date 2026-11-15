@@ -420,3 +420,66 @@ test("池化工具桥：alpha.2 折叠 / 默认池共存 / 未知仓拒绝不动
   assert_nil(kv("lane.3.req"), "扁平台账也不写")
   assert_eq(kv("reject.count"), rejects_before, "工具面拒绝不得移动 reject 账")
 end)
+
+test("artifact_probe 与 vfs.write 共用一份台账", function()
+  fresh()
+  fire("event.start", "subsystem gate|synthetic task description")
+  local sha = string.rep("a", 64)
+
+  -- ① 可读产物落台账。
+  fire("tool.call", "fs.artifact_probe|path=artifacts/plan.md|t1")
+  reset()
+  fire("tool.result", "t1|fs.artifact_probe|ok|0|path=artifacts/plan.md;exists=1;bytes=42;sha256=" .. sha)
+  assert_eq(count_marker("[ARTIFACT VERIFIED]"), 1, "必须叙述已验证")
+  assert_eq(kv("artifact.artifacts/plan.md.bytes"), 42, "字节数")
+  assert_eq(kv("artifact.artifacts/plan.md.sha256"), sha, "摘要")
+  assert_eq(kv("artifact.artifacts/plan.md.source"), "probe", "来源是探针")
+  assert_eq(kv("artifact.count"), 1, "台账条数")
+  assert_eq(kv("artifact.seq.1"), "artifacts/plan.md", "序号")
+
+  -- ② 空文件不是证据。
+  fire("tool.call", "fs.artifact_probe|path=artifacts/empty.md|t2")
+  reset()
+  fire("tool.result", "t2|fs.artifact_probe|ok|0|path=artifacts/empty.md;exists=1;bytes=0;sha256=")
+  assert_eq(count_marker("[ARTIFACT EMPTY]"), 1, "必须叙述空文件")
+  assert_nil(kv("artifact.artifacts/empty.md.bytes"), "不落台账")
+  assert_eq(kv("artifact.count"), 1, "台账条数不变")
+
+  -- ③ 目录穿越永不进台账（fail-closed）。
+  fire("tool.call", "fs.artifact_probe|path=artifacts/../x.md|t3")
+  reset()
+  fire("tool.result", "t3|fs.artifact_probe|ok|0|path=artifacts/../x.md;exists=1;bytes=5;sha256=ffff")
+  assert_eq(count_marker("[ARTIFACT PATH REFUSED]"), 1, "必须叙述路径被拒")
+  assert_eq(kv("artifact.count"), 1, "台账条数不变")
+
+  -- ④ vfs.write 无论宿主是否暴露 `ygg.fs` 都记台账；只有叙述不同（两分支必须互斥）。
+  reset()
+  fire("vfs.write", "artifacts/notes.md|# notes\n" .. sha)
+  local joined = table.concat(narrated(), "\n")
+  local disk = joined:find("[VFS WRITTEN]", 1, true) ~= nil
+  local ledger_only = joined:find("[VFS LEDGER ONLY]", 1, true) ~= nil
+  assert_true(disk ~= ledger_only, "vfs.write 必须且只能报告一种结果：" .. joined)
+  assert_eq(kv("artifact.artifacts/notes.md.source"), "vfs", "来源是 vfs")
+  assert_eq(kv("artifact.count"), 2, "台账增加到 2")
+  assert_eq(kv("artifact.artifacts/notes.md.bytes"), #("# notes\n" .. sha), "字节数是内容长度")
+  if disk then
+    local vfs_sha = kv("artifact.artifacts/notes.md.sha256")
+    assert_eq(#vfs_sha, 64, "sha256 必须是 64 位十六进制")
+    assert_true(joined:find(vfs_sha:sub(1, 12), 1, true) ~= nil, "摘要被叙述：" .. joined)
+  end
+
+  -- ⑤ 路径形状无条件检查：穿越被拒且不记录。
+  reset()
+  fire("vfs.write", "artifacts/../../etc/passwd|x")
+  assert_true(
+    narrated_contains("VFS PATH"),
+    "必须点名路径问题：" .. table.concat(narrated(), " | ")
+  )
+  assert_nil(kv("artifact.artifacts/../../etc/passwd.bytes"), "不记录")
+  assert_eq(kv("artifact.count"), 2, "台账条数不变")
+
+  -- ⑥ 重写同一路径只刷行，不占新槽。
+  fire("vfs.write", "artifacts/notes.md|# notes")
+  assert_eq(kv("artifact.count"), 2, "无重复槽位")
+  assert_eq(kv("artifact.artifacts/notes.md.bytes"), 7, "字节数被刷新")
+end)
