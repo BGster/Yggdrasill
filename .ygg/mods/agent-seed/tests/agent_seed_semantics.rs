@@ -2341,37 +2341,6 @@ fn profile_registration_via_config_set_roundtrip() {
     game.assert_kv("settings.profile_index", json!("agent-1"));
 }
 
-/// 值 = 显式清除该件（与 run.retire / goal.authorization 同构）：值置空 + 索引摘除；
-/// 重复清除幂等（不产生拒绝行，也不留垃圾键）。
-#[test]
-fn read_signature_clears_with_an_empty_value() {
-    let mut game = Game::open(&project_mod_dir());
-    charter_and_begin(&mut game);
-    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
-    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
-    game.assert_kv(
-        "settings.read_index",
-        json!("acts/coordinate,coordinate/dispatch"),
-    );
-
-    let cleared = game.narrate("config.set", &text("read.acts/coordinate="));
-    assert_eq!(
-        count_lines(&cleared, "[SIGN] acts/coordinate cleared"),
-        1,
-        "{cleared:#?}"
-    );
-    game.assert_kv("settings.read.acts/coordinate", json!(""));
-    game.assert_kv("settings.read_index", json!("coordinate/dispatch"));
-
-    // 幂等：再清一次既不拒绝也不改索引。
-    let again = game.narrate("config.set", &text("read.acts/coordinate="));
-    assert!(
-        !again.iter().any(|line| line.contains("REJECTED")),
-        "{again:#?}"
-    );
-    game.assert_kv("settings.read_index", json!("coordinate/dispatch"));
-}
-
 /// 销票：作用域边界**主动清除**全部签名，于是「键非空」本身就等于「本作用域内已签」——
 /// 消费者（r4）不需要时钟、不需要比较序号。覆蓋三类边界：立局→协调（run.begin）、
 /// rev 推进（requirement.amend，停在 req_bump_rev）、提案打回（proposal.reject）。

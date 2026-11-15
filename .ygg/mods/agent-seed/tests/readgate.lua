@@ -59,3 +59,24 @@ test("签名拒绝：坏 doc-id / 超长 / 坏 ver / 索引键不可写，且零
   assert_true(narrated_contains("[REJECTED"), "the index key is not user-writable")
   assert_nil(kv("settings.read_index"), "index stays untouched")
 end)
+
+test("空值清除签名：值置空 + 索引摘除，重复清除幂等", function()
+  fresh()
+  charter_and_begin()
+
+  fire("config.set", "read.acts/coordinate=9f2c1a")
+  fire("config.set", "read.coordinate/dispatch=c0ffee")
+  assert_eq(kv("settings.read_index"), "acts/coordinate,coordinate/dispatch", "both docs indexed")
+
+  reset()
+  fire("config.set", "read.acts/coordinate=")
+  assert_true(narrated_contains("[SIGN] acts/coordinate cleared"), "must narrate the clear")
+  assert_eq(kv("settings.read.acts/coordinate"), "", "the value is emptied, not deleted")
+  assert_eq(kv("settings.read_index"), "coordinate/dispatch", "the index drops the cleared doc")
+
+  -- 幂等：再清一次既不拒绝也不改索引。
+  reset()
+  fire("config.set", "read.acts/coordinate=")
+  assert_true(not narrated_contains("REJECTED"), "a repeated clear must not be rejected")
+  assert_eq(kv("settings.read_index"), "coordinate/dispatch", "a repeated clear leaves the index alone")
+end)
