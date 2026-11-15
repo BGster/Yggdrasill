@@ -1,7 +1,7 @@
 # Yggdrasill · 派发仪式（dispatch-ritual）
 > **id** rituals/dispatch · **幕** coordinate（派发前） · **触发** 派发任何 subagent（plan / development / analysis）前
 > **读不到代价** hard-refusal（`.env.local` 未 source 即派发、工件落检出、submit 缺 `exec=` 均不合规）
-> **ver** d12280
+> **ver** f049e5
 
 > **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
@@ -56,7 +56,7 @@ set +a
 
 - 子代理用 `subagent_submit_cmd` 模板提交 `proposal.submit`（模板句式见 [../copy/harness.md](../copy/harness.md)），payload 尾段携带 `exec=<agent_id>`（内联执行者注册）与身份段（宿主在声明路由上盖 `actor=` / `actor_session=` 章）。
 - 执行者台账：主会话在拿到子代理 id 后 `config.set executor.<rN>.<stage>=<id>`（stage ∈ analysis / plan / development）。同一 (req, stage) 换人或跨阶段移交不同 id 必须带原因（`=<id>|<reason>`）；amend 不改绑定，split/merge 不继承。`proposal.submit` 不硬查台账，未注册只在 `requirement.list` 显示 unregistered，因此它是自声明审计轨迹而非身份凭证。
-- 自报 profile 卡：`config.set profile.<handle>.<key>=…`（每键一次 config.set）；profile 是自报声明不是凭据，问责以执行者台账为准。宿主身份段、三态互证与 opener 契约见 [../../design/identity.md](../../design/identity.md)，本节不复制。
+- 自报 profile 卡：`config.set profile.<handle>.<key>=…`（每键一次 config.set）；profile 是自报声明不是凭据，问责以执行者台账为准。宿主身份段、三态互证与 opener 契约见 [../../design/identity.md](../../design/mod/identity.md)，本节不复制。
 
 ## 6. 配置面板语义（config_opened 正文的知识权威）
 

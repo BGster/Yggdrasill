@@ -69,7 +69,7 @@
       "order": 15,
       "title": "15. External tools (two-layer allowlist)",
       "summary": "A tool call is a request, never a side effect: the Mod publishes a pending queue in meta.tool_calls, the host executes, and the result comes back as an ordinary tool.result event.",
-      "source": "docs/design/state-machine.md §2.9.2 receipt effect + docs/design/tool-bridge.md wire contract",
+      "source": "docs/design/kernel/state-machine.md §2.9.2 receipt effect + docs/design/mod/tool-bridge.md wire contract",
       "priority": "standard",
       "rules": [
         {
@@ -94,13 +94,13 @@
           "id": "tools.receipt-effect-bounded",
           "modality": "must-not",
           "text": "The `tools.receipt` effect (`receipt_effect`) may only latch `tool.notified.<call_id>` and narrate one line; it must never render, choose, or touch requirement / proposal / gate / lane / stage state. Domain folding belongs to the separate `tools.reactive` effect (`tools.reactive-effect-scope`).",
-          "basis": "docs/design/state-machine.md §2.9.2 + src/runtime/tools.lua `receipt_effect()`"
+          "basis": "docs/design/kernel/state-machine.md §2.9.2 + src/runtime/tools.lua `receipt_effect()`"
         },
         {
           "id": "tools.no-inline-secrets",
           "modality": "must",
           "text": "Never inline a credential in a tool declaration or a request: `$ENV{VAR}` placeholders are resolved host-side from the process environment, `<mod_dir>/.env.local` and `<mod_dir>/.env`, and the resolved value never enters a payload, a receipt or a notice — error text names the variable only.",
-          "basis": "docs/design/tool-bridge.md (credentials and two-layer allowlist) + the host `$ENV{}` resolution order"
+          "basis": "docs/design/mod/tool-bridge.md (credentials and two-layer allowlist) + the host `$ENV{}` resolution order"
         },
         {
           "id": "tools.reactive-effect-scope",
@@ -135,8 +135,8 @@
         {
           "id": "tools.harness-settlement-crosscheck",
           "modality": "must",
-          "text": "Settlement machine cross-check (D-MA26): the settlement.todo / settlement.sessions handlers synchronously call the harness tools (`harness.todo-check` / `harness.sessions-count`) before applying, reusing the artifact-probe precedent. The Mod composes the argv from the registered KV (`settings.tools.session` / `settings.tools.sessions_root`) because the sandbox cannot read the process environment. A machine/human contradiction is refused with zero state writes; an unregistered tools.root, a missing parameter, or an unexecutable script falls back to the human-attestation path with a readable hint and never blocks the settlement. A pass writes `settlement.<item>.source=machine:harness.*` (human writes `human`) — machine evidence is same-level, not stronger (historical AGENTS.md (pre-migration; see git history)). The scripts under `.pi/tools/` are a pure argv/env contract (no config, no run KV, no egg), so a no-egg agent can run them directly per docs/design/harness-tools.md.",
-          "basis": "src/handlers/operate/review.lua `cross_check_todo` / `cross_check_sessions` + .pi/tools/*.sh + docs/design/harness-tools.md"
+          "text": "Settlement machine cross-check (D-MA26): the settlement.todo / settlement.sessions handlers synchronously call the harness tools (`harness.todo-check` / `harness.sessions-count`) before applying, reusing the artifact-probe precedent. The Mod composes the argv from the registered KV (`settings.tools.session` / `settings.tools.sessions_root`) because the sandbox cannot read the process environment. A machine/human contradiction is refused with zero state writes; an unregistered tools.root, a missing parameter, or an unexecutable script falls back to the human-attestation path with a readable hint and never blocks the settlement. A pass writes `settlement.<item>.source=machine:harness.*` (human writes `human`) — machine evidence is same-level, not stronger (historical AGENTS.md (pre-migration; see git history)). The scripts under `.pi/tools/` are a pure argv/env contract (no config, no run KV, no egg), so a no-egg agent can run them directly per docs/design/host/harness-tools.md.",
+          "basis": "src/handlers/operate/review.lua `cross_check_todo` / `cross_check_sessions` + .pi/tools/*.sh + docs/design/host/harness-tools.md"
         }
       ]
     }

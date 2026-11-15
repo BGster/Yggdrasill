@@ -1,8 +1,10 @@
 # Yggdrasill · 事件总表（39 口径）
+> **id** kernel/events · **模块** ① ygg 内核 · **触发** 增删事件 / 改事件分类口径之前
+> **读不到代价** hard-refusal（事件名或 payload 形状对不上 → 派发被拒）
 
 > **定位**：剧情/操作/基础设施三类 39 个事件与 payload 落点（D-MA23 基础上 r1/D-MA24 增 lane.pool；与 action-faces 的 registry 口径并存互链）。
 > **replaces**：DESIGN §2.6（L248–284）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[wire-protocol.md](wire-protocol.md) · [action-faces.md](action-faces.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[wire-protocol.md](wire-protocol.md) · [action-faces.md](../mod/action-faces.md)
 > **搬运**：以下正文自 DESIGN.md L248–L284 逐字迁移，不重写语义。
 
 ### 2.6 事件总表（39 个，三分类）

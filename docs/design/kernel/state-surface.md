@@ -1,8 +1,10 @@
 # Yggdrasill · 状态面：存储键契约与拒绝面矩阵
+> **id** kernel/state-surface · **模块** ① ygg 内核 · **触发** 写新 KV 键 / 改拒绝面之前
+> **读不到代价** silent-drift（键写错或漏写拒绝面 → 存储漂移与缺口看不见）
 
 > **定位**：KV 状态存储键契约（含 D-MA23 删除清单）与各微状态的拒绝面矩阵。
 > **replaces**：DESIGN §2.7 + §2.8（L285–328）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[state-machine.md](state-machine.md) · [run-story.md](run-story.md) · [requirement-story.md](requirement-story.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[state-machine.md](state-machine.md) · [run-story.md](../run-story.md) · [requirement-story.md](../requirement-story.md)
 > **搬运**：以下正文自 DESIGN.md L285–L305 + DESIGN.md L306–L328 逐字迁移，不重写语义。
 
 ### 2.7 拒绝面矩阵

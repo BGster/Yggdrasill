@@ -1,8 +1,10 @@
 # Yggdrasill · Mod 包与多文件纯度契约
+> **id** mod/mod-package · **模块** ③ agent-seed mod · **触发** 改 pack.json / manifest / 多文件纯度契约之前
+> **读不到代价** hard-refusal（包契约不合法 → 加载被拒）
 
 > **定位**：pack.json / data/config.json / manifest.json 三段包契约与工具白名单 Layer 1 面。
 > **replaces**：DESIGN §3.2（L403–419）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[lua-api.md](lua-api.md) · [tool-bridge.md](tool-bridge.md) · [serve.md](serve.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[lua-api.md](../kernel/lua-api.md) · [tool-bridge.md](tool-bridge.md) · [serve.md](../host/serve.md)
 > **搬运**：以下正文自 DESIGN.md L403–L419 逐字迁移，不重写语义。
 
 ### 3.2 Mod 包与多文件纯度契约（`pack.json`、`manifest.json`、`data/*`）

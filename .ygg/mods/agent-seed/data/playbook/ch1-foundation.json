@@ -5,7 +5,7 @@
       "order": 1,
       "title": "1. Credentials and the data red line",
       "summary": "Highest priority, non-negotiable: credentials never enter the repository or any conversation artifact; the committed surface (game settings / playbook / experience-growth Mod / evolution output) is equally off limits for sensitive values, and every example uses synthetic data.",
-      "source": "Runtime projection of AGENTS.md data red line and docs/design/tool-bridge.md (credential resolution); not an independent authority",
+      "source": "Runtime projection of AGENTS.md data red line and docs/design/mod/tool-bridge.md (credential resolution); not an independent authority",
       "priority": "critical",
       "rules": [
         {
@@ -135,8 +135,8 @@
         {
           "id": "repository.mod-text-hygiene",
           "modality": "must-not",
-          "text": "Runtime projection of `docs/design/mod-package.md` (Mod text hygiene): never reintroduce retired mod/CLI path literals into `data/texts/**` or `data/playbook/**`; only a same-line `[deprecated-ref]` marks a genuine historical reference. Run the specification's grep probe (empty output required) or the semantic test goes red and executors follow a fail-closed path.",
-          "basis": "docs/design/mod-package.md (runtime projection)"
+          "text": "Runtime projection of `docs/design/mod/mod-package.md` (Mod text hygiene): never reintroduce retired mod/CLI path literals into `data/texts/**` or `data/playbook/**`; only a same-line `[deprecated-ref]` marks a genuine historical reference. Run the specification's grep probe (empty output required) or the semantic test goes red and executors follow a fail-closed path.",
+          "basis": "docs/design/mod/mod-package.md (runtime projection)"
         }
       ]
     },
@@ -145,7 +145,7 @@
       "order": 3,
       "title": "3. Branch management",
       "summary": "master accepts merges only; all development happens on feature branches that integrate through the standing `develop` branch (feature → develop → master); every merge is no-FF.",
-      "source": "Runtime projection of docs/context/acts/release.md and docs/design/lanes.md; historical branch rulings remain in git history",
+      "source": "Runtime projection of docs/context/acts/release.md and docs/design/host/lanes.md; historical branch rulings remain in git history",
       "priority": "standard",
       "rules": [
         {

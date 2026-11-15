@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 交付（req-acts/delivery）
 > **id** req-acts/delivery · **幕** req: ready/developing/accept/accept_gate · **触发** 派发 development / 交付受理前
 > **读不到代价** hard-refusal（工件纪律漏读 → 交付被打回；`.env.local` 未 source → 派发不合规）
-> **ver** f95112
+> **ver** eff13c
 
 ## 4. 待开发（ready）
 
@@ -9,7 +9,7 @@
 - **入口条件**：`plan_ok=true`、无 job、无 pending。
 - **必做动作**：无主动作——等资源（job 槽位 / 泳道）；主会话可在槽位空出时 `requirement.dispatch` 派发开发。自动派发（declared single successor）在同回无 pending、无冲突、有空槽时触发。
 - **出口判据**：被派发进开发（认领泳道，job=development）。
-- **本幕关联阅读**：[../../design/lanes.md](../../design/lanes.md)（泳道池认领/释放）；[copy/lanes.md](../copy/lanes.md)（`lane_claimed` / `lane_claim_*` 拒绝句式）。
+- **本幕关联阅读**：[../../design/lanes.md](../../design/host/lanes.md)（泳道池认领/释放）；[copy/lanes.md](../copy/lanes.md)（`lane_claimed` / `lane_claim_*` 拒绝句式）。
 
 ## 5. 开发中（developing）
 

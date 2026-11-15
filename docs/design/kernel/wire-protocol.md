@@ -1,8 +1,10 @@
 # Yggdrasill · 事件 Payload 线协议契约
+> **id** kernel/wire-protocol · **模块** ① ygg 内核 · **触发** 改 payload 形状 / 改 exec-actor 尾段链之前
+> **读不到代价** hard-refusal（段位错位 → 载荷被拒或 ACTOR_FORGED）
 
 > **定位**：管道分隔 payload 的逐事件格式与校验规则（含 exec/actor/actor_session 尾段链）。
 > **replaces**：DESIGN §3.3（L420–445）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[events.md](events.md) · [identity.md](identity.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[events.md](events.md) · [identity.md](../mod/identity.md)
 > **搬运**：以下正文自 DESIGN.md L420–L445 逐字迁移，不重写语义。
 
 ### 3.3 事件 Payload 线协议契约

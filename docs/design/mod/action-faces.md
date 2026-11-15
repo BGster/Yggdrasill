@@ -1,8 +1,10 @@
 # Yggdrasill · 三层动作面契约（event/op/action）
+> **id** mod/action-faces · **模块** ③ agent-seed mod · **触发** 新增或移动一个动作面之前
+> **读不到代价** silent-drift（把 op 当 event 用 → 状态旁路）
 
 > **定位**：L1/L2/L3 分层、三条硬不变量（I1–I3）、A1–A4 落点与 event 全集 registry 口径末注（33/34 口径）。
 > **replaces**：DESIGN §3.4（L446–508）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[events.md](events.md) · [cli-daemon.md](cli-daemon.md) · [compaction.md](compaction.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[events.md](../kernel/events.md) · [cli-daemon.md](../host/cli-daemon.md) · [compaction.md](../kernel/compaction.md)
 > **搬运**：以下正文自 DESIGN.md L446–L508 逐字迁移，不重写语义。
 
 ### 3.4 三层动作面契约：`event` / `op` / `action`

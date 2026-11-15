@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · core 与全局键账
 > **id** copy/core · **幕** all · **触发** 改 `core.json` 前
 > **读不到代价** silent-drift
-> **ver** 20fcb5
+> **ver** 190115
 
 > **定位**：`core.json` 的 options 27 / tuning 8 / endings 1（共 36 键），以及跨域指针壳与全局键数核对。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/core.json`
@@ -86,6 +86,6 @@
 
 **键数核对（Q3 已绑定）**：六个 beats 片段共 **414** 键（flow 63 + harness 79 + lanes 36 + map-guide 38 + requirements 144 + settlement 54），core 的 options/tuning/endings 共 **36** 键，合计 **450 个唯一键**。§H 的 23 处指针壳全部是这 450 键的子集（beats 13 + core scenes 5 + prompts 5），**不得再次相加**；旧文「beats 390 / A–G 426 / 加 H=436」同时漏算了 14 个 tools 键并重复计算指针壳。
 
-**Producer / trigger / check**：owner = 修改 `data/texts/*.json` 或本契约的执行者；trigger = 任一键新增、删除、改名、跨域移动，或 scenes/prompts 指针范围变化，或 `scenes.*` 的 [READ FIRST] 块内容变化；同 commit 必须更新本段、[../design/prompt-surface.md](../../design/prompt-surface.md)、[../README.md](../../README.md) 与受影响域文件。check = `agent_seed_semantics` 的逐域键集断言、`narrative_pointer_anchors_exist_in_docs_context`、`docs-consistency.sh` 与 `scripts/sync-seed-mod.sh --check`（后者含 [READ FIRST] 块零漂移）；任何一键缺失或计数漂移都使验收失败，不得靠手改数字放行。
+**Producer / trigger / check**：owner = 修改 `data/texts/*.json` 或本契约的执行者；trigger = 任一键新增、删除、改名、跨域移动，或 scenes/prompts 指针范围变化，或 `scenes.*` 的 [READ FIRST] 块内容变化；同 commit 必须更新本段、[../design/prompt-surface.md](../../design/mod/prompt-surface.md)、[../README.md](../../README.md) 与受影响域文件。check = `agent_seed_semantics` 的逐域键集断言、`narrative_pointer_anchors_exist_in_docs_context`、`docs-consistency.sh` 与 `scripts/sync-seed-mod.sh --check`（后者含 [READ FIRST] 块零漂移）；任何一键缺失或计数漂移都使验收失败，不得靠手改数字放行。
 
 **`scenes.*` 的 [READ FIRST] 块（r2 新增，脚本产物、人不手写）**：五个幕台词的值尾各带一段必读块——`[READ FIRST · <幕>] 本幕必读 n 件：` + 逐件 `docs/context/<id>.md (ver <6hex>) —— <触发短语>｜读不到：<代价>` + 逐件一条可原样执行的 `config.set read.<id>=<ver>`。块由 `scripts/gen-scene-readfirst.py` 从 `context/scenes.json` + 各文件固定头**生成**（ver 抄自文件头，不在此处另造版本源）；`scripts/sync-seed-mod.sh` 在算 manifest 前刷新，`--check` 比对漂移并 fail-closed。零-src：`scenes.<node>` 已有渲染者（`render.lua` 的 `RENDER[phase]` 首条 narrate），故只改值、不增键（450 不变）。

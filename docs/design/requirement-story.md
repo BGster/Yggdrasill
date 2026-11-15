@@ -2,7 +2,7 @@
 
 > **定位**：需求九幕微状态表、转场表与旁路/覆盖层语义（含 open→done mermaid）。
 > **replaces**：DESIGN §2.4（L145–205）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[run-story.md](run-story.md) · [state-surface.md](state-surface.md) · [lanes.md](lanes.md)
+> **上游**：[docs/README.md](../README.md) · **相关**：[run-story.md](run-story.md) · [state-surface.md](kernel/state-surface.md) · [lanes.md](host/lanes.md)
 > **搬运**：以下正文自 DESIGN.md L145–L205 逐字迁移，不重写语义。
 
 ### 2.4 需求级剧情（`open`）

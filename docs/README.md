@@ -73,23 +73,23 @@ docs/
 | 文件 | 一句话定位 | replaces（原 DESIGN.md） |
 | --- | --- | --- |
 | [system-boundaries.md](design/system-boundaries.md) | 三层架构图、协商矩阵（Tier 1–3）、Adapter 五义务 C1–C5 | §1 |
-| [state-machine.md](design/state-machine.md) | Mod 纯度、双层真状态压缩、微状态判定单一来源、响应式推进 | §2 章首 + §2.1/2.2/2.5/2.9 |
+| [state-machine.md](design/kernel/state-machine.md) | Mod 纯度、双层真状态压缩、微状态判定单一来源、响应式推进 | §2 章首 + §2.1/2.2/2.5/2.9 |
 | [run-story.md](design/run-story.md) | 运行级剧情：微状态表、盘点子微状态、发布幕 | §2.3 |
 | [requirement-story.md](design/requirement-story.md) | 需求九幕、转场表、旁路/覆盖层 | §2.4 |
-| [events.md](design/events.md) | 39 事件三分类与 payload 落点（设计目标全集口径，r1 +lane.pool） | §2.6 |
-| [state-surface.md](design/state-surface.md) | 状态存储键契约与拒绝面矩阵 | §2.7 + §2.8 |
-| [lanes.md](design/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
-| [tool-bridge.md](design/tool-bridge.md) | 同步工具桥双层白名单指针 | §2.11 |
-| [harness-tools.md](design/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | D-MA26 |
-| [prompt-surface.md](design/prompt-surface.md) | 6 个 beats 片段 × 409 键 + core 36 键职责表 | §2.12 |
-| [identity.md](design/identity.md) | 台账/身份章/profile/票据门（不进剧情） | §2.13 |
-| [lua-api.md](design/lua-api.md) | ygg.* 全 API 面与副作用类别 | §3 章题 + §3.1 |
-| [mod-package.md](design/mod-package.md) | pack.json / config.json / manifest.json 契约 | §3.2 |
-| [wire-protocol.md](design/wire-protocol.md) | 逐事件 payload 格式与尾段链 | §3.3 |
-| [action-faces.md](design/action-faces.md) | event/op/action 分层、I1–I3、A1–A4、registry 末注 | §3.4 |
-| [cli-daemon.md](design/cli-daemon.md) | egg CLI、builtin 工具、daemon 协议、summary Schema | §3.5 |
-| [compaction.md](design/compaction.md) | 压缩双入口、水位线、稳定检查点谓词 | §3.6 |
-| [serve.md](design/serve.md) | serve 观察面全契约（CLI/面板/API/SSE/安全） | §3.7 |
+| [events.md](design/kernel/events.md) | 39 事件三分类与 payload 落点（设计目标全集口径，r1 +lane.pool） | §2.6 |
+| [state-surface.md](design/kernel/state-surface.md) | 状态存储键契约与拒绝面矩阵 | §2.7 + §2.8 |
+| [lanes.md](design/host/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
+| [tool-bridge.md](design/mod/tool-bridge.md) | 同步工具桥双层白名单指针 | §2.11 |
+| [harness-tools.md](design/host/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | D-MA26 |
+| [prompt-surface.md](design/mod/prompt-surface.md) | 6 个 beats 片段 × 409 键 + core 36 键职责表 | §2.12 |
+| [identity.md](design/mod/identity.md) | 台账/身份章/profile/票据门（不进剧情） | §2.13 |
+| [lua-api.md](design/kernel/lua-api.md) | ygg.* 全 API 面与副作用类别 | §3 章题 + §3.1 |
+| [mod-package.md](design/mod/mod-package.md) | pack.json / config.json / manifest.json 契约 | §3.2 |
+| [wire-protocol.md](design/kernel/wire-protocol.md) | 逐事件 payload 格式与尾段链 | §3.3 |
+| [action-faces.md](design/mod/action-faces.md) | event/op/action 分层、I1–I3、A1–A4、registry 末注 | §3.4 |
+| [cli-daemon.md](design/host/cli-daemon.md) | egg CLI、builtin 工具、daemon 协议、summary Schema | §3.5 |
+| [compaction.md](design/kernel/compaction.md) | 压缩双入口、水位线、稳定检查点谓词 | §3.6 |
+| [serve.md](design/host/serve.md) | serve 观察面全契约（CLI/面板/API/SSE/安全） | §3.7 |
 
 ## 导航表 · 横切
 
@@ -103,9 +103,9 @@ docs/
 
 - **新执行者（plan/development 前）**：[CONTEXT.md](CONTEXT.md)（壳）→ [context/README.md](context/README.md)（召回入口：时点 → 文件）→ [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) → 当前幕对应的 `context/acts/<act>.md` 与 `context/req-acts/<stage>.md` → [context/rituals/dispatch.md](context/rituals/dispatch.md) → 本需求触碰的子系统主题文件（见 brief 的 `Mandatory references:` 行；plan 对照 playbook run_machine/actions，development 再对照 gates/live_evidence）。
 - **决策检索**：D1–D21 → [context/archive/decisions-engine.md](context/archive/decisions-engine.md)；D-MAx → [context/archive/decisions-agent.md](context/archive/decisions-agent.md)。
-- **门禁核验**：[requirement-story.md](design/requirement-story.md)（九幕/转场）+ [state-surface.md](design/state-surface.md)（拒绝面）+ [context/archive/decisions-agent.md](context/archive/decisions-agent.md)（D-MA22 集成职责）。
-- **CLI/契约/serve 开发**：[cli-daemon.md](design/cli-daemon.md)、[action-faces.md](design/action-faces.md)、[wire-protocol.md](design/wire-protocol.md)、[serve.md](design/serve.md)。
+- **门禁核验**：[requirement-story.md](design/requirement-story.md)（九幕/转场）+ [state-surface.md](design/kernel/state-surface.md)（拒绝面）+ [context/archive/decisions-agent.md](context/archive/decisions-agent.md)（D-MA22 集成职责）。
+- **CLI/契约/serve 开发**：[cli-daemon.md](design/host/cli-daemon.md)、[action-faces.md](design/mod/action-faces.md)、[wire-protocol.md](design/kernel/wire-protocol.md)、[serve.md](design/host/serve.md)。
 
 ## 旧式引用解析
 
-旧文档与历史回执中的 `§N` 引用经两个薄壳的映射表解析（如 "DESIGN §2.10" → [lanes.md](design/lanes.md)）；`docs/CONTEXT.md` / `docs/DESIGN.md` 路径本身持续有效（薄壳即入口）。git 历史引用（如 D-MA16 double-claim 证据）指向两单文件的历史版本，不受拆分影响。
+旧文档与历史回执中的 `§N` 引用经两个薄壳的映射表解析（如 "DESIGN §2.10" → [lanes.md](design/host/lanes.md)）；`docs/CONTEXT.md` / `docs/DESIGN.md` 路径本身持续有效（薄壳即入口）。git 历史引用（如 D-MA16 double-claim 证据）指向两单文件的历史版本，不受拆分影响。

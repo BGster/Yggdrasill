@@ -1,7 +1,7 @@
 //! agent-seed semantics gate: **decidable** assertions for the D-MA23 two-layer story
 //! (4 true states + 13 micro-states), the requirement-level nine-act machine, the
 //! run-level resident batch loop (charter → coordinate ⇄ settle → release → retired),
-//! and the operation-map / tool-bridge / identity surfaces (docs/design/state-machine.md §2.10
+//! and the operation-map / tool-bridge / identity surfaces (docs/design/kernel/state-machine.md §2.10
 //! behavioural scope, DESIGN.md §2 remains the thin-shell route).
 //!
 //! Why this layer exists: the scripted playtest walks only prove happy menus — they never
@@ -3629,7 +3629,7 @@ fn tool_declarations_pin_the_merged_capability_surface() {
 /// Mod prose fragments must not carry retired path literals (`ygg-agent` / `pi-agent-seed`).
 /// Scope = pack.json `entries` whose path sits under `data/texts/` or `data/playbook/`; a line
 /// violates when it names a retired literal without the explicit `[deprecated-ref]` marker on
-/// the same line. Machine-checkable half of docs/design/mod-package.md (Mod text hygiene).
+/// the same line. Machine-checkable half of docs/design/mod/mod-package.md (Mod text hygiene).
 #[test]
 fn mod_text_fragments_carry_no_retired_paths() {
     let mod_dir = project_mod_dir();

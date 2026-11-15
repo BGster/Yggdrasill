@@ -1,8 +1,10 @@
 # Yggdrasill · 上下文压缩与检查点交接契约
+> **id** kernel/compaction · **模块** ① ygg 内核 · **触发** 改压缩水位 / 检查点判定 / 交接产物之前
+> **读不到代价** silent-drift（压缩点选错 → 回执丢失与上下文腐化）
 
 > **定位**：显式压缩双入口、三级水位线与稳定检查点谓词（r9 批边界天然检查点）。
 > **replaces**：DESIGN §3.6（L590–605）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[action-faces.md](action-faces.md) · [cli-daemon.md](cli-daemon.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[action-faces.md](../mod/action-faces.md) · [cli-daemon.md](../host/cli-daemon.md)
 > **搬运**：以下正文自 DESIGN.md L590–L605 逐字迁移，不重写语义。
 
 ### 3.6 上下文压缩与检查点交接契约
