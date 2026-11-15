@@ -240,3 +240,41 @@ test("tool.call / tool.result 载荷形状与白名单：17 个拒绝分支 + �
   assert_true(narrated_contains("no free tool slot"), "占满后拒绝")
   assert_eq(kv("tool.count"), capacity, "计数不变")
 end)
+
+test("tool.call 发布密集待决快照：分配序、args 省略、meta 不拖 summary", function()
+  fresh()
+  fire("event.start", "tools gate|synthetic task description")
+
+  reset()
+  fire("tool.call", "git.head_short")
+  local calls = __SELFTEST.meta.tool_calls
+  assert_true(type(calls) == "table", "meta.tool_calls 必须是数组")
+  assert_eq(#calls, 1, "一次请求入队一个 call")
+  assert_eq(calls[1].id, "t1", "分配序从 t1 起")
+  assert_eq(calls[1].tool, "git.head_short", "工具名")
+  assert_true(calls[1].args == nil,
+    "空参数集必须**省略** args 键（Lua 空表只能序列化成 []）")
+  assert_true(__SELFTEST.meta.summary == nil,
+    "一次派发只写它自己动作设置的键——tool_calls 不得把 summary 拖进来")
+
+  assert_eq(kv("tool.count"), 1, "计数")
+  assert_eq(kv("tool.pending"), 1, "待决计数")
+  assert_eq(kv("tool.t1.status"), "pending", "行状态")
+  assert_eq(kv("tool.t1.code"), -1, "未跑过 code=-1")
+  assert_eq(kv("tool.t1.output"), "", "输出空")
+  assert_true(narrated_contains("[TOOL REQUESTED]"), "必须叙述请求行")
+  assert_true(
+    narrated_contains("t1 -> git.head_short"),
+    "请求行必须带分配序：" .. table.concat(narrated(), " | ")
+  )
+
+  reset()
+  fire("tool.call", "git.status|path=.|t2")
+  local calls2 = __SELFTEST.meta.tool_calls
+  assert_eq(#calls2, 2, "两条都仍待决")
+  assert_eq(calls2[1].id, "t1", "数组顺序 = 分配顺序")
+  assert_eq(calls2[2].id, "t2", "数组顺序 = 分配顺序")
+  assert_eq(calls2[2].args.path, ".", "参数进快照")
+  assert_eq(kv("tool.pending"), 2, "待决计数")
+  assert_eq(kv("tool.t2.status"), "pending", "第二行状态")
+end)

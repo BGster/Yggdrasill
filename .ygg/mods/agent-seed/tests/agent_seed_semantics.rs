@@ -2602,60 +2602,6 @@ fn playbook_and_src_context_pointers_resolve() {
 
 // ───────────────────── tool bridge (T1–T4) ─────────────────────
 
-/// T1 The request direction: a `tool.call` publishes **one dense snapshot** (`meta.tool_calls`,
-/// allocation order, `args` omitted when empty) and one self-describing KV row. It never
-/// publishes `meta.summary` — the two keys are independent slots of the same `BTreeMap`.
-#[test]
-fn tool_call_publishes_a_dense_pending_snapshot_and_kv_rows() {
-    let mut game = Game::open(&project_mod_dir());
-    game.narrate(
-        "event.start",
-        &text("tools gate|synthetic task description"),
-    );
-
-    let first = game.reply("tool.call", &text("git.head_short"));
-    let calls = first["meta"]["tool_calls"]
-        .as_array()
-        .unwrap_or_else(|| panic!("meta.tool_calls must be an array: {first}"));
-    assert_eq!(calls.len(), 1, "one request queues one call: {first}");
-    assert_eq!(calls[0]["id"], json!("t1"));
-    assert_eq!(calls[0]["tool"], json!("git.head_short"));
-    assert!(
-        calls[0].get("args").is_none(),
-        "an empty argument set must omit the `args` key (a Lua empty table can only be `[]`): {first}"
-    );
-    assert!(
-        first["meta"].get("summary").is_none(),
-        "one dispatch writes only the keys its own action set — tool_calls must not drag summary in: {first}"
-    );
-
-    game.assert_kv("tool.count", json!(1));
-    game.assert_kv("tool.pending", json!(1));
-    game.assert_kv("tool.t1.status", json!("pending"));
-    game.assert_kv("tool.t1.code", json!(-1));
-    game.assert_kv("tool.t1.output", json!(""));
-    let first_lines = narrative_lines(&first).join("\n");
-    assert!(
-        first_lines.contains("[TOOL REQUESTED]") && first_lines.contains("t1 -> git.head_short"),
-        "the request must be narrated with its allocation order: {first_lines}"
-    );
-
-    let second = game.reply("tool.call", &text("git.status|path=.|t2"));
-    let calls = second["meta"]["tool_calls"]
-        .as_array()
-        .unwrap_or_else(|| panic!("meta.tool_calls must be an array: {second}"));
-    assert_eq!(calls.len(), 2, "both calls are still pending: {second}");
-    assert_eq!(calls[0]["id"], json!("t1"));
-    assert_eq!(
-        calls[1]["id"],
-        json!("t2"),
-        "the array order is the allocation order: {second}"
-    );
-    assert_eq!(calls[1]["args"]["path"], json!("."));
-    game.assert_kv("tool.pending", json!(2));
-    game.assert_kv("tool.t2.status", json!("pending"));
-}
-
 /// T2 The result direction: `tool.result` writes the row, drops the call from the queue, and the
 /// receipt effect converges **in the same turn** (both lines in one narrative batch).
 #[test]
