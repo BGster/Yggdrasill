@@ -201,7 +201,7 @@ end
 
 -- `data/config.json.allowedTools`：缺失 / 非表 / 元素非法 → 空数组（一个也不放行）。
 -- Mod **读不到** `pack.json`（`ygg.data` 只读 entries 声明的资源），所以跨层一致性
--- （allowedTools ⊇ tools）由 `agent_seed_semantics` 的声明一致性用例钉住，不在运行期判。
+-- （allowedTools ⊇ tools）由 `tests/tools.lua` 的声明一致性用例钉住，不在运行期判。
 local function allowed()
   local raw = effective("allowedTools")
   local out = {}

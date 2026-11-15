@@ -131,9 +131,9 @@
       "sha256": "c4e68ff43a5da46bb48165396bb2a16621a7048321c690b140938cd862b1442a"
     },
     {
-      "byteLength": 52464,
+      "byteLength": 52459,
       "path": "src/runtime/tools.lua",
-      "sha256": "de0d78545b20f53ef20160a74f9f31487d33803ec9ccda97279fde03212b5968"
+      "sha256": "091b9c2810ea1c11f2d55a710c16e3a50b2bec385332031102ad16d8fa27796c"
     },
     {
       "byteLength": 1875,
