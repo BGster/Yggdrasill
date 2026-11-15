@@ -286,9 +286,13 @@ function M.install(deps)
     -- 必读集 = 结算幕必读（acts/settle + rituals/cleanup，由生成器写在 readPlan.settle）。
     -- r9：批边界没有单一需求，所以没有「提案作者」可代理——票据路只能降级（无身份叙事），
     -- 直派路必须自带 `--actor`（否则拒绝）。这里不造假来源。
+    -- fix（2026-11-15）：但 coordinate.submit **结构上无身份载体**——它只收空载荷 /
+    --   "0" / "full"，宿主无处追加 `|actor=`，于是直派路永远无身份 = 永远被拒，
+    --   goal 模式的批边界被死锁。改用第三档：降级为覆盖检查并另立叙事告明原因。
     local read_block = gates.read_problem("coordinate.submit", {
       actor = actor,
       entry = HUMAN.entry,
+      identity_carrier_missing = true,
     })
     if read_block ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", read_block)

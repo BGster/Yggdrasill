@@ -2991,6 +2991,56 @@ fn read_gate_blocks_and_releases_the_batch_boundary() {
     game.assert_kv("run.phase", json!("settle"));
 }
 
+/// ⑩ 批边界的身份载体缺失：`coordinate.submit` 只收空载荷 / "0" / "full"，宿主无处追加
+/// `|actor=`，因此按人判定在这个动作上**结构不可满足**。直派路必须降级为覆盖检查并另立
+/// 叙事告明原因——否则 goal 模式的批边界永远跳不过去。
+/// 这条用例补的正是 r9 的缺口：既有批边界用例走菜单点击的**票据路**，覆盖不到直派路。
+#[test]
+fn batch_boundary_degrades_when_identity_has_no_carrier() {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
+        "semantics-batch-no-carrier",
+    ))));
+    // 直派路只在 goal 模式可达（guide 会先被人机门禁拒，走不到读签）。
+    game.narrate("config.set", &text("play.mode=goal"));
+    let lines = game.narrate("coordinate.submit", "0");
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("no-carrier") && joined.contains("attribution is structurally unavailable"),
+        "the batch boundary must narrate the missing identity carrier: {joined}"
+    );
+    assert!(
+        !joined.contains("read-gate/no-identity"),
+        "no-carrier must not degrade into a hard no-identity refusal: {joined}"
+    );
+    // 本次仍会因未签结算幕文档被**覆盖维**拦下（acts/settle / rituals/cleanup 未签）——
+    // 降级只放弃「按人」，不放弃其余维度。goal 模式端到端能否收批由真实运行验证。
+    assert!(
+        joined.contains("read-gate/missing"),
+        "coverage must still be enforced after the identity dimension degrades: {joined}"
+    );
+}
+
+/// ⑪ ⑩ 的反证：降级只让「按人」这一维失效，**覆盖维仍然生效**——没签就照拒。
+#[test]
+fn batch_boundary_still_enforces_coverage_without_identity_carrier() {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
+        "semantics-batch-no-carrier-unsigned",
+    ))));
+    game.suppress_reads = true;
+    game.narrate("config.set", &text("play.mode=goal"));
+    let lines = game.narrate("coordinate.submit", "0");
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("read-gate/missing") && joined.contains("acts/settle"),
+        "coverage must still block the batch boundary: {joined}"
+    );
+    assert_ne!(
+        game.kv("run.phase").as_str(),
+        Some("settle"),
+        "a coverage refusal must not advance the batch boundary"
+    );
+}
+
 /// ⑨ 文档改版：签名本身没变，但台账 ver 前进了 → `read_gate_stale` 拒；按新 ver 重签后放行。
 /// 现场构成：先签 aaaaaa → 存档 → 改 fixture 的 `readGate.ver` → 重装 mod 并 restore 存档。
 /// 这正是「文档改版需重读」的机械载体（ver 台账与文档头同源）。
@@ -4003,9 +4053,9 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
     assert_eq!(documented, actual, "core copy table must cover core.json");
     total += documented.len();
-    assert_eq!(total, 453, "417 beats + 36 core keys; §H adds no keys");
+    assert_eq!(total, 454, "418 beats + 36 core keys; §H adds no keys");
     assert!(
-        core_text.contains("453 个唯一键") && core_text.contains("不得再次相加"),
+        core_text.contains("454 个唯一键") && core_text.contains("不得再次相加"),
         "the global ledger must explain why the 23 pointer shells are not added again"
     );
 }

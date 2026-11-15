@@ -11,7 +11,7 @@ Mod 内部结构。
 派发仪式 / `rituals/cleanup.md` 清理政策 / `copy/README.md` 七域句式契约索引）；`data/texts/`
 是其运行时投影，不承担文案解释权。改文案先改 context 权威域文件再同步 mod（单向同步纪律，见
 `docs/wiki-governance.md`）；23 处剧情/策略键已收缩为「状态前缀 + docs/context 指针」，全部
-453 唯一键（417 beats + core 36）原文或指针壳留守（宿主无文案缺省机制，运行时物理必须；23 处是子集不重复计数）。不装 egg 时按 `docs/context/acts/`
+454 唯一键（418 beats + core 36）原文或指针壳留守（宿主无文案缺省机制，运行时物理必须；23 处是子集不重复计数）。不装 egg 时按 `docs/context/acts/`
 的「无 egg 执行本章」人工执行同一工作流。
 
 ## 零、host 契约（**必填；宿主不含任何默认值**）

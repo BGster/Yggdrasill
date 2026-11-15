@@ -19,8 +19,8 @@ local num, text_of, effective =
   config.num, config.text_of, config.effective
 local P_PENDING, prop_count, prop_pending_total, prop_req, prop_status =
   props.P_PENDING, props.prop_count, props.prop_pending_total, props.prop_req, props.prop_status
-local job_capacity, job_total, req_all_done, req_conflict, req_conflict_total, req_count, req_gate, req_id, req_job, req_key, req_needs_amend, req_open_total, req_rev, req_status, run_phase =
-  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_status, reqs.run_phase
+local job_capacity, job_total, req_all_done, req_conflict, req_conflict_total, req_count, req_gate, req_id, req_job, req_key, req_needs_amend, req_open_total, req_rev, run_phase =
+  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.run_phase
 local fill, join, trim =
   util.fill, util.join, util.trim
 
@@ -210,13 +210,16 @@ local function read_problem(action, ctx)
   -- r9 身份（按人判定的前件）。两条来源，优先级由 handler 决定后存入 ctx：
   --   ctx.actor —— 宿主在载荷末尾盖的 `|actor=<id>`（直接 `--event` 通道，不可伪造）
   --   ctx.entry —— "ticket" = 本步由人类从菜单点选（`ygg.choice_selector` → emit，无章）
-  -- 缺身份的两种结局刻意不同：
+  -- 缺身份的三种结局刻意不同：
   --   票据路 → **降级**为 any-signer 并叙事告明「不区分签署人」（人工点击不可能带章，
   --            若也 fail-closed 就等于把 guide 模式锁死；这是两层得而不是放水）。
+  --   无载体路（批边界）→ **降级**并另立叙事：`coordinate.submit` 只收空载荷 / "0" /
+  --            "full"，宿主无处追加 `|actor=`，按人判定在这个动作上**结构不可满足**；
+  --            要求身份即等于把批边界锁死给菜单点击，goal 模式从此不能自己收批。
   --   直派路 → **拒**（能带而不带 = 机制的门被绕开，“按人”就成了一句空话）。
   local actor = trim(tostring(ctx.actor or ""))
   if actor == "" then
-    if ctx.entry ~= "ticket" then
+    if ctx.entry ~= "ticket" and not ctx.identity_carrier_missing then
       local commands = {}
       for i = 1, #docs do
         commands[#commands + 1] = sign_command(docs[i], readset.doc_ver(docs[i]))
@@ -229,11 +232,19 @@ local function read_problem(action, ctx)
       })
     end
     local k, n = readsig.coverage(tostring(run_phase()), config.effective("readPlan"), "")
-    ygg.narrate(fill(TEXTS.beats.read_gate_ticket, {
-      action = tostring(action),
-      k = tostring(k),
-      n = n ~= nil and tostring(n) or "?",
-    }))
+    if ctx.identity_carrier_missing then
+      ygg.narrate(fill(TEXTS.beats.read_gate_no_carrier, {
+        action = tostring(action),
+        k = tostring(k),
+        n = n ~= nil and tostring(n) or "?",
+      }))
+    else
+      ygg.narrate(fill(TEXTS.beats.read_gate_ticket, {
+        action = tostring(action),
+        k = tostring(k),
+        n = n ~= nil and tostring(n) or "?",
+      }))
+    end
   end
 
   -- ① 覆盖：**完全没签**的件（签了但 ver 旧走新鲜维度——文档改版是「旧了」而不是「没签」）。

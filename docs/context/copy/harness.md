@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-harness
 > **id** copy/harness · **幕** all · **触发** 改 `beats-harness.json` 前
 > **读不到代价** silent-drift
-> **ver** 69832a
+> **ver** f591d4
 
 > **定位**：`beats-harness.json` 82 键的句式知识权威：配置面板、身份注册、工具桥、泳道工具与 tools 注册面。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-harness.json`
@@ -46,6 +46,7 @@
 | `read_gate_stale` | read-gate/stale: {{doc}} was signed at dispatch {{sign}}, {{gap}} dispatch(es) ago, but {{reason}} — the signature no longer counts. Window {{window}}. Re-read then sign: {{command}}. If the window is what blocks you, widen it: {{raise}} | doc, sign, gap, reason, window, command, raise | 拒绝 |
 | `read_gate_forgotten` | read-gate/forgotten: {{doc}} was signed {{gap}} dispatch(es) ago, past the window {{window}} (dispatch now {{now}}). Re-read then sign: {{command}}. Or widen the window: {{raise}} | doc, gap, now, window, command, raise | 拒绝 |
 | `read_gate_no_identity` | read-gate/no-identity: {{action}} needs {{count}} doc(s) ({{docs}}) but this dispatch carries no actor, so "did the actor read this" cannot be answered. Pass --actor <id> (or set YGG_ACTOR) on the dispatching command, then sign: {{commands}} | action, count, docs, commands | 拒绝 |
+| `read_gate_no_carrier` | [READ GATE · no-carrier] {{action}} accepts only an empty payload (or "0"/"full"), so the host has nowhere to append `\|actor=` — attribution is structurally unavailable on this action. Falling back to a coverage check ({{k}}/{{n}} signed in this act); every other dimension still applies | action, k, n | 叙述 |
 | `read_gate_other_actor` | read-gate/other-actor: {{count}} doc(s) for {{action}} were signed by someone else (first: {{docs}} by {{signer}}) — a signature only counts for the actor who signed it, and this action is dispatched as {{actor}}. This act has {{k}}/{{n}} docs signed, {{mine}} of them by you. Read then sign it yourself: {{commands}} (window {{window}}; widen with {{raise}}) | action, actor, count, docs, signer, k, n, mine, window, commands, raise | 拒绝 |
 | `read_gate_ticket` | [READ GATE · ticket] human ticket for {{action}}: {{k}}/{{n}} signed in this act — signers are NOT distinguished on the ticket path (a menu click carries no actor), so this is a coverage check, not an attribution check | action, k, n | 叙述 |
 | `read_gate_unvered` | [READ GATE] {{action}} needs {{count}} doc(s) but readGate.ver carries no version ledger — version drift cannot be checked and the sign commands cannot be exact. Regenerate the table: python3 scripts/gen-scene-readfirst.py --readset | action, count | 叙述 |
