@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "agent-seed-tests"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+ "ygg-sandbox",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

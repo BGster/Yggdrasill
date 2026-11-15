@@ -6329,7 +6329,10 @@ fn config_surface_every_key_is_classified() {
 #[test]
 fn armed_features_ship_armed_with_a_semantics_case() {
     let config = support::read_json(&project_mod_dir().join("data/config.json"));
-    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agent_seed_semantics.rs");
+    // 本文件住在 Mod 内（迁移期由 crates/agent-seed-tests 的纯 manifest 登记为 target），
+    // 因此不能假设它在 <manifest>/tests/ 下。
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.ygg/mods/agent-seed/tests/agent_seed_semantics.rs");
     let source = std::fs::read_to_string(&source_path)
         .unwrap_or_else(|err| panic!("read {}: {err}", source_path.display()));
 
