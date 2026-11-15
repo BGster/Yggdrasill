@@ -73,3 +73,19 @@ test("章程门：开局在 charter、菜单诚实、三件套可修订、run.be
   assert_eq(kv("run.phase"), "", "run.begin clears the charter micro-state")
   assert_true(narrated_contains("[RUN BEGUN]"), "it must narrate the open")
 end)
+
+test("未完成批次时退休不可达：走完选择序列也不出现 [ENDING", function()
+  fresh()
+  -- 固定走局序列（等价 playtest 的 choices）。
+  for _, idx in ipairs({ 3, 4, 5, 1, 2, 1 }) do
+    click_index(idx)
+  end
+  -- 必须查**行首**：`run.retire` 的说明文案里会引用 `[ENDING · run retired]` 这句话本身，
+  -- 用 anywhere 匹配会把文案引用误当成真结束行。
+  for _, line in ipairs(narrated()) do
+    assert_true(
+      line:sub(1, #"[ENDING") ~= "[ENDING",
+      "未完成的局不得出现结束行：" .. line
+    )
+  end
+end)

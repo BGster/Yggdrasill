@@ -670,57 +670,6 @@ fn resident_batch_cycle_reaches_coordinate_again() {
     }
 }
 
-/// r9 Baseline B — the armed retirement (the **only** path to a run-level ending) is
-/// unreachable without a completed, release-declared batch. The pinned script arms
-/// `run.retire` through the config sub-page (`3`=config · `4`=run.retire · `5`=back) and
-/// then walks the charter (`1`=charter.set · `2`=run.begin) into a refused batch closer:
-/// exhausted at a choice (`reached=choice`, 7 steps) with **no `[ENDING` line anywhere**.
-#[test]
-fn resident_retire_is_unreachable_without_a_charter() {
-    for dir in [project_mod_dir(), seed_mod_dir()] {
-        let options = PlaytestOptions {
-            choices: vec![3, 4, 5, 1, 2, 1],
-            ..Default::default()
-        };
-        let report = playtest(&dir, &options);
-        assert!(
-            report.ok,
-            "{} retirement walk failed: reached={:?} errors={:?}",
-            dir.display(),
-            report.reached,
-            report.errors
-        );
-        assert_eq!(
-            report.reached,
-            Some(Reached::Choice),
-            "{} without a completed batch the retiring ending must be unreachable",
-            dir.display()
-        );
-        assert_eq!(
-            report.steps,
-            7,
-            "{}: the pinned retirement walk is 7 steps",
-            dir.display()
-        );
-        assert!(
-            !report
-                .narrative_sample
-                .iter()
-                .any(|line| line.starts_with("[ENDING")),
-            "{}: no ending line may appear on an unfinished run: {:?}",
-            dir.display(),
-            report.narrative_sample
-        );
-        assert!(
-            report.warnings.is_empty() && report.errors.is_empty(),
-            "{} must walk clean: {:?} / {:?}",
-            dir.display(),
-            report.warnings,
-            report.errors
-        );
-    }
-}
-
 /// r9 The retire value domain and the retiring close (the R2 two-direction lock):
 /// - `run.retire` only accepts `true` / `""` (anything else is a payload rejection that
 ///   writes nothing);

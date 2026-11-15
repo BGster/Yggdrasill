@@ -499,6 +499,22 @@ function click(prefix)
   return fire("ygg.choice_selected", tostring(index))
 end
 
+--- 按菜单序号点选（等价 `click`，用于「走局」这类不知道前缀但知道序号的场景）。
+function click_index(n)
+  local action = nil
+  local options = render_options()
+  local text = options[n]
+  assert_true(text ~= nil, ("菜单没有第 %d 项（共 %d 项）"):format(n, #options))
+  local head = text:match("^([%w%._%-]+)")
+  if head then
+    ensure_reads(head, nil, nil)
+    options = render_options()
+    text = options[n]
+    assert_true(text ~= nil, ("重渲染后菜单没有第 %d 项"):format(n))
+  end
+  return fire("ygg.choice_selected", tostring(n))
+end
+
 --- 章程三件套 → 开工（Rust 侧的 charter_and_begin）。
 function charter_and_begin()
   click("charter.set — ")
