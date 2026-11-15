@@ -1284,65 +1284,6 @@ fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
     narrative_lines(&game.reply("tool.result", &text(result)))
 }
 
-/// r1 (泳道分池) parallelism is counted **per pool** (k ∈ 1..job_capacity inside one pool),
-/// occupancy and the one-lane-per-requirement bound are (pool, k)-scoped, and a different
-/// pool's same k never counts as occupied.
-#[test]
-fn same_pool_parallelism_and_occupancy_scoped() {
-    let mut game = Game::open(&project_mod_dir());
-    charter_and_begin(&mut game);
-    game.narrate("lane.pool", &text("alpha|/tmp/checkout-alpha"));
-    game.narrate("requirement.add", &text("first|description|subsys-a"));
-    game.narrate("requirement.add", &text("second|description|subsys-b"));
-    game.narrate("requirement.add", &text("third|description|subsys-c"));
-
-    // ① two parallel lanes inside one named pool.
-    game.narrate("lane.claim", &text("1|r1|feature/aa11-one|abc1234|1|alpha"));
-    game.narrate("lane.claim", &text("2|r2|feature/aa11-two|abc1234|1|alpha"));
-    game.assert_kv("lane.alpha.1.req", json!("r1"));
-    game.assert_kv("lane.alpha.2.req", json!("r2"));
-
-    // ② k beyond the per-pool capacity is refused (job_capacity = 4).
-    let over = game.narrate(
-        "lane.claim",
-        &text("5|r3|feature/aa11-five|abc1234|1|alpha"),
-    );
-    assert_refused(&over, "lane.claim");
-
-    // ③ occupancy is (pool, k)-scoped: r3 cannot take alpha-1 (held by r1), and r1 cannot
-    // hold a second lane in the same pool — but r3 CAN take default-1 while alpha-1 is held.
-    let occupied = game.narrate(
-        "lane.claim",
-        &text("1|r3|feature/aa11-three|abc1234|1|alpha"),
-    );
-    assert_refused(&occupied, "lane.claim");
-    let bound = game.narrate(
-        "lane.claim",
-        &text("2|r1|feature/aa11-one-b|abc1234|1|alpha"),
-    );
-    assert_refused(&bound, "lane.claim");
-    game.assert_kv("lane.alpha.1.req", json!("r1"));
-    game.assert_kv("lane.alpha.2.req", json!("r2"));
-    let cross = game.narrate("lane.claim", &text("1|r3|feature/aa11-def|abc1234|1"));
-    assert_eq!(count_lines(&cross, "[LANE CLAIMED]"), 1, "{cross:#?}");
-    game.assert_kv("lane.1.req", json!("r3"));
-    game.assert_kv("req.3.lane_pool", json!(""));
-
-    // ④ the pool-scoped lane labels flow through the panel surface (`lane_text` rides the
-    // requirement.list head): the default pool keeps the byte-stable `lane-<k>` labels and
-    // the named pool adds `lane-<pool>-<k>` rows.
-    let list = game.narrate("requirement.list", "0");
-    let joined = list.iter().cloned().collect::<Vec<_>>().join("\n");
-    assert!(
-        joined.contains("lane-1 `r3`(open)"),
-        "the default pool keeps the byte-stable label: {joined}"
-    );
-    assert!(
-        joined.contains("lane-alpha-1 `r1`(open)") && joined.contains("lane-alpha-2 `r2`(open)"),
-        "named-pool rows use the lane-<pool>-<k> label: {joined}"
-    );
-}
-
 /// r1 (泳道分池) release is (pool, k)-scoped: releasing one pool's lane never touches another
 /// pool's same-k lane, the requirement-side binding (lane + lane_pool) clears together, and
 /// the tool-face pooled release resolves the pool from the **request** repo argument.

@@ -174,3 +174,66 @@ test("lane.pool 注册表 / 多仓同名 k 并行 / 注册与未注册池的形�
   assert_true(kv("reject.count") ~= before2, "认领拒绝必须移动 reject 账")
   assert_nil(kv("lane.gamma.2.req"), "不得注册")
 end)
+
+test("同池并行与占用作用域：容量 / 占用 / 跨池互不干扰 + panel 标签", function()
+  fresh()
+  charter_and_begin()
+  fire("lane.pool", "alpha|/tmp/checkout-alpha")
+  fire("requirement.add", "first|description|subsys-a")
+  fire("requirement.add", "second|description|subsys-b")
+  fire("requirement.add", "third|description|subsys-c")
+
+  -- ① 同一命名池里的两条并行泳道。
+  fire("lane.claim", "1|r1|feature/aa11-one|abc1234|1|alpha")
+  fire("lane.claim", "2|r2|feature/aa11-two|abc1234|1|alpha")
+  assert_eq(kv("lane.alpha.1.req"), "r1", "池内 k=1")
+  assert_eq(kv("lane.alpha.2.req"), "r2", "池内 k=2")
+
+  -- ② k 超出单池容量（job_capacity = 4）必须被拒。
+  reset()
+  fire("lane.claim", "5|r3|feature/aa11-five|abc1234|1|alpha")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "超容量必须被拒：" .. table.concat(narrated(), " | ")
+  )
+
+  -- ③ 占用是 (pool, k) 作用域。
+  reset()
+  fire("lane.claim", "1|r3|feature/aa11-three|abc1234|1|alpha")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "alpha-1 被 r1 占着，r3 拿不到：" .. table.concat(narrated(), " | ")
+  )
+  reset()
+  fire("lane.claim", "2|r1|feature/aa11-one-b|abc1234|1|alpha")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "r1 不能在同一池里占第二条：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("lane.alpha.1.req"), "r1", "台账未变（1）")
+  assert_eq(kv("lane.alpha.2.req"), "r2", "台账未变（2）")
+
+  -- 但跨池互不干扰：r3 可以拿默认池的 k=1。
+  reset()
+  fire("lane.claim", "1|r3|feature/aa11-def|abc1234|1")
+  assert_eq(count_marker("[LANE CLAIMED]"), 1, "跨池互不干扰")
+  assert_eq(kv("lane.1.req"), "r3", "默认池 k=1 归 r3")
+  assert_eq(kv("req.3.lane_pool"), "", "默认池的需求 lane_pool 为空")
+
+  -- ④ 池作用域标签流经 panel 面。
+  reset()
+  fire("requirement.list", "0")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    joined:find("lane-1 `r3`(open)", 1, true) ~= nil,
+    "默认池保持字节稳定的 lane-<k> 标签：" .. joined
+  )
+  assert_true(
+    joined:find("lane-alpha-1 `r1`(open)", 1, true) ~= nil,
+    "命名池行用 lane-<pool>-<k>：" .. joined
+  )
+  assert_true(
+    joined:find("lane-alpha-2 `r2`(open)", 1, true) ~= nil,
+    "命名池行用 lane-<pool>-<k>：" .. joined
+  )
+end)
