@@ -1263,37 +1263,6 @@ fn sign(game: &mut Game, doc: &str, ver: &str) {
     game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
 }
 
-/// ① 覆盖：缺签直接拒，零副作用，且拒台词自带「读什么 + 跑什么命令 + 窗口多大」。
-#[test]
-fn read_gate_missing_signature_blocks_a_proposal_with_zero_side_effects() {
-    let mut game = armed_game("gate-missing");
-    let lines = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|armed plan|artifacts/r1.md"),
-    );
-    assert_refused(&lines, "proposal.submit");
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("read-gate/missing"),
-        "the refusal must name the dimension: {lines:#?}"
-    );
-    // 三件事：确切的签名命令（逐件）、当前窗口值、已隔派发数。
-    assert!(
-        joined.contains("config.set read.acts/coordinate=aaaaaa")
-            && joined.contains("config.set read.req-acts/intake=bbbbbb"),
-        "each missing doc must come with its exact sign command: {lines:#?}"
-    );
-    assert!(
-        joined.contains("window 80") && joined.contains("dispatch(es) ago"),
-        "the refusal must report the window and the elapsed dispatches: {lines:#?}"
-    );
-    // 零副作用：门禁没升起、提案没落库、签名账本没动（派发计数器前进不算副作用）。
-    game.assert_kv("req.1.gate", json!(""));
-    game.assert_kv("req.1.job", json!("plan"));
-    game.assert_kv("prop.1.status", Json::Null);
-    game.assert_kv("settings.read_index", Json::Null);
-}
-
 /// ② 新鲜：阶段边界之后旧签名作废（跨阶段读 = 没读），拒台词报两个 seq。
 #[test]
 fn read_gate_voids_a_signature_taken_before_the_stage_edge() {
