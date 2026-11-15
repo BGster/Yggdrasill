@@ -964,37 +964,6 @@ fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
     );
 }
 
-/// Amending a requirement **while development is in flight** (before any development
-/// proposal is submitted) updates its description and bumps `rev` without resetting the
-/// job (`req_amend_active`); submitting the new `rev`'s development proposal must succeed
-/// rather than deadlocking on `plan_ok == false`. If that proposal is later rejected,
-/// `plan_ok == false` sends the row back to `draft` (replan).
-#[test]
-fn developing_amend_without_pending_proposal_does_not_deadlock() {
-    let mut game = drive_to_plan_gate();
-    game.click("gate.approve — ");
-    // Auto-dispatched into developing (no pending proposal yet).
-    game.assert_kv("req.1.job", json!("development"));
-
-    game.narrate(
-        "requirement.amend",
-        &text("r1|refined title|refined description in flight"),
-    );
-    game.assert_kv("req.1.rev", json!(2));
-    game.assert_kv("req.1.job", json!("development"));
-    game.assert_kv("req.1.plan_ok", json!(false));
-    assert_eq!(game.phase("r1"), "developing");
-
-    // Submitting a development proposal for the new rev must succeed (no deadlock).
-    submit(&mut game, 2, "development", "semantics-dev-after-amend");
-    assert_eq!(game.phase("r1"), "dev_review");
-
-    // And if that proposal is rejected, `plan_ok == false` sends it back to `draft` (replan).
-    game.narrate("proposal.reject", &text("r1|needs replan after amend"));
-    game.assert_kv("req.1.plan_ok", json!(false));
-    assert_eq!(game.phase("r1"), "draft");
-}
-
 // ───────────────────── inline executor ledger (`exec=`) ─────────────────────
 
 /// `proposal.submit` binds the executor in the same transaction, refuses an `exec=` that is

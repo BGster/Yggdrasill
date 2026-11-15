@@ -180,3 +180,24 @@ test("开发提案 reject：未 amend 保 plan_ok；amend 后落 draft", functio
   fire("requirement.dispatch", "0")
   assert_eq(kv("req.1.job"), "plan", "a plan job is re-hung")
 end)
+
+test("开发中 amend 不死锁：新 rev 可提交、reject 后回 draft", function()
+  drive_to_plan_gate()
+  click("gate.approve — ")
+  assert_eq(kv("req.1.job"), "development", "auto-dispatched into developing")
+
+  fire("requirement.amend", "r1|refined title|refined description in flight")
+  assert_eq(kv("req.1.rev"), 2, "amend bumps the revision")
+  assert_eq(kv("req.1.job"), "development", "the running job is untouched")
+  assert_eq(kv("req.1.plan_ok"), false, "plan_ok is invalidated")
+  assert_eq(phase_of("r1"), "developing", "the row is still developing")
+
+  -- 新 rev 的 development 提案必须能提交（无死锁）。
+  submit(2, "development", "semantics-dev-after-amend")
+  assert_eq(phase_of("r1"), "dev_review", "the delivery reaches dev_review")
+
+  -- 该提案被拒：plan_ok=false 让它回 draft（需要重规划）。
+  fire("proposal.reject", "r1|needs replan after amend")
+  assert_eq(kv("req.1.plan_ok"), false, "plan_ok stays false")
+  assert_eq(phase_of("r1"), "draft", "back to draft for a replan")
+end)
