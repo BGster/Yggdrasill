@@ -2263,54 +2263,6 @@ fn summary_projection_carries_play_and_resident_trio() {
     game.assert_kv("req.count", json!(2));
 }
 
-// ───────────────────────── harness tools 机证 cross-check（r3 / harness 机证）─────────────────────────
-
-/// 注入 harness 工具 runner：按 tool_id 返回 controlled 输出（k=v 对的 BTreeMap 形式，
-/// 与 InProcessToolRunner.parse_kv_output 的产物同形）。用于机证 cross-check 的矛盾/一致两路。
-struct HarnessRunner {
-    todo_remaining: i32,
-    sessions_matching: i32,
-}
-
-impl HostToolRunner for HarnessRunner {
-    fn call(
-        &mut self,
-        tool_id: &str,
-        _args: &std::collections::BTreeMap<String, String>,
-    ) -> Result<std::collections::BTreeMap<String, String>, String> {
-        let mut out = std::collections::BTreeMap::new();
-        match tool_id {
-            "harness.todo-check" => {
-                out.insert("found".to_owned(), "1".to_owned());
-                out.insert("total".to_owned(), "3".to_owned());
-                out.insert("remaining".to_owned(), self.todo_remaining.to_string());
-                out.insert("active".to_owned(), "1".to_owned());
-                out.insert(
-                    "ok".to_owned(),
-                    if self.todo_remaining == 0 { "1" } else { "0" }.to_owned(),
-                );
-                Ok(out)
-            }
-            "harness.sessions-count" => {
-                out.insert("total".to_owned(), "4".to_owned());
-                out.insert("matching".to_owned(), self.sessions_matching.to_string());
-                out.insert("trash".to_owned(), "1".to_owned());
-                out.insert(
-                    "ok".to_owned(),
-                    if self.sessions_matching == 0 {
-                        "1"
-                    } else {
-                        "0"
-                    }
-                    .to_owned(),
-                );
-                Ok(out)
-            }
-            other => Err(format!("unexpected tool_id: {other}")),
-        }
-    }
-}
-
 // ───────────────────── r8 · E3: the armed surface ─────────────────────
 //
 // 命题：证据清单过去只度量「代码存在」。r4 首版交付代码完整、10 条用例、三套门禁 473/158/77
