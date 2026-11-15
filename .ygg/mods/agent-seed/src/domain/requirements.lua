@@ -7,6 +7,7 @@ local M = {}
 
 local config = require("src.core.config")
 local util = require("src.core.util")
+local readsig = require("src.domain.readsig")
 
 local TEXTS
 local LANES
@@ -559,6 +560,10 @@ local function req_bump_rev(index)
   ygg.kv.set(req_key(index, "stale"), false)
   -- 计划随 rev 一起作废：旧的 ready 上 amend 仍能派开发（用陈旧计划），这里是收紧。
   ygg.kv.set(req_key(index, "plan_ok"), false)
+  -- r3 销票（作用域边界）：rev 推进 = 工作范围变了（amend 修订、两路打回），
+  -- 幕前必读签名全部作废重读。挂在这里而不是逐个 handler：req_bump_rev 是「rev 变了」
+  -- 的唯一写口（amend 三条成功路径 + gate.reject 两条分支全覆盖），多一处复制就会漏一处。
+  readsig.clear()
   return rev
 end
 
