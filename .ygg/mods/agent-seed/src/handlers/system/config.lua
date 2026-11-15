@@ -5,10 +5,12 @@
 
 local M = {}
 
+local clock = require("src.core.clock")
 local config = require("src.core.config")
 local executor = require("src.domain.executor")
 local flow = require("src.runtime.flow")
 local menus = require("src.view.menus")
+local readset = require("src.domain.readset")
 local readsig = require("src.domain.readsig")
 local render_mod = require("src.view.render")
 local reqs = require("src.domain.requirements")
@@ -111,6 +113,8 @@ local function read_set(key, value)
     return reject_payload("config.set", fill(TEXTS.beats.read_bad_ver, { ver = ver }))
   end
   readsig.sign(doc, ver, scene)
+  -- r4：签名时刻快照（与 readsig 值段的 seq 互为印证；值段 seq 为 0 时消费者回落读它）。
+  clock.mark_sign(doc)
   local kept, total = readsig.coverage(scene, effective("readPlan"))
   if total == nil then
     ygg.narrate(fill(TEXTS.beats.read_signed_unplotted, {
@@ -196,6 +200,27 @@ function M.install(deps)
       return profile_set(key, value)
     elseif key:sub(1, 5) == "read." then
       return read_set(key, value)
+    elseif key == "readGate.window" then
+      -- 遗忘窗口（r4 四维之一）：整数，缺省 80，越界夹紧到 [0, MAX]。
+      -- 调窗是**自解除的第二个杆杆**（第一杆是重读重签）：四维拒台词里逐条报当前值与抬高命令。
+      -- 回执走通用 config_changed（`effective("readGate.window")` 此刻已是夹紧后的值）——不新开文案键。
+      local parsed = tonumber(value)
+      if parsed == nil then
+        problem = fill(TEXTS.beats.bad_config_value, {
+          key = key,
+          value = value,
+          allowed = "integer 0-" .. tostring(readset.MAX_WINDOW),
+        })
+      else
+        parsed = math.floor(parsed)
+        if parsed < 0 then
+          parsed = 0
+        end
+        if parsed > readset.MAX_WINDOW then
+          parsed = readset.MAX_WINDOW
+        end
+        ygg.kv.set("settings.readGate.window", parsed)
+      end
     elseif key == "tools.root" then
       -- harness tools 注册根（r3 / D-MA26）：目录路径，形状校验（无 `..`/`|`/控制字符，≤240）。
       -- 只校形状不读文件（Mod 无 IO）；空值 = 显式清除（机证回退人证）。

@@ -1,9 +1,9 @@
 # Yggdrasill · mod 文案契约 · beats-harness
 > **id** copy/harness · **幕** all · **触发** 改 `beats-harness.json` 前
 > **读不到代价** silent-drift
-> **ver** 7f6464
+> **ver** 56c803
 
-> **定位**：`beats-harness.json` 74 键的句式知识权威：配置面板、身份注册、工具桥、泳道工具与 tools 注册面。
+> **定位**：`beats-harness.json` 79 键的句式知识权威：配置面板、身份注册、工具桥、泳道工具与 tools 注册面。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-harness.json`
 > **维护**：改文案先改本表再同步 mod；键增删/改域触发索引、prompt-surface 与键数同批更新。
 
@@ -42,6 +42,11 @@
 | `reactive_malformed` | [PROBE MALFORMED] {{call_id}} ({{tool_id}}): the output is not a `k=v;...` map - nothing was applied | call_id, tool_id | 叙述 |
 | `read_bad_doc` | a read signature needs read.<act>/<doc-id>=<ver>: lowercase letters, digits and dashes, exactly one slash, no dots (got "{{doc}}") | doc | 叙述 |
 | `read_bad_ver` | the signature version must be 4-40 lowercase hex characters (copy it from the doc header ver line); got "{{ver}}" | ver | 叙述 |
+| `read_gate_missing` | read-gate/missing: {{count}} doc(s) for {{action}} are unsigned (scope {{scope}}, opened {{gap}} dispatch(es) ago; window {{window}}). Details: {{docs}}. Read then sign each: {{commands}}. If the window is what blocks you, widen it: {{raise}} | action, count, scope, gap, window, docs, commands, raise | 拒绝 |
+| `read_gate_stale` | read-gate/stale: {{doc}} was signed at dispatch {{sign}}, {{gap}} dispatch(es) ago, but {{reason}} — the signature no longer counts. Window {{window}}. Re-read then sign: {{command}}. If the window is what blocks you, widen it: {{raise}} | doc, sign, gap, reason, window, command, raise | 拒绝 |
+| `read_gate_forgotten` | read-gate/forgotten: {{doc}} was signed {{gap}} dispatch(es) ago, past the window {{window}} (dispatch now {{now}}). Re-read then sign: {{command}}. Or widen the window: {{raise}} | doc, gap, now, window, command, raise | 拒绝 |
+| `read_gate_subject` | read-gate/subject: {{doc}} was signed at dispatch {{sign}}, before {{req}} entered rev {{rev}} at dispatch {{entry}} — {{gap}} dispatch(es) before it, so the current revision does not cover the signature. Window {{window}}. Re-read then sign: {{command}}. If the window is what blocks you, widen it: {{raise}} | doc, sign, req, rev, entry, gap, window, command, raise | 拒绝 |
+| `read_gate_unvered` | [READ GATE] {{action}} needs {{count}} doc(s) but readGate.ver carries no version ledger — version drift cannot be checked and the sign commands cannot be exact. Regenerate the table: python3 scripts/gen-scene-readfirst.py --readset | action, count | 叙述 |
 | `read_cleared` | [SIGN] {{doc}} cleared: the signature no longer counts ({{scene}}) | doc, scene | 叙述 |
 | `read_signed` | [SIGNED] {{doc}}@{{ver}} — {{k}}/{{n}} signed in this act ({{scene}}) | doc, ver, k, n, scene | 叙述 |
 | `read_signed_unplotted` | [SIGNED] {{doc}}@{{ver}} — {{k}} signed in this act ({{scene}}); no read plan is baked for this act, so coverage is not computed | doc, ver, k, scene | 叙述 |

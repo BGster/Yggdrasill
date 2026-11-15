@@ -6,12 +6,14 @@
 local M = {}
 
 local config = require("src.core.config")
+local clock = require("src.core.clock")
 local gates = require("src.domain.gates")
 local guide = require("src.view.guide")
 local hooks = require("src.core.hooks")
 local lanes = require("src.domain.lanes")
 local menus = require("src.view.menus")
 local props = require("src.domain.proposals")
+local readset = require("src.domain.readset")
 local reqs = require("src.domain.requirements")
 local util = require("src.core.util")
 local wire = require("src.domain.wire")
@@ -844,8 +846,12 @@ local function render()
   -- 响应式收敛（唯一入口）：所有 useEffect（唯一后继自动推进）必须在产出 choice **之前**
   -- 同步跑完——已产生 choice 的 handler 里再 emit 会被内核静默丢弃（transition.rs 排空规则）。
   -- 重入守卫：effect 自身不 render，这层只防未来新增 effect 误调。
+  -- r4：这里也是**派发序号与纪元边沿的唯一推进点**——每次 Mod 派发恰好一次，且在
+  -- flush_effects 之前（同一派发内 effect 看到的 now() 已是本派发值，派生一致）。
   if not flushing then
     flushing = true
+    clock.bump()
+    readset.observe()
     hooks.flush_effects()
     flushing = false
   end

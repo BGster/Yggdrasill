@@ -44,5 +44,55 @@
     "harness.sessions-count",
     "harness.manifest-verify",
     "harness.docs-consistency"
-  ]
+  ],
+  "readPlan": {
+    "prologue": [
+      "cold-start/vocabulary"
+    ],
+    "charter": [
+      "acts/charter"
+    ],
+    "coordinate": [
+      "acts/coordinate",
+      "req-acts/intake"
+    ],
+    "settle": [
+      "acts/settle",
+      "rituals/cleanup"
+    ],
+    "release": [
+      "acts/release",
+      "acts/retired"
+    ]
+  },
+  "readGate": {
+    "ver": {
+      "cold-start/vocabulary": "48b82e",
+      "acts/charter": "3187d8",
+      "acts/coordinate": "a50977",
+      "req-acts/intake": "a40353",
+      "acts/settle": "97f4ce",
+      "rituals/cleanup": "9326e8",
+      "acts/release": "ac9f0b",
+      "acts/retired": "c7f2a3",
+      "req-acts/delivery": "f95112",
+      "req-acts/integration": "38ae6a"
+    },
+    "reqActs": {
+      "plan": [
+        "req-acts/intake"
+      ],
+      "development": [
+        "req-acts/delivery"
+      ]
+    },
+    "gates": {
+      "plan": [
+        "req-acts/delivery"
+      ],
+      "accept": [
+        "req-acts/integration"
+      ]
+    }
+  }
 }
