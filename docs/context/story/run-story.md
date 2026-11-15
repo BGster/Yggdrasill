@@ -1,8 +1,12 @@
 # Yggdrasill · 运行级剧情（live）
 
+> **id** story/run-story · **幕** all · **触发** 理解一整局怎么跑 / 改运行级转场之前
+> **读不到代价** silent-drift（按记忆讲微状态 → 讲错转场与会话边界）
+> **ver** 756fe0
+
 > **定位**：常驻自循环的运行级微状态表、开场序列、盘点子微状态与发布幕（含 live→retired 唯一转场 mermaid）。
 > **replaces**：DESIGN §2.3（L96–144）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[requirement-story.md](requirement-story.md) · [state-machine.md](kernel/state-machine.md) · [events.md](kernel/events.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[requirement-story.md](requirement-story.md) · [state-machine.md](../../design/kernel/state-machine.md) · [events.md](../../design/kernel/events.md)
 > **搬运**：以下正文自 DESIGN.md L96–L144 逐字迁移，不重写语义。
 
 ### 2.3 运行级剧情（`live`）

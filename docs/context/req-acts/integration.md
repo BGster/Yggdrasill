@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 集成（req-acts/integration）
 > **id** req-acts/integration · **幕** req: accept_gate/integrating/done · **触发** 验收门禁前 / 集成核验前
 > **读不到代价** hard-refusal（证据清单漏项 → 验收被拒；SHA 不符 → `integration_bad_sha` 打回）
-> **ver** 030620
+> **ver** 74bf53
 
 ## 7. 验收门禁（accept_gate）
 
@@ -37,4 +37,4 @@
 - **入口条件**：`integration.confirm` 成功；旁路关闭（split/merge/dropped）时为 `closed_reason`。
 - **必做动作**：无（终态）；泳道已释放，证据在册。
 - **出口判据**：无（终态）。
-- **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_amend_derive_hist` / `req_after_done` / `req_resolve_*` 句式）；旁路语义见 [../../design/requirement-story.md](../../design/requirement-story.md)（覆盖层：split/merge/conflict/resolve）。
+- **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_amend_derive_hist` / `req_after_done` / `req_resolve_*` 句式）；旁路语义见 [../../design/requirement-story.md](../story/requirement-story.md)（覆盖层：split/merge/conflict/resolve）。

@@ -4,7 +4,7 @@
 
 > **定位**：Mod 纯度边界、双层真状态压缩、微状态判定单一来源（run_phase/req_phase）与响应式推进契约。
 > **replaces**：DESIGN §2 章首 + §2.1 + §2.2 + §2.5 + §2.9（L66–95, L206–247, L329–339）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../../README.md) · **相关**：[events.md](events.md) · [run-story.md](../run-story.md) · [requirement-story.md](../requirement-story.md) · [state-surface.md](state-surface.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[events.md](events.md) · [run-story.md](../../context/story/run-story.md) · [requirement-story.md](../../context/story/requirement-story.md) · [state-surface.md](state-surface.md)
 > **搬运**：以下正文自 DESIGN.md L66–L69 + DESIGN.md L70–L77 + DESIGN.md L78–L95 + DESIGN.md L206–L247 + DESIGN.md L329–L339 逐字迁移，不重写语义。
 
 ## 2. Mod 剧情与状态机语义

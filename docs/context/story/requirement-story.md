@@ -1,8 +1,12 @@
 # Yggdrasill · 需求级剧情（open）
 
+> **id** story/requirement-story · **幕** req: all · **触发** 理解一条需求走九幕 / 改需求级转场与门禁判定之前
+> **读不到代价** hard-refusal（转场表与门禁判据漏读 → 门禁被绕过或 gate_rev stale 走错）
+> **ver** 78ad48
+
 > **定位**：需求九幕微状态表、转场表与旁路/覆盖层语义（含 open→done mermaid）。
 > **replaces**：DESIGN §2.4（L145–205）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[run-story.md](run-story.md) · [state-surface.md](kernel/state-surface.md) · [lanes.md](host/lanes.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[run-story.md](run-story.md) · [state-surface.md](../../design/kernel/state-surface.md) · [lanes.md](../../design/host/lanes.md)
 > **搬运**：以下正文自 DESIGN.md L145–L205 逐字迁移，不重写语义。
 
 ### 2.4 需求级剧情（`open`）

@@ -10,12 +10,12 @@
 
 | 旧章节 | 新文件 |
 | --- | --- |
-| §1 产品形态与三层系统边界（含 1.1 协商矩阵、1.2 Adapter 五义务） | [design/system-boundaries.md](design/system-boundaries.md) |
+| §1 产品形态与三层系统边界（含 1.1 协商矩阵、1.2 Adapter 五义务） | [design/system-boundaries.md](context/cold-start/system-boundaries.md) |
 | §2 章首（组织原则） | [design/state-machine.md](design/kernel/state-machine.md) |
 | §2.1 Mod 是什么（边界与纯度） | [design/state-machine.md](design/kernel/state-machine.md) |
 | §2.2 双层结构与真状态压缩 | [design/state-machine.md](design/kernel/state-machine.md) |
-| §2.3 运行级剧情（live） | [design/run-story.md](design/run-story.md) |
-| §2.4 需求级剧情（open） | [design/requirement-story.md](design/requirement-story.md) |
+| §2.3 运行级剧情（live） | [design/run-story.md](context/story/run-story.md) |
+| §2.4 需求级剧情（open） | [design/requirement-story.md](context/story/requirement-story.md) |
 | §2.5 微状态判定的单一来源 | [design/state-machine.md](design/kernel/state-machine.md) |
 | §2.6 事件总表（39 口径） | [design/events.md](design/kernel/events.md) |
 | §2.7 拒绝面矩阵 | [design/state-surface.md](design/kernel/state-surface.md) |

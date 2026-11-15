@@ -4,7 +4,7 @@
 
 > **定位**：KV 状态存储键契约（含 D-MA23 删除清单）与各微状态的拒绝面矩阵。
 > **replaces**：DESIGN §2.7 + §2.8（L285–328）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../../README.md) · **相关**：[state-machine.md](state-machine.md) · [run-story.md](../run-story.md) · [requirement-story.md](../requirement-story.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[state-machine.md](state-machine.md) · [run-story.md](../../context/story/run-story.md) · [requirement-story.md](../../context/story/requirement-story.md)
 > **搬运**：以下正文自 DESIGN.md L285–L305 + DESIGN.md L306–L328 逐字迁移，不重写语义。
 
 ### 2.7 拒绝面矩阵

@@ -5,7 +5,7 @@
       "order": 16,
       "title": "16. Run machine · requirement pipeline · decision gates",
       "summary": "The coordinator is a live self-loop across five acts (charter → coordinate → settle → release → retired); stored truth is a 2-state requirement pipeline with nine derived micro-states; the two mandatory gates (plan / accept) can never be bypassed, and each batch boundary has hard closeout criteria. This chapter answers \"where am I in the machine and which gate is next\".",
-      "source": "historical AGENTS.md (pre-migration; see git history) (text before the 2026-10-31 condensation) + docs/design/kernel/state-machine.md + docs/design/requirement-story.md (D-MA23)",
+      "source": "historical AGENTS.md (pre-migration; see git history) (text before the 2026-10-31 condensation) + docs/design/kernel/state-machine.md + docs/context/story/requirement-story.md (D-MA23)",
       "priority": "standard",
       "rules": [
         {
@@ -24,13 +24,13 @@
           "id": "machine.pipeline-states",
           "modality": "must",
           "text": "There is one requirement pipeline per requirement. Stored truth is exactly **2 states** (`req.<i>.status`): `open` / `done` — everything else is derived, never stored; `split` / `merged` / `dropped` are values of the `closed_reason` field (R11), not states. Inside `open` the requirement walks nine micro-states derived by the single-source judge `req_phase()` (menus / render / beats legend all read it — no second copy anywhere): draft(立项) → planning(计划中) ──proposal.submit(plan)──▶ plan_gate(计划门禁) ──gate.approve──▶ ready(待开发) ──requirement.dispatch(+lane)──▶ developing(开发中) ──proposal.submit(development)──▶ dev_review(交付受理) ──proposal.accept──▶ accept_gate(验收门禁) ──gate.approve──▶ integrating(集成) ──integration.confirm──▶ done(完成, terminal). Three push-back paths (`proposal.reject` on a development delivery / `gate.reject` on the accept gate / `integration.reject`) land uniformly in ready (R6: `plan_ok` kept, `job=\"\"`, lane released); `gate.reject` on the plan gate returns to planning with `plan_ok=false`. The two overlay markers (`blocked` / `stale`) stack on top of the phase display and are not states; `analyzing` survives only as a legacy-save compatibility value.",
-          "basis": "docs/design/requirement-story.md + docs/design/kernel/state-machine.md (ex-DESIGN §2.4/§2.5; D-MA23, 2026-11-12)"
+          "basis": "docs/context/story/requirement-story.md + docs/design/kernel/state-machine.md (ex-DESIGN §2.4/§2.5; D-MA23, 2026-11-12)"
         },
         {
           "id": "machine.terminal-states",
           "modality": "must",
           "text": "The old side states are demoted (D-MA23): `split` / `merged` / `dropped` are now values of the `closed_reason` field on a closed (`done`) row (R11 — a closed reason, not a state); the two marker overlays stay display-only: `blocked` (unresolved conflict or needs_amend, cleared by `requirement.resolve` / `requirement.amend`) and `stale` (a proposal whose rev is outdated, cleared automatically once a rebase proposal lands).",
-          "basis": "docs/design/kernel/state-machine.md + docs/design/requirement-story.md (ex-DESIGN §2.2/§2.4; D-MA23, 2026-11-12)"
+          "basis": "docs/design/kernel/state-machine.md + docs/context/story/requirement-story.md (ex-DESIGN §2.2/§2.4; D-MA23, 2026-11-12)"
         },
         {
           "id": "machine.coordinator-scope",
@@ -54,7 +54,7 @@
           "id": "machine.accept-gate",
           "modality": "must",
           "text": "The accept gate (`req.gate=accept`) fires after the main agent accepts the development proposal (the executor delivered); approve → the integrating act (`integrating=true`, gate cleared) — done is NOT granted here, the executor still has to land `integration.confirm` with `develop@<sha>` evidence; reject → the ready act (`plan_ok` keeps its value: not amended → back into the development queue; amended → `plan_ok` was already invalidated → planning, must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
-          "basis": "historical AGENTS.md (pre-migration; see git history) (gate table, pre-migration) + docs/design/requirement-story.md acts 7-8 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (gate table, pre-migration) + docs/context/story/requirement-story.md acts 7-8 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
         },
         {
           "id": "machine.accept-vs-gate",

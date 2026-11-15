@@ -106,7 +106,7 @@
           "id": "action.dispatch-idempotent",
           "modality": "must",
           "text": "requirement.dispatch dispatches by readiness order (draft → plan; ready → development·lane, development deps all done), with a job cap of 4; no candidate or a full slot set is a normal `[DISPATCH] 0 candidates` receipt (idempotent, never counted as a failed step).",
-          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/design/requirement-story.md (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/context/story/requirement-story.md (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
         },
         {
           "id": "action.proposal-changes",
@@ -130,7 +130,7 @@
           "id": "action.reject-paths",
           "modality": "must",
           "text": "Reject paths (D-MA23 unification, R6): `proposal.reject` on a plan proposal → back to planning (gate cleared, `job=\"plan\"` re-hung on the executor, `plan_ok` stays false, rev untouched); `proposal.reject` on a development delivery / `gate.reject` on the accept gate / `integration.reject` all land the ready act — `plan_ok` kept, `job=\"\"`, lane released, feedback written; `gate.reject` on the plan gate → planning with `plan_ok=false`, `rev+1` (a new plan is required).",
-          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/design/requirement-story.md R6 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/context/story/requirement-story.md R6 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
         },
         {
           "id": "action.stale-rebase",

@@ -72,10 +72,10 @@ docs/
 
 | 文件 | 一句话定位 | replaces（原 DESIGN.md） |
 | --- | --- | --- |
-| [system-boundaries.md](design/system-boundaries.md) | 三层架构图、协商矩阵（Tier 1–3）、Adapter 五义务 C1–C5 | §1 |
+| [system-boundaries.md](context/cold-start/system-boundaries.md) | 三层架构图、协商矩阵（Tier 1–3）、Adapter 五义务 C1–C5 | §1 |
 | [state-machine.md](design/kernel/state-machine.md) | Mod 纯度、双层真状态压缩、微状态判定单一来源、响应式推进 | §2 章首 + §2.1/2.2/2.5/2.9 |
-| [run-story.md](design/run-story.md) | 运行级剧情：微状态表、盘点子微状态、发布幕 | §2.3 |
-| [requirement-story.md](design/requirement-story.md) | 需求九幕、转场表、旁路/覆盖层 | §2.4 |
+| [run-story.md](context/story/run-story.md) | 运行级剧情：微状态表、盘点子微状态、发布幕 | §2.3 |
+| [requirement-story.md](context/story/requirement-story.md) | 需求九幕、转场表、旁路/覆盖层 | §2.4 |
 | [events.md](design/kernel/events.md) | 39 事件三分类与 payload 落点（设计目标全集口径，r1 +lane.pool） | §2.6 |
 | [state-surface.md](design/kernel/state-surface.md) | 状态存储键契约与拒绝面矩阵 | §2.7 + §2.8 |
 | [lanes.md](design/host/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
@@ -103,7 +103,7 @@ docs/
 
 - **新执行者（plan/development 前）**：[CONTEXT.md](CONTEXT.md)（壳）→ [context/README.md](context/README.md)（召回入口：时点 → 文件）→ [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) → 当前幕对应的 `context/acts/<act>.md` 与 `context/req-acts/<stage>.md` → [context/rituals/dispatch.md](context/rituals/dispatch.md) → 本需求触碰的子系统主题文件（见 brief 的 `Mandatory references:` 行；plan 对照 playbook run_machine/actions，development 再对照 gates/live_evidence）。
 - **决策检索**：D1–D21 → [context/archive/decisions-engine.md](context/archive/decisions-engine.md)；D-MAx → [context/archive/decisions-agent.md](context/archive/decisions-agent.md)。
-- **门禁核验**：[requirement-story.md](design/requirement-story.md)（九幕/转场）+ [state-surface.md](design/kernel/state-surface.md)（拒绝面）+ [context/archive/decisions-agent.md](context/archive/decisions-agent.md)（D-MA22 集成职责）。
+- **门禁核验**：[requirement-story.md](context/story/requirement-story.md)（九幕/转场）+ [state-surface.md](design/kernel/state-surface.md)（拒绝面）+ [context/archive/decisions-agent.md](context/archive/decisions-agent.md)（D-MA22 集成职责）。
 - **CLI/契约/serve 开发**：[cli-daemon.md](design/host/cli-daemon.md)、[action-faces.md](design/mod/action-faces.md)、[wire-protocol.md](design/kernel/wire-protocol.md)、[serve.md](design/host/serve.md)。
 
 ## 旧式引用解析

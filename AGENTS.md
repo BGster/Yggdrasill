@@ -202,7 +202,7 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 | serve / lanes / CLI / identity touch | `docs/design/host/serve.md`, `lanes.md`, `cli-daemon.md`, `identity.md` |
 | Runtime copy / protocol wording | `docs/context/copy/README.md` (seven-domain index) + `docs/design/mod/prompt-surface.md` |
 | Archive: why a ruling exists | `docs/context/archive/decisions-engine.md`, `archive/decisions-agent.md`, `cold-start/vision.md`, `cold-start/principles.md` |
-| Repository topology | `docs/context/cold-start/topology.md` + `docs/design/system-boundaries.md` |
+| Repository topology | `docs/context/cold-start/topology.md` + `docs/context/cold-start/system-boundaries.md` |
 
 The flat `docs/context/` paths retired by r1 (`workflow-acts.md`, `dispatch-ritual.md`, `copy-contract-*.md` 等 15 条)
 were **compat shims for then-frozen consumers**; r5 rewrote every mod pointer and crates test path onto the

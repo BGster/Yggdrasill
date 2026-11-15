@@ -1,8 +1,12 @@
 # Yggdrasill · 产品形态与三层系统边界
 
+> **id** cold-start/system-boundaries · **幕** all · **触发** 冷启动 / 需要「系统由哪几层构成」的全景 / 改三层边界与 Adapter 义务之前
+> **读不到代价** silent-drift（层边界讲错 → 后续所有契约解释失真）
+> **ver** 328a6b
+
 > **定位**：三层架构图、跨治理引擎能力协商矩阵（Tier 1–3）与 Adapter 一致性契约五义务（C1–C5）。
 > **replaces**：DESIGN §1（L11–65）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[../context/cold-start/vision.md](../context/cold-start/vision.md) · [cli-daemon.md](host/cli-daemon.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[../context/cold-start/vision.md](vision.md) · [cli-daemon.md](../../design/host/cli-daemon.md)
 > **搬运**：以下正文自 DESIGN.md L11–L65 逐字迁移，不重写语义。
 
 ## 1. 产品形态与三层系统边界

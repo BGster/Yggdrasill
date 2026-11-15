@@ -1,7 +1,7 @@
 # 协调幕 · coordinate
 > **id** acts/coordinate · **幕** coordinate · **触发** 进入协调幕 / 每次派发前
 > **读不到代价** hard-refusal（载荷形状错、rev stale 被拒）
-> **ver** 9f5dd3
+> **ver** 5586cb
 
 **场景台词（知识权威）**：任务「{{title}}」：{{goal}}｜{{count}} 条需求（{{open}} 条进行中）｜{{pending}} 条待受理提案。这一层你只做三件事：**派发、串行受理、过两道门禁**；其余需求的分析/计划/开发可异步并行。
 
@@ -28,4 +28,4 @@
 
 **prompts.coordinate 语义**：下一步问题只保留动作名——「受理提案、过门禁、派发，还是收口进盘点（coordinate.submit）？」
 
-**本幕关联阅读**：**[需求级九幕进行时](../req-acts/intake.md)（协调幕内每条需求的九幕指引）**；[rituals/dispatch.md](../rituals/dispatch.md)（派发仪式全文）；[copy/requirements.md](../copy/requirements.md) / [copy/lanes.md](../copy/lanes.md)（派发/提案/门禁/泳道句式）；[../../design/requirement-story.md](../../design/requirement-story.md)（九幕微状态表）、[../../design/lanes.md](../../design/host/lanes.md)（泳道池）、[../../design/state-surface.md](../../design/kernel/state-surface.md)（拒绝面矩阵）。
+**本幕关联阅读**：**[需求级九幕进行时](../req-acts/intake.md)（协调幕内每条需求的九幕指引）**；[rituals/dispatch.md](../rituals/dispatch.md)（派发仪式全文）；[copy/requirements.md](../copy/requirements.md) / [copy/lanes.md](../copy/lanes.md)（派发/提案/门禁/泳道句式）；[../../design/requirement-story.md](../story/requirement-story.md)（九幕微状态表）、[../../design/lanes.md](../../design/host/lanes.md)（泳道池）、[../../design/state-surface.md](../../design/kernel/state-surface.md)（拒绝面矩阵）。

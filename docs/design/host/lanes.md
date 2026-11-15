@@ -4,7 +4,7 @@
 
 > **定位**：泳道 worktree 池的分池认领/释放（r1/D-MA24：默认池 + 具名池）、强制分支命名、绑定窗口与三态实时投影。
 > **replaces**：DESIGN §2.10（L340–351；r1/D-MA24 分池语义并入）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../../README.md) · **相关**：[requirement-story.md](../requirement-story.md) · [cli-daemon.md](cli-daemon.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[requirement-story.md](../../context/story/requirement-story.md) · [cli-daemon.md](cli-daemon.md)
 > **搬运**：以下正文自 DESIGN.md L340–L351 逐字迁移，不重写语义。
 
 ### 2.10 持久化泳道池与实时进度投影

@@ -1,11 +1,11 @@
 # 需求级九幕进行时 · 进料（req-acts/intake）
 > **id** req-acts/intake · **幕** req: draft/planning/plan_gate · **触发** 立项 / 派发 plan 前
 > **读不到代价** hard-refusal（合并判据与决策号规则漏读 → 立项被指出「本可合并」或 D-MA 双占）
-> **ver** 0c2a77
+> **ver** d5ff35
 
 主流程五幕是「局的剧情」，需求级九幕是「每条需求的剧情」——协调幕内，每条需求各自走九幕（微状态）。本节给出**按幕展开的进行时指引**：场景台词（从 `beats-requirements.json` 对应键提炼）、入口条件 / 必做动作 / 出口判据、关联文件指针。
 
-与 [../../design/requirement-story.md](../../design/requirement-story.md) 的关系：**那边是机器契约**（微状态表 / 转场表 / 旁路覆盖层的判定序与副作用键），**这边是进行时指引**（我在哪一幕 / 该做什么 / 做完看什么证据）——语义不重复讲述，以那边为契约权威，本节只做执行侧台词与动作清单。九幕一览表见 [召回入口](../README.md)。
+与 [../../design/requirement-story.md](../story/requirement-story.md) 的关系：**那边是机器契约**（微状态表 / 转场表 / 旁路覆盖层的判定序与副作用键），**这边是进行时指引**（我在哪一幕 / 该做什么 / 做完看什么证据）——语义不重复讲述，以那边为契约权威，本节只做执行侧台词与动作清单。九幕一览表见 [召回入口](../README.md)。
 
 三道打回（交付受理 `proposal.reject` / 验收门禁 `gate.reject` / 集成 `integration.reject`）**统一落「待开发」**（plan_ok 保持、job 清空、泳道释放），打回不重走计划门禁（除非需求被 amend 使 plan_ok 失效）。
 
