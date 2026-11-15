@@ -576,3 +576,12 @@ function drive_to_release()
       "sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo list"
   )
 end
+
+--- 带 `exec=` 尾段提交 r1 提案（内联执行者台账）。
+function submit_with_exec(rev, stage, ext, exec)
+  ensure_reads("proposal.submit", stage, 1)
+  local payload = ("r1|%d|%s|%s proposal summary|artifacts/%s.md||%s|exec=%s"):format(
+    rev, stage, stage, stage, ext, exec
+  )
+  return fire("proposal.submit", payload)
+end

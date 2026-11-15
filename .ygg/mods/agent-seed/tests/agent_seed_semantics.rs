@@ -966,58 +966,6 @@ fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
 
 // ───────────────────── inline executor ledger (`exec=`) ─────────────────────
 
-/// `proposal.submit` binds the executor in the same transaction, refuses an `exec=` that is
-/// not the last segment, and requires a reason for a cross-stage handoff (given here with
-/// the `:` form so it survives the outer `|` split).
-#[test]
-fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    // Misplaced exec= (not the last segment) → payload rejection, no proposal is created.
-    let misplaced = game.narrate(
-        "proposal.submit",
-        &text("r1|1|plan|summary|artifacts/plan.md|exec=agent-1||semantics-bad"),
-    );
-    assert_refused(&misplaced, "exec=");
-    game.assert_kv("prop.1.req", Json::Null);
-    game.assert_kv("settings.executor.r1.plan", Json::Null);
-    // The job slot is untouched: nothing was consumed.
-    game.assert_kv("req.1.job", json!("plan"));
-
-    // Inline binding works and the proposal lands in the same transaction.
-    submit_with_exec(&mut game, 1, "plan", "semantics-p1", "agent-1");
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-    game.assert_kv("prop.1.stage", json!("plan"));
-
-    // Cross-stage handoff without a reason → precondition rejection, no proposal. The plan
-    // gate is up now; approving it (delivery is the gate) auto-dispatches development.
-    game.click("gate.approve — ");
-    // r4 开闸：门禁批准跨了阶段边界，旧签名随之作废——直派提交前按判据口径重签。
-    game.ensure_reads("proposal.submit", Some("development"), Some(1));
-    let no_reason = game.narrate(
-        "proposal.submit",
-        &text("r1|1|development|summary|artifacts/development.md||semantics-p2|exec=agent-2"),
-    );
-    assert_refused(&no_reason, "reason");
-    game.assert_kv("settings.executor.r1.development", Json::Null);
-    // The auto-dispatched job slot is still held (the refused submit released nothing).
-    game.assert_kv("req.1.job", json!("development"));
-
-    // Same handoff with the `:` separator (the outer payload splits on `|`).
-    submit_with_exec(
-        &mut game,
-        1,
-        "development",
-        "semantics-p3",
-        "agent-2:cross-stage handoff",
-    );
-    game.assert_kv(
-        "settings.executor.r1.development",
-        json!("agent-2|cross-stage handoff"),
-    );
-}
-
 // ───────────────────── settlement merge & the batch loop ─────────────────────
 
 // ───────────────────── batch-maintenance auto-append (r3 / 批结算自动维护) ─────────────────────

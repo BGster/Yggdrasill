@@ -201,3 +201,41 @@ test("开发中 amend 不死锁：新 rev 可提交、reject 后回 draft", func
   assert_eq(kv("req.1.plan_ok"), false, "plan_ok stays false")
   assert_eq(phase_of("r1"), "draft", "back to draft for a replan")
 end)
+
+test("exec= 内联执行者：错位拒绝 / 同事务绑定 / 跨阶段需理由", function()
+  fresh()
+  start_requirement()
+
+  -- ① 错位（exec 不在末段）→ 载荷拒绝，零副作用。
+  reset()
+  fire("proposal.submit", "r1|1|plan|summary|artifacts/plan.md|exec=agent-1||semantics-bad")
+  assert_true(narrated_contains("exec="), "the refusal names exec=")
+  assert_nil(kv("prop.1.req"), "no proposal is created")
+  assert_nil(kv("settings.executor.r1.plan"), "no ledger row is written")
+  assert_eq(kv("req.1.job"), "plan", "the job slot is untouched")
+
+  -- ② 内联绑定：台账与提案同事务落地。
+  submit_with_exec(1, "plan", "semantics-p1", "agent-1")
+  assert_eq(kv("settings.executor.r1.plan"), "agent-1", "the ledger binds the executor")
+  assert_eq(kv("prop.1.stage"), "plan", "the proposal lands in the same transaction")
+
+  -- ③ 跨阶段移交但没给理由 → 前置拒绝。
+  click("gate.approve — ")
+  ensure_reads("proposal.submit", "development", 1)
+  reset()
+  fire(
+    "proposal.submit",
+    "r1|1|development|summary|artifacts/development.md||semantics-p2|exec=agent-2"
+  )
+  assert_true(narrated_contains("reason"), "the refusal names the missing reason")
+  assert_nil(kv("settings.executor.r1.development"), "no ledger row for the refused handoff")
+  assert_eq(kv("req.1.job"), "development", "the auto-dispatched job slot is still held")
+
+  -- ④ 带理由的跨阶段移交（`:` 形式，外层的 `|` 切分不会吃掉它）。
+  submit_with_exec(1, "development", "semantics-p3", "agent-2:cross-stage handoff")
+  assert_eq(
+    kv("settings.executor.r1.development"),
+    "agent-2|cross-stage handoff",
+    "the ledger writes id|reason"
+  )
+end)
