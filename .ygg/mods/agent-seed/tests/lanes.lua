@@ -483,3 +483,33 @@ test("artifact_probe 与 vfs.write 共用一份台账", function()
   assert_eq(kv("artifact.count"), 2, "无重复槽位")
   assert_eq(kv("artifact.artifacts/notes.md.bytes"), 7, "字节数被刷新")
 end)
+
+test("verify_suite 只在 settle 幕记绿：相位门 / 诚实失败 / 绿与出处", function()
+  drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending("semantics-p2"))))
+
+  -- ① 错误微状态（coordinate）：拒绝，绝不记绿。
+  fire("tool.call", "gate.verify_suite|mode=all|t1")
+  reset()
+  fire("tool.result", "t1|gate.verify_suite|ok|0|passed=1;summary=52 suites green")
+  assert_eq(count_marker("[VERIFY SUITE BLOCKED]"), 1, "相位不对必须被挡住")
+  assert_nil(kv("verify.passed"), "不得记绿")
+
+  click("coordinate.submit — ")
+  assert_eq(kv("verify.passed"), false, "批次边界把它置 false")
+
+  -- ② 诚实失败：叙述失败，绝不写绿。
+  fire("tool.call", "gate.verify_suite|mode=all|t2")
+  reset()
+  fire("tool.result", "t2|gate.verify_suite|ok|0|passed=0;summary=3 failures")
+  assert_eq(count_marker("[VERIFY SUITE FAILED]"), 1, "失败必须叙述")
+  assert_eq(kv("verify.passed"), false, "仍不绿")
+
+  -- ③ 绿：与人工路径写**同一份 KV**，外加出处键。
+  fire("tool.call", "gate.verify_suite|mode=all|t3")
+  reset()
+  fire("tool.result", "t3|gate.verify_suite|ok|0|passed=1;summary=52 suites green")
+  assert_eq(count_marker("[VERIFY SUITE PASSED]"), 1, "绿必须叙述")
+  assert_eq(kv("verify.passed"), true, "记绿")
+  assert_eq(kv("verify.report"), "52 suites green", "报告正文")
+  assert_eq(kv("verify.source"), "tool:gate.verify_suite", "出处键")
+end)

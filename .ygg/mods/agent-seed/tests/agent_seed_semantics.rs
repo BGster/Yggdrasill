@@ -1284,61 +1284,6 @@ fn tool_round(game: &mut Game, call: &str, result: &str) -> Vec<String> {
     narrative_lines(&game.reply("tool.result", &text(result)))
 }
 
-/// A4 `gate.verify_suite` writes green evidence only in the **settle** micro-state (剧情双层重写:
-/// the review stage became the settle act), only when the payload says `passed=1`, and only
-/// when the same gate precondition holds. A failed suite narrates honestly and never writes
-/// green; the green path writes the same KV as the human `verify.submit` plus provenance.
-#[test]
-fn verify_suite_result_records_green_evidence_only_in_settle() {
-    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
-        "semantics-p2",
-    ))));
-
-    // ① wrong micro-state (coordinate): refused, no green.
-    let early = tool_round(
-        &mut game,
-        "gate.verify_suite|mode=all|t1",
-        "t1|gate.verify_suite|ok|0|passed=1;summary=52 suites green",
-    );
-    assert_eq!(
-        count_lines(&early, "[VERIFY SUITE BLOCKED]"),
-        1,
-        "{early:#?}"
-    );
-    game.assert_kv("verify.passed", json!(null));
-
-    game.click("coordinate.submit — ");
-    game.assert_kv("verify.passed", json!(false));
-
-    // ② honest failure: narrate it, never write green.
-    let failed = tool_round(
-        &mut game,
-        "gate.verify_suite|mode=all|t2",
-        "t2|gate.verify_suite|ok|0|passed=0;summary=3 failures",
-    );
-    assert_eq!(
-        count_lines(&failed, "[VERIFY SUITE FAILED]"),
-        1,
-        "{failed:#?}"
-    );
-    game.assert_kv("verify.passed", json!(false));
-
-    // ③ green: the same KV as the human path, plus the provenance key.
-    let passed = tool_round(
-        &mut game,
-        "gate.verify_suite|mode=all|t3",
-        "t3|gate.verify_suite|ok|0|passed=1;summary=52 suites green",
-    );
-    assert_eq!(
-        count_lines(&passed, "[VERIFY SUITE PASSED]"),
-        1,
-        "{passed:#?}"
-    );
-    game.assert_kv("verify.passed", json!(true));
-    game.assert_kv("verify.report", json!("52 suites green"));
-    game.assert_kv("verify.source", json!("tool:gate.verify_suite"));
-}
-
 struct SyncRitualRunner;
 
 impl HostToolRunner for SyncRitualRunner {
