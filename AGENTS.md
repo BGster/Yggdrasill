@@ -198,17 +198,26 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 | Dispatch / submit / integration ritual | `docs/context/rituals/dispatch.md`; playbook `branches`, `integration` |
 | Verification / evidence / cleanup | `docs/context/acts/settle.md` + `docs/context/rituals/cleanup.md`; playbook `gates`, `live_evidence`, `evidence`, `run_artifacts` |
 | No egg / no mod fallback | `docs/context/rituals/fallback.md` |
-| Mod / host / tool touch | `docs/design/kernel/state-machine.md`, `mod-package.md`, `tool-bridge.md`; playbook `mod_engineering`, `host_contract`, `tools` |
-| serve / lanes / CLI / identity touch | `docs/design/host/serve.md`, `lanes.md`, `cli-daemon.md`, `identity.md` |
+| Entry — which design file for this surface | `docs/design/README.md` (module → file → recall moment) |
+| Mod / host / tool touch | `docs/design/kernel/state-machine.md`, `docs/design/mod/mod-package.md`, `docs/design/mod/tool-bridge.md`; playbook `mod_engineering`, `host_contract`, `tools` |
+| serve / lanes / CLI / identity touch | `docs/design/host/serve.md`, `docs/design/host/lanes.md`, `docs/design/host/cli-daemon.md`, `docs/design/mod/identity.md` |
+| Kernel semantics / storage surface touch | `docs/design/kernel/state-machine.md`, `docs/design/kernel/events.md`, `docs/design/kernel/state-surface.md`, `docs/design/kernel/wire-protocol.md` |
 | Runtime copy / protocol wording | `docs/context/copy/README.md` (seven-domain index) + `docs/design/mod/prompt-surface.md` |
 | Archive: why a ruling exists | `docs/context/archive/decisions-engine.md`, `archive/decisions-agent.md`, `cold-start/vision.md`, `cold-start/principles.md` |
 | Repository topology | `docs/context/cold-start/topology.md` + `docs/context/cold-start/system-boundaries.md` |
+| Whole-run / requirement walk-through | `docs/context/story/run-story.md`, `docs/context/story/requirement-story.md` |
 
 The flat `docs/context/` paths retired by r1 (`workflow-acts.md`, `dispatch-ritual.md`, `copy-contract-*.md` 等 15 条)
 were **compat shims for then-frozen consumers**; r5 rewrote every mod pointer and crates test path onto the
 authoritative files and deleted them, so they no longer exist and must not be reintroduced. The migration record
 lives in `docs/context/README.md`; history and the original ruling (D-MA29 two-way split + mandatory exit
 condition) live in git and `docs/context/archive/decisions-*.md`, never here.
+
+The flat `docs/design/` paths (`<topic>.md`) retired by r6, for the same reason: they became `kernel/ host/ mod/`
+(entry `docs/design/README.md`) and **no shim was left** — `docs/design/*.md` may contain only `README.md`, which
+`design_tree_index_is_complete_and_ids_match_paths` asserts. The three behaviour narratives (`run-story`,
+`requirement-story`, `system-boundaries`) moved to `docs/context/` (`story/`, `cold-start/`) because they have no
+code consumer — the design/context criterion is written once in `docs/wiki-governance.md`.
 
 Every playbook chapter has a phase-entry route; `map.show` additionally prints the complete chapter index.
 Each phase receipt names its chapter titles, summaries and rule counts. Read the fragment whose
