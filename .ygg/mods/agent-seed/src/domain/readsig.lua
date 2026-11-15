@@ -34,6 +34,12 @@ local split, trim = util.split, util.trim
 local INDEX = "settings.read_index"
 local SEQ = "settings.event_seq"
 local DOC_PREFIX = "settings.read."
+-- r9 签署人侧键（**不翻倍值形状、不翻倍索引**）：值形状 `ver|scene|seq` 已被逐字钉死
+-- （`…|0` 断言），把签署人塞进值段会当场打红，并让「销票」多一个要清的字段。
+-- 侧键与值同生共死：sign 同事务写，forget / clear 同事务清（半状态会让判定读到
+-- 「值空了、签署人还在」或反之）。键名以 `read_actor.` 开头而**不是** `read.actor.`：
+-- 后者会被 config.set 的 `read.` 分支认成签名键，把不可写面暴露给用户面。
+local ACTOR_PREFIX = "settings.read_actor."
 
 -- 值组装（单一事实源；handler 与测试共用口径）。
 local function value_of(ver, scene, seq)
@@ -98,9 +104,12 @@ end
 -- 写面：签名 / 单件清除 / 边界销票
 -- ============================================================================
 
--- 签一件：值三段 + 索引补 doc（同键重写幂等 upsert）。
-function M.sign(doc, ver, scene)
+-- 签一件：值三段 + 索引补 doc + 签署人侧键（同键重写幂等 upsert）。
+-- `actor` 必需：handler 已在调用前拒签无身份签名。空侧键 **不写**——「不知道谁读的」
+-- 签名在按人判定里等于不存在，却会占着值让人误以为有效（宁可不写，不写空的）。
+function M.sign(doc, ver, scene, actor)
   ygg.kv.set(DOC_PREFIX .. doc, value_of(ver, scene, current_seq()))
+  ygg.kv.set(ACTOR_PREFIX .. doc, trim(actor or ""))
   local docs = index_docs()
   if not index_has(docs, doc) then
     docs[#docs + 1] = doc
@@ -113,10 +122,23 @@ function M.signed(doc)
   return parse_value(ygg.kv.get(DOC_PREFIX .. doc))
 end
 
--- 单件清除（`config.set read.<doc>=`）：值置空 + 索引摘除。空值不写新键（幂等）。
+-- 签署人（r9）：未签 / r3 旧存档（无侧键）→ ""。调用方必须把 "" 当「未知」而不当
+-- 「不是我」：旧存档不该因为机制升级被一夜判死（降级面由 gates 叙事告警）。
+function M.actor_of(doc)
+  local value = ygg.kv.get(ACTOR_PREFIX .. doc)
+  if type(value) ~= "string" then
+    return ""
+  end
+  return trim(value)
+end
+
+-- 单件清除（`config.set read.<doc>=`）：值置空 + 索引摘除 + 侧键同清。空值不写新键（幂等）。
 function M.forget(doc)
   if ygg.kv.get(DOC_PREFIX .. doc) ~= nil then
     ygg.kv.set(DOC_PREFIX .. doc, "")
+  end
+  if ygg.kv.get(ACTOR_PREFIX .. doc) ~= nil then
+    ygg.kv.set(ACTOR_PREFIX .. doc, "")
   end
   local docs = index_docs()
   local kept = {}
@@ -144,6 +166,7 @@ function M.clear()
   end
   for i = 1, #docs do
     ygg.kv.set(DOC_PREFIX .. docs[i], "")
+    ygg.kv.set(ACTOR_PREFIX .. docs[i], "")
     clock.clear_sign(docs[i])
   end
   ygg.kv.set(INDEX, "")
@@ -154,15 +177,27 @@ function M.count()
   return #index_docs()
 end
 
--- 覆盖面：本幕已签件数 / 本幕清单件数。
+-- 覆盖面：本幕已签件数 / 本幕清单件数（r9 追加 `mine` = 其中**本人**签的件数）。
 --   清单在场（r2 的 readPlan 已烘进 data/config.json）→ k = 清单内已签件数、n = 清单件数；
 --   清单缺席 → k = 已签件数、n = nil（**降级**：签名照旧成立，只是不算比例）。
+-- `k` 口径**不变**（本幕覆盖了几个文件）——`mine` 是第二个口径（其中几个是我签的），
+-- 两个必须在回执里并列出现：单报 `k/n` 就是「像我已签全」的歧义本身（r9 要修的东西）。
 -- 边界：清单里重复的 doc 只算一次；清单长度封顶 32（防手抖写成无限长）。
-function M.coverage(scene, plan)
+function M.coverage(scene, plan, actor)
+  local who = trim(actor or "")
   local docs = index_docs()
+  local function mine_of(doc)
+    if who == "" or not index_has(docs, doc) then
+      return 0
+    end
+    if M.actor_of(doc) ~= who then
+      return 0
+    end
+    return 1
+  end
   if type(plan) == "table" and type(plan[scene]) == "table" then
     local seen = {}
-    local n, k = 0, 0
+    local n, k, mine = 0, 0, 0
     for _, item in ipairs(plan[scene]) do
       local doc = trim(type(item) == "string" and item or "")
       if doc ~= "" and seen[doc] == nil and n < 32 then
@@ -171,11 +206,16 @@ function M.coverage(scene, plan)
         if index_has(docs, doc) then
           k = k + 1
         end
+        mine = mine + mine_of(doc)
       end
     end
-    return k, n
+    return k, n, mine
   end
-  return #docs, nil
+  local mine = 0
+  for i = 1, #docs do
+    mine = mine + mine_of(docs[i])
+  end
+  return #docs, nil, mine
 end
 
 M.value_of = value_of

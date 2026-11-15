@@ -2025,7 +2025,23 @@ mod inbox_route_actor_tests {
         // 反查：未声明布尔的动作 → (false, false)
         assert_eq!(routes.actor_flags_for("proposal.submit"), (false, false));
         // 反查：不在表内的动作 → (false, false)（宿主不注入也不拦截）
-        assert_eq!(routes.actor_flags_for("config.set"), (false, false));
+        assert_eq!(routes.actor_flags_for("verify.submit"), (false, false));
+    }
+
+    /// r9：**stamp-only 路由**（声明 `actor` 但不带 `write`）是合法形态——它让宿主为
+    /// 非 inbox 动作盖身份章，却不长出任何 CLI 写命令（`write_binding` 只匹配带 `write` 的）。
+    #[test]
+    fn stamp_only_route_declares_actor_without_a_write_binding() {
+        let mut route = legacy_route();
+        route["action"] = json!("config.set");
+        route["fields"] = json!(["key", "value", "external_id"]);
+        route["actor"] = json!(true);
+        route.as_object_mut().expect("route object").remove("write");
+        let routes = InboxRoutes::from_pack(&routes_pack(route)).expect("stamp-only 必须放行");
+        assert_eq!(routes.actor_flags_for("config.set"), (true, false));
+        // 无 write 绑定 ⇒ 宿主拒绝任何以它为目标的写命令（不会冒出 `--config` 旗标）。
+        assert!(routes.write_binding("config").is_none());
+        assert!(routes.write_binding("proposal").is_none());
     }
 
     #[test]

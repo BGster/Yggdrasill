@@ -13407,12 +13407,25 @@ end)
 
     /// 声明承重锁（r3 变异探针 4 的红面）：真 Mod 的 proposal 路由必须声明双布尔——
     /// 删掉任一布尔，此测试与宿主注入路径一起变红（声明是注入/拦截的唯一依据）。
+    /// r9 追加：三个**推进/配置动作**各有一条 stamp-only 路由（只盖 actor，不声明
+    /// actor_session、不带 write）——宿主据此为直接 `--event` 通道盖章，人机门禁才"按人"。
     #[test]
     fn project_pack_declares_actor_bools_on_the_proposal_route() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let routes =
             InboxRoutes::load(&repo.join(".ygg/mods/agent-seed")).expect("读真 Mod 路由表");
         assert_eq!(routes.actor_flags_for("proposal.submit"), (true, true));
+        // r9：签名与推进动作必须盖章（否则按人门禁无身份来源）。
+        assert_eq!(routes.actor_flags_for("config.set"), (true, false));
+        assert_eq!(routes.actor_flags_for("gate.approve"), (true, false));
+        assert_eq!(routes.actor_flags_for("coordinate.submit"), (true, false));
+        // stamp-only 的负面契约：这三条不得长出任何写命令（inbox 不是它们的旁路）。
+        for kind in ["config", "gate", "coordinate"] {
+            assert!(
+                routes.get(kind).is_some_and(|route| route.write.is_none()),
+                "`{kind}` 必须是 stamp-only（不带 write）"
+            );
+        }
         // 其余动作不声明身份段（宿主不注入也不拦截）。
         assert_eq!(routes.actor_flags_for("tool.result"), (false, false));
         assert_eq!(routes.actor_flags_for("requirement.add"), (false, false));

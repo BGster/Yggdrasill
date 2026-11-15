@@ -26,9 +26,9 @@
       "sha256": "892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
     },
     {
-      "byteLength": 12952,
+      "byteLength": 15761,
       "path": "src/domain/gates.lua",
-      "sha256": "2fd38c72a83a00736636b92669a15893785646f4570468ec8728e95872141b27"
+      "sha256": "4fa98412f0cf9e161fea27e4f53f95a264dd20b9f1ebc990b29873c0ff2e10c0"
     },
     {
       "byteLength": 12478,
@@ -46,9 +46,9 @@
       "sha256": "274e53cc4376c14b49671b059a524e2ee109859a4a6285fdb4f218b3118f2cfa"
     },
     {
-      "byteLength": 6640,
+      "byteLength": 8733,
       "path": "src/domain/readsig.lua",
-      "sha256": "1cf8b2acb2a7d9db8877c39ea0e72ab16ba2aacc2b3f784c91a429f88cfc6f08"
+      "sha256": "9237f057c27b24313b3eb14034fee45f274563ff16ecb1b7de50c187e062aea9"
     },
     {
       "byteLength": 19846,
@@ -56,9 +56,9 @@
       "sha256": "bce774f866e5bc549c1f6e09b8ef28b8c288721855e22911e06b794e04304020"
     },
     {
-      "byteLength": 38561,
+      "byteLength": 41068,
       "path": "src/domain/wire.lua",
-      "sha256": "a7ff5bfb4389faa6d5416833bcf7a9568e2c3e0b713e01c12ff3b1ac91204fcb"
+      "sha256": "98642525d9452d742ca85c1bfda2b20c9791b6598e6452679211b3c676502823"
     },
     {
       "byteLength": 11376,
@@ -76,9 +76,9 @@
       "sha256": "ab8a748c8af18c006c2ec907b8598ddb9eaa6a075440ae78c2e11434d7df424a"
     },
     {
-      "byteLength": 2794,
+      "byteLength": 3331,
       "path": "src/handlers/operate/choice.lua",
-      "sha256": "bfe8368afb106a4777b3acf6a330535ba9ce7a0792c6ce869df10a038566802f"
+      "sha256": "3429cdb5a2d997c0b28721d545c7ee754770f5fbc8b792204355446caa03643f"
     },
     {
       "byteLength": 8383,
@@ -91,14 +91,14 @@
       "sha256": "f6f79e07101987e574888d8e85e83adaec7fa2c45b992ee87115938cb0ea02e6"
     },
     {
-      "byteLength": 25734,
+      "byteLength": 26375,
       "path": "src/handlers/operate/review.lua",
-      "sha256": "68c780242969f585e60dd75d6a629975cd06044261ed339a21817e829903c2a7"
+      "sha256": "71cb11d5faff46b141acda2cf90c7e67c6d1f5ea30c3707ccaebec2b06dce38b"
     },
     {
-      "byteLength": 7946,
+      "byteLength": 8729,
       "path": "src/handlers/requirements/gate_actions.lua",
-      "sha256": "5de2b08d39e615133cd419d9138fb8f952b53c752c2204055d0b38c0c5b2766d"
+      "sha256": "4c3bb9d95447708f7ec0d2aec2625c5463271923dd32db4690bbf04cf8ed7332"
     },
     {
       "byteLength": 4923,
@@ -106,9 +106,9 @@
       "sha256": "a70506ba126f783958cd413fe46644af8c0bc5d36a212deb7e52626ab12752a5"
     },
     {
-      "byteLength": 13986,
+      "byteLength": 14298,
       "path": "src/handlers/requirements/proposals.lua",
-      "sha256": "feb15cba63662aee89f1dfbccb1673cecc3bf53c98d08e2d3e0f638bfad00968"
+      "sha256": "d4d25070df74d74a9173466f2237cfd9a8b5aed69c8121c972d6f37187387be1"
     },
     {
       "byteLength": 15799,
@@ -116,9 +116,9 @@
       "sha256": "e7e020d146871cc99d3807f9e1347c345799722d240741ecd8d0a42aedd958ca"
     },
     {
-      "byteLength": 15338,
+      "byteLength": 16515,
       "path": "src/handlers/system/config.lua",
-      "sha256": "3d58872f8fecfe7937f8596cca2e2729505a49de62a5204df99fa7630b332be8"
+      "sha256": "c65207d5e9b862b70d29c23d49d80a1af7faaacf36e9805f1c5575490c5975cb"
     },
     {
       "byteLength": 1155,
@@ -201,12 +201,12 @@
       "sha256": "019019913147c506b667f0eb08853ea2748cf67faae299ad77dfe497dac63199"
     },
     {
-      "byteLength": 12761,
+      "byteLength": 13999,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "7fe3cb5a816fcac46a2ebfbb4100581c73eb572d6f147dd8a6364e9f10975c0e"
+      "sha256": "5395da82bca08f432cff18fe5f7b726e2d9ff397be557763cd328a80f250561a"
     },
     {
       "byteLength": 1918,

@@ -48,6 +48,11 @@ use ygg_sandbox::HostToolRunner;
 
 mod support;
 
+/// r9：测试侧提交者身份（宿主在真路径上盖 `|actor=`，kernel 直派没有宿主通道）。
+/// 签名与推进都用**同一个**身份，才符合「执行这个动作的人读过」的语义；
+/// 需要另一个代理时用 `game.as_actor(Some("..."))`。
+const TEST_ACTOR: &str = "test-agent";
+
 // ───────────────────────── locating ─────────────────────────
 
 /// Repository root (`CARGO_MANIFEST_DIR` is `crates/ygg-sandbox`; two levels up).
@@ -76,6 +81,11 @@ struct Game {
     dir: PathBuf,
     /// 关掉自动补签（只给读签门禁自己的用例用：它们要「不签」的现场）。
     suppress_reads: bool,
+    /// r9 提交者身份（宿主盖章的测试侧替身）。**只有四个声明路由用得上**：
+    /// `proposal.submit` / `gate.approve` / `coordinate.submit` / `config.set`——宿主在真路径上
+    /// 往载荷末尾盖 `|actor=<id>`，kernel 直派没有这条通道，所以测试必须自己模拟它。
+    /// `None` 模拟「旧宿主 / 没带 --actor」的直接派发面（r9 的拒签与拒绝路径靠它取证）。
+    stamp_actor: Option<String>,
 }
 
 impl Game {
@@ -91,15 +101,45 @@ impl Game {
             kernel,
             dir: dir.to_path_buf(),
             suppress_reads: false,
+            stamp_actor: Some(TEST_ACTOR.to_owned()),
         };
         game.narrate("event.start", "0");
         game
     }
 
+    /// 本步以谁的身份提交（模拟 `--actor`；`None` = 不盖章）。
+    fn as_actor(&mut self, actor: Option<&str>) {
+        self.stamp_actor = actor.map(str::to_owned);
+    }
+
+    /// 派发前按声明路由盖身份段（宿主 `inject_identity_segments` 的同形模拟）。
+    /// 只盖四个真声明了 `actor` 的动作；已自带 `actor=` / `actor_session=` 尾段的载荷原样透传。
+    fn stamped(&self, event: &str, payload: &str) -> String {
+        let Some(actor) = self.stamp_actor.as_deref() else {
+            return payload.to_owned();
+        };
+        if !matches!(
+            event,
+            "proposal.submit" | "gate.approve" | "coordinate.submit" | "config.set"
+        ) {
+            return payload.to_owned();
+        }
+        if payload.contains("|actor=") || payload.contains("|actor_session=") {
+            return payload.to_owned();
+        }
+        let trimmed = payload.trim_end();
+        if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+            format!("{}|actor={actor}\"", &trimmed[..trimmed.len() - 1])
+        } else {
+            payload.to_owned()
+        }
+    }
+
     /// Dispatch and assert the envelope `ok` (a domain-error envelope always fails the test).
     #[track_caller]
     fn reply(&mut self, event: &str, payload: &str) -> Json {
-        let reply: Json = serde_json::from_str(&self.kernel.dispatch(event, payload))
+        let stamped = self.stamped(event, payload);
+        let reply: Json = serde_json::from_str(&self.kernel.dispatch(event, &stamped))
             .unwrap_or_else(|err| panic!("the {event} reply is not JSON: {err}"));
         assert_eq!(reply["ok"], json!(true), "{event} dispatch failed: {reply}");
         reply
@@ -109,7 +149,8 @@ impl Game {
     /// `error.code` / `error.message` instead of a narrative.
     #[track_caller]
     fn raw_reply(&mut self, event: &str, payload: &str) -> Json {
-        serde_json::from_str(&self.kernel.dispatch(event, payload))
+        let stamped = self.stamped(event, payload);
+        serde_json::from_str(&self.kernel.dispatch(event, &stamped))
             .unwrap_or_else(|err| panic!("the {event} reply is not JSON: {err}"))
     }
 
@@ -1708,6 +1749,7 @@ fn gate_approval_settles_its_own_proposal_and_still_blocks_foreign_pendings() {
             .expect("a save with an injected own proposal must load"),
         dir: plan_gate.dir.clone(),
         suppress_reads: false,
+        stamp_actor: Some(TEST_ACTOR.to_owned()),
     };
     blocked.assert_kv("prop.2.status", json!("pending"));
 
@@ -2160,8 +2202,14 @@ fn submit_identity_for(
     if let Some(session) = session {
         payload.push_str(&format!("|actor_session={session}"));
     }
+    // r9：**签名与提交同身份**——调用方声明的 actor 就是本步的执行者，补签也必须以它签，
+    // 否则按人门禁会把「自己签的」看成「别人签的」（传 None = 老宿主无章，补签也不盖章）。
+    let previous = game.stamp_actor.clone();
+    game.as_actor(actor);
     game.ensure_reads("proposal.submit", Some(stage), req_index(req));
-    game.narrate("proposal.submit", &text(&payload))
+    let lines = game.narrate("proposal.submit", &text(&payload));
+    game.stamp_actor = previous;
+    lines
 }
 
 /// verified：exec 与宿主章同句柄 → 双章落库；save/重放后 KV 仍可读。
@@ -2191,6 +2239,7 @@ fn actor_channel_verified_lands_in_kv_and_survives_a_reload() {
         kernel: game.bundle.restore(&bytes).expect("restore from save"),
         dir: game.dir.clone(),
         suppress_reads: false,
+        stamp_actor: Some(TEST_ACTOR.to_owned()),
     };
     rebuilt.assert_kv("prop.1.actor", json!("agent-1"));
     rebuilt.assert_kv("prop.1.actor_session", json!("s-plan-1"));
@@ -2230,19 +2279,41 @@ fn actor_channel_mismatch_is_recorded_never_rejected() {
     game.assert_kv("req.1.gate", json!("plan"));
 }
 
-/// unverified + actor-only：无章 = 章位空串；只带章不带 exec = 只记章、不绑账本；
-/// 账本绑定不受“打回”影响（账本只增改）。
+/// unverified + actor-only：r9 起「有 exec 无章」不再是可推进态——无身份就无法签名，
+/// 也就无法自证「执行这个动作的人读过」（拒签 + 拒绝推进，零写入）；
+/// 只带章不带 exec 仍合法（只记章、不绑账本）；账本绑定不受「打回」影响（账本只增改）。
 #[test]
 fn actor_channel_unverified_and_actor_only() {
     let mut game = Game::open(&project_mod_dir());
     start_requirement(&mut game);
 
-    // unverified：exec 有、章无（旧宿主 / 直接派发面）。
-    submit_with_identity(&mut game, 1, "plan", "id-unv", Some("agent-1"), None, None);
-    game.assert_kv("prop.1.actor", json!(""));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    // 本段模拟「旧宿主 / 没带 --actor」：整个步骤无身份。
+    game.as_actor(None);
 
-    // r1 的账本绑定不受“打回”影响（账本只增改）；plan 提案打回清门禁、job 挂回 plan。
+    // unverified：exec 有、章无（旧宿主 / 直接派发面）→ r9 拒。
+    let refused = submit_with_identity(&mut game, 1, "plan", "id-unv", Some("agent-1"), None, None);
+    assert_refused(&refused, "read-gate/no-identity");
+    game.assert_kv("prop.1.req", Json::Null);
+    game.assert_kv("settings.executor.r1.plan", Json::Null);
+    // 无身份时签名本身也被拒（“不知道谁签的”的签名在判定里等于不存在）。
+    let unsigned = game.narrate("config.set", &text("read.acts/coordinate=aaaaaa"));
+    assert!(
+        unsigned.iter().any(|line| line.contains("SIGNED REFUSED")),
+        "a signature without an actor must be refused: {unsigned:#?}"
+    );
+    game.assert_kv("settings.read.acts/coordinate", Json::Null);
+
+    // 恢复正常身份，r1 的账本绑定不受「打回」影响（账本只增改）；plan 提案打回清门禁、job 挂回 plan。
+    game.as_actor(Some(TEST_ACTOR));
+    submit_with_identity(
+        &mut game,
+        1,
+        "plan",
+        "id-plan",
+        Some("agent-1"),
+        Some(TEST_ACTOR),
+        None,
+    );
     game.narrate("proposal.reject", &text("r1|replan without identity"));
     game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
     game.assert_kv("req.1.gate", json!(""));
@@ -2294,6 +2365,9 @@ fn actor_session_segments_lock_relative_order_and_full_chain() {
 
     // 全链 10 段（R5 形状锁）：字段与三个尾段各归其位。
     // r4 开闸：本用例直派提交（不走 submit* helper），补签一行以穿读签门禁。
+    // r9：签名与提交必须**同身份**——载荷章是 agent-1，补签也必须以 agent-1 签，
+    // 否则按人门禁会把「自己签的」判成「别人签的」（other-actor 拒绝）。
+    game.as_actor(Some("agent-1"));
     game.ensure_reads("proposal.submit", Some("plan"), Some(1));
     let lines = game.narrate(
         "proposal.submit",
@@ -2565,20 +2639,28 @@ fn read_coverage_counts_planned_docs() {
 
     let first = game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
     assert_eq!(
-        count_lines(&first, "1/2 signed in this act"),
+        count_lines(&first, "this act has 1/2 docs signed, 1 of them by you"),
         1,
         "{first:#?}"
     );
+    // r9：另一个代理签下第二件 —— 覆盖面 k 上升，但「我签的」不动。两个口径必须分得开：
+    // 旧文案的 `2/2` 读起来像「我已签全」，而它从来只统计「本幕覆盖了几件」。
+    game.as_actor(Some("other-agent"));
     let second = game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
     assert_eq!(
-        count_lines(&second, "2/2 signed in this act"),
+        count_lines(&second, "this act has 2/2 docs signed, 1 of them by you"),
         1,
         "{second:#?}"
     );
+    game.assert_kv(
+        "settings.read_actor.coordinate/dispatch",
+        json!("other-agent"),
+    );
     // 计划外的 doc：签名照旧成立，但不进分子（不拒签、不越界）。
+    game.as_actor(Some(TEST_ACTOR));
     let extra = game.narrate("config.set", &text("read.acts/charter=aaaaaa"));
     assert_eq!(
-        count_lines(&extra, "2/2 signed in this act"),
+        count_lines(&extra, "this act has 2/2 docs signed, 1 of them by you"),
         1,
         "{extra:#?}"
     );
@@ -2922,6 +3004,7 @@ fn read_gate_refuses_a_signature_against_a_revised_doc() {
         bundle,
         dir: dir.clone(),
         suppress_reads: true,
+        stamp_actor: Some(TEST_ACTOR.to_owned()),
     };
     let lines = revised.narrate(
         "proposal.submit",
@@ -2966,6 +3049,160 @@ fn read_gate_does_not_mask_existing_rejection_reasons() {
         joined.contains("is bound to rev") || refused(&lines, "gate.approve"),
         "the pre-existing gate reason must win: {lines:#?}"
     );
+}
+
+// ───────────────── r9 · attribution: the signature belongs to an actor ─────────────────
+
+/// r9 核心断言：**别人**签的不能当「你读过」——这正是本需求要修的缺陷（r6 子代理签名
+/// 被主代理的 gate.approve 计入 `2/2 signed`）。同一份台账、同一份签名，换个人推进就必须拒。
+#[test]
+fn read_gate_refuses_a_signature_owned_by_another_actor() {
+    let mut game = armed_game("gate-other-actor");
+    // 另一个代理把本幕必读签齐（真路径上它就是当时的执行者）。
+    game.as_actor(Some("r6-planner"));
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    game.assert_kv("settings.read_actor.acts/coordinate", json!("r6-planner"));
+
+    // 换成另一个代理推进：签名有效（ver 对、序号新），但不是它签的。
+    game.as_actor(Some("main-agent"));
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    let joined = lines.join("\n");
+    assert_refused(&lines, "proposal.submit");
+    assert!(
+        joined.contains("read-gate/other-actor"),
+        "another actor's signature must be reported as such (not as missing): {lines:#?}"
+    );
+    assert!(
+        joined.contains("by r6-planner") && joined.contains("dispatched as main-agent"),
+        "the refusal must name both the signer and the acting actor: {lines:#?}"
+    );
+    assert!(
+        joined.contains("0 of them by you"),
+        "the two counts must stay separate (coverage vs mine): {lines:#?}"
+    );
+    // 拒绝零副作用：提案不落库、门禁不挂（dispatch 时写下的空串保持不变）。
+    game.assert_kv("prop.1.req", Json::Null);
+    game.assert_kv("req.1.gate", json!(""));
+
+    // 正面对照：换回签署人本人 → 同一份签名立刻生效（证明拒的是“不是你”，不是“签名无效”）。
+    game.as_actor(Some("r6-planner"));
+    let ok = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert!(!refused(&ok, "proposal.submit"), "{ok:#?}");
+    game.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// 造一个「计划门禁已挂起」的现场：以 `actor` 签齐本幕必读、交计划提案（交付即门禁），
+/// 并把该门禁交出的下一幕规则（`req-acts/delivery`）也签上——门禁批的就是它。
+fn armed_plan_gate(tag: &str, actor: &str) -> Game {
+    let mut game = armed_game(tag);
+    game.as_actor(Some(actor));
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    sign(&mut game, "req-acts/delivery", "cccccc");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
+    assert_eq!(game.phase("r1"), "plan_gate");
+    game
+}
+
+/// r9：无身份的直接派发**不能**推进（能带而不带 = 机器门被绕开）；guide 模式的人机门
+/// 先报（更粗、更早），所以这里用 `play.mode=goal` 把那条门绕到背后去。
+#[test]
+fn read_gate_refuses_a_direct_approve_without_identity() {
+    let mut game = armed_plan_gate("gate-no-identity", "r6-planner");
+    game.narrate("config.set", &text("play.mode=goal"));
+    game.as_actor(None);
+
+    let lines = game.narrate("gate.approve", &text("r1"));
+    let joined = lines.join("\n");
+    assert_refused(&lines, "gate.approve");
+    assert!(
+        joined.contains("read-gate/no-identity"),
+        "a direct advance without an actor must be refused: {lines:#?}"
+    );
+    assert!(
+        joined.contains("YGG_ACTOR") && joined.contains("config.set read."),
+        "the refusal must give the self-release path (identity flag + sign commands): {lines:#?}"
+    );
+    // 状态不动：门禁仍挂、计划未过。
+    game.assert_kv("req.1.gate", json!("plan"));
+    game.assert_kv("req.1.plan_ok", json!(false));
+}
+
+/// r9：**票据路降级**——人工菜单点击永远没有宿主身份段（`ygg.choice_selected` → emit）。
+/// 此时按人判定不可得，于是降为覆盖检查，并把“不区分签署人”写进回执。
+/// 这条用例同时是 `guide` 模式的防锁死线：若票据也 fail-closed，人类就再也过不了门。
+#[test]
+fn read_gate_ticket_degrades_to_coverage_only() {
+    // 另一个代理把该签的都签了（本用例的现场就是“签字的人不是点菜单的人”）。
+    let mut game = armed_plan_gate("gate-ticket", "r6-planner");
+    game.as_actor(None);
+    game.suppress_reads = true;
+
+    let clicked = game.click("gate.approve — ");
+    let lines = narrative_lines(&clicked);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("[READ GATE · ticket]"),
+        "the ticket path must declare its degraded semantics: {lines:#?}"
+    );
+    assert!(
+        joined.contains("signers are NOT distinguished"),
+        "degradation must be stated, not implied: {lines:#?}"
+    );
+    assert!(!joined.contains("read-gate/"), "{lines:#?}");
+    // 降级不是放水：覆盖率仍然被核（这里 1/1 已签），所以门禁真的过了。
+    game.assert_kv("req.1.plan_ok", json!(true));
+    game.assert_kv("req.1.gate", json!(""));
+}
+
+/// r9：侧键与值**同生共死**——单件清除与作用域销票都必须连带清签署人，
+/// 否则判定会读到「值空了、签署人还在」或「值在、签署人丢了」的半状态。
+#[test]
+fn read_actor_side_key_dies_with_the_signature() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.assert_kv(
+        "settings.read.acts/coordinate",
+        json!("9f2c1a|coordinate|0"),
+    );
+    game.assert_kv("settings.read_actor.acts/coordinate", json!(TEST_ACTOR));
+
+    // ① 单件清除：两个键一起变空。
+    game.narrate("config.set", &text("read.acts/coordinate="));
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_actor.acts/coordinate", json!(""));
+
+    // ② 换人重签 = 侧键 upsert（不是两个签名叠加）。
+    game.as_actor(Some("other-agent"));
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.assert_kv("settings.read_actor.acts/coordinate", json!("other-agent"));
+
+    // ③ 作用域边界（rev 推进 → req_bump_rev 的销票）：两个键一起清。
+    game.narrate(
+        "requirement.add",
+        &text("side-key requirement|synthetic description|semantics-side"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    game.narrate(
+        "requirement.amend",
+        &text("r1||amended to bump the revision"),
+    );
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_actor.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_index", json!(""));
 }
 
 /// P10 决策归属的守门线：`play.mode=goal` 在 `goal.authorization` 注册之前会发出可读
@@ -3748,9 +3985,9 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
     assert_eq!(documented, actual, "core copy table must cover core.json");
     total += documented.len();
-    assert_eq!(total, 450, "414 beats + 36 core keys; §H adds no keys");
+    assert_eq!(total, 454, "418 beats + 36 core keys; §H adds no keys");
     assert!(
-        core_text.contains("450 个唯一键") && core_text.contains("不得再次相加"),
+        core_text.contains("454 个唯一键") && core_text.contains("不得再次相加"),
         "the global ledger must explain why the 23 pointer shells are not added again"
     );
 }
