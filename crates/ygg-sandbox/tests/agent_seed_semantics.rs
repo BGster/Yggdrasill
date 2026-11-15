@@ -3970,6 +3970,577 @@ fn context_pointer_parser_accepts_subdirectories_and_flags_missing_anchors() {
     assert_eq!(violations.len(), 1, "`..` 穿越必须违规：{violations:?}");
 }
 
+// ──────────────── r6: docs/design 契约树的指针 / 索引机检 ────────────────
+
+/// 解析一段文本里所有指向 `docs/design/` 的文件指针（**允许多级子目录**）。
+///
+/// 字符集 `[A-Za-z0-9._/-]`（与 `context_pointer_paths` 同集）：遇空白、`§`、`；`、中文标点即止，
+/// 所以占位 `docs/design/<module>/<topic>.md`、通配 `docs/design/*.md`、目录指针
+/// `docs/design/kernel/` 都不会被当成文件指针。
+///
+/// r6 比 r5 的实现多做一步：把尾部的 `.` 与 `/` 剥掉再判 `.md`——
+/// `…/harness-tools.md.` 这类「句末点多写一个」的写法在只认 `.md` 结尾的解析器里会被整条吞掉（漏检不是通过）。
+fn design_pointer_paths(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some(pos) = rest.find("docs/design/") {
+        let tail = &rest[pos + "docs/design/".len()..];
+        let run: String = tail
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+            .collect();
+        rest = &tail[run.len().min(tail.len())..];
+        let file = run.trim_end_matches(['.', '/']);
+        if file.ends_with(".md") {
+            out.push(file.to_owned());
+        }
+    }
+    out
+}
+
+/// 核一个键值的全部 design 指针：累加 `count` 并返回违规清单（锚点缺失 / 非法路径段）。
+///
+/// `..` 与空段一律判违规——`docs/design/kernel/../../AGENTS.md` 能骗过存在性检查，
+/// 却把读者带出契约树。
+fn design_pointer_violations(
+    design_dir: &std::path::Path,
+    ns: &str,
+    key: &str,
+    value: &str,
+    count: &mut usize,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    for file in design_pointer_paths(value) {
+        *count += 1;
+        if file.split('/').any(|seg| seg.is_empty() || seg == "..") {
+            violations.push(format!(
+                "{ns}.{key} -> docs/design/{file} (illegal path segment)"
+            ));
+            continue;
+        }
+        if !design_dir.join(&file).is_file() {
+            violations.push(format!("{ns}.{key} -> docs/design/{file} (missing)"));
+        }
+    }
+    violations
+}
+
+/// 递归收集目录下按后缀过滤的文件（不引 `walkdir`：`ygg-sandbox` 的 dev-dependencies 只有 `ygg-store`）。
+fn collect_files_with(dir: &std::path::Path, suffix: &str, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|e| e.path())
+        .collect();
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            collect_files_with(&path, suffix, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some(suffix) {
+            out.push(path);
+        }
+    }
+}
+
+/// 词法归一化：消 `./` 与 `..` 段（不碰磁盘）。
+fn normalize_repo_path(path: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for segment in path.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out.join("/")
+}
+
+/// r6：设计契约树的**指针可达性**。
+///
+/// `docs/design/` 收缩为 `kernel/ host/ mod/` 三模块后，playbook 的 `basis`/`source`、`texts` 的
+/// 文案键、`src/**` 的注释里那些 `docs/design/<module>/<topic>.md` 指针必须逐个命中真实文件——
+/// 它们会原样出现在回执与章摘要里，断了就是把读者送进空目录。
+///
+/// 同时钉住**逐来源硬账**：33 处（ch1 4 + ch4-mod-host 8 + ch4-protocol 3 + ch4-run-machine 7
+/// + ch5 6 + beats-settlement 3 + src/runtime/tools.lua 2）。删掉一处指针 → ledger 少 1 → 转红。
+///
+/// Mutation：把任一指针改成 `docs/design/kernel/nope.md`，或用例改用不存在的子目录 → 本用例转红。
+#[test]
+fn design_pointer_anchors_exist_under_docs_design() {
+    let repo = repo_dir();
+    let mod_dir = project_mod_dir();
+    let design_dir = repo.join("docs/design");
+
+    // (来源文件, 键, 值) —— playbook / texts / core / src 四处，缺一处就是漏检
+    let mut items: Vec<(String, String, String)> = Vec::new();
+    let mut playbook: Vec<PathBuf> = Vec::new();
+    collect_files_with(&mod_dir.join("data/playbook"), "json", &mut playbook);
+    for path in &playbook {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("playbook file name")
+            .to_owned();
+        let fragment = read_json(path);
+        let Some(sections) = fragment["sections"].as_array() else {
+            continue; // `head.json` 是章首投影，没有 sections
+        };
+        for section in sections {
+            let id = section["id"].as_str().unwrap_or("?").to_owned();
+            for key in ["source", "summary"] {
+                if let Some(text) = section[key].as_str() {
+                    items.push((name.clone(), format!("{id}.{key}"), text.to_owned()));
+                }
+            }
+            for rule in section["rules"].as_array().expect("rules") {
+                let rid = rule["id"].as_str().unwrap_or("?").to_owned();
+                for key in ["text", "basis"] {
+                    if let Some(text) = rule[key].as_str() {
+                        items.push((name.clone(), format!("{rid}.{key}"), text.to_owned()));
+                    }
+                }
+            }
+        }
+    }
+    let mut texts: Vec<PathBuf> = Vec::new();
+    collect_files_with(&mod_dir.join("data/texts"), "json", &mut texts);
+    for path in &texts {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("texts file name")
+            .to_owned();
+        let fragment = read_json(path);
+        if let Some(beats) = fragment["beats"].as_object() {
+            for (key, value) in beats {
+                if let Some(text) = value.as_str() {
+                    items.push((name.clone(), key.clone(), text.to_owned()));
+                }
+            }
+        }
+        for ns in ["scenes", "prompts"] {
+            if let Some(map) = fragment[ns].as_object() {
+                for (key, value) in map {
+                    if let Some(text) = value.as_str() {
+                        items.push((name.clone(), format!("{ns}.{key}"), text.to_owned()));
+                    }
+                }
+            }
+        }
+    }
+    let mut lua: Vec<PathBuf> = Vec::new();
+    collect_files_with(&mod_dir.join("src"), "lua", &mut lua);
+    for path in &lua {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("lua file name")
+            .to_owned();
+        let text = std::fs::read_to_string(path).expect("read lua source");
+        items.push((name, "source".to_owned(), text));
+    }
+
+    let mut ledger: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut violations: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    for (source, key, value) in &items {
+        let mut n = 0usize;
+        violations.extend(design_pointer_violations(
+            &design_dir,
+            source,
+            key,
+            value,
+            &mut n,
+        ));
+        if n > 0 {
+            total += n;
+            *ledger.entry(source.clone()).or_insert(0) += n;
+        }
+    }
+
+    let expected: std::collections::BTreeMap<String, usize> = [
+        ("ch1-foundation.json", 4usize),
+        ("ch4-mod-host.json", 8),
+        ("ch4-protocol.json", 3),
+        ("ch4-run-machine.json", 7),
+        ("ch5-evolution-tools.json", 6),
+        ("beats-settlement.json", 3),
+        ("tools.lua", 2),
+    ]
+    .into_iter()
+    .map(|(name, count)| (name.to_owned(), count))
+    .collect();
+
+    assert_eq!(
+        ledger, expected,
+        "docs/design 指针账漂移（逐来源）：{ledger:?}"
+    );
+    assert_eq!(total, 33, "docs/design 指针总数漂移：期望 33，实得 {total}");
+    assert!(
+        violations.is_empty(),
+        "docs/design 指针锚点不存在：{}",
+        violations.join(", ")
+    );
+}
+
+/// r6 反向断言（漏检防线）：验证性、子目录、`..` 三件事一起钉死。
+///
+/// ① 子目录指针必须识别并计数（旧式只认 `[A-Za-z0-9._-]` 的实现给 0 条）；
+/// ② 句末点多写一个（`…/harness-tools.md.`）也必须识别（r5 的实现会整条吞掉）；
+/// ③ 目录指针 / 通配 / 占位不算文件指针；
+/// ④ 存在的子目录锚点：计数 1、零违规；
+/// ⑤ 不存在的子目录锚点：计数 1、一条违规（**漏检不是通过**）；
+/// ⑥ `..` 穿越必须判违规。
+///
+/// Mutation：把 `design_pointer_paths` 的字符集退回 `[A-Za-z0-9._-]`（去掉 `/`）→ ①⑤转红；
+/// 去掉 `trim_end_matches` → ②转红；去掉 `..` 判定 → ⑥转红。
+#[test]
+fn design_pointer_parser_accepts_subdirectories_and_flags_missing_anchors() {
+    let design_dir = repo_dir().join("docs/design");
+
+    // ① 一层子目录
+    assert_eq!(
+        design_pointer_paths("见 docs/design/kernel/state-machine.md（状态机）。"),
+        vec!["kernel/state-machine.md".to_string()]
+    );
+    // ② 句末点多写一个也不吞；紧邻中文标点 / `；` 不吞路径
+    assert_eq!(
+        design_pointer_paths("改 harness-tools 前读 docs/design/host/harness-tools.md. 再看 docs/design/mod/tool-bridge.md；"),
+        vec![
+            "host/harness-tools.md".to_string(),
+            "mod/tool-bridge.md".to_string()
+        ]
+    );
+    // ③ 目录指针 / 通配 / 占位都不算文件指针
+    assert!(design_pointer_paths(
+        "目录 docs/design/kernel/ 与通配 docs/design/*.md 与占位 docs/design/<module>/<topic>.md"
+    )
+    .is_empty());
+
+    // ④ 存在的子目录锚点：计数 1、零违规
+    let mut n = 0;
+    assert!(design_pointer_violations(
+        &design_dir,
+        "t",
+        "ok",
+        "docs/design/kernel/state-machine.md",
+        &mut n
+    )
+    .is_empty());
+    assert_eq!(n, 1, "子目录指针必须计入 pointer_count");
+
+    // ⑤ 不存在的子目录锚点：必须计数 1 且产生 1 条违规
+    let mut n = 0;
+    let violations = design_pointer_violations(
+        &design_dir,
+        "t",
+        "missing",
+        "docs/design/kernel/definitely-no-such-doc.md",
+        &mut n,
+    );
+    assert_eq!(
+        (n, violations.len()),
+        (1, 1),
+        "指向不存在子目录文件的指针必须转红：{violations:?}"
+    );
+
+    // ⑥ `..` 穿越必须违规
+    let mut n = 0;
+    let violations = design_pointer_violations(
+        &design_dir,
+        "t",
+        "escape",
+        "docs/design/kernel/../README.md",
+        &mut n,
+    );
+    assert_eq!(violations.len(), 1, "`..` 穿越必须违规：{violations:?}");
+}
+
+/// r6：**索引集合相等** + `id` 与路径的双射 + 结构性禁止留壳。
+///
+/// ① `docs/design/README.md` 里指向本树的链接集合 **双向等于** 磁盘上的实文件集合
+///    （新增文件忘进索引 → 红；删文件索引还挂着 → 红）；
+/// ② 每份文件头的 `id` 与其相对路径（去 `.md`）逐字相等；
+/// ③ `docs/design/*.md` 只允许 `README.md`——出现任何平铺文件或软链即违规
+///    （这是「不留兼容层」的结构性表达：壳没有藏身处）；
+/// ④ 一级子目录恰好 `{kernel, host, mod}`，各自非空——出现第四目录（如残余桶 `narrative/`）即违规。
+///
+/// Mutation：往 `docs/design/` 放一个平铺文件或软链、或把某份文件搬进新目录 → 本用例转红。
+#[test]
+fn design_tree_index_is_complete_and_ids_match_paths() {
+    let repo = repo_dir();
+    let design_dir = repo.join("docs/design");
+
+    // ④ 一级子目录恰好三模块
+    let mut modules: Vec<String> = Vec::new();
+    let mut flat: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&design_dir).expect("read docs/design") {
+        let path = entry.expect("dir entry").path();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("name")
+            .to_owned();
+        if path.is_dir() {
+            modules.push(name);
+        } else {
+            flat.push(name);
+        }
+    }
+    modules.sort();
+    flat.sort();
+    assert_eq!(
+        modules,
+        vec!["host".to_string(), "kernel".to_string(), "mod".to_string()],
+        "docs/design 一级子目录必须是 kernel/host/mod 三模块（不得出现第四目录/残余桶）"
+    );
+    assert_eq!(
+        flat,
+        vec!["README.md".to_string()],
+        "docs/design/*.md 只允许树入口 README.md（平铺文件或软链 = 留了兼容壳）"
+    );
+
+    // ① 实文件集合（相对 docs/design）
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_files_with(&design_dir, "md", &mut files);
+    let mut actual: Vec<String> = files
+        .iter()
+        .filter_map(|path| {
+            path.strip_prefix(&design_dir)
+                .ok()
+                .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        })
+        .filter(|rel| rel != "README.md")
+        .collect();
+    actual.sort();
+    assert_eq!(actual.len(), 15, "契约面应为 15 份文件：{actual:?}");
+
+    // ① 索引里的链接集合
+    let readme = std::fs::read_to_string(design_dir.join("README.md")).expect("read design README");
+    let mut indexed: Vec<String> = Vec::new();
+    for chunk in readme.split("](").skip(1) {
+        let target = chunk
+            .split(')')
+            .next()
+            .unwrap_or("")
+            .split('#')
+            .next()
+            .unwrap_or("");
+        if target.is_empty() || target.starts_with("http") || target.starts_with("mailto:") {
+            continue;
+        }
+        if !target.ends_with(".md") {
+            continue;
+        }
+        let resolved = normalize_repo_path(&format!("docs/design/{target}"));
+        if let Some(rel) = resolved.strip_prefix("docs/design/") {
+            if rel != "README.md" {
+                indexed.push(rel.to_owned());
+            }
+        }
+    }
+    indexed.sort();
+    indexed.dedup();
+    assert_eq!(
+        indexed, actual,
+        "docs/design/README.md 的索引与实文件集合必须双向相等"
+    );
+
+    // ② id 与路径双射
+    for rel in &actual {
+        let path = design_dir.join(rel);
+        let text = std::fs::read_to_string(&path).expect("read design file");
+        let id_line = text
+            .lines()
+            .find(|line| line.starts_with("> **id** "))
+            .unwrap_or_else(|| panic!("{} 缺 `> **id**` 固定头", rel));
+        let declared = id_line
+            .trim_start_matches("> **id** ")
+            .split_whitespace()
+            .next()
+            .expect("id token");
+        let expected_id = rel.trim_end_matches(".md");
+        assert_eq!(declared, expected_id, "{rel} 的 id 与路径不一致");
+    }
+}
+
+/// r6：`AGENTS.md §3` 的每条 design 路由都能解析到真实文件，且路由行不许写裸文件名。
+///
+/// 13 条 design 指针（Entry 1 + Mod/host/tool 3 + serve/lanes/CLI/identity 4 + Kernel 4 +
+/// Runtime copy 1）。此外 §3 的 `Repository topology` 行必须把 `system-boundaries` 指向
+/// **`docs/context/cold-start/system-boundaries.md`**（r6 归位后它不再是 design 文件），
+/// 且该指针也在本用例的机检范围内。
+///
+/// Mutation：把某条路由改回旧平铺路径、或写成裸文件名 `mod-package.md`、或让 topology 行
+/// 仍指 `docs/design/system-boundaries.md` → 本用例转红。
+#[test]
+fn agents_design_routes_resolve() {
+    let repo = repo_dir();
+    let design_dir = repo.join("docs/design");
+    let agents = std::fs::read_to_string(repo.join("AGENTS.md")).expect("read AGENTS.md");
+
+    let start = agents
+        .find("## 3. Prompt-surface index")
+        .expect("AGENTS.md 必须有 `## 3. Prompt-surface index` 段");
+    let end = agents[start + 5..]
+        .find("\n## ")
+        .map(|offset| start + 5 + offset)
+        .unwrap_or(agents.len());
+    let section = &agents[start..end];
+    // 只看表格行：§3 的散文（退役说明）里也会提到 design 路径，但它不是路由。
+    let table: String = section
+        .lines()
+        .filter(|line| line.trim_start().starts_with('|'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let routes = design_pointer_paths(&table);
+    assert_eq!(
+        routes.len(),
+        13,
+        "AGENTS §3 的 design 路由应为 13 条：{routes:?}"
+    );
+    for route in &routes {
+        let path = design_dir.join(route);
+        assert!(
+            path.is_file(),
+            "AGENTS §3 路由解析不到文件：docs/design/{route}"
+        );
+        let module = route.split('/').next().unwrap_or("");
+        assert!(
+            route == "README.md" || matches!(module, "kernel" | "host" | "mod"),
+            "AGENTS §3 路由必须落在三模块内（或指向树入口 README.md）：docs/design/{route}"
+        );
+    }
+
+    // 裸文件名省略形（`mod-package.md`）不可机械解析，禁；
+    // 只禁「指向 design 的裸名」——context 树自身的裸名（`topology.md`）不属本约束。
+    let topics: Vec<String> = ["kernel", "host", "mod"]
+        .iter()
+        .filter_map(|module| std::fs::read_dir(design_dir.join(module)).ok())
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| entry.file_name().to_str().map(|n| n.to_owned()))
+        .collect();
+    for (index, token) in table.split('`').enumerate() {
+        if index % 2 == 1
+            && token.ends_with(".md")
+            && !token.contains('/')
+            && topics.iter().any(|topic| topic == token)
+        {
+            panic!(
+                "AGENTS §3 路由禁写裸文件名：`{token}`（写全路径 docs/design/<module>/{token}）"
+            );
+        }
+    }
+
+    // Repository topology 行：system-boundaries 必须落在 context/cold-start
+    let topology = table
+        .lines()
+        .find(|line| line.contains("Repository topology"))
+        .expect("AGENTS §3 必须有 Repository topology 行");
+    assert!(
+        topology.contains("docs/context/cold-start/system-boundaries.md"),
+        "Repository topology 行必须指向 docs/context/cold-start/system-boundaries.md：{topology}"
+    );
+    assert!(
+        !topology.contains("docs/design/system-boundaries.md"),
+        "system-boundaries 已归位 context，路由不得再指 design：{topology}"
+    );
+    assert!(
+        repo.join("docs/context/cold-start/system-boundaries.md")
+            .is_file(),
+        "Repository topology 路由指向的文件必须真实存在"
+    );
+}
+
+/// r6：`scenes.json` 的 `reference` 段——**登记但不拦门禁**，且默认值被负向断言钉死。
+///
+/// ① 三个 id 都能解析到 `docs/context/<id>.md`，且文件头 `id` 与表中值逐字相等；
+/// ② 负向：它们**不在** `scene` / `reqStage` 里（不被升格成必读）；
+/// ③ 负向：`data/config.json` 的 `readPlan` 里**不含**这三个 id（不进 `[READ FIRST]`、不出签名义务）。
+///
+/// Mutation：把某份归位文件挪进 `scene`/`reqStage`（升格成必读）→ ②③转红。
+#[test]
+fn context_scene_reference_ids_resolve() {
+    let repo = repo_dir();
+    let mod_dir = project_mod_dir();
+    let context_dir = repo.join("docs/context");
+    let scenes = read_json(&context_dir.join("scenes.json"));
+
+    let mut reference: Vec<String> = Vec::new();
+    let reference_obj = scenes["reference"].as_object().expect("scenes.reference");
+    for (key, value) in reference_obj {
+        if key == "note" {
+            continue;
+        }
+        for id in value.as_array().expect("reference group array") {
+            reference.push(id.as_str().expect("reference id string").to_owned());
+        }
+    }
+    assert_eq!(
+        reference.len(),
+        3,
+        "reference 段应登记 3 个理解性文档：{reference:?}"
+    );
+
+    let mut scene_ids: Vec<String> = Vec::new();
+    for group in scenes["scene"].as_object().expect("scenes.scene").values() {
+        for id in group.as_array().expect("scene group array") {
+            scene_ids.push(id.as_str().expect("scene id").to_owned());
+        }
+    }
+    let mut stage_ids: Vec<String> = Vec::new();
+    for value in scenes["reqStage"]
+        .as_object()
+        .expect("scenes.reqStage")
+        .values()
+    {
+        stage_ids.push(value.as_str().expect("reqStage id").to_owned());
+    }
+    let read_plan = read_json(&mod_dir.join("data/config.json"))["readPlan"].to_string();
+
+    for id in &reference {
+        let path = context_dir.join(format!("{id}.md"));
+        assert!(
+            path.is_file(),
+            "reference id 解析不到文件：docs/context/{id}.md"
+        );
+        let text = std::fs::read_to_string(&path).expect("read reference doc");
+        let id_line = text
+            .lines()
+            .find(|line| line.starts_with("> **id** "))
+            .unwrap_or_else(|| panic!("docs/context/{id}.md 缺 `> **id**` 固定头"));
+        let declared = id_line
+            .trim_start_matches("> **id** ")
+            .split_whitespace()
+            .next()
+            .expect("id token");
+        assert_eq!(
+            declared,
+            id.as_str(),
+            "docs/context/{id}.md 的 id 与 scenes 表不一致"
+        );
+
+        assert!(
+            !scene_ids.iter().any(|scene| scene == id),
+            "{id} 是理解性文档，不得进 scenes.scene（那会进 [READ FIRST] 并产生签名义务）"
+        );
+        assert!(
+            !stage_ids.iter().any(|stage| stage == id),
+            "{id} 是理解性文档，不得进 scenes.reqStage"
+        );
+        assert!(
+            !read_plan.contains(id.as_str()),
+            "{id} 不得出现在 data/config.json 的 readPlan 里（默认不拦门禁）"
+        );
+    }
+}
+
 /// r5 (D-MA21): the cleanup prompt beat must stay harness-agnostic — subagent session cleanup
 /// is delegated to the main session's own environment, so `data/texts/beats-settlement.json`
 /// must not carry any harness-implementation literal (`pi-subagents`, `.pi/agent`, `.claude`,
