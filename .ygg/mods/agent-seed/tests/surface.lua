@@ -628,3 +628,58 @@ test("requirement.list 分页：默认只翻开放行，full 才含已关闭", f
     "full 视图同样保留图头"
   )
 end)
+
+test("summary 投影：play/生命周期三件套 + 批结算后 drain + 维护义务", function()
+  fresh()
+
+  -- 新局：boot 落在立局幕，结算前置未满足。
+  reset()
+  fire("agent.summary", "0")
+  local s = __SELFTEST.meta.summary
+  assert_eq(s.play, "guide", "play.mode 默认 guide 必须投影")
+  assert_eq(s.lifecycle, "resident", "resident 生命周期")
+  assert_eq(s.batch, 1, "批次号")
+  assert_eq(s.batchDrained, false, "未 drain")
+
+  -- 立局 + 一条开放需求 → `gate_problem()` 非 nil，仍未 drain。
+  charter_and_begin()
+  fire("requirement.add", "watchdog req|synthetic description|watchdog-r1")
+  reset()
+  fire("agent.summary", "0")
+  assert_eq(
+    __SELFTEST.meta.summary.batchDrained,
+    false,
+    "有开放需求时不得 drain"
+  )
+
+  -- 完整链路 + 批结算 → drain。
+  fire("requirement.dispatch", "0")
+  submit(1, "plan", "watchdog-p1")
+  click("gate.approve — ")
+  submit(1, "development", "watchdog-p2")
+  click("proposal.accept — ")
+  click("gate.approve — ")
+  fire("integration.confirm", "r1|develop@abc1234")
+  click("coordinate.submit — ")
+  click("verify.submit all_green=true — ")
+  fire("settlement.evolution", "|screened|c=0/0|sessions=0/0/none|todo=0/cleared")
+  fire("release.skip", "纯测试批次")
+  click("review.note — ")
+
+  reset()
+  fire("agent.summary", "0")
+  local s2 = __SELFTEST.meta.summary
+  assert_eq(s2.batch, 2, "批次号 +1")
+  -- 文档维护义务不再派生需求行（用户裁定：CONTEXT / DESIGN 维护归主会话自办）。
+  assert_eq(kv("req.count"), 1, "注册表没有新增行")
+  assert_eq(kv("docs.maintenance.due"), "1", "义务登记在 due 上")
+  assert_eq(s2.batchDrained, true, "批结算且无开放需求 → drain")
+
+  -- 主会话做完复核后解除义务；此后新需求正常入册。
+  reset()
+  fire("config.set", "docs.maintenance.done=1")
+  assert_true(narrated_contains("[DOCS MAINTENANCE CLEARED]"), "必须叙述已解除")
+  assert_eq(kv("docs.maintenance.due"), "", "due 清空")
+  fire("requirement.add", "watchdog b2|desc|watchdog-2")
+  assert_eq(kv("req.count"), 2, "解除后新需求正常入册")
+end)
