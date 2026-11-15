@@ -4,7 +4,7 @@
 > **replaces**：原 DESIGN.md 全文（L1–739 @ `3a2536f`），逐节映射见下表。
 > **上游**：[README.md](README.md) · **相关**：[CONTEXT.md](CONTEXT.md)（领域/决策薄壳）
 
-**定位（载体改写，语义保留）**：本树规定 Yggdrasill **始终最新的产品形态、系统行为、状态机语义与规范接口契约**——当前设计方案权威快照，不是流水账：变更就在对应主题文件就地改写，历史归 git 与结算产物。覆盖范围是**整个仓库**，按子系统分文件：内核（[lua-api.md](design/lua-api.md)）、Mod 包（[mod-package.md](design/mod-package.md)）、宿主 CLI/Daemon（[cli-daemon.md](design/cli-daemon.md)）、serve 观察面（[serve.md](design/serve.md)）等各有其章，修改哪个子系统就更新哪个文件。领域词汇、愿景、架构原则与决策台账（`D1–D21` 与 `D-MA` 系列台账，上界随台账顺延不写死）见 [CONTEXT.md](CONTEXT.md) 薄壳所引 `docs/context/*` 树。为使契约在实现重构下保持持久，其定义保持在边界层（**JSON Schema、CLI/JSON-RPC 线协议、Lua 沙箱宿主 API、事件 Payload、状态迁移表**），而非内部源码函数名或行号。术语速览见 [context/vocabulary.md](context/vocabulary.md)；动作面分层见 [action-faces.md](design/action-faces.md)。
+**定位（载体改写，语义保留）**：本树规定 Yggdrasill **始终最新的产品形态、系统行为、状态机语义与规范接口契约**——当前设计方案权威快照，不是流水账：变更就在对应主题文件就地改写，历史归 git 与结算产物。覆盖范围是**整个仓库**，按子系统分文件：内核（[lua-api.md](design/lua-api.md)）、Mod 包（[mod-package.md](design/mod-package.md)）、宿主 CLI/Daemon（[cli-daemon.md](design/cli-daemon.md)）、serve 观察面（[serve.md](design/serve.md)）等各有其章，修改哪个子系统就更新哪个文件。领域词汇、愿景、架构原则与决策台账（`D1–D21` 与 `D-MA` 系列台账，上界随台账顺延不写死）见 [CONTEXT.md](CONTEXT.md) 薄壳所引 `docs/context/*` 树。为使契约在实现重构下保持持久，其定义保持在边界层（**JSON Schema、CLI/JSON-RPC 线协议、Lua 沙箱宿主 API、事件 Payload、状态迁移表**），而非内部源码函数名或行号。术语速览见 [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md)；动作面分层见 [action-faces.md](design/action-faces.md)。
 
 ## 拆分映射表（旧 § → 新文件；旧式引用按此行解析）
 

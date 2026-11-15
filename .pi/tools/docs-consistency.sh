@@ -101,10 +101,12 @@ for rel in links:
 required = [
     'docs/README.md',
     'docs/wiki-governance.md',
-    'docs/context/vocabulary.md',
-    'docs/context/principles.md',
-    'docs/context/decisions-agent.md',
-    'docs/context/decisions-engine.md',
+    'docs/context/README.md',
+    'docs/context/scenes.json',
+    'docs/context/cold-start/vocabulary.md',
+    'docs/context/cold-start/principles.md',
+    'docs/context/archive/decisions-agent.md',
+    'docs/context/archive/decisions-engine.md',
 ]
 for rel in required:
     fp = os.path.join(repo, rel)
