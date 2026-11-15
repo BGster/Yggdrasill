@@ -297,3 +297,105 @@ test("design 解析器漏检防线：子目录 / 句末点 / 通配 / `..` 六�
   local escape = design_ptr_violations("t", "escape", "docs/design/kernel/../README.md")
   assert_eq(#escape.violations, 1, "`..` 穿越必须违规：" .. table.concat(escape.violations, ", "))
 end)
+
+--- 列出目录下的一级条目，分成 { dirs, files } 两个数组。
+local function list_entries(path)
+  local dirs, files = {}, {}
+  local pipe = io.popen(('ls -1a "%s"'):format(path))
+  if pipe == nil then
+    return dirs, files
+  end
+  for name in pipe:lines() do
+    if name ~= "." and name ~= ".." then
+      local probe = io.popen(('test -d "%s/%s" && echo yes'):format(path, name))
+      local is_dir = probe:read("*l") == "yes"
+      probe:close()
+      if is_dir then
+        dirs[#dirs + 1] = name
+      else
+        files[#files + 1] = name
+      end
+    end
+  end
+  pipe:close()
+  return dirs, files
+end
+
+--- 规范化仓库内相对路径（吃掉 `.`，`..` 回退一级）。
+local function normalize_repo_path(p)
+  local parts = {}
+  for seg in p:gmatch("[^/]+") do
+    if seg == ".." then
+      if #parts > 0 then
+        table.remove(parts)
+      end
+    elseif seg ~= "." then
+      parts[#parts + 1] = seg
+    end
+  end
+  return table.concat(parts, "/")
+end
+
+test("docs/design 树索引：三模块 + 16 份文件 + README 双向相等 + id 双射", function()
+  local dir = DESIGN_DIR
+
+  -- ④ 一级子目录恰好三模块；平铺只允许树入口 README.md。
+  local dirs, flat = list_entries(dir)
+  table.sort(dirs)
+  table.sort(flat)
+  assert_eq(#dirs, 3, "docs/design 一级子目录必须是三模块，实得：" .. table.concat(dirs, ","))
+  assert_eq(dirs[1], "host", "一级子目录 1")
+  assert_eq(dirs[2], "kernel", "一级子目录 2")
+  assert_eq(dirs[3], "mod", "一级子目录 3")
+  assert_eq(#flat, 1, "docs/design/*.md 只允许 README.md，实得：" .. table.concat(flat, ","))
+  assert_eq(flat[1], "README.md", "平铺文件或软链 = 留了兼容壳")
+
+  -- ① 实文件集合（相对 docs/design，排除 README.md）。
+  local actual = {}
+  local prefix = dir .. "/"
+  for _, path in ipairs(list_files(dir, "md")) do
+    local rel = path:sub(#prefix + 1)
+    if rel ~= "README.md" then
+      actual[#actual + 1] = rel
+    end
+  end
+  table.sort(actual)
+  assert_eq(#actual, 16, "契约面应为 16 份文件：" .. table.concat(actual, ","))
+
+  -- ① 索引里的链接集合必须与实文件集合双向相等。
+  local readme = read_file(dir .. "/README.md")
+  local indexed, seen_idx = {}, {}
+  for target in readme:gmatch("%]%(([^%)]+)%)") do
+    local bare = target:match("^([^#]*)")
+    if bare ~= nil and bare ~= "" and not bare:match("^https?://")
+      and not bare:match("^mailto:") and bare:sub(-3) == ".md" then
+      local resolved = normalize_repo_path("docs/design/" .. bare)
+      local rel = resolved:match("^docs/design/(.+)$")
+      if rel ~= nil and rel ~= "README.md" and not seen_idx[rel] then
+        seen_idx[rel] = true
+        indexed[#indexed + 1] = rel
+      end
+    end
+  end
+  table.sort(indexed)
+  assert_eq(#indexed, #actual,
+    "docs/design/README.md 的索引与实文件集合必须双向相等，索引实得："
+      .. table.concat(indexed, ","))
+  for i = 1, #actual do
+    assert_eq(indexed[i], actual[i], "索引与实文件集合逐项相等")
+  end
+
+  -- ② id 与路径双射（每份文件的 `> **id** ` 固定头必须等于去扩展名的相对路径）。
+  for _, rel in ipairs(actual) do
+    local text = read_file(dir .. "/" .. rel)
+    local declared = nil
+    for line in text:gmatch("[^\n]+") do
+      if line:sub(1, 9) == "> **id** " then
+        declared = line:sub(10):match("^%S+")
+        break
+      end
+    end
+    assert_true(declared ~= nil, rel .. " 缺 `> **id**` 固定头")
+    assert_eq(declared, (rel:gsub("%.md$", "")), rel .. " 的 id 与路径不一致")
+  end
+end)
