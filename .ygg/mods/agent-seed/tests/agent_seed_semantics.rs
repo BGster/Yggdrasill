@@ -1791,56 +1791,6 @@ fn read_json(path: &Path) -> Json {
 
 // ───────────────────── E6 · Mod text hygiene (别名退役/子会话清理) ─────────────────────
 
-/// 从一个文案值里取出所有 `docs/context/<相对路径>.md` 指针（r5）。
-///
-/// 旧实现只收 `[A-Za-z0-9._-]`，于是 `docs/context/acts/charter.md` 被截成 `acts`、不以
-/// `.md` 结尾 → **静默跳过**（既不计数也不报违规）。r1 把权威文件切进子目录之后，整张锚点账
-/// 从那天起就是假绿。现在允许 `/`，仍然要求 `.md` 结尾：目录指针 `acts/`、通配 `acts/*.md`
-/// 与空串一律不算文件指针。
-fn context_pointer_paths(value: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut rest = value;
-    while let Some(pos) = rest.find("docs/context/") {
-        let tail = &rest[pos + "docs/context/".len()..];
-        let file: String = tail
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
-            .collect();
-        rest = &tail[file.len().min(tail.len())..];
-        if file.ends_with(".md") {
-            out.push(file);
-        }
-    }
-    out
-}
-
-/// 核一个键值的全部指针：累加 `count` 并返回违规清单（锚点缺失 / 非法路径段）。
-///
-/// `..` 与空段一律判违规——`docs/context/acts/../AGENTS.md` 这类写法能骗过存在性检查，
-/// 却把读者带出 context 树。
-fn context_pointer_violations(
-    context_dir: &std::path::Path,
-    ns: &str,
-    key: &str,
-    value: &str,
-    count: &mut usize,
-) -> Vec<String> {
-    let mut violations = Vec::new();
-    for file in context_pointer_paths(value) {
-        *count += 1;
-        if file.split('/').any(|seg| seg.is_empty() || seg == "..") {
-            violations.push(format!(
-                "{ns}.{key} -> docs/context/{file} (illegal path segment)"
-            ));
-            continue;
-        }
-        if !context_dir.join(&file).is_file() {
-            violations.push(format!("{ns}.{key} -> docs/context/{file} (missing)"));
-        }
-    }
-    violations
-}
-
 // ──────────────── r6: docs/design 契约树的指针 / 索引机检 ────────────────
 
 /// 通用「树内指针」解析器：在 `prefix`（形如 `docs/design/`）之后取字符集内的最长串。
