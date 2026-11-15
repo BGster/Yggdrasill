@@ -1,7 +1,7 @@
 # Yggdrasill · 推进必签的判定（rituals/read-gate）
 > **id** rituals/read-gate · **幕** all（任何推进动作前） · **触发** 执行 `requirement.dispatch` / `proposal.submit` / `gate.approve` / `coordinate.submit` 之前
 > **读不到代价** hard-refusal（缺签 / 过期 / 跨幕 / 他人签署 → 门禁 fail-closed，主状态不动）
-> **ver** 000000
+> **ver** c592c7
 
 > **定位**：签名该消费什么（正文通读 vs 版本核对）、窗口规则、维度与拒台词归属的**可判定形式**。规则本体见 [../../wiki-governance.md](../../wiki-governance.md)「幕进必读与推进必签」；本文件只给执行侧判定，不改写规则。
 

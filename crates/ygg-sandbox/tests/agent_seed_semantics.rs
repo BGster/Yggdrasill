@@ -1488,7 +1488,7 @@ fn batch_settle_auto_appends_maintenance_requirement() {
     );
     assert!(
         desc.contains("docs/README.md")
-            && desc.contains("docs/context/archive/decisions-agent.md")
+            && desc.contains("docs/context/cold-start/vocabulary.md")
             && desc.contains("docs/design/"),
         "description must carry the per-file wiki guidance: {desc}"
     );
@@ -4242,11 +4242,11 @@ fn context_pointer_parser_accepts_subdirectories_and_flags_missing_anchors() {
     // ② 两层子目录 + 紧邻中文标点 / `§` / `；` 不得吞掉路径
     assert_eq!(
         context_pointer_paths(
-            "政策见 docs/context/rituals/cleanup.md §2；台账 docs/context/archive/decisions-agent.md。"
+            "政策见 docs/context/rituals/cleanup.md §2；叙事 docs/context/story/run-story.md。"
         ),
         vec![
             "rituals/cleanup.md".to_string(),
-            "archive/decisions-agent.md".to_string()
+            "story/run-story.md".to_string()
         ]
     );
     // ③ 目录指针 / 通配不算文件指针（真实写法：`docs/context/acts/` 与 `docs/context/acts/*.md`）
@@ -4810,8 +4810,8 @@ fn context_scene_reference_ids_resolve() {
     }
     assert_eq!(
         reference.len(),
-        3,
-        "reference 段应登记 3 个理解性文档：{reference:?}"
+        4,
+        "reference 段应登记 4 个（含不进 readPlan 的规范文档）：{reference:?}"
     );
 
     let mut scene_ids: Vec<String> = Vec::new();
@@ -4872,9 +4872,9 @@ fn context_scene_reference_ids_resolve() {
 /// 这是 r5 盲区的补丁：r5 的锚点用例（`narrative_pointer_anchors_exist_in_docs_context`）
 /// 只扫 `data/texts/**` 与 `core.scenes/prompts`，**从不打开 `data/playbook/**` 与 `src/**`**，
 /// 于是 11 处 playbook 指针 + 1 处 `src/runtime/tools.lua` 注释在 r5 之后仍指向已删除的文件
-/// （**死链全绿**）。本用例把这两个入口纳入，并钉住 56 处逐来源硬账。
+/// （**死链全绿**）。本用例把这两个入口纳入，并钉住 48 处逐来源硬账。
 ///
-/// Mutation：把任一处改回 `docs/context/decisions-engine.md`（已移入 `archive/`）→ 本用例转红。
+/// Mutation：把任一处改回一个已解散的台账路径 → 本用例转红。
 #[test]
 fn playbook_and_src_context_pointers_resolve() {
     let repo = repo_dir();
@@ -4969,8 +4969,7 @@ fn playbook_and_src_context_pointers_resolve() {
         ("beats-harness.json", 2),
         ("beats-map-guide.json", 2),
         ("beats-settlement.json", 4),
-        ("ch1-foundation.json", 12),
-        ("ch3-evidence.json", 2),
+        ("ch1-foundation.json", 6),
         ("ch4-mod-host.json", 0),
         ("ch4-protocol.json", 2),
         ("ch4-run-machine.json", 5),
@@ -4988,8 +4987,8 @@ fn playbook_and_src_context_pointers_resolve() {
         "docs/context 指针账漂移（playbook + texts + src）：{ledger:?}"
     );
     assert_eq!(
-        total, 56,
-        "docs/context 指针总数漂移：期望 56，实得 {total}"
+        total, 48,
+        "docs/context 指针总数漂移：期望 48，实得 {total}"
     );
     assert!(
         violations.is_empty(),

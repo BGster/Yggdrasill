@@ -158,7 +158,7 @@
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "da83dbf31af67c8bb151f1195d575e5a1f0900110f5c4828d98eb54731393839"
+      "sha256": "c27fef8400df9c77cb35d75929da056a1f26cf8f14dc5bbb9408f4b1402a3b26"
     },
     {
       "byteLength": 7338,
@@ -193,12 +193,12 @@
       "sha256": "e38bbcd677c1f179f7642b335c58d438659de5cf0b5ce07226f84785c7c46f74"
     },
     {
-      "byteLength": 10374,
+      "byteLength": 10393,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "019019913147c506b667f0eb08853ea2748cf67faae299ad77dfe497dac63199"
+      "sha256": "4bcb2dc2a620ce07fe8cb0647c08fb24f32952af8be3cecd987677ed20320baf"
     },
     {
       "byteLength": 13985,
@@ -214,7 +214,7 @@
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "8ea1b2508b2446ab19c19d6938adb6074da679aa63e148a54c7bcefc271c3137"
+      "sha256": "98bda90ab924692311d8371cc1a2d44d1394872c3e96484bd87856373aa293ef"
     },
     {
       "byteLength": 1943,
@@ -225,12 +225,12 @@
       "sha256": "ee576c5e1951932f3abdef820f0f4194788df27da71bdcaf1d6459525942b5f5"
     },
     {
-      "byteLength": 15602,
+      "byteLength": 15610,
       "id": "ygg:agent/playbook/ch1-foundation",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch1-foundation.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "ce90c15db1dfc7acb1e977d0ebf4ab5cb79bf7e1e5b6bab27d6f8772f68dd909"
+      "sha256": "9e2ae9e66fef62f046a5ebd3b5b8f8c1b672beb16827c4557beed859d4c6a587"
     },
     {
       "byteLength": 19557,
@@ -241,12 +241,12 @@
       "sha256": "04a9925e33834d880eaba39b59e5f69f554e585dd73e885ce1a7f8f6fb7c74de"
     },
     {
-      "byteLength": 10059,
+      "byteLength": 10040,
       "id": "ygg:agent/playbook/ch3-evidence",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch3-evidence.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "191017e7e85700d764e398a5020560c8e4c48155715cffa2379d0f9685014c1b"
+      "sha256": "abbc2503774fdaaf2da0f1980bc5f0c3c82db92615b6dca83dffee841821ead5"
     },
     {
       "byteLength": 11341,

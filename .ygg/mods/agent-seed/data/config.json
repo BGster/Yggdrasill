@@ -67,11 +67,11 @@
   },
   "readGate": {
     "ver": {
-      "cold-start/vocabulary": "6c693f",
+      "cold-start/vocabulary": "16b47f",
       "acts/charter": "70eb65",
       "acts/coordinate": "692edb",
       "req-acts/intake": "ea0700",
-      "acts/settle": "e5a134",
+      "acts/settle": "c85c16",
       "rituals/cleanup": "e02303",
       "acts/release": "df77ee",
       "acts/retired": "c7f2a3",

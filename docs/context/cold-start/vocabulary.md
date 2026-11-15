@@ -1,7 +1,7 @@
 # Yggdrasill · 术语速览与核心领域词汇
 > **id** cold-start/vocabulary · **幕** cold-start · **触发** 冷启动 / 读懂任何动作名
 > **读不到代价** hard-refusal（术语错则动作语义错）
-> **ver** 6c693f
+> **ver** 16b47f
 
 > **定位**：全部领域术语的中英速查表与权威定义，是 wiki 内所有文件的词汇上游。
 > **replaces**：CONTEXT 术语速览（L7–24）+ §2（L43–61）（搬运基线 `3a2536f`）

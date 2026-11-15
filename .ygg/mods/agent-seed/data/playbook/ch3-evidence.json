@@ -183,7 +183,7 @@
         {
           "id": "hard.decision-change-backfill",
           "modality": "must",
-          "text": "A decision change must be written back into the decision ledger (`docs/context/archive/decisions-engine.md` / `docs/context/archive/decisions-agent.md`); when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
+          "text": "A decision change must be written back into the decision ledger (each ruling's 「设计依据」 section in the document it governs); when code and decision disagree, either change the code or run the decision-change process — silent drift is not allowed (details in the repository chapter).",
           "basis": "historical AGENTS.md (pre-migration; see git history) item 7"
         }
       ]
