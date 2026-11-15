@@ -3334,7 +3334,7 @@ fn mod_architecture_is_fragments_plus_five_layers() {
         .iter()
         .filter(|path| path.starts_with("data/playbook/"))
         .count();
-    assert_eq!(playbook, 7, "playbook = head + 6 chapter fragments (r5; ch2/ch5 removed on 2026-11-15)");
+    assert_eq!(playbook, 6, "playbook = head + 5 chapter fragments (r5; ch2/ch4-async/ch5 removed on 2026-11-15)");
     for path in &pack_entry_paths {
         assert!(
             project.join(path).is_file(),
@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        10,
-        "STAGE_GUIDE must route all 10 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
+        9,
+        "STAGE_GUIDE must route all 9 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        10,
-        "r5 assembles 10 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
+        9,
+        "r5 assembles 9 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        10,
+        9,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3530,7 +3530,6 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     assert_receipt(
         &mut settle,
         &[
-            "run_artifacts",
             "mod_engineering",
             "host_contract",
         ],

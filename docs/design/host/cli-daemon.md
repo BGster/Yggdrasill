@@ -117,3 +117,19 @@
 
 **坏行与结算闸**：畸形行跳过并让游标越过它（否则会永久阻塞）。**硬结算闸**：`--settle` 发现未消费行即返回 `ok=false` + 非零退出（写完后会复查：结算期间到达的行会使报告作废）——「ending 之后才投递」永不会静默成功，必须开新局。进程退出之后的投递属于**新局**：inbox 保留这些行给下一局消费，结算报错。
 
+#### run 目录文件契约
+
+- `run.json` = `{run_id, mod, mod_signature, started_at, updated_at}`。
+- `autosave.json`：逐步自动存档（实体表 + KV + 待决选择），可直接喂给 `load`。
+- `events.jsonl`：每次 dispatch 一行 `{seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}`。
+- `inbox.jsonl`：异步操作队列（append-only，由运行中的局消费；协议见上一节）。
+- `coordination.json`：跨进程协议 `{phase, writers, owner_pid, heartbeat_at}`（见上一节）。
+- `settlement.json`：只在 `--settle` 时写；`ok` = 事件日志非空 ∧ 无失败步 ∧ 出现 ending 叙述行 ∧ inbox 无未消费行（开关来自 Mod 契约的 `settlement` 段）；退出码镜像 `ok`；有未消费行时报告写「ending 之后还有 N 条未消费 inbox 行——需要新局」且 `ok=false`。
+- `decide-input.json`：外部决策命令的输入——`--drive cmd:` 下，每次出现待决选择、在调用命令之前，把完整当前回执写进去。
+
+**回执面（不落盘）**：
+
+- summary 走内核的结构化回执通道 `ygg.meta("summary", {…})`，落在回执信封的 `meta.summary`（stage / ending / verifyPassed / nextEndsRun / pendingProposals / requirementCount / conflicts / awaiting / evolution{artifact,summary,candidates,classes}）；**宿主只读这个字段**，所以把同样内容写进 narrative 不会被误读；载荷 `"0"` 表示只读。
+- **宿主永不读 Mod 私有 KV**：Mod 没有 `agent.summary` 时，宿主报「unknown」并安全暂停，不回落到 `ending` / `fsm.stage` / `prop.*` / `req.*`。
+- **`meta` 是瞬时回执面**：不进存档、不进规范快照、不进 state hash——同一事件序列调用与否 `ygg.meta`，`state_hash` 相同。
+
