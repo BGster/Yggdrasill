@@ -964,37 +964,6 @@ fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
     );
 }
 
-/// Development `proposal.reject` (**before** the accept gate, R6):
-/// - not amended: `plan_ok` keeps its value → back to `ready` with the lane released, the
-///   next dispatch re-claims development;
-/// - amended: the rev bump invalidated `plan_ok` → the row falls back to `draft`, and the
-///   next dispatch hands out **plan** (replan).
-#[test]
-fn dev_proposal_reject_keeps_plan_ok_unless_amended() {
-    // Path without an amend.
-    let mut normal = drive_to_dev_pending("semantics-p3");
-    normal.narrate("proposal.reject", &text("r1|incomplete artifacts"));
-    normal.assert_kv("req.1.status", json!("open"));
-    normal.assert_kv("req.1.plan_ok", json!(true));
-    normal.assert_kv("req.1.lane", json!(0));
-    assert_eq!(normal.phase("r1"), "ready");
-    normal.narrate("requirement.dispatch", "0");
-    normal.assert_kv("req.1.job", json!("development"));
-    normal.assert_kv("req.1.lane", json!(1));
-
-    // Amended path: the proposal is pending, the amend invalidates the rev, then reject.
-    let mut amended = drive_to_dev_pending("semantics-p4");
-    amended.narrate("requirement.amend", &text("r1|add an acceptance criterion"));
-    amended.assert_kv("req.1.rev", json!(2));
-    amended.assert_kv("req.1.plan_ok", json!(false));
-    amended.narrate("proposal.reject", &text("r1|redo on the new rev"));
-    amended.assert_kv("req.1.status", json!("open"));
-    amended.assert_kv("req.1.plan_ok", json!(false));
-    assert_eq!(amended.phase("r1"), "draft");
-    amended.narrate("requirement.dispatch", "0");
-    amended.assert_kv("req.1.job", json!("plan"));
-}
-
 /// Amending a requirement **while development is in flight** (before any development
 /// proposal is submitted) updates its description and bumps `rev` without resetting the
 /// job (`req_amend_active`); submitting the new `rev`'s development proposal must succeed

@@ -155,3 +155,28 @@ test("验收门 amend：rev+1 / plan_ok 失效 / gate 绑定旧 rev / 旧批准�
   fire("requirement.dispatch", "0")
   assert_eq(kv("req.1.job"), "plan", "a plan job is re-hung")
 end)
+
+test("开发提案 reject：未 amend 保 plan_ok；amend 后落 draft", function()
+  -- 路径 1：未 amend —— plan_ok 保住，回到 ready 可重新派发。
+  drive_to_dev_pending("semantics-p3")
+  fire("proposal.reject", "r1|incomplete artifacts")
+  assert_eq(kv("req.1.status"), "open", "status stays open")
+  assert_eq(kv("req.1.plan_ok"), true, "plan_ok survives a plain dev reject")
+  assert_eq(kv("req.1.lane"), 0, "the lane is released")
+  assert_eq(phase_of("r1"), "ready", "back to ready")
+  fire("requirement.dispatch", "0")
+  assert_eq(kv("req.1.job"), "development", "development is re-dispatched")
+  assert_eq(kv("req.1.lane"), 1, "a lane is bound again")
+
+  -- 路径 2：先 amend（rev 推进使 plan_ok 失效），再 reject —— 落 draft，需要新计划。
+  drive_to_dev_pending("semantics-p4")
+  fire("requirement.amend", "r1|add an acceptance criterion")
+  assert_eq(kv("req.1.rev"), 2, "amend bumps the revision")
+  assert_eq(kv("req.1.plan_ok"), false, "amend invalidates plan_ok")
+  fire("proposal.reject", "r1|redo on the new rev")
+  assert_eq(kv("req.1.status"), "open", "status stays open")
+  assert_eq(kv("req.1.plan_ok"), false, "plan_ok stays false")
+  assert_eq(phase_of("r1"), "draft", "an amended reject falls to draft")
+  fire("requirement.dispatch", "0")
+  assert_eq(kv("req.1.job"), "plan", "a plan job is re-hung")
+end)
