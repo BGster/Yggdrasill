@@ -424,3 +424,12 @@ function submit(rev, stage, ext)
   local payload = ("r1|%d|%s|%s proposal summary|artifacts/%s.md||%s"):format(rev, stage, stage, stage, ext)
   return fire("proposal.submit", payload)
 end
+
+--- 切换当前 actor（模拟宿主在不同命令上盖不同身份章）。
+function as_actor(name)
+  ACTOR = name or "test-agent"
+end
+
+function actor()
+  return ACTOR
+end

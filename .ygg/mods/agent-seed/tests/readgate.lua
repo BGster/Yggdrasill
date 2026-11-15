@@ -116,3 +116,32 @@ test("作用域边界销票：run.begin / amend / proposal.reject 都清空签�
   assert_eq(kv("settings.read.acts/coordinate"), "", "a reject wipes signatures")
   assert_eq(kv("settings.read_index"), "", "the index is cleared")
 end)
+
+test("actor 侧键随签名同生共死（清除 / 换人 / 边界销票）", function()
+  fresh()
+  as_actor("test-agent")
+  charter_and_begin()
+
+  fire("config.set", "read.acts/coordinate=9f2c1a")
+  assert_eq(kv("settings.read.acts/coordinate"), "9f2c1a|coordinate|0", "value shape")
+  assert_eq(kv("settings.read_actor.acts/coordinate"), "test-agent", "side key records the signer")
+
+  -- ① 单件清除：两个键一起变空。
+  fire("config.set", "read.acts/coordinate=")
+  assert_eq(kv("settings.read.acts/coordinate"), "", "the value is emptied")
+  assert_eq(kv("settings.read_actor.acts/coordinate"), "", "the side key dies with it")
+
+  -- ② 换人重签 = 侧键 upsert（不是两个签名叠加）。
+  as_actor("other-agent")
+  fire("config.set", "read.acts/coordinate=9f2c1a")
+  assert_eq(kv("settings.read_actor.acts/coordinate"), "other-agent", "upsert, not a second entry")
+  as_actor("test-agent")
+
+  -- ③ 作用域边界（rev 推进 → req_bump_rev 销票）：两个键一起清。
+  fire("requirement.add", "side-key requirement|synthetic description|semantics-side")
+  fire("requirement.dispatch", "0")
+  fire("requirement.amend", "r1||amended to bump the revision")
+  assert_eq(kv("settings.read.acts/coordinate"), "", "the boundary wipes the value")
+  assert_eq(kv("settings.read_actor.acts/coordinate"), "", "and the side key")
+  assert_eq(kv("settings.read_index"), "", "and the index")
+end)

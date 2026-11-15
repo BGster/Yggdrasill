@@ -2954,45 +2954,6 @@ fn read_gate_ticket_degrades_to_coverage_only() {
     game.assert_kv("req.1.gate", json!(""));
 }
 
-/// r9：侧键与值**同生共死**——单件清除与作用域销票都必须连带清签署人，
-/// 否则判定会读到「值空了、签署人还在」或「值在、签署人丢了」的半状态。
-#[test]
-fn read_actor_side_key_dies_with_the_signature() {
-    let mut game = Game::open(&project_mod_dir());
-    charter_and_begin(&mut game);
-
-    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
-    game.assert_kv(
-        "settings.read.acts/coordinate",
-        json!("9f2c1a|coordinate|0"),
-    );
-    game.assert_kv("settings.read_actor.acts/coordinate", json!(TEST_ACTOR));
-
-    // ① 单件清除：两个键一起变空。
-    game.narrate("config.set", &text("read.acts/coordinate="));
-    game.assert_kv("settings.read.acts/coordinate", json!(""));
-    game.assert_kv("settings.read_actor.acts/coordinate", json!(""));
-
-    // ② 换人重签 = 侧键 upsert（不是两个签名叠加）。
-    game.as_actor(Some("other-agent"));
-    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
-    game.assert_kv("settings.read_actor.acts/coordinate", json!("other-agent"));
-
-    // ③ 作用域边界（rev 推进 → req_bump_rev 的销票）：两个键一起清。
-    game.narrate(
-        "requirement.add",
-        &text("side-key requirement|synthetic description|semantics-side"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    game.narrate(
-        "requirement.amend",
-        &text("r1||amended to bump the revision"),
-    );
-    game.assert_kv("settings.read.acts/coordinate", json!(""));
-    game.assert_kv("settings.read_actor.acts/coordinate", json!(""));
-    game.assert_kv("settings.read_index", json!(""));
-}
-
 /// P10 决策归属的守门线：`play.mode=goal` 在 `goal.authorization` 注册之前会发出可读
 /// 警告（`[GOAL AUTH PENDING]`）；注册后再切不再警告。
 #[test]
