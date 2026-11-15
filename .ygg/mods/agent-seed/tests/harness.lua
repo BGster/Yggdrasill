@@ -450,10 +450,15 @@ function charter_and_begin()
 end
 
 --- 提交 r1 的提案（先按 stage 补签，再发 7 段载荷）。
-function submit(rev, stage, ext)
-  ensure_reads("proposal.submit", stage, 1)
-  local payload = ("r1|%d|%s|%s proposal summary|artifacts/%s.md||%s"):format(rev, stage, stage, stage, ext)
+function submit_req(id, rev, stage, ext)
+  local index = tonumber(id:match("r(%d+)"))
+  ensure_reads("proposal.submit", stage, index)
+  local payload = ("%s|%d|%s|%s proposal summary|artifacts/%s.md||%s"):format(id, rev, stage, stage, stage, ext)
   return fire("proposal.submit", payload)
+end
+
+function submit(rev, stage, ext)
+  return submit_req("r1", rev, stage, ext)
 end
 
 --- 切换当前 actor（模拟宿主在不同命令上盖不同身份章）。
