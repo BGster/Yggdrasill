@@ -37,6 +37,7 @@ docs/design/
 | ③ mod · 包契约与多文件纯度 | [mod/mod-package.md](mod/mod-package.md) | 改 `pack.json` / `manifest` / 多文件纯度契约之前 | hard-refusal |
 | ③ mod · 提示词面（beats） | [mod/prompt-surface.md](mod/prompt-surface.md) | 改文案键面或键账之前 | silent-drift |
 | ③ mod · 同步工具桥 | [mod/tool-bridge.md](mod/tool-bridge.md) | 改工具桥或凭据解析之前 | irreversible |
+| ④ mod · 测试策略（纯 Lua 自检） | [mod/testing-strategy.md](mod/testing-strategy.md) | 改 `tests/**` 或 `selftest.rs` 之前 | silent-gap |
 | ③ mod · 三层动作面 | [mod/action-faces.md](mod/action-faces.md) | 新增或移动一个动作面之前 | silent-drift |
 | ③ mod · 身份与权限 | [mod/identity.md](mod/identity.md) | 改执行者台账 / 身份判定 / profile 之前 | silent-drift |
 

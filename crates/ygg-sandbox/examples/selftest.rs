@@ -172,6 +172,25 @@ fn install_assets(lua: &Lua, mod_dir: &Path) -> Result<usize, String> {
     lua.globals()
         .set("__ASSETS", assets)
         .map_err(|e| e.to_string())?;
+    // 仓库根与 manifest：seed 布局类断言要读它们（Lua 无 JSON 解析器，故由宿主转值）。
+    let repo_root = mod_dir
+        .canonicalize()
+        .map_err(|e| e.to_string())?
+        .join("../../..")
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    lua.globals()
+        .set("__REPO_ROOT", repo_root.display().to_string())
+        .map_err(|e| e.to_string())?;
+    let manifest_text = std::fs::read_to_string(mod_dir.join("manifest.json"))
+        .map_err(|err| format!("read manifest.json: {err}"))?;
+    let manifest: Json =
+        serde_json::from_str(&manifest_text).map_err(|err| format!("manifest.json: {err}"))?;
+    let manifest_lua = json_to_lua(lua, &manifest).map_err(|e| e.to_string())?;
+    lua.globals()
+        .set("__MANIFEST", manifest_lua)
+        .map_err(|e| e.to_string())?;
+
     // pack.json 本身也注入：结构类断言（模块表、entries、tools 声明）要读它。
     let pack_lua = json_to_lua(lua, &pack).map_err(|e| e.to_string())?;
     lua.globals()
