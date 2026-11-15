@@ -15,12 +15,12 @@ local util = require("src.core.util")
 
 local TEXTS
 
-local num, text_of =
-  config.num, config.text_of
+local num, text_of, effective =
+  config.num, config.text_of, config.effective
 local P_PENDING, prop_count, prop_pending_total, prop_req, prop_status =
   props.P_PENDING, props.prop_count, props.prop_pending_total, props.prop_req, props.prop_status
-local job_capacity, job_total, req_all_done, req_conflict, req_conflict_total, req_count, req_gate, req_id, req_job, req_key, req_needs_amend, req_open_total, req_rev, req_status =
-  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_status
+local job_capacity, job_total, req_all_done, req_conflict, req_conflict_total, req_count, req_gate, req_id, req_job, req_key, req_needs_amend, req_open_total, req_rev, req_status, run_phase =
+  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_status, reqs.run_phase
 local fill, join, trim =
   util.fill, util.join, util.trim
 
@@ -208,13 +208,54 @@ local function read_problem(action, ctx)
     }))
   end
 
+  -- r9 身份（按人判定的前件）。两条来源，优先级由 handler 决定后存入 ctx：
+  --   ctx.actor —— 宿主在载荷末尾盖的 `|actor=<id>`（直接 `--event` 通道，不可伪造）
+  --   ctx.entry —— "ticket" = 本步由人类从菜单点选（`ygg.choice_selector` → emit，无章）
+  -- 缺身份的两种结局刻意不同：
+  --   票据路 → **降级**为 any-signer 并叙事告明「不区分签署人」（人工点击不可能带章，
+  --            若也 fail-closed 就等于把 guide 模式锁死；这是两层得而不是放水）。
+  --   直派路 → **拒**（能带而不带 = 机制的门被绕开，“按人”就成了一句空话）。
+  local actor = trim(tostring(ctx.actor or ""))
+  if actor == "" then
+    if ctx.entry ~= "ticket" then
+      local commands = {}
+      for i = 1, #docs do
+        commands[#commands + 1] = sign_command(docs[i], readset.doc_ver(docs[i]))
+      end
+      return fill(TEXTS.beats.read_gate_no_identity, {
+        action = tostring(action),
+        count = tostring(#docs),
+        docs = join(docs, " / "),
+        commands = join(commands, " && "),
+      })
+    end
+    local k, n = readsig.coverage(tostring(run_phase()), config.effective("readPlan"), "")
+    ygg.narrate(fill(TEXTS.beats.read_gate_ticket, {
+      action = tostring(action),
+      k = tostring(k),
+      n = n ~= nil and tostring(n) or "?",
+    }))
+  end
+
   -- ① 覆盖：**完全没签**的件（签了但 ver 旧走新鲜维度——文档改版是「旧了」而不是「没签」）。
+  -- r9 在这一维里加**第二段**：签了、但不是**本动作执行者**签的——那是「别人签的」而不是
+  -- 「没签」，必须用不同文案（否则拒台词会把人引向“你还没读”的错结论）。
   local missing, commands = {}, {}
+  local foreign, foreign_cmds = {}, {}
   for i = 1, #docs do
     local doc = docs[i]
-    if readsig.signed(doc) == nil then
+    local signed_ver = readsig.signed(doc)
+    if signed_ver == nil then
       missing[#missing + 1] = doc
       commands[#commands + 1] = sign_command(doc, readset.doc_ver(doc))
+    elseif actor ~= "" then
+      -- 按人：签了但不是**你**签的。空签署人（r3 旧存档 / 无身份签名）不参与
+      -- 这条判定——旧存档不该因为机制升级被一夜判死；它仍要在 ②③④ 里自证。
+      local signer = readsig.actor_of(doc)
+      if signer ~= "" and signer ~= actor then
+        foreign[#foreign + 1] = doc
+        foreign_cmds[#foreign_cmds + 1] = sign_command(doc, readset.doc_ver(doc))
+      end
     end
   end
   if #missing > 0 then
@@ -230,6 +271,22 @@ local function read_problem(action, ctx)
       window = tostring(window),
       docs = join(missing, " / "),
       commands = join(commands, " && "),
+      raise = raise,
+    })
+  end
+  if #foreign > 0 then
+    local k, n, mine = readsig.coverage(tostring(run_phase()), effective("readPlan"), actor)
+    return fill(TEXTS.beats.read_gate_other_actor, {
+      action = tostring(action),
+      actor = actor,
+      count = tostring(#foreign),
+      docs = join(foreign, " / "),
+      signer = readsig.actor_of(foreign[1]),
+      k = tostring(k),
+      n = n ~= nil and tostring(n) or "?",
+      mine = tostring(mine),
+      window = tostring(window),
+      commands = join(foreign_cmds, " && "),
       raise = raise,
     })
   end
