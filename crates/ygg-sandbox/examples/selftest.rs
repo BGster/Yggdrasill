@@ -191,6 +191,17 @@ fn install_assets(lua: &Lua, mod_dir: &Path) -> Result<usize, String> {
         .set("__MANIFEST", manifest_lua)
         .map_err(|e| e.to_string())?;
 
+    // docs/context/scenes.json：reference / scene / reqStage 的 id 解析与读签模拟都要它。
+    let scenes_path = repo_root.join("docs/context/scenes.json");
+    let scenes_text = std::fs::read_to_string(&scenes_path)
+        .map_err(|err| format!("read {}: {err}", scenes_path.display()))?;
+    let scenes: Json =
+        serde_json::from_str(&scenes_text).map_err(|err| format!("scenes.json: {err}"))?;
+    let scenes_lua = json_to_lua(lua, &scenes).map_err(|e| e.to_string())?;
+    lua.globals()
+        .set("__SCENES", scenes_lua)
+        .map_err(|e| e.to_string())?;
+
     // pack.json 本身也注入：结构类断言（模块表、entries、tools 声明）要读它。
     let pack_lua = json_to_lua(lua, &pack).map_err(|e| e.to_string())?;
     lua.globals()

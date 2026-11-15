@@ -199,3 +199,25 @@ function fresh()
   __SELFTEST.meta = {}
   fire("event.start", "0")
 end
+
+--- 读一个文件；失败即抛错（避免「读不到就静默通过」）。
+function read_file(path)
+  local handle = io.open(path, "r")
+  assert_true(handle ~= nil, ("file must be readable: %s"):format(path))
+  local text = handle:read("*a")
+  handle:close()
+  return text
+end
+
+--- 路径是否存在（文件或目录）。
+function exists(path)
+  local handle = io.open(path, "r")
+  if handle then
+    handle:close()
+    return true
+  end
+  local probe = io.popen(('test -e "%s" && echo yes'):format(path))
+  local out = probe:read("*l")
+  probe:close()
+  return out == "yes"
+end

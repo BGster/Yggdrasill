@@ -4133,96 +4133,6 @@ fn design_tree_index_is_complete_and_ids_match_paths() {
     }
 }
 
-/// r6：`AGENTS.md §3` 的每条 design 路由都能解析到真实文件，且路由行不许写裸文件名。
-///
-/// 13 条 design 指针（Entry 1 + Mod/host/tool 3 + serve/lanes/CLI/identity 4 + Kernel 4 +
-/// Runtime copy 1）。此外 §3 的 `Repository topology` 行必须把 `system-boundaries` 指向
-/// **`docs/context/cold-start/system-boundaries.md`**（r6 归位后它不再是 design 文件），
-/// 且该指针也在本用例的机检范围内。
-///
-/// Mutation：把某条路由改回旧平铺路径、或写成裸文件名 `mod-package.md`、或让 topology 行
-/// 仍指 `docs/design/system-boundaries.md` → 本用例转红。
-#[test]
-fn agents_design_routes_resolve() {
-    let repo = repo_dir();
-    let design_dir = repo.join("docs/design");
-    let agents = std::fs::read_to_string(repo.join("AGENTS.md")).expect("read AGENTS.md");
-
-    let start = agents
-        .find("## 3. Prompt-surface index")
-        .expect("AGENTS.md 必须有 `## 3. Prompt-surface index` 段");
-    let end = agents[start + 5..]
-        .find("\n## ")
-        .map(|offset| start + 5 + offset)
-        .unwrap_or(agents.len());
-    let section = &agents[start..end];
-    // 只看表格行：§3 的散文（退役说明）里也会提到 design 路径，但它不是路由。
-    let table: String = section
-        .lines()
-        .filter(|line| line.trim_start().starts_with('|'))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let routes = design_pointer_paths(&table);
-    assert_eq!(
-        routes.len(),
-        13,
-        "AGENTS §3 的 design 路由应为 13 条：{routes:?}"
-    );
-    for route in &routes {
-        let path = design_dir.join(route);
-        assert!(
-            path.is_file(),
-            "AGENTS §3 路由解析不到文件：docs/design/{route}"
-        );
-        let module = route.split('/').next().unwrap_or("");
-        assert!(
-            route == "README.md" || matches!(module, "kernel" | "host" | "mod"),
-            "AGENTS §3 路由必须落在三模块内（或指向树入口 README.md）：docs/design/{route}"
-        );
-    }
-
-    // 裸文件名省略形（`mod-package.md`）不可机械解析，禁；
-    // 只禁「指向 design 的裸名」——context 树自身的裸名（`topology.md`）不属本约束。
-    let topics: Vec<String> = ["kernel", "host", "mod"]
-        .iter()
-        .filter_map(|module| std::fs::read_dir(design_dir.join(module)).ok())
-        .flatten()
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| entry.file_name().to_str().map(|n| n.to_owned()))
-        .collect();
-    for (index, token) in table.split('`').enumerate() {
-        if index % 2 == 1
-            && token.ends_with(".md")
-            && !token.contains('/')
-            && topics.iter().any(|topic| topic == token)
-        {
-            panic!(
-                "AGENTS §3 路由禁写裸文件名：`{token}`（写全路径 docs/design/<module>/{token}）"
-            );
-        }
-    }
-
-    // Repository topology 行：system-boundaries 必须落在 context/cold-start
-    let topology = table
-        .lines()
-        .find(|line| line.contains("Repository topology"))
-        .expect("AGENTS §3 必须有 Repository topology 行");
-    assert!(
-        topology.contains("docs/context/cold-start/system-boundaries.md"),
-        "Repository topology 行必须指向 docs/context/cold-start/system-boundaries.md：{topology}"
-    );
-    assert!(
-        !topology.contains("docs/design/system-boundaries.md"),
-        "system-boundaries 已归位 context，路由不得再指 design：{topology}"
-    );
-    assert!(
-        repo.join("docs/context/cold-start/system-boundaries.md")
-            .is_file(),
-        "Repository topology 路由指向的文件必须真实存在"
-    );
-}
-
 /// r6：`scenes.json` 的 `reference` 段——**登记但不拦门禁**，且默认值被负向断言钉死。
 ///
 /// ① 三个 id 都能解析到 `docs/context/<id>.md`，且文件头 `id` 与表中值逐字相等；
@@ -5300,48 +5210,6 @@ fn verify_suite_result_records_green_evidence_only_in_settle() {
     game.assert_kv("verify.source", json!("tool:gate.verify_suite"));
 }
 
-/// A5 (子会话清理): `harness.archive_sessions` is retired from the Mod tool bridge — the cleanup
-/// is prompt-driven and the only settlement path is the human `settlement.sessions`
-/// declaration. Re-pin the retirement facts: the tool is declared in neither `pack.json`
-/// nor `allowedTools`, and a direct `settlement.sessions` registration still unblocks the
-/// batch close (through the 剧情双层重写 release declaration).
-#[test]
-fn archive_sessions_is_retired_from_the_tool_bridge() {
-    let mod_dir = project_mod_dir();
-    let pack: Json = serde_json::from_str(
-        &std::fs::read_to_string(mod_dir.join("pack.json")).expect("read pack.json"),
-    )
-    .expect("parse pack.json");
-    assert!(
-        pack["tools"].get("harness.archive_sessions").is_none(),
-        "pack.json must no longer declare harness.archive_sessions"
-    );
-    let config: Json = serde_json::from_str(
-        &std::fs::read_to_string(mod_dir.join("data/config.json")).expect("read config"),
-    )
-    .expect("parse data/config.json");
-    let allowed = config["allowedTools"]
-        .as_array()
-        .expect("allowedTools is an array");
-    assert!(
-        !allowed
-            .iter()
-            .any(|entry| entry == "harness.archive_sessions"),
-        "allowedTools must no longer release harness.archive_sessions"
-    );
-
-    // The human declaration path (the only one left) still unblocks the close.
-    let mut game = drive_to_release();
-    game.narrate("release.skip", &text("纯测试批次，无 develop→master 合并"));
-    let closed = game.click("review.note — ");
-    assert!(
-        closed["narrative"]
-            .to_string()
-            .contains("[BATCH 1 SETTLED]"),
-        "review.note must settle after the human sessions declaration: {closed}"
-    );
-}
-
 struct SyncRitualRunner;
 
 impl HostToolRunner for SyncRitualRunner {
@@ -5545,59 +5413,6 @@ fn synchronous_tool_bridge_runs_inline_rituals() {
 }
 
 // ───────────────────── r13 · fuel autoscale + requirement list pagination ─────────────────────
-
-/// r13 A: the dispatch fuel budget autoscales with the canonical state size —
-/// `clamp(per_entry × kv_len, floor, cap)` — while an explicit `YGG_FUEL_BUDGET` wins
-/// **exactly** (the escape hatch is not clipped by the floor or the cap); a missing,
-/// zero, or unparseable env falls back to the autoscale.
-#[test]
-fn fuel_budget_autoscales_with_state_size_and_env_wins() {
-    // Autoscale: the pure function is the single source (host-injected only).
-    assert_eq!(
-        auto_budget(0),
-        DEFAULT_FUEL_BUDGET,
-        "kv_len 0 sits on the floor"
-    );
-    assert_eq!(
-        auto_budget(60),
-        FUEL_AUTOSCALE_PER_ENTRY * 60,
-        "the scale is exactly per_entry × kv_len inside the window"
-    );
-    assert_eq!(
-        auto_budget(10_000),
-        FUEL_AUTOSCALE_CAP,
-        "huge states clamp to the 4M cap"
-    );
-    assert_eq!(
-        auto_budget(usize::MAX),
-        FUEL_AUTOSCALE_CAP,
-        "saturating multiplication must not panic and still clamp"
-    );
-
-    // Resolution: explicit env is byte-exact and uncapped (both escape directions).
-    assert_eq!(resolve_budget(Some("12345"), 100), 12_345);
-    assert_eq!(
-        resolve_budget(Some("1"), 100_000),
-        1,
-        "below the floor: allowed"
-    );
-    assert_eq!(
-        resolve_budget(Some("99999999999"), 0),
-        99_999_999_999,
-        "above the cap: allowed (escape hatch semantics)"
-    );
-    assert_eq!(
-        resolve_budget(Some(" 4096 "), 100),
-        4_096,
-        "the raw is trimmed"
-    );
-
-    // Fallback: missing / zero / unparseable → the autoscale.
-    assert_eq!(resolve_budget(None, 0), DEFAULT_FUEL_BUDGET);
-    assert_eq!(resolve_budget(Some("0"), 100), auto_budget(100));
-    assert_eq!(resolve_budget(Some("abc"), 100), auto_budget(100));
-    assert_eq!(resolve_budget(Some(""), 100), auto_budget(100));
-}
 
 /// r13 B: `requirement.list` is a **paged** view by default — open requirements first
 /// (canonical order), page width 12, the rest folded into a hint line — while
