@@ -38,10 +38,7 @@ use std::sync::OnceLock;
 
 use serde_json::{json, Value as Json};
 
-use ygg_sandbox::driver::{KernelFacade, DEFAULT_FUEL_BUDGET};
-use ygg_sandbox::fuel::{
-    auto_budget, resolve_budget, FUEL_AUTOSCALE_CAP, FUEL_AUTOSCALE_PER_ENTRY,
-};
+use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 use ygg_sandbox::HostToolRunner;
@@ -1362,9 +1359,6 @@ fn release_declaration_gates_the_batch_settlement() {
 /// An unarmed batch settle **auto-appends the next batch's docs-maintenance requirement**
 /// (批结算自动维护): the `[BATCH 1 SETTLED]` receipt is followed by `[MAINTENANCE REQ ADDED]` in
 /// the same transaction — one new open/draft row carrying the `req.<i>.maintenance` marker,
-/// the canonical title (no batch number, so the dedup title match stays exact) and the
-/// per-file wiki guidance in its description; `run.maintenance.last` points at it.
-#[test]
 /// 未武装批结算在尾部登记**文档维护义务**（用户 2026-11-15 裁定：CONTEXT / DESIGN 的维护是
 /// 主会话自办工作，不再派生可派发的需求——subagent 缺跨批次上下文，r11 / r12 两次实测的产出
 /// 仍需主会话逐条复核）。义务落在 `docs.maintenance.due`，并把下一次 `coordinate.submit`
@@ -1422,7 +1416,6 @@ fn batch_settle_marks_docs_maintenance_due_and_blocks_the_next_boundary() {
 /// the pipeline like any requirement, and when the batch finally closes it appends a
 /// fresh round's row (r3) — a terminal same-title row does not suppress it. (The failed
 /// verify never completed the close, so `run.batch` stays 1: this IS batch 1's close.)
-#[test]
 /// 解除只认**等值批次**：拿旧批次号清不掉新义务，未知 docs 键直接拒；空值才是显式放弃。
 #[test]
 fn docs_maintenance_clear_requires_the_outstanding_batch() {
@@ -1448,11 +1441,6 @@ fn docs_maintenance_clear_requires_the_outstanding_batch() {
     );
     game.assert_kv("docs.maintenance.due", json!(""));
 }
-
-/// The auto-appended maintenance requirement **walks the nine acts** and **gates the next
-/// boundary** until done: the per-batch docs cadence is enforced by `gate_problem()`, not
-/// by convention. The second batch settle appends the next round's row (r3).
-#[test]
 
 /// The **retired path appends nothing**: an armed `review.note` writes the ending and
 /// leaves the register (and the pointer) untouched — no maintenance row for a closed run.
@@ -3199,32 +3187,6 @@ fn tool_declarations_pin_the_merged_capability_surface() {
 }
 
 // ───────────────────── E6 · Mod text hygiene (别名退役/子会话清理) ─────────────────────
-
-fn markdown_key_set(text: &str) -> std::collections::BTreeSet<String> {
-    text.lines()
-        .filter_map(|line| line.strip_prefix("| `"))
-        .filter_map(|tail| tail.split('`').next().map(str::to_owned))
-        .collect()
-}
-
-fn markdown_template_map(text: &str) -> std::collections::BTreeMap<String, String> {
-    let mut out = std::collections::BTreeMap::new();
-    for line in text.lines().filter(|line| line.starts_with("| `")) {
-        let mut cells = line.rsplitn(3, " | ");
-        let _protocol = cells.next();
-        let _variables = cells.next();
-        let Some(head) = cells.next() else {
-            panic!("malformed copy-contract row: {line}")
-        };
-        let rest = head.strip_prefix("| `").expect("row key prefix");
-        let (key, template) = rest.split_once("` | ").expect("row key/template split");
-        out.insert(
-            key.to_owned(),
-            template.replace("\\|", "|").replace("\\n", "\n"),
-        );
-    }
-    out
-}
 
 /// 从一个文案值里取出所有 `docs/context/<相对路径>.md` 指针（r5）。
 ///
