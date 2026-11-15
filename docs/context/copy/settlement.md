@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-settlement
 > **id** copy/settlement · **幕** all · **触发** 改 `beats-settlement.json` 前
 > **读不到代价** silent-drift
-> **ver** 73a77d
+> **ver** f8a2dc
 
 > **定位**：`beats-settlement.json` 54 键的句式知识权威：盘点四项、批结算、退役、发布与 tools 机证。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-settlement.json`
@@ -9,11 +9,11 @@
 
 | 键 | 句式模板（逐字） | 变量 | 协议归属 |
 |---|---|---|---|
-| `maintenance_req_added` | [MAINTENANCE REQ ADDED] {{id}} "{{title}}" — batch {{batch}} closeout appended next batch's docs-maintenance requirement (open/draft); dispatch it in coordinate — it gates the next boundary until done. | id, title, batch | 叙述 |
-| `maintenance_req_desc` | 依 wiki-governance 三职责复核上批全部需求的 plan 与 develop 验收结果是否已落 docs wiki：决策 → 它治理的文档的「设计依据」段、词汇 → docs/context/cold-start/vocabulary.md 词条；行为与契约 → docs/design/ 对应主题文件（按本批触碰面：state-machine/events/state-surface/lanes 等；行为叙事与产品定位 → docs/context/story/* 与 docs/context/cold-start/system-boundaries.md）；结构变化 → docs/README.md 索引与 CONTEXT.md/DESIGN.md 两薄壳映射表；纪律：每主题一文件 ≤300 行、头部定位/replaces/上下游、双向链接；纯缺陷修复与措辞调整不触碰文档。 | — | 叙述 |
-| `maintenance_req_skipped_dedup` | [MAINTENANCE REQ SKIP] {{id}} already carries an open docs-maintenance requirement (maintenance marker / canonical title) — dedup hit, the batch settles without a second one. | id | 叙述 |
-| `maintenance_req_skipped_full` | [MAINTENANCE REQ SKIP] requirement register is full ({{cap}} open) — docs-maintenance append deferred; the batch settles regardless. | cap | 叙述 |
-| `maintenance_req_title` | 维护更新 docs wiki（上批收口） | — | 叙述 |
+| `docs_maintenance_due` | [DOCS MAINTENANCE DUE] batch {{batch}} settled — the CONTEXT/DESIGN pass is the main session's OWN work (no requirement is dispatched: subagents lack cross-batch context and got it wrong twice). Per wiki-governance's three duties, reconcile what this batch changed into the wiki: decisions → the governing doc's 设计依据 section; vocabulary → docs/context/cold-start/vocabulary.md; product boundaries → docs/context/cold-start/system-boundaries.md; behaviour/contract → docs/design/<module>; act narration → docs/context/. Then clear it: config.set docs.maintenance.done={{batch}} | batch | 叙述 |
+| `docs_maintenance_still_due` | [DOCS MAINTENANCE STILL DUE] batch {{batch}} — obligation unchanged; clearing needs config.set docs.maintenance.done={{batch}} | batch | 叙述 |
+| `docs_maintenance_blocked` | docs-maintenance/due: batch {{batch}} left the docs wiki unreviewed (CONTEXT/DESIGN upkeep is the main session's own work, not a dispatched requirement). Do the pass, then clear: {{command}} | batch, command | 叙述 |
+| `docs_maintenance_cleared` | [DOCS MAINTENANCE CLEARED] batch {{batch}} — the wiki pass is declared done; the batch boundary is unblocked | batch | 叙述 |
+| `docs_maintenance_bad_batch` | docs.maintenance.done must equal the outstanding batch ({{due}}), or be empty to clear explicitly; got "{{got}}" | due, got | 叙述 |
 | `release_confirm_payload` | master@1a2b3c4d\|v2026.11.12.1 | — | 叙述 |
 | `release_confirmed` | [RELEASE CONFIRMED] 第 {{batch}} 批合并已声明：master@{{sha}} tag {{tag}}——review.note 可批结算/退役 | batch, sha, tag | 叙述 |
 | `release_required` | 发布未声明：先 release.confirm（master@<sha> + 批次 tag）或 release.skip（跳过理由），review.note 才能收口本批 | — | 叙述 |

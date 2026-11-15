@@ -2,7 +2,7 @@
 
 > **id** story/run-story · **幕** all · **触发** 理解一整局怎么跑 / 改运行级转场之前
 > **读不到代价** silent-drift（按记忆讲微状态 → 讲错转场与会话边界）
-> **ver** 26c8f2
+> **ver** 693b3c
 
 > **定位**：常驻自循环的运行级微状态表、开场序列、盘点子微状态与发布幕（含 live→retired 唯一转场 mermaid）。
 > **replaces**：DESIGN §2.3（L96–144）（搬运基线 `3a2536f`）
@@ -58,5 +58,5 @@ stateDiagram-v2
 
 `review.note` 两个落点（R10）：**未武装（常态）= 批结算**——`run.phase=""`、清 release 键、`run.batch+1`、`[BATCH n SETTLED]`（绝无 `[ENDING` 前缀）；**`run.retire` 武装 = 退役终局**——`advance(retired)` 写 `ending`，`[ENDING · run retired]`。
 
-**批结算自动维护追加（批结算自动维护，r3）**：未武装批结算在 `[BATCH n SETTLED]` 之后、同 handler 事务内自动 `req_append` 一条 draft 态「维护更新 docs wiki（上批收口）」需求（description 携 r2 wiki 树分文件指引，见 `beats-settlement.json` `maintenance_req_desc`）。防重复：注册表已存在 open ∧ 无 closed_reason ∧（`req.<i>.maintenance` 标记 ∨ 规范标题）的行则跳过；容量满同样跳过——追加尽力而为，只叙事不拒绝，绝不使批结算失败。退役路径不追加。追加行永不带 mark（draft 不被 auto_dispatch 推进），由主代理在下一批协调幕 `requirement.dispatch`，未 done 前阻塞下一批 `coordinate.submit`——每批一轮的文档维护节奏由此强制。
+**批结算文档维护义务（用户 2026-11-15 裁定，主会话自办）**：未武装批结算在 `[BATCH n SETTLED]` 之后、同 handler 事务内登记 `docs.maintenance.due=<batch>` 并叙述 `[DOCS MAINTENANCE DUE]`（含分文件指引与解除命令）。**它不派生需求行**——CONTEXT / DESIGN 的维护是主会话的自身工作，subagent 缺跨批次上下文。义务靠**下一次 `coordinate.submit` 硬阻塞**闭环，解除命令 `config.set docs.maintenance.done=<batch>`（只认等值批次）。防重复：注册表已存在 open ∧ 无 closed_reason ∧（`req.<i>.maintenance` 标记 ∨ 规范标题）的行则跳过；容量满同样跳过——追加尽力而为，只叙事不拒绝，绝不使批结算失败。退役路径不追加。追加行永不带 mark（draft 不被 auto_dispatch 推进），由主代理在下一批协调幕 `requirement.dispatch`，未 done 前阻塞下一批 `coordinate.submit`——每批一轮的文档维护节奏由此强制。
 

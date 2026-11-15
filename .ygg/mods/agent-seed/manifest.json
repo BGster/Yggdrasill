@@ -91,9 +91,9 @@
       "sha256": "f6f79e07101987e574888d8e85e83adaec7fa2c45b992ee87115938cb0ea02e6"
     },
     {
-      "byteLength": 26812,
+      "byteLength": 27136,
       "path": "src/handlers/operate/review.lua",
-      "sha256": "0fcef11c9bae723d9edc3f4d5b7b2b264326c2ac4be6611c04284a35abc66237"
+      "sha256": "f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
     },
     {
       "byteLength": 8741,
@@ -116,9 +116,9 @@
       "sha256": "e7e020d146871cc99d3807f9e1347c345799722d240741ecd8d0a42aedd958ca"
     },
     {
-      "byteLength": 16531,
+      "byteLength": 17660,
       "path": "src/handlers/system/config.lua",
-      "sha256": "51113685779937d67d210941fd62ef97902156f1bed59d74120905d494b37583"
+      "sha256": "e80f0c83d14a339f02f6a5ff690055a9d0e8f9ee348317590f98b4dc6392eacf"
     },
     {
       "byteLength": 1155,
@@ -193,12 +193,12 @@
       "sha256": "e38bbcd677c1f179f7642b335c58d438659de5cf0b5ce07226f84785c7c46f74"
     },
     {
-      "byteLength": 10393,
+      "byteLength": 10299,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "4bcb2dc2a620ce07fe8cb0647c08fb24f32952af8be3cecd987677ed20320baf"
+      "sha256": "13f65f60a7bf3b3e9999783b802fcff6a4af1f37a0e9c314bfb30626b5ae9124"
     },
     {
       "byteLength": 14038,
@@ -214,7 +214,7 @@
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "c933a0c3908480cf9241d3224e2b8f1ae4974e2962ebfae70f82cc667a2258d7"
+      "sha256": "5b264a0655eaaa596e1abe991a095ce09d3aed2ba88fdb0ffafbb453fe191d02"
     },
     {
       "byteLength": 1943,

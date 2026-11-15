@@ -17,7 +17,7 @@
 | `beats-requirements.json` | 144 | 需求族文案：派发/提案/门禁/打回/依赖校验/九幕行文（含集成确认/打回与台账错位提示） |
 | `beats-lanes.json` | 36 | 泳道账本、池注册（`lane.pool`）与认领/释放、分支命名拒绝、池化标签叙事（r1 分池七键） |
 | `beats-map-guide.json` | 38 | 地图视图、菜单行、人机门禁提示、`map_note_*` 节点注记 |
-| `beats-settlement.json` | 54 | 盘点四项、批结算、退役、发布幕文案；批结算自动维护追加五键；tools 机证七键（tools.root 注册/脚本缺失/机证通过与被拒/未注册提醒/sessions-parent 与 todo-session 缺失） |
+| `beats-settlement.json` | 54 | 盘点四项、批结算、退役、发布幕文案；批结算文档维护义务五键；tools 机证七键（tools.root 注册/脚本缺失/机证通过与被拒/未注册提醒/sessions-parent 与 todo-session 缺失） |
 | `beats-harness.json` | 83 | 配置面板、身份注册、工具桥提示、`subagent_submit_cmd` 模板；tools 注册面七键（root 注册/清除、name 与 param 注册、形状拒绝） |
 | `core.json` | — | `scenes`（5）/ `endings`（1）/ `prompts`（5）/ `options`（27）/ `tuning`（8） |
 

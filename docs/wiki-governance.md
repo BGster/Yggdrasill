@@ -69,13 +69,16 @@
 
 **这个文件不进 `readPlan`，也不产生签名义务**——它是"怎么签名"的规则，若自身成为必读并需要签名，就构成「先签名才能读到怎么签名」的自指门禁。它登记在 `scenes.json` 的 `reference` 段以便机检可达。
 
-## 6. 批结算自动维护需求（机器闭环）
+## 6. 批结算文档维护义务（机器闭环，主会话自办）
 
-**未武装的 `review.note` 批结算，会在 `[BATCH n SETTLED]` 之后、同一 handler 事务内追加一条 draft 态「维护更新 docs wiki（上批收口）」需求**，description 携 wiki 树的分文件指引。去重判据 = `open` ∧ 无 `closed_reason` ∧（`req.<i>.maintenance` 标记 ∨ 规范标题）；容量满同样跳过——**尽力而为，绝不使批结算失败**；退役路径不追加。
+**未武装的 `review.note` 批结算，会在 `[BATCH n SETTLED]` 之后、同一 handler 事务内登记 `docs.maintenance.due=<batch>`**，并在回执里叙述 `[DOCS MAINTENANCE DUE]`（含 wiki 的分文件指引与解除命令）。**它不派生需求行**——CONTEXT / DESIGN 的维护是**主会话的自身工作**。
 
-**依据**：文档闭环此前纯靠人工自觉（brief 提醒 + 结算前核验），而连续多批迭代实证每批都有文档维护诉求、各靠临时立项。把它变成需求，"每批一轮"才由状态机强制承载，而不是靠协调者记得。
+**为什么不是需求**（用户 2026-11-15 裁定）：subagent 缺跨批次上下文。r11（68,376 token / 129 次调用）与 r12（68,303 token / 76 次调用）两次实测，执行者在 ≈68k token 处被上游打断，且产出的文档仍需主会话逐条复核。派发它，等于用一条「看起来在治理」的需求掩盖「没人有上下文做这件事」。
 
-**判据**：① 阻断——下一批 `coordinate.submit`（上批维护需求未终态即无法关闭）；② 症状——批结算后 `req.count` 未 +1，或 `run.maintenance.last` 未指向新行；③ 确认——语义用例断言 `run.batch` 递增、`req.<n>.maintenance == "1"`、description 含 `wiki-governance` 与分文件指引。
+**闭环靠阻塞而不是靠占位行**：义务未解除时，下一次 `coordinate.submit` 直接拒（`docs-maintenance/due`，附解除命令）；主会话做完复核后 `config.set docs.maintenance.done=<batch>` 解除——**只解除等值批次**：旧批次号清不掉新义务，空值是显式放弃（自担后果）。
+
+**判据**：① 阻断——下一批 `coordinate.submit`（义务未解除即无法跨批边界）；② 症状——批结算后 `docs.maintenance.due` 未置位，或 `req.count` 因维护而 +1（说明又派生了需求），或拿旧批次号就能清掉；③ 确认——语义用例 `batch_settle_marks_docs_maintenance_due_and_blocks_the_next_boundary` 与 `docs_maintenance_clear_requires_the_outstanding_batch`。
+
 
 ## 7. ver 定义与旧路径兼容层两分法
 

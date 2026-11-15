@@ -223,6 +223,29 @@ function M.install(deps)
       return profile_set(key, value)
     elseif key:sub(1, 5) == "read." then
       return read_set(key, value, actor)
+    elseif key:sub(1, 5) == "docs." then
+      -- 文档维护义务（用户 2026-11-15 裁定：CONTEXT / DESIGN 的维护归主会话自办，不派 subagent）。
+      -- docs.maintenance.done=<batch> 只解除**等值**批次；空值 = 显式清除（放弃义务，需自知）。
+      if key ~= "docs.maintenance.done" then
+        return reject_payload("config.set",
+          fill(TEXTS.beats.bad_config_key, { key = key, allowed = TEXTS.beats.config_keys }))
+      end
+      local due = trim(tostring(ygg.kv.get("docs.maintenance.due") or ""))
+      local got = trim(value)
+      if got == "" then
+        ygg.kv.set("docs.maintenance.due", "")
+        ygg.narrate(fill(TEXTS.beats.docs_maintenance_cleared, { batch = due ~= "" and due or "-" }))
+        render()
+        return
+      end
+      if due ~= "" and got ~= due then
+        return reject_payload("config.set",
+          fill(TEXTS.beats.docs_maintenance_bad_batch, { due = due, got = got }))
+      end
+      ygg.kv.set("docs.maintenance.due", "")
+      ygg.narrate(fill(TEXTS.beats.docs_maintenance_cleared, { batch = got }))
+      render()
+      return
     elseif key == "readGate.window" then
       -- 遗忘窗口（r4 读签一维）：整数，缺省 80，越界夹紧到 [0, MAX]。
       -- 调窗是**自解除的第二个杆杆**（第一杆是重读重签）：读签拒台词里逐条报当前值与抬高命令。

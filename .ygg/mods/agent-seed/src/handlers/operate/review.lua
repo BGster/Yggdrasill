@@ -196,44 +196,21 @@ local function settle_four_ready()
   return true
 end
 
--- r3 / 批结算自动维护：批结算尾部自动追加下一批的「维护更新 docs wiki」需求（draft 态，进
--- 入派发队列，由主代理在下一批协调幕 requirement.dispatch——draft 行永不带 mark，
--- auto_dispatch 不碰它）。防重复：注册表里存在 open ∧ 无 closed_reason ∧（maintenance
--- 标记 ∨ 标题精确等于规范标题）的行则跳过——closed_reason 过滤保证 done / split /
--- merged / dropped 的历史维护行不压制新批追加。尽力而为：去重命中或容量满只发可读
--- 叙事（前缀非拒绝前缀，不计失败步），绝不使批结算本身失败。退役路径不调用（本函数
--- 只挂在未武装批结算尾部）。
-local function append_maintenance_req(batch)
-  for i = 1, req_count() do
-    if req_status(i) == reqs_R_OPEN
-      and req_closed_reason(i) == ""
-      and (
-        ygg.kv.get(req_key(i, "maintenance"))
-        or req_title(i) == TEXTS.beats.maintenance_req_title
-      )
-    then
-      ygg.narrate(fill(TEXTS.beats.maintenance_req_skipped_dedup, { id = req_id(i) }))
-      return
-    end
-  end
-  if req_open_total() >= req_capacity() then
-    ygg.narrate(fill(TEXTS.beats.maintenance_req_skipped_full, { cap = tostring(req_capacity()) }))
+-- 批结算尾部的文档维护义务（用户 2026-11-15 裁定）：CONTEXT / DESIGN 的维护是**主会话的
+-- 自身工作**，不再自动派生可派发的需求——subagent 缺跨批次上下文、改文档容易改错
+-- （r11 / r12 两次实测：执行者在 ≈68k token 处被打断，且产出的文档仍需主会话逐条复核）。
+-- 改为「KV 义务 + 批边界硬阻塞」：批结算尾部登记 docs.maintenance.due=<batch>；下一次
+-- coordinate.submit 在义务未解除时直接拒绝并给出解除命令；主会话做完复核后
+-- `config.set docs.maintenance.done=<batch>` 解除（只解除等值批次，旧值不误清新值）。
+-- 尽力而为：本函数永不使批结算自身失败；退役路径不调用。
+local function mark_docs_maintenance_due(batch)
+  local due = trim(tostring(ygg.kv.get("docs.maintenance.due") or ""))
+  if due == tostring(batch) then
+    ygg.narrate(fill(TEXTS.beats.docs_maintenance_still_due, { batch = tostring(batch) }))
     return
   end
-  local index = req_append(
-    TEXTS.beats.maintenance_req_title,
-    TEXTS.beats.maintenance_req_desc,
-    "",
-    {},
-    ""
-  )
-  ygg.kv.set(req_key(index, "maintenance"), "1")
-  ygg.kv.set("run.maintenance.last", req_id(index))
-  ygg.narrate(fill(TEXTS.beats.maintenance_req_added, {
-    id = req_id(index),
-    title = TEXTS.beats.maintenance_req_title,
-    batch = tostring(batch),
-  }))
+  ygg.kv.set("docs.maintenance.due", tostring(batch))
+  ygg.narrate(fill(TEXTS.beats.docs_maintenance_due, { batch = tostring(batch) }))
 end
 
 function M.install(deps)
@@ -281,6 +258,18 @@ function M.install(deps)
     local problem = gate_problem()
     if problem ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit", problem)
+    end
+    -- 文档维护义务（用户 2026-11-15 裁定）：CONTEXT / DESIGN 的维护是主会话自办工作，
+    -- 不派给 subagent。上一批结算时登记了 docs.maintenance.due；未解除前批边界不放行——
+    -- 这样「文档跟上机制」就不会因为“忘了派”或“派给缺上下文的人”而滑过去。
+    -- 解除权在配置面（docs.maintenance.done=<batch>），只解除等值批次。
+    local docs_due = trim(tostring(ygg.kv.get("docs.maintenance.due") or ""))
+    if docs_due ~= "" then
+      return refuse(TEXTS.beats.req_wait_rejected, "coordinate.submit",
+        fill(TEXTS.beats.docs_maintenance_blocked, {
+          batch = docs_due,
+          command = "config.set docs.maintenance.done=" .. docs_due,
+        }))
     end
     -- r4 读签前置校验（批边界）：排在各局收口判据之后、确认转场之前。
     -- 必读集 = 结算幕必读（acts/settle + rituals/cleanup，由生成器写在 readPlan.settle）。
@@ -603,10 +592,10 @@ function M.install(deps)
       score = tostring(score),
       lesson = lesson,
     }))
-    -- r3 / 批结算自动维护：追加发生在全部结算检查之后——本批再无任何 gate_problem 读点，
-    -- 不阻塞本批；新需求落在下一批协调幕的派发队列（§9.1 四条件：handler 事务内
-    -- 普通派生写，非 effect）。
-    append_maintenance_req(batch)
+    -- r3 / 批结算文档维护义务（用户 2026-11-15 裁定改为主会话自办）：登记发生在全部结算
+    -- 检查之后——本批再无任何 gate_problem 读点，不阻塞本批；义务落在下一次
+    -- coordinate.submit 的硬阻塞上（§9.1 四条件：handler 事务内普通派生写，非 effect）。
+    mark_docs_maintenance_due(batch)
     render()
   end)
 end

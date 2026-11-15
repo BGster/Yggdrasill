@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 交付（req-acts/delivery）
 > **id** req-acts/delivery · **幕** req: ready/developing/accept/accept_gate · **触发** 派发 development / 交付受理前
 > **读不到代价** hard-refusal（工件纪律漏读 → 交付被打回；`.env.local` 未 source → 派发不合规）
-> **ver** a0d904
+> **ver** d34a75
 
 ## 4. 待开发（ready）
 
@@ -21,7 +21,7 @@
 
 ## 5b. 文档同步（Doc sync，适用时）
 
-docs wiki 是全仓始终最新的权威——不是变更日志，历史归 git 与结算产物。若变更改变任何子系统的工作方式（内核 crates / egg CLI / Mod / serve / 工具链）：plan 阶段声明触碰面；development 阶段在同一特性分支就地更新对应文件（决策/词汇 → `docs/context/` 对应台账行或词条；行为/契约 → `docs/design/` 对应主题文件；幕台词/仪式/文案句式 → `docs/context/` 的 [acts/](../acts/) / [rituals/dispatch.md](../rituals/dispatch.md) / [copy/README.md](../copy/README.md) 七域索引）。纯缺陷修复与措辞调整不触碰文档。
+docs wiki 是全仓始终最新的权威——不是变更日志，历史归 git 与结算产物。若变更改变任何子系统的工作方式（内核 crates / egg CLI / Mod / serve / 工具链）：plan 阶段声明触碰面；development 阶段在同一特性分支就地更新对应文件（决策/词汇 → `docs/context/` 对应台账行或词条；行为/契约 → `docs/design/` 对应主题文件；幕台词/仪式/文案句式 → `docs/context/` 的 [acts/](../acts/) / [rituals/dispatch.md](../rituals/dispatch.md) / [copy/README.md](../copy/README.md) 七域索引）。纯缺陷修复与措辞调整不触碰文档。**归属边界（用户 2026-11-15 裁定）**：本节说的是**你自己这次改动**的 Doc sync——就地在同一分支更新你改动所影响的文件。**跨批次的 docs wiki 收口**（回看上批全部需求、把散落的决策/词汇/契约归位）**不派给 subagent，由主会话自办**：批结算会在 `docs.maintenance.due` 登记该义务并阻塞下一次 `coordinate.submit`（见 [../../wiki-governance.md](../../wiki-governance.md) §6）。判据很简单：**你改的东西你知道，所以同分支更新**；**跨批次的东西只有主会话有上下文，所以归主会话**。
 
 ## 6. 交付受理（accept）
 
