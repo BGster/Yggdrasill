@@ -4,7 +4,7 @@
 -- 本模块写的 KV 前缀：无（只经 src/core/clock.lua 封存纪元；自身零直写）。
 --
 -- 分层（与 gates 的契约）：本模块只回答「该读什么 / 当前 ver 是什么 / 窗口多大 / 纪元何时开始」，
--- **不做判定、不产文案**——四维判定与四条拒台词在 `src/domain/gates.lua` 的 read_problem。
+-- **不做判定、不产文案**——读签判定（覆盖 / 新鲜 / 遗忘 + 按人）与拒台词在 `src/domain/gates.lua` 的 read_problem。
 -- 这样 gates 是唯一裁判，本模块可被 render / 菜单 / 测试单独复用。
 --
 -- 数据来源（全部**内嵌在 data/config.json 的生成区**，由 scripts/gen-scene-readfirst.py
@@ -27,10 +27,10 @@ local effective =
   config.effective
 local split, trim =
   util.split, util.trim
-local req_count, req_key, req_plan_ok, req_rev, req_id, run_phase =
-  reqs.req_count, reqs.req_key, reqs.req_plan_ok, reqs.req_rev, reqs.req_id, reqs.run_phase
+local req_count, req_key, req_plan_ok, run_phase =
+  reqs.req_count, reqs.req_key, reqs.req_plan_ok, reqs.run_phase
 
--- 遗忘窗口缺省（用户裁决：50 → 80；四维拒台词里逐条报当前值）。
+-- 遗忘窗口缺省（用户裁决：50 → 80；读签拒台词里逐条报当前值）。
 local DEFAULT_WINDOW = 80
 local MAX_WINDOW = 1000
 
@@ -70,7 +70,6 @@ function M.observe()
   clock.seal("act", tostring(run_phase()))
   local total = req_count()
   for i = 1, total do
-    clock.seal("req." .. tostring(i) .. ".rev", tostring(req_rev(i)))
     clock.seal("req." .. tostring(i) .. ".stage", stage_flag(i))
   end
 end
@@ -136,11 +135,13 @@ function M.bearing(action, ctx)
   return out
 end
 
--- 一个动作涉及的纪元（供 gates 组装四维判据；顺序 = 判定优先级）。
+-- 一个动作涉及的纪元（供 gates 组装读签判定；顺序 = 判定优先级）。
 -- 纪元集合只由 ctx.req 决定（幕级动作没有需求级维度），所以签名只收 ctx：
 --   act    —— 运行幕（跨幕作废）
 --   stage  —— 该需求的阶段（plan → development → integrating）
---   rev    —— 该需求的修订号（amend / 打回：主体维度）
+-- **没有 rev 纪元（r11）**：amend / 两路打回推进 rev 时 `req_bump_rev` 同事务 `readsig.clear()`，
+-- 签名在判定之前就被抹光，所以「签名早于新 rev」这一维从无机会生效——r11 退役了它。
+-- 不要再把 rev 纪元加回来：它只会让「一维假保护」重新看起来像四维。（守护用例见 gates.lua 头注。）
 function M.epochs(ctx)
   local scene = tostring(run_phase())
   local out = {
@@ -155,14 +156,6 @@ function M.epochs(ctx)
       seq = clock.epoch_seq("req." .. tostring(index) .. ".stage"),
       scope = "stage " .. stage_name,
       kind = "stage",
-    }
-    out[#out + 1] = {
-      id = "req." .. tostring(index) .. ".rev",
-      seq = clock.epoch_seq("req." .. tostring(index) .. ".rev"),
-      scope = "rev " .. tostring(req_rev(index)),
-      kind = "rev",
-      req = req_id(index),
-      rev = req_rev(index),
     }
   end
   return out

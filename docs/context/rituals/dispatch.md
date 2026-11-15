@@ -1,7 +1,7 @@
 # Yggdrasill · 派发仪式（rituals/dispatch）
 > **id** rituals/dispatch · **幕** coordinate（派发前） · **触发** 派发任何 subagent（plan / development / analysis）前
 > **读不到代价** hard-refusal（`.env.local` 未 source 即派发、工件落检出、submit 缺 `exec=` 均不合规）
-> **ver** eb96ed
+> **ver** 9aa252
 
 > **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
@@ -52,12 +52,49 @@ set +a
 
 交付物通过 harness 存档，**绝不作为散文件落在任何检出里**：子代理在最终汇报中返回全文（或写到 /tmp 下），主会话用 `--artifact-put artifacts/<name>.md` 记入本局存档。一局的所有工件只活在该局存档（`<run-dir>/artifacts/`）；任何检出内的 `artifacts/` 是 git 忽略的草稿区，不是权威副本。
 
+**取证标准（Falsifiable assertions）**——`AGENTS.md §1.7` 该条的**操作面细化**（判定权威在 §1.7，本节只多给一列反例形态与两条实录）：工件里的**否定性断言**（“X 不存在 / 本仓从未有 Y”）与**数量断言**（“16 处”）必须先跑一条**本来可能给出反例**的方法并贴原始输出，结论旁写明方法名。方法必须与断言对象的**形态**匹配——
+
+| 断言形态 | 方法（会失败的那种） | 反例（看着像取证、其实不可能给出“存在”） |
+| --- | --- | --- |
+| PATH 上的命令不存在 | `command -v <tool>; echo "exit=$?"`（exit=1 才算不存在） | `which <tool>`（同 PATH，换名不换语义）；`ls scripts/*<tool>*`（只扫本仓脚本目录，对 cargo crate / 全局命令恒空） |
+| cargo crate 不存在 | `cargo metadata --no-deps --format-version 1`（取 `packages[].name`，或直接 `ls crates/`） | `command -v ygg-lint`（crate 不是 PATH 命令，恒空 → 假否定） |
+| 文件 / 目录存在性 | `test -e <path> && echo EXISTS` | `ls <glob>`（通配不匹配时不报错，易读成“没有”） |
+| 数量 N（出现次数 / 文件数 / 行数） | 一条可复算命令 + 贴原始输出；写清分母（口径） | 目测、抽样、只数一屏、换口径不声明（16 vs 23 键 24 处） |
+
+**断言“不存在”时必须写明「我用什么方法找过」**——未写方法的否定结论视同“我没往那儿看”，不得作为证据；数量断言必须可被第三方用同一条命令复算同一个数。
+
+实录一（假否定，r6）：需求描述写「`req-acts/integration.md` 证据清单里的 `ygg-lint` 本仓从未存在」，取证用的是 `command -v ygg-lint` 与 `ls scripts/*lint*`——两者都不适用于 cargo crate；实测 `crates/ygg-lint` 存在，`cargo run -q -p ygg-lint -- --pack .ygg/mods/agent-seed` → `0 error(s), 0 warning(s)`。
+
+实录二（数量口径，r5）：指针数报“16 处”，实为 23 键 24 处（`prop.10` 更正）——差的是分母口径与扫描范围，不是抄写错。
+
 ## 5. 提交仪式（Submit）
 
 - 子代理用 `subagent_submit_cmd` 模板提交 `proposal.submit`（模板句式见 [../copy/harness.md](../copy/harness.md)），payload 尾段携带 `exec=<agent_id>`（内联执行者注册）与身份段（宿主在声明路由上盖 `actor=` / `actor_session=` 章）。
 - 执行者台账：主会话在拿到子代理 id 后 `config.set executor.<rN>.<stage>=<id>`（stage ∈ analysis / plan / development）。同一 (req, stage) 换人或跨阶段移交不同 id 必须带原因（`=<id>|<reason>`）；amend 不改绑定，split/merge 不继承。`proposal.submit` 不硬查台账，未注册只在 `requirement.list` 显示 unregistered，因此它是自声明审计轨迹而非身份凭证。
 - 自报 profile 卡：`config.set profile.<handle>.<key>=…`（每键一次 config.set）；profile 是自报声明不是凭据，问责以执行者台账为准。宿主身份段、三态互证与 opener 契约见 [../../design/mod/identity.md](../../design/mod/identity.md)，本节不复制。
+- **交付洁净度自检（提交 `proposal.submit` 之前必跑）**：`sh .pi/tools/git-delivery-check.sh --repo <checkout> --text` 必须 `ok=1`（`dirty` / `unpushed` / `stash` / `conflict_debris` / `fmt` 五项计数全 0）。**回执里贴这一行的原文**——「工作树 clean」这句话不再是证据，证据是这一行输出（五项与修法见 §7）。
 
 ## 6. 配置面板语义（config_opened 正文的知识权威）
 
 `[CONFIG MENU]` 面板承载 play mode / evolution preference / gates 三类设置：点选一项即生效并停留在本页；选「back」返回幕菜单。注意：切换 play mode 会离开本页（驱动者变了，子页上下文失效）。演进预登记不走菜单——用 `config.set review.evolution.artifact|summary|candidates|classes=<value>` 写设置；verify 通过后 `settlement.evolution` 菜单在同一处组装并校验载荷。
+
+## 7. 收尾自检（交付洁净度五问）
+
+提交 `proposal.submit` 之前逐条过。五项各对应一个机器计数，跑一次 `sh .pi/tools/git-delivery-check.sh --repo <checkout> --text` 就能同时拿到：
+
+| # | 问 | 计数键（`ok=1` 当且仅当五项 count 全 0） | 红灯时的修法 |
+| --- | --- | --- | --- |
+| 1 | 工作树有未提交改动吗？ | `dirty.count`（拆 `tracked` / `untracked` / `unmerged`） | 提交或丢弃；**不许用 `stash` 了事**（见 ③） |
+| 2 | 有提交没进上游吗？ | `unpushed.count`；**无 upstream 记 `-1` = 失败** | `git push -u origin HEAD` |
+| 3 | 有悬置 stash 吗？ | `stash.count` | 提交或 `git stash drop`。stash 栈是**仓库级共享**的（泳道 worktree 池与主检出共用），先看 `stash=` 明细行是不是自己的 |
+| 4 | 有冲突/编辑残留吗？ | `conflict_debris.count`（basename 含 `~`、`*.orig`、`*.rej`） | `rm`；**尤其防 `git add -A` 把它扫进提交**（r1 的 `copy-contract-core.md~develop` 就是这么进去的） |
+| 5 | 格式化干净吗？ | `fmt.status=clean`；非 Rust 仓为 `n/a`（不计，显式可见） | `cargo fmt` 后提交 |
+
+**为什么这五问存在**：r3/r4/r5 三次交付全部留未提交的 rustfmt 差异，三次回执都写了「工作树 clean」——形容词没有对照物，计数有。r6 之所以第一次干净，是因为这一条被写进了 brief；本节的用途就是**不依赖协调者每次记得写**。
+
+**纪律**：
+
+- **回执格式**：贴 `git-delivery-check.sh --text` 的 `ok=` 行原文；`n/a` / `--no-fmt` / `--no-stash` 属豁免，须在同一回执里写明理由（脚本会把它写进 `waived=`，不静默）。
+- **它不是门禁**：本检查不进 `gates.gate_problem()`，不改任何 KV。红灯由执行者修，**不阻塞其他需求**（同 `lane_probe` 的「警告不是门禁」先例）。
+- **`unpushed` 记 `-1` 是刻意的**：`0` 表示「比过了、一致」，`-1` 表示「没法比」——r3/r4/r5 那种「本地干净、远端没有」的半交付只能靠这两个值可分辨才抓得到。分支尚未 push 但想与 develop 比时用 `--upstream origin/develop`。
+- **脚本只读**：不改 refs / index / worktree，不 push、不 reset、不 stash；契约见 [../../design/host/harness-tools.md](../../design/host/harness-tools.md) §2.2。

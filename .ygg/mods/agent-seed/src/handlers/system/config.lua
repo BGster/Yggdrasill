@@ -95,7 +95,10 @@ end
 -- 消费者（r4）不需要时钟、不需要比较序号。
 -- 覆盖面 k/n 只在 r2 的 readPlan 已烘进 data/config.json 时才算；**缺表即降级**
 -- （回执只给件数），绝不因此拒签：签名是自声明，不是门禁。
-local function read_set(key, value)
+-- r9：签名**必须按人**——`actor` 空则不签（不写值、不写侧键、不占索引）。门禁的语义是
+-- 「执行这个动作的人读过」，一个不知道谁签的签名在判定里等于不存在，先写再报错只会
+-- 留下一个看起来有效、实际无人认领的签名（比不签更坏）。
+local function read_set(key, value, actor)
   local doc = wire.parse_read_key(key)
   if doc == nil then
     return reject_payload("config.set", fill(TEXTS.beats.read_bad_doc, { doc = key }))
@@ -103,32 +106,40 @@ local function read_set(key, value)
   local scene = run_phase()
   local ver = trim(value)
   if ver == "" then
-    -- 空值 = 显式清除该件（与 run.retire / goal.authorization 同构）。
+    -- 空值 = 显式清除该件（与 run.retire / goal.authorization 同构）。清除不需要身份。
     readsig.forget(doc)
     ygg.narrate(fill(TEXTS.beats.read_cleared, { doc = doc, scene = scene }))
     render()
     return
   end
+  local who = trim(actor or "")
+  if who == "" then
+    return reject_payload("config.set", TEXTS.beats.read_no_identity)
+  end
   if not wire.read_ver_ok(ver) then
     return reject_payload("config.set", fill(TEXTS.beats.read_bad_ver, { ver = ver }))
   end
-  readsig.sign(doc, ver, scene)
+  readsig.sign(doc, ver, scene, who)
   -- r4：签名时刻快照（与 readsig 值段的 seq 互为印证；值段 seq 为 0 时消费者回落读它）。
   clock.mark_sign(doc)
-  local kept, total = readsig.coverage(scene, effective("readPlan"))
+  local kept, total, mine = readsig.coverage(scene, effective("readPlan"), who)
   if total == nil then
     ygg.narrate(fill(TEXTS.beats.read_signed_unplotted, {
       doc = doc,
       ver = ver,
+      actor = who,
       k = tostring(kept),
+      mine = tostring(mine),
       scene = scene,
     }))
   else
     ygg.narrate(fill(TEXTS.beats.read_signed, {
       doc = doc,
       ver = ver,
+      actor = who,
       k = tostring(kept),
       n = tostring(total),
+      mine = tostring(mine),
       scene = scene,
     }))
   end
@@ -141,6 +152,18 @@ function M.install(deps)
     local current = stage()
     if type(payload) ~= "string" then
       return reject("config.set", fill(TEXTS.beats.bad_payload, { action = "config.set" }))
+    end
+    -- r9：`config.set` 是 stamp-only 路由（pack.json 声明 `actor: true` 但无 write）：
+    -- 宿主为直接 `--event` 通道在载荷末尾盖 `|actor=<id>`。盖章段必须先剥下落成身份，
+    -- 否则会污染 `key=value` 的 value 段（`read.x=abc|actor=me` 会被当成坏 ver 拒掉）。
+    local actor = nil
+    do
+      local clean, stamped, _, problem = wire.strip_identity_tail(payload)
+      if problem ~= nil then
+        return reject_payload("config.set", problem)
+      end
+      payload = clean
+      actor = stamped
     end
     local key, value = cut(trim(payload), "=")
     key = trim(key)
@@ -199,10 +222,10 @@ function M.install(deps)
     elseif key:sub(1, 8) == "profile." then
       return profile_set(key, value)
     elseif key:sub(1, 5) == "read." then
-      return read_set(key, value)
+      return read_set(key, value, actor)
     elseif key == "readGate.window" then
-      -- 遗忘窗口（r4 四维之一）：整数，缺省 80，越界夹紧到 [0, MAX]。
-      -- 调窗是**自解除的第二个杆杆**（第一杆是重读重签）：四维拒台词里逐条报当前值与抬高命令。
+      -- 遗忘窗口（r4 读签一维）：整数，缺省 80，越界夹紧到 [0, MAX]。
+      -- 调窗是**自解除的第二个杆杆**（第一杆是重读重签）：读签拒台词里逐条报当前值与抬高命令。
       -- 回执走通用 config_changed（`effective("readGate.window")` 此刻已是夹紧后的值）——不新开文案键。
       local parsed = tonumber(value)
       if parsed == nil then

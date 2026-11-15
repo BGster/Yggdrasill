@@ -48,6 +48,11 @@ use ygg_sandbox::HostToolRunner;
 
 mod support;
 
+/// r9：测试侧提交者身份（宿主在真路径上盖 `|actor=`，kernel 直派没有宿主通道）。
+/// 签名与推进都用**同一个**身份，才符合「执行这个动作的人读过」的语义；
+/// 需要另一个代理时用 `game.as_actor(Some("..."))`。
+const TEST_ACTOR: &str = "test-agent";
+
 // ───────────────────────── locating ─────────────────────────
 
 /// Repository root (`CARGO_MANIFEST_DIR` is `crates/ygg-sandbox`; two levels up).
@@ -76,6 +81,11 @@ struct Game {
     dir: PathBuf,
     /// 关掉自动补签（只给读签门禁自己的用例用：它们要「不签」的现场）。
     suppress_reads: bool,
+    /// r9 提交者身份（宿主盖章的测试侧替身）。**只有四个声明路由用得上**：
+    /// `proposal.submit` / `gate.approve` / `coordinate.submit` / `config.set`——宿主在真路径上
+    /// 往载荷末尾盖 `|actor=<id>`，kernel 直派没有这条通道，所以测试必须自己模拟它。
+    /// `None` 模拟「旧宿主 / 没带 --actor」的直接派发面（r9 的拒签与拒绝路径靠它取证）。
+    stamp_actor: Option<String>,
 }
 
 impl Game {
@@ -91,15 +101,45 @@ impl Game {
             kernel,
             dir: dir.to_path_buf(),
             suppress_reads: false,
+            stamp_actor: Some(TEST_ACTOR.to_owned()),
         };
         game.narrate("event.start", "0");
         game
     }
 
+    /// 本步以谁的身份提交（模拟 `--actor`；`None` = 不盖章）。
+    fn as_actor(&mut self, actor: Option<&str>) {
+        self.stamp_actor = actor.map(str::to_owned);
+    }
+
+    /// 派发前按声明路由盖身份段（宿主 `inject_identity_segments` 的同形模拟）。
+    /// 只盖四个真声明了 `actor` 的动作；已自带 `actor=` / `actor_session=` 尾段的载荷原样透传。
+    fn stamped(&self, event: &str, payload: &str) -> String {
+        let Some(actor) = self.stamp_actor.as_deref() else {
+            return payload.to_owned();
+        };
+        if !matches!(
+            event,
+            "proposal.submit" | "gate.approve" | "coordinate.submit" | "config.set"
+        ) {
+            return payload.to_owned();
+        }
+        if payload.contains("|actor=") || payload.contains("|actor_session=") {
+            return payload.to_owned();
+        }
+        let trimmed = payload.trim_end();
+        if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+            format!("{}|actor={actor}\"", &trimmed[..trimmed.len() - 1])
+        } else {
+            payload.to_owned()
+        }
+    }
+
     /// Dispatch and assert the envelope `ok` (a domain-error envelope always fails the test).
     #[track_caller]
     fn reply(&mut self, event: &str, payload: &str) -> Json {
-        let reply: Json = serde_json::from_str(&self.kernel.dispatch(event, payload))
+        let stamped = self.stamped(event, payload);
+        let reply: Json = serde_json::from_str(&self.kernel.dispatch(event, &stamped))
             .unwrap_or_else(|err| panic!("the {event} reply is not JSON: {err}"));
         assert_eq!(reply["ok"], json!(true), "{event} dispatch failed: {reply}");
         reply
@@ -109,7 +149,8 @@ impl Game {
     /// `error.code` / `error.message` instead of a narrative.
     #[track_caller]
     fn raw_reply(&mut self, event: &str, payload: &str) -> Json {
-        serde_json::from_str(&self.kernel.dispatch(event, payload))
+        let stamped = self.stamped(event, payload);
+        serde_json::from_str(&self.kernel.dispatch(event, &stamped))
             .unwrap_or_else(|err| panic!("the {event} reply is not JSON: {err}"))
     }
 
@@ -545,7 +586,13 @@ fn submit_dev_with_exec(
 /// Drive to **plan gate pending**: plan proposal → **delivery is the gate** (D-MA23) —
 /// the submit itself raises `gate="plan"` bound to the rev; there is no acceptance step.
 fn drive_to_plan_gate() -> Game {
-    let mut game = Game::open(&project_mod_dir());
+    drive_to_plan_gate_at(&project_mod_dir())
+}
+
+/// Same drive against an arbitrary mod directory (r8: the armed / bare-copy pairs need the
+/// **same** pipeline with a different shipped config, so the opening move must be a parameter).
+fn drive_to_plan_gate_at(mod_dir: &Path) -> Game {
+    let mut game = Game::open(mod_dir);
     start_requirement(&mut game);
     submit(&mut game, 1, "plan", "semantics-p1");
     game.assert_kv("req.1.gate", json!("plan"));
@@ -558,7 +605,11 @@ fn drive_to_plan_gate() -> Game {
 /// From the plan gate to **dev review pending**: approve plan (the reactive effect
 /// auto-dispatches development in the same turn) → deliver.
 fn drive_to_dev_pending(ext: &str) -> Game {
-    let mut game = drive_to_plan_gate();
+    drive_to_dev_pending_at(ext, &project_mod_dir())
+}
+
+fn drive_to_dev_pending_at(ext: &str, mod_dir: &Path) -> Game {
+    let mut game = drive_to_plan_gate_at(mod_dir);
     game.click("gate.approve — ");
     game.assert_kv("req.1.plan_ok", json!(true));
     game.assert_kv("req.1.job", json!("development"));
@@ -613,9 +664,14 @@ fn drive_to_done(mut game: Game) -> Game {
 /// Complete the single requirement and close the batch boundary: `coordinate.submit` moves
 /// `run.phase` to `settle` (a micro-state move — `fsm.stage` stays `live`, R8).
 fn drive_to_settle() -> Game {
-    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
-        "semantics-p2",
-    ))));
+    drive_to_settle_at(&project_mod_dir())
+}
+
+/// Same drive against an arbitrary mod directory (r8 armed / bare-copy pairs).
+fn drive_to_settle_at(mod_dir: &Path) -> Game {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(
+        drive_to_dev_pending_at("semantics-p2", mod_dir),
+    )));
     let closed = game.click("coordinate.submit — ");
     assert!(
         closed["narrative"]
@@ -1693,6 +1749,7 @@ fn gate_approval_settles_its_own_proposal_and_still_blocks_foreign_pendings() {
             .expect("a save with an injected own proposal must load"),
         dir: plan_gate.dir.clone(),
         suppress_reads: false,
+        stamp_actor: Some(TEST_ACTOR.to_owned()),
     };
     blocked.assert_kv("prop.2.status", json!("pending"));
 
@@ -2145,8 +2202,14 @@ fn submit_identity_for(
     if let Some(session) = session {
         payload.push_str(&format!("|actor_session={session}"));
     }
+    // r9：**签名与提交同身份**——调用方声明的 actor 就是本步的执行者，补签也必须以它签，
+    // 否则按人门禁会把「自己签的」看成「别人签的」（传 None = 老宿主无章，补签也不盖章）。
+    let previous = game.stamp_actor.clone();
+    game.as_actor(actor);
     game.ensure_reads("proposal.submit", Some(stage), req_index(req));
-    game.narrate("proposal.submit", &text(&payload))
+    let lines = game.narrate("proposal.submit", &text(&payload));
+    game.stamp_actor = previous;
+    lines
 }
 
 /// verified：exec 与宿主章同句柄 → 双章落库；save/重放后 KV 仍可读。
@@ -2176,6 +2239,7 @@ fn actor_channel_verified_lands_in_kv_and_survives_a_reload() {
         kernel: game.bundle.restore(&bytes).expect("restore from save"),
         dir: game.dir.clone(),
         suppress_reads: false,
+        stamp_actor: Some(TEST_ACTOR.to_owned()),
     };
     rebuilt.assert_kv("prop.1.actor", json!("agent-1"));
     rebuilt.assert_kv("prop.1.actor_session", json!("s-plan-1"));
@@ -2215,19 +2279,41 @@ fn actor_channel_mismatch_is_recorded_never_rejected() {
     game.assert_kv("req.1.gate", json!("plan"));
 }
 
-/// unverified + actor-only：无章 = 章位空串；只带章不带 exec = 只记章、不绑账本；
-/// 账本绑定不受“打回”影响（账本只增改）。
+/// unverified + actor-only：r9 起「有 exec 无章」不再是可推进态——无身份就无法签名，
+/// 也就无法自证「执行这个动作的人读过」（拒签 + 拒绝推进，零写入）；
+/// 只带章不带 exec 仍合法（只记章、不绑账本）；账本绑定不受「打回」影响（账本只增改）。
 #[test]
 fn actor_channel_unverified_and_actor_only() {
     let mut game = Game::open(&project_mod_dir());
     start_requirement(&mut game);
 
-    // unverified：exec 有、章无（旧宿主 / 直接派发面）。
-    submit_with_identity(&mut game, 1, "plan", "id-unv", Some("agent-1"), None, None);
-    game.assert_kv("prop.1.actor", json!(""));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
+    // 本段模拟「旧宿主 / 没带 --actor」：整个步骤无身份。
+    game.as_actor(None);
 
-    // r1 的账本绑定不受“打回”影响（账本只增改）；plan 提案打回清门禁、job 挂回 plan。
+    // unverified：exec 有、章无（旧宿主 / 直接派发面）→ r9 拒。
+    let refused = submit_with_identity(&mut game, 1, "plan", "id-unv", Some("agent-1"), None, None);
+    assert_refused(&refused, "read-gate/no-identity");
+    game.assert_kv("prop.1.req", Json::Null);
+    game.assert_kv("settings.executor.r1.plan", Json::Null);
+    // 无身份时签名本身也被拒（“不知道谁签的”的签名在判定里等于不存在）。
+    let unsigned = game.narrate("config.set", &text("read.acts/coordinate=aaaaaa"));
+    assert!(
+        unsigned.iter().any(|line| line.contains("SIGNED REFUSED")),
+        "a signature without an actor must be refused: {unsigned:#?}"
+    );
+    game.assert_kv("settings.read.acts/coordinate", Json::Null);
+
+    // 恢复正常身份，r1 的账本绑定不受「打回」影响（账本只增改）；plan 提案打回清门禁、job 挂回 plan。
+    game.as_actor(Some(TEST_ACTOR));
+    submit_with_identity(
+        &mut game,
+        1,
+        "plan",
+        "id-plan",
+        Some("agent-1"),
+        Some(TEST_ACTOR),
+        None,
+    );
     game.narrate("proposal.reject", &text("r1|replan without identity"));
     game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
     game.assert_kv("req.1.gate", json!(""));
@@ -2279,6 +2365,9 @@ fn actor_session_segments_lock_relative_order_and_full_chain() {
 
     // 全链 10 段（R5 形状锁）：字段与三个尾段各归其位。
     // r4 开闸：本用例直派提交（不走 submit* helper），补签一行以穿读签门禁。
+    // r9：签名与提交必须**同身份**——载荷章是 agent-1，补签也必须以 agent-1 签，
+    // 否则按人门禁会把「自己签的」判成「别人签的」（other-actor 拒绝）。
+    game.as_actor(Some("agent-1"));
     game.ensure_reads("proposal.submit", Some("plan"), Some(1));
     let lines = game.narrate(
         "proposal.submit",
@@ -2550,20 +2639,28 @@ fn read_coverage_counts_planned_docs() {
 
     let first = game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
     assert_eq!(
-        count_lines(&first, "1/2 signed in this act"),
+        count_lines(&first, "this act has 1/2 docs signed, 1 of them by you"),
         1,
         "{first:#?}"
     );
+    // r9：另一个代理签下第二件 —— 覆盖面 k 上升，但「我签的」不动。两个口径必须分得开：
+    // 旧文案的 `2/2` 读起来像「我已签全」，而它从来只统计「本幕覆盖了几件」。
+    game.as_actor(Some("other-agent"));
     let second = game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
     assert_eq!(
-        count_lines(&second, "2/2 signed in this act"),
+        count_lines(&second, "this act has 2/2 docs signed, 1 of them by you"),
         1,
         "{second:#?}"
     );
+    game.assert_kv(
+        "settings.read_actor.coordinate/dispatch",
+        json!("other-agent"),
+    );
     // 计划外的 doc：签名照旧成立，但不进分子（不拒签、不越界）。
+    game.as_actor(Some(TEST_ACTOR));
     let extra = game.narrate("config.set", &text("read.acts/charter=aaaaaa"));
     assert_eq!(
-        count_lines(&extra, "2/2 signed in this act"),
+        count_lines(&extra, "this act has 2/2 docs signed, 1 of them by you"),
         1,
         "{extra:#?}"
     );
@@ -2712,14 +2809,44 @@ fn read_gate_reports_the_forget_distance_past_the_window() {
     game.assert_kv("req.1.gate", json!("plan"));
 }
 
-/// ④ 主体：签名绑定 (req, rev)。两条路径都拒：新增需求（rev 纪元晚于签名）报 `subject`；
-/// amend 推进 rev 时 r3 的销票制先把签名抹掉，于是报 `missing`（分层而非重复报错）。
+/// **r11 的证据**：amend 推进 rev 时 r3 的销票制先把签名全抹掉，所以下一次推进动作报的是
+/// **覆盖维** `read-gate/missing`（分层而非重复报错）。
+/// 这条用例是「主体维退役」的机械依据：rev 一变签名已不存在，「签名早于新 rev」永远轮不到
+/// 判定——所以主体维（`read-gate/subject`）测不到 amend，它是假保护。
 #[test]
-fn read_gate_subject_binds_a_signature_to_the_requirement_revision() {
-    let mut game = armed_game("gate-subject");
+fn read_gate_amendment_loses_signatures_through_the_clear_not_a_subject_dimension() {
+    let mut game = armed_game("gate-amend");
     sign(&mut game, "acts/coordinate", "aaaaaa");
     sign(&mut game, "req-acts/intake", "bbbbbb");
-    // 签名之后才出现第二条需求：它的 rev 纪元晚于签名 → 主体维度拒。
+    // amend 推进 rev：销票制先抹掉全部签名，所以此后报覆盖（missing）——不双报、不错报。
+    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
+    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
+    game.assert_kv("settings.read_index", json!(""));
+    let after = game.narrate(
+        "proposal.submit",
+        &text("r1|2|plan|replanned|artifacts/r1.md"),
+    );
+    let joined = after.join("\n");
+    assert!(
+        refused(&after, "proposal.submit") && joined.contains("read-gate/missing"),
+        "an amendment wipes signatures through r3's clear(), so the refusal is coverage: {after:#?}"
+    );
+    assert!(
+        !joined.contains("read-gate/subject"),
+        "r11: the amend path must report coverage only — the subject dimension is retired: {after:#?}"
+    );
+}
+
+/// **r11 守护（可证伪）**：主体维已退役。复刻它当年「唯一可达」的路径——先签名，再
+/// `requirement.add` 一条新需求（该需求的 rev/stage 纪元因此晚于签名）——现在必须**绝不出现**
+/// `read-gate/subject`；同一场景由**新鲜维** `read-gate/stale` 接管（新需求的阶段纪元晚于签名），
+/// 所以删掉主体维并没有开口子。
+/// 变异探针：把主体维分支加回 `gates.read_problem`，这条立刻转红。
+#[test]
+fn read_gate_handles_a_signature_taken_before_a_new_requirement_without_a_subject_dimension() {
+    let mut game = armed_game("gate-no-subject");
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
     game.narrate(
         "requirement.add",
         &text("second requirement|second description|armed-r2"),
@@ -2730,25 +2857,13 @@ fn read_gate_subject_binds_a_signature_to_the_requirement_revision() {
         &text("r2|1|plan|r2 plan|artifacts/r2.md"),
     );
     let joined = lines.join("\n");
-    assert_refused(&lines, "proposal.submit");
     assert!(
-        joined.contains("read-gate/subject")
-            && joined.contains("before r2 entered rev 1 at dispatch"),
-        "the refusal must name the requirement revision the signature misses: {lines:#?}"
-    );
-
-    // amend 推进 rev：销票制先抹掉全部签名，所以此处报覆盖（missing）——不双报、不错报。
-    let amended = game.narrate("requirement.amend", &text("r1||amended description"));
-    assert!(!refused(&amended, "requirement.amend"), "{amended:#?}");
-    game.assert_kv("settings.read_index", json!(""));
-    let after = game.narrate(
-        "proposal.submit",
-        &text("r1|2|plan|replanned|artifacts/r1.md"),
+        !joined.contains("read-gate/subject"),
+        "r11: the subject dimension is retired — no refusal may carry it: {lines:#?}"
     );
     assert!(
-        refused(&after, "proposal.submit")
-            && after.join("\n").contains("read-gate/missing"),
-        "an amendment wipes signatures through r3's clear(), so the refusal is coverage: {after:#?}"
+        refused(&lines, "proposal.submit") && joined.contains("read-gate/stale"),
+        "the freshness dimension must take over the old subject scenario: {lines:#?}"
     );
 }
 
@@ -2876,6 +2991,56 @@ fn read_gate_blocks_and_releases_the_batch_boundary() {
     game.assert_kv("run.phase", json!("settle"));
 }
 
+/// ⑩ 批边界的身份载体缺失：`coordinate.submit` 只收空载荷 / "0" / "full"，宿主无处追加
+/// `|actor=`，因此按人判定在这个动作上**结构不可满足**。直派路必须降级为覆盖检查并另立
+/// 叙事告明原因——否则 goal 模式的批边界永远跳不过去。
+/// 这条用例补的正是 r9 的缺口：既有批边界用例走菜单点击的**票据路**，覆盖不到直派路。
+#[test]
+fn batch_boundary_degrades_when_identity_has_no_carrier() {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
+        "semantics-batch-no-carrier",
+    ))));
+    // 直派路只在 goal 模式可达（guide 会先被人机门禁拒，走不到读签）。
+    game.narrate("config.set", &text("play.mode=goal"));
+    let lines = game.narrate("coordinate.submit", "0");
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("no-carrier") && joined.contains("attribution is structurally unavailable"),
+        "the batch boundary must narrate the missing identity carrier: {joined}"
+    );
+    assert!(
+        !joined.contains("read-gate/no-identity"),
+        "no-carrier must not degrade into a hard no-identity refusal: {joined}"
+    );
+    // 本次仍会因未签结算幕文档被**覆盖维**拦下（acts/settle / rituals/cleanup 未签）——
+    // 降级只放弃「按人」，不放弃其余维度。goal 模式端到端能否收批由真实运行验证。
+    assert!(
+        joined.contains("read-gate/missing"),
+        "coverage must still be enforced after the identity dimension degrades: {joined}"
+    );
+}
+
+/// ⑪ ⑩ 的反证：降级只让「按人」这一维失效，**覆盖维仍然生效**——没签就照拒。
+#[test]
+fn batch_boundary_still_enforces_coverage_without_identity_carrier() {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
+        "semantics-batch-no-carrier-unsigned",
+    ))));
+    game.suppress_reads = true;
+    game.narrate("config.set", &text("play.mode=goal"));
+    let lines = game.narrate("coordinate.submit", "0");
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("read-gate/missing") && joined.contains("acts/settle"),
+        "coverage must still block the batch boundary: {joined}"
+    );
+    assert_ne!(
+        game.kv("run.phase").as_str(),
+        Some("settle"),
+        "a coverage refusal must not advance the batch boundary"
+    );
+}
+
 /// ⑨ 文档改版：签名本身没变，但台账 ver 前进了 → `read_gate_stale` 拒；按新 ver 重签后放行。
 /// 现场构成：先签 aaaaaa → 存档 → 改 fixture 的 `readGate.ver` → 重装 mod 并 restore 存档。
 /// 这正是「文档改版需重读」的机械载体（ver 台账与文档头同源）。
@@ -2907,6 +3072,7 @@ fn read_gate_refuses_a_signature_against_a_revised_doc() {
         bundle,
         dir: dir.clone(),
         suppress_reads: true,
+        stamp_actor: Some(TEST_ACTOR.to_owned()),
     };
     let lines = revised.narrate(
         "proposal.submit",
@@ -2951,6 +3117,160 @@ fn read_gate_does_not_mask_existing_rejection_reasons() {
         joined.contains("is bound to rev") || refused(&lines, "gate.approve"),
         "the pre-existing gate reason must win: {lines:#?}"
     );
+}
+
+// ───────────────── r9 · attribution: the signature belongs to an actor ─────────────────
+
+/// r9 核心断言：**别人**签的不能当「你读过」——这正是本需求要修的缺陷（r6 子代理签名
+/// 被主代理的 gate.approve 计入 `2/2 signed`）。同一份台账、同一份签名，换个人推进就必须拒。
+#[test]
+fn read_gate_refuses_a_signature_owned_by_another_actor() {
+    let mut game = armed_game("gate-other-actor");
+    // 另一个代理把本幕必读签齐（真路径上它就是当时的执行者）。
+    game.as_actor(Some("r6-planner"));
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    game.assert_kv("settings.read_actor.acts/coordinate", json!("r6-planner"));
+
+    // 换成另一个代理推进：签名有效（ver 对、序号新），但不是它签的。
+    game.as_actor(Some("main-agent"));
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    let joined = lines.join("\n");
+    assert_refused(&lines, "proposal.submit");
+    assert!(
+        joined.contains("read-gate/other-actor"),
+        "another actor's signature must be reported as such (not as missing): {lines:#?}"
+    );
+    assert!(
+        joined.contains("by r6-planner") && joined.contains("dispatched as main-agent"),
+        "the refusal must name both the signer and the acting actor: {lines:#?}"
+    );
+    assert!(
+        joined.contains("0 of them by you"),
+        "the two counts must stay separate (coverage vs mine): {lines:#?}"
+    );
+    // 拒绝零副作用：提案不落库、门禁不挂（dispatch 时写下的空串保持不变）。
+    game.assert_kv("prop.1.req", Json::Null);
+    game.assert_kv("req.1.gate", json!(""));
+
+    // 正面对照：换回签署人本人 → 同一份签名立刻生效（证明拒的是“不是你”，不是“签名无效”）。
+    game.as_actor(Some("r6-planner"));
+    let ok = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert!(!refused(&ok, "proposal.submit"), "{ok:#?}");
+    game.assert_kv("req.1.gate", json!("plan"));
+}
+
+/// 造一个「计划门禁已挂起」的现场：以 `actor` 签齐本幕必读、交计划提案（交付即门禁），
+/// 并把该门禁交出的下一幕规则（`req-acts/delivery`）也签上——门禁批的就是它。
+fn armed_plan_gate(tag: &str, actor: &str) -> Game {
+    let mut game = armed_game(tag);
+    game.as_actor(Some(actor));
+    sign(&mut game, "acts/coordinate", "aaaaaa");
+    sign(&mut game, "req-acts/intake", "bbbbbb");
+    sign(&mut game, "req-acts/delivery", "cccccc");
+    let lines = game.narrate(
+        "proposal.submit",
+        &text("r1|1|plan|armed plan|artifacts/r1.md"),
+    );
+    assert!(!refused(&lines, "proposal.submit"), "{lines:#?}");
+    assert_eq!(game.phase("r1"), "plan_gate");
+    game
+}
+
+/// r9：无身份的直接派发**不能**推进（能带而不带 = 机器门被绕开）；guide 模式的人机门
+/// 先报（更粗、更早），所以这里用 `play.mode=goal` 把那条门绕到背后去。
+#[test]
+fn read_gate_refuses_a_direct_approve_without_identity() {
+    let mut game = armed_plan_gate("gate-no-identity", "r6-planner");
+    game.narrate("config.set", &text("play.mode=goal"));
+    game.as_actor(None);
+
+    let lines = game.narrate("gate.approve", &text("r1"));
+    let joined = lines.join("\n");
+    assert_refused(&lines, "gate.approve");
+    assert!(
+        joined.contains("read-gate/no-identity"),
+        "a direct advance without an actor must be refused: {lines:#?}"
+    );
+    assert!(
+        joined.contains("YGG_ACTOR") && joined.contains("config.set read."),
+        "the refusal must give the self-release path (identity flag + sign commands): {lines:#?}"
+    );
+    // 状态不动：门禁仍挂、计划未过。
+    game.assert_kv("req.1.gate", json!("plan"));
+    game.assert_kv("req.1.plan_ok", json!(false));
+}
+
+/// r9：**票据路降级**——人工菜单点击永远没有宿主身份段（`ygg.choice_selected` → emit）。
+/// 此时按人判定不可得，于是降为覆盖检查，并把“不区分签署人”写进回执。
+/// 这条用例同时是 `guide` 模式的防锁死线：若票据也 fail-closed，人类就再也过不了门。
+#[test]
+fn read_gate_ticket_degrades_to_coverage_only() {
+    // 另一个代理把该签的都签了（本用例的现场就是“签字的人不是点菜单的人”）。
+    let mut game = armed_plan_gate("gate-ticket", "r6-planner");
+    game.as_actor(None);
+    game.suppress_reads = true;
+
+    let clicked = game.click("gate.approve — ");
+    let lines = narrative_lines(&clicked);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("[READ GATE · ticket]"),
+        "the ticket path must declare its degraded semantics: {lines:#?}"
+    );
+    assert!(
+        joined.contains("signers are NOT distinguished"),
+        "degradation must be stated, not implied: {lines:#?}"
+    );
+    assert!(!joined.contains("read-gate/"), "{lines:#?}");
+    // 降级不是放水：覆盖率仍然被核（这里 1/1 已签），所以门禁真的过了。
+    game.assert_kv("req.1.plan_ok", json!(true));
+    game.assert_kv("req.1.gate", json!(""));
+}
+
+/// r9：侧键与值**同生共死**——单件清除与作用域销票都必须连带清签署人，
+/// 否则判定会读到「值空了、签署人还在」或「值在、签署人丢了」的半状态。
+#[test]
+fn read_actor_side_key_dies_with_the_signature() {
+    let mut game = Game::open(&project_mod_dir());
+    charter_and_begin(&mut game);
+
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.assert_kv(
+        "settings.read.acts/coordinate",
+        json!("9f2c1a|coordinate|0"),
+    );
+    game.assert_kv("settings.read_actor.acts/coordinate", json!(TEST_ACTOR));
+
+    // ① 单件清除：两个键一起变空。
+    game.narrate("config.set", &text("read.acts/coordinate="));
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_actor.acts/coordinate", json!(""));
+
+    // ② 换人重签 = 侧键 upsert（不是两个签名叠加）。
+    game.as_actor(Some("other-agent"));
+    game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
+    game.assert_kv("settings.read_actor.acts/coordinate", json!("other-agent"));
+
+    // ③ 作用域边界（rev 推进 → req_bump_rev 的销票）：两个键一起清。
+    game.narrate(
+        "requirement.add",
+        &text("side-key requirement|synthetic description|semantics-side"),
+    );
+    game.narrate("requirement.dispatch", "0");
+    game.narrate(
+        "requirement.amend",
+        &text("r1||amended to bump the revision"),
+    );
+    game.assert_kv("settings.read.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_actor.acts/coordinate", json!(""));
+    game.assert_kv("settings.read_index", json!(""));
 }
 
 /// P10 决策归属的守门线：`play.mode=goal` 在 `goal.authorization` 注册之前会发出可读
@@ -3733,9 +4053,9 @@ fn copy_contract_domain_fragments_cover_every_text_key() {
     assert_eq!(documented.len(), 36, "core options/tuning/endings = 36");
     assert_eq!(documented, actual, "core copy table must cover core.json");
     total += documented.len();
-    assert_eq!(total, 450, "414 beats + 36 core keys; §H adds no keys");
+    assert_eq!(total, 454, "418 beats + 36 core keys; §H adds no keys");
     assert!(
-        core_text.contains("450 个唯一键") && core_text.contains("不得再次相加"),
+        core_text.contains("454 个唯一键") && core_text.contains("不得再次相加"),
         "the global ledger must explain why the 23 pointer shells are not added again"
     );
 }
@@ -6108,4 +6428,346 @@ fn settlement_machine_agreement_passes_and_records_provenance() {
         "settlement.sessions.source",
         json!("machine:harness.sessions-count"),
     );
+}
+
+// ───────────────────── r8 · E3: the armed surface ─────────────────────
+//
+// 命题：证据清单过去只度量「代码存在」。r4 首版交付代码完整、10 条用例、三套门禁 473/158/77
+// 全绿，而 `data/config.json` 里 `readGate` / `readPlan` 根本不存在——线上零拦截。缺的不是用例，
+// 是一条**通用规则**：凡「缺席即失效 / 关掉即失效」的开关，必须在**入库态**生效，并被一条
+// `ships_armed_*` 用例钉住「生效态 + 退让路径」两半。
+//
+// 三种失效形态在本仓同时存在，这就是本规则要覆盖的全集：
+//   ① 可选段缺席（`readPlan` / `readGate` 在 schema 里是可选 → 整段不见即 inert，r4 的实况）；
+//   ② 必填键缺席（`gates.require_all_green` 是 required → 装载期就拦，schema 能保这一格）；
+//   ③ **必填键值不对**（`false` 是 schema 合法值，但 `false` 一样让保护静默失效）——
+//      schema 只管形状，值域只能靠 armed 断言钉。③ 是②的盲区，也是本规则多咬的那一口。
+//
+// 三条判定式：
+//   R1 分区完备（机检）—— 配置面每个键都必须被分类：生成区 / 手写区 × armed / fixed；
+//      生成区的归属**解析自生成器的自报键表**，不靠手抄常量，两边分叉立刻红。
+//   R2 armed 有据（机检）—— Armed 键入库态生效（非空对象 / 布尔 true），且同文件里有
+//      `fn <slug>_ships_armed` 用例。
+//   R3 退让可回（**不**机检）—— `ships_armed` 用例内部必须同时断言「剥掉该键的副本仍走
+//      退让路径」。刻意不造「检查用例内容是否完整」的元检查：那是无穷倒退，也违反
+//      「不写自造检查器当纪律载体」的红线；R3 靠样板复制 + 评审，此处如实记账。
+
+/// 配置面的**来源**：生成区（`scripts/gen-scene-readfirst.py --readset` 产出；手改会被内容寻址
+/// 的 manifest 与文档头比对拦下）还是手写区（人工维护，无生成器覆盖）。
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Origin {
+    Generated,
+    HandWritten,
+}
+
+/// Armed 键「生效」的判定形态。新开关选一种形态登记即可——**不绑定具体键名**。
+#[derive(Debug, Clone, Copy)]
+enum ArmedProbe {
+    /// 非空对象即生效（必读集 / ver 台账这类表）。
+    NonEmptyObject,
+    /// 布尔 `true` 即生效（`effective(path) == true` 式的开关）。
+    IsTrue,
+}
+
+/// 配置面上的一格：键路径 + 来源 + 是否为「开关型」。
+struct ConfigKey {
+    /// 点分路径；顶层键只写一段。
+    path: &'static str,
+    origin: Origin,
+    /// `Some((slug, probe))` = 关掉即静默削弱一项保护；`slug` 决定 `ships_armed` 用例名前缀。
+    armed: Option<(&'static str, ArmedProbe)>,
+}
+
+/// 配置面分区表（r8 / R1）。**新增 `data/config.json` 顶层键或 `gates` 子键必须在此登记**，
+/// 否则 `config_surface_every_key_is_classified` 直接红——这正是 R1 的咬合力所在：
+/// 加开关的人必须先回答「这是固定项还是 armed」。
+const CONFIG_SURFACE: &[ConfigKey] = &[
+    // ── 生成区：生成器拥有；两份都是 armed（缺席 ⇒ 必读集为空 ⇒ 读签门禁整体 inert）。
+    ConfigKey {
+        path: "readPlan",
+        origin: Origin::Generated,
+        armed: Some(("read_gate", ArmedProbe::NonEmptyObject)),
+    },
+    ConfigKey {
+        path: "readGate",
+        origin: Origin::Generated,
+        armed: Some(("read_gate", ArmedProbe::NonEmptyObject)),
+    },
+    // ── 手写区：缺席走 lib 缺省，且不削弱任何保护。
+    ConfigKey {
+        path: "play",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "drive",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "evolution",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "autosave",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "hot_reload",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "harness",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "settlement",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    // `allowedTools` 缺席 = 一个工具都不放行（fail-closed）：缺席**收紧**而非削弱，故非 armed。
+    ConfigKey {
+        path: "allowedTools",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    // ── `gates` 容器与其开关。
+    ConfigKey {
+        path: "gates",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    // 见文件尾 `gates_strict_ships_armed_*` 用例：schema 只保存在，值域靠此断言钉。
+    ConfigKey {
+        path: "gates.require_all_green",
+        origin: Origin::HandWritten,
+        armed: Some(("gates_strict", ArmedProbe::IsTrue)),
+    },
+];
+
+const NULL_CONFIG: Json = Json::Null;
+
+/// 按点分路径取值（缺键 → `Null`，不 panic：R2 要把「缺席」本身报成断言失败而不是崩溃）。
+fn config_value(config: &Json, path: &str) -> Json {
+    let mut node = config;
+    for segment in path.split('.') {
+        node = node.get(segment).unwrap_or(&NULL_CONFIG);
+    }
+    node.clone()
+}
+
+/// 某一层被声明过的键（`depth` = 段数，只取该层的末段）。
+fn declared_keys_at(depth: usize) -> Vec<String> {
+    CONFIG_SURFACE
+        .iter()
+        .filter(|entry| entry.path.split('.').count() == depth)
+        .map(|entry| {
+            entry
+                .path
+                .rsplit('.')
+                .next()
+                .expect("non-empty path")
+                .to_owned()
+        })
+        .collect()
+}
+
+/// 覆盖检查：实际键集合与声明集合**双向**相等——漏登记（实际多）与残留（表里多）都红。
+#[track_caller]
+fn assert_cover(label: &str, actual: &[String], declared: &[String]) {
+    let mut unclassified: Vec<&String> = actual
+        .iter()
+        .filter(|key| !declared.iter().any(|known| known == *key))
+        .collect();
+    let mut stale: Vec<&String> = declared
+        .iter()
+        .filter(|known| !actual.iter().any(|key| key == *known))
+        .collect();
+    unclassified.sort();
+    stale.sort();
+    assert!(
+        unclassified.is_empty(),
+        "{label}: unclassified config key(s) {unclassified:?} — register them in CONFIG_SURFACE \
+         (a new switch must answer `fixed` or `armed` before it ships)"
+    );
+    assert!(
+        stale.is_empty(),
+        "{label}: CONFIG_SURFACE declares key(s) {stale:?} that the shipped config no longer has"
+    );
+}
+
+/// 生成器自报它拥有哪些键（`scripts/gen-scene-readfirst.py` 的 `READSET_KEYS`）。
+/// 解析而不是抄一份常量：两处一旦分叉，R1 立刻红（生成区归属是事实，不是声明）。
+fn generator_owned_keys() -> Vec<String> {
+    let path = repo_dir().join("scripts/gen-scene-readfirst.py");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+    let line = source
+        .lines()
+        .find(|line| line.trim_start().starts_with("READSET_KEYS"))
+        .expect("gen-scene-readfirst.py must declare READSET_KEYS (the generated-region oracle)");
+    let mut keys = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find('"') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('"') else { break };
+        keys.push(after[..end].to_owned());
+        rest = &after[end + 1..];
+    }
+    assert!(
+        !keys.is_empty(),
+        "READSET_KEYS parsed to nothing — the oracle line changed shape: {line}"
+    );
+    keys
+}
+
+/// **R1 · 分区完备**：配置面每个键都被分类，且生成区归属 == 生成器自报的键表。
+#[test]
+fn config_surface_every_key_is_classified() {
+    let config = support::read_json(&project_mod_dir().join("data/config.json"));
+    let object = config
+        .as_object()
+        .expect("data/config.json top level is an object");
+
+    let actual_top: Vec<String> = object.keys().cloned().collect();
+    assert_cover("top-level", &actual_top, &declared_keys_at(1));
+
+    let actual_gates: Vec<String> = object
+        .get("gates")
+        .and_then(Json::as_object)
+        .map(|table| table.keys().cloned().collect())
+        .unwrap_or_default();
+    assert_cover("gates", &actual_gates, &declared_keys_at(2));
+
+    // 生成区不是「我们在表里这么写」，而是「生成器这么报」——两处必须逐项相等。
+    let mut declared_generated: Vec<String> = CONFIG_SURFACE
+        .iter()
+        .filter(|entry| entry.origin == Origin::Generated)
+        .map(|entry| entry.path.to_owned())
+        .collect();
+    declared_generated.sort();
+    let mut actual_generated = generator_owned_keys();
+    actual_generated.sort();
+    assert_eq!(
+        actual_generated, declared_generated,
+        "the generated region must equal READSET_KEYS in scripts/gen-scene-readfirst.py: a key the \
+         generator owns but the table calls hand-written (or the reverse) means the partition is a \
+         declaration about nothing"
+    );
+
+    // 分区必须真的分出了 armed：一张全是 fixed 的表会让 R2 空转。
+    let armed = CONFIG_SURFACE
+        .iter()
+        .filter(|entry| entry.armed.is_some())
+        .count();
+    assert!(
+        armed >= 2,
+        "the surface must classify at least two armed switches, got {armed} — an empty armed set \
+         turns R2 into a vacuous green"
+    );
+}
+
+/// **R2 · armed 有据**：每个 Armed 键在入库态生效，且同文件里有一条 `ships_armed` 用例。
+///
+/// 这一条直接咬住 r4 的失效态：`readGate` / `readPlan` 当时**整键缺席**，而三套门禁照样全绿。
+#[test]
+fn armed_features_ship_armed_with_a_semantics_case() {
+    let config = support::read_json(&project_mod_dir().join("data/config.json"));
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agent_seed_semantics.rs");
+    let source = std::fs::read_to_string(&source_path)
+        .unwrap_or_else(|err| panic!("read {}: {err}", source_path.display()));
+
+    let armed: Vec<&ConfigKey> = CONFIG_SURFACE
+        .iter()
+        .filter(|entry| entry.armed.is_some())
+        .collect();
+    assert!(!armed.is_empty(), "an empty armed table proves nothing");
+
+    for entry in armed {
+        let (slug, probe) = entry.armed.expect("armed entry");
+        let value = config_value(&config, entry.path);
+
+        // ①入库态生效：缺键 / 空表 / false 都不是「已 armed」，而是 r4 那种「代码在、开关没开」。
+        match probe {
+            ArmedProbe::NonEmptyObject => {
+                let table = value.as_object().unwrap_or_else(|| {
+                    panic!(
+                        "{} must ship as an object — the shipped config carries no such key, which \
+                         is exactly the r4 failure mode (code complete, gate inert): {value}",
+                        entry.path
+                    )
+                });
+                assert!(
+                    !table.is_empty(),
+                    "{} must ship **armed**: an empty table is the inert state",
+                    entry.path
+                );
+            }
+            ArmedProbe::IsTrue => {
+                assert_eq!(
+                    value,
+                    json!(true),
+                    "{} must ship as true — absent or false silently disables the guard it fronts",
+                    entry.path
+                );
+            }
+        }
+
+        // ② 同文件里有 ships_armed 用例：生效态 + 退让路径（R3）由那条用例承担。
+        //    针要求行首 `fn `（Rust 顶层项 = 列 0）：注释里提到用例名不能冒充用例本体。
+        let needle = format!("\nfn {slug}_ships_armed");
+        assert!(
+            source.contains(&needle),
+            "the armed switch {:?} (slug {slug}) has no `fn {slug}_ships_armed*` case: an armed \
+             config key without an assertion on BOTH halves (armed behaviour + the disabled \
+             fallback) is the silence this rule exists to remove",
+            entry.path
+        );
+    }
+}
+
+/// **R3 的第二实例**（第一个是 `read_gate_ships_armed_and_a_bare_copy_stays_inert`）：
+/// `gates.require_all_green` 是「关掉即失效」的开关——`src/core/config.lua` 的
+/// `strict_gates()` 判的是 `== true`。
+///
+/// 后果不是旁枝：红盘（`verify.submit all_green=false`）会被记成 `verify.passed=true`——
+/// 能骗过所有后续门禁的那种错误。全仓此前零用例引用该键。
+#[test]
+fn gates_strict_ships_armed_and_a_bare_copy_bypasses_a_red_verify() {
+    // ① 入库态：红盘如实记失败，整批退回协调。
+    let mut armed = drive_to_settle();
+    let failed = armed.click("verify.submit all_green=false — ");
+    assert!(
+        failed["narrative"].to_string().contains("[GATES FAILED]"),
+        "an armed require_all_green must send a red verify back to coordinate: {failed}"
+    );
+    armed.assert_kv("verify.passed", json!(false));
+    armed.assert_kv("run.phase", json!(""));
+    armed.assert_kv("verify.failures", json!(1));
+
+    // ② 值改成 false（**schema 合法**：required 只管存在，不管值）：同一条路径必须走退让分支。
+    //    R3 的回归保护：退让路径必须仍然可选（关闸是设计内的安全阀），但它的存在必须被写在
+    //    断言里——「不拦人」与「红盘记成绿盘」是同一行代码的两面，不能靠记忆区分。
+    let bare_dir = support::temp_dir("gates-strict-bare");
+    support::copy_dir(&project_mod_dir(), &bare_dir);
+    let mut bare_config = support::read_json(&bare_dir.join("data/config.json"));
+    bare_config["gates"]["require_all_green"] = json!(false);
+    support::write_json(&bare_dir.join("data/config.json"), &bare_config);
+    support::reseal(&bare_dir);
+
+    let mut bare = drive_to_settle_at(&bare_dir);
+    let bypassed = bare.click("verify.submit all_green=false — ");
+    assert!(
+        bypassed["narrative"]
+            .to_string()
+            .contains("[GATES BYPASSED]"),
+        "a disabled require_all_green must narrate the bypass, not fail silently: {bypassed}"
+    );
+    bare.assert_kv("verify.passed", json!(true));
+    bare.assert_kv("run.phase", json!(""));
+    bare.assert_kv("verify.failures", json!(1));
 }

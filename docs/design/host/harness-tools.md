@@ -18,7 +18,16 @@
   不引入任何隐式局状态耦合；默认模式（索引闭包）行为一字不变。
 - **不依赖 egg**：`sh <script> <args>` 即可运行，无 egg 环境的 agent 直接调用。
 
-**输入面** = argv（具名旗标，主）+ 进程环境（位置性缺省，次）。**输出面** = 缺省单行 `k=v;k=v`（与现役工具同方言），`--json` 输出同信息集的单行 JSON（服务无 egg 环境的程序化消费，不进 tool.result wire）。
+**输入面** = argv（具名旗标，主）+ 进程环境（位置性缺省，次）。
+
+**输出面存在两个亚家族（r8 纠偏：此前本文写「全脚本统一 k=v」，与事实不符）**：
+
+| 亚家族 | 成员 | 缺省输出 | 切换旗标 |
+| --- | --- | --- | --- |
+| harness 四件 (§2) + `scripts/` | `todo-check` / `sessions-count` / `manifest-verify` / `docs-consistency` / `docs-ver` | 单行 `k=v;k=v` | `--json` 出同信息集单行 JSON |
+| **git 亚家族 (§2.2)** | `git-alignment-check` / `git-conflict-check` / `git-integrate` / `git-release` / `git-delivery-check` | 单行 JSON **三段式** `ok` / `data` / `error` | `--text` 出人读单行 |
+
+为什么 git 亚家族不并到 k=v：`data` 是嵌套结构（`checks.<name>.<field>`、`failed[]`、`waived[]`），k=v 表达不了层级；且这五件在 k=v 口径成文**之前**就已经是 JSON 缺省。制造第三种方言的代价大于统一个已既成的方言。`--json` 在 git 亚家族里是**兼容性空操作**（JSON 已是缺省）。
 
 **exit 码表**（全脚本统一）：
 
@@ -56,6 +65,31 @@
 - 软链一律跳过（兼容层不是权威内容，不参与 ver 账）。
 
 `todo-check` 是**状态重放机**：按转录内 `create`（建清单）→ `update`（按 id 改状态）→ `delete` → `clear` 全序列重放，算最终 `total`/`remaining`（`pending`/`in_progress`/`open`/`blocked` 计未完成）。`sessions-count` 用 `find -print0 | xargs -0 grep -lF` 做布尔 contains(parent) 匹配（macOS BSD grep 兼容，内容零回显）。
+
+### 2.2 git 亚家族五脚本 argv 规格（缺省 JSON 三段式，`--text` 人读）
+
+风格约定：`--repo <dir>` 缺省 = 调用者 cwd 的 git toplevel；`--text` / `--json`（兼容空操作）；`--help`。
+全部 **只读**（不改 refs / index / worktree）；`git-integrate` / `git-release` 的例外是缺省 dry-run、只有显式 `--push` 才写（写入面，不是检查器）。
+
+| 脚本 | argv（必填 `*`） | `data` 关键字段 / 结论键 |
+| --- | --- | --- |
+| `git-alignment-check.sh` | `[--repo] [--develop] [--master] [--origin]`；三者 argv > `$YGG_*` > `.env.local` > `.env` | `branches.{develop,master}.{name,local,remote,ahead,behind,status}`；`ok` = 两者皆 `aligned` |
+| `git-conflict-check.sh` | `[--repo] [--develop] [--origin]` | rebase/merge 冲突预检结果（只读） |
+| `git-integrate.sh` | `--feature <branch>`\* `[--develop] [--origin] [--push\|--dry-run]` | `steps[]`（`name`/`status`/`command`）、`merge_sha`、`pushed`、`reset_develop`、`partial`、`failed_step` |
+| `git-release.sh` | `[--develop] [--master] [--origin] [--push\|--dry-run]` | 同上（develop → master `--no-ff` + reset develop） |
+| `git-delivery-check.sh` | `[--repo] [--upstream <ref>] [--max-paths <n>] [--no-fmt] [--no-stash] [--fmt-cmd <cmd>]` | `checks.{dirty,unpushed,stash,conflict_debris,fmt}`（每项都有 `count`）；`failed[]`、`waived[]`、`truncated`；**`ok` = 五项 count 全 0** |
+
+**`git-delivery-check.sh` 的五项口径（r8 / E2）**：
+
+| 检查 | 命令 | 边界（为什么这样定） |
+| --- | --- | --- |
+| `dirty` | `git status --porcelain=v1 -uall` | `-uall` 是必须的：缺省 `-unormal` 把整个未跟踪目录折叠成一行，回执数字会骗人。拆 `tracked` / `untracked` / `unmerged` |
+| `unpushed` | `git rev-list --count <upstream>..HEAD` | **无 upstream 记 `-1` = 失败**：`0` = 比过了且一致，`-1` = 没法比，两者必须可分辨（「本地干净、远端没有」的半交付只能靠这个区分）；detached HEAD 同记 `-1` 但给不同 hint |
+| `stash` | `git stash list --format='%gd %s'` | stash 栈**仓库级共享**（泳道 worktree 池与主检出共用），所以 `--no-stash` 豁免必须进 `waived` 并写明理由 |
+| `conflict_debris` | `git ls-files -z --cached --others --exclude-standard` 后按 basename 匹配 `*~*` / `*.orig` / `*.rej` | 用 `*~*`（**含**波浪号）而非 `*~`：真实残留形如 `copy-contract-core.md~develop`，波浪号在中间；`--exclude-standard` 让 `target/` 下的 `.orig` 不成噪音 |
+| `fmt` | 有 `Cargo.toml` 时 `cargo fmt --check`（`--fmt-cmd` / `$YGG_FMT_CMD` 可覆盖） | 无 `Cargo.toml` → `n/a`（count 0，**不计**）；`--no-fmt` → `skipped`；命令不可执行 → `error` + count 1（fail-closed）。**语言无关是刻意的**：git 亚家族其余四件只认 git，把 cargo 焊死会让脚本离开本仓就废；但「不存在即静默通过」会造假绿，所以 `n/a` / `skipped` 在输出里显式可见 |
+
+exit 码与 §1 同表；**「检测发现问题」永远 exit 0 + `ok=false`**（与 `git-alignment-check.sh` 同口径）。挂载点：交付自检 = [rituals/dispatch.md](../../context/rituals/dispatch.md) §7；验收证据 = [req-acts/integration.md](../../context/req-acts/integration.md) §7 表格首行。
 
 ## 3. 三层调用方参数来源
 

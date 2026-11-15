@@ -16,6 +16,7 @@ local render_mod = require("src.view.render")
 local reqs = require("src.domain.requirements")
 local tools = require("src.runtime.tools")
 local util = require("src.core.util")
+local wire = require("src.domain.wire")
 
 local TEXTS
 
@@ -72,6 +73,16 @@ function M.install(deps)
     if not phase_guard("gate.approve", { RUN_PHASE.coordinate }) then
       return
     end
+    -- r9：宿主在本动作载荷末尾盖 `|actor=<id>`（pack.json 的 stamp-only 路由）。
+    -- 先剥下落成身份，再切 target/note——否则 `note` 会吞掉一个 `|actor=…` 尾巴。
+    local actor
+    do
+      local clean, stamped, _, problem = wire.strip_identity_tail(payload)
+      if problem ~= nil then
+        return reject_payload("gate.approve", problem)
+      end
+      payload, actor = clean, stamped
+    end
     local target, note = cut(trim(payload), "|")
     local index = pick_gate(target)
     if index == nil then
@@ -92,7 +103,14 @@ function M.install(deps)
       return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", evidence)
     end
     -- r4 读签前置校验：排在 stale / 证据两条既有拒绝之后、**首个 KV 写之前**。
-    local read_block = gates.read_problem("gate.approve", { req = index, kind = kind })
+    -- r9：`actor` = 宿主盖章（直接 `--event` 通道）；`entry` = 本步入口（票据 / 直派），
+    -- 两者一起决定「按人」能走到多细：无身份 + 直派 = 拒，无身份 + 票据 = 降级叙事。
+    local read_block = gates.read_problem("gate.approve", {
+      req = index,
+      kind = kind,
+      actor = actor,
+      entry = HUMAN.entry,
+    })
     if read_block ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "gate.approve", read_block)
     end

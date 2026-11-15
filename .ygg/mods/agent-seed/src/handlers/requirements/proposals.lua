@@ -145,10 +145,17 @@ function M.install(deps)
         prop = prop_id(blocking),
       }))
     end
-    -- r4 读签前置校验（四维）：排在全部形状/状态检查之后、**首个 KV 写之前**。
+    -- r4 读签前置校验（覆盖 / 新鲜 / 遗忘 + 按人）：排在全部形状/状态检查之后、**首个 KV 写之前**。
     -- 放这里的三层理由：① 形状错误与既有语义拒绝的文案优先不变；② 拒绝零副作用
     -- （不落提案、不占槽位、不写 stale）；③ 与 gate_problem_for 同层兄弟，不叫 gate_problem。
-    local read_block = gates.read_problem("proposal.submit", { req = index, stage = spec.stage })
+    -- r9：`actor` = 宿主在尾链盖的章（proposal.submit 一直是声明路由，无需新增管道）；
+    -- 提案提交永远不是人类票据（entry 恒 direct），所以无身份一律拒（能带而不带 = 绕门）。
+    local read_block = gates.read_problem("proposal.submit", {
+      req = index,
+      stage = spec.stage,
+      actor = spec.host_actor,
+      entry = "direct",
+    })
     if read_block ~= nil then
       return refuse(TEXTS.beats.req_wait_rejected, "proposal.submit", read_block)
     end

@@ -15,12 +15,12 @@ local util = require("src.core.util")
 
 local TEXTS
 
-local num, text_of =
-  config.num, config.text_of
+local num, text_of, effective =
+  config.num, config.text_of, config.effective
 local P_PENDING, prop_count, prop_pending_total, prop_req, prop_status =
   props.P_PENDING, props.prop_count, props.prop_pending_total, props.prop_req, props.prop_status
-local job_capacity, job_total, req_all_done, req_conflict, req_conflict_total, req_count, req_gate, req_id, req_job, req_key, req_needs_amend, req_open_total, req_rev, req_status =
-  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.req_status
+local job_capacity, job_total, req_all_done, req_conflict, req_conflict_total, req_count, req_gate, req_id, req_job, req_key, req_needs_amend, req_open_total, req_rev, run_phase =
+  reqs.job_capacity, reqs.job_total, reqs.req_all_done, reqs.req_conflict, reqs.req_conflict_total, reqs.req_count, reqs.req_gate, reqs.req_id, reqs.req_job, reqs.req_key, reqs.req_needs_amend, reqs.req_open_total, reqs.req_rev, reqs.run_phase
 local fill, join, trim =
   util.fill, util.join, util.trim
 
@@ -132,17 +132,25 @@ end
 -- 这里管 run 级结算（进化复核 / subagent 会话 / 主会话 Todo）。全部通过才允许 review.note。
 -- Lua 沙箱没有文件、会话与 Todo API：本函数只校登记断言，不证明实际复核或清理发生过。
 -- ============================================================================
--- 读签四维判据（r4）：`gate_problem` 的**同层兄弟**，不是它的一部分。
+-- 读签判据（r4；r11 起 = 三维 + 按人）：`gate_problem` 的**同层兄弟**，不是它的一部分。
 --
 -- 为什么必须分开：`gate_problem` 是局收口判据，被 coordinate.submit / verify.submit(true)
 -- / review.note 共用；把读签塞进去会连带拦住退役终局（武装后的 review.note），而那是唯一
 -- 出口——死锁。这里按**动作**定必读集，只影响三个推进动作，收口语义一字不动。
 --
--- 四维（无时钟，全用事件序号与 KV 版本；序号由 src/core/clock.lua 落 KV）：
+-- 三维 + 按人（无时钟，全用事件序号与 KV 版本；序号由 src/core/clock.lua 落 KV）：
 --   ① 覆盖  —— 必读集内每件都有签名，且签名 ver == 台账 ver（文档改版 ⇒ 视为未签）
---   ② 主体  —— 签名晚于「该需求当前 rev」的进入 seq（amend / 打回推进 rev ⇒ 作废）
---   ③ 新鲜  —— 签名晚于本幕 / 本阶段纪元的进入 seq（跨幕、跨阶段 ⇒ 作废）
---   ④ 遗忘  —— now - sign ≤ window（窗口可配，缺省 80）
+--   ② 新鲜  —— 签名晚于本幕 / 本阶段纪元的进入 seq（跨幕、跨阶段 ⇒ 作废）
+--   ③ 遗忘  —— now - sign ≤ window（窗口可配，缺省 80）
+--   ＋ 按人  —— 签名属于**执行本动作的人**（r9）：无身份直派拒，人工票据降级为仅覆盖
+--
+-- **amend 由销票覆盖，不再单设主体维（r11 退役）**：`req_bump_rev` 是 rev 的唯一写口，
+-- 它在同一事务里 `readsig.clear()`（src/domain/requirements.lua 的 req_bump_rev），所以
+-- 「签名早于新 rev」在任何 amend / 两路打回路径上都**不可达**——还没轮到本判据，签名已被抹光，
+-- 报的是覆盖维 read-gate/missing。旧的「主体维」（read-gate/subject）因此是从未生效的假保护，
+-- r11 删除它并留下守护用例 `read_gate_handles_a_signature_taken_before_a_new_requirement_without_a_subject_dimension`
+-- （把这一维加回去，该用例立刻转红）。不要为「更严格」把主体维加回来：它测不到 amend，
+-- 只能测到「签名后立了新需求」，那是坐标系错位而不是人没读。
 -- 每条拒绝都必须自解除：报「隔了多少派发」「当前窗口」「确切命令」。
 -- 生成区缺席（必读集为空）⇒ 直接放行，不叙事：判据 inert 是分阶段上线的安全阀。
 
@@ -165,27 +173,18 @@ local function raise_command(window)
   return "config.set readGate.window=" .. tostring(target)
 end
 
--- 本动作的「作用域进入点」：幕与阶段取最大者（rev 单列为主体维度，不混进来）。
+-- 本动作的「作用域进入点」：幕与阶段取最大者。
 -- 返回整个纪元条目，而不只是 seq——拒绝文案里「什么时候开始的」必须报**真正赢得比较那个**
 -- 纪元的名字（幕还是阶段），否则会出现「说 scene 却指向阶段边界」的错报。
 local function scope_epoch_of(epochs)
   local best = nil
   for i = 1, #epochs do
     local epoch = epochs[i]
-    if epoch.kind ~= "rev" and (best == nil or epoch.seq > best.seq) then
+    if best == nil or epoch.seq > best.seq then
       best = epoch
     end
   end
   return best
-end
-
-local function rev_epoch_of(epochs)
-  for i = 1, #epochs do
-    if epochs[i].kind == "rev" then
-      return epochs[i]
-    end
-  end
-  return nil
 end
 
 local function read_problem(action, ctx)
@@ -208,13 +207,65 @@ local function read_problem(action, ctx)
     }))
   end
 
+  -- r9 身份（按人判定的前件）。两条来源，优先级由 handler 决定后存入 ctx：
+  --   ctx.actor —— 宿主在载荷末尾盖的 `|actor=<id>`（直接 `--event` 通道，不可伪造）
+  --   ctx.entry —— "ticket" = 本步由人类从菜单点选（`ygg.choice_selector` → emit，无章）
+  -- 缺身份的三种结局刻意不同：
+  --   票据路 → **降级**为 any-signer 并叙事告明「不区分签署人」（人工点击不可能带章，
+  --            若也 fail-closed 就等于把 guide 模式锁死；这是两层得而不是放水）。
+  --   无载体路（批边界）→ **降级**并另立叙事：`coordinate.submit` 只收空载荷 / "0" /
+  --            "full"，宿主无处追加 `|actor=`，按人判定在这个动作上**结构不可满足**；
+  --            要求身份即等于把批边界锁死给菜单点击，goal 模式从此不能自己收批。
+  --   直派路 → **拒**（能带而不带 = 机制的门被绕开，“按人”就成了一句空话）。
+  local actor = trim(tostring(ctx.actor or ""))
+  if actor == "" then
+    if ctx.entry ~= "ticket" and not ctx.identity_carrier_missing then
+      local commands = {}
+      for i = 1, #docs do
+        commands[#commands + 1] = sign_command(docs[i], readset.doc_ver(docs[i]))
+      end
+      return fill(TEXTS.beats.read_gate_no_identity, {
+        action = tostring(action),
+        count = tostring(#docs),
+        docs = join(docs, " / "),
+        commands = join(commands, " && "),
+      })
+    end
+    local k, n = readsig.coverage(tostring(run_phase()), config.effective("readPlan"), "")
+    if ctx.identity_carrier_missing then
+      ygg.narrate(fill(TEXTS.beats.read_gate_no_carrier, {
+        action = tostring(action),
+        k = tostring(k),
+        n = n ~= nil and tostring(n) or "?",
+      }))
+    else
+      ygg.narrate(fill(TEXTS.beats.read_gate_ticket, {
+        action = tostring(action),
+        k = tostring(k),
+        n = n ~= nil and tostring(n) or "?",
+      }))
+    end
+  end
+
   -- ① 覆盖：**完全没签**的件（签了但 ver 旧走新鲜维度——文档改版是「旧了」而不是「没签」）。
+  -- r9 在这一维里加**第二段**：签了、但不是**本动作执行者**签的——那是「别人签的」而不是
+  -- 「没签」，必须用不同文案（否则拒台词会把人引向“你还没读”的错结论）。
   local missing, commands = {}, {}
+  local foreign, foreign_cmds = {}, {}
   for i = 1, #docs do
     local doc = docs[i]
-    if readsig.signed(doc) == nil then
+    local signed_ver = readsig.signed(doc)
+    if signed_ver == nil then
       missing[#missing + 1] = doc
       commands[#commands + 1] = sign_command(doc, readset.doc_ver(doc))
+    elseif actor ~= "" then
+      -- 按人：签了但不是**你**签的。空签署人（r3 旧存档 / 无身份签名）不参与
+      -- 这条判定——旧存档不该因为机制升级被一夜判死；它仍要在 ②③④ 里自证。
+      local signer = readsig.actor_of(doc)
+      if signer ~= "" and signer ~= actor then
+        foreign[#foreign + 1] = doc
+        foreign_cmds[#foreign_cmds + 1] = sign_command(doc, readset.doc_ver(doc))
+      end
     end
   end
   if #missing > 0 then
@@ -233,10 +284,25 @@ local function read_problem(action, ctx)
       raise = raise,
     })
   end
+  if #foreign > 0 then
+    local k, n, mine = readsig.coverage(tostring(run_phase()), effective("readPlan"), actor)
+    return fill(TEXTS.beats.read_gate_other_actor, {
+      action = tostring(action),
+      actor = actor,
+      count = tostring(#foreign),
+      docs = join(foreign, " / "),
+      signer = readsig.actor_of(foreign[1]),
+      k = tostring(k),
+      n = n ~= nil and tostring(n) or "?",
+      mine = tostring(mine),
+      window = tostring(window),
+      commands = join(foreign_cmds, " && "),
+      raise = raise,
+    })
+  end
 
-  -- ②③④ 逐件判序（主体优先于新鲜，新鲜优先于遗忘：越具体越先报）。
+  -- ②③ 逐件判序（新鲜优先于遗忘：越具体越先报）。
   local entry = scope_epoch ~= nil and scope_epoch.seq or 0
-  local rev_epoch = rev_epoch_of(epochs)
   for i = 1, #docs do
     local doc = docs[i]
     local signed_ver, _, value_seq = readsig.signed(doc)
@@ -263,19 +329,6 @@ local function read_problem(action, ctx)
     -- 序号未知（r3 时代签的存档 / 只读局）⇒ 该件不判序，只保留「签过」这一事实。
     if sign > 0 then
       local command = sign_command(doc, want)
-      if rev_epoch ~= nil and rev_epoch.seq > sign then
-        return fill(TEXTS.beats.read_gate_subject, {
-          doc = doc,
-          sign = tostring(sign),
-          req = tostring(rev_epoch.req),
-          rev = tostring(rev_epoch.rev),
-          entry = tostring(rev_epoch.seq),
-          gap = tostring(rev_epoch.seq - sign),
-          window = tostring(window),
-          command = command,
-          raise = raise,
-        })
-      end
       if entry > sign then
         return fill(TEXTS.beats.read_gate_stale, {
           doc = doc,
