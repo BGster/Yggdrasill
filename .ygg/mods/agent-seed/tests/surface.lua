@@ -447,3 +447,103 @@ test("scenes 表 reference 段：4 个理解性文档可解析，且不进 scene
       id .. " 不得出现在 data/config.json 的 readPlan 里（默认不拦门禁）")
   end
 end)
+
+--- 通用指针解析（带 `trim_end_matches(['.', '/'])`——与 design 侧同语义）。
+local function pointer_paths_trim(value, prefix)
+  local out = {}
+  local at = 1
+  while true do
+    local s = value:find(prefix, at, true)
+    if s == nil then
+      break
+    end
+    local tail_start = s + #prefix
+    local tail = value:sub(tail_start)
+    local run = tail:match("^[A-Za-z0-9_%./%-]*")
+    at = tail_start + #run
+    local file = run:gsub("[%./]+$", "")
+    if file:sub(-3) == ".md" then
+      out[#out + 1] = file
+    end
+  end
+  return out
+end
+
+test("texts 与 src 的 docs/context 指针：逐来源账 34 守恒 + 锚点全部存在", function()
+  local items = {}
+
+  for _, asset in ipairs({
+    "ygg:scene/texts", "ygg:scene/beats/flow", "ygg:scene/beats/harness",
+    "ygg:scene/beats/lanes", "ygg:scene/beats/map-guide",
+    "ygg:scene/beats/requirements", "ygg:scene/beats/settlement",
+  }) do
+    local frag = __ASSETS[asset]
+    local name = asset:match("([^/]+)$")
+    local fname = ({ ["texts"] = "core.json" })[name] or ("beats-" .. name .. ".json")
+    if frag.beats ~= nil then
+      for key, value in pairs(frag.beats) do
+        if type(value) == "string" then
+          items[#items + 1] = { fname, key, value }
+        end
+      end
+    end
+    for _, ns in ipairs({ "scenes", "prompts" }) do
+      if frag[ns] ~= nil then
+        for key, value in pairs(frag[ns]) do
+          if type(value) == "string" then
+            items[#items + 1] = { fname, ns .. "." .. key, value }
+          end
+        end
+      end
+    end
+  end
+
+  for _, path in ipairs(list_files(__MOD_DIR .. "/src", "lua")) do
+    items[#items + 1] = { path:match("([^/]+)$"), "source", read_file(path) }
+  end
+
+  local ledger, total, violations = {}, 0, {}
+  for _, item in ipairs(items) do
+    for _, file in ipairs(pointer_paths_trim(item[3], "docs/context/")) do
+      total = total + 1
+      ledger[item[1]] = (ledger[item[1]] or 0) + 1
+      local illegal = false
+      for seg in (file .. "/"):gmatch("([^/]*)/") do
+        if seg == "" or seg == ".." then
+          illegal = true
+          break
+        end
+      end
+      if illegal then
+        violations[#violations + 1] = ("%s.%s -> docs/context/%s (illegal)"):format(item[1], item[2], file)
+      elseif not exists(CONTEXT_DIR .. "/" .. file) then
+        violations[#violations + 1] = ("%s.%s -> docs/context/%s (missing)"):format(item[1], item[2], file)
+      end
+    end
+  end
+
+  local expected = {
+    ["beats-flow.json"] = 7,
+    ["beats-harness.json"] = 5,
+    ["beats-settlement.json"] = 3,
+    ["core.json"] = 18,
+    ["tools.lua"] = 1,
+  }
+  local keys = {}
+  for k in pairs(ledger) do
+    keys[#keys + 1] = k
+  end
+  table.sort(keys)
+  local ek = {}
+  for k in pairs(expected) do
+    ek[#ek + 1] = k
+  end
+  table.sort(ek)
+  assert_eq(#keys, #ek, "docs/context 指针账漂移（来源数）：实得 " .. table.concat(keys, ","))
+  for i = 1, #ek do
+    assert_eq(keys[i], ek[i], "来源名漂移")
+    assert_eq(ledger[keys[i]], expected[ek[i]], ("来源 `%s` 的指针数漂移"):format(ek[i]))
+  end
+  assert_eq(total, 34, ("docs/context 指针总数漂移：期望 34，实得 %d"):format(total))
+  assert_eq(#violations, 0, "docs/context 指针锚点不存在：" .. table.concat(violations, ", "))
+end)
