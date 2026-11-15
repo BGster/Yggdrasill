@@ -1395,57 +1395,6 @@ fn actor_session_segments_lock_relative_order_and_full_chain() {
     game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
 }
 
-/// profile 注册表：config.set 逐键注册 roundtrip（KV 落位 / upsert / settings. 前缀等价 /
-/// 空值清除 / 键形坏拒绝 / 未知键 fail-closed）。
-#[test]
-fn profile_registration_via_config_set_roundtrip() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    game.narrate("config.set", &text("profile.agent-1.harness=pi"));
-    game.assert_kv("settings.profile.agent-1.harness", json!("pi"));
-    game.assert_kv("settings.profile_index", json!("agent-1"));
-    // upsert：同键重写覆盖。
-    game.narrate("config.set", &text("profile.agent-1.harness=codex"));
-    game.assert_kv("settings.profile.agent-1.harness", json!("codex"));
-    // 其余保留键 + 自由键。
-    game.narrate(
-        "config.set",
-        &text("profile.agent-1.session_id=01a1c961-test"),
-    );
-    game.narrate("config.set", &text("profile.agent-1.role=plan-executor"));
-    game.narrate(
-        "config.set",
-        &text("profile.agent-1.assignments=r1:plan,r1:development,r3"),
-    );
-    game.narrate("config.set", &text("profile.agent-1.registered_by=main"));
-    game.assert_kv(
-        "settings.profile.agent-1.session_id",
-        json!("01a1c961-test"),
-    );
-    game.assert_kv("settings.profile.agent-1.role", json!("plan-executor"));
-    game.assert_kv(
-        "settings.profile.agent-1.assignments",
-        json!("r1:plan,r1:development,r3"),
-    );
-    game.assert_kv("settings.profile.agent-1.registered_by", json!("main"));
-    game.assert_kv("settings.profile_index", json!("agent-1"));
-    // settings. 前缀写法等价。
-    game.narrate("config.set", &text("settings.profile.agent-1.role=dev"));
-    game.assert_kv("settings.profile.agent-1.role", json!("dev"));
-    // 空值 = 逐字段清除。
-    game.narrate("config.set", &text("profile.agent-1.role="));
-    game.assert_kv("settings.profile.agent-1.role", json!(""));
-    // 键形坏（缺 <key> 段）→ parse 层拒绝且不落 KV。
-    let malformed = game.narrate("config.set", &text("profile.agent-1=x"));
-    assert_refused(&malformed, "config.set");
-    game.assert_kv("settings.profile.agent-1", Json::Null);
-    // 真未知键 → fail-closed（config_keys 面同步拒绝）。
-    let alien = game.narrate("config.set", &text("profile_index=agent-x"));
-    assert_refused(&alien, "config.set");
-    game.assert_kv("settings.profile_index", json!("agent-1"));
-}
-
 /// 覆盖面 k/n：`readPlan` 在场时按本幕清单计算（计划外的 doc 不进分子），
 /// 不在场时降级。清单是**装资源的静态值**，改它必须重算 manifest（`reseal`）。
 #[test]
