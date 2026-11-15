@@ -168,7 +168,14 @@ local function describe(err)
 end
 
 --- 注册并立即执行一条用例。用例失败不中断同文件内的其它用例。
-function test(name, fn)
+--- 注册一个用例。第三个参数是 fixture tag：
+---   `nil`     → 只在无 `--fixture` 的全量跑里执行（默认用例）；
+---   `"armed"` → 只在 `selftest --fixture armed` 里执行。
+--- 一次运行只跑一个 tag，所以「全绿」= 无 fixture 一次 + 每个 tag 各一次。
+function test(name, fn, fixture)
+  if (__FIXTURE or nil) ~= (fixture or nil) then
+    return
+  end
   local ok, err = pcall(fn)
   if ok then
     __SELFTEST.pass = __SELFTEST.pass + 1

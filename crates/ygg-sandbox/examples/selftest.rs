@@ -19,21 +19,37 @@ use serde_json::Value as Json;
 fn main() {
     let mut mod_dir: Option<PathBuf> = None;
     let mut filter: Option<String> = None;
+    let mut fixture: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--mod" => mod_dir = args.next().map(PathBuf::from),
             "--filter" => filter = args.next(),
+            "--fixture" => fixture = args.next(),
             other => {
                 eprintln!("未知参数：{other}");
                 std::process::exit(2);
             }
         }
     }
-    let Some(mod_dir) = mod_dir else {
-        eprintln!("用法：selftest --mod <mod 目录> [--filter <substr>]");
+    let Some(mut mod_dir) = mod_dir else {
+        eprintln!("用法：selftest --mod <mod 目录> [--filter <substr>] [--fixture <tag>]");
         std::process::exit(2);
     };
+    // 仓库锚点必须在 fixture 复制**之前**取：fixture 目录在 tmp 下，`../../..` 指不到仓库根。
+    let source_mod_dir = mod_dir.clone();
+    if let Some(tag) = fixture.clone() {
+        match prepare_fixture(&mod_dir, &tag) {
+            Ok(dir) => {
+                println!("fixture: {tag} -> {}", dir.display());
+                mod_dir = dir;
+            }
+            Err(err) => {
+                eprintln!("fixture 准备失败：{err}");
+                std::process::exit(1);
+            }
+        }
+    }
     if !mod_dir.is_dir() {
         eprintln!("mod 目录不存在：{}", mod_dir.display());
         std::process::exit(2);
@@ -43,7 +59,7 @@ fn main() {
 
     // 资源注入：pack.json entries 的 id → 解析后的 JSON（转成 Lua 值）。
     // 沙箱里由宿主负责这一步；自检里由本文件负责，语义等同「ygg.data(id) 拿到表」。
-    match install_assets(&lua, &mod_dir) {
+    match install_assets(&lua, &mod_dir, &source_mod_dir) {
         Ok(n) => println!("assets: {n} entries"),
         Err(err) => {
             eprintln!("资源装载失败：{err}");
@@ -54,10 +70,16 @@ fn main() {
     // mod 的 src/** 走文件 require（普通 Lua 的 package.path）。
     let pattern = format!("{}/?.lua", mod_dir.display());
     let init = format!("{}/?/init.lua", mod_dir.display());
+    let fixture_literal = match fixture.as_deref() {
+        Some(tag) => format!("\"{tag}\""),
+        None => "nil".to_owned(),
+    };
     let prelude = format!(
         "package.path = [[{pattern};{init};]] .. package.path\n\
-         __MOD_DIR = [[{}]]",
-        mod_dir.display()
+         __MOD_DIR = [[{}]]\n\
+         __FIXTURE = {}",
+        mod_dir.display(),
+        fixture_literal
     );
     if let Err(err) = lua.load(&prelude).set_name("prelude").exec() {
         eprintln!("prelude 失败：{err}");
@@ -155,7 +177,7 @@ fn counters(lua: &Lua) -> (i64, i64) {
 }
 
 /// 把 `pack.json` 声明的资源按 id 注入成 Lua 表：`ygg.data(id)` 直接取到它。
-fn install_assets(lua: &Lua, mod_dir: &Path) -> Result<usize, String> {
+fn install_assets(lua: &Lua, mod_dir: &Path, anchor: &Path) -> Result<usize, String> {
     let pack_text = std::fs::read_to_string(mod_dir.join("pack.json"))
         .map_err(|err| format!("read pack.json: {err}"))?;
     let pack: Json = serde_json::from_str(&pack_text).map_err(|err| format!("pack.json: {err}"))?;
@@ -182,7 +204,7 @@ fn install_assets(lua: &Lua, mod_dir: &Path) -> Result<usize, String> {
         .set("__ASSETS", assets)
         .map_err(|e| e.to_string())?;
     // 仓库根与 manifest：seed 布局类断言要读它们（Lua 无 JSON 解析器，故由宿主转值）。
-    let repo_root = mod_dir
+    let repo_root = anchor
         .canonicalize()
         .map_err(|e| e.to_string())?
         .join("../../..")
@@ -245,4 +267,63 @@ fn json_to_lua(lua: &Lua, v: &Json) -> mlua::Result<Value> {
             Value::Table(t)
         }
     })
+}
+
+/// 递归复制目录（fixture 需要一份可改写的 mod 副本）。
+fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("mkdir {}: {e}", dst.display()))?;
+    let entries = std::fs::read_dir(src).map_err(|e| format!("read {}: {e}", src.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to).map_err(|e| format!("copy {}: {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// 按 tag 准备一份 fixture mod 副本（复制 + 改写 `data/config.json`）。
+///
+/// `manifest.json` 只列文件与 schemaVersion、不含内容哈希，所以改写 config 后无需重新
+/// 封签（`sync-seed-mod.sh --check` 仍通过）。
+fn prepare_fixture(src: &Path, tag: &str) -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join(format!("ygg-selftest-{tag}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(src, &dir)?;
+    let cfg_path = dir.join("data/config.json");
+    match tag {
+        // 裸拷贝：一行都不改，用来证明「未开闸的副本是惰性的」。
+        "bare" => {}
+        // 开闸副本：读签台账与覆盖清单全部上膛。
+        "armed" => {
+            let text = std::fs::read_to_string(&cfg_path)
+                .map_err(|e| format!("read config.json: {e}"))?;
+            let mut cfg: Json =
+                serde_json::from_str(&text).map_err(|e| format!("parse config.json: {e}"))?;
+            cfg["readPlan"] = serde_json::json!({
+                "coordinate": ["acts/coordinate"],
+                "settle": ["acts/settle", "rituals/cleanup"]
+            });
+            cfg["readGate"] = serde_json::json!({
+                "ver": {
+                    "acts/coordinate": "aaaaaa",
+                    "req-acts/intake": "bbbbbb",
+                    "req-acts/delivery": "cccccc",
+                    "acts/settle": "dddddd",
+                    "rituals/cleanup": "eeeeee"
+                },
+                "reqActs": { "plan": ["req-acts/intake"], "development": ["req-acts/delivery"] },
+                "gates": { "plan": ["req-acts/delivery"], "accept": ["req-acts/delivery"] }
+            });
+            let out = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+            std::fs::write(&cfg_path, out)
+                .map_err(|e| format!("write config.json: {e}"))?;
+        }
+        other => return Err(format!("未知 fixture tag：{other}")),
+    }
+    Ok(dir)
 }
