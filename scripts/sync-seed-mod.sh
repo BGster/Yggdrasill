@@ -10,11 +10,16 @@
 #   scripts/sync-seed-mod.sh --check          # 只读校验（软链目标 + manifest.json 与内容哈希一致）
 #   scripts/sync-seed-mod.sh --from project   # 兼容旧参数
 #   scripts/sync-seed-mod.sh --no-pack        # 只校验软链/目录，不重算 manifest
+#
+# 除 manifest 外，本脚本还刷新一处**投影**：core.json 的 scenes.<node> 必读块
+# （docs/context/scenes.json + 各文件固定头 → 幕转场台词；由 scripts/gen-scene-readfirst.py 生成）。
+# 该块不在任何文案键账里（键账只覆盖 beats + core 的 options/tuning/endings），
+# 所以 --check 里的块比对是它唯一的漂移防线：不一致即 fail-closed。
 
 set -eu
 
 usage() {
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 from="project"
@@ -113,6 +118,25 @@ done
 if [ "$run_pack" = "no" ]; then
     echo "完成：单源软链 $seed_dir -> $expected_target 已核验（--no-pack 跳过 manifest）"
     exit 0
+fi
+
+# 幕必读块投影：docs/context 固定头 → core.json 的 scenes.<node>（零-src，幂等）。
+# check 模式只比对不写盘，漂移/缺件即 fail-closed；--no-pack 已在上方提前退出（本模式不重算 manifest，
+# 若在此写盘会让 manifest 失真）。
+gen_script="$root/scripts/gen-scene-readfirst.py"
+if [ -f "$gen_script" ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "错误：找不到 python3，无法校验或生成幕必读块（$gen_script）" >&2
+        exit 1
+    fi
+    if [ "$check_only" = "yes" ]; then
+        if ! python3 "$gen_script" --check --root "$root"; then
+            echo "错误：core.json 的 [READ FIRST] 块与 docs/context 固定头漂移——请运行 ./scripts/sync-seed-mod.sh" >&2
+            exit 1
+        fi
+    else
+        python3 "$gen_script" --root "$root"
+    fi
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
