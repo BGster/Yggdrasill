@@ -222,3 +222,64 @@ test("读签不掩盖既有拒绝：amend 后的 stale 门禁理由优先", func
     "既有的门禁理由必须先报：" .. joined
   )
 end, "armed")
+
+--- armed 副本的 plan 门起跑线：签齐三件 + plan 提案受理（等价 Rust 的 `armed_plan_gate`）。
+local function armed_plan_gate(actor)
+  armed_game()
+  as_actor(actor)
+  sign("acts/coordinate", "aaaaaa")
+  sign("req-acts/intake", "bbbbbb")
+  sign("req-acts/delivery", "cccccc")
+  reset()
+  fire("proposal.submit", "r1|1|plan|armed plan|artifacts/r1.md")
+  assert_true(
+    not narrated_contains("[REJECTED"),
+    "plan 提案必须被受理：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(phase_of("r1"), "plan_gate", "停在 plan 门")
+end
+
+test("读签无身份：直派 gate.approve 被拒，且给出自我解除路径", function()
+  armed_plan_gate("r6-planner")
+  fire("config.set", "play.mode=goal")
+  as_actor(nil) -- 真无身份
+
+  reset()
+  fire("gate.approve", "r1")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "无身份直派必须被拒：" .. joined
+  )
+  assert_true(narrated_contains("read-gate/no-identity"), "必须点名 no-identity 维度：" .. joined)
+  assert_true(joined:find("YGG_ACTOR", 1, true) ~= nil, "必须给出身份开关：" .. joined)
+  assert_true(joined:find("config.set read.", 1, true) ~= nil, "必须给出签名命令：" .. joined)
+
+  -- 状态不动：门禁仍挂、计划未过。
+  assert_eq(kv("req.1.gate"), "plan", "门禁仍挂")
+  assert_eq(kv("req.1.plan_ok"), false, "计划未过")
+  as_actor("selftest")
+end, "armed")
+
+test("读签票据降级：菜单路径只核覆盖率，并明说不区分署名", function()
+  -- 另一个代理把该签的都签了——现场就是「签字的人不是点菜单的人」。
+  armed_plan_gate("gate-ticket")
+  as_actor(nil)
+
+  click("gate.approve — ")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    joined:find("[READ GATE · ticket]", 1, true) ~= nil,
+    "票据路径必须声明自己的降级语义：" .. joined
+  )
+  assert_true(
+    joined:find("signers are NOT distinguished", 1, true) ~= nil,
+    "降级必须写明白，不能暗示：" .. joined
+  )
+  assert_true(not joined:find("read-gate/", 1, true), "票据路径不走拒绝分支：" .. joined)
+
+  -- 降级不是放水：覆盖率仍然被核（这里已签齐），所以门禁真的过了。
+  assert_eq(kv("req.1.plan_ok"), true, "计划通过")
+  assert_eq(kv("req.1.gate"), "", "门禁清空")
+  as_actor("selftest")
+end, "armed")

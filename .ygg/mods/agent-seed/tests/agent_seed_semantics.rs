@@ -1472,57 +1472,6 @@ fn armed_plan_gate(tag: &str, actor: &str) -> Game {
     game
 }
 
-/// r9：无身份的直接派发**不能**推进（能带而不带 = 机器门被绕开）；guide 模式的人机门
-/// 先报（更粗、更早），所以这里用 `play.mode=goal` 把那条门绕到背后去。
-#[test]
-fn read_gate_refuses_a_direct_approve_without_identity() {
-    let mut game = armed_plan_gate("gate-no-identity", "r6-planner");
-    game.narrate("config.set", &text("play.mode=goal"));
-    game.as_actor(None);
-
-    let lines = game.narrate("gate.approve", &text("r1"));
-    let joined = lines.join("\n");
-    assert_refused(&lines, "gate.approve");
-    assert!(
-        joined.contains("read-gate/no-identity"),
-        "a direct advance without an actor must be refused: {lines:#?}"
-    );
-    assert!(
-        joined.contains("YGG_ACTOR") && joined.contains("config.set read."),
-        "the refusal must give the self-release path (identity flag + sign commands): {lines:#?}"
-    );
-    // 状态不动：门禁仍挂、计划未过。
-    game.assert_kv("req.1.gate", json!("plan"));
-    game.assert_kv("req.1.plan_ok", json!(false));
-}
-
-/// r9：**票据路降级**——人工菜单点击永远没有宿主身份段（`ygg.choice_selected` → emit）。
-/// 此时按人判定不可得，于是降为覆盖检查，并把“不区分签署人”写进回执。
-/// 这条用例同时是 `guide` 模式的防锁死线：若票据也 fail-closed，人类就再也过不了门。
-#[test]
-fn read_gate_ticket_degrades_to_coverage_only() {
-    // 另一个代理把该签的都签了（本用例的现场就是“签字的人不是点菜单的人”）。
-    let mut game = armed_plan_gate("gate-ticket", "r6-planner");
-    game.as_actor(None);
-    game.suppress_reads = true;
-
-    let clicked = game.click("gate.approve — ");
-    let lines = narrative_lines(&clicked);
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("[READ GATE · ticket]"),
-        "the ticket path must declare its degraded semantics: {lines:#?}"
-    );
-    assert!(
-        joined.contains("signers are NOT distinguished"),
-        "degradation must be stated, not implied: {lines:#?}"
-    );
-    assert!(!joined.contains("read-gate/"), "{lines:#?}");
-    // 降级不是放水：覆盖率仍然被核（这里 1/1 已签），所以门禁真的过了。
-    game.assert_kv("req.1.plan_ok", json!(true));
-    game.assert_kv("req.1.gate", json!(""));
-}
-
 // ───────────────────── r4/r6/r7 · layout, fragments, tool declarations ─────────────────────
 
 /// A mod resource read straight from disk (the declaration surface is a file, not Lua state).
