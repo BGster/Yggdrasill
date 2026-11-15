@@ -1146,50 +1146,6 @@ fn proposal_submit_inlines_the_executor_and_refuses_misplaced_exec() {
 
 // ───────────────────── gate locality & the integration act ─────────────────────
 
-/// Gate independence: **another requirement's** pending proposal / running job does not
-/// block r1's gate. Approving r1 at the plan gate while r2 sits on its own plan gate and
-/// r3's plan job is running must pass the gate and auto-dispatch r1's development in the
-/// same turn. The run-closing preconditions (`coordinate.submit` / `verify.submit` /
-/// `review.note`) stay global — only per-requirement advancement is localized.
-#[test]
-fn gate_independence_other_requirements_do_not_block() {
-    let mut game = drive_to_plan_gate();
-    // r2: add → dispatch → submit a plan proposal that raises its own plan gate.
-    game.narrate(
-        "requirement.add",
-        &text("second requirement|synthetic description|semantics-r2"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    submit_req(&mut game, "r2", 1, "plan", "semantics-r2-p1");
-    game.assert_kv("prop.2.status", json!("pending"));
-    game.assert_kv("req.2.job", json!(""));
-    game.assert_kv("req.2.gate", json!("plan"));
-    // r3: add → dispatch (its plan job is running, no proposal yet).
-    game.narrate(
-        "requirement.add",
-        &text("third requirement|synthetic description|semantics-r3"),
-    );
-    game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.3.job", json!("plan"));
-
-    let reply = game.click("gate.approve — ");
-    let narrative = narrative_lines(&reply);
-    assert!(
-        narrative
-            .iter()
-            .any(|line| line.starts_with("[AUTO-DISPATCH]")),
-        "approving r1 must auto-dispatch its development in the same turn: {narrative:#?}"
-    );
-    game.assert_kv("req.1.plan_ok", json!(true));
-    game.assert_kv("req.1.job", json!("development"));
-    game.assert_kv("req.1.lane", json!(1));
-    // The neighbours are untouched: r2 keeps its own plan gate, r3's job keeps running.
-    game.assert_kv("prop.2.status", json!("pending"));
-    game.assert_kv("req.2.gate", json!("plan"));
-    assert_eq!(game.phase("r2"), "plan_gate");
-    game.assert_kv("req.3.job", json!("plan"));
-}
-
 /// The plan gate's own pending proposal does **not** block its approval (剧情双层重写: delivery is
 /// the gate — the gate-raising proposal settles to accepted as part of the approval), while
 /// an injected **development** pending does (one gate at a time; the KV-injected fixture is

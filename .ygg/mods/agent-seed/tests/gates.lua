@@ -66,3 +66,34 @@ test("旁路关闭：split/merge 写 closed_reason、被旁路行不可 amend、
   assert_eq(kv("req.5.origin"), "r4", "the successor records its origin")
   assert_eq(phase_of("r5"), "draft", "the successor is a draft")
 end)
+
+test("门禁独立性：别人的待决提案与在跑 job 不阻塞本条门的推进", function()
+  drive_to_plan_gate()
+
+  -- r2：加 → 派发 → 抬高自己的 plan gate。
+  fire("requirement.add", "second requirement|synthetic description|semantics-r2")
+  fire("requirement.dispatch", "0")
+  submit_req("r2", 1, "plan", "semantics-r2-p1")
+  assert_eq(kv("prop.2.status"), "pending", "r2's proposal is pending")
+  assert_eq(kv("req.2.job"), "", "r2's job slot is free")
+  assert_eq(kv("req.2.gate"), "plan", "r2 raises its own plan gate")
+
+  -- r3：加 → 派发（plan job 在跑，尚无提案）。
+  fire("requirement.add", "third requirement|synthetic description|semantics-r3")
+  fire("requirement.dispatch", "0")
+  assert_eq(kv("req.3.job"), "plan", "r3's plan job is running")
+
+  -- 批准 r1：同回合自动派发 r1 的 development。
+  reset()
+  click("gate.approve — ")
+  assert_true(narrated_contains("[AUTO-DISPATCH]"), "approving r1 auto-dispatches development")
+  assert_eq(kv("req.1.plan_ok"), true, "r1 plan_ok")
+  assert_eq(kv("req.1.job"), "development", "r1 development job starts")
+  assert_eq(kv("req.1.lane"), 1, "r1 binds a lane")
+
+  -- 邻居不受影响。
+  assert_eq(kv("prop.2.status"), "pending", "r2's proposal stays pending")
+  assert_eq(kv("req.2.gate"), "plan", "r2 keeps its own gate")
+  assert_eq(phase_of("r2"), "plan_gate", "r2 is still on its plan gate")
+  assert_eq(kv("req.3.job"), "plan", "r3's job keeps running")
+end)
