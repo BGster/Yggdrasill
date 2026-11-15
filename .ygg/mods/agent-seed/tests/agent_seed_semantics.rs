@@ -391,9 +391,6 @@ impl Game {
         row[open + 1..close].to_owned()
     }
 
-    /// The requirement panel line (per-micro-state tally) — the `useMemo` derived surface.
-    /// The requirement **rows** of a `requirement.list` receipt (`mark rN [status] title`).
-    #[track_caller]
 }
 
 /// Rust string → JSON string payload (a dispatch payload must be valid JSON).
