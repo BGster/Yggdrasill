@@ -411,3 +411,22 @@ test("读签阻塞批次边界：点名 settle 幕要的文档，补签后放行
   )
   assert_eq(kv("run.phase"), "settle", "相位推进到 settle")
 end)
+
+test("批次边界无身份载体：覆盖不足仍然阻塞（goal 模式直派）", function()
+  drive_to_done(drive_to_integrating(drive_to_accept(
+    drive_to_dev_pending("semantics-batch-no-carrier-unsigned")
+  )))
+  suppress_reads(true)
+  fire("config.set", "play.mode=goal")
+
+  reset()
+  fire("coordinate.submit", "0")
+  local joined = table.concat(narrated(), "\n")
+  assert_true(
+    narrated_contains("read-gate/missing"),
+    "覆盖不足必须仍阻塞批次边界：" .. joined
+  )
+  assert_true(joined:find("acts/settle", 1, true) ~= nil, "必须点名 acts/settle：" .. joined)
+  assert_true(kv("run.phase") ~= "settle", "覆盖拒绝不得推进批次边界")
+  suppress_reads(false)
+end)

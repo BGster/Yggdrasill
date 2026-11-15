@@ -1201,27 +1201,6 @@ fn sign(game: &mut Game, doc: &str, ver: &str) {
     game.narrate("config.set", &text(&format!("read.{doc}={ver}")));
 }
 
-/// ⑪ ⑩ 的反证：降级只让「按人」这一维失效，**覆盖维仍然生效**——没签就照拒。
-#[test]
-fn batch_boundary_still_enforces_coverage_without_identity_carrier() {
-    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
-        "semantics-batch-no-carrier-unsigned",
-    ))));
-    game.suppress_reads = true;
-    game.narrate("config.set", &text("play.mode=goal"));
-    let lines = game.narrate("coordinate.submit", "0");
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("read-gate/missing") && joined.contains("acts/settle"),
-        "coverage must still block the batch boundary: {joined}"
-    );
-    assert_ne!(
-        game.kv("run.phase").as_str(),
-        Some("settle"),
-        "a coverage refusal must not advance the batch boundary"
-    );
-}
-
 /// ⑨ 文档改版：签名本身没变，但台账 ver 前进了 → `read_gate_stale` 拒；按新 ver 重签后放行。
 /// 现场构成：先签 aaaaaa → 存档 → 改 fixture 的 `readGate.ver` → 重装 mod 并 restore 存档。
 /// 这正是「文档改版需重读」的机械载体（ver 台账与文档头同源）。
