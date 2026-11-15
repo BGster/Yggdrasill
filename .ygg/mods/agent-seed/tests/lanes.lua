@@ -362,3 +362,61 @@ test("冲突雷达只在同池内比较：跨池同文件不误报", function()
   assert_eq(kv("req.conflicts"), 0, "冲突归零")
   assert_eq(kv("req.1.conflict"), "", "正文清空")
 end)
+
+test("池化工具桥：alpha.2 折叠 / 默认池共存 / 未知仓拒绝不动 reject 账", function()
+  fresh()
+  charter_and_begin()
+  fire("lane.pool", "alpha|/tmp/checkout-alpha")
+  fire("requirement.add", "pooled req|description|subsys-a")
+  fire("requirement.add", "default req|description|subsys-b")
+  fire("lane.claim", "2|r1|feature/aa11-pool|abc1234|1|alpha")
+
+  -- ① 池化认领折进 `lane.alpha.2.*`，路径取宿主报告的 worktree 路径。
+  fire(
+    "tool.call",
+    "git.worktree_claim_pool|lane=2;req=r1;branch=feature/aa11-pool;repo=/tmp/checkout-alpha|t1"
+  )
+  reset()
+  fire(
+    "tool.result",
+    "t1|git.worktree_claim_pool|ok|0|lane=2;req=r1;branch=feature/aa11-pool;base=abc1234;clean=1;reused=0;path=/tmp/checkout-alpha-lane-2"
+  )
+  assert_eq(count_marker("[WORKTREE CLAIMED]"), 1, "必须叙述已认领")
+  assert_true(
+    narrated_contains("lane-alpha-2 <- r1"),
+    "叙述要点名池作用域泳道：" .. table.concat(narrated(), " | ")
+  )
+  assert_eq(kv("lane.alpha.2.req"), "r1", "池台账记需求")
+  assert_eq(kv("lane.alpha.2.path"), "/tmp/checkout-alpha-lane-2", "宿主报告的路径")
+  -- tick 1 = 预占，tick 2 = 本次工具回合的重绑（同一次折叠，since 被刷新）。
+  assert_eq(kv("lane.alpha.2.since"), 2, "since 记本次派发序号")
+  assert_eq(kv("req.1.lane"), 2, "需求绑泳道")
+  assert_eq(kv("req.1.lane_pool"), "alpha", "需求绑池")
+
+  -- ② 默认工具仍折进扁平台账键——两个池在 k=2 上共存。
+  fire("tool.call", "git.worktree_claim|lane=2;req=r2;branch=feature/aa11-def|t2")
+  reset()
+  fire(
+    "tool.result",
+    "t2|git.worktree_claim|ok|0|lane=2;req=r2;branch=feature/aa11-def;base=abc1234;clean=1;reused=0;path=/tmp/wt-def-2"
+  )
+  assert_eq(count_marker("[WORKTREE CLAIMED]"), 1, "默认认领必须叙述")
+  assert_eq(kv("lane.2.req"), "r2", "默认池 k=2")
+  assert_eq(kv("lane.alpha.2.req"), "r1", "alpha 池 k=2 不受影响")
+
+  -- ③ 解析不到注册池的仓 → 在任何台账写入前被拒，且不动 reject 账（与旧路径同一张面）。
+  local rejects_before = kv("reject.count")
+  fire(
+    "tool.call",
+    "git.worktree_claim_pool|lane=3;req=r1;branch=feature/aa11-ghost;repo=/tmp/ghost|t3"
+  )
+  reset()
+  fire(
+    "tool.result",
+    "t3|git.worktree_claim_pool|ok|0|lane=3;req=r1;branch=feature/aa11-ghost;base=abc1234;clean=1;reused=0;path=/tmp/ghost-lane-3"
+  )
+  assert_eq(count_marker("[WORKTREE CLAIM REFUSED]"), 1, "未知仓必须叙述为拒绝")
+  assert_nil(kv("lane.alpha.3.req"), "池台账不写")
+  assert_nil(kv("lane.3.req"), "扁平台账也不写")
+  assert_eq(kv("reject.count"), rejects_before, "工具面拒绝不得移动 reject 账")
+end)
