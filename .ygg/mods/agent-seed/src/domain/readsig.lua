@@ -15,13 +15,16 @@
 -- 值形状 `ver|scene|seq`（三段固定分隔符，不拆成多键）：
 --   ver   —— 被读文档文件头的版本（r1 的 `> **ver 9f2c1a**`），签名者抄写；
 --   scene —— **签名时所在的幕**（handler 盖，签名者无法伪造），值自描述、可审计；
---   seq   —— `settings.event_seq` 的快照（此刻恒 0）：全局计数器自增由 r4 落地，
---            本模块**只读不写**，两环不抢同一处；r4 开始自增后签名自动带上真值。
+--   seq   —— 值形状占位，**恒为 0**（r3 定稿：本模块只读 `settings.event_seq` 且不改它）。
+--            r4 的权威签名序号存在 `settings.sign_seq.<doc>`（单写者 = clock.mark_sign），
+--            消费侧先读值段、为 0 时回落读快照。把序号写进值段会当场打红 4 条既有用例
+--            的 `ver|scene|0` 断言，也会让两环抢同一个键——所以值形状冻结。
 -- 选单键而不是 `read.<doc>.ver` / `read.<doc>.seq` 两键：销票要逐件清除，两键就是
 -- 两条要清、两处可能漏；单键一次写一次清，索引只需记 doc 名。
 
 local M = {}
 
+local clock = require("src.core.clock")
 local util = require("src.core.util")
 
 local split, trim = util.split, util.trim
@@ -128,6 +131,8 @@ function M.forget(doc)
   if dropped then
     index_write(kept)
   end
+  -- r4：签名时刻快照与值同生共死（否则会出现「值空了、序号还在」的半状态）。
+  clock.clear_sign(doc)
 end
 
 -- 边界销票：清本作用域全部签名。无索引 = 无签名 = 零写入（新局不留痕）。
@@ -139,6 +144,7 @@ function M.clear()
   end
   for i = 1, #docs do
     ygg.kv.set(DOC_PREFIX .. docs[i], "")
+    clock.clear_sign(docs[i])
   end
   ygg.kv.set(INDEX, "")
   return #docs
