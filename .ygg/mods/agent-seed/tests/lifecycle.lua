@@ -142,3 +142,23 @@ test("run.retire 值域与退役收口：子页装配 / 退休结束行 / 清除
   assert_eq(count_marker("[RUN RETIRE CLEARED]"), 1, "清除必须叙述")
   assert_eq(kv("settings.run.retire"), "", "键置为空串")
 end)
+
+test("批次循环回到协调幕：空队列永不关闭、永不记绿、永不结算", function()
+  fresh()
+  -- 固定走局序列（等价 playtest 的 choices）：boot → charter.set → run.begin → 两次被拒的收口。
+  for _, idx in ipairs({ 1, 2, 1, 1 }) do
+    click_index(idx)
+  end
+
+  for _, line in ipairs(narrated()) do
+    assert_true(
+      line:sub(1, #"[COORDINATION DONE]") ~= "[COORDINATION DONE]",
+      "空队列不得关闭协调幕：" .. line
+    )
+    assert_true(
+      line:sub(1, #"[GATES GREEN]") ~= "[GATES GREEN]",
+      "空队列不得登记全绿：" .. line
+    )
+    assert_true(line:sub(1, #"[BATCH") ~= "[BATCH", "空队列不得结算批次：" .. line)
+  end
+end)

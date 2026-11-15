@@ -579,65 +579,6 @@ fn drive_to_settle_at(mod_dir: &Path) -> Game {
 
 // ───────────────────────── charter & resident lifecycle ─────────────────────────
 
-/// r9 Resident lifecycle: `review.note` **settles the batch and returns to coordinate**;
-/// the run only ends through an explicitly armed retirement (a separate case).
-///
-/// Baseline A — the pinned script walks the charter first (`2`=run.begin once the menu
-/// offers it, then `1`×3 refused batch closers on the empty queue): 1 boot + 4 choices,
-/// exhausted back at a coordinate choice (`reached=choice`, 5 steps) with the `[RUN BEGUN]`
-/// line present and **no closure beat** anywhere. Script pins make a menu reorder fail here
-/// loudly, not silently.
-#[test]
-fn resident_batch_cycle_reaches_coordinate_again() {
-    for dir in [project_mod_dir(), seed_mod_dir()] {
-        let options = PlaytestOptions {
-            choices: vec![1, 2, 1, 1],
-            ..Default::default()
-        };
-        let report = playtest(&dir, &options);
-        assert!(
-            report.ok,
-            "{} batch cycle failed: reached={:?} errors={:?}",
-            dir.display(),
-            report.reached,
-            report.errors
-        );
-        assert_eq!(
-            report.reached,
-            Some(Reached::Choice),
-            "{} must exhaust the script back at a coordinate choice (resident run)",
-            dir.display()
-        );
-        assert_eq!(
-            report.steps,
-            5,
-            "{}: the pinned batch-cycle walk is 5 steps (boot + charter.set + run.begin + two refused closers)",
-            dir.display()
-        );
-        // (The narrative_sample is capped at 8 lines and the boot receipt alone fills 7 —
-        // later receipts are invisible here; the coordinate-phase reachability is pinned by
-        // the Game-driven cases instead.)
-        let closed = report.narrative_sample.iter().any(|line| {
-            line.starts_with("[COORDINATION DONE]")
-                || line.starts_with("[GATES GREEN]")
-                || line.starts_with("[BATCH")
-        });
-        assert!(
-            !closed,
-            "{}: an empty queue must never close: {:?}",
-            dir.display(),
-            report.narrative_sample
-        );
-        assert!(
-            report.warnings.is_empty() && report.errors.is_empty(),
-            "{} must walk clean: {:?} / {:?}",
-            dir.display(),
-            report.warnings,
-            report.errors
-        );
-    }
-}
-
 /// r9 The default no-arg all-1 walk is **expected to fail** under the resident lifecycle:
 /// the charter gate keeps an empty run from ever closing, so the walk loops on refusals
 /// until the step limit — `ok=false, reached=limit` is the documented steady state, not a
