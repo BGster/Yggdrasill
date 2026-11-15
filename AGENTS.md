@@ -220,7 +220,7 @@ Start from the consumer moment, not the file at hand. Full navigation: `docs/REA
 | serve / lanes / CLI / identity touch | `docs/design/host/serve.md`, `docs/design/host/lanes.md`, `docs/design/host/cli-daemon.md`, `docs/design/mod/identity.md` |
 | Kernel semantics / storage surface touch | `docs/design/kernel/state-machine.md`, `docs/design/kernel/events.md`, `docs/design/kernel/state-surface.md`, `docs/design/kernel/wire-protocol.md` |
 | Runtime copy / protocol wording | `docs/context/copy/README.md` (seven-domain index) + `docs/design/mod/prompt-surface.md` |
-| Archive: why a ruling exists | `docs/context/archive/decisions-engine.md`, `archive/decisions-agent.md`, `cold-start/vision.md`, `cold-start/principles.md` |
+| Why a ruling exists / how to add one | the 「设计依据」 section of the document the ruling governs (criterion: `docs/wiki-governance.md`; product identity: `docs/context/cold-start/vision.md`, `principles.md`) |
 | Repository topology | `docs/context/cold-start/topology.md` + `docs/context/cold-start/system-boundaries.md` |
 | Whole-run / requirement walk-through | `docs/context/story/run-story.md`, `docs/context/story/requirement-story.md` |
 
