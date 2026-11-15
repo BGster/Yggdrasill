@@ -130,3 +130,34 @@ test("尾链顺序：重复 exec / exec 错位都拒；全链解析并落六键"
   assert_eq(kv("settings.executor.r1.plan"), "agent-1", "the ledger binds exec")
   as_actor("selftest")
 end)
+
+test("无身份（缺章）：提交被拒、签名被拒；恢复身份后正常", function()
+  fresh()
+  start_requirement()
+
+  -- ① 真无身份：提案被 read-gate 拒，零副作用。
+  as_actor(nil)
+  submit_with_identity(1, "plan", "id-unv", "agent-1", nil, nil)
+  assert_nil(kv("prop.1.req"), "no proposal without an identity stamp")
+  assert_nil(kv("settings.executor.r1.plan"), "no ledger row either")
+
+  -- ② 无身份也签不了名。
+  fire("config.set", "read.acts/coordinate=aaaaaa")
+  assert_true(narrated_contains("[SIGNED REFUSED]"), "a signature without an actor is refused")
+  assert_nil(kv("settings.read.acts/coordinate"), "nothing is written")
+
+  -- ③ 恢复身份后一切照常。
+  as_actor("selftest")
+  submit_with_identity(1, "plan", "id-plan", "agent-1", "selftest", nil)
+  fire("proposal.reject", "r1|replan without identity")
+  assert_eq(kv("settings.executor.r1.plan"), "agent-1", "the ledger keeps the exec binding")
+  assert_eq(kv("req.1.gate"), "", "the gate is cleared by the reject")
+  assert_eq(kv("req.1.job"), "plan", "the job slot is re-hung")
+
+  -- ④ 只有 actor 章、没有 exec：章落 kv，但不建台账（不冒充绑定）。
+  fire("requirement.add", "actor-only requirement|synthetic description|id-r2")
+  fire("requirement.dispatch", "r2")
+  submit_identity_for("r2", 1, "plan", "id-actor-only", nil, "agent-9", nil)
+  assert_eq(kv("prop.2.actor"), "agent-9", "an actor-only stamp still lands")
+  assert_nil(kv("settings.executor.r2.plan"), "but no ledger row is invented")
+end)

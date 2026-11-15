@@ -50,7 +50,7 @@ local function deliver(name, payload)
     return nil
   end
   local body = payload
-  if STAMP_ONLY[name] and type(body) == "string" and not body:find("|actor=", 1, true) then
+  if STAMP_ONLY[name] and type(body) == "string" and ACTOR ~= nil and not body:find("|actor=", 1, true) then
     body = body .. "|actor=" .. ACTOR
   end
   return fn(body)
@@ -469,7 +469,8 @@ end
 
 --- 切换当前 actor（模拟宿主在不同命令上盖不同身份章）。
 function as_actor(name)
-  ACTOR = name or "test-agent"
+  -- nil = 真无身份（缺章），不是「换一个章」。
+  ACTOR = name
 end
 
 function actor()
@@ -579,8 +580,9 @@ end
 
 --- 带 `exec=` 尾段提交 r1 提案（内联执行者台账）。
 function submit_with_exec(rev, stage, ext, exec)
-  ensure_reads("proposal.submit", stage, 1)
-  local payload = ("r1|%d|%s|%s proposal summary|artifacts/%s.md||%s|exec=%s"):format(
+  local index = tonumber(id:match("r(%d+)"))
+  ensure_reads("proposal.submit", stage, index)
+  local payload = ("%s|%d|%s|%s proposal summary|artifacts/%s.md||%s|exec=%s"):format(
     rev, stage, stage, stage, ext, exec
   )
   return fire("proposal.submit", payload)
@@ -599,14 +601,15 @@ function panel()
 end
 
 --- 带 exec / actor / actor_session 三段的提案提交（模拟宿主盖章的完整尾链）。
-function submit_with_identity(rev, stage, ext, exec, actor, session)
+function submit_identity_for(id, rev, stage, ext, exec, actor, session)
   -- 读签按人（r9）：宿主盖的 actor 章决定门禁查谁的签名，所以签名也必须换成同一个人。
   local prev = ACTOR
   if actor then
     as_actor(actor)
   end
-  ensure_reads("proposal.submit", stage, 1)
-  local payload = ("r1|%d|%s|%s proposal summary|artifacts/%s.md||%s"):format(rev, stage, stage, stage, ext)
+  local index = tonumber(id:match("r(%d+)"))
+  ensure_reads("proposal.submit", stage, index)
+  local payload = ("%s|%d|%s|%s proposal summary|artifacts/%s.md||%s"):format(id, rev, stage, stage, stage, ext)
   if exec then
     payload = payload .. "|exec=" .. exec
   end
@@ -619,4 +622,9 @@ function submit_with_identity(rev, stage, ext, exec, actor, session)
   local ret = fire("proposal.submit", payload)
   ACTOR = prev
   return ret
+end
+
+--- r1 的便捷包装（迁移用例里绝大多数是 r1）。
+function submit_with_identity(rev, stage, ext, exec, actor, session)
+  return submit_identity_for("r1", rev, stage, ext, exec, actor, session)
 end

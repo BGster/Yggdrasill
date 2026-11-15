@@ -1221,66 +1221,6 @@ fn submit_identity_for(
     lines
 }
 
-/// unverified + actor-only：r9 起「有 exec 无章」不再是可推进态——无身份就无法签名，
-/// 也就无法自证「执行这个动作的人读过」（拒签 + 拒绝推进，零写入）；
-/// 只带章不带 exec 仍合法（只记章、不绑账本）；账本绑定不受「打回」影响（账本只增改）。
-#[test]
-fn actor_channel_unverified_and_actor_only() {
-    let mut game = Game::open(&project_mod_dir());
-    start_requirement(&mut game);
-
-    // 本段模拟「旧宿主 / 没带 --actor」：整个步骤无身份。
-    game.as_actor(None);
-
-    // unverified：exec 有、章无（旧宿主 / 直接派发面）→ r9 拒。
-    let refused = submit_with_identity(&mut game, 1, "plan", "id-unv", Some("agent-1"), None, None);
-    assert_refused(&refused, "read-gate/no-identity");
-    game.assert_kv("prop.1.req", Json::Null);
-    game.assert_kv("settings.executor.r1.plan", Json::Null);
-    // 无身份时签名本身也被拒（“不知道谁签的”的签名在判定里等于不存在）。
-    let unsigned = game.narrate("config.set", &text("read.acts/coordinate=aaaaaa"));
-    assert!(
-        unsigned.iter().any(|line| line.contains("SIGNED REFUSED")),
-        "a signature without an actor must be refused: {unsigned:#?}"
-    );
-    game.assert_kv("settings.read.acts/coordinate", Json::Null);
-
-    // 恢复正常身份，r1 的账本绑定不受「打回」影响（账本只增改）；plan 提案打回清门禁、job 挂回 plan。
-    game.as_actor(Some(TEST_ACTOR));
-    submit_with_identity(
-        &mut game,
-        1,
-        "plan",
-        "id-plan",
-        Some("agent-1"),
-        Some(TEST_ACTOR),
-        None,
-    );
-    game.narrate("proposal.reject", &text("r1|replan without identity"));
-    game.assert_kv("settings.executor.r1.plan", json!("agent-1"));
-    game.assert_kv("req.1.gate", json!(""));
-    game.assert_kv("req.1.job", json!("plan"));
-
-    // actor-only：干净需求上只带章不带 exec —— 不绑账本、章落库。
-    game.narrate(
-        "requirement.add",
-        &text("actor-only requirement|synthetic description|id-r2"),
-    );
-    game.narrate("requirement.dispatch", &text("r2"));
-    submit_identity_for(
-        &mut game,
-        "r2",
-        1,
-        "plan",
-        "id-actor-only",
-        None,
-        Some("agent-9"),
-        None,
-    );
-    game.assert_kv("prop.2.actor", json!("agent-9"));
-    game.assert_kv("settings.executor.r2.plan", Json::Null);
-}
-
 /// 覆盖面 k/n：`readPlan` 在场时按本幕清单计算（计划外的 doc 不进分子），
 /// 不在场时降级。清单是**装资源的静态值**，改它必须重算 manifest（`reseal`）。
 #[test]
