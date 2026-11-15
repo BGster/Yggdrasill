@@ -54,6 +54,24 @@ The user runs real-data verification and pastes the output; synthetic data under
     every scene receipt's `[READ FIRST]` block resolves to existing files, the signed version equals the
     on-disk one, and no signature predates the current scene entry.
 
+0d. **Classification axis is the recall moment, never the content type.** A new file or directory must answer one
+    question before it exists: *who opens it, and at which moment in the run?* If the answer is a content
+    category — "decisions", "narrative", "misc", "common", "utils" — it is a **residual dump** and must not
+    be created: dissolve the content into the documents that govern it instead. A `触发` header field that names
+    a topic rather than a situation ("查台账", "看叙事", "有需要时") is the same failure wearing a header.
+    - **Two live proofs in this repository**: `docs/context/narrative/` (split by content type — overturned in
+      r6) and `docs/context/archive/` (split by "this is a ledger" — dissolved in r12). Both carried proper
+      headers, both passed every machine check, and both separated a rule from the moment it is needed.
+    - **When something fits nowhere, a new bucket is never the answer.** Either it belongs beside the document
+      that governs it (a decision goes into the contract it constrains), or the existing cut is wrong and must
+      be re-cut along recall moments.
+
+    Three-question criterion (§1.7): ① which action does it block? — creating a directory/file, or parking the
+    thing that "doesn't fit" into a fresh bucket; ② symptom — a directory named archive/misc/common/narrative,
+    a header whose `触发` names a topic, or two readers arriving from unrelated moments; ③ confirm next time —
+    every directory names one situation in one sentence, that situation appears in `scenes.json` or the AGENTS §3
+    route, and no directory's justification is "it is a kind of content".
+
 1. **Every in-run artifact must be carried by an event first**: before writing a file, changing code or
    producing a deliverable, an event must bring it into the state machine (`requirement.dispatch` →
    proposal → gate). The verdict looks at events, not where bytes landed — `~/tmp`, `/tmp` and chat all
