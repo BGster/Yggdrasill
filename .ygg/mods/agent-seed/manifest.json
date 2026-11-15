@@ -136,9 +136,9 @@
       "sha256": "de0d78545b20f53ef20160a74f9f31487d33803ec9ccda97279fde03212b5968"
     },
     {
-      "byteLength": 2285,
+      "byteLength": 2276,
       "path": "src/view/guide.lua",
-      "sha256": "7cf7f1014d9883bc1add78ec73755af2a0fcbb7af6ccda37540802ccc74e0db5"
+      "sha256": "344533e6d16d97f83d3045f56051002f79ce8148bfbb86b79392e79adf13e25c"
     },
     {
       "byteLength": 15806,
@@ -281,12 +281,12 @@
       "sha256": "8408033aaf0231ae59cad1614469ec05e1e18d81d66413dbaa219d4f12021d3b"
     },
     {
-      "byteLength": 14552,
+      "byteLength": 7354,
       "id": "ygg:agent/playbook/ch5-evolution-tools",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch5-evolution-tools.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "ef5bb805e33924927aaa05b6c94123fb0c7e814c04f1d6ee7dff73a934b99f68"
+      "sha256": "ab972516e926b8c6b872ddbf69662dcc96ef447994e649c82885d9b2abf3a765"
     }
   ],
   "schemaVersion": 1

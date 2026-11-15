@@ -25,6 +25,12 @@
 
 反应器边界（只写 KV + 叙事、探针失败是警告不是门禁、机证与人证同级）正文见 [state-machine.md](../kernel/state-machine.md) §2.9.2；本节不复制。
 
+#### 2.11.2 Mod 不自己做 IO，也不重复应用结果
+
+- **Mod 从不自己做 IO**：无进程、无网络、无直接文件系统调用。它只发布请求（`meta.tool_calls`）、应用结果（`tool.result`）；唯一可碰的文件面是宿主中介的 `ygg.fs` VFS（run 相对、路径夹紧），`vfs.write` 与 artifact 探针共用同一份有界台账。宿主无 `ygg.fs` 时 `vfs.write` 记同一行台账并叙述 `[VFS LEDGER ONLY]`，不得声称已写盘——两种宿主形态下 KV 与叙述必须一致。
+- **结果幂等**：携带已应用过 `external_id` 的 `tool.result` 是**重放**——叙述 `[REPLAY:TOOL]`，不改任何状态，`pending` 计数绝不重复扣减；同一 call 收到**不同的终态**是冲突，不是覆盖，必须显式报冲突而非静默采用后到的那个。
+- **其余不变量已各有权威，本节不复制**：双层白名单与凭据见本节上文；receipt / reactive 职责边界、探针失败是警告、机证与人证同级、截断必须诚实见 [state-machine.md](../kernel/state-machine.md) §2.9.2；`k=v;` 输出形状与结算 cross-check 接入点见 [harness-tools.md](../host/harness-tools.md) §2、§3.2。
+
 #### 2.11.1 设计依据（为什么是一回合内联 + 双层白名单）
 
 **当宿主挂载了工具运行器时，白名单工具在同一次 dispatch 回合内内联执行，结果立即折叠进 KV**；未挂载的宿主保留异步 `tool.call` / `tool.result` 回退。**LLM 提供方只能是双协议适配器**（`openai-chat` 缺省 + `anthropic-messages` 回退），且严格只从 git-ignored 的 `.env` 键（`YGG_LLM_*`）配置。

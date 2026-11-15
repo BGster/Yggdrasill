@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        18,
-        "STAGE_GUIDE must route all 18 remaining chapters (dispatch/integration/lanes moved to docs on 2026-11-15): {mapped:?}"
+        17,
+        "STAGE_GUIDE must route all 17 remaining chapters (dispatch/integration/lanes/tools moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        18,
-        "r5 assembles 18 chapters (14 legacy + 4 new; dispatch/integration/lanes moved to docs on 2026-11-15): {sections:?}"
+        17,
+        "r5 assembles 17 chapters (14 legacy + 3 new; dispatch/integration/lanes/tools moved to docs on 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        18,
+        17,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3538,7 +3538,6 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
             "live_evidence",
             "mod_engineering",
             "host_contract",
-            "tools",
         ],
     );
     let mut release = drive_to_release();
@@ -4394,7 +4393,6 @@ fn design_pointer_anchors_exist_under_docs_design() {
         ("ch4-mod-host.json", 8),
         ("ch4-protocol.json", 3),
         ("ch4-run-machine.json", 7),
-        ("ch5-evolution-tools.json", 6),
         ("beats-settlement.json", 3),
         ("tools.lua", 2),
     ]
@@ -4406,7 +4404,7 @@ fn design_pointer_anchors_exist_under_docs_design() {
         ledger, expected,
         "docs/design 指针账漂移（逐来源）：{ledger:?}"
     );
-    assert_eq!(total, 33, "docs/design 指针总数漂移：期望 33，实得 {total}");
+    assert_eq!(total, 27, "docs/design 指针总数漂移：期望 27，实得 {total}");
     assert!(
         violations.is_empty(),
         "docs/design 指针锚点不存在：{}",
