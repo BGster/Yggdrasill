@@ -126,3 +126,32 @@ test("验收门 reject：保住 plan_ok、释放泳道、回 ready 并重新派�
   assert_eq(kv("req.1.job"), "development", "development is re-dispatched")
   assert_eq(kv("req.1.lane"), 1, "a lane is bound again")
 end)
+
+test("验收门 amend：rev+1 / plan_ok 失效 / gate 绑定旧 rev / 旧批准必须 stale", function()
+  drive_to_dev_pending("semantics-p2")
+  drive_to_accept()
+  assert_eq(phase_of("r1"), "accept_gate", "the row sits on the accept gate")
+
+  fire("requirement.amend", "r1|amended title")
+  assert_eq(kv("req.1.rev"), 2, "amend bumps the revision")
+  assert_eq(kv("req.1.plan_ok"), false, "plan_ok is invalidated")
+  assert_eq(kv("req.1.gate"), "accept", "the gate itself is not taken down")
+  assert_eq(kv("req.1.gate_rev"), 1, "but it stays bound to the old revision")
+
+  -- 旧批准不得生效：stale 拒绝，状态与门位都不动。
+  reset()
+  click("gate.approve — ")
+  assert_true(narrated_contains("stale"), "an approval bound to the old rev must be refused as stale")
+  assert_eq(kv("req.1.status"), "open", "status untouched")
+  assert_eq(kv("req.1.gate"), "accept", "the gate stays up")
+  assert_eq(kv("req.1.gate_rev"), 1, "gate_rev untouched")
+
+  reset()
+  click("gate.reject — ")
+  assert_eq(kv("req.1.gate"), "", "reject clears the gate")
+  assert_eq(kv("req.1.plan_ok"), false, "plan_ok stays false after the amend")
+  assert_eq(phase_of("r1"), "draft", "the row falls back to draft")
+
+  fire("requirement.dispatch", "0")
+  assert_eq(kv("req.1.job"), "plan", "a plan job is re-hung")
+end)

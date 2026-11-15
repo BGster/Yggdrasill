@@ -927,38 +927,6 @@ fn default_all1_walk_loops_empty_batches_to_limit() {
 
 // ───────────────────── requirement pipeline: gates & deliverables ─────────────────────
 
-/// Amend while the accept gate is pending: `rev+1` and `plan_ok` is invalidated → the old
-/// approval is stale (refused, state unchanged — `gate_rev` still binds the old rev) → the
-/// reject path falls back to `draft` (the invalidated plan), and the next dispatch replans.
-#[test]
-fn accept_gate_amend_invalidates_plan_and_stales_the_pending_gate() {
-    let mut game = drive_to_accept(drive_to_dev_pending("semantics-p2"));
-    assert_eq!(game.phase("r1"), "accept_gate");
-
-    game.narrate("requirement.amend", &text("r1|amended title"));
-    game.assert_kv("req.1.rev", json!(2));
-    game.assert_kv("req.1.plan_ok", json!(false));
-    // The gate itself is not taken down (only reject/approve do that) but it is bound to
-    // the old rev.
-    game.assert_kv("req.1.gate", json!("accept"));
-    game.assert_kv("req.1.gate_rev", json!(1));
-
-    // The old approval must not take effect: stale rejection, state and gate untouched.
-    let stale = game.click("gate.approve — ");
-    assert_refused(&narrative_lines(&stale), "stale");
-    game.assert_kv("req.1.status", json!("open"));
-    game.assert_kv("req.1.gate", json!("accept"));
-    game.assert_kv("req.1.gate_rev", json!(1));
-
-    game.click("gate.reject — ");
-    game.assert_kv("req.1.gate", json!(""));
-    game.assert_kv("req.1.plan_ok", json!(false));
-    assert_eq!(game.phase("r1"), "draft");
-
-    game.narrate("requirement.dispatch", "0");
-    game.assert_kv("req.1.job", json!("plan"));
-}
-
 /// Approving the `plan` gate makes the row `ready`; the declared `useEffect` auto-dispatches
 /// **development for that requirement only** before the receipt is rendered (one turn saved),
 /// and the memoized requirement panel reflects the new state (no stale `useMemo`).
