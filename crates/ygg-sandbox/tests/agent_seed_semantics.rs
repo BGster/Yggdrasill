@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        20,
-        "STAGE_GUIDE must route all 20 remaining chapters (`dispatch` moved to docs on 2026-11-15): {mapped:?}"
+        19,
+        "STAGE_GUIDE must route all 19 remaining chapters (`dispatch`/`integration` moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        20,
-        "r5 assembles 20 chapters (14 legacy + 6 new; `dispatch` moved to docs/context/rituals/dispatch.md on 2026-11-15): {sections:?}"
+        19,
+        "r5 assembles 19 chapters (14 legacy + 5 new; dispatch/integration moved to docs on 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        20,
+        19,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3525,7 +3525,6 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
             "inbox",
             "lanes",
             "branches",
-            "integration",
         ],
     );
 
@@ -3544,7 +3543,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
         ],
     );
     let mut release = drive_to_release();
-    assert_receipt(&mut release, &["integration", "branches"]);
+    assert_receipt(&mut release, &["branches"]);
 
     release.narrate("release.skip", &text("playbook receipt probe"));
     release.click("config — ");

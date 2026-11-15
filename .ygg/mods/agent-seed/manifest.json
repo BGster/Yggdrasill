@@ -136,9 +136,9 @@
       "sha256": "de0d78545b20f53ef20160a74f9f31487d33803ec9ccda97279fde03212b5968"
     },
     {
-      "byteLength": 2324,
+      "byteLength": 2294,
       "path": "src/view/guide.lua",
-      "sha256": "ba3fc366fe83677d6ae390ee049f938f0f1b94a6f393dc8c000c76101cca6d5a"
+      "sha256": "2f561a39e3bee133444a998c2d8b0a2898a8d3d160c44c1b20b869e3b4bf0b5c"
     },
     {
       "byteLength": 15806,
@@ -158,7 +158,7 @@
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "d264fceaa49a7a40ccaf26d40f39d972d345beb10dbf58e8efd2d3c39268b2f4"
+      "sha256": "1de08e5b76bb10ae34128fefdbb62a117f3585c079fbbd67fc9d14d596ef2a54"
     },
     {
       "byteLength": 7338,
@@ -214,7 +214,7 @@
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "5b264a0655eaaa596e1abe991a095ce09d3aed2ba88fdb0ffafbb453fe191d02"
+      "sha256": "ba9535f84a8a29a9fda99bcda824f9d4436c99bb5cec9f374c99291ba7171ffa"
     },
     {
       "byteLength": 1943,
@@ -233,12 +233,12 @@
       "sha256": "840983b6add062fcdf25cdd651f876a875ed9a1062107ec146a1646695840ac8"
     },
     {
-      "byteLength": 15016,
+      "byteLength": 6057,
       "id": "ygg:agent/playbook/ch2-delivery",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch2-delivery.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "2248288c61b90223b4d786f294c4d42bd279832dc2db232d8fa27061eda6fea5"
+      "sha256": "3621d432075c652fdb2fdb1d918e8f6fce01eb01ede5754acb8c1ab053e1bb2e"
     },
     {
       "byteLength": 10078,
