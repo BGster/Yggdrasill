@@ -15,3 +15,20 @@ test("退役路径不追加维护需求：武装的 review.note 写 ending 且�
   assert_nil(kv("run.maintenance.last"), "the retired path leaves the register untouched")
   assert_eq(kv("ending"), "retired", "the ending is written")
 end)
+
+test("verify 失败：回协调幕、失败计数 +1、结算槽与发布声明清空", function()
+  drive_to_settle()
+  reset()
+  click("verify.submit all_green=false — ")
+  assert_true(narrated_contains("[GATES FAILED]"), "the honest failure must narrate its beat")
+  assert_eq(kv("run.phase"), "", "the batch falls back to coordinate")
+  assert_nil(kv("fsm.stage"), "live is the FSM initial state: not materialized")
+  assert_eq(kv("verify.passed"), false, "verify is not passed")
+  assert_eq(kv("verify.failures"), 1, "the failure counter advances")
+  assert_eq(kv("settlement.evolution.summary"), "", "the settlement slot is cleared")
+  assert_eq(kv("run.release.master_sha"), "", "the release declaration is cleared")
+
+  -- 回协调幕后可继续接活。
+  fire("requirement.add", "rework requirement|desc|semantics-rework")
+  assert_eq(kv("req.2.status"), "open", "the queue accepts new work for the next round")
+end)

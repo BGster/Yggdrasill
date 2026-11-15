@@ -1220,32 +1220,6 @@ sessions=1/0/~/.pi/agent/sessions-trash/semantics|todo=0/re-checked the todo lis
     );
 }
 
-/// A failed verify returns the **whole batch** to coordinate (R9): `run.phase=""`, the
-/// settlement and release keys are cleared, the failure counter increments, and the
-/// coordinate surface is usable again (a new requirement can enter the queue).
-#[test]
-fn verify_failure_returns_the_batch_to_coordinate() {
-    let mut game = drive_to_settle();
-    let failed = game.click("verify.submit all_green=false — ");
-    assert!(
-        failed["narrative"].to_string().contains("[GATES FAILED]"),
-        "the honest failure must narrate its beat: {failed}"
-    );
-    game.assert_kv("run.phase", json!(""));
-    game.assert_kv("fsm.stage", json!(null)); // live is the FSM initial state: not materialized in KV yet
-    game.assert_kv("verify.passed", json!(false));
-    game.assert_kv("verify.failures", json!(1));
-    game.assert_kv("settlement.evolution.summary", json!(""));
-    game.assert_kv("run.release.master_sha", json!(""));
-
-    // Coordinate again: the queue accepts new work for the next round.
-    game.narrate(
-        "requirement.add",
-        &text("rework requirement|desc|semantics-rework"),
-    );
-    game.assert_kv("req.2.status", json!("open"));
-}
-
 /// The release act gates the batch settlement (R-a/R10): an undeclared release keeps
 /// `review.note` off the menu; `release.skip` requires a non-empty reason; `release.confirm`
 /// validates the sha/tag shape; either declaration unblocks the batch close, and the next
