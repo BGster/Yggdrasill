@@ -972,66 +972,6 @@ fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
 
 // ───────────────────── gate locality & the integration act ─────────────────────
 
-/// The plan gate's own pending proposal does **not** block its approval (剧情双层重写: delivery is
-/// the gate — the gate-raising proposal settles to accepted as part of the approval), while
-/// an injected **development** pending does (one gate at a time; the KV-injected fixture is
-/// the only way a proposal can coexist with a gate, since `submit_slot_ok` refuses live
-/// submits while a gate is up).
-#[test]
-fn gate_approval_settles_its_own_proposal_and_still_blocks_foreign_pendings() {
-    let mut game = drive_to_plan_gate();
-    // p1 (the gate-raising plan proposal) is pending; the approval must proceed and settle it.
-    game.assert_kv("prop.1.status", json!("pending"));
-    game.click("gate.approve — ");
-    game.assert_kv("prop.1.status", json!("accepted"));
-    game.assert_kv("req.1.gate", json!(""));
-    game.assert_kv("req.1.job", json!("development"));
-
-    // Inject a pending development proposal (in-memory fixture) while the row sits on a
-    // fresh plan gate: the approval is refused — a pending proposal must be served first.
-    let mut plan_gate = drive_to_plan_gate();
-    let mut save = plan_gate.save();
-    let entries = save["kv"]["entries"]
-        .as_object_mut()
-        .expect("kv.entries must be an object");
-    let injected = 2;
-    entries.insert("prop.count".to_owned(), json!(injected));
-    for (key, value) in [
-        ("req", json!(1)),
-        ("rev", json!(1)),
-        ("stage", json!("development")),
-        ("summary", json!("injected own pending proposal")),
-        ("artifacts", json!("artifacts/injected.md")),
-        ("status", json!("pending")),
-        ("ext", json!("semantics-injected")),
-        ("changes", json!("")),
-    ] {
-        entries.insert(format!("prop.{injected}.{key}"), value);
-    }
-    let bytes = serde_json::to_vec(&save).expect("serialize the save");
-    let mut blocked = Game {
-        bundle: plan_gate.bundle.clone(),
-        kernel: plan_gate
-            .bundle
-            .restore(&bytes)
-            .expect("a save with an injected own proposal must load"),
-        dir: plan_gate.dir.clone(),
-        suppress_reads: false,
-        stamp_actor: Some(TEST_ACTOR.to_owned()),
-    };
-    blocked.assert_kv("prop.2.status", json!("pending"));
-
-    // The snapshot's pendingChoice predates the injection; re-render first to resync.
-    blocked.narrate("requirement.list", "0");
-
-    let refused = blocked.click("gate.approve — ");
-    let lines = narrative_lines(&refused);
-    assert_refused(&lines, "gate.approve");
-    blocked.assert_kv("req.1.gate", json!("plan"));
-    blocked.assert_kv("req.1.status", json!("open"));
-    blocked.assert_kv("prop.2.status", json!("pending"));
-}
-
 // ───────────────────── r1 · single operation map + registry fail-closed ─────────────────────
 
 /// Take the **map window** from the `map.show` receipt: from the map head line to the map

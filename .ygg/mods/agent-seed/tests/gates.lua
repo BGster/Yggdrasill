@@ -239,3 +239,36 @@ test("exec= 内联执行者：错位拒绝 / 同事务绑定 / 跨阶段需理�
     "the ledger writes id|reason"
   )
 end)
+
+test("门禁批准结清自己的提案；注入的 development 待决会阻塞批准", function()
+  -- ① 正常：批准 plan 门 → 抬高门禁的那条 plan 提案被一并结清。
+  drive_to_plan_gate()
+  assert_eq(kv("prop.1.status"), "pending", "the gate-raising proposal is pending")
+  click("gate.approve — ")
+  assert_eq(kv("prop.1.status"), "accepted", "the approval settles its own proposal")
+  assert_eq(kv("req.1.gate"), "", "the gate slot clears")
+  assert_eq(kv("req.1.job"), "development", "development auto-dispatches")
+
+  -- ② 注入一条 pending development 提案（KV 直写，等价于 Rust 侧的 save 注入）。
+  drive_to_plan_gate()
+  set_kv("prop.count", 2)
+  set_kv("prop.2.req", 1)
+  set_kv("prop.2.rev", 1)
+  set_kv("prop.2.stage", "development")
+  set_kv("prop.2.summary", "injected own pending proposal")
+  set_kv("prop.2.artifacts", "artifacts/injected.md")
+  set_kv("prop.2.status", "pending")
+  set_kv("prop.2.ext", "semantics-injected")
+  set_kv("prop.2.changes", "")
+  assert_eq(kv("prop.2.status"), "pending", "the injected proposal is pending")
+
+  reset()
+  click("gate.approve — ")
+  assert_true(
+    narrated_contains("[REJECTED") or narrated_contains("[BLOCKED"),
+    "a pending proposal must be served before the gate advances"
+  )
+  assert_eq(kv("req.1.gate"), "plan", "the gate stays up")
+  assert_eq(kv("req.1.status"), "open", "status unchanged")
+  assert_eq(kv("prop.2.status"), "pending", "the injected proposal is untouched")
+end)
