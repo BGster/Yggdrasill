@@ -36,14 +36,19 @@
       "sha256": "1d6712ee1ffb9c58b699d7064ceda7f94c9baa08dcb6e5ddfe893d6879ae31b6"
     },
     {
+      "byteLength": 6203,
+      "path": "src/domain/readsig.lua",
+      "sha256": "c94606c3ecf4fc3bc2602172c0fb79c826dacf377875cc3498752a2fb97da4b3"
+    },
+    {
       "byteLength": 19438,
       "path": "src/domain/requirements.lua",
       "sha256": "24a63bad72c668b4a339caf9bfaf705378521c511e0923629361f7411ccd5b76"
     },
     {
-      "byteLength": 36909,
+      "byteLength": 38561,
       "path": "src/domain/wire.lua",
-      "sha256": "d6bf1ef40a9cd63eb5b5b611584fa48947de5923480201abe138738da5ae9cdf"
+      "sha256": "a7ff5bfb4389faa6d5416833bcf7a9568e2c3e0b713e01c12ff3b1ac91204fcb"
     },
     {
       "byteLength": 11376,
@@ -101,9 +106,9 @@
       "sha256": "e7e020d146871cc99d3807f9e1347c345799722d240741ecd8d0a42aedd958ca"
     },
     {
-      "byteLength": 12371,
+      "byteLength": 14197,
       "path": "src/handlers/system/config.lua",
-      "sha256": "e725e5cef837253514121c12c9fd2e356d9bb0d650d05c67967e938aff0275af"
+      "sha256": "7bdf25ec6dea9e5cc7e21fa28f28b8eccbb5ff72eabebc870e7b679eb633e37f"
     },
     {
       "byteLength": 1155,
@@ -186,12 +191,12 @@
       "sha256": "56722f4b5972cb2894dcb1cb0cc66f63978c654d2071479f22e7f979fac9823d"
     },
     {
-      "byteLength": 10743,
+      "byteLength": 11407,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "4c22913a0e4f55ea5b6ad5e675fd4835a950a16b5a2ea5750e12b8d290c12f3e"
+      "sha256": "8b2ce153a9f65dbc9bbec07fc1c1a4bad75617b5a122cf2f878642bf98d3a064"
     },
     {
       "byteLength": 932,
