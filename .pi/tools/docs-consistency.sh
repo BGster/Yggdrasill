@@ -1,44 +1,69 @@
 #!/bin/sh
-# docs-consistency.sh —— docs wiki 闭包核验（只读）。
+# docs-consistency.sh —— docs wiki 闭包核验（只读）+ 场景签名验真（--attest）。
 #
 # 纯命令行契约（rev3 / D-MA26）：不读 config、不读局 KV、不依赖 egg。
-# 校验 docs/README.md 索引内的相对链接逐一存在 + 必备文件清单存在。
+# 默认模式：校验 docs/README.md 索引内的相对链接逐一存在 + 必备文件清单存在。
+# --attest：核验某局事件日志里的 `read.<doc-id>=<ver>` 签名声明与磁盘实际 ver 是否一致
+#           （`--run <dir>` 必填 —— 脚本不猜「最新局」，路径只由调用方给）。
 #
 # 用法：
 #   docs-consistency.sh [--repo <dir>] [--index <file>] [--json]
+#   docs-consistency.sh --attest --run <run-dir> [--repo <dir>] [--json] [--max-history <n>]
 #   docs-consistency.sh --help
 #
 # 参数：
-#   --repo <dir>   缺省 = 脚本所在 git toplevel。
-#   --index <file> 缺省 = <repo>/docs/README.md。
-#   --json         输出单行 JSON（与 k=v 同信息集）；缺省输出 k=v;k=v。
+#   --repo <dir>       缺省 = 脚本所在 git toplevel。
+#   --index <file>     缺省 = <repo>/docs/README.md。
+#   --json             输出单行 JSON（与 k=v 同信息集）；缺省输出 k=v;k=v。
+#   --attest           进入签名验真模式（读事件日志，不解索引链接）。
+#   --run <run-dir>    --attest 必填：run 目录（含 events.jsonl 或 run.sqlite）。
+#   --max-history <n>  每个文件回溯的历史版本上限，缺省 50。
 #
-# 输出（exit 0，k=v 缺省）：
+# 输出 · 默认（exit 0，k=v）：
 #   links=<n>;broken=<k>;first=<relpath|->;ok=<0|1>
 #   links  = 索引内相对 markdown 链接总数（(http/https/# 开头的外链与锚点不计）。
 #   broken = 链接目标文件不存在 / 必备文件缺失的总数。
 #   first  = 第一个 broken 的相对路径（无 = -）。仓库内文档路径，非业务数据。
 #   ok     = 1 当且仅当 broken=0。
 #
-# exit 码：0 正常执行（结论在 ok 键）；2 用法错；3 环境缺失（无 python3/git）；4 索引不可读。
-# 「检测发现问题」（broken>0）永远 exit 0 + ok=0。
+# 输出 · --attest（exit 0，k=v）：
+#   claims=<n>;forged=<k>;stale=<s>;first=<doc-id|->;ok=<0|1>
+#   claims = 事件日志里出现过的**去重** doc-id 数（同一 id 多次签名取最后一条）。
+#   forged = 声明值与磁盘当前 ver 不符，且该值不是任何历史版本的 ver。
+#   stale  = 声明值曾是某历史版本的 ver，但当前已变（签名过期）。
+#   first  = 第一个出问题的 doc-id（先 forged 后 stale；无 = -）。
+#   ok     = 1 当且仅当 claims>0 且 forged=0 且 stale=0（0 声明 = 无证据 → fail-closed）。
+#
+# 事件源（先后）：<run>/events.jsonl（JSON 后端）；否则 <run>/run.sqlite 的 `step` 表
+#   （SQLite 后端，r9 缺省；以 `immutable=1` 只读打开，不建 WAL、不写盘）。
+#
+# exit 码：0 正常执行（结论在 ok 键）；2 用法错；3 环境缺失（无 python3/git/sqlite3）；
+#          4 索引不可读 / run 不可读；5 索引读取异常。
+# 「检测发现问题」（broken>0 / forged>0 / stale>0）永远 exit 0 + ok=0。
 
 set -eu
 
 usage() {
   cat <<'EOF'
 docs-consistency.sh [--repo <dir>] [--index <file>] [--json]
-  --repo <dir>   default: git toplevel of the script location
-  --index <file> default: <repo>/docs/README.md
-  --json         emit single-line JSON instead of k=v;k=v
-  --help         this text
-exit: 0 ok (see ok=), 2 usage, 3 env missing (python3/git), 4 index unreadable
+docs-consistency.sh --attest --run <run-dir> [--repo <dir>] [--json] [--max-history <n>]
+  --repo <dir>       default: git toplevel of the script location
+  --index <file>     default: <repo>/docs/README.md
+  --json             emit single-line JSON instead of k=v;k=v
+  --attest           verify read.<doc-id>=<ver> signatures against on-disk ver
+  --run <run-dir>    required by --attest (events.jsonl or run.sqlite)
+  --max-history <n>  history depth per doc for stale detection (default 50)
+  --help             this text
+exit: 0 ok (see ok=), 2 usage, 3 env missing, 4 unreadable, 5 index read error
 EOF
 }
 
 REPO=""
 INDEX=""
 AS_JSON=0
+ATTEST=0
+RUN=""
+MAXHIST=50
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -46,6 +71,9 @@ while [ $# -gt 0 ]; do
     --repo) REPO="${2-}"; shift 2 ;;
     --index) INDEX="${2-}"; shift 2 ;;
     --json) AS_JSON=1; shift ;;
+    --attest) ATTEST=1; shift ;;
+    --run) RUN="${2-}"; shift 2 ;;
+    --max-history) MAXHIST="${2-}"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
@@ -56,6 +84,178 @@ if [ -z "$REPO" ]; then
   command -v git >/dev/null 2>&1 || { echo "git required (or pass --repo)" >&2; exit 3; }
   REPO=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "not in a git repo; pass --repo" >&2; exit 3; }
 fi
+
+# ---------------------------------------------------------------- --attest 模式
+if [ "$ATTEST" -eq 1 ]; then
+  if [ -z "$RUN" ]; then
+    echo "--attest requires --run <run-dir>" >&2
+    usage >&2
+    exit 2
+  fi
+  [ -d "$RUN" ] || { echo "run dir not readable: $RUN" >&2; exit 4; }
+
+  RESULT=$(python3 - "$REPO" "$RUN" "$MAXHIST" <<'PYEOF'
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+repo = os.path.abspath(sys.argv[1])
+run_dir = os.path.abspath(sys.argv[2])
+maxhist = int(sys.argv[3])
+
+ctx = os.path.join(repo, "docs", "context")
+VER_LINE = re.compile(r'^> \*\*ver\*\* ([0-9a-f]{6})$', re.M)
+CLAIM = re.compile(r'read\.([A-Za-z0-9._/-]+)=([0-9a-f]{6})')
+PLACEHOLDER = "000000"
+
+
+def fail(code, msg):
+    print("ERR%d:%s" % (code, msg))
+    sys.exit(0)
+
+
+def load_events():
+    jsonl = os.path.join(run_dir, "events.jsonl")
+    if os.path.exists(jsonl):
+        chunks = []
+        with open(jsonl, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    chunks.append(json.dumps(json.loads(line), ensure_ascii=False))
+                except Exception:
+                    chunks.append(line)  # 坏行也扫：宁可多扫，不可漏签
+        return chunks, "jsonl"
+
+    db = os.path.join(run_dir, "run.sqlite")
+    if os.path.exists(db):
+        if shutil.which("sqlite3") is None:
+            fail(3, "sqlite3-missing")
+        uri = "file:%s?immutable=1" % db  # 只读：不建 WAL、不写盘
+        res = subprocess.run(
+            ["sqlite3", "-json", uri, "select event, payload from step order by seq"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if res.returncode != 0:
+            fail(4, "sqlite-read:%s" % res.stderr.decode(errors="replace").strip()[:160])
+        try:
+            rows = json.loads(res.stdout.decode("utf-8") or "[]")
+        except Exception as exc:
+            fail(4, "sqlite-json:%s" % exc)
+        chunks = [(str(r.get("event") or "") + "\n" + str(r.get("payload") or "")) for r in rows]
+        return chunks, "sqlite"
+
+    fail(4, "run-unreadable:%s" % run_dir)
+
+
+def blob_hash(data):
+    return subprocess.run(["git", "hash-object", "--stdin"], input=data,
+                          stdout=subprocess.PIPE, check=True).stdout.decode().strip()
+
+
+def ver_of_text(text):
+    norm = VER_LINE.sub("> **ver** " + PLACEHOLDER, text)
+    return blob_hash(norm.encode("utf-8", "surrogateescape"))[:6]
+
+
+def current_ver(path):
+    with open(path, "rb") as f:
+        text = f.read().decode("utf-8", "surrogateescape")
+    return ver_of_text(text)
+
+
+def historical_vers(path):
+    real = os.path.realpath(path)  # 软链先解引用：否则 git 只看到壳自己的历史
+    repo_real = os.path.realpath(repo)  # /tmp → /private/tmp 这类宏重解析后仍能算相对路径
+    rel = os.path.relpath(real, repo_real)
+    if rel.startswith(".."):
+        return set()
+    revs = subprocess.run(["git", "-C", repo, "log", "--format=%H", "--follow", "--", rel],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.decode().split()
+    out = set()
+    for rev in revs[:maxhist]:
+        blob = subprocess.run(["git", "-C", repo, "show", "%s:%s" % (rev, rel)],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+        if not blob:
+            continue
+        try:
+            out.add(ver_of_text(blob.decode("utf-8", "surrogateescape")))
+        except Exception:
+            continue
+    return out
+
+
+def normalize_id(doc_id):
+    if doc_id.endswith(".md"):
+        doc_id = doc_id[:-3]
+    if "/" in doc_id:
+        return doc_id
+    return doc_id.replace(".", "/")  # read.acts.coordinate → acts/coordinate
+
+
+chunks, source = load_events()
+
+claims = {}
+for chunk in chunks:  # 事件顺序：后出现的覆盖先出现的（同一 id 取最新签名）
+    for m in CLAIM.finditer(chunk):
+        claims[normalize_id(m.group(1))] = m.group(2)
+
+forged = 0
+stale = 0
+first = "-"
+detail = []
+
+for doc_id, declared in claims.items():
+    path = os.path.join(ctx, doc_id + ".md")
+    if not os.path.isfile(path):
+        forged += 1
+        detail.append("forged:%s:missing-file" % doc_id)
+        if first == "-":
+            first = doc_id
+        continue
+    cur = current_ver(path)
+    if declared == cur:
+        continue
+    if declared in historical_vers(path):
+        stale += 1
+        detail.append("stale:%s:%s->%s" % (doc_id, declared, cur))
+        if first == "-":
+            first = doc_id
+    else:
+        forged += 1
+        detail.append("forged:%s:%s!=%s" % (doc_id, declared, cur))
+        if first == "-":
+            first = doc_id
+
+ok = 1 if (claims and forged == 0 and stale == 0) else 0
+print("%d;%d;%d;%s;%d" % (len(claims), forged, stale, first, ok))
+PYEOF
+)
+
+  case "$RESULT" in
+    ERR3:*) echo "${RESULT#ERR3:}" >&2; exit 3 ;;
+    ERR4:*) echo "${RESULT#ERR4:}" >&2; exit 4 ;;
+  esac
+
+  CLAIMS=$(printf '%s' "$RESULT" | cut -d';' -f1)
+  FORGED=$(printf '%s' "$RESULT" | cut -d';' -f2)
+  STALE=$(printf '%s' "$RESULT" | cut -d';' -f3)
+  FIRST=$(printf '%s' "$RESULT" | cut -d';' -f4)
+  OK=$(printf '%s' "$RESULT" | cut -d';' -f5)
+
+  if [ "$AS_JSON" -eq 1 ]; then
+    printf '{"claims":%s,"forged":%s,"stale":%s,"first":"%s","ok":%s}\n' "$CLAIMS" "$FORGED" "$STALE" "$FIRST" "$OK"
+  else
+    printf 'claims=%s;forged=%s;stale=%s;first=%s;ok=%s\n' "$CLAIMS" "$FORGED" "$STALE" "$FIRST" "$OK"
+  fi
+  exit 0
+fi
+
+# ---------------------------------------------------------------- 默认模式（索引闭包）
 [ -n "$INDEX" ] || INDEX="$REPO/docs/README.md"
 
 [ -r "$INDEX" ] || { echo "index not readable: $INDEX" >&2; exit 4; }
