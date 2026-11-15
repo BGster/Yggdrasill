@@ -174,7 +174,7 @@ curl -X POST http://127.0.0.1:7800/api/roots -H 'Content-Type: application/json'
 .ygg/bin/egg serve --port 7801 --poll-ms 300  # explicit separate instance / faster polling
 ```
 
-Registry lifecycle, DELETE, panel routes and single-instance behavior: `docs/design/host/serve.md`.
+Registry lifecycle, `DELETE`, the four panel levels, SSE frames and single-instance semantics: `docs/design/host/serve.md` §3.7.1–3.7.5 — read-only, no run-state write endpoint.
 
 ### Continue
 
@@ -199,14 +199,7 @@ that channel. Re-run Continue to resume. Lane reuse/parking: `docs/design/host/l
 
 ### Settle and finish cadence
 
-1. Per batch: drain all leaves and pending jobs/proposals/conflicts, then `coordinate.submit` →
-   `verify.submit` → `settlement.evolution` → release declaration → `review.note`.
-2. Unarmed `review.note` is a batch settle, not an ending. `config.set run.retire=true` arms the only
-   ending; after the last cycle run `--settle` and require `settlement.json ok=true`.
-3. Exact payloads, evidence standards, integration cadence and reset-develop are not repeated here:
-   read `docs/context/acts/settle.md`, `release.md` and `retired.md` before acting.
-4. Upgrade only after a batch settles, then open a new run-id; never migrate or adopt old runs.
-5. Clear the main-session todo list (`todo clear`, including completed/history) before ending the run.
+Batch cadence in one line: drain the queue → `coordinate.submit` → `verify.submit` → `settlement.evolution` → release declaration → `review.note`; unarmed `review.note` settles the batch, `config.set run.retire=true` arms the only ending. Exact payloads, evidence standards, upgrade discipline (new run-id per batch boundary, old runs never migrated or adopted) and both cleanups are stated in `docs/context/acts/settle.md`, `release.md`, `retired.md` and `rituals/cleanup.md` — not repeated here.
 
 ## 3. Prompt-surface index
 

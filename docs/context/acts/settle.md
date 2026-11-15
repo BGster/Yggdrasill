@@ -15,6 +15,10 @@
 
 **宿主收口提示**：`agent.summary.nextEndsRun` 仅在 settle 首项为 `review.note` 且 `run.retire` 已武装时为 true；无预登记时默认空 artifact + 中性 summary + `c=0/0`。宿主随后进入 closing（禁新写、最后 drain）；未武装批结算不得预关闭。常驻局在 `batchDrained` 且 inbox 无未消费行时泵安全暂停 exit 0，不在空批上连发 `coordinate.submit`。
 
+**批边界即重启点（升级纪律）**：升级（Mod 演进或宿主二进制）**只在批结算之后**落地，随后开**新的 run-id**；旧 run 目录**永不迁移、永不 adopt**——装载失败即开新局。批边界是天然重启点，因为它已是一个自洽的收口点（本批需求全部终态、四项齐备、已声明发布）。
+
+**判据**：① 阻断——在批中间替换 Mod/宿主后继续推进同一个局，或写迁移/兼容代码去读旧 run 目录；② 症状——同一 `run-id` 下出现两个 Mod 版本的产物，或为“让旧局能开”而降低装载校验；③ 确认——新局是新的 `.ygg/runs/<id>`，且 `run.json` 的 `store` / `engineVersion` 与当前二进制一致。
+
 **菜单语义对照**：`verify_green` / `verify_fail`（记绿/记不绿）、`settlement_evolution`（登记演进）、`review_note`（批结算/退役）、`map.show`。
 
 **prompts.settle 语义**：「门禁全绿了吗？依次验证 → 演进登记 → 会话 → 待办；四项齐备自动进发布幕。」
