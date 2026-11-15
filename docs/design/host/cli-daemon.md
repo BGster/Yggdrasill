@@ -133,3 +133,25 @@
 - **宿主永不读 Mod 私有 KV**：Mod 没有 `agent.summary` 时，宿主报「unknown」并安全暂停，不回落到 `ending` / `fsm.stage` / `prop.*` / `req.*`。
 - **`meta` 是瞬时回执面**：不进存档、不进规范快照、不进 state hash——同一事件序列调用与否 `ygg.meta`，`state_hash` 相同。
 
+#### 驱动模式（`--drive`）与决策协议
+
+| 模式 | 行为 |
+| --- | --- |
+| `stdin`（缺省） | 每一步、每次提案受理与每道门禁都从 stdin 读选择 |
+| `cmd:<path>` | **不读 stdin**：每个待决选择交给决策命令，局在 ending 自动结算；回答 `HUMAN` 则安全暂停（exit 0） |
+| `none` | 只打印当前回执（含 `pendingChoice`）就退出，不推进、不读 stdin（exit 0） |
+
+**决策命令协议**：stdin 不参与；命令的唯一参数是 `decide-input.json` 的路径（完整当前回执），stdout **只允许一行**——`N`（1..=选项数）或 `HUMAN[:reason]`。**5 秒超时、非零退出、非法输出、越界索引全部 fail-closed**（安全暂停、状态不变）；`YGG_DECIDE_CMD` 可临时覆盖决策命令路径。
+
+**碰撞必须暂停**：`cmd:` 遇到冲突时打印双方与 note，然后 **exit 0 不做选择**；解决后重跑该命令，或切到 stdin 从 `pendingChoice` 选 1/2/3（keep_both / keep_first / revise）。
+
+**人类动作门（`play.mode=guide` 时生效）**：`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` / `config.set play.mode` **只能**经 `ygg.choice_selected` 进入；直派的 single-shot `--event` 以 `[REJECTED:ACTION]` 拒绝（信封仍 `ok:true`，主状态不变）。`gate.reject` / `proposal.reject` 不受限——它们是纠正通道。因此「代人受理」只有一条路：`ygg.choice_selected`。
+
+**绝不伪造内容**：有任务在跑但无待决提案时，宿主**不生成占位提案**（门禁必须被真实交付满足）——它打印可读理由、安全暂停并 exit 0，等外部执行者提交后重跑命令。
+
+**失控护栏**：阈值来自 Mod 的 `data/config.json` `drive` 段（字段缺失或非法时逐个回退）：硬步数上限 = `maxSteps + stepsPerRequirement × 需求数`（缺省 64 + 16×n）；另有「连续 `stallLimit` 步 `pendingChoice` 不变」的停止条件（缺省 12）。
+
+**`play.mode` 是 Mod 叙述语义，宿主不解释**：`config.set play.mode=<goal|guide>` 只切换 Mod 的提示词与叙述语气，推进只由 `--drive` 驱动——宿主既不读 `data/config.json` 的 `play.mode`，也不读存档 KV 里的 `settings.play.mode`。
+
+**goal 模式的判者是 agent 本身**，不是脚本、也不是「永远选 1」：goal 下 Mod 只改措辞与提示语气，推进仍经 `ygg.choice_selected`，每一步都由 agent 依叙述与候选自行判断——该拒的受理要拒、该等的门禁要等，机械取第一项等于伪造结论。仓内不提供默认决策脚本；菜单第一项按设计是主推进动作，但**不保证在当步正确**。
+

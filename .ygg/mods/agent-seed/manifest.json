@@ -136,9 +136,9 @@
       "sha256": "de0d78545b20f53ef20160a74f9f31487d33803ec9ccda97279fde03212b5968"
     },
     {
-      "byteLength": 2161,
+      "byteLength": 2152,
       "path": "src/view/guide.lua",
-      "sha256": "4230a99dfb65511b3459e5eb3d3a6df700a840a6a502bfe48b40c2efad67ceb3"
+      "sha256": "b40b1eda0c2a21a8b2ca1c186825d275867165ac2afd235648dacc73943e4b24"
     },
     {
       "byteLength": 15806,
@@ -249,12 +249,12 @@
       "sha256": "76a41cbfc7473a2bdff5fcff00d67683817c2c54e55f25d5116f5aaef2f1cea4"
     },
     {
-      "byteLength": 18407,
+      "byteLength": 11734,
       "id": "ygg:agent/playbook/ch4-protocol",
       "kind": "agent-playbook-fragment",
       "path": "data/playbook/ch4-protocol.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "sha256": "447a1fb1198414f09a96aa9b217a2b179b539d73ca2535c71eba797c7de3295f"
+      "sha256": "e46e5a17cad5b665c64e6c2672ff6169e61baf34acd4712ddd9059a5eeb5213f"
     },
     {
       "byteLength": 14550,

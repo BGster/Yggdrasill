@@ -3410,8 +3410,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
         .collect();
     assert_eq!(
         mapped.len(),
-        9,
-        "STAGE_GUIDE must route all 9 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
+        8,
+        "STAGE_GUIDE must route all 8 remaining chapters (moved to docs on 2026-11-15): {mapped:?}"
     );
 
     // assembled sections, same merge semantics as mod.lua (only ADJACENT same-id merges)
@@ -3448,8 +3448,8 @@ fn stage_guide_maps_existing_nonempty_sections() {
     }
     assert_eq!(
         sections.len(),
-        9,
-        "r5 assembles 9 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
+        8,
+        "r5 assembles 8 chapters (chapters move to docs in batches, 2026-11-15): {sections:?}"
     );
     for id in &mapped {
         let rules = sections.get(id).unwrap_or_else(|| {
@@ -3492,7 +3492,7 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
     }
     assert_eq!(
         chapters.len(),
-        9,
+        8,
         "chapter inventory changed: {chapters:?}"
     );
 
@@ -3521,7 +3521,6 @@ fn playbook_index_and_phase_entry_receipts_cover_every_chapter() {
         &[
             "run_machine",
             "actions",
-            "drive",
             "branches",
         ],
     );
