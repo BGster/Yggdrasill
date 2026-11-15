@@ -171,7 +171,7 @@
         {
           "id": "hard.no-dual-schema-write",
           "modality": "must-not",
-          "text": "Never write a schema twice: change the resource format contract only in `packages/schema/`, both the Rust and the TS side are subordinate (D11/D15; details in the repository chapter).",
+          "text": "Never write a schema twice: change the resource format contract only in `packages/schema/`, both the Rust and the TS side are subordinate (Lua 唯一可执行接口/Schema 单一来源; details in the repository chapter).",
           "basis": "historical AGENTS.md (pre-migration; see git history) item 5"
         },
         {

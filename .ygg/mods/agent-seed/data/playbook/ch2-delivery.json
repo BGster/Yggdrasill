@@ -15,10 +15,10 @@
           "basis": "user decision 2026-11-01 (E2 ruling: reuse config.set, bind no rev, no hard submit gate, a cross-stage handoff must give a reason)"
         },
         {
-          "id": "dispatch.decision-id-preallocation",
+          "id": "dispatch.decision-in-place",
           "modality": "must",
-          "text": "A genuinely new architectural decision gets its `D-MAx` number allocated serially by the main session at dispatch time and written into the requirement description and the subagent brief; an existing decision reuses its existing number. An executor never self-allocates `max+1`: two lanes picking `max+1` from the same base double-claimed `D-MA16` (see docs/CONTEXT.md history `d0b4a7c` / `6848138`). IDs beyond the brief are not self-served — return to the coordinator.",
-          "basis": "user decision 2026-11-12 (E9: parallel-lane D-MA16 collision)"
+          "text": "A genuinely new architectural decision carries no identifier: in the same commit that implements it, write it in place into the 「设计依据」 section of the document it governs (rule + basis + three-question criterion), and let the requirement description and the subagent brief name only that file and section. Two lanes touching the same decision merge in place against the existing paragraph. No numbering, no ledger, nothing to self-allocate or return to the coordinator. History: coordination once ran on pre-booked numbers; two lanes picking the next number from the same base double-claimed one (see git `d0b4a7c` / `6848138`) — identifiers are not a coordination mechanism, anchors are.",
+          "basis": "user decision 2026-11-12 (parallel-lane numbering collision) + r12 ruling: a ruling is dissolved into the document it governs"
         },
         {
           "id": "dispatch.background-only",
@@ -58,7 +58,7 @@
           "id": "integration.serial-closeout",
           "modality": "must",
           "text": "Iteration-level integration (feature → develop) is executed by the requirement's development executor inside its own lane at closeout — the main agent never performs an iteration-level integration. Integration serializes per repo through `origin/develop` itself: re-align before merging; a rejected develop push means another lane landed first — re-align and retry; stacked lanes integrate base-first. Round-level (develop → master) and deployment remain serial main-agent duties.",
-          "basis": "user decision (D-MA22): executor integrates feature→develop, main flow only develop→master"
+          "basis": "user decision (集成分工): executor integrates feature→develop, main flow only develop→master"
         },
         {
           "id": "integration.iter.fetch",

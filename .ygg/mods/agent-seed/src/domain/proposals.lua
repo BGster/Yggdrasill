@@ -94,7 +94,7 @@ local function prop_pending_total()
   return total
 end
 
--- 「下一个待受理提案」（D-MA23 口径）：只认 **development** 阶段的 pending 提案——
+-- 「下一个待受理提案」（剧情双层重写 口径）：只认 **development** 阶段的 pending 提案——
 -- 受理幕（交付受理）只服务开发交付；plan 提案的裁决走 gate.approve / gate.reject
 -- （提交即门禁），不经 proposal.accept。排序：最低 req 序 → 同 req 最低提案序。
 local function prop_next()

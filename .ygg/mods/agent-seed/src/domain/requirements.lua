@@ -31,7 +31,7 @@ local function stage()
   return value
 end
 
--- D-MA23 双层剧情：需求真状态只有 `open` / `done` 两个；`split / merged / dropped`
+-- 剧情双层重写 双层剧情：需求真状态只有 `open` / `done` 两个；`split / merged / dropped`
 -- 降为 `closed_reason` 字段（R11），终态判定 = `status=="done"`。
 local R_OPEN = "open"
 
@@ -467,7 +467,7 @@ local function req_lane(index)
   return num(req_key(index, "lane"), 0)
 end
 
--- 需求侧池绑定（r1 D-MA24）："" = 默认池（与 `lane.<k>` 旧键同池）。
+-- 需求侧池绑定（r1 泳道分池）："" = 默认池（与 `lane.<k>` 旧键同池）。
 local function req_lane_pool(index)
   return text_of(req_key(index, "lane_pool"), "")
 end
@@ -606,7 +606,7 @@ local function req_validate_deps(index, ids)
   return nil
 end
 
--- D-MA23：`req_advance_after_accept` 已删除——真状态不再因受理改变（受理只升门禁，
+-- 剧情双层重写：`req_advance_after_accept` 已删除——真状态不再因受理改变（受理只升门禁，
 -- 落点改写全部在 handlers 层直接写 gate / gate_rev / job；见 proposals.lua / gate_actions.lua）。
 
 local function req_release(index)

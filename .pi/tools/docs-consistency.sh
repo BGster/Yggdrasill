@@ -1,7 +1,7 @@
 #!/bin/sh
 # docs-consistency.sh —— docs wiki 闭包核验（只读）+ 场景签名验真（--attest）。
 #
-# 纯命令行契约（rev3 / D-MA26）：不读 config、不读局 KV、不依赖 egg。
+# 纯命令行契约（rev3 / harness 机证）：不读 config、不读局 KV、不依赖 egg。
 # 默认模式：校验 docs/README.md 索引内的相对链接逐一存在 + 必备文件清单存在。
 # --attest：核验某局事件日志里的 `read.<doc-id>=<ver>` 签名声明与磁盘实际 ver 是否一致
 #           （`--run <dir>` 必填 —— 脚本不猜「最新局」，路径只由调用方给）。

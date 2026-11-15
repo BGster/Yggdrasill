@@ -79,7 +79,7 @@ docs/
 | --- | --- | --- |
 | [cli-daemon.md](design/host/cli-daemon.md) | egg CLI、builtin 工具、daemon 协议、summary Schema | §3.5 |
 | [serve.md](design/host/serve.md) | serve 观察面全契约（CLI/面板/API/SSE/安全） | §3.7 |
-| [harness-tools.md](design/host/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | D-MA26 |
+| [harness-tools.md](design/host/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | harness 机证 |
 | [lanes.md](design/host/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
 
 ### ③ mod · agent-seed mod
@@ -109,4 +109,4 @@ docs/
 
 ## 旧式引用解析
 
-旧文档与历史回执中的 `§N` 引用经两个薄壳的映射表解析（如 "DESIGN §2.10" → [lanes.md](design/host/lanes.md)；"DESIGN §1 / §2.3 / §2.4" → [context/cold-start/system-boundaries.md](context/cold-start/system-boundaries.md) / [context/story/run-story.md](context/story/run-story.md) / [context/story/requirement-story.md](context/story/requirement-story.md)）：r6 之后映射表是**跨树**的，`design/` 只收有代码消费者的契约面。`docs/CONTEXT.md` / `docs/DESIGN.md` 路径本身持续有效（薄壳即入口）。git 历史引用（如 D-MA16 double-claim 证据）指向两单文件的历史版本，不受拆分影响。
+旧文档与历史回执中的 `§N` 引用经两个薄壳的映射表解析（如 "DESIGN §2.10" → [lanes.md](design/host/lanes.md)；"DESIGN §1 / §2.3 / §2.4" → [context/cold-start/system-boundaries.md](context/cold-start/system-boundaries.md) / [context/story/run-story.md](context/story/run-story.md) / [context/story/requirement-story.md](context/story/requirement-story.md)）：r6 之后映射表是**跨树**的，`design/` 只收有代码消费者的契约面。`docs/CONTEXT.md` / `docs/DESIGN.md` 路径本身持续有效（薄壳即入口）。git 历史引用（如 自动收波（已废弃） double-claim 证据）指向两单文件的历史版本，不受拆分影响。

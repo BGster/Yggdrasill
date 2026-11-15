@@ -2,7 +2,7 @@
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 注册面全部在 install() 内（派发序 = 入口 install 调用序）。
--- D-MA23：协调/盘点/发布是 run.phase 微状态——coordinate.submit 不再转场（R8）；
+-- 剧情双层重写：协调/盘点/发布是 run.phase 微状态——coordinate.submit 不再转场（R8）；
 -- 盘点四项齐备由响应式效应自动转发布幕（R9）；review.note 前置=发布已声明（R10），
 -- 未武装=批结算（batch+1 回协调），run.retire 武装=退役终局（唯一真转场 live→retired）。
 
@@ -45,7 +45,7 @@ local probe_payload_ok =
   wire.probe_payload_ok
 
 -- ============================================================================
--- harness 机证 cross-check（r3 / D-MA26）
+-- harness 机证 cross-check（r3 / harness 机证）
 -- 与 settlement.evolution 的 artifact-probe 同构：机证与人证同级不越权（§9.2c）。
 -- 未注册 tools.root / 参数缺 / 脚本不可执行 → 人证旧路径 + 可读提示，绝不拒绝结算。
 -- 机证与人证矛盾 → reject_payload（零状态写入）。mod 沙箱读不到进程环境，
@@ -196,7 +196,7 @@ local function settle_four_ready()
   return true
 end
 
--- r3 / D-MA25：批结算尾部自动追加下一批的「维护更新 docs wiki」需求（draft 态，进
+-- r3 / 批结算自动维护：批结算尾部自动追加下一批的「维护更新 docs wiki」需求（draft 态，进
 -- 入派发队列，由主代理在下一批协调幕 requirement.dispatch——draft 行永不带 mark，
 -- auto_dispatch 不碰它）。防重复：注册表里存在 open ∧ 无 closed_reason ∧（maintenance
 -- 标记 ∨ 标题精确等于规范标题）的行则跳过——closed_reason 过滤保证 done / split /
@@ -309,7 +309,7 @@ function M.install(deps)
       count = tostring(req_count()),
       batch = tostring(num("run.batch", 1)),
     }))
-    -- r3 / D-MA26：进入结算时若未注册 tools.root，给一次性机证提醒（非门禁、不阻塞）。
+    -- r3 / harness 机证：进入结算时若未注册 tools.root，给一次性机证提醒（非门禁、不阻塞）。
     tools_unregistered_hint()
     render()
   end)
@@ -473,7 +473,7 @@ function M.install(deps)
     if sessions == nil then
       return reject_payload("settlement.sessions", sessions_problem)
     end
-    -- r3 / D-MA26：机证 cross-check（与人证同级）。矛盾 → 拒（零状态写入）；
+    -- r3 / harness 机证：机证 cross-check（与人证同级）。矛盾 → 拒（零状态写入）；
     -- 未注册/参数缺/脚本不可执行 → 人证旧路径 + 提示（handler 内已叙事）。
     local cc_problem, cc_source = cross_check_sessions()
     if cc_problem ~= nil then
@@ -493,7 +493,7 @@ function M.install(deps)
     if todo == nil then
       return reject_payload("settlement.todo", todo_problem)
     end
-    -- r3 / D-MA26：机证 cross-check（与人证同级）。矛盾 → 拒（零状态写入）；
+    -- r3 / harness 机证：机证 cross-check（与人证同级）。矛盾 → 拒（零状态写入）；
     -- 未注册/参数缺/脚本不可执行 → 人证旧路径 + 提示（handler 内已叙事）。
     local cc_problem, cc_source = cross_check_todo()
     if cc_problem ~= nil then
@@ -603,7 +603,7 @@ function M.install(deps)
       score = tostring(score),
       lesson = lesson,
     }))
-    -- r3 / D-MA25：追加发生在全部结算检查之后——本批再无任何 gate_problem 读点，
+    -- r3 / 批结算自动维护：追加发生在全部结算检查之后——本批再无任何 gate_problem 读点，
     -- 不阻塞本批；新需求落在下一批协调幕的派发队列（§9.1 四条件：handler 事务内
     -- 普通派生写，非 effect）。
     append_maintenance_req(batch)

@@ -117,7 +117,7 @@
         {
           "id": "subsystems.machine-evidence-parity",
           "modality": "must",
-          "text": "Machine evidence (`gate.verify_suite`) writes the same KV as human evidence (`verify.submit`, `settlement.sessions`): same level, not stronger. It only proves \"the suite ran and this output was read\", so `verify.source` / `settlement.sessions.source` must keep the provenance and a report may never claim machine evidence outranks a self-declaration. (r5, D-MA21: `harness.archive_sessions` left the Mod tool bridge — session cleanup is prompt-driven and declared via `settlement.sessions`.)",
+          "text": "Machine evidence (`gate.verify_suite`) writes the same KV as human evidence (`verify.submit`, `settlement.sessions`): same level, not stronger. It only proves \"the suite ran and this output was read\", so `verify.source` / `settlement.sessions.source` must keep the provenance and a report may never claim machine evidence outranks a self-declaration. (r5, 子会话清理: `harness.archive_sessions` left the Mod tool bridge — session cleanup is prompt-driven and declared via `settlement.sessions`.)",
           "basis": "src/tools.lua `react_verify_suite()` + `gates.settlement_problem()`"
         },
         {
@@ -135,7 +135,7 @@
         {
           "id": "tools.harness-settlement-crosscheck",
           "modality": "must",
-          "text": "Settlement machine cross-check (D-MA26): the settlement.todo / settlement.sessions handlers synchronously call the harness tools (`harness.todo-check` / `harness.sessions-count`) before applying, reusing the artifact-probe precedent. The Mod composes the argv from the registered KV (`settings.tools.session` / `settings.tools.sessions_root`) because the sandbox cannot read the process environment. A machine/human contradiction is refused with zero state writes; an unregistered tools.root, a missing parameter, or an unexecutable script falls back to the human-attestation path with a readable hint and never blocks the settlement. A pass writes `settlement.<item>.source=machine:harness.*` (human writes `human`) — machine evidence is same-level, not stronger (historical AGENTS.md (pre-migration; see git history)). The scripts under `.pi/tools/` are a pure argv/env contract (no config, no run KV, no egg), so a no-egg agent can run them directly per docs/design/host/harness-tools.md.",
+          "text": "Settlement machine cross-check (harness 机证): the settlement.todo / settlement.sessions handlers synchronously call the harness tools (`harness.todo-check` / `harness.sessions-count`) before applying, reusing the artifact-probe precedent. The Mod composes the argv from the registered KV (`settings.tools.session` / `settings.tools.sessions_root`) because the sandbox cannot read the process environment. A machine/human contradiction is refused with zero state writes; an unregistered tools.root, a missing parameter, or an unexecutable script falls back to the human-attestation path with a readable hint and never blocks the settlement. A pass writes `settlement.<item>.source=machine:harness.*` (human writes `human`) — machine evidence is same-level, not stronger (historical AGENTS.md (pre-migration; see git history)). The scripts under `.pi/tools/` are a pure argv/env contract (no config, no run KV, no egg), so a no-egg agent can run them directly per docs/design/host/harness-tools.md.",
           "basis": "src/handlers/operate/review.lua `cross_check_todo` / `cross_check_sessions` + .pi/tools/*.sh + docs/design/host/harness-tools.md"
         }
       ]

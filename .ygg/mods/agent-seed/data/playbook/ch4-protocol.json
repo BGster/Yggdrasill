@@ -12,7 +12,7 @@
           "id": "drive.start-command",
           "modality": "must",
           "text": "Cold start of a run: `.ygg/bin/egg new --mod .ygg/mods/agent-seed --in .ygg/runs --event event.start` (auto run-id; receipt last line = `run-root: <path>`; subsequent dispatches: `.ygg/bin/egg open <run-root> --event ...`) — boot narrates the three opening lines and lands the charter act; the payload may carry the charter (`\"title|goal|success\"`) to set it in the same step, and `run.begin` then opens the coordinate act.",
-          "basis": "historical AGENTS.md (pre-migration; see git history) Start (D-MA23 charter sequence, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) Start (剧情双层重写 charter sequence, 2026-11-12)"
         },
         {
           "id": "drive.stdin",
@@ -94,7 +94,7 @@
           "id": "action.payload-formats",
           "modality": "must",
           "text": "Action payloads are JSON strings whose fields are separated by `|`: event.start `\"\"` / `\"title|goal|success\"` (optional charter, R3); charter.set `\"title|goal|success\"`; run.begin `\"\"`; requirement.add `\"title|description[|external_id[|depends_on]]\"`; requirement.dispatch `\"\"` / `\"0\"` (readiness order) / `\"rN\"` (that requirement only); proposal.submit `\"rN|rev|stage|summary|artifacts[|changes[|external_id[|exec=<agent_id>[:<reason>]]]]\"` (the tail chain `exec` → `actor` → `actor_session` is host-injected on declared routes); proposal.accept `\"pN\"`; proposal.reject `\"pN|<reason>\"`; gate.approve `\"rN[|note]\"` / `\"\"`; gate.reject `\"rN|feedback\"` / `\"\"`; integration.confirm `\"rN|develop@<sha>\"`; integration.reject `\"rN|<reason>\"`; coordinate.submit `\"\"`; verify.submit `\"true\"` / `\"all_green=false;report=…\"`; settlement.evolution `\"artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=<moved>/<remaining>/<destination>][|todo=<remaining>/<verified_by>]\"`; settlement.sessions `\"moved|remaining|destination\"`; settlement.todo `\"remaining|verified_by\"`; release.confirm `\"master@<sha>|vYYYY.MM.DD.N\"`; release.skip `\"<reason>\"`; review.note `\"lesson|score(1-5)\"`. The shape printed in a rejection receipt is the correct format — copy it, never guess a segment position.",
-          "basis": "docs/design/kernel/events.md event table (ex-DESIGN §2.6; D-MA23, 2026-11-12); historical AGENTS.md (pre-migration; see git history)"
+          "basis": "docs/design/kernel/events.md event table (ex-DESIGN §2.6; 剧情双层重写, 2026-11-12); historical AGENTS.md (pre-migration; see git history)"
         },
         {
           "id": "action.rev-from-receipt",
@@ -106,7 +106,7 @@
           "id": "action.dispatch-idempotent",
           "modality": "must",
           "text": "requirement.dispatch dispatches by readiness order (draft → plan; ready → development·lane, development deps all done), with a job cap of 4; no candidate or a full slot set is a normal `[DISPATCH] 0 candidates` receipt (idempotent, never counted as a failed step).",
-          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/context/story/requirement-story.md (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/context/story/requirement-story.md (ex-DESIGN §2.4; 剧情双层重写, 2026-11-12)"
         },
         {
           "id": "action.proposal-changes",
@@ -129,8 +129,8 @@
         {
           "id": "action.reject-paths",
           "modality": "must",
-          "text": "Reject paths (D-MA23 unification, R6): `proposal.reject` on a plan proposal → back to planning (gate cleared, `job=\"plan\"` re-hung on the executor, `plan_ok` stays false, rev untouched); `proposal.reject` on a development delivery / `gate.reject` on the accept gate / `integration.reject` all land the ready act — `plan_ok` kept, `job=\"\"`, lane released, feedback written; `gate.reject` on the plan gate → planning with `plan_ok=false`, `rev+1` (a new plan is required).",
-          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/context/story/requirement-story.md R6 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
+          "text": "Reject paths (剧情双层重写 unification, R6): `proposal.reject` on a plan proposal → back to planning (gate cleared, `job=\"plan\"` re-hung on the executor, `plan_ok` stays false, rev untouched); `proposal.reject` on a development delivery / `gate.reject` on the accept gate / `integration.reject` all land the ready act — `plan_ok` kept, `job=\"\"`, lane released, feedback written; `gate.reject` on the plan gate → planning with `plan_ok=false`, `rev+1` (a new plan is required).",
+          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/context/story/requirement-story.md R6 (ex-DESIGN §2.4; 剧情双层重写, 2026-11-12)"
         },
         {
           "id": "action.stale-rebase",
@@ -159,7 +159,7 @@
         {
           "id": "action.config-subpage",
           "modality": "must",
-          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates); it is a presentation layer only and never advances state. config.set / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used by the closing check), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only), and the harness tools registry (D-MA26): tools.root (the machine-check enable switch + script root), tools.session / tools.sessions_root (reserved parameter keys: the main-session id and the session-store path — the Mod sandbox cannot read the process environment, so the settlement cross-check argv can only come from these KV), tools.<name> (a script-path override ending in .sh). Register tools.root before the first settlement to enable the machine cross-check; an unregistered root falls back to human attestation with a readable hint, never a refusal. The no-egg parameter convention (which values, where they live, how to compose the command line) is written in docs/design/host/harness-tools.md.",
+          "text": "config.open / config.close enter and leave the second-level config sub-page (play mode · evolution preference · gates); it is a presentation layer only and never advances state. config.set / map.show are always-on read-only / configuration actions. Pre-registration keys that do not take a menu item go through a direct `config.set`: review.evolution.artifact / summary / candidates / classes (stored in `settings.review.evolution.*`, shape-checked per key; `settlement.evolution` validates them together and writes this round's registration, and `review.note` then archives it single-source into `review.evolution.*`), goal.authorization (the run-level goal authorization used by the closing check), executor.<rN>.<stage> (the executor ledger; not checked at closing, display only), and the harness tools registry (harness 机证): tools.root (the machine-check enable switch + script root), tools.session / tools.sessions_root (reserved parameter keys: the main-session id and the session-store path — the Mod sandbox cannot read the process environment, so the settlement cross-check argv can only come from these KV), tools.<name> (a script-path override ending in .sh). Register tools.root before the first settlement to enable the machine cross-check; an unregistered root falls back to human attestation with a readable hint, never a refusal. The no-egg parameter convention (which values, where they live, how to compose the command line) is written in docs/design/host/harness-tools.md.",
           "basis": "historical AGENTS.md (pre-migration; see git history)"
         },
         {

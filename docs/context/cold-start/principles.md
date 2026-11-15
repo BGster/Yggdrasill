@@ -1,7 +1,7 @@
 # Yggdrasill · 架构与运营原则（P 列表）
 > **id** cold-start/principles · **幕** cold-start · **触发** 冷启动 / 设计取舍前
 > **读不到代价** hard-refusal
-> **ver** e7e7da
+> **ver** 893066
 
 > **定位**：P1–P11 工程原则与 PLAY 家族注记，约束一切实现、评审与文档组织。
 > **replaces**：CONTEXT §3（L62–96）（搬运基线 `3a2536f`）
@@ -30,11 +30,11 @@
 8. **P8 · 可选加入的能力降级（Wasm 纯度 vs 本地宿主能力）**
    - Lua 沙箱默认严格隔离（无 I/O、无时钟、确定性 PRNG、指令燃料上限），使 Mod 在浏览器 Wasm 中运行结果完全一致。本地宿主能力（`ygg.fs` VFS 与 `ygg.tool.call` 同步工具运行器）通过可选的宿主 trait 注入；当未挂载时，Mod 优雅降级而不破坏状态语义。
 9. **P9 · 保留构建缓存的持久化泳道工作区**
-   - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（r1/D-MA24 起按池：`<pool-root>/<repo>-lane-<k>`，默认池 + `lane.pool` 注册的具名池）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
+   - 并行子代理泳道跨需求与跨运行复用持久化 worktree 目录（r1/泳道分池 起按池：`<pool-root>/<repo>-lane-<k>`，默认池 + `lane.pool` 注册的具名池）。认领泳道时将已跟踪文件重置为 `HEAD`，同时保留未跟踪的构建目录（`target/`、`node_modules/`），在保持分支隔离的同时避免冷编译惩罚。
 10. **P10 · 数据红线与显式的每运行目标授权**
     - **数据红线**：权威正文见仓库根 `AGENTS.md` 数据红线；真实业务数据及其目录元信息一律不得由 agent 读取，需真实数据的验证由用户运行并贴回。本原则只保留指针，不复制扩展 tool_firewall 的已退役实现叙事。
     - **决策归属**：`guide` 模式是默认（里程碑动作需要通过 `ygg.choice_selected` 给出人类菜单索引）。运行时切换到 `goal` 模式会把派发权移交给主 agent，要求在**每批盘点结算与退役**（常驻下 review.note 每批都走）之前先记录一条每运行的 `config.set goal.authorization=<note>`；若在授权注册之前就进入该模式，会立即告警（`[GOAL AUTH PENDING]`）。操作正文见 [acts/coordinate.md](../acts/coordinate.md) 协调幕。
-    - **注册纪律（用前注册）**：凡「用前注册」参数——`executor.<rN>.<stage>`（执行者台账）、`profile.<handle>.*`（身份卡）、`goal.authorization`（目标授权）、`lane.pool`（泳道池）、`tools.root`/`tools.session`/`tools.sessions_root`（harness 工具，D-MA26）——一律经 `config.set`（或专用注册动作）在使用前写入；未注册 = 消费点可读拒绝或提示（`[GOAL AUTH PENDING]` / `[TOOLS UNREGISTERED]` / `lane_pool_unknown` 等），**绝不静默假成功**。mod 在相关剧情节点给提醒（beats 提示行），context 文档写明「哪些键、何时注册、未注册的可读行为」。
+    - **注册纪律（用前注册）**：凡「用前注册」参数——`executor.<rN>.<stage>`（执行者台账）、`profile.<handle>.*`（身份卡）、`goal.authorization`（目标授权）、`lane.pool`（泳道池）、`tools.root`/`tools.session`/`tools.sessions_root`（harness 工具，harness 机证）——一律经 `config.set`（或专用注册动作）在使用前写入；未注册 = 消费点可读拒绝或提示（`[GOAL AUTH PENDING]` / `[TOOLS UNREGISTERED]` / `lane_pool_unknown` 等），**绝不静默假成功**。mod 在相关剧情节点给提醒（beats 提示行），context 文档写明「哪些键、何时注册、未注册的可读行为」。
 11. **P11 · 宿主零语义（引擎/壳分界）**
     - 宿主（内核与 CLI/服务壳）不持有、不解析任何 Mod 领域概念；跨 Mod 复用的只有通用机制
       （存储、事件、路由、裸数据服务）。领域概念出现在宿主面即层次错位。
