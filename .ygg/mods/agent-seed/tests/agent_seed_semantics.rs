@@ -927,43 +927,6 @@ fn default_all1_walk_loops_empty_batches_to_limit() {
 
 // ───────────────────── requirement pipeline: gates & deliverables ─────────────────────
 
-/// Approving the `plan` gate makes the row `ready`; the declared `useEffect` auto-dispatches
-/// **development for that requirement only** before the receipt is rendered (one turn saved),
-/// and the memoized requirement panel reflects the new state (no stale `useMemo`).
-#[test]
-fn plan_gate_approval_auto_dispatches_development_in_the_same_turn() {
-    let mut game = drive_to_plan_gate();
-    assert_eq!(game.phase("r1"), "plan_gate");
-    let before = game.panel();
-    assert!(
-        before.contains("门禁 1"),
-        "before approval the row sits on the plan gate: {before}"
-    );
-
-    let reply = game.click("gate.approve — ");
-    let narrative = narrative_lines(&reply);
-    assert!(
-        narrative
-            .iter()
-            .any(|line| line.starts_with("[AUTO-DISPATCH]")),
-        "the auto-dispatch effect must narrate its own line: {narrative:#?}"
-    );
-
-    // Same turn: the development job and its lane already exist; the true status is open.
-    game.assert_kv("req.1.status", json!("open"));
-    game.assert_kv("req.1.job", json!("development"));
-    game.assert_kv("req.1.lane", json!(1));
-    assert_eq!(game.phase("r1"), "developing");
-
-    // Memoized derived tally must be invalidated by the state change.
-    let after = game.panel();
-    assert_ne!(before, after, "the panel must not stay memoized stale");
-    assert!(
-        after.contains("开发中 1") && after.contains("门禁 0"),
-        "the panel must show the auto-dispatched requirement: {after}"
-    );
-}
-
 // ───────────────────── inline executor ledger (`exec=`) ─────────────────────
 
 // ───────────────────── settlement merge & the batch loop ─────────────────────

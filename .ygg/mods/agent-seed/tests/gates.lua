@@ -272,3 +272,26 @@ test("门禁批准结清自己的提案；注入的 development 待决会阻塞�
   assert_eq(kv("req.1.status"), "open", "status unchanged")
   assert_eq(kv("prop.2.status"), "pending", "the injected proposal is untouched")
 end)
+
+test("计划门批准：同回合 auto-dispatch development（含 useMemo 失忆检查）", function()
+  drive_to_plan_gate()
+  assert_eq(phase_of("r1"), "plan_gate", "the row sits on the plan gate")
+  local before = panel()
+  assert_true(before:find("门禁 1", 1, true) ~= nil, "before approval the row is in the gate bucket")
+
+  reset()
+  click("gate.approve — ")
+  assert_true(narrated_contains("[AUTO-DISPATCH]"), "the auto-dispatch effect narrates its own line")
+
+  -- 同一回合：development job 与泳道都已存在，真状态仍是 open。
+  assert_eq(kv("req.1.status"), "open", "the true status stays open")
+  assert_eq(kv("req.1.job"), "development", "the development job starts in the same turn")
+  assert_eq(kv("req.1.lane"), 1, "the lane is bound in the same turn")
+  assert_eq(phase_of("r1"), "developing", "the row is developing")
+
+  -- 派生面板必须被状态变化失效（useMemo 不得留着旧值）。
+  local after = panel()
+  assert_true(before ~= after, "the memoized panel must not stay stale")
+  assert_true(after:find("开发中 1", 1, true) ~= nil, "the panel shows the auto-dispatched row")
+  assert_true(after:find("门禁 0", 1, true) ~= nil, "the gate bucket empties")
+end)

@@ -585,3 +585,15 @@ function submit_with_exec(rev, stage, ext, exec)
   )
   return fire("proposal.submit", payload)
 end
+
+--- requirement.list 的图头行（per-micro-state 计数面板 = useMemo 派生面）。
+function panel()
+  reset()
+  fire("requirement.list", "0")
+  for _, line in ipairs(narrated()) do
+    if line:sub(1, #"[REQ GRAPH]") == "[REQ GRAPH]" then
+      return line
+    end
+  end
+  error("requirement.list must start with the graph header")
+end
