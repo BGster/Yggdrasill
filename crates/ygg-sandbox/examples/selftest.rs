@@ -1,0 +1,204 @@
+//! `selftest` —— agent-seed Mod 的纯 Lua 自检入口。
+//!
+//! 设计边界（见 `docs/design/mod/testing-strategy.md`）：
+//!
+//! - 这里跑的是**普通 Lua 解释器**，不是内核沙箱。mod 的 `src/**` 与 `mod.lua`
+//!   原样加载（走 `package.path`，不注入 pack.json 的 module 影子表），`ygg.*`
+//!   由 `tests/harness.lua` 提供一个可控 mock。
+//! - 因此**不覆盖** driver 层语义：事务回滚、fuel 预算、save receipt 结构 /
+//!   state_hash、事件路由 fail-closed。这四类由真实跑局暴露，属已知缺口。
+//! - 不修改宿主源码：只读 mod 目录、注入资源、执行 Lua。
+//!
+//! 用法：`cargo run -q --example selftest -- --mod .ygg/mods/agent-seed [--filter <substr>]`
+
+use std::path::{Path, PathBuf};
+
+use mlua::{Lua, Value};
+use serde_json::Value as Json;
+
+fn main() {
+    let mut mod_dir: Option<PathBuf> = None;
+    let mut filter: Option<String> = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--mod" => mod_dir = args.next().map(PathBuf::from),
+            "--filter" => filter = args.next(),
+            other => {
+                eprintln!("未知参数：{other}");
+                std::process::exit(2);
+            }
+        }
+    }
+    let Some(mod_dir) = mod_dir else {
+        eprintln!("用法：selftest --mod <mod 目录> [--filter <substr>]");
+        std::process::exit(2);
+    };
+    if !mod_dir.is_dir() {
+        eprintln!("mod 目录不存在：{}", mod_dir.display());
+        std::process::exit(2);
+    }
+
+    let lua = Lua::new();
+
+    // 资源注入：pack.json entries 的 id → 解析后的 JSON（转成 Lua 值）。
+    // 沙箱里由宿主负责这一步；自检里由本文件负责，语义等同「ygg.data(id) 拿到表」。
+    match install_assets(&lua, &mod_dir) {
+        Ok(n) => println!("assets: {n} entries"),
+        Err(err) => {
+            eprintln!("资源装载失败：{err}");
+            std::process::exit(1);
+        }
+    }
+
+    // mod 的 src/** 走文件 require（普通 Lua 的 package.path）。
+    let pattern = format!("{}/?.lua", mod_dir.display());
+    let init = format!("{}/?/init.lua", mod_dir.display());
+    let prelude = format!(
+        "package.path = [[{pattern};{init};]] .. package.path\n\
+         __MOD_DIR = [[{}]]",
+        mod_dir.display()
+    );
+    if let Err(err) = lua.load(&prelude).set_name("prelude").exec() {
+        eprintln!("prelude 失败：{err}");
+        std::process::exit(1);
+    }
+
+    let tests_dir = mod_dir.join("tests");
+    let harness = tests_dir.join("harness.lua");
+    if !harness.is_file() {
+        eprintln!("缺少 {}", harness.display());
+        std::process::exit(1);
+    }
+    if let Err(err) = run_file(&lua, &harness) {
+        eprintln!("harness 装载失败：{err}");
+        std::process::exit(1);
+    }
+
+    // mod.lua 是装配入口：装完 handlers 才谈得上断言。
+    let entry = mod_dir.join("mod.lua");
+    if let Err(err) = run_file(&lua, &entry) {
+        eprintln!("mod 装载失败：{err}");
+        std::process::exit(1);
+    }
+
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&tests_dir)
+        .expect("read tests dir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("lua"))
+        .filter(|p| p.file_name().and_then(|s| s.to_str()) != Some("harness.lua"))
+        .collect();
+    files.sort();
+    if let Some(needle) = &filter {
+        files.retain(|p| p.file_name().and_then(|s| s.to_str()).unwrap_or("").contains(needle.as_str()));
+    }
+    if files.is_empty() {
+        eprintln!("没有可执行的测试文件（{}）", tests_dir.display());
+        std::process::exit(1);
+    }
+
+    let mut hard_failures = 0usize;
+    for file in &files {
+        let name = file.file_name().and_then(|s| s.to_str()).unwrap_or("?").to_owned();
+        match run_file(&lua, file) {
+            Ok(()) => println!("file ok   {name}"),
+            Err(err) => {
+                hard_failures += 1;
+                println!("file FAIL {name}: {err}");
+            }
+        }
+    }
+
+    let (pass, fail) = counters(&lua);
+    println!("---");
+    println!("cases passed={pass} failed={fail}");
+    if fail > 0 || hard_failures > 0 {
+        println!("ok=0");
+        std::process::exit(1);
+    }
+    println!("ok=1");
+}
+
+fn run_file(lua: &Lua, path: &Path) -> Result<(), String> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|err| format!("read {}: {err}", path.display()))?;
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("chunk")
+        .to_owned();
+    // 每个文件一个独立作用域：用 do-string 包住，避免局部变量互相污染。
+    let chunk = format!("do\n{source}\nend");
+    lua.load(&chunk)
+        .set_name(name)
+        .exec()
+        .map_err(|err| err.to_string())
+}
+
+fn counters(lua: &Lua) -> (i64, i64) {
+    let globals = lua.globals();
+    let Ok(Value::Table(t)) = globals.get::<Value>("__SELFTEST") else {
+        return (0, 0);
+    };
+    let pass = t.get::<i64>("pass").unwrap_or(0);
+    let fail = t.get::<i64>("fail").unwrap_or(0);
+    (pass, fail)
+}
+
+/// 把 `pack.json` 声明的资源按 id 注入成 Lua 表：`ygg.data(id)` 直接取到它。
+fn install_assets(lua: &Lua, mod_dir: &Path) -> Result<usize, String> {
+    let pack_text = std::fs::read_to_string(mod_dir.join("pack.json"))
+        .map_err(|err| format!("read pack.json: {err}"))?;
+    let pack: Json = serde_json::from_str(&pack_text).map_err(|err| format!("pack.json: {err}"))?;
+    let entries = pack["entries"]
+        .as_array()
+        .ok_or_else(|| "pack.json 缺少 entries".to_owned())?;
+
+    let assets = lua.create_table().map_err(|e| e.to_string())?;
+    let mut count = 0usize;
+    for entry in entries {
+        let (Some(id), Some(path)) = (entry["id"].as_str(), entry["path"].as_str()) else {
+            continue;
+        };
+        let file = mod_dir.join(path);
+        let text = std::fs::read_to_string(&file)
+            .map_err(|err| format!("read {}: {err}", file.display()))?;
+        let json: Json =
+            serde_json::from_str(&text).map_err(|err| format!("{}: {err}", file.display()))?;
+        let value = json_to_lua(lua, &json).map_err(|e| e.to_string())?;
+        assets.set(id, value).map_err(|e| e.to_string())?;
+        count += 1;
+    }
+    lua.globals()
+        .set("__ASSETS", assets)
+        .map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+/// JSON → Lua 值。手写而非 `LuaSerdeExt`：mlua 的 serialize feature 未启用，
+/// 而这里只需要「结构 + 标量」这一层，不需要 serde 的通用桥。
+fn json_to_lua(lua: &Lua, v: &Json) -> mlua::Result<Value> {
+    Ok(match v {
+        Json::Null => Value::Nil,
+        Json::Bool(b) => Value::Boolean(*b),
+        Json::Number(n) => match n.as_i64() {
+            Some(i) => Value::Integer(i),
+            None => Value::Number(n.as_f64().unwrap_or(0.0)),
+        },
+        Json::String(s) => Value::String(lua.create_string(s)?),
+        Json::Array(items) => {
+            let t = lua.create_table()?;
+            for (i, item) in items.iter().enumerate() {
+                t.set(i + 1, json_to_lua(lua, item)?)?;
+            }
+            Value::Table(t)
+        }
+        Json::Object(map) => {
+            let t = lua.create_table()?;
+            for (k, item) in map {
+                t.set(k.as_str(), json_to_lua(lua, item)?)?;
+            }
+            Value::Table(t)
+        }
+    })
+}
