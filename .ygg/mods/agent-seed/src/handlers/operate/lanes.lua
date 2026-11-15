@@ -1,6 +1,6 @@
 -- src/handlers/operate/lanes.lua —— 泳道动作：lane.claim / lane.release / lane.pool / 迁移解析。
 --
--- r1 分池（D-MA24）：载荷尾部新增可选池段——`lane.claim` 第 6 段、`lane.release` 第 2 段
+-- r1 分池（泳道分池）：载荷尾部新增可选池段——`lane.claim` 第 6 段、`lane.release` 第 2 段
 -- （缺省 = 默认池，键形与叙事字节沿用旧版）；新动作 `lane.pool "label|path"` 幂等注册
 -- 池（label 形状见 domain.lanes.pool_ok，path 仅形状校验、不验是否 git 仓——首次 claim
 -- 时由宿主可读回传 error=repo）。

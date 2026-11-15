@@ -1,7 +1,7 @@
 #!/bin/sh
 # todo-check.sh —— 主会话 Todo 盘点（只读）。
 #
-# 纯命令行契约（rev3 / D-MA26）：不读 config、不读局 KV、不依赖 egg。
+# 纯命令行契约（rev3 / harness 机证）：不读 config、不读局 KV、不依赖 egg。
 #
 # 用法：
 #   todo-check.sh [--session <id>] [--sessions-root <dir>] [--json]

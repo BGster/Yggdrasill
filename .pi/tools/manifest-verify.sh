@@ -1,7 +1,7 @@
 #!/bin/sh
 # manifest-verify.sh —— 单源 Mod 完整性核验（只读）。
 #
-# 纯命令行契约（rev3 / D-MA26）：不读 config、不读局 KV、不依赖 egg。
+# 纯命令行契约（rev3 / harness 机证）：不读 config、不读局 KV、不依赖 egg。
 # 自实现只读比对：逐条读 manifest.json，对声明的每个文件做 sha256 + 字节数比对。
 # 不包装 sync-seed-mod.sh --check（那会临时改写 manifest 且需 cargo）。
 #

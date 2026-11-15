@@ -2,7 +2,7 @@
 
 > **id** cold-start/system-boundaries · **幕** all · **触发** 冷启动 / 需要「系统由哪几层构成」的全景 / 改三层边界与 Adapter 义务之前
 > **读不到代价** silent-drift（层边界讲错 → 后续所有契约解释失真）
-> **ver** 70adde
+> **ver** dd587f
 
 > **定位**：三层架构图、跨治理引擎能力协商矩阵（Tier 1–3）与 Adapter 一致性契约五义务（C1–C5）。
 > **replaces**：DESIGN §1（L11–65）（搬运基线 `3a2536f`）
@@ -57,7 +57,7 @@ Yggdrasill 将确定性规则执行、声明式工作流语义与宿主环境集
 | **C1** | 派发给 subagent 的 prompt 必须含 `Mandatory references:` 与 `Submit:` 两条**行首锚线**（`^Submit:\s*\S` 要求后续非空） | 回执 `[ADAPTER CONTRACT] <rN> <stage>: …`，**不 spawn**，结果进 `degraded` |
 | **C2** | `deltaPrompt` 若被单独使用，必须可判定；不可判定时**不得消费**（fail-closed），退回完整 `brief` | `delta-unassessable`；回执写 `[ADAPTER NOTE]` |
 | **C3** | 任何一次派发都必须把**实际使用的 prompt 逐字节**落进 `artifacts/<rN>-<stage>-brief.md` | `[BRIEF REFUSED] <path>：<原因>` 进回执，并计入 `degraded` |
-| **C4** | 归档/清理结论必须诚实：「查过且查空」或「没有库可查」才算证据，不得以「工具跑过」充当 `0/0`——不知道落点时宁可说没查，不谎报查空（现由 D-MA21 提示词方案承载，声明制见 §2.6 `settlement.sessions`） | 非证据态写 `sessions=0/0/unsettled:<kind>` |
+| **C4** | 归档/清理结论必须诚实：「查过且查空」或「没有库可查」才算证据，不得以「工具跑过」充当 `0/0`——不知道落点时宁可说没查，不谎报查空（现由 子会话清理 提示词方案承载，声明制见 §2.6 `settlement.sessions`） | 非证据态写 `sessions=0/0/unsettled:<kind>` |
 | **C5** | 每一份 brief 都以 `## 续跑承接（Resume Handover）` 段收尾（`basis` / 前任执行者 / 未落地清单 / 硬约束 / 已归档制品） | `brief-missing-resume-handover`；无 `agentId` 时 `resume` 无法等价 |
 
 **锚线为什么必须是「行首前缀」而不是 `includes`**：`job.description` 是多行需求正文，正文里完全可能出现 `Mandatory references: …` 这几个字，用任意 `includes` 判定会被一句话绕过——那是自指类断言的经典空转。**两条路必须同形状**：Core 的 `subagent_brief` 模板（`data/texts/` 片段装配）带这两行，adapter **本地拼装**的 brief 也必须带。**`resume` 的等价物是制品**（`artifacts/<rN>-<stage>.md` 加门禁证据），续跑承接段只是让下一个执行者（可能是另一个 harness、另一个上下文窗口）知道上一任为什么停在门外。

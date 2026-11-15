@@ -5,7 +5,7 @@
       "order": 16,
       "title": "16. Run machine · requirement pipeline · decision gates",
       "summary": "The coordinator is a live self-loop across five acts (charter → coordinate → settle → release → retired); stored truth is a 2-state requirement pipeline with nine derived micro-states; the two mandatory gates (plan / accept) can never be bypassed, and each batch boundary has hard closeout criteria. This chapter answers \"where am I in the machine and which gate is next\".",
-      "source": "historical AGENTS.md (pre-migration; see git history) (text before the 2026-10-31 condensation) + docs/design/kernel/state-machine.md + docs/context/story/requirement-story.md (D-MA23)",
+      "source": "historical AGENTS.md (pre-migration; see git history) (text before the 2026-10-31 condensation) + docs/design/kernel/state-machine.md + docs/context/story/requirement-story.md (剧情双层重写)",
       "priority": "standard",
       "rules": [
         {
@@ -18,25 +18,25 @@
           "id": "machine.coordinator-chain",
           "modality": "must",
           "text": "The coordinator is a **live self-loop** — the kernel FSM has exactly one true transition, `live → retired` (R1): the run opens in the charter act (`run.phase==\"charter\"`, charter trio via `charter.set`) → `run.begin` opens the standing coordinate act (`run.phase==\"\"`, self-loop: dispatch / serial acceptance / both gates / conflicts) → `coordinate.submit` (queue drained) enters the settle act (`run.phase==\"settle\"`, four items linearly: `verify.submit` → `settlement.evolution` → `settlement.sessions` → `settlement.todo`) → four items complete auto-advances to the release act (`run.phase==\"release\"`, R9 effect, no event spent) → `release.confirm` / `release.skip` declare the batch's develop→master outcome → `review.note` settles the batch (`run.phase=\"\"`, `run.batch+1`, back to coordinate) or, with `run.retire` armed, stamps the one true transition to `retired`. `verify.submit=false` sends the whole batch back to coordinate (settlement and release keys cleared).",
-          "basis": "docs/design/kernel/state-machine.md (ex-DESIGN §2; D-MA23, 2026-11-12)"
+          "basis": "docs/design/kernel/state-machine.md (ex-DESIGN §2; 剧情双层重写, 2026-11-12)"
         },
         {
           "id": "machine.pipeline-states",
           "modality": "must",
           "text": "There is one requirement pipeline per requirement. Stored truth is exactly **2 states** (`req.<i>.status`): `open` / `done` — everything else is derived, never stored; `split` / `merged` / `dropped` are values of the `closed_reason` field (R11), not states. Inside `open` the requirement walks nine micro-states derived by the single-source judge `req_phase()` (menus / render / beats legend all read it — no second copy anywhere): draft(立项) → planning(计划中) ──proposal.submit(plan)──▶ plan_gate(计划门禁) ──gate.approve──▶ ready(待开发) ──requirement.dispatch(+lane)──▶ developing(开发中) ──proposal.submit(development)──▶ dev_review(交付受理) ──proposal.accept──▶ accept_gate(验收门禁) ──gate.approve──▶ integrating(集成) ──integration.confirm──▶ done(完成, terminal). Three push-back paths (`proposal.reject` on a development delivery / `gate.reject` on the accept gate / `integration.reject`) land uniformly in ready (R6: `plan_ok` kept, `job=\"\"`, lane released); `gate.reject` on the plan gate returns to planning with `plan_ok=false`. The two overlay markers (`blocked` / `stale`) stack on top of the phase display and are not states; `analyzing` survives only as a legacy-save compatibility value.",
-          "basis": "docs/context/story/requirement-story.md + docs/design/kernel/state-machine.md (ex-DESIGN §2.4/§2.5; D-MA23, 2026-11-12)"
+          "basis": "docs/context/story/requirement-story.md + docs/design/kernel/state-machine.md (ex-DESIGN §2.4/§2.5; 剧情双层重写, 2026-11-12)"
         },
         {
           "id": "machine.terminal-states",
           "modality": "must",
-          "text": "The old side states are demoted (D-MA23): `split` / `merged` / `dropped` are now values of the `closed_reason` field on a closed (`done`) row (R11 — a closed reason, not a state); the two marker overlays stay display-only: `blocked` (unresolved conflict or needs_amend, cleared by `requirement.resolve` / `requirement.amend`) and `stale` (a proposal whose rev is outdated, cleared automatically once a rebase proposal lands).",
-          "basis": "docs/design/kernel/state-machine.md + docs/context/story/requirement-story.md (ex-DESIGN §2.2/§2.4; D-MA23, 2026-11-12)"
+          "text": "The old side states are demoted (剧情双层重写): `split` / `merged` / `dropped` are now values of the `closed_reason` field on a closed (`done`) row (R11 — a closed reason, not a state); the two marker overlays stay display-only: `blocked` (unresolved conflict or needs_amend, cleared by `requirement.resolve` / `requirement.amend`) and `stale` (a proposal whose rev is outdated, cleared automatically once a rebase proposal lands).",
+          "basis": "docs/design/kernel/state-machine.md + docs/context/story/requirement-story.md (ex-DESIGN §2.2/§2.4; 剧情双层重写, 2026-11-12)"
         },
         {
           "id": "machine.coordinator-scope",
           "modality": "must",
           "text": "The coordinator does exactly four things — dispatch (requirement.dispatch), accept proposals serially (proposal.accept / proposal.reject), pass the two mandatory gates (gate.approve / gate.reject), and walk each batch boundary (coordinate.submit → the settle act's four items → release.confirm / release.skip → review.note batch settle or retire); it never carries development itself — the feature→develop integration of a requirement belongs to its development executor (`integration.confirm` / `integration.reject`) — and it may never bypass a gate.",
-          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/design/kernel/state-machine.md (ex-DESIGN §2; D-MA23, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) + docs/design/kernel/state-machine.md (ex-DESIGN §2; 剧情双层重写, 2026-11-12)"
         },
         {
           "id": "machine.requirement-granularity",
@@ -47,14 +47,14 @@
         {
           "id": "machine.plan-gate",
           "modality": "must",
-          "text": "The plan gate (`req.gate=plan`) fires when a plan proposal is submitted (D-MA23: gate-on-submit — the plan side has no proposal.accept hop); approve → `plan_ok=true` (the ready act, the only phase that may dispatch into development; the reactive auto-dispatch may continue into developing in the same turn); reject → back to planning with `plan_ok=false`, `rev+1` and the feedback written; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
-          "basis": "historical AGENTS.md (pre-migration; see git history) (gate table, pre-migration) + D-MA23 gate-on-submit (2026-11-12)"
+          "text": "The plan gate (`req.gate=plan`) fires when a plan proposal is submitted (剧情双层重写: gate-on-submit — the plan side has no proposal.accept hop); approve → `plan_ok=true` (the ready act, the only phase that may dispatch into development; the reactive auto-dispatch may continue into developing in the same turn); reject → back to planning with `plan_ok=false`, `rev+1` and the feedback written; it validates `gate_rev == req.rev` (otherwise stale, approval is not allowed).",
+          "basis": "historical AGENTS.md (pre-migration; see git history) (gate table, pre-migration) + 剧情双层重写 gate-on-submit (2026-11-12)"
         },
         {
           "id": "machine.accept-gate",
           "modality": "must",
           "text": "The accept gate (`req.gate=accept`) fires after the main agent accepts the development proposal (the executor delivered); approve → the integrating act (`integrating=true`, gate cleared) — done is NOT granted here, the executor still has to land `integration.confirm` with `develop@<sha>` evidence; reject → the ready act (`plan_ok` keeps its value: not amended → back into the development queue; amended → `plan_ok` was already invalidated → planning, must be replanned); it validates `gate_rev == req.rev` and requires non-empty `artifacts` — a summary-only completion claim is not accepted.",
-          "basis": "historical AGENTS.md (pre-migration; see git history) (gate table, pre-migration) + docs/context/story/requirement-story.md acts 7-8 (ex-DESIGN §2.4; D-MA23, 2026-11-12)"
+          "basis": "historical AGENTS.md (pre-migration; see git history) (gate table, pre-migration) + docs/context/story/requirement-story.md acts 7-8 (ex-DESIGN §2.4; 剧情双层重写, 2026-11-12)"
         },
         {
           "id": "machine.accept-vs-gate",
@@ -78,7 +78,7 @@
           "id": "machine.batch-maintenance",
           "modality": "must",
           "text": "An unarmed batch settle (`review.note`) **auto-appends the next batch's docs-maintenance requirement**: after the `[BATCH n SETTLED]` narration, the same handler transaction adds one open/draft requirement (canonical title 「维护更新 docs wiki（上批收口）」) whose description carries the per-file wiki update guidance over the r2 doc tree (`docs/README.md` index; `docs/context/*` decisions/vocabulary; `docs/design/*` topic files per the batch's touched surface; the two thin-shell maps; wiki-governance's three duties). Dedup: skip the append when the register already holds an open, non-bypassed row carrying the `req.<i>.maintenance` marker or the exact canonical title; a full register also skips. The append is best-effort and **never fails the settlement** — it narrates (`[MAINTENANCE REQ SKIP]`), it never refuses. The retired path (`run.retire` armed → `[ENDING`) appends nothing. The appended draft is never auto-dispatched (draft rows carry no mark) — the main agent dispatches it in the next coordinate phase, and it blocks the next `coordinate.submit` until done: the per-batch docs cadence.",
-          "basis": "requirement r3 (D-MA25, 2026-11-12)"
+          "basis": "requirement r3 (批结算自动维护, 2026-11-12)"
         },
         {
           "id": "machine.turn-cut",

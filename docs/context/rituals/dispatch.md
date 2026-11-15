@@ -1,7 +1,7 @@
 # Yggdrasill · 派发仪式（rituals/dispatch）
 > **id** rituals/dispatch · **幕** coordinate（派发前） · **触发** 派发任何 subagent（plan / development / analysis）前
 > **读不到代价** hard-refusal（`.env.local` 未 source 即派发、工件落检出、submit 缺 `exec=` 均不合规）
-> **ver** 9aa252
+> **ver** f3bf4e
 
 > **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
 > **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
@@ -42,6 +42,8 @@ set +a
 **跨仓库同步的源基线（r5 实证）**：当需求是「从 A 仓同步到 B 仓」时，源仓可能在实施期间前进（主会话并发提交他需求）。brief 里的 `base=<sha>` 只钉住**目标仓**基线；对源仓，要么写「取实施时最新 HEAD」（可变基线），要么写「pin 在 `<sha>`」并声明源仓冻结。默认取**可变基线**——计划稿里的「源基线变化就停机」条件只适用于显式 pin 的场景，否则会因无关提交误停。
 
 在提议或编辑之前，先读 `docs/README.md`（索引）、[acts/](../acts/)（当前幕的入口/必做/出口）与本文（派发/提交/集成仪式），再读需求点名的 `docs/design/<subsystem>.md`。不得只泛读目录后就开始动手。
+
+**推进动作的读签判定不在本文**：本文只管「派发前读什么」，而「签名该消费正文还是只需核对版本、窗口怎么算」由 [read-gate.md](read-gate.md) 给出（支配协调者自己的推进动作，不限于派发）。两文不互抄规则。
 
 - **plan**：对照 playbook `run_machine` 与 `actions`，在 plan artifact 声明触碰的 wiki 主题文件和验收证据。
 - **development**：除上述文件外，对照 playbook `gates`、`live_evidence` 与触碰子系统章；在同一特性分支就地更新对应 wiki（Doc sync 见 [../../wiki-governance.md](../../wiki-governance.md)）。

@@ -79,7 +79,7 @@ function cell(...children) {
   return el("td", {}, ...children);
 }
 
-// ---- 局详情投影辅助（只读展示投影；权威=mod 回执/CLI。P11 裁决落档：CONTEXT D-MA16）----
+// ---- 局详情投影辅助（只读展示投影；权威=mod 回执/CLI。P11 裁决落档：CONTEXT 自动收波（已废弃））----
 
 const EVENT_TAIL = 500; // 与 serve 封顶一致（EVENT_LIMIT_MAX）
 
@@ -522,7 +522,7 @@ function stageBarNode(kv, eventsTail) {
   );
 }
 
-// 门禁标签：工作流固定序只有两道门（plan→plan_gate、development→accept，D-MA1）；
+// 门禁标签：工作流固定序只有两道门（plan→plan_gate、development→accept，工作流即 Mod）；
 // 归属不了的显示中性 gate，不猜。
 const GATE_LABEL = { plan: "plan_gate", development: "accept" };
 
@@ -843,7 +843,7 @@ async function renderRunDetail(pinnedRunId) {
   if (staleDetailRoute(pinnedRunId, runId)) return;
 
   const kv = kvBody?.kv?.entries && typeof kvBody.kv.entries === "object" ? kvBody.kv.entries : null;
-  // agent-seed 工作流判定 = KV 含 req.* 键族；无键族的 mod 无害退化为通用摘要（D-MA16 判据）。
+  // agent-seed 工作流判定 = KV 含 req.* 键族；无键族的 mod 无害退化为通用摘要（自动收波（已废弃） 判据）。
   const hasWorkflow = !!kv && Object.keys(kv).some((k) => typeof k === "string" && k.startsWith("req."));
   const props = hasWorkflow ? collectProps(kv) : [];
   const propById = Object.fromEntries(props.map((p) => [p.id, p]));

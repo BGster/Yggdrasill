@@ -1,7 +1,7 @@
 #!/bin/sh
 # sessions-count.sh —— 子会话盘点（只读）。
 #
-# 纯命令行契约（rev3 / D-MA26）：不读 config、不读局 KV、不依赖 egg。
+# 纯命令行契约（rev3 / harness 机证）：不读 config、不读局 KV、不依赖 egg。
 # 参数全部走 argv；缺省值取进程环境或固定约定路径。
 #
 # 用法：

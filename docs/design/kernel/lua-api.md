@@ -27,3 +27,11 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 | `ygg.fs.{write,read,stat,list}` | 可选宿主注入的 VFS 接口，严格限定于 `artifacts/*.md`。`write(path, content)` 返回 `{ bytes, sha256 }`。 | 变更调用 **模块顶层禁用** |
 | `ygg.tool.call(tool_id, args_table)` | 可选同步宿主工具桥。挂载时内联执行白名单工具并返回 `{ ok = true, data = { ... } }` 或 `{ ok = false, error = "..." }`。未挂载时返回 `{ ok = false, unmounted = true }`，使 Mod 回退到异步 `meta.tool_calls`。 | **模块顶层禁用** |
 
+#### 3.1.1 设计依据（沙箱安全边界 / 语言方言 / 边界划分）
+
+**沙箱的安全边界是六项硬上限，不是建议**：零 I/O、零网络、零时钟、指令燃料上限、内存上限（`16 MiB`）、API 白名单（`safe_stdlib`）与确定性种子 PRNG。**语言标准是标准 Lua 5.4**（内置 `mlua`），带指令计数钩子燃料；标准库被加固——移除 `os` / `io` / `debug` / `package` / `dofile` / `loadfile`，`require` 换成纯沙箱加载器，种子走确定性 `luai_makeseed`。**`crates/ygg-sandbox` 封装 `mlua`、宿主 API 白名单与内嵌的 `ygg` 标准库；`crates/ygg-lint` 提供独立的 AST 静态分析。**
+
+**依据**：内容审查被简化为「JSON Schema 校验 + `ygg-lint` + `playtest`」三件可离线跑的事，因此运行期不能再靠权限收束——权限面必须在加载期就封死。反方案（在运行期给 `os`/`io` 按需开口）会让「同一份内容在任何宿主上结果相同」失效，且回放不再可重现。确定性种子与燃料上限是回放可重现的前提；把两者拆到两个 crate 是因为静态分析与执行沙箱的失败模式完全不同（前者发诊断，后者 fail-closed）。
+
+**判据**：① 阻断——向白名单添加未在 `safe_stdlib` 里的标准库面、引入非确定性来源（时钟/随机/环境读）、或把 AST 分析搬进 `ygg-sandbox`；② 症状——同一 seed 两次回放产出不同回执，或 `YGG-MOD-EFFECT` 在加载期未拒绝顶层副作用；③ 确认——`cargo test --workspace`（含 `ygg-lint` 与沙箱语义用例）与 `cargo run -q -p ygg-lint -- --path <mod>`。
+

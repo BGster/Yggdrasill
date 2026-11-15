@@ -23,7 +23,7 @@
   - `worktree-release --lane <1..4> [--repo <path>]` $\to$ `lane=<k>;released=1;idle=<0|1>`（同上，`git.worktree_release_pool` 携带 `--repo`）
   - `artifact-probe --path artifacts/<name>.md [--run-dir <dir>]` $\to$ `path=<p>;exists=<0|1>;bytes=<N>;sha256=<hex>`
   - `verify-suite [--mode fast|full] [--repo <path>]` $\to$ `passed=1;summary=<M>/<M>`（在回退到默认 Rust cargo 门禁前，尊重 `YGG_VERIFY_COMMANDS="cmd1 args;cmd2 args"` 环境变量覆盖）。
-  - `archive-sessions --parent <id> --batch <run_id>` $\to$ `moved=<N>;remaining=0;dest=<path>`（r5/D-MA21：宿主 builtin 本体保留，但 **Mod 工具桥合同已摘除**——`harness.archive_sessions` 不再在 `pack.json`/`allowedTools` 声明，Mod 不再发起；子会话清理改提示词驱动 + `settlement.sessions` 声明制；builtin 物理退役归 N2 宿主决策）
+  - `archive-sessions --parent <id> --batch <run_id>` $\to$ `moved=<N>;remaining=0;dest=<path>`（r5/子会话清理：宿主 builtin 本体保留，但 **Mod 工具桥合同已摘除**——`harness.archive_sessions` 不再在 `pack.json`/`allowedTools` 声明，Mod 不再发起；子会话清理改提示词驱动 + `settlement.sessions` 声明制；builtin 物理退役归 N2 宿主决策）
 
 #### Daemon 模式（`--daemon`）行分隔 JSON-RPC 协议
 每个请求是 `stdin` 上的一行 UTF-8 JSON；每个响应是 `stdout` 上的一行 UTF-8 JSON：
@@ -87,5 +87,5 @@
 }
 ```
 
-> ~~r1 自动收波看门狗契约（D-MA16）~~ 已废弃：扩展层删除（2026-11-12），看门狗随层移除；daemon 常驻由宿主 `--daemon`/`serve` 原生承担。
+> ~~r1 自动收波看门狗契约（自动收波（已废弃））~~ 已废弃：扩展层删除（2026-11-12），看门狗随层移除；daemon 常驻由宿主 `--daemon`/`serve` 原生承担。
 

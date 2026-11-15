@@ -23,7 +23,7 @@ local contains, fill, join =
   util.contains, util.fill, util.join
 
 -- 转场票据：`stage.advance` 本身是可被外部直派的事件（`--event stage.advance`）。
--- D-MA23（R1）：内核 FSM 唯一转场是 live → retired；不设闸就能把 live 直接搬进
+-- 剧情双层重写（R1）：内核 FSM 唯一转场是 live → retired；不设闸就能把 live 直接搬进
 -- retired，绕过 review.note 武装路径与全部前置校验。
 -- 只给 advance() 盖章，FSM 的 when 取证即消费——外部直派没有章，一律静默 no-op。
 local stage_ticket = nil

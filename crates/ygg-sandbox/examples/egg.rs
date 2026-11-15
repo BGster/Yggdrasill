@@ -1788,7 +1788,7 @@ impl Session {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
-        // D-MA19 退役专名拒绝在入口生效（与 resolve_mod_dir 同一份理由源）：旧名不再翻译，
+        // 别名退役 退役专名拒绝在入口生效（与 resolve_mod_dir 同一份理由源）：旧名不再翻译，
         // 缺席且形状命中即给可读拒绝；其余缺席维持既有装载期通用错误。
         let mod_dir = if requested.exists() {
             requested
@@ -5958,7 +5958,7 @@ fn run_single(args: &Args) -> i32 {
     }
 }
 
-/// 退役专名拒绝（D-MA19，原双向别名机制已删除）：形状=父目录名 `mods` +
+/// 退役专名拒绝（别名退役，原双向别名机制已删除）：形状=父目录名 `mods` +
 /// 末段精确 `pi-agent-seed` 时给出可读理由——点名同父规范路径 `agent-seed`、
 /// 宣布退役日期与「历史 run 不迁移、开新 run-id」。只认精确形状：
 /// 前缀撞名（`-v2`/`-s`）与无 `mods` 父段的裸值一律不命中（装载期通用错误）。
@@ -5981,7 +5981,7 @@ fn retired_seed_name_reason(requested: &Path) -> Option<String> {
 ///
 /// 两者都没有 → 可读错误。契约是**必填面**：没有 Mod 目录就读不到声明，
 /// 宿主不会猜任何默认值（fail-closed）。
-/// 旧名 `pi-agent-seed` 已退役（D-MA19）：请求路径缺席且命中退役形状时
+/// 旧名 `pi-agent-seed` 已退役（别名退役）：请求路径缺席且命中退役形状时
 /// 给专名拒绝（[`retired_seed_name_reason`]）；其余缺席维持既有缺路径错误。
 fn resolve_mod_dir(args: &Args, run_dir: &Path) -> Result<PathBuf, String> {
     let requested = args
@@ -7446,10 +7446,10 @@ mod harness_adapter_tests {
 }
 
 #[cfg(test)]
-/// 退役专名拒绝（D-MA19）的判定面：旧名 `pi-agent-seed` 不再翻译——精确形状缺席时
+/// 退役专名拒绝（别名退役）的判定面：旧名 `pi-agent-seed` 不再翻译——精确形状缺席时
 /// `resolve_mod_dir` 给点名规范路径的可读拒绝；其余缺席维持通用缺路径错误。
 ///
-/// 为何要有这个模块：D-MA13 的双向别名已退役（2026-11-12），历史 run.json 里的
+/// 为何要有这个模块：更名 agent-seed 的双向别名已退役（2026-11-12），历史 run.json 里的
 /// `"mod": ".ygg/mods/pi-agent-seed"` 不迁移——宿主拒绝并指引开新 run-id，磁盘上的
 /// `run.json` 一个字节都不动。本模块不装内核、不派发、不读真 Mod：临时目录里建空目录当 Mod。
 mod legacy_seed_refusal_tests {

@@ -73,7 +73,7 @@ local MAX_ARTIFACT_CHECKS = 4        -- 一次 `proposal.submit` 最多同步核
 local MAX_RADAR_FILES = 32           -- 一次雷达最多比几个文件（防 O(n·m) 爆炸）
 local SHA_DISPLAY = 12               -- 叙事里显示 sha256 的前多少位
 local VERIFY_TOOL_SOURCE = "tool:gate.verify_suite"
--- r5（D-MA21）：harness.archive_sessions 从 Mod 工具桥整体退役——子会话清理改为
+-- r5（子会话清理）：harness.archive_sessions 从 Mod 工具桥整体退役——子会话清理改为
 -- 提示词驱动（beats 清理文案 + settlement.sessions 声明制），宿主 builtin 的物理
 -- 退役归 N2 宿主决策。SESSIONS_TOOL_SOURCE 与 REACTORS 条目随工具一并摘除。
 

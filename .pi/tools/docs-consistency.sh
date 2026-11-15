@@ -1,7 +1,7 @@
 #!/bin/sh
 # docs-consistency.sh —— docs wiki 闭包核验（只读）+ 场景签名验真（--attest）。
 #
-# 纯命令行契约（rev3 / D-MA26）：不读 config、不读局 KV、不依赖 egg。
+# 纯命令行契约（rev3 / harness 机证）：不读 config、不读局 KV、不依赖 egg。
 # 默认模式：校验 docs/README.md 索引内的相对链接逐一存在 + 必备文件清单存在。
 # --attest：核验某局事件日志里的 `read.<doc-id>=<ver>` 签名声明与磁盘实际 ver 是否一致
 #           （`--run <dir>` 必填 —— 脚本不猜「最新局」，路径只由调用方给）。
@@ -305,8 +305,7 @@ required = [
     'docs/context/scenes.json',
     'docs/context/cold-start/vocabulary.md',
     'docs/context/cold-start/principles.md',
-    'docs/context/archive/decisions-agent.md',
-    'docs/context/archive/decisions-engine.md',
+    # r12：决策台账已解散（逐条裁决落进它治理的文档的「设计依据」段），archive/ 不再存在
     # r6：设计契约树的树入口（三模块的枚举由 agent_seed_semantics 的索引集合相等用例负责，
     # 那处才是权威；这里只登记入口，避免两处清单互相追平）
     'docs/design/README.md',
