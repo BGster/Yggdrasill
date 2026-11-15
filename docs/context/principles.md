@@ -1,1 +1,0 @@
-cold-start/principles.md

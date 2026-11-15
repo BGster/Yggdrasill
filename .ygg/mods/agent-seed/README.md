@@ -7,11 +7,11 @@ Mod 内部结构。
 
 **职责边界（r2「mod 剧情提示词迁出」）**：本 mod 只做三件事——**状态管理**（五幕/九幕/门禁/台账）、
 **需求看板**（map/requirement.list 渲染与进度投影）、**CONTEXT 索引提示**（指针行文）。文案的
-**知识权威**在 `docs/context/` 运行流程层（`workflow-acts.md` 幕台词 / `dispatch-ritual.md`
-派发仪式 / `cleanup-policy.md` 清理政策 / `copy-contract.md` 七域句式契约索引）；`data/texts/`
+**知识权威**在 `docs/context/` 运行流程层（`acts/` 幕台词 / `rituals/dispatch.md`
+派发仪式 / `rituals/cleanup.md` 清理政策 / `copy/README.md` 七域句式契约索引）；`data/texts/`
 是其运行时投影，不承担文案解释权。改文案先改 context 权威域文件再同步 mod（单向同步纪律，见
 `docs/wiki-governance.md`）；23 处剧情/策略键已收缩为「状态前缀 + docs/context 指针」，全部
-440 唯一键（404 beats + core 36）原文或指针壳留守（宿主无文案缺省机制，运行时物理必须；23 处是子集不重复计数）。不装 egg 时按 `docs/context/workflow-acts.md`
+450 唯一键（414 beats + core 36）原文或指针壳留守（宿主无文案缺省机制，运行时物理必须；23 处是子集不重复计数）。不装 egg 时按 `docs/context/acts/`
 的「无 egg 执行本章」人工执行同一工作流。
 
 ## 零、host 契约（**必填；宿主不含任何默认值**）
@@ -377,7 +377,7 @@ end)
   `review.evolution.candidates` / `review.evolution.classes`（进化候选预登记，见下）。
 - 顶层菜单只暴露一个 `config` 入口，三项常用设置走二级页（见 §5.2）；其余键仍可直接
   `config.set "<键>=<值>"` 派发。**配置写一律不设人类动作门禁**（不产生「通过」效果）；`play.mode` 的切换是
-  决策权移交，操作正文见 `docs/context/workflow-acts.md` 协调幕（用户当次授权下可自行切，goal 局收口前要交代授权），不走票据闸。
+  决策权移交，操作正文见 `docs/context/acts/coordinate.md` 协调幕（用户当次授权下可自行切，goal 局收口前要交代授权），不走票据闸。
 - `goal.authorization`（run 级 goal 授权，见 §8.2）与 `executor.<rN>.<stage>`（执行者账本，见 §8.3）同样走
   `config.set` 直派，不占菜单项。
 - `tuning`：`req_capacity`（需求上限 32）、`job_capacity`（4）、`min_slices` / `max_slices`（历史遗留）、
@@ -629,7 +629,7 @@ cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1
 
 # 基线 B · 退役（混合驱动，纯 choices 结构性不可达 [ENDING：完成需求必须经执行者收件箱
 #   事件 proposal.submit ×2 + integration.confirm，菜单面无对应项]）：完整 15 choices +
-#   3 事件链见 docs/context/workflow-acts.md 盘点/发布/退役幕；config 子页经菜单可达（立局幕 3=进、
+#   3 事件链见 docs/context/acts/ 盘点/发布/退役幕；config 子页经菜单可达（立局幕 3=进、
 #   4=武装 run.retire、5=退），端到端已在 /tmp runs-root 实测
 cargo run --example playtest -- .ygg/mods/agent-seed --choices 1,2,4,1   # 前缀钉
 

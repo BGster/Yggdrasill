@@ -1,7 +1,7 @@
 # Yggdrasill · 盘点清理政策（cleanup-policy）
 > **id** rituals/cleanup · **幕** settle · **触发** `review.note` 批结算 / 退役前
 > **读不到代价** hard-refusal（未清理则 `[SESSIONS CLEANUP PENDING]` 阻塞收口；误触他人会话是越界）
-> **ver** 9326e8
+> **ver** e02303
 
 **定位**：盘点幕两项清理（子代理会话清理 / 主会话待办清理）的政策正文知识权威。mod 的 `beats-settlement.settlement_sessions_unsetted_hint` 与 `settlement_todo_segment` 是本文的运行时投影（判据短句 + 指针）。
 
@@ -22,7 +22,7 @@
 5. **成功判据**：清理后，本局的子代理会话不再出现在你自己的会话历史 / resume 列表中。
 6. **识别注意**：子会话记录可能与主会话并排存于同一会话存储——移动前按 spawn 时间与 session id 逐文件识别，绝不误触主会话或无关会话；不要把临时目录下的任务 I/O 拷贝当作会话记录本体——记录是你的会话历史实际列出的那些条目。
 
-**运行时投影**：mod 键只保留「[SESSIONS CLEANUP PENDING] remaining={{remaining}} — review.note blocked；政策见 docs/context/cleanup-policy.md；完成后 settlement.sessions 或 sessions= 段声明（remaining 须为 0）」量级。
+**运行时投影**：mod 键只保留「[SESSIONS CLEANUP PENDING] remaining={{remaining}} — review.note blocked；政策见 docs/context/rituals/cleanup.md；完成后 settlement.sessions 或 sessions= 段声明（remaining 须为 0）」量级。
 
 ## 2. 主会话待办清理（settlement.todo）
 

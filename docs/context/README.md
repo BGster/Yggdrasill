@@ -1,7 +1,7 @@
 # Yggdrasill · Context 召回树（docs/context）
 > **id** readme · **幕** all · **触发** 任何时刻 / 进树第一读
 > **读不到代价** silent-drift（迷路后从记忆推进，是 §1.0c scene gate 的首要失效来源）
-> **ver** caa07a
+> **ver** cab193
 
 > **定位**：五幕（立局/协调/盘点/发布/退役）的「进行时台词」知识权威——场景叙事、阶段策略、每幕入口/必做/出口动作清单，以及**无 egg 环境的人工执行法**。mod 的 `scenes` / `prompts` / 六个 `<node>_common` 键是本文的运行时投影（状态前缀 + 指针）；语义以本文为准。本文件是这棵树的召回入口（时点 → 文件见下表）。
 > **replaces**：r2「mod 剧情提示词迁出」前散置于 `.ygg/mods/agent-seed/data/texts/core.json`（scenes/prompts）与 `beats-flow.json`（`*_common`）的幕叙事正文。
@@ -69,31 +69,30 @@ docs/context/
 - 菜单措辞（core `options` 27 键）由 mod 运行时渲染；本树只在各幕「菜单语义对照」小节解释每个菜单项的语义，不复制键值（键值契约见 [copy/core.md](copy/core.md) options 节）。
 - **每份文件头部 4 行是机读契约**：`id`（本文件在树内的唯一标识，同时也是签名 `read.<id>=<ver>` 的键）、`幕`、`触发`、`读不到代价`（四值域 `irreversible` / `hard-refusal` / `silent-drift` / `none`）、`ver`（内容指纹）。
 
-## compat 层（旧路径兼容，**不是权威**）
+## 兼容层已退役（r5 完成）
 
-r1 重切文件边界后，以下 **15 个旧路径**仍必须存在——因为冻结消费者（`.ygg/mods/agent-seed/**` 的 45 处指针、`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 按路径读取的 7 个 copy 表）按旧路径取锚点，删掉即死链 / 测试转红。
+r1 重切文件边界时曾保留 **15 个旧路径**（13 软链 + 2 薄壳）给当时的冻结消费者：
+`.ygg/mods/agent-seed/**` 的文案指针与 `crates/ygg-sandbox/tests/agent_seed_semantics.rs` 按路径读取的 copy 表。
+r5 已把两侧引用全部改指权威文件，兼容层随之删除——**现在树里只有权威文件，没有第二入口**。
 
-| 旧路径 | 形态 | 指向 | 退场条件 |
-| --- | --- | --- | --- |
-| `workflow-acts.md` | 薄壳（指针壳） | `acts/` + `req-acts/` + `rituals/fallback.md` | r2 落地后由 r5 删除 |
-| `dispatch-ritual.md` | 薄壳（指针壳） | `rituals/dispatch.md` + `req-acts/integration.md` + `rituals/fallback.md` | r2 落地后由 r5 删除 |
-| `cleanup-policy.md` | 软链 | `rituals/cleanup.md` | r2 落地后由 r5 删除 |
-| `decisions-engine.md` | 软链 | `archive/decisions-engine.md` | r2 落地后由 r5 删除 |
-| `decisions-agent.md` | 软链 | `archive/decisions-agent.md` | r2 落地后由 r5 删除 |
-| `topology.md` | 软链 | `cold-start/topology.md` | r2 落地后由 r5 删除 |
-| `principles.md` | 软链 | `cold-start/principles.md` | r2 落地后由 r5 删除 |
-| `copy-contract.md` | 软链 | `copy/README.md` | r2 落地后由 r5 删除 |
-| `copy-contract-core.md` | 软链 | `copy/core.md` | r2 落地后由 r5 删除 |
-| `copy-contract-flow.md` | 软链 | `copy/flow.md` | r2 落地后由 r5 删除 |
-| `copy-contract-harness.md` | 软链 | `copy/harness.md` | r2 落地后由 r5 删除 |
-| `copy-contract-lanes.md` | 软链 | `copy/lanes.md` | r2 落地后由 r5 删除 |
-| `copy-contract-map-guide.md` | 软链 | `copy/map-guide.md` | r2 落地后由 r5 删除 |
-| `copy-contract-requirements.md` | 软链 | `copy/requirements.md` | r2 落地后由 r5 删除 |
-| `copy-contract-settlement.md` | 软链 | `copy/settlement.md` | r2 落地后由 r5 删除 |
+| 已删除的旧路径 | 形态 | 现在的权威 |
+| --- | --- | --- |
+| `workflow-acts.md` | 薄壳（多目标指针） | `acts/` + `req-acts/` + `rituals/fallback.md` |
+| `dispatch-ritual.md` | 薄壳（多目标指针） | `rituals/dispatch.md` + `req-acts/integration.md` + `req-acts/delivery.md` + `rituals/fallback.md` |
+| `cleanup-policy.md` | 软链 | `rituals/cleanup.md` |
+| `decisions-engine.md` / `decisions-agent.md` | 软链 | `archive/decisions-engine.md` / `archive/decisions-agent.md` |
+| `topology.md` / `principles.md` | 软链 | `cold-start/topology.md` / `cold-start/principles.md` |
+| `copy-contract.md` | 软链 | `copy/README.md` |
+| `copy-contract-{core,flow,harness,lanes,map-guide,requirements,settlement}.md` | 软链 | `copy/{core,flow,harness,lanes,map-guide,requirements,settlement}.md` |
 
-- **13 软链 + 2 薄壳**：软链是 1:1 迁移后的同字节入口（`git hash-object` 与原文件一致）；薄壳是拆分型文件的「多目标指针」，正文不超过 10 行、不自带规则。
-- 判据来源：D-MA29（兼容层两分法 + 必须带退场条件）。核验命令：`ls -l docs/context/*.md | grep -- '->' | wc -l` 应为 13；`bash scripts/docs-ver.sh --check` 应 `ok=1`。
-- **已真删**（零冻结引用）：`vision.md`、`vocabulary.md` —— 权威在 `cold-start/` 下，改动方的引用已全部改写。
+- **判据来源**：D-MA29（兼容层两分法 + 必须带退场条件）；退场条件在 r5 兑现。
+- **为什么能删**：两类冻结消费者都已改指——mod 的 23 个散文键指针（25 处路径）改指子目录权威文件，
+  crates 的 7 个 copy 表读取路径改指 `docs/context/copy/*.md`；锚点用例（`narrative_pointer_anchors_exist_in_docs_context`）
+  现在真的能看见子目录指针（r5 修好了只认 `[A-Za-z0-9._-]` 的旧解析器），所以「没死链」是被查出来的，不是被假设的。
+- **核验命令**：`ls -l docs/context/*.md | grep -- '->' | wc -l` 应为 **0**；
+  `bash scripts/docs-ver.sh --check` 应 `ok=1`；`bash .pi/tools/docs-consistency.sh --repo .` 应 `ok=1`。
+- **已真删**（更早一轮）：`vision.md`、`vocabulary.md` —— 权威在 `cold-start/` 下，引用已全部改写。
+- 旧路径不再作为可执行指针存在；历史与当时理由只在 git 与 `archive/decisions-*.md` 里。
 
 ## 维护闭环
 
