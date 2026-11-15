@@ -1,8 +1,10 @@
 # Yggdrasill · Harness Tools 检测机制（`.pi/tools`）
+> **id** host/harness-tools · **模块** ② egg CLI 与 host · **触发** 改或调用 .pi/tools/* 与结算机证参数之前
+> **读不到代价** silent-drift（机证参数错 → 结算结论静默漂移）
 
 > **定位**：`.pi/tools/` 只读检测脚本的契约、注册面、三层调用方参数来源与「无 egg 环境的参数约定」。
 > **决策**：D-MA26（docs/context/archive/decisions-agent.md）。
-> **上游**：[docs/README.md](../README.md) · **相关**：[tool-bridge.md](tool-bridge.md) · [lua-api.md](lua-api.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[tool-bridge.md](../mod/tool-bridge.md) · [lua-api.md](../kernel/lua-api.md)
 
 ## 1. 契约：纯命令行接口（argv/env）
 
@@ -84,7 +86,7 @@
 - 未注册 / 参数缺 / 脚本不可执行 → **人证旧路径 + 可读提示**，绝不拒绝结算；
 - 通过 → 写 `settlement.todo.source=machine:harness.todo-check` / `settlement.sessions.source=machine:harness.sessions-count`（人证写 `human`）。
 
-**机证与人证同级不越权**（[state-machine.md](state-machine.md) §2.9.2）：`settlement_problem()` 保持纯 KV 断言、零改动；机证只是「脚本跑过 + 输出与人证一致」的证据，不高于人证。
+**机证与人证同级不越权**（[state-machine.md](../kernel/state-machine.md) §2.9.2）：`settlement_problem()` 保持纯 KV 断言、零改动；机证只是「脚本跑过 + 输出与人证一致」的证据，不高于人证。
 
 ### 3.3 未注册提醒落点
 

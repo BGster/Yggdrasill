@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-settlement
 > **id** copy/settlement · **幕** all · **触发** 改 `beats-settlement.json` 前
 > **读不到代价** silent-drift
-> **ver** 9fb537
+> **ver** e9f57a
 
 > **定位**：`beats-settlement.json` 54 键的句式知识权威：盘点四项、批结算、退役、发布与 tools 机证。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-settlement.json`
@@ -10,7 +10,7 @@
 | 键 | 句式模板（逐字） | 变量 | 协议归属 |
 |---|---|---|---|
 | `maintenance_req_added` | [MAINTENANCE REQ ADDED] {{id}} "{{title}}" — batch {{batch}} closeout appended next batch's docs-maintenance requirement (open/draft); dispatch it in coordinate — it gates the next boundary until done. | id, title, batch | 叙述 |
-| `maintenance_req_desc` | 依 wiki-governance 三职责复核上批全部需求的 plan 与 develop 验收结果是否已落 docs wiki：决策与词汇 → docs/context/archive/decisions-agent.md 台账行、vocabulary.md 词条；行为与契约 → docs/design/ 对应主题文件（按本批触碰面：state-machine/events/state-surface/run-story/requirement-story 等）；结构变化 → docs/README.md 索引与 CONTEXT.md/DESIGN.md 两薄壳映射表；纪律：每主题一文件 ≤300 行、头部定位/replaces/上下游、双向链接；纯缺陷修复与措辞调整不触碰文档。 | — | 叙述 |
+| `maintenance_req_desc` | 依 wiki-governance 三职责复核上批全部需求的 plan 与 develop 验收结果是否已落 docs wiki：决策与词汇 → docs/context/archive/decisions-agent.md 台账行、vocabulary.md 词条；行为与契约 → docs/design/ 对应主题文件（按本批触碰面：state-machine/events/state-surface/lanes 等；行为叙事与产品定位 → docs/context/story/* 与 docs/context/cold-start/system-boundaries.md）；结构变化 → docs/README.md 索引与 CONTEXT.md/DESIGN.md 两薄壳映射表；纪律：每主题一文件 ≤300 行、头部定位/replaces/上下游、双向链接；纯缺陷修复与措辞调整不触碰文档。 | — | 叙述 |
 | `maintenance_req_skipped_dedup` | [MAINTENANCE REQ SKIP] {{id}} already carries an open docs-maintenance requirement (maintenance marker / canonical title) — dedup hit, the batch settles without a second one. | id | 叙述 |
 | `maintenance_req_skipped_full` | [MAINTENANCE REQ SKIP] requirement register is full ({{cap}} open) — docs-maintenance append deferred; the batch settles regardless. | cap | 叙述 |
 | `maintenance_req_title` | 维护更新 docs wiki（上批收口） | — | 叙述 |
@@ -31,7 +31,7 @@
 | `review_note_legacy_evolution` | review.note no longer accepts ev= / c= / cls= segments; register with settlement.evolution first, then close with lesson\|score. | — | 叙述 |
 | `review_note_usage` | review.note accepts only lesson\|score; the evolution record must be registered through settlement.evolution first — this action only archives it single-source. | — | 叙述 |
 | `review_ok` | [REVIEW RECORDED] {{score}}/5 — {{lesson}} | score, lesson | 叙述 |
-| `sessions_parent_missing` | [SESSIONS PARENT MISSING] settlement.sessions: no parent session id supplied — the machine cross-check needs it. Append the optional 4th segment `\|parent=<session_id>` to the settlement.sessions payload, or register the parent via context and run sessions-count.sh manually (docs/design/harness-tools.md). | — | 叙述 |
+| `sessions_parent_missing` | [SESSIONS PARENT MISSING] settlement.sessions: no parent session id supplied — the machine cross-check needs it. Append the optional 4th segment `\|parent=<session_id>` to the settlement.sessions payload, or register the parent via context and run sessions-count.sh manually (docs/design/host/harness-tools.md). | — | 叙述 |
 | `settlement_artifact_absent` | artifact {{artifact}} does not exist in the mounted VFS — registration refused (no settlement written, no archive side effects) | artifact | 叙述 |
 | `settlement_artifact_empty` | artifact {{artifact}} is empty in the mounted VFS — registration refused (no settlement written, no archive side effects) | artifact | 叙述 |
 | `settlement_artifact_no_vfs` | artifact {{artifact}} cannot be verified: the host VFS is not mounted — non-empty registration refused (no settlement written, no archive side effects) | artifact | 叙述 |
@@ -57,9 +57,9 @@
 | `settlement_todo_segment_bad` | the settlement.evolution todo= segment must be `<remaining>/<verified_by>`: remaining exactly 0, verified_by non-empty and <= 120 chars. | — | 叙述 |
 | `settlement_todo_usage` | settlement.todo payload "remaining\|verified_by": exactly two segments, remaining exactly 0, verified_by non-empty and <= 120 chars. | — | 叙述 |
 | `settlement_verify_first` | record all-green evidence with verify.submit first, then register the three settlement tasks (all of them in the review stage). | — | 叙述 |
-| `todo_session_missing` | [TODO SESSION MISSING] settlement.todo: no session id resolvable (PI_SESSION_ID unset) — falling back to human attestation. Export PI_SESSION_ID for the main session, or run todo-check.sh --session <id> manually (docs/design/harness-tools.md). | — | 叙述 |
+| `todo_session_missing` | [TODO SESSION MISSING] settlement.todo: no session id resolvable (PI_SESSION_ID unset) — falling back to human attestation. Export PI_SESSION_ID for the main session, or run todo-check.sh --session <id> manually (docs/design/host/harness-tools.md). | — | 叙述 |
 | `tools_check_passed` | [TOOLS CHECK OK] settlement.{{item}}: machine cross-check agrees with the declaration ({{detail}}). | item, detail | 叙述 |
 | `tools_check_refused` | settlement.{{item}}: the machine cross-check contradicts the declaration ({{detail}}). Reconcile the actual state before declaring; the registration was not written. | item, detail | 叙述 |
 | `tools_root_missing` | [TOOLS ROOT MISSING] settlement.{{item}}: tools.root is not registered — falling back to human attestation. Register `config.set tools.root=<dir>` to enable the machine cross-check. | item | 叙述 |
 | `tools_script_missing` | [TOOLS SCRIPT MISSING] settlement.{{item}}: the harness script could not be resolved or executed ({{detail}}) — falling back to human attestation. Check that the registered tools.root points at a checkout containing .pi/tools/. | item, detail | 叙述 |
-| `tools_unregistered_hint` | [TOOLS UNREGISTERED] settlement checks are running on human attestation. Register `config.set tools.root=<dir>` (e.g. the checkout's .pi/tools) to enable machine cross-checks via harness.todo-check / harness.sessions-count. Without an egg environment, run the scripts manually per docs/design/harness-tools.md. | — | 叙述 |
+| `tools_unregistered_hint` | [TOOLS UNREGISTERED] settlement checks are running on human attestation. Register `config.set tools.root=<dir>` (e.g. the checkout's .pi/tools) to enable machine cross-checks via harness.todo-check / harness.sessions-count. Without an egg environment, run the scripts manually per docs/design/host/harness-tools.md. | — | 叙述 |

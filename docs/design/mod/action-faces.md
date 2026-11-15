@@ -1,8 +1,10 @@
 # Yggdrasill · 三层动作面契约（event/op/action）
+> **id** mod/action-faces · **模块** ③ agent-seed mod · **触发** 新增或移动一个动作面之前
+> **读不到代价** silent-drift（把 op 当 event 用 → 状态旁路）
 
 > **定位**：L1/L2/L3 分层、三条硬不变量（I1–I3）、A1–A4 落点与 event 全集 registry 口径末注（33/34 口径）。
 > **replaces**：DESIGN §3.4（L446–508）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[events.md](events.md) · [cli-daemon.md](cli-daemon.md) · [compaction.md](compaction.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[events.md](../kernel/events.md) · [cli-daemon.md](../host/cli-daemon.md) · [compaction.md](../kernel/compaction.md)
 > **搬运**：以下正文自 DESIGN.md L446–L508 逐字迁移，不重写语义。
 
 ### 3.4 三层动作面契约：`event` / `op` / `action`
@@ -11,7 +13,7 @@ Yggdrasill 的动作面被严格分成三层，任何一层都不得越权承担
 
 | 层 | 载体 | 值域 | 权威来源 | 职责边界 |
 | --- | --- | --- | --- | --- |
-| **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 32 个事件名（全集见本节末注，payload 位次见 §3.3；`guide.show` 已随 r1 注销、`task.intake` 已随 r2 rev2 注销） | Mod（`.ygg/mods/agent-seed/src/**`（core/domain/view/runtime/handlers 五层）、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
+| **L1 `event`** | `ygg.on(event_name, handler)` 注册的 handler（`stage.advance` 由 `ygg.fsm.define` 转手注册） | 39 个事件名（全集见本节末注，payload 位次见 §3.3；`guide.show` 已随 r1 注销、`task.intake` 已随 r2 rev2 注销） | Mod（`.ygg/mods/agent-seed/src/**`（core/domain/view/runtime/handlers 五层）、`mod.lua`） | **唯一的状态推进货币**：`(state, event) -> state'`，全有或全无（见 CONTEXT `P1`）。事件之外不存在任何改状态的路径。 |
 | **L2 `op`** | daemon JSON-RPC 请求的 `op` 字段 | `ping` / `summary` / `dispatch` / `vfs_put` / `vfs_get` / `vfs_list` / `settle` / `shutdown`（8 个） | Rust 宿主（`crates/ygg-sandbox/examples/egg.rs`）；线协议见 §3.5 | **状态推进之外的旁路能力**：制品读写、摘要查询、结算报告、进程控制。`op=vfs_put` 与 `event=vfs.write` 是**两条平行端口**，互不经过对方，且语义不等价（见下文对照表）。 |
 | **L3 `action`** | `ygg_session` 工具的 `action` 参数（`StringEnum`） | `kickoff` / `dispatch` / `approve_gate` / `reject_gate` / `vfs_write` / `vfs_read` / `vfs_list` / `handoff_compact` / `settle_close`（9 个） | 各 harness 适配器（本仓库无内置，执行壳已删除）；L3 由各 harness 自行定义，值域随适配器可变，不是跨 harness 契约 | **面向模型/人的语义入口**：它只决定「用哪个动词说出意图、由谁拼 payload」，**不决定状态**。值域随适配器可变，**不是**跨 harness 契约。 |
 
@@ -62,9 +64,9 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 结论：凡需要进入 `artifact.*` 台账、需要阶段守卫或 64 KiB 上限的制品，**必须**经 `event=vfs.write`；`op=vfs_put` 只用于「不参与台账」的宿主侧归档（例如交接单 `artifacts/handoff-latest.md` 与 `settle_close` 的进化复盘）。这两个名字长得像，但**不是**同一个原语的两种写法。
 
-#### 本节末注 · `event` 全集（32 个）
+#### 本节末注 · `event` 全集（39 个）
 
 `agent.summary`、`requirement.add` / `requirement.list` / `requirement.dispatch` / `requirement.amend` / `requirement.split` / `requirement.merge` / `requirement.conflict` / `requirement.resolve`、`lane.pool` / `lane.claim` / `lane.release`、`proposal.submit` / `proposal.accept` / `proposal.reject`、`coordinate.submit`、`verify.submit`、`settlement.evolution` / `settlement.sessions` / `settlement.todo`、`review.note`、`gate.approve` / `gate.reject`、`config.set` / `config.open` / `config.close`、`map.show`、`ygg.choice_selected`、`event.start`、`tool.call` / `tool.result`、`vfs.write`、`stage.advance`。
 
-计数口径（可复核）：前 31 个由 Mod 直接调用 `ygg.on(...)` 注册；`stage.advance` 是第 32 个，它由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，**不在** `ygg.on` 的字面出现处。可执行复算：`grep -rn 'ygg\.on("' .ygg/mods/agent-seed/ | sed 's/.*ygg\.on("\([^"]*\)".*/\1/' | sort -u` 得到 31 项，再加上 `mod.lua` 的 `ygg.fsm.define` 声明里那一项 `event = "stage.advance"`，合计 33。这 33 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 33 个之外还有别的状态转换」。运行期 registry = 这 33 个 + stdlib 内置注册面（`ygg.narrative.goto`，合计 34）；registry 之外的事件名（含拼错的名字与未注册的 `ygg.*`）派发一律 **fail-closed**——外部名在门面预检零副作用拒绝（可读 VALIDATION，文案带已注册全集），派生名（handler `ygg.emit`）使整次转换失败回滚。registry 是运行时唯一事实，宿主不持任何事件名白名单。
+计数口径（可复核，r6 实测复核）：`grep -rho 'ygg\.on("[a-z._]*"' .ygg/mods/agent-seed | sed 's/.*ygg\.on("//;s/"//' | sort -u` 得到 **38** 项；`stage.advance` 由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，`mod.lua` 里声明 `event = "stage.advance"`，不在 `ygg.on` 的字面出现处——38 + 1 = **39**，与 `events.md` 的 39 设计目标全集一致。r1 时代的 33 / registry 34 两数只描述当时尚未递增的已装载事实集（滞后已在 r2 集成交付时登记）；r6 复核后已装载集与设计目标全集追平，不再有两个口径。这 39 个事件构成状态机的完整原子转换集合；`action` 面**从不**表示「这 39 个之外还有别的状态转换」。registry 之外的事件名（含拼错的名字与未注册的 `ygg.*`）派发一律 **fail-closed**——外部名在门面预检零副作用拒绝（可读 VALIDATION，文案带已注册全集），派生名（handler `ygg.emit`）使整次转换失败回滚。registry 是运行时唯一事实，宿主不持任何事件名白名单。
 

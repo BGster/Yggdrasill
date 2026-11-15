@@ -1,8 +1,10 @@
 # Yggdrasill · 状态机语义与微状态判定
+> **id** kernel/state-machine · **模块** ① ygg 内核 · **触发** 改状态机语义 / 增删事件 / 改微状态判定之前
+> **读不到代价** silent-drift（按记忆改判定 → 双重推进或旁路打开，门禁全绿也看不出来）
 
 > **定位**：Mod 纯度边界、双层真状态压缩、微状态判定单一来源（run_phase/req_phase）与响应式推进契约。
 > **replaces**：DESIGN §2 章首 + §2.1 + §2.2 + §2.5 + §2.9（L66–95, L206–247, L329–339）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[events.md](events.md) · [run-story.md](run-story.md) · [requirement-story.md](requirement-story.md) · [state-surface.md](state-surface.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[events.md](events.md) · [run-story.md](../../context/story/run-story.md) · [requirement-story.md](../../context/story/requirement-story.md) · [state-surface.md](state-surface.md)
 > **搬运**：以下正文自 DESIGN.md L66–L69 + DESIGN.md L70–L77 + DESIGN.md L78–L95 + DESIGN.md L206–L247 + DESIGN.md L329–L339 逐字迁移，不重写语义。
 
 ## 2. Mod 剧情与状态机语义
@@ -89,7 +91,7 @@ end
 #### 2.9.1 省回合动作与尾段协议
 
 - **内联执行者台账**：`proposal.submit` 的保留尾段允许 `exec=<agent_id>[:<reason>]`，在提案入库前、同一事务内通过与 `config.set executor.*` 相同的 `src/domain/executor.lua` 实现登记。登记失败则整个载荷被拒绝且不产生提案。固定相对顺序为 `…|exec=<id>[:<reason>]|actor=<actor>|actor_session=<session>`；三段各自可省略、总计至多三段。reason 内使用 `:`（如 `exec=agent2:handoff`），因为外层按 `|` 切分。
-- **宿主身份段不可伪造**：`actor=` / `actor_session=` 只能由宿主在 `inboxRoutes.<kind>.actor / .actor_session` 声明路由上注入；调用方自带则宿主以 `ACTOR_FORGED` 拒绝，不 dispatch、不持久化。尾段位置错误由 Mod 分别以 `req_prop_exec_misplaced` / `req_prop_actor_misplaced` / `req_prop_actor_session_misplaced` 拒绝；宿主会把短于声明七字段的载荷补位，因此中段错位不能静默吞掉。三态互证只比较 `exec=` 与宿主 `actor=`；`actor_session` 纯审计，永不参与判定。首条带身份的成功写先到先得认领不可变 `run.json opener_actor`，失败/拒绝不写，同一 actor 重写为 no-op；身份模型正文见 [identity.md](identity.md)。
+- **宿主身份段不可伪造**：`actor=` / `actor_session=` 只能由宿主在 `inboxRoutes.<kind>.actor / .actor_session` 声明路由上注入；调用方自带则宿主以 `ACTOR_FORGED` 拒绝，不 dispatch、不持久化。尾段位置错误由 Mod 分别以 `req_prop_exec_misplaced` / `req_prop_actor_misplaced` / `req_prop_actor_session_misplaced` 拒绝；宿主会把短于声明七字段的载荷补位，因此中段错位不能静默吞掉。三态互证只比较 `exec=` 与宿主 `actor=`；`actor_session` 纯审计，永不参与判定。首条带身份的成功写先到先得认领不可变 `run.json opener_actor`，失败/拒绝不写，同一 actor 重写为 no-op；身份模型正文见 [identity.md](../mod/identity.md)。
 - **阶段合并**：`requirement.dispatch` 遇到 `draft` 行时直接派发 plan 并写入 `planning`，默认管线没有 analysis 回合。`analyzing` 仅为旧存档兼容态，以及 `planning` 行显式提交并接受 analysis 提案时的兼容态；`R_ANALYZING` 与读者保留，但不新增迁移代码。
 
 #### 2.9.2 现行效应及折叠边界

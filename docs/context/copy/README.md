@@ -1,10 +1,10 @@
 # Yggdrasill · mod 文案契约（copy-contract）
 > **id** copy/README · **幕** all（改文案前） · **触发** 任一 mod 文案键变更
 > **读不到代价** silent-drift
-> **ver** b887ac
+> **ver** 765625
 
 > **定位**：mod 状态行文键的知识权威索引。正文按现有 beats 消费域拆为七件；mod `data/texts/` 是运行时投影，改文案先改对应域文件再同步 mod。
-> **上游**：[../README.md](../../README.md) · **相关**：[acts/](../acts/) · [../design/prompt-surface.md](../../design/prompt-surface.md)
+> **上游**：[../README.md](../../README.md) · **相关**：[acts/](../acts/) · [../../design/mod/prompt-surface.md](../../design/mod/prompt-surface.md)
 > **拆分判据**：消费域，不按行数对半切；每个域文件直接对应一个 `data/texts` 片段，core 文件同时承载跨域指针壳与键账。
 
 ## 域文件与召回路径
@@ -19,7 +19,7 @@
 | 盘点 / 批结算 / 发布 / tools 机证 | [settlement.md](settlement.md) | `beats-settlement.json` | 54 |
 | options / tuning / endings / 指针壳与总账 | [core.md](core.md) | `core.json` | 36 + §H |
 
-六个 beats 片段共 409 键，core 的 options/tuning/endings 共 36 键，合计 445 个唯一键。§H 的 23 处指针壳是子集，不额外计数；实测口径、owner、trigger 与检查见 [core §H](core.md#h-23-处散文键的指针壳句式mod-收缩后形态)。
+六个 beats 片段共 414 键，core 的 options/tuning/endings 共 36 键，合计 450 个唯一键。§H 的 23 处指针壳是子集，不额外计数；实测口径、owner、trigger 与检查见 [core §H](core.md#h-23-处散文键的指针壳句式mod-收缩后形态)。
 
 ## 通用读法与协议归属
 
@@ -30,4 +30,4 @@
 
 ## 维护闭环
 
-owner = 文案或键面修改者；trigger = 任一键值、键集、域归属或指针目标变化。先在对应域文件修改，再同步 mod JSON、manifest、[../design/prompt-surface.md](../../design/prompt-surface.md) 与 [../README.md](../../README.md)。`agent_seed_semantics` 逐域比较键集并检查指针文件存在，`docs-consistency.sh` 检查文档闭包；缺键、死链或只改总数而未改域表，均不得验收。
+owner = 文案或键面修改者；trigger = 任一键值、键集、域归属或指针目标变化。先在对应域文件修改，再同步 mod JSON、manifest、[../../design/mod/prompt-surface.md](../../design/mod/prompt-surface.md) 与 [../README.md](../../README.md)。`agent_seed_semantics` 逐域比较键集并检查指针文件存在，`docs-consistency.sh` 检查文档闭包；缺键、死链或只改总数而未改域表，均不得验收。

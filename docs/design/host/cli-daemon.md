@@ -1,8 +1,10 @@
 # Yggdrasill · 宿主 CLI 与 Daemon JSON-RPC 线协议
+> **id** host/cli-daemon · **模块** ② egg CLI 与 host · **触发** 改命令行 / daemon 协议 / 存储与版本兼容面之前
+> **读不到代价** hard-refusal（存储后端不匹配 fail-closed，旧局打不开）
 
 > **定位**：egg 单发 CLI 参数、6 个 builtin 工具、daemon 行分隔 JSON-RPC 与 summary/HarnessAction Schema。
 > **replaces**：DESIGN §3.5（L509–589）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[action-faces.md](action-faces.md) · [lanes.md](lanes.md) · [compaction.md](compaction.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[action-faces.md](../mod/action-faces.md) · [lanes.md](lanes.md) · [compaction.md](../kernel/compaction.md)
 > **搬运**：以下正文自 DESIGN.md L509–L589 逐字迁移，不重写语义。
 
 ### 3.5 宿主 CLI 与 Daemon JSON-RPC 线协议契约

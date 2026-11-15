@@ -1,8 +1,10 @@
 # Yggdrasill · 身份与权限（不进剧情）
+> **id** mod/identity · **模块** ③ agent-seed mod · **触发** 改执行者台账 / 身份判定 / profile 之前
+> **读不到代价** silent-drift（把自声明当身份证据）
 
 > **定位**：执行者台账、提交者身份章、profile 卡与人机票据门四机制及其「不改变任何微状态」定性。
 > **replaces**：DESIGN §2.13（L372–382）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[wire-protocol.md](wire-protocol.md) · [lanes.md](lanes.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[wire-protocol.md](../kernel/wire-protocol.md) · [lanes.md](../host/lanes.md)
 > **搬运**：以下正文自 DESIGN.md L372–L382 逐字迁移，不重写语义。
 
 ### 2.13 身份与权限（不进剧情）

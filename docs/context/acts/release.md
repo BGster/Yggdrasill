@@ -1,7 +1,7 @@
 # 发布幕 · release
 > **id** acts/release · **幕** release · **触发** 盘点四项齐备后（`[SETTLE READY]` 自动进入）
 > **读不到代价** hard-refusal（未声明发布则 `review.note` 不收口）
-> **ver** ac9f0b
+> **ver** df77ee
 
 **场景台词（知识权威）**：第 {{batch}} 批 · 任务「{{title}}」{{declared}}。声明本批 develop→master 合并结果（`release.confirm` / `release.skip`）；已声明即可 `review.note` 批结算（未武装）或退役（`run.retire` 武装）。
 
@@ -17,4 +17,4 @@
 
 **prompts.release 语义**：「声明本批结果（release.confirm / release.skip）后 review.note 批结算；run.retire 武装时它是终局。」
 
-**本幕关联阅读**：[copy/settlement.md](../copy/settlement.md)（`release_*` / `review_batch_ok` / `endings.done` 句式）；[../../design/run-story.md](../../design/run-story.md)（发布幕与常驻批周期）；[../req-acts/integration.md](../req-acts/integration.md)（执行者 feature→develop 集成纪律）；D-MA22 只记录裁决，不复制本操作面。
+**本幕关联阅读**：[copy/settlement.md](../copy/settlement.md)（`release_*` / `review_batch_ok` / `endings.done` 句式）；[../story/run-story.md](../story/run-story.md)（发布幕与常驻批周期）；[../req-acts/integration.md](../req-acts/integration.md)（执行者 feature→develop 集成纪律）；D-MA22 只记录裁决，不复制本操作面。

@@ -7,7 +7,7 @@
 //! `coordinate.submit` / `verify.submit` / `review.note`）在 serve 面上**不存在
 //! 写路径**——数据端点只登记 GET；唯一例外 = `/api/roots` 观察根注册表
 //! （POST/DELETE），那是**进程内观察配置**（不写存档、不写局状态、不建目录），
-//! 与局状态写（事件/门禁/inbox）严格对象分离（docs/design/serve.md §3.7.6）。
+//! 与局状态写（事件/门禁/inbox）严格对象分离（docs/design/host/serve.md §3.7.6）。
 //!
 //! # 观察根注册表（r1）
 //!

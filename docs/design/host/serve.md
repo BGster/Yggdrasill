@@ -1,8 +1,10 @@
 # Yggdrasill · serve 观察面契约
+> **id** host/serve · **模块** ② egg CLI 与 host · **触发** 触碰 serve 任何一行之前
+> **读不到代价** irreversible（只读边界被破 → 局状态被写坏，不可回滚）
 
 > **定位**：只读观察台：CLI 形态、四级面板形态、GET API 总表、pack.json panel 段、SSE 帧协议与安全边界。
 > **replaces**：DESIGN §3.7（L606–732）（搬运基线 `3a2536f`）
-> **上游**：[docs/README.md](../README.md) · **相关**：[mod-package.md](mod-package.md) · [cli-daemon.md](cli-daemon.md)
+> **上游**：[docs/README.md](../../README.md) · **相关**：[mod-package.md](../mod/mod-package.md) · [cli-daemon.md](cli-daemon.md)
 > **搬运**：以下正文自 DESIGN.md L606–L732 逐字迁移，不重写语义。
 
 ### 3.7 serve 观察面契约（只读观察台 + 注册表化观察根 + 内置面板页 + mod 面板 iframe 托管）
