@@ -433,3 +433,42 @@ end
 function actor()
   return ACTOR
 end
+
+--- 一条在册需求走到 plan job（Rust 的 start_requirement）。
+function start_requirement()
+  charter_and_begin()
+  fire("requirement.add", "synthetic requirement|synthetic description|semantics-r1")
+  fire("requirement.dispatch", "0")
+  assert_eq(kv("req.1.status"), "open", "status stays open until integration")
+  assert_eq(kv("req.1.job"), "plan", "the plan job is hung")
+  return phase_of("r1")
+end
+
+--- 走到计划门：需求在册 + 一条 plan 提案待受理。
+function drive_to_plan_gate()
+  fresh()
+  local phase = start_requirement()
+  assert_eq(phase, "planning", "start_requirement lands in planning")
+  submit(1, "plan", "semantics-p1")
+  assert_eq(kv("req.1.gate"), "plan", "the plan gate is up")
+  assert_eq(kv("req.1.gate_rev"), 1, "gate_rev pins the revision")
+  assert_eq(kv("req.1.job"), "", "the job slot frees once the gate is up")
+end
+
+--- 从 requirement.list 的行里取某需求的微状态名（`[planning]` → "planning"）。
+function phase_of(id)
+  -- 每次独立回执（与 Rust 的 narrate 一致）：否则会读到上一次 requirement.list 的旧行。
+  reset()
+  fire("requirement.list", "0")
+  local needle = " " .. id .. " ["
+  for _, line in ipairs(narrated()) do
+    if line:find(needle, 1, true) then
+      local open = line:find("[", 1, true)
+      local close = line:find("]", open, true)
+      if open and close then
+        return line:sub(open + 1, close - 1)
+      end
+    end
+  end
+  error("no " .. id .. " in the requirement list")
+end

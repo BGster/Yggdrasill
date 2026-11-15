@@ -990,27 +990,6 @@ fn accept_gate_amend_invalidates_plan_and_stales_the_pending_gate() {
     game.assert_kv("req.1.job", json!("plan"));
 }
 
-/// The `plan` gate rejected: `plan_ok` goes back to false and the plan task is re-attached
-/// to the executor (`job="plan"`) — a fresh plan proposal on the same row is accepted again
-/// (slot = planning ∧ no gate).
-#[test]
-fn plan_gate_reject_requires_a_new_plan() {
-    let mut game = drive_to_plan_gate();
-    assert_eq!(game.phase("r1"), "plan_gate");
-
-    game.click("gate.reject — ");
-    game.assert_kv("req.1.gate", json!(""));
-    game.assert_kv("req.1.plan_ok", json!(false));
-    // The plan job returns to the executor without a new dispatch turn.
-    game.assert_kv("req.1.job", json!("plan"));
-    assert_eq!(game.phase("r1"), "planning");
-
-    // A second plan proposal is deliverable again (the gate slot is free).
-    submit(&mut game, 1, "plan", "semantics-p1-replan");
-    game.assert_kv("req.1.gate", json!("plan"));
-    game.assert_kv("req.1.gate_rev", json!(1));
-}
-
 /// Approving the `plan` gate makes the row `ready`; the declared `useEffect` auto-dispatches
 /// **development for that requirement only** before the receipt is rendered (one turn saved),
 /// and the memoized requirement panel reflects the new state (no stale `useMemo`).
