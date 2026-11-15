@@ -3947,8 +3947,8 @@ fn narrative_pointer_anchors_exist_in_docs_context() {
     // 一并静默跳过——所以此数从旧实装口径的 25 直接跳到 32，正是漏检被补上的尺度。
     // `stage_prompt_missing` 指向 `docs/context/acts/`（目录指针，不是 .md，不计入）。
     assert_eq!(
-        pointer_count, 32,
-        "docs/context pointer ledger drifted: expected 32, got {pointer_count}"
+        pointer_count, 33,
+        "docs/context pointer ledger drifted: expected 33, got {pointer_count}"
     );
     assert!(
         violations.is_empty(),
@@ -4694,9 +4694,8 @@ fn playbook_and_src_context_pointers_resolve() {
 
     let expected: std::collections::BTreeMap<String, usize> = [
         ("beats-flow.json", 7usize),
-        ("beats-harness.json", 2),
-        ("beats-map-guide.json", 1),
-        ("beats-settlement.json", 4),
+        ("beats-harness.json", 5),
+        ("beats-settlement.json", 3),
         ("ch4-mod-host.json", 0),
         ("core.json", 18),
         ("tools.lua", 1),
@@ -4711,8 +4710,8 @@ fn playbook_and_src_context_pointers_resolve() {
         "docs/context 指针账漂移（playbook + texts + src）：{ledger:?}"
     );
     assert_eq!(
-        total, 33,
-        "docs/context 指针总数漂移：期望 33，实得 {total}"
+        total, 34,
+        "docs/context 指针总数漂移：期望 34，实得 {total}"
     );
     assert!(
         violations.is_empty(),

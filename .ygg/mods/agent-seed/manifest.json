@@ -185,28 +185,28 @@
       "sha256": "7dc2a07fa043c0cf690f9ede2648d620ee400ce7860a68775030cfa691c4b9e6"
     },
     {
-      "byteLength": 3554,
+      "byteLength": 3347,
       "id": "ygg:scene/beats/map-guide",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-map-guide.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "d44b413c978f2c903f0c54a6727a2e397be01a2cb6e6ed8e43d42eefa84ef8f3"
+      "sha256": "61b121af6dc8f2f27159adb1ea63628d11db1c9e1524dc4484c88a2db7fff614"
     },
     {
-      "byteLength": 10299,
+      "byteLength": 9578,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "13f65f60a7bf3b3e9999783b802fcff6a4af1f37a0e9c314bfb30626b5ae9124"
+      "sha256": "2bb6b98d8475714dad5c74284e917cf3dcfe1c59fffaf092401750ebce4cd604"
     },
     {
-      "byteLength": 14038,
+      "byteLength": 12281,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "eaae55fcbde7ba517c311724b1e3d4d4bb5bf1e4a200f258113c0a58c276405a"
+      "sha256": "84588d31f24905bf517eb588354122abc773e8f2ccfcd01327b89edcbb7252df"
     },
     {
       "byteLength": 1918,

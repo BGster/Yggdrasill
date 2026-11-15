@@ -1,7 +1,7 @@
 # Yggdrasill · mod 文案契约 · beats-settlement
 > **id** copy/settlement · **幕** all · **触发** 改 `beats-settlement.json` 前
 > **读不到代价** silent-drift
-> **ver** f8a2dc
+> **ver** 4fa54a
 
 > **定位**：`beats-settlement.json` 54 键的句式知识权威：盘点四项、批结算、退役、发布与 tools 机证。
 > **上游**：[copy/README.md](README.md) · **运行时投影**：`.ygg/mods/agent-seed/data/texts/beats-settlement.json`
@@ -9,7 +9,7 @@
 
 | 键 | 句式模板（逐字） | 变量 | 协议归属 |
 |---|---|---|---|
-| `docs_maintenance_due` | [DOCS MAINTENANCE DUE] batch {{batch}} settled — the CONTEXT/DESIGN pass is the main session's OWN work (no requirement is dispatched: subagents lack cross-batch context and got it wrong twice). Per wiki-governance's three duties, reconcile what this batch changed into the wiki: decisions → the governing doc's 设计依据 section; vocabulary → docs/context/cold-start/vocabulary.md; product boundaries → docs/context/cold-start/system-boundaries.md; behaviour/contract → docs/design/<module>; act narration → docs/context/. Then clear it: config.set docs.maintenance.done={{batch}} | batch | 叙述 |
+| `docs_maintenance_due` | [DOCS MAINTENANCE DUE] batch {{batch}}: the CONTEXT/DESIGN pass is the main session's OWN work — 见 docs/wiki-governance.md §6；解除：config.set docs.maintenance.done={{batch}} | batch | 叙述 |
 | `docs_maintenance_still_due` | [DOCS MAINTENANCE STILL DUE] batch {{batch}} — obligation unchanged; clearing needs config.set docs.maintenance.done={{batch}} | batch | 叙述 |
 | `docs_maintenance_blocked` | docs-maintenance/due: batch {{batch}} left the docs wiki unreviewed (CONTEXT/DESIGN upkeep is the main session's own work, not a dispatched requirement). Do the pass, then clear: {{command}} | batch, command | 叙述 |
 | `docs_maintenance_cleared` | [DOCS MAINTENANCE CLEARED] batch {{batch}} — the wiki pass is declared done; the batch boundary is unblocked | batch | 叙述 |
@@ -42,13 +42,13 @@
 | `settlement_evolution_missing` | evolution registration is missing: run settlement.evolution first; summary must be non-empty after trim (artifact may stay empty when c=0/0). | — | 叙述 |
 | `settlement_evolution_need_summary` | the settlement.evolution summary must be non-empty after trim; with zero candidates you may register the neutral summary and c=0/0 with an empty artifact. | — | 叙述 |
 | `settlement_evolution_ok` | [EVOLUTION REGISTERED] {{summary}} \| candidates {{candidates}} (kept/screened) \| classes {{classes}}. Sessions and todo are settled in the same transaction when their segments are present; review.note archives single-source and closes the run. | summary, candidates, classes | 叙述 |
-| `settlement_evolution_usage` | settlement.evolution payload: artifact\|summary[\|c=<kept>/<screened>[\|cls=<kind>:<n>,...]][\|sessions=<moved>/<remaining>/<destination>][\|todo=<remaining>/<verified_by>]; summary is required after trim and must not contain \|; the only optional segments are c=, cls=, sessions= and todo= — ev=, duplicates and unknown segments are refused. | — | 叙述 |
+| `settlement_evolution_usage` | settlement.evolution 载荷：artifact\|summary[\|c=<kept>/<screened>[\|cls=<kind>:<n>,...]][\|sessions=…][\|todo=…]；summary 必填且不得含 \|，只认这四个可选段。详见 docs/context/acts/settle.md（登记载荷与拒绝面）。 | — | 叙述 |
 | `settlement_sessions_missing` | subagent sessions are not settled (settlement.sessions, remaining must be 0) | — | 叙述 |
 | `settlement_sessions_ok` | subagent sessions settled: moved {{moved}} to {{destination}} (files renamed into the trash directory — not a permanent deletion; no per-file guarantee about which sessions were spared: verify the destination yourself). | moved, destination | 叙述 |
 | `settlement_sessions_payload` | 0\|0\|<your-destination>/<batch> | — | 叙述 |
 | `settlement_sessions_segment` | sessions=0/0/<your-destination>/<batch> | — | 叙述 |
 | `settlement_sessions_segment_bad` | the settlement.evolution sessions= segment must be `<moved>/<remaining>/<destination>`: moved a non-negative integer, remaining exactly 0, destination non-empty (slashes inside the destination are kept). | — | 叙述 |
-| `settlement_sessions_unsetted_hint` | [SESSIONS CLEANUP PENDING] subagent sessions remaining={{remaining}} — review.note stays blocked. Cleanup policy (scope strictly this run, never main/unrelated sessions, moved=0 legal, success = gone from your session history) is the authority of docs/context/rituals/cleanup.md §1. Declare via settlement.sessions (moved\|remaining\|destination) or the settlement.evolution sessions= segment; remaining must be 0. Missing declaration stays honestly unsettled. | remaining | 叙述 |
+| `settlement_sessions_unsetted_hint` | [SESSIONS CLEANUP PENDING] subagent sessions remaining={{remaining}} — review.note stays blocked. 政策见 docs/context/rituals/cleanup.md §1；用 settlement.sessions 或 settlement.evolution 的 sessions= 段声明，remaining 必须为 0。 | remaining | 叙述 |
 | `settlement_sessions_usage` | settlement.sessions payload "moved\|remaining\|destination": moved a non-negative integer, remaining exactly 0, destination non-empty (e.g. <your-destination>/<batch>); all three segments are required. | — | 叙述 |
 | `settlement_todo_missing` | the main-session todo list is not settled (settlement.todo, remaining must be 0) | — | 叙述 |
 | `settlement_todo_ok` | main-session todo list cleared: re-checked to 0 items (basis: {{verified_by}}). | verified_by | 叙述 |
