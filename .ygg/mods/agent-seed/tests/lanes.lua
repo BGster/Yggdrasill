@@ -48,3 +48,64 @@ test("worktree_claim 绑泳道台账 / release 释放（含非法分支名拒绝
   assert_eq(kv("lane.2.req"), "", "台账清空")
   assert_eq(kv("req.1.lane"), 0, "需求解绑")
 end)
+
+test("lane_probe 记真相 / 冲突雷达阻塞 / 失败只警告 / resolve 是唯一出口", function()
+  fresh()
+  charter_and_begin()
+  fire("requirement.add", "left half|description|subsys-a")
+  fire("requirement.add", "right half|description|subsys-b")
+  fire("lane.claim", "1|r1|||1")
+  fire("lane.claim", "2|r2|||1")
+
+  -- ① 探针落 KV，此时还没有重叠。
+  fire("tool.call", "git.lane_probe|lane=1;base=abc;branch=feature/aa11-left|t1")
+  reset()
+  fire(
+    "tool.result",
+    "t1|git.lane_probe|ok|0|lane=1;branch=feature/aa11-left;base=abc;head=1111111;commits=2;clean=1;files=src/a.lua,src/b.lua"
+  )
+  assert_eq(kv("lane.1.probe.commits"), 2, "提交数")
+  assert_eq(kv("lane.1.probe.clean"), "1", "干净位")
+  assert_eq(kv("lane.1.probe.head"), "1111111", "HEAD")
+  assert_eq(kv("lane.1.probe.files"), "src/a.lua,src/b.lua", "触碰文件")
+  assert_eq(kv("lane.1.probe.call"), "t1", "探针来源 call")
+  assert_eq(kv("req.1.conflict"), "", "尚无冲突")
+
+  -- ② 共享文件 → 由**与人工路径同一个写入器**抬高冲突。
+  fire("tool.call", "git.lane_probe|lane=2;base=abc;branch=feature/aa11-right|t2")
+  reset()
+  fire(
+    "tool.result",
+    "t2|git.lane_probe|ok|0|lane=2;branch=feature/aa11-right;base=abc;head=2222222;commits=1;clean=1;files=src/b.lua,src/c.lua"
+  )
+  assert_eq(count_marker("[CONFLICT RADAR]"), 1, "雷达必须叙述一次")
+  assert_eq(kv("req.1.conflict"), "overlapping file: src/b.lua", "冲突正文")
+  assert_eq(kv("req.1.conflict_peer"), "r2", "对手需求")
+  assert_eq(kv("req.1.conflict_note"), "overlapping file: src/b.lua", "备注")
+  assert_eq(kv("req.1.conflict_source"), "radar", "来源标记为雷达")
+  assert_eq(kv("req.2.conflict_peer"), "r1", "反向也记")
+  assert_eq(kv("req.conflicts"), 2, "冲突总数")
+  assert_eq(phase_of("r1"), "blocked", "r1 受阻")
+  assert_eq(phase_of("r2"), "blocked", "r2 受阻")
+
+  -- ③ 失败探针（commits=0）只警告，绝不阻塞：不产生新冲突，状态不动。
+  fire("tool.call", "git.lane_probe|lane=2;base=abc;branch=feature/aa11-right|t3")
+  reset()
+  fire(
+    "tool.result",
+    "t3|git.lane_probe|ok|0|lane=2;branch=feature/aa11-right;base=abc;head=2222222;commits=0;clean=1;files=src/b.lua"
+  )
+  assert_eq(count_marker("[LANE PROBE FAILED]"), 1, "失败探针必须叙述警告")
+  assert_eq(kv("req.conflicts"), 2, "冲突总数不变")
+  assert_eq(kv("lane.2.probe.commits"), 0, "探针真相照记")
+
+  -- ④ `requirement.resolve` 是唯一出口：四个键一起回空。
+  fire("requirement.resolve", "r1,r2|keep_both|re-checked")
+  assert_eq(kv("req.conflicts"), 0, "冲突总数归零")
+  assert_eq(kv("req.1.conflict"), "", "正文清空")
+  assert_eq(kv("req.1.conflict_peer"), "", "对手清空")
+  assert_eq(kv("req.1.conflict_note"), "", "备注清空")
+  assert_eq(kv("req.1.conflict_source"), "", "来源清空")
+  assert_eq(kv("req.2.conflict_source"), "", "反向来源清空")
+  assert_eq(phase_of("r1"), "draft", "回到 draft")
+end)
