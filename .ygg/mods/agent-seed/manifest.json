@@ -214,7 +214,7 @@
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "07ad9c5acc9b9b046aa0f2371cb0cad9a6a05007d3fe8c911f7203ec7335c97a"
+      "sha256": "8ea1b2508b2446ab19c19d6938adb6074da679aa63e148a54c7bcefc271c3137"
     },
     {
       "byteLength": 1943,

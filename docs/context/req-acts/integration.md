@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 集成（req-acts/integration）
 > **id** req-acts/integration · **幕** req: accept_gate/integrating/done · **触发** 验收门禁前 / 集成核验前
 > **读不到代价** hard-refusal（证据清单漏项 → 验收被拒；SHA 不符 → `integration_bad_sha` 打回）
-> **ver** 44ef6e
+> **ver** 2a00f8
 
 ## 7. 验收门禁（accept_gate）
 
@@ -12,15 +12,19 @@
 - **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_gate_ok` / `req_gate_no_artifacts` / `req_gate_no_evidence` / `req_gate_stale` 句式）；[../../design/kernel/state-surface.md](../../design/kernel/state-surface.md)（验收证据键）。
 - **场景化证据清单**（按需求类型选列核验，避免“看过就算”）：
 
+  **通用子句（对所有行生效）**：证据只度量「代码存在」是不合格的。凡本需求引入/依赖**开关型、feature-flag 型**能力（「缺席即失效 / 关掉即失效」的那一类），必须追加「**在真实配置下处于生效态**」的证据：`data/config.json` 里的生效值 + 对应的 `*_ships_armed_*` 用例名与结果。r4 首版交付三套门禁 473/158/77 全绿而 `readGate`/`readPlan` 根本不存在，就是这一条缺失的代价。**schema 只校形状，不校值域**：可选段可以整段缺席（r4 实况），必填键可以是 `false`（schema 合法但保护静默失效）——两形态都只能靠 armed 断言钉。
+
   | 需求类型 | 必须亲测的证据 |
   | --- | --- |
+  | **交付洁净度（所有需求类型必核）** | 执行者回执中的 `git-delivery-check.sh --text` 原文行：`ok=1` 且 `dirty`/`unpushed`/`stash`/`conflict_debris`/`fmt` 五项计数全 0；`n/a` / `waived` 项须附理由。**回执里只有「工作树 clean」字样、没有这一行的，按证据缺失不受理**。本行不随需求类型变化——代码需求它验「改动已提交且已推送」，纯文档需求同样验（文档改动也会漏提交） |
+  | **开关型 / feature-flag 特性**（「缺席即失效 / 关掉即失效」的能力） | ① `data/config.json` 实测存在**且生效**（非空表 / 布尔 `true`，不是「键在这里」）；② 同特性分支的 `*_ships_armed_*` 语义用例存在且全绿（贴用例名）；③ 剥掉/关掉该配置的副本仍走退让路径（回归保护未丢）。典型对象：`readPlan`/`readGate`（可选段，缺席即 inert）、`gates.require_all_green`（required，但 `false` 即静默失效） |
   | 跨仓库同步（mod/CLI/文档搬运） | 源↔目标 `diff -rq` 为空；二进制 `sha256` 双侧一致；目标仓 boot 三件套实测；docs 闭包 ok=1；数据红线零触碰；子模块指针未动 |
   | Mod 代码/文案改动 | `scripts/sync-seed-mod.sh --check`；`cargo run -p ygg-lint -- --pack .ygg/mods/agent-seed`（期望 `0 error(s), 0 warning(s)`）；`cargo test -p ygg-sandbox --test agent_seed_semantics` 全绿（含新增用例）；`cargo run --example playtest -- .ygg/mods/agent-seed` 的 all-1 走到 `[ENDING` |
   | 宿主 crates 改动 | 字面三件套（`cargo test --workspace` ∧ `--example egg` ∧ `agent_seed_semantics`），记录真实退出码与计数 |
   | 纯文档/规则修改 | `docs-consistency` ok=1；受影响的键数/枚举实测对齐；语义测试不变红 |
   | 需求图/台账操作 | `requirement.list` 终态数对得上；分支模型/注册项存在性实测 |
 
-  清单是三问的一环：① 本需求属于哪类？② 该类的每项证据跑了吗（贴末行/输出）？③ 没跑的那项为何不适用（写明）。
+  清单是三问的一环：① 本需求属于哪类？② 该类的每项证据跑了吗（贴末行/输出）？③ 没跑的那项为何不适用（写明）。新增一问：**④ 有没有把「已存在」错当成「已生效」？**
 
 ## 8. 集成（integrating）
 

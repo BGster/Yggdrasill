@@ -545,7 +545,13 @@ fn submit_dev_with_exec(
 /// Drive to **plan gate pending**: plan proposal → **delivery is the gate** (D-MA23) —
 /// the submit itself raises `gate="plan"` bound to the rev; there is no acceptance step.
 fn drive_to_plan_gate() -> Game {
-    let mut game = Game::open(&project_mod_dir());
+    drive_to_plan_gate_at(&project_mod_dir())
+}
+
+/// Same drive against an arbitrary mod directory (r8: the armed / bare-copy pairs need the
+/// **same** pipeline with a different shipped config, so the opening move must be a parameter).
+fn drive_to_plan_gate_at(mod_dir: &Path) -> Game {
+    let mut game = Game::open(mod_dir);
     start_requirement(&mut game);
     submit(&mut game, 1, "plan", "semantics-p1");
     game.assert_kv("req.1.gate", json!("plan"));
@@ -558,7 +564,11 @@ fn drive_to_plan_gate() -> Game {
 /// From the plan gate to **dev review pending**: approve plan (the reactive effect
 /// auto-dispatches development in the same turn) → deliver.
 fn drive_to_dev_pending(ext: &str) -> Game {
-    let mut game = drive_to_plan_gate();
+    drive_to_dev_pending_at(ext, &project_mod_dir())
+}
+
+fn drive_to_dev_pending_at(ext: &str, mod_dir: &Path) -> Game {
+    let mut game = drive_to_plan_gate_at(mod_dir);
     game.click("gate.approve — ");
     game.assert_kv("req.1.plan_ok", json!(true));
     game.assert_kv("req.1.job", json!("development"));
@@ -613,9 +623,14 @@ fn drive_to_done(mut game: Game) -> Game {
 /// Complete the single requirement and close the batch boundary: `coordinate.submit` moves
 /// `run.phase` to `settle` (a micro-state move — `fsm.stage` stays `live`, R8).
 fn drive_to_settle() -> Game {
-    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(drive_to_dev_pending(
-        "semantics-p2",
-    ))));
+    drive_to_settle_at(&project_mod_dir())
+}
+
+/// Same drive against an arbitrary mod directory (r8 armed / bare-copy pairs).
+fn drive_to_settle_at(mod_dir: &Path) -> Game {
+    let mut game = drive_to_done(drive_to_integrating(drive_to_accept(
+        drive_to_dev_pending_at("semantics-p2", mod_dir),
+    )));
     let closed = game.click("coordinate.submit — ");
     assert!(
         closed["narrative"]
@@ -6108,4 +6123,346 @@ fn settlement_machine_agreement_passes_and_records_provenance() {
         "settlement.sessions.source",
         json!("machine:harness.sessions-count"),
     );
+}
+
+// ───────────────────── r8 · E3: the armed surface ─────────────────────
+//
+// 命题：证据清单过去只度量「代码存在」。r4 首版交付代码完整、10 条用例、三套门禁 473/158/77
+// 全绿，而 `data/config.json` 里 `readGate` / `readPlan` 根本不存在——线上零拦截。缺的不是用例，
+// 是一条**通用规则**：凡「缺席即失效 / 关掉即失效」的开关，必须在**入库态**生效，并被一条
+// `ships_armed_*` 用例钉住「生效态 + 退让路径」两半。
+//
+// 三种失效形态在本仓同时存在，这就是本规则要覆盖的全集：
+//   ① 可选段缺席（`readPlan` / `readGate` 在 schema 里是可选 → 整段不见即 inert，r4 的实况）；
+//   ② 必填键缺席（`gates.require_all_green` 是 required → 装载期就拦，schema 能保这一格）；
+//   ③ **必填键值不对**（`false` 是 schema 合法值，但 `false` 一样让保护静默失效）——
+//      schema 只管形状，值域只能靠 armed 断言钉。③ 是②的盲区，也是本规则多咬的那一口。
+//
+// 三条判定式：
+//   R1 分区完备（机检）—— 配置面每个键都必须被分类：生成区 / 手写区 × armed / fixed；
+//      生成区的归属**解析自生成器的自报键表**，不靠手抄常量，两边分叉立刻红。
+//   R2 armed 有据（机检）—— Armed 键入库态生效（非空对象 / 布尔 true），且同文件里有
+//      `fn <slug>_ships_armed` 用例。
+//   R3 退让可回（**不**机检）—— `ships_armed` 用例内部必须同时断言「剥掉该键的副本仍走
+//      退让路径」。刻意不造「检查用例内容是否完整」的元检查：那是无穷倒退，也违反
+//      「不写自造检查器当纪律载体」的红线；R3 靠样板复制 + 评审，此处如实记账。
+
+/// 配置面的**来源**：生成区（`scripts/gen-scene-readfirst.py --readset` 产出；手改会被内容寻址
+/// 的 manifest 与文档头比对拦下）还是手写区（人工维护，无生成器覆盖）。
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Origin {
+    Generated,
+    HandWritten,
+}
+
+/// Armed 键「生效」的判定形态。新开关选一种形态登记即可——**不绑定具体键名**。
+#[derive(Debug, Clone, Copy)]
+enum ArmedProbe {
+    /// 非空对象即生效（必读集 / ver 台账这类表）。
+    NonEmptyObject,
+    /// 布尔 `true` 即生效（`effective(path) == true` 式的开关）。
+    IsTrue,
+}
+
+/// 配置面上的一格：键路径 + 来源 + 是否为「开关型」。
+struct ConfigKey {
+    /// 点分路径；顶层键只写一段。
+    path: &'static str,
+    origin: Origin,
+    /// `Some((slug, probe))` = 关掉即静默削弱一项保护；`slug` 决定 `ships_armed` 用例名前缀。
+    armed: Option<(&'static str, ArmedProbe)>,
+}
+
+/// 配置面分区表（r8 / R1）。**新增 `data/config.json` 顶层键或 `gates` 子键必须在此登记**，
+/// 否则 `config_surface_every_key_is_classified` 直接红——这正是 R1 的咬合力所在：
+/// 加开关的人必须先回答「这是固定项还是 armed」。
+const CONFIG_SURFACE: &[ConfigKey] = &[
+    // ── 生成区：生成器拥有；两份都是 armed（缺席 ⇒ 必读集为空 ⇒ 读签门禁整体 inert）。
+    ConfigKey {
+        path: "readPlan",
+        origin: Origin::Generated,
+        armed: Some(("read_gate", ArmedProbe::NonEmptyObject)),
+    },
+    ConfigKey {
+        path: "readGate",
+        origin: Origin::Generated,
+        armed: Some(("read_gate", ArmedProbe::NonEmptyObject)),
+    },
+    // ── 手写区：缺席走 lib 缺省，且不削弱任何保护。
+    ConfigKey {
+        path: "play",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "drive",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "evolution",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "autosave",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "hot_reload",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "harness",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    ConfigKey {
+        path: "settlement",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    // `allowedTools` 缺席 = 一个工具都不放行（fail-closed）：缺席**收紧**而非削弱，故非 armed。
+    ConfigKey {
+        path: "allowedTools",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    // ── `gates` 容器与其开关。
+    ConfigKey {
+        path: "gates",
+        origin: Origin::HandWritten,
+        armed: None,
+    },
+    // 见文件尾 `gates_strict_ships_armed_*` 用例：schema 只保存在，值域靠此断言钉。
+    ConfigKey {
+        path: "gates.require_all_green",
+        origin: Origin::HandWritten,
+        armed: Some(("gates_strict", ArmedProbe::IsTrue)),
+    },
+];
+
+const NULL_CONFIG: Json = Json::Null;
+
+/// 按点分路径取值（缺键 → `Null`，不 panic：R2 要把「缺席」本身报成断言失败而不是崩溃）。
+fn config_value(config: &Json, path: &str) -> Json {
+    let mut node = config;
+    for segment in path.split('.') {
+        node = node.get(segment).unwrap_or(&NULL_CONFIG);
+    }
+    node.clone()
+}
+
+/// 某一层被声明过的键（`depth` = 段数，只取该层的末段）。
+fn declared_keys_at(depth: usize) -> Vec<String> {
+    CONFIG_SURFACE
+        .iter()
+        .filter(|entry| entry.path.split('.').count() == depth)
+        .map(|entry| {
+            entry
+                .path
+                .rsplit('.')
+                .next()
+                .expect("non-empty path")
+                .to_owned()
+        })
+        .collect()
+}
+
+/// 覆盖检查：实际键集合与声明集合**双向**相等——漏登记（实际多）与残留（表里多）都红。
+#[track_caller]
+fn assert_cover(label: &str, actual: &[String], declared: &[String]) {
+    let mut unclassified: Vec<&String> = actual
+        .iter()
+        .filter(|key| !declared.iter().any(|known| known == *key))
+        .collect();
+    let mut stale: Vec<&String> = declared
+        .iter()
+        .filter(|known| !actual.iter().any(|key| key == *known))
+        .collect();
+    unclassified.sort();
+    stale.sort();
+    assert!(
+        unclassified.is_empty(),
+        "{label}: unclassified config key(s) {unclassified:?} — register them in CONFIG_SURFACE \
+         (a new switch must answer `fixed` or `armed` before it ships)"
+    );
+    assert!(
+        stale.is_empty(),
+        "{label}: CONFIG_SURFACE declares key(s) {stale:?} that the shipped config no longer has"
+    );
+}
+
+/// 生成器自报它拥有哪些键（`scripts/gen-scene-readfirst.py` 的 `READSET_KEYS`）。
+/// 解析而不是抄一份常量：两处一旦分叉，R1 立刻红（生成区归属是事实，不是声明）。
+fn generator_owned_keys() -> Vec<String> {
+    let path = repo_dir().join("scripts/gen-scene-readfirst.py");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+    let line = source
+        .lines()
+        .find(|line| line.trim_start().starts_with("READSET_KEYS"))
+        .expect("gen-scene-readfirst.py must declare READSET_KEYS (the generated-region oracle)");
+    let mut keys = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find('"') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('"') else { break };
+        keys.push(after[..end].to_owned());
+        rest = &after[end + 1..];
+    }
+    assert!(
+        !keys.is_empty(),
+        "READSET_KEYS parsed to nothing — the oracle line changed shape: {line}"
+    );
+    keys
+}
+
+/// **R1 · 分区完备**：配置面每个键都被分类，且生成区归属 == 生成器自报的键表。
+#[test]
+fn config_surface_every_key_is_classified() {
+    let config = support::read_json(&project_mod_dir().join("data/config.json"));
+    let object = config
+        .as_object()
+        .expect("data/config.json top level is an object");
+
+    let actual_top: Vec<String> = object.keys().cloned().collect();
+    assert_cover("top-level", &actual_top, &declared_keys_at(1));
+
+    let actual_gates: Vec<String> = object
+        .get("gates")
+        .and_then(Json::as_object)
+        .map(|table| table.keys().cloned().collect())
+        .unwrap_or_default();
+    assert_cover("gates", &actual_gates, &declared_keys_at(2));
+
+    // 生成区不是「我们在表里这么写」，而是「生成器这么报」——两处必须逐项相等。
+    let mut declared_generated: Vec<String> = CONFIG_SURFACE
+        .iter()
+        .filter(|entry| entry.origin == Origin::Generated)
+        .map(|entry| entry.path.to_owned())
+        .collect();
+    declared_generated.sort();
+    let mut actual_generated = generator_owned_keys();
+    actual_generated.sort();
+    assert_eq!(
+        actual_generated, declared_generated,
+        "the generated region must equal READSET_KEYS in scripts/gen-scene-readfirst.py: a key the \
+         generator owns but the table calls hand-written (or the reverse) means the partition is a \
+         declaration about nothing"
+    );
+
+    // 分区必须真的分出了 armed：一张全是 fixed 的表会让 R2 空转。
+    let armed = CONFIG_SURFACE
+        .iter()
+        .filter(|entry| entry.armed.is_some())
+        .count();
+    assert!(
+        armed >= 2,
+        "the surface must classify at least two armed switches, got {armed} — an empty armed set \
+         turns R2 into a vacuous green"
+    );
+}
+
+/// **R2 · armed 有据**：每个 Armed 键在入库态生效，且同文件里有一条 `ships_armed` 用例。
+///
+/// 这一条直接咬住 r4 的失效态：`readGate` / `readPlan` 当时**整键缺席**，而三套门禁照样全绿。
+#[test]
+fn armed_features_ship_armed_with_a_semantics_case() {
+    let config = support::read_json(&project_mod_dir().join("data/config.json"));
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agent_seed_semantics.rs");
+    let source = std::fs::read_to_string(&source_path)
+        .unwrap_or_else(|err| panic!("read {}: {err}", source_path.display()));
+
+    let armed: Vec<&ConfigKey> = CONFIG_SURFACE
+        .iter()
+        .filter(|entry| entry.armed.is_some())
+        .collect();
+    assert!(!armed.is_empty(), "an empty armed table proves nothing");
+
+    for entry in armed {
+        let (slug, probe) = entry.armed.expect("armed entry");
+        let value = config_value(&config, entry.path);
+
+        // ①入库态生效：缺键 / 空表 / false 都不是「已 armed」，而是 r4 那种「代码在、开关没开」。
+        match probe {
+            ArmedProbe::NonEmptyObject => {
+                let table = value.as_object().unwrap_or_else(|| {
+                    panic!(
+                        "{} must ship as an object — the shipped config carries no such key, which \
+                         is exactly the r4 failure mode (code complete, gate inert): {value}",
+                        entry.path
+                    )
+                });
+                assert!(
+                    !table.is_empty(),
+                    "{} must ship **armed**: an empty table is the inert state",
+                    entry.path
+                );
+            }
+            ArmedProbe::IsTrue => {
+                assert_eq!(
+                    value,
+                    json!(true),
+                    "{} must ship as true — absent or false silently disables the guard it fronts",
+                    entry.path
+                );
+            }
+        }
+
+        // ② 同文件里有 ships_armed 用例：生效态 + 退让路径（R3）由那条用例承担。
+        //    针要求行首 `fn `（Rust 顶层项 = 列 0）：注释里提到用例名不能冒充用例本体。
+        let needle = format!("\nfn {slug}_ships_armed");
+        assert!(
+            source.contains(&needle),
+            "the armed switch {:?} (slug {slug}) has no `fn {slug}_ships_armed*` case: an armed \
+             config key without an assertion on BOTH halves (armed behaviour + the disabled \
+             fallback) is the silence this rule exists to remove",
+            entry.path
+        );
+    }
+}
+
+/// **R3 的第二实例**（第一个是 `read_gate_ships_armed_and_a_bare_copy_stays_inert`）：
+/// `gates.require_all_green` 是「关掉即失效」的开关——`src/core/config.lua` 的
+/// `strict_gates()` 判的是 `== true`。
+///
+/// 后果不是旁枝：红盘（`verify.submit all_green=false`）会被记成 `verify.passed=true`——
+/// 能骗过所有后续门禁的那种错误。全仓此前零用例引用该键。
+#[test]
+fn gates_strict_ships_armed_and_a_bare_copy_bypasses_a_red_verify() {
+    // ① 入库态：红盘如实记失败，整批退回协调。
+    let mut armed = drive_to_settle();
+    let failed = armed.click("verify.submit all_green=false — ");
+    assert!(
+        failed["narrative"].to_string().contains("[GATES FAILED]"),
+        "an armed require_all_green must send a red verify back to coordinate: {failed}"
+    );
+    armed.assert_kv("verify.passed", json!(false));
+    armed.assert_kv("run.phase", json!(""));
+    armed.assert_kv("verify.failures", json!(1));
+
+    // ② 值改成 false（**schema 合法**：required 只管存在，不管值）：同一条路径必须走退让分支。
+    //    R3 的回归保护：退让路径必须仍然可选（关闸是设计内的安全阀），但它的存在必须被写在
+    //    断言里——「不拦人」与「红盘记成绿盘」是同一行代码的两面，不能靠记忆区分。
+    let bare_dir = support::temp_dir("gates-strict-bare");
+    support::copy_dir(&project_mod_dir(), &bare_dir);
+    let mut bare_config = support::read_json(&bare_dir.join("data/config.json"));
+    bare_config["gates"]["require_all_green"] = json!(false);
+    support::write_json(&bare_dir.join("data/config.json"), &bare_config);
+    support::reseal(&bare_dir);
+
+    let mut bare = drive_to_settle_at(&bare_dir);
+    let bypassed = bare.click("verify.submit all_green=false — ");
+    assert!(
+        bypassed["narrative"]
+            .to_string()
+            .contains("[GATES BYPASSED]"),
+        "a disabled require_all_green must narrate the bypass, not fail silently: {bypassed}"
+    );
+    bare.assert_kv("verify.passed", json!(true));
+    bare.assert_kv("run.phase", json!(""));
+    bare.assert_kv("verify.failures", json!(1));
 }
