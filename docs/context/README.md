@@ -1,13 +1,11 @@
 # Yggdrasill · Context 召回树（docs/context）
 > **id** readme · **幕** all · **触发** 任何时刻 / 进树第一读
 > **读不到代价** silent-drift（迷路后从记忆推进，是 §1.0c scene gate 的首要失效来源）
-> **ver** 3e9616
+> **ver** caa07a
 
-**定位**：五幕（立局/协调/盘点/发布/退役）与需求级九幕的「进行时台词」知识权威树的**唯一入口**——场景叙事、阶段策略、每幕入口/必做/出口动作清单，以及**无 egg 环境的人工执行法**。mod 的 `scenes` / `prompts` / 六个 `<node>_common` 键是这棵树的运行时投影（状态前缀 + 指针）；语义以树内文件为准。
-
-**replaces**：r2「mod 剧情提示词迁出」前散置于 `.ygg/mods/agent-seed/data/texts/core.json`（scenes/prompts）与 `beats-flow.json`（`*_common`）的幕叙事正文；以及 r1 之前平铺在 `docs/context/` 的 17 个文件（按「召回时点」重切成 27 份权威文件，D-MA27）。
-
-**上游**：[../README.md](../README.md) · **相关**：[scenes.json](scenes.json)（场景 → 文档加载表，r2 消费） · [rituals/dispatch.md](rituals/dispatch.md) · [rituals/cleanup.md](rituals/cleanup.md) · [copy/README.md](copy/README.md)（七域索引） · [../design/run-story.md](../design/run-story.md)（微状态机契约，语义不重复讲述）
+> **定位**：五幕（立局/协调/盘点/发布/退役）的「进行时台词」知识权威——场景叙事、阶段策略、每幕入口/必做/出口动作清单，以及**无 egg 环境的人工执行法**。mod 的 `scenes` / `prompts` / 六个 `<node>_common` 键是本文的运行时投影（状态前缀 + 指针）；语义以本文为准。本文件是这棵树的召回入口（时点 → 文件见下表）。
+> **replaces**：r2「mod 剧情提示词迁出」前散置于 `.ygg/mods/agent-seed/data/texts/core.json`（scenes/prompts）与 `beats-flow.json`（`*_common`）的幕叙事正文。
+> **上游**：[../README.md](../README.md) · **相关**：[rituals/dispatch.md](rituals/dispatch.md) · [rituals/cleanup.md](rituals/cleanup.md) · [copy/README.md](copy/README.md)（七域索引） · [../design/run-story.md](../design/run-story.md)（微状态机契约，语义不重复讲述）
 
 ## 我在哪个时点 → 读哪个文件
 

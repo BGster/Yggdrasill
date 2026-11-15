@@ -1,20 +1,18 @@
 # Yggdrasill · 派发仪式（dispatch-ritual）
 > **id** rituals/dispatch · **幕** coordinate（派发前） · **触发** 派发任何 subagent（plan / development / analysis）前
 > **读不到代价** hard-refusal（`.env.local` 未 source 即派发、工件落检出、submit 缺 `exec=` 均不合规）
-> **ver** b8b1c5
+> **ver** d12280
 
-**定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
-
-**replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
-
-**上游**：[../../README.md](../../README.md) · **相关**：[acts/](../acts/)（当前幕的入口/必做/出口） · [../copy/harness.md](../copy/harness.md)（submit 命令模板等句式契约） · [../../wiki-governance.md](../../wiki-governance.md)
+> **定位**：`subagent_brief` 模板的策略正文知识权威——子代理必读材料纪律、执行者注册、提交仪式、回执纪律与降级说明。mod 的 `beats-harness.subagent_brief` / `config_opened` / `subagent_fallback_note` 是本文的运行时投影（事实头 + 指针）。
+> **replaces**：r2 前散置于 `.ygg/mods/agent-seed/data/texts/beats-harness.json` 的派发策略正文。
+> **上游**：[../../README.md](../../README.md) · **相关**：[../acts/](../acts/) · [../copy/harness.md](../copy/harness.md)（submit 命令模板等句式契约） · [../../wiki-governance.md](../../wiki-governance.md)
 
 ## 1. brief 结构（事实头 + 策略正文）
 
 mod 运行时发出的 brief = **事实头**（留 mod，带状态变量）+ **策略正文**（知识权威在本文）：
 
 - 事实头：`Requirement {{id}} (rev {{rev}}, stage={{stage}}): {{title}}` / `Description: {{desc}}` / `Worktree: {{worktree}} (branch={{branch}}, base={{base}})` / `Artifact: {{artifact}}` / `Submit: {{submit}}`。
-- 策略正文（以下 §3–§7）随 brief 指针给出，各项目可在自己的 context 副本中本地化改写。
+- 策略正文（以下 §3–§6）随 brief 指针给出，各项目可在自己的 context 副本中本地化改写。
 
 ## 2. 派发前环境准备（必须 source .env.local，并将结果用于创建）
 

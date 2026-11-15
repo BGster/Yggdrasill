@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 交付（req-acts/delivery）
 > **id** req-acts/delivery · **幕** req: ready/developing/accept/accept_gate · **触发** 派发 development / 交付受理前
 > **读不到代价** hard-refusal（工件纪律漏读 → 交付被打回；`.env.local` 未 source → 派发不合规）
-> **ver** 5cec9d
+> **ver** f95112
 
 ## 4. 待开发（ready）
 
@@ -36,4 +36,4 @@ docs wiki 是全仓始终最新的权威——不是变更日志，历史归 git
 - **amend**：递增 rev 并使 plan_ok 失效——门禁挂起时 stale、阻塞 approve；done 上 amend 派生新需求。
 - **split / merge**：仅开发前且无活动任务/门禁/泳道/冲突的需求可做；父/源需求落 done + closed_reason。
 - **conflict / resolve**：两需求间双向冲突阻塞派发与收口，直到 `requirement.resolve`（keep_both / keep_first / revise）。
-- `blocked`（冲突 / needs_amend）是显示覆盖层，不是微状态——判微状态仍以九幕为准（见 [召回入口](../README.md) 九幕一览）。
+- `blocked`（冲突 / needs_amend）是显示覆盖层，不是微状态——判微状态仍以上面九幕为准（九幕一览见 [README.md](../README.md)）。
