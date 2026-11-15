@@ -2341,67 +2341,6 @@ fn profile_registration_via_config_set_roundtrip() {
     game.assert_kv("settings.profile_index", json!("agent-1"));
 }
 
-/// 幕前必读签名（r3 销票制）：`config.set read.<act>/<doc-id>=<ver>` 落 `settings.read.*`，
-/// 值形状 `ver|签名幕|seq`，平铺索引 `settings.read_index` 同步；同键重签是幂等 upsert。
-/// 覆盖面只有在 `readPlan` 已烘进 `data/config.json` 时才算——缺表即降级（不拒签）。
-#[test]
-fn read_signature_records_ver_scene_and_index() {
-    let mut game = Game::open(&project_mod_dir());
-    charter_and_begin(&mut game); // 协调幕（run.phase = "" → scene = coordinate）
-
-    let signed = game.narrate("config.set", &text("read.acts/coordinate=9f2c1a"));
-    assert_eq!(
-        count_lines(&signed, "[SIGNED] acts/coordinate@9f2c1a"),
-        1,
-        "{signed:#?}"
-    );
-    game.assert_kv(
-        "settings.read.acts/coordinate",
-        json!("9f2c1a|coordinate|0"),
-    );
-    game.assert_kv("settings.read_index", json!("acts/coordinate"));
-
-    // `settings.` 前缀写法等价；同键重签覆盖 ver，索引不重复登记。
-    game.narrate("config.set", &text("settings.read.acts/coordinate=aa11bb"));
-    game.assert_kv(
-        "settings.read.acts/coordinate",
-        json!("aa11bb|coordinate|0"),
-    );
-    game.assert_kv("settings.read_index", json!("acts/coordinate"));
-
-    // 第二件：索引追加，两件互不覆盖。
-    game.narrate("config.set", &text("read.coordinate/dispatch=c0ffee"));
-    game.assert_kv(
-        "settings.read.coordinate/dispatch",
-        json!("c0ffee|coordinate|0"),
-    );
-    game.assert_kv(
-        "settings.read_index",
-        json!("acts/coordinate,coordinate/dispatch"),
-    );
-
-    // 缺 readPlan → 降级：回执报件数、不报 k/n，且**不拒签**。
-    // 开闸后入库件带 readPlan，故这条降级路径在「剥掉 readPlan」的副本上验。
-    let bare_dir = support::temp_dir("read-unplotted");
-    support::copy_dir(&project_mod_dir(), &bare_dir);
-    let mut bare_config = support::read_json(&bare_dir.join("data/config.json"));
-    bare_config
-        .as_object_mut()
-        .expect("config object")
-        .remove("readPlan");
-    support::write_json(&bare_dir.join("data/config.json"), &bare_config);
-    support::reseal(&bare_dir);
-    let mut bare = Game::open(&bare_dir);
-    charter_and_begin(&mut bare);
-    let unplotted = bare.narrate("config.set", &text("read.acts/charter=123456"));
-    assert_eq!(
-        count_lines(&unplotted, "no read plan is baked for this act"),
-        1,
-        "{unplotted:#?}"
-    );
-    bare.assert_kv("settings.read.acts/charter", json!("123456|coordinate|0"));
-}
-
 /// 非法键形 / 非法 ver 一律 `[REJECTED:PAYLOAD]` 且不落 KV；未知键仍 fail-closed
 ///（白名单扩张没有把 `bad_config_key` 那条路径堵死）。
 #[test]

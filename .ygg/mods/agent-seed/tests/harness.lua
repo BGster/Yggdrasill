@@ -14,6 +14,43 @@ local KV = {}
 local NARRATED = {}
 local EMITTED = {}
 local HANDLERS = {}
+local QUEUE = {}
+local DRAINING = false
+
+-- stamp-only 路由：宿主在声明路由上盖 `|actor=` 章（pack.json inboxRoutes 的 actor:true）。
+local STAMP_ONLY = {
+  ["proposal.submit"] = true,
+  ["config.set"] = true,
+  ["gate.approve"] = true,
+  ["coordinate.submit"] = true,
+}
+local ACTOR = "selftest"
+
+--- 投递一个事件到 handler，按路由语义决定是否盖 actor 章。
+local function deliver(name, payload)
+  local fn = HANDLERS[name]
+  if fn == nil then
+    return nil
+  end
+  local body = payload
+  if STAMP_ONLY[name] and type(body) == "string" and not body:find("|actor=", 1, true) then
+    body = body .. "|actor=" .. ACTOR
+  end
+  return fn(body)
+end
+
+--- 按 FIFO 把 emit 收集到的事件派发出去（重入安全：外层循环会继续消费）。
+local function drain()
+  if DRAINING then
+    return
+  end
+  DRAINING = true
+  while #QUEUE > 0 do
+    local event = table.remove(QUEUE, 1)
+    deliver(event.name, event.payload)
+  end
+  DRAINING = false
+end
 
 ygg = {
   engine_version = "selftest",
@@ -31,8 +68,12 @@ ygg = {
   narrate = function(line)
     NARRATED[#NARRATED + 1] = line
   end,
+  -- 沙箱里 `ygg.emit` 是**收集面**：driver 在 handler 返回后按队列 dispatch。
+  -- 这里用同步队列复刻同一语义（否则 `choice_selected` 发出的动作会悬空）。
   emit = function(name, payload)
     EMITTED[#EMITTED + 1] = { name = name, payload = payload }
+    QUEUE[#QUEUE + 1] = { name = name, payload = payload }
+    drain()
   end,
   on = function(name, fn)
     HANDLERS[name] = fn
@@ -148,9 +189,8 @@ end
 
 --- 调用一个 handler；未注册即失败（防止「测试悄悄空跑」）。
 function fire(name, payload)
-  local fn = HANDLERS[name]
-  assert_true(fn ~= nil, ("handler not registered: %s"):format(name))
-  return fn(payload)
+  assert_true(HANDLERS[name] ~= nil, ("handler not registered: %s"):format(name))
+  return deliver(name, payload)
 end
 
 function kv(key)
@@ -190,6 +230,13 @@ end
 --- 清空 KV 与收集面，然后重新开局（等价于 Rust 侧每个用例新建一个 Game）。
 --- handlers 不动：它们是 mod 加载时注册的，跨用例复用。
 function fresh()
+  -- 保真：Rust 侧每个用例都是一个全新内核。这里用「清模块缓存 + 重载 mod」等价实现，
+  -- 否则模块级 local（config 缓存、lanes 台账等）会在用例之间串味。
+  for name in pairs(package.loaded) do
+    if type(name) == "string" and name:match("^src%.") then
+      package.loaded[name] = nil
+    end
+  end
   for key in pairs(KV) do
     KV[key] = nil
   end
@@ -197,6 +244,8 @@ function fresh()
   EMITTED = {}
   __SELFTEST.lastChoice = nil
   __SELFTEST.meta = {}
+  HANDLERS = {}
+  dofile(__MOD_DIR .. "/mod.lua")
   fire("event.start", "0")
 end
 
@@ -220,4 +269,151 @@ function exists(path)
   local out = probe:read("*l")
   probe:close()
   return out == "yes"
+end
+
+------------------------------------------------------------------------------
+-- 5. 读签门禁模拟（镜像 src/domain/readset.lua 的 bearing/ensure_reads）
+--
+-- 口径：幕维度 readPlan.<scene>，阶段维度 readGate.reqActs.<stage>，
+-- 门禁维度 readGate.gates.<kind>，批边界 readPlan.settle；ver 一律从 readGate.ver 读。
+------------------------------------------------------------------------------
+
+local function mod_config()
+  return __ASSETS["ygg:agent/config"]
+end
+
+local function current_scene()
+  local phase = KV["run.phase"]
+  if type(phase) == "string" and phase ~= "" then
+    return phase
+  end
+  return "coordinate"
+end
+
+--- 待批门禁：第一个非空 `req.N.gate`（与 gate_actions.pick_gate 同口径）。
+local function pending_gate()
+  for i = 1, 64 do
+    local kind = KV["req." .. i .. ".gate"]
+    if type(kind) == "string" and kind ~= "" then
+      return i, kind
+    end
+  end
+  return nil
+end
+
+local function bearing(action, stage, req)
+  local config = mod_config()
+  local plan = config.readPlan or {}
+  local gate = config.readGate or {}
+  local docs, seen = {}, {}
+  local function push(group)
+    if type(group) == "table" then
+      for _, doc in ipairs(group) do
+        if type(doc) == "string" and not seen[doc] then
+          seen[doc] = true
+          docs[#docs + 1] = doc
+        end
+      end
+    end
+  end
+
+  if action == "proposal.submit" then
+    push(plan[current_scene()])
+    if stage and gate.reqActs then
+      push(gate.reqActs[stage])
+    end
+  elseif action == "gate.approve" then
+    local index = req or pending_gate()
+    if index then
+      local kind = KV["req." .. index .. ".gate"]
+      if type(kind) == "string" and gate.gates then
+        push(gate.gates[kind])
+      end
+    end
+  elseif action == "coordinate.submit" then
+    push(plan.settle)
+  end
+
+  local out = {}
+  for _, doc in ipairs(docs) do
+    out[#out + 1] = { doc = doc, ver = (gate.ver and gate.ver[doc]) or "" }
+  end
+  return out
+end
+
+local function scope_epoch(req)
+  local epoch = KV["settings.epoch.act.seq"] or 0
+  if req then
+    local stage = KV["settings.epoch.req." .. req .. ".stage.seq"] or 0
+    if stage > epoch then
+      epoch = stage
+    end
+  end
+  return epoch
+end
+
+local function sign_seq_of(doc, value)
+  local third = tonumber(tostring(value):match("^[^|]*|[^|]*|(%d+)"))
+  if third and third > 0 then
+    return third
+  end
+  return KV["settings.sign_seq." .. doc] or 0
+end
+
+--- 把该动作的必读集签成新鲜的（未签 / 跨纪元 / 超窗口 → 重签）。
+function ensure_reads(action, stage, req)
+  local now = KV["settings.clock_seq"] or 0
+  local window = KV["settings.readGate.window"] or 80
+  local index = req or pending_gate()
+
+  for _, item in ipairs(bearing(action, stage, index)) do
+    local doc, ver = item.doc, item.ver
+    if ver ~= "" then
+      local signed = KV["settings.read." .. doc]
+      local fresh = false
+      if type(signed) == "string" and signed ~= "" then
+        local head = signed:match("^([^|]*)")
+        local seq = sign_seq_of(doc, signed)
+        if head == ver and seq > scope_epoch(index) and (now - seq) <= window then
+          fresh = true
+        end
+      end
+      if not fresh then
+        fire("config.set", "read." .. doc .. "=" .. ver)
+      end
+    end
+  end
+end
+
+--- 重新渲染并取菜单项（mock 的 ygg.choice 收集面）。
+function render_options()
+  -- 选项由「最近一次 handler 末尾的 ygg.choice」产生（沙箱里渲染是 handler 的副作用）。
+  -- `node:render` 只是叙事节点，不是 handler——别去 fire 它。
+  local choice = __SELFTEST.lastChoice
+  assert_true(choice ~= nil, "no pending choice: call fresh() first")
+  return choice.options
+end
+
+--- 点菜单：先按动作补签，再按前缀找序号，最后发 ygg.choice_selected。
+function click(prefix)
+  local action = prefix:match("^([%w%._%-]+)")
+  if action then
+    ensure_reads(action, nil, nil)
+  end
+  local options = render_options()
+  local index
+  for i, text in ipairs(options) do
+    if text:sub(1, #prefix) == prefix then
+      index = i
+      break
+    end
+  end
+  assert_true(index ~= nil, ("no menu entry starts with `%s`"):format(prefix))
+  return fire("ygg.choice_selected", tostring(index))
+end
+
+--- 章程三件套 → 开工（Rust 侧的 charter_and_begin）。
+function charter_and_begin()
+  click("charter.set — ")
+  click("run.begin — ")
 end

@@ -90,7 +90,12 @@ fn main() {
         .collect();
     files.sort();
     if let Some(needle) = &filter {
-        files.retain(|p| p.file_name().and_then(|s| s.to_str()).unwrap_or("").contains(needle.as_str()));
+        files.retain(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .contains(needle.as_str())
+        });
     }
     if files.is_empty() {
         eprintln!("没有可执行的测试文件（{}）", tests_dir.display());
@@ -99,7 +104,11 @@ fn main() {
 
     let mut hard_failures = 0usize;
     for file in &files {
-        let name = file.file_name().and_then(|s| s.to_str()).unwrap_or("?").to_owned();
+        let name = file
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_owned();
         match run_file(&lua, file) {
             Ok(()) => println!("file ok   {name}"),
             Err(err) => {
@@ -120,8 +129,8 @@ fn main() {
 }
 
 fn run_file(lua: &Lua, path: &Path) -> Result<(), String> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|err| format!("read {}: {err}", path.display()))?;
+    let source =
+        std::fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
     let name = path
         .file_name()
         .and_then(|s| s.to_str())
