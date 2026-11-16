@@ -48,7 +48,7 @@
 | 脚本 | argv（必填 `*`） | 输出（exit 0，k=v 缺省） |
 | --- | --- | --- |
 | `todo-check.sh` | `[--session <id>]`（缺省 `$YGG_SESSION_ID`→`$PI_SESSION_ID`）`[--sessions-root <dir>]` `[--json]` | `found=…;total=…;remaining=…;active=…;ok=…;approx=…`（remaining=0 → ok=1） |
-| `sessions-count.sh` | `--parent <id>`\* `[--sessions-root <dir>]` `[--trash-root <dir>]` `[--json]` | `total=…;matching=…;trash=…;ok=…`（matching=0 → ok=1；结算不变式） |
+| `sessions-count.sh` | `--parent <id>`\* `[--sessions-root <dir>]` `[--trash-root <dir>]` `[--json]` | `total=…;matching=…;trash=…;ok=…`（matching=0 → ok=1；结算不变式；matching 不含父会话自身） |
 | `manifest-verify.sh` | `[--repo <dir>]`（缺省 git toplevel）`[--mod <dir>]`（缺省 `<repo>/.ygg/mods/agent-seed`）`[--json]` | `files=…;drift=…;first=…;ok=…`（drift=0 → ok=1） |
 | `docs-consistency.sh` | `[--repo <dir>]` `[--index <file>]`（缺省 `<repo>/docs/README.md`）`[--json]`；`--attest --run <dir>`\* `[--max-history <n>]` | `links=…;broken=…;first=…;ok=…`（broken=0 → ok=1）；`--attest` → `claims=…;forged=…;stale=…;first=…;ok=…`（claims>0 且 forged=stale=0 → ok=1） |
 
@@ -64,7 +64,7 @@
 - 不带 `--check` = 就地刷新（幂等）；`--check` = 只报告不写，并顺带跑树内链接闭包与 `scenes.json` 一致性（表内 id 必须解析到文件且与文件头 `id` 逐字相等）。
 - 软链一律跳过（兼容层不是权威内容，不参与 ver 账）。
 
-`todo-check` 是**状态重放机**：按转录内 `create`（建清单）→ `update`（按 id 改状态）→ `delete` → `clear` 全序列重放，算最终 `total`/`remaining`（`pending`/`in_progress`/`open`/`blocked` 计未完成）。`sessions-count` 用 `find -print0 | xargs -0 grep -lF` 做布尔 contains(parent) 匹配（macOS BSD grep 兼容，内容零回显）。
+`todo-check` 是**状态重放机**：按转录内 `create`（建清单；`tasks[]` 项缺 id 时由递增计数器分配——复刻宿主口径：会话内单调递增、`clear` 重置、`delete` 不回收号段）→ `update`（按 id 改状态）→ `delete` → `clear` 全序列重放，算最终 `total`/`remaining`（`pending`/`in_progress`/`open`/`blocked` 计未完成）。`sessions-count` 用 `find -print0 | xargs -0 grep -lF` 做布尔 contains(parent) 匹配，并排除父会话自身的归档（`<parent>.jsonl` / `*_<parent>.jsonl`）——主档必然含自己的 id，不排除则 `matching=0` 不可达；`trash` 递归计入每个 run 子目录，`total`/`matching` 只看平铺的库（macOS BSD grep 兼容，内容零回显）。
 
 ### 2.2 git 亚家族五脚本 argv 规格（缺省 JSON 三段式，`--text` 人读）
 

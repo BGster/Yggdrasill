@@ -9,8 +9,9 @@
 #   sessions-count.sh --help
 #
 # 参数：
-#   --parent <id>        必填。父（主）会话标识；对会话库内每个 .jsonl 做布尔 contains 匹配
-#                        （与宿主 archive-sessions 选集规则同口径），内容零回显。
+#   --parent <id>        必填。父（主）会话标识；对会话库内每个 .jsonl 做布尔 contains 匹配，
+#                        **排除父会话自身的归档**（<parent>.jsonl / *_<parent>.jsonl；主档必然
+#                        含自己的 id）——与宿主 archive-sessions 选集规则同口径，内容零回显。
 #                        形状：非空、不含 | 换行 / 控制字符。
 #   --sessions-root <dir> 缺省 = $YGG_SESSIONS_ROOT，或 $HOME/.pi/agent/sessions/--<cwd-slug>--。
 #                        slug = cwd 去前导 / 后把 / 换成 -（与宿主 cwd_slug 同口径）。
@@ -19,9 +20,10 @@
 #
 # 输出（exit 0，k=v 缺省）：
 #   total=<t>;matching=<m>;trash=<x>;ok=<0|1>
-#   total    = 会话库内 .jsonl 总数（库不存在 = 0）。
-#   matching = 含 parent 的 .jsonl 数（结算不变式：matching=0 即全部归档）。
-#   trash    = trash 根下 .jsonl 数（trash 根不存在 = 0）。
+#   total    = 会话库内 .jsonl 总数（平铺，不递归；库不存在 = 0）。
+#   matching = 内容含 parent、且不是父会话自身归档的 .jsonl 数
+#              （即「未归档的子会话数」，不含父会话自身；结算不变式：matching=0 即全部归档）。
+#   trash    = trash 根下 .jsonl 数，递归计入每个 run 子目录（trash 根不存在 = 0）。
 #   ok       = 1 当且仅当 matching=0。
 #
 # exit 码：0 正常执行（结论在 ok 键）；2 用法错；3 环境缺失（$HOME 缺席且未给根）；4 目标资源不可读。
@@ -96,21 +98,33 @@ if [ -z "$TRASH_ROOT" ]; then
 fi
 
 # 计数：库不存在 = 0（合法：无会话可清）
+# $1 = dir，$2 = flat|recursive（缺省 flat）。
+# 会话库是平铺的（实测子目录里没有 .jsonl）；trash 根按「每个 run 一个子目录」组织，必须递归。
+# 不要为了统一把两边都改递归——那会把 trash 里的子会话误算进 matching。
 count_jsonl() {
-  # $1 = dir；不存在或不可读返回 0
-  dir="$1"
+  dir="$1"; mode="${2:-flat}"
   if [ ! -d "$dir" ]; then
     echo 0; return
   fi
   # find 只按扩展名入选；不打开内容
-  n=$(find "$dir" -maxdepth 1 -type f -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$mode" = "recursive" ]; then
+    n=$(find "$dir" -type f -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
+  else
+    n=$(find "$dir" -maxdepth 1 -type f -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
+  fi
   echo "$n"
 }
 
-# matching：对 sessions-root 内每个 .jsonl 做布尔 contains(parent) 匹配。
+# matching：对 sessions-root 内每个 .jsonl 做布尔 contains(parent) 匹配，排除父会话自身的归档。
+# 为什么必须排除：主档内容必然含自己的 session id（真实现场自命中 121 处），不排除则 matching>=1
+#   恒成立，「matching=0 即全部归档」的不变式永不成立。
+# 排除口径 = 宿主文件名约定 <ts>_<session>.jsonl，兜底兼容裸 <session>.jsonl。
+# 用 grep -vF（字面量）而不是 find -name：parent 里的 glob 元字符不会被当成模式。
 # find -print0 喂 xargs -0 grep -lF（NUL 分隔输入，含空格/换行文件名安全）：
 # grep -l 只打印命中文件名（内容零回显），grep -F = 字面量（parent 不当正则），LC_ALL=C 防多字节误配。
 # 命中文件每行一个 → wc -l 计数。不用 grep -Z（GNU 专有 NUL 输出；macOS BSD grep 的 -Z 语义不同）。
+# { … || true; } 是必须的：过滤后一行不剩时 grep -v 返回 1，掩码它让该管道段恒为 0
+#   （契约调用是 `sh <script>`，但不把退出码取决于是否刚好过滤空了）。
 matching_count() {
   dir="$1"
   if [ ! -d "$dir" ]; then
@@ -118,13 +132,14 @@ matching_count() {
   fi
   m=$(find "$dir" -maxdepth 1 -type f -name '*.jsonl' -print0 2>/dev/null \
        | LC_ALL=C xargs -0 grep -lF -- "$PARENT" 2>/dev/null \
+       | { LC_ALL=C grep -vF -e "_${PARENT}.jsonl" -e "/${PARENT}.jsonl" || true; } \
        | wc -l | tr -d ' ')
   echo "${m:-0}"
 }
 
 TOTAL=$(count_jsonl "$SESSIONS_ROOT")
 MATCHING=$(matching_count "$SESSIONS_ROOT")
-TRASH=$(count_jsonl "$TRASH_ROOT")
+TRASH=$(count_jsonl "$TRASH_ROOT" recursive)
 
 if [ "$MATCHING" -eq 0 ]; then OK=1; else OK=0; fi
 

@@ -92,7 +92,9 @@ TRANSCRIPT=$(find "$SESSIONS_ROOT" -maxdepth 1 -type f -name "*${SESSION}*.jsonl
 
 # 用 python3 重放 todo 工具调用序列（状态机），算最终 total/remaining（内容零回显：只回计数）。
 # 真实转录结构（pi）：content[] 里 type=toolCall、name=todo、arguments={action,...}。
-# 契约：create 建清单（tasks[]，id 从 1 起）→ update 按 id 改 status → delete 按 id 删 → clear 清空。
+# 契约：create 建清单（tasks[] 项缺 id 时由递增计数器分配：复刻宿主分配器——会话内单调递增、
+#       clear 重置、delete 不回收号段；tasks[] 项自带 id 时以它为准）→ update 按 id 改 status →
+#       delete 按 id 删 → clear 清空（并重置计数器）。
 # 兼容旧形（type=tool_use、input/args）与批量 tasks[] 替换。
 if command -v python3 >/dev/null 2>&1; then
   RESULT=$(python3 - "$TRANSCRIPT" <<'PYEOF'
@@ -104,27 +106,31 @@ OPEN = ('pending','in_progress','in-progress','todo','open','blocked')
 # 任务表：id -> status（dict 保持插入序，id 用 int/str 原样）
 tasks = {}
 order = []
+# 宿主 id 分配器的复刻：会话内单调递增，clear 重置为 0，delete 不回收号段。
+# 不能用位置编号（1..n）——create 的 tasks[] 不带 id，位置与真实 id 无关。
+seq = 0
 saw_todo = False
 
 def norm_status(s):
     return str(s or '').lower()
 
 def apply_call(args):
-    global saw_todo
+    global saw_todo, seq
     if not isinstance(args, dict):
         return
     saw_todo = True
     action = str(args.get('action','') or '').lower()
     if action == 'create' or (not action and isinstance(args.get('tasks'), list)):
-        # 建/替换整表：tasks[] 每项可带 id/status，缺 id 按位置编号
+        # 建/替换整表：tasks[] 每项可带 id/status；缺 id 用递增 seq（= 宿主分配的真实 id 口径）
         new = args.get('tasks')
         if isinstance(new, list):
-            for i, t in enumerate(new, start=1):
+            for t in new:
+                seq += 1
                 if isinstance(t, dict):
-                    tid = t.get('id', i)
+                    tid = t.get('id', seq)
                     st = norm_status(t.get('status','pending'))
                 else:
-                    tid = i; st = 'pending'
+                    tid = seq; st = 'pending'
                 if tid not in tasks:
                     order.append(tid)
                 tasks[tid] = st
@@ -143,18 +149,19 @@ def apply_call(args):
             if tid in order:
                 order.remove(tid)
     elif action == 'clear':
-        tasks.clear(); order.clear()
+        tasks.clear(); order.clear(); seq = 0
     elif action == 'list':
         pass  # 查询不改状态
     else:
-        # 未知 action：若带 tasks[] 按替换处理
+        # 未知 action：若带 tasks[] 按替换处理（id 口径同 create：递增 seq，不用位置编号）
         new = args.get('tasks')
         if isinstance(new, list):
-            for i, t in enumerate(new, start=1):
+            for t in new:
+                seq += 1
                 if isinstance(t, dict):
-                    tid = t.get('id', i); st = norm_status(t.get('status','pending'))
+                    tid = t.get('id', seq); st = norm_status(t.get('status','pending'))
                 else:
-                    tid = i; st = 'pending'
+                    tid = seq; st = 'pending'
                 if tid not in tasks:
                     order.append(tid)
                 tasks[tid] = st

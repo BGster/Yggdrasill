@@ -39,10 +39,13 @@ HUMAN.ACTIONS = {
 
 HUMAN.ticket = nil
 
--- 本步的入口（r9 按人读签需要）："ticket" = 人类从菜单点选（\`ygg.choice_selected\` 盖章后
--- emit，载荷无宿主身份段），"direct" = 直接 `--event` 派发（声明路由上带 `|actor=` 章）。
--- 判定侧据此决定「没身份」的结局：票据路降级并告明，直派路拒绝（见 gates.read_problem）。
--- 只会在 HUMAN.needs 里改写：人机门禁动作每步都过它，所以值总是本步的。
+-- 本步的入口（r9 按人读签需要），三态：
+--   "ticket"    = 人类从菜单点选（`ygg.choice_selected` 盖章后 emit，载荷无宿主身份段）
+--   "delegated" = guide 模式下主 Agent 在用户对话授权后代执行（载荷带 `|actor=` 章）
+--   "direct"    = goal 模式自主派发，或非 guide 的直派（载荷带 `|actor=` 章）
+-- 判定侧据此决定「没身份」的结局：票据路降级并告明，带身份的两条路正常记账
+-- （见 gates.read_problem）。只会在 HUMAN.needs 里改写：人机门禁动作每步都过它，
+-- 所以值总是本步的。
 HUMAN.entry = "direct"
 
 function HUMAN.needs(label)
@@ -55,7 +58,13 @@ function HUMAN.needs(label)
     HUMAN.entry = "ticket"
     return true
   end
-  return refuse(TEXTS.beats.guide_human_blocked, label)
+  -- guide 模式的语义是「主 Agent 必须先请示用户」，不是「用户必须自己点菜单」。
+  -- 用户只有对话窗口一个通道，主 Agent 就是他唯一的执行面；拒绝直派等于把 guide
+  -- 锁死成「去终端点菜单」，那不符合产品形态。放行，但记为 delegated：读签判定仍
+  -- 要求载荷带 `|actor=` 章（可审计，见 gates.read_problem 的直派路），且与 goal 的
+  -- 自主 direct 在审计上可区分。
+  HUMAN.entry = "delegated"
+  return true
 end
 
 function HUMAN.gated(action)
