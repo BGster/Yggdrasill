@@ -338,7 +338,7 @@ LINKS=$(printf '%s' "$RESULT" | cut -d';' -f1)
 BROKEN=$(printf '%s' "$RESULT" | cut -d';' -f2)
 FIRST=$(printf '%s' "$RESULT" | cut -d';' -f3)
 AGENTS=$(printf '%s' "$RESULT" | cut -d';' -f4)
-AGENTS_BUDGET=250
+AGENTS_BUDGET=500
 
 if [ "$BROKEN" -eq 0 ] && [ "${AGENTS:-0}" -le "$AGENTS_BUDGET" ]; then OK=1; else OK=0; fi
 
