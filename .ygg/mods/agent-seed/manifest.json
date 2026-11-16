@@ -76,9 +76,9 @@
       "sha256": "ab8a748c8af18c006c2ec907b8598ddb9eaa6a075440ae78c2e11434d7df424a"
     },
     {
-      "byteLength": 3331,
+      "byteLength": 3967,
       "path": "src/handlers/operate/choice.lua",
-      "sha256": "3429cdb5a2d997c0b28721d545c7ee754770f5fbc8b792204355446caa03643f"
+      "sha256": "8e989defd098407b03e3261fb2f37e4214eb253916d30d417d8a122bb4132a6a"
     },
     {
       "byteLength": 8389,
