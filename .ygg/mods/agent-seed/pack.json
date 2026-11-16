@@ -48,66 +48,11 @@
       "kind": "agent-config",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
       "path": "data/config.json"
-    },
-    {
-      "id": "ygg:agent/playbook",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/head.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch1-foundation",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch1-foundation.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch2-delivery",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch2-delivery.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch3-evidence",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch3-evidence.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch4-run-machine",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-run-machine.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch4-protocol",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-protocol.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch4-async",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-async.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch4-mod-host",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch4-mod-host.json"
-    },
-    {
-      "id": "ygg:agent/playbook/ch5-evolution-tools",
-      "kind": "agent-playbook-fragment",
-      "schema": "https://yggdrasill.dev/schemas/v1/agent-playbook-fragment.json",
-      "path": "data/playbook/ch5-evolution-tools.json"
     }
   ],
   "schemaFiles": [
     "schemas/scene-texts-fragment.json",
-    "schemas/agent-config.json",
-    "schemas/agent-playbook-fragment.json"
+    "schemas/agent-config.json"
   ],
   "agent": {
     "entryEvent": "event.start",

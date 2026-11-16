@@ -27,7 +27,7 @@
 
 **依据**：身份章的用途是“让冒用可见”，不是“拦住推进”；把一个它本来拿不到的载体当作硬前置，换来的不是安全而是死锁。反方案（为批收口单独造一个身份载体）会多出一条只能由主代理走的身份路径，而那正是本机制要消除的“两套真相”。
 
-**判据**：① 阻断——给 `coordinate.submit` 加回“必须有身份章”的前置；② 症状——`goal` 模式批收口被拒且 `pendingChoice` 始终停在 `coordinate.submit`；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的批收口与门禁独立性用例。
+**判据**：① 阻断——给 `coordinate.submit` 加回“必须有身份章”的前置；② 症状——`goal` 模式批收口被拒且 `pendingChoice` 始终停在 `coordinate.submit`；③ 确认——`cargo test -p ygg-sandbox --test selftest` 的批收口与门禁独立性用例。
 
 ### 设计依据（身份与权限为什么这样分）
 
@@ -39,7 +39,7 @@
 
 **依据**：身份在这里解决的是“责任可追溯 + 冒用可见”，不是“防伪造”——Mod 与宿主跑在同一个沙箱里，能改配置的人也能改路由声明，真正的边界只有沙箱本身。因此每加一道“身份门”都只是把一个可读的失信改成一次不可解释的拒绝。反方案（把三态提示升级为自动拒绝、把 profile 当凭据、把 session 当判定依据）均会先锁死合法路径，再因为绕过手段存在而无法补回安全。
 
-**判据**：① 阻断——把三态提示改成自动拒绝、把 `session` 当判定依据、把 profile 当凭据，或把“本局有人读过”当成“执行者读过”；② 症状——`read-gate/other-actor` 不报却实际由他人签名；amend 后报的是“签名过期”而不是“未签”；`guide` 模式下人工点选被身份门锁死；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的 inline-exec / `ACTOR_FORGED` / profile roundtrip / opener / 三态互证 / 四条归属用例 / `read_actor_side_key_dies_with_the_signature` / 两条主体维守护用例全组。
+**判据**：① 阻断——把三态提示改成自动拒绝、把 `session` 当判定依据、把 profile 当凭据，或把“本局有人读过”当成“执行者读过”；② 症状——`read-gate/other-actor` 不报却实际由他人签名；amend 后报的是“签名过期”而不是“未签”；`guide` 模式下人工点选被身份门锁死；③ 确认——`cargo test -p ygg-sandbox --test selftest` 的 inline-exec / `ACTOR_FORGED` / profile roundtrip / opener / 三态互证 / 四条归属用例 / `read_actor_side_key_dies_with_the_signature` / 两条主体维守护用例全组。
 
 ---
 

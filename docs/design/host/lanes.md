@@ -30,5 +30,5 @@
 
 **依据**：默认名生成是“看起来方便”的陷阱——它让两个泳道可能得到同一个可读名，而名字一旦撞车，排查要从分支追到需求再追到泳道台账；“拒绝并要求自报”把成本前移到一个能当场修正的时刻。两条入口同规则是因为泳道有两个真实使用者（Mod 侧与宿主工具侧），任一入口宽松都等于没有规则。
 
-**判据**：① 阻断——新增一条泳道或工具桥入口而不复用 `branch_problem`；给 `worktree-release` 加 `-x`；或在无法证明工作树干净时复用；② 症状——两仓需求抢同一 `k`；`lane.pools` 缺条目却 claim 成功；同一泳道出现两分支的提交；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的 `git.worktree_claim` / `git.worktree_release` / `lane_probe` 子系统用例与分支命名用例。
+**判据**：① 阻断——新增一条泳道或工具桥入口而不复用 `branch_problem`；给 `worktree-release` 加 `-x`；或在无法证明工作树干净时复用；② 症状——两仓需求抢同一 `k`；`lane.pools` 缺条目却 claim 成功；同一泳道出现两分支的提交；③ 确认——`cargo test -p ygg-sandbox --test selftest` 的 `git.worktree_claim` / `git.worktree_release` / `lane_probe` 子系统用例与分支命名用例。
 

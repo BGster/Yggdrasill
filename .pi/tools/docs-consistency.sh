@@ -319,7 +319,14 @@ for rel in required:
         if first == "-":
             first = rel
 
-print("%d;%d;%s" % (checked, broken, first))
+# AGENTS 行数预算：硬约束面是每会话自动注入的，膨胀直接摊薄所有约束的注意力。
+# r12 前它在 277 行（超预算 27），是「操作程序混进硬约束」的可见信号——
+# 分类判断无法机械化，但「什么时候该重新审视分类」可以。
+agents_lines = 0
+agents_path = os.path.join(repo, "AGENTS.md")
+if os.path.exists(agents_path):
+    agents_lines = sum(1 for _ in open(agents_path, encoding="utf-8"))
+print("%d;%d;%s;%d" % (checked, broken, first, agents_lines))
 PYEOF
 )
 
@@ -329,13 +336,17 @@ fi
 
 LINKS=$(printf '%s' "$RESULT" | cut -d';' -f1)
 BROKEN=$(printf '%s' "$RESULT" | cut -d';' -f2)
-FIRST=$(printf '%s' "$RESULT" | cut -d';' -f3-)
+FIRST=$(printf '%s' "$RESULT" | cut -d';' -f3)
+AGENTS=$(printf '%s' "$RESULT" | cut -d';' -f4)
+AGENTS_BUDGET=250
 
-if [ "$BROKEN" -eq 0 ]; then OK=1; else OK=0; fi
+if [ "$BROKEN" -eq 0 ] && [ "${AGENTS:-0}" -le "$AGENTS_BUDGET" ]; then OK=1; else OK=0; fi
 
 if [ "$AS_JSON" -eq 1 ]; then
-  printf '{"links":%s,"broken":%s,"first":"%s","ok":%s}\n' "$LINKS" "$BROKEN" "$FIRST" "$OK"
+  printf '{"links":%s,"broken":%s,"first":"%s","agents":%s,"agents_budget":%s,"ok":%s}\n' \
+    "$LINKS" "$BROKEN" "$FIRST" "${AGENTS:-0}" "$AGENTS_BUDGET" "$OK"
 else
-  printf 'links=%s;broken=%s;first=%s;ok=%s\n' "$LINKS" "$BROKEN" "$FIRST" "$OK"
+  printf 'links=%s;broken=%s;first=%s;agents=%s/%s;ok=%s\n' \
+    "$LINKS" "$BROKEN" "$FIRST" "${AGENTS:-0}" "$AGENTS_BUDGET" "$OK"
 fi
 exit 0

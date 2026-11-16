@@ -2,7 +2,7 @@
 > **定位**：`docs/design/` 是**「改之前必须遵守的契约」**——判据是**有代码消费者**（playbook JSON 的 `basis`/`source`、`src/**` 注释、crates 测试与注释按路径引用它）。行为叙事与产品定位不在此树，见 [../context/README.md](../context/README.md)。
 > **replaces**：r6 前的 18 文件平铺形态（`docs/design/<topic>.md`）。平铺路径已退役，**不留软链**；历史与理由在 git。
 > **判据**：[../wiki-governance.md](../wiki-governance.md)「design / context 二分判据」——本文件只是它的导航投影，不复制正文。
-> **上游**：[../README.md](../README.md)（顶层索引） · **机检**：`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的 `design_pointer_anchors_exist_under_docs_design` / `design_tree_index_is_complete_and_ids_match_paths` / `agents_design_routes_resolve`
+> **上游**：[../README.md](../README.md)（顶层索引） · **机检**：`.ygg/mods/agent-seed/tests/` 的 `design_pointer_anchors_exist_under_docs_design` / `design_tree_index_is_complete_and_ids_match_paths` / `agents_design_routes_resolve`
 
 ## 目录树
 
@@ -37,6 +37,7 @@ docs/design/
 | ③ mod · 包契约与多文件纯度 | [mod/mod-package.md](mod/mod-package.md) | 改 `pack.json` / `manifest` / 多文件纯度契约之前 | hard-refusal |
 | ③ mod · 提示词面（beats） | [mod/prompt-surface.md](mod/prompt-surface.md) | 改文案键面或键账之前 | silent-drift |
 | ③ mod · 同步工具桥 | [mod/tool-bridge.md](mod/tool-bridge.md) | 改工具桥或凭据解析之前 | irreversible |
+| ④ mod · 测试策略（纯 Lua 自检） | [mod/testing-strategy.md](mod/testing-strategy.md) | 改 `tests/**` 或 `selftest.rs` 之前 | silent-gap |
 | ③ mod · 三层动作面 | [mod/action-faces.md](mod/action-faces.md) | 新增或移动一个动作面之前 | silent-drift |
 | ③ mod · 身份与权限 | [mod/identity.md](mod/identity.md) | 改执行者台账 / 身份判定 / profile 之前 | silent-drift |
 

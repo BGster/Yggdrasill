@@ -36,6 +36,8 @@
 
 **行数上限是切分判据，不是排版目标**：主流程幕 1:1 一文件（`acts/`，≤40 行），需求级九幕按共享时点聚合三份（`req-acts/intake` = 1-3、`delivery` = 4-6、`integration` = 7-9，≤45 行）。超限说明切分单元选错了（实证：`delivery` 若含第 7 幕为 51 行、超 45，故第 7 幕归 `integration`）。
 
+**AGENTS.md 同样有预算：≤ 250 行**，由 `docs-consistency.sh` 逐次报告（`agents=<当前>/250`，超限则 `ok=0`）。它是每会话自动注入的面，膨胀直接摊薄所有约束的注意力——r12 前它在 277 行（超 27），那个超限正是「操作程序混进硬约束」的可见信号。**分类对错不能机械化，但「何时该重新审视分类」可以。** 超限前先逐行过 `AGENTS.md` §1.8 的 Q1/Q2，或把内容迁到它真正被需要的那一刻。
+
 **判据**：① 阻断——新建目录/文件，或把"放不下的东西"停进一个新桶；② 症状——出现名为 `archive`/`misc`/`common`/`narrative` 的目录，`触发` 头写的是话题，或两个互不相关的读者时点必须打开同一份文件；③ 确认——`bash scripts/docs-ver.sh --check` 返回 `ok=1`，`wc -l docs/context/acts/*.md docs/context/req-acts/*.md` 全部落在上限内，且每个目录能用一句话说清一个情境、该情境出现在 `scenes.json` 或 `AGENTS.md §3` 的路由里。
 
 ## 4. design / context 二分判据
@@ -53,7 +55,45 @@
 
 「按路径引用」要分清：playbook 是**提示词素材**（读它的是人与 agent 的知识面），crates 测试里 `read_to_string("docs/…")` 才是**代码消费者**。前者不构成留在 design 的理由。
 
-**机检（不是口号）**：`crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的三例把这条判据钉在状态里——`design_pointer_anchors_exist_under_docs_design`（逐来源指针硬账）、`design_tree_index_is_complete_and_ids_match_paths`（索引集合双向相等 + `docs/design/*.md` 只允许 `README.md` + 一级子目录恰好三模块）、`agents_design_routes_resolve`（`AGENTS.md §3` 每条 design 路由可解析）。把行为面搬回 design、或在 design 里留兼容壳、或新增第四目录，都会转红。
+但「代码读它」还不足以下结论，要看**代码拿它做什么**：
+
+| 代码对文档的关系 | 例子 | 判据归属 |
+| --- | --- | --- |
+| **实现它**——照它写逻辑、按它判定 | `design/kernel/state-surface.md`（KV 键就是代码真的会写的） | `design/` |
+| **校验它**——测试读它与投影比对，保证不漂移 | 逐字文案比对 | **不构成**「代码消费者」；它是 4.2 描述的症状，不是归档依据 |
+
+（2026-11-15 校准：曾据旧口径把 `docs/context/scenes/` 判为归档错位，属误判——它是**源**、mod 是**投影**，代码只是校验。）
+
+### 4.1 三分：契约 / 知识 / 输出（mod 与 docs 的边界）
+
+上一节只回答「进哪棵树」。**一段内容该不该出现在 mod 里**是另一问，用三分回答：
+
+| 类 | 判据 | 唯一副本位置 |
+| --- | --- | --- |
+| **契约** | 代码照它**实现**（按它写逻辑、按它判定） | `docs/design/` |
+| **知识** | 离开当前时刻也该知道（规则、为什么、怎么用、有几种用法、注意事项） | `docs/context/`（按幕归位；剧本面在 `scenes/`） |
+| **输出** | 离开当前状态就无意义（状态计数、回执、门禁/拒绝提示、指针行） | mod `data/texts/`（唯一副本） |
+
+- **mod 不承载知识**：mod 只约束流程、渲染输出、指向文件。知识型散文出现在 beats 或 playbook 正文里即为**漂移**。
+- **拒绝/门禁提示属于输出**，必须当场说清原因与下一步——它出现在「操作者正在做事、被打断」的那一刻，塌成指针会多一次往返（用户 2026-11-15 裁定：保留在 mod）。
+- **`[READ FIRST]` 块属于输出**：只有路径、版本号与签名命令，无解释；权威在 `docs/context/scenes.json`，mod 内是 `gen-scene-readfirst.py` 的**生成物**，不构成第二份手写副本。
+
+### 4.2 单副本纪律（duplicate 是待消除形态，不是「需要同步的两份」）
+
+**同一段话出现两处即为缺陷。** 同步机制（逐字比对测试、生成脚本）只能缓解症状，不能使其合规：
+
+- 两处**手写** → 必须消除一处：合并到唯一副本后删除另一处；
+- 一处手写 + 一处**生成** → 合规（生成物受 `--check` 约束，无从漂移）。
+
+推论：`docs/context/` 里若存在只是 mod 输出镜像的「逐字文案表」，即违反本节——无 Mod 的读者真正需要的是**流程与判据**（`acts/` / `req-acts/` / `rituals/` 已覆盖），不是逐字回执。
+
+### 4.3 树的最高目的：无 Mod 也自洽可读
+
+`docs/context/` 必须能在**没有安装 CLI 与 Mod** 的情况下被读通，并据此执行工作流。任何判据、任何「代码有引用」的技术理由，都不得把内容搬走而使这条承诺失效。
+
+`docs/context/scenes/` 曾按此目的留在 context（用户明确：这是刻意设计，不是归档失误）。2026-11-15 更名为 `scenes/`——`copy` 是「文案」直译、无业务含义，而这里装的是**剧本**：每一刻该发生什么、操作者该做什么、判据在哪。逐字回执仍归 mod 单副本（4.1）。
+
+**机检（不是口号）**：`.ygg/mods/agent-seed/tests/` 的三例把这条判据钉在状态里——`design_pointer_anchors_exist_under_docs_design`（逐来源指针硬账）、`design_tree_index_is_complete_and_ids_match_paths`（索引集合双向相等 + `docs/design/*.md` 只允许 `README.md` + 一级子目录恰好三模块）、`agents_design_routes_resolve`（`AGENTS.md §3` 每条 design 路由可解析）。把行为面搬回 design、或在 design 里留兼容壳、或新增第四目录，都会转红。
 
 ## 5. 幕进必读与推进必签（scene gate）
 
@@ -67,13 +107,16 @@
 
 **这个文件不进 `readPlan`，也不产生签名义务**——它是"怎么签名"的规则，若自身成为必读并需要签名，就构成「先签名才能读到怎么签名」的自指门禁。它登记在 `scenes.json` 的 `reference` 段以便机检可达。
 
-## 6. 批结算自动维护需求（机器闭环）
+## 6. 批结算文档维护义务（机器闭环，主会话自办）
 
-**未武装的 `review.note` 批结算，会在 `[BATCH n SETTLED]` 之后、同一 handler 事务内追加一条 draft 态「维护更新 docs wiki（上批收口）」需求**，description 携 wiki 树的分文件指引。去重判据 = `open` ∧ 无 `closed_reason` ∧（`req.<i>.maintenance` 标记 ∨ 规范标题）；容量满同样跳过——**尽力而为，绝不使批结算失败**；退役路径不追加。
+**未武装的 `review.note` 批结算，会在 `[BATCH n SETTLED]` 之后、同一 handler 事务内登记 `docs.maintenance.due=<batch>`**，并在回执里叙述 `[DOCS MAINTENANCE DUE]`（含 wiki 的分文件指引与解除命令）。**它不派生需求行**——CONTEXT / DESIGN 的维护是**主会话的自身工作**。
 
-**依据**：文档闭环此前纯靠人工自觉（brief 提醒 + 结算前核验），而连续多批迭代实证每批都有文档维护诉求、各靠临时立项。把它变成需求，"每批一轮"才由状态机强制承载，而不是靠协调者记得。
+**为什么不是需求**（用户 2026-11-15 裁定）：subagent 缺跨批次上下文。r11（68,376 token / 129 次调用）与 r12（68,303 token / 76 次调用）两次实测，执行者在 ≈68k token 处被上游打断，且产出的文档仍需主会话逐条复核。派发它，等于用一条「看起来在治理」的需求掩盖「没人有上下文做这件事」。
 
-**判据**：① 阻断——下一批 `coordinate.submit`（上批维护需求未终态即无法关闭）；② 症状——批结算后 `req.count` 未 +1，或 `run.maintenance.last` 未指向新行；③ 确认——语义用例断言 `run.batch` 递增、`req.<n>.maintenance == "1"`、description 含 `wiki-governance` 与分文件指引。
+**闭环靠阻塞而不是靠占位行**：义务未解除时，下一次 `coordinate.submit` 直接拒（`docs-maintenance/due`，附解除命令）；主会话做完复核后 `config.set docs.maintenance.done=<batch>` 解除——**只解除等值批次**：旧批次号清不掉新义务，空值是显式放弃（自担后果）。
+
+**判据**：① 阻断——下一批 `coordinate.submit`（义务未解除即无法跨批边界）；② 症状——批结算后 `docs.maintenance.due` 未置位，或 `req.count` 因维护而 +1（说明又派生了需求），或拿旧批次号就能清掉；③ 确认——语义用例 `batch_settle_marks_docs_maintenance_due_and_blocks_the_next_boundary` 与 `docs_maintenance_clear_requires_the_outstanding_batch`。
+
 
 ## 7. ver 定义与旧路径兼容层两分法
 
@@ -81,11 +124,11 @@
 
 **依据**：ver 若直接哈希文件本体，则"文件含 ver、ver 由哈希决定"构成自引用循环，永不收敛；定宽占位同时保证字节长度不变（不引起行位移）。兼容层不是风格选择：当冻结消费者（mod 字面指针、crates 按路径读表）还在时直接删旧路径会让锚点校验与逐域键集断言同时转红；但薄壳与软链都不携带第二份权威，因此不违反"一条规则一个权威载体"。
 
-**判据**：① 阻断——"改了正文不改 ver"与"删旧路径但没补兼容层"两类提交；② 症状——`docs-ver --check` 报 `changed>0` / `missing_header>0`；`agent_seed_semantics` 的指针锚点用例或 `copy_contract_domain_fragments_cover_every_text_key` 转红；③ 确认——`bash scripts/docs-ver.sh --check` 连跑两次 `changed=0`、`cargo test -p ygg-sandbox --test agent_seed_semantics` 全绿、`ls -l docs/context/*.md | grep -c -- '->'` 为 0。
+**判据**：① 阻断——"改了正文不改 ver"与"删旧路径但没补兼容层"两类提交；② 症状——`docs-ver --check` 报 `changed>0` / `missing_header>0`；`selftest` 的指针锚点用例或 `copy_contract_domain_fragments_cover_every_text_key` 转红；③ 确认——`bash scripts/docs-ver.sh --check` 连跑两次 `changed=0`、`cargo test -p ygg-sandbox --test selftest` 全绿、`ls -l docs/context/*.md | grep -c -- '->'` 为 0。
 
 ## 8. 文案单向同步纪律
 
-mod 文案（叙事台词 / 仪式正文 / 句式模板）的**知识权威源**在 `docs/context/` 运行流程层（`context/acts/` + `context/req-acts/` / `context/rituals/` / `context/copy/README.md` 及其七个消费域文件），mod `data/texts/*.json` 是其运行时投影。任何文案改动**先改 context 对应文件，再同步 mod 键值**；对应域契约表的句式模板列与 mod 键值必须逐字一致（允许 `{{变量}}` 原样保留），验收与每批的维护需求复核该一致性（双向核对无多无缺）。context 流程层（台词/仪式/句式）与 design 契约层（状态机/事件/线协议）语义不重复讲述，以双向链接互指。
+mod 文案（叙事台词 / 仪式正文 / 句式模板）的**知识权威源**在 `docs/context/` 运行流程层（`context/acts/` + `context/req-acts/` / `context/rituals/` / `context/scenes/README.md` 及其七个消费域文件），mod `data/texts/*.json` 是其运行时投影。任何文案改动**先改 context 对应文件，再同步 mod 键值**；对应域契约表的句式模板列与 mod 键值必须逐字一致（允许 `{{变量}}` 原样保留），验收与每批的维护需求复核该一致性（双向核对无多无缺）。context 流程层（台词/仪式/句式）与 design 契约层（状态机/事件/线协议）语义不重复讲述，以双向链接互指。
 
 ## 9. 方案呈报纪律（top-down layering）
 

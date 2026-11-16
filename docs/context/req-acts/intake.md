@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 进料（req-acts/intake）
 > **id** req-acts/intake · **幕** req: draft/planning/plan_gate · **触发** 立项 / 派发 plan 前
 > **读不到代价** hard-refusal（合并判据与决策号规则漏读 → 立项被指出「本可合并」或 D-MA 双占）
-> **ver** 1b8065
+> **ver** c8584b
 
 主流程五幕是「局的剧情」，需求级九幕是「每条需求的剧情」——协调幕内，每条需求各自走九幕（微状态）。本节给出**按幕展开的进行时指引**：场景台词（从 `beats-requirements.json` 对应键提炼）、入口条件 / 必做动作 / 出口判据、关联文件指针。
 
@@ -16,7 +16,7 @@
 - **决策就地入册**：真正新的架构决策**不取号、不记台账**——在实现它的同一次提交里，写进**它治理的那份文档**的「设计依据」段（规范 + 依据 + 三问判据），需求描述与 brief 只写「这条决策落在哪个文件的哪一节」。两泳道同时写同一条决策时，后写者以既有段落为基线**原地合并**（按普通合并解决冲突）。历史教训：当年靠「预订编号」协调，两泳道从同一 base 各取下一个号，造成同一编号被双重认领（证据 `d0b4a7c` / `6848138`）——取号不是协调机制，锚点才是。
 - **必做动作**：`requirement.add "<title>|<description>"`（可带外部幂等 id 与 deps 段）；描述写清目标、改动面、验收标准。
 - **出口判据**：需求在册（draft），可被 `requirement.dispatch` 派发进计划。
-- **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_added` / `req_dispatch_usage` / `req_bad_dep` / `req_cycle_dep` 句式）。
+- **本幕关联阅读**：[scenes/README.md](../scenes/README.md)（`req_added` / `req_dispatch_usage` / `req_bad_dep` / `req_cycle_dep` 句式）。
 
 ## 2. 计划中（planning）
 
@@ -24,7 +24,7 @@
 - **入口条件**：需求 draft 且依赖已就绪（deps 全 done）、有空闲 job 槽位。
 - **必做动作**：主会话 `requirement.dispatch` 派发 plan 阶段；执行者读必读材料（[rituals/dispatch.md](../rituals/dispatch.md) §3）后产出计划稿，`proposal.submit(plan)` 提交（内联 `exec=<agent_id>` 注册执行者）。
 - **出口判据**：plan 提案挂起（pending）→ 自动升入计划门禁（交付即门禁，无需再受理）。
-- **本幕关联阅读**：[rituals/dispatch.md](../rituals/dispatch.md)（brief 结构 / 工件纪律 / submit 仪式）；[copy/requirements.md](../copy/requirements.md)（`req_prop_*` 提案句式、`req_prop_plan_gate` 提示）。
+- **本幕关联阅读**：[rituals/dispatch.md](../rituals/dispatch.md)（brief 结构 / 工件纪律 / submit 仪式）；[scenes/README.md](../scenes/README.md)（`req_prop_*` 提案句式、`req_prop_plan_gate` 提示）。
 
 ## 3. 计划门禁（plan_gate）
 
@@ -32,4 +32,4 @@
 - **入口条件**：plan 提案 pending（`gate=="plan"`）。
 - **必做动作**：**人**审计划稿，`gate.approve`（过）或 `gate.reject`（打回，须新计划）；guide 模式下只能由人从菜单点选（人机门禁，见 [acts/coordinate.md](../acts/coordinate.md) `guide_human_blocked`）。
 - **出口判据**：approve → 待开发（`plan_ok=true`，同回可自动派发开发）；reject → 回计划中（`plan_ok=false`，须重新出计划）。
-- **本幕关联阅读**：[copy/requirements.md](../copy/requirements.md)（`req_gate_*` 拒绝面：own_props/own_job/stale/no_note 等）；[../../design/kernel/state-surface.md](../../design/kernel/state-surface.md)（`gate_rev==rev` stale 校验）。
+- **本幕关联阅读**：[scenes/README.md](../scenes/README.md)（`req_gate_*` 拒绝面：own_props/own_job/stale/no_note 等）；[../../design/kernel/state-surface.md](../../design/kernel/state-surface.md)（`gate_rev==rev` stale 校验）。

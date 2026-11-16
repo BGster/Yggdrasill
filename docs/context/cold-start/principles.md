@@ -1,7 +1,7 @@
 # Yggdrasill · 架构与运营原则（P 列表）
 > **id** cold-start/principles · **幕** cold-start · **触发** 冷启动 / 设计取舍前
 > **读不到代价** hard-refusal
-> **ver** 893066
+> **ver** c96545
 
 > **定位**：P1–P11 工程原则与 PLAY 家族注记，约束一切实现、评审与文档组织。
 > **replaces**：CONTEXT §3（L62–96）（搬运基线 `3a2536f`）
@@ -51,9 +51,33 @@ P2（零硬编码）的文档面投影：mod 的叙事与文案**知识权威**�
 - [acts/](../acts/)：五幕进行时台词（`scenes`/`prompts`/`<node>_common` 正文）+ 无 egg 执行章；
 - [rituals/dispatch.md](../rituals/dispatch.md)：派发仪式（`subagent_brief` 策略段、`config_opened` 面板语义）；
 - [rituals/cleanup.md](../rituals/cleanup.md)：盘点清理政策（会话/待办清理正文）；
-- [copy/README.md](../copy/README.md)：七域文案契约索引（409 beats + core 36 = 445 唯一键；错误码/回执/台账模板 + 协议前缀归属）。
+- [copy/README.md](../scenes/README.md)：七域文案契约索引（409 beats + core 36 = 445 唯一键；错误码/回执/台账模板 + 协议前缀归属）。
 
 改文案**先改上述文件再同步 mod**（单向同步纪律，见 [../wiki-governance.md](../../wiki-governance.md)）；本节只放指针不搬正文，防双源漂移。
 
 ---
 
+## 输出与指针纪律（output · pointers）
+
+- **语言分工**：对用户说中文；代码、标识符、路径与命令保持原样英文。
+- **结论先行**：报错或下结论时先说结论，证据跟在后面。
+- **编辑前先读**：改一个文件之前先读它；一次改多个文件时，逐文件说明改了什么、为什么。
+- **大批量机械改写的回环**：先打印结果 → 再写入 → **立刻读回验证**。这类改写的失效形态是静默的（整段被吞、编辑锚点截断误删、表格错行），不读回就发现不了。
+- **指针不复制正文**：指针槽（包括本章这类索引节）只放指针，**永不复制**被指向文档的正文。
+- **为什么用指针**：指针表索引的是「已知目的地」——先经索引定位到真文本再动手，**永不凭记忆复述被引用的文档**（记忆会过期，文档会变）。
+
+
+## 凭据与数据卫生（原 playbook `credentials` 章，2026-11-15 归位）
+
+> 逐条自 原 playbook 章 `ch1-foundation.json`（已删除） 搬入（**未改写**）。
+> 其中「凭据只存 `.env` / `.env.local`、只报键名」已由 `AGENTS.md` 的 Credentials 条覆盖，
+> 「数据红线」由 `AGENTS.md` §0 覆盖——本节只收那两条之外的细则。
+
+- **`credentials.no-secret-in-artifacts`**（must-not）：Never write a credential into any conversation artifact: reports, summaries, issue/PR descriptions, pasted log excerpts.
+- **`credentials.no-secret-in-committed-resources`**（must-not）：No sensitive information may enter a committed resource — the committed surface explicitly includes: game settings `data/config.json`, the playbook resources under 原 playbook 目录（已删除） (the head plus the chapter fragments assembled at load), the experience/growth (evolution) Mod and its output, and every other Mod resource or document committed with the repository.
+- **`credentials.settings-not-a-secret-vault`**（must）：The runtime KV family `settings.*` is no exception for sensitive values: the static defaults (`data/config.json`) and the dynamic overrides (`settings.*` written by `config.set`) only ever hold non-sensitive behavior switches, numbers and experience text (such as `evolution.mode` / `gates.require_all_green` / `evolution.max_per_run`).
+- **`credentials.secret-values-local-only`**（must）：Sensitive values — LLM API keys, tokens, database/object-storage connection strings, subagent model parameters (`YGG_SUBAGENT_*`) — live only in the local `.env` / `.env.local` (both git-ignored) and in no other file.
+- **`credentials.mod-and-report-keys-only`**（must）：Mod resources and reports may show key names only (such as `YGG_LLM_*`, `YGG_SUBAGENT_MODEL`), never values — including narrative text, `beats`/`prompts`, the closing review and any walk report.
+- **`credentials.evolution-output-not-exempt`**（must-not）：End-of-run evolution output (suggestion text, the review artifact, and any resource edit made from it) also counts as committed surface: never write a sensitive value into a Mod or a report as "accumulated experience".
+- **`credentials.synthetic-data`**（must）：Examples and test data are always synthetic; never introduce real personal data.
+- **`credentials.breach-disclosure`**（must）：After a violation, list honestly what was exposed (the specific file plus the content location), without downplaying or arguing; then stop the affected operations and wait for the user.

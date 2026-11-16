@@ -51,7 +51,7 @@ Mod 是一个**纯确定性状态机**：无 IO、无时钟、无随机（P8，�
 
 **依据**：状态越多，转场表越大、拒绝面越难穷举，而「某个状态忘了写拒绝面」是这类系统最常见的旁路来源。反方案（每个关闭理由一个终态）会让转场表项数量级增长，且每个新终态都要在菜单、文案、渲染、门禁判定四处同步；字段化之后只剩一条判定 `status=="done"`。
 
-**判据**：① 阻断——新增一个**独立存储**的需求级或运行级状态（而不是派生微状态或字段）；② 症状——`req_phase()` / `run_phase()` 之外出现第二处状态判定来源，或 §2.8 键表里出现第二个状态键；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的徽章 / 微状态派生用例与 `state-surface.md` §2.8 键表断言。
+**判据**：① 阻断——新增一个**独立存储**的需求级或运行级状态（而不是派生微状态或字段）；② 症状——`req_phase()` / `run_phase()` 之外出现第二处状态判定来源，或 §2.8 键表里出现第二个状态键；③ 确认——`cargo test -p ygg-sandbox --test selftest` 的徽章 / 微状态派生用例与 `state-surface.md` §2.8 键表断言。
 
 ### 2.5 微状态判定的单一来源
 
@@ -127,14 +127,14 @@ end
 
 **依据**：省回合的做法里最贵的是「等一轮再派发」。三条规则各砍一处往返——`draft` 阶段合并（派发即入 planning）、`proposal.submit` 内联 `exec=` 注册（省一次 `config.set`）、`gate.approve(plan)` 后的响应式派发（省一次 `requirement.dispatch`）。反方案（在 handler 末尾追加渲染）会让「choice 已发出」之后的状态变更被静默丢弃。
 
-**判据**：① 阻断——在 `useEffect` 里调用 `render()` / `ygg.choice`，或把门禁类动作（主人 = 人）做成自动后继；② 症状——一次派发出现两个 choice，或 `flush_effects` 撑满 `MAX_PASSES` 后报错（不收敛是缺陷，不是警告）；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的同回响应式派发与 `useMemo` 失效用例。
+**判据**：① 阻断——在 `useEffect` 里调用 `render()` / `ygg.choice`，或把门禁类动作（主人 = 人）做成自动后继；② 症状——一次派发出现两个 choice，或 `flush_effects` 撑满 `MAX_PASSES` 后报错（不收敛是缺陷，不是警告）；③ 确认——`cargo test -p ygg-sandbox --test selftest` 的同回响应式派发与 `useMemo` 失效用例。
 
 ### 2.10 Mod 行为验收（触源码或场景措辞时）
 
 修改 `.ygg/mods/agent-seed/src/**`、`.ygg/mods/agent-seed/mod.lua` 或 `data/texts/` 的地图措辞，除 lint 与 playtest 外，必须运行：
 
 ```bash
-cargo test -p ygg-sandbox --test agent_seed_semantics
+cargo test -p ygg-sandbox --test selftest
 ```
 
 该套件覆盖阶段合并与 analysis 兼容、plan/accept 门禁通过与打回、stale/amend、同回响应式派发与 useMemo 失效、门禁独立性、自身 pending 阻塞、development 提案打回、内联 exec 尾段、settlement 合并段、旧存档缺 `plan_ok`、双 pack 操作/设计地图契约、工具桥请求/结果/replay/声明奇偶、泳道工具与冲突雷达、VFS 台账、settle 机证以及声明完整性。测试计数以当次命令真实输出为准，不在文档硬编码；新增行为必须新增或修改对应用例。
@@ -150,7 +150,7 @@ all-1 playtest 只覆盖 happy path，不会走 `gate.reject` / `requirement.ame
 ```bash
 cargo test --workspace
 cargo test --example egg -p ygg-sandbox
-cargo test -p ygg-sandbox --test agent_seed_semantics
+cargo test -p ygg-sandbox --test selftest
 ```
 
 第二条不可省：Cargo 的 `--workspace` 不编译 example target 的单元测试，`crates/ygg-sandbox/examples/egg.rs` 中持久化原子性、reset、热载与结算策略断言不会因只跑 workspace 而执行。`cargo check`、`verify-suite --mode fast`、过滤测试、单测选择或 `YGG_VERIFY_COMMANDS` 覆盖各有合法用途，但只能证明其自身，不能替代字面三件套。

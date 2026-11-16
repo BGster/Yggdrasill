@@ -1,11 +1,11 @@
 # Yggdrasill · Context 召回树（docs/context）
 > **id** readme · **幕** all · **触发** 任何时刻 / 进树第一读
 > **读不到代价** silent-drift（迷路后从记忆推进，是 §1.0c scene gate 的首要失效来源）
-> **ver** a7e2da
+> **ver** 1f58cd
 
 > **定位**：五幕（立局/协调/盘点/发布/退役）的「进行时台词」知识权威——场景叙事、阶段策略、每幕入口/必做/出口动作清单，以及**无 egg 环境的人工执行法**。mod 的 `scenes` / `prompts` / 六个 `<node>_common` 键是本文的运行时投影（状态前缀 + 指针）；语义以本文为准。本文件是这棵树的召回入口（时点 → 文件见下表）。
 > **replaces**：r2「mod 剧情提示词迁出」前散置于 `.ygg/mods/agent-seed/data/texts/core.json`（scenes/prompts）与 `beats-flow.json`（`*_common`）的幕叙事正文。
-> **上游**：[../README.md](../README.md) · **相关**：[rituals/dispatch.md](rituals/dispatch.md) · [rituals/cleanup.md](rituals/cleanup.md) · [copy/README.md](copy/README.md)（七域索引） · [story/run-story.md](story/run-story.md)（微状态机契约，语义不重复讲述）
+> **上游**：[../README.md](../README.md) · **相关**：[rituals/dispatch.md](rituals/dispatch.md) · [rituals/cleanup.md](rituals/cleanup.md) · [copy/README.md](scenes/README.md)（七域索引） · [story/run-story.md](story/run-story.md)（微状态机契约，语义不重复讲述）
 > **判据**：本树收的是**无代码消费者的行为面**；`docs/design/` 收的是有代码消费者的契约面——二分判据见 [../wiki-governance.md](../wiki-governance.md)。
 
 ## 我在哪个时点 → 读哪个文件
@@ -23,14 +23,14 @@
 | 需求 accept_gate / integrating / done | [req-acts/integration.md](req-acts/integration.md) | `req-acts/integration` |
 | 盘点（批结算 / 退役前） | [acts/settle.md](acts/settle.md) + [rituals/cleanup.md](rituals/cleanup.md) | `acts/settle` · `rituals/cleanup` |
 | 发布声明 | [acts/release.md](acts/release.md) + [acts/retired.md](acts/retired.md) | `acts/release` · `acts/retired` |
-| 改 mod 文案 / 键面 | [copy/README.md](copy/README.md)（按域分流） | `copy/README` |
+| 改 mod 文案 / 键面 | [copy/README.md](scenes/README.md)（按域分流） | `copy/README` |
 | 无 egg / 无 mod | [rituals/fallback.md](rituals/fallback.md) | `rituals/fallback` |
 
 ### 理解性阅读（**不拦门禁**）
 
 这三份**没有代码消费者**，按 [../wiki-governance.md](../wiki-governance.md) 的「design / context 二分判据」归本树。
 它们登记在 [scenes.json](scenes.json) 的 `reference` 段，**不进 `readPlan`**、不出 `[READ FIRST]` 块、不产生签名义务
-（负向断言见 `crates/ygg-sandbox/tests/agent_seed_semantics.rs` 的 `context_scene_reference_ids_resolve`）。
+（负向断言见 `.ygg/mods/agent-seed/tests/` 的 `context_scene_reference_ids_resolve`）。
 
 `rituals/read-gate.md` 也在 `reference` 段，但**不是理解性文档**：它是推进必签的规范，只因“自身成为必读并需签名”会构成自指门禁（先签名才能读到怎么签名）才不进 `readPlan`。读它的时候是“门禁拒了我”的那一刻。
 
@@ -86,13 +86,13 @@ docs/context/
 
 - 本树是**给人与 agent 读的执行底座**：每一幕「我在哪 / 说什么 / 做什么 / 下一步动作名」。
 - mod 运行时在每幕开场输出场景行（`scenes.<act>`），在每幕内输出菜单与阶段提示（`prompts.<act>`、`<act>_common`）；这些键值只保留状态变量与短句，**叙事与策略正文以本树为唯一权威**（改文案先改本树再同步 mod，见 [../wiki-governance.md](../wiki-governance.md)）。
-- 菜单措辞（core `options` 27 键）由 mod 运行时渲染；本树只在各幕「菜单语义对照」小节解释每个菜单项的语义，不复制键值（键值契约见 [copy/core.md](copy/core.md) options 节）。
+- 菜单措辞（core `options` 27 键）由 mod 运行时渲染；本树只在各幕「菜单语义对照」小节解释每个菜单项的语义，不复制键值（键值契约见 [scenes/README.md](scenes/README.md) options 节）。
 - **每份文件头部 4 行是机读契约**：`id`（本文件在树内的唯一标识，同时也是签名 `read.<id>=<ver>` 的键）、`幕`、`触发`、`读不到代价`（四值域 `irreversible` / `hard-refusal` / `silent-drift` / `none`）、`ver`（内容指纹）。
 
 ## 兼容层已退役（r5 完成，2026-11-15；**本节仅为历史追溯**）
 
 r1 重切文件边界时曾保留 **15 个旧路径**（13 软链 + 2 薄壳）给当时的冻结消费者：
-`.ygg/mods/agent-seed/**` 的文案指针与 `crates/ygg-sandbox/tests/agent_seed_semantics.rs` 按路径读取的 copy 表。
+`.ygg/mods/agent-seed/**` 的文案指针与 `.ygg/mods/agent-seed/tests/` 按路径读取的 copy 表。
 r5 已把两侧引用全部改指权威文件，兼容层随之删除——**现在树里只有权威文件，没有第二入口**。
 
 > **下表是历史记录，不是入口也不是迁移指引**：这些旧路径**已不存在**，任何按表复活的尝试都会被指针机检判红
@@ -111,7 +111,7 @@ r5 已把两侧引用全部改指权威文件，兼容层随之删除——**现
 
 - **判据来源**：兼容层两分法——拆分型 → 薄壳、1:1 迁移 → 软链，且每条必须写明退场条件（规则见 [../wiki-governance.md](../wiki-governance.md)「ver 定义与旧路径兼容层两分法」）；退场条件在 r5 兑现。
 - **为什么能删**：两类冻结消费者都已改指——mod 的 23 个散文键指针（25 处路径）改指子目录权威文件，
-  crates 的 7 个 copy 表读取路径改指 `docs/context/copy/*.md`；锚点用例（`narrative_pointer_anchors_exist_in_docs_context`）
+  crates 的 7 个 copy 表读取路径改指 `docs/context/scenes/*.md`；锚点用例（`narrative_pointer_anchors_exist_in_docs_context`）
   现在真的能看见子目录指针（r5 修好了只认 `[A-Za-z0-9._-]` 的旧解析器），所以「没死链」是被查出来的，不是被假设的。
 - **核验命令**：`ls -l docs/context/*.md | grep -- '->' | wc -l` 应为 **0**；
   `bash scripts/docs-ver.sh --check` 应 `ok=1`；`bash .pi/tools/docs-consistency.sh --repo .` 应 `ok=1`。

@@ -17,7 +17,7 @@
 | `beats-requirements.json` | 144 | 需求族文案：派发/提案/门禁/打回/依赖校验/九幕行文（含集成确认/打回与台账错位提示） |
 | `beats-lanes.json` | 36 | 泳道账本、池注册（`lane.pool`）与认领/释放、分支命名拒绝、池化标签叙事（r1 分池七键） |
 | `beats-map-guide.json` | 38 | 地图视图、菜单行、人机门禁提示、`map_note_*` 节点注记 |
-| `beats-settlement.json` | 54 | 盘点四项、批结算、退役、发布幕文案；批结算自动维护追加五键；tools 机证七键（tools.root 注册/脚本缺失/机证通过与被拒/未注册提醒/sessions-parent 与 todo-session 缺失） |
+| `beats-settlement.json` | 54 | 盘点四项、批结算、退役、发布幕文案；批结算文档维护义务五键；tools 机证七键（tools.root 注册/脚本缺失/机证通过与被拒/未注册提醒/sessions-parent 与 todo-session 缺失） |
 | `beats-harness.json` | 83 | 配置面板、身份注册、工具桥提示、`subagent_submit_cmd` 模板；tools 注册面七键（root 注册/清除、name 与 param 注册、形状拒绝） |
 | `core.json` | — | `scenes`（5）/ `endings`（1）/ `prompts`（5）/ `options`（27）/ `tuning`（8） |
 
@@ -29,10 +29,10 @@ mod 职责收缩为「状态管理 + 需求看板 + CONTEXT 索引提示」后�
 
 | 知识形态 | 键范围 | 正文权威 | mod 侧形态 |
 | --- | --- | --- | --- |
-| 状态行文（错误码/回执/台账/面板/菜单，454 个唯一键） | 全部 beats 键 + core options/tuning/endings（23 处指针壳为子集） | [../../context/copy/README.md](../../context/copy/README.md)（七域索引；逐域句式表） | 原文留 mod（宿主无文案缺省机制，运行时物理必须） |
-| 幕台词与阶段策略（6 `*_common` + scenes 5 + prompts 5 + guide 2） | `prologue/charter/coordinate/settle/release/retired_common`、`scenes.*`、`prompts.*`、`guide_human_blocked`、`guide_hint` | [../context/acts/](../context/acts/) + [../context/req-acts/](../context/req-acts/)（幕 1:1 一文件 + 需求级三份） | 收缩为「状态前缀/{{变量}}头 + docs/context 指针」；`scenes.*` 值尾另带脚本生成的 [READ FIRST] 必读块（`gen-scene-readfirst.py`，见 [copy/core.md](../../context/copy/core.md) §H） |
+| 状态行文（错误码/回执/台账/面板/菜单，454 个唯一键） | 全部 beats 键 + core options/tuning/endings（23 处指针壳为子集） | [../../context/scenes/README.md](../../context/scenes/README.md)（七域索引；逐域句式表） | 原文留 mod（宿主无文案缺省机制，运行时物理必须） |
+| 幕台词与阶段策略（6 `*_common` + scenes 5 + prompts 5 + guide 2） | `prologue/charter/coordinate/settle/release/retired_common`、`scenes.*`、`prompts.*`、`guide_human_blocked`、`guide_hint` | [../context/acts/](../../context/acts/) + [../context/req-acts/](../../context/req-acts/)（幕 1:1 一文件 + 需求级三份） | 收缩为「状态前缀/{{变量}}头 + docs/context 指针」；`scenes.*` 值尾另带脚本生成的 [READ FIRST] 必读块（`gen-scene-readfirst.py`，见 [scenes/README.md](../../context/scenes/README.md) §H） |
 | 派发仪式（3 键） | `subagent_brief`、`config_opened`、`subagent_fallback_note` | [../../context/rituals/dispatch.md](../../context/rituals/dispatch.md)（+ `rituals/fallback.md`） | 事实头留 mod + 指针 |
 | 清理政策（2 键） | `settlement_sessions_unsetted_hint`、`settlement_todo_segment` | [../../context/rituals/cleanup.md](../../context/rituals/cleanup.md) | 判据短句 + 指针 |
 
-单向同步纪律（[../wiki-governance.md](../../wiki-governance.md)）：改文案先改 context 权威域文件再同步 mod 键值；指针锚点存在性由 `agent_seed_semantics` 的 `narrative_pointer_anchors_exist_in_docs_context` 用例机器闭环，逐域键集由 `copy_contract_domain_fragments_cover_every_text_key` 用例闭环。owner = texts/契约编辑者；trigger = 任一键或指针变化；检查失败 = 缺键、死链或计数漂移，不得验收。
+单向同步纪律（[../wiki-governance.md](../../wiki-governance.md)）：改文案先改 context 权威域文件再同步 mod 键值；指针锚点存在性由 `selftest` 的 `narrative_pointer_anchors_exist_in_docs_context` 用例机器闭环，逐域键集由 `copy_contract_domain_fragments_cover_every_text_key` 用例闭环。owner = texts/契约编辑者；trigger = 任一键或指针变化；检查失败 = 缺键、死链或计数漂移，不得验收。
 

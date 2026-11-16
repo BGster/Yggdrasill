@@ -1,4 +1,4 @@
--- src/guide.lua —— 幕后规则书索引与阶段提示（`data/playbook.json`）。
+-- src/guide.lua —— 阶段提示壳（playbook 已于 2026-11-15 退役，规则正文在 docs/）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。
@@ -15,15 +15,8 @@ local fill =
 
 local SECTIONS = {}
 
--- 相位→规则章节索引（微状态口径）：每相位播全部候选章，不再让首章遮蔽后续章节。
--- 未映射章同样是死资产：21 章必须至少在一条 phase-entry 路由上出现；map.show 另播全局索引。
-local STAGE_GUIDE = {
-  charter = { "repository", "credentials", "hard_constraints", "output" },
-  coordinate = { "run_machine", "actions", "drive", "inbox", "dispatch", "lanes", "branches", "integration" },
-  settle = { "evolution", "gates", "run_artifacts", "evidence", "live_evidence", "mod_engineering", "host_contract", "tools" },
-  release = { "integration", "branches" },
-  retired = { "pointers" },
-}
+-- playbook 退役后不再有章节索引；保留空表与函数壳，render/views 的调用点无需改动。
+local STAGE_GUIDE = {}
 
 local function guide_section(st)
   local candidates = STAGE_GUIDE[st]
@@ -38,6 +31,9 @@ local function guide_section(st)
 end
 
 local function narrate_guide_entry(section)
+  if section == nil then
+    return
+  end
   ygg.narrate(fill(TEXTS.beats.guide_hint, {
     title = section.title,
     summary = section.summary,

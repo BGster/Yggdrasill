@@ -6,7 +6,7 @@
 -- 派发序 = 下面 install() 的调用序（不是 require 序、也不是 pack.json 的 code.modules 声明序）。
 
 -- 资源快照（片段装配；片段 ↔ entry 一一对应，见 pack.json entries）。
--- 契约：beats 键跨片段不相交；playbook 章节片段按文件名序（=order 序）排列，
+-- 契约：beats 键跨片段不相交；（原 playbook 章节片段已于 2026-11-15 退役）
 --       各 section id 全局唯一（r5 起 harness 七片段同 id 拼接模式退役），装配不排序。
 
 local TEXTS = ygg.data("ygg:scene/texts")          -- core：scenes/endings/prompts/options/tuning
@@ -19,27 +19,10 @@ for _, id in ipairs({ "flow", "requirements", "lanes", "map-guide", "settlement"
 end
 
 local CONFIG = ygg.data("ygg:agent/config")
-local PLAYBOOK = ygg.data("ygg:agent/playbook")    -- head：schemaVersion/title/summary/source
-PLAYBOOK.sections = {}
-for _, id in ipairs({
-  "ch1-foundation", "ch2-delivery", "ch3-evidence",
-  "ch4-run-machine", "ch4-protocol", "ch4-async", "ch4-mod-host",
-  "ch5-evolution-tools",
-}) do
-  local fragment = ygg.data("ygg:agent/playbook/" .. id)
-  for _, section in ipairs(fragment.sections) do
-    local last = PLAYBOOK.sections[#PLAYBOOK.sections]
-    if last ~= nil and last.id == section.id then
-      for _, rule in ipairs(section.rules) do
-        last.rules[#last.rules + 1] = rule
-      end
-    else
-      PLAYBOOK.sections[#PLAYBOOK.sections + 1] = section
-    end
-  end
-end
+-- playbook 已于 2026-11-15 整体退役：规则正文归位 docs/context 与 docs/design，
+-- Mod 只保留状态机 + 回执 + 指路。此处保留空壳，避免 view 层判空分支。
+local PLAYBOOK = { sections = {} }
 
-local util = require("src.core.util")
 local config = require("src.core.config")
 local reqs = require("src.domain.requirements")
 local lanes = require("src.domain.lanes")

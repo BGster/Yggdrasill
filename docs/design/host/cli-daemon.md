@@ -89,3 +89,69 @@
 
 > ~~r1 自动收波看门狗契约（自动收波（已废弃））~~ 已废弃：扩展层删除（2026-11-12），看门狗随层移除；daemon 常驻由宿主 `--daemon`/`serve` 原生承担。
 
+#### 收件箱（inbox）与跨进程协调协议
+
+**文件**：`<runs-root>/<run-id>/inbox.jsonl`，一行一个对象 `{external_id, kind, title, description, payload, created_at}`，`kind ∈ add/amend/split/merge/conflict/resolve/proposal`。
+
+**异步命令表**（只追加、不读写 autosave，因此不需要 `--mod`，可与活跃局并发执行）：
+
+- `--requirement 'title|description'`（add）
+- `--proposal 'rN|rev|stage|summary|artifacts[|changes]'`（proposal；external_id 自动作为第 7 段追加）
+- `--amend 'rN|new title|new description|deps'`（rev+1）
+- `--split 'rN|child A|child B'`
+- `--merge 'r2,r3|title|description'`
+- `--conflict 'r1,r2|note'`
+- `--resolve 'r1,r2|keep_both'`
+
+**消费点**：`cmd` 下每次自动推进前、`stdin` 下每次提示前、每次 single-shot dispatch 前——新行按 kind 排空并派发；**在局活跃期间到达的行永不可漏**。
+
+**跨进程互斥（协议级，不是「再看一眼文件」）**：
+
+- `coordination.lock`（`create_new` 排他；陈旧锁按 mtime 2s 接管）＋ `coordination.json` `{phase, writers, owner_pid, heartbeat_at}`，`phase ∈ running / closing / finalized`。
+- **写命令先注册**：`running` → 在它的行落盘前算一个 writer；`closing`（心跳未过期）→ 命令自身失败退出 3；`finalized` → 非零拒绝（退出 3，需要新局）。
+- **closing 协议**：自动推进在派发最终 `review.note` 前把 phase 置 `closing`，等在途 writer 归零，再在同一保护下做最后一次 drain——若有新的未 done 需求则撤销 closing 继续循环（不写 ending）；若没有新行则在同一保护下完成 `review.note` + settle 并置 `finalized`。因此「写命令成功了但局已越过最后一次 drain」在协议上不可能发生。
+- **陈旧与崩溃恢复**：closing 用心跳（10s 过期）自保；过期后写命令或 `open`（attach）宣布它死亡并把 phase 拉回 `running`；锁同样按 mtime 接管——两者都不会因进程崩溃永久卡死。
+- **`--settle` 在 closing 下同样走协议**：有未消费行时返回 `ok=false` 并回退 `running`（resume 可消费）；已经 `finalized` 时幂等返回旧报告，不改写任何东西。
+
+**幂等与游标**：游标（`inbox.cursor` 的 `{consumed:N}`）只在派发成功且存档落盘之后推进；重放靠 `external_id`——add / proposal 由 Mod 按实体 ext 去重（`[REPLAY:REQ]` / `[REPLAY:PROPOSAL]`），amend / split / merge / conflict / resolve 用载荷尾部 `@ext=` 加 `inbox.last` 去重（`[REPLAY:ASYNC]`）。
+
+**坏行与结算闸**：畸形行跳过并让游标越过它（否则会永久阻塞）。**硬结算闸**：`--settle` 发现未消费行即返回 `ok=false` + 非零退出（写完后会复查：结算期间到达的行会使报告作废）——「ending 之后才投递」永不会静默成功，必须开新局。进程退出之后的投递属于**新局**：inbox 保留这些行给下一局消费，结算报错。
+
+#### run 目录文件契约
+
+- `run.json` = `{run_id, mod, mod_signature, started_at, updated_at}`。
+- `autosave.json`：逐步自动存档（实体表 + KV + 待决选择），可直接喂给 `load`。
+- `events.jsonl`：每次 dispatch 一行 `{seq, event, payload, ok, narrative_count, timestamp, ending, ending_line?}`。
+- `inbox.jsonl`：异步操作队列（append-only，由运行中的局消费；协议见上一节）。
+- `coordination.json`：跨进程协议 `{phase, writers, owner_pid, heartbeat_at}`（见上一节）。
+- `settlement.json`：只在 `--settle` 时写；`ok` = 事件日志非空 ∧ 无失败步 ∧ 出现 ending 叙述行 ∧ inbox 无未消费行（开关来自 Mod 契约的 `settlement` 段）；退出码镜像 `ok`；有未消费行时报告写「ending 之后还有 N 条未消费 inbox 行——需要新局」且 `ok=false`。
+- `decide-input.json`：外部决策命令的输入——`--drive cmd:` 下，每次出现待决选择、在调用命令之前，把完整当前回执写进去。
+
+**回执面（不落盘）**：
+
+- summary 走内核的结构化回执通道 `ygg.meta("summary", {…})`，落在回执信封的 `meta.summary`（stage / ending / verifyPassed / nextEndsRun / pendingProposals / requirementCount / conflicts / awaiting / evolution{artifact,summary,candidates,classes}）；**宿主只读这个字段**，所以把同样内容写进 narrative 不会被误读；载荷 `"0"` 表示只读。
+- **宿主永不读 Mod 私有 KV**：Mod 没有 `agent.summary` 时，宿主报「unknown」并安全暂停，不回落到 `ending` / `fsm.stage` / `prop.*` / `req.*`。
+- **`meta` 是瞬时回执面**：不进存档、不进规范快照、不进 state hash——同一事件序列调用与否 `ygg.meta`，`state_hash` 相同。
+
+#### 驱动模式（`--drive`）与决策协议
+
+| 模式 | 行为 |
+| --- | --- |
+| `stdin`（缺省） | 每一步、每次提案受理与每道门禁都从 stdin 读选择 |
+| `cmd:<path>` | **不读 stdin**：每个待决选择交给决策命令，局在 ending 自动结算；回答 `HUMAN` 则安全暂停（exit 0） |
+| `none` | 只打印当前回执（含 `pendingChoice`）就退出，不推进、不读 stdin（exit 0） |
+
+**决策命令协议**：stdin 不参与；命令的唯一参数是 `decide-input.json` 的路径（完整当前回执），stdout **只允许一行**——`N`（1..=选项数）或 `HUMAN[:reason]`。**5 秒超时、非零退出、非法输出、越界索引全部 fail-closed**（安全暂停、状态不变）；`YGG_DECIDE_CMD` 可临时覆盖决策命令路径。
+
+**碰撞必须暂停**：`cmd:` 遇到冲突时打印双方与 note，然后 **exit 0 不做选择**；解决后重跑该命令，或切到 stdin 从 `pendingChoice` 选 1/2/3（keep_both / keep_first / revise）。
+
+**人类动作门（`play.mode=guide` 时生效）**：`proposal.accept` / `gate.approve` / `coordinate.submit` / `verify.submit` / `review.note` / `config.set play.mode` **只能**经 `ygg.choice_selected` 进入；直派的 single-shot `--event` 以 `[REJECTED:ACTION]` 拒绝（信封仍 `ok:true`，主状态不变）。`gate.reject` / `proposal.reject` 不受限——它们是纠正通道。因此「代人受理」只有一条路：`ygg.choice_selected`。
+
+**绝不伪造内容**：有任务在跑但无待决提案时，宿主**不生成占位提案**（门禁必须被真实交付满足）——它打印可读理由、安全暂停并 exit 0，等外部执行者提交后重跑命令。
+
+**失控护栏**：阈值来自 Mod 的 `data/config.json` `drive` 段（字段缺失或非法时逐个回退）：硬步数上限 = `maxSteps + stepsPerRequirement × 需求数`（缺省 64 + 16×n）；另有「连续 `stallLimit` 步 `pendingChoice` 不变」的停止条件（缺省 12）。
+
+**`play.mode` 是 Mod 叙述语义，宿主不解释**：`config.set play.mode=<goal|guide>` 只切换 Mod 的提示词与叙述语气，推进只由 `--drive` 驱动——宿主既不读 `data/config.json` 的 `play.mode`，也不读存档 KV 里的 `settings.play.mode`。
+
+**goal 模式的判者是 agent 本身**，不是脚本、也不是「永远选 1」：goal 下 Mod 只改措辞与提示语气，推进仍经 `ygg.choice_selected`，每一步都由 agent 依叙述与候选自行判断——该拒的受理要拒、该等的门禁要等，机械取第一项等于伪造结论。仓内不提供默认决策脚本；菜单第一项按设计是主推进动作，但**不保证在当步正确**。
+

@@ -76,5 +76,43 @@ A1 的正确性依赖适配器对 Mod 内部语义的理解（例如 `kickoff` �
 
 **依据**：全收敛会逼 `action` 变成 `event` 的镜像，于是每加一个 `event` 都要同步加一个 `action`，而 `action` 的消费者是模型可读的语义面，不是状态机——两边同步只会制造二份真相。反过来，`action` 若不携带 Mod 的实时状态（就绪序、泳道、探针），适配器就必须自己重建一份工作流知识，那是真正的第二个状态机。把指令做成结构化的 `subagentAction`，适配器只需执行、不需理解。
 
-**判据**：① 阻断——给一个答不出“能防哪类具体 payload 错位”的 `action` 新增别名、或让 `action` 直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`；② 症状——`action` 清单与 `event` 清单逐渐对齐（同义重复），或适配器里出现第二套状态判定；③ 确认——`cargo test -p ygg-sandbox --test agent_seed_semantics` 的三层动作面契约用例与 `summary.jobs[].subagentAction` 形状用例。
+**判据**：① 阻断——给一个答不出“能防哪类具体 payload 错位”的 `action` 新增别名、或让 `action` 直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`；② 症状——`action` 清单与 `event` 清单逐渐对齐（同义重复），或适配器里出现第二套状态判定；③ 确认——`cargo test -p ygg-sandbox --test selftest` 的三层动作面契约用例与 `summary.jobs[].subagentAction` 形状用例。
 
+
+### 动作载荷与语义细节（原 playbook `actions` 章，2026-11-15 归位）
+
+**载荷是 `|` 分段字符串**。形状在拒绝回执里会原样打出——**照抄，永不猜段位**：
+
+| event | payload |
+| --- | --- |
+| `event.start` | `""` / `"title\|goal\|success"`（可选章程） |
+| `charter.set` | `"title\|goal\|success"` |
+| `run.begin` | `""` |
+| `requirement.add` | `"title\|description[\|external_id[\|depends_on]]"` |
+| `requirement.dispatch` | `""` / `"0"`（就绪序）/ `"rN"`（仅该需求） |
+| `proposal.submit` | `"rN\|rev\|stage\|summary\|artifacts[\|changes[\|external_id[\|exec=<agent_id>[:<reason>]]]]"`（尾链 `exec`→`actor`→`actor_session`，后者两条由宿主在声明路由注入） |
+| `proposal.accept` | `"pN"` |
+| `proposal.reject` | `"pN\|<reason>"` |
+| `gate.approve` / `gate.reject` | `"rN[\|note]"` / `"rN\|feedback"`（或 `""`） |
+| `integration.confirm` / `integration.reject` | `"rN\|develop@<sha>"` / `"rN\|<reason>"` |
+| `coordinate.submit` | `""` |
+| `verify.submit` | `"true"` / `"all_green=false;report=…"` |
+| `settlement.evolution` | `"artifact\|summary[\|c=<kept>/<screened>[\|cls=<kind>:<n>,...]][\|sessions=<moved>/<remaining>/<destination>][\|todo=<remaining>/<verified_by>]"` |
+| `settlement.sessions` / `settlement.todo` | `"moved\|remaining\|destination"` / `"remaining\|verified_by"` |
+| `release.confirm` / `release.skip` | `"master@<sha>\|vYYYY.MM.DD.N"` / `"<reason>"` |
+| `review.note` | `"lesson\|score(1-5)"` |
+
+- **`rev` 与 `id` 必须取自回执**（`requirement.list` / `map.show`），不得凭记忆或沿用上一次提交：错的 rev 会以 stale 被拒（回执里 `{{want}}` 打出真实当前 rev），每次猜都要多一个完整 dispatch 往返。
+- **`requirement.dispatch` 按就绪序派发**（draft → plan；ready → development·lane，且开发依赖全 done），job 上限 4；无候选或槽位已满属正常的 `[DISPATCH] 0 candidates` 回执（幂等，**不计失败步**）。
+- **`changes` 只是建议**：`split=a,b` / `merge=r5` / `amend=title:description` / `conflict=r5:note`——子代理只提议，**变更在 `proposal.accept` 时才落地**。
+- **`summary` 是裁决面，不是变更日志**：按门禁决策写——先写计划的形状与理由，再写影响与细节，是评审者**不打开代码就能裁决**的人读散文。技术大件（`file:line`、键名、伪代码、测试清单）放 `artifacts`。分工：summary 论证「为什么这份计划该过」，artifacts 展示「怎么实现、怎么验」。
+- **`proposal.accept` 串行且必须点名**：一次只受理一条，用 `pN` / `rN` 指定；空载荷取需求 id 规范序的第一条——**待决提案多于一条时必须点名**，否则验错需求。
+- **三条 reject 路径**：`proposal.reject`（plan 提案）→ 回 planning（门禁清空、`job="plan"` 重新挂到执行者、`plan_ok` 保持 false、rev 不动）；`proposal.reject`（development 交付）/ `gate.reject`（验收门）/ `integration.reject` 都落 ready 幕（`plan_ok` 保住、`job=""`、泳道释放、写 feedback）；`gate.reject`（计划门）→ planning 且 `plan_ok=false`、`rev+1`（需要新计划）。
+- **stale 与 rebase**：受理时 `rev ≠ req.<i>.rev` → 提案变 stale 并在需求上打 stale 标记（可读拒绝；**旧提案永不得覆盖更新的决定**）。恢复路径是「同一阶段、当前 rev 的新提案」：这种 rebase 提案只在需求**没有其他待决提案**时被受理，rebase 落地后 stale 标记自动清除。
+- **四类拒绝前缀**：动作不在其阶段 / 人类动作被直派 → `[REJECTED:ACTION]`；载荷非法 → `[REJECTED:PAYLOAD]`；前置未满足 → `[BLOCKED:TODO]`。全部**原位重渲染**（主状态不变），且都登记在 `pack.json` 的 `agent.rejectionPrefixes`——宿主据此判「无效果」，**不记失败步**。
+- **主代理的直接变更动作**：`requirement.split "parent|child A|child B[|…]"`（父变 split，子继承依赖，至少 2 个）；`requirement.merge "id1,id2|title|description"`（源变 merged，新需求取并集依赖）；`requirement.amend "id|new title|new description|new deps"`（rev+1；对 done 需求 amend 派生新需求，对开发中 amend 只更新说明）；`requirement.conflict "id1,id2|note"`（双方 blocked，派发与收口跳过）；`requirement.resolve "id1,id2|keep_both|keep_first|revise[|note]"`。
+- **泳道台账**：`lane.pool "label|path"` 注册具名池（幂等 upsert；label `^[a-z][a-z0-9-]{0,23}$`，保留字 seq/pools；path 即传给宿主的 `--repo` 本地检出）；`lane.claim "lane|req_id|branch|base|clean|label"` 认领或补挂牌（`clean` 必须为 "1"，脏树不得认领；末尾池段可省 = 运行仓默认池）；`lane.release "lane|label"` 释放（幂等，按 (池, lane) 作用域）。并行度按池计；冲突雷达只在同池内比对探针。
+- **config 子页与直写键**：`config.open` / `config.close` 进出二级配置页（play mode · evolution preference · gates），纯呈现层、永不推进状态；`config.set` / `map.show` 是常开动作。不走菜单的预登记键一律直写 `config.set`：`review.evolution.artifact|summary|candidates|classes`（存 `settings.review.evolution.*`，逐键查形状；`settlement.evolution` 统一校验并写本轮登记，`review.note` 再单源归档到 `review.evolution.*`）、`goal.authorization`（收口检查用的逐局授权）、`executor.<rN>.<stage>`（执行者台账，收口不校验、只作展示）、以及 harness 机证注册表：`tools.root`（机检开关 + 脚本根，**首次结算前必须注册**，未注册则回退人工见证并给可读提示、永不拒绝）、`tools.session` / `tools.sessions_root`（保留参数键：主会话 id 与会话库路径——沙箱读不到进程环境，结算 cross-check 的 argv 只能来自这些 KV）、`tools.<name>`（以 `.sh` 结尾的脚本路径覆盖）。无 egg 的参数约定见 host/harness-tools.md。
+- **`requirement.list`（`""` / `"0"` / `"full"`）只读**：逐行需求图（状态 + 依赖 + rev + 泳道 + job + 冲突/stale 痕迹）、待决提案清单、泳道台账与图例。
+- **`map.show` 打两层地图**：协调者 4 状态节点图 + 需求管线（含两道门禁）+ job / 泳道台账；泳道行形如 `lane-<k> ← <requirement> | branch | base | since #N | clean`（未设字段显示 `-`）。
+- **`pendingChoice` 顺序**：解决冲突（若有）→ 主推进动作（`proposal.accept` > `gate.approve` > `requirement.dispatch` > `coordinate.submit`）→ `map.show` → `requirement.list` → `requirement.add` → 配置（子页内：play.mode → evolution.mode → gates + back）。
