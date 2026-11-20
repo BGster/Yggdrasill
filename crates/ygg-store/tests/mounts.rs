@@ -36,8 +36,12 @@ fn attach_env(tag: &str) -> (PathBuf, PathBuf) {
 }
 
 fn attach(run: &Path, mod_dir: &Path, mounts: Json) -> MountStore {
-    MountStore::attach(run, &json!({ "schemaVersion": 1, "mounts": mounts }), mod_dir)
-        .expect("attach 必须成功")
+    MountStore::attach(
+        run,
+        &json!({ "schemaVersion": 1, "mounts": mounts }),
+        mod_dir,
+    )
+    .expect("attach 必须成功")
 }
 
 /// 四个入口对同一个路径都必须 `YGG-FS-JAIL`，且码在 message 首段。
@@ -123,9 +127,7 @@ fn jail_rejects_escape_vector_table() {
     assert_jail(&mut store, &deep, "超过 24 段");
     // 恰好 24 段是合法的文法（父目录不存在由规则 7 拒，不是段数）。
     let edge = format!("mounts/w/{}", vec!["d"; 24].join("/"));
-    let err = store
-        .read(&edge)
-        .expect_err("24 段但父缺失，必须拒");
+    let err = store.read(&edge).expect_err("24 段但父缺失，必须拒");
     assert_eq!(err.code(), codes::JAIL, "{err}");
     assert!(
         err.to_string().contains("父目录"),
@@ -137,7 +139,10 @@ fn jail_rejects_escape_vector_table() {
     assert_jail(&mut store, "mounts/work/out/deep/a.txt", "多级父缺失");
 
     // 合法面：挂载根本身是目录（stat / list 收，read / write 拒）。
-    assert_eq!(store.stat("mounts/w").expect("stat root").kind.as_str(), "dir");
+    assert_eq!(
+        store.stat("mounts/w").expect("stat root").kind.as_str(),
+        "dir"
+    );
     assert!(store.list("mounts/w").expect("list root").is_empty());
     match store.read("mounts/w") {
         Ok(_) => panic!("挂载根不能当文件读"),
@@ -149,11 +154,7 @@ fn jail_rejects_escape_vector_table() {
 #[test]
 fn jail_rejects_symlink_and_prefix_traps() {
     let (run, mod_dir) = attach_env("symlink");
-    let mut store = attach(
-        &run,
-        &mod_dir,
-        json!([{ "name": "w", "mode": "rw" }]),
-    );
+    let mut store = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]));
     let root = run.join("mounts").join("w");
     fs::create_dir_all(root.join("sub")).expect("mkdir sub");
     fs::write(root.join("sub/real.txt"), b"real").expect("write real");
@@ -189,7 +190,10 @@ fn jail_rejects_symlink_and_prefix_traps() {
         store.read("mounts/w/alias/real.txt").expect("read through"),
         Some(b"real".to_vec())
     );
-    assert_eq!(store.stat("mounts/w/alias/real.txt").expect("stat").bytes, 4);
+    assert_eq!(
+        store.stat("mounts/w/alias/real.txt").expect("stat").bytes,
+        4
+    );
     // 末段是软链的目录不能 list（「末段永不是软链」对最后一个段一律生效）。
     match store.list("mounts/w/alias") {
         Ok(_) => panic!("末段是软链的目录不能 list"),
@@ -200,7 +204,9 @@ fn jail_rejects_symlink_and_prefix_traps() {
     assert_eq!(rows[0].path, "mounts/w/sub/real.txt", "路径按请求路径拼");
 
     // 未被拒的写确实落了盘（「拒」不是「一律不写」的反面证据）。
-    store.write("mounts/w/sub/written.txt", b"ok").expect("write");
+    store
+        .write("mounts/w/sub/written.txt", b"ok")
+        .expect("write");
     assert_eq!(
         fs::read(root.join("sub/written.txt")).expect("read back"),
         b"ok"
@@ -272,7 +278,10 @@ fn attach_is_idempotent_and_conflicts_write_nothing() {
         .map(|(name, root, _mode)| (name.to_owned(), root.to_path_buf()))
         .collect();
     assert_eq!(roots, again, "重载必须落到同一批冻结根");
-    assert_eq!(second.budget_left(), ygg_store::mounts::MOUNT_RUN_WRITE_BUDGET);
+    assert_eq!(
+        second.budget_left(),
+        ygg_store::mounts::MOUNT_RUN_WRITE_BUDGET
+    );
 
     // 把私有挂载点换成真目录而声明仍是目录挂载 → 冲突，且另一条声明也不落地。
     let other = temp_dir("idem-conflict");
@@ -303,7 +312,10 @@ fn write_read_roundtrip_lands_on_the_host_dir_and_survives_reattach() {
     assert_eq!(written.bytes, content.len());
     assert_eq!(written.sha256, ygg_store::sha256_hex(content));
     // 写穿：字节就是落在宿主目录里的那一份（不拷贝、不另存）。
-    assert_eq!(fs::read(host.join("note.md")).expect("read host file"), content);
+    assert_eq!(
+        fs::read(host.join("note.md")).expect("read host file"),
+        content
+    );
     // 摘要 / 大小 / 种类三面一致。
     assert_eq!(
         store.stat("mounts/work/note.md").expect("stat"),
@@ -321,7 +333,9 @@ fn write_read_roundtrip_lands_on_the_host_dir_and_survives_reattach() {
     // 续局（新实例，预算与审计 seq 都重新装载）之后内容仍在。
     let mut again = MountStore::attach(&run, &pack, &mod_dir).expect("reattach");
     assert_eq!(
-        again.read("mounts/work/note.md").expect("read after reattach"),
+        again
+            .read("mounts/work/note.md")
+            .expect("read after reattach"),
         Some(content.to_vec())
     );
     assert_eq!(audit_rows(&again).len(), 1, "审计行跨 attach 累积");
@@ -368,7 +382,9 @@ fn list_shape_is_dense_sorted_and_capped() {
         fs::write(root.join(name), b"1").expect("write");
     }
     fs::create_dir_all(root.join("dir")).expect("mkdir");
-    store.write("mounts/w/d.txt", b"22").expect("write via store");
+    store
+        .write("mounts/w/d.txt", b"22")
+        .expect("write via store");
     let rows = store.list("mounts/w").expect("list");
     let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
     assert_eq!(names, vec!["a.txt", "b.txt", "c.txt", "d.txt", "dir"]);
@@ -415,11 +431,7 @@ fn time_ms<F: FnMut()>(mut body: F) -> f64 {
 
 /// 三次取样取中位数（各自跑三次 = 每个操作 3 个样本）。
 fn median_ms<F: FnMut()>(mut body: F) -> f64 {
-    median3([
-        time_ms(&mut body),
-        time_ms(&mut body),
-        time_ms(&mut body),
-    ])
+    median3([time_ms(&mut body), time_ms(&mut body), time_ms(&mut body)])
 }
 
 /// 故障探测阈值：任何单操作超过它即判定「有隐藏的树扫描」并回炉。
@@ -440,10 +452,14 @@ fn mount_io_budget_report() {
     let attach_ms = median_ms(|| {
         MountStore::attach(&run, &pack, &mod_dir).expect("attach");
     });
-    let mut store = attach(&run, &mod_dir, json!([
-        { "name": "work", "dir": "biz", "mode": "rw" },
-        { "name": "out", "mode": "rw" },
-    ]));
+    let mut store = attach(
+        &run,
+        &mod_dir,
+        json!([
+            { "name": "work", "dir": "biz", "mode": "rw" },
+            { "name": "out", "mode": "rw" },
+        ]),
+    );
 
     // ② write 4 MiB（每次满帽写；3 次 = 12 MiB，远在 64 MiB 预算之内）。
     let payload = vec![b'x'; MOUNT_FILE_MAX_BYTES];
@@ -485,9 +501,18 @@ fn mount_io_budget_report() {
     }
 
     println!("perf attach_ms={attach_ms:.3} (1 dir mount + 1 private)");
-    println!("perf write_4mib_ms={write_ms:.3} ({} bytes)", MOUNT_FILE_MAX_BYTES);
-    println!("perf read_4mib_ms={read_ms:.3} ({} bytes)", MOUNT_FILE_MAX_BYTES);
-    println!("perf stat_4mib_ms={stat_ms:.3} (sha256 over {} bytes)", MOUNT_FILE_MAX_BYTES);
+    println!(
+        "perf write_4mib_ms={write_ms:.3} ({} bytes)",
+        MOUNT_FILE_MAX_BYTES
+    );
+    println!(
+        "perf read_4mib_ms={read_ms:.3} ({} bytes)",
+        MOUNT_FILE_MAX_BYTES
+    );
+    println!(
+        "perf stat_4mib_ms={stat_ms:.3} (sha256 over {} bytes)",
+        MOUNT_FILE_MAX_BYTES
+    );
     for (label, value) in [
         ("attach", attach_ms),
         ("write_4mib", write_ms),
@@ -499,5 +524,8 @@ fn mount_io_budget_report() {
             "{label} 耗时 {value:.3} ms 超过故障探测阈值 {PERF_FAULT_MS} ms"
         );
     }
-    assert_eq!(store.budget_left(), MOUNT_RUN_WRITE_BUDGET - 3 * MOUNT_FILE_MAX_BYTES as u64);
+    assert_eq!(
+        store.budget_left(),
+        MOUNT_RUN_WRITE_BUDGET - 3 * MOUNT_FILE_MAX_BYTES as u64
+    );
 }

@@ -29,6 +29,4 @@ pub mod resources;
 pub mod sandbox;
 pub mod stdlib;
 
-pub use host_api::{
-    HostToolRunner, MountEntry, MountFs, MountKind, MountStat, MountWritten,
-};
+pub use host_api::{HostToolRunner, MountEntry, MountFs, MountKind, MountStat, MountWritten};

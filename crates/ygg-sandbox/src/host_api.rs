@@ -748,7 +748,9 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
                     let Some(bridge) = slot.as_mut() else {
                         return Err(Error::runtime(unmounted_message("fs.write", &path)));
                     };
-                    let written = bridge.write(&path, content.as_bytes()).map_err(Error::runtime)?;
+                    let written = bridge
+                        .write(&path, content.as_bytes())
+                        .map_err(Error::runtime)?;
                     out.raw_set("path", written.path)?;
                     out.raw_set("bytes", written.bytes)?;
                     out.raw_set("sha256", written.sha256)?;

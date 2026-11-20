@@ -286,7 +286,9 @@ fn mount_name_violation(name: &str) -> Option<&'static str> {
     if !head.is_ascii_lowercase() {
         return Some("首字符必须是 ASCII 小写字母");
     }
-    if let Some(ch) = chars.find(|ch| !(ch.is_ascii_lowercase() || ch.is_ascii_digit() || *ch == '_' || *ch == '-')) {
+    if let Some(ch) = chars
+        .find(|ch| !(ch.is_ascii_lowercase() || ch.is_ascii_digit() || *ch == '_' || *ch == '-'))
+    {
         return Some(if ch.is_ascii_uppercase() {
             "只允许小写字母 / 数字 / `_` / `-`（不得含大写）"
         } else {
@@ -461,7 +463,11 @@ impl MountStore {
                         return Err(MountError::mount(format!(
                             "挂载点 `{}` 已存在，但与声明不一致（{}）",
                             slot.display(),
-                            if meta.is_dir() { "声明了 dir」却已存在为真目录" } else { "已存在且不是目录" }
+                            if meta.is_dir() {
+                                "声明了 dir」却已存在为真目录"
+                            } else {
+                                "已存在且不是目录"
+                            }
                         )));
                     }
                 }
@@ -489,7 +495,10 @@ impl MountStore {
         for spec in &specs {
             let slot = mounts_root.join(&spec.name);
             let root = slot.canonicalize().map_err(|err| {
-                MountError::mount(format!("挂载点 {} 不可 canonicalize（{err}）", slot.display()))
+                MountError::mount(format!(
+                    "挂载点 {} 不可 canonicalize（{err}）",
+                    slot.display()
+                ))
             })?;
             roots.insert(
                 spec.name.clone(),
@@ -614,7 +623,10 @@ impl MountStore {
             parent.push(segment);
         }
         let canonical_parent = parent.canonicalize().map_err(|err| {
-            MountError::jail(format!("父目录 {} 不存在或不可达（{err}）", parent.display()))
+            MountError::jail(format!(
+                "父目录 {} 不存在或不可达（{err}）",
+                parent.display()
+            ))
         })?;
         let meta = fs::metadata(&canonical_parent).map_err(|err| {
             MountError::jail(format!(
@@ -711,9 +723,7 @@ impl MountStore {
             )));
         }
         if meta.is_dir() {
-            return Err(MountError::jail(format!(
-                "`{path}` 是目录，不能当文件读"
-            )));
+            return Err(MountError::jail(format!("`{path}` 是目录，不能当文件读")));
         }
         if meta.len() > MOUNT_FILE_MAX_BYTES as u64 {
             return Err(MountError::cap(format!(
@@ -1032,10 +1042,8 @@ mod tests {
 
     /// 本用例独占的临时目录（`std::env::temp_dir()` 合成数据，不碰任何业务目录）。
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "ygg-mounts-unit-{tag}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("ygg-mounts-unit-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
@@ -1086,7 +1094,14 @@ mod tests {
     #[test]
     fn name_vectors() {
         let dir = temp_dir("names");
-        for good in ["a", "work", "out-2", "a_b", "z9", "abcdefghijklmnopqrstuvwxyz012345"] {
+        for good in [
+            "a",
+            "work",
+            "out-2",
+            "a_b",
+            "z9",
+            "abcdefghijklmnopqrstuvwxyz012345",
+        ] {
             let specs = parse_mounts(&pack(json!([{ "name": good }])), &dir)
                 .unwrap_or_else(|err| panic!("`{good}` 必须合法：{err}"));
             assert_eq!(specs[0].name, good);
@@ -1111,10 +1126,7 @@ mod tests {
     #[test]
     fn duplicate_and_reserved_names_are_refused() {
         let dir = temp_dir("dup");
-        let (_, detail) = refused(
-            &pack(json!([{ "name": "work" }, { "name": "work" }])),
-            &dir,
-        );
+        let (_, detail) = refused(&pack(json!([{ "name": "work" }, { "name": "work" }])), &dir);
         assert!(detail.contains("重复"), "{detail}");
         let (_, detail) = refused(&pack(json!([{ "name": "artifacts" }])), &dir);
         assert!(detail.contains("保留名"), "{detail}");
@@ -1124,10 +1136,7 @@ mod tests {
     fn dir_must_be_an_existing_directory() {
         let dir = temp_dir("dir");
         // 不存在。
-        let (_, detail) = refused(
-            &pack(json!([{ "name": "w", "dir": "missing" }])),
-            &dir,
-        );
+        let (_, detail) = refused(&pack(json!([{ "name": "w", "dir": "missing" }])), &dir);
         assert!(detail.contains("无法 canonicalize"), "{detail}");
         // 存在但是文件。
         let file = dir.join("a.txt");
@@ -1183,8 +1192,8 @@ mod tests {
         let dir = temp_dir("mode");
         let specs = parse_mounts(&pack(json!([{ "name": "w" }])), &dir).expect("缺省合法");
         assert_eq!(specs[0].mode, MountMode::Ro, "缺省是 ro（唯一减压阀）");
-        let specs = parse_mounts(&pack(json!([{ "name": "w", "mode": "rw" }])), &dir)
-            .expect("rw 合法");
+        let specs =
+            parse_mounts(&pack(json!([{ "name": "w", "mode": "rw" }])), &dir).expect("rw 合法");
         assert_eq!(specs[0].mode, MountMode::Rw);
         let (_, detail) = refused(&pack(json!([{ "name": "w", "mode": "readonly" }])), &dir);
         assert!(detail.contains("只能是 `ro` / `rw`"), "{detail}");
@@ -1259,7 +1268,10 @@ mod tests {
         // 父目录不存在 → 拒（r1 不做挂载点内的 mkdir）。
         assert!(store.locate("mounts/w/nope/x.txt", Need::File).is_err());
         // 超出段数 / 字节上限 → 拒。
-        let deep = format!("mounts/w/{}", vec!["d"; MOUNT_PATH_MAX_SEGMENTS + 1].join("/"));
+        let deep = format!(
+            "mounts/w/{}",
+            vec!["d"; MOUNT_PATH_MAX_SEGMENTS + 1].join("/")
+        );
         assert!(store.locate(&deep, Need::File).is_err());
         let long = format!("mounts/w/{}", "x".repeat(MOUNT_PATH_MAX_BYTES));
         assert!(store.locate(&long, Need::File).is_err());
@@ -1316,7 +1328,10 @@ mod tests {
         );
         // 不拷贝内容：挂载点里读到的就是宿主目录那一份。
         assert_eq!(fs::read(slot.join("a.txt")).expect("read through"), b"host");
-        assert_eq!(store.declared().next().expect("一个挂载点").2, MountMode::Rw);
+        assert_eq!(
+            store.declared().next().expect("一个挂载点").2,
+            MountMode::Rw
+        );
     }
 
     #[cfg(unix)]
@@ -1374,11 +1389,8 @@ mod tests {
         // 槽位是软链，声明却是私有挂载 → 冲突。
         let other = attach_env("attach-conflict-link");
         fs::create_dir_all(other.0.join(MOUNTS_DIR)).expect("mounts root");
-        std::os::unix::fs::symlink(
-            other.1.join("biz"),
-            other.0.join(MOUNTS_DIR).join("work"),
-        )
-        .expect("pre-create link");
+        std::os::unix::fs::symlink(other.1.join("biz"), other.0.join(MOUNTS_DIR).join("work"))
+            .expect("pre-create link");
         match attach(&other.0, &other.1, json!([{ "name": "work" }])) {
             Ok(_) => panic!("软链 + 私有声明必须拒"),
             Err(err) => assert_eq!(err.code(), codes::MOUNT, "{err}"),
@@ -1388,12 +1400,13 @@ mod tests {
         fs::create_dir_all(third.0.join(MOUNTS_DIR)).expect("mounts root");
         fs::create_dir_all(third.1.join("biz")).expect("declared host dir");
         fs::create_dir_all(third.1.join("biz2")).expect("other host dir");
-        std::os::unix::fs::symlink(
-            third.1.join("biz2"),
-            third.0.join(MOUNTS_DIR).join("work"),
-        )
-        .expect("pre-create link");
-        match attach(&third.0, &third.1, json!([{ "name": "work", "dir": "biz" }])) {
+        std::os::unix::fs::symlink(third.1.join("biz2"), third.0.join(MOUNTS_DIR).join("work"))
+            .expect("pre-create link");
+        match attach(
+            &third.0,
+            &third.1,
+            json!([{ "name": "work", "dir": "biz" }]),
+        ) {
             Ok(_) => panic!("指向别处的软链必须拒"),
             Err(err) => {
                 assert_eq!(err.code(), codes::MOUNT, "{err}");
@@ -1461,11 +1474,16 @@ mod tests {
         assert_eq!(dir.kind, MountKind::Dir);
         assert_eq!(dir.kind.as_str(), "dir");
         // 挂载根本身是目录（stat 接受空 rel）。
-        assert_eq!
-            (store.stat("mounts/w").expect("stat root").kind, MountKind::Dir);
+        assert_eq!(
+            store.stat("mounts/w").expect("stat root").kind,
+            MountKind::Dir
+        );
         let miss = store.stat("mounts/w/none.txt").expect("stat miss");
         assert!(!miss.exists);
-        assert_eq!((miss.bytes, miss.sha256.as_str(), miss.kind.as_str()), (0, "", ""));
+        assert_eq!(
+            (miss.bytes, miss.sha256.as_str(), miss.kind.as_str()),
+            (0, "", "")
+        );
     }
 
     #[cfg(unix)]
@@ -1478,14 +1496,14 @@ mod tests {
         fs::write(root.join("a.txt"), b"1").expect("write a");
         fs::create_dir_all(root.join("sub")).expect("mkdir sub");
         fs::create_dir_all(mod_dir.join("outside")).expect("mkdir outside");
-        std::os::unix::fs::symlink(
-            mod_dir.join("outside"),
-            root.join("escape"),
-        )
-        .expect("symlink");
+        std::os::unix::fs::symlink(mod_dir.join("outside"), root.join("escape")).expect("symlink");
         let rows = store.list("mounts/w").expect("list");
         let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
-        assert_eq!(names, vec!["a.txt", "b.txt", "sub"], "按名字字节序升序，不递归，跳过软链");
+        assert_eq!(
+            names,
+            vec!["a.txt", "b.txt", "sub"],
+            "按名字字节序升序，不递归，跳过软链"
+        );
         assert_eq!(rows[0].path, "mounts/w/a.txt");
         assert_eq!((rows[2].bytes, rows[2].kind), (0, MountKind::Dir));
         assert_eq!(rows[1].kind, MountKind::File);
@@ -1517,8 +1535,8 @@ mod tests {
     #[test]
     fn write_appends_audit_rows_for_success_and_rejection() {
         let (run, mod_dir) = attach_env("write-audit");
-        let mut store = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]))
-            .expect("attach");
+        let mut store =
+            attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }])).expect("attach");
         let written = store.write("mounts/w/a.txt", b"hello").expect("write");
         assert_eq!(written.path, "mounts/w/a.txt");
         assert_eq!(written.bytes, 5);
@@ -1571,8 +1589,8 @@ mod tests {
     #[test]
     fn write_caps_single_file_and_per_attach_budget() {
         let (run, mod_dir) = attach_env("write-budget");
-        let mut store = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]))
-            .expect("attach");
+        let mut store =
+            attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }])).expect("attach");
         let oversize = vec![b'x'; MOUNT_FILE_MAX_BYTES + 1];
         match store.write("mounts/w/big.bin", &oversize) {
             Ok(_) => panic!("超单件帽必须拒"),
@@ -1591,8 +1609,8 @@ mod tests {
             Err(err) => assert_eq!(err.code(), codes::CAP, "{err}"),
         }
         // 续局拿到新预算（预算不落盘）。
-        let mut again = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]))
-            .expect("re-attach");
+        let mut again =
+            attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }])).expect("re-attach");
         assert_eq!(again.budget_left(), MOUNT_RUN_WRITE_BUDGET);
         again.write("mounts/w/one.txt", b"z").expect("新预算可写");
     }
@@ -1609,4 +1627,3 @@ mod tests {
         assert_eq!(MountError::audit("x").code(), codes::AUDIT);
     }
 }
-

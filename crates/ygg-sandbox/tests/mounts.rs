@@ -303,10 +303,7 @@ end)
     let lines = narrate(&mut fixture.kernel, "probe.jail");
     assert_eq!(lines.len(), 11, "9 个路径向量 + list + 旧面：{lines:?}");
     for line in lines.iter().take(10) {
-        assert!(
-            line.contains("ok=false"),
-            "每个向量都必须被拒：{line}"
-        );
+        assert!(line.contains("ok=false"), "每个向量都必须被拒：{line}");
         let message = err_message(line);
         assert!(
             message.starts_with("YGG-FS-JAIL: "),
@@ -319,10 +316,7 @@ end)
         old.contains("必须以 `artifacts/` 起头"),
         "非 mounts 首段仍归既有 VFS 门：{old}"
     );
-    assert!(
-        !old.starts_with("YGG-FS-"),
-        "旧面不得被改写成挂载码：{old}"
-    );
+    assert!(!old.starts_with("YGG-FS-"), "旧面不得被改写成挂载码：{old}");
     // 越狱后的落点一个都不存在（磁盘零写入）。
     for name in ["a.txt", "b.txt", "a", "b"] {
         assert!(
