@@ -291,4 +291,62 @@ function M.has(id, role_name)
   return record ~= nil and record.role == role_name
 end
 
+-- ── 技能集读面（纯读：`skills_of` / `skill_state`）──────────────────────
+
+--- `role.skills_of(id)` → **升序名字数组**（无记录 / 无槽位 ⇒ `{}`）。
+---
+--- 排序必须自己做：宿主沙箱只暴露白名单 globals，`math` / `string` / `table` 三张
+--- 表都不可达（`crates/ygg-sandbox/src/sandbox.rs` 的 `BASE_WHITELIST`），没有
+--- `table.sort`。槽位数是 6–29，插入排序的 O(k²) 可以不计。
+---
+--- `rank = 0` 的槽位也返回：这是**结构真相**（槽位存在与否是写面的事），包不替
+--- 调用方筛「等级够不够」——那是 mod 的规则（I7）。
+function M.skills_of(id)
+  local record = M.read_actor(id)
+  if record == nil then
+    return {}
+  end
+  local names = {}
+  for name in pairs(record.skills) do
+    names[#names + 1] = name
+  end
+  for i = 2, #names do
+    local value = names[i]
+    local j = i - 1
+    while j > 0 and names[j] > value do
+      names[j + 1] = names[j]
+      j = j - 1
+    end
+    names[j + 1] = value
+  end
+  return names
+end
+
+--- `role.skill_state(id, name)` → 槽位**副本** `{ rank, charges?, capacity? }` 或 `nil`。
+---
+--- 返回副本而不是内部引用：调用方改了返回值不得影响后续读取（否则「读面」会变成
+--- 一个不会写盘的旁路写面）。字段只映槽位，**不并入**声明的 `charges`（声明面是
+--- mod 自己的数据，包内的 defs 面只有写、没有读）。
+function M.skill_state(id, name)
+  if type(name) ~= "string" or name == "" then
+    fail(E.DEF, "skill_state 的技能名必须是非空字符串，得到 " .. tostring(name))
+  end
+  local record = M.read_actor(id)
+  if record == nil then
+    return nil
+  end
+  local slot = record.skills[name]
+  if slot == nil then
+    return nil
+  end
+  local out = { rank = slot.rank }
+  if slot.charges ~= nil then
+    out.charges = slot.charges
+  end
+  if slot.capacity ~= nil then
+    out.capacity = slot.capacity
+  end
+  return out
+end
+
 return M

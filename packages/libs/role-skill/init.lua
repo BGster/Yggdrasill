@@ -9,11 +9,12 @@
 --
 -- # 分工
 --
---   `pkg.role_skill.store`   四个 KV 键的唯一读写口 + 依赖解析 + emit
---   `pkg.role_skill.actors`  角色/技能定义表、实体记录、授予/撤销/查询
---   `pkg.role_skill.skills`  技能槽位（rank / charges）
+--   `pkg.role_skill.store`   全部 KV 键的唯一读写口 + 依赖解析 + emit
+--   `pkg.role_skill.actors`  角色/技能定义表、实体记录、授予/撤销/查询（含技能集读面）
+--   `pkg.role_skill.skills`  技能槽位（rank / charges / capacity）
 --   `pkg.role_skill.compose` `effective` 的合成规则（只读，从不写回）
 --   `pkg.role_skill.counters` 事件计数（订阅面 + 显式清零）
+--   `pkg.role_skill.window`  近期流的有界 ring（`window_push` / `window`）
 --
 -- # 沙箱纪律
 --
@@ -25,6 +26,7 @@ local actors = require("pkg.role_skill.actors")
 local skills = require("pkg.role_skill.skills")
 local compose = require("pkg.role_skill.compose")
 local counters = require("pkg.role_skill.counters")
+local window = require("pkg.role_skill.window")
 
 local M = { VERSION = "0.1.0" }
 
@@ -42,14 +44,18 @@ for key, code in pairs(store.E) do
   M.ERRORS[key] = code
 end
 
---- KV 键名（四个键的单源；契约 §2）。
+--- KV 键名（全在这里的单源；契约 §2）。
 M.KEY = store.KEY
 
---- 装配：`{ host?, ygg?, entity?, codec?, events? }`。
+--- 窗口 ring 的容量（安装期解析；缺省 100）。契约 §4 那一行是单源，这里是副本。
+M.WINDOW_CAP = store.DEFAULT_WINDOW_CAP
+
+--- 装配：`{ host?, ygg?, entity?, codec?, events?, window_cap? }`。
 ---
 --- 只记 deps、装事件订阅面（`events` 非空时）；不预读定义、不写 KV（I8）。
 function M.install(deps)
   store.install(deps)
+  M.WINDOW_CAP = store.window_cap()
   if type(deps) == "table" and deps.events ~= nil then
     counters.subscribe(deps.events)
   end
@@ -97,8 +103,8 @@ function M.charge(id, name)
 end
 
 --- `role.recharge(id, name, n?)` → 恢复后的格数（上限由声明的 `charges` 决定）。
-function M.recharge(id, name, n)
-  return skills.recharge(id, name, n)
+function M.recharge(id, name, n, cap)
+  return skills.recharge(id, name, n, cap)
 end
 
 --- `role.effective(id, attr)` → `number`（基础值 + 合成加成；**纯读，从不写回**）。
@@ -119,6 +125,31 @@ end
 --- `role.reset_counters(id, event?)` → `true`（显式清零；**何时清是 mod 的语义**）。
 function M.reset_counters(id, event)
   return counters.reset(id, event)
+end
+
+--- `role.skills_of(id)` → 升序名字数组（纯读；无记录 ⇒ `{}`）。
+function M.skills_of(id)
+  return actors.skills_of(id)
+end
+
+--- `role.skill_state(id, name)` → 槽位副本 `{ rank, charges?, capacity? }` 或 `nil`（纯读）。
+function M.skill_state(id, name)
+  return actors.skill_state(id, name)
+end
+
+--- `role.set_capacity(id, name, cap)` → 生效后的容量（实例级上限，D13）。
+function M.set_capacity(id, name, cap)
+  return skills.set_capacity(id, name, cap)
+end
+
+--- `role.window_push(id, label)` → 推入后的 ring 长度（近期流，I10）。
+function M.window_push(id, label)
+  return window.push(id, label)
+end
+
+--- `role.window(id, label, n)` → 最近 `n` 条里等于 `label` 的条数（纯读）。
+function M.window(id, label, n)
+  return window.count(id, label, n)
 end
 
 return M

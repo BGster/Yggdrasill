@@ -63,6 +63,11 @@ do
     "compose",
     "count",
     "reset_counters",
+    "skills_of",
+    "skill_state",
+    "set_capacity",
+    "window_push",
+    "window",
   }
   for _, name in ipairs(exports) do
     if type(role[name]) ~= "function" then
@@ -85,8 +90,8 @@ do
     end
   end
 
-  -- KV 前缀纪律（D10）：本包只写 `role.*`，且四个键名是单源。
-  for _, key in ipairs({ "DEFS", "SKILLS", "INDEX" }) do
+  -- KV 前缀纪律（D10）：本包只写 `role.*`，且键名是单源。
+  for _, key in ipairs({ "DEFS", "SKILLS", "INDEX", "WINDOW" }) do
     local value = (role.KEY or {})[key]
     if type(value) ~= "string" or value:find("^role%.") == nil then
       problems[#problems + 1] = "KEY." .. key .. " 必须以 role. 开头，实得 " .. tostring(value)
