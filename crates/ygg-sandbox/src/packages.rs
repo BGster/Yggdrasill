@@ -543,4 +543,134 @@ mod tests {
         assert!(is_valid_package_id("a"));
         assert!(is_valid_package_id("a_b-c9"));
     }
+
+    /// `pkg.json` 拒绝文案（断言「先知道是哪个包，再谈细节」）。
+    fn pkg_err(id: &str, text: &str) -> String {
+        let file = Path::new("packages/libs").join(id).join(PKG_FILE);
+        match PackageManifest::parse(id, text.as_bytes(), &file) {
+            Ok(_) => panic!("expected the package manifest to be rejected"),
+            Err(err) => err.to_string(),
+        }
+    }
+
+    /// 合格 `pkg.json` 的便捷构造函数（只写出差异字段）。
+    fn pkg_json(extra: &str) -> String {
+        format!(
+            r#"{{"schemaVersion": 1, "name": "fixture", "version": "0.1.0",
+                 "contract": "docs/design/packages/README.md"{extra}}}"#
+        )
+    }
+
+    #[test]
+    fn package_manifest_parses_the_documented_shape_and_defaults_deps_to_empty() {
+        let file = Path::new("packages/libs/fixture/pkg.json");
+        let bare = PackageManifest::parse("fixture", pkg_json("").as_bytes(), file)
+            .expect("minimal pkg.json");
+        assert_eq!(bare.id(), "fixture");
+        assert_eq!(bare.version(), "0.1.0");
+        assert!(bare.deps().is_empty());
+        assert_eq!(bare.contract(), "docs/design/packages/README.md");
+
+        // deps 与 packages[] 同形（共用 PackageRef 与 parse_refs）。
+        let with_deps = PackageManifest::parse(
+            "fixture",
+            pkg_json(r#", "deps": [{"id": "role-skill", "version": "1.2.3"}]"#).as_bytes(),
+            file,
+        )
+        .expect("pkg.json with deps");
+        assert_eq!(with_deps.deps().len(), 1);
+        assert_eq!(with_deps.deps()[0].id(), "role-skill");
+        assert_eq!(with_deps.deps()[0].version(), "1.2.3");
+    }
+
+    #[test]
+    fn package_manifest_rejects_a_name_that_differs_from_its_directory() {
+        let text = r#"{"schemaVersion": 1, "name": "other", "version": "0.1.0",
+                       "contract": "docs/design/packages/README.md"}"#;
+        let err = pkg_err("fixture", text);
+        assert_eq!(
+            err,
+            "package \"fixture\" declares name \"other\" but lives in directory \"fixture\" \
+             (a package has exactly one name) (packages/libs/fixture/pkg.json)"
+        );
+    }
+
+    #[test]
+    fn package_manifest_rejects_bad_deps_and_contract_shape() {
+        // deps 不是数组。
+        let err = pkg_err("fixture", &pkg_json(r#", "deps": "none""#));
+        assert!(
+            err.starts_with("package \"fixture\" `deps` must be an array"),
+            "{err}"
+        );
+        // deps 项缺 version。
+        let err = pkg_err("fixture", &pkg_json(r#", "deps": [{"id": "codec"}]"#));
+        assert!(
+            err.contains("`deps[0]` must be an object with string `id` and `version`"),
+            "{err}"
+        );
+        // deps id 非法（点号）。
+        let err = pkg_err(
+            "fixture",
+            &pkg_json(r#", "deps": [{"id": "role.skill", "version": "1"}]"#),
+        );
+        assert!(
+            err.contains("`deps[0].id` = \"role.skill\" must match"),
+            "{err}"
+        );
+        // deps 同一 id 两次。
+        let err = pkg_err(
+            "fixture",
+            &pkg_json(
+                r#", "deps": [{"id": "codec", "version": "1"}, {"id": "codec", "version": "2"}]"#,
+            ),
+        );
+        assert!(
+            err.contains("declares `deps` entry \"codec\" twice"),
+            "{err}"
+        );
+        // contract 上跳。
+        let err = pkg_err(
+            "fixture",
+            r#"{"schemaVersion": 1, "name": "fixture", "version": "0.1.0",
+                "contract": "../escape.md"}"#,
+        );
+        assert!(err.contains("must be a repo-relative path"), "{err}");
+        // contract 绝对路径。
+        let err = pkg_err(
+            "fixture",
+            r#"{"schemaVersion": 1, "name": "fixture", "version": "0.1.0",
+                "contract": "/abs.md"}"#,
+        );
+        assert!(err.contains("must be a repo-relative path"), "{err}");
+    }
+
+    #[test]
+    fn package_manifest_rejects_bad_json_schema_version_and_missing_fields() {
+        let err = pkg_err("fixture", "{ not json");
+        assert!(err.contains("is not valid JSON"), "{err}");
+        // schemaVersion 是本构建实现的锚。
+        let err = pkg_err(
+            "fixture",
+            r#"{"schemaVersion": 2, "name": "fixture", "version": "0.1.0",
+                "contract": "docs/design/packages/README.md"}"#,
+        );
+        assert!(
+            err.contains("declares schemaVersion 2 (this build implements 1)"),
+            "{err}"
+        );
+        // 缺 version：半声明一律拒绕（与 packages[] 同一条纪律）。
+        let err = pkg_err(
+            "fixture",
+            r#"{"schemaVersion": 1, "name": "fixture",
+                "contract": "docs/design/packages/README.md"}"#,
+        );
+        assert!(err.contains("is missing string `version`"), "{err}");
+        // 缺 contract。
+        let err = pkg_err(
+            "fixture",
+            r#"{"schemaVersion": 1, "name": "fixture", "version": "0.1.0"}"#,
+        );
+        assert!(err.contains("is missing string `contract`"), "{err}");
+    }
 }
