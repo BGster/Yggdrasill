@@ -147,6 +147,22 @@ The user runs real-data verification and pastes the output; synthetic data under
    authority, all others pointers or labelled projections. Owner = touched-surface editor; trigger = every
    prompt-surface commit; check = migration matrix + `docs-consistency.sh`.
 
+9. **Zero debt (aggressive iteration contract, user ruling 2026-11-20)**: every discovered
+   optimization, defect, or worth-building capability has exactly two legal endings — **implement it
+   now**, or **convert it on the spot into a scheduled requirement with acceptance criteria** (the
+   master schedule in the Goal contract; conditional systems are exempt only when their trigger is
+   written down, e.g. sim-kernel §1 “physics lands with P3-4/P4 use cases”). “Deferred / future work /
+   待优化 / 遗留” wording in any deliverable — plan, report, artifact, doc — without a schedule ID means
+   the deliverable is rejected as unfinished; schedule items have exactly two states, `scheduled` and
+   `done`; a schedule that only grows without draining fails the Goal's completion criteria. Evidence
+   discipline still applies: a “discovery” must be measured, defective, or user-named — no speculative
+   wish lists. ① Blocked action: closing a discovery by filing it as future work, or shipping a
+   deliverable that parks one; ② Symptom: deferred wording without a schedule ID, or a schedule item
+   without acceptance criteria, or a schedule that never drains; ③ Confirmation: before delivery
+   `grep -nE "遗留|后续需求|待优化|future work|TODO" <artifact>` returns zero hits (the master schedule and
+   sentences citing a schedule ID excepted), and the Goal completion criteria include “master schedule
+   drained”.
+
 ## 2. Cold start
 
 ### Build and install
