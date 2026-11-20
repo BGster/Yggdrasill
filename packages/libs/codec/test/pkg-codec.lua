@@ -250,3 +250,141 @@ run("pkg.codec.sha256-vectors", function()
   eq(#codec.sha256(""), 64, "输出长度")
   eq(codec.sha256("") == codec.sha256(""):lower(), true, "输出小写")
 end)
+
+-- ── 用例 1-7：encode（确定性字节 / 键序 / 数字 / 转义 / 拒绝面）────────────────
+
+run("pkg.codec.encode-deterministic-bytes", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+
+  -- 同值两次必须**逐字节**相等。
+  local value = {
+    name = "creature",
+    hp = 100,
+    alive = true,
+    tags = { "enemy", "boss" },
+    nested = { a = 1, b = { 2, 3 } },
+  }
+  eq(codec.encode(value), codec.encode(value), "同值两次")
+
+  -- 插入序扰动：100 键对象用两种插入序建两张表，字节必须一样。
+  -- （`pairs` 序依赖哈希种子，不排序就做不到这一条。）
+  local forward = {}
+  for i = 1, 100 do
+    forward[("k%03d"):format(i)] = i
+  end
+  local backward = {}
+  for i = 100, 1, -1 do
+    backward[("k%03d"):format(i)] = i
+  end
+  eq(codec.encode(forward), codec.encode(backward), "插入序扰动不影响字节")
+  eq(#codec.encode(forward) > 0, true, "编码结果非空")
+end)
+
+run("pkg.codec.encode-key-order", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+  -- 字面量对拍，而不是「能解析」：“能解析”对任何键序都成立，测不到 I1。
+  eq(codec.encode({ b = 1, a = 2 }), '{"a":2,"b":1}', "键序为字节序")
+  eq(codec.encode({ z = 1, A = 2, _x = 3 }), '{"A":2,"_x":3,"z":1}', "大小写与下划线的字节序")
+  eq(codec.encode({}), "{}", "空表编码为对象")
+  eq(codec.encode({ 1, 2, 3 }), "[1,2,3]", "序列编码为数组")
+end)
+
+run("pkg.codec.encode-number-form", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+
+  eq(codec.encode(1), "1", "整数直接写")
+  eq(codec.encode(1.0), "1.0", "浮点幺保持浮点身份")
+  eq(codec.encode(0.1), "0.1", "浮点最短往返（不是 0.10000000000000001）")
+  eq(codec.encode(1e300), "1e300", "大指数去 + 与 E")
+  eq(codec.encode(-0.0), "0.0", "负零归一到零（与内核 normalize_f64 同口径）")
+  is_true(codec.encode(2 ^ 63):find("e") ~= nil, "2^63 需指数形式")
+  eq(codec.encode(100.0), "100.0", "量级在区间内优先十进制")
+  -- 往返面（`decode(encode(v))` 同值同 math.type）在 C3 补齐：这里只钉**编码侧**，
+  -- 因为 decode 还不存在——用例允许跨段长大，但不允许拿不存在的函数写断言。
+end)
+
+run("pkg.codec.encode-number-nonfinite", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+  -- NaN 与 ±inf 不是 JSON 值；静默写 null 会把「无穷大」读成「没有值」。
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode(0 / 0)
+  end, "NaN 被拒")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode(math.huge)
+  end, "+inf 被拒")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode(-math.huge)
+  end, "-inf 被拒")
+end)
+
+run("pkg.codec.encode-string-escapes", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+
+  local source = '"' .. "\\" .. "\n\r\t" .. ("%c"):format(1)
+  local expected = '"' .. '\\"' .. "\\\\" .. "\\n\\r\\t" .. "\\u0001" .. '"'
+  eq(codec.encode(source), expected, "引号/反斜杠/换行/回车/制表/控制字符")
+
+  -- 非 ASCII 原样（UTF-8 直通，不转 \\uXXXX）。
+  eq(codec.encode("中文"), '"中文"', "非 ASCII 不转义")
+  -- 转义往返同样归 C3（需 decode）。
+end)
+
+run("pkg.codec.encode-rejects-holes", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+
+  -- `{1, nil, 3}` 在 Lua 里 `#` 是未定义的（可能 1 也可能 3），一律当洞。
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode({ 1, nil, 3 })
+  end, "序列中间有 nil")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode({ [1] = 1, [3] = 3 })
+  end, "显式洞")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode({ a = 1, [1] = 2 })
+  end, "数组键与字符串键混用")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode({ [0] = 1 })
+  end, "下标 0")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode({ [1.5] = 1 })
+  end, "非整数键")
+end)
+
+run("pkg.codec.encode-rejects-non-values", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode({ f = function()
+      return 1
+    end })
+  end, "函数值")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode({ co = coroutine.create(function()
+      return 1
+    end) })
+  end, "thread 值")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode(function()
+      return 1
+    end)
+  end, "顶层函数")
+
+  -- 对照组：带元表的表**可以**编码（元表不进字节，只编内容）。
+  eq(codec.encode(setmetatable({ a = 1 }, { __index = function()
+    return 9
+  end })), '{"a":1}', "元表不进字节")
+
+  -- 循环引用要报错而不是栈溢出。
+  local loop = {}
+  loop.self = loop
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.encode(loop)
+  end, "循环引用")
+end)
