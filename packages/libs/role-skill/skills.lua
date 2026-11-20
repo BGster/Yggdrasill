@@ -104,7 +104,7 @@ function M.grant_skill(id, name, rank)
   end
   record.skills[name] = slot
   actors.write_actor(id, record)
-  store.emit("role.skill_gained", { id = id, rank = slot.rank, skill = name })
+  store.emit("role.skill_gained", tostring(id) .. "|" .. name .. "|" .. tostring(slot.rank))
   return true
 end
 
@@ -116,7 +116,7 @@ function M.revoke_skill(id, name)
   end
   record.skills[name] = nil
   actors.write_actor(id, record)
-  store.emit("role.skill_lost", { id = id, skill = name })
+  store.emit("role.skill_lost", tostring(id) .. "|" .. name)
   return true
 end
 
