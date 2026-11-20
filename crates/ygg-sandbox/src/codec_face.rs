@@ -110,7 +110,7 @@ fn trimmed(value: &[u8]) -> &[u8] {
 /// 舍入本身交给 Rust 的 `{:.*e}`（正确舍入、与 C 一致，含 round-half-to-even），
 /// 本函数只做**形态选择**——那是 `%g` 与 `%e` 唯一不同的地方。
 fn format_g(value: f64, precision: usize) -> String {
-    debug_assert!(precision >= 1 && precision <= 17);
+    debug_assert!((1..=17).contains(&precision));
     debug_assert!(value.is_finite() && value > 0.0);
 
     let scientific = format!("{:.*e}", precision - 1, value);
@@ -187,7 +187,7 @@ pub fn number_text(value: f64) -> Result<String, CodecFaceError> {
     }
 
     let magnitude = value.abs();
-    let allow_exponent = !(magnitude >= 1e-4 && magnitude < 1e15);
+    let allow_exponent = !(1e-4..1e15).contains(&magnitude);
     let mut chosen: Option<String> = None;
     for precision in 1..=17 {
         let candidate = format_g(magnitude, precision);
