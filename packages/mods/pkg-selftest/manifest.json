@@ -48,9 +48,9 @@
           "sha256": "0d3e108ba7643679a14d3c3f72e90ffaff3bb641558babcc5b18d4ce65c323a6"
         },
         {
-          "byteLength": 4676,
+          "byteLength": 4696,
           "path": "dialogue/memory.lua",
-          "sha256": "1739706646e7b78bb79ad8366a8cc542e07e70f687cc5fa802a6673e66c7ee5b"
+          "sha256": "207f557aed5ebc78e564e91a205884fa530b686ad0e1d2da35d0b4a4495d63b5"
         },
         {
           "byteLength": 180,
@@ -58,9 +58,9 @@
           "sha256": "1d4ed8fec98962fd9c3201c8137a49dc646d64de42718b596f79ca63efaddb03"
         },
         {
-          "byteLength": 7668,
+          "byteLength": 8095,
           "path": "dialogue/store.lua",
-          "sha256": "e2cdd09b5fa22b5ecb3b89a10c42293fa8012f85e26d43cb954ebccd12266be9"
+          "sha256": "252d73f2ea675b5f42bbfa8df4e0e42e80e7e099b696b793749ad91daf611430"
         }
       ],
       "id": "dialogue"

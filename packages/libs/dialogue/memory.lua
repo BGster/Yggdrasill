@@ -87,8 +87,8 @@ end
 
 --- 追加一轮（`seq` 恰好 +1，窗口外丢最旧）。返回新轮次号。
 function M.append(h, thread, who, text, window)
-  if not S.key_name_ok(thread) then
-    S.fail(S.E.TYPE, "线程键不在合法字符集内：" .. tostring(thread))
+  if not S.thread_key_ok(thread) then
+    S.fail(S.E.TYPE, "线程键必须是非空且不含换行的字符串：" .. tostring(thread))
   end
   if type(text) ~= "string" or #text == 0 then
     S.fail(S.E.TYPE, "text 必须是文本键（非空字符串），得到 " .. tostring(text))

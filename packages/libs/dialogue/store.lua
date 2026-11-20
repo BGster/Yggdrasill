@@ -173,6 +173,17 @@ function S.key_name_ok(name)
   return true
 end
 
+--- 线程键是否合法：非空、无换行。
+---
+--- 与 handler 名不同，线程键**以数字开头**（`"<source>:<target>"`），所以不能套
+--- `key_name_ok` 的首字符规则；它进的是 KV 键中段与名表项，唯一能劈开名表的是换行。
+function S.thread_key_ok(thread)
+  if type(thread) ~= "string" or #thread == 0 then
+    return false
+  end
+  return thread:find("\n", 1, true) == nil
+end
+
 function S.type_name_ok(name)
   if type(name) ~= "string" or #name == 0 then
     return false
