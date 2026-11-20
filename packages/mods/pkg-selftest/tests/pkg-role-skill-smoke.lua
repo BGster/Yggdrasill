@@ -61,6 +61,8 @@ do
     "recharge",
     "effective",
     "compose",
+    "count",
+    "reset_counters",
   }
   for _, name in ipairs(exports) do
     if type(role[name]) ~= "function" then

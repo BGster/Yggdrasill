@@ -24,6 +24,7 @@ local store = require("pkg.role_skill.store")
 local actors = require("pkg.role_skill.actors")
 local skills = require("pkg.role_skill.skills")
 local compose = require("pkg.role_skill.compose")
+local counters = require("pkg.role_skill.counters")
 
 local M = { VERSION = "0.1.0" }
 
@@ -49,6 +50,9 @@ M.KEY = store.KEY
 --- 只记 deps、装事件订阅面（`events` 非空时）；不预读定义、不写 KV（I8）。
 function M.install(deps)
   store.install(deps)
+  if type(deps) == "table" and deps.events ~= nil then
+    counters.subscribe(deps.events)
+  end
   return M
 end
 
@@ -105,6 +109,16 @@ end
 --- `role.compose(fn)` → `true`（替换合成规则 `(base, bonuses) -> number`）。
 function M.compose(fn)
   return compose.set(fn)
+end
+
+--- `role.count(id, event)` → 次数（纯读；冷却靠它表达，不靠时钟）。
+function M.count(id, event)
+  return counters.count(id, event)
+end
+
+--- `role.reset_counters(id, event?)` → `true`（显式清零；**何时清是 mod 的语义**）。
+function M.reset_counters(id, event)
+  return counters.reset(id, event)
 end
 
 return M
