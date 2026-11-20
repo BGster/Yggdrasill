@@ -708,4 +708,153 @@ function M.set(id, key, value)
   return true
 end
 
+-- ── 标签 / 存活集合 / 生命周期 ───────────────────────────────────────────────
+--
+-- 标签用**内核标签面**（`add_tag` / `remove_tag` / `has_tag`）：它们随存档往返、
+-- 返回「是否真的变了」、且不用本包自己维护第二份集合。代价是「有哪些 tag」不可
+-- 枚举（内核没有列 tag 面）——所以 tag 也必须是 schema 声明的（D8）：未声明的 tag
+-- 无法出现在 `destroy` 的清理名单里，会变成永远擦不掉的残留。
+
+--- `entity.tags(id)`：已声明的、当前存在的 tag 名（升序数组）。
+---
+--- 契约 §4 的 API 表原本只有 `has`；导出侧（codec）需要「把一条记录的 tag 全取
+--- 出来」而 KV 不可遍历，故补这一面（已回写 entity.md §4）。
+function M.tags(id)
+  local h = host()
+  local out = {}
+  if not alive(h, id) then
+    return out
+  end
+  memo_sync(h)
+  local spec = memo.specs[h.kv.get(K.rec .. id .. ".schema")]
+  if spec == nil then
+    return out
+  end
+  for i = 1, #spec.tags do
+    local tag_name = spec.tags[i].name
+    if h.entity.has_tag(id, tag_name) then
+      out[#out + 1] = tag_name
+    end
+  end
+  return out
+end
+
+--- `entity.has(id, tag)`：纯读；死亡实体与未声明 tag 都是 `false`。
+function M.has(id, tag_name)
+  local h = host()
+  if not alive(h, id) then
+    return false
+  end
+  if type(tag_name) ~= "string" then
+    return false
+  end
+  return h.entity.has_tag(id, tag_name)
+end
+
+--- `entity.tag` / `entity.untag` 的共同体：声明校验 → 存活门 → 内核变更 → 事件。
+local function tag_write(id, tag_name, adding)
+  local h = host()
+  if not alive(h, id) then
+    fail(E_ATTR, "实体 " .. tostring(id) .. " 不存活，不可改标签")
+  end
+  local spec = require_spec(h, h.kv.get(K.rec .. id .. ".schema"))
+  if spec.tag_index[tag_name] == nil then
+    spec_error("schema `" .. spec.name .. "` 未声明 tag `" .. tostring(tag_name) .. "`")
+  end
+  local changed
+  if adding then
+    changed = h.entity.add_tag(id, tag_name)
+  else
+    changed = h.entity.remove_tag(id, tag_name)
+  end
+  if changed then
+    h.emit(adding and "entity.tagged" or "entity.untagged", tostring(id) .. "|" .. tag_name)
+  end
+  return changed
+end
+
+--- `entity.tag(id, tag)`：加标签；返回「是否真的变了」（已存在 = `false`）。
+function M.tag(id, tag_name)
+  return tag_write(id, tag_name, true)
+end
+
+--- `entity.untag(id, tag)`：去标签；返回「是否真的变了」（原本没有 = `false`）。
+function M.untag(id, tag_name)
+  return tag_write(id, tag_name, false)
+end
+
+--- `entity.exists(id)`：一次 KV 读存活位，**绝不扫键**（契约 I5）。
+function M.exists(id)
+  return alive(host(), id)
+end
+
+--- `entity.schema_of(id)`：实体的 schema 名；死亡或不存在 = `nil`。
+function M.schema_of(id)
+  local h = host()
+  if not alive(h, id) then
+    return nil
+  end
+  return h.kv.get(K.rec .. id .. ".schema")
+end
+
+--- `entity.count()`：存活实体数（KV 计数器，O(1)）。
+function M.count()
+  local current = host().kv.get(K.count)
+  if type(current) ~= "number" then
+    return 0
+  end
+  return current
+end
+
+--- `entity.ids(tag?, schema?)`：存活 id 升序数组；可过 tag / schema。
+---
+--- 扫 `1..seq` 而不是扫 KV 键（宿主没有遍历面）：死亡位与「内核直生 id」自动
+--- 跳过，未到达的水位不会多扫。复杂度 O(seq)，契约已将 `ids` / `count` 登记为 O(n)。
+function M.ids(tag_filter, schema_filter)
+  local h = host()
+  local out = {}
+  local seq = h.kv.get(K.seq)
+  if type(seq) ~= "number" then
+    return out
+  end
+  for id = 1, seq do
+    if alive(h, id) then
+      local keep = true
+      if schema_filter ~= nil then
+        keep = h.kv.get(K.rec .. id .. ".schema") == schema_filter
+      end
+      if keep and tag_filter ~= nil then
+        keep = h.entity.has_tag(id, tag_filter)
+      end
+      if keep then
+        out[#out + 1] = id
+      end
+    end
+  end
+  return out
+end
+
+--- `entity.destroy(id)`：把实体从存活集合里摘掉（**不**遍历、**不清**引用）。
+---
+--- 三件主机事实决定了这个形状：
+---   * 内核没有 `destroy` 面（6 面里没有）——所以属性只能留在内核，靠存活位遮蔽；
+---   * KV 没有删除——所以存活位只能 `true` → `false`（墓碑），不能消失；
+---   * 引用的清理归 mod 语义（「召唤物死亡，主人失去它」是规则），包不代决（契约 I4）。
+function M.destroy(id)
+  local h = host()
+  if not alive(h, id) then
+    return false
+  end
+  local spec = require_spec(h, h.kv.get(K.rec .. id .. ".schema"))
+  h.kv.set(alive_key(id), false)
+  shift(h, K.count, -1)
+  -- 清掉已声明的 tag：属性没有删除面（那是内核缺口，已登记），但标签有，不擦就
+  -- 会在「同 id 不复用」的前提下永远占着内存。
+  for i = 1, #spec.tags do
+    h.entity.remove_tag(id, spec.tags[i].name)
+  end
+  h.emit("entity.destroyed", id)
+  return true
+end
+
 return M
