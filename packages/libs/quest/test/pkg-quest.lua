@@ -556,3 +556,172 @@ run("pkg.quest.events-exact", function()
   end
   eq(events_named(world, "quest.opened")[2].payload, b .. "|errand", "opened 载荷 = id|type")
 end)
+
+-- ── 静态面：源文件清单来自 manifest 的 packages 段（内容寻址的那份，不是目录扫描）──
+--
+-- 为什么不硬编码文件清单：包加一个模块就要改两处（实现 + 测试清单），那正是漂移。
+-- 为什么不用目录扫描：沙箱外能扫，但「该在册的文件」的权威是 manifest——用名单表
+-- 扫出来的是**可能漏登记**的影子集合。
+
+--- 本包在册的源文件（相对包根），按 manifest 的 packages 段。
+local function pkg_sources(id)
+  local manifest = rawget(_G, "__MANIFEST")
+  if type(manifest) ~= "table" or type(manifest.packages) ~= "table" then
+    error("manifest 缺 packages 段（载体 pack.json 未声明包或未重算 manifest）", 0)
+  end
+  for i = 1, #manifest.packages do
+    local pkg = manifest.packages[i]
+    if pkg.id == id then
+      local out = {}
+      for j = 1, #pkg.files do
+        out[#out + 1] = pkg.files[j].path
+      end
+      return out
+    end
+  end
+  error("manifest 的 packages 段没有包 " .. id, 0)
+end
+
+--- 在包的源文件里数字面量出现次数（会返回反例的形态：命中数 > 0 即可证伪）。
+local function count_in_sources(id, needle)
+  local hits = 0
+  local where = {}
+  local paths = pkg_sources(id)
+  for i = 1, #paths do
+    local path = PKG_ROOT .. "/" .. paths[i]
+    local handle = assert(io.open(path, "rb"), "读不到 " .. path)
+    local text = handle:read("a")
+    handle:close()
+    local start = 1
+    while true do
+      local pos = text:find(needle, start, true)
+      if pos == nil then
+        break
+      end
+      hits = hits + 1
+      where[#where + 1] = paths[i] .. "@" .. pos
+      start = pos + #needle
+    end
+  end
+  return hits, where
+end
+
+-- ── 用例 13-18：委托是引用、读面、无时钟、顶层纯度 ──────────────────────────
+
+run("pkg.quest.no-entity-api", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+
+  -- I4：giver / taker 只是 ref，包不判存活——一个根本不存在的 id 照样能开。
+  local id = quest.open("errand", { giver = 999999, taker = 1000000 })
+  eq(quest.get(id).giver, 999999, "悬垂 giver 原样存")
+  eq(quest.get(id).taker, 1000000, "悬垂 taker 原样存")
+  names_equal(quest.open_ids(999999), { id }, "owner_ref 命中 giver")
+  names_equal(quest.open_ids(1000000), { id }, "owner_ref 命中 taker")
+
+  -- assign 只写两个 ref：换成另一个（同样不存在的）id 也不报错。
+  is_true(quest.assign(id, 7, 8), "assign 返回 true")
+  eq(quest.get(id).giver, 7, "giver 被改写")
+  eq(quest.get(id).taker, 8, "taker 被改写")
+  eq(world.entity_calls(), 0, "ygg.entity.* 调用次数必须为 0")
+end)
+
+run("pkg.quest.open-ids-ordered", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+
+  local ids = {}
+  for i = 1, 5 do
+    ids[i] = quest.open("errand")
+  end
+  quest.abandon(ids[2], "gone")
+  quest.abandon(ids[4], "gone")
+
+  -- 升序、只含 open（终态的不在列表里）。
+  names_equal(quest.open_ids(), { ids[1], ids[3], ids[5] }, "open_ids 升序")
+  eq(#quest.open_ids(), 3, "只剩三个开着的")
+  -- 无参 = 不过滤（owner 缺省）；传一个不存在的 ref = 空表而不是 nil。
+  names_equal(quest.open_ids(12345), {}, "不命中 owner 返回空表")
+end)
+
+run("pkg.quest.open-ids-owner", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+
+  local mine = quest.open("errand", { giver = 10 })
+  local taken = quest.open("errand", { taker = 10 })
+  local other = quest.open("errand", { giver = 11, taker = 12 })
+  local loose = quest.open("errand")
+
+  names_equal(quest.open_ids(10), { mine, taken }, "giver 或 taker 命中都算")
+  names_equal(quest.open_ids(11), { other }, "giver 命中")
+  names_equal(quest.open_ids(12), { other }, "taker 命中")
+  names_equal(quest.open_ids(13), {}, "谁都不是")
+  eq(#quest.open_ids(), 4, "不过滤时四个都在")
+  is_true(loose > other, "id 递增")
+
+  -- assign 换手后归属跟着走（过滤读的是 KV 里的现值，不是开单时的快照）。
+  quest.assign(other, 10, nil)
+  names_equal(quest.open_ids(10), { mine, taken, other }, "换手后归属更新")
+  names_equal(quest.open_ids(11), {}, "旧 giver 不再命中")
+end)
+
+run("pkg.quest.step-reader", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+  local id = quest.open("errand")
+
+  local first = quest.step(id)
+  eq(first.index, 1, "index")
+  eq(first.id, "accept", "步 id 来自模板")
+  eq(first.guide, "quests.errand.accept", "guide 是文本键")
+  is_nil(first.on_enter, "首步没有 on_enter")
+  names_equal(sorted_keys(first), { "guide", "id", "index" }, "step 的键集（无 on_enter 时三枚）")
+
+  quest.advance(id)
+  local second = quest.step(id)
+  eq(second.index, 2, "推进后的 index")
+  eq(second.id, "deliver", "推进后的步 id")
+  eq(second.on_enter, "quest.check.deliver", "on_enter 只是读数（不自动 emit）")
+  names_equal(sorted_keys(second), { "guide", "id", "index", "on_enter" }, "step 的键集（有 on_enter 时四枚）")
+  eq(#events_named(world, "quest.check.deliver"), 0, "on_enter 不得被自动发成事件")
+
+  -- 不存在 = nil（不抛错：读面与写面的错误面不同）。
+  is_nil(quest.step(999), "不存在的 id")
+  is_nil(quest.get(999), "get 不存在的 id")
+end)
+
+run("pkg.quest.no-clock", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+
+  -- I7：静态面——包源文件里一次 `ticks(` 都没有（命中数会返回反例）。
+  local hits, where = count_in_sources("quest", "ticks(")
+  eq(hits, 0, "包源码里的 ticks( 命中数： " .. table.concat(where, ","))
+
+  -- 行为面——把 mock 时钟推到 12345，结果与 0 时逐字段相同，且一次都没读它。
+  world.tick = 12345
+  local id = quest.open("errand")
+  eq(quest.advance(id), "open", "推进结果与时钟无关")
+  eq(quest.get(id).step, 2, "步下标与时钟无关")
+  eq(world.ticks_calls(), 0, "ygg.ticks 调用次数必须为 0")
+end)
+
+run("pkg.quest.pure-export", function()
+  local world = new_world()
+
+  -- I8：require + install 不写任何 KV（一个字节都不写，连名表都不建）。
+  local quest = fresh(world)
+  eq(world.writes_now(), 0, "require + install 的 KV 写次数")
+  eq(#sorted_keys(world.kv), 0, "require + install 后的 KV 键集")
+
+  -- 首次真正的写发生在 define（不是 install）。
+  quest.define("errand", errand_spec())
+  is_true(world.writes_now() > 0, "define 才写 KV")
+  eq(world.kv["quest.seq"], nil, "define 不碰 seq")
+end)
