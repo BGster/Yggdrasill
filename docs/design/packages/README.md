@@ -26,20 +26,20 @@
 | quest | [quest.md](quest.md) | entity · codec | 实现已落地 · test 24 | 3（PokeRogue / CDDA / DCSS） |
 | dialogue | [dialogue.md](dialogue.md) | quest | 实现已落地 · test 26 | 3（PokeRogue / CDDA / Saltline） |
 | role-skill | [role-skill.md](role-skill.md) | entity · codec | 契约已定 · 代码 P2 待实现 | 3（PokeRogue / DCSS / CDDA） |
-| procgen | [procgen.md](procgen.md) | 无（只依赖确定性种子） | 契约已定 · 代码 P2 待实现 | 3（CDDA / DCSS / Saltline） |
+| procgen | [procgen.md](procgen.md) | codec（仅摘要面） | 实现已落地 · test 18 | 3（CDDA / DCSS / Saltline） |
 | assetgen（规划项） | `packages/assetgen.md`（P2.5 立项时创建，届时本行改为链接） | procgen（共享 rng 契约） | 规划 | CDDA / DCSS / Saltline |
 
 最后一行是**规划项，不是链接**：P2.5 的硬要求「全部由 seed 驱动、同 seed 同产物字节一致」使它和 [procgen.md](procgen.md) 共享同一份 rng 契约，先建 `assetgen.md` 会迫使 rng 契约写两遍。P0 只登记，立项时创建文件并把本行改成链接。
 
 ## 3. 依赖序
 
-`entity → codec → quest → dialogue → role-skill`，`procgen` 独立、可提前。每条边都是**数据形状**依赖（不是编译依赖）：
+`entity → codec → quest → dialogue → role-skill`，`procgen → codec`（仅摘要面）。每条边都是**数据形状**依赖（不是编译依赖）：
 
 - `codec` 依赖 `entity`：bundle 里的记录形状 = entity §2 的属性袋形状；序列化不能自己发明第二份实体表示。
 - `quest` 依赖 `entity` + `codec`：委托方与承接方是实体 ref；任务实例随 KV 前缀由 codec 点名导出。
 - `dialogue` 依赖 `quest`：任务推进靠 `quest.*` 事件驱动对白，对话包消费事件，不反向调用任务状态机。
 - `role-skill` 依赖 `entity` + `codec`：角色/技能只存引用与计数，属性袋归 entity，存档归 codec。
-- `procgen` 只依赖确定性种子：不依赖其它包，可最先落地；它是唯一一个「产物不落 KV」的包。
+- `procgen` 依赖 `codec`（**仅摘要面**）：`procgen.hash` 借 [codec.md](codec.md) I1 的确定性编码口径，不自己写第二份编码器；PRNG 本身只依赖确定性种子（不依赖其它包），可以最先落地。它是唯一一个「产物不落 KV、defs 也不落 KV」的包——`defs` 由安装期注入 + 运行期注册表（[procgen.md](procgen.md) §2）。
 
 ## 4. 契约章节模板
 
