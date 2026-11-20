@@ -16,6 +16,7 @@ local join = require("pkg.assetgen.join")
 local spec = require("pkg.assetgen.spec")
 local encode = require("pkg.assetgen.encode")
 local texture_algos = require("pkg.assetgen.texture")
+local mesh_algos = require("pkg.assetgen.mesh")
 
 local M = { VERSION = "0.1.0" }
 
@@ -225,6 +226,7 @@ function M.install(deps)
     end
   end
   register("texture", texture_algos)
+  register("mesh", mesh_algos)
   return M
 end
 
