@@ -350,3 +350,206 @@ fn type_name(value: &Json) -> &'static str {
         Json::Object(_) => "object",
     }
 }
+
+// ============================================================================
+// §crate 内单测：声明面逐条钉规则（`docs/design/mod/mod-package.md` §3.2.2）
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::fs;
+
+    /// 本用例独占的临时目录（`std::env::temp_dir()` 合成数据，不碰任何业务目录）。
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ygg-mounts-unit-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// 只有 `mounts` 段的 pack（声明面的最小输入）。
+    fn pack(mounts: Json) -> Json {
+        json!({ "schemaVersion": 1, "mounts": mounts })
+    }
+
+    /// 解析失败时取码 + 原因（码必须在前，调用方按首段分派）。
+    fn refused(pack: &Json, mod_dir: &Path) -> (String, String) {
+        let err = parse_mounts(pack, mod_dir).expect_err("必须拒绍");
+        assert_eq!(err.code(), codes::MOUNT, "声明面的拒绍一律 YGG-FS-MOUNT");
+        let text = err.to_string();
+        let prefix = format!("{}: ", codes::MOUNT);
+        assert!(text.starts_with(&prefix), "码必须在前：{text}");
+        (err.code().to_owned(), text[prefix.len()..].to_owned())
+    }
+
+    #[test]
+    fn absent_or_empty_mounts_means_zero_mounts() {
+        let dir = temp_dir("absent");
+        // 段缺失：旧 mod 100% 兼容。
+        let empty = parse_mounts(&json!({ "schemaVersion": 1 }), &dir).expect("段缺失合法");
+        assert!(empty.is_empty());
+        // 段为空数组：同一语义（显式声明「零挂载」）。
+        let none = parse_mounts(&pack(json!([])), &dir).expect("空数组合法");
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn non_array_segment_is_refused() {
+        let dir = temp_dir("nonarray");
+        for bad in [json!(null), json!("x"), json!(1), json!({ "name": "w" })] {
+            let (_, detail) = refused(&pack(bad.clone()), &dir);
+            assert!(detail.contains("必须是数组"), "{bad}: {detail}");
+        }
+    }
+
+    #[test]
+    fn non_object_element_is_refused() {
+        let dir = temp_dir("nonobject");
+        let (_, detail) = refused(&pack(json!(["work"])), &dir);
+        assert!(detail.contains("mounts[0] 必须是对象"), "{detail}");
+    }
+
+    #[test]
+    fn name_vectors() {
+        let dir = temp_dir("names");
+        for good in ["a", "work", "out-2", "a_b", "z9", "abcdefghijklmnopqrstuvwxyz012345"] {
+            let specs = parse_mounts(&pack(json!([{ "name": good }])), &dir)
+                .unwrap_or_else(|err| panic!("`{good}` 必须合法：{err}"));
+            assert_eq!(specs[0].name, good);
+        }
+        for (bad, hint) in [
+            ("", "不得为空"),
+            ("Work", "首字符必须是 ASCII 小写字母"),
+            ("9x", "首字符必须是 ASCII 小写字母"),
+            ("a b", "只允许小写字母"),
+            ("a/b", "只允许小写字母"),
+            ("_x", "首字符必须是 ASCII 小写字母"),
+            ("abcdefghijklmnopqrstuvwxyz0123456", "超过 32 字节"),
+        ] {
+            let (_, detail) = refused(&pack(json!([{ "name": bad }])), &dir);
+            assert!(detail.contains(hint), "`{bad}` 的拒绍理由：{detail}");
+        }
+        // 缺 name（非字符串也算）：必填字段缺失。
+        let (_, detail) = refused(&pack(json!([{ "dir": "/tmp" }])), &dir);
+        assert!(detail.contains("缺省必填字段 name"), "{detail}");
+    }
+
+    #[test]
+    fn duplicate_and_reserved_names_are_refused() {
+        let dir = temp_dir("dup");
+        let (_, detail) = refused(
+            &pack(json!([{ "name": "work" }, { "name": "work" }])),
+            &dir,
+        );
+        assert!(detail.contains("重复"), "{detail}");
+        let (_, detail) = refused(&pack(json!([{ "name": "artifacts" }])), &dir);
+        assert!(detail.contains("保留名"), "{detail}");
+    }
+
+    #[test]
+    fn dir_must_be_an_existing_directory() {
+        let dir = temp_dir("dir");
+        // 不存在。
+        let (_, detail) = refused(
+            &pack(json!([{ "name": "w", "dir": "missing" }])),
+            &dir,
+        );
+        assert!(detail.contains("无法 canonicalize"), "{detail}");
+        // 存在但是文件。
+        let file = dir.join("a.txt");
+        fs::write(&file, b"x").expect("write file");
+        let (_, detail) = refused(
+            &pack(json!([{ "name": "w", "dir": file.display().to_string() }])),
+            &dir,
+        );
+        assert!(detail.contains("不是目录"), "{detail}");
+    }
+
+    #[test]
+    fn dir_resolves_relative_to_the_mod_dir() {
+        let mod_dir = temp_dir("reldir");
+        let host = mod_dir.join("biz");
+        fs::create_dir_all(&host).expect("create host dir");
+        let specs = parse_mounts(&pack(json!([{ "name": "w", "dir": "biz" }])), &mod_dir)
+            .expect("相对路径合法");
+        assert_eq!(
+            specs[0].dir.as_deref(),
+            Some(host.canonicalize().expect("canonical").as_path()),
+            "相对路径对 <mod dir> 解析并 canonicalize"
+        );
+        // 绝对路径原样（仍然 canonicalize：符号链接 / `..` 都被折叠）。
+        let specs = parse_mounts(
+            &pack(json!([{ "name": "w", "dir": host.display().to_string() }])),
+            &mod_dir,
+        )
+        .expect("绝对路径合法");
+        assert_eq!(
+            specs[0].dir.as_deref(),
+            Some(host.canonicalize().expect("canonical").as_path())
+        );
+    }
+
+    #[test]
+    fn dir_shape_limits_are_enforced() {
+        let dir = temp_dir("dirlimits");
+        let (_, detail) = refused(&pack(json!([{ "name": "w", "dir": "" }])), &dir);
+        assert!(detail.contains("不得为空串"), "{detail}");
+        let long = "x".repeat(MOUNT_DIR_MAX_BYTES + 1);
+        let (_, detail) = refused(&pack(json!([{ "name": "w", "dir": long }])), &dir);
+        assert!(detail.contains("超过 4096 字节"), "{detail}");
+        let (_, detail) = refused(&pack(json!([{ "name": "w", "dir": "a\u{0}b" }])), &dir);
+        assert!(detail.contains("不得含 NUL"), "{detail}");
+        // 非字符串的 dir：类型不对也是声明错误。
+        let (_, detail) = refused(&pack(json!([{ "name": "w", "dir": 3 }])), &dir);
+        assert!(detail.contains("dir 必须是字符串"), "{detail}");
+    }
+
+    #[test]
+    fn mode_defaults_to_ro_and_rejects_unknown_values() {
+        let dir = temp_dir("mode");
+        let specs = parse_mounts(&pack(json!([{ "name": "w" }])), &dir).expect("缺省合法");
+        assert_eq!(specs[0].mode, MountMode::Ro, "缺省是 ro（唯一减压阀）");
+        let specs = parse_mounts(&pack(json!([{ "name": "w", "mode": "rw" }])), &dir)
+            .expect("rw 合法");
+        assert_eq!(specs[0].mode, MountMode::Rw);
+        let (_, detail) = refused(&pack(json!([{ "name": "w", "mode": "readonly" }])), &dir);
+        assert!(detail.contains("只能是 `ro` / `rw`"), "{detail}");
+        let (_, detail) = refused(&pack(json!([{ "name": "w", "mode": 1 }])), &dir);
+        assert!(detail.contains("mode 必须是字符串"), "{detail}");
+    }
+
+    #[test]
+    fn unknown_keys_are_ignored() {
+        // 键集宽松：旧宿主忽略未知顶层段，新宿主同样忽略未知元素键。
+        let dir = temp_dir("unknown");
+        let specs = parse_mounts(
+            &json!({
+                "schemaVersion": 1,
+                "mounts": [{ "name": "w", "futureField": { "nested": true } }],
+                "panel": { "futureKey": 1 },
+            }),
+            &dir,
+        )
+        .expect("未知键忽略");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].dir, None, "无 dir = 私有挂载");
+    }
+
+    #[test]
+    fn error_display_puts_the_code_first() {
+        // 码在前是调用方契约（Lua 侧与 CLI 回执按首段分派）。
+        assert_eq!(
+            MountError::jail("x").to_string(),
+            "YGG-FS-JAIL: x".to_owned()
+        );
+        assert_eq!(MountError::cap("x").code(), codes::CAP);
+        assert_eq!(MountError::mount("x").code(), codes::MOUNT);
+        assert_eq!(MountError::audit("x").code(), codes::AUDIT);
+    }
+}
+
