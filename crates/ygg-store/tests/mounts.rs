@@ -12,7 +12,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value as Json};
-use ygg_store::mounts::{codes, MountError, MountMode, MountStore};
+use ygg_store::mounts::{
+    codes, MountError, MountKind, MountMode, MountStore, MOUNT_FILE_MAX_BYTES,
+    MOUNT_LIST_MAX_ENTRIES,
+};
 
 /// 本用例独占的临时目录。
 fn temp_dir(tag: &str) -> PathBuf {
@@ -230,4 +233,165 @@ fn declared_modes_are_reported_as_declared() {
         vec![("ro_one", MountMode::Ro), ("rw_one", MountMode::Rw)],
         "缺省 ro；declared() 按名字序"
     );
+}
+
+// ============================================================================
+// §行为面：三态幂等 / 往返落盘 / 帽 / 审计行 / list 形状（公开 API 口径）
+// ============================================================================
+
+/// 审计文件的各行（测试面直接读 JSON）。
+fn audit_rows(store: &MountStore) -> Vec<Json> {
+    match fs::read_to_string(store.audit_path()) {
+        Ok(text) => text
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("审计行必须是 JSON"))
+            .collect(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(err) => panic!("读审计文件失败：{err}"),
+    }
+}
+
+#[test]
+fn attach_is_idempotent_and_conflicts_write_nothing() {
+    let (run, mod_dir) = attach_env("idem");
+    let host = mod_dir.join("biz");
+    fs::create_dir_all(&host).expect("create host dir");
+    let pack = json!({ "schemaVersion": 1, "mounts": [
+        { "name": "work", "dir": "biz", "mode": "rw" },
+        { "name": "out" },
+    ] });
+    let first = MountStore::attach(&run, &pack, &mod_dir).expect("first attach");
+    let roots: Vec<(String, PathBuf)> = first
+        .declared()
+        .map(|(name, root, _mode)| (name.to_owned(), root.to_path_buf()))
+        .collect();
+    // 第二个实例（等价于「续局 / 另一进程」）：静默通过，冻结根一致。
+    let second = MountStore::attach(&run, &pack, &mod_dir).expect("second attach");
+    let again: Vec<(String, PathBuf)> = second
+        .declared()
+        .map(|(name, root, _mode)| (name.to_owned(), root.to_path_buf()))
+        .collect();
+    assert_eq!(roots, again, "重载必须落到同一批冻结根");
+    assert_eq!(second.budget_left(), ygg_store::mounts::MOUNT_RUN_WRITE_BUDGET);
+
+    // 把私有挂载点换成真目录而声明仍是目录挂载 → 冲突，且另一条声明也不落地。
+    let other = temp_dir("idem-conflict");
+    let other_run = other.join("run");
+    fs::create_dir_all(other_run.join("mounts").join("work")).expect("pre-create");
+    match MountStore::attach(&other_run, &pack, &mod_dir) {
+        Ok(_) => panic!("冲突必须拒"),
+        Err(err) => assert_eq!(err.code(), codes::MOUNT, "{err}"),
+    }
+    assert!(
+        !other_run.join("mounts").join("out").exists(),
+        "冲突时其余挂载点不得被创建（零写入）"
+    );
+}
+
+#[test]
+fn write_read_roundtrip_lands_on_the_host_dir_and_survives_reattach() {
+    let (run, mod_dir) = attach_env("roundtrip");
+    let host = mod_dir.join("biz");
+    fs::create_dir_all(&host).expect("create host dir");
+    let pack = json!({ "schemaVersion": 1, "mounts": [
+        { "name": "work", "dir": "biz", "mode": "rw" },
+    ] });
+    let mut store = MountStore::attach(&run, &pack, &mod_dir).expect("attach");
+    let content = b"# note\nline 2\n";
+    let written = store.write("mounts/work/note.md", content).expect("write");
+    assert_eq!(written.path, "mounts/work/note.md");
+    assert_eq!(written.bytes, content.len());
+    assert_eq!(written.sha256, ygg_store::sha256_hex(content));
+    // 写穿：字节就是落在宿主目录里的那一份（不拷贝、不另存）。
+    assert_eq!(fs::read(host.join("note.md")).expect("read host file"), content);
+    // 摘要 / 大小 / 种类三面一致。
+    assert_eq!(
+        store.stat("mounts/work/note.md").expect("stat"),
+        ygg_store::MountStat {
+            exists: true,
+            bytes: content.len(),
+            sha256: ygg_store::sha256_hex(content),
+            kind: MountKind::File,
+        }
+    );
+    assert_eq!(
+        store.read("mounts/work/note.md").expect("read"),
+        Some(content.to_vec())
+    );
+    // 续局（新实例，预算与审计 seq 都重新装载）之后内容仍在。
+    let mut again = MountStore::attach(&run, &pack, &mod_dir).expect("reattach");
+    assert_eq!(
+        again.read("mounts/work/note.md").expect("read after reattach"),
+        Some(content.to_vec())
+    );
+    assert_eq!(audit_rows(&again).len(), 1, "审计行跨 attach 累积");
+    again
+        .write("mounts/work/note2.md", b"x")
+        .expect("write after reattach");
+    assert_eq!(
+        audit_rows(&again)[1]["seq"],
+        json!(2),
+        "新实例从磁盘上的非空行数继续编号（不是从 1 重来）"
+    );
+}
+
+#[test]
+fn caps_refuse_instead_of_truncating() {
+    let (run, mod_dir) = attach_env("caps");
+    let mut store = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]));
+    let root = run.join("mounts").join("w");
+    // 读侧：磁盘上的超大文件（他处写入）→ 帽拒，不截断。
+    fs::write(root.join("big.bin"), vec![b'x'; MOUNT_FILE_MAX_BYTES + 1]).expect("write big");
+    match store.read("mounts/w/big.bin") {
+        Ok(_) => panic!("超单件帽必须拒"),
+        Err(err) => assert_eq!(err.code(), codes::CAP, "{err}"),
+    }
+    // 写侧：同样帽（超限时磁盘零写入）。
+    match store.write("mounts/w/big2.bin", &vec![b'y'; MOUNT_FILE_MAX_BYTES + 1]) {
+        Ok(_) => panic!("超单件帽必须拒"),
+        Err(err) => assert_eq!(err.code(), codes::CAP, "{err}"),
+    }
+    assert!(!root.join("big2.bin").exists(), "被拒的写不得落盘");
+    // stat 也受同一帽（算摘要要读全文件）。
+    match store.stat("mounts/w/big.bin") {
+        Ok(_) => panic!("超单件帽必须拒"),
+        Err(err) => assert_eq!(err.code(), codes::CAP, "{err}"),
+    }
+}
+
+#[test]
+fn list_shape_is_dense_sorted_and_capped() {
+    let (run, mod_dir) = attach_env("list-shape");
+    let mut store = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]));
+    let root = run.join("mounts").join("w");
+    for name in ["c.txt", "a.txt", "b.txt"] {
+        fs::write(root.join(name), b"1").expect("write");
+    }
+    fs::create_dir_all(root.join("dir")).expect("mkdir");
+    store.write("mounts/w/d.txt", b"22").expect("write via store");
+    let rows = store.list("mounts/w").expect("list");
+    let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(names, vec!["a.txt", "b.txt", "c.txt", "d.txt", "dir"]);
+    assert_eq!(rows[3].path, "mounts/w/d.txt");
+    assert_eq!(rows[3].bytes, 2);
+    assert_eq!(rows[4].kind, MountKind::Dir);
+    assert_eq!(rows[4].bytes, 0, "目录的 bytes 恒为 0（无递归、无树扫描）");
+
+    // 条目帽：16385 个条目 > 16384 → 帽拒（无分页）。
+    let big = temp_dir("list-cap");
+    let big_run = big.join("run");
+    let big_mod = big.join("mod");
+    fs::create_dir_all(&big_mod).expect("mod dir");
+    let mut big_store = attach(&big_run, &big_mod, json!([{ "name": "w" }]));
+    let big_root = big_run.join("mounts").join("w");
+    for index in 0..=MOUNT_LIST_MAX_ENTRIES {
+        fs::write(big_root.join(format!("f{index:05}.txt")), b"").expect("write entry");
+    }
+    match big_store.list("mounts/w") {
+        Ok(rows) => panic!("{} 条目必须超过上限", rows.len()),
+        Err(err) => {
+            assert_eq!(err.code(), codes::CAP, "{err}");
+            assert!(err.to_string().contains("16384"), "{err}");
+        }
+    }
 }
