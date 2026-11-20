@@ -96,17 +96,12 @@ fn bench_sandbox(tag: &str) -> Sandbox {
     let bundle = ModBundle::load(&tree.mod_dir()).expect("pkg-selftest 必须可装载");
     let sandbox = Sandbox::new().expect("沙箱构造");
     sandbox.modules().set_modules(bundle.modules.clone());
-    sandbox.modules().set_chunk_paths(bundle.chunk_paths.clone());
+    sandbox
+        .modules()
+        .set_chunk_paths(bundle.chunk_paths.clone());
     let entities = Rc::new(RefCell::new(EntityStore::new()));
     let kv = Rc::new(RefCell::new(KvStore::new()));
-    host_api::install(
-        sandbox.lua(),
-        HostHandles {
-            kv,
-            entities,
-        },
-    )
-    .expect("host API 必须可装");
+    host_api::install(sandbox.lua(), HostHandles { kv, entities }).expect("host API 必须可装");
     sandbox
 }
 
@@ -196,7 +191,9 @@ fn codec_native_before_after_on_the_same_surface() {
 
     // ── after：面在场（原生径）──────────────────────────────────────────────
     let encode_native: mlua::Function = lua
-        .load("local codec = require('pkg.codec'); return function() return codec.encode(BUNDLE) end")
+        .load(
+            "local codec = require('pkg.codec'); return function() return codec.encode(BUNDLE) end",
+        )
         .eval()
         .expect("encode 闭包");
     let decode_native: mlua::Function = lua
@@ -210,7 +207,9 @@ fn codec_native_before_after_on_the_same_surface() {
     let mut encode_native_samples = [0.0f64; 3];
     for round in 0..3 {
         let began = Instant::now();
-        encode_native.call::<mlua::LuaString>(()).expect("原生 encode");
+        encode_native
+            .call::<mlua::LuaString>(())
+            .expect("原生 encode");
         encode_native_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
     }
     let mut decode_native_samples = [0.0f64; 3];
@@ -232,7 +231,9 @@ fn codec_native_before_after_on_the_same_surface() {
     "#;
     lua.load(switch_to_lua).exec().expect("切到 Lua 径");
     let encode_lua: mlua::Function = lua
-        .load("local codec = require('pkg.codec'); return function() return codec.encode(BUNDLE) end")
+        .load(
+            "local codec = require('pkg.codec'); return function() return codec.encode(BUNDLE) end",
+        )
         .eval()
         .expect("encode 闭包（lua）");
     let decode_lua: mlua::Function = lua
@@ -291,12 +292,8 @@ fn codec_native_before_after_on_the_same_surface() {
         "PERF codec_native.encode_mbps={encode_native_mbps:.2} ({encode_native_ms:.1} ms; samples {:.1}/{:.1}/{:.1})",
         encode_native_samples[0], encode_native_samples[1], encode_native_samples[2]
     );
-    println!(
-        "PERF codec_lua.decode_mbps={decode_lua_mbps:.2} ({decode_lua_ms:.1} ms)",
-    );
-    println!(
-        "PERF codec_native.decode_mbps={decode_native_mbps:.2} ({decode_native_ms:.1} ms)",
-    );
+    println!("PERF codec_lua.decode_mbps={decode_lua_mbps:.2} ({decode_lua_ms:.1} ms)",);
+    println!("PERF codec_native.decode_mbps={decode_native_mbps:.2} ({decode_native_ms:.1} ms)",);
     println!(
         "PERF codec.encode_speedup={:.2}x decode_speedup={:.2}x",
         encode_native_mbps / encode_lua_mbps,

@@ -17,7 +17,8 @@ use ygg_sim::component::ComponentDef;
 use ygg_sim::sim::Sim;
 
 fn fixture() -> Json {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/canonical-order.json");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/canonical-order.json");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("读 {} 失败：{error}", path.display()));
     serde_json::from_str(&raw).expect("fixture 必须是合法 JSON")

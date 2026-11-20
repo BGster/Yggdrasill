@@ -94,7 +94,6 @@ fn lua_encode(lua: &Lua, value: &Value) -> Result<Vec<u8>, mlua::Error> {
     Ok(text.as_bytes().to_vec())
 }
 
-
 /// decode 双径比较：返回「用 Lua 径重编码 native 解出的值」的文本。
 ///
 /// 三件事一次做完：① native `ygg.codec.decode` 必须成功（误拒即失败）；② 与
@@ -145,7 +144,10 @@ fn decode_via_both_paths(lua: &Lua, text: &[u8]) -> Result<Vec<u8>, mlua::Error>
 fn native_encode_matches_the_lua_path_byte_for_byte() {
     let (lua, cases) = build();
     let count = cases.raw_len();
-    assert!(count >= 2_000, "语料不足：{count} 条（计划稿 §5.4 要求 2 000+）");
+    assert!(
+        count >= 2_000,
+        "语料不足：{count} 条（计划稿 §5.4 要求 2 000+）"
+    );
 
     let mut compared = 0usize;
     for index in 1..=count {
@@ -154,12 +156,12 @@ fn native_encode_matches_the_lua_path_byte_for_byte() {
         let native = native_encode(&value)
             .unwrap_or_else(|error| panic!("第 {index} 条被原生误拒：{error}"));
         // ② 面包装与直调同一份字节
-        let via_face =
-            face_encode(&lua, &value).unwrap_or_else(|error| panic!("第 {index} 条过面失败：{error}"));
+        let via_face = face_encode(&lua, &value)
+            .unwrap_or_else(|error| panic!("第 {index} 条过面失败：{error}"));
         assert_eq!(native, via_face, "第 {index} 条：面包装与直调不一致");
         // ③ 与规范执行体逐字节相等
-        let lua_bytes =
-            lua_encode(&lua, &value).unwrap_or_else(|error| panic!("第 {index} 条 Lua 径失败：{error}"));
+        let lua_bytes = lua_encode(&lua, &value)
+            .unwrap_or_else(|error| panic!("第 {index} 条 Lua 径失败：{error}"));
         assert_eq!(
             native,
             lua_bytes,
@@ -174,9 +176,7 @@ fn native_encode_matches_the_lua_path_byte_for_byte() {
 #[test]
 fn metatables_are_unsupported_and_the_lua_path_still_produces_bytes() {
     let (lua, cases) = build();
-    let metatables: Table = cases
-        .raw_get("metatables")
-        .expect("语料带 metatables 段");
+    let metatables: Table = cases.raw_get("metatables").expect("语料带 metatables 段");
     for index in 1..=metatables.raw_len() {
         let value: Value = metatables.raw_get(index as i64).expect("元表元素");
         let error = native_encode(&value).expect_err("带元方法的表必须整值回退");
@@ -313,7 +313,8 @@ fn decode_matches_the_lua_path_across_the_encode_corpus() {
         let reencoded = decode_via_both_paths(&lua, &text)
             .unwrap_or_else(|error| panic!("第 {index} 条 decode 双径失败：{error}"));
         assert_eq!(
-            reencoded, text,
+            reencoded,
+            text,
             "第 {index} 条：decode → 重编码与原文不同（输入 {:?}）",
             value.type_name()
         );
@@ -334,7 +335,10 @@ fn saved_saves_decode_and_reencode_byte_identically() {
         }
         // ① 老档必须能解（native 误拒 = 旧档不可读，这是最贵的一类缺陷）
         let decoded = ygg_sandbox::codec_face::decode(&lua, line).unwrap_or_else(|error| {
-            panic!("第 {documents} 份老档被原生拒：{error}（{}）", String::from_utf8_lossy(line))
+            panic!(
+                "第 {documents} 份老档被原生拒：{error}（{}）",
+                String::from_utf8_lossy(line)
+            )
         });
         assert!(!matches!(decoded, Value::Nil));
         // ② 与 Lua 径同构；③ 重编码逐字节等于原文
@@ -415,7 +419,8 @@ fn malformed_documents_are_rejected_by_the_native_path() {
 #[test]
 fn codec_key_order_follows_the_canonical_order_fixture() {
     let (lua, _cases) = build();
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/ygg-sim/fixtures/canonical-order.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/ygg-sim/fixtures/canonical-order.json");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("读 {} 失败：{error}", path.display()));
     let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture 是 JSON");
