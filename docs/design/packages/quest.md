@@ -15,16 +15,40 @@
 
 ## 2. 数据形状
 
-| 字段 | 类型 | 必填 | 缺省 | 持久化位置 |
-| --- | --- | --- | --- | --- |
-| `types.<name>` | table（流程模板） | 是 | — | `ygg.kv` 键 `quest.types` |
-| `inst.<id>` | table（实例） | 是 | — | `ygg.kv` 键 `quest.inst.<id>` |
-| `index` | table（id 集合，键为 id） | 是 | — | `ygg.kv` 键 `quest.index`（唯一索引真源） |
-| `seq` | number（已分配的最大实例 id） | 是 | `0` | `ygg.kv` 键 `quest.seq` |
+逻辑形状（代码看见的）：`types.<name>` = 流程模板、`inst.<id>` = 实例、`index` = id 集合、`seq` = 已分配的最大 id。
 
-模板形状：`{ steps = { { id = "…", guide = "text.key", on_enter = "event.name" }, … }, meta_spec = { <键> = <类型> } }`。步骤 `id` 在类型内唯一；`guide` 是文本键，本身不含文案。
+**物理落点（KV 只收标量——D10）**：宿主 `ygg.kv.set` 经 `value_from_lua` 只接受四个标量型（`crates/ygg-sandbox/src/host_api.rs:568`），表写入即 `unsupported payload type: table`。所以「表值」的四个字段全部落成**扁平标量键 + 一个换行名表**（与 [entity.md](entity.md) §2 同一套形状）：
 
-实例形状：`{ type = "…", step = <1 基下标>, state = "open"|"done"|"abandoned", giver = <实体 ref|nil>, taker = <实体 ref|nil>, meta = { … } }`。
+| 键 | 值 | 说明 |
+| --- | --- | --- |
+| `quest.seq` | number | 已分配的最大 id；**唯一写口 = `open`** |
+| `quest.index.<id>` | `true` | id 集合的成员标记（唯一索引真源；§5 的泄漏口径数它） |
+| `quest.types` | string | 类型名表（升序、换行连接） |
+| `quest.t.<name>.steps` | number | 步骤数（`advance` 只读这一枚——§5 的 O(1) 依据） |
+| `quest.t.<name>.s.<i>.id` / `.guide` / `.on_enter` | string | 第 `i` 步（1 基）；`on_enter` 的 `nil` 落**空串**（KV 无删除，空串是唯一可往返的「无」） |
+| `quest.t.<name>.m.names` | string | `meta_spec` 的键名表（升序） |
+| `quest.t.<name>.m.<key>` | string | 类型词 `number` / `string` / `boolean` / `ref`（复用 [entity.md](entity.md) §2 的词表，不另造第五种） |
+| `quest.inst.<id>.type` / `.step` / `.state` | string / number / string | |
+| `quest.inst.<id>.giver` / `.taker` | number | `0` = 无（`nil` 存不进 KV） |
+| `quest.inst.<id>.m.names` | string | 本实例**实际写过**的 meta 键名表（升序） |
+| `quest.inst.<id>.m.<key>` | 标量 | meta 值（只写调用方真的给了的键） |
+
+实例上多出的 `m.names` 不是冗余：读面一旦向模板要 meta 名表，`get` / `advance` / `open_ids` 就全部退化回 `O(步数)`（每次重建整张步骤表），而 §5 把「按 id 查找 / 更新」钉在 `O(1)`。一枚键换 O(1) 是这笔账的解法。
+
+模板形状（对外）：`{ steps = { { id = "…", guide = "text.key", on_enter = "event.name" }, … }, meta_spec = { <键> = <类型词> } }`。步骤 `id` 在类型内唯一；`guide` 是文本键，本身不含文案。
+实例形状（对外）：`{ id, type, step, state, giver, taker, meta }`——`step` 是 1 基下标，`giver`/`taker` 是实体 ref 或 `nil`。
+
+### 事件载荷（`ygg.emit` 只收标量，形状必须定形——D11）
+
+| 事件 | 载荷 | 说明 |
+| --- | --- | --- |
+| `quest.opened` | `"<id>\|<type>"` | |
+| `quest.advanced` | `"<id>\|<step>"` | 推进**后**的步下标 |
+| `quest.completed` | `"<id>"` | |
+| `quest.abandoned` | `"<id>\|<reason>"` | `reason` 缺省 = 空串 |
+| `quest.jumped` | `"<id>\|<from>\|<to>"` | 步**下标**（不是步 id） |
+
+`on_enter` **不是**事件：它是 `quest.step()` 的读数，由 mod / dialogue 消费。自动 emit 它会让 I6「名字集合恰好相等」这条断言失去意义。
 
 ## 3. 不变量
 
@@ -51,16 +75,34 @@
 | `quest.abandon` | `(id, reason)` | `boolean` | 写 + 事件 `quest.abandoned` |
 | `quest.open_ids` | `(owner_ref?)` | `{id, …}`（升序） | 纯读；O(n)，n = 存活任务数 |
 | `quest.step` | `(id)` | `{ index, id, guide, on_enter }` | 纯读 |
+| `quest.keys` | `()` | `{键, …}`（升序） | 纯读；`codec.export({ keys = quest.keys() })` 的点名面（D6） |
+
+**错误码（逐条可断——D1）**：码面 `YGG-PKG-QUEST-<COND>`，`: ` 之后是可读细节；用例按码做子串断言。
+
+| 码 | 触发 |
+| --- | --- |
+| `-NAME` | 类型名不匹配 `^[a-z][a-z0-9_-]*$` |
+| `-TEMPLATE` | 模板形状坏：`steps` 空/非表、步 `id` 重复或非串、`guide`/`on_enter` 非串、`meta_spec` 键或类型词非法 |
+| `-TYPE` | 类型未注册；或异 spec 重复 `define`（不覆盖，I1） |
+| `-META` | `meta` 键未在 `meta_spec` 声明 / 值与声明的类型词不符 / `opts.meta` 非表 / `reason` 非串 |
+| `-REF` | `giver` / `taker` / `owner_ref` 不是正整数 id 或 `nil` |
+| `-ID` | 实例 id 不存在，或不是正整数 |
+| `-STEP` | `jump` 的步 id 不在该类型的模板里 |
+| `-TERMINAL` | 终态（`done` / `abandoned`）后的任何原语（I3） |
+| `-INSTALL` | `install(deps)` 收到非表 |
+| `-HOST` | `ygg` 不可达且未注入 `deps.host`（环境面，与 `entity.md` 的 `-HOST` 同义） |
 
 ## 5. 性能预算
 
-| 指标 | 阈值（Goal 原则二） | 本包取值与测量方法 |
+**口径声明（先读再读数字——D12）**：下列实测值产在 **selftest 面**（普通 Lua + mock KV），因为沙箱里既无 `os.clock` 也无 `collectgarbage`（`crates/ygg-sandbox/src/sandbox.rs` 的白名单测试钉死）。所以内存那行是**包侧 Lua 堆上界**（含 mock KV 的表开销），不是宿主 Rust 堆读数；序列化吞吐不在此表（[codec.md](codec.md) §5 独占那个口径）。复算：`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-quest`（三次取中位）。
+
+| 指标 | 阈值（Goal 原则二） | 实测与测量方法 |
 | --- | --- | --- |
-| 包加载耗时 | `< 10ms` | 目标 `≤ 1ms`（纯 Lua，`install` 不预读模板）。测法同 [entity.md](entity.md) §5。 |
-| 实体按 id 查找 / 更新 | `O(1)` | **强约束**：`get` / `advance` = 一次 `ygg.kv.get("quest.inst.<id>")` + 模板直取，无遍历。测法：N 任务数 1 / 100 / 10k 三档，耗时不随 N 增长（≤ 1.2×）。 |
-| 序列化吞吐（实体 / 秒，双向） | 附基准集与耗时 | **不适用**：任务实例随 `quest` 前缀由 [codec.md](codec.md) §5 的基准集覆盖；本包不自定口径。 |
-| 10k 实体常驻内存 | 给出数字 | 目标 1k 同时存活任务 `≤ 1 MiB`（每任务 4 步 + 3 个 meta 键）；硬帽 `16 MiB`。口径同 [entity.md](entity.md) §5。 |
-| 泄漏检测 | 导入导出 100 轮内存不增长 | 100 轮 `open → advance×末步` 后 `quest.index` 条目数回到起点，内存差 `≤ 1%`。 |
+| 包加载耗时 | `< 10ms` | 目标 `≤ 1ms`；**实测 0.85–0.94 ms**（50 次 clear+require 每轮均值，三批取中位） |
+| 实体按 id 查找 / 更新 | `O(1)` | **强约束**：`get` / `advance` 都是「按 id 直取标量键」，无遍历。实测 N = 1 / 100 / 10k 三档，档间比 **1.05–1.09×**；判据 `t(10k)/t(1) ≤ 1.5`（1.2 会被 GC 脉冲打成假红，r1 实证）。`get ≈ 7.5–8.3 µs/op`、`advance ≈ 8–9 µs/op`（5000 / 300 次 × 3 批取中位） |
+| 序列化吞吐（实体 / 秒，双向） | 附基准集与耗时 | **不适用**：任务实例随 `quest` 前缀由 [codec.md](codec.md) §5 的基准集覆盖；本包不自定口径 |
+| 10k 实体常驻内存 | 给出数字 | 1k 同时存活任务（4 步 + 3 个 meta 键）**实测 598 KiB**（目标 `≤ 1 MiB`，硬帽 `16 MiB`）；口径同 [entity.md](entity.md) §5 |
+| 泄漏检测 | 导入导出 100 轮内存不增长 | **口径改写成「每轮重置后恒为 1」**（D7）：包无删除面（§4 的 11 个函数里没有 `delete`，[codec.md](codec.md) I5 亦明令不删），所以「100 轮后回到起点」只能在每轮一份新 KV 的语义下成立。实测 100 轮 `open → advance×末步`：每轮 `quest.index` 条目数**恒为 1**，GC 差 ≤ 1% |
 
 ## 6. 用点计划
 
@@ -74,7 +116,7 @@
 
 - **用例名前缀**：`pkg.quest.`（例 `pkg.quest.advance-monotonic`、`pkg.quest.terminal-once`）。
 - **断言面**：I1 用「改模板后旧实例的 `step` 仍解释为同一语义」；I2 / I3 断拒绝路径与事件计数；I5 用「往 meta 塞任意键，推进结果不变」；I6 断事件名集合恰好相等（不是「包含」）。
-- **计数**：计入 `cargo run -q --example selftest -- --mod .ygg/mods/agent-seed` 的 `cases passed=`（发现机制见 [README.md](README.md) §5 未决项）。
+- **计数（D4）**：24 条（20 行为 + 4 性能）计入 `cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-quest` 的 `cases passed=`。载体是 `packages/mods/pkg-selftest/`（声明四包闭包的那个消费夹具）——生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远是 79/0，这是回归钉（发现机制见 [README.md](README.md) §5）。
 - **禁止宽松断言**：只断「有事件发出」不断事件名与次数，视同没测 I6。
 
 ## 8. 设计依据
