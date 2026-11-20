@@ -300,3 +300,59 @@ run("pkg.procgen.params-error", function()
     procgen.run("bad2", "seed")
   end, "fill = 101")
 end)
+
+-- ── 用例 17：运行期 define 组合两个算法（地形 → 散布）─────────────────────────
+
+run("pkg.procgen.compose-via-define", function()
+  local procgen = fresh()
+  procgen.install()
+
+  -- 第一步：洞穴（0/1 稠密数组）。
+  is_true(procgen.define("cave", {
+    algo = "terrain.cellular",
+    params = { w = 24, h = 24, fill = 45, steps = 3 },
+  }), "define cave")
+  local cave = procgen.run("cave", "compose-seed")
+  eq(#cave.cells, 24 * 24, "洞穴 cells 长度")
+
+  -- 第二步：把洞穴当 `blocked` 撒点——组合不新增 API，产物直接当参数。
+  is_true(procgen.define("marks", {
+    algo = "layout.scatter",
+    params = { w = 24, h = 24, count = 12, blocked = cave.cells },
+  }), "define marks")
+  local first = procgen.run("marks", "compose-seed")
+  local second = procgen.run("marks", "compose-seed")
+  eq(first.placed, #first.points, "placed 与实际点数一致")
+  is_true(first.placed > 0, "空位足够时至少放下一个点")
+  eq(procgen.hash(first), procgen.hash(second), "同 seed 两次组合产物 hash 相等")
+  for i = 1, #first.points do
+    local point = first.points[i]
+    eq(cave.cells[(point.y - 1) * 24 + point.x], 0, "点 " .. i .. " 不落在墙上")
+  end
+
+  -- 第三步：房间布局（同一用例钉形状，不为一条断言多开用例）。
+  is_true(procgen.define("keep", {
+    algo = "layout.rooms",
+    params = { w = 40, h = 30, count = 6, min_w = 3, min_h = 3, max_w = 8, max_h = 6, padding = 1, tries = 40 },
+  }), "define keep")
+  local keep = procgen.run("keep", "rooms-seed")
+  is_true(#keep.rooms >= 1, "至少放下一间房")
+  eq(#keep.corridors, (#keep.rooms - 1) * 2, "相邻房间之间恰好两条 L 形走廊")
+  for i = 1, #keep.rooms do
+    local room = keep.rooms[i]
+    is_true(room.x >= 1 and room.y >= 1, "房间 " .. i .. " 起点在界内")
+    is_true(room.x + room.w - 1 <= 40 and room.y + room.h - 1 <= 30, "房间 " .. i .. " 终点在界内")
+    is_true(room.w >= 3 and room.w <= 8 and room.h >= 3 and room.h <= 6, "房间 " .. i .. " 尺寸在声明区间")
+  end
+  for i = 1, #keep.rooms do
+    for j = i + 1, #keep.rooms do
+      local left = keep.rooms[i]
+      local right = keep.rooms[j]
+      local apart = left.x + left.w - 1 + 1 < right.x
+        or right.x + right.w - 1 + 1 < left.x
+        or left.y + left.h - 1 + 1 < right.y
+        or right.y + right.h - 1 + 1 < left.y
+      is_true(apart, "房间 " .. i .. " 与 " .. j .. " 间隔 ≥ padding")
+    end
+  end
+end)

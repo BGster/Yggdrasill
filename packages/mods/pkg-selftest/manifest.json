@@ -83,6 +83,11 @@
     {
       "files": [
         {
+          "byteLength": 5412,
+          "path": "procgen/algos/layout.lua",
+          "sha256": "31c7918e6783b185eb5fcac0b074bb9e1e09ea9e7d71b2db8b0b99578690f8f3"
+        },
+        {
           "byteLength": 5607,
           "path": "procgen/algos/terrain.lua",
           "sha256": "3296d5da06b76faaabe74ec2770c0103125b76964ef95f6804c67258e13d9718"
@@ -103,9 +108,9 @@
           "sha256": "b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
         },
         {
-          "byteLength": 6720,
+          "byteLength": 6750,
           "path": "procgen/registry.lua",
-          "sha256": "13b9224eff0d97fd5d4a3735e164ff70a42bf00c23ebb15cc560d3983bd17c85"
+          "sha256": "0acc45a8b037fad86347dd2bfce991fa6375f302ecfa0ebe4c305bdfc0462ef7"
         },
         {
           "byteLength": 11258,
