@@ -10,8 +10,21 @@
     ],
     "schemaFiles": [],
     "packages": [
-        { "id": "entity", "version": "0.1.0" },
-        { "id": "codec", "version": "0.1.0" },
-        { "id": "quest", "version": "0.1.0" }
+        {
+            "id": "entity",
+            "version": "0.1.0"
+        },
+        {
+            "id": "codec",
+            "version": "0.1.0"
+        },
+        {
+            "id": "quest",
+            "version": "0.1.0"
+        },
+        {
+            "id": "dialogue",
+            "version": "0.1.0"
+        }
     ]
 }

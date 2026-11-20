@@ -33,6 +33,41 @@
     {
       "files": [
         {
+          "byteLength": 5456,
+          "path": "dialogue/dispatch.lua",
+          "sha256": "561c5cfb1e0395e49046667dadaa1ef613d8f59754059f859089f9f13a88234d"
+        },
+        {
+          "byteLength": 7548,
+          "path": "dialogue/handlers.lua",
+          "sha256": "1cad3d00c5469e3f878d18224a94ddde8f55ec04bc2a4504e6b1d2fde21c2253"
+        },
+        {
+          "byteLength": 6785,
+          "path": "dialogue/init.lua",
+          "sha256": "0d3e108ba7643679a14d3c3f72e90ffaff3bb641558babcc5b18d4ce65c323a6"
+        },
+        {
+          "byteLength": 4676,
+          "path": "dialogue/memory.lua",
+          "sha256": "1739706646e7b78bb79ad8366a8cc542e07e70f687cc5fa802a6673e66c7ee5b"
+        },
+        {
+          "byteLength": 180,
+          "path": "dialogue/pkg.json",
+          "sha256": "1d4ed8fec98962fd9c3201c8137a49dc646d64de42718b596f79ca63efaddb03"
+        },
+        {
+          "byteLength": 7668,
+          "path": "dialogue/store.lua",
+          "sha256": "e2cdd09b5fa22b5ecb3b89a10c42293fa8012f85e26d43cb954ebccd12266be9"
+        }
+      ],
+      "id": "dialogue"
+    },
+    {
+      "files": [
+        {
           "byteLength": 29297,
           "path": "entity/init.lua",
           "sha256": "0f29b9e14210dd64c7a1469b4590f7eda6d5a9029bba0ae9f120987b1355f84c"
