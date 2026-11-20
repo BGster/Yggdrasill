@@ -407,3 +407,56 @@ fn malformed_documents_are_rejected_by_the_native_path() {
         );
     }
 }
+
+/// 规范序 fixture 的**第二个消费者**（第一个在 `crates/ygg-sim/tests/canonical_order.rs`）。
+///
+/// 判据与 Tier 1 侧完全一样：两边都等于**同一份 fixture** 的 `expected`，而不是
+/// 「两边互相比」——后者只能证明两者一致，不能证明它们等于契约那条序。
+#[test]
+fn codec_key_order_follows_the_canonical_order_fixture() {
+    let (lua, _cases) = build();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/ygg-sim/fixtures/canonical-order.json");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("读 {} 失败：{error}", path.display()));
+    let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture 是 JSON");
+    let names: Vec<&str> = fixture["names"]
+        .as_array()
+        .expect("names 数组")
+        .iter()
+        .map(|item| item.as_str().expect("名字"))
+        .collect();
+    let expected: Vec<&str> = fixture["expected"]
+        .as_array()
+        .expect("expected 数组")
+        .iter()
+        .map(|item| item.as_str().expect("名字"))
+        .collect();
+
+    // 洗序插入（fixture 的 names 本身就是乱序），两条路径都必须给出字节序
+    let table = lua.create_table().expect("建表");
+    for (index, name) in names.iter().enumerate() {
+        table.set(*name, index as i64 + 1).expect("写键");
+    }
+    let value = Value::Table(table);
+
+    for (label, bytes) in [
+        ("native", native_encode(&value).expect("合法表")),
+        ("lua", lua_encode(&lua, &value).expect("Lua 径")),
+    ] {
+        let text = String::from_utf8(bytes).expect("键都是 UTF-8");
+        // 输出形如 {"0":..,"9":..}：按键字面量在输出里的位置排序，得到出现序
+        let mut seen: Vec<(usize, &str)> = names
+            .iter()
+            .filter_map(|name| {
+                text.find(&format!("\"{name}\":"))
+                    .map(|position| (position, *name))
+            })
+            .collect();
+        seen.sort_by_key(|(position, _)| *position);
+        let seen: Vec<&str> = seen.into_iter().map(|(_, name)| name).collect();
+        assert_eq!(
+            seen, expected,
+            "{label} 径的键序必须等于 fixture 的期望序（codec.md §4.1 / sim-kernel §2）"
+        );
+    }
+}
