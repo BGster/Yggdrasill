@@ -83,6 +83,26 @@
     {
       "files": [
         {
+          "byteLength": 1499,
+          "path": "procgen/init.lua",
+          "sha256": "ad557576ee84b0f971f001ff3253cfd10a708bbb4f1fb039e28c6f1df414505c"
+        },
+        {
+          "byteLength": 178,
+          "path": "procgen/pkg.json",
+          "sha256": "b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
+        },
+        {
+          "byteLength": 7174,
+          "path": "procgen/rng.lua",
+          "sha256": "62e832e10d5a9040380edcfeb2e0933e35cb1448649de00463d3389d0dcbef02"
+        }
+      ],
+      "id": "procgen"
+    },
+    {
+      "files": [
+        {
           "byteLength": 12292,
           "path": "quest/flow.lua",
           "sha256": "f2900c3ff68927e2422df100b3f6c59f93d480ac534daebd59a948e3d9df830b"
