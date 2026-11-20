@@ -25,9 +25,11 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value as Json;
+use serde_json::{json, Value as Json};
 
 /// 挂载点根目录名（`<run-dir>/mounts`）。
 pub const MOUNTS_DIR: &str = "mounts";
@@ -384,6 +386,8 @@ pub struct MountStore {
     roots: BTreeMap<String, MountRoot>,
     /// 剩余写预算（字节；**进程级、不落盘**）。
     budget_left: u64,
+    /// 审计行的下一个 `seq`（懒加载：首次 append 时数非空行）。
+    next_audit_seq: Option<u64>,
 }
 
 impl MountStore {
@@ -502,6 +506,7 @@ impl MountStore {
             audit: run_dir.join(FS_AUDIT_FILE),
             roots,
             budget_left: MOUNT_RUN_WRITE_BUDGET,
+            next_audit_seq: None,
         })
     }
 
@@ -836,6 +841,151 @@ impl MountStore {
         }
         Ok(entries)
     }
+}
+
+/// `write` 的结果（对应沙箱面 `{ path, bytes, sha256 }`）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountWritten {
+    pub path: String,
+    pub bytes: usize,
+    pub sha256: String,
+}
+
+impl MountStore {
+    /// 写一个挂载文件：**同步写穿磁盘、不回滚**，并追加一行审计。
+    ///
+    /// 拒绝面（每一条都**先登记审计行**再返回错误）：
+    /// - 路径狱 / 目标是目录 → `YGG-FS-JAIL`；
+    /// - 只读挂载 → `YGG-FS-MOUNT`；
+    /// - 超单件 4 MiB 或超剩余写预算 → `YGG-FS-CAP`。
+    ///
+    /// 写成功而审计 append 失败 → `YGG-FS-AUDIT`（诚实报「已写未审」）。
+    pub fn write(&mut self, path: &str, content: &[u8]) -> Result<MountWritten, MountError> {
+        let mount = mount_name_of(path);
+        let located = match self.locate(path, Need::File) {
+            Ok(located) => located,
+            Err(err) => {
+                self.log_rejection(&mount, path, err.code());
+                return Err(err);
+            }
+        };
+        let mode = self
+            .roots
+            .get(&located.mount)
+            .map(|entry| entry.mode)
+            .unwrap_or(MountMode::Ro);
+        if mode == MountMode::Ro {
+            let err = MountError::mount(format!(
+                "挂载点 `{}` 是只读（pack.json 的 mounts[].mode 缺省是 `ro`）",
+                located.mount
+            ));
+            self.log_rejection(&located.mount, path, err.code());
+            return Err(err);
+        }
+        if content.len() > MOUNT_FILE_MAX_BYTES {
+            let err = MountError::cap(format!(
+                "`{path}` 的 {} 字节超过单件上限 {MOUNT_FILE_MAX_BYTES} 字节",
+                content.len()
+            ));
+            self.log_rejection(&located.mount, path, err.code());
+            return Err(err);
+        }
+        if content.len() as u64 > self.budget_left {
+            let err = MountError::cap(format!(
+                "写入 {} 字节会超过本轮剩余写预算 {} 字节（每次 attach 重计）",
+                content.len(),
+                self.budget_left
+            ));
+            self.log_rejection(&located.mount, path, err.code());
+            return Err(err);
+        }
+        if let Err(err) = fs::write(&located.target, content) {
+            let err = MountError::mount(format!("写入 {} 失败（{err}）", located.target.display()));
+            self.log_rejection(&located.mount, path, err.code());
+            return Err(err);
+        }
+        self.budget_left -= content.len() as u64;
+        let sha256 = crate::sha256_hex(content);
+        if let Err(err) = self.append_audit(json!({
+            "event": "fs.write",
+            "mount": located.mount,
+            "path": path,
+            "bytes": content.len(),
+            "sha256": sha256,
+        })) {
+            return Err(err); // 已写未审：不假装成功
+        }
+        Ok(MountWritten {
+            path: path.to_owned(),
+            bytes: content.len(),
+            sha256,
+        })
+    }
+
+    /// 被拒写也登记（审计的价值一半在「谁试图做了什么」）。
+    ///
+    /// 审计 append 在此路径上的失败被**吞掉**：主事实是「这次写被拒」，
+    /// 用 `YGG-FS-AUDIT` 盖掉它反而丢掉主事实。
+    fn log_rejection(&mut self, mount: &str, path: &str, reason: &str) {
+        let _ = self.append_audit(json!({
+            "event": "fs.write.rejected",
+            "mount": mount,
+            "path": path,
+            "bytes": 0,
+            "sha256": "",
+            "reason": reason,
+        }));
+    }
+
+    /// 追加一行审计（`<run-dir>/fs.jsonl`，append-only、懒创建）。
+    ///
+    /// `seq` = 文件内非空行数 + 1（首次懒加载），**无墙钟**——行序即执行序。
+    fn append_audit(&mut self, mut row: Json) -> Result<(), MountError> {
+        let seq = self.audit_next_seq()?;
+        row["seq"] = json!(seq);
+        let mut line = serde_json::to_string(&row)
+            .map_err(|err| MountError::audit(format!("审计行序列化失败（{err}）")))?;
+        line.push('\n');
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.audit)
+            .map_err(|err| {
+                MountError::audit(format!("审计文件 {} 不可写（{err}）", self.audit.display()))
+            })?;
+        file.write_all(line.as_bytes()).map_err(|err| {
+            MountError::audit(format!("审计文件 {} 写失败（{err}）", self.audit.display()))
+        })
+    }
+
+    /// 下一个审计 `seq`（懒加载：首次数非空行——与 `events.jsonl` 的 `next_seq`
+    /// 同口径：不可解析的行同样占一个号）。
+    fn audit_next_seq(&mut self) -> Result<u64, MountError> {
+        if self.next_audit_seq.is_none() {
+            let count = match fs::read_to_string(&self.audit) {
+                Ok(text) => text.lines().filter(|line| !line.trim().is_empty()).count() as u64,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => 0,
+                Err(err) => {
+                    return Err(MountError::audit(format!(
+                        "审计文件 {} 不可读（{err}）",
+                        self.audit.display()
+                    )))
+                }
+            };
+            self.next_audit_seq = Some(count + 1);
+        }
+        let seq = self.next_audit_seq.unwrap_or(1);
+        self.next_audit_seq = Some(seq + 1);
+        Ok(seq)
+    }
+}
+
+/// 从沙箱路径里取挂载点名（审计行的 `mount` 字段；解不出就是空串）。
+fn mount_name_of(path: &str) -> String {
+    path.strip_prefix(MOUNT_PATH_PREFIX)
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// 建「目录挂载」的符号链接（bind 语义；不拷贝内容）。
@@ -1351,6 +1501,101 @@ mod tests {
                 Err(err) => assert_eq!(err.code(), codes::JAIL, "{err}"),
             }
         }
+    }
+
+    /// 读审计文件的各行（测试面：直接读 JSON，不绕过实现）。
+    fn audit_rows(store: &MountStore) -> Vec<Json> {
+        match fs::read_to_string(store.audit_path()) {
+            Ok(text) => text
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("审计行必须是 JSON"))
+                .collect(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(err) => panic!("读审计文件失败：{err}"),
+        }
+    }
+
+    #[test]
+    fn write_appends_audit_rows_for_success_and_rejection() {
+        let (run, mod_dir) = attach_env("write-audit");
+        let mut store = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]))
+            .expect("attach");
+        let written = store.write("mounts/w/a.txt", b"hello").expect("write");
+        assert_eq!(written.path, "mounts/w/a.txt");
+        assert_eq!(written.bytes, 5);
+        assert_eq!(written.sha256, crate::sha256_hex(b"hello"));
+        store.write("mounts/w/b.txt", b"22").expect("write 2");
+        // 被拒也登记。
+        match store.write("mounts/w/../x", b"x") {
+            Ok(_) => panic!("`..` 必须拒"),
+            Err(err) => assert_eq!(err.code(), codes::JAIL, "{err}"),
+        }
+        // 写穿磁盘：文件就在挂载目录里。
+        assert_eq!(
+            fs::read(run.join(MOUNTS_DIR).join("w").join("a.txt")).expect("read back"),
+            b"hello"
+        );
+        let rows = audit_rows(&store);
+        assert_eq!(rows.len(), 3, "2 成功 + 1 被拒：{rows:?}");
+        assert_eq!(rows[0]["seq"], json!(1));
+        assert_eq!(rows[0]["event"], json!("fs.write"));
+        assert_eq!(rows[0]["mount"], json!("w"));
+        assert_eq!(rows[0]["path"], json!("mounts/w/a.txt"));
+        assert_eq!(rows[0]["bytes"], json!(5));
+        assert_eq!(rows[0]["sha256"], json!(crate::sha256_hex(b"hello")));
+        assert_eq!(rows[1]["seq"], json!(2));
+        assert_eq!(rows[2]["seq"], json!(3));
+        assert_eq!(rows[2]["event"], json!("fs.write.rejected"));
+        assert_eq!(rows[2]["reason"], json!(codes::JAIL));
+        assert_eq!(rows[2]["bytes"], json!(0));
+        assert_eq!(rows[2]["sha256"], json!(""));
+    }
+
+    #[test]
+    fn write_refuses_read_only_mounts() {
+        let (run, mod_dir) = attach_env("write-ro");
+        let mut store = attach(&run, &mod_dir, json!([{ "name": "w" }])).expect("attach");
+        match store.write("mounts/w/a.txt", b"x") {
+            Ok(_) => panic!("ro 缺省下写必须拒"),
+            Err(err) => assert_eq!(err.code(), codes::MOUNT, "{err}"),
+        }
+        assert!(
+            !run.join(MOUNTS_DIR).join("w").join("a.txt").exists(),
+            "只读拒写：磁盘零写入"
+        );
+        let rows = audit_rows(&store);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["event"], json!("fs.write.rejected"));
+        assert_eq!(rows[0]["reason"], json!(codes::MOUNT));
+    }
+
+    #[test]
+    fn write_caps_single_file_and_per_attach_budget() {
+        let (run, mod_dir) = attach_env("write-budget");
+        let mut store = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]))
+            .expect("attach");
+        let oversize = vec![b'x'; MOUNT_FILE_MAX_BYTES + 1];
+        match store.write("mounts/w/big.bin", &oversize) {
+            Ok(_) => panic!("超单件帽必须拒"),
+            Err(err) => assert_eq!(err.code(), codes::CAP, "{err}"),
+        }
+        // 预算 = 16 次满帽写；用完后再写 1 字节 → 帽拒。
+        let full = vec![b'y'; MOUNT_FILE_MAX_BYTES];
+        for index in 0..16 {
+            store
+                .write(&format!("mounts/w/f{index}.bin"), &full)
+                .unwrap_or_else(|err| panic!("第 {index} 次满帽写必须成功：{err}"));
+        }
+        assert_eq!(store.budget_left(), 0);
+        match store.write("mounts/w/one.txt", b"z") {
+            Ok(_) => panic!("预算耗尽后必须拒"),
+            Err(err) => assert_eq!(err.code(), codes::CAP, "{err}"),
+        }
+        // 续局拿到新预算（预算不落盘）。
+        let mut again = attach(&run, &mod_dir, json!([{ "name": "w", "mode": "rw" }]))
+            .expect("re-attach");
+        assert_eq!(again.budget_left(), MOUNT_RUN_WRITE_BUDGET);
+        again.write("mounts/w/one.txt", b"z").expect("新预算可写");
     }
 
     #[test]
