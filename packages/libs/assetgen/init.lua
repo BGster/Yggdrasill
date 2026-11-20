@@ -184,6 +184,46 @@ function M.raster(mesh, opts)
   return finish("texture", "texture.raster", product, mesh.seed, tostring(mesh.stream) .. "/raster")
 end
 
+--- `assetgen.bundle(entries, seed)` → 成套素材（`items` 顺序 = 入参数组顺序）。
+---
+--- `entries[i] = { key, kind, algo, params, stream? }`；`key` 非空且唯一，缺省流名
+--- `"assetgen/<key>"`（I2）。一条 seed 派生成套素材的入口——四个复现都只需要这一个
+--- 调用就能拿到一整套零外部素材。
+function M.bundle(entries, seed)
+  if type(entries) ~= "table" or #entries == 0 then
+    fail(E.PARAM, "bundle 需要非空的 entries 数组")
+  end
+  local items = {}
+  local seen = {}
+  for i = 1, #entries do
+    local entry = entries[i]
+    if type(entry) ~= "table" then
+      fail(E.PARAM, "entries[" .. i .. "] 必须是表")
+    end
+    local key = entry.key
+    if type(key) ~= "string" or key == "" then
+      fail(E.PARAM, "entries[" .. i .. "].key 必须是非空字符串")
+    end
+    if seen[key] then
+      fail(E.PARAM, "entries 的 key 重复：" .. key)
+    end
+    seen[key] = true
+    local kind = entry.kind
+    if kind ~= "texture" and kind ~= "mesh" and kind ~= "sound" then
+      fail(E.KIND, "entries[" .. i .. "].kind 必须是 texture / mesh / sound，得到 " .. tostring(kind))
+    end
+    local stream = entry.stream
+    if stream == nil then
+      stream = "assetgen/" .. key
+    end
+    local product = generate(kind, { algo = entry.algo, params = entry.params }, seed, stream)
+    items[i] = { key = key, kind = kind, product = product }
+  end
+  local bundle = { kind = "bundle", v = M.V, seed_text = tostring(seed), items = items }
+  bundle.canon = M.canon(bundle)
+  return bundle
+end
+
 --- `assetgen.encode(product, container?)` → 字节串（纯；容器表见契约 §4）。
 function M.encode(product, container)
   return encode.encode(product, container)

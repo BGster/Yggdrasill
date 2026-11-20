@@ -851,3 +851,77 @@ run("pkg.assetgen.sound-caps", function()
     assetgen.sound({ algo = "sound.mix", params = { layers = {} } }, "caps")
   end, "空 layers")
 end)
+
+-- ── 用例：bundle 顺序与键 / 流隔离 ──────────────────────────────────────────
+
+local BUNDLE_ENTRIES = {
+  { key = "grass", kind = "texture", algo = "texture.checker", params = { w = 8, h = 8, ch = 1, size = 2 } },
+  { key = "crate", kind = "mesh", algo = "mesh.box", params = { sx = 600, sy = 600, sz = 600 } },
+  { key = "blip", kind = "sound", algo = "sound.osc", params = { wave = "square", freq = 300, ms = 20, sr = 8000 } },
+}
+
+run("pkg.assetgen.bundle-order-and-keys", function()
+  local assetgen = fresh()
+  local bundle = assetgen.bundle(BUNDLE_ENTRIES, "bundle-seed")
+  eq(#bundle.items, 3, "items 数量")
+  for i = 1, #BUNDLE_ENTRIES do
+    eq(bundle.items[i].key, BUNDLE_ENTRIES[i].key, "items 顺序必须等于入参顺序（第 " .. i .. " 项）")
+    eq(bundle.items[i].kind, BUNDLE_ENTRIES[i].kind, "items kind（第 " .. i .. " 项）")
+    eq(bundle.items[i].product.algo, BUNDLE_ENTRIES[i].algo, "items algo（第 " .. i .. " 项）")
+  end
+  eq(bundle.seed_text, "bundle-seed", "bundle.seed_text")
+  eq(bundle.v, 1, "bundle.v 是单一常量")
+  eq(bundle.canon, assetgen.canon(bundle), "bundle 的 canon 与 canon(bundle) 一致")
+  is_true(bundle.items[1].product.stream == "assetgen/grass", "缺省流名 = assetgen/<key>")
+
+  local function bundle_error(code, entries, label)
+    expect_error(code, function()
+      assetgen.bundle(entries, "bundle-seed")
+    end, label)
+  end
+  bundle_error("YGG-PKG-ASSETGEN-PARAM", {
+    BUNDLE_ENTRIES[1],
+    { key = "grass", kind = "mesh", algo = "mesh.box", params = {} },
+  }, "重复 key")
+  bundle_error("YGG-PKG-ASSETGEN-PARAM", {
+    { key = "", kind = "texture", algo = "texture.checker", params = { w = 4, h = 4 } },
+  }, "空 key")
+  bundle_error("YGG-PKG-ASSETGEN-KIND", {
+    { key = "x", kind = "video", algo = "texture.checker", params = { w = 4, h = 4 } },
+  }, "kind 不在三值")
+  bundle_error("YGG-PKG-ASSETGEN-PARAM", {}, "空 entries")
+end)
+
+run("pkg.assetgen.stream-isolation", function()
+  local assetgen = fresh()
+  local texture_spec = { algo = "texture.fbm", params = { w = 16, h = 16, ch = 3, cell = 4, octaves = 2 } }
+  local mesh_spec = { algo = "mesh.blob", params = { radius = 500, segs = 6, rings = 4, amp = 300 } }
+  local sound_spec = { algo = "sound.noise", params = { ms = 30, sr = 8000 } }
+
+  -- 先用后生成音频，再反过来：三条流各自的状态由 (seed, stream) 派生，顺序不得影响。
+  local tex_a = assetgen.texture(texture_spec, "iso-seed")
+  local mesh_a = assetgen.mesh(mesh_spec, "iso-seed")
+  local snd_a = assetgen.sound(sound_spec, "iso-seed")
+  local snd_b = assetgen.sound(sound_spec, "iso-seed")
+  local mesh_b = assetgen.mesh(mesh_spec, "iso-seed")
+  local tex_b = assetgen.texture(texture_spec, "iso-seed")
+
+  is_true(tex_a.bytes == tex_b.bytes, "纹理字节不受生成顺序影响")
+  is_true(mesh_a.bytes == mesh_b.bytes, "网格字节不受生成顺序影响")
+  is_true(snd_a.bytes == snd_b.bytes, "音频字节不受生成顺序影响")
+
+  -- 同一 (seed, stream) 显式共享时序列才共享；换类别的缺省流名互不相同。
+  local streams = assetgen.streams("iso-seed")
+  eq(#assetgen.algo_list("texture"), 7, "texture 算法数")
+  eq(#assetgen.algo_list("mesh"), 6, "mesh 算法数")
+  eq(#assetgen.algo_list("sound"), 6, "sound 算法数")
+  local names = assetgen.algo_list("mesh")
+  for i = 2, #names do
+    is_true(names[i - 1] < names[i], "algo_list 必须字节序升序：" .. names[i - 1] .. " < " .. names[i])
+  end
+  eq(type(streams.texture), "table", "streams 返回三条句柄")
+  eq(streams.texture:int(0, 0), 0, "句柄可用（单面区间不取数）")
+  expect_error("YGG-PKG-ASSETGEN-KIND", function()
+    assetgen.algo_list("video")
+  end, "未知 kind")
+end)

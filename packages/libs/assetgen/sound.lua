@@ -89,6 +89,9 @@ local function gain_at(ctx, i)
   return (1000 * (span - t)) // (span + 2 * t)
 end
 
+-- 前向声明：`finalize` 用它，实现在下方（交织与归一互相独立，顺序不必颠倒）。
+local interleave
+
 --- 归一 + 交织 + 装箱。`amp` 为 0 时产物是全静音（`peak = 0`）。
 local function finalize(ctx, samples)
   local max = 0
@@ -120,12 +123,15 @@ local function finalize(ctx, samples)
     ch = ctx.ch,
     frames = ctx.frames,
     peak = ctx.amp,
-    pcm = M.interleave(ctx, samples),
+    pcm = interleave(ctx, samples),
   }
 end
 
 --- s16 小端交织成字节串（每 256 个样本一块，最后 `join.concat`）。
-function M.interleave(ctx, samples)
+---
+--- **local 而不是 `M.*`**：`register` 把模块表的每个键都当算法装进算法表，一个
+--- 辅助函数漏在 `M` 上就会变成 `algo_list("sound")` 里的第七个「算法」。
+interleave = function(ctx, samples)
   local parts = {}
   local chunk = {}
   local at = 0
@@ -337,7 +343,7 @@ function M.mix(params, _)
     ch = ch,
     frames = frames,
     peak = peak,
-    pcm = M.interleave({ sr = sr, ch = ch, frames = frames }, samples),
+    pcm = interleave({ sr = sr, ch = ch, frames = frames }, samples),
   }
 end
 
