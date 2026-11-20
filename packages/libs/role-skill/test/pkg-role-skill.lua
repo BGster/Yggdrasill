@@ -150,7 +150,7 @@ local function new_world()
 end
 
 --- 取一份**全新**的包实例并装上 mock（清缓存 = 定义表 / 索引缓存 / 订阅表归零）。
-local function fresh(world)
+local function fresh(world, events)
   package.loaded["pkg.role_skill"] = nil
   for name in pairs(package.loaded) do
     if type(name) == "string" and name:find("^pkg%.role_skill%.") then
@@ -158,7 +158,7 @@ local function fresh(world)
     end
   end
   local role = require("pkg.role_skill")
-  role.install({ host = world.host, entity = world.entity, codec = codec })
+  role.install({ codec = codec, entity = world.entity, events = events, host = world.host })
   return role
 end
 
@@ -401,4 +401,73 @@ run("pkg.role-skill.effective-missing-attr-zero", function()
   eq(role.effective(1, "magic"), 7, "缺失属性 base 记 0，加成照加（5 + 2）")
   eq(role.effective(1, "luck"), 0, "无基础无加成 ⇒ 0")
   eq(role.effective(99, "attack"), 0, "无记录的实体 ⇒ 0")
+end)
+
+-- ── 用例 12：计数器只增（订阅面 + 选择器两种形态）────────────────────────────
+
+run("pkg.role-skill.counters-increment", function()
+  local world = new_world()
+  local role = fresh(world, {
+    tick = function(payload)
+      return payload.who
+    end,
+    turn = "entity",
+  })
+  role.define("warrior", {})
+  role.grant(1, "warrior")
+  role.grant(2, "warrior")
+
+  is_true(type(world.handlers.turn) == "function", "turn 已订阅")
+  is_true(type(world.handlers.tick) == "function", "tick 已订阅")
+
+  for _ = 1, 3 do
+    world.handlers.turn({ entity = 1 })
+  end
+  eq(role.count(1, "turn"), 3, "三次 turn ⇒ 3")
+  eq(role.count(2, "turn"), 0, "实体 2 未被计数")
+  eq(role.count(1, "never"), 0, "未订阅的事件名 ⇒ 0")
+
+  -- 解析不出 id（payload 里没有那个字段）⇒ 不写
+  local writes = world.writes_now()
+  world.handlers.turn({ other = 1 })
+  eq(world.writes_now(), writes, "id 为 nil ⇒ 不写")
+  eq(role.count(1, "turn"), 3, "计数不变")
+
+  -- 函数选择器读的是 payload 里的自定义字段
+  world.handlers.tick({ who = 2 })
+  eq(role.count(2, "tick"), 1, "函数选择器解析出的 id")
+
+  -- 没有记录的实体：统计事件不凭空建记录
+  world.handlers.turn({ entity = 99 })
+  eq(world.kv["role.actor.99"], nil, "没有记录就不建记录")
+end)
+
+-- ── 用例 13：显式清零（带 event / 不带 event）────────────────────────────────
+
+run("pkg.role-skill.counters-reset", function()
+  local world = new_world()
+  local role = fresh(world, { turn = "entity", tick = "entity" })
+  role.define("warrior", {})
+  role.grant(1, "warrior")
+  world.handlers.turn({ entity = 1 })
+  world.handlers.turn({ entity = 1 })
+  world.handlers.tick({ entity = 1 })
+
+  is_true(role.reset_counters(1, "turn"), "带 event 清零")
+  eq(role.count(1, "turn"), 0, "turn 归零")
+  eq(role.count(1, "tick"), 1, "别的计数不动")
+
+  -- 已经是 0：返回 true 且不写
+  local writes = world.writes_now()
+  is_true(role.reset_counters(1, "turn"), "零值再清仍 true")
+  eq(world.writes_now(), writes, "零值再清不写")
+
+  is_true(role.reset_counters(1), "不带 event 清全部")
+  eq(role.count(1, "tick"), 0, "tick 也归零")
+  eq(#sorted_keys(record_of(world, 1).counters), 0, "counters 清空")
+
+  -- 无记录：视为已清零，不写
+  local before = sorted_keys(world.kv)
+  is_true(role.reset_counters(99), "无记录返回 true")
+  eq_seq(sorted_keys(world.kv), before, "无记录不写")
 end)
