@@ -74,8 +74,25 @@ cargo run -q --example selftest -- --mod .ygg/mods/agent-seed --fixture armed   
 用例侧 `test(name, fn, fixture)` 的第三参决定它只在哪个 tag 下执行。**一次运行只跑一个 tag**，
 所以「全绿」= 无 fixture 一次 + 每个 tag 各一次。
 
-Rust 侧只留一个**门禁薄壳**（`crates/agent-seed-tests/tests/agent_seed_semantics.rs`）：它不重复
+Rust 侧只留一个**门禁薄壳**（`crates/ygg-sandbox/tests/agent_seed_semantics.rs`，属包 `ygg-sandbox`）：它不重复
 任何行为断言，只断言 Lua 套件仍存在且非空——因为宿主三套门禁的第三条被硬编码成
 `cargo test -p ygg-sandbox --test agent_seed_semantics`（见 `examples/egg.rs` 的 `verify_gates`），
-而 egg.rs 是 non-negotiable host。**注意**：那条命令的包名与实际所属包（`agent-seed-tests`）不符，
-是既有缺陷，需宿主侧一行修复（详见 goal 文档的收口记录）。
+而 egg.rs 是 non-negotiable host。壳与门禁命令**同包同名**，不存在包名不符。
+
+## 6. 设计依据（外部仓装载：可选注入优先于全局前置）
+
+**规范**：`install_assets` 对 `docs/context/scenes.json` 采用「**有则注入、无则跳过**」，不把本仓的
+doc 索引当成所有仓的装载前置。注入的其余面（`__ASSETS` / `__MANIFEST` / `__PACK` / `__REPO_ROOT`）
+仍从 `<mod>` 与 `--mod` 锚点派生，语义不变。
+
+**依据**：`repo_root` 由 `ancestor_with_git(--mod)` 求出，外部仓（装载别人的 Mod，如 `PokeRogue-YGG`）
+自然没有本仓的 `docs/context/scenes.json`；该文件的唯一消费方是 agent-seed 的读签用例
+（`tests/surface.lua` 的 `scenes 表 reference 段` 断言），外部仓不会跑 agent-seed 的测试。
+「没有」与「坏了」必须分开：`is_file()` 为假 → 跳过并打印一行 `scenes: 跳过（… 不存在）`；
+文件存在却读不动或不是合法 JSON → 仍然 `资源装载失败`，否则真损坏会被静默跳过。
+
+**三问判据**：① 阻断——把该文件写成装载期必读（回归 S14：外部仓一跑就 `No such file or directory`，
+退出码 1）；② 症状——外部仓 selftest 停在 `资源装载失败：read …/docs/context/scenes.json`，
+Lua 一条用例都没跑；③ 确认——`cargo run -q --example selftest -- --mod <外部仓>/mod --packages <本仓>/packages/libs`
+打印 `scenes: 跳过（…）` 且 mod 自有测试文件全 `file ok`；把该文件写成非法 JSON 则仍报
+`资源装载失败：scenes.json: …`。
