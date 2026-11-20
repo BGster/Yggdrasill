@@ -68,14 +68,25 @@ local function run(name, fn)
   check(name, ok, ok and nil or err)
 end
 
---- 升序键列表（测试里允许排序库：这里跑的是普通 Lua，不是沙箱）。
-local function sorted_keys(map)
-  local keys = {}
-  for key in pairs(map) do
-    keys[#keys + 1] = key
+--- 深相等（含 `math.type`：`1` 与 `1.0` 在序列化面不是同一个值）。
+local function same_deep(a, b)
+  if type(a) ~= type(b) then
+    return false
   end
-  table.sort(keys)
-  return keys
+  if type(a) ~= "table" then
+    return a == b and math.type(a) == math.type(b)
+  end
+  local count = 0
+  for key, value in pairs(a) do
+    count = count + 1
+    if not same_deep(value, b[key]) then
+      return false
+    end
+  end
+  for _ in pairs(b) do
+    count = count - 1
+  end
+  return count == 0
 end
 
 -- ── mock 宿主面（语义对齐内核；见文件头注）─────────────────────────────────────
@@ -302,8 +313,14 @@ run("pkg.codec.encode-number-form", function()
   eq(codec.encode(-0.0), "0.0", "负零归一到零（与内核 normalize_f64 同口径）")
   is_true(codec.encode(2 ^ 63):find("e") ~= nil, "2^63 需指数形式")
   eq(codec.encode(100.0), "100.0", "量级在区间内优先十进制")
-  -- 往返面（`decode(encode(v))` 同值同 math.type）在 C3 补齐：这里只钉**编码侧**，
-  -- 因为 decode 还不存在——用例允许跨段长大，但不允许拿不存在的函数写断言。
+
+  -- 每个再 decode 回同值**同 math.type**（编解码对偶：`1` 与 `1.0` 两条路都不串形）。
+  for _, pair in ipairs({ { 1, "integer" }, { 1.0, "float" }, { 0.1, "float" }, { 1e300, "float" }, { -0.0, "float" }, { 100.0, "float" } }) do
+    local original = pair[1]
+    local round = codec.decode(codec.encode(original))
+    eq(round, original, "往返值 " .. tostring(original))
+    eq(math.type(round), pair[2], "往返 math.type " .. tostring(original))
+  end
 end)
 
 run("pkg.codec.encode-number-nonfinite", function()
@@ -328,10 +345,15 @@ run("pkg.codec.encode-string-escapes", function()
   local source = '"' .. "\\" .. "\n\r\t" .. ("%c"):format(1)
   local expected = '"' .. '\\"' .. "\\\\" .. "\\n\\r\\t" .. "\\u0001" .. '"'
   eq(codec.encode(source), expected, "引号/反斜杠/换行/回车/制表/控制字符")
+  eq(codec.decode(codec.encode(source)), source, "转义往返")
 
   -- 非 ASCII 原样（UTF-8 直通，不转 \\uXXXX）。
   eq(codec.encode("中文"), '"中文"', "非 ASCII 不转义")
-  -- 转义往返同样归 C3（需 decode）。
+  eq(codec.decode(codec.encode("中文")), "中文", "非 ASCII 往返")
+  -- 手写的 `\\uXXXX` 要能读回来（含代理对）：这层不是为了自己用，是为了能读
+  -- 别人生成的 JSON。
+  eq(codec.decode('"\\u4e2d\\u6587"'), "中文", "\\u 转义读回")
+  eq(codec.decode('"\\ud83d\\ude00"'), "\240\159\152\128", "代理对读回（😀）")
 end)
 
 run("pkg.codec.encode-rejects-holes", function()
@@ -387,4 +409,72 @@ run("pkg.codec.encode-rejects-non-values", function()
   expect_error("YGG-PKG-CODEC-TYPE", function()
     codec.encode(loop)
   end, "循环引用")
+end)
+
+-- ── 用例 8：decode 往返 + 位置化报错 ────────────────────────────────────────
+
+run("pkg.codec.decode-roundtrip", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+
+  -- 深 fixture：嵌套 + 三种标量 + 转义串 + 空表。
+  local fixture = {
+    name = "creature",
+    hp = 100,
+    ratio = 0.5,
+    alive = true,
+    tags = { "enemy", "boss" },
+    nested = { deep = { 1, 2, { 3, "四" } }, empty = {} },
+    escaped = '"' .. "\\" .. "\n\t",
+  }
+  is_true(same_deep(fixture, codec.decode(codec.encode(fixture))), "深 fixture 往返")
+
+  -- 三类坏 JSON（题面点名的）：尾逗号 / 缺引号 / 截断——必须报错并带字节位置。
+  for _, bad in ipairs({ '{"a":1,}', '{"a":}', '{"a":1' }) do
+    local ok, err = pcall(codec.decode, bad)
+    eq(ok, false, "坏 JSON 必须报错：" .. bad)
+    is_true(
+      tostring(err):find("YGG-PKG-CODEC-TYPE", 1, true) ~= nil,
+      "错误码不对：" .. tostring(err)
+    )
+    is_true(tostring(err):find("at byte", 1, true) ~= nil, "错误必须带位置：" .. tostring(err))
+  end
+
+  -- 其它形态：每一类都是真实生成的 JSON 会遇到的形状。
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.decode("[1,]")
+  end, "数组尾逗号")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.decode('"abc')
+  end, "字符串未闭合")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.decode("tru")
+  end, "字面量被截断")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.decode('{"a":1} x')
+  end, "顶层值之后的残留字节")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.decode('{"a" 1}')
+  end, "键后缺冒号")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.decode('"a' .. ("%c"):format(1) .. '"')
+  end, "未转义的控制字符")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.decode(12345)
+  end, "非字符串输入")
+
+  -- null 的对偶语义：对象里 = 键不存在；数组里 = 报错（丢不得）；顶层 = nil。
+  local with_null = codec.decode('{"a":null,"b":1}')
+  is_nil(with_null.a, "对象 null 丢弃")
+  eq(with_null.b, 1, "null 旁边的值不受影响")
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.decode("[null]")
+  end, "数组里的 null")
+  is_nil(codec.decode("null"), "顶层 null = nil")
+
+  -- 空白容忍（四种合法空白）。
+  is_true(
+    same_deep(codec.decode('  { "a" :\t[ 1 , 2 ]\r\n}  '), { a = { 1, 2 } }),
+    "空白不影响语义"
+  )
 end)
