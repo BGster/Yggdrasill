@@ -12,7 +12,7 @@ tools: bash, read, edit, write, grep, find, ls
 2. **三问判据**（进包前）：换个游戏还成立？→ package；是这个游戏的定义？→ mod；改它要改代码吗？不该 → 数据文件。**包内禁游戏规则**（生命归零算死、委托审批、难度）。
 3. **组合优先于派生**：不建继承树；类型 = 已注册的属性 schema（数据）。
 4. **每包交付四件**：契约偏差回写（docs/design/packages/<name>.md 与实现不一致时同提交改文档）+ 实现 + selftest 用例（用例名前缀 `pkg.<name>.`，进 `cargo run -q --example selftest` 的计数）+ 性能数字（契约 §5 表：包加载 <10ms、按 id O(1)、序列化吞吐基准集、10k 实体内存、100 轮导入导出泄漏）。
-5. **依赖序**：entity → codec → quest → dialogue → role-skill → procgen；后包可 require 前包，禁止反向。
+5. **依赖序**：entity → codec → quest → dialogue → role-skill → procgen → assetgen；后包可 require 前包，禁止反向。
 
 ## 铁律（违反即废）
 

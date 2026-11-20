@@ -26,7 +26,7 @@ docs/
     ├── kernel/                # ① ygg 内核（6）：state-machine / events（39 口径）/ state-surface / wire-protocol / lua-api / compaction
     ├── host/                  # ② egg CLI 与 host（4）：cli-daemon / serve / harness-tools / lanes
     ├── mod/                   # ③ agent-seed mod（6）：mod-package / prompt-surface / tool-bridge / action-faces / identity / testing-strategy
-    └── packages/              # ⑤ packages 通用能力层（7）：README + entity / codec / quest / dialogue / role-skill / procgen
+    └── packages/              # ⑤ packages 通用能力层（8）：README + entity / codec / quest / dialogue / role-skill / procgen / assetgen
 ```
 
 > **两棵树的判据**：`design/` = 改之前必须遵守的契约（**有代码消费者**）；`context/` = 我要理解/执行这个工作流（**无代码消费者**）。判定三步与反例见 [wiki-governance.md](wiki-governance.md)「design / context 二分判据」。
@@ -91,13 +91,14 @@ docs/
 
 | 文件 | 一句话定位 | replaces |
 | --- | --- | --- |
-| [packages/README.md](design/packages/README.md) | 六包契约入口：判据三问、包清单与状态、依赖序、模板与命名规则 | — |
+| [packages/README.md](design/packages/README.md) | 七包契约入口：判据三问、包清单与状态、依赖序、模板与命名规则 | — |
 | [entity.md](design/packages/entity.md) | 实体与属性袋（schema 校验、存活索引、生命周期事件） | — |
 | [codec.md](design/packages/codec.md) | 序列化与 KV 形状（存档往返、sha256） | — |
 | [quest.md](design/packages/quest.md) | 任务流转（stage 状态机、依赖与交付） | — |
 | [dialogue.md](design/packages/dialogue.md) | 对话调度（节点图、文案单副本） | — |
 | [role-skill.md](design/packages/role-skill.md) | 角色与技能（属性袋组合、事件计数冷却） | — |
 | [procgen.md](design/packages/procgen.md) | 程序化生成（确定性种子、地形与布局） | — |
+| [assetgen.md](design/packages/assetgen.md) | 素材生成（纹理 / 几何 / 音频，seed 驱动字节一致） | — |
 
 ## 导航表 · 横切
 
