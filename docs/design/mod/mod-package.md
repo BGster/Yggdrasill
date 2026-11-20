@@ -18,6 +18,7 @@
    - `agent`：8 个必填字段（`entryEvent`、`choiceEvent`、`summaryEvent`、`endingPrefix`、`metaKey`、`rejectionPrefixes`、`replayPrefix`、`defaultPayload`）。
    - `inboxRoutes`：声明 `idField`、`externalIdField`、`kindField`，以及每 kind 的 `{ event, fields[] }` 映射，用于异步 JSONL 收件箱摄入；需要宿主注入提交者身份的动作可声明 `actor` / `actor_session` 布尔（r3，缺省 false = 功能关闭）。
    - `tools`（可选，**Layer 1 能力白名单**）：将 `<namespace>.<name>` 映射到 `{ kind: "cli" | "http", program, args[], timeoutMs, maxOutputBytes, readOnly, resultEvent }`。占位符用 `{{arg}}` 表示调用参数，用 `$ENV{VAR}` 表示宿主侧密钥解析。
+   - `mounts`（可选，**宿主侧文件挂载声明**）：数组，每项 `{ name, dir?, mode? }`——把宿主目录 bind 成沙箱可见的 `mounts/<name>/…`（沙箱侧路径文法与读写面见 [lua-api.md §3.1.2](../kernel/lua-api.md)，run 目录落点见 [cli-daemon.md](../host/cli-daemon.md)）。字段与校验见 §3.2.2。
 2. **`data/config.json`（运行时默认值与 Layer 2 发布白名单）**：
    - 依据 `packages/schema/schemas/agent-config.json` 校验。
    - 声明 `play.mode`（`"guide"` | `"goal"`）、`evolution`（`mode`、`allow_paths`、`max_per_run`）、`gates.require_all_green`、`drive`（`maxSteps`、`stagnationLimit`、`decideTimeoutMs`）、`settlement`（`requireNonEmptyEvents`、`requireZeroFailedSteps`、`requireEnding`、`requireInboxConsumed`）、`allowedTools`（**Layer 2 发布白名单**，必须是 `pack.json` `tools` 键的超集），以及可选的 `harness` 适配器元数据。
@@ -32,6 +33,29 @@
 **依据**：反方案是声明式 JSON 条件/对话树——它把“表达力”锁在了一种固定的 schema 里，每加一种叙事花样就要改 schema，而 schema 是双语言共同产物，改动成本远高于改一段 Lua。Schema 单一来源是因为双端各写一份校验必然随时间漂移，而“同一个文件在宿主与工具链里判定不同”是最难查的一类缺陷。多文件纯度是为了让模块化不以“谁都能改状态”为代价。
 
 **判据**：① 阻断——在 `src/**` 顶层注册处理器或改 KV、在 `packages/schema/schemas/` 之外新增 Schema 定义、或新增一个未被 `modules[]` 枚举的 Lua 文件；② 症状——加载期 `YGG-MOD-EFFECT` / 模块未声明报错，或 Rust 与 TS 校验同一资源结论不同；③ 确认——`cargo test --workspace`（含 `ygg-schema` / `ygg-lint` 用例）与 `./scripts/sync-seed-mod.sh --check`。
+
+#### 3.2.2 mounts 段（宿主侧文件挂载声明）
+
+```json
+"mounts": [
+  { "name": "work", "dir": "../biz", "mode": "ro" },
+  { "name": "out" }
+]
+```
+
+| 字段 | 类型 | 必填 | 规则（违规 → `YGG-FS-MOUNT`，attach 期、零写入） |
+| --- | --- | --- | --- |
+| `name` | string | 是 | `^[a-z][a-z0-9_-]{0,31}$`；同一 pack 内唯一；不得等于 `artifacts` |
+| `dir` | string | 否 | 1..=4096 字节、无 NUL；绝对路径原样，相对路径对 `<mod dir>` 解析；`canonicalize` 后必须是**已存在目录**（非文件、非断链）。缺省 = **私有挂载**：内容是本局产物 |
+| `mode` | string | 否 | `"ro"`（**缺省**）或 `"rw"`；`ro` 下任何写 → `YGG-FS-MOUNT` |
+
+- 段缺失或 `[]` → 零挂载，不报错（旧 mod 100% 兼容）；
+- 段存在但不是数组、或元素不是对象 → `YGG-FS-MOUNT`；
+- **未知键忽略**（宽松 Value 读取）：键集宽松、**已知键的取值严格**——与 `panel` 段同源（`pack.json` 解析是宽松 Value 读取，旧宿主忽略未知顶层段）；
+- 校验发生在 **attach（宿主侧）**，不是 `ModBundle::load`：`mounts` 与 `panel` 同族（宿主面声明），声明坏了不能炸 mod 装载；`ModBundle` / `modload.rs` 不因本段新增字段；
+- **r2 兼容条款**：本表三个字段与上述规则即 r2 `packages/schema/schemas/` 要编码的规范原文。r1 落 Rust 层（宿主可执行）、r2 落 Schema 层（pack 时可校验），**两层判定必须逐条一致**；r1 不预先冻结未来字段，r2 加字段时按「键集宽松」向后兼容。
+
+① 阻断：声明一个 `dir` 指向不存在 / 非目录 / 断链的路径、重名的 `name`、或 `mode` 取值不在 `ro`/`rw` 内而 attach 仍成功；② 症状：挂载点被隐形创建、或声明错了却只在该次 `ygg.fs.*` 调用时才报错（错误面应在 attach 期、零写入）；③ 确认——`cargo test -p ygg-store --test mounts` 的声明校验与三态幂等用例，以及 `git-ls <run-dir>/mounts/` 显示声明与磁盘一致。
 
 ### pack 声明变更的连带义务
 

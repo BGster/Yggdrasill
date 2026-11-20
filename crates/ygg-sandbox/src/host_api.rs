@@ -90,6 +90,96 @@ pub trait HostToolRunner {
     ) -> Result<BTreeMap<String, String>, String>;
 }
 
+// ============================================================================
+// §文件挂载桥的注入面（`ygg.fs.*` 的 `mounts/` 根）
+// ============================================================================
+
+/// 挂载点里一项的类型（= `ygg.fs.stat` / `ygg.fs.list` 回执里的 `kind` 取值源）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MountKind {
+    File,
+    Dir,
+    /// 不存在（只出现在 `stat` 的回执里，`as_str()` 是空串）。
+    Missing,
+}
+
+impl MountKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MountKind::File => "file",
+            MountKind::Dir => "dir",
+            MountKind::Missing => "",
+        }
+    }
+}
+
+/// 一次挂载写的回执（`ygg.fs.write` 的 `{ path, bytes, sha256 }`）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountWritten {
+    pub path: String,
+    pub bytes: usize,
+    pub sha256: String,
+}
+
+/// 一个挂载路径的探测结果（`ygg.fs.stat` 的 `{ exists, bytes, sha256, kind }`）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountStat {
+    pub exists: bool,
+    pub bytes: usize,
+    pub sha256: String,
+    pub kind: MountKind,
+}
+
+/// `ygg.fs.list` 的一行（`{ name, path, bytes, sha256, kind }`；`sha256` 恒为 `""`）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountEntry {
+    pub name: String,
+    pub path: String,
+    pub bytes: usize,
+    pub kind: MountKind,
+}
+
+/// 宿主侧文件挂载桥注入面（与 [`HostToolRunner`] 同型：沙箱只转发，零 IO）。
+///
+/// 实现方是持盘面（宿主 CLI / 测试桥），错误串必须是 `YGG-FS-*` 首段的人读
+/// 文案——沙箱原样包成 Lua 运行时错误，不重新拼码。
+pub trait MountFs {
+    /// 读一个挂载文件（`miss → None`，与 `artifacts/` 面同口径）。
+    fn read(&self, path: &str) -> Result<Option<Vec<u8>>, String>;
+    /// 写一个挂载文件（写穿磁盘；成功即已落盘）。
+    fn write(&mut self, path: &str, content: &[u8]) -> Result<MountWritten, String>;
+    /// 探测一个挂载路径。
+    fn stat(&self, path: &str) -> Result<MountStat, String>;
+    /// 列一个挂载目录（不递归、不算摘要）。
+    fn list(&self, path: &str) -> Result<Vec<MountEntry>, String>;
+}
+
+/// 沙箱侧挂载路径的前缀（与 `ygg_store::mounts::MOUNT_PATH_PREFIX` 同值；
+/// 沙箱是零依赖面，不能引用 store 的常量）。
+pub const MOUNT_PREFIX: &str = "mounts/";
+
+/// 是否落在挂载面（`mounts` 本身或 `mounts/...`）。
+fn is_mount_path(path: &str) -> bool {
+    path == "mounts" || path.starts_with(MOUNT_PREFIX)
+}
+
+/// 未挂载桥时的统一表述（码在首段：`nil` 与「文件不存在」不可分辨，静默降级
+/// 会把「宿主没挂」读成「文件没了」）。
+fn unmounted_message(what: &str, path: &str) -> String {
+    format!(
+        "{}: 宿主未挂载文件桥，`{what}(\"{path}\")` 不可用（旧面 `artifacts/` 不受影响）",
+        ygg_fs_code::UNMOUNTED
+    )
+}
+
+/// 沙箱侧用到的两个错误码（与宿主侧 `ygg_store::mounts::codes` 同值）。
+pub mod ygg_fs_code {
+    /// 宿主未挂载文件桥。
+    pub const UNMOUNTED: &str = "YGG-FS-UNMOUNTED";
+    /// 路径首段既不是 `artifacts/` 也不是 `mounts`。
+    pub const JAIL: &str = "YGG-FS-JAIL";
+}
+
 /// 宿主相位：`ygg.tool.call` 仅允许在转换期（`Phase::Transition`）调用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -314,6 +404,12 @@ pub struct HostState {
     vfs: Rc<RefCell<VfsStore>>,
     /// 宿主侧同步工具执行器（未挂载时 `None`，`ygg.tool.call` 返回 `unmounted = true`）。
     tool_runner: Rc<RefCell<Option<Box<dyn HostToolRunner>>>>,
+    /// 宿主侧文件挂载桥（未挂载时 `None`，访问 `mounts/…` 抛 `YGG-FS-UNMOUNTED`）。
+    ///
+    /// 与 `vfs` 的区别是纪律性的：VFS 是沙箱内存态（dispatch 级回滚），
+    /// 挂载桥是写穿磁盘的对外面（不回滚、每次写审计）。两者共享同一个 `ygg.fs` 表，
+    /// 按路径首段分派。
+    mount: Rc<RefCell<Option<Box<dyn MountFs>>>>,
     /// 当前执行相位（装载期 `Loading`，封口后待机 `Idle`，handler 执行期间 `Transition`）。
     phase: Phase,
     sealed: bool,
@@ -524,6 +620,7 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         // [`HostApi::vfs_handle`] 拿到同一个 `Rc` 后接入 savepoint 回滚。
         vfs: Rc::new(RefCell::new(VfsStore::default())),
         tool_runner: Rc::new(RefCell::new(None)),
+        mount: Rc::new(RefCell::new(None)),
         phase: Phase::Loading,
         sealed: false,
         // per-kernel sentinel：内核种子派生（splitmix64 四轮），Mod 面不可预测
@@ -643,12 +740,27 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         "write",
         lua.create_function(
             move |lua, (path, content): (String, String)| -> Result<Table, Error> {
+                let out = lua.create_table()?;
+                // 首段分派：`mounts` 走挂载桥（写穿磁盘 + 审计），其余走旧内存 VFS。
+                if is_mount_path(&path) {
+                    let bridge = Rc::clone(&fs_write.borrow().mount);
+                    let mut slot = bridge.borrow_mut();
+                    let Some(bridge) = slot.as_mut() else {
+                        return Err(Error::runtime(unmounted_message("fs.write", &path)));
+                    };
+                    let written = bridge
+                        .write(&path, content.as_bytes())
+                        .map_err(Error::runtime)?;
+                    out.raw_set("path", written.path)?;
+                    out.raw_set("bytes", written.bytes)?;
+                    out.raw_set("sha256", written.sha256)?;
+                    return Ok(out);
+                }
                 let vfs = Rc::clone(&fs_write.borrow().vfs);
                 let file = vfs
                     .borrow_mut()
                     .put(&path, content.as_bytes())
                     .map_err(Error::runtime)?;
-                let out = lua.create_table()?;
                 out.raw_set("path", path)?;
                 out.raw_set("bytes", file.bytes.len())?;
                 out.raw_set("sha256", file.sha256)?;
@@ -661,6 +773,18 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     fs_table.raw_set(
         "read",
         lua.create_function(move |lua, path: String| -> Result<LuaValue, Error> {
+            if is_mount_path(&path) {
+                let bridge = Rc::clone(&fs_read.borrow().mount);
+                let slot = bridge.borrow();
+                let Some(bridge) = slot.as_ref() else {
+                    return Err(Error::runtime(unmounted_message("fs.read", &path)));
+                };
+                let hit = bridge.read(&path).map_err(Error::runtime)?;
+                return Ok(match hit {
+                    Some(bytes) => LuaValue::String(lua.create_string(&bytes)?),
+                    None => LuaValue::Nil, // miss = nil（与旧面同口径）
+                });
+            }
             let vfs = Rc::clone(&fs_read.borrow().vfs);
             let hit = vfs.borrow().get(&path).map(|file| file.bytes.clone());
             Ok(match hit {
@@ -674,12 +798,25 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     fs_table.raw_set(
         "stat",
         lua.create_function(move |lua, path: String| -> Result<Table, Error> {
+            let out = lua.create_table()?;
+            if is_mount_path(&path) {
+                let bridge = Rc::clone(&fs_stat.borrow().mount);
+                let slot = bridge.borrow();
+                let Some(bridge) = slot.as_ref() else {
+                    return Err(Error::runtime(unmounted_message("fs.stat", &path)));
+                };
+                let stat = bridge.stat(&path).map_err(Error::runtime)?;
+                out.raw_set("exists", stat.exists)?;
+                out.raw_set("bytes", stat.bytes)?;
+                out.raw_set("sha256", stat.sha256)?;
+                out.raw_set("kind", stat.kind.as_str())?;
+                return Ok(out);
+            }
             let vfs = Rc::clone(&fs_stat.borrow().vfs);
             let hit = vfs
                 .borrow()
                 .get(&path)
                 .map(|file| (file.bytes.len(), file.sha256.clone()));
-            let out = lua.create_table()?;
             match hit {
                 Some((bytes, sha256)) => {
                     out.raw_set("exists", true)?;
@@ -699,10 +836,36 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     let fs_list = Rc::clone(&state);
     fs_table.raw_set(
         "list",
-        lua.create_function(move |lua, ()| -> Result<Table, Error> {
+        lua.create_function(move |lua, prefix: Option<String>| -> Result<Table, Error> {
+            let out = lua.create_table()?;
+            // 无参 = 旧面（字节级不变）；有参且以 `mounts` 起头 = 挂载面；
+            // 其余前缀 → 拒（不做「按前缀列 artifacts」的第二套遍历语义）。
+            if let Some(path) = prefix {
+                if !is_mount_path(&path) {
+                    return Err(Error::runtime(format!(
+                        "{}: ygg.fs.list 的前缀必须以 `mounts` 起头（当前是 `{path}`）",
+                        ygg_fs_code::JAIL
+                    )));
+                }
+                let bridge = Rc::clone(&fs_list.borrow().mount);
+                let slot = bridge.borrow();
+                let Some(bridge) = slot.as_ref() else {
+                    return Err(Error::runtime(unmounted_message("fs.list", &path)));
+                };
+                let rows = bridge.list(&path).map_err(Error::runtime)?;
+                for (index, row) in rows.into_iter().enumerate() {
+                    let table = lua.create_table()?;
+                    table.raw_set("name", row.name)?;
+                    table.raw_set("path", row.path)?;
+                    table.raw_set("bytes", row.bytes)?;
+                    table.raw_set("sha256", String::new())?; // 不算摘要（键在场、值留白）
+                    table.raw_set("kind", row.kind.as_str())?;
+                    out.raw_set(index + 1, table)?; // 稠密数组：1..=n
+                }
+                return Ok(out);
+            }
             let vfs = Rc::clone(&fs_list.borrow().vfs);
             let rows = vfs.borrow().snapshot(); // 已按 BTreeMap 序
-            let out = lua.create_table()?;
             for (index, (path, bytes, sha256)) in rows.into_iter().enumerate() {
                 let row = lua.create_table()?;
                 row.raw_set("path", path)?;
@@ -1155,6 +1318,16 @@ impl HostApi {
     /// 挂载或卸载宿主侧同步工具执行器。
     pub fn set_tool_runner(&self, runner: Option<Box<dyn HostToolRunner>>) {
         *self.state.borrow().tool_runner.borrow_mut() = runner;
+    }
+
+    /// 挂载或卸载宿主侧文件挂载桥（`ygg.fs.*` 的 `mounts/` 面）。
+    pub fn set_mount_fs(&self, bridge: Option<Box<dyn MountFs>>) {
+        *self.state.borrow().mount.borrow_mut() = bridge;
+    }
+
+    /// 取文件挂载桥句柄（驱动层共享）。
+    pub fn mount_fs_handle(&self) -> Rc<RefCell<Option<Box<dyn MountFs>>>> {
+        Rc::clone(&self.state.borrow().mount)
     }
 
     /// 取同步工具执行器句柄（驱动层共享）。
