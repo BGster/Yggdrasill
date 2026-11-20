@@ -164,6 +164,10 @@ fn run_with_recording() -> (Scenario, Vec<u8>, Vec<u8>, Vec<(u64, u64)>) {
 fn same_process_replay_matches_every_tick() {
     let (world, snapshot, log, trace) = run_with_recording();
     let report = world.sim.replay(&snapshot, &log).unwrap();
+    println!(
+        "replay.same_process ticks={} matched={} first_mismatch={:?} final_hash={:016x}",
+        report.ticks, report.matched, report.first_mismatch, report.final_hash
+    );
     assert_eq!(report.ticks, 150, "回放覆盖 51..=200");
     assert_eq!(report.matched, report.ticks, "逐 tick hash 必须全等");
     assert_eq!(report.first_mismatch, None);
@@ -210,6 +214,10 @@ fn from_genesis_matches_the_original_trace() {
     assert_eq!(genesis_trace.len(), 200);
 
     let report = fresh.sim.replay(&[], &log).unwrap();
+    println!(
+        "replay.from_genesis ticks={} matched={} first_mismatch={:?} final_hash={:016x}",
+        report.ticks, report.matched, report.first_mismatch, report.final_hash
+    );
     assert_eq!(report.ticks, 200);
     assert_eq!(report.matched, 200, "从创世回放必须逐 tick 一致");
     assert_eq!(report.first_mismatch, None);
@@ -229,6 +237,10 @@ fn mismatch_detected_when_dt_is_tampered() {
     decoded.records_mut()[6].dt += 1;
     let tampered = decoded.encode();
     let report = world.sim.replay(&snapshot, &tampered).unwrap();
+    println!(
+        "replay.tampered ticks={} matched={} first_mismatch={:?} expected={target}",
+        report.ticks, report.matched, report.first_mismatch
+    );
     assert_eq!(
         report.first_mismatch,
         Some(target),
