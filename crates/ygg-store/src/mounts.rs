@@ -647,6 +647,197 @@ impl MountStore {
     }
 }
 
+/// 挂载点里一项的类型（= 沙箱面 `kind` 的取值源）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MountKind {
+    File,
+    Dir,
+    /// 不存在（只出现在 `stat` 的回执里，`as_str()` 是空串）。
+    Missing,
+}
+
+impl MountKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MountKind::File => "file",
+            MountKind::Dir => "dir",
+            MountKind::Missing => "",
+        }
+    }
+}
+
+/// `stat` 的结果（对应沙箱面 `{ exists, bytes, sha256, kind }`）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountStat {
+    pub exists: bool,
+    pub bytes: usize,
+    pub sha256: String,
+    pub kind: MountKind,
+}
+
+/// `list` 的一行（对应沙箱面 `{ name, path, bytes, sha256 = "", kind }`）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountEntry {
+    pub name: String,
+    /// 沙箱可见路径（`mounts/<name>[/<rel>]/<entry>`，由**请求路径**拼，不用 canonical 路径）。
+    pub path: String,
+    pub bytes: usize,
+    pub kind: MountKind,
+}
+
+impl MountStore {
+    /// 读一个挂载文件（`miss → None`，与 `artifacts/` 面同口径：miss 不报错）。
+    pub fn read(&self, path: &str) -> Result<Option<Vec<u8>>, MountError> {
+        let located = self.locate(path, Need::File)?;
+        let meta = match fs::symlink_metadata(&located.target) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(MountError::mount(format!(
+                    "读取 {} 失败（{err}）",
+                    located.target.display()
+                )))
+            }
+            Ok(meta) => meta,
+        };
+        if meta.file_type().is_symlink() {
+            return Err(MountError::jail(format!(
+                "路径末段不得是符号链接（`{}`）",
+                located.target.display()
+            )));
+        }
+        if meta.is_dir() {
+            return Err(MountError::jail(format!(
+                "`{path}` 是目录，不能当文件读"
+            )));
+        }
+        if meta.len() > MOUNT_FILE_MAX_BYTES as u64 {
+            return Err(MountError::cap(format!(
+                "`{path}` 的 {} 字节超过单件上限 {MOUNT_FILE_MAX_BYTES} 字节",
+                meta.len()
+            )));
+        }
+        fs::read(&located.target).map(Some).map_err(|err| {
+            MountError::mount(format!("读取 {} 失败（{err}）", located.target.display()))
+        })
+    }
+
+    /// 探一个挂载路径（目录 `bytes = 0`、`sha256 = ""`；文件算真实摘要）。
+    pub fn stat(&self, path: &str) -> Result<MountStat, MountError> {
+        let located = self.locate(path, Need::Dir)?;
+        let missing = MountStat {
+            exists: false,
+            bytes: 0,
+            sha256: String::new(),
+            kind: MountKind::Missing,
+        };
+        let meta = match fs::symlink_metadata(&located.target) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(missing),
+            Err(err) => {
+                return Err(MountError::mount(format!(
+                    "探测 {} 失败（{err}）",
+                    located.target.display()
+                )))
+            }
+            Ok(meta) => meta,
+        };
+        if meta.file_type().is_symlink() {
+            return Err(MountError::jail(format!(
+                "路径末段不得是符号链接（`{}`）",
+                located.target.display()
+            )));
+        }
+        if meta.is_dir() {
+            return Ok(MountStat {
+                exists: true,
+                bytes: 0,
+                sha256: String::new(),
+                kind: MountKind::Dir,
+            });
+        }
+        if meta.len() > MOUNT_FILE_MAX_BYTES as u64 {
+            return Err(MountError::cap(format!(
+                "`{path}` 的 {} 字节超过单件上限 {MOUNT_FILE_MAX_BYTES} 字节",
+                meta.len()
+            )));
+        }
+        let bytes = fs::read(&located.target).map_err(|err| {
+            MountError::mount(format!("读取 {} 失败（{err}）", located.target.display()))
+        })?;
+        Ok(MountStat {
+            exists: true,
+            bytes: bytes.len(),
+            sha256: crate::sha256_hex(&bytes),
+            kind: MountKind::File,
+        })
+    }
+
+    /// 列一个挂载目录（不递归、不算摘要、按 `name` 字节序升序）。
+    ///
+    /// **跳过软链条目**：「末段永不是软链」的同一纪律——列表不会把链接目标
+    /// 冒充成 `file` / `dir`（非 UTF-8 名字同理跳过：沙箱路径是 Rust `String`，
+    /// 它们本来就不可寻址）。
+    pub fn list(&self, path: &str) -> Result<Vec<MountEntry>, MountError> {
+        let located = self.locate(path, Need::Dir)?;
+        let meta = fs::symlink_metadata(&located.target).map_err(|err| {
+            MountError::jail(format!(
+                "目录 {} 不存在或不可达（{err}）",
+                located.target.display()
+            ))
+        })?;
+        if meta.file_type().is_symlink() {
+            return Err(MountError::jail(format!(
+                "路径末段不得是符号链接（`{}`）",
+                located.target.display()
+            )));
+        }
+        if !meta.is_dir() {
+            return Err(MountError::jail(format!("`{path}` 不是目录")));
+        }
+        let read_dir = fs::read_dir(&located.target).map_err(|err| {
+            MountError::mount(format!("目录 {} 不可读（{err}）", located.target.display()))
+        })?;
+        let mut entries = Vec::new();
+        for item in read_dir {
+            let item = item.map_err(|err| {
+                MountError::mount(format!("目录 {} 不可读（{err}）", located.target.display()))
+            })?;
+            let Ok(name) = item.file_name().into_string() else {
+                continue; // 非 UTF-8 名字：沙箱不可寻址
+            };
+            let item_meta = match item.metadata() {
+                Ok(meta) => meta,
+                Err(_) => continue, // 列目录中途消失的条目：不是错误
+            };
+            if item_meta.file_type().is_symlink() {
+                continue; // 末段永不是软链（同一条纪律）
+            }
+            let kind = if item_meta.is_dir() {
+                MountKind::Dir
+            } else {
+                MountKind::File
+            };
+            entries.push(MountEntry {
+                path: format!("{path}/{name}"),
+                name,
+                bytes: if kind == MountKind::Dir {
+                    0
+                } else {
+                    item_meta.len() as usize
+                },
+                kind,
+            });
+        }
+        entries.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+        if entries.len() > MOUNT_LIST_MAX_ENTRIES {
+            return Err(MountError::cap(format!(
+                "目录 `{path}` 有 {} 条目，超过单次 list 上限 {MOUNT_LIST_MAX_ENTRIES} 条（无分页）",
+                entries.len()
+            )));
+        }
+        Ok(entries)
+    }
+}
+
 /// 建「目录挂载」的符号链接（bind 语义；不拷贝内容）。
 #[cfg(unix)]
 fn link_dir(dir: &Path, slot: &Path) -> Result<(), MountError> {
@@ -1058,6 +1249,106 @@ mod tests {
             Err(err) => {
                 assert_eq!(err.code(), codes::MOUNT, "{err}");
                 assert!(err.to_string().contains("不一致"), "{err}");
+            }
+        }
+    }
+
+    #[test]
+    fn read_hits_misses_and_caps() {
+        let (run, mod_dir) = attach_env("read");
+        let store = attach(&run, &mod_dir, json!([{ "name": "w" }])).expect("attach");
+        let root = run.join(MOUNTS_DIR).join("w");
+        fs::write(root.join("a.txt"), b"hello").expect("write fixture");
+        assert_eq!(
+            store.read("mounts/w/a.txt").expect("read").as_deref(),
+            Some(b"hello".as_slice())
+        );
+        // miss = None（与 artifacts/ 面同口径），不是错误。
+        assert_eq!(store.read("mounts/w/none.txt").expect("miss"), None);
+        // 目标是目录 → 狱拒（路径形状不对）。
+        match store.read("mounts/w") {
+            Ok(_) => panic!("挂载根本身不能 read"),
+            Err(err) => assert_eq!(err.code(), codes::JAIL, "{err}"),
+        }
+        match store.read("mounts/w/") {
+            Ok(_) => panic!("结尾 `/` 必须拒"),
+            Err(err) => assert_eq!(err.code(), codes::JAIL, "{err}"),
+        }
+        // 超过单件上限 → 帽拒（拒绝而不截断）。
+        let big = vec![b'x'; MOUNT_FILE_MAX_BYTES + 1];
+        fs::write(root.join("big.bin"), &big).expect("write big");
+        match store.read("mounts/w/big.bin") {
+            Ok(_) => panic!("超过 4 MiB 必须拒"),
+            Err(err) => assert_eq!(err.code(), codes::CAP, "{err}"),
+        }
+        // 恰好等于上限：收（边界是闭区间）。
+        fs::write(root.join("edge.bin"), vec![b'y'; MOUNT_FILE_MAX_BYTES]).expect("write edge");
+        assert_eq!(
+            store
+                .read("mounts/w/edge.bin")
+                .expect("边缘合法")
+                .expect("必须命中")
+                .len(),
+            MOUNT_FILE_MAX_BYTES
+        );
+    }
+
+    #[test]
+    fn stat_reports_kind_bytes_and_sha() {
+        let (run, mod_dir) = attach_env("stat");
+        let store = attach(&run, &mod_dir, json!([{ "name": "w" }])).expect("attach");
+        let root = run.join(MOUNTS_DIR).join("w");
+        fs::write(root.join("a.txt"), b"hello").expect("write fixture");
+        fs::create_dir_all(root.join("sub")).expect("mkdir");
+        let file = store.stat("mounts/w/a.txt").expect("stat file");
+        assert_eq!(file.exists, true);
+        assert_eq!(file.bytes, 5);
+        assert_eq!(file.sha256, crate::sha256_hex(b"hello"));
+        assert_eq!(file.kind, MountKind::File);
+        assert_eq!(file.kind.as_str(), "file");
+        let dir = store.stat("mounts/w/sub").expect("stat dir");
+        assert_eq!(dir.exists, true);
+        assert_eq!((dir.bytes, dir.sha256.as_str()), (0, ""));
+        assert_eq!(dir.kind, MountKind::Dir);
+        assert_eq!(dir.kind.as_str(), "dir");
+        // 挂载根本身是目录（stat 接受空 rel）。
+        assert_eq!
+            (store.stat("mounts/w").expect("stat root").kind, MountKind::Dir);
+        let miss = store.stat("mounts/w/none.txt").expect("stat miss");
+        assert!(!miss.exists);
+        assert_eq!((miss.bytes, miss.sha256.as_str(), miss.kind.as_str()), (0, "", ""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_is_sorted_and_skips_symlinks() {
+        let (run, mod_dir) = attach_env("list");
+        let store = attach(&run, &mod_dir, json!([{ "name": "w" }])).expect("attach");
+        let root = run.join(MOUNTS_DIR).join("w");
+        fs::write(root.join("b.txt"), b"22").expect("write b");
+        fs::write(root.join("a.txt"), b"1").expect("write a");
+        fs::create_dir_all(root.join("sub")).expect("mkdir sub");
+        fs::create_dir_all(mod_dir.join("outside")).expect("mkdir outside");
+        std::os::unix::fs::symlink(
+            mod_dir.join("outside"),
+            root.join("escape"),
+        )
+        .expect("symlink");
+        let rows = store.list("mounts/w").expect("list");
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, vec!["a.txt", "b.txt", "sub"], "按名字字节序升序，不递归，跳过软链");
+        assert_eq!(rows[0].path, "mounts/w/a.txt");
+        assert_eq!((rows[2].bytes, rows[2].kind), (0, MountKind::Dir));
+        assert_eq!(rows[1].kind, MountKind::File);
+        assert_eq!(rows[1].bytes, 2);
+        // 子目录：路径按请求路径拼
+        let sub = store.list("mounts/w/sub").expect("list sub");
+        assert!(sub.is_empty());
+        // 列一个不存在 / 是文件的路径 → 狱拒
+        for bad in ["mounts/w/nope", "mounts/w/a.txt"] {
+            match store.list(bad) {
+                Ok(_) => panic!("`{bad}` 必须拒"),
+                Err(err) => assert_eq!(err.code(), codes::JAIL, "{err}"),
             }
         }
     }

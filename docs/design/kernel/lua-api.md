@@ -74,7 +74,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 | `write(path, content)` | 同步写穿磁盘，返回 `{ path, bytes, sha256 }`，并追加一行审计（见下）。`mode = ro` 的挂载点拒（`YGG-FS-MOUNT`） |
 | `read(path)` | 命中 → string；miss → `nil`（与 `artifacts/` 面同口径：miss 不 throw） |
 | `stat(path)` | `{ exists, bytes, sha256, kind }`；`kind` 取 `file` / `dir`；目录 `bytes = 0`、`sha256 = ""`；miss 时 `exists = false`、`kind = ""` |
-| `list(path)` | `{ name, path, bytes, sha256, kind }` 的**稠密数组**（1..=n），按 `name` 字节序升序，**不递归**。**不算摘要**——对每行算 sha256 是 O(总字节)，会把「看一眼目录」变成「读一遍全盘」，要摘要走 `fs.stat`，故 `sha256` 恒为 `""`（键在场、值留白） |
+| `list(path)` | `{ name, path, bytes, sha256, kind }` 的**稠密数组**（1..=n），按 `name` 字节序升序，**不递归**。**不算摘要**——对每行算 sha256 是 O(总字节)，会把「看一眼目录」变成「读一遍全盘」，要摘要走 `fs.stat`，故 `sha256` 恒为 `""`（键在场、值留白）。**跳过软链条目**（「末段永不是软链」的同一条纪律：列表不得把链接目标冒充成 file/dir）；非 UTF-8 名同理跳过——沙箱路径是 Rust `String`，它们本来就不可寻址 |
 
 `fs.list()` 无参时仍是 `artifacts/` 的旧面（字节级不变）；有参且以 `mounts` 起头走本面；有参而**不**以 `mounts` 起头 → `YGG-FS-JAIL`（不提供「按前缀列 artifacts」的第二套遍历语义）。
 
@@ -93,7 +93,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 | 码 | 语义 |
 | --- | --- |
-| `YGG-FS-JAIL` | 路径狱拒绍（首段非两根本 / 段非法 / 越界 / 父缺失 / 末段软链） |
+| `YGG-FS-JAIL` | 路径狱拒绍（首段非两根本 / 段非法 / 越界 / 父缺失 / 末段软链 / 目标是目录——`read` / `write` 不能把目录当文件） |
 | `YGG-FS-CAP` | 尺寸帽拒绍（单件 / 写预算 / list 条目数） |
 | `YGG-FS-MOUNT` | 声明非法（attach 期）或挂载点状态冲突；写只读挂载 |
 | `YGG-FS-UNMOUNTED` | 宿主未挂载文件桥 |
