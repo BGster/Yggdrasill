@@ -336,7 +336,7 @@ local function normalize_repo_path(p)
   return table.concat(parts, "/")
 end
 
-test("docs/design 树索引：四模块 + 23 份文件 + README 双向相等 + id 双射", function()
+test("docs/design 树索引：四模块 + 24 份文件 + README 双向相等 + id 双射", function()
   local dir = DESIGN_DIR
 
   -- ④ 一级子目录恰好四模块；平铺只允许树入口 README.md。
@@ -361,7 +361,7 @@ test("docs/design 树索引：四模块 + 23 份文件 + README 双向相等 + i
     end
   end
   table.sort(actual)
-  assert_eq(#actual, 23, "契约面应为 23 份文件：" .. table.concat(actual, ","))
+  assert_eq(#actual, 24, "契约面应为 24 份文件：" .. table.concat(actual, ","))
 
   -- ① 索引里的链接集合必须与实文件集合双向相等。
   local readme = read_file(dir .. "/README.md")
