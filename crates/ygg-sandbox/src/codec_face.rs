@@ -256,7 +256,177 @@ pub fn string_text(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
-// ── 面安装（后续块补 decode / 遍历器；本块只留骨架）────────────────────────
+// ── 遍历器与 encode ─────────────────────────────────────────────────────────
+
+/// 嵌套深度上限（与 `init.lua` 的 `MAX_DEPTH` 逐值同源：改一处必改两处）。
+const MAX_DEPTH: usize = 64;
+
+/// 确定性 JSON 编码器：一次遍历产出字节，不回头、不分配中间字符串。
+struct Encoder {
+    out: Vec<u8>,
+    /// 正在编码的表的**身份**栈（循环引用检测）。用指针身份而不是结构等价：
+    /// 同一个表出现两次是环，两个内容相同的表不是（与 Lua 侧 `stack[value]` 同义）。
+    stack: Vec<*const std::ffi::c_void>,
+}
+
+impl Encoder {
+    fn new(capacity: usize) -> Self {
+        Encoder {
+            out: Vec::with_capacity(capacity),
+            stack: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
+        self.out.extend_from_slice(bytes);
+    }
+
+    /// 一个 Lua 值 → 字节。值域拒绝一律 [`CodecFaceError::Unsupported`]
+    /// （调用方随后回退 Lua 路径，由那里产出规范文案）。
+    fn value(&mut self, value: &mlua::Value, depth: usize) -> Result<(), CodecFaceError> {
+        match value {
+            mlua::Value::Nil => Err(unsupported("nil 不是可编码的值（对象键用「不存在」表达）")),
+            mlua::Value::Boolean(true) => {
+                self.push(b"true");
+                Ok(())
+            }
+            mlua::Value::Boolean(false) => {
+                self.push(b"false");
+                Ok(())
+            }
+            mlua::Value::Integer(integer) => {
+                self.push(integer_text(*integer).as_bytes());
+                Ok(())
+            }
+            mlua::Value::Number(number) => {
+                self.push(number_text(*number)?.as_bytes());
+                Ok(())
+            }
+            mlua::Value::String(text) => {
+                let bytes = text.as_bytes();
+                self.push(&string_text(&bytes));
+                Ok(())
+            }
+            mlua::Value::Table(table) => self.table(table, depth),
+            other => Err(unsupported(format!(
+                "类型 {} 不可编码",
+                other.type_name()
+            ))),
+        }
+    }
+
+    /// 一张表 → 字节：先查环/深度/元方法，再分类（array / object），再发射。
+    fn table(&mut self, table: &mlua::Table, depth: usize) -> Result<(), CodecFaceError> {
+        let pointer = table.to_pointer() as *const std::ffi::c_void;
+        if self.stack.contains(&pointer) {
+            return Err(unsupported("表循环引用"));
+        }
+        if depth > MAX_DEPTH {
+            return Err(unsupported(format!("嵌套超过 {MAX_DEPTH} 层")));
+        }
+        // 元方法整值回退（契约 §3.1.4）：`pairs` 会走 `__pairs`、`t[k]` 会穿
+        // `__index`，复刻它们意味着编码过程中执行 Lua 代码——纯函数立刻变成
+        // 可重入、可报错、可侧效。所以只要任一层带元方法，整次调用交给 Lua 路径。
+        if table.metatable().is_some() {
+            return Err(unsupported("带元方法的表交给 Lua 路径（元表不进字节）"));
+        }
+
+        self.stack.push(pointer);
+        let result = self.table_body(table, depth);
+        self.stack.pop();
+        result
+    }
+
+    fn table_body(&mut self, table: &mlua::Table, depth: usize) -> Result<(), CodecFaceError> {
+        let mut array_count = 0usize;
+        let mut object_count = 0usize;
+        let mut max_index: i64 = 0;
+        let mut members: Vec<(Vec<u8>, mlua::Value)> = Vec::new();
+
+        for pair in table.clone().pairs::<mlua::Value, mlua::Value>() {
+            let (key, value) = pair.map_err(|error| internal(format!("遍历表失败：{error}")))?;
+            match key {
+                mlua::Value::Integer(index) => {
+                    if index < 1 {
+                        return Err(unsupported(format!(
+                            "表的键必须是正整数或字符串（遇到下标 {index}）"
+                        )));
+                    }
+                    array_count += 1;
+                    if index > max_index {
+                        max_index = index;
+                    }
+                }
+                mlua::Value::Number(_) => {
+                    return Err(unsupported("表的键必须是正整数或字符串（遇到非整数 number 键）"));
+                }
+                mlua::Value::String(text) => {
+                    object_count += 1;
+                    let bytes = text.as_bytes().to_vec();
+                    members.push((bytes, value));
+                }
+                other => {
+                    return Err(unsupported(format!(
+                        "表的键必须是正整数或字符串（遇到 {} 键）",
+                        other.type_name()
+                    )));
+                }
+            }
+        }
+
+        if array_count > 0 && object_count > 0 {
+            return Err(unsupported("同一张表不得混用数组键与字符串键"));
+        }
+        if array_count > 0 && max_index as usize != array_count {
+            return Err(unsupported(format!(
+                "数组有洞（最大下标 {max_index}，条目数 {array_count}）"
+            )));
+        }
+
+        if array_count > 0 {
+            self.push(b"[");
+            for index in 1..=array_count as i64 {
+                if index > 1 {
+                    self.push(b",");
+                }
+                let item: mlua::Value = table
+                    .raw_get(index)
+                    .map_err(|error| internal(format!("数组下标 {index} 读取失败：{error}")))?;
+                self.value(&item, depth + 1)?;
+            }
+            self.push(b"]");
+        } else {
+            // 键序 = UTF-8 字节序升序（契约 I1）。`sort_unstable` 与 Lua 的插入
+            // 排序在同一把比较器下给出同一个全序：键是 Lua 字符串，字节相同即同一
+            // 个键，因此不存在「相等但不同」的键需要稳定性。
+            members.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+            self.push(b"{");
+            for (position, (key, value)) in members.iter().enumerate() {
+                if position > 0 {
+                    self.push(b",");
+                }
+                self.push(&string_text(key));
+                self.push(b":");
+                self.value(value, depth + 1)?;
+            }
+            self.push(b"}");
+        }
+        Ok(())
+    }
+}
+
+/// 一个 Lua 值 → 确定性 JSON 字节（与 `pkg.codec.encode` 逐字节相等）。
+///
+/// 这是面的可测入口：测试直接调它，能区分「原生拒绝（合法值被误判）」与
+/// 「原生成功」，而不是只看包装层的输出字节（包装层遇 `Unsupported` 会回退，
+/// 误拒在字节相等下看不出来，只丢性能）。
+pub fn encode(value: &mlua::Value) -> Result<Vec<u8>, CodecFaceError> {
+    let mut encoder = Encoder::new(1024);
+    encoder.value(value, 0)?;
+    Ok(encoder.out)
+}
+
+// ── 面安装（decode 在 C5 加入）──────────────────────────────────────────────
 
 /// 装 `ygg.codec.*`（2 键闭集）。
 ///
@@ -266,6 +436,15 @@ pub fn string_text(bytes: &[u8]) -> Vec<u8> {
 pub fn install(lua: &Lua) -> Result<(), mlua::Error> {
     let ygg: mlua::Table = lua.globals().raw_get("ygg")?;
     let table = lua.create_table()?;
+    let encode_function = lua.create_function(
+        |lua: &Lua, value: mlua::Value| -> Result<mlua::LuaString, mlua::Error> {
+            let bytes = encode(&value).map_err(|error| mlua::Error::runtime(error.to_message()))?;
+            // 字节过面：`create_string(&[u8])` 而不是 `&str`——合法输出可以含
+            // 非 UTF-8 字节（契约 §3.1.4「字节过面不要求 UTF-8」）。
+            lua.create_string(&bytes)
+        },
+    )?;
+    table.raw_set("encode", encode_function)?;
     ygg.raw_set("codec", table)?;
     Ok(())
 }

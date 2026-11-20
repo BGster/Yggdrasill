@@ -1305,6 +1305,9 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     ygg.raw_set("entity", entity_table)?;
 
     install_sim(lua, &state)?;
+    // `ygg.codec.*`（Tier 2 pkg.codec 的原生加速面；契约 lua-api.md §3.1.4）。
+    // 无状态、无实例，所以没有 `set_*` 注入面，也不需要 CLI 激活。
+    crate::codec_face::install(lua)?;
 
     Ok(HostApi {
         lua: lua.clone(),
