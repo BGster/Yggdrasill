@@ -143,8 +143,8 @@ function H.on(h, type_name, spec)
     S.fail(S.E.TYPE, "spec.kind 只能是 builtin|agent，得到 " .. tostring(kind))
   end
   local name = spec.name
-  if not S.key_name_ok(name) then
-    S.fail(S.E.TYPE, "spec.name 不在合法字符集内：" .. tostring(name))
+  if not S.handler_name_ok(name) then
+    S.fail(S.E.TYPE, "spec.name 必须匹配 ^[A-Za-z_][A-Za-z0-9_:-]*$（不含点）：" .. tostring(name))
   end
   local opts = check_opts(type_name, name, spec.opts)
 

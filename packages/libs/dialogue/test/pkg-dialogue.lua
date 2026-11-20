@@ -705,3 +705,180 @@ run("pkg.dialogue.text-key-passthrough", function()
   eq(hits, 0, "包源码里的 ygg.data( 命中数： " .. table.concat(where, ","))
   eq(world.data_calls(), 0, "运行时也没调 ygg.data")
 end)
+
+-- ── 用例 17-22：quest 桥、纯导出、重载、KV 形状、导出点名面 ────────────────────
+
+run("pkg.dialogue.quest-bridge", function()
+  local world = new_world()
+  package.loaded["pkg.quest"] = nil
+  local quest = require("pkg.quest")
+  package.loaded["pkg.quest"] = nil
+
+  local dialogue = fresh(world, { host = world.host, quest = quest })
+
+  -- 桥只读 `quest.EVENTS`（五个名字），一个 `ygg.on` 都不多不少。
+  eq(#world.registrations, 5, "ygg.on 注册数")
+  local registered = {}
+  for i = 1, #world.registrations do
+    registered[i] = world.registrations[i].name
+  end
+  table.sort(registered)
+  names_equal(registered, {
+    "quest.abandoned",
+    "quest.advanced",
+    "quest.completed",
+    "quest.jumped",
+    "quest.opened",
+  }, "注册的事件名（= quest.EVENTS）")
+
+  -- 触发桥：host 派发 `quest.advanced` → 对应对白 handler 被调，链深从 1 起算。
+  local seen = nil
+  dialogue.on("quest.advanced", builtin("npc", { memory = "none" }, function(frame)
+    seen = frame
+    return true
+  end))
+  local receipt = nil
+  for i = 1, #world.registrations do
+    if world.registrations[i].name == "quest.advanced" then
+      receipt = world.registrations[i].fn("1|2")
+      break
+    end
+  end
+  is_true(receipt ~= nil, "桥返回回执")
+  eq(receipt.depth, 1, "跨事件不共享深度：桥发起的是新链")
+  eq(receipt.by, "npc", "对白 handler 认领")
+  eq(seen.type, "quest.advanced", "帧 type = 事件名")
+  eq(seen.source, 0, "source = 0（系统）")
+  eq(seen.target, 0, "target = 0（系统）")
+  eq(seen.payload.text_key, "quest.advanced", "缺省文本键 = 事件名（仍是键，不造文案）")
+  eq(seen.payload.quest_payload, "1|2", "quest 载荷原样透传")
+end)
+
+run("pkg.dialogue.bridge-absent", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  eq(#world.registrations, 0, "不传 deps.quest 时不装桥（不猜名字）")
+
+  -- 形状不合法的 deps.quest 是硬错，不是「静默不装」。
+  expect_error("YGG-PKG-DIALOGUE-INSTALL", function()
+    dialogue.install({ host = world.host, quest = { EVENTS = "quest.opened" } })
+  end, "EVENTS 不是表")
+  eq(#world.registrations, 0, "被拒的 install 不注册")
+end)
+
+run("pkg.dialogue.pure-export", function()
+  local world = new_world()
+
+  -- I8：require + install 不写任何 KV（连空名表都不写）。
+  fresh(world)
+  eq(world.writes_now(), 0, "require + install 的 KV 写次数")
+  eq(#sorted_keys(world.kv), 0, "require + install 后的 KV 键集")
+
+  -- 只有 `on` 才写 handlers（install 不预写）。
+  local dialogue = fresh(world)
+  eq(#sorted_keys(world.kv), 0, "二次 install 仍是零写")
+  dialogue.on("greet", builtin("npc", { memory = "none" }, function()
+    return true
+  end))
+  is_true(world.writes_now() > 0, "on 才写 KV")
+end)
+
+run("pkg.dialogue.reload-unbound", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  local calls = 0
+  dialogue.on("greet", builtin("npc", { memory = "none" }, function()
+    calls = calls + 1
+    return true
+  end))
+  eq(dialogue.emit("greet", 1, 2).handled, true, "重载前正常")
+
+  -- 模拟进程重载：清模块缓存重新 require（函数丢，KV 不动）。
+  for i = 1, #MODULES do
+    package.loaded[MODULES[i]] = nil
+  end
+  local reloaded = require("pkg.dialogue")
+  reloaded.install({ host = world.host })
+
+  local receipt = reloaded.emit("greet", 1, 2)
+  eq(receipt.handled, false, "重载后有 spec 无函数 = 未绑定")
+  eq(calls, 1, "旧函数不再被调（REGISTRY 已丢）")
+  eq(#events_named(world, "dialogue.failed"), 1, "dialogue.failed 恰好一次")
+  eq(events_named(world, "dialogue.failed")[1].payload, "greet|unbound", "reason = unbound")
+end)
+
+run("pkg.dialogue.kv-shape", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  world.tool_replies["npc.agent"] = { ok = true, unmounted = false, code = 0, data = {} }
+  dialogue.on("greet", agent("npc-agent", { tool = "npc.agent", credential_key = "NPC_TOKEN" }))
+  dialogue.on("greet", builtin("npc", { memory = "pair", window = 4 }, function()
+    return true
+  end))
+  dialogue.emit("greet", 3, 4, { text_key = "beats.greet" })
+  dialogue.say("9:10", "beats.push")
+
+  local allowed = {
+    "^dlg%.seq$",
+    "^dlg%.types$",
+    "^dlg%.keys$",
+    "^dlg%.h%.[a-z][a-z0-9_-]*%.names$",
+    "^dlg%.h%.[a-z][a-z0-9_-]*%.n%.[A-Za-z_][A-Za-z0-9_.:-]*%.kind$",
+    "^dlg%.h%.[a-z][a-z0-9_-]*%.n%.[A-Za-z_][A-Za-z0-9_.:-]*%.opts$",
+    "^dlg%.h%.[a-z][a-z0-9_-]*%.n%.[A-Za-z_][A-Za-z0-9_.:-]*%.opt%.[A-Za-z_][A-Za-z0-9_.:-]*$",
+    "^dlg%.thread%.[^%%s]+%.turns$",
+    "^dlg%.thread%.[^%%s]+%.t%.%d+%.who$",
+    "^dlg%.thread%.[^%%s]+%.t%.%d+%.text$",
+    "^dlg%.thread%.[^%%s]+%.t%.%d+%.seq$",
+  }
+  for key in pairs(world.kv) do
+    local ok = false
+    for i = 1, #allowed do
+      if key:find(allowed[i]) then
+        ok = true
+      end
+    end
+    is_true(ok, "越界键：" .. key)
+    eq(key:sub(1, 4), "dlg.", "键前缀：" .. key)
+    local kind = type(world.kv[key])
+    is_true(kind == "number" or kind == "string" or kind == "boolean", "非标量值：" .. key)
+  end
+
+  -- 名表口径：handler 名表保注册序（不排序），线程名表升序。
+  eq(world.kv["dlg.h.greet.names"], "npc-agent\nnpc", "handler 名表 = 注册序")
+  eq(world.kv["dlg.keys"], "3:4\n9:10", "线程名表升序")
+  eq(world.kv["dlg.types"], "greet", "type 名表")
+end)
+
+run("pkg.dialogue.keys-export", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  dialogue.on("greet", builtin("npc", { memory = "pair" }, function()
+    return true
+  end))
+  dialogue.emit("greet", 1, 2, { text_key = "beats.greet" })
+  dialogue.say("5:6", "beats.push")
+
+  local actual = {}
+  for key in pairs(world.kv) do
+    actual[#actual + 1] = key
+  end
+  table.sort(actual)
+  names_equal(dialogue.keys(), actual, "keys() 与实际键集")
+  names_equal(dialogue.keys(), dialogue.keys(), "keys() 稳定")
+
+  -- codec 点名面（D5：`ns.keys` 是 r1 落地的等价枚举面，本包只消费）。
+  package.loaded["pkg.codec"] = nil
+  package.loaded["pkg.entity"] = nil
+  local codec = require("pkg.codec")
+  codec.install({ host = world.host })
+  local bundle = codec.export({ entities = false, keys = dialogue.keys(), mod = "pkg-selftest" })
+  local exported = {}
+  for key in pairs(bundle.kv) do
+    exported[#exported + 1] = key
+  end
+  table.sort(exported)
+  names_equal(exported, actual, "bundle.kv 的键集 = keys()")
+  package.loaded["pkg.codec"] = nil
+  package.loaded["pkg.entity"] = nil
+end)

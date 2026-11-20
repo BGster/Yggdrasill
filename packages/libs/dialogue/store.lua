@@ -184,6 +184,12 @@ function S.thread_key_ok(thread)
   return thread:find("\n", 1, true) == nil
 end
 
+--- dialogue 的 `type` 名：`^[a-z][a-z0-9_.-]*$`。
+---
+--- **允许 `.`** 是为了 quest 桥：派生事件名（`quest.advanced` 等）本身带点，桥把
+--- 「事件名」直接当 dialogue 的 type 用，不做字符串改写（改写会让「注册在哪个
+--- 事件上」要靠猜）。为此 handler 名**禁止** `.`（见 `handler_name_ok`），
+--- 于是 `dlg.h.<type>.n.<name>.<field>` 的段数无歧义。
 function S.type_name_ok(name)
   if type(name) ~= "string" or #name == 0 then
     return false
@@ -194,7 +200,29 @@ function S.type_name_ok(name)
   end
   for i = 2, #name do
     local b = name:byte(i)
-    local ok = (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b == 95 or b == 45
+    local ok = (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b == 95 or b == 45 or b == 46
+    if not ok then
+      return false
+    end
+  end
+  return true
+end
+
+--- handler 名：首字符字母或下划线，其余 `[A-Za-z0-9_:-]`——**不含 `.`**。
+---
+--- 不含点的理由写在 `type_name_ok`：type 可以带点，若 handler 名也带点，
+--- `dlg.h.a.n.n.x.kind` 就能由两种 (type, name) 拼出，两套注册会写到同一批键上。
+function S.handler_name_ok(name)
+  if type(name) ~= "string" or #name == 0 then
+    return false
+  end
+  local first = name:byte(1)
+  if not (is_alpha(first) or first == 95) then
+    return false
+  end
+  for i = 2, #name do
+    local b = name:byte(i)
+    local ok = is_alpha(b) or (b >= 48 and b <= 57) or b == 95 or b == 58 or b == 45
     if not ok then
       return false
     end

@@ -38,9 +38,9 @@
           "sha256": "949dcc3ff2b6133b2596457c31686fafdcce725acf58808119f6ec40d4ad1c50"
         },
         {
-          "byteLength": 7548,
+          "byteLength": 7582,
           "path": "dialogue/handlers.lua",
-          "sha256": "1cad3d00c5469e3f878d18224a94ddde8f55ec04bc2a4504e6b1d2fde21c2253"
+          "sha256": "3dc56195c8da0960b7d66ca7cbf46acbcbb54cdbffca22024914f245320c95c7"
         },
         {
           "byteLength": 6785,
@@ -58,9 +58,9 @@
           "sha256": "1d4ed8fec98962fd9c3201c8137a49dc646d64de42718b596f79ca63efaddb03"
         },
         {
-          "byteLength": 8095,
+          "byteLength": 9239,
           "path": "dialogue/store.lua",
-          "sha256": "252d73f2ea675b5f42bbfa8df4e0e42e80e7e099b696b793749ad91daf611430"
+          "sha256": "99ae62f4e00f1d49607d313f19d53f93324a5104c578532e9c07ebfb5c574aa4"
         }
       ],
       "id": "dialogue"
