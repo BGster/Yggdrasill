@@ -1,9 +1,30 @@
 {
     "schemaVersion": 1,
-    "entries": [],
+    "entries": [
+        {
+            "id": "pkg:selftest/probe",
+            "kind": "probe",
+            "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
+            "path": "data/probe.json"
+        }
+    ],
     "schemaFiles": [],
     "packages": [
-        { "id": "entity", "version": "0.1.0" },
-        { "id": "codec", "version": "0.1.0" }
+        {
+            "id": "entity",
+            "version": "0.1.0"
+        },
+        {
+            "id": "codec",
+            "version": "0.1.0"
+        },
+        {
+            "id": "quest",
+            "version": "0.1.0"
+        },
+        {
+            "id": "dialogue",
+            "version": "0.1.0"
+        }
     ]
 }
