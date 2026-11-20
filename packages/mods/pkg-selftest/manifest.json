@@ -23,9 +23,9 @@
           "sha256": "d868b55809df9fb95aefa1568f70d548ce03da216112fd70b9aa623b7ab3be49"
         },
         {
-          "byteLength": 5597,
+          "byteLength": 5705,
           "path": "assetgen/encode.lua",
-          "sha256": "d72a859d1821a77715f5fd2a16d491792d5f333337ea2681d82e209c28051e1e"
+          "sha256": "17663008f111628e5ccc1b40ad6d05d0ffabbff7db4c12e199fd8a6a8fd7c858"
         },
         {
           "byteLength": 10794,
