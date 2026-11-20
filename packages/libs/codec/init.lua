@@ -153,13 +153,20 @@ end
 ---
 --- 写法约束：沙箱没有 `table.sort`（也没有 `string` 表），所以归并手写；
 --- 原地语义必须保住——调用方 `sort_names(keys)` 不接返回值。
+---
+--- **缓冲复用**（不是随手写）：`scratch` 若每次调用新建，一次 `codec.encode` 会为
+--- 每张对象表留一份未回收的垃圾——1 000 张 6 键表 ⇒ Lua 堆涨 **+270 KiB**（实测
+--- 998 KiB vs 728 KiB），正好把 `pkg.role-skill` 的「1k actor 载荷 ≤ 1 MiB」结构
+--- 断言顶红。复用是安全的：一次排序跑完才返回，排序期间不会发生第二次排序
+---（递归发生在排序之后），所以不存在重入。
+local SORT_SCRATCH = {}
+
 local function sort_names(items)
   local count = #items
   if count < 2 then
     return items
   end
-  local scratch = {}
-  local source, target = items, scratch
+  local source, target = items, SORT_SCRATCH
   local width = 1
   while width < count do
     local left = 1
