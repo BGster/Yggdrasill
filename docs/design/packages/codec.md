@@ -62,7 +62,7 @@ bundle（导出物，也是导入物的唯一形状）：
 
 `import` 返回体的四个非计数项：`renamed`（旧 id → 新 id）、`refs`（指向被重命名 id 的 ref 属性数）、`verified`（本次是否真的校过 checksum）、`kv`（bundle 的 `kv` 段**原样带回**——单写者纪律归 mod，包不写回，见 D9）。
 
-**sha256 来源（D11 已定稿）**：包内自算（`pkg.codec.sha256`，纯 Lua FIPS 180-4），**不是**宿主值。P0 写的 FNV-1a 降级路径**退役**：纯 Lua sha256 已就位（已知答案向量见 §7），且 P1 挂载桥已落地。宿主 `ygg.fs.write` 回的 `sha256` 由「来源」降为「互校」——两者不一致即 `YGG-PKG-CODEC-CHECKSUM`，不选一个信。为何不能拿宿主值当来源：它只能**落盘之后**得到，而 `checksum(bundle)` 必须在落盘前就能算（导出侧要把校验和写进 bundle 本体），且 `read` 要在纯读路径上复核「盘上没被改过」。
+**sha256 来源（D11 已定稿）**：包内自算（`pkg.codec.sha256`，纯 Lua FIPS 180-4），**不是**宿主值。P0 写的 FNV-1a 降级路径**退役**：纯 Lua sha256 已就位（已知答案向量见 §7），且 P1 挂载桥已落地。宿主 `ygg.fs.write` 回的 `sha256` 是**它自己对写出文本的记录**（`sha256_hex(content)`，挂在 VFS 条目上，`ygg.fs.stat` 可查），**不做互校**（S16）——`checksum(bundle)` 是对 `checksum=""` 的规范化编码求的，写出文本含 `checksum=<digest>`，两份字节永不相同；写侧只校**回执字节数**（截断/半写 → `YGG-PKG-CODEC-CHECKSUM`），内容面由 `read` 的强制 checksum（I4）在越信任边界时复核。**为何不再重哈希写出文本做互校**：纯 Lua sha256 ≈0.8 MB/s（下沉是 S19），每写一遍多 90 ms / 66 KiB（宿主上限 256 KiB ≈ 285 ms），等于把存档耗时翻倍。为何不能拿宿主值当来源：它只能**落盘之后**得到，而 `checksum(bundle)` 必须在落盘前就能算（导出侧要把校验和写进 bundle 本体），且 `read` 要在纯读路径上复核「盘上没被改过」。
 
 ### 4.1 下沉边界（原生加速面与回退）
 
@@ -73,7 +73,7 @@ bundle（导出物，也是导入物的唯一形状）：
 | `encode` / `decode` 的字节产出 | **下沉**（面在场时由原生计算） | 逐节点成本 `964 ns/节点`（10k 实体实测），是解释器常数项；原生侧同遍历 `22 ns/节点` |
 | `sha256` | 不动 | 另一条热路径（纯 Lua FIPS 180-4），已排期 S19 |
 | `export` | 不动 | 成本在逐实体 `pkg.entity` 面调用，属 Tier 2 布局，已排期 S20 |
-| `checksum` / `write` / `read` / `import` / `roundtrip` | 不动（内部那次 `encode` 顺带变快） | 与 S16 的 `write` 自校缺陷同一改动面；本包只承诺 `encode`/`decode` 两行数字 |
+| `checksum` / `write` / `read` / `import` / `roundtrip` | 不动（内部那次 `encode` 顺带变快） | S16 已修：`write` 删 sha256 互校（两侧是不同字节，永假）→ 校回执字节数；本包只承诺 `encode`/`decode` 两行数字 |
 
 **委托与回退（包侧唯一改动，`init.lua` 的 `M.encode` / `M.decode` 两处）**：面在场 ⇒ `pcall` 调原生，成功即返回；面缺席 ⇒ 直接走 Lua 路径。两条都由测试钉住：
 - **缺席**是既有契约（裸沙箱只有 `ygg = { engine_version }`，`crates/ygg-sandbox/tests/packages_sandbox.rs` 用例 ② 断言该路径的字节）；
