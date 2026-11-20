@@ -362,3 +362,136 @@ run("pkg.dialogue.fallback-chain", function()
   eq(builtin_calls, 1, "builtin 跳数")
   eq(#events_named(world, "dialogue.failed"), 0, "回退成功不得发 failed")
 end)
+
+-- ── 用例 5-10：失败面、深度帽、记忆窗口 ─────────────────────────────────────
+
+run("pkg.dialogue.failed-event", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  world.tool_replies["npc.agent"] = { ok = false, unmounted = false, code = 1, error = "boom-42" }
+  dialogue.on("greet", agent("npc-agent", { tool = "npc.agent" }))
+
+  local receipt = dialogue.emit("greet", 3, 4, { text_key = "beats.greet" })
+  eq(receipt.handled, false, "无人认领")
+  is_nil(receipt.by, "by 为空")
+  eq(#events_named(world, "dialogue.failed"), 1, "dialogue.failed 恰好一次")
+  local payload = events_named(world, "dialogue.failed")[1].payload
+  eq(type(payload), "string", "载荷是字符串（标量纪律）")
+  eq(payload, "greet|boom-42", "载荷 = <type>|<原错误>")
+  -- I2：失败不静默吞——错误文本原样挂在载荷里。
+  is_true(payload:find("boom-42", 1, true) ~= nil, "载荷带原错误")
+end)
+
+run("pkg.dialogue.agent-unmounted", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  world.tool_replies["npc.agent"] = { ok = false, unmounted = true, code = -1, error = "no host tool runner mounted" }
+  local builtin_calls = 0
+  dialogue.on("greet", agent("npc-agent", { tool = "npc.agent" }))
+  dialogue.on("greet", builtin("npc-fallback", {}, function()
+    builtin_calls = builtin_calls + 1
+    return true
+  end))
+
+  local receipt = dialogue.emit("greet", 1, 2)
+  eq(receipt.by, "npc-fallback", "unmounted 也走回退链（不静默吞）")
+  eq(builtin_calls, 1, "回退命中一次")
+
+  -- 无 builtin 可退：failed 的 reason 是 unmounted（可断言，不是「没响应」）。
+  dialogue.off("greet", "npc-fallback")
+  dialogue.emit("greet", 1, 2)
+  eq(events_named(world, "dialogue.failed")[1].payload, "greet|unmounted", "reason = unmounted")
+end)
+
+run("pkg.dialogue.depth-capped", function()
+  local world = new_world()
+  local dialogue = fresh(world, { host = world.host, config = { max_depth = 3 } })
+  local calls = 0
+  dialogue.on("loop", builtin("recur", { memory = "none" }, function(frame)
+    calls = calls + 1
+    -- 同步嵌套：handler 内再 emit 才是深度 +1（ygg.emit 入队不算）。
+    dialogue.emit("loop", frame.source, frame.target)
+    return true
+  end))
+
+  local receipt = dialogue.emit("loop", 1, 2)
+  eq(calls, 3, "总调用数 == max_depth")
+  eq(#events_named(world, "dialogue.depth_capped"), 1, "depth_capped 恰好一次")
+  eq(events_named(world, "dialogue.depth_capped")[1].payload, "loop|4", "载荷 = <type>|<超限深度>")
+  eq(receipt.handled, true, "最外层仍算已处理")
+  eq(receipt.depth, 1, "最外层深度 = 1")
+
+  -- 链结束后深度复位：下一次 emit 仍从 1 起算（异常/截断都不得永久压帽）。
+  local after = dialogue.emit("loop", 1, 2)
+  eq(after.depth, 1, "截断后深度复位")
+  eq(#events_named(world, "dialogue.depth_capped"), 2, "第二次链同样在 max_depth+1 截断")
+end)
+
+run("pkg.dialogue.thread-window", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  dialogue.on("greet", builtin("npc", {}, function()
+    return true
+  end))
+
+  for i = 1, 20 do
+    dialogue.emit("greet", 5, 6, { text_key = "beats.n" .. i })
+  end
+  local turns = dialogue.history("5:6")
+  eq(#turns, 12, "窗口缺省 12")
+  eq(turns[1].text, "beats.n9", "保留最新 12 轮（丢最旧）")
+  eq(turns[12].text, "beats.n20", "最后一轮是第 20 次")
+  for i = 2, #turns do
+    is_true(turns[i].seq > turns[i - 1].seq, "n 严格递增")
+  end
+  eq(turns[12].seq, 20, "轮次号 = 全局 seq（不因截断回退）")
+  eq(world.kv["dlg.seq"], 20, "dlg.seq 是唯一写口")
+  eq(world.kv["dlg.thread.5:6.turns"], 12, "轮数落 KV")
+
+  -- `opts.window` 覆盖缺省：3 轮窗口时只留 3 条。
+  local other = fresh(world)
+  other.on("greet", builtin("tight", { window = 3 }, function()
+    return true
+  end))
+  for i = 1, 5 do
+    other.emit("greet", 1, 2, { text_key = "x" .. i })
+  end
+  eq(#other.history("1:2"), 3, "opts.window 覆盖缺省")
+end)
+
+run("pkg.dialogue.memory-none", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  dialogue.on("shout", builtin("npc", { memory = "none" }, function()
+    return true
+  end))
+
+  local receipt = dialogue.emit("shout", 9, 10, { text_key = "beats.shout" })
+  eq(receipt.handled, true, "handler 仍被调")
+  eq(#dialogue.history("9:10"), 0, "没有线程历史")
+  for key in pairs(world.kv) do
+    is_true(key:find("^dlg%.thread%.") == nil, "memory=none 不得写线程键：" .. key)
+  end
+  is_nil(world.kv["dlg.keys"], "没有线程名表")
+  is_nil(world.kv["dlg.seq"], "没有轮次推进")
+end)
+
+run("pkg.dialogue.memory-entity", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  dialogue.on("greet", builtin("npc", { memory = "entity" }, function()
+    return true
+  end))
+
+  dialogue.emit("greet", 5, 6, { text_key = "beats.one" })
+  dialogue.emit("greet", 5, 7, { text_key = "beats.two" })
+
+  -- entity 模式：键 = "<source>"，两次对同一 source 的对话进同一条线程。
+  local turns = dialogue.history("5")
+  eq(#turns, 2, "entity 模式按 source 聚合")
+  eq(turns[1].text, "beats.one", "第一轮")
+  eq(turns[2].text, "beats.two", "第二轮")
+  eq(world.kv["dlg.keys"], "5", "线程名表里只有 source 键")
+  eq(#dialogue.history("5:6"), 0, "pair 键不存在")
+  names_equal(dialogue.threads(), { "5" }, "threads() 名表")
+end)
