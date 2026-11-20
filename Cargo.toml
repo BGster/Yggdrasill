@@ -9,6 +9,7 @@ members = [
     "crates/ygg-lint",
     "crates/ygg-wasm",
     "crates/ygg-store",
+    "crates/ygg-sim",
 ]
 
 [workspace.package]
@@ -27,6 +28,14 @@ edition = "2021"
 # 事实（run.json / settlement.json / coordination.* 都留在宿主），依赖面仅
 # serde_json（+ 可选 rusqlite），不被任何业务 crate 依赖（ygg-sandbox 只在
 # dev-dependencies 里引用，故 wasm/lint 的结构面不受影响）。
+#
+# members 一次成型的第三次受控例外：`ygg-sim` 是 Tier 1 原生模拟内核的**新载体**，
+# 就是 `docs/design/kernel/sim-kernel.md` §0 表格写的那个 crate（不是第 N 个业务 crate）。
+# 它不能挂在既有 crate 下：`ygg-core` 的实体存储是行式且 `Value::Float` 是一等变体——
+# 恰是 Tier 1 明令禁止的两件事（列式 SoA、禁浮点）；`ygg-store` 是持久化端口（Tier 1 零 IO）；
+# `ygg-sandbox` 拥有 mlua（Tier 1 必须无 VM 可编译可基准）。依赖纯度：零内部依赖、
+# 运行时依赖仅 thiserror，且必须能编到 wasm32（经 ygg-wasm → ygg-sandbox → ygg-sim）。
+# 理由与取证见 sim-kernel.md §1 与 topology.md 不变量 5。
 
 # B1：wasm 体积预算面（research §7）：fat LTO + 体积级优化 + 单 codegen unit
 # + strip。仅作用 release（wasm-pack 默认 release 出 pkg/）；门禁

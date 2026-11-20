@@ -1174,6 +1174,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ygg-sim"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "ygg-store"
 version = "0.1.0"
 dependencies = [
