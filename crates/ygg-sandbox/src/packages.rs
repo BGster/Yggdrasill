@@ -1046,4 +1046,226 @@ mod tests {
         );
         assert!(err.contains("is missing string `contract`"), "{err}");
     }
+
+    // ───────────────────── 闭包与包根解析（S3） ─────────────────────
+
+    /// 本用例独占的临时包根（先清空，重跑不受上次残留影响）。
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ygg-r3-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create package root");
+        dir
+    }
+
+    /// 写一个包：`pkg.json` + 给定文件（`rel_in_pkg` → 源码）。
+    fn write_pkg(
+        root: &Path,
+        id: &str,
+        version: &str,
+        deps: &[(&str, &str)],
+        files: &[(&str, &str)],
+    ) {
+        let dir = root.join(id);
+        fs::create_dir_all(&dir).expect("create package dir");
+        let deps_json: Vec<String> = deps
+            .iter()
+            .map(|(dep_id, dep_version)| {
+                format!(r#"{{ "id": "{dep_id}", "version": "{dep_version}" }}"#)
+            })
+            .collect();
+        let pkg = format!(
+            r#"{{ "schemaVersion": 1, "name": "{id}", "version": "{version}",
+                 "deps": [{}], "contract": "docs/design/packages/README.md" }}"#,
+            deps_json.join(", ")
+        );
+        fs::write(dir.join(PKG_FILE), pkg).expect("write pkg.json");
+        for (rel, source) in files {
+            let target = dir.join(rel);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).expect("create file dir");
+            }
+            fs::write(&target, source).unwrap_or_else(|err| panic!("write {rel}: {err}"));
+        }
+    }
+
+    /// `[{id, version}]` → [`PackagesSpec`]（走真实解析面，不绕开校验）。
+    fn spec_of(pairs: &[(&str, &str)]) -> PackagesSpec {
+        let declared: Vec<Json> = pairs
+            .iter()
+            .map(|(id, version)| json!({ "id": id, "version": version }))
+            .collect();
+        PackagesSpec::parse(&json!({ "packages": declared }))
+            .expect("parse")
+            .expect("section present")
+    }
+
+    #[test]
+    fn resolve_maps_package_files_to_module_names_and_skips_tests() {
+        let root = temp_root("resolve-ok");
+        write_pkg(
+            &root,
+            "fixture",
+            "0.1.0",
+            &[],
+            &[
+                ("init.lua", "return {}"),
+                ("words.lua", "return {}"),
+                ("nested/deep.lua", "return {}"),
+                ("test/pkg-fixture.lua", "-- self test"),
+            ],
+        );
+        let resolved = resolve(&root, &spec_of(&[("fixture", "0.1.0")])).expect("resolve");
+        assert_eq!(resolved.len(), 1);
+        let package = &resolved.packages()[0];
+        assert_eq!(package.id(), "fixture");
+        assert_eq!(package.version(), "0.1.0");
+        // 非 test/** 的 lua + pkg.json，按 rel 升序；test/** 不在其中。
+        let rels: Vec<&str> = package.files().iter().map(PackageFile::rel).collect();
+        assert_eq!(
+            rels,
+            [
+                "fixture/init.lua",
+                "fixture/nested/deep.lua",
+                "fixture/pkg.json",
+                "fixture/words.lua",
+            ]
+        );
+        // pkg.json 是包文件但不是模块。
+        assert_eq!(package.files()[2].module(), None);
+        // init.lua 是包根模块（不带 `.init`）。
+        let chunks = resolved.chunk_paths();
+        assert_eq!(chunks["pkg.fixture"], "fixture/init.lua");
+        assert_eq!(chunks["pkg.fixture.words"], "fixture/words.lua");
+        assert_eq!(chunks["pkg.fixture.nested.deep"], "fixture/nested/deep.lua");
+    }
+
+    #[test]
+    fn resolve_hyphenated_id_becomes_an_underscore_module_prefix() {
+        let root = temp_root("resolve-hyphen");
+        write_pkg(
+            &root,
+            "role-skill",
+            "0.1.0",
+            &[],
+            &[("init.lua", "return {}")],
+        );
+        let resolved = resolve(&root, &spec_of(&[("role-skill", "0.1.0")])).expect("resolve");
+        assert_eq!(
+            resolved.chunk_paths()["pkg.role_skill"],
+            "role-skill/init.lua"
+        );
+    }
+
+    #[test]
+    fn resolve_reports_a_missing_package_with_the_ids_it_found() {
+        let root = temp_root("resolve-unknown");
+        write_pkg(&root, "fixture", "0.1.0", &[], &[("init.lua", "return {}")]);
+        let err = resolve(&root, &spec_of(&[("quest", "0.1.0")])).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("package \"quest\" is not a package under"),
+            "{text}"
+        );
+        // 「找不到」必须告诉作者有哪些——否则只能猜目录名。
+        assert!(text.contains("(found: fixture)"), "{text}");
+    }
+
+    #[test]
+    fn resolve_rejects_version_drift_and_requires_the_full_closure() {
+        let root = temp_root("resolve-version");
+        write_pkg(&root, "fixture", "0.2.0", &[], &[("init.lua", "return {}")]);
+        // 声明 0.1.0，pkg.json 是 0.2.0：报双方值（声明错，不是完整性错）。
+        let err = resolve(&root, &spec_of(&[("fixture", "0.1.0")])).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("package \"fixture\" is required at version 0.1.0"),
+            "{text}"
+        );
+        assert!(text.contains("declares 0.2.0"), "{text}");
+
+        // 传递依赖未声明：quest 依赖 codec，但 packages 段只列了 quest。
+        let root = temp_root("resolve-closure");
+        write_pkg(
+            &root,
+            "quest",
+            "0.1.0",
+            &[("codec", "0.1.0")],
+            &[("init.lua", "return {}")],
+        );
+        write_pkg(&root, "codec", "0.1.0", &[], &[("init.lua", "return {}")]);
+        let err = resolve(&root, &spec_of(&[("quest", "0.1.0")])).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "package \"quest\" depends on \"codec\" which the mod's `packages` section \
+             does not declare (declare the full closure)"
+        );
+        // 声明完整闭包即通过。
+        let resolved = resolve(&root, &spec_of(&[("quest", "0.1.0"), ("codec", "0.1.0")]))
+            .expect("full closure resolves");
+        assert_eq!(resolved.len(), 2);
+    }
+
+    #[test]
+    fn resolve_detects_dependency_cycles() {
+        let root = temp_root("resolve-cycle");
+        write_pkg(
+            &root,
+            "a",
+            "0.1.0",
+            &[("b", "0.1.0")],
+            &[("init.lua", "return {}")],
+        );
+        write_pkg(
+            &root,
+            "b",
+            "0.1.0",
+            &[("a", "0.1.0")],
+            &[("init.lua", "return {}")],
+        );
+        let err = resolve(&root, &spec_of(&[("a", "0.1.0"), ("b", "0.1.0")])).unwrap_err();
+        assert_eq!(err.to_string(), "package dependency cycle: a -> b -> a");
+    }
+
+    #[test]
+    fn resolve_rejects_files_that_are_not_allowed() {
+        let root = temp_root("resolve-files");
+        write_pkg(
+            &root,
+            "fixture",
+            "0.1.0",
+            &[],
+            &[("init.lua", "return {}"), ("README.md", "# not allowed")],
+        );
+        let err = resolve(&root, &spec_of(&[("fixture", "0.1.0")])).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("contains `README.md` which is not an allowed file"),
+            "{text}"
+        );
+        // 点开头的条目静默跳过（.DS_Store 不该拦住整包）。
+        let root = temp_root("resolve-dotfile");
+        write_pkg(
+            &root,
+            "fixture",
+            "0.1.0",
+            &[],
+            &[("init.lua", "return {}"), (".DS_Store", "junk")],
+        );
+        let resolved =
+            resolve(&root, &spec_of(&[("fixture", "0.1.0")])).expect("dotfiles are skipped");
+        assert_eq!(resolved.packages()[0].files().len(), 2);
+    }
+
+    #[test]
+    fn resolve_root_fails_loudly_instead_of_degrading_to_zero_packages() {
+        let mod_dir = temp_root("resolve-root/mod/a/b");
+        let err = resolve_root(&mod_dir, Some(&mod_dir.join("absent"))).unwrap_err();
+        assert!(
+            err.to_string().contains("is not a readable directory"),
+            "{err}"
+        );
+        // 显式参数优先：存在即采纳。
+        let good = temp_root("resolve-root-good");
+        assert_eq!(resolve_root(&mod_dir, Some(&good)).unwrap(), good);
+    }
 }
