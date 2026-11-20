@@ -263,6 +263,14 @@ impl EntityStore {
         Ok(())
     }
 
+    /// 下一个将要分配的 id（只读镜像；**不是**「当前存活数」）。
+    ///
+    /// 批式面（`ygg.entity.spawn_batch`）要用它把水位一次回给 Tier 2，免得逐条读。
+    /// 与 `EntityStore::iter` 的区别是语义：这里吃的是**分配水位**，与存活无关。
+    pub fn next_id(&self) -> EntityId {
+        self.next_id
+    }
+
     /// 删除实体；返回被删实体（不存在时 `None` 且不计变更）。
     pub fn remove(&mut self, id: EntityId) -> Option<Entity> {
         let removed = self.entities.remove(&id);

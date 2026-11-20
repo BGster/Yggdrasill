@@ -585,6 +585,206 @@ fn value_from_lua(value: &LuaValue) -> Result<Value, Error> {
     })
 }
 
+// ============================================================================
+// `ygg.entity.*` 批式面的形状校验（P-K A1；铁律②「数组进出、单次调用承载整批」）
+// ============================================================================
+
+/// 形状不对（非数组 / 元素不是表 / 字段类型错 / 值非标量）。
+pub const ENTITY_FRAME: &str = "YGG-ENTITY-FRAME";
+/// 值不在值域（非有限浮点）。
+pub const ENTITY_VALUE: &str = "YGG-ENTITY-VALUE";
+/// 未知实体 id。
+pub const ENTITY_ID: &str = "YGG-ENTITY-ID";
+
+/// 取实体句柄（批式面的统一入口；`HostState` 借用只在调用瞬间）。
+fn entities_of(state: &Rc<RefCell<HostState>>) -> Rc<RefCell<EntityStore>> {
+    Rc::clone(&state.borrow().handles.entities)
+}
+
+fn entity_frame(detail: impl std::fmt::Display) -> Error {
+    Error::runtime(format!("{ENTITY_FRAME}: {detail}"))
+}
+
+fn entity_value(detail: impl std::fmt::Display) -> Error {
+    Error::runtime(format!("{ENTITY_VALUE}: {detail}"))
+}
+
+fn entity_id_error(id: u64) -> Error {
+    Error::runtime(format!("{ENTITY_ID}: 未知实体 id {id}"))
+}
+
+/// 一个待造的行：属性袋 + tag 名单（都是可选的）。
+#[derive(Clone, Debug, Default)]
+pub struct EntityRowSpec {
+    pub attrs: Vec<(String, Value)>,
+    pub tags: Vec<String>,
+}
+
+/// 值域闸门：标量四型直通，非有限浮点拒（`EntityStore::set_attribute` 同样拒，
+/// 但这一层先拒 = 整批零副作用）。
+fn entity_value_arg(value: &LuaValue, what: &str) -> Result<Value, Error> {
+    let value = value_from_lua(value).map_err(|_| {
+        entity_value(format!(
+            "`{what}` 只接受标量（boolean / number / string），得到 {}",
+            lua_type_name(value)
+        ))
+    })?;
+    if let Value::Float(f) = &value {
+        if !f.is_finite() {
+            return Err(entity_value(format!("`{what}` 不接受 NaN/±∞")));
+        }
+    }
+    Ok(value)
+}
+
+/// 稠密数组 → Vec（非表即拒；`raw_len` 为 0 的表按空批处理）。
+fn entity_array(table: &Table, what: &str) -> Result<Vec<LuaValue>, Error> {
+    let len = table.raw_len();
+    let mut out = Vec::with_capacity(len);
+    for index in 1..=len {
+        out.push(
+            table
+                .raw_get::<LuaValue>(index)
+                .map_err(|_| entity_frame(format!("`{what}` 的第 {index} 项不可读")))?,
+        );
+    }
+    Ok(out)
+}
+
+fn entity_field(row: &Table, key: &str) -> Result<Option<Table>, Error> {
+    match row.raw_get::<LuaValue>(key).map_err(|_| entity_frame("字段不可读"))? {
+        LuaValue::Nil => Ok(None),
+        LuaValue::Table(t) => Ok(Some(t)),
+        other => Err(entity_frame(format!(
+            "`{key}` 必须是表或 nil，得到 {}",
+            lua_type_name(&other)
+        ))),
+    }
+}
+
+/// `spawn_batch(rows)`：每个元素 `{ attrs = {k = v}, tags = {t, …} }`。
+pub fn entity_rows(rows: &Table) -> Result<Vec<EntityRowSpec>, Error> {
+    let mut out = Vec::new();
+    for (index, item) in entity_array(rows, "rows")?.iter().enumerate() {
+        let LuaValue::Table(row) = item else {
+            return Err(entity_frame(format!(
+                "rows[{index}] 必须是表，得到 {}",
+                lua_type_name(item)
+            )));
+        };
+        let mut spec = EntityRowSpec::default();
+        if let Some(attrs) = entity_field(row, "attrs")? {
+            for pair in attrs.clone().pairs::<LuaValue, LuaValue>() {
+                let (key, value) = pair.map_err(|_| entity_frame("attrs 的键值对不可读"))?;
+                let LuaValue::String(key) = key else {
+                    return Err(entity_frame("attrs 的键必须是字符串"));
+                };
+                let key = key.to_str().map_err(|_| entity_frame("attrs 的键非 UTF-8"))?;
+                spec.attrs
+                    .push((key.to_string(), entity_value_arg(&value, key.as_ref())?));
+            }
+        }
+        if let Some(tags) = entity_field(row, "tags")? {
+            for item in entity_array(&tags, "tags")? {
+                let LuaValue::String(tag) = item else {
+                    return Err(entity_frame("tags 的元素必须是字符串"));
+                };
+                spec.tags
+                    .push(tag.to_str().map_err(|_| entity_frame("tag 非 UTF-8"))?.to_string());
+            }
+        }
+        out.push(spec);
+    }
+    Ok(out)
+}
+
+/// `attr_apply(ops)`：每个元素 `{ id = n, attrs = {k = v} }`。
+pub fn entity_attr_ops(ops: &Table) -> Result<Vec<(u64, Vec<(String, Value)>)>, Error> {
+    let mut out = Vec::new();
+    for (index, item) in entity_array(ops, "ops")?.iter().enumerate() {
+        let LuaValue::Table(op) = item else {
+            return Err(entity_frame(format!(
+                "ops[{index}] 必须是表，得到 {}",
+                lua_type_name(item)
+            )));
+        };
+        let id = match op.raw_get::<LuaValue>("id") {
+            Ok(LuaValue::Integer(v)) if v >= 0 => v as u64,
+            _ => return Err(entity_frame(format!("ops[{index}].id 必须是非负整数"))),
+        };
+        let mut kvs = Vec::new();
+        if let Some(attrs) = entity_field(op, "attrs")? {
+            for pair in attrs.clone().pairs::<LuaValue, LuaValue>() {
+                let (key, value) = pair.map_err(|_| entity_frame("attrs 的键值对不可读"))?;
+                let LuaValue::String(key) = key else {
+                    return Err(entity_frame("attrs 的键必须是字符串"));
+                };
+                let key = key.to_str().map_err(|_| entity_frame("attrs 的键非 UTF-8"))?;
+                kvs.push((key.to_string(), entity_value_arg(&value, key.as_ref())?));
+            }
+        }
+        out.push((id, kvs));
+    }
+    Ok(out)
+}
+
+/// `attr_fetch(queries)`：每个元素 `{ id = n, keys = {k, …} }`。
+pub fn entity_fetch_queries(queries: &Table) -> Result<Vec<(u64, Vec<String>)>, Error> {
+    let mut out = Vec::new();
+    for (index, item) in entity_array(queries, "queries")?.iter().enumerate() {
+        let LuaValue::Table(query) = item else {
+            return Err(entity_frame(format!(
+                "queries[{index}] 必须是表，得到 {}",
+                lua_type_name(item)
+            )));
+        };
+        let id = match query.raw_get::<LuaValue>("id") {
+            Ok(LuaValue::Integer(v)) if v >= 0 => v as u64,
+            _ => return Err(entity_frame(format!("queries[{index}].id 必须是非负整数"))),
+        };
+        let mut keys = Vec::new();
+        if let Some(list) = entity_field(query, "keys")? {
+            for item in entity_array(&list, "keys")? {
+                let LuaValue::String(key) = item else {
+                    return Err(entity_frame("keys 的元素必须是字符串"));
+                };
+                keys.push(key.to_str().map_err(|_| entity_frame("key 非 UTF-8"))?.to_string());
+            }
+        }
+        out.push((id, keys));
+    }
+    Ok(out)
+}
+
+/// `tag_batch(ops)`：每个元素 `{ id = n, tag = "t", add = true|false }`。
+pub fn entity_tag_ops(ops: &Table) -> Result<Vec<(u64, String, bool)>, Error> {
+    let mut out = Vec::new();
+    for (index, item) in entity_array(ops, "ops")?.iter().enumerate() {
+        let LuaValue::Table(op) = item else {
+            return Err(entity_frame(format!(
+                "ops[{index}] 必须是表，得到 {}",
+                lua_type_name(item)
+            )));
+        };
+        let id = match op.raw_get::<LuaValue>("id") {
+            Ok(LuaValue::Integer(v)) if v >= 0 => v as u64,
+            _ => return Err(entity_frame(format!("ops[{index}].id 必须是非负整数"))),
+        };
+        let tag = match op.raw_get::<LuaValue>("tag") {
+            Ok(LuaValue::String(tag)) => {
+                tag.to_str().map_err(|_| entity_frame("tag 非 UTF-8"))?.to_string()
+            }
+            _ => return Err(entity_frame(format!("ops[{index}].tag 必须是字符串"))),
+        };
+        let add = match op.raw_get::<LuaValue>("add") {
+            Ok(LuaValue::Boolean(v)) => v,
+            _ => return Err(entity_frame(format!("ops[{index}].add 必须是布尔"))),
+        };
+        out.push((id, tag, add));
+    }
+    Ok(out)
+}
+
 /// options 必须是字符串的 Lua 序列（数组形态），否则可读报错。
 fn options_from_lua(options: &LuaValue) -> Result<Vec<String>, Error> {
     let table = match options {
@@ -1302,6 +1502,198 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
             Ok(removed)
         })?,
     )?;
+    // ---- 批式五面（P-K A1；一个逐实体 getter 都没有）------------------------
+    //
+    // 入参是 Lua 数组（铁律② 原文「bytes/数组进出」）：n=1 的热路径不必付 pack 成本，
+    // 测试夹具也不必写第二份编解码器。五面一律**先校验后改**。
+    let ent_spawn_batch = Rc::clone(&state);
+    entity_table.raw_set(
+        "spawn_batch",
+        lua.create_function(move |lua, rows: Table| -> Result<Table, Error> {
+            let specs = entity_rows(&rows)?;
+            let entities = Rc::clone(&ent_spawn_batch.borrow().handles.entities);
+            let (ids, next_id) = {
+                let mut store = entities.borrow_mut();
+                let mut ids = Vec::with_capacity(specs.len());
+                for spec in &specs {
+                    let id = store.spawn().map_err(|e| Error::runtime(e.to_string()))?;
+                    for (name, value) in &spec.attrs {
+                        store
+                            .set_attribute(id, name.clone(), value.clone())
+                            .map_err(|e| Error::runtime(e.to_string()))?;
+                    }
+                    for tag in &spec.tags {
+                        store
+                            .add_tag(id, tag.clone())
+                            .map_err(|e| Error::runtime(e.to_string()))?;
+                    }
+                    ids.push(id);
+                }
+                (ids, store.next_id())
+            };
+            let out = lua.create_table()?;
+            out.raw_set("spawned", ids.len())?;
+            out.raw_set("next_id", next_id)?;
+            let list = lua.create_table()?;
+            for (index, id) in ids.iter().enumerate() {
+                list.raw_set(index + 1, *id)?;
+            }
+            out.raw_set("ids", list)?;
+            Ok(out)
+        })?,
+    )?;
+
+    let ent_attr_apply = Rc::clone(&state);
+    entity_table.raw_set(
+        "attr_apply",
+        lua.create_function(move |lua, ops: Table| -> Result<Table, Error> {
+            let parsed = entity_attr_ops(&ops)?;
+            let entities = Rc::clone(&ent_attr_apply.borrow().handles.entities);
+            let (applied, changed) = {
+                let mut store = entities.borrow_mut();
+                // 先校验后改：整批 id 全部在场，否则零改（错误带首个坏 id）。
+                for (id, _) in &parsed {
+                    if store.get(*id).is_none() {
+                        return Err(entity_id_error(*id));
+                    }
+                }
+                let mut applied = 0usize;
+                let mut changed = 0usize;
+                for (id, kvs) in &parsed {
+                    for (name, value) in kvs {
+                        // 「值是否真的变了」由内核判（含整/浮身份：`Value::Int(2) != Value::Float(2.0)`），
+                        // Tier 2 据 `changed` 决定发不发事件（entity.md I6）。
+                        let before = store.get(*id).and_then(|e| e.attribute(name)).cloned();
+                        if before.as_ref() != Some(value) {
+                            changed += 1;
+                        }
+                        store
+                            .set_attribute(*id, name.clone(), value.clone())
+                            .map_err(|e| Error::runtime(e.to_string()))?;
+                        applied += 1;
+                    }
+                }
+                (applied, changed)
+            };
+            let out = lua.create_table()?;
+            out.raw_set("applied", applied)?;
+            out.raw_set("changed", changed)?;
+            Ok(out)
+        })?,
+    )?;
+
+    let ent_attr_fetch = Rc::clone(&state);
+    entity_table.raw_set(
+        "attr_fetch",
+        lua.create_function(move |lua, queries: Table| -> Result<Table, Error> {
+            let parsed = entity_fetch_queries(&queries)?;
+            // 先把数据拷出来再建表：不在 create_* 期间持 RefCell 借用（借用纪律同 ygg.sim）。
+            let rows: Vec<(Vec<(String, Value)>, Vec<String>)> = {
+                let store = entities_of(&ent_attr_fetch);
+                let store = store.borrow();
+                parsed
+                    .iter()
+                    .map(|(id, keys)| {
+                        let entity = store.get(*id);
+                        let values = keys
+                            .iter()
+                            .filter_map(|key| {
+                                entity
+                                    .and_then(|e| e.attribute(key))
+                                    .map(|v| (key.clone(), v.clone()))
+                            })
+                            .collect::<Vec<_>>();
+                        let tags = entity
+                            .map(|e| e.tags().map(str::to_owned).collect::<Vec<_>>())
+                            .unwrap_or_default();
+                        (values, tags)
+                    })
+                    .collect()
+            };
+            let values_table = lua.create_table()?;
+            let tags_table = lua.create_table()?;
+            for (index, (values, tags)) in rows.iter().enumerate() {
+                let row = lua.create_table()?;
+                for (key, value) in values {
+                    row.raw_set(key.as_str(), value_to_lua(lua, value)?)?;
+                }
+                values_table.raw_set(index + 1, row)?;
+                let list = lua.create_table()?;
+                for (position, tag) in tags.iter().enumerate() {
+                    list.raw_set(position + 1, tag.as_str())?;
+                }
+                tags_table.raw_set(index + 1, list)?;
+            }
+            let out = lua.create_table()?;
+            out.raw_set("values", values_table)?;
+            out.raw_set("tags", tags_table)?;
+            Ok(out)
+        })?,
+    )?;
+
+    let ent_tag_batch = Rc::clone(&state);
+    entity_table.raw_set(
+        "tag_batch",
+        lua.create_function(move |_, ops: Table| -> Result<usize, Error> {
+            let parsed = entity_tag_ops(&ops)?;
+            let entities = Rc::clone(&ent_tag_batch.borrow().handles.entities);
+            let mut store = entities.borrow_mut();
+            for (id, _, _) in &parsed {
+                if store.get(*id).is_none() {
+                    return Err(entity_id_error(*id));
+                }
+            }
+            let mut changed = 0usize;
+            for (id, tag, add) in &parsed {
+                let outcome = if *add {
+                    store.add_tag(*id, tag.clone())
+                } else {
+                    store.remove_tag(*id, tag.as_str())
+                }
+                .map_err(|e| Error::runtime(e.to_string()))?;
+                if outcome {
+                    changed += 1;
+                }
+            }
+            Ok(changed)
+        })?,
+    )?;
+
+    let ent_scan = Rc::clone(&state);
+    entity_table.raw_set(
+        "scan",
+        lua.create_function(
+            move |lua, (lo, hi, tag): (u64, u64, Option<String>)|
+                  -> Result<Table, Error> {
+                if hi < lo {
+                    return Err(entity_frame(format!("scan 的区间非法：lo={lo} > hi={hi}")));
+                }
+                let entities = Rc::clone(&ent_scan.borrow().handles.entities);
+                // **吃调用方给的 [lo, hi]，绝不读 next_id**：上界是 Tier 2 的 `seq` 水位，
+                // 用它挡「本包 before 出生 / 他处直接 spawn」的实体（entity.md §2 冷启动边界）。
+                let ids: Vec<u64> = {
+                    let store = entities.borrow();
+                    store
+                        .iter()
+                        .filter(|e| e.id >= lo && e.id <= hi)
+                        .filter(|e| match &tag {
+                            Some(needle) => e.has_tag(needle.as_str()),
+                            None => true,
+                        })
+                        .map(|e| e.id)
+                        .collect()
+                };
+                let out = lua.create_table()?;
+                let list = lua.create_table()?;
+                for (index, id) in ids.iter().enumerate() {
+                    list.raw_set(index + 1, *id)?;
+                }
+                out.raw_set("ids", list)?;
+                Ok(out)
+            },
+        )?,
+    )?;
+
     ygg.raw_set("entity", entity_table)?;
 
     install_sim(lua, &state)?;
