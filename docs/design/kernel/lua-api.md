@@ -152,6 +152,8 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 | `trace` | `ygg.sim.trace(on)` | `{ tracing = bool }` | 变更（逐 tick 证据缓冲开关） |
 | `replay` | `ygg.sim.replay(snap, log)` | `{ ticks, matched, first_mismatch = int\|nil, final_hash = "16 hex" }` | 纯（在临时 Sim 上重放） |
 
+**字节帧过面不要求 UTF-8**：`restore` / 三个批量面 / `replay` 的参数按 Lua string 的**原始字节**取（Rust 侧是 `mlua::String` 而不是 `String`）。若按 `String` 收，合法快照会因「非 UTF-8 序列」在参数转换处就失败——把「帧格式校验」（`YGG-SIM-FRAME`，带位置说明）降级成一条与帧内容无关的类型错误。
+
 **数值过面只有一个闸门**：Lua 的双精度与内核的定点之间，`ygg.sim.*` 只接受「**值上等于整数的 Lua number**」（`n.fract() == 0.0` 且 `|n| ≤ 2^53`），其余一律 `YGG-SIM-FIXED`——静默取整会把「调用方算错了」变成「内核算错了」。定点除零同码（不定义 0 的近似值：给 `i64::MAX` 会把除零藏成数值异常）。
 
 **字节帧形状**（列式，可直拷；与快照列编码**共用同一个读写器**，所以「快照能解的列、批量也能解」是结构性质而不是两套代码的巧合）：

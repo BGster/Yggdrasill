@@ -1159,6 +1159,7 @@ dependencies = [
  "ygg-core",
  "ygg-modules",
  "ygg-schema",
+ "ygg-sim",
  "ygg-store",
 ]
 
