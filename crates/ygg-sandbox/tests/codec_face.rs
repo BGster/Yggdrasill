@@ -94,6 +94,53 @@ fn lua_encode(lua: &Lua, value: &Value) -> Result<Vec<u8>, mlua::Error> {
     Ok(text.as_bytes().to_vec())
 }
 
+
+/// decode 双径比较：返回「用 Lua 径重编码 native 解出的值」的文本。
+///
+/// 三件事一次做完：① native `ygg.codec.decode` 必须成功（误拒即失败）；② 与
+/// `pkg.codec.decode` 的结果**深度等价**（含数字子类型——`1` 与 `1.0` 是两个值）；
+/// ③ 把 native 解出的值交回 Lua 径重编码，供调用方与原文比字节。
+fn decode_via_both_paths(lua: &Lua, text: &[u8]) -> Result<Vec<u8>, mlua::Error> {
+    let function: Function = lua
+        .load(
+            r#"
+            local codec = require("pkg.codec")
+            local function deep_equal(left, right)
+              if type(left) ~= type(right) then return false end
+              if type(left) ~= "table" then
+                if type(left) == "number" then
+                  return math.type(left) == math.type(right) and left == right
+                end
+                return left == right
+              end
+              local count_left, count_right = 0, 0
+              for key, value in pairs(left) do
+                count_left = count_left + 1
+                if not deep_equal(value, right[key]) then return false end
+              end
+              for _ in pairs(right) do count_right = count_right + 1 end
+              return count_left == count_right
+            end
+            return function(text)
+              local native = ygg.codec.decode(text)
+              local saved = ygg.codec
+              ygg.codec = nil
+              local ok, lua_value = pcall(codec.decode, text)
+              local encoded_ok, encoded = pcall(codec.encode, native)
+              ygg.codec = saved
+              if not ok then error(lua_value, 0) end
+              if not deep_equal(native, lua_value) then error("decode 结果不同构", 0) end
+              if not encoded_ok then error(encoded, 0) end
+              return encoded
+            end
+            "#,
+        )
+        .eval()?;
+    let text = lua.create_string(text)?;
+    let encoded: mlua::LuaString = function.call(text)?;
+    Ok(encoded.as_bytes().to_vec())
+}
+
 #[test]
 fn native_encode_matches_the_lua_path_byte_for_byte() {
     let (lua, cases) = build();
@@ -254,3 +301,109 @@ cases.metatables = {
 }
 return cases
 "#;
+
+#[test]
+fn decode_matches_the_lua_path_across_the_encode_corpus() {
+    let (lua, cases) = build();
+    let mut compared = 0usize;
+    for index in 1..=cases.raw_len() {
+        let value: Value = cases.raw_get(index as i64).expect("语料元素");
+        // 原文由规范执行体产出（canonical 字节），再走 decode 双径
+        let text = lua_encode(&lua, &value).expect("语料必须可编码");
+        let reencoded = decode_via_both_paths(&lua, &text)
+            .unwrap_or_else(|error| panic!("第 {index} 条 decode 双径失败：{error}"));
+        assert_eq!(
+            reencoded, text,
+            "第 {index} 条：decode → 重编码与原文不同（输入 {:?}）",
+            value.type_name()
+        );
+        compared += 1;
+    }
+    assert!(compared >= 2_000, "语料不足：{compared}");
+}
+
+#[test]
+fn saved_saves_decode_and_reencode_byte_identically() {
+    let (lua, _cases) = build();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codec-saves.jsonl");
+    let raw = std::fs::read(&path).unwrap_or_else(|error| panic!("读 {}：{error}", path.display()));
+    let mut documents = 0usize;
+    for line in raw.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        // ① 老档必须能解（native 误拒 = 旧档不可读，这是最贵的一类缺陷）
+        let decoded = ygg_sandbox::codec_face::decode(&lua, line).unwrap_or_else(|error| {
+            panic!("第 {documents} 份老档被原生拒：{error}（{}）", String::from_utf8_lossy(line))
+        });
+        assert!(!matches!(decoded, Value::Nil));
+        // ② 与 Lua 径同构；③ 重编码逐字节等于原文
+        let reencoded = decode_via_both_paths(&lua, line).expect("双径 decode");
+        assert_eq!(
+            reencoded,
+            line.to_vec(),
+            "第 {documents} 份老档：重编码与原文不同（{}）",
+            String::from_utf8_lossy(line)
+        );
+        documents += 1;
+    }
+    assert!(documents >= 10, "老档语料不足：{documents} 份");
+}
+
+#[test]
+fn key_set_is_exactly_encode_and_decode() {
+    let (lua, _cases) = build();
+    let ygg: Table = lua.globals().get("ygg").expect("ygg 表");
+    let face: Table = ygg.get("codec").expect("ygg.codec 表");
+    let mut keys: Vec<String> = face
+        .pairs::<String, Value>()
+        .map(|pair| pair.expect("键值对").0)
+        .collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec!["decode".to_string(), "encode".to_string()],
+        "ygg.codec 的键集是闭集（契约 §3.1.4：恰好 2 个，没有逐节点 getter）"
+    );
+}
+
+#[test]
+fn malformed_documents_are_rejected_by_the_native_path() {
+    let (lua, _cases) = build();
+    let bad: &[&[u8]] = &[
+        b"",
+        b"[1,2",
+        b"{\"a\":1",
+        b"{\"a\" 1}",
+        b"{a:1}",
+        b"[1 2]",
+        b"1 2",
+        b"tru",
+        b"1.",
+        b"1e",
+        b"\"\\q\"",
+        b"\"\\u12\"",
+        b"{\"a\":null,\"b\":[null]}",
+    ];
+    for text in bad {
+        let error = ygg_sandbox::codec_face::decode(&lua, text).expect_err("坏档必须被原生拒");
+        assert_eq!(
+            error.code(),
+            ygg_sandbox::codec_face::CODEC_UNSUPPORTED,
+            "{}",
+            String::from_utf8_lossy(text)
+        );
+        // 包侧必须仍然给出它自己的文案（回退路径不变）
+        let message: String = lua
+            .load("local c = require('pkg.codec'); return function(t) local ok, e = pcall(c.decode, t); return tostring(ok) .. '|' .. tostring(e) end")
+            .eval::<Function>()
+            .expect("闭包")
+            .call::<String>(lua.create_string(text).expect("字符串"))
+            .expect("调用");
+        assert!(
+            message.starts_with("false|YGG-PKG-CODEC-TYPE"),
+            "Lua 径的文案必须仍是包的码：{}",
+            message
+        );
+    }
+}
