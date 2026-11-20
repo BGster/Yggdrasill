@@ -98,7 +98,7 @@ function M.bmp24(texture)
     if pad > 0 then
       parts[w + 1] = zeros
     end
-    rows[y + 1] = join.concat(parts)
+    rows[y + 2] = join.concat(parts) -- +2：rows[1] 是 BMP 头，像素行从 rows[2] 起（修复 r4-F1：y=0 行曾覆盖头部 54 字节）
   end
   return join.concat(rows)
 end

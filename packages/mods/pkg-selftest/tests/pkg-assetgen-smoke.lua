@@ -126,3 +126,25 @@ do
     error("[pkg.assetgen.loadable] " .. table.concat(problems, "; "), 0)
   end
 end
+
+-- [pkg.assetgen.bmp24-header] r4-F1 回归：bmp24 的 54 字节头不得被 y=0 像素行覆盖。
+-- 62 = 14 文件头 + 40 DIB + (2×3 像素 + 2 pad) × 1 行；头被覆盖时实得 8。
+do
+  assetgen.install()
+  local bundle = assetgen.bundle({
+    {
+      key = "probe-bmp",
+      kind = "texture",
+      algo = "texture.checker",
+      params = { w = 2, h = 1, ch = 3, size = 2 },
+    },
+  }, "bmp24-header")
+  local bmp = assetgen.encode(bundle.items[1].product, "bmp24")
+  if type(bmp) ~= "string" or #bmp ~= 62 then
+    error("[pkg.assetgen.bmp24-header] w=2,h=1 的 bmp24 应为 62 字节，实得 "
+      .. tostring(type(bmp) == "string" and #bmp or type(bmp)), 0)
+  end
+  if bmp:sub(1, 2) ~= "BM" then
+    error("[pkg.assetgen.bmp24-header] bmp24 头两字节应为 'BM'（头被像素行覆盖即丢）", 0)
+  end
+end
