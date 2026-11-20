@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::modload::ModBundle;
+use ygg_sandbox::sandbox::Sandbox;
 
 /// 合成树：`<R>/packages/libs/<产品包…>` + `<R>/mods/pkg-selftest`。
 struct Tree {
@@ -126,21 +127,29 @@ fn lines_of(reply: &Json) -> Vec<String> {
 
 // ── 用例 ①：生产真值（driver 路径）─────────────────────────────────────────
 
+/// `codec.sha256("abc")` 的已知答案向量（FIPS 180-4 附录 B），driver 与裸沙箱
+/// 两边都拿它当锚点。
+const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
 /// 冒烟叙述行（**逐字**）。七行一包一行，最后一行是收尾。
 ///
 /// 它们与 r2 计划 §6.5 的六包原文逐字节相同（含 `sha=ba7816bf…15ad`、
 /// `next32=726839672`、`hash=14b44f969c391c53`），只多了 assetgen 一行与 N=7
-/// ——改口径等价于改契约，必须同提交改这条常量。
-const SMOKE_LINES: [&str; 8] = [
-    "pkg.entity ok id=1 hp=2.5 ref_reject=true",
-    "pkg.codec ok array=[1,2,3] obj={\"f\":1.5,\"i\":1} roundtrip=true sha=ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    "pkg.quest ok id=1 state=open step=2",
-    "pkg.dialogue ok history=1",
-    "pkg.role-skill ok granted=true has=true atk=3",
-    "pkg.procgen ok next32=726839672 hash=14b44f969c391c53",
-    "pkg.assetgen ok algos=7 canon=kind=texture algo=texture.fbm v=1 seed=smoke stream=assetgen/texture/fbm w=4 h=4 ch=1 bytes=16",
-    "pkg.smoke packages=7",
-];
+/// ——改口径等价于改契约，必须同提交改这份清单。
+fn smoke_lines() -> Vec<String> {
+    [
+        "pkg.entity ok id=1 hp=2.5 ref_reject=true".to_owned(),
+        format!("pkg.codec ok array=[1,2,3] obj={{\"f\":1.5,\"i\":1}} roundtrip=true sha={SHA256_ABC}"),
+        "pkg.quest ok id=1 state=open step=2".to_owned(),
+        "pkg.dialogue ok history=1".to_owned(),
+        "pkg.role-skill ok granted=true has=true atk=3".to_owned(),
+        "pkg.procgen ok next32=726839672 hash=14b44f969c391c53".to_owned(),
+        "pkg.assetgen ok algos=7 canon=kind=texture algo=texture.fbm v=1 seed=smoke stream=assetgen/texture/fbm w=4 h=4 ch=1 bytes=16".to_owned(),
+        "pkg.smoke packages=7".to_owned(),
+    ]
+    .into_iter()
+    .collect()
+}
 
 #[test]
 fn seven_packages_load_and_run_in_the_real_sandbox() {
@@ -165,7 +174,8 @@ fn seven_packages_load_and_run_in_the_real_sandbox() {
     );
 
     let lines = lines_of(&reply);
-    assert_eq!(lines, SMOKE_LINES, "冒烟叙述必须逐字相等：{lines:#?}");
+    let expected = smoke_lines();
+    assert_eq!(lines, expected, "冒烟叙述必须逐字相等：{lines:#?}");
 
     // R9：收尾行的 N 与声明面、与目录面三方对照——「加包忘改冒烟」与
     // 「冒烟里多写一个不存在的包」两个方向都会红。
@@ -176,8 +186,308 @@ fn seven_packages_load_and_run_in_the_real_sandbox() {
         "pack.json 的 packages[] 必须与 packages/libs 下的产品目录恰好相等"
     );
     assert_eq!(
-        lines[SMOKE_LINES.len() - 1],
+        lines[expected.len() - 1],
         format!("pkg.smoke packages={}", products.len()),
         "收尾行的包数必须等于声明闭包（由 PACKAGES 表长度现算）"
     );
+}
+
+// ── 用例 ②：无注入面（裸 `Sandbox::new()`，没有 `inject::install`）────────
+
+#[test]
+fn packages_load_in_a_bare_sandbox_without_determinism_injection() {
+    let tree = Tree::new("bare");
+    let bundle = tree.load();
+
+    // 根模块名从模块表现算：加一个包，这条自动跟上（不手抄包清单）。
+    let mut roots: Vec<String> = bundle
+        .modules
+        .names()
+        .filter(|name| name.starts_with("pkg.") && name.matches('.').count() == 1)
+        .map(str::to_owned)
+        .collect();
+    roots.sort();
+    assert_eq!(
+        roots.len(),
+        product_packages().len(),
+        "每个产品包应恰好一个根模块：{roots:?}"
+    );
+
+    // 裸沙箱：没有 `inject::install`（math 缺席）、没有完整 host API（只有
+    // 占位 `ygg = { engine_version }`）——所以这条用例问的是「包的**顶层**
+    // 是否真的只依赖 base 白名单 + 模块表」。
+    let sandbox = Sandbox::new().expect("裸沙箱构造");
+    sandbox.modules().set_modules(bundle.modules.clone());
+    sandbox.modules().set_chunk_paths(bundle.chunk_paths.clone());
+
+    let names = roots
+        .iter()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let chunk = format!(
+        r#"
+        assert(math == nil, "裸沙箱不该有 math：本用例的前提是没跑 inject")
+        local roots = {{ {names} }}
+        for i = 1, #roots do
+          require(roots[i])
+        end
+        local codec = require("pkg.codec")
+        local array = codec.encode({{ 1, 2, 3 }})
+        local object = codec.encode({{ i = 1, f = 1.5 }})
+        local roundtrip = codec.encode(codec.decode(object)) == object
+        return #roots .. "|" .. array .. "|" .. object .. "|" .. tostring(roundtrip)
+          .. "|" .. codec.sha256("abc")
+        "#
+    );
+    let observed: String = sandbox
+        .lua()
+        .load(chunk)
+        .set_name("@bare/packages")
+        .eval()
+        .unwrap_or_else(|err| panic!("裸沙箱装包失败（包依赖了只有 driver 才有的面）：{err}"));
+
+    assert_eq!(
+        observed,
+        format!(
+            "{}|[1,2,3]|{{\"f\":1.5,\"i\":1}}|true|{}",
+            roots.len(),
+            SHA256_ABC
+        ),
+        "裸沙箱里七个根模块必须全部可 require，且 codec 的输出与 driver 路径同字节"
+    );
+}
+
+// ── 用例 ③：静态面（包的源码不得出现白名单外的全局）───────────────────
+
+/// 裸沙箱缺席的**命名空间表**（出现 `<名>.` 即视为一次点式调用）。
+const NAMESPACE_GLOBALS: [&str; 9] = [
+    "coroutine",
+    "debug",
+    "io",
+    "math",
+    "os",
+    "package",
+    "string",
+    "table",
+    "utf8",
+];
+
+/// 裸沙箱缺席的**函数**（出现 `<名>(` 即视为一次调用）。
+const FUNCTION_GLOBALS: [&str; 6] = [
+    "collectgarbage",
+    "dofile",
+    "load",
+    "loadfile",
+    "print",
+    "rawset",
+];
+
+/// 包内所有**非 `test/`** 的 Lua 源文件（`(包 id, 文件路径)`，按路径升序）。
+fn package_sources() -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    for id in product_packages() {
+        collect_lua(&repo_libs().join(&id), &id, &mut out);
+    }
+    out.sort();
+    out
+}
+
+fn collect_lua(dir: &Path, id: &str, out: &mut Vec<(String, PathBuf)>) {
+    for item in fs::read_dir(dir)
+        .unwrap_or_else(|err| panic!("read {}: {err}", dir.display()))
+        .filter_map(|item| item.ok())
+    {
+        let path = item.path();
+        if path.is_dir() {
+            // `test/**` 跑在普通 Lua 里（有完整标准库），不在沙箱装载面上。
+            if path.file_name().and_then(|name| name.to_str()) == Some("test") {
+                continue;
+            }
+            collect_lua(&path, id, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("lua") {
+            out.push((id.to_owned(), path));
+        }
+    }
+}
+
+/// 扫一段 Lua 源码，返回**代码区**（注释与字符串之外）首次出现的白名单外全局
+/// 调用形态：`(行号, 形态)`。
+///
+/// 为什么要一个小词法器而不是逐行 `find`：注释与字符串里出现这些名字是**合法的**
+/// ——`assetgen/spec.lua` 写着「不用 `math.type`」、`join.lua` 写着「`table.concat`
+/// 不可达」、`mod-package.md` 这个文档路径里就含 `package.`。逐行文本匹配会把这
+/// 八处**正确**的叙述判成违规，于是门禁只能靠加例外活着——那比没有门禁更糟。
+///
+/// 判据：命名空间名后面紧跟 `.`、函数名后面紧跟 `(`；前置字符是 `.` / `:` 的视为
+/// 字段访问（`a.b`、`a:b`），不算全局。
+fn forbidden_global(source: &str) -> Option<(usize, String)> {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    let mut line = 1usize;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        // 注释：`--` 后可接长括号（`--[[ … ]]`），否则吃到行尾。
+        if byte == b'-' && bytes.get(i + 1) == Some(&b'-') {
+            i += 2;
+            match long_bracket_end(bytes, i) {
+                Some(end) => {
+                    line += count_newlines(&bytes[i..end]);
+                    i = end;
+                }
+                None => {
+                    while i < bytes.len() && bytes[i] != b'\n' {
+                        i += 1;
+                    }
+                }
+            }
+            continue;
+        }
+        // 长字符串 `[[ … ]]` / `[==[ … ]==]`。
+        if byte == b'[' {
+            if let Some(end) = long_bracket_end(bytes, i) {
+                line += count_newlines(&bytes[i..end]);
+                i = end;
+                continue;
+            }
+        }
+        // 短字符串：跳掉转义与闭合引号（未闭合就停在行尾，不吞后文）。
+        if byte == b'"' || byte == b'\'' {
+            i = skip_short_string(bytes, i);
+            continue;
+        }
+        if byte == b'\n' {
+            line += 1;
+            i += 1;
+            continue;
+        }
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let word = &source[start..i];
+            let is_field = matches!(bytes.get(start.wrapping_sub(1)), Some(b'.') | Some(b':'));
+            if !is_field {
+                let follow = if NAMESPACE_GLOBALS.contains(&word) {
+                    Some(b'.')
+                } else if FUNCTION_GLOBALS.contains(&word) {
+                    Some(b'(')
+                } else {
+                    None
+                };
+                if let Some(follow) = follow {
+                    let mut next = i;
+                    while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+                        next += 1;
+                    }
+                    if bytes.get(next) == Some(&follow) {
+                        return Some((line, format!("{word}{}", follow as char)));
+                    }
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
+fn count_newlines(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|byte| **byte == b'\n').count()
+}
+
+/// `start` 指向 `[` 时返回长括号的结束下标（`None` = 不是长括号）。
+fn long_bracket_end(bytes: &[u8], start: usize) -> Option<usize> {
+    if bytes.get(start) != Some(&b'[') {
+        return None;
+    }
+    let mut i = start + 1;
+    let mut level = 0usize;
+    while bytes.get(i) == Some(&b'=') {
+        level += 1;
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'[') {
+        return None;
+    }
+    i += 1;
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            let mut j = i + 1;
+            let mut seen = 0usize;
+            while bytes.get(j) == Some(&b'=') {
+                seen += 1;
+                j += 1;
+            }
+            if seen == level && bytes.get(j) == Some(&b']') {
+                return Some(j + 1);
+            }
+        }
+        i += 1;
+    }
+    Some(bytes.len())
+}
+
+fn skip_short_string(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut i = start + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'\n' => return i,
+            byte if byte == quote => return i + 1,
+            _ => i += 1,
+        }
+    }
+    i
+}
+
+#[test]
+fn package_sources_use_no_global_outside_the_base_whitelist() {
+    let sources = package_sources();
+    let visited: Vec<String> = {
+        let mut ids: Vec<String> = sources.iter().map(|(id, _)| id.clone()).collect();
+        ids.dedup();
+        ids
+    };
+    assert_eq!(
+        visited,
+        product_packages(),
+        "扫描面必须恰好是产品包目录（扫不到 = 这条用例空转）"
+    );
+
+    let mut offenders: Vec<String> = Vec::new();
+    for (_, path) in &sources {
+        let source = fs::read_to_string(path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+        let name = path
+            .strip_prefix(repo_libs())
+            .map(|rel| rel.display().to_string())
+            .unwrap_or_else(|_| path.display().to_string());
+        if let Some((line, form)) = forbidden_global(&source) {
+            offenders.push(format!("{name}:{line}: {form} 不在 base 白名单"));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "包源码出现白名单外的全局（裸沙箱装载期必炸）：\n{}",
+        offenders.join("\n")
+    );
+
+    // 禁名列自检：这些名字在裸沙箱里确实全为 nil。沙箱哪天真的放出
+    // `math`（或别的名字），这里会红并提醒复核——否则上面那段扫描就只是
+    // 一句「相信白名单」的断言。
+    let sandbox = Sandbox::new().expect("裸沙箱构造");
+    for global in NAMESPACE_GLOBALS.iter().chain(FUNCTION_GLOBALS.iter()) {
+        let absent: bool = sandbox
+            .lua()
+            .load(format!("return {global} == nil"))
+            .eval()
+            .unwrap_or_else(|err| panic!("探测 {global} 失败：{err}"));
+        assert!(
+            absent,
+            "{global} 出现在沙箱 globals 里了：白名单变了，禁名列需要重新复核"
+        );
+    }
 }
