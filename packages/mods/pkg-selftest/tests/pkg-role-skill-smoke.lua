@@ -48,7 +48,21 @@ do
   if touched ~= nil then
     problems[#problems + 1] = "模块顶层访问了 ygg." .. tostring(touched)
   end
-  for _, name in ipairs({ "install", "define", "skill_define", "grant", "revoke", "has" }) do
+  local exports = {
+    "install",
+    "define",
+    "skill_define",
+    "grant",
+    "revoke",
+    "has",
+    "grant_skill",
+    "revoke_skill",
+    "charge",
+    "recharge",
+    "effective",
+    "compose",
+  }
+  for _, name in ipairs(exports) do
     if type(role[name]) ~= "function" then
       problems[#problems + 1] = name .. " 必须是函数"
     end

@@ -22,6 +22,8 @@
 
 local store = require("pkg.role_skill.store")
 local actors = require("pkg.role_skill.actors")
+local skills = require("pkg.role_skill.skills")
+local compose = require("pkg.role_skill.compose")
 
 local M = { VERSION = "0.1.0" }
 
@@ -73,6 +75,36 @@ end
 --- `role.has(id, role_name)` → `boolean`（纯读）。
 function M.has(id, role_name)
   return actors.has(id, role_name)
+end
+
+--- `role.grant_skill(id, name, rank?)` → `boolean`（+ 事件 `role.skill_gained`）。
+function M.grant_skill(id, name, rank)
+  return skills.grant_skill(id, name, rank)
+end
+
+--- `role.revoke_skill(id, name)` → `boolean`（+ 事件 `role.skill_lost`）。
+function M.revoke_skill(id, name)
+  return skills.revoke_skill(id, name)
+end
+
+--- `role.charge(id, name)` → 剩余格数（PP 语义；零不减负）。
+function M.charge(id, name)
+  return skills.charge(id, name)
+end
+
+--- `role.recharge(id, name, n?)` → 恢复后的格数（上限由声明的 `charges` 决定）。
+function M.recharge(id, name, n)
+  return skills.recharge(id, name, n)
+end
+
+--- `role.effective(id, attr)` → `number`（基础值 + 合成加成；**纯读，从不写回**）。
+function M.effective(id, attr)
+  return compose.effective(id, attr)
+end
+
+--- `role.compose(fn)` → `true`（替换合成规则 `(base, bonuses) -> number`）。
+function M.compose(fn)
+  return compose.set(fn)
 end
 
 return M
