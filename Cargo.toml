@@ -46,3 +46,9 @@ lto = "fat"
 opt-level = "s"
 codegen-units = 1
 strip = true
+
+# 基准测量口径（r1 ygg-sim）：根 [profile.release] 的 opt-level="s" 是**wasm 体积面**，
+# 直接继承会把 Tier 1 的 tick 时间测成「体积优先」的数字（§5 的 16.6 ms 契约线会假红）。
+# 这里单点覆盖热核 crate 的优化级；其余 crate 仍按体积面优化。
+[profile.release.package.ygg-sim]
+opt-level = 3
