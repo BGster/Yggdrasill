@@ -144,4 +144,159 @@ function M.checker(params, _)
   end)
 end
 
+--- 双倍坐标到中心的距离（`isqrt` 前）：用 `2x-(w-1)` 而不是 `x - (w-1)/2`，
+--- 全程整数且对称轴落在两条中线之间（偶数边长时不会偏向一侧）。
+local function radial_distance(x, y, w, h)
+  local dx = 2 * x - (w - 1)
+  local dy = 2 * y - (h - 1)
+  return mathx.isqrt(dx * dx + dy * dy)
+end
+
+--- `texture.stripes`：沿 `axis` 的条纹（`period` 像素一周期，`duty` 千分比占空）。
+function M.stripes(params, _)
+  local w, h, ch, base, accent, alpha = common(params)
+  local period = spec.int(params, "period", 8, 1, 4096)
+  local duty = spec.int(params, "duty", 500, 0, 1000)
+  local axis = spec.int(params, "axis", 0, 0, 1)
+  return pack(w, h, ch, base, accent, alpha, function(x, y)
+    local at = x
+    if axis == 1 then
+      at = y
+    end
+    if ((at % period) * 1000) // period < duty then
+      return 255
+    end
+    return 0
+  end)
+end
+
+--- `texture.gradient`：线性（`axis` = 0 x / 1 y / 2 对角）或径向（中心亮、边缘暗）。
+function M.gradient(params, _)
+  local w, h, ch, base, accent, alpha = common(params)
+  local shape = spec.one_of(params, "shape", "linear", { linear = true, radial = true })
+  local axis = spec.int(params, "axis", 0, 0, 2)
+  if shape == "radial" then
+    local span = mathx.isqrt((w - 1) * (w - 1) + (h - 1) * (h - 1))
+    return pack(w, h, ch, base, accent, alpha, function(x, y)
+      if span == 0 then
+        return 255
+      end
+      return 255 - radial_distance(x, y, w, h) * 255 // span
+    end)
+  end
+  if axis == 2 then
+    local span = w + h - 2
+    if span <= 0 then
+      span = 1
+    end
+    return pack(w, h, ch, base, accent, alpha, function(x, y)
+      return (x + y) * 255 // span
+    end)
+  end
+  if axis == 0 then
+    local span = w - 1
+    if span <= 0 then
+      return pack(w, h, ch, base, accent, alpha, function()
+        return 0
+      end)
+    end
+    return pack(w, h, ch, base, accent, alpha, function(x)
+      return x * 255 // span
+    end)
+  end
+  local span = h - 1
+  if span <= 0 then
+    return pack(w, h, ch, base, accent, alpha, function()
+      return 0
+    end)
+  end
+  return pack(w, h, ch, base, accent, alpha, function(_, y)
+    return y * 255 // span
+  end)
+end
+
+--- `texture.rings`：以画面中心为圆心的同心环（`period` = 一个环带的双倍直径宽度）。
+function M.rings(params, _)
+  local w, h, ch, base, accent, alpha = common(params)
+  local period = spec.int(params, "period", 8, 1, 4096)
+  return pack(w, h, ch, base, accent, alpha, function(x, y)
+    if ((radial_distance(x, y, w, h) // period) & 1) == 0 then
+      return 255
+    end
+    return 0
+  end)
+end
+
+--- `texture.bricks`：错缝砖墙（`bw` × `bh` 的砖，`mortar` 像素灰缝）。
+function M.bricks(params, _)
+  local w, h, ch, base, accent, alpha = common(params)
+  local bw = spec.int(params, "bw", 16, 2, 4096)
+  local bh = spec.int(params, "bh", 8, 2, 4096)
+  local mortar = spec.int(params, "mortar", 1, 0, 64)
+  local half = bw // 2
+  return pack(w, h, ch, base, accent, alpha, function(x, y)
+    local row = y // bh
+    local offset = (row & 1) * half
+    if ((x + offset) % bw) < mortar or (y % bh) < mortar then
+      return 0
+    end
+    return 255
+  end)
+end
+
+--- 站点表：显式给了就用它（可判定用例走这条），否则按 `cells` 从流里抽。
+---
+--- 等距点取**最小站点索引**（`<` 严格比较 → 先到者胜）：这是 T6 钉的那条。
+function M.voronoi(params, rng)
+  local w, h, ch, base, accent, alpha = common(params)
+  local given = spec.array(params, "sites", nil)
+  local count = spec.int(params, "cells", 8, 1, 64)
+  local sites = {}
+  if given ~= nil then
+    count = #given
+    for i = 1, count do
+      local site = given[i]
+      if type(site) ~= "table" then
+        fail(E.PARAM, "params.sites[" .. i .. "] 必须是 {x, y}")
+      end
+      sites[i] = {
+        x = spec.int(site, "x", 0, 0, w - 1),
+        y = spec.int(site, "y", 0, 0, h - 1),
+      }
+    end
+  else
+    for i = 1, count do
+      sites[i] = { x = rng:int(0, w - 1), y = rng:int(0, h - 1) }
+    end
+  end
+  local tint = spec.array(params, "values", nil)
+  local values = {}
+  for i = 1, count do
+    if tint ~= nil then
+      local v = tint[i]
+      if not spec.is_int(v) or v < 0 or v > 255 then
+        fail(E.PARAM, "params.values[" .. i .. "] 必须是 0..255 的整数")
+      end
+      values[i] = v
+    else
+      values[i] = rng:int(0, 255)
+    end
+  end
+  return pack(w, h, ch, base, accent, alpha, function(x, y)
+    local best = 0
+    local best_distance = 0
+    for i = 1, count do
+      local site = sites[i]
+      local dx = x - site.x
+      local dy = y - site.y
+      local distance = dx * dx + dy * dy
+      if best == 0 or distance < best_distance then
+        best = i
+        best_distance = distance
+      end
+    end
+    return values[best]
+  end)
+end
+
 return M
