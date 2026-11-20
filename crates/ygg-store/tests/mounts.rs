@@ -382,7 +382,7 @@ fn list_shape_is_dense_sorted_and_capped() {
     let big_run = big.join("run");
     let big_mod = big.join("mod");
     fs::create_dir_all(&big_mod).expect("mod dir");
-    let mut big_store = attach(&big_run, &big_mod, json!([{ "name": "w" }]));
+    let big_store = attach(&big_run, &big_mod, json!([{ "name": "w" }]));
     let big_root = big_run.join("mounts").join("w");
     for index in 0..=MOUNT_LIST_MAX_ENTRIES {
         fs::write(big_root.join(format!("f{index:05}.txt")), b"").expect("write entry");

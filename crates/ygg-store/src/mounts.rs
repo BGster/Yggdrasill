@@ -1450,13 +1450,13 @@ mod tests {
         fs::write(root.join("a.txt"), b"hello").expect("write fixture");
         fs::create_dir_all(root.join("sub")).expect("mkdir");
         let file = store.stat("mounts/w/a.txt").expect("stat file");
-        assert_eq!(file.exists, true);
+        assert!(file.exists);
         assert_eq!(file.bytes, 5);
         assert_eq!(file.sha256, crate::sha256_hex(b"hello"));
         assert_eq!(file.kind, MountKind::File);
         assert_eq!(file.kind.as_str(), "file");
         let dir = store.stat("mounts/w/sub").expect("stat dir");
-        assert_eq!(dir.exists, true);
+        assert!(dir.exists);
         assert_eq!((dir.bytes, dir.sha256.as_str()), (0, ""));
         assert_eq!(dir.kind, MountKind::Dir);
         assert_eq!(dir.kind.as_str(), "dir");

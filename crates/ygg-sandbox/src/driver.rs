@@ -79,7 +79,7 @@ use ygg_core::snapshot::{canonical_snapshot, SnapshotError};
 use ygg_core::transition::{run_transition, TransitionError};
 
 use crate::fuel::{self, HookFuelMeter};
-use crate::host_api::{self, HostApi, HostHandles, HostToolRunner, VfsStore};
+use crate::host_api::{self, HostApi, HostHandles, HostToolRunner, MountFs, VfsStore};
 use crate::inject::{self, DeterminismHandle};
 use crate::modules::{ModuleError, ModuleSet};
 use crate::resources::{ResourceError, ResourceTable};
@@ -799,6 +799,12 @@ impl KernelFacade {
     /// 挂载或卸载宿主侧同步工具执行器（供 `ygg.tool.call` 同步调用）。
     pub fn set_tool_runner(&mut self, runner: Option<Box<dyn HostToolRunner>>) {
         self.host.set_tool_runner(runner);
+    }
+
+    /// 挂载或卸载宿主侧文件挂载桥（供 `ygg.fs.*` 的 `mounts/` 面）；
+    /// 卸载后访问 `mounts/…` 抛 `YGG-FS-UNMOUNTED`，旧面 `artifacts/` 不受影响。
+    pub fn set_mount_fs(&mut self, bridge: Option<Box<dyn MountFs>>) {
+        self.host.set_mount_fs(bridge);
     }
 }
 
