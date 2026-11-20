@@ -336,17 +336,18 @@ local function normalize_repo_path(p)
   return table.concat(parts, "/")
 end
 
-test("docs/design 树索引：三模块 + 16 份文件 + README 双向相等 + id 双射", function()
+test("docs/design 树索引：四模块 + 23 份文件 + README 双向相等 + id 双射", function()
   local dir = DESIGN_DIR
 
-  -- ④ 一级子目录恰好三模块；平铺只允许树入口 README.md。
+  -- ④ 一级子目录恰好四模块；平铺只允许树入口 README.md。
   local dirs, flat = list_entries(dir)
   table.sort(dirs)
   table.sort(flat)
-  assert_eq(#dirs, 3, "docs/design 一级子目录必须是三模块，实得：" .. table.concat(dirs, ","))
+  assert_eq(#dirs, 4, "docs/design 一级子目录必须是四模块，实得：" .. table.concat(dirs, ","))
   assert_eq(dirs[1], "host", "一级子目录 1")
   assert_eq(dirs[2], "kernel", "一级子目录 2")
   assert_eq(dirs[3], "mod", "一级子目录 3")
+  assert_eq(dirs[4], "packages", "一级子目录 4")
   assert_eq(#flat, 1, "docs/design/*.md 只允许 README.md，实得：" .. table.concat(flat, ","))
   assert_eq(flat[1], "README.md", "平铺文件或软链 = 留了兼容壳")
 
@@ -360,7 +361,7 @@ test("docs/design 树索引：三模块 + 16 份文件 + README 双向相等 + i
     end
   end
   table.sort(actual)
-  assert_eq(#actual, 16, "契约面应为 16 份文件：" .. table.concat(actual, ","))
+  assert_eq(#actual, 23, "契约面应为 23 份文件：" .. table.concat(actual, ","))
 
   -- ① 索引里的链接集合必须与实文件集合双向相等。
   local readme = read_file(dir .. "/README.md")
