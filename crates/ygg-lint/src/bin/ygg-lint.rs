@@ -30,7 +30,7 @@ use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term::{self, termcolor::Buffer, Config};
 
 use ygg_lint::diagnostic::{Diagnostic, Severity};
-use ygg_lint::pack::{lint_pack, PackOutcome};
+use ygg_lint::pack::{lint_pack_with_packages, PackOutcome};
 use ygg_lint::rules::lint_source;
 
 fn main() {
@@ -111,6 +111,55 @@ fn main() {
     }
 }
 
+/// 从 `<mod>/manifest.json` 的 `packages` 段推导「包模块名 → 展示路径」。
+///
+/// 映射规则与装载期的 `ygg_sandbox::packages` **同一条**（`init` 是包根模块、
+/// 路径段以 `.` 连接、id 的连字符折叠为下划线），此处是它在静态面上的投影：
+/// `ygg-lint` 会被编进 wasm32，不能依赖 `ygg-sandbox`（那会把 mlua 拉进图），
+/// 所以映射在这里是重写的十行而不是复用调用——权威实现仍在 packages.rs。
+///
+/// manifest 缺失 / 不可读 / 无 `packages` 段 ⇒ 空表（不是错误：单文件 Mod 与
+/// 不声明包的 Mod 都走这条，它们本来就没有包名字面）。
+fn package_module_labels(dir: &Path) -> BTreeMap<String, String> {
+    let mut labels: BTreeMap<String, String> = BTreeMap::new();
+    let Ok(text) = fs::read_to_string(dir.join("manifest.json")) else {
+        return labels;
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return labels;
+    };
+    let Some(packages) = manifest.get("packages").and_then(|v| v.as_array()) else {
+        return labels;
+    };
+    for package in packages {
+        let Some(id) = package.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let prefix = format!("pkg.{}", id.replace('-', "_"));
+        let Some(files) = package.get("files").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for file in files {
+            let Some(path) = file.get("path").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(rest) = path.strip_prefix(&format!("{id}/")) else {
+                continue;
+            };
+            let Some(rest) = rest.strip_suffix(".lua") else {
+                continue;
+            };
+            let name = if rest == "init" {
+                prefix.clone()
+            } else {
+                format!("{prefix}.{}", rest.replace('/', "."))
+            };
+            labels.insert(name, path.to_owned());
+        }
+    }
+    labels
+}
+
 /// `--pack` 模式：读 `<mod目录>/pack.json` → 整包检查 → 渲染 / 退出码。
 fn run_pack(dir: &Path, json: bool) -> i32 {
     let pack_path = dir.join("pack.json");
@@ -125,9 +174,13 @@ fn run_pack(dir: &Path, json: bool) -> i32 {
 
     // 读盘由本层注入（lib 不碰文件系统）；顺手留住源码供 codespan 渲染。
     let mut sources: BTreeMap<String, String> = BTreeMap::new();
+    // r2：包模块的声明名集从**本 Mod 的 manifest** 推导（manifest 的 `packages`
+    // 段已逐文件内容寻址，就是权威的「声明了什么」）。因此本工具**不需要**包根：
+    // 它不解析包，只把已声明的名字纳入 require 名字集。
+    let package_modules = package_module_labels(dir);
     let outcome = {
         let sources = &mut sources;
-        lint_pack(&pack_label, &pack_text, |relative| {
+        lint_pack_with_packages(&pack_label, &pack_text, &package_modules, |relative| {
             let text = fs::read_to_string(dir.join(relative)).ok()?;
             sources.insert(relative.to_owned(), text.clone());
             Some(text)
