@@ -17,8 +17,8 @@
 --
 -- # 冷却不是时间
 --
--- 冷却由 `counters`（事件计数）表达，不由时钟：`ygg.ticks()` 有 API 无推进者
--- （恒 0），用它做冷却等于冷却永不过期（契约 I6）。
+-- 冷却由 `counters`（事件计数）表达，不由时钟：宿主的时间面（`ticks()`）有 API
+-- 无推进者（恒 0），拿它做冷却等于冷却永不过期（契约 I6）。
 
 local store = require("pkg.role_skill.store")
 local actors = require("pkg.role_skill.actors")

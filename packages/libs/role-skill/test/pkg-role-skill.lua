@@ -140,6 +140,13 @@ local function new_world()
     end
     tags[id][tag] = true
   end
+  -- 事件日志是**脚手架**：真实宿主把派生事件排队、派发后释放。泄漏用例要测的是包的
+  -- 增长面，不清日志就变成测「日志数组增长」——那是 mock 的性质，不是包的性质。
+  world.clear_events = function()
+    for i = #events, 1, -1 do
+      events[i] = nil
+    end
+  end
   world.reads_now = function()
     return reads
   end
@@ -470,4 +477,188 @@ run("pkg.role-skill.counters-reset", function()
   local before = sorted_keys(world.kv)
   is_true(role.reset_counters(99), "无记录返回 true")
   eq_seq(sorted_keys(world.kv), before, "无记录不写")
+end)
+
+-- ── 用例 14：静态面（零时间源、零属性写回面）──────────────────────────────────
+
+--- 包的源文件清单：来自 manifest 的 packages 段（内容寻址，天然排除 test/**）。
+local function pkg_sources(id)
+  local manifest = rawget(_G, "__MANIFEST")
+  if type(manifest) ~= "table" or type(manifest.packages) ~= "table" then
+    error("manifest 缺 packages 段（载体 pack.json 未声明包或未重算 manifest）", 0)
+  end
+  for i = 1, #manifest.packages do
+    local package = manifest.packages[i]
+    if package.id == id then
+      local out = {}
+      for j = 1, #package.files do
+        out[#out + 1] = package.files[j].path
+      end
+      return out
+    end
+  end
+  error("manifest 的 packages 段没有包 " .. id, 0)
+end
+
+local function source_text(rel)
+  local full = PKG_ROOT .. "/" .. rel
+  local handle = assert(io.open(full, "rb"), "读不到 " .. full)
+  local text = handle:read("a")
+  handle:close()
+  return text
+end
+
+run("pkg.role-skill.static-no-clock", function()
+  local paths = pkg_sources("role-skill")
+  is_true(#paths >= 7, "manifest 里 role-skill 源文件 ≥ 7，实得 " .. #paths)
+  local needles = {
+    "ygg.ticks",
+    "os.clock",
+    "os.time",
+    "math.random",
+    "set_attribute",
+    "entity.set(",
+  }
+  local problems = {}
+  for i = 1, #paths do
+    local text = source_text(paths[i])
+    for j = 1, #needles do
+      if text:find(needles[j], 1, true) ~= nil then
+        problems[#problems + 1] = paths[i] .. " 含 " .. needles[j]
+      end
+    end
+  end
+  is_true(#problems == 0, table.concat(problems, "; "))
+end)
+
+-- ── 用例 15：100 轮授予/撤销不增长（索引只增，技能集回零）────────────────────
+
+run("pkg.role-skill.leak-100-rounds", function()
+  local world = new_world()
+  local role = fresh(world)
+  role.define("warrior", { attrs_spec = { attack = 3 } })
+  is_true(role.grant(1, "warrior"), "grant")
+  for i = 1, 6 do
+    role.skill_define("skill" .. i, { attrs_spec = { attack = i } })
+  end
+
+  local index_before = #codec.decode(world.kv["role.index"])
+  local keys_before = #sorted_keys(world.kv)
+  collectgarbage("collect")
+  collectgarbage("collect")
+  local before = collectgarbage("count")
+
+  for _ = 1, 100 do
+    for i = 1, 6 do
+      role.grant_skill(1, "skill" .. i)
+    end
+    for i = 1, 6 do
+      role.revoke_skill(1, "skill" .. i)
+    end
+    world.clear_events()
+  end
+
+  collectgarbage("collect")
+  collectgarbage("collect")
+  local growth = (collectgarbage("count") - before) / before * 100
+  print(string.format("perf.role-skill.leak_delta_pct=%.3f", growth))
+
+  eq_seq(sorted_keys(record_of(world, 1).skills), {}, "技能集回零")
+  eq(#codec.decode(world.kv["role.index"]), index_before, "索引条目数不变（只增不摘）")
+  eq(#sorted_keys(world.kv), keys_before, "KV 键数不变")
+  is_true(growth <= 1, "100 轮后内存差 ≤ 1%，实得 " .. string.format("%.3f", growth) .. "%")
+end)
+
+-- ── 用例 16：一次 effective 的读次数与实体总数无关（O(1) 的结构证据）───────────
+
+run("pkg.role-skill.perf-o1-structural", function()
+  local world = new_world()
+  local role = fresh(world)
+  role.define("warrior", { attrs_spec = { attack = 3 } })
+  for i = 1, 6 do
+    role.skill_define("skill" .. i, { attrs_spec = { attack = 1 } })
+  end
+
+  --- 直接铺记录：这里测的是 `effective` 的复杂度（与实体**总数**无关）与载荷常驻
+  --- 内存。`grant` 走 KV 时每建一个记录要重写整张 `role.index`（「一个键装整张索引」
+  --- 的固有成本），拿它当 O(1) 的探针会把两件事混在一起——那属于契约 §5 已声明的
+  --- 边界，不是 `effective` 的形状。
+  local function seed(count, first)
+    for id = first or 1, count do
+      local skills = {}
+      for i = 1, 6 do
+        skills["skill" .. i] = { rank = 1 }
+      end
+      world.kv["role.actor." .. id] = codec.encode({
+        counters = {},
+        role = "warrior",
+        skills = skills,
+      })
+      world.set_attr(id, "attack", 10)
+    end
+  end
+
+  -- ① 1k actor（各 1 角色 + 6 技能）的载荷常驻内存
+  collectgarbage("collect")
+  collectgarbage("collect")
+  local before_mem = collectgarbage("count")
+  seed(1000)
+  local mem_kib = collectgarbage("count") - before_mem
+  print(string.format("perf.role-skill.mem_1k_actors_kib=%.1f", mem_kib))
+  is_true(mem_kib <= 1024, "1k actor 载荷 ≤ 1 MiB，实得 " .. string.format("%.1f", mem_kib) .. " KiB")
+
+  -- ② 三档读次数与墙钟
+  local function measure(count)
+    seed(count)
+    local reads_before = world.reads_now()
+    local sample = role.effective(1, "attack")
+    local ops = world.reads_now() - reads_before
+    local began = os.clock()
+    local total = 0
+    for _ = 1, 200 do
+      total = total + role.effective(1, "attack")
+    end
+    local per_call = (os.clock() - began) / 200
+    return ops, per_call, sample, total
+  end
+
+  seed(1)
+  local ops_one, time_one, sample, total = measure(1)
+  local ops_hundred = measure(100)
+  local ops_tenk, time_tenk = measure(10000)
+
+  eq(ops_one, 3, "一次 effective 恰好三次 kv.get")
+  eq(ops_hundred, ops_one, "N=100 同")
+  eq(ops_tenk, ops_one, "N=10k 同")
+  eq(sample, 19, "10 + 3 + 6×1（角色 + 六个技能的加成）")
+  is_true(total > 0, "累加参与（不让 200 次调用被当成不可观测）")
+  print(string.format("perf.role-skill.kv_ops_per_effective=%d", ops_one))
+
+  local ratio = time_tenk / time_one
+  print(string.format("perf.role-skill.time_ratio_10k_over_1=%.3f", ratio))
+  -- 1.5 而不是 1.2：1.2 会被 GC 脉冲打成假红（r1 在 quest 的同类指标上实证过，
+  -- 见 `docs/design/packages/quest.md` §5）。判据要能复算，不能靠运气。
+  is_true(ratio <= 1.5, "墙钟比 ≤ 1.5×，实得 " .. string.format("%.3f", ratio))
+end)
+
+-- ── 用例 17：包加载（清缓存 = 定义表与订阅面一起归零）────────────────────────
+
+run("pkg.role-skill.perf-load", function()
+  local samples = {}
+  for round = 1, 5 do
+    package.loaded["pkg.role_skill"] = nil
+    for name in pairs(package.loaded) do
+      if type(name) == "string" and name:find("^pkg%.role_skill%.") then
+        package.loaded[name] = nil
+      end
+    end
+    local began = os.clock()
+    local module = require("pkg.role_skill")
+    module.install({ codec = codec })
+    samples[round] = (os.clock() - began) * 1000
+  end
+  table.sort(samples)
+  local median = samples[3]
+  print(string.format("perf.role-skill.load_ms=%.3f", median))
+  is_true(median < 10, "包加载 < 10ms，实得 " .. string.format("%.3f", median) .. "ms")
 end)

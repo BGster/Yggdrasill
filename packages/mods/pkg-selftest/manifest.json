@@ -158,14 +158,29 @@
           "sha256": "49f451416fe28e9ee4cab0a6db3aa418d00e7d6884f79d9cc7c8114b1704388f"
         },
         {
-          "byteLength": 2833,
+          "byteLength": 3931,
+          "path": "role-skill/compose.lua",
+          "sha256": "183e52a707b3a1d31642c752cad86275dba3d1a18859bed83bf22bb527b04111"
+        },
+        {
+          "byteLength": 4606,
+          "path": "role-skill/counters.lua",
+          "sha256": "bad78ece1876104000f76cf71cd2ea1bb6152707a33c2fb1b8807c14cfa5d0a5"
+        },
+        {
+          "byteLength": 4399,
           "path": "role-skill/init.lua",
-          "sha256": "d4f47bf0e5c6af64df56f60ef97679799440b875d815be4c0777b66c249740f9"
+          "sha256": "988e1292299dee6cb6a06e11ecfd797678326112d4ef681e48f79683359aa7c3"
         },
         {
           "byteLength": 246,
           "path": "role-skill/pkg.json",
           "sha256": "f3bc9859d7c126c7695052a7b4aca8aca1ba71122858b77690df643b8b888c1e"
+        },
+        {
+          "byteLength": 5416,
+          "path": "role-skill/skills.lua",
+          "sha256": "f6a1385fcef1eb55c5dd469abdb9abfe04540c14db28913dc719dc72085756fa"
         },
         {
           "byteLength": 5805,
