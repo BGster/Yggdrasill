@@ -75,6 +75,29 @@ local function fresh()
   return require("pkg.procgen")
 end
 
+--- 加权用例的共享夹具：合成权重池，`w[i] = 1 + (i*7) % 11`，首末置 0。
+---
+--- 不抄任何业务数据（数据红线），但形状与真用点同：n=20、Σw=109、含零权
+--- （零权落在最外侧，最容易被「回落首项」的实现吃掉）、Σ 不是 2 的幂。
+local function weight_pool()
+  local pool = {}
+  for i = 1, 20 do
+    pool[i] = 1 + (i * 7) % 11
+  end
+  pool[1], pool[20] = 0, 0
+  return pool
+end
+
+--- 四字状态是否不同（只关心「推进了没有」，不比绝对值）。
+local function state_moved(before, after)
+  for i = 1, 4 do
+    if before[i] ~= after[i] then
+      return true
+    end
+  end
+  return false
+end
+
 --- xoshiro128** 的 KAT（参考 C 实现，state = {1,2,3,4} 的前 8 个 next）。
 local KAT = { 11520, 0, 5927040, 70819200, 2031721883, 1637235492, 1287239034, 3734860849 }
 
@@ -612,32 +635,34 @@ run("pkg.procgen.perf-load", function()
   local rate = rates[2]
   print(string.format("perf.procgen.rng_int_per_s=%.0f", rate))
   is_true(rate >= 100000, "取数吞吐 ≥ 100k/s，实得 " .. string.format("%.0f", rate))
+
+  -- 加权抽样吞吐：同一 20 项合成池，**复用权重数组**（调用方的正确用法）。
+  -- 每次现建权重表会翻倍（表分配是主成本），那种用法不作为本包口径。
+  local pool = weight_pool()
+  local weighted_rates = {}
+  for round = 1, 3 do
+    local handle = require("pkg.procgen").rng("throughput/weighted")
+    local began = os.clock()
+    local total = 0
+    for _ = 1, 200000 do
+      total = total + handle:weighted(pool)
+    end
+    weighted_rates[round] = 200000 / (os.clock() - began)
+    is_true(total >= 0, "加权取数结果参与累加（不让整段被当成不可观测）")
+  end
+  table.sort(weighted_rates)
+  local weighted_rate = weighted_rates[2]
+  print(string.format("perf.procgen.rng_weighted_per_s=%.0f", weighted_rate))
+  print(string.format("perf.procgen.weighted_vs_int_ratio=%.2f", rate / weighted_rate))
+  is_true(
+    weighted_rate >= 100000,
+    "加权取数吞吐 ≥ 100k/s，实得 " .. string.format("%.0f", weighted_rate)
+  )
 end)
 
 -- ── 用例 19-23：加权抽样（`rng.weighted`）────────────────────────────────────
 --
--- 权重池一律**合成**（`w[i] = 1 + (i*7) % 11`，首末置 0）：不抄任何业务数据
--- （数据红线），但形状与真用点同（n=20、含零权、Σ 非 2 的幂）。
-
---- 合成权重池：n=20、Σw=109、首末两项零权（零权落在最外侧，最容易被「回落首项」实现吃掉）。
-local function weight_pool()
-  local pool = {}
-  for i = 1, 20 do
-    pool[i] = 1 + (i * 7) % 11
-  end
-  pool[1], pool[20] = 0, 0
-  return pool
-end
-
---- 四字状态是否不同（只关心「推进了没有」，不比绝对值）。
-local function state_moved(before, after)
-  for i = 1, 4 do
-    if before[i] ~= after[i] then
-      return true
-    end
-  end
-  return false
-end
+-- 权重池见文件头的共享夹具 `weight_pool()`（合成、n=20、Σw=109、首末零权）。
 
 -- ── 用例 19：边界与错误码（五个失败路径全落既有六码）─────────────────────────
 
