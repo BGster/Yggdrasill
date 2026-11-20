@@ -372,3 +372,187 @@ run("pkg.quest.advance-to-done", function()
   eq(#events_named(world, "quest.completed"), 1, "completed 恰好一次")
   eq(events_named(world, "quest.completed")[1].payload, tostring(id), "completed 载荷 = id")
 end)
+
+-- ── 用例 6-12：终态、跳步与事件面 ────────────────────────────────────────────
+
+run("pkg.quest.terminal-once", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("short", { steps = { { id = "one" }, { id = "two" } } })
+  local id = quest.open("short")
+  quest.advance(id)
+  eq(quest.advance(id), "done", "到 done")
+  local events_before = #world.events
+
+  -- I3：终态后一切原语被拒，且**零事件**（重复设置终态会让奖励双发）。
+  expect_error("YGG-PKG-QUEST-TERMINAL", function()
+    quest.advance(id)
+  end, "done 后 advance")
+  expect_error("YGG-PKG-QUEST-TERMINAL", function()
+    quest.jump(id, "one")
+  end, "done 后 jump")
+  expect_error("YGG-PKG-QUEST-TERMINAL", function()
+    quest.abandon(id, "late")
+  end, "done 后 abandon")
+  expect_error("YGG-PKG-QUEST-TERMINAL", function()
+    quest.assign(id, 7, 8)
+  end, "done 后 assign")
+  eq(#world.events, events_before, "被拒的调用不得产生事件")
+  eq(quest.get(id).state, "done", "状态不得被改写")
+  eq(quest.get(id).step, 2, "步下标不得被改写")
+
+  -- abandoned 同样是终态（两态各自独立判）。
+  local other = quest.open("short")
+  quest.abandon(other, "cancelled")
+  expect_error("YGG-PKG-QUEST-TERMINAL", function()
+    quest.advance(other)
+  end, "abandoned 后 advance")
+end)
+
+run("pkg.quest.abandon", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+  local id = quest.open("errand")
+
+  is_true(quest.abandon(id, "giver-left"), "abandon 返回 true")
+  eq(quest.get(id).state, "abandoned", "状态落盘")
+  eq(#events_named(world, "quest.abandoned"), 1, "quest.abandoned 恰好一次")
+  eq(events_named(world, "quest.abandoned")[1].payload, id .. "|giver-left", "载荷 = id|reason")
+
+  -- reason 缺省是空串（载荷形状仍定形，不出现 nil）。
+  local second = quest.open("errand")
+  quest.abandon(second)
+  eq(events_named(world, "quest.abandoned")[2].payload, second .. "|", "缺省 reason 落空串")
+
+  -- 放弃的任务不再出现在 open_ids。
+  eq(#quest.open_ids(), 0, "全部任务已放弃")
+end)
+
+run("pkg.quest.jump-audit", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+  local id = quest.open("errand")
+
+  is_true(quest.jump(id, "reward"), "jump 到第三步")
+  eq(quest.get(id).step, 3, "步下标被显式改写")
+  eq(quest.get(id).state, "open", "跳步不进终态")
+  eq(#events_named(world, "quest.jumped"), 1, "quest.jumped 恰好一次")
+  eq(events_named(world, "quest.jumped")[1].payload, id .. "|1|3", "载荷 = id|from|to")
+
+  -- 跳步留痕后仍可继续推进（末步 advance → done）。
+  eq(quest.advance(id), "done", "跳到末步后 advance 转 done")
+end)
+
+run("pkg.quest.jump-unknown-step", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+  local id = quest.open("errand")
+  local events_before = #world.events
+
+  expect_error("YGG-PKG-QUEST-STEP", function()
+    quest.jump(id, "no-such-step")
+  end, "未知步 id")
+  eq(quest.get(id).step, 1, "被拒的 jump 不改步下标")
+  eq(#world.events, events_before, "被拒的 jump 不发事件")
+  eq(#events_named(world, "quest.jumped"), 0, "没有 jumped 事件")
+end)
+
+run("pkg.quest.meta-not-in-flow", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+
+  -- I5：meta 里塞满三个键，推进结果与不塞时逐字段相同。
+  local with_meta = quest.open("errand", {
+    meta = { source = "guild", weight = 3, urgent = true, npc = 42 },
+  })
+  local bare = quest.open("errand")
+  eq(quest.step(with_meta).id, quest.step(bare).id, "起始步相同")
+  eq(quest.advance(with_meta), quest.advance(bare), "第一次推进的 state 相同")
+  eq(quest.get(with_meta).step, quest.get(bare).step, "推进后的步下标相同")
+  eq(quest.get(with_meta).state, quest.get(bare).state, "推进后的 state 相同")
+  eq(quest.step(with_meta).id, quest.step(bare).id, "推进后读到的步 id 相同")
+  eq(quest.advance(with_meta), quest.advance(bare), "第二次推进的 state 相同")
+
+  -- meta 值本身原样可读（它只是数据，不参与判定）。
+  eq(quest.get(with_meta).meta.source, "guild", "string meta")
+  eq(quest.get(with_meta).meta.weight, 3, "number meta")
+  eq(quest.get(with_meta).meta.urgent, true, "boolean meta")
+  eq(quest.get(with_meta).meta.npc, 42, "ref meta")
+
+  -- 事件载荷只有 id 与步下标——不含任何 meta 字段。
+  local advanced = events_named(world, "quest.advanced")[1]
+  eq(advanced.payload, with_meta .. "|2", "advanced 载荷只带 id 与步下标")
+end)
+
+run("pkg.quest.meta-spec-gate", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+
+  -- 未声明的键：拒绝（不是「忽略」——忽略会让存档里出现模板从不认识的字段）。
+  expect_error("YGG-PKG-QUEST-META", function()
+    quest.open("errand", { meta = { difficulty = 5 } })
+  end, "未声明的 meta 键")
+  -- 类型不符：四个词表逐一拒绝。
+  expect_error("YGG-PKG-QUEST-META", function()
+    quest.open("errand", { meta = { weight = "heavy" } })
+  end, "number 位塞字符串")
+  expect_error("YGG-PKG-QUEST-META", function()
+    quest.open("errand", { meta = { urgent = 1 } })
+  end, "boolean 位塞数字")
+  expect_error("YGG-PKG-QUEST-META", function()
+    quest.open("errand", { meta = { npc = 0 } })
+  end, "ref 位塞 0")
+  expect_error("YGG-PKG-QUEST-META", function()
+    quest.open("errand", { meta = { npc = 2.5 } })
+  end, "ref 位塞非整数")
+  -- 被拒的 open 不分配 id（否则 seq 会被空转推进）。
+  eq(world.kv["quest.seq"], nil, "被拒的 open 不写 seq")
+  eq(#quest.open_ids(), 0, "被拒的 open 不产生实例")
+
+  -- giver / taker 的 ref 校验走独立错误码。
+  expect_error("YGG-PKG-QUEST-REF", function()
+    quest.open("errand", { giver = -1 })
+  end, "负 giver")
+  expect_error("YGG-PKG-QUEST-REF", function()
+    quest.open("errand", { taker = "7" })
+  end, "字符串 taker")
+end)
+
+run("pkg.quest.events-exact", function()
+  local world = new_world()
+  local quest = fresh(world)
+  quest.define("errand", errand_spec())
+
+  local a = quest.open("errand")
+  quest.advance(a)
+  quest.jump(a, "reward")
+  quest.advance(a)
+  local b = quest.open("errand")
+  quest.abandon(b, "nope")
+
+  -- I6：「名字集合恰好相等」= 名字数组逐项相等（含次数与顺序），不是「包含」。
+  names_equal(event_names(world), {
+    "quest.opened",
+    "quest.advanced",
+    "quest.jumped",
+    "quest.completed",
+    "quest.opened",
+    "quest.abandoned",
+  }, "事件全序")
+  eq(#events_named(world, "quest.opened"), 2, "opened 两次")
+  eq(#events_named(world, "quest.advanced"), 1, "advanced 一次")
+  eq(#events_named(world, "quest.jumped"), 1, "jumped 一次")
+  eq(#events_named(world, "quest.completed"), 1, "completed 一次")
+  eq(#events_named(world, "quest.abandoned"), 1, "abandoned 一次")
+
+  -- 载荷全部是字符串（标量纪律），且 opened 的第二段就是类型名。
+  for i = 1, #world.events do
+    eq(type(world.events[i].payload), "string", "事件 " .. world.events[i].name .. " 的载荷是字符串")
+  end
+  eq(events_named(world, "quest.opened")[2].payload, b .. "|errand", "opened 载荷 = id|type")
+end)
