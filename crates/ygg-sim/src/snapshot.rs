@@ -41,7 +41,7 @@ use std::collections::BTreeMap;
 
 use crate::archetype::{Archetype, Column};
 use crate::canonical::{FrameReader, FrameWriter};
-use crate::component::{AttrType, CompSet, ComponentDef, EntityId, Registry};
+use crate::component::{AttrType, CompSet, ComponentDef, ComponentId, EntityId, Registry};
 use crate::error::{SimError, SimResult};
 use crate::rng::RngRegistry;
 use crate::store::ArchetypeStore;
@@ -404,6 +404,65 @@ fn read_column(
         }
     }
     Ok(())
+}
+
+/// 把解码出的世界**重绑定**到既有注册表（`restore` 的唯一正确姿势）。
+///
+/// 为什么必须有这一步：内部 `ComponentId` 是**进程局部**的（快照按名称排序重建注册表），
+/// 而系统闭包捕获的是注册时的 id。若 restore 直接换掉注册表，系统就会写到错误的列上——
+/// 一个只会在「存档 → 读档 → 继续跑」时才显形的错误。
+///
+/// 规则：
+/// 1. 既有注册表里的名字**保持原 id**（系统的捕获值继续有效）；
+/// 2. 快照里有、注册表里没有的组件按名称升序**追加**（id 只增）；
+/// 3. archetype 的位集与列下标按映射重写，行与列载荷原样保留。
+///
+/// 于是 `restore(b).snapshot() == b` 仍然成立（快照只认名称），而系统不需要知道任何 id 变了。
+pub fn rebind(decoded: SnapshotState, registry: &mut Registry) -> SimResult<SnapshotState> {
+    let SnapshotState {
+        tick,
+        resources,
+        rng,
+        store,
+    } = decoded;
+    let (old_registry, archetypes, next_id) = store.into_parts();
+    // 旧 id → 新 id（按旧注册表的名称序逐个登记）。
+    let mut map: Vec<ComponentId> = Vec::with_capacity(old_registry.len());
+    for old_id in 0..old_registry.len() as u32 {
+        let name = old_registry.name_of(old_id)?.to_string();
+        let ty = old_registry.type_of(old_id)?;
+        map.push(registry.register(&name, ComponentDef { ty })?);
+    }
+    let mut rebuilt = Vec::with_capacity(archetypes.len());
+    for arch in archetypes {
+        let mut key: CompSet = 0;
+        for old_id in old_registry.ids_of_set(arch.key) {
+            let new_id = *map
+                .get(old_id as usize)
+                .ok_or_else(|| SimError::frame(format!("组件 id {old_id} 超出注册表")))?;
+            key |= 1u128 << new_id;
+        }
+        let mut col_ids = Vec::with_capacity(arch.col_ids.len());
+        for old_id in &arch.col_ids {
+            let new_id = *map
+                .get(*old_id as usize)
+                .ok_or_else(|| SimError::frame(format!("组件 id {old_id} 超出注册表")))?;
+            col_ids.push(new_id);
+        }
+        rebuilt.push(Archetype {
+            key,
+            ids: arch.ids,
+            cols: arch.cols,
+            col_ids,
+        });
+    }
+    let store = ArchetypeStore::from_parts(registry.clone(), rebuilt, next_id)?;
+    Ok(SnapshotState {
+        tick,
+        resources,
+        rng,
+        store,
+    })
 }
 
 /// 从原始字节算 state hash（快照尾 8 字节；见 [`crate::hash::state_hash`]）。

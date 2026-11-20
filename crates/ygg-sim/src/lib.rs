@@ -40,12 +40,18 @@ pub mod component;
 pub mod error;
 pub mod fixed;
 pub mod hash;
+pub mod input;
 pub mod rng;
+pub mod sim;
 pub mod snapshot;
 pub mod store;
+pub mod system;
 
 pub use archetype::{Archetype, Column, ValueRef};
 pub use component::{AttrType, CompSet, ComponentDef, ComponentId, EntityId, Registry};
 pub use error::SimError;
 pub use fixed::Fixed;
+pub use input::ReplayLog;
+pub use rng::RngRegistry;
+pub use sim::{InsertReport, ReplayReport, Sim, SimState, SpawnReport};
 pub use store::ArchetypeStore;

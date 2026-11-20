@@ -72,6 +72,11 @@ impl ArchetypeStore {
         &self.registry
     }
 
+    /// 注册表可写视图（**只有** `restore` 的重绑定路径需要它：快照里可能有本进程还没登记的组件）。
+    pub fn registry_mut(&mut self) -> &mut Registry {
+        &mut self.registry
+    }
+
     /// 全部 archetype（桶下标 = 创建序）。
     pub fn archetypes(&self) -> &[Archetype] {
         &self.archetypes
