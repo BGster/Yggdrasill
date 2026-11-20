@@ -21,20 +21,16 @@
 -- 依赖序单向：codec → entity（`packages/README.md` §3）。
 
 local entity = require("pkg.entity")
+local sha256 = require("pkg.codec.sha256")
 
 local M = { VERSION = "0.1.0" }
+
+-- 依赖记位（`install` 写入；`host()` 读）。
+M.deps = nil
 
 -- 错误码家族 `YGG-PKG-CODEC-<COND>`（契约固定 TYPE / CONFLICT / CHECKSUM；
 -- MISSING / VERSION / HOST 是本实现补齐的家族成员，见 codec.md §8）。
 local E_TYPE = "YGG-PKG-CODEC-TYPE"
-local E_CONFLICT = "YGG-PKG-CODEC-CONFLICT"
-local E_CHECKSUM = "YGG-PKG-CODEC-CHECKSUM"
-local E_MISSING = "YGG-PKG-CODEC-MISSING"
-local E_VERSION = "YGG-PKG-CODEC-VERSION"
-local E_HOST = "YGG-PKG-CODEC-HOST"
-
--- 本实现写出的 `codec_version`。跨版本不做迁移（契约 §1：只拒，不猜）。
-local CODEC_VERSION = "1"
 
 --- 报错：`<码>: <细节>`（level 0 = 不夹带调用点，测试按码做子串断言）。
 local function fail(code, detail)
@@ -43,24 +39,28 @@ end
 
 -- ── 宿主句柄（install 只记 deps；契约 I8 的「不预读不预写」）────────────────────
 
-local installed = nil
-
---- 装配：记下可选依赖。缺省 `{ host = ygg }`，selftest 用 `{ host = mock }` 注入。
+--- 装配：记下可选依赖（`{ host = ... }`；缺省走 `ygg` 全局）。
+---
+--- `M.deps` 是**公开字段**而不是私有 local：装进去的东西应该看得见（用例靠它
+--- 断言装的是哪份 mock；调度处也靠它排查「到底装了没」）。
 function M.install(deps)
-  installed = { host = (type(deps) == "table" and deps.host) or nil }
+  M.deps = { host = (type(deps) == "table" and deps.host) or nil }
   return M
 end
 
---- 取本次调用的宿主句柄（`deps.host` 优先，其次 `ygg` 全局）。
-local function host()
-  local h = installed and installed.host or nil
-  if h == nil then
-    h = ygg
+--- `codec.sha256(bytes)`：纯 Lua SHA-256（64 位小写 hex）。
+---
+--- 为何自己写而不取宿主 `fs.write` 的回值：那一值只能在**落盘之后**得到，而
+--- `checksum(bundle)` 必须在不落盘时就能算（导出侧要把校验和写进 bundle 本体），
+--- 且「导入前先校验」要求能在纯读路径上复核。详见 `sha256.lua` 的头注。
+---
+--- 输入域先在这里收窄：非字符串（表 / 函数 / nil）在进哈希前就报
+--- `YGG-PKG-CODEC-TYPE`，而不是变成 `tostring(table)` 这种带地址的字节。
+function M.sha256(bytes)
+  if type(bytes) ~= "string" then
+    fail(E_TYPE, "sha256 只收字符串，得到 " .. type(bytes))
   end
-  if h == nil then
-    fail(E_HOST, "ygg 不可达：沙箱外调用需 `install({ host = ... })`")
-  end
-  return h
+  return sha256.sha256(bytes)
 end
 
 return M
