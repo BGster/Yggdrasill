@@ -25,6 +25,14 @@
         {
             "id": "dialogue",
             "version": "0.1.0"
+        },
+        {
+            "id": "procgen",
+            "version": "0.1.0"
+        },
+        {
+            "id": "role-skill",
+            "version": "0.1.0"
         }
     ]
 }

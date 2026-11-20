@@ -25,21 +25,21 @@
 | codec | [codec.md](codec.md) | entity | 实现已落地 · test 20 | 3（CDDA / PokeRogue / DCSS） |
 | quest | [quest.md](quest.md) | entity · codec | 实现已落地 · test 24 | 3（PokeRogue / CDDA / DCSS） |
 | dialogue | [dialogue.md](dialogue.md) | quest | 实现已落地 · test 26 | 3（PokeRogue / CDDA / Saltline） |
-| role-skill | [role-skill.md](role-skill.md) | entity · codec | 契约已定 · 代码 P2 待实现 | 3（PokeRogue / DCSS / CDDA） |
-| procgen | [procgen.md](procgen.md) | 无（只依赖确定性种子） | 契约已定 · 代码 P2 待实现 | 3（CDDA / DCSS / Saltline） |
+| role-skill | [role-skill.md](role-skill.md) | entity · codec | 实现已落地 · test 17 | 3（PokeRogue / DCSS / CDDA） |
+| procgen | [procgen.md](procgen.md) | codec（仅摘要面） | 实现已落地 · test 18 | 3（CDDA / DCSS / Saltline） |
 | assetgen（规划项） | `packages/assetgen.md`（P2.5 立项时创建，届时本行改为链接） | procgen（共享 rng 契约） | 规划 | CDDA / DCSS / Saltline |
 
 最后一行是**规划项，不是链接**：P2.5 的硬要求「全部由 seed 驱动、同 seed 同产物字节一致」使它和 [procgen.md](procgen.md) 共享同一份 rng 契约，先建 `assetgen.md` 会迫使 rng 契约写两遍。P0 只登记，立项时创建文件并把本行改成链接。
 
 ## 3. 依赖序
 
-`entity → codec → quest → dialogue → role-skill`，`procgen` 独立、可提前。每条边都是**数据形状**依赖（不是编译依赖）：
+`entity → codec → quest → dialogue → role-skill`，`procgen → codec`（仅摘要面）。每条边都是**数据形状**依赖（不是编译依赖）：
 
 - `codec` 依赖 `entity`：bundle 里的记录形状 = entity §2 的属性袋形状；序列化不能自己发明第二份实体表示。
 - `quest` 依赖 `entity` + `codec`：委托方与承接方是实体 ref；任务实例随 KV 前缀由 codec 点名导出。
 - `dialogue` 依赖 `quest`：任务推进靠 `quest.*` 事件驱动对白，对话包消费事件，不反向调用任务状态机。
 - `role-skill` 依赖 `entity` + `codec`：角色/技能只存引用与计数，属性袋归 entity，存档归 codec。
-- `procgen` 只依赖确定性种子：不依赖其它包，可最先落地；它是唯一一个「产物不落 KV」的包。
+- `procgen` 依赖 `codec`（**仅摘要面**）：`procgen.hash` 借 [codec.md](codec.md) I1 的确定性编码口径，不自己写第二份编码器；PRNG 本身只依赖确定性种子（不依赖其它包），可以最先落地。它是唯一一个「产物不落 KV、defs 也不落 KV」的包——`defs` 由安装期注入 + 运行期注册表（[procgen.md](procgen.md) §2）。
 
 ## 4. 契约章节模板
 
@@ -76,9 +76,10 @@
     --mod packages/mods/pkg-selftest --packages packages/libs [--filter pkg-<name>]
   ```
   为何必须存在这一层：生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远看不到 `pkg.*`（仍为 79/0，这就是回归钉）；而这个夹具的全量计数刚好是可复算的包用例总数。
-  - **声明闭包**：`packages` 段声明 `entity` / `codec` / `quest` / `dialogue` 四包（版本精确 pin）。`pkg.json` 的 `deps` 只表达形状依赖，**闭包由夹具的声明决定**——加一个包 = 夹具 `packages[]` 加一行 + 重算 manifest。
-  - **计数口径**：全量 = 40（entity 18 + codec 20 + 两个冒烟）+ 24（quest）+ 26（dialogue）= **90**；逐包复算 `--filter pkg-entity` → 19、`pkg-codec` → 21、`pkg-quest` → 24、`pkg-dialogue` → 26。`--filter` 过滤的是**文件名**，所以每个包在 `tests/` 下都要有一个同名冒烟文件接住，否则该包单独跑会「没有可执行的测试文件」直接 exit 1。
-  - **冒烟不计数**：`tests/pkg-{quest,dialogue}-smoke.lua` 是 **file 级断言**（`error` ⇒ `file FAIL` ⇒ `ok=0`），只钉「包装载面 + 顶层纯度 + 导出面清单」，不复述 API 函数表（那份真源在行为用例里）。不进 `cases passed=` 的理由：包用例的计数口径是「r1 的 40 + 新增的 50」，载体冒烟计入就会让 90 变成 92。
+  - **声明闭包**：`packages` 段声明 `entity` / `codec` / `quest` / `dialogue` / `role-skill` / `procgen` 六包（版本精确 pin）。`pkg.json` 的 `deps` 只表达形状依赖，**闭包由夹具的声明决定**——加一个包 = 夹具 `packages[]` 加一行 + 重算 manifest。
+  - **计数口径**：全量 = 90（r1/r2 的 entity 18 + codec 20 + 两个冒烟 + quest 24 + dialogue 26）+ **35**（role-skill 17 + procgen 18）= **125**；逐包复算 `--filter pkg-entity` → 19、`pkg-codec` → 21、`pkg-quest` → 24、`pkg-dialogue` → 26、`pkg-role-skill` → 17、`pkg-procgen` → 18。`--filter` 过滤的是**文件名**，所以每个包在 `tests/` 下都要有一个同名冒烟文件接住，否则该包单独跑会「没有可执行的测试文件」直接 exit 1。
+  - **冒烟不计数**：`tests/pkg-{quest,dialogue,role-skill,procgen}-smoke.lua` 与 `tests/pkg-procgen-digest-smoke.lua` 是 **file 级断言**（`error` ⇒ `file FAIL` ⇒ `ok=0`），只钉「包装载面 + 顶层纯度 + 导出面清单（+ 事件名集合、KV 前缀、摘要格式）」，不复述 API 函数表（那份真源在行为用例里）。不进 `cases passed=` 的理由：包用例的计数口径是「90 + 新增的 35」，载体冒烟计入就会让 125 变成 130。
+  - **为什么每包都要一个 mod 侧冒烟**：`--filter` 对 mod 的 `tests/*.lua` 与包的 `test/*.lua` **同时**过滤，mod 侧筛完为空就「没有可执行的测试文件」直接 exit 1——`--filter pkg-procgen-digest` 这种只命中包内文件的过滤器尤其需要一个同名接应文件。
   - **`entries` 必须非空**：打包工具要求资源包至少一个数据条目（`crates/ygg-sandbox/examples/pack.rs`），所以夹具带一条只为满足该硬要求的探针条目（`data/probe.json`），随后 `manifest.json` 由 `cargo run -p ygg-sandbox --example pack -- packages/mods/pkg-selftest --packages packages/libs` 重算，`sh .pi/tools/manifest-verify.sh --mod packages/mods/pkg-selftest` 复核 `pkg_drift=0`。
 - **性能数字**：每包 §5 五个指标必须给数字口径与测量方法（同数据集 / 同机器 / 跑三次取中位）；P0 期填**目标值**，P2 首实现填实测值，偏差回写契约。
 - **不新增存储层**：实体持久化只有一条路——mod KV 命名空间 + codec。每个包的 KV 前缀在它自己的 §2「持久化位置」列声明，前缀单写者（对齐 `mod-package.md` 的 `mod.kv-prefix-owner`）。
