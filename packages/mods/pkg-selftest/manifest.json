@@ -83,9 +83,9 @@
     {
       "files": [
         {
-          "byteLength": 38052,
+          "byteLength": 41911,
           "path": "codec/init.lua",
-          "sha256": "3dbcbc8db8878bf7bf52df1d1f7ffae639d91d953f54a84356f13ecb013473ee"
+          "sha256": "d8c425378ab186b56790ec59b648ba5877a5d13599b46fb05a7e345f4ac459d1"
         },
         {
           "byteLength": 175,

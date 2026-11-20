@@ -39,6 +39,8 @@
 
 **「复用 codec 编码序」= 复用排序规范，不是复用文本容器**（本句是该行的判准，改快照容器前先读）。上表 `Snapshot` 行的「编码序」指 codec 契约里那四条**序**的性质——键/组件名按字节序、整数标量定宽 LE、无浮点、版本前置——而不是「快照是一段确定性 JSON 文本」。Tier 1 快照是**二进制列帧**（`magic | fmt_version | flags | tick | next_entity | 组件名表 | resources | archetype 段 | 尾 digest`），理由是可算的：10⁵ 实体 8 属性转 JSON 文本约 12 MB，`serde_json` 编码 ~150–300 MB/s ⇒ 40–80 ms **仅编码**，再加一次哈希即逼近 §5 的 100 ms 线；同期二进制列拷贝 ≤10 ms。且文本容器要把「数值的十进制文本形态」变成契约的一部分（`-0.0` / `1e3` / 尾随零），那是给确定性凭空加一条待测边界。
 
+**JSON 文本容器归宿主面，不归这里**（P-K A2）：`pkg.codec` 的 `encode`/`decode` 已下沉到 `crates/ygg-sandbox/src/codec_face.rs` 的 `ygg.codec.*` 面（契约 [lua-api.md §3.1.4](lua-api.md)），它复用的是上一条的**序**，容器仍是 JSON 文本（存档兼容面）。`ygg-sim` 保持零 mlua、零浮点 token、二进制帧不变——两侧的序由同一份 fixture 钉住（`crates/ygg-sim/fixtures/canonical-order.json`，两个消费者各断言一次）。
+
 **尾 digest 就是 state hash**：帧末 8 字节小端 = `fnv1a64(帧去尾 digest)` = `hash()` 的返回值。于是 `restore(b)` 的校验与 `hash()` 的取值是**同一个数、同一次计算**——不存在「restore 通过了但 hash 不同」这种要第三种解释的状态。
 
 **组件形状：Tier 2 属性袋的类型词汇 + 命名投影**（`required` / `default` 不下沉的裁决理由同段末）：

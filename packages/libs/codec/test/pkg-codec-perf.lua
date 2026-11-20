@@ -238,6 +238,21 @@ print(
   )
 )
 
+-- decode：同一份文本解回 Lua 值（契约 §5 的第五条；此前没有这一行——`decode`
+-- 一直被 import 路径掩盖着，而它的吞吐是 `read` 的天花板）。
+local decode_began = os.clock()
+local decoded = codec.decode(text)
+local decode_elapsed = os.clock() - decode_began
+print(
+  ("PERF codec.decode=%.3f MB in %.1f ms  (%.2f MB/s)"):format(
+    #text / (1024 * 1024),
+    decode_elapsed * 1000,
+    (#text / (1024 * 1024)) / decode_elapsed
+  )
+)
+must(decoded ~= nil, "decode 必须解出值")
+must((#text / (1024 * 1024)) / decode_elapsed >= 1.0, "decode 吞吐跌破 1 MB/s（解释器路径的回退口径）")
+
 -- sha256：64 KiB 样本的 MB/s + 整份耗时**估算**（显式标注为估算）。
 local sample = text:sub(1, SHA_SAMPLE_BYTES)
 local sha_began = os.clock()
@@ -338,4 +353,35 @@ do
     )
   )
   must(drift <= 0.01, ("100 轮后内存增长 %.3f%% > 1%%"):format(drift * 100))
+end
+
+-- ── ⑤ 键序排序的规模行为（归并排序 O(n log n) vs 旧插入排序 O(n²)）──────────
+--
+-- 口径：同一 `codec` 实例、同一台机、逆序插入逼最坏路径。旧插入排序实测
+-- 2 000 键 51.4 ms、4 000 键 174.8 ms（键数 ×2 ⇒ 耗时 ×3.4，二次行为）。
+-- 这里给**绝对**上界而不是比值：比值在 3.4 与 2.2 之间太窄，机器抖动会打架。
+
+do
+  local target = new_world()
+  local _, codec_w = fresh(target)
+  local function measure(width)
+    local value = {}
+    for i = width, 1, -1 do
+      value[("k%05d"):format(i)] = i
+    end
+    local began = os.clock()
+    codec_w.encode(value)
+    return (os.clock() - began) * 1000
+  end
+  local small = measure(2000)
+  local large = measure(4000)
+  print(
+    ("PERF codec.wide_keys_ms=2000:%.2f/4000:%.2f  (ns/key %.0f/%.0f)"):format(
+      small,
+      large,
+      small * 1e6 / 2000,
+      large * 1e6 / 4000
+    )
+  )
+  must(large <= 40, ("4 000 键耗时 %.2f ms > 40：键序排序退回二次行为？"):format(large))
 end

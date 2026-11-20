@@ -1,0 +1,35 @@
+{
+  "_comment": "canonical-order.json —— 规范序的唯一 fixture。两个消费者（ygg-sim 的快照组件名表 / ygg-sandbox 的 codec 键序）各断言一次：names 洗序注册/插入，期望序 = expected（UTF-8 字节序升序）。改这个文件等于改两个平面的契约。",
+  "names": [
+    "zed",
+    "A1",
+    "任务",
+    "_x",
+    "z",
+    "aa",
+    "B",
+    "0",
+    "Z",
+    "a",
+    "_",
+    "9",
+    "ygg",
+    "Ä"
+  ],
+  "expected": [
+    "0",
+    "9",
+    "A1",
+    "B",
+    "Z",
+    "_",
+    "_x",
+    "a",
+    "aa",
+    "ygg",
+    "z",
+    "zed",
+    "Ä",
+    "任务"
+  ]
+}

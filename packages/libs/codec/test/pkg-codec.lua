@@ -323,6 +323,37 @@ run("pkg.codec.encode-key-order", function()
   eq(codec.encode({ z = 1, A = 2, _x = 3 }), '{"A":2,"_x":3,"z":1}', "大小写与下划线的字节序")
   eq(codec.encode({}), "{}", "空表编码为对象")
   eq(codec.encode({ 1, 2, 3 }), "[1,2,3]", "序列编码为数组")
+
+  -- 宽表（契约基准集的 `kv` 段就是 2 000 键，见 §5）：键序不因排序算法实现而变。
+  -- 逆序插入逼出最坏插入序，输出里的键必须**严格升序**出现。
+  local WIDTH = 1000
+  local wide = {}
+  for i = WIDTH, 1, -1 do
+    wide[("k%04d"):format(i)] = i
+  end
+  local text = codec.encode(wide)
+  local cursor = 1
+  local seen = 0
+  local previous = nil
+  while true do
+    local start, finish = text:find('"k%d%d%d%d"', cursor)
+    if start == nil then
+      break
+    end
+    local key = text:sub(start + 1, finish - 1)
+    if previous ~= nil then
+      is_true(previous < key, "宽表键序必须严格升序：" .. previous .. " → " .. key)
+    end
+    previous = key
+    seen = seen + 1
+    cursor = finish + 1
+  end
+  eq(seen, WIDTH, "宽表：全部键都必须出现在输出里")
+  local forward = {}
+  for i = 1, WIDTH do
+    forward[("k%04d"):format(i)] = i
+  end
+  eq(codec.encode(forward), text, "宽表：正序插入与逆序插入字节相同")
 end)
 
 run("pkg.codec.encode-number-form", function()

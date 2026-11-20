@@ -64,6 +64,30 @@ bundle（导出物，也是导入物的唯一形状）：
 
 **sha256 来源（D11 已定稿）**：包内自算（`pkg.codec.sha256`，纯 Lua FIPS 180-4），**不是**宿主值。P0 写的 FNV-1a 降级路径**退役**：纯 Lua sha256 已就位（已知答案向量见 §7），且 P1 挂载桥已落地。宿主 `ygg.fs.write` 回的 `sha256` 由「来源」降为「互校」——两者不一致即 `YGG-PKG-CODEC-CHECKSUM`，不选一个信。为何不能拿宿主值当来源：它只能**落盘之后**得到，而 `checksum(bundle)` 必须在落盘前就能算（导出侧要把校验和写进 bundle 本体），且 `read` 要在纯读路径上复核「盘上没被改过」。
 
+### 4.1 下沉边界（原生加速面与回退）
+
+序列化的**字节产出**（`encode` / `decode`）下沉到宿主面 `ygg.codec.{encode,decode}`（契约 [kernel/lua-api.md §3.1.4](../kernel/lua-api.md#314-codec-确定性-json-编解码面宿主注入)，实现 `crates/ygg-sandbox/src/codec_face.rs`）。包内 Lua 实现**不下沉、不删**：它是**规范执行体**（本文 I1 的可执行形态），原生面是它的**符合实现**。两者之间唯一的判据是**逐字节相等**，不是「功能一致」。
+
+| 面 | 去向 | 理由 |
+| --- | --- | --- |
+| `encode` / `decode` 的字节产出 | **下沉**（面在场时由原生计算） | 逐节点成本 `964 ns/节点`（10k 实体实测），是解释器常数项；原生侧同遍历 `22 ns/节点` |
+| `sha256` | 不动 | 另一条热路径（纯 Lua FIPS 180-4），已排期 S19 |
+| `export` | 不动 | 成本在逐实体 `pkg.entity` 面调用，属 Tier 2 布局，已排期 S20 |
+| `checksum` / `write` / `read` / `import` / `roundtrip` | 不动（内部那次 `encode` 顺带变快） | 与 S16 的 `write` 自校缺陷同一改动面；本包只承诺 `encode`/`decode` 两行数字 |
+
+**委托与回退（包侧唯一改动，`init.lua` 的 `M.encode` / `M.decode` 两处）**：面在场 ⇒ `pcall` 调原生，成功即返回；面缺席 ⇒ 直接走 Lua 路径。两条都由测试钉住：
+- **缺席**是既有契约（裸沙箱只有 `ygg = { engine_version }`，`crates/ygg-sandbox/tests/packages_sandbox.rs` 用例 ② 断言该路径的字节）；
+- **在场**由 `cargo test -p ygg-sandbox --test codec_face` 与 `--test codec_bench` 断言（键集闭集、同面 before/after、差分字节相等）。
+
+**两个错误码的边界**：`YGG-CODEC-UNSUPPORTED`（值域拒绝，或值里出现带元方法的表）⇒ 包**回退 Lua 路径重跑**，于是错误文案只有一处来源（本包的 `fail(...)`），不维护第二套字符串契约；`YGG-CODEC-INTERNAL`（原生实现内部失败）⇒ 包报 `YGG-PKG-CODEC-HOST` 并**不回退**（缺陷必须响，静默降级会把 bug 藏成「性能偶尔不达标」）。带元方法的表整值回退是刻意的：Lua 的 `pairs` 与 `t[i]` 分别会走 `__pairs` / `__index`，复刻它们等于「编码过程中执行 Lua 代码」。
+
+**差分门禁（改任一侧都必须跑）**：`cargo test -p ygg-sandbox --test codec_face`。语料 = `pkg-codec.lua` 行为用例的全部值形状 + 边界集（`1` vs `1.0`、`-0.0`、NaN/±inf、深度 64/65、环、`\u0000`/`\u007f`、代理对、非法转义、残留字节）+ 10⁴ 实体集 + 2 000 个 fuzz 值；判据是**双向**：`native_encode(v) == lua_encode(v)` 逐字节，且 `native_decode(t)` 与 `lua_decode(t)` 深度等价（含数字子类型）。附加一条：合法语料直调 `codec_face::encode/decode` 必须 `Ok`——否则「把合法值误判为非法」会让包静默回退，字节相等看不出来，只丢性能。
+
+**与 Tier 1 快照编码器的关系**：复用它的**规范序纪律**（键/名按 UTF-8 字节序升序，[kernel/sim-kernel.md §2](../kernel/sim-kernel.md) 的「复用排序规范 ≠ 复用文本容器」），**不**复用它的容器：`ygg-sim` 无 mlua（拿不到 Lua 值）、`src/**` 禁浮点 token（`f64` 数字格式化放不进去）、快照是带 magic 与尾 digest 的二进制列帧（本包的对外格式是 JSON 文本，是存档兼容面）。两者的一致性用**同一份 fixture** 钉住（`crates/ygg-sim/fixtures/canonical-order.json`，两个消费者各断言一次），而不是互相引用说法。
+
+**判据**：① 阻断——只改一侧（原生或 Lua）就交付；用二进制容器换吞吐（破存档兼容）；把 `UNSUPPORTED` 改成静默返回半截字节；② 症状——同一输入两条路径字节不同、带 `__pairs` 的表编码结果漂移、旧档 `read` 报 `CHECKSUM` 不符；③ 确认——`cargo test -p ygg-sandbox --test codec_face`（差分全绿 + 无误拒）、`--test codec_bench`（`codec_native.encode_mbps ≥ 30` 且同面打印 `codec_lua.*`）、`pkg-selftest` 的 `cases passed=155 failed=0`。
+
+
 ## 5. 性能预算
 
 **本包是序列化吞吐的唯一口径定义处**：基准集 = 10k 实体（每实体 8 属性 + 3 tag）+ KV 前缀 `quest` / `dlg` 各 1k 条；同机器、跑三次取中位。
@@ -87,6 +111,20 @@ bundle（导出物，也是导入物的唯一形状）：
 | `import` | 173 实体/秒 | **3,573 实体/秒** | **20×** | 同上（校验和要先 `encode` 一遍，两个缺陷叠加在 import 路径上） |
 
 修正手法：拼接改**两两合并**（对数轮）、转义改 pattern 一次跳到下一个需转义字节（C 层扫描）+ 整段原字一次取出、浮点精度试探的格式串提到模块级。
+
+**下沉前后的同面 before/after（P-K A2，§4.1 原生面）**。两个测面必须分清，否则数字没有意义：
+
+| 测面 | 口径 | Lua 径 | 原生径 | 倍率 |
+| --- | --- | --- | --- | --- |
+| **契约面**（普通 Lua，`--example selftest`，debug 构建） | 本文件 §5 的基准集与复算命令 | encode **2.48 MB/s**（642.8 ms）、decode **1.91 MB/s**（832.3 ms） | 无（面只在宿主里） | — |
+| **运行面**（真沙箱，`cargo test --release -p ygg-sandbox --test codec_bench`） | 同 10⁴ 实体 + 2k KV、同进程、三次中位 | encode 7.79 / decode 7.19 MiB/s | encode **60.92** / decode **59.57 MiB/s** | **7.82× / 8.29×** |
+
+三条必须一起读的结论：
+
+1. **绝对判据过线**：原生 encode 60.92 MiB/s、decode 59.57 MiB/s，对「≥30 MiB/s」各留 **2.0×** 余量（预算 53.1 ms / 实测 26.2 ms）。
+2. **「≥10×」的基准面要说清**：契约记的 2.77 MB/s 是 **debug** 构建的读数；同一个 Lua 实现在 release 下本来就有 7.79 MiB/s。所以对 debug 基线是 **22×**，对同面（release）基线是 **7.8×/8.3×**——两个数字都成立，但只有后者是「同一次运行里 before 与 after」比出来的。
+3. **回退路径没有退化**：契约面 encode 从 2.34 升到 2.48 MB/s（`sort_names` 的 O(n²)→O(n log n) 顺手带来的），decode 1.91 与基线 1.86 同带。
+
 
 ## 6. 用点计划
 
@@ -116,4 +154,8 @@ bundle（导出物，也是导入物的唯一形状）：
 
 **性能上的一条硬教训（写在这里是因为它会重犯）。** Lua 字符串不可变，`out = out .. part` 写在循环里就是 O(n²)：1.6 MB 的 bundle 跑了 **43 秒**（0.04 MB/s）。同时，逐字节 `sub(i, i)` 拼接会为同一份文本产出**百万级片段**，内存与拼接两头都掌不住。两处都改掉之后 encode 到 **2.77 MB/s**（69×）。结论：在这个沙箱里，「看上去无害的字符串相加」是本包第一个要怀疑的对象；拼接只写在两两合并或先批量再合并的形态里。
 
-**判据（①②③）。** ① 阻断——同一实体在两个游戏里用两套序列化；导入冲突策略隐式（靠 id 大小碰运气）；checksum 缺失导致半读的坏档被接受。② 症状——读档两次实体翻倍；同一份 bundle 在两台机器上字节不同导致「存档校验失败」查不出原因；坏档只报「某个字段是 nil」。③ 确认——本文件被索引；`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-codec` 的 `cases passed=` 含 20 条 `pkg.codec.*`；§5 吞吐表有 before/after 数字与复算命令。
+**为什么“同一份实现”变成了两份，而规范仍然只有一份（P-K A2 的裁决，2026-11）。** 下沉的载体是宿主面 `ygg.codec.*`（[kernel/lua-api.md §3.1.4](../kernel/lua-api.md)），不是 Tier 1 快照编码器：`ygg-sim` 没有 mlua（拿不到 Lua 值）、`src/**` 禁浮点 token（JSON 数字的最短往返必须有 `f64`）、快照是带尾 digest 的二进制列帧（本包的容器是 JSON 文本，是存档兼容面）。于是「Rust 一份 + Lua 一份」是结构事实，不是选择。
+它之所以不构成第二条规范，靠三条纪律而不是自觉：① 规范的唯一处仍是本文 I1 与 `init.lua` 的那四个函数（原生面被定义为**符合实现**）；② 判据是**逐字节相等**且由差分用例钉住（语料 = 行为用例值形状 + 边界集 + 10⁴ 实体集 + 2 000 fuzz；改任一侧必跑 `cargo test -p ygg-sandbox --test codec_face`）；③ 原生面拒绝的输入（值域错 / 带元方法的表）**回退 Lua 重跑**，于是错误文案只有一处来源——不维护第二套字符串契约。
+反方案：换二进制容器（内存里再快 2–3×，但存档格式换代、旧档全部不可读，而本文 §1 明确「不做版本迁移」）；或让 Tier 1 快照编码器兼职（三条结构证据都不允许）。这两条都在计划稿 §2.3/§3.1 算过账，结论是**不值得**：≥30 MiB/s 的判据已经用兼容格式过线，换容器买不到这个需求需要的任何东西。
+
+**判据（①②③）。** ① 阻断——同一实体在两个游戏里用两套序列化；导入冲突策略隐式（靠 id 大小碰运气）；checksum 缺失导致半读的坏档被接受；只改原生或只改 Lua 就交付。② 症状——读档两次实体翻倍；同一份 bundle 在两台机器上字节不同导致「存档校验失败」查不出原因；坏档只报「某个字段是 nil」。③ 确认——本文件被索引；`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-codec` 的 `cases passed=` 含 20 条 `pkg.codec.*`；§5 吞吐表有 before/after 数字与复算命令。
