@@ -238,6 +238,21 @@ print(
   )
 )
 
+-- decode：同一份文本解回 Lua 值（契约 §5 的第五条；此前没有这一行——`decode`
+-- 一直被 import 路径掩盖着，而它的吞吐是 `read` 的天花板）。
+local decode_began = os.clock()
+local decoded = codec.decode(text)
+local decode_elapsed = os.clock() - decode_began
+print(
+  ("PERF codec.decode=%.3f MB in %.1f ms  (%.2f MB/s)"):format(
+    #text / (1024 * 1024),
+    decode_elapsed * 1000,
+    (#text / (1024 * 1024)) / decode_elapsed
+  )
+)
+must(decoded ~= nil, "decode 必须解出值")
+must((#text / (1024 * 1024)) / decode_elapsed >= 1.0, "decode 吞吐跌破 1 MB/s（解释器路径的回退口径）")
+
 -- sha256：64 KiB 样本的 MB/s + 整份耗时**估算**（显式标注为估算）。
 local sample = text:sub(1, SHA_SAMPLE_BYTES)
 local sha_began = os.clock()
