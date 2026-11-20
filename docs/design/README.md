@@ -17,7 +17,7 @@ docs/design/
 │   └── harness-tools.md  lanes.md
 ├── mod/               # ③ agent-seed mod
 │   ├── mod-package.md  prompt-surface.md  tool-bridge.md
-│   └── action-faces.md  identity.md
+│   └── action-faces.md  identity.md  testing-strategy.md
 └── packages/          # ⑤ packages 通用能力层（7）：README + entity / codec / quest / dialogue / role-skill / procgen
 ```
 

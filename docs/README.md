@@ -21,11 +21,12 @@ docs/
 │   ├── req-acts/            # 需求级九幕聚合三份：intake(1-3) / delivery(4-6) / integration(7-9)
 │   ├── rituals/             # 按动作时点：dispatch / cleanup / fallback / read-gate
 │   ├── copy/                # 文案契约：README + flow / harness / lanes / map-guide / requirements / settlement / core
-└── design/              # 设计契约树（有代码消费者的「改前必守」）——三模块，入口 design/README.md
+└── design/              # 设计契约树（有代码消费者的「改前必守」）——四模块，入口 design/README.md
     ├── README.md              # 树入口：模块 → 文件 → 召回时点（索引完备性由机检断言）
     ├── kernel/                # ① ygg 内核（6）：state-machine / events（39 口径）/ state-surface / wire-protocol / lua-api / compaction
     ├── host/                  # ② egg CLI 与 host（4）：cli-daemon / serve / harness-tools / lanes
-    └── mod/                   # ③ agent-seed mod（5）：mod-package / prompt-surface / tool-bridge / action-faces / identity
+    ├── mod/                   # ③ agent-seed mod（6）：mod-package / prompt-surface / tool-bridge / action-faces / identity / testing-strategy
+    └── packages/              # ⑤ packages 通用能力层（7）：README + entity / codec / quest / dialogue / role-skill / procgen
 ```
 
 > **两棵树的判据**：`design/` = 改之前必须遵守的契约（**有代码消费者**）；`context/` = 我要理解/执行这个工作流（**无代码消费者**）。判定三步与反例见 [wiki-governance.md](wiki-governance.md)「design / context 二分判据」。
@@ -53,7 +54,7 @@ docs/
 
 ## 导航表 · 设计契约（design/）
 
-三模块，入口 [design/README.md](design/README.md)（模块 → 文件 → 召回时点）。判据：**有代码消费者**。
+四模块，入口 [design/README.md](design/README.md)（模块 → 文件 → 召回时点）。判据：**有代码消费者**。
 
 ### ① kernel · ygg 内核
 
@@ -95,7 +96,7 @@ docs/
 
 ## 阅读路径
 
-- **新执行者（plan/development 前）**：[CONTEXT.md](CONTEXT.md)（壳）→ [context/README.md](context/README.md)（召回入口：时点 → 文件）→ [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) → 当前幕对应的 `context/acts/<act>.md` 与 `context/req-acts/<stage>.md` → [context/rituals/dispatch.md](context/rituals/dispatch.md) → 本需求触碰的子系统契约文件（入口 [design/README.md](design/README.md)，按 kernel / host / mod 三模块取；见 brief 的 `Mandatory references:` 行；plan 对照 playbook run_machine/actions，development 再对照 gates/live_evidence）。
+- **新执行者（plan/development 前）**：[CONTEXT.md](CONTEXT.md)（壳）→ [context/README.md](context/README.md)（召回入口：时点 → 文件）→ [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) → 当前幕对应的 `context/acts/<act>.md` 与 `context/req-acts/<stage>.md` → [context/rituals/dispatch.md](context/rituals/dispatch.md) → 本需求触碰的子系统契约文件（入口 [design/README.md](design/README.md)，按 kernel / host / mod / packages 四模块取；见 brief 的 `Mandatory references:` 行；plan 对照 playbook run_machine/actions，development 再对照 gates/live_evidence）。
 - **决策检索**：没有决策台账也没有编号——逐条裁决都写在它治理的那份文件的「设计依据」段（规范 + 依据 + 三问判据）。从 [design/README.md](design/README.md)（触碰面 → 文件）或 [wiki-governance.md](wiki-governance.md)（治理法则）进。
 - **门禁核验**：[requirement-story.md](context/story/requirement-story.md)（九幕/转场）+ [state-surface.md](design/kernel/state-surface.md)（拒绝面）+ [context/req-acts/integration.md](context/req-acts/integration.md)（集成分工）。
 - **CLI/契约/serve 开发**：[cli-daemon.md](design/host/cli-daemon.md)、[action-faces.md](design/mod/action-faces.md)、[wire-protocol.md](design/kernel/wire-protocol.md)、[serve.md](design/host/serve.md)。
