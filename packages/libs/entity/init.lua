@@ -7,11 +7,13 @@
 --
 -- # 实现纪律（沙箱方言；契约 §8「设计依据」记着为什么）
 --
--- 1. **没有标准库表**：沙箱 globals 里 `string` / `table` / `utf8` / `coroutine`
---    全为 nil（`crates/ygg-sandbox/src/sandbox.rs` 的白名单测试钉死）。字符串操作
---    只能走方法语法（`("x"):sub(1, 1)`），表工具（排序 / 拼接）手写在下面。
---    本文件里若出现标准库表的点式调用，就会在真实跑局里 nil-index 崩，
---    而 selftest（普通 Lua）**看不出来**——所以交付门禁带一条静态 grep。
+-- 1. **没有标准库表**：沙箱 globals 里 `string` / `table` / `utf8` / `coroutine` /
+--    `math` 全为 nil（`crates/ygg-sandbox/src/sandbox.rs` 的白名单测试钉死；`math`
+--    在 driver 路径由 `inject::install` 注入，裸沙箱缺席——包不得依赖那条注入）。
+--    字符串操作只能走方法语法（`("x"):sub(1, 1)`），表工具（排序 / 拼接）与
+--    整/浮判据手写在下面。本文件里若出现标准库表的点式调用，就会在真实跑局里
+--    nil-index 崩，而 selftest（普通 Lua）**看不出来**——所以交付门禁带一条静态
+--    grep（`tests/packages_sandbox.rs` 用例 ③）。
 -- 2. **模块顶层纯**：只有 local / 常量 / 函数定义。任何 `ygg` 访问都发生在被调用
 --    的函数体里，且经 `host()` 单点取句柄。
 -- 3. **名字字符集** `^[A-Za-z_][A-Za-z0-9_.:-]*$`：名表是换行连接的字符串（KV 存
@@ -76,8 +78,40 @@ local function name_ok(name)
 end
 
 --- 有限数（NaN / ±∞ 不是属性值：内核 `EntityStore::set_attribute` 同样拒）。
+---
+--- `v - v == 0` 同时排除两类：`inf - inf = nan ≠ 0`、`nan - nan = nan ≠ 0`；
+--- 有限数恒 `0`。调用点全在 `type(v) == "number"` 之后（`value_ok` 先判类型）。
 local function finite(v)
-  return v == v and v ~= math.huge and v ~= -math.huge
+  return v - v == 0
+end
+
+--- 数是不是 Lua 5.4 的 **integer**（与 `pkg.codec` 的同名谓词各自一份）。
+---
+--- 沙箱不保证注入面那个整/浮类型函数（`math` 只由驱动注入，包不得依赖它，见文件头
+--- 第 1 条），而整数与浮点在算术、比较、`//`、`%` 下完全不可区分（`1 == 1.0`）。能
+--- 区分身份的只剩文本形态：整数按 `%d` 打印（无 `.`、无 `e`），浮点按 `%.14g` 打印
+--- 且「整数形」补 `.0`（`tostring(1)="1"` / `tostring(1.0)="1.0"`）。
+---
+--- 为什么不能写 `v % 1 == 0`：`2.0 % 1 == 0.0`，整值浮点会被吞成整型。而 `ref` 值域与
+--- `set` 的同值判定都以**身份**为判据（KV 写 `tostring(id)`，`2` 与 `2.0` 是两个键）。
+---
+--- 只用 `:byte` 不引入 pattern：与上面 `name_ok` 同一条纪律（`string` 全局缺席，
+--- 字符串方法经元表可达）。
+---
+--- 不抽第三个包：与 `codec` 各自一份，是「抽出去就多一条依赖边」的同一笔账
+--- （契约 §1.4）。
+local function is_integer(v)
+  if type(v) ~= "number" or v - v ~= 0 then
+    return false
+  end
+  local text = tostring(v)
+  for i = 1, #text do
+    local b = text:byte(i)
+    if b == 46 or b == 101 then -- '.' / 'e'
+      return false
+    end
+  end
+  return true
 end
 
 --- 换行分隔的名表 → 数组（空串 → 空数组）。
@@ -183,7 +217,7 @@ local function value_ok(kind, v)
   elseif kind == "boolean" then
     return type(v) == "boolean"
   elseif kind == "ref" then
-    return type(v) == "number" and math.type(v) == "integer" and v >= 1
+    return type(v) == "number" and is_integer(v) and v >= 1
   end
   return false
 end
@@ -292,7 +326,7 @@ local function compile_spec(schema_name, raw)
   }
 end
 
---- 两份 spec 是否逐字段相同（缺省值的 `math.type` 也比：`1` 与 `1.0` 落盘即两样）。
+--- 两份 spec 是否逐字段相同（缺省值的整/浮身份也比：`1` 与 `1.0` 落盘即两样）。
 local function spec_equal(a, b)
   if #a.attrs ~= #b.attrs or #a.tags ~= #b.tags then
     return false
@@ -308,7 +342,7 @@ local function spec_equal(a, b)
       return false
     end
     if x.has_default then
-      if math.type(x.default) ~= math.type(y.default) or x.default ~= y.default then
+      if x.default ~= y.default or is_integer(x.default) ~= is_integer(y.default) then
         return false
       end
     end
@@ -681,7 +715,7 @@ end
 ---
 --- 同值写入返回 `false` 且**不发事件**（契约 I6）——“有没有变”由本包判定而不交给
 --- 内核：内核 `set_attribute` 对同值写只做到「不计 revision」，而事件的恰好一次
---- 是本包的语义。`math.type` 参与比较：`1` 与 `1.0` 在存诸面是两个值。
+--- 是本包的语义。整/浮身份参与比较：`1` 与 `1.0` 在存诸面是两个值。
 function M.set(id, key, value)
   local h = host()
   if not alive(h, id) then
@@ -700,7 +734,7 @@ function M.set(id, key, value)
     )
   end
   local current = h.entity.get_attribute(id, key)
-  if current ~= nil and current == value and math.type(current) == math.type(value) then
+  if current ~= nil and current == value and is_integer(current) == is_integer(value) then
     return false
   end
   h.entity.set_attribute(id, key, value)

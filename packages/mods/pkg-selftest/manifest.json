@@ -138,9 +138,9 @@
     {
       "files": [
         {
-          "byteLength": 29297,
+          "byteLength": 30934,
           "path": "entity/init.lua",
-          "sha256": "0f29b9e14210dd64c7a1469b4590f7eda6d5a9029bba0ae9f120987b1355f84c"
+          "sha256": "b103cfeb4ff2305d0c5fd5b799a8e0db6a0ade200515b70c7b3424ef7f90a67d"
         },
         {
           "byteLength": 139,
