@@ -14,6 +14,10 @@
         "code": {
             "type": "array",
             "items": { "$ref": "#/$defs/codeEntry" }
+        },
+        "packages": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/packageEntry" }
         }
     },
     "$defs": {
@@ -49,6 +53,35 @@
                 "path": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9_/]*[.]lua$",
+                    "maxLength": 256
+                },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "byteLength": { "type": "integer", "minimum": 1 }
+            }
+        },
+        "packageEntry": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "files"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]*$"
+                },
+                "files": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/packageFile" }
+                }
+            }
+        },
+        "packageFile": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "byteLength"],
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9_/]*[.](lua|json)$",
                     "maxLength": 256
                 },
                 "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

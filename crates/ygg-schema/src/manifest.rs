@@ -29,6 +29,11 @@ pub const RESOURCE_SCHEMA_PREFIX: &str = "https://yggdrasill.dev/schemas/v1/";
 /// 管数据资源（manifest 必填），code 管可 `require` 的模块源码（可选，缺失即
 /// 单文件 Mod）。两者不混入同一数组——资源的 schema 分发校验与模块的
 /// `ModuleSet` 登记是两条装载面，混装会让「谁是模块」要靠 kind 猜。
+///
+/// `packages`（r3）是**第二个受控模块命名空间**（`pkg.<id>.*`）的内容寻址清单：
+/// 每个声明的包一条，`files` 是包内非 `test/**` 文件 + `pkg.json`。它与 `code`
+/// 分开的理由同上（mod 自有模块 vs 可复用的包模块是两个装载身份），且 `path`
+/// 相对**包根**、以包 id 打头，与 `codeEntry.path` 的相对**mod 根**不同源。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
@@ -37,6 +42,9 @@ pub struct Manifest {
     /// 代码模块清单（r2；缺省 = 单文件 Mod，旧 manifest 逐字节可解析）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     code: Vec<ManifestCodeEntry>,
+    /// 包文件清单（r3；缺省 = 不声明包，旧 manifest 逐字节可解析）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    packages: Vec<ManifestPackage>,
 }
 
 /// 单条资源条目：URI 风格 id + 资源分发 schema id + 内容寻址（sha256/byteLength）。
@@ -121,6 +129,14 @@ impl Manifest {
         &self.code
     }
 
+    /// 包文件清单（r3；空 = 本 Mod 不声明任何包）。
+    ///
+    /// 顺序不作语义面：装载方按 `(id, path)` 查表（`ygg-sandbox::packages`），
+    /// 不依赖本数组的排列。
+    pub fn packages(&self) -> &[ManifestPackage] {
+        &self.packages
+    }
+
     /// 装载序 = id 升序（D-A2 sorted manifest 序：与文件系统枚举序解耦，
     /// native/wasm 装载序一致）。
     pub fn entries_in_load_order(&self) -> Vec<&ManifestEntry> {
@@ -152,6 +168,71 @@ impl ManifestCodeEntry {
     }
 
     /// 包内相对路径（如 `src/util.lua`）。
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// 期望内容摘要（小写十六进制 sha256）。
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+
+    /// 期望字节数（廉价预检，先于哈希）。
+    pub fn byte_length(&self) -> u64 {
+        self.byte_length
+    }
+}
+
+/// 单条包文件条目（r3）：相对**包根**的路径 + 内容寻址（sha256/byteLength）。
+///
+/// `path` 以包 id 打头（`fixture/init.lua`）——这条落在 schema pattern 与
+/// 装载期校验里，不是命名建议：载荷哈希只对「哪个包的哪个文件」有意义，
+/// 丢掉 id 前缀就只剩一个包内相对路径。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestPackage {
+    id: String,
+    files: Vec<ManifestPackageFile>,
+}
+
+impl ManifestPackage {
+    pub fn new(id: impl Into<String>, files: Vec<ManifestPackageFile>) -> Self {
+        Self {
+            id: id.into(),
+            files,
+        }
+    }
+
+    /// 包 id（= 包根下的目录名，`packages/libs/<id>/`）。
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// 本包纳入内容寻址的文件（按 `path` 序；装载查表不依赖顺序）。
+    pub fn files(&self) -> &[ManifestPackageFile] {
+        &self.files
+    }
+}
+
+/// 单条包文件条目（r3）：`path` 相对包根且以包 id 打头（`fixture/init.lua`）。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestPackageFile {
+    path: String,
+    sha256: String,
+    byte_length: u64,
+}
+
+impl ManifestPackageFile {
+    pub fn new(path: impl Into<String>, sha256: impl Into<String>, byte_length: u64) -> Self {
+        Self {
+            path: path.into(),
+            sha256: sha256.into(),
+            byte_length,
+        }
+    }
+
+    /// 相对包根的路径（如 `fixture/init.lua`）。
     pub fn path(&self) -> &str {
         &self.path
     }
@@ -208,8 +289,17 @@ pub fn verify_code_entry(bytes: &[u8], entry: &ManifestCodeEntry) -> Result<(), 
     verify_content(entry.path(), entry.sha256(), entry.byte_length(), bytes)
 }
 
-/// 内容寻址判定单点（[`verify_entry`] / [`verify_code_entry`] 共用——两条
-/// 装载面但一套口径，避免「数据校验严、代码校验松」这类分叉）。
+/// 包文件的内容寻址校验（r3，同一套判定：byteLength 先于 sha256）。
+///
+/// `path` 是包根相对路径（`fixture/init.lua`），所以文案里的 `file` 也是它
+/// ——与数据资源（mod 根相对）、mod 模块（mod 根相对）三条面但**一套口径**。
+pub fn verify_package_file(bytes: &[u8], entry: &ManifestPackageFile) -> Result<(), SchemaError> {
+    verify_content(entry.path(), entry.sha256(), entry.byte_length(), bytes)
+}
+
+/// 内容寻址判定单点（[`verify_entry`] / [`verify_code_entry`] /
+/// [`verify_package_file`] 共用——三条装载面但一套口径，避免「数据校验严、
+/// 代码校验松」这类分叉）。
 fn verify_content(
     path: &str,
     expected_sha256: &str,
@@ -432,5 +522,107 @@ mod tests {
             panic!("expected ContentMismatch");
         };
         assert_eq!(file, "src/util.lua");
+    }
+
+    #[test]
+    fn packages_array_is_optional_so_old_manifests_parse_unchanged() {
+        // 缺 packages：旧 manifest 逐字节可解析，packages() 为空。
+        let legacy = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world"))
+        );
+        let manifest = parse_manifest(legacy.as_bytes()).unwrap();
+        assert!(manifest.packages().is_empty());
+    }
+
+    #[test]
+    fn packages_array_round_trips_and_carries_id_prefixed_paths() {
+        let init = "return {}";
+        let pkg = "{\"schemaVersion\": 1}";
+        let with_pkgs = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}], "packages": [{{"id": "fixture", "files": [
+                {{"path": "fixture/init.lua", "sha256": "{}", "byteLength": {}}},
+                {{"path": "fixture/pkg.json", "sha256": "{}", "byteLength": {}}}
+            ]}}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world")),
+            sha_of(init),
+            init.len(),
+            sha_of(pkg),
+            pkg.len(),
+        );
+        let manifest = parse_manifest(with_pkgs.as_bytes()).unwrap();
+        assert_eq!(manifest.packages().len(), 1);
+        let package = &manifest.packages()[0];
+        assert_eq!(package.id(), "fixture");
+        assert_eq!(package.files().len(), 2);
+        assert_eq!(package.files()[0].path(), "fixture/init.lua");
+        assert_eq!(package.files()[0].byte_length(), init.len() as u64);
+        // 包清单与 entries / code 是三个独立数组：互不污染。
+        assert_eq!(manifest.entries().len(), 1);
+        assert!(manifest.code().is_empty());
+    }
+
+    #[test]
+    fn package_entries_violations_point_at_the_packages_section() {
+        // 段内不允许 `.` / `..` 段：pattern 要求 `^<id>/…[.](lua|json)$`，
+        // 而 `../` 既不以小写 id 起头也不结尾于扩展名。
+        let traversal = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}], "packages": [{{"id": "fixture", "files": [
+                {{"path": "../escape.lua", "sha256": "{}", "byteLength": 11}}
+            ]}}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world")),
+            sha_of("hello world")
+        );
+        let err = parse_manifest(traversal.as_bytes()).unwrap_err();
+        let SchemaError::InvalidManifest { issues, .. } = err else {
+            panic!("expected InvalidManifest");
+        };
+        assert_eq!(issues[0].pointer, "/packages/0/files/0/path");
+        assert_eq!(issues[0].code, "Pattern");
+
+        // 大写 id：包 id 与目录名同源，只允许 `^[a-z][a-z0-9_-]*$`。
+        let bad_id = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}], "packages": [{{"id": "Fixture", "files": []}}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world"))
+        );
+        let err = parse_manifest(bad_id.as_bytes()).unwrap_err();
+        let SchemaError::InvalidManifest { issues, .. } = err else {
+            panic!("expected InvalidManifest");
+        };
+        assert_eq!(issues[0].pointer, "/packages/0/id");
+
+        // 路径必须以包 id 打头：`other/init.lua` 在一个 `fixture` 包里是错位登记。
+        let mismatched = format!(
+            r#"{{"schemaVersion": 1, "entries": [{}], "packages": [{{"id": "fixture", "files": [
+                {{"path": "init.lua", "sha256": "{}", "byteLength": 11}}
+            ]}}]}}"#,
+            entry_json("ygg:data/a.txt", &sha_of("hello world")),
+            sha_of("hello world")
+        );
+        let err = parse_manifest(mismatched.as_bytes()).unwrap_err();
+        let SchemaError::InvalidManifest { issues, .. } = err else {
+            panic!("expected InvalidManifest");
+        };
+        assert_eq!(issues[0].pointer, "/packages/0/files/0/path");
+    }
+
+    #[test]
+    fn verify_package_file_reuses_the_one_content_addressing_ruleset() {
+        let content = b"return {}\n";
+        let entry = ManifestPackageFile::new(
+            "fixture/init.lua",
+            sha256_hex(content),
+            content.len() as u64,
+        );
+        assert!(verify_package_file(content, &entry).is_ok());
+        // byteLength 先于 sha256。
+        let err = verify_package_file(b"return {}", &entry).unwrap_err();
+        assert!(matches!(err, SchemaError::ByteLengthMismatch { .. }));
+        // 字节数同、内容换：ContentMismatch 带包根相对路径。
+        let err = verify_package_file(b"return []\n", &entry).unwrap_err();
+        let SchemaError::ContentMismatch { file, .. } = err else {
+            panic!("expected ContentMismatch");
+        };
+        assert_eq!(file, "fixture/init.lua");
     }
 }
