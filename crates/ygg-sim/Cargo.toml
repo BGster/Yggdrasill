@@ -1,0 +1,24 @@
+[package]
+name = "ygg-sim"
+version.workspace = true
+edition.workspace = true
+description = "Yggdrasill Tier 1 原生模拟内核：确定性 tick / 列式 ECS / 快照 / 回放 / state hash"
+
+# 依赖纯度（契约：docs/design/kernel/sim-kernel.md §1 + I2/I5，topology.md 不变量 5）。
+# 运行时**只有** thiserror——这一条被 tests/determinism_scan.rs 的 R4 用例逐键断言
+# （[dependencies] 键集必须 == {thiserror}）。四条禁令各自的理由：
+# - 不引 serde/serde_json：快照是自写的**规范二进制**编码器，字节可逐条断言；
+#   若走 serde，编码序会变成第三方 crate 的默认序，确定性就不再是本仓的结构性质。
+# - 不引 sha2：state hash 是 FNV-1a 64，十行手写，且是 `pkg.procgen.rng.fnv64`
+#   的跨语言镜像（一份向量表、两个消费者）。再引一份摘要算法 = 仓里第二份 hash。
+# - 不引 rand/getrandom：I5（不读外部随机源）——随机数只由 seed 流派生，
+#   算法是 xoshiro128**，与 procgen 位级同源。
+# - 不引 mlua：Tier 1 必须在**无 VM**时可编译可基准（`cargo test -p ygg-sim`
+#   不构建 Lua），宿主注入面在 ygg-sandbox（方向单一 sandbox → sim）。
+[dependencies]
+thiserror = "2"
+
+# 唯一的 dev-dependency：读 `fixtures/fnv64-vectors.json`（跨语言向量表）。
+# 夹具归 Tier 1 自己（不放进 packages/**：那是 Mod 装载面，包目录枚举类用例的扫描对象）。
+[dev-dependencies]
+serde_json = "1"

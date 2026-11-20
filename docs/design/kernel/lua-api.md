@@ -29,6 +29,7 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 | `ygg.entity.*` | `spawn()`、`get_attribute(id, k)`、`set_attribute(id, k, v)`、`add_tag(id, t)`、`remove_tag(id, t)`、`has_tag(id, t)`。返回数字实体 ID（`YGG-R2` 要求将 ID 持久化到 `ygg.kv`）。**无 `exists` / `destroy`**（与 [packages/entity.md](../packages/entity.md) §1 一致：id 永不复用，死亡=墓碑降级；回收面演进见 Goal 排期 S9）。 | 查询允许；变更 **模块顶层禁用** |
 | `ygg.fsm.*` / `ygg.narrative.*` | 内嵌 Lua 标准库辅助，用于扁平有限状态机（`fsm.define`、`fsm.current`、`fsm.on_event`）与故事节点（`narrative.node`、`narrative["goto"]`；点形式 `narrative.goto` 是 Lua 5.4 语法错误，由 `YGG-R3` 捕获）。 | `define` / `node` / `goto` **模块顶层禁用** |
 | `ygg.fs.{write,read,stat,list}` | 可选宿主注入的两根文件面：`artifacts/<file>`（内存 VFS，dispatch 级回滚）与 `mounts/<name>/<rel>`（挂载桥，写穿磁盘）。`write(path, content)` 返回 `{ path, bytes, sha256 }`。两根的文法、尺寸帽、返回形状与错误码见 [§3.1.2](#312-mounts-挂载面宿主注入的盘上文件桥)。 | 变更调用 **模块顶层禁用** |
+| `ygg.sim.*` | 可选宿主注入的**原生模拟内核面**（Tier 1）：`step` / `hash` / `snapshot` / `restore` / `spawn_batch` / `despawn_batch` / `insert_batch` / `status` / `trace` / `replay`——恰好 10 个键，**一个逐实体 getter 都没有**（批式铁律：bytes/数组进出、单帧单调用）。全部字节帧带尾 digest，坏帧先拒后改。未挂载时**每个函数**抛 `YGG-SIM-UNMOUNTED`（不是 `nil` / `false`）。形状、`16 位小写 hex` 与错误码见 [§3.1.3](#313-sim-模拟内核面宿主注入)。 | 查询允许；变更调用 **模块顶层禁用**（静态 `YGG-MOD-EFFECT` 规则与宿主激活同批接，排期 S1；本行运行期面已注册，未挂载即拒） |
 | `ygg.tool.call(tool_id, args_table)` | 可选同步宿主工具桥。挂载时内联执行白名单工具并返回 `{ ok = true, data = { ... } }` 或 `{ ok = false, error = "..." }`。未挂载时返回 `{ ok = false, unmounted = true }`，使 Mod 回退到异步 `meta.tool_calls`。 | **模块顶层禁用** |
 
 **`require` 面（受控装载器，无 `package` 全局）**：`require(name)` 只查宿主注入的**已登记模块表**（`ModuleSet`），不做任何路径拼接；名字是点分标识符（各段字符集 `[A-Za-z0-9_]`），未登记的名字在装载前即可读拒绝。表里有**两个命名空间**：
@@ -131,3 +132,43 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 
 用例只设**故障探测阈值**（任一单操作 > 500 ms 即判定「有隐藏的树扫描」并回炉），**不设性能目标**。
 
+
+#### 3.1.3 sim 模拟内核面（宿主注入）
+
+`ygg.sim.*` 是 Tier 1（`crates/ygg-sim`，契约 [sim-kernel.md](sim-kernel.md)）在 Lua 侧的**唯一**进出口。它和 `ygg.fs` 的 `mounts/` 面同款纪律：库侧 `set_sim(...)` 注入（`driver.rs`），CLI 激活触点在 `egg.rs`（宿主面改动走用户授权账，**排期 S1**）；本需求交付「表始终注册 + 未挂载降级」，**不**在宿主里注入实例。
+
+**十个键，一个逐键 getter 都没有**（批式铁律 ②：mlua 边界穿越 ~µs，细粒度调用是负收益）。键集是**闭集**——多一个键即红（`tests/sim_face.rs` 的键集断言），这条断言的作用是防止未来退化回逐项访问：
+
+| 键 | 签名 | 返回 | 副作用 |
+| --- | --- | --- | --- |
+| `step` | `ygg.sim.step(dt)`，`dt` = Q32.32 整数 | `{ tick = int, hash = "16 hex" }` | 变更模拟态（一次 tick 一次穿越） |
+| `hash` | `ygg.sim.hash()` | `"16 hex"` | 纯 |
+| `snapshot` | `ygg.sim.snapshot()` | string（快照帧字节） | 纯（全量字节一次给） |
+| `restore` | `ygg.sim.restore(bytes)` | `{ tick = int, bytes = int, hash = "16 hex" }` | 变更模拟态（先校验后改） |
+| `spawn_batch` | `ygg.sim.spawn_batch(frame)` | `{ spawned = int, next_id = int }` | 变更模拟态（列式批量） |
+| `despawn_batch` | `ygg.sim.despawn_batch(frame)` | `{ despawned = int }` | 变更模拟态（列式批量） |
+| `insert_batch` | `ygg.sim.insert_batch(frame)` | `{ entities = int, values = int }` | 变更模拟态（列式批量） |
+| `status` | `ygg.sim.status()` | `{ mounted = true, tick, entities, archetypes, hash }` | 纯（单个状态包，避免 N 次 getter） |
+| `trace` | `ygg.sim.trace(on)` | `{ tracing = bool }` | 变更（逐 tick 证据缓冲开关） |
+| `replay` | `ygg.sim.replay(snap, log)` | `{ ticks, matched, first_mismatch = int\|nil, final_hash = "16 hex" }` | 纯（在临时 Sim 上重放） |
+
+**字节帧过面不要求 UTF-8**：`restore` / 三个批量面 / `replay` 的参数按 Lua string 的**原始字节**取（Rust 侧是 `mlua::String` 而不是 `String`）。若按 `String` 收，合法快照会因「非 UTF-8 序列」在参数转换处就失败——把「帧格式校验」（`YGG-SIM-FRAME`，带位置说明）降级成一条与帧内容无关的类型错误。
+
+**数值过面只有一个闸门**：Lua 的双精度与内核的定点之间，`ygg.sim.*` 只接受「**值上等于整数的 Lua number**」（`n.fract() == 0.0` 且 `|n| ≤ 2^53`），其余一律 `YGG-SIM-FIXED`——静默取整会把「调用方算错了」变成「内核算错了」。定点除零同码（不定义 0 的近似值：给 `i64::MAX` 会把除零藏成数值异常）。
+
+**字节帧形状**（列式，可直拷；与快照列编码**共用同一个读写器**，所以「快照能解的列、批量也能解」是结构性质而不是两套代码的巧合）：
+
+```text
+spawn_batch:   u32 n | u16 comp_n | [u16 name_len | name]×comp_n | 每组件一列载荷
+insert_batch:  u32 n | u64 ids[n] | u16 comp_n | [u16 name_len | name]×comp_n | 每组件一列载荷
+despawn_batch: u32 n | u64 ids[n]
+每帧尾部:      u64 digest = FNV-1a 64（前面的全部字节）
+```
+
+**未挂载降级**：`ygg.sim` 表**始终**在场，但宿主没注入实例时**每个**函数抛 `YGG-SIM-UNMOUNTED`。不返回 `nil` / `false` / 空表：`nil` 与「状态为空」不可分辨，静默降级会让 Mod 把「宿主不支持」读成「世界是空的」并据此写下错误状态。这一个码把「宿主没这个能力」变成装载期就能看见的硬停。
+
+**错误码**（`YGG-SIM-*` 六码，全部经 `Error::runtime` 浮出，message 首段即码；信封码不新增——与 `YGG-FS-*` 同一处置）：`YGG-SIM-UNMOUNTED`（未注入）、`YGG-SIM-FIXED`（非整数值过面 / 定点除零）、`YGG-SIM-FRAME`（magic / 版本 / 长度 / 尾 digest / 列类型不符，含坏快照）、`YGG-SIM-SCHEMA`（未知组件名、同帧重复组件名、类型与列不符）、`YGG-SIM-ENTITY`（未知实体 id、`insert` 目标不存在、`next_id` 溢出）、`YGG-SIM-STATE`（内部不变量破坏）。**六个码的共同性质：状态未变**——先校验后改，拒绍不产生半改的模拟态。
+
+**确定性不是本面的纪律而是内核的性质**：`step` 的随机数只来自 seed 流派生（`(seed, stream)` → 四字状态，与 `pkg.procgen.rng` 位级同源、同一份向量表双向断言）；结构操作在 tick 内只入队、tick 边界按 FIFO 应用；`hash` = `FNV-1a 64(快照字节去尾 digest)`，与 `snapshot` 同源。所以「同 seed + 同输入帧 → 同 `hash`」是可用一条等式验的，不需要 Mod 侧自证。
+
+**判据**：① 阻断——给本面加逐实体 getter（`get_attribute(id, k)` 式的 N 次穿越），或让未挂载态返回 `nil` 而不是抛码；② 症状——同一 seed 两次 `step` 得到不同 `hash`（说明某处引了时钟 / 外部随机源 / 无序容器遍历），或 Mod 在未挂载宿主上静默算出空世界；③ 确认——`cargo test -p ygg-sim`（逐 tick hash + 跨进程 digest + 禁浮点/禁时钟/禁 `HashMap` 静态扫描）与 `cargo test -p ygg-sandbox --test sim_face`（键集闭集、未挂载降级、非整数拒绍）。

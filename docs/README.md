@@ -40,7 +40,7 @@ docs/
 | [context/cold-start/vision.md](context/cold-start/vision.md) | 统一命题与双重产品身份 | §1 |
 | [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) | 术语速查表 + 12 条权威领域词汇定义 | 术语速览 + §2 |
 | [context/cold-start/principles.md](context/cold-start/principles.md) | P1–P11 工程原则与 PLAY 家族注记 | §3 |
-| [context/cold-start/topology.md](context/cold-start/topology.md) | 仓库目录拓扑与 4 条硬性依赖不变量 | §4 |
+| [context/cold-start/topology.md](context/cold-start/topology.md) | 仓库目录拓扑与 5 条硬性依赖不变量 | §4 |
 | [context/cold-start/system-boundaries.md](context/cold-start/system-boundaries.md) | 产品形态、三层架构图、协商矩阵（Tier 1–3）、Adapter 五义务 C1–C5 | §1 |
 | [context/story/run-story.md](context/story/run-story.md) | 运行级剧情：微状态表、开场序列、盘点子微状态、发布幕 | §2.3 |
 | [context/story/requirement-story.md](context/story/requirement-story.md) | 需求九幕、转场表、旁路/覆盖层 | §2.4 |

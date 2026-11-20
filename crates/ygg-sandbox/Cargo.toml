@@ -39,6 +39,10 @@ thiserror = "2"
 # S11 填充：ygg-schema path 依赖（资源 manifest / 内容寻址 / 校验机器复用；
 # **不引入 sha2**——内容寻址经 ygg-schema verify_entry，D-继承-5 双宿不变）。
 ygg-schema = { path = "../ygg-schema" }
+# r1-sim 填充：ygg-sim path 依赖（Tier 1 原生模拟内核的宿主注入面 `ygg.sim.*`）。
+# 方向单一 `ygg-sandbox → ygg-sim`（宿主是注入者、内核是提供者）；ygg-sim 零内部依赖
+# 且不引 mlua，所以这条依赖不改变本 crate 的依赖树性质（wasm 侧同样可见）。
+ygg-sim = { path = "../ygg-sim" }
 # S12 填充：sha2（状态哈希——D-继承-5：状态哈希归 sandbox、内容寻址归 ygg-schema，
 # ygg-core 零哈希；状态哈希 = SHA-256(canonical_state_bytes)，D-继承-5 归位）。
 sha2 = "0.10"

@@ -1159,6 +1159,7 @@ dependencies = [
  "ygg-core",
  "ygg-modules",
  "ygg-schema",
+ "ygg-sim",
  "ygg-store",
 ]
 
@@ -1170,6 +1171,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "ygg-sim"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
  "thiserror",
 ]
 

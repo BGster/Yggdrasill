@@ -16,7 +16,7 @@
 | §1 产品愿景与双重身份 | [context/cold-start/vision.md](context/cold-start/vision.md) | 统一命题与双重身份 |
 | §2 核心领域词汇 | [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) | 12 条权威领域定义 |
 | §3 架构与运营原则 | [context/cold-start/principles.md](context/cold-start/principles.md) | P1–P11 + PLAY 注记 |
-| §4 Monorepo 模块拓扑与依赖白名单 | [context/cold-start/topology.md](context/cold-start/topology.md) | 目录树 + 4 条硬性依赖不变量 |
+| §4 Monorepo 模块拓扑与依赖白名单 | [context/cold-start/topology.md](context/cold-start/topology.md) | 目录树 + 5 条硬性依赖不变量 |
 | §5 引言（台账维护规则） | [wiki-governance.md](wiki-governance.md) | 三职责（注入 / 同步 / 核验）——即原“台账维护规则”的现行形态 |
 | §5.1 核心引擎与平台决策 | [design/README.md](design/README.md)（模块 → 文件） | 裁决已解散：逐条落在它治理的契约文件的「设计依据」段（内核 / host / mod） |
 | §5.2 Agent 治理决策 | [wiki-governance.md](wiki-governance.md) + [design/mod/identity.md](design/mod/identity.md) | 治理法则落 wiki-governance；身份与权限落 identity.md |

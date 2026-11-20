@@ -857,6 +857,19 @@ impl KernelFacade {
     pub fn set_mount_fs(&mut self, bridge: Option<Box<dyn MountFs>>) {
         self.host.set_mount_fs(bridge);
     }
+
+    /// 注入或卸载模拟内核实例（供 `ygg.sim.*`，Tier 1）。
+    ///
+    /// 未注入时 10 个函数抛 `YGG-SIM-UNMOUNTED`（与 fs 桥同一纪律：不返回 `nil`/`false`）。
+    /// CLI 激活触点（`egg.rs` 的 `set_sim` 与开关）**不在此处**——宿主面改动走用户授权账。
+    pub fn set_sim(&mut self, sim: Option<Box<ygg_sim::Sim>>) {
+        self.host.set_sim(sim);
+    }
+
+    /// 取模拟内核句柄（宿主批量帧走这条，不经 Lua 边界）。
+    pub fn sim_handle(&self) -> std::rc::Rc<std::cell::RefCell<Option<Box<ygg_sim::Sim>>>> {
+        self.host.sim_handle()
+    }
 }
 
 /// 转换错误 → 稳定码信封（A1：下游按码分支，message 只作人读定位）。

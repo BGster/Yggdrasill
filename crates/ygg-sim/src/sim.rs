@@ -1,0 +1,462 @@
+//! `Sim`：tick 循环、延迟结构操作、hash trace、录制与回放（Tier 1 的对外门面）。
+//!
+//! 契约：sim-kernel §3.4（tick 纪律）+ §4（API 面）+ I1/I3（确定性回放）。
+//!
+//! # 一次 `step` 的五步（顺序即语义，别调换）
+//!
+//! 1. 应用**上一个 tick 边界**留下的结构操作（FIFO）——正常情况下这一步是空的；
+//!    它存在是为了「宿主在两次 step 之间投了批量帧」与「系统内部投了延迟操作」共用一个入口。
+//! 2. 按 `systems` 的**下标序**逐个执行，每个系统拿到同一份 `SystemCtx`。
+//! 3. 应用系统在本 tick 内提交的延迟结构操作（FIFO）——**只有**这里会改 archetype，
+//!    所以系统看到的行集与行序在整帧内稳定。
+//! 4. `tick += 1`。
+//! 5. 算 state hash（= 快照尾 digest），进 trace / 录制日志。
+//!
+//! # 为什么 hash 每次都真的编码一遍快照
+//!
+//! 「一条等式统摄快照与哈希」（`hash == fnv(快照字节)`）只有在**真的编码一次**时才是
+//! 可执行的等式。另写一条「不编码直接算 hash」的快路径会让两者迟早分叉，而分叉的表现
+//! 是「存档能读、回放对不上」这种最难查的故障。代价是一次编码（10⁴ 实体约 0.2–0.7 MB），
+//! 在 §5 的 16.6 ms 预算里占比很小。
+//!
+//! # 回放为什么是实例方法而不是关联函数
+//!
+//! 计划稿写的是 `Sim::replay(snapshot, log)`。**系统是宿主注册的闭包**（不可序列化），
+//! 所以回放必须拿到「同一批系统」才能重跑——关联函数凭空拿不到它们。于是回放做成
+//! 实例方法：`self` 只提供系统列表（`Rc` 共享），实际重跑发生在一份**新建** Sim 上。
+//! 语义边界不变（调用者不传状态，只借用系统表）。
+
+use crate::archetype::Column;
+use crate::canonical::FrameReader;
+use crate::component::{AttrType, ComponentDef, ComponentId, EntityId};
+use crate::error::{SimError, SimResult};
+use crate::fixed::Fixed;
+use crate::hash;
+use crate::input::{OpKind, ReplayLog};
+use crate::rng::RngRegistry;
+use crate::snapshot;
+use crate::store::ArchetypeStore;
+use crate::system::{Resources, StructuralOp, SystemCtx, SystemId, SystemSet};
+
+/// `spawn_batch` 的回执。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnReport {
+    /// 新生成的实体数。
+    pub spawned: u32,
+    /// 下一个可用 id（不含）。
+    pub next_id: EntityId,
+}
+
+/// `insert_batch` 的回执。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InsertReport {
+    /// 被迁移的实体数。
+    pub entities: u32,
+    /// 写入的值个数（含零宽组件计数为 0）。
+    pub values: u32,
+}
+
+/// 回放报告（`first_mismatch = None` 才算逐 tick 一致）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplayReport {
+    /// 回放了几个 tick。
+    pub ticks: u64,
+    /// hash 与前缀一致的 tick 数。
+    pub matched: u64,
+    /// 第一个失配的 tick（`None` = 全程一致）。
+    pub first_mismatch: Option<u64>,
+    /// 回放结束时的 state hash。
+    pub final_hash: u64,
+}
+
+/// 模拟态全量（tick + 世界 + 资源）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimState {
+    /// tick 计数。
+    pub tick: u64,
+    /// 世界（列式 archetype）。
+    pub world: ArchetypeStore,
+    /// 资源表（`KV<u64>`：键升序）。
+    pub resources: Resources,
+}
+
+/// 模拟内核门面。
+pub struct Sim {
+    seed: u64,
+    state: SimState,
+    systems: SystemSet,
+    pending: Vec<StructuralOp>,
+    trace: Option<Vec<(u64, u64)>>,
+    recorder: Option<ReplayLog>,
+    rng: RngRegistry,
+}
+
+impl Sim {
+    /// 新世界（`seed` 是**唯一**随机源入口；I5）。
+    pub fn new(seed: u64) -> Self {
+        Self {
+            seed,
+            state: SimState {
+                tick: 0,
+                world: ArchetypeStore::new(),
+                resources: Resources::new(),
+            },
+            systems: SystemSet::new(),
+            pending: Vec::new(),
+            trace: None,
+            recorder: None,
+            rng: RngRegistry::new(seed),
+        }
+    }
+
+    /// 注册一个组件（幂等）。
+    pub fn register(&mut self, name: &str, def: ComponentDef) -> SimResult<ComponentId> {
+        self.state.world.register(name, def)
+    }
+
+    /// 注册一条系统（顺序即执行序）。
+    pub fn add_system<F>(&mut self, name: &str, func: F) -> SystemId
+    where
+        F: FnMut(&mut SystemCtx<'_>) -> SimResult<()> + 'static,
+    {
+        self.systems.add(name, func)
+    }
+
+    /// 当前 tick。
+    pub fn tick(&self) -> u64 {
+        self.state.tick
+    }
+
+    /// 种子。
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// 世界（只读）。
+    pub fn world(&self) -> &ArchetypeStore {
+        &self.state.world
+    }
+
+    /// 世界（写面：宿主直接改列/批量操作时用，风险自负——绕过确定性纪律的入口只有这一个）。
+    pub fn world_mut(&mut self) -> &mut ArchetypeStore {
+        &mut self.state.world
+    }
+
+    /// 资源表（只读）。
+    pub fn resources(&self) -> &Resources {
+        &self.state.resources
+    }
+
+    /// 资源表（写面）。
+    pub fn resources_mut(&mut self) -> &mut Resources {
+        &mut self.state.resources
+    }
+
+    /// 系统名（执行序；诊断用）。
+    pub fn system_names(&self) -> Vec<&str> {
+        self.systems.names()
+    }
+
+    /// 推进一 tick，返回该 tick 结束时的 state hash。
+    pub fn step(&mut self, dt: Fixed) -> SimResult<u64> {
+        // ① 上个边界留下的操作（宿主批量帧已在调用时立即应用；这里只可能是内部排队）。
+        self.apply_pending()?;
+        // ② 系统按序执行。
+        let tick = self.state.tick;
+        {
+            let mut ctx = SystemCtx::new(
+                tick,
+                dt,
+                &mut self.state.world,
+                &mut self.rng,
+                &mut self.pending,
+            );
+            self.systems.run(&mut ctx)?;
+        }
+        // ③ 系统提交的延迟结构操作（tick 边界，FIFO）。
+        self.apply_pending()?;
+        // ④ tick 前进。
+        self.state.tick = tick + 1;
+        // ⑤ hash 与证据面。
+        let digest = self.hash();
+        if let Some(trace) = &mut self.trace {
+            trace.push((self.state.tick, digest));
+        }
+        if let Some(log) = &mut self.recorder {
+            log.push_tick(self.state.tick, dt, digest);
+        }
+        Ok(digest)
+    }
+
+    /// 按 FIFO 应用延迟结构操作（**唯一**改 archetype 的入口之一）。
+    fn apply_pending(&mut self) -> SimResult<()> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let ops = std::mem::take(&mut self.pending);
+        for op in ops {
+            op.apply(&mut self.state.world)?;
+        }
+        Ok(())
+    }
+
+    /// 当前 state hash（= 快照尾 digest）。
+    pub fn hash(&self) -> u64 {
+        hash::state_hash(&self.snapshot())
+    }
+
+    /// 当前快照帧（含尾 digest）。
+    pub fn snapshot(&self) -> Vec<u8> {
+        snapshot::encode(
+            self.state.tick,
+            &self.state.resources,
+            &self.rng,
+            &self.state.world,
+        )
+    }
+
+    /// 从快照恢复（先校验后改：解码失败时本对象**不变**）。
+    pub fn restore(&mut self, bytes: &[u8]) -> SimResult<()> {
+        // 先校验后改：解码与重绑定都可能在半途失败，二者都不写 self。
+        let registry = &mut self.state.world.registry_mut();
+        let decoded = snapshot::rebind(snapshot::decode(bytes)?, registry)?;
+        self.seed = decoded.rng.seed();
+        self.state.tick = decoded.tick;
+        self.state.resources = decoded.resources;
+        self.state.world = decoded.store;
+        self.rng = decoded.rng;
+        self.pending.clear();
+        // 录制从恢复点重新起算（旧日志的 start_tick 已经不对了，续录会造成 tick 倒退）。
+        if self.recorder.is_some() {
+            self.recorder = Some(ReplayLog::new(self.seed, self.state.tick));
+        }
+        Ok(())
+    }
+
+    /// 开关逐 tick hash trace。
+    pub fn trace(&mut self, on: bool) {
+        if on {
+            if self.trace.is_none() {
+                self.trace = Some(Vec::new());
+            }
+        } else {
+            self.trace = None;
+        }
+    }
+
+    /// trace 条目（`(tick, hash)`）。
+    pub fn trace_entries(&self) -> Option<&[(u64, u64)]> {
+        self.trace.as_deref()
+    }
+
+    /// 开关输入日志录制。
+    pub fn record(&mut self, on: bool) {
+        if on {
+            if self.recorder.is_none() {
+                self.recorder = Some(ReplayLog::new(self.seed, self.state.tick));
+            }
+        } else {
+            self.recorder = None;
+        }
+    }
+
+    /// 取走录制中的日志（`None` = 未在录制）。
+    pub fn take_log(&mut self) -> Option<ReplayLog> {
+        self.recorder.take()
+    }
+
+    /// 批量生成实体（列式帧）。
+    pub fn spawn_batch(&mut self, frame: &[u8]) -> SimResult<SpawnReport> {
+        let (rows, cols, tags) = self.decode_batch(frame)?;
+        let ids = self.state.world.spawn_columns(rows, &cols, &tags)?;
+        if let Some(log) = &mut self.recorder {
+            log.push_op(OpKind::Spawn, frame.to_vec());
+        }
+        Ok(SpawnReport {
+            spawned: ids.len() as u32,
+            next_id: self.state.world.next_id(),
+        })
+    }
+
+    /// 批量删除实体（`u32 n | u64 ids[n]`）。
+    pub fn despawn_batch(&mut self, frame: &[u8]) -> SimResult<usize> {
+        let mut reader = FrameReader::open(frame)?;
+        let n = reader.u32()? as usize;
+        let mut ids = Vec::with_capacity(n);
+        for _ in 0..n {
+            ids.push(reader.u64()?);
+        }
+        reader.finish()?;
+        let removed = self.state.world.despawn_ids(&ids)?;
+        if let Some(log) = &mut self.recorder {
+            log.push_op(OpKind::Despawn, frame.to_vec());
+        }
+        Ok(removed)
+    }
+
+    /// 批量插入组件（列式帧 + 目标 id 列表）。
+    pub fn insert_batch(&mut self, frame: &[u8]) -> SimResult<InsertReport> {
+        let mut reader = FrameReader::open(frame)?;
+        let rows = reader.u32()? as usize;
+        let mut ids = Vec::with_capacity(rows);
+        for _ in 0..rows {
+            ids.push(reader.u64()?);
+        }
+        let rest = frame_from_reader(&mut reader, rows, &self.state.world)?;
+        reader.finish()?;
+        let (_, cols, tags) = rest;
+        let values = self.state.world.insert_columns(&ids, &cols, &tags)?;
+        if let Some(log) = &mut self.recorder {
+            log.push_op(OpKind::Insert, frame.to_vec());
+        }
+        Ok(InsertReport {
+            entities: ids.len() as u32,
+            values: values as u32,
+        })
+    }
+
+    /// 解码「`u32 n` 之后」的通用列式载荷（spawn 与 insert 共用）。
+    fn decode_batch(
+        &self,
+        frame: &[u8],
+    ) -> SimResult<(usize, Vec<(ComponentId, Column)>, Vec<ComponentId>)> {
+        let mut reader = FrameReader::open(frame)?;
+        let rows = reader.u32()? as usize;
+        let parsed = frame_from_reader(&mut reader, rows, &self.state.world)?;
+        reader.finish()?;
+        Ok(parsed)
+    }
+
+    /// 回放（`snapshot` 为空 = 从创世重跑；否则先从快照恢复）。
+    pub fn replay(&self, snapshot: &[u8], log: &[u8]) -> SimResult<ReplayReport> {
+        let log = ReplayLog::decode(log)?;
+        let mut sim = Sim::new(log.seed());
+        sim.systems = self.systems.clone();
+        // 系统与批量帧都按**名称**寻址，所以原型 Sim 的注册表（schema）必须先搬过来；
+        // 搬过来之后 `restore` 的 rebind 会保持 id 不变，系统捕获的 id 继续有效。
+        sim.state.world =
+            ArchetypeStore::from_parts(self.state.world.registry().clone(), Vec::new(), 1)?;
+        if !snapshot.is_empty() {
+            sim.restore(snapshot)?;
+            if log.start_tick() != 0 && sim.tick() != log.start_tick() {
+                return Err(SimError::frame(format!(
+                    "日志起点 tick {} 与快照 tick {} 不符",
+                    log.start_tick(),
+                    sim.tick()
+                )));
+            }
+        } else if log.start_tick() != 0 {
+            return Err(SimError::frame(format!(
+                "日志声明从 tick {} 起，但没有提供快照",
+                log.start_tick()
+            )));
+        }
+        let mut matched = 0u64;
+        let mut first_mismatch: Option<u64> = None;
+        for record in log.records() {
+            // 该 tick 开始前的结构操作按录制序重投（原字节 → 同一个解码器）。
+            for op in &record.ops {
+                match op.kind {
+                    OpKind::Spawn => {
+                        sim.spawn_batch(&op.frame)?;
+                    }
+                    OpKind::Despawn => {
+                        sim.despawn_batch(&op.frame)?;
+                    }
+                    OpKind::Insert => {
+                        sim.insert_batch(&op.frame)?;
+                    }
+                }
+            }
+            let got = sim.step(record.dt)?;
+            if got == record.hash {
+                matched += 1;
+            } else if first_mismatch.is_none() {
+                first_mismatch = Some(record.tick);
+            }
+        }
+        Ok(ReplayReport {
+            ticks: log.records().len() as u64,
+            matched,
+            first_mismatch,
+            final_hash: sim.hash(),
+        })
+    }
+}
+
+/// 读「`u32 n` 之后」的列式载荷：`u16 comp_n | [u16 len | name]×comp_n | 每有列组件一列`。
+///
+/// `tag` 只出现在名单里、没有载荷——所以「名单 → 有列 / 零宽」的分派必须查注册表，
+/// 而注册表是解析的唯一权威（帧里不重复写类型）。
+fn frame_from_reader(
+    reader: &mut FrameReader<'_>,
+    rows: usize,
+    world: &ArchetypeStore,
+) -> SimResult<(usize, Vec<(ComponentId, Column)>, Vec<ComponentId>)> {
+    // 帧布局是**两段式**：先把全部组件名读完，再按同一顺序读载荷。逐名读载荷会错位——
+    // 因为载荷紧跟在整张名单之后（这条在 `tests/snapshot_roundtrip.rs` 的帧往返里钉住）。
+    let comp_n = reader.u16()? as usize;
+    let mut plan: Vec<(ComponentId, AttrType)> = Vec::with_capacity(comp_n);
+    for _ in 0..comp_n {
+        let name_len = reader.u16()? as usize;
+        let raw = reader.raw(name_len)?;
+        let name = std::str::from_utf8(raw)
+            .map_err(|err| SimError::frame(format!("帧里的组件名不是合法 UTF-8：{err}")))?;
+        let id = world.registry().id_of(name)?;
+        let ty = world.registry().type_of(id)?;
+        plan.push((id, ty));
+    }
+    let mut cols: Vec<(ComponentId, Column)> = Vec::with_capacity(comp_n);
+    let mut tags: Vec<ComponentId> = Vec::new();
+    for (id, ty) in plan {
+        let column = match ty {
+            // tag 只出现在名单里、没有载荷。
+            AttrType::Tag => {
+                tags.push(id);
+                continue;
+            }
+            AttrType::Number { .. } => {
+                let mut values = Vec::with_capacity(rows);
+                for _ in 0..rows {
+                    values.push(reader.i64()?);
+                }
+                Column::I64(values)
+            }
+            AttrType::Ref => {
+                let mut values = Vec::with_capacity(rows);
+                for _ in 0..rows {
+                    values.push(reader.u64()?);
+                }
+                Column::U64(values)
+            }
+            AttrType::Bool => {
+                let mut values = Vec::with_capacity(rows);
+                for _ in 0..rows {
+                    let byte = reader.u8()?;
+                    if byte > 1 {
+                        return Err(SimError::frame(format!(
+                            "组件 id {id} 是 boolean 列，帧里出现非 0/1 值 {byte}"
+                        )));
+                    }
+                    values.push(byte);
+                }
+                Column::U8(values)
+            }
+            AttrType::Str => {
+                let mut off = vec![0u32];
+                let mut buf: Vec<u8> = Vec::new();
+                for _ in 0..rows {
+                    let bytes = reader.bytes()?;
+                    buf.extend_from_slice(bytes);
+                    let end = u32::try_from(buf.len()).map_err(|_| {
+                        SimError::frame(format!("组件 id {id} 的字符串列超出 4 GiB"))
+                    })?;
+                    off.push(end);
+                }
+                Column::Bytes { off, buf }
+            }
+        };
+        cols.push((id, column));
+    }
+    Ok((rows, cols, tags))
+}
