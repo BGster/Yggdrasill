@@ -23,13 +23,13 @@
 
 | 包 | 契约 | 依赖 | 状态 | 用点覆盖 |
 | --- | --- | --- | --- | --- |
-| entity | [entity.md](entity.md) | 无（薄包 `ygg.entity.*`） | 实现已落地 · test 18 | 3（PokeRogue / CDDA / DCSS） |
-| codec | [codec.md](codec.md) | entity | 实现已落地 · test 20 | 3（CDDA / PokeRogue / DCSS） |
-| quest | [quest.md](quest.md) | entity · codec | 实现已落地 · test 24 | 3（PokeRogue / CDDA / DCSS） |
+| entity | [entity.md](entity.md) | 无（薄包 `ygg.entity.*`） | 实现已落地 · test 18 | 4（PokeRogue / CDDA / DCSS / Saltline，P3 交付实证） |
+| codec | [codec.md](codec.md) | entity | 实现已落地 · test 20 | 4（CDDA / PokeRogue / DCSS / Saltline，P3 交付实证） |
+| quest | [quest.md](quest.md) | entity · codec | 实现已落地 · test 24 | 4（PokeRogue / CDDA / DCSS / Saltline，P3 交付实证） |
 | dialogue | [dialogue.md](dialogue.md) | quest | 实现已落地 · test 26 | 3（PokeRogue / CDDA / Saltline） |
-| role-skill | [role-skill.md](role-skill.md) | entity · codec | 实现已落地 · test 17 | 3（PokeRogue / DCSS / CDDA） |
-| procgen | [procgen.md](procgen.md) | codec（仅摘要面） | 实现已落地 · test 18 | 3（CDDA / DCSS / Saltline） |
-| assetgen | [assetgen.md](assetgen.md) | procgen（**仅 rng 面**） | 实现已落地 · test 28 | 4（Saltline / CDDA / DCSS / PokeRogue） |
+| role-skill | [role-skill.md](role-skill.md) | entity · codec | 实现已落地 · test 17 | 4（PokeRogue / DCSS / CDDA / Saltline，P3 交付实证） |
+| procgen | [procgen.md](procgen.md) | codec（仅摘要面） | 实现已落地 · test 18 | 4（CDDA / DCSS / Saltline / PokeRogue，P3 交付实证） |
+| assetgen | [assetgen.md](assetgen.md) | procgen（**仅 rng 面**） | 实现已落地 · test 28 | 3（Saltline / CDDA·导出面 / PokeRogue；DCSS 字符渲染不消费像素未兑现用点，P3-3 G-6 裁定 2026-11-21） |
 
 ## 3. 依赖序
 
