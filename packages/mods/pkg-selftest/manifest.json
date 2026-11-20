@@ -223,9 +223,9 @@
     {
       "files": [
         {
-          "byteLength": 9876,
+          "byteLength": 11915,
           "path": "role-skill/actors.lua",
-          "sha256": "f60d0f93802f655d6b5e8cc25f091d98e44ba3036a743f486dbb073ddc6685c5"
+          "sha256": "eab1f6c3afbee783cad5f928a3384d7cb76f1003c17c76df82ed4eb8b1b458a1"
         },
         {
           "byteLength": 3931,
@@ -238,9 +238,9 @@
           "sha256": "bad78ece1876104000f76cf71cd2ea1bb6152707a33c2fb1b8807c14cfa5d0a5"
         },
         {
-          "byteLength": 4399,
+          "byteLength": 5613,
           "path": "role-skill/init.lua",
-          "sha256": "988e1292299dee6cb6a06e11ecfd797678326112d4ef681e48f79683359aa7c3"
+          "sha256": "57a4ec09ae5452b04f0521f90c2c101ee6dc602683616ca0650a928d9e2656ab"
         },
         {
           "byteLength": 246,
@@ -248,14 +248,19 @@
           "sha256": "f3bc9859d7c126c7695052a7b4aca8aca1ba71122858b77690df643b8b888c1e"
         },
         {
-          "byteLength": 5432,
+          "byteLength": 7984,
           "path": "role-skill/skills.lua",
-          "sha256": "7cb4564675e6b5a0cca97c1a4190b7910219eb006dc6a32206d3ab552adb9a5d"
+          "sha256": "ded3b4770171f8377dc724e5643f2b53cf22ecde5a49638ca3dd2ed5f54cbf5c"
         },
         {
-          "byteLength": 5805,
+          "byteLength": 6618,
           "path": "role-skill/store.lua",
-          "sha256": "6e63ceb1c0f633a674d1aa8b9ba0812c6dfae08bff54449310de104982dc10e7"
+          "sha256": "f56817149b1b288fa7da096f1ca61ca7db518b5d3b6c9aedbcb90caabff4b786"
+        },
+        {
+          "byteLength": 3442,
+          "path": "role-skill/window.lua",
+          "sha256": "f80e8364e53412b9a7aa240e917a195750f859ee7a96364e386826ec12f57753"
         }
       ],
       "id": "role-skill"

@@ -993,6 +993,111 @@ run("pkg.role-skill.perf-o1-structural", function()
   -- 1.2 更不行：GC 脉冲会被打成假红（r1 在 quest 的同类指标上实证，见 quest.md §5）。
   is_true(ratio <= 1.55, "墙钟比 ≤ 1.55×，实得 " .. string.format("%.3f", ratio))
 
+  -- ③ 读面 / 实例容量 / 窗口 与既有 `charge` 同带对照（契约 §5；三次取中位、print 即口径）
+  --
+  -- 余量给到 1e9 是为了让 `charge` 恒走「有得扣 ⇒ 必写」的那条路：余量耗尽后它只剩
+  -- 一次 kv.get，会把基准压成读面速度，同带比例随之失真。
+  local cap = role.WINDOW_CAP
+  role.skill_define("pp", { attrs_spec = {}, charges = 1000000000 })
+  role.grant_skill(1, "pp")
+  role.set_capacity(1, "pp", 1000000000)
+  role.recharge(1, "pp")
+  for i = 1, cap do
+    role.window_push(1, "skill" .. tostring(i % 6 + 1))
+  end
+
+  local function bench(fn, iters, rounds)
+    local best = math.huge
+    local acc = 0
+    for _ = 1, rounds or 3 do
+      local began = os.clock()
+      for _ = 1, iters do
+        acc = acc + (fn() or 0)
+      end
+      local dt = (os.clock() - began) / iters
+      if dt < best then
+        best = dt
+      end
+    end
+    return best, acc
+  end
+
+  local function ops_of(fn)
+    local reads_before = world.reads_now()
+    local writes_before = world.writes_now()
+    fn()
+    return world.reads_now() - reads_before, world.writes_now() - writes_before
+  end
+
+  local flip = false
+  local charge_ms = bench(function()
+    return role.charge(1, "pp")
+  end, 500)
+  local ratios = {
+    { "recharge", bench(function()
+      return role.recharge(1, "pp", 1)
+    end, 500) },
+    { "skills_of", bench(function()
+      role.skills_of(1)
+      return 1
+    end, 500) },
+    { "skill_state", bench(function()
+      role.skill_state(1, "pp")
+      return 1
+    end, 500) },
+    { "set_capacity", bench(function()
+      flip = not flip
+      return role.set_capacity(1, "pp", flip and 1000000000 or 1000000001)
+    end, 500) },
+    { "window", bench(function()
+      return role.window(1, "skill1", cap)
+    end, 500) },
+    { "window_push", bench(function()
+      return role.window_push(1, "skill2")
+    end, 500) },
+  }
+  for i = 1, #ratios do
+    print(string.format("perf.role-skill.ratio_%s=%.3f", ratios[i][1], ratios[i][2] / charge_ms))
+  end
+
+  -- 结构证据（与实体总数无关）：窗口与读面的 KV 次数是形状，不是墙钟
+  eq(select(1, ops_of(function()
+    role.skills_of(1)
+  end)), 1, "skills_of = 1 次 kv.get")
+  eq(select(1, ops_of(function()
+    role.skill_state(1, "pp")
+  end)), 1, "skill_state = 1 次 kv.get")
+  eq(select(1, ops_of(function()
+    role.window(1, "skill1", cap)
+  end)), 1, "window = 1 次 kv.get")
+  local ring_reads, ring_writes = ops_of(function()
+    role.window_push(1, "skill3")
+  end)
+  eq(ring_reads, 1, "window_push = 1 次 kv.get")
+  eq(ring_writes, 1, "window_push = 1 次 kv.set（不碰 actor 记录）")
+  local cap_reads, cap_writes = ops_of(function()
+    flip = not flip
+    role.set_capacity(1, "pp", flip and 1000000000 or 1000000001)
+  end)
+  eq(cap_reads, 2, "set_capacity = 2 次 kv.get（记录 + 索引回读，与 charge 同形）")
+  eq(cap_writes, 1, "set_capacity = 1 次 kv.set")
+  print(string.format("perf.role-skill.window_payload_bytes=%d", #world.kv["role.window.1"]))
+  print(string.format("perf.role-skill.window_cap=%d", cap))
+
+  -- 判据按计划稿 §5 的原型值 + 余量（selftest 面实测为准，O(N) 回归在本仪器上是 ~10×）
+  local function ratio_of(name)
+    for i = 1, #ratios do
+      if ratios[i][1] == name then
+        return ratios[i][2] / charge_ms
+      end
+    end
+    error("unknown ratio " .. name)
+  end
+  is_true(ratio_of("skills_of") <= 1.0, "skills_of ≤ 1.0×charge，实得 " .. string.format("%.2f", ratio_of("skills_of")))
+  is_true(ratio_of("skill_state") <= 1.0, "skill_state ≤ 1.0×charge，实得 " .. string.format("%.2f", ratio_of("skill_state")))
+  is_true(ratio_of("set_capacity") <= 1.5, "set_capacity ≤ 1.5×charge，实得 " .. string.format("%.2f", ratio_of("set_capacity")))
+  is_true(ratio_of("window") <= 2.5, "window ≤ 2.5×charge，实得 " .. string.format("%.2f", ratio_of("window")))
+  is_true(ratio_of("window_push") <= 4.0, "window_push ≤ 4.0×charge，实得 " .. string.format("%.2f", ratio_of("window_push")))
 end)
 
 -- ── 用例 28：包加载（清缓存 = 定义表与订阅面一起归零）────────────────────────
