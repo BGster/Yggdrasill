@@ -86,13 +86,29 @@ end
 
 -- ── 无标准库的骨架工具（与 entity 各自 6 行，不抽第三个包）──────────────────
 
---- 数组 → 字符串（沙箱里没有拼接库，只能手写）。
+--- 数组 → 字符串。
+---
+--- **不能写成 `out = out .. parts[i]`**：Lua 字符串不可变，逐段追加是 O(n²)，
+--- 1.6 MB 的 bundle 会跑到几十秒（实测：43 s）。改成两两合并（对数轮），每轮
+--- 把元素数减半，总拷贝量为 O(总字节 × log n)，降到百毫秒级。
 local function join(parts)
-  local out = ""
-  for i = 1, #parts do
-    out = out .. parts[i]
+  local n = #parts
+  if n == 0 then
+    return ""
   end
-  return out
+  local width = 1
+  while width < n do
+    local index = 1
+    while index <= n do
+      local right = parts[index + width]
+      if right ~= nil then
+        parts[index] = parts[index] .. right
+      end
+      index = index + width * 2
+    end
+    width = width * 2
+  end
+  return parts[1]
 end
 
 --- 原地插入排序（字节序升序）。键序 = 字节序是**契约 I1 的定义**，不是偏好：
@@ -127,21 +143,43 @@ local ESCAPES = {
 ---
 --- 非 ASCII 原样输出（UTF-8 字节直通）：多一层 `\uXXXX` 就只能多一个出错面，而
 --- 确定性判据不需要它。控制字符用 `\u00XX`（JSON 强制），其余保留原字。
+---
+--- 扫描方式：用 pattern 一次跳到**下一个需要转义的字节**（C 层扫描），把中间的
+--- 整段原字一次性取出——逐字节 `sub(i, i)` 会为 1.6 MB 产出百万级片段，拼接与
+--- 内存都会掌不住（实测：这种写法让 encode 掉到 0.04 MB/s）。
 local function string_text(text)
   local out = { '"' }
-  for i = 1, #text do
-    local byte = text:byte(i)
+  local start = 1
+  local length = #text
+  while true do
+    local at = text:find('["\\%c]', start)
+    if at == nil then
+      break
+    end
+    if at > start then
+      out[#out + 1] = text:sub(start, at - 1)
+    end
+    local byte = text:byte(at)
     local escape = ESCAPES[byte]
     if escape ~= nil then
       out[#out + 1] = escape
-    elseif byte < 32 then
-      out[#out + 1] = ("\\u%04x"):format(byte)
     else
-      out[#out + 1] = text:sub(i, i)
+      out[#out + 1] = ("\\u%04x"):format(byte)
     end
+    start = at + 1
+  end
+  if start <= length then
+    out[#out + 1] = text:sub(start)
   end
   out[#out + 1] = '"'
   return join(out)
+end
+
+-- 浮点的精度试探格式串：提到模块级，避开每次尝试都新建一个格式串。
+-- （导出侧每个数字都要试 1..17 次，10k × 8 属性就是几十万次。）
+local NUMBER_FORMATS = {}
+for precision = 1, 17 do
+  NUMBER_FORMATS[precision] = "%." .. precision .. "g"
 end
 
 --- 数字 → 最短往返字节。
@@ -170,7 +208,7 @@ local function number_text(value)
   local allow_exponent = not (magnitude >= 1e-4 and magnitude < 1e15)
   local text = nil
   for precision = 1, 17 do
-    local candidate = ("%." .. precision .. "g"):format(value)
+    local candidate = NUMBER_FORMATS[precision]:format(value)
     if tonumber(candidate) == value then
       local uses_exponent = candidate:find("[eE]") ~= nil
       if allow_exponent or not uses_exponent then
