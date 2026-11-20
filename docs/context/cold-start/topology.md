@@ -1,9 +1,9 @@
 # Yggdrasill · Monorepo 模块拓扑与依赖白名单
 > **id** cold-start/topology · **幕** cold-start · **触发** 冷启动 / 改仓库结构前
 > **读不到代价** irreversible（依赖白名单误改）
-> **ver** 1dfdfd
+> **ver** 36a3cd
 
-> **定位**：仓库目录拓扑全景与 4 条硬性依赖不变量的唯一清单。
+> **定位**：仓库目录拓扑全景与 5 条硬性依赖不变量的唯一清单。
 > **replaces**：CONTEXT §4（L97–133）（搬运基线 `3a2536f`）
 > **上游**：[docs/README.md](../../README.md) · **相关**：[principles.md](principles.md) · [../../design/mod/mod-package.md](../../design/mod/mod-package.md)
 > **搬运**：以下正文自 CONTEXT.md L97–L133 逐字迁移，不重写语义。
@@ -19,6 +19,7 @@ Yggdrasill/
 │   ├── ygg-store/       # 运行持久化端口：SQLite 默认（run.sqlite + VFS）与遗留 JSON 后端（仅作为 ygg-sandbox 示例的 dev 依赖）；observe.rs = serve 只读观察面
 │   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、宿主 CLI（examples/agent/，含 serve.rs 只读观察台与 assets/panel 内置两级列表页）
 │   ├── ygg-lint/        # 静态 AST 检查器（full_moon）：YGG-R1/R2/R3、YGG-MOD-EFFECT、YGG-PARSE（仅依赖 ygg-modules，零内核/VM 依赖）
+│   ├── ygg-sim/         # Tier 1 原生模拟内核：tick 循环、列式 ECS、确定性快照/回放/state hash（零内部依赖；运行时依赖仅 thiserror，且必须能编到 wasm32）
 │   └── ygg-wasm/        # 浏览器 WebAssembly 绑定（wasm-bindgen 薄壳，位于 ygg-core + ygg-sandbox 之上）
 ├── packages/
 │   ├── schema/          # JSON Schema 单一事实来源（manifest、pack、story、agent-config）
@@ -46,6 +47,7 @@ Yggdrasill/
 - `ygg-modules` 是被 `ygg-sandbox` 与 `ygg-lint` 共享的零依赖叶 crate。
 - `ygg-lint` 绝不依赖 `ygg-core`、`ygg-schema` 或 `ygg-sandbox`（保证静态 AST 检查快速且免去 `mlua` 编译）。
 - `ygg-store`（及 `rusqlite`）只被原生宿主 CLI（`crates/ygg-sandbox/examples/agent/main.rs`，经 `[dev-dependencies]`）链接，确保 `ygg-wasm` 与 `ygg-lint` 的依赖树 100% 不含 SQLite 与文件系统依赖。
+- `ygg-sim` 零内部依赖（不依赖任何 `ygg-*` crate），运行时依赖仅 `thiserror`（`serde_json` 只在 dev-dependencies 读向量夹具）；方向单一 `ygg-sandbox → ygg-sim`（宿主是注入者，内核是提供者）。它必须能编到 `wasm32-unknown-unknown`（经 `ygg-wasm → ygg-sandbox → ygg-sim` 传递可见），故 `src/**` 里不得出现 `std::time` / `std::fs` / 线程 / `std::process`；`ygg-sim` 不得出现在 `ygg-lint` 的依赖树（静态检查必须免 `mlua` 也免热核引擎）。
 
 ---
 

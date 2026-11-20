@@ -37,6 +37,24 @@
 | `Snapshot` | 确定性编码全量字节（复用 codec 编码序） | restore 后 state hash 必须与原运行一致 |
 | `ReplayLog` | `{ seed, inputs: [(tick, input)] }` | 输入日志；回放 = restore + 逐 tick 重放 |
 
+**「复用 codec 编码序」= 复用排序规范，不是复用文本容器**（本句是该行的判准，改快照容器前先读）。上表 `Snapshot` 行的「编码序」指 codec 契约里那四条**序**的性质——键/组件名按字节序、整数标量定宽 LE、无浮点、版本前置——而不是「快照是一段确定性 JSON 文本」。Tier 1 快照是**二进制列帧**（`magic | fmt_version | flags | tick | next_entity | 组件名表 | resources | archetype 段 | 尾 digest`），理由是可算的：10⁵ 实体 8 属性转 JSON 文本约 12 MB，`serde_json` 编码 ~150–300 MB/s ⇒ 40–80 ms **仅编码**，再加一次哈希即逼近 §5 的 100 ms 线；同期二进制列拷贝 ≤10 ms。且文本容器要把「数值的十进制文本形态」变成契约的一部分（`-0.0` / `1e3` / 尾随零），那是给确定性凭空加一条待测边界。
+
+**组件形状：Tier 2 属性袋的类型词汇 + 命名投影**（`required` / `default` 不下沉的裁决理由同段末）：
+
+| Tier 2（[../packages/entity.md](../packages/entity.md) §2） | Tier 1（`crates/ygg-sim`） | 存储列 | 边界规则 |
+| --- | --- | --- | --- |
+| `type = "number"` | `AttrType::Number { frac_bits }`（缺省 32） | `Column::I64` | 内核只保证 `i64` 与位宽声明；Q32.32 是**跨面约定**，`frac_bits` 只被 Lua 面换算助手消费 |
+| `type = "string"` | `AttrType::Str` | `Column::Bytes`（`off` + `buf`） | UTF-8 字节序原样，内核不做规范化 |
+| `type = "boolean"` | `AttrType::Bool` | `Column::U8` | 只允许 0/1，其余值 restore 即 `YGG-SIM-FRAME` |
+| `type = "ref"` | `AttrType::Ref` | `Column::U64` | `0` = 无引用（实体 id 从 1 起）；悬垂 ref 不自动修（谁引用谁是游戏语义） |
+| `tags.<t>`（无值标记） | `AttrType::Tag` | 无列（只进 archetype key） | |
+| `required` / `default` | **不下沉** | — | 存在性/缺省校验属 Tier 2 schema 层；内核不做业务校验（§1「不内嵌游戏语义」） |
+
+**`frac_bits` 的作用域（诚实声明）**：内核**不解释小数位**——它只存 `i64`。`frac_bits` 是 schema 元数据，今天是**声明面**（供 Lua 面换算助手与将来按面声明使用），不是运算面；不要以为内核会按 `frac_bits = 16` 去做 Q16.16 运算。
+
+**行序与删除语义**：archetype 内行是 **dense 插入序**，删除一律 `swap_remove`（末行填洞）并同步 `entity_index`；组件**注册后永不移除**（Registry 只增），`restore` 按**组件名升序**重排内部 id ⇒ **内部 id 不是持久事实**（快照与 hash 只认名称与行序）。这条是回放对「换行策略」耦合的唯一定义处：改 despawn 策略即改逐 tick hash。
+
+
 ## 3. 不变量
 
 - **I1 确定性**：同 seed + 同 ReplayLog → 逐 tick 状态字节一致（跨 tick 数、跨进程）。
@@ -52,9 +70,13 @@
 | --- | --- | --- |
 | `sim.step(dt)` | 推进一 tick（系统注册制，系统列表是数据） | 变更模拟态 |
 | `sim.snapshot()` → bytes / `sim.restore(bytes)` | 全量存取 | 纯 |
-| `sim.hash()` → u64 | 规范化序列化序的哈希 | 纯 |
+| `sim.hash()` → u64 | 规范化序列化序的哈希（FNV-1a 64；**Rust 面 u64，Lua 面 = 16 位小写 hex 字符串**） | 纯 |
 | bulk entity ops | `spawn_batch/despawn_batch/insert_batch`（批量字节进出） | 变更模拟态 |
 | noise/DSP/几何原语面 | `eval(buffer_in) -> buffer_out` 批式 | 纯 |
+
+**hash 的跨面形状（不是强度妥协）**：Lua 5.4 整数是 **i64**，u64 上半区不可表，直转会变成负数——于是 Lua 面统一返回**16 位小写十六进制字符串**（既有先例：`pkg.procgen` 的「64 位一律十六进制」口径，K5）。Rust 面保持 `u64` 裸值（库侧不为面形状付字符串代价）。两侧是同一个数的两种呈现，**不是两种算法**：全仓额外哈希仅此一份 FNV-1a 64 实现，向量表与 `pkg.procgen.rng.fnv64` 双向断言。
+
+**noise/DSP/几何行不在首个需求范围内**：该行是契约承诺的**后续面**，验收归 Goal 排期总表（建议 S3：各面 buffer 吞吐数字 + 七包不回退）。首个需求只交付 `step / snapshot / restore / hash / bulk ops / replay`；读到本行时不得据此宣称 noise 面已存在。
 
 宿主注册范式与 fs 桥同款：库侧 `driver.rs` 注入（可改），CLI 激活触点在 `egg.rs`（宿主面——**改动走用户授权账，与 U1 六行同笔**）。
 
@@ -67,6 +89,19 @@
 | 回放一致 | 逐 tick hash 一致 | replay 用例（字节对比） |
 | Tier 2 兼容 | `pkg-selftest` 153/0 不回退 | 每次下沉后全量 |
 | 跨平台 | x86_64 ↔ aarch64 digest 一致 | 当前仅单机（macOS/arm64），结构性论证为整数语义；**实测已排期：Goal 排期总表 S2**，落地前所有跨平台声明引用该排期 |
+
+### 5.1 实测回填表（数字只落本表，不回写上方阈值）
+
+阈值是契约线，**实测不回流去改阈值**（未达线即回炉，见 I4）。每行必须带可复算命令；跨平台行引用 Goal 排期总表 S2，落地前不得声称已测。
+
+| 指标 | 阈值 | 实测（三轮取中位） | 方法（可复算） | 备注 |
+| --- | --- | --- | --- | --- |
+| tick 10⁴ 活跃实体 | ≤ 16.6 ms | `<待回填>` | `cargo test --release -p ygg-sim --test perf_tick -- --nocapture` | workload = 4 archetype / 3 系统 / 200 tick（20 warmup） |
+| snapshot 10⁵ 实体 | ≤ 100 ms | `<待回填>` | 同上 | 1 archetype × 8 attrs |
+| restore 10⁵ 实体 | ≤ 100 ms | `<待回填>` | 同上 | 含尾 digest 校验 |
+| 回放一致 | 逐 tick hash 全等 | `<待回填>` | `cargo test -p ygg-sim --test replay_tick_hash` | 含 1 条篡改负例 |
+| 跨进程 digest | parent == child | `<待回填>` | `cargo test -p ygg-sim --test replay_cross_process` | `current_exe` 子进程 + 临时文件 |
+
 
 ## 6. 用点计划
 
