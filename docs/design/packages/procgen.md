@@ -70,13 +70,15 @@
 
 | 指标 | 阈值（Goal 原则二） | 本包取值与测量方法 |
 | --- | --- | --- |
-| 包加载耗时 | `< 10ms` | 目标 `≤ 1ms`；**实测 0.813 ms**（清掉全部 `pkg.procgen*` 后 `require` + `install`（含四个自带算法注册、不含任何 `run`），5 次取中位，批内三次取中位；单次 0.795–0.859 ms）。打印 `perf.procgen.load_ms` |
+| 包加载耗时 | `< 10ms` | 目标 `≤ 1ms`；**实测 0.848 ms**（清掉全部 `pkg.procgen*` 后 `require` + `install`（含四个自带算法注册、不含任何 `run`），5 次取中位，批内三次取中位；单次 0.760–0.919 ms；加 `rng.weighted` 前同口径为 0.813 ms）。打印 `perf.procgen.load_ms` |
 | 实体按 id 查找 / 更新 | `O(1)` | **不适用**：本包不碰实体表；唯一的表访问是 `defs` 直取（`registry.defs[name]`），与实体总数无关是构造性的 |
 | 序列化吞吐（实体 / 秒，双向） | 附基准集与耗时 | **不适用**：产物序列化由 [codec.md](codec.md) §5 承包；本包的等价面是 §7 的**跨进程字节一致**（同 seed 两次独立进程的 canon 行 `cmp` 相等 + 宿主 sha256 相等），比吞吐更硬 |
 | 10k 实体常驻内存 | 给出数字 | 不适用（无实体）。等价口径：一张 64×64 噪声产物 **实测 135.2 KiB**（目标 `≤ 256 KiB`，硬帽 `16 MiB`；`collectgarbage("count")` 差）。打印 `perf.procgen.map64_mem_kib` |
-| 泄漏检测 | 100 轮不增长 | 确定性替身：同一 `(seed, stream)` 跑 100 轮 `run`，100 次 `hash` **全相等**（`leak_100_equal=1`）且内存差 **0.041%**（≤ 1%）。打印 `perf.procgen.leak_100_equal` / `perf.procgen.leak_gc_pct` |
+| 泄漏检测 | 100 轮不增长 | 确定性替身：同一 `(seed, stream)` 跑 100 轮 `run`，100 次 `hash` **全相等**（`leak_100_equal=1`）且内存差 **0.024%**（≤ 1%）。打印 `perf.procgen.leak_100_equal` / `perf.procgen.leak_gc_pct` |
 
-另加一条本包专属数字：**取数吞吐** `≥ 100,000 次 rng.int/秒`，因为地图生成的热路径在这里。20 万次 `rng.int(0,255)`（含拒绝采样）**实测 758,832 次/秒**（三次取中位；单次 754,196–759,143），约 7.6× 余量。打印 `perf.procgen.rng_int_per_s`。
+另加两条本包专属数字。**取数吞吐** `≥ 100,000 次 rng.int/秒`，因为地图生成的热路径在这里：20 万次 `rng.int(0,255)`（含拒绝采样）**实测 750,497 次/秒**（三次取中位；单次 740,612–753,264），约 7.5× 余量。打印 `perf.procgen.rng_int_per_s`。
+
+**加权取数吞吐** 同阈值 `≥ 100,000 次 rng.weighted/秒`：20 万次 `rng.weighted`（20 项合成权重池，**复用权重数组** —— 调用方的正确用法）**实测 184,700 次/秒**（三次取中位；单次 183,607–185,502），同段 `rng.int` 为 750,497 次/秒 ⇒ **`perf.procgen.weighted_vs_int_ratio = 4.06`**。比值构成：两轮遍历（Σw + 扫描）各 20 次，加每元素一次 `to_int` 校验；同机 stock lua 5.5 对照为 3.9×（`weighted` 1.112 ms/1k、`int` 0.287 ms/1k）。代价可查：每元素标签若用 `"weights[" .. i .. "]"`（每次调用拼 20 个字符串）比值会升到 5.45、吞吐降到 137,366 次/秒——这条实测就是把它改成常量标签的原因。打印 `perf.procgen.rng_weighted_per_s` / `perf.procgen.weighted_vs_int_ratio`。
 
 ## 6. 用点计划
 
@@ -90,9 +92,9 @@
 ## 7. 自测与验收
 
 - **用例名前缀**：`pkg.procgen.`（例 `pkg.procgen.same-seed-same-hash`、`pkg.procgen.stream-isolation`）。
-- **断言面**：I1 用「同 seed 两次 `run` → `cells` 逐值相等 + `hash` 相等」，且 `canon` 行由**两次独立进程**各跑一次、宿主比对（跨 run 确定性）；I2 用「插入一条新流不改变既有流的序列」；I3 用静态扫字面量（含 `ygg.` 与三张标准库表，`os.` 带边界匹配以免误伤 `algos.`）；I4 用「装一个一访问就记账的宿主代理，一次 `run` 零触碰」。
-- **用例清单（18 条）**：`kat-xoshiro128ss` / `int-bounds` / `int-uniformity` / `float-range` / `pick-shuffle` / `same-seed-same-hash` / `same-seed-same-canon`（digest 载体）/ `diff-seed-diff-hash` / `stream-isolation` / `state-resume` / `run-pure` / `algo-version-in-hash` / `unknown-algo` / `params-error` / `static-no-entropy` / `leak-100-runs` / `compose-via-define` / `perf-load`。
-- **计数**：18 条计入 `cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-procgen` 的 `cases passed=`。载体是 `packages/mods/pkg-selftest/`（声明包闭包的那个消费夹具）——生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远是 79/0，这是回归钉。
+- **断言面**：I1 用「同 seed 两次 `run` → `cells` 逐值相等 + `hash` 相等」，且 `canon` 行由**两次独立进程**各跑一次、宿主比对（跨 run 确定性）；I2 用「插入一条新流不改变既有流的序列」；I3 用静态扫字面量（含 `ygg.` 与三张标准库表，`os.` 带边界匹配以免误伤 `algos.`），并扫 `procgen/rng.lua` 不得出现 `pairs(` / `next(`（键序铁律：池序 = 数组声明序）；I4 用「装一个一访问就记账的宿主代理，一次 `run` 零触碰」。**加权面**另有四类断言：确定性（同 seed 两条流 1016 次逐值相等 + KAT16 定值 + 只消费一个 `next32`）、等权特例（`weighted(ones) == int(1,n)` 且句柄状态相等）、零权不可达（首/中/末三种位置各 20,000 次 0 命中，且正权项必须都被抽到）、分布（10⁶ 次 χ² < 43.82 (dof=19, p=0.999) **与**每桶相对偏差 ≤ 5% 双断言）。
+- **用例清单（22 条，`pkg-procgen.lua`）**：`kat-xoshiro128ss` / `int-bounds` / `int-uniformity` / `float-range` / `pick-shuffle` / `weighted-bounds` / `weighted-equal-weight` / `weighted-determinism` / `weighted-zero-weight` / `weighted-distribution` / `same-seed-same-hash` / `diff-seed-diff-hash` / `stream-isolation` / `state-resume` / `run-pure` / `algo-version-in-hash` / `unknown-algo` / `params-error` / `static-no-entropy` / `leak-100-runs` / `compose-via-define` / `perf-load`。另有 3 条载体用例在 `pkg-procgen-digest.lua`（`same-seed-same-canon` 与两条跨语言向量 `rng.fnv64-cross-language-vectors` / `rng.derive-state-cross-language-vectors`）。
+- **计数**：`--filter pkg-procgen` 的 `cases passed=` = **25**（22 + 3 条载体），全量 = **161**。载体是 `packages/mods/pkg-selftest/`（声明包闭包的那个消费夹具）——生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远是 79/0，这是回归钉。
 - **冒烟不计数**：`tests/pkg-procgen-smoke.lua` 与 `tests/pkg-procgen-digest-smoke.lua` 是 **file 级**断言（`error` ⇒ `file FAIL` ⇒ `ok=0`），不进 `cases passed=`；它们接住 `--filter` 的 mod 侧过滤，并钉装载面与 canon 行格式。
 - **禁止宽松断言**：只断「两次结果长度相同」不逐值相等，视同没测 I1（Goal P2.5 的验收是字节一致，不是形状一致）。
 
