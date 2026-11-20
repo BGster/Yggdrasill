@@ -35,9 +35,12 @@
 #![forbid(unsafe_code)]
 
 pub mod archetype;
+pub mod canonical;
 pub mod component;
 pub mod error;
 pub mod fixed;
+pub mod hash;
+pub mod snapshot;
 pub mod store;
 
 pub use archetype::{Archetype, Column, ValueRef};
