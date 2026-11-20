@@ -129,6 +129,7 @@ P0 期这一列是**目标值**；P2 首实现填实测值，偏差回写本表�
   - **perf 文件不计数**：`pkg-entity-perf.lua` 用 file 级断言（`error` ⇒ `file FAIL` ⇒ `ok=0`），不进 `cases passed=`——这样「40 条」这个可复算计数不被 perf 污染，而判定一样硬。
   - **`--filter` 的硬约束**：它同时对 mod 侧与包侧文件过滤，且「一处都不匹配」会以 `没有可执行的测试文件` 直接 exit 1。所以按包跑只能用 `--filter pkg-entity` / `--filter pkg-codec`（各有对应的冒烟文件接住），不能单跑一个 perf 文件。
   - **禁止宽松断言**：`assert(true)`、只断类型不断值、只断「没报错」一律作废（Goal 反例 5）。
+- **真沙箱面不计入 `cases passed=`**：包能不能在**无 `inject`** 的裸沙箱里装载、`set` 的整/浮身份判据能不能不自相矛盾，由 `cargo test -p ygg-sandbox --test packages_sandbox` 的用例 ② 钉住（`2` 与 `2.0` 必须判为异值）；`cases passed=` 只数 Lua 用例（[README.md](README.md) §5「沙箱可装载面」）。
 
 ## 8. 设计依据
 

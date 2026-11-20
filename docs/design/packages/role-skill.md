@@ -111,6 +111,7 @@
 - **用例清单（17 条）**：`kv-string-shape` / `grant-idempotent` / `revoke-absent-false` / `grant-unknown-role-errors` / `requires-tags-gate` / `skill-gain-once` / `charge-floor` / `recharge-cap` / `compose-no-writeback` / `compose-custom-order` / `effective-missing-attr-zero` / `counters-increment` / `counters-reset` / `static-no-clock` / `leak-100-rounds` / `perf-o1-structural` / `perf-load`。
 - **计数**：17 条计入 `cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-role-skill` 的 `cases passed=`。载体是 `packages/mods/pkg-selftest/`——生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远是 79/0，这是回归钉。
 - **冒烟不计数**：`tests/pkg-role-skill-smoke.lua` 是 **file 级**断言（`error` ⇒ `file FAIL` ⇒ `ok=0`），不进 `cases passed=`；它接住 `--filter` 的 mod 侧过滤，并钉装载面、导出面清单、事件名集合与 KV 前缀。
+- **真沙箱面不计入 `cases passed=`**：四个派生事件的**载荷形状**（`ygg.emit` 只收标量，D11）由 `cargo test -p ygg-sandbox --test packages_sandbox` 的用例 ① 钉住。它必须单独算：普通 Lua 的 mock `ygg.emit` 吃表，所以表载荷在 `cases passed=` 这一面**测不出来**（本包四处表载荷就是这么活到 r2 才被那个冒烟抓住的，[README.md](README.md) §5「沙箱可装载面」）。
 - **禁止宽松断言**：只断 `effective` 返回了数字、不断它等于基础值加各加成之和，视同没测 I2。
 
 ## 8. 设计依据
