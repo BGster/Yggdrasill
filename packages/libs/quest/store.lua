@@ -87,24 +87,31 @@ end
 -- ── 无标准库的骨架工具（与 entity 各自几行，不抽第三个包）───────────────────
 
 --- 字符串拼接（沙箱里 `table.concat` 不可达；O(n) 两两合并，理由同 codec 的 `join`）。
+---
+--- **不改入参**：两两合并是在一份新数组上做的。入参可能是调用方的 `meta_names`，
+--- 就地改写会把「名表」変成「已拼好的一个名」（实测：`npc\nweight` 当成了键名）。
 local function concat(parts, sep)
   local n = #parts
   if n == 0 then
     return ""
   end
+  local buf = {}
+  for i = 1, n do
+    buf[i] = parts[i]
+  end
   local width = 1
   while width < n do
     local index = 1
     while index <= n do
-      local right = parts[index + width]
+      local right = buf[index + width]
       if right ~= nil then
-        parts[index] = parts[index] .. sep .. right
+        buf[index] = buf[index] .. sep .. right
       end
       index = index + width * 2
     end
     width = width * 2
   end
-  return parts[1]
+  return buf[1]
 end
 
 --- 数组 → 换行名表（空数组 = 空串）。

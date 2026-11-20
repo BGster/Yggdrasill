@@ -1,0 +1,10 @@
+{
+    "schemaVersion": 1,
+    "name": "quest",
+    "version": "0.1.0",
+    "deps": [
+        { "id": "entity", "version": "0.1.0" },
+        { "id": "codec", "version": "0.1.0" }
+    ],
+    "contract": "docs/design/packages/quest.md"
+}

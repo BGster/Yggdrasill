@@ -63,9 +63,9 @@
           "sha256": "87b7e2f8902171508c38b5c5d386dd9474a0d0bf95fdb38c4a0454ce6e15c77b"
         },
         {
-          "byteLength": 8990,
+          "byteLength": 9276,
           "path": "quest/store.lua",
-          "sha256": "77ca6c9367d70c93c556a10dbaa30473e39c2a247da52616d82242008fb83e5a"
+          "sha256": "7ce7351f580d7f3d8666ce0d741ac5b9f534b18d06717708702cbb0341cda179"
         },
         {
           "byteLength": 8072,
