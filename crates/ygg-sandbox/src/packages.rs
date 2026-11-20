@@ -54,10 +54,13 @@
 //! [`crate::pack::PackError`]：英文小写、点名 JSON 位置、直接说该写什么。
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
 use thiserror::Error as ThisError;
+
+use crate::modules;
 
 /// 包 id 的字符集规则（`packages/libs/<id>/` 的目录名，也是 `pkg.<id>.*` 的 id）。
 ///
@@ -581,6 +584,226 @@ impl ResolvedPackages {
         }
         map
     }
+}
+
+/// 声明 → 包闭包（目录枚举 + `pkg.json` 解析 + 版本 / 缺失 / 循环校验）。
+///
+/// # 闭包必须是**完整声明**
+///
+/// `packages` 段是唯一的装载清单：包的 `deps` 只**声明**依赖关系（用于校验与
+/// 循环检测），不把未声明的包"拉进来"。一个 dep 未在 `packages` 段出现即
+/// [`PackageError::MissingTransitive`]。这条与本仓既有纪律同形：`code.modules`
+/// 也必须枚举每一个可 `require` 的模块，没有任何隐式发现面。
+///
+/// 全部校验在**进入内核之前**完成（零副作用）。
+pub fn resolve(root: &Path, spec: &PackagesSpec) -> Result<ResolvedPackages, PackageError> {
+    let found = list_package_ids(root);
+    let found_list = if found.is_empty() {
+        "-".to_owned()
+    } else {
+        found.join(", ")
+    };
+
+    // ① 逐个声明：目录存在 → pkg.json 可解析 → 版本相符。
+    let mut manifests: BTreeMap<String, PackageManifest> = BTreeMap::new();
+    for package in spec.packages() {
+        let id = package.id();
+        let dir = root.join(id);
+        if !dir.is_dir() {
+            return Err(PackageError::Unknown {
+                id: id.to_owned(),
+                root: root.display().to_string(),
+                found: found_list.clone(),
+            });
+        }
+        let file = dir.join(PKG_FILE);
+        let bytes = fs::read(&file).map_err(|err| PackageError::Package {
+            id: id.to_owned(),
+            reason: format!("cannot be read: {err}"),
+            file: file.display().to_string(),
+        })?;
+        let manifest = PackageManifest::parse(id, &bytes, &file)?;
+        if manifest.version() != package.version() {
+            return Err(PackageError::VersionMismatch {
+                id: id.to_owned(),
+                want: package.version().to_owned(),
+                got: manifest.version().to_owned(),
+                file: file.display().to_string(),
+            });
+        }
+        manifests.insert(id.to_owned(), manifest);
+    }
+
+    // ② 每个 dep 必须在声明集内（完整闭包），且版本与它自己的声明一致。
+    for manifest in manifests.values() {
+        for dep in manifest.deps() {
+            let Some(declared) = spec.packages().iter().find(|item| item.id() == dep.id()) else {
+                return Err(PackageError::MissingTransitive {
+                    parent: manifest.id().to_owned(),
+                    id: dep.id().to_owned(),
+                });
+            };
+            let target = &manifests[dep.id()];
+            if target.version() != dep.version() || target.version() != declared.version() {
+                return Err(PackageError::VersionMismatch {
+                    id: dep.id().to_owned(),
+                    want: dep.version().to_owned(),
+                    got: target.version().to_owned(),
+                    file: root.join(dep.id()).join(PKG_FILE).display().to_string(),
+                });
+            }
+        }
+    }
+
+    // ③ 循环（声明图；递归深度 = 包数，P1 的十几个包构不成栈风险）。
+    let mut marks: BTreeMap<String, u8> = BTreeMap::new();
+    let mut path: Vec<String> = Vec::new();
+    for id in manifests.keys() {
+        visit(id, &manifests, &mut marks, &mut path)?;
+    }
+
+    // ④ 文件枚举（按 id 升序：确定性）。
+    let mut packages = Vec::with_capacity(manifests.len());
+    for (id, manifest) in manifests {
+        let dir = root.join(&id);
+        let files = enumerate_files(&id, &dir, &dir.join(PKG_FILE))?;
+        packages.push(ResolvedPackage { manifest, files });
+    }
+    Ok(ResolvedPackages { packages })
+}
+
+/// 包根下的目录名清单（升序；用于「找不到该包时告诉你有哪些」）。
+fn list_package_ids(root: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            is_valid_package_id(&name).then_some(name)
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// 声明图的 DFS：`0` 未访问 / `1` 在栈上 / `2` 已完成。
+fn visit(
+    id: &str,
+    manifests: &BTreeMap<String, PackageManifest>,
+    marks: &mut BTreeMap<String, u8>,
+    path: &mut Vec<String>,
+) -> Result<(), PackageError> {
+    match marks.get(id).copied().unwrap_or(0) {
+        2 => return Ok(()),
+        1 => {
+            let start = path.iter().position(|item| item == id).unwrap_or(0);
+            let mut chain: Vec<String> = path[start..].to_vec();
+            chain.push(id.to_owned());
+            return Err(PackageError::Cycle {
+                chain: chain.join(" -> "),
+            });
+        }
+        _ => {}
+    }
+    marks.insert(id.to_owned(), 1);
+    path.push(id.to_owned());
+    if let Some(manifest) = manifests.get(id) {
+        for dep in manifest.deps() {
+            visit(dep.id(), manifests, marks, path)?;
+        }
+    }
+    path.pop();
+    marks.insert(id.to_owned(), 2);
+    Ok(())
+}
+
+/// 枚举一个包纳入闭包的文件：`pkg.json` + 非 `test/**` 的 `*.lua`。
+///
+/// 其它任何文件 = 可读拒绝（「无未声明文件」纪律）；以 `.` 开头的条目静默跳过
+/// （`.DS_Store` 之类，与 git 惯例一致）。`test/**` 不进模块表也不进 manifest——
+/// 包自测是开发面，不是装载面。
+fn enumerate_files(
+    id: &str,
+    dir: &Path,
+    pkg_file: &Path,
+) -> Result<Vec<PackageFile>, PackageError> {
+    let reject = |rel: &str| PackageError::Package {
+        id: id.to_owned(),
+        reason: format!(
+            "contains `{rel}` which is not an allowed file \
+             (allowed: `{PKG_FILE}`, `*.lua`, `{PKG_TEST_DIR}/**`)"
+        ),
+        file: pkg_file.display().to_string(),
+    };
+    let mut files: Vec<PackageFile> = vec![PackageFile {
+        rel: format!("{id}/{PKG_FILE}"),
+        module: None,
+    }];
+    let mut pending: Vec<(PathBuf, String)> = vec![(dir.to_path_buf(), String::new())];
+    while let Some((current, prefix)) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&current) else {
+            return Err(reject(&prefix));
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let rel_in_pkg = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            let path = entry.path();
+            if path.is_dir() {
+                // 只有包根的 `test/` 整棵子树跳过（子目录里的 test 仍是非法面）。
+                if prefix.is_empty() && name == PKG_TEST_DIR {
+                    continue;
+                }
+                pending.push((path, rel_in_pkg));
+                continue;
+            }
+            if prefix.is_empty() && name == PKG_FILE {
+                continue; // 已作为非模块条目入册
+            }
+            if !name.ends_with(modules::MODULE_EXTENSION) {
+                return Err(reject(&rel_in_pkg));
+            }
+            let module = module_name(id, &rel_in_pkg).map_err(|cause| PackageError::Package {
+                id: id.to_owned(),
+                reason: format!(
+                    "contains `{rel_in_pkg}` which is not a valid module path: {cause}"
+                ),
+                file: pkg_file.display().to_string(),
+            })?;
+            files.push(PackageFile {
+                rel: format!("{id}/{rel_in_pkg}"),
+                module: Some(module),
+            });
+        }
+    }
+    files.sort_by(|a, b| a.rel.cmp(&b.rel));
+    Ok(files)
+}
+
+/// 包内相对路径 → 模块名（复用 [`modules::name_of_path`]，不另写一套字符规则）。
+///
+/// `init.lua` → `pkg.<id>`（包根模块）；`words.lua` → `pkg.<id>.words`；
+/// `a/b.lua` → `pkg.<id>.a.b`。
+fn module_name(id: &str, rel_in_pkg: &str) -> Result<String, modules::ModuleError> {
+    let path_relative = modules::name_of_path(rel_in_pkg)?;
+    let prefix = module_prefix(id);
+    let name = if path_relative == "init" {
+        prefix
+    } else {
+        format!("{prefix}.{path_relative}")
+    };
+    modules::normalize(&name)?;
+    Ok(name)
 }
 
 #[cfg(test)]
