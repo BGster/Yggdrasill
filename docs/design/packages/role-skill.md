@@ -86,7 +86,7 @@
 | 指标 | 阈值（Goal 原则二） | 实测与测量方法 |
 | --- | --- | --- |
 | 包加载耗时 | `< 10ms` | 目标 `≤ 1ms`；**实测 0.738 ms**（清掉全部 `pkg.role_skill*` 后 `require` + `install({ codec })`，5 次取中位、批内三次取中位；单次 0.651–0.906 ms）。打印 `perf.role-skill.load_ms` |
-| 实体按 id 查找 / 更新 | `O(1)` | **强约束**，用**结构证据**而不是只看墙钟：一次 `effective` 的 `kv.get` 次数在 N = 1 / 100 / 10k 三档**恒为 3**（记录 + 角色定义表 + 技能定义表），打印 `perf.role-skill.kv_ops_per_effective=3`；墙钟比 `t(10k)/t(1)` **实测 1.0×**（三次取中位 0.998–1.048），打印 `perf.role-skill.time_ratio_10k_over_1`。判据写 `≤ 1.5×`（1.2 会被 GC 脉冲打成假红，r1 在 [quest.md](quest.md) §5 的同类指标上实证过） |
+| 实体按 id 查找 / 更新 | `O(1)` | **强约束**，用**结构证据**而不是只看墙钟：一次 `effective` 的 `kv.get` 次数在 N = 1 / 100 / 10k 三档**恒为 3**（记录 + 角色定义表 + 技能定义表），打印 `perf.role-skill.kv_ops_per_effective=3`；墙钟比 `t(10k)/t(1)` **实测 1.0×**（三次取中位 0.998–1.048），打印 `perf.role-skill.time_ratio_10k_over_1`。判据写 `≤ 1.55×`（S13：1.5 被 P-K r1 D-8 实测 1.50 摸到边界——同命令两连 1.46/1.50 一红一绿，余量按红值 +3.3%；1.2 会被 GC 脉冲打成假红，r1 在 [quest.md](quest.md) §5 的同类指标上实证过） |
 | 序列化吞吐（实体 / 秒，双向） | 附基准集与耗时 | **不适用**：`role` 前缀由 [codec.md](codec.md) §5 基准集覆盖 |
 | 10k 实体常驻内存 | 给出数字 | 1k actor（各 1 角色 + 6 技能）**实测 892.2 KiB**（目标 `≤ 1 MiB`，硬帽 `16 MiB`；`collectgarbage("count")` 差）。打印 `perf.role-skill.mem_1k_actors_kib` |
 | 泄漏检测 | 导入导出 100 轮内存不增长 | 100 轮 `grant_skill → revoke_skill` 后：技能集回零、`role.index` 条目数不变、KV 键数不变，内存差 **0.026%**（≤ 1%）。打印 `perf.role-skill.leak_delta_pct` |

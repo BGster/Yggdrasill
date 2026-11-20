@@ -886,12 +886,13 @@ function M.export(ns)
   return bundle
 end
 
---- `codec.write(path, bundle)`：算 checksum → 编码 → 落盘 → 与宿主回值**互校**。
+--- `codec.write(path, bundle)`：算 checksum → 编码 → 落盘 → 校**回执字节数**。
 ---
 --- 返回 `{ bytes, sha256 }`，sha256 **是我方算法算的**（它是「写进 bundle 的那个
---- 值」）。宿主的 sha256 从 P0 的「来源」变成「互校」：一致则无事，不一致报
---- `YGG-PKG-CODEC-CHECKSUM`——两套实现算出不同字节就说明有一边错了，该报警而不是
---- 选一个信。不修改入参（写进文件的是副本）。
+--- 值」）。宿主回的 `sha256` 不是互校对象：它算写出文本，而 `checksum(bundle)` 算
+--- `checksum=""` 的规范化编码，两份字节永不相同（S16）；内容面由 `read` 的强制
+--- checksum 兜底，写侧只比字节数（截断/半写 → `YGG-PKG-CODEC-CHECKSUM`）。
+--- 不修改入参（写进文件的是副本）。
 function M.write(path, bundle)
   if type(path) ~= "string" or #path == 0 then
     fail(E_TYPE, "write 需要一个非空路径字符串")
@@ -909,12 +910,13 @@ function M.write(path, bundle)
   if type(written) ~= "table" then
     fail(E_TYPE, "ygg.fs.write 未返回结果表")
   end
-  local host_digest = written.sha256
-  if type(host_digest) == "string" and #host_digest > 0 and host_digest:lower() ~= digest then
-    fail(
-      E_CHECKSUM,
-      "宿主 sha256 与包内自算不一致（宿主 " .. host_digest .. " / 包内 " .. digest .. "）"
-    )
+  -- 写入完整性只校**字节数**（截断 / 半写）。内容面不在这里重哈希：宿主 `fs.write`
+  -- 自己算 `sha256(content)` 并挂在 VFS 条目上（`ygg.fs.stat` 可查），而本包的纯 Lua
+  -- sha256 是 ~0.8 MB/s（S19 才下沉）——每写一遍就再哈希整份文本等于把存档耗时翻倍
+  -- （实测 66 KiB=90 ms、上限 256 KiB=285 ms）。「档没被改过」的证据仍由 `read` 的
+  -- 强制 checksum（I4）在越信任边界时复核；S16 前的互校对象是两份不同字节，永假。
+  if type(written.bytes) == "number" and written.bytes ~= #text then
+    fail(E_CHECKSUM, "写入字节数不符（宿主 " .. written.bytes .. " / 期望 " .. #text .. "）")
   end
   return { bytes = #text, sha256 = digest }
 end

@@ -618,7 +618,7 @@ run("pkg.codec.export-kv-keys", function()
   eq(next(missing.kv), nil, "不存在的键被跳过")
 end)
 
-run("pkg.codec.checksum-corroboree", function()
+run("pkg.codec.write-integrity", function()
   local bundle = {
     codec_version = "1",
     exported_from = "probe",
@@ -648,14 +648,18 @@ run("pkg.codec.checksum-corroboree", function()
     eq(out.sha256, world.fs_sha_value, "两套实现一致时不报警")
   end
 
-  -- ③ 宿主回错值 → YGG-PKG-CODEC-CHECKSUM（不选一个信）。
+  -- ③ 回执字节数对不上（截断 / 半写）→ YGG-PKG-CODEC-CHECKSUM。
+  --    （S16 后不再比宿主 sha256：它算写出文本，包内 digest 算 `checksum=""` 的编码，
+  --    两份字节永不相同；内容面由 `read` 的强制 checksum 兜底。）
   do
     local world = new_world()
     local _, codec = fresh(world)
-    world.fs_sha_mode = "wrong"
+    world.host.fs.write = function(path, content)
+      return { path = path, bytes = #content + 1 }
+    end
     expect_error("YGG-PKG-CODEC-CHECKSUM", function()
       codec.write("c.json", bundle)
-    end, "宿主 sha256 与包内不一致必须报错")
+    end, "写入字节数不符必须报错")
   end
 
   -- checksum 不修改入参（纯读面）。
