@@ -100,11 +100,13 @@
 
 | 指标 | 阈值 | 实测（三轮取中位） | 方法（可复算） | 备注 |
 | --- | --- | --- | --- | --- |
-| tick 10⁴ 活跃实体 | ≤ 16.6 ms | `<待回填>` | `cargo test --release -p ygg-sim --test perf_tick -- --nocapture` | workload = 4 archetype / 3 系统 / 200 tick（20 warmup） |
-| snapshot 10⁵ 实体 | ≤ 100 ms | `<待回填>` | 同上 | 1 archetype × 8 attrs |
-| restore 10⁵ 实体 | ≤ 100 ms | `<待回填>` | 同上 | 含尾 digest 校验 |
-| 回放一致 | 逐 tick hash 全等 | `<待回填>` | `cargo test -p ygg-sim --test replay_tick_hash` | 含 1 条篡改负例 |
-| 跨进程 digest | parent == child | `<待回填>` | `cargo test -p ygg-sim --test replay_cross_process` | `current_exe` 子进程 + 临时文件 |
+| tick 10⁴ 活跃实体 | ≤ 16.6 ms | **0.553 ms**（三轮 0.590 / 0.553 / 0.551；p95 0.588–0.603，max 0.757） | `cargo test --release -p ygg-sim --test perf_tick -- --nocapture` | workload = 4 archetype / 3 系统 / 200 tick（20 warmup） |
+| snapshot 10⁵ 实体 | ≤ 100 ms | **8.351 ms**（帧 7 200 130 B） | 同上 | 1 archetype × 8 attrs |
+| restore 10⁵ 实体 | ≤ 100 ms | **16.633 ms** | 同上 | 含尾 digest 校验 |
+| 回放一致 | 逐 tick hash 全等 | **matched=150/150（快照续跑）、200/200（创世重跑）；first_mismatch=None** | `cargo test -p ygg-sim --test replay_tick_hash` | 含 1 条篡改负例（改 dt +1 ulp 必在该 tick 报失配） |
+| 跨进程 digest | parent == child | **parent_digest = child_digest = `0c6199352032440b`（60 行 trace）** | `cargo test -p ygg-sim --test replay_cross_process` | `current_exe` 子进程 + 临时文件 |
+
+口径：macOS / arm64、`--release`（`[profile.release.package.ygg-sim] opt-level = 3` 单点覆盖，根 `opt-level="s"` 是 wasm 体积面）、三轮各新建 Sim、每轮取逐 tick 中位、再取三轮中位。**实测比 §5.3 的预判（1–3 ms）更快**，余量 30×；不因此下调阈值——阈值是契约线，不是目标值。
 
 
 ## 6. 用点计划
@@ -128,4 +130,7 @@
 - **为什么三层**：模拟上限差 2 个数量级只能靠层级补；确定性回放是 agent 游戏核心卖点，必须结构化；Factorio 先例（原生引擎+Lua mod+确定性）已验证该分工。
 - **为什么 v1 收窄**：tick/ECS 存储/快照/hash 是所有后续面的公共底座，先立底座；物理/寻路等重系统随用例立项——防投机性引擎建造。
 - **反方案**：全 Lua 包（上限不足，保留为 Tier 2 角色）；七包重写 Rust（杀掉笼内免编译生态，拒绝）；等 P3 数据再定（被用户裁决否决——架构直接承诺，数字用于排序下沉面而非决定是否下沉）。
+- **为什么名称键控（内部 id 不进快照/hash）**：`ComponentId` 是注册序的副产物，而注册序是宿主装载序的副产物——把 id 写进存档等于把「装载顺序」变成持久契约，跨进程/跨版本必然分叉。改成名称键控后，同一世界在两种注册顺序下给出**逐字节相同**的快照与 hash（`snapshot_roundtrip::id_order_independent` 实测：内部 id 0 vs 4，字节与 hash 全同）。代价是一次按名称排序的编码（每个 archetype 段几十字节的元数据），相对列载荷可忽略。
+- **为什么结构操作延迟到 tick 边界**：系统迭代列的同时增删行，会让「这一帧里到底有哪些行」依赖遍历进度——同一份代码在 `Vec` 增长/搬移下给出不同结果。延迟到边界 FIFO 应用后，系统看到的行集与行序在整帧内稳定，且换进/换出顺序可复算（回放的逐 tick hash 依赖它）。反方案（就地增删 + 索引失效重查）不是更快，只是把确定性换成了「跑两次看看」。
+- **为什么 hash 每次真编码一遍快照**：等式 `state_hash == fnv1a64(快照字节去尾 digest)` 只有在真的编码时才可执行。另写快路径（遍历列直接算 hash）会让两条路径在「加了一个字段」时静默分叉，症状是「存档能读、回放对不上」——最难查的一类故障。代价在 §5.1：10⁴ 实体 tick 仍只用 0.553 ms，远低于 16.6 ms 预算。
 - **①②③ 判据**（每个下沉面）：① 被阻动作=该面性能预算不达或需宿主资源；② 症状=对比表数字；③ 确认=digest/帧率/吞吐实测。
