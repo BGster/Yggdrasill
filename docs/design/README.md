@@ -15,9 +15,10 @@ docs/design/
 ├── host/              # ② egg CLI 与 host
 │   ├── cli-daemon.md  serve.md
 │   └── harness-tools.md  lanes.md
-└── mod/               # ③ agent-seed mod
-    ├── mod-package.md  prompt-surface.md  tool-bridge.md
-    └── action-faces.md  identity.md
+├── mod/               # ③ agent-seed mod
+│   ├── mod-package.md  prompt-surface.md  tool-bridge.md
+│   └── action-faces.md  identity.md
+└── packages/          # ⑤ packages 通用能力层（7）：README + entity / codec / quest / dialogue / role-skill / procgen
 ```
 
 ## 我碰哪个面 → 读哪个文件
@@ -40,6 +41,18 @@ docs/design/
 | ④ mod · 测试策略（纯 Lua 自检） | [mod/testing-strategy.md](mod/testing-strategy.md) | 改 `tests/**` 或 `selftest.rs` 之前 | silent-gap |
 | ③ mod · 三层动作面 | [mod/action-faces.md](mod/action-faces.md) | 新增或移动一个动作面之前 | silent-drift |
 | ③ mod · 身份与权限 | [mod/identity.md](mod/identity.md) | 改执行者台账 / 身份判定 / profile 之前 | silent-drift |
+
+### ⑤ packages · 通用能力层（可复用的引擎能力，契约先于实现）
+
+| 触碰面 | 文件 | 触发（召回时点） | 读不到代价 |
+| --- | --- | --- | --- |
+| ⑤ packages · 索引与命名规则 | [packages/README.md](packages/README.md) | 新增或修改任何 package 或其契约之前 | hard-refusal |
+| ⑤ packages · 实体与属性袋 | [packages/entity.md](packages/entity.md) | 改实体 / 属性袋形状、索引或生命周期事件之前 | silent-drift |
+| ⑤ packages · 编解码与存档往返 | [packages/codec.md](packages/codec.md) | 改 bundle 形状、键序规则或导入冲突策略之前 | irreversible |
+| ⑤ packages · 任务与委托 | [packages/quest.md](packages/quest.md) | 改任务模板 / 实例形状或步骤推进语义之前 | silent-drift |
+| ⑤ packages · 对话事件总线 | [packages/dialogue.md](packages/dialogue.md) | 改 handler 注册面、回退链或 agent 通道之前 | irreversible |
+| ⑤ packages · 角色与技能 | [packages/role-skill.md](packages/role-skill.md) | 改角色授予 / 技能引用 / 属性合成之前 | silent-drift |
+| ⑤ packages · 程序化生成 | [packages/procgen.md](packages/procgen.md) | 改 PRNG 算法、流派生规则或生成器声明形状之前 | irreversible |
 
 ## 不在本树的（行为面）
 

@@ -93,12 +93,27 @@ The user runs real-data verification and pastes the output; synthetic data under
    no CLI source changes**. Choose this file for a cold-start ruling or `.ygg/mods/agent-seed/` for machine
    enforcement (`src/runtime/flow.lua`, `src/handlers/**`, `data/*.json`; `mod.lua` is assembly only).
    Both may change together. Indexed `docs/**` may carry the chosen ruling's operating or subsystem
-   elaboration in the same commit, but is never a third place to originate a constraint.
+   elaboration in the same commit, but is never a third place to originate a constraint. **The capability
+   exit below is a third carrier for engine infrastructure only — it originates no constraint.**
    - Never write a checker, wrapper or hook as a patch. Scripts may only perform read-only queries and may
      not carry constraints. Never patch the egg CLI source; give the user the symptom and reproduction.
      **Boundary**: a host `#[cfg(test)]` assertion that has to change because a *pack declaration* changed shape is maintenance, not capability expansion — change it in the same commit and name the declaration (`docs/design/mod/mod-package.md`「pack 声明变更的连带义务」).
    - Every evolution needs all three: ① the specific action blocked; ② the visible violation symptom;
      ③ one runnable confirmation. Fewer than three means it is not written. A verbal promise is unhandled.
+   - **Capability exit (engine infrastructure) — the third carrier, never a third constraint exit.** New
+     capability (a data shape, an invariant, an API surface) has exactly two homes and no third:
+     `crates/ygg-*/` when it needs kernel semantics or Rust-side facilities, `packages/libs/<name>/` when it
+     is pure Lua over the `ygg.*` surface. Every capability lands in one commit with its contract
+     `docs/design/packages/<name>.md` (data shape / invariants / API face / perf budget / ≥2 cross-game use
+     points), its `selftest` cases and its perf numbers — an undocumented or untested package is not a
+     package. The three elements above apply verbatim here too: **① blocked** — a capability commit that
+     never chose its carrier (kernel capability vs package vs this game's own business); **② symptom** — the
+     same data shape re-invented per game, a package only one game uses, or a game re-building entity
+     management / serialisation / quest flow / dialogue scheduling / asset generation inside its own mod;
+     **③ confirmation** — the contract exists and is indexed, its cases are counted in `selftest`, its perf
+     table is filled. Host surface stays non-negotiable: `crates/ygg-sandbox/examples/egg.rs` and serve are
+     reported by symptom and reproduction, never patched; no capability may add a checker, wrapper or hook.
+     Contract index and naming rules: `docs/design/packages/README.md`.
    - **No claim without its method — absence and counts included.** A negative claim ("this repo never had
      X") and a quantity claim ("16 occurrences") are assertions: unproven until a method that *could have
      returned the opposite* produced them. Before either enters a requirement description, a plan or
