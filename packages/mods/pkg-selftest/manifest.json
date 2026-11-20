@@ -93,9 +93,9 @@
           "sha256": "b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
         },
         {
-          "byteLength": 7174,
+          "byteLength": 10495,
           "path": "procgen/rng.lua",
-          "sha256": "62e832e10d5a9040380edcfeb2e0933e35cb1448649de00463d3389d0dcbef02"
+          "sha256": "f9e3e165d8d7dcfe73ba04f6da70bf022b8d94d42973ba4bd3ffea6507a97043"
         }
       ],
       "id": "procgen"
