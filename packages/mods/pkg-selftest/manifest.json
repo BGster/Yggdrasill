@@ -253,9 +253,9 @@
           "sha256": "ded3b4770171f8377dc724e5643f2b53cf22ecde5a49638ca3dd2ed5f54cbf5c"
         },
         {
-          "byteLength": 6618,
+          "byteLength": 6569,
           "path": "role-skill/store.lua",
-          "sha256": "f56817149b1b288fa7da096f1ca61ca7db518b5d3b6c9aedbcb90caabff4b786"
+          "sha256": "187655c62634feb35a31e7aacf07a92ea377e57ef9a7b0706894d4a37b3fce23"
         },
         {
           "byteLength": 3442,
