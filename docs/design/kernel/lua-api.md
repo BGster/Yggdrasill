@@ -26,7 +26,7 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 | `ygg.meta(key, json_value)` | 将结构化元数据（`summary`、`tool_calls`、`harness_actions`）写入当前 dispatch 回执的临时 `meta` 映射。 | **模块顶层禁用** |
 | `ygg.data(resource_id)` | 纯读取，返回 `pack.json` `entries` 中声明的、经 Schema 校验的 JSON 资源的深度 Lua 表副本。 | 模块顶层允许（纯读取） |
 | `ygg.kv.get(key)` / `ygg.kv.set(key, val)` | 读取或写入持久化键值状态。可写值只有**四个标量**：`nil` / `boolean` / `number` / `string`——表一律被拒（`value_from_lua` 报 `unsupported payload type`，core 的 `Value` 只有四个标量变体）。复合结构 = **一个键 + 一条确定性编码字符串**（口径归 `pkg.codec`，见 [packages/README.md](../packages/README.md) §5）。处理器失败时回滚。 | `get` 允许；`set` **模块顶层禁用** |
-| `ygg.entity.*` | `spawn()`、`get_attribute(id, k)`、`set_attribute(id, k, v)`、`add_tag(id, t)`、`remove_tag(id, t)`、`has_tag(id, t)`。返回数字实体 ID（`YGG-R2` 要求将 ID 持久化到 `ygg.kv`）。**无 `exists` / `destroy`**（与 [packages/entity.md](../packages/entity.md) §1 一致：id 永不复用，死亡=墓碑降级；回收面演进见 Goal 排期 S9）。 | 查询允许；变更 **模块顶层禁用** |
+| `ygg.entity.*` | **单条六面**：`spawn()`、`get_attribute(id, k)`、`set_attribute(id, k, v)`、`add_tag(id, t)`、`remove_tag(id, t)`、`has_tag(id, t)`。**批式六面**（P-K A1，铁律②「数组进出、单次调用承载整批」；**一个逐实体 getter 都没有**，键集是闭集）：`spawn_batch(rows)` → `{spawned, next_id, ids}`；`attr_apply(ops)` → `{applied, changed}`（`changed` 逐条反映真实变更，供 Tier 2 判「值变才发事件」）；`attr_fetch(queries)` → `{values}`（列式回，整/浮身份靠 `Value::Int|Float` 自身保真）；`tag_batch(ops)` → `{changed}`；`scan(lo, hi, tag?)` → `{ids}`（**扫 [lo, hi] 且实体存在**；`hi` 由调用方给 = `pkg.entity.seq` 水位，原生侧不读 `next_id`）；`despawn_batch(ids)` → `{despawned}`。返回数字实体 ID（`YGG-R2` 要求将 ID 持久化到 `ygg.kv`）。**无 `exists` / `destroy`**（与 [packages/entity.md](../packages/entity.md) §1 一致：id 永不复用，死亡=墓碑降级；回收面演进见 Goal 排期 S9）。失败一律**先校验后改**；错误码 `YGG-ENTITY-FRAME`（形状）/ `YGG-ENTITY-VALUE`（非有限值或非标量）/ `YGG-ENTITY-ID`（未知 id）。 | 查询允许；变更 **模块顶层禁用** |
 | `ygg.fsm.*` / `ygg.narrative.*` | 内嵌 Lua 标准库辅助，用于扁平有限状态机（`fsm.define`、`fsm.current`、`fsm.on_event`）与故事节点（`narrative.node`、`narrative["goto"]`；点形式 `narrative.goto` 是 Lua 5.4 语法错误，由 `YGG-R3` 捕获）。 | `define` / `node` / `goto` **模块顶层禁用** |
 | `ygg.fs.{write,read,stat,list}` | 可选宿主注入的两根文件面：`artifacts/<file>`（内存 VFS，dispatch 级回滚）与 `mounts/<name>/<rel>`（挂载桥，写穿磁盘）。`write(path, content)` 返回 `{ path, bytes, sha256 }`。两根的文法、尺寸帽、返回形状与错误码见 [§3.1.2](#312-mounts-挂载面宿主注入的盘上文件桥)。 | 变更调用 **模块顶层禁用** |
 | `ygg.sim.*` | 可选宿主注入的**原生模拟内核面**（Tier 1）：`step` / `hash` / `snapshot` / `restore` / `spawn_batch` / `despawn_batch` / `insert_batch` / `status` / `trace` / `replay`——恰好 10 个键，**一个逐实体 getter 都没有**（批式铁律：bytes/数组进出、单帧单调用）。全部字节帧带尾 digest，坏帧先拒后改。未挂载时**每个函数**抛 `YGG-SIM-UNMOUNTED`（不是 `nil` / `false`）。形状、`16 位小写 hex` 与错误码见 [§3.1.3](#313-sim-模拟内核面宿主注入)。 | 查询允许；变更调用 **模块顶层禁用**（静态 `YGG-MOD-EFFECT` 规则与宿主激活同批接，排期 S1；本行运行期面已注册，未挂载即拒） |
@@ -137,7 +137,7 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 
 `ygg.sim.*` 是 Tier 1（`crates/ygg-sim`，契约 [sim-kernel.md](sim-kernel.md)）在 Lua 侧的**唯一**进出口。它和 `ygg.fs` 的 `mounts/` 面同款纪律：库侧 `set_sim(...)` 注入（`driver.rs`），CLI 激活触点在 `egg.rs`（宿主面改动走用户授权账，**排期 S1**）；本需求交付「表始终注册 + 未挂载降级」，**不**在宿主里注入实例。
 
-**十个键，一个逐键 getter 都没有**（批式铁律 ②：mlua 边界穿越 ~µs，细粒度调用是负收益）。键集是**闭集**——多一个键即红（`tests/sim_face.rs` 的键集断言），这条断言的作用是防止未来退化回逐项访问：
+**十个键，一个逐键 getter 都没有**（批式铁律 ②：穿越实测 45–57 ns/带参调用；批式的优势来自 per-entity 摊薄，不是「逐项调用负收益」）。键集是**闭集**——多一个键即红（`tests/sim_face.rs` 的键集断言），这条断言的作用是防止未来退化回逐项访问：
 
 | 键 | 签名 | 返回 | 副作用 |
 | --- | --- | --- | --- |
