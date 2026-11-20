@@ -13,6 +13,9 @@
 //!            （按 name 字节序升序；下面的 archetype 段按**这个表的序**引用组件）
 //! res_n       4B   LE            （键升序）
 //!   × res_n: key 8B | value 8B
+//! rng_seed    8B   LE
+//! rng_n       4B   LE            （流名升序）
+//!   × rng_n: name_len 2B | name UTF-8 | w0..w3（各 4B LE）
 //! arch_n      4B   LE            （按「升序组件名串联」的字节序升序）
 //!   × arch_n: comp_cnt 2B | comp_idx 2B×comp_cnt | row_n 4B
 //!            | ids: u64×row_n  | 每列载荷（顺序 = comp_idx 顺序）:
@@ -40,6 +43,7 @@ use crate::archetype::{Archetype, Column};
 use crate::canonical::{FrameReader, FrameWriter};
 use crate::component::{AttrType, CompSet, ComponentDef, EntityId, Registry};
 use crate::error::{SimError, SimResult};
+use crate::rng::RngRegistry;
 use crate::store::ArchetypeStore;
 
 /// 一次解码的结果（`Sim` 的 `restore` 把它写回自己的字段）。
@@ -49,12 +53,19 @@ pub struct SnapshotState {
     pub tick: u64,
     /// 资源表（`KV<u64>`：键升序）。
     pub resources: BTreeMap<u64, u64>,
+    /// 随机流状态（seed + 每条流的四字状态——**存档续跑要接着往下走**，不是从头重播）。
+    pub rng: RngRegistry,
     /// 世界（注册表已按**名称升序**重建）。
     pub store: ArchetypeStore,
 }
 
 /// 编码一帧快照（含尾 digest）。
-pub fn encode(tick: u64, resources: &BTreeMap<u64, u64>, store: &ArchetypeStore) -> Vec<u8> {
+pub fn encode(
+    tick: u64,
+    resources: &BTreeMap<u64, u64>,
+    rng: &RngRegistry,
+    store: &ArchetypeStore,
+) -> Vec<u8> {
     let registry = store.registry();
     // 组件表的规范序：名称字节序升序。
     let mut table: Vec<(u32, &str, AttrType)> = Vec::with_capacity(registry.len());
@@ -85,6 +96,18 @@ pub fn encode(tick: u64, resources: &BTreeMap<u64, u64>, store: &ArchetypeStore)
     for (key, value) in resources {
         writer.u64(*key);
         writer.u64(*value);
+    }
+
+    // 随机流状态：seed + 每条流（名称升序，`entries()` 的序即 `BTreeMap` 序）。
+    writer.u64(rng.seed());
+    let streams: Vec<(&str, [u32; 4])> = rng.entries().collect();
+    writer.u32(streams.len() as u32);
+    for (name, words) in &streams {
+        writer.u16(name.len() as u16);
+        writer.raw(name.as_bytes());
+        for word in words {
+            writer.u32(*word);
+        }
     }
 
     // canonical index：内部 id → 组件表下标（名称序）。
@@ -231,7 +254,31 @@ pub fn decode(bytes: &[u8]) -> SimResult<SnapshotState> {
         resources.insert(key, value);
     }
 
-    // ③ archetype 段。
+    // ③ 随机流段。
+    let rng_seed = reader.u64()?;
+    let rng_n = reader.u32()? as usize;
+    let mut streams: BTreeMap<String, [u32; 4]> = BTreeMap::new();
+    let mut prev_stream: Option<String> = None;
+    for _ in 0..rng_n {
+        let name_len = reader.u16()? as usize;
+        let raw = reader.raw(name_len)?;
+        let name = std::str::from_utf8(raw)
+            .map_err(|err| SimError::frame(format!("流名不是合法 UTF-8：{err}")))?
+            .to_string();
+        if let Some(prev) = &prev_stream {
+            if prev.as_bytes() >= name.as_bytes() {
+                return Err(SimError::frame(format!(
+                    "流名未按字节序严格升序：`{prev}` 之后是 `{name}`"
+                )));
+            }
+        }
+        let words = [reader.u32()?, reader.u32()?, reader.u32()?, reader.u32()?];
+        prev_stream = Some(name.clone());
+        streams.insert(name, words);
+    }
+    let rng = RngRegistry::from_parts(rng_seed, streams)?;
+
+    // ④ archetype 段。
     let arch_n = reader.u32()? as usize;
     let mut archetypes: Vec<Archetype> = Vec::with_capacity(arch_n);
     for _ in 0..arch_n {
@@ -281,11 +328,12 @@ pub fn decode(bytes: &[u8]) -> SimResult<SnapshotState> {
     }
 
     reader.finish()?;
-    // ④ 用 store 的 from_parts 重建桶索引与实体索引（它同时做行数/重复 id/越界校验）。
+    // ⑤ 用 store 的 from_parts 重建桶索引与实体索引（它同时做行数/重复 id/越界校验）。
     let store = ArchetypeStore::from_parts(registry, archetypes, next_id)?;
     Ok(SnapshotState {
         tick,
         resources,
+        rng,
         store,
     })
 }
@@ -377,8 +425,9 @@ mod tests {
     fn empty_world_round_trips() {
         let store = ArchetypeStore::new();
         let resources = BTreeMap::new();
-        let bytes = encode(0, &resources, &store);
-        assert_eq!(bytes, encode(0, &resources, &store));
+        let rng = RngRegistry::new(7);
+        let bytes = encode(0, &resources, &rng, &store);
+        assert_eq!(bytes, encode(0, &resources, &rng, &store));
         let decoded = decode(&bytes).unwrap();
         assert_eq!(decoded.tick, 0);
         assert!(decoded.store.registry().is_empty());

@@ -40,6 +40,7 @@ pub mod component;
 pub mod error;
 pub mod fixed;
 pub mod hash;
+pub mod rng;
 pub mod snapshot;
 pub mod store;
 

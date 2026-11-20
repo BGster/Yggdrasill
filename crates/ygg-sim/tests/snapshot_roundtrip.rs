@@ -10,6 +10,7 @@ use ygg_sim::component::ComponentDef;
 use ygg_sim::error::codes;
 use ygg_sim::fixed::ONE;
 use ygg_sim::hash::fnv1a64;
+use ygg_sim::rng::RngRegistry;
 use ygg_sim::snapshot;
 use ygg_sim::store::ArchetypeStore;
 
@@ -62,6 +63,15 @@ fn fixture(order: &[&str]) -> ArchetypeStore {
     store
 }
 
+/// 抽过两条流的世界（随机流状态必须随快照往返，否则存档前后序列会分叉）。
+fn rng() -> RngRegistry {
+    let mut rng = RngRegistry::new(12345);
+    rng.next32("sim/integrate/0");
+    rng.next32("sim/integrate/0");
+    rng.next32("sim/decay/1");
+    rng
+}
+
 fn resources() -> BTreeMap<u64, u64> {
     let mut map = BTreeMap::new();
     map.insert(9, 90);
@@ -76,8 +86,8 @@ const ORDER_B: &[&str] = &["Enemy", "Owner", "Alive", "Label", "Pos"];
 #[test]
 fn bytes_stable_and_hash_is_fnv_of_payload() {
     let store = fixture(ORDER_A);
-    let first = snapshot::encode(5, &resources(), &store);
-    let second = snapshot::encode(5, &resources(), &store);
+    let first = snapshot::encode(5, &resources(), &rng(), &store);
+    let second = snapshot::encode(5, &resources(), &rng(), &store);
     assert_eq!(first, second, "同态两次编码必须逐字节相同");
     // hash = 尾 digest = fnv(去尾 digest 的字节)
     let payload = &first[..first.len() - 8];
@@ -87,24 +97,39 @@ fn bytes_stable_and_hash_is_fnv_of_payload() {
     // tick 进 hash：换 tick 就换 hash
     assert_ne!(
         snapshot::hash_of(&first),
-        snapshot::hash_of(&snapshot::encode(6, &resources(), &store))
+        snapshot::hash_of(&snapshot::encode(6, &resources(), &rng(), &store))
     );
 }
 
 #[test]
 fn round_trip_is_idempotent() {
     let store = fixture(ORDER_A);
-    let bytes = snapshot::encode(5, &resources(), &store);
+    let bytes = snapshot::encode(5, &resources(), &rng(), &store);
     let decoded = snapshot::decode(&bytes).unwrap();
     assert_eq!(decoded.tick, 5);
     assert_eq!(decoded.resources, resources());
     // 重编码必须逐字节相同（含列顺序、组件表、资源序）
-    let again = snapshot::encode(decoded.tick, &decoded.resources, &decoded.store);
+    let again = snapshot::encode(
+        decoded.tick,
+        &decoded.resources,
+        &decoded.rng,
+        &decoded.store,
+    );
     assert_eq!(again, bytes, "restore(b).snapshot() == b");
     assert_eq!(snapshot::hash_of(&again), snapshot::hash_of(&bytes));
     // 值真的回来了（不是「字节相同但世界是空的」这类空转）
     assert_eq!(decoded.store.entity_count(), 3);
     assert_eq!(decoded.store.archetype_count(), 2);
+    // 随机流状态跟着回来了：续跑的下一抽与原始世界一致
+    assert_eq!(decoded.rng.seed(), 12345);
+    assert_eq!(decoded.rng.stream_count(), 2);
+    let mut continued = decoded.rng.clone();
+    let mut original = rng();
+    assert_eq!(
+        continued.next32("sim/integrate/0"),
+        original.next32("sim/integrate/0"),
+        "restore 之后的随机序列必须接着原世界往下走"
+    );
 }
 
 #[test]
@@ -119,8 +144,8 @@ fn id_order_does_not_change_bytes_or_hash() {
     assert_eq!(a.registry().id_of("Pos").unwrap(), 0);
     assert_eq!(b.registry().id_of("Pos").unwrap(), 4);
     // 但字节与 hash 完全相同——名称键控把 id 抹掉
-    let bytes_a = snapshot::encode(5, &resources(), &a);
-    let bytes_b = snapshot::encode(5, &resources(), &b);
+    let bytes_a = snapshot::encode(5, &resources(), &rng(), &a);
+    let bytes_b = snapshot::encode(5, &resources(), &rng(), &b);
     assert_eq!(bytes_a, bytes_b, "注册顺序不得改变快照字节");
     assert_eq!(snapshot::hash_of(&bytes_a), snapshot::hash_of(&bytes_b));
     // 反过来：decode 之后两边都能正确取到值
@@ -135,7 +160,7 @@ fn id_order_does_not_change_bytes_or_hash() {
 #[test]
 fn corrupt_bytes_are_rejected_not_panicked() {
     let store = fixture(ORDER_A);
-    let bytes = snapshot::encode(5, &resources(), &store);
+    let bytes = snapshot::encode(5, &resources(), &rng(), &store);
     // 翻转中间某个字节：尾 digest 必须抓到
     let mut broken = bytes.clone();
     let mid = broken.len() / 2;
@@ -169,6 +194,6 @@ fn corrupt_bytes_are_rejected_not_panicked() {
     // 原帧仍然可读（拒绍不改输入）
     assert_eq!(
         snapshot::hash_of(&bytes),
-        snapshot::hash_of(&snapshot::encode(5, &resources(), &store))
+        snapshot::hash_of(&snapshot::encode(5, &resources(), &rng(), &store))
     );
 }
