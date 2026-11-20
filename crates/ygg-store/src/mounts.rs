@@ -906,15 +906,14 @@ impl MountStore {
         }
         self.budget_left -= content.len() as u64;
         let sha256 = crate::sha256_hex(content);
-        if let Err(err) = self.append_audit(json!({
+        // 已写未审：审计 append 失败必须诚实报错（`YGG-FS-AUDIT`），不假装成功。
+        self.append_audit(json!({
             "event": "fs.write",
             "mount": located.mount,
             "path": path,
             "bytes": content.len(),
             "sha256": sha256,
-        })) {
-            return Err(err); // 已写未审：不假装成功
-        }
+        }))?;
         Ok(MountWritten {
             path: path.to_owned(),
             bytes: content.len(),
