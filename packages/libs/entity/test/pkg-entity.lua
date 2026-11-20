@@ -281,3 +281,151 @@ run("pkg.entity.define-kv-layout", function()
   spec.attrs[1].type = "string"
   eq(entity.schema("creature").attrs[1].type, "number", "schema() 必须返回深副本")
 end)
+
+-- ── 用例 4-9：构造 / 读 / 写 ────────────────────────────────────────────────
+
+--- 四类属性 + 两个 tag 的标准 fixture：`hp` 必填带缺省、`title` 可选无缺省、
+--- `alive_flag` 布尔带缺省、`target` 引用。
+local function basic_spec()
+  return {
+    attrs = {
+      hp = { type = "number", required = true, default = 100 },
+      title = { type = "string" },
+      alive_flag = { type = "boolean", default = true },
+      target = { type = "ref" },
+    },
+    tags = { enemy = {}, boss = {} },
+  }
+end
+
+run("pkg.entity.attr-domain", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("creature", basic_spec())
+  local id = entity.spawn("creature")
+
+  -- 表与函数不是属性值：一旦允许嵌套表，「按属性查找」与「序列化形状」立刻分家。
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.set(id, "hp", {})
+  end, "表值被拒")
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.set(id, "hp", function()
+      return 1
+    end)
+  end, "函数值被拒")
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.set(id, "title", print)
+  end, "非 string 值被拒")
+
+  -- 被拒的写不得改状态（不是「报错后再写一半」）。
+  eq(entity.get(id, "hp"), 100, "被拒的写不得改值")
+  is_nil(entity.get(id, "title"), "title 从未写过")
+
+  -- 四类合法值直通。
+  is_true(entity.set(id, "hp", 250), "number 写入")
+  is_true(entity.set(id, "title", "流浪者"), "string 写入")
+  is_true(entity.set(id, "alive_flag", false), "boolean 写入")
+  is_true(entity.set(id, "target", 7), "ref 写入")
+  eq(entity.get(id, "hp"), 250, "number 读回")
+  eq(entity.get(id, "title"), "流浪者", "string 读回")
+  eq(entity.get(id, "alive_flag"), false, "boolean 读回（false 不是「没有值」）")
+  eq(entity.get(id, "target"), 7, "ref 读回")
+end)
+
+run("pkg.entity.attr-undeclared-key", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("creature", basic_spec())
+  local id = entity.spawn("creature")
+
+  -- 未声明键写入是**错误**，不是静默 `false`：静默丢写会让「为什么这个属性永远
+  -- 是初始值」变成一场考古（契约 I3）。
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.set(id, "mana", 10)
+  end, "未声明键 set")
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.spawn("creature", { mana = 10 })
+  end, "未声明键 spawn")
+  is_nil(entity.get(id, "mana"), "未声明键读不到值")
+end)
+
+run("pkg.entity.attr-ref-domain", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("creature", basic_spec())
+  local id = entity.spawn("creature")
+
+  -- `ref` 是正整数 id：`0` / 负数 / 非整数 / 字符串数字全拒——「字符串 "3" 看着
+  -- 像 3」正是跨档导入时炸得最晚的那一类。
+  for _, bad in ipairs({ 0, -1, 2.5, "3" }) do
+    expect_error("YGG-PKG-ENTITY-ATTR", function()
+      entity.set(id, "target", bad)
+    end, "ref 拒 " .. tostring(bad))
+  end
+  is_true(entity.set(id, "target", 3), "ref 收正整数")
+  eq(entity.get(id, "target"), 3, "ref 读回")
+  eq(math.type(entity.get(id, "target")), "integer", "ref 读回必须是整数")
+end)
+
+run("pkg.entity.attr-required-missing", function()
+  local world = new_world()
+  local entity = fresh(world)
+  -- 必填且**无缺省**：缺省值能补上的必填不算缺失。
+  entity.define("strict", { attrs = { hp = { type = "number", required = true } } })
+  local writes_before = world.kv_writes_now()
+
+  expect_error("YGG-PKG-ENTITY-SCHEMA", function()
+    entity.spawn("strict")
+  end, "必填缺失")
+
+  -- 先校验后写：失败调用是零写且不分配 id（用例名里的「先于任何写」在这里。
+  eq(world.kv_writes_now(), writes_before, "校验失败不得写 KV")
+  eq(world.store.next_id, 1, "校验失败不得分配 id")
+  eq(#events_named(world, "entity.created"), 0, "校验失败不得发事件")
+
+  -- 缺省值能补上时，同一个 schema 就该成。
+  entity.define("lenient", { attrs = { hp = { type = "number", required = true, default = 5 } } })
+  local id = entity.spawn("lenient")
+  eq(entity.get(id, "hp"), 5, "缺省值补齐必填")
+end)
+
+run("pkg.entity.attr-changed-once", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("creature", basic_spec())
+  local id = entity.spawn("creature")
+
+  is_true(entity.set(id, "hp", 250), "首次改值返回 true")
+  eq(#events_named(world, "entity.attr_changed"), 1, "首次改值发一条事件")
+
+  -- 同值写：返回 false、**不发事件**（契约 I6 的「仅在真的变化时」）。
+  eq(entity.set(id, "hp", 250), false, "同值写返回 false")
+  eq(#events_named(world, "entity.attr_changed"), 1, "同值写不得发事件")
+
+  is_true(entity.set(id, "hp", 300), "异值写返回 true")
+  eq(#events_named(world, "entity.attr_changed"), 2, "异值写再发一条")
+
+  -- 事件载荷是标量字符串（`ygg.emit` 只收四类标量）：`<id>|<key>|<wire>`。
+  local ev = events_named(world, "entity.attr_changed")
+  eq(ev[2].payload, id .. "|hp|300", "attr_changed 载荷定形")
+end)
+
+run("pkg.entity.created-once", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("creature", basic_spec())
+  local id = entity.spawn("creature", { hp = 7 }, { "enemy" })
+
+  local ev = events_named(world, "entity.created")
+  eq(#ev, 1, "一次 spawn 恰好一条 entity.created")
+  eq(ev[1].payload, id, "载荷就是 id")
+  eq(math.type(ev[1].payload), "integer", "载荷是数字（不是字符串 id）")
+  -- 同一次 spawn 不得捎带属性/标签事件（那是 set / tag 的语义）。
+  eq(#events_named(world, "entity.attr_changed"), 0, "spawn 不得发 attr_changed")
+  eq(#events_named(world, "entity.tagged"), 0, "spawn 不得发 tagged")
+
+  -- 属性落盘：调用方给的值覆盖缺省值，没给的走缺省。
+  eq(entity.get(id, "hp"), 7, "显式值覆盖缺省")
+  eq(entity.get(id, "alive_flag"), true, "未给值走缺省")
+  is_nil(entity.get(id, "title"), "无缺省的可选属性仍是 nil")
+end)

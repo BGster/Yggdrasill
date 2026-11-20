@@ -80,15 +80,6 @@ local function finite(v)
   return v == v and v ~= math.huge and v ~= -math.huge
 end
 
---- 属性值域：boolean / 有限 number / string（契约 I2）。
-local function scalar(v)
-  local t = type(v)
-  if t == "number" then
-    return finite(v)
-  end
-  return t == "string" or t == "boolean"
-end
-
 --- 换行分隔的名表 → 数组（空串 → 空数组）。
 --- KV 存不了数组，所以「已定义的 schema 名」「某 schema 的属性名」都是这个形状。
 local function split_lines(text)
@@ -498,6 +489,223 @@ function M.schema(name)
     return nil
   end
   return copy_spec(spec)
+end
+
+-- ── 存活索引与计数器（§2 的 index 行：逐 id 一标量位 + 计数 + 水位）────────────
+--
+-- KV 没有删除也没有遍历，所以「存活集合」不能存成一张表：存成**逐 id 的布尔位**。
+-- 位一旦写过就只能改写（`true` → `false`），于是死亡实体在 KV 里留下一个墓碑位，
+-- 而**对外不可见**由 `alive()` 门在每一读口子上兑现（契约 I5 / D3）。
+
+local function alive_key(id)
+  return K.alive .. tostring(id)
+end
+
+--- 存活判定：一次 KV 读，绝不扫键（契约 I5 的力气花在这里）。
+local function alive(h, id)
+  return h.kv.get(alive_key(id)) == true
+end
+
+--- 计数器增减（缺失 = 0；负数收敛到 0，不做断言——计数是派生值，不是真源）。
+local function shift(h, key, delta)
+  local current = h.kv.get(key)
+  if type(current) ~= "number" then
+    current = 0
+  end
+  local next_value = current + delta
+  if next_value < 0 then
+    next_value = 0
+  end
+  h.kv.set(key, next_value)
+  return next_value
+end
+
+--- 写路径取 spec：未注册即 `SCHEMA`（读路径用 `M.schema` 拿 nil）。
+local function require_spec(h, schema_name)
+  memo_sync(h)
+  local spec = memo.specs[schema_name]
+  if spec == nil then
+    spec_error("未注册的 schema `" .. tostring(schema_name) .. "`")
+  end
+  return spec
+end
+
+--- 把 `tags` 参数（序列形或集合形）规范化成**升序去重**的名字数组。
+---
+--- 两种形都收：序列形 `{ "enemy", "boss" }` 更好写，集合形 `{ enemy = true }` 是
+--- 契约 §2 声明的形状。不存在歧义——名字字符集里没有纯数字，所以 `#tags > 0`
+--- 只可能是序列形。
+local function tag_list_of(spec, tags)
+  local out = {}
+  local seen = {}
+  if tags == nil then
+    return out
+  end
+  local function accept(tag_name)
+    if type(tag_name) ~= "string" then
+      spec_error("tag 必须是字符串，得到 " .. type(tag_name))
+    end
+    if spec.tag_index[tag_name] == nil then
+      spec_error("schema `" .. spec.name .. "` 未声明 tag `" .. tag_name .. "`")
+    end
+    if not seen[tag_name] then
+      seen[tag_name] = true
+      out[#out + 1] = tag_name
+    end
+  end
+  if #tags > 0 then
+    for i = 1, #tags do
+      accept(tags[i])
+    end
+  else
+    for key, value in pairs(tags) do
+      if value ~= true then
+        spec_error("集合形 tags 的值必须是 true（得到 " .. tostring(value) .. "）")
+      end
+      accept(key)
+    end
+  end
+  sort_names(out)
+  return out
+end
+
+-- ── 构造 / 读 / 写 ──────────────────────────────────────────────────────────
+
+--- `entity.spawn(name, attrs?, tags?)`：按 schema 分配 id 并写入属性袋。
+---
+--- **所有校验在任何写之前完成**：未知 schema / 未声明键 / 值域外 / 必填缺失都会
+--- 在 `ygg.entity.spawn()` 之前报错，于是失败调用是**零写零事件**的（用例 7 用
+--- mock 的写计数钉这一条）。
+function M.spawn(schema_name, attrs, tags)
+  local h = host()
+  local spec = require_spec(h, schema_name)
+  if attrs ~= nil and type(attrs) ~= "table" then
+    fail(E_ATTR, "attrs 必须是表，得到 " .. type(attrs))
+  end
+
+  -- 最终属性集 = 缺省值 ← 调用方给的值（后者覆盖前者）。
+  local final = {}
+  for i = 1, #spec.attrs do
+    local attr = spec.attrs[i]
+    if attr.has_default then
+      final[attr.name] = attr.default
+    end
+  end
+  if attrs ~= nil then
+    for key, value in pairs(attrs) do
+      local index = spec.attr_index[key]
+      if index == nil then
+        fail(E_ATTR, "schema `" .. schema_name .. "` 未声明属性 `" .. tostring(key) .. "`")
+      end
+      local decl = spec.attrs[index]
+      if not value_ok(decl.type, value) then
+        fail(
+          E_ATTR,
+          "属性 `" .. tostring(key) .. "` 的值不在 `" .. decl.type .. "` 值域内（得到 " .. type(value) .. "）"
+        )
+      end
+      final[key] = value
+    end
+  end
+  for i = 1, #spec.attrs do
+    local attr = spec.attrs[i]
+    if attr.required and final[attr.name] == nil then
+      spec_error("schema `" .. schema_name .. "` 的必填属性 `" .. attr.name .. "` 缺失")
+    end
+  end
+
+  local tag_list = tag_list_of(spec, tags)
+
+  -- 校验全部通过，从这一行起才碰宿主。
+  local id = h.entity.spawn()
+  h.kv.set(K.rec .. id .. ".schema", schema_name)
+  for i = 1, #spec.attrs do
+    local attr = spec.attrs[i]
+    local value = final[attr.name]
+    if value ~= nil then
+      h.entity.set_attribute(id, attr.name, value)
+    end
+  end
+  for i = 1, #tag_list do
+    h.entity.add_tag(id, tag_list[i])
+  end
+  h.kv.set(alive_key(id), true)
+  shift(h, K.count, 1)
+  local seq = h.kv.get(K.seq)
+  if type(seq) ~= "number" or seq < id then
+    h.kv.set(K.seq, id)
+  end
+  h.emit("entity.created", id)
+  return id
+end
+
+--- `entity.get(id, key)`：存活门 + 一次内核属性读（未声明键读不到值，天然 nil）。
+function M.get(id, key)
+  local h = host()
+  if not alive(h, id) then
+    return nil
+  end
+  if type(key) ~= "string" then
+    return nil
+  end
+  return h.entity.get_attribute(id, key)
+end
+
+--- `entity.attrs(id)`：该实体**实际有值**的全部属性（浅副本；值域是标量，浅即完整）。
+---
+--- 遍历 schema 声明的属性名表而不是内核的属性迭代面：内核没给「列属性」的 Lua
+--- 面（只有逐个 `get_attribute`），而属性名集合 = schema 声明集这条不变量已由
+--- `spawn` / `set` 的键校验保证。
+function M.attrs(id)
+  local h = host()
+  local out = {}
+  if not alive(h, id) then
+    return out
+  end
+  memo_sync(h)
+  local spec = memo.specs[h.kv.get(K.rec .. id .. ".schema")]
+  if spec == nil then
+    return out
+  end
+  for i = 1, #spec.attrs do
+    local attr_name = spec.attrs[i].name
+    local value = h.entity.get_attribute(id, attr_name)
+    if value ~= nil then
+      out[attr_name] = value
+    end
+  end
+  return out
+end
+
+--- `entity.set(id, key, value)`：写一个属性；返回「值是否真的变了」。
+---
+--- 同值写入返回 `false` 且**不发事件**（契约 I6）——“有没有变”由本包判定而不交给
+--- 内核：内核 `set_attribute` 对同值写只做到「不计 revision」，而事件的恰好一次
+--- 是本包的语义。`math.type` 参与比较：`1` 与 `1.0` 在存诸面是两个值。
+function M.set(id, key, value)
+  local h = host()
+  if not alive(h, id) then
+    fail(E_ATTR, "实体 " .. tostring(id) .. " 不存活，不可写属性")
+  end
+  local spec = require_spec(h, h.kv.get(K.rec .. id .. ".schema"))
+  local index = spec.attr_index[key]
+  if index == nil then
+    fail(E_ATTR, "实体 " .. tostring(id) .. " 的 schema 未声明属性 `" .. tostring(key) .. "`")
+  end
+  local decl = spec.attrs[index]
+  if not value_ok(decl.type, value) then
+    fail(
+      E_ATTR,
+      "属性 `" .. tostring(key) .. "` 的值不在 `" .. decl.type .. "` 值域内（得到 " .. type(value) .. "）"
+    )
+  end
+  local current = h.entity.get_attribute(id, key)
+  if current ~= nil and current == value and math.type(current) == math.type(value) then
+    return false
+  end
+  h.entity.set_attribute(id, key, value)
+  h.emit("entity.attr_changed", tostring(id) .. "|" .. key .. "|" .. tostring(value))
+  return true
 end
 
 return M
