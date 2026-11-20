@@ -53,12 +53,10 @@
 //! [`PackageError`] 一律在**进入内核之前**失败（零副作用），文案风格对齐
 //! [`crate::pack::PackError`]：英文小写、点名 JSON 位置、直接说该写什么。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
 use thiserror::Error as ThisError;
-
-use crate::modules;
 
 /// 包 id 的字符集规则（`packages/libs/<id>/` 的目录名，也是 `pkg.<id>.*` 的 id）。
 ///
@@ -94,7 +92,7 @@ pub fn is_valid_package_id(id: &str) -> bool {
 /// 包 id → 模块名前缀（`role-skill` → `pkg.role_skill`；`fixture` → `pkg.fixture`）。
 ///
 /// 连字符折叠为下划线是**唯一可行映射**：模块名段字符集只有 `[A-Za-z0-9_]`，
-/// `pkg.role-skill` 会被 [`modules::normalize`] 拒掉。反向不成立（`role_skill`
+/// `pkg.role-skill` 会被 [`crate::modules::normalize`] 拒掉。反向不成立（`role_skill`
 /// 与 `role-skill` 同前缀），所以 id 仍是单源——前缀只用于装载，不用于回查 id。
 pub fn module_prefix(id: &str) -> String {
     format!(
@@ -222,6 +220,37 @@ pub enum PackageError {
     /// 同一 id 声明两次。
     #[error("pack.json `packages` declares \"{id}\" twice")]
     DuplicateId { id: String },
+    /// 包根不可读（D4：点名推导值与两个来源，不静默降级）。
+    #[error(
+        "package root `{root}` is not a readable directory \
+         (looked for the `--packages` / `$YGG_PACKAGES_ROOT` value and the default \
+         `<mod>/../../packages/libs`)"
+    )]
+    RootUnreadable { root: String },
+    /// 声明的包在包根下不存在。
+    #[error("package \"{id}\" is not a package under {root} (found: {found})")]
+    Unknown {
+        id: String,
+        root: String,
+        found: String,
+    },
+    /// 版本不符（声明精确 pin，不符是**声明错**而非完整性错，故报双方值）。
+    #[error("package \"{id}\" is required at version {want} but {file} declares {got}")]
+    VersionMismatch {
+        id: String,
+        want: String,
+        got: String,
+        file: String,
+    },
+    /// 传递依赖未被本 Mod 的 `packages` 段声明（必须声明完整闭包）。
+    #[error(
+        "package \"{parent}\" depends on \"{id}\" which the mod's `packages` section \
+         does not declare (declare the full closure)"
+    )]
+    MissingTransitive { parent: String, id: String },
+    /// 包依赖成环。
+    #[error("package dependency cycle: {chain}")]
+    Cycle { chain: String },
     /// 包自描述 `pkg.json` 坏了（JSON / 字段 / name ≠ 目录 / 非允许文件）。
     ///
     /// 一个包的所有局部问题共用这一条：读者先要知道**是哪个包**，再谈细节；
@@ -433,6 +462,36 @@ impl PackageManifest {
     }
 }
 
+// ───────────────────────── 闭包与包根解析 ─────────────────────────
+
+/// 包根环境变量（最高优先级的显式来源；与 `--packages` 参数同义）。
+pub const PACKAGES_ROOT_ENV: &str = "YGG_PACKAGES_ROOT";
+
+/// 包根解析：`explicit`（`--packages`）> `$YGG_PACKAGES_ROOT` > `<mod>/../../packages/libs`。
+///
+/// 包根是 **host 环境态**而非 run 身份态，所以 `pack.json` 的 `packages` 段只写
+/// id / version 不写路径（`pack.rs` 的 `Traversal` 规则与可移植性都要求包根不
+/// 落在 pack 声明里）。内容由 manifest 的 sha256 钉死：同字节换根行为等价，异字节
+/// 在装载期 hash 失配即失败。
+///
+/// 不可读即失败并点名推导值——**不静默降级为零包**：声明了包而静默不装，症状是
+/// 运行期一个看似无关的 `NotFound`。
+pub fn resolve_root(mod_dir: &Path, explicit: Option<&Path>) -> Result<PathBuf, PackageError> {
+    let candidate = match explicit {
+        Some(dir) => dir.to_path_buf(),
+        None => match std::env::var_os(PACKAGES_ROOT_ENV) {
+            Some(value) => PathBuf::from(value),
+            None => mod_dir.join("../../packages/libs"),
+        },
+    };
+    if candidate.is_dir() {
+        return Ok(candidate);
+    }
+    Err(PackageError::RootUnreadable {
+        root: candidate.display().to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -532,8 +591,8 @@ mod tests {
         let prefix = module_prefix("role-skill");
         assert_eq!(prefix, "pkg.role_skill");
         // 折叠前的形态是**非法模块名**——折叠不是风格选择，是唯一可行映射。
-        assert!(modules::normalize("pkg.role-skill").is_err());
-        assert_eq!(modules::normalize(&prefix).expect("prefix"), prefix);
+        assert!(crate::modules::normalize("pkg.role-skill").is_err());
+        assert_eq!(crate::modules::normalize(&prefix).expect("prefix"), prefix);
         // 无反斜杠/空段的 id 同样合法，前缀保形。
         assert_eq!(module_prefix("fixture"), "pkg.fixture");
         // 首字符规则与模块名段同口径。
