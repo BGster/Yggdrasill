@@ -32,6 +32,7 @@ local CONTRACT_VERSION = 1
 
 --- 自带算法所在的模块（`M.ALGOS` = 名字 → 实现）。注册在 `install` 期完成，不改 KV。
 local BUILTIN_MODULES = {
+  "pkg.procgen.algos.layout",
   "pkg.procgen.algos.terrain",
 }
 
