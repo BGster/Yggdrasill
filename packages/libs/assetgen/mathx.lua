@@ -16,7 +16,6 @@ local M = {}
 
 local Q15 = 32768 -- 1.0 的定点表示
 local QUARTER = 16384 -- 一象限的相位宽度（全转 = 65536 = 2^16）
-local HALF_TURN = 32768 -- 半转（正弦取负的位置）
 local DEG_QUARTER = 90000 -- 一象限 = 90 度，以**毫度**为单位
 local BHASKARA_DEN = 40500000000 -- 40500 × 10^6：把毫度带进 Bhaskara 的分母
 
@@ -117,9 +116,19 @@ function M.sin_q15(phase)
   return -quarter_sin(QUARTER - r)
 end
 
---- `cos_q15(phase)` = `sin_q15(phase + 半转)`（相位是整数，加半转即移相 90°）。
+--- `n / 32768`，四舍五入到最近整数。
+---
+--- 用「加半再向下取整」而不是裸 `//`：Q15 的 1.0 是 32767，裸除会让每一次旋转都
+--- 系统性缩小 0.03‰（一个 1000mm 的盒子转一次变成 999mm，`mesh.compose` 的包围盒
+--- 断言会以「差 1」的形式红掉）。四舍五入把偏差压到 ±0.5，且对负数同样确定。
+function M.q15_div(n)
+  return (n + QUARTER) // Q15
+end
+
+--- `cos_q15(phase)` = `sin_q15(phase + 一象限)`：正弦移相 **90°**（不是 180°——半转移的
+--- 是符号，会把余弦变成零，而零值构造出来的圆柱/环面/球会全部塌到一条轴上）。
 function M.cos_q15(phase)
-  return M.sin_q15(phase + HALF_TURN)
+  return M.sin_q15(phase + QUARTER)
 end
 
 return M
