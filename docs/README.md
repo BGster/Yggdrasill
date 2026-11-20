@@ -85,6 +85,19 @@ docs/
 | [tool-bridge.md](design/mod/tool-bridge.md) | 同步工具桥双层白名单指针 | §2.11 |
 | [action-faces.md](design/mod/action-faces.md) | event/op/action 分层、I1–I3、A1–A4、registry 末注 | §3.4 |
 | [identity.md](design/mod/identity.md) | 台账/身份章/profile/票据门（不进剧情） | §2.13 |
+| [testing-strategy.md](design/mod/testing-strategy.md) | Mod 测试策略与门禁清单 | — |
+
+### ⑤ packages · 通用能力层
+
+| 文件 | 一句话定位 | replaces |
+| --- | --- | --- |
+| [packages/README.md](design/packages/README.md) | 六包契约入口：判据三问、包清单与状态、依赖序、模板与命名规则 | — |
+| [entity.md](design/packages/entity.md) | 实体与属性袋（schema 校验、存活索引、生命周期事件） | — |
+| [codec.md](design/packages/codec.md) | 序列化与 KV 形状（存档往返、sha256） | — |
+| [quest.md](design/packages/quest.md) | 任务流转（stage 状态机、依赖与交付） | — |
+| [dialogue.md](design/packages/dialogue.md) | 对话调度（节点图、文案单副本） | — |
+| [role-skill.md](design/packages/role-skill.md) | 角色与技能（属性袋组合、事件计数冷却） | — |
+| [procgen.md](design/packages/procgen.md) | 程序化生成（确定性种子、地形与布局） | — |
 
 ## 导航表 · 横切
 

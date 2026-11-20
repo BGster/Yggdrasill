@@ -40,7 +40,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 #### 3.1.1 设计依据（沙箱安全边界 / 语言方言 / 边界划分）
 
-**沙箱的安全边界是六项硬上限，不是建议**：零盘上 I/O、零网络、零时钟、指令燃料上限、内存上限（`16 MiB`）、API 白名单（`safe_stdlib`）与确定性种子 PRNG。
+**沙箱的安全边界是六项硬上限，不是建议**：零盘上 I/O、零网络、零时钟、指令燃料上限、内存上限（`64 MiB`，`sandbox.rs` 的 `SANDBOX_MEMORY_LIMIT`）、API 白名单（`safe_stdlib`）与确定性种子 PRNG。
 
 **「零盘上 I/O」有两个且只有两个出口**：`artifacts/` 的内存 VFS（写不落盘，dispatch 失败整面回滚）与 `mounts/` 的挂载桥（写穿磁盘、不回滚）。挂载桥不是「第三根」的入口，而是把宿主声明的挂载点变成沙箱可见目录；它由三道边界收束，缺一即不得上线：**路径狱**（`mounts/<name>/<rel>` 之外一律 `YGG-FS-JAIL`，含末段软链与路径分量包含检查）、**尺寸帽**（单件 4 MiB / 每次 attach 的写预算 64 MiB / 单次 list 16384 条目，超限 `YGG-FS-CAP`）、**审计行**（每次写——成功与被拒——追加 `<run-dir>/fs.jsonl` 一行，写成功而审计失败报 `YGG-FS-AUDIT`）。① 阻断：向 Lua 白名单添加「有盘上副作用且不经挂载桥」的 I/O 面（放出 `io`/`os`，或让 `ygg.fs.*` 接受 `artifacts/`、`mounts/` 之外的第三根）；② 症状：同一 seed 两次回放产出不同的外部文件集合，或 `mounts/…` 之外的路径能读到宿主任意文件，或某次成功写没有 `fs.jsonl` 行；③ 确认——`cargo test -p ygg-store --test mounts`（狱向量 + 审计行）、`cargo test -p ygg-sandbox --test mounts`（面 + 未挂载降级）、`grep -c '"event":"fs.write"' <run-dir>/fs.jsonl`。**语言标准是标准 Lua 5.4**（内置 `mlua`），带指令计数钩子燃料；标准库被加固——移除 `os` / `io` / `debug` / `package` / `dofile` / `loadfile`，`require` 换成纯沙箱加载器，种子走确定性 `luai_makeseed`。**`crates/ygg-sandbox` 封装 `mlua`、宿主 API 白名单与内嵌的 `ygg` 标准库；`crates/ygg-lint` 提供独立的 AST 静态分析。**
 

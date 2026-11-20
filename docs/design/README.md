@@ -2,7 +2,7 @@
 > **定位**：`docs/design/` 是**「改之前必须遵守的契约」**——判据是**有代码消费者**（playbook JSON 的 `basis`/`source`、`src/**` 注释、crates 测试与注释按路径引用它）。行为叙事与产品定位不在此树，见 [../context/README.md](../context/README.md)。
 > **replaces**：r6 前的 18 文件平铺形态（`docs/design/<topic>.md`）。平铺路径已退役，**不留软链**；历史与理由在 git。
 > **判据**：[../wiki-governance.md](../wiki-governance.md)「design / context 二分判据」——本文件只是它的导航投影，不复制正文。
-> **上游**：[../README.md](../README.md)（顶层索引） · **机检**：`.ygg/mods/agent-seed/tests/` 的 `design_pointer_anchors_exist_under_docs_design` / `design_tree_index_is_complete_and_ids_match_paths` / `agents_design_routes_resolve`
+> **上游**：[../README.md](../README.md)（顶层索引） · **机检**：`.ygg/mods/agent-seed/tests/surface.lua` 的 docs/design 树索引用例（目录/文件计数、索引双向相等、id 双射、指针锚存在性）与 `tests/modpkg.lua` 的 `AGENTS.md §3` 路由用例（用例名以测试文件为准，本文不维护叙述名）
 
 ## 目录树
 
@@ -60,7 +60,7 @@ docs/design/
 
 ## 维护闭环
 
-- **每个文件头两行是机读契约**：`id`（= 相对 `docs/design/` 的路径去 `.md`）与 `读不到代价`（四值域 `irreversible` / `hard-refusal` / `silent-drift` / `none`）。`id` 与真实路径的双射由 `design_tree_index_is_complete_and_ids_match_paths` 断言。
+- **每个文件头两行是机读契约**：`id`（= 相对 `docs/design/` 的路径去 `.md`）与 `读不到代价`（四值域 `irreversible` / `hard-refusal` / `silent-drift` / `none`）。`id` 与真实路径的双射由 surface.lua 的树索引用例断言。
 - **本文件是索引**：索引链接集合与 `docs/design/**/*.md` 实文件集合**双向相等**由机检断言；新增/删除文件必须同批改本文件，否则用例转红。
-- **不留兼容层**：`docs/design/*.md` 下只允许本文件——出现任何平铺文件或软链即被 `design_tree_index_is_complete_and_ids_match_paths` 判红（结构性禁止留壳）。
-- **指针**：`.ygg/mods/**` 与 `crates/**` 里的 `docs/design/<module>/<topic>.md` 由 `design_pointer_anchors_exist_under_docs_design` 逐条核存在性（支持子目录、拒绝 `..`）；`AGENTS.md §3` 的路由由 `agents_design_routes_resolve` 核。
+- **不留兼容层**：`docs/design/*.md` 下只允许本文件——出现任何平铺文件或软链即被 surface.lua 的树索引用例判红（结构性禁止留壳）。
+- **指针**：`.ygg/mods/**` 与 `crates/**` 里的 `docs/design/<module>/<topic>.md` 由 surface.lua 的指针锚用例逐条核存在性（支持子目录、拒绝 `..`）；`AGENTS.md §3` 的路由由 modpkg.lua 的路由用例核。
