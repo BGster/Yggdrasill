@@ -155,10 +155,10 @@ P0 期这一列是**目标值**；P2 首实现填实测值，偏差回写本表�
 | 导出（签名零变化） | 去向 | 理由 |
 | --- | --- | --- |
 | `install` / `VERSION` / `define` / `schema` | 留 Lua | 装配与 schema 层（Tier 2）；`define` 的「同 spec 幂等且零写」靠 KV 精确写点数断言 |
-| `spawn` | **`ygg.entity.spawn_batch`**（n=1） | 单条 18 次跨边界 → 1 次；值域原样过面 |
+| `spawn` | **留 Lua**（批式面 `spawn_batch` 已交付，包内未采用——见 9.6） | 实测：n=1 的帧构造成本 > 省下的 18 次跨边界 |
 | `get` / `set` / `has` / `exists` / `schema_of` / `count` | 留 Lua（n=1 可内部复用批式面） | 单值；语义大头是存活门 + 同值判定 + 事件 |
-| `attrs` / `tags` | **`ygg.entity.attr_fetch`**（n=1，列式回） | 8 次逐项读 → 1 次 |
-| `ids` | **`ygg.entity.scan`** + Lua 存活门 | O(seq) 逐 id 跨边界 → 一次扫描回 id 列；**schema 过滤留 Lua**（schema 在 KV，`EntityStore` 不知道它） |
+| `attrs` / `tags` | **留 Lua**（`attr_fetch` 已交付，包内未采用——见 9.6） | 实测：同上（n=1 不划算） |
+| `ids` | **留 Lua**（`scan` 已交付；包内未采用——见 9.6） | 存活门每 id 一枚 KV 读，扫描省下的只是 `has_tag` 那一次 |
 | `tag` / `untag` | 留 Lua（n=1；批式面 `tag_batch` 供将来批量调用方） | 单条仍是 1 次跨边界 + 1 条事件 |
 | `destroy` | 部分：**索引侧**下沉，墓碑写点不动 | 见 9.3 |
 
@@ -172,8 +172,43 @@ P0 期这一列是**目标值**；P2 首实现填实测值，偏差回写本表�
 
 ### 9.4 宿主面新增的批式键（`ygg.entity.*`，键集闭集）
 
-六个：`spawn_batch` / `attr_apply` / `attr_fetch` / `tag_batch` / `scan` / `despawn_batch`（形状见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1）。三条纪律：① **一个逐实体 getter 都不新增**（键集闭集断言在 `crates/ygg-sandbox/tests/host_contract.rs`，多一个即红）；② 入参是 **Lua 数组**（铁律② 原文允许「bytes/数组进出」），这样 n=1 热路径不必付 pack 成本，测试夹具也不必写第二份编解码器；③ 新面一律**先校验后改**（整批要么全成、要么零改）。
+五个：`spawn_batch` / `attr_apply` / `attr_fetch` / `tag_batch` / `scan`（形状见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1）。`despawn_batch` **不交付**——墓碑语义禁止真删（9.3），没有消费者就不该有面。三条纪律：① **一个逐实体 getter 都不新增**（键集闭集断言在 `crates/ygg-sandbox/tests/host_contract.rs`，多一个即红）；② 入参是 **Lua 数组**（铁律② 原文允许「bytes/数组进出」），这样 n=1 热路径不必付 pack 成本，测试夹具也不必写第二份编解码器；③ 新面一律**先校验后改**（整批要么全成、要么零改）。
 
 ### 9.5 判据（①②③）
 
 ① 阻断——想给本包加一条「更快的按 id 读」而绕开批式面，或把属性值搬进定点列；② 症状——`2` / `2.0` 在沙箱用例②里变成同值，或 `codec` 泄漏用例的「恰好 +200 键」变红；③ 确认——`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-entity` 的 `PERF entity.paths_*` 七行 + `cases passed=` 不回退。
+
+### 9.6 实测裁决：批式面**已交付**，但包内委托**未采纳**（2026-11-21）
+
+**结论先行**：五个批式键在 `ygg.entity` 上落地并有契约用例（11 键闭集 + 五面往返 + 三族错误码），
+但 `pkg.entity` 内部**没有**改用它。理由是实测，不是口味。
+
+**为什么**（同机同 10⁴ 实体集，`PERF entity.paths_*` 三跑中位）：
+
+| 路径 | 委托前 | 委托后（走批式面） | 差 |
+| --- | --- | --- | --- |
+| `get`（n=1 `attr_fetch`） | 748 ns | 3 147 ns | **4.2× 更慢** |
+| `set`（n=1 `attr_apply`） | 2 967 ns | 3 540 ns | 更慢 |
+| `attrs`（8 键 `attr_fetch`） | 2 444 ns | 4 512 ns | 更慢 |
+| `tags`（n=1 `attr_fetch`） | 1 596 ns | 3 289 ns | 更慢 |
+| `ids`（`scan`） | 503 ns/实体 | 602 ns/实体 | 更慢 |
+| `spawn`（`spawn_batch` n=1） | 12 656 ns | 15 310 ns | 更慢 |
+
+**机理（可复算）**：Tier 2 侧构造一次批式帧（外层数组 + 行表 + key 数组，n=1 时 2–3 张表）
+≈ 200–600 ns，而它换掉的跨边界只有 **44–57 ns/次**（`path_costs` 的 `probe.crossing.*`）。
+n=1 时这笔账**必然亏**；n 大时（`ids` 的 10⁴ 个 id）本该赢，但 `ids` 的成本大头是**存活门**
+——每个 id 一枚 `pkg.entity.alive.<id>` 的 KV 读，而墓碑位按 9.3 不能下沉。于是扫描省下的
+只有 `has_tag` 那一次跨边界，构造成本反超。
+
+**两个能翻盘的方向（都不在本需求边界内，需裁决）**：
+
+1. **逐项原生面**（`get_attribute` 级批量 1 次穿越、按位参数，不构造帧）：可省 200–600 ns 的
+   构造费，n=1 才有得赚。代价是它与「禁逐实体 getter」的批式铁律直接冲突（`sim-kernel` §0②），
+   且要再开 4–6 个键。
+2. **存活位搬进原生面**（`EntityStore` 上加 alive 位或原生 alive 位图），让 `ids` 的 10⁴ 次
+   KV 读消失（这是唯一有数量级收益的一条）。代价：墓碑位从「KV 唯一真源」变成双写，
+   直接动 I5 与 `codec` 的「恰好 +200 键」断言——必须由契约层面拍板。
+
+**判据（①②③）**：① 阻断——想靠「把 n=1 的调用包成批式帧」来提速；② 症状——`PERF entity.paths_get`
+从 748 涨到 3 147 ns；③ 确认——上面六行数字 + `cargo test -p ygg-sandbox --test path_costs`
+的穿越系数。
