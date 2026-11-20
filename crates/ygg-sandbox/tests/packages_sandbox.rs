@@ -45,7 +45,10 @@ impl Tree {
         fs::create_dir_all(root.join("packages/libs")).expect("mkdir package root");
         fs::create_dir_all(root.join("mods")).expect("mkdir mods");
         for id in product_packages() {
-            support::copy_dir(&repo_libs().join(&id), &root.join("packages/libs").join(&id));
+            support::copy_dir(
+                &repo_libs().join(&id),
+                &root.join("packages/libs").join(&id),
+            );
         }
         support::copy_dir(&repo_fixture(), &root.join("mods/pkg-selftest"));
         Self { root }
@@ -218,7 +221,9 @@ fn packages_load_in_a_bare_sandbox_without_determinism_injection() {
     // 是否真的只依赖 base 白名单 + 模块表」。
     let sandbox = Sandbox::new().expect("裸沙箱构造");
     sandbox.modules().set_modules(bundle.modules.clone());
-    sandbox.modules().set_chunk_paths(bundle.chunk_paths.clone());
+    sandbox
+        .modules()
+        .set_chunk_paths(bundle.chunk_paths.clone());
 
     let names = roots
         .iter()
@@ -459,8 +464,8 @@ fn package_sources_use_no_global_outside_the_base_whitelist() {
 
     let mut offenders: Vec<String> = Vec::new();
     for (_, path) in &sources {
-        let source = fs::read_to_string(path)
-            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+        let source =
+            fs::read_to_string(path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
         let name = path
             .strip_prefix(repo_libs())
             .map(|rel| rel.display().to_string())
