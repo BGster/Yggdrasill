@@ -4,7 +4,7 @@
 --
 -- `turns[i].text` 存的是**文本键**（如 `beats.dlg.greet`），包不读 `ygg.data`、
 -- 不渲染、不拼句子——文案的唯一副本在 mod 的 `data/texts/*.json`（d16 用静态
--- 命中数钉「包内零 `ygg.data(`」）。
+-- 命中数钉「包内一次数据读取都没有」；字面量清单在 dialogue.md §7）。
 --
 -- # 线程键
 --

@@ -495,3 +495,213 @@ run("pkg.dialogue.memory-entity", function()
   eq(#dialogue.history("5:6"), 0, "pair 键不存在")
   names_equal(dialogue.threads(), { "5" }, "threads() 名表")
 end)
+
+-- ── 静态面：源文件清单来自 manifest 的 packages 段（内容寻址的那份）─────────────
+
+local function pkg_sources(id)
+  local manifest = rawget(_G, "__MANIFEST")
+  if type(manifest) ~= "table" or type(manifest.packages) ~= "table" then
+    error("manifest 缺 packages 段（载体 pack.json 未声明包或未重算 manifest）", 0)
+  end
+  for i = 1, #manifest.packages do
+    local pkg = manifest.packages[i]
+    if pkg.id == id then
+      local out = {}
+      for j = 1, #pkg.files do
+        out[#out + 1] = pkg.files[j].path
+      end
+      return out
+    end
+  end
+  error("manifest 的 packages 段没有包 " .. id, 0)
+end
+
+local function count_in_sources(id, needle)
+  local hits = 0
+  local where = {}
+  local paths = pkg_sources(id)
+  for i = 1, #paths do
+    local path = PKG_ROOT .. "/" .. paths[i]
+    local handle = assert(io.open(path, "rb"), "读不到 " .. path)
+    local text = handle:read("a")
+    handle:close()
+    local start = 1
+    while true do
+      local pos = text:find(needle, start, true)
+      if pos == nil then
+        break
+      end
+      hits = hits + 1
+      where[#where + 1] = paths[i] .. "@" .. pos
+      start = pos + #needle
+    end
+  end
+  return hits, where
+end
+
+-- ── 用例 11-16：无时钟、通道封闭、凭据只留键名、帧、adapter、文本键 ──────────
+
+run("pkg.dialogue.no-clock", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  dialogue.on("greet", builtin("npc", { memory = "none" }, function()
+    return true
+  end))
+
+  -- I5：静态面——包源文件里一次 `ticks(` 都没有。
+  local hits, where = count_in_sources("dialogue", "ticks(")
+  eq(hits, 0, "包源码里的 ticks( 命中数： " .. table.concat(where, ","))
+
+  -- 行为面——把 mock 时钟推到 12345，回执与之一致，且一次都没读它。
+  world.tick = 12345
+  local receipt = dialogue.emit("greet", 1, 2)
+  eq(receipt.handled, true, "结果与时钟无关")
+  eq(receipt.depth, 1, "深度与时钟无关")
+  eq(world.ticks_calls(), 0, "ygg.ticks 调用次数必须为 0")
+end)
+
+run("pkg.dialogue.no-second-egress", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+
+  -- I1：静态面——四类字面量命中数全为 0（每一条都能返回反例）。
+  local needles = {
+    "http",
+    "socket",
+    "os.execute",
+    "io.",
+  }
+  for i = 1, #needles do
+    local hits, where = count_in_sources("dialogue", needles[i])
+    eq(hits, 0, "静态命中 " .. needles[i] .. "： " .. table.concat(where, ","))
+  end
+
+  -- 运行时面——agent 走 `ygg.tool.call`，其它宿主面调用计数全 0。
+  world.tool_replies["npc.agent"] = { ok = true, unmounted = false, code = 0, data = {} }
+  dialogue.on("greet", agent("npc-agent", { tool = "npc.agent" }))
+  local receipt = dialogue.emit("greet", 1, 2, { text_key = "beats.greet" })
+  eq(receipt.handled, true, "agent 认领")
+  eq(world.tool_call_count(), 1, "ygg.tool.call 是唯一外部调用")
+  eq(world.entity_calls(), 0, "ygg.entity 调用次数")
+  eq(world.data_calls(), 0, "ygg.data 调用次数")
+  eq(world.narrative_calls(), 0, "ygg.narrative 调用次数（节点图归宿主，包不碰）")
+end)
+
+run("pkg.dialogue.credential-key-only", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  local SECRET = "sk-live-DO-NOT-LEAK"
+  world.tool_replies["npc.agent"] = { ok = true, unmounted = false, code = 0, data = {} }
+  dialogue.on("greet", agent("npc-agent", { tool = "npc.agent", credential_key = "NPC_SHOPKEEPER_TOKEN" }))
+
+  dialogue.emit("greet", 1, 2, { text_key = "beats.greet" })
+  local call = world.tool_calls[1]
+  eq(call.args.credential_key, "NPC_SHOPKEEPER_TOKEN", "工具实参里只有键名")
+  -- I6：凭据值不出现在任何 KV 值里（哪怕调用方把它塞进 payload）。
+  for key in pairs(world.kv) do
+    local value = world.kv[key]
+    is_true(tostring(value):find(SECRET, 1, true) == nil, "KV 里出现了凭据值：" .. key)
+  end
+  for i = 1, #world.events do
+    is_true(tostring(world.events[i].payload):find(SECRET, 1, true) == nil, "事件里出现了凭据值")
+  end
+
+  -- 键名形态是硬约束（.env 的键名形态）；非法形态在注册期就拒。
+  expect_error("YGG-PKG-DIALOGUE-TYPE", function()
+    dialogue.on("greet", agent("bad-key", { tool = "npc.agent", credential_key = "npc-token" }))
+  end, "小写 credential_key")
+  expect_error("YGG-PKG-DIALOGUE-TYPE", function()
+    dialogue.on("greet", agent("bad-key2", { tool = "npc.agent", credential_key = SECRET }))
+  end, "把凭据值当键名")
+end)
+
+run("pkg.dialogue.frame-shape", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+
+  local frame = dialogue.frame("greet", 1, 2, { text_key = "beats.greet" })
+  names_equal(sorted_keys(frame), { "payload", "source", "target", "type", "v" }, "帧键集")
+  eq(frame.v, 1, "版本")
+  eq(frame.type, "greet", "type")
+  eq(frame.source, 1, "source 原样（ref，不转字符串）")
+  eq(frame.target, 2, "target 原样")
+  eq(frame.payload.text_key, "beats.greet", "payload 原样")
+
+  -- 纯函数：不写 KV、不推 seq、不发事件。
+  eq(world.writes_now(), 0, "frame 不写 KV")
+  eq(#world.events, 0, "frame 不发事件")
+  is_nil(world.kv["dlg.seq"], "frame 不推 dlg.seq")
+
+  -- handler 侧拿到的帧与 frame() 同形（同一构造函数）。
+  local seen = nil
+  dialogue.on("greet", builtin("npc", { memory = "none" }, function(f)
+    seen = f
+    return true
+  end))
+  dialogue.emit("greet", 1, 2)
+  names_equal(sorted_keys(seen), { "payload", "source", "target", "type", "v" }, "handler 收到的帧键集")
+end)
+
+run("pkg.dialogue.adapters-registry", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  local send_calls = 0
+  local function adapter()
+    return {
+      send = function()
+        send_calls = send_calls + 1
+        return nil
+      end,
+      health = function()
+        return true
+      end,
+    }
+  end
+
+  is_true(dialogue.register_adapter("term", adapter()), "注册 term")
+  is_true(dialogue.register_adapter("echo", adapter()), "注册 echo")
+  names_equal(dialogue.adapters(), { "echo", "term" }, "adapters() 升序副本")
+
+  -- 副本：调用方改返回值不影响注册表。
+  local copy = dialogue.adapters()
+  copy[1] = "tampered"
+  names_equal(dialogue.adapters(), { "echo", "term" }, "adapters() 是副本")
+
+  expect_error("YGG-PKG-DIALOGUE-DUP", function()
+    dialogue.register_adapter("term", adapter())
+  end, "重名注册")
+  expect_error("YGG-PKG-DIALOGUE-TYPE", function()
+    dialogue.register_adapter("bad", { health = function() end })
+  end, "缺 send")
+  expect_error("YGG-PKG-DIALOGUE-TYPE", function()
+    dialogue.register_adapter("bad2", "nope")
+  end, "adapter 不是表")
+
+  -- 包不驱动 adapter：一次 emit 之后 send 调用计数仍是 0（装配归 mod/宿主）。
+  dialogue.on("greet", builtin("npc", { memory = "none" }, function()
+    return true
+  end))
+  dialogue.emit("greet", 1, 2)
+  eq(send_calls, 0, "adapter.send 调用次数必须为 0")
+end)
+
+run("pkg.dialogue.text-key-passthrough", function()
+  local world = new_world()
+  local dialogue = fresh(world)
+  local key = "beats.dlg.greet.问候"
+  dialogue.on("greet", builtin("npc", {}, function()
+    return true
+  end))
+
+  dialogue.emit("greet", 1, 2, { text_key = key })
+  local turns = dialogue.history("1:2")
+  eq(#turns, 1, "记了一轮")
+  eq(turns[1].text, key, "文本键原样进 turns（字节相同）")
+  eq(#turns[1].text, #key, "文本键长度不变")
+  eq(world.kv["dlg.thread.1:2.t.1.text"], key, "KV 里的 text 也是同一个键")
+
+  -- 静态面：包内零 `ygg.data(`（文案的唯一副本在 mod 的 data/texts）。
+  local hits, where = count_in_sources("dialogue", "ygg.data(")
+  eq(hits, 0, "包源码里的 ygg.data( 命中数： " .. table.concat(where, ","))
+  eq(world.data_calls(), 0, "运行时也没调 ygg.data")
+end)

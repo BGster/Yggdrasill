@@ -33,9 +33,9 @@
     {
       "files": [
         {
-          "byteLength": 5456,
+          "byteLength": 5600,
           "path": "dialogue/dispatch.lua",
-          "sha256": "561c5cfb1e0395e49046667dadaa1ef613d8f59754059f859089f9f13a88234d"
+          "sha256": "949dcc3ff2b6133b2596457c31686fafdcce725acf58808119f6ec40d4ad1c50"
         },
         {
           "byteLength": 7548,
@@ -48,9 +48,9 @@
           "sha256": "0d3e108ba7643679a14d3c3f72e90ffaff3bb641558babcc5b18d4ce65c323a6"
         },
         {
-          "byteLength": 4696,
+          "byteLength": 4745,
           "path": "dialogue/memory.lua",
-          "sha256": "207f557aed5ebc78e564e91a205884fa530b686ad0e1d2da35d0b4a4495d63b5"
+          "sha256": "b8c4e52ab275c7e678b7c79fd3f3b84f7d75b7cf3a9e12242a4b11fc14023615"
         },
         {
           "byteLength": 180,
