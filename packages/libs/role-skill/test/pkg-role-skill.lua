@@ -157,7 +157,7 @@ local function new_world()
 end
 
 --- 取一份**全新**的包实例并装上 mock（清缓存 = 定义表 / 索引缓存 / 订阅表归零）。
-local function fresh(world, events)
+local function fresh(world, events, window_cap)
   package.loaded["pkg.role_skill"] = nil
   for name in pairs(package.loaded) do
     if type(name) == "string" and name:find("^pkg%.role_skill%.") then
@@ -165,7 +165,13 @@ local function fresh(world, events)
     end
   end
   local role = require("pkg.role_skill")
-  role.install({ codec = codec, entity = world.entity, events = events, host = world.host })
+  role.install({
+    codec = codec,
+    entity = world.entity,
+    events = events,
+    host = world.host,
+    window_cap = window_cap,
+  })
   return role
 end
 
@@ -569,7 +575,180 @@ run("pkg.role-skill.leak-100-rounds", function()
   is_true(growth <= 1, "100 轮后内存差 ≤ 1%，实得 " .. string.format("%.3f", growth) .. "%")
 end)
 
--- ── 用例 16：一次 effective 的读次数与实体总数无关（O(1) 的结构证据）───────────
+-- ── 用例 16：技能集读面（升序名字数组 + 副本语义 + 空集边界）──────────────────
+
+run("pkg.role-skill.read-skills-of", function()
+  local world = new_world()
+  local role = fresh(world)
+
+  eq_seq(role.skills_of(1), {}, "无记录 ⇒ 空数组（不是 nil）")
+  role.skill_define("zeta", { attrs_spec = {} })
+  role.skill_define("alpha", { attrs_spec = {} })
+  role.skill_define("mid", { attrs_spec = {} })
+  role.define("warrior", { attrs_spec = {} })
+  role.grant(1, "warrior")
+  eq_seq(role.skills_of(1), {}, "有记录但无槽位 ⇒ 仍是空数组")
+
+  -- 授予顺序与名字顺序故意相反：结果是升序，与装配顺序无关
+  role.grant_skill(1, "zeta")
+  role.grant_skill(1, "mid")
+  role.grant_skill(1, "alpha")
+  eq_seq(role.skills_of(1), { "alpha", "mid", "zeta" }, "升序名字数组")
+
+  -- 副本语义：读面不能被调用方当成旁路写面
+  local snapshot = role.skills_of(1)
+  snapshot[1] = "tampered"
+  snapshot[#snapshot + 1] = "extra"
+  eq_seq(role.skills_of(1), { "alpha", "mid", "zeta" }, "改返回值不影响存储")
+
+  role.revoke_skill(1, "mid")
+  eq_seq(role.skills_of(1), { "alpha", "zeta" }, "撤销后从集合消失")
+
+  -- `rank = 0` 的槽位也在：槽位存在与否是写面的事实，筛等级是 mod 的规则（I7）
+  role.skill_define("zero", { attrs_spec = {} })
+  role.grant_skill(1, "zero", 0)
+  eq_seq(role.skills_of(1), { "alpha", "zero", "zeta" }, "rank=0 的槽位也在")
+end)
+
+-- ── 用例 17：单槽读面（字段只映槽位 + nil 边界 + 副本）─────────────────────────
+
+run("pkg.role-skill.read-skill-state", function()
+  local world = new_world()
+  local role = fresh(world)
+  role.skill_define("fire", { attrs_spec = {}, charges = 7 })
+  role.skill_define("plain", { attrs_spec = {} })
+  role.grant_skill(1, "fire", 3)
+  role.grant_skill(1, "plain")
+
+  local fire = role.skill_state(1, "fire")
+  eq(fire.rank, 3, "rank 与授予值相等")
+  eq(fire.charges, 7, "声明了 charges ⇒ 槽位带 charges")
+  eq(fire.capacity, nil, "未设容量 ⇒ 没有 capacity 字段")
+  eq(role.skill_state(1, "plain").charges, nil, "未声明 charges ⇒ 没有 charges 字段")
+  eq(role.skill_state(1, "nope"), nil, "无槽位 ⇒ nil（不是空表）")
+  eq(role.skill_state(99, "fire"), nil, "无记录 ⇒ nil")
+  expect_error(role.ERRORS.DEF, function()
+    role.skill_state(1, "")
+  end, "空技能名 ⇒ -DEF")
+
+  local copy = role.skill_state(1, "fire")
+  copy.rank = 99
+  copy.charges = 0
+  eq(role.skill_state(1, "fire").rank, 3, "改副本的 rank 不回写")
+  eq(role.skill_state(1, "fire").charges, 7, "改副本的 charges 不回写")
+
+  eq(role.set_capacity(1, "fire", 12), 12, "设容量")
+  eq(role.skill_state(1, "fire").capacity, 12, "设容量后带 capacity")
+  eq(role.skill_state(1, "fire").charges, 7, "放大不补满：余量仍是 7")
+end)
+
+-- ── 用例 18：实例容量放大（声明的 charges 不再是天花板）───────────────────────
+
+run("pkg.role-skill.capacity-grow", function()
+  local world = new_world()
+  local role = fresh(world)
+  role.skill_define("pp", { attrs_spec = {}, charges = 30 })
+  role.grant_skill(1, "pp")
+  eq(role.skill_state(1, "pp").charges, 30, "建槽位时充满到声明的 30")
+
+  eq(role.set_capacity(1, "pp", 60), 60, "set_capacity 返回生效后的容量")
+  eq(role.skill_state(1, "pp").charges, 30, "放大不补满")
+  eq(role.recharge(1, "pp"), 60, "recharge 充满到新上限")
+
+  local left = nil
+  for _ = 1, 60 do
+    left = role.charge(1, "pp")
+  end
+  eq(left, 0, "连调 60 次才到 0（声明的 30 不再是天花板）")
+  eq(role.charge(1, "pp"), 0, "0 不减负")
+end)
+
+-- ── 用例 19：实例容量缩容（余量夹紧 + 上限换成新值）───────────────────────────
+
+run("pkg.role-skill.capacity-shrink", function()
+  local world = new_world()
+  local role = fresh(world)
+  role.skill_define("pp", { attrs_spec = {}, charges = 30 })
+  role.grant_skill(1, "pp")
+
+  eq(role.set_capacity(1, "pp", 10), 10, "缩容到 10")
+  eq(role.skill_state(1, "pp").charges, 10, "余量夹紧到 10")
+  for _ = 1, 10 do
+    role.charge(1, "pp")
+  end
+  eq(role.charge(1, "pp"), 0, "打光后仍是 0（不减负）")
+  eq(role.skill_state(1, "pp").charges, 0, "余量 0")
+  eq(role.recharge(1, "pp"), 10, "回到新上限（不是声明的 30）")
+end)
+
+-- ── 用例 20：容量面的错误码与「未声明 charges」技能的下场 ──────────────────────
+
+run("pkg.role-skill.capacity-errors", function()
+  local world = new_world()
+  local role = fresh(world)
+  role.skill_define("bare", { attrs_spec = {} })
+  role.grant_skill(1, "bare")
+
+  eq(role.charge(1, "bare"), 0, "未声明 charges 且无容量 ⇒ 不参与充能")
+  eq(role.recharge(1, "bare"), 0, "同上（recharge 返回 0 且不写）")
+  expect_error(role.ERRORS.UNKNOWN, function()
+    role.set_capacity(1, "nope", 5)
+  end, "无槽位 ⇒ -UNKNOWN")
+  expect_error(role.ERRORS.UNKNOWN, function()
+    role.set_capacity(99, "bare", 5)
+  end, "无记录 ⇒ -UNKNOWN")
+  expect_error(role.ERRORS.DEF, function()
+    role.set_capacity(1, "bare", -1)
+  end, "负 cap ⇒ -DEF")
+  expect_error(role.ERRORS.DEF, function()
+    role.set_capacity(1, "bare", 1.5)
+  end, "小数 cap ⇒ -DEF")
+  expect_error(role.ERRORS.DEF, function()
+    role.set_capacity(1, "bare", "3")
+  end, "字符串 cap ⇒ -DEF")
+
+  eq(role.set_capacity(1, "bare", 3), 3, "未声明 charges 的技能也能设容量")
+  eq(role.skill_state(1, "bare").charges, 3, "余量以 cap 初始化（与建槽位时充满同口径）")
+  eq(role.charge(1, "bare"), 2, "设了容量就开始参与充能（D8 只在两者皆无时生效）")
+end)
+
+-- ── 用例 21：recharge 第 4 参（持久化容量；3 参路径逐字节同前）─────────────────
+
+run("pkg.role-skill.capacity-recharge-cap", function()
+  local world = new_world()
+  local role = fresh(world)
+  role.skill_define("pp", { attrs_spec = {}, charges = 30 })
+  role.grant_skill(1, "pp")
+
+  -- 3 参路径：与本轮前的语义逐值相等，且不写 capacity 字段
+  eq(role.recharge(1, "pp"), 30, "3 参：填到声明的 30")
+  is_true(
+    world.kv["role.actor.1"]:find("capacity", 1, true) == nil,
+    "3 参路径的载荷不含 capacity 字段"
+  )
+  eq(role.recharge(1, "pp", 5), 30, "已满再充仍夹紧在 30")
+  role.charge(1, "pp")
+  eq(role.recharge(1, "pp", 2), 30, "n=2 充回上限")
+
+  -- 第 4 参 = 持久化新容量（不是「临时上限」——那会造出第二个真源）
+  eq(role.recharge(1, "pp", 1, 40), 31, "4 参：余量 30+1，容量同时换成 40")
+  eq(role.skill_state(1, "pp").capacity, 40, "4 参把容量落进槽位")
+  is_true(
+    world.kv["role.actor.1"]:find("capacity", 1, true) ~= nil,
+    "载荷里确实出现 capacity"
+  )
+  eq(role.recharge(1, "pp"), 40, "之后无参 recharge 以新容量为上限")
+
+  -- 对照世界：只走 3 参 ⇒ 没有容量、上限仍是声明值
+  local world2 = new_world()
+  local role2 = fresh(world2)
+  role2.skill_define("pp", { attrs_spec = {}, charges = 30 })
+  role2.grant_skill(1, "pp")
+  eq(role2.recharge(1, "pp"), 30, "对照世界 3 参仍是 30")
+  eq(role2.skill_state(1, "pp").capacity, nil, "对照世界没有 capacity")
+end)
+
+-- ── 用例 27：一次 effective 的读次数与实体总数无关（O(1) 的结构证据）───────────
 
 run("pkg.role-skill.perf-o1-structural", function()
   local world = new_world()
@@ -603,6 +782,12 @@ run("pkg.role-skill.perf-o1-structural", function()
   collectgarbage("collect")
   local before_mem = collectgarbage("count")
   seed(1000)
+  -- 读之前显式回收：`collectgarbage("count")` 含**未回收**的垃圾，而 seed 里每次
+  -- `codec.encode` 都产一张临时表 —— 不回收时这个数随进程 GC 步进漂移（S8 实测同一
+  -- 命令三次得 505.7 / 714.4 / 1098.4 KiB；普通 Lua 对照 live 面：老包 333.3 / 新包
+  -- 332.6 KiB，差 0.2%）。判据量的是「载荷常驻」，不是「这次恰好留了多少垃圾」。
+  collectgarbage("collect")
+  collectgarbage("collect")
   local mem_kib = collectgarbage("count") - before_mem
   print(string.format("perf.role-skill.mem_1k_actors_kib=%.1f", mem_kib))
   is_true(mem_kib <= 1024, "1k actor 载荷 ≤ 1 MiB，实得 " .. string.format("%.1f", mem_kib) .. " KiB")
@@ -640,9 +825,10 @@ run("pkg.role-skill.perf-o1-structural", function()
   -- 观测红值（S13）；余量按红值 +3.3% 取 1.55。O(N) 回归在本仪器上是 ~10×，判据仍挡得住。
   -- 1.2 更不行：GC 脉冲会被打成假红（r1 在 quest 的同类指标上实证，见 quest.md §5）。
   is_true(ratio <= 1.55, "墙钟比 ≤ 1.55×，实得 " .. string.format("%.3f", ratio))
+
 end)
 
--- ── 用例 17：包加载（清缓存 = 定义表与订阅面一起归零）────────────────────────
+-- ── 用例 28：包加载（清缓存 = 定义表与订阅面一起归零）────────────────────────
 
 run("pkg.role-skill.perf-load", function()
   local samples = {}
