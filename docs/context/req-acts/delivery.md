@@ -1,7 +1,7 @@
 # 需求级九幕进行时 · 交付（req-acts/delivery）
 > **id** req-acts/delivery · **幕** req: ready/developing/accept/accept_gate · **触发** 派发 development / 交付受理前
 > **读不到代价** hard-refusal（工件纪律漏读 → 交付被打回；`.env.local` 未 source → 派发不合规）
-> **ver** 18f2d3
+> **ver** 2affff
 
 ## 4. 待开发（ready）
 
