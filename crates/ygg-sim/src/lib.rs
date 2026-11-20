@@ -34,8 +34,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod archetype;
+pub mod component;
 pub mod error;
 pub mod fixed;
 
+pub use archetype::{Archetype, Column, ValueRef};
+pub use component::{AttrType, ComponentDef, ComponentId, CompSet, EntityId, Registry};
 pub use error::SimError;
 pub use fixed::Fixed;

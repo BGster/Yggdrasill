@@ -96,7 +96,7 @@ pub fn to_decimal(value: Fixed) -> String {
     // 取绝对值走 i128：`i64::MIN` 的绝对值在 i64 里不可表（饱和会把它变成 MAX，
     // 打印出错误的符号量级）。
     let magnitude = (value as i128).unsigned_abs();
-    let int_part = (magnitude >> FRAC_BITS) as u128;
+    let int_part = magnitude >> FRAC_BITS;
     let frac_part = magnitude & (FRAC_MASK as u128);
     // 9 位小数 = frac * 10^9 / 2^32（向下取整，确定）。
     let scaled = frac_part * 1_000_000_000u128 / (1u128 << FRAC_BITS);
