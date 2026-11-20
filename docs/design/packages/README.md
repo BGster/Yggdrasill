@@ -7,7 +7,7 @@
 
 ## 1. 定位与判据
 
-这里是六份**能力契约**的入口。包是「换个游戏还成立」的那一层：id 分配、属性袋、序列化、任务流转、对话调度、角色与技能引用、程序化生成。进包之前先过三问：
+这里是七份**能力契约**的入口。包是「换个游戏还成立」的那一层：id 分配、属性袋、序列化、任务流转、对话调度、角色与技能引用、程序化生成、素材字节。进包之前先过三问：
 
 | 判据 | 归宿 |
 | --- | --- |
@@ -27,9 +27,7 @@
 | dialogue | [dialogue.md](dialogue.md) | quest | 实现已落地 · test 26 | 3（PokeRogue / CDDA / Saltline） |
 | role-skill | [role-skill.md](role-skill.md) | entity · codec | 实现已落地 · test 17 | 3（PokeRogue / DCSS / CDDA） |
 | procgen | [procgen.md](procgen.md) | codec（仅摘要面） | 实现已落地 · test 18 | 3（CDDA / DCSS / Saltline） |
-| assetgen（规划项） | `packages/assetgen.md`（P2.5 立项时创建，届时本行改为链接） | procgen（共享 rng 契约） | 规划 | CDDA / DCSS / Saltline |
-
-最后一行是**规划项，不是链接**：P2.5 的硬要求「全部由 seed 驱动、同 seed 同产物字节一致」使它和 [procgen.md](procgen.md) 共享同一份 rng 契约，先建 `assetgen.md` 会迫使 rng 契约写两遍。P0 只登记，立项时创建文件并把本行改成链接。
+| assetgen | [assetgen.md](assetgen.md) | procgen（**仅 rng 面**） | 实现已落地 · test 28 | 4（Saltline / CDDA / DCSS / PokeRogue） |
 
 ## 3. 依赖序
 
@@ -40,10 +38,11 @@
 - `dialogue` 依赖 `quest`：任务推进靠 `quest.*` 事件驱动对白，对话包消费事件，不反向调用任务状态机。
 - `role-skill` 依赖 `entity` + `codec`：角色/技能只存引用与计数，属性袋归 entity，存档归 codec。
 - `procgen` 依赖 `codec`（**仅摘要面**）：`procgen.hash` 借 [codec.md](codec.md) I1 的确定性编码口径，不自己写第二份编码器；PRNG 本身只依赖确定性种子（不依赖其它包），可以最先落地。它是唯一一个「产物不落 KV、defs 也不落 KV」的包——`defs` 由安装期注入 + 运行期注册表（[procgen.md](procgen.md) §2）。
+- `assetgen` 依赖 `procgen`（**仅 rng 面**）：只用 `procgen.rng` / `procgen.state` / `procgen.next32`，不调 `define` / `run` / `hash`——素材产物不是 procgen 的 def，也不借它的 FNV 当摘要（[assetgen.md](assetgen.md) §1）。共享的是 rng 契约，不是生成算法：procgen 产 `cells`（地图格），assetgen 产 `pixels` / `pcm` / 顶点表。
 
 ## 4. 契约章节模板
 
-六份契约**逐节同构**，缺节即视为未写完：
+七份契约**逐节同构**，缺节即视为未写完：
 
 ```text
 # Yggdrasill · packages/<name> — <一句定位>
@@ -69,16 +68,16 @@
 - **纯度**：包模块顶层只允许纯导出（函数与常量），注册 / 写状态 / 输出一律在 `M.install(deps)` 或调用期——与 [../mod/mod-package.md](../mod/mod-package.md) 的 `mod.pure-export` 同一条纪律。**无未声明文件**：包内除 `test/**` 外的每个文件都必须被宿主 manifest 的 `packages` 段纳管（已落地；其它文件打包期即拒）。
 - **自测入册**（已落地，条件式）：用例名前缀 `pkg.<name>.`，放在 `<包根>/<本包>/test/*.lua`，由 `cargo run -q --example selftest -- --mod <mod> --packages <包根>` 收集，与 mod 自测进入**同一个** `__SELFTEST` 计数面（`cases passed=` 里一并计）。于是条件式成立——声明的包计入该命令的计数，不声明包的 mod 跑 0 条，生产 mod（`agent-seed`）的 `cases passed=` 不因本机制变化。包自测自带计数垫片，不依赖消费它的 mod 的 harness。
 - **发现机制（P1 已定）**：声明驱动，不靠目录扫描——只有 `pack.json` 的 `packages` 段声明过的包才会被装载，包根由 `--packages` / `$YGG_PACKAGES_ROOT` / `<mod>/../../packages/libs` 解析。完整规则见 [../mod/mod-package.md](../mod/mod-package.md) §3.2.3。
-- **装载面夹具（`fixture`）**：`packages/libs/fixture/` 是**装载面活体夹具**（`pkg.json` + `init.lua` + `words.lua` + `test/pkg-fixture.lua`），**不是能力包**，显式豁免第 ② 节「≥2 个不同游戏用点」硬闸——那道闸针对能力包；夹具的作用是钉住装载契约（多文件 require、缓存身份、chunk 名、纯导出边界），不是提供能力。P2 的六个能力包（entity / codec / quest / dialogue / role-skill / procgen）不受此豁免影响。
+- **装载面夹具（`fixture`）**：`packages/libs/fixture/` 是**装载面活体夹具**（`pkg.json` + `init.lua` + `words.lua` + `test/pkg-fixture.lua`），**不是能力包**，显式豁免第 ② 节「≥2 个不同游戏用点」硬闸——那道闸针对能力包；夹具的作用是钉住装载契约（多文件 require、缓存身份、chunk 名、纯导出边界），不是提供能力。P2 的七个能力包（entity / codec / quest / dialogue / role-skill / procgen / assetgen）不受此豁免影响。
 - **消费夹具（`pkg-selftest`，P2 落地——D9）：**`packages/mods/pkg-selftest/` 是一个**声明了 `packages` 段的 Mod**，唯一职责是让包自测能被收集执行：
   ```sh
   cargo run -q --example selftest -p ygg-sandbox -- \
     --mod packages/mods/pkg-selftest --packages packages/libs [--filter pkg-<name>]
   ```
   为何必须存在这一层：生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远看不到 `pkg.*`（仍为 79/0，这就是回归钉）；而这个夹具的全量计数刚好是可复算的包用例总数。
-  - **声明闭包**：`packages` 段声明 `entity` / `codec` / `quest` / `dialogue` / `role-skill` / `procgen` 六包（版本精确 pin）。`pkg.json` 的 `deps` 只表达形状依赖，**闭包由夹具的声明决定**——加一个包 = 夹具 `packages[]` 加一行 + 重算 manifest。
-  - **计数口径**：全量 = 90（r1/r2 的 entity 18 + codec 20 + 两个冒烟 + quest 24 + dialogue 26）+ **35**（role-skill 17 + procgen 18）= **125**；逐包复算 `--filter pkg-entity` → 19、`pkg-codec` → 21、`pkg-quest` → 24、`pkg-dialogue` → 26、`pkg-role-skill` → 17、`pkg-procgen` → 18。`--filter` 过滤的是**文件名**，所以每个包在 `tests/` 下都要有一个同名冒烟文件接住，否则该包单独跑会「没有可执行的测试文件」直接 exit 1。
-  - **冒烟不计数**：`tests/pkg-{quest,dialogue,role-skill,procgen}-smoke.lua` 与 `tests/pkg-procgen-digest-smoke.lua` 是 **file 级断言**（`error` ⇒ `file FAIL` ⇒ `ok=0`），只钉「包装载面 + 顶层纯度 + 导出面清单（+ 事件名集合、KV 前缀、摘要格式）」，不复述 API 函数表（那份真源在行为用例里）。不进 `cases passed=` 的理由：包用例的计数口径是「90 + 新增的 35」，载体冒烟计入就会让 125 变成 130。
+  - **声明闭包**：`packages` 段声明 `entity` / `codec` / `quest` / `dialogue` / `role-skill` / `procgen` / `assetgen` 七包（版本精确 pin）。`pkg.json` 的 `deps` 只表达形状依赖，**闭包由夹具的声明决定**——加一个包 = 夹具 `packages[]` 加一行 + 重算 manifest。
+  - **计数口径**：全量 = 90（r1/r2 的 entity 18 + codec 20 + 两个冒烟 + quest 24 + dialogue 26）+ **35**（role-skill 17 + procgen 18）+ **28**（assetgen）= **153**；逐包复算 `--filter pkg-entity` → 19、`pkg-codec` → 21、`pkg-quest` → 24、`pkg-dialogue` → 26、`pkg-role-skill` → 17、`pkg-procgen` → 18、`pkg-assetgen` → 28。`--filter` 过滤的是**文件名**，所以每个包在 `tests/` 下都要有一个同名冒烟文件接住，否则该包单独跑会「没有可执行的测试文件」直接 exit 1。
+  - **冒烟不计数**：`tests/pkg-{quest,dialogue,role-skill,procgen,assetgen}-smoke.lua` 与 `tests/pkg-{procgen,assetgen}-digest-smoke.lua` 是 **file 级断言**（`error` ⇒ `file FAIL` ⇒ `ok=0`），只钉「包装载面 + 顶层纯度 + 导出面清单（+ 事件名集合、KV 前缀、摘要 / canon 行格式）」，不复述 API 函数表（那份真源在行为用例里）。不进 `cases passed=` 的理由：包用例的计数口径是「90 + 新增的 63」，载体冒烟计入就会让 153 变成 158。
   - **为什么每包都要一个 mod 侧冒烟**：`--filter` 对 mod 的 `tests/*.lua` 与包的 `test/*.lua` **同时**过滤，mod 侧筛完为空就「没有可执行的测试文件」直接 exit 1——`--filter pkg-procgen-digest` 这种只命中包内文件的过滤器尤其需要一个同名接应文件。
   - **`entries` 必须非空**：打包工具要求资源包至少一个数据条目（`crates/ygg-sandbox/examples/pack.rs`），所以夹具带一条只为满足该硬要求的探针条目（`data/probe.json`），随后 `manifest.json` 由 `cargo run -p ygg-sandbox --example pack -- packages/mods/pkg-selftest --packages packages/libs` 重算，`sh .pi/tools/manifest-verify.sh --mod packages/mods/pkg-selftest` 复核 `pkg_drift=0`。
 - **性能数字**：每包 §5 五个指标必须给数字口径与测量方法（同数据集 / 同机器 / 跑三次取中位）；P0 期填**目标值**，P2 首实现填实测值，偏差回写契约。

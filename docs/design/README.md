@@ -18,7 +18,7 @@ docs/design/
 ├── mod/               # ③ agent-seed mod
 │   ├── mod-package.md  prompt-surface.md  tool-bridge.md
 │   └── action-faces.md  identity.md  testing-strategy.md
-└── packages/          # ⑤ packages 通用能力层（7）：README + entity / codec / quest / dialogue / role-skill / procgen
+└── packages/          # ⑤ packages 通用能力层（8）：README + entity / codec / quest / dialogue / role-skill / procgen / assetgen
 ```
 
 ## 我碰哪个面 → 读哪个文件
@@ -53,6 +53,7 @@ docs/design/
 | ⑤ packages · 对话事件总线 | [packages/dialogue.md](packages/dialogue.md) | 改 handler 注册面、回退链或 agent 通道之前 | irreversible |
 | ⑤ packages · 角色与技能 | [packages/role-skill.md](packages/role-skill.md) | 改角色授予 / 技能引用 / 属性合成之前 | silent-drift |
 | ⑤ packages · 程序化生成 | [packages/procgen.md](packages/procgen.md) | 改 PRNG 算法、流派生规则或生成器声明形状之前 | irreversible |
+| ⑤ packages · 素材生成 | [packages/assetgen.md](packages/assetgen.md) | 改素材字节形状、噪声与波形参数、容器头之前 | irreversible |
 
 ## 不在本树的（行为面）
 
