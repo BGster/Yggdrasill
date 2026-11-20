@@ -126,6 +126,8 @@
 - `coordination.json`：跨进程协议 `{phase, writers, owner_pid, heartbeat_at}`（见上一节）。
 - `settlement.json`：只在 `--settle` 时写；`ok` = 事件日志非空 ∧ 无失败步 ∧ 出现 ending 叙述行 ∧ inbox 无未消费行（开关来自 Mod 契约的 `settlement` 段）；退出码镜像 `ok`；有未消费行时报告写「ending 之后还有 N 条未消费 inbox 行——需要新局」且 `ok=false`。
 - `decide-input.json`：外部决策命令的输入——`--drive cmd:` 下，每次出现待决选择、在调用命令之前，把完整当前回执写进去。
+- `mounts/`：`pack.json` `mounts` 段声明的挂载点根。`<run-dir>/mounts/<name>` **恒存在**：私有挂载（无 `dir`）是真目录、内容是本局产物；`{name, dir}` 挂载是指向 `canonicalize(dir)` 的**符号链接**（bind 语义，**不拷贝内容**）——因此 `du` / 备份 / 归档工具默认会跳进业务目录，这是声明过的运维副作用。三态幂等（不存在→建；已存在且与声明一致→静默通过；不一致→ `YGG-FS-MOUNT` 硬拒且零写入）由 `MountStore::attach` 承担；段的字段与校验在 [mod-package.md §3.2.2](../mod/mod-package.md)，挂载点内的路径文法与读写面在 [lua-api.md §3.1.2](../kernel/lua-api.md)。
+- `fs.jsonl`：`ygg.fs.write` 的审计行（append-only、懒创建）。行的字段、`seq` 口径与被拒登记由 [kernel/lua-api.md](../kernel/lua-api.md) §3.1.2 定。它**不进 `events.jsonl`**——后者一行 = 一次 dispatch，`seq` 由提交临界区唯一分配，带外追加会打乱唯一来源。
 
 **回执面（不落盘）**：
 
