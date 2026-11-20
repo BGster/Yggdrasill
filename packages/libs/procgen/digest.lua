@@ -22,7 +22,7 @@ local E = rng.E
 
 local M = {}
 
---- 十六进制数字面：不用 `string.format`（沙箱里 `string` 表不可达）。
+--- 十六进制数字面：不用 `string` 表的 `format`（宿主沙箱里那张表不可达）。
 local HEX = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" }
 
 local encoder = nil

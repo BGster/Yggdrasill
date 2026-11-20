@@ -17,7 +17,7 @@
 --
 -- 宿主沙箱的 globals 是白名单（`crates/ygg-sandbox/src/sandbox.rs` 的
 -- `BASE_WHITELIST`）：`math` / `string` / `table` 三张表**都不可达**。所以本包
--- 不用它们（连 `string.format` 都不用），只用算术、位运算与 `tostring`。
+-- 不用它们（连 `string` 表的 `format` 都不用），只用算术、位运算与 `tostring`。
 
 local M = {}
 

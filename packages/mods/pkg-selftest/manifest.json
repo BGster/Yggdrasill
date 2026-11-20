@@ -93,9 +93,9 @@
           "sha256": "3296d5da06b76faaabe74ec2770c0103125b76964ef95f6804c67258e13d9718"
         },
         {
-          "byteLength": 2717,
+          "byteLength": 2728,
           "path": "procgen/digest.lua",
-          "sha256": "6d1bcf0448aed1a9531fa0468288584012dddb0598c9af0a6611c3485ca2f3b9"
+          "sha256": "6ca1a556bb1bbf429fbcb1edffdb19aaad68c3be13402ef25cd7ed4a0aaef097"
         },
         {
           "byteLength": 2504,
@@ -113,9 +113,9 @@
           "sha256": "0acc45a8b037fad86347dd2bfce991fa6375f302ecfa0ebe4c305bdfc0462ef7"
         },
         {
-          "byteLength": 11258,
+          "byteLength": 11267,
           "path": "procgen/rng.lua",
-          "sha256": "5148efb17ab47842cc37dc3de3e3d2d7059f2df142ec420904c9b6a8bd06032b"
+          "sha256": "ab4fbb0e2ec9ff0c830be4d29ab6adefcb2982ff06bd480c787f5e3952bf9f00"
         }
       ],
       "id": "procgen"
