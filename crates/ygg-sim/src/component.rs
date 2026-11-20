@@ -229,7 +229,11 @@ impl Registry {
     /// 位集 → 组件名，按**名字节序升序**（快照/批量帧的规范序；见模块头注 1）。
     pub fn names_in_byte_order(&self, set: CompSet) -> Vec<ComponentId> {
         let mut ids = self.ids_of_set(set);
-        ids.sort_by(|a, b| self.names[*a as usize].as_bytes().cmp(self.names[*b as usize].as_bytes()));
+        ids.sort_by(|a, b| {
+            self.names[*a as usize]
+                .as_bytes()
+                .cmp(self.names[*b as usize].as_bytes())
+        });
         ids
     }
 }

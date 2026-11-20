@@ -17,7 +17,7 @@
 //! `entity_index`，于是「被填洞的行 = 原末行」是显式语义而不是实现巧合——改掉它即改逐
 //! tick hash（回放对行序强耦合，见 `store.rs` 头注）。
 
-use crate::component::{ComponentId, CompSet, EntityId};
+use crate::component::{CompSet, ComponentId, EntityId};
 use crate::error::{SimError, SimResult};
 
 /// 单列载荷（SoA）。变体与 `AttrType` 一一对应（`Tag` 除外——它没有列）。
@@ -99,7 +99,13 @@ impl Column {
             (Column::I64(dst), Column::I64(src)) => dst.push(src[row]),
             (Column::U64(dst), Column::U64(src)) => dst.push(src[row]),
             (Column::U8(dst), Column::U8(src)) => dst.push(src[row]),
-            (Column::Bytes { off, buf }, Column::Bytes { off: src_off, buf: src_buf }) => {
+            (
+                Column::Bytes { off, buf },
+                Column::Bytes {
+                    off: src_off,
+                    buf: src_buf,
+                },
+            ) => {
                 let (start, end) = (src_off[row] as usize, src_off[row + 1] as usize);
                 buf.extend_from_slice(&src_buf[start..end]);
                 let end = u32::try_from(buf.len()).map_err(|_| {
@@ -235,7 +241,11 @@ impl Archetype {
     }
 
     /// 追加一行（列载荷由调用方按 `col_ids` 序给齐）。
-    pub fn push_row(&mut self, id: EntityId, values: &[(ComponentId, ValueRef<'_>)]) -> SimResult<()> {
+    pub fn push_row(
+        &mut self,
+        id: EntityId,
+        values: &[(ComponentId, ValueRef<'_>)],
+    ) -> SimResult<()> {
         if values.len() != self.cols.len() {
             return Err(SimError::state(format!(
                 "archetype 行写入的列数不符：期望 {} 得到 {}",

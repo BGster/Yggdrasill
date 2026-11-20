@@ -38,8 +38,10 @@ pub mod archetype;
 pub mod component;
 pub mod error;
 pub mod fixed;
+pub mod store;
 
 pub use archetype::{Archetype, Column, ValueRef};
-pub use component::{AttrType, ComponentDef, ComponentId, CompSet, EntityId, Registry};
+pub use component::{AttrType, CompSet, ComponentDef, ComponentId, EntityId, Registry};
 pub use error::SimError;
 pub use fixed::Fixed;
+pub use store::ArchetypeStore;
