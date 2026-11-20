@@ -1029,6 +1029,136 @@ mod tests {
         assert_eq!(control, b"\"\\u0000\\u0001\\u001f\\u007f\"");
     }
 
+    // ── 解析器与 decode ────────────────────────────────────────────────────
+
+    fn decode_text(lua: &Lua, text: &[u8]) -> Result<mlua::Value, CodecFaceError> {
+        decode(lua, text)
+    }
+
+    #[test]
+    fn decode_round_trips_through_encode() {
+        let lua = Lua::new();
+        for text in [
+            &b"[1,2,3]"[..],
+            b"{}",
+            b"{\"f\":1.5,\"i\":1}",
+            b"[true,false,\"x\",{},\"a\"]",
+            b"{\"nested\":{\"deep\":[1,2,{\"k\":3}]}}",
+            "[\"任务 0\",\"emoji 🙂\"]".as_bytes(),
+        ] {
+            let value = decode_text(&lua, text).expect("合法 JSON 必须可解");
+            let bytes = encode(&value).expect("解出来的值必须可编码");
+            assert_eq!(bytes, text, "往返字节不同：{}", String::from_utf8_lossy(text));
+        }
+        // `[]` 与 `{}` 是同一个 Lua 值（空表），再编码只能是 `{}`——这是规范执行体
+        // 的既有非对称性（Lua 的 `table_kind` 无数组证据时给 object），不是本面的偏差。
+        let empty_array = decode_text(&lua, b"[]").expect("空数组");
+        assert_eq!(encode(&empty_array).expect("编码"), b"{}".to_vec());
+        // 嵌套位置的 `null` 值同样丢键（R9 对整棵树生效，不只顶层对象）
+        let nested_null = decode_text(&lua, b"{\"a\":[{\"k\":null,\"z\":1}]}").expect("嵌套 null");
+        assert_eq!(
+            encode(&nested_null).expect("编码"),
+            b"{\"a\":[{\"z\":1}]}".to_vec()
+        );
+    }
+
+    #[test]
+    fn decode_preserves_number_subtypes() {
+        let lua = Lua::new();
+        let integer = decode_text(&lua, b"100").expect("整数");
+        assert!(matches!(integer, mlua::Value::Integer(100)));
+        for text in [&b"1e2"[..], b"100.0", b"-0.0"] {
+            let lexeme = String::from_utf8_lossy(text);
+            match decode_text(&lua, text).expect("浮点") {
+                mlua::Value::Number(number) => {
+                    let expected: f64 = std::str::from_utf8(text).unwrap().parse().unwrap();
+                    assert_eq!(number.to_bits(), expected.to_bits(), "{lexeme}");
+                }
+                other => panic!("{lexeme} 必须解成浮点，得到 {}", other.type_name()),
+            }
+        }
+        // 整数溢出退回浮点（契约 R10）
+        match decode_text(&lua, b"99999999999999999999").expect("溢出") {
+            mlua::Value::Number(number) => assert_eq!(number, 1e20),
+            other => panic!("溢出必须退回浮点，得到 {}", other.type_name()),
+        }
+        // "-0" 是整数零（与 Lua 的 tonumber 一致），再编码成 "0"
+        assert!(matches!(
+            decode_text(&lua, b"-0").expect("负零整数"),
+            mlua::Value::Integer(0)
+        ));
+    }
+
+    #[test]
+    fn decode_handles_null_positions_and_escapes() {
+        let lua = Lua::new();
+        assert!(matches!(
+            decode_text(&lua, b"null").expect("顶层 null"),
+            mlua::Value::Nil
+        ));
+        let dropped = decode_text(&lua, b"{\"a\":null,\"b\":1}").expect("对象 null 丢键");
+        assert_eq!(encode(&dropped).expect("编码"), b"{\"b\":1}".to_vec());
+        assert_eq!(
+            decode_text(&lua, b"[1,null]").expect_err("数组 null 必须被拒").code(),
+            CODEC_UNSUPPORTED
+        );
+        // 代理对合成 + 单字节转义
+        let value = decode_text(&lua, b"\"\\ud83d\\ude42\\/\\u00e9\"").expect("转义");
+        assert_eq!(encode(&value).expect("编码"), "\"🙂/é\"".as_bytes().to_vec());
+        for bad in [
+            &b"\"\\ud83d\""[..],   // 高位代理无低位
+            b"\"\\ud83dx\"",       // 低位位置不是 \u
+            b"\"\\q\"",            // 非法转义
+            b"\"\\u12\"",          // \u 不足 4 位
+            b"\"\x01\"",           // 未转义控制字符
+            b"\"abc",              // 未闭合
+        ] {
+            assert_eq!(
+                decode_text(&lua, bad).expect_err("非法转义/控制字符").code(),
+                CODEC_UNSUPPORTED,
+                "{}",
+                String::from_utf8_lossy(bad)
+            );
+        }
+    }
+
+    #[test]
+    fn decode_rejects_malformed_documents() {
+        let lua = Lua::new();
+        for bad in [
+            &b""[..],
+            b" ",
+            b"[1,2",
+            b"{\"a\":1",
+            b"{\"a\" 1}",
+            b"{a:1}",
+            b"[1 2]",
+            b"1 2",
+            b"trueX",
+            b"tru",
+            b"+1",
+            b"1.",
+            b"1e",
+            b"01x",
+            b"{}extra",
+        ] {
+            assert_eq!(
+                decode_text(&lua, bad).expect_err("坏文档").code(),
+                CODEC_UNSUPPORTED,
+                "{}",
+                String::from_utf8_lossy(bad)
+            );
+        }
+        // 深度护栏：超过 256 层交回 Lua 路径（不是语义变更）
+        let deep = format!("{}{}", "[".repeat(300), "]".repeat(300));
+        assert_eq!(
+            decode_text(&lua, deep.as_bytes()).expect_err("过深").code(),
+            CODEC_UNSUPPORTED
+        );
+        let ok_depth = format!("{}{}", "[".repeat(32), "]".repeat(32));
+        assert!(decode_text(&lua, ok_depth.as_bytes()).is_ok());
+    }
+
     #[test]
     fn format_g_follows_the_c_printf_style_rule() {
         // 形态选择的三条边界（C `%g`：P > X ≥ -4 走定点，否则指数）
