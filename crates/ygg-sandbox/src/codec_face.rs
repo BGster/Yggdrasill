@@ -274,6 +274,72 @@ pub fn install(lua: &Lua) -> Result<(), mlua::Error> {
 mod tests {
     use super::*;
 
+    /// 数字向量：`(输入位型, 期望字节)`。期望值由**规范执行体**（Lua 侧
+    /// `pkg.codec`）产出后逐字抄入——方法见计划稿 §3.5（用公开面当 oracle，
+    /// 不在测试里复制第三份口径）。
+    const NUMBER_VECTORS: &[(u64, &str)] = &[
+        (0x0000_0000_0000_0000, "0.0"),
+        (0x8000_0000_0000_0000, "0.0"),
+        (0x3ff8_0000_0000_0000, "1.5"),
+        (0xbff8_0000_0000_0000, "-1.5"),
+        (0x3fb9_9999_9999_999a, "0.1"),
+        (0x4004_0000_0000_0000, "2.5"),
+        (0x3fe0_0000_0000_0000, "0.5"),
+        (0x3fd0_0000_0000_0000, "0.25"),
+        (0x3fd3_3333_3333_3334, "0.30000000000000004"),
+        (0x4197_d784_0000_0000, "100000000.0"),
+        (0x42d6_bcc4_1e90_0000, "100000000000000.0"),
+        (0x430c_6bf5_2634_0000, "1e15"),
+        (0x4341_c379_37e0_8000, "1e16"),
+        (0x444b_1ae4_d6e2_ef50, "1e21"),
+        (0x54b2_49ad_2594_c37d, "1e100"),
+        (0x7e37_e43c_8800_759c, "1e300"),
+        (0x3f1a_36e2_eb1c_432d, "0.0001"),
+        (0x3ee4_f8b5_88e3_68f1, "1e-05"),
+        (0x3b92_e3b4_0a0e_9b4f, "1e-21"),
+        (0x2b2b_ff2e_e48e_0530, "1e-100"),
+        (0x01a5_6e1f_c2f8_f359, "1e-300"),
+        (0x3e84_21f5_f40d_8376, "1.5e-07"),
+        (0x0000_0000_0000_0001, "5e-324"),
+        (0x7fef_ffff_ffff_ffff, "1.7976931348623157e308"),
+        (0x0010_0000_0000_0000, "2.2250738585072014e-308"),
+        (0x419d_6f34_5400_0000, "123456789.0"),
+        (0x437b_69b4_ba63_0f35, "1.2345678901234568e17"),
+        (0x4340_0000_0000_0000, "9007199254740992.0"),
+        (0x3ff0_0000_0000_0001, "1.0000000000000002"),
+        (0x4009_21fb_5444_2d18, "3.141592653589793"),
+        (0x4005_bf0a_8b14_5769, "2.718281828459045"),
+        (0x4023_fae1_47ae_147b, "9.99"),
+        (0x4058_f999_9999_999a, "99.9"),
+        (0x408f_3ffd_f3b6_45a2, "999.999"),
+        (0x3ff0_147a_e147_ae14, "1.005"),
+        (0x4005_6666_6666_6666, "2.675"),
+        (0x3ee9_e3fe_580f_5494, "1.23456e-05"),
+        (0xc005_6666_6666_6666, "-2.675"),
+        (0xc023_fae1_47ae_147b, "-9.99"),
+        (0x44df_e185_ca57_c517, "6.02214076e23"),
+        (0x3c07_a4da_290c_1653, "1.602176634e-19"),
+        (0x3f50_624d_d2f1_a9fc, "0.001"),
+        (0x3f1a_3637_1ea5_31a8, "9.999e-05"),
+        (0x42d6_bcc4_1e8f_fffa, "99999999999999.9"),
+        (0x430c_6bf5_2633_ffff, "999999999999999.9"),
+        (0x3f20_2c9d_edbc_309d, "0.0001234"),
+        (0x4029_0000_0000_0000, "12.5"),
+        (0x405f_4000_0000_0000, "125.0"),
+    ];
+
+    #[test]
+    fn number_text_matches_the_lua_oracle_vectors() {
+        for (bits, expected) in NUMBER_VECTORS {
+            let value = f64::from_bits(*bits);
+            assert_eq!(
+                number_text(value).expect("有限值必然可编码"),
+                *expected,
+                "位型 0x{bits:016x} 的编码形态与规范执行体不一致"
+            );
+        }
+    }
+
     #[test]
     fn integer_text_is_plain_decimal() {
         assert_eq!(integer_text(0), "0");
@@ -290,6 +356,43 @@ mod tests {
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let error = number_text(value).expect_err("非有限值必须被拒");
             assert_eq!(error.code(), CODEC_UNSUPPORTED);
+        }
+    }
+
+    /// 字符串向量：`(输入字节, 期望字面量字节)`，期望值同样取自规范执行体。
+    #[test]
+    fn string_text_matches_the_lua_oracle_vectors() {
+        let cases: &[(&[u8], &[u8])] = &[
+            (b"", b"\"\""),
+            (b"abc", b"\"abc\""),
+            (b"quote\"inside", b"\"quote\\\"inside\""),
+            (b"back\\slash", b"\"back\\\\slash\""),
+            (
+                b"tab\tnewline\nreturn\r",
+                b"\"tab\\tnewline\\nreturn\\r\"",
+            ),
+            (b"\x08\x0c", b"\"\\b\\f\""),
+            (
+                &[0x00, 0x01, 0x1f, 0x7f],
+                b"\"\\u0000\\u0001\\u001f\\u007f\"",
+            ),
+            (&[0x80, 0x9f, 0xff], b"\"\x80\x9f\xff\""),
+            (
+                "任务 0".as_bytes(),
+                b"\"\xe4\xbb\xbb\xe5\x8a\xa1 0\"".as_slice(),
+            ),
+            (
+                "emoji 🙂".as_bytes(),
+                b"\"emoji \xf0\x9f\x99\x82\"".as_slice(),
+            ),
+            (b"sol/forward", b"\"sol/forward\""),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                string_text(input),
+                expected.to_vec(),
+                "输入字节 {input:02x?} 的转义与规范执行体不一致"
+            );
         }
     }
 
