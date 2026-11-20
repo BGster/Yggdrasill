@@ -630,7 +630,10 @@ fn entity_face_keys_are_exactly_the_eleven_documented_keys() {
         "tag_batch",
     ];
     expected.sort_unstable();
-    assert_eq!(seen, expected, "ygg.entity 的键集必须恰为这 11 个：{seen:?}");
+    assert_eq!(
+        seen, expected,
+        "ygg.entity 的键集必须恰为这 11 个：{seen:?}"
+    );
 }
 
 /// 批式面的行为：造 3 行（属性 + tag）、列式取回、同值不写、整/浮身份保留、
@@ -703,7 +706,11 @@ fn entity_batch_face_round_trip_preserves_values_and_identity() {
     assert!(!first.has_tag("boss"), "tag_batch 必须真的把它摘掉");
     assert!(first.has_tag("enemy"));
     let second = entities.get(2).expect("实体 2 必须在库里");
-    assert_eq!(second.attribute("hp"), Some(&Value::Int(2)), "2.5 → 2 必须是 Int");
+    assert_eq!(
+        second.attribute("hp"),
+        Some(&Value::Int(2)),
+        "2.5 → 2 必须是 Int"
+    );
 }
 
 /// 三族错误码：形状（FRAME）/ 值域（VALUE）/ 未知 id（ID），且**整批零副作用**。

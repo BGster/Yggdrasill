@@ -155,7 +155,11 @@ fn path_costs_are_measured() {
     ygg.raw_set("kvset", kv_set).expect("挂 kvset");
     lua.globals().raw_set("ygg", ygg).expect("挂 ygg");
 
-    crossing_cost(&lua, "zero_arg", "local f = ygg.f0 for _ = 1, 200000 do f() end");
+    crossing_cost(
+        &lua,
+        "zero_arg",
+        "local f = ygg.f0 for _ = 1, 200000 do f() end",
+    );
     crossing_cost(
         &lua,
         "int_int_str",

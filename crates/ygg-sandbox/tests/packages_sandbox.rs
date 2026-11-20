@@ -537,8 +537,23 @@ fn entity_exports_are_exactly_the_seventeen_documented_keys() {
     seen.sort_unstable();
 
     let mut expected = vec![
-        "VERSION", "attrs", "count", "define", "destroy", "exists", "get", "has", "ids",
-        "install", "schema", "schema_of", "set", "spawn", "tag", "tags", "untag",
+        "VERSION",
+        "attrs",
+        "count",
+        "define",
+        "destroy",
+        "exists",
+        "get",
+        "has",
+        "ids",
+        "install",
+        "schema",
+        "schema_of",
+        "set",
+        "spawn",
+        "tag",
+        "tags",
+        "untag",
     ];
     expected.sort_unstable();
 

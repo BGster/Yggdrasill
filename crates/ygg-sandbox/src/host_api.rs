@@ -652,7 +652,10 @@ fn entity_array(table: &Table, what: &str) -> Result<Vec<LuaValue>, Error> {
 }
 
 fn entity_field(row: &Table, key: &str) -> Result<Option<Table>, Error> {
-    match row.raw_get::<LuaValue>(key).map_err(|_| entity_frame("字段不可读"))? {
+    match row
+        .raw_get::<LuaValue>(key)
+        .map_err(|_| entity_frame("字段不可读"))?
+    {
         LuaValue::Nil => Ok(None),
         LuaValue::Table(t) => Ok(Some(t)),
         other => Err(entity_frame(format!(
@@ -679,7 +682,9 @@ pub fn entity_rows(rows: &Table) -> Result<Vec<EntityRowSpec>, Error> {
                 let LuaValue::String(key) = key else {
                     return Err(entity_frame("attrs 的键必须是字符串"));
                 };
-                let key = key.to_str().map_err(|_| entity_frame("attrs 的键非 UTF-8"))?;
+                let key = key
+                    .to_str()
+                    .map_err(|_| entity_frame("attrs 的键非 UTF-8"))?;
                 spec.attrs
                     .push((key.to_string(), entity_value_arg(&value, key.as_ref())?));
             }
@@ -689,8 +694,11 @@ pub fn entity_rows(rows: &Table) -> Result<Vec<EntityRowSpec>, Error> {
                 let LuaValue::String(tag) = item else {
                     return Err(entity_frame("tags 的元素必须是字符串"));
                 };
-                spec.tags
-                    .push(tag.to_str().map_err(|_| entity_frame("tag 非 UTF-8"))?.to_string());
+                spec.tags.push(
+                    tag.to_str()
+                        .map_err(|_| entity_frame("tag 非 UTF-8"))?
+                        .to_string(),
+                );
             }
         }
         out.push(spec);
@@ -719,7 +727,9 @@ pub fn entity_attr_ops(ops: &Table) -> Result<Vec<(u64, Vec<(String, Value)>)>, 
                 let LuaValue::String(key) = key else {
                     return Err(entity_frame("attrs 的键必须是字符串"));
                 };
-                let key = key.to_str().map_err(|_| entity_frame("attrs 的键非 UTF-8"))?;
+                let key = key
+                    .to_str()
+                    .map_err(|_| entity_frame("attrs 的键非 UTF-8"))?;
                 kvs.push((key.to_string(), entity_value_arg(&value, key.as_ref())?));
             }
         }
@@ -748,7 +758,11 @@ pub fn entity_fetch_queries(queries: &Table) -> Result<Vec<(u64, Vec<String>)>, 
                 let LuaValue::String(key) = item else {
                     return Err(entity_frame("keys 的元素必须是字符串"));
                 };
-                keys.push(key.to_str().map_err(|_| entity_frame("key 非 UTF-8"))?.to_string());
+                keys.push(
+                    key.to_str()
+                        .map_err(|_| entity_frame("key 非 UTF-8"))?
+                        .to_string(),
+                );
             }
         }
         out.push((id, keys));
@@ -771,9 +785,10 @@ pub fn entity_tag_ops(ops: &Table) -> Result<Vec<(u64, String, bool)>, Error> {
             _ => return Err(entity_frame(format!("ops[{index}].id 必须是非负整数"))),
         };
         let tag = match op.raw_get::<LuaValue>("tag") {
-            Ok(LuaValue::String(tag)) => {
-                tag.to_str().map_err(|_| entity_frame("tag 非 UTF-8"))?.to_string()
-            }
+            Ok(LuaValue::String(tag)) => tag
+                .to_str()
+                .map_err(|_| entity_frame("tag 非 UTF-8"))?
+                .to_string(),
             _ => return Err(entity_frame(format!("ops[{index}].tag 必须是字符串"))),
         };
         let add = match op.raw_get::<LuaValue>("add") {
@@ -1663,8 +1678,7 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     entity_table.raw_set(
         "scan",
         lua.create_function(
-            move |lua, (lo, hi, tag): (u64, u64, Option<String>)|
-                  -> Result<Table, Error> {
+            move |lua, (lo, hi, tag): (u64, u64, Option<String>)| -> Result<Table, Error> {
                 if hi < lo {
                     return Err(entity_frame(format!("scan 的区间非法：lo={lo} > hi={hi}")));
                 }
