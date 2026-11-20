@@ -83,9 +83,19 @@
     {
       "files": [
         {
-          "byteLength": 1499,
+          "byteLength": 5607,
+          "path": "procgen/algos/terrain.lua",
+          "sha256": "3296d5da06b76faaabe74ec2770c0103125b76964ef95f6804c67258e13d9718"
+        },
+        {
+          "byteLength": 2717,
+          "path": "procgen/digest.lua",
+          "sha256": "6d1bcf0448aed1a9531fa0468288584012dddb0598c9af0a6611c3485ca2f3b9"
+        },
+        {
+          "byteLength": 2504,
           "path": "procgen/init.lua",
-          "sha256": "ad557576ee84b0f971f001ff3253cfd10a708bbb4f1fb039e28c6f1df414505c"
+          "sha256": "a70dbe771d50af18760ea518e9dcecb7c02a607bea687eedea89030ed3b21a0e"
         },
         {
           "byteLength": 178,
@@ -93,9 +103,14 @@
           "sha256": "b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
         },
         {
-          "byteLength": 10495,
+          "byteLength": 6720,
+          "path": "procgen/registry.lua",
+          "sha256": "13b9224eff0d97fd5d4a3735e164ff70a42bf00c23ebb15cc560d3983bd17c85"
+        },
+        {
+          "byteLength": 11258,
           "path": "procgen/rng.lua",
-          "sha256": "f9e3e165d8d7dcfe73ba04f6da70bf022b8d94d42973ba4bd3ffea6507a97043"
+          "sha256": "5148efb17ab47842cc37dc3de3e3d2d7059f2df142ec420904c9b6a8bd06032b"
         }
       ],
       "id": "procgen"

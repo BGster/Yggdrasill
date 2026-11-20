@@ -16,9 +16,12 @@ local entity = require("pkg.entity")
 local codec = require("pkg.codec")
 local quest = require("pkg.quest")
 local dialogue = require("pkg.dialogue")
+local procgen = require("pkg.procgen")
 
--- 装配：三个包的 `install` 都只记 deps（不预读、不预写，契约 I7 / I8）。
+-- 装配：包的 `install` 都只记 deps / 注注册表（不预读、不预写，契约 I7 / I8）。
+-- procgen 不接宿主面（不写 KV、不发事件、不注册 handler），所以 `install()` 无参。
 entity.install()
 codec.install()
 quest.install()
 dialogue.install()
+procgen.install()
