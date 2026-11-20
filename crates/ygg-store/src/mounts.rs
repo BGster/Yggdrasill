@@ -22,7 +22,9 @@
 //! 规范正文在 `docs/design/kernel/lua-api.md` §3.1.2 与
 //! `docs/design/mod/mod-package.md` §3.2.2；本文件是实现，不是第二个真源。
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
@@ -339,6 +341,333 @@ fn resolve_mount_dir(name: &str, text: &str, mod_dir: &Path) -> Result<PathBuf, 
     Ok(canon)
 }
 
+// ============================================================================
+// §挂载点落地（三态幂等）与路径狱
+// ============================================================================
+
+/// 一个已冻结的挂载根（attach 时 `canonicalize` 一次，之后不再解析）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MountRoot {
+    root: PathBuf,
+    mode: MountMode,
+}
+
+/// 落地的待执行动作（先算全部现状再写，保证「不一致 → 零写入」/ 两条声明
+/// 里后一条冲突时前一条也不会被顺手建出来）。
+enum Landing<'a> {
+    /// 无需动盘（已存在且与声明一致）。
+    Keep,
+    /// 建真目录（私有挂载）。
+    MakeDir,
+    /// 建指向声明目录的符号链接（bind 语义，不拷贝内容）。
+    MakeLink(&'a Path),
+}
+
+/// 狱的「要什么」：文件面要求 `<rel>` 非空；目录面接受挂载根本身。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Need {
+    File,
+    Dir,
+}
+
+/// 一次成功的狱裁决。
+struct Located {
+    mount: String,
+    target: PathBuf,
+}
+
+/// 文件挂载桥的宿主侧句柄（`pack.json` `mounts` 段的运行时形）。
+pub struct MountStore {
+    run_dir: PathBuf,
+    mounts_root: PathBuf,
+    audit: PathBuf,
+    roots: BTreeMap<String, MountRoot>,
+    /// 剩余写预算（字节；**进程级、不落盘**）。
+    budget_left: u64,
+}
+
+impl MountStore {
+    /// 把 `pack.json` 的 `mounts` 段落到 `<run-dir>/mounts/`，并把每个挂载根
+    /// canonicalize 一次后冻结。
+    ///
+    /// 三态幂等（重载 / 续局走同一个入口）：
+    /// - 不存在 → 创建（私有 = 真目录；`{name,dir}` = 指向 `canonicalize(dir)` 的软链）；
+    /// - 已存在且与声明一致（私有 = 真目录 / 目录挂载 = 软链指向同一 canonical 目标）
+    ///   → 静默通过，**零写入**；
+    /// - 已存在但不一致 → `YGG-FS-MOUNT` 硬拒且**零写入**（先全部算现状、再落地）。
+    ///
+    /// 挂载点内的条目仍是懒创建（父目录不存在即拒，见 §狱的规则 7）。
+    pub fn attach(run_dir: &Path, pack: &Json, mod_dir: &Path) -> Result<Self, MountError> {
+        let specs = parse_mounts(pack, mod_dir)?; // 声明坏了：零写入
+        let mounts_root = run_dir.join(MOUNTS_DIR);
+
+        // ① 全量算现状（这一阶段不碰盘任何写）。
+        let mut plan: Vec<(&MountSpec, Landing<'_>)> = Vec::with_capacity(specs.len());
+        for spec in &specs {
+            let slot = mounts_root.join(&spec.name);
+            let landing = match fs::symlink_metadata(&slot) {
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => match &spec.dir {
+                    None => Landing::MakeDir,
+                    Some(dir) => Landing::MakeLink(dir),
+                },
+                Err(err) => {
+                    return Err(MountError::mount(format!(
+                        "挂载点 `{}` 不可探测（{err}）",
+                        slot.display()
+                    )))
+                }
+                Ok(meta) => {
+                    if meta.file_type().is_symlink() {
+                        match &spec.dir {
+                            None => {
+                                return Err(MountError::mount(format!(
+                                    "挂载点 `{}` 已存在为软链，但声明是私有挂载（不一致）",
+                                    slot.display()
+                                )))
+                            }
+                            Some(dir) => {
+                                let actual = fs::read_link(&slot)
+                                    .map_err(|err| {
+                                        MountError::mount(format!(
+                                            "挂载点 `{}` 的链接目标不可读（{err}）",
+                                            slot.display()
+                                        ))
+                                    })?
+                                    .canonicalize()
+                                    .map_err(|err| {
+                                        MountError::mount(format!(
+                                            "挂载点 `{}` 的链接目标不可 canonicalize（{err}）",
+                                            slot.display()
+                                        ))
+                                    })?;
+                                if actual != *dir {
+                                    return Err(MountError::mount(format!(
+                                        "挂载点 `{}` 指向 `{}`，与声明的 `{}` 不一致",
+                                        slot.display(),
+                                        actual.display(),
+                                        dir.display()
+                                    )));
+                                }
+                                Landing::Keep
+                            }
+                        }
+                    } else if meta.is_dir() && spec.dir.is_none() {
+                        Landing::Keep
+                    } else {
+                        return Err(MountError::mount(format!(
+                            "挂载点 `{}` 已存在，但与声明不一致（{}）",
+                            slot.display(),
+                            if meta.is_dir() { "声明了 dir」却已存在为真目录" } else { "已存在且不是目录" }
+                        )));
+                    }
+                }
+            };
+            plan.push((spec, landing));
+        }
+
+        // ② 落地（到这里所有声明都已验证过，不会半途才发现冲突）。
+        fs::create_dir_all(&mounts_root).map_err(|err| {
+            MountError::mount(format!("创建 {} 失败（{err}）", mounts_root.display()))
+        })?;
+        for (spec, landing) in &plan {
+            let slot = mounts_root.join(&spec.name);
+            match landing {
+                Landing::Keep => {}
+                Landing::MakeDir => fs::create_dir_all(&slot).map_err(|err| {
+                    MountError::mount(format!("创建 {} 失败（{err}）", slot.display()))
+                })?,
+                Landing::MakeLink(dir) => link_dir(dir, &slot)?,
+            }
+        }
+
+        // ③ 冻结每个挂载根（一次 canonicalize；之后的路径裁决只用这个值）。
+        let mut roots = BTreeMap::new();
+        for spec in &specs {
+            let slot = mounts_root.join(&spec.name);
+            let root = slot.canonicalize().map_err(|err| {
+                MountError::mount(format!("挂载点 {} 不可 canonicalize（{err}）", slot.display()))
+            })?;
+            roots.insert(
+                spec.name.clone(),
+                MountRoot {
+                    root,
+                    mode: spec.mode,
+                },
+            );
+        }
+
+        Ok(Self {
+            run_dir: run_dir.to_path_buf(),
+            mounts_root,
+            audit: run_dir.join(FS_AUDIT_FILE),
+            roots,
+            budget_left: MOUNT_RUN_WRITE_BUDGET,
+        })
+    }
+
+    /// run 目录（调用方拼产物路径用）。
+    pub fn run_dir(&self) -> &Path {
+        &self.run_dir
+    }
+
+    /// 挂载点根（`<run-dir>/mounts`；运维观察面）。
+    pub fn mounts_root(&self) -> &Path {
+        &self.mounts_root
+    }
+
+    /// 审计行文件（`<run-dir>/fs.jsonl`）。
+    pub fn audit_path(&self) -> &Path {
+        &self.audit
+    }
+
+    /// 声明的挂载点（名字 → （冻结根，模式）；声明序无关，`BTreeMap` 序即名字序）。
+    pub fn declared(&self) -> impl Iterator<Item = (&str, &Path, MountMode)> {
+        self.roots
+            .iter()
+            .map(|(name, entry)| (name.as_str(), entry.root.as_path(), entry.mode))
+    }
+
+    /// 剩余写预算（字节）。
+    pub fn budget_left(&self) -> u64 {
+        self.budget_left
+    }
+
+    /// 路径狱（**唯一实现**）：`mounts/<name>` 与 `mounts/<name>/<rel>` 之外一律拒。
+    ///
+    /// 拒绝条件（顺序即报错顺序，逐条对应 `docs/design/kernel/lua-api.md` §3.1.2）：
+    /// ① 不以 `mounts/` 起头；② `<name>` 未声明；③ 任一段为空 / `.` / `..` / 含
+    /// NUL 或 ASCII 控制字符；④ 路径 > 512 字节或 `<rel>` 段数 > 24；⑤ canonicalize
+    /// 后必须按**路径分量**落在冻结根内；⑥ 末段不得是软链；⑦ 父目录必须存在。
+    /// `<rel>` 为空（`mounts/<name>`）只被 `Need::Dir` 接受。
+    fn locate(&self, path: &str, need: Need) -> Result<Located, MountError> {
+        if path.is_empty() {
+            return Err(MountError::jail("路径不得为空"));
+        }
+        if path.len() > MOUNT_PATH_MAX_BYTES {
+            return Err(MountError::jail(format!(
+                "路径超过 {MOUNT_PATH_MAX_BYTES} 字节（当前 {} 字节）",
+                path.len()
+            )));
+        }
+        let Some(rest) = path.strip_prefix(MOUNT_PATH_PREFIX) else {
+            return Err(MountError::jail(format!(
+                "挂载路径必须以 `{MOUNT_PATH_PREFIX}` 起头（当前是 `{path}`）"
+            )));
+        };
+        let mut segments = rest.split('/');
+        let name = segments.next().unwrap_or_default();
+        let Some(entry) = self.roots.get(name) else {
+            return Err(MountError::jail(format!(
+                "挂载点 `{name}` 未在 pack.json 的 mounts 段声明"
+            )));
+        };
+        let rel: Vec<&str> = segments.collect();
+        for segment in &rel {
+            if segment.is_empty() {
+                return Err(MountError::jail(format!(
+                    "路径不得含空段（`//` 或结尾 `/`；当前是 `{path}`）"
+                )));
+            }
+            if *segment == "." || *segment == ".." {
+                return Err(MountError::jail(format!(
+                    "路径段不得是 `.` 或 `..`（当前段 `{segment}`）"
+                )));
+            }
+            if let Some(ch) = segment
+                .chars()
+                .find(|ch| *ch == '\u{0}' || (*ch as u32) < 0x20 || *ch == '\u{7f}')
+            {
+                return Err(MountError::jail(format!(
+                    "路径段含 NUL 或 ASCII 控制字符（U+{:04X}）",
+                    ch as u32
+                )));
+            }
+        }
+        if rel.len() > MOUNT_PATH_MAX_SEGMENTS {
+            return Err(MountError::jail(format!(
+                "路径段数超过 {MOUNT_PATH_MAX_SEGMENTS}（当前 {} 段）",
+                rel.len()
+            )));
+        }
+        if rel.is_empty() {
+            if need == Need::File {
+                return Err(MountError::jail(format!(
+                    "`{path}` 是挂载根本身（目录），不能当文件路径用"
+                )));
+            }
+            return Ok(Located {
+                mount: name.to_owned(),
+                target: entry.root.clone(),
+            });
+        }
+
+        // 父目录：canonicalize 一次（同时杀掉 `..` 与中间段软链的两条歧义），
+        // 再按路径分量确认它仍在冻结根内。
+        let (last, parents) = rel.split_last().expect("rel 非空");
+        let mut parent = entry.root.clone();
+        for segment in parents {
+            parent.push(segment);
+        }
+        let canonical_parent = parent.canonicalize().map_err(|err| {
+            MountError::jail(format!("父目录 {} 不存在或不可达（{err}）", parent.display()))
+        })?;
+        let meta = fs::metadata(&canonical_parent).map_err(|err| {
+            MountError::jail(format!(
+                "父路径 {} 不可读（{err}）",
+                canonical_parent.display()
+            ))
+        })?;
+        if !meta.is_dir() {
+            return Err(MountError::jail(format!(
+                "父路径 {} 不是目录",
+                canonical_parent.display()
+            )));
+        }
+        if !canonical_parent.starts_with(&entry.root) {
+            return Err(MountError::jail(format!(
+                "路径越界：`{}` 不在挂载根 `{}` 内",
+                canonical_parent.display(),
+                entry.root.display()
+            )));
+        }
+        let target = canonical_parent.join(last);
+        // 末段永不跟随：已存在的软链一律拒（读穿与写穿两条逃逸同时关闭）。
+        if let Ok(existing) = fs::symlink_metadata(&target) {
+            if existing.file_type().is_symlink() {
+                return Err(MountError::jail(format!(
+                    "路径末段不得是符号链接（`{}`）",
+                    target.display()
+                )));
+            }
+        }
+        Ok(Located {
+            mount: name.to_owned(),
+            target,
+        })
+    }
+}
+
+/// 建「目录挂载」的符号链接（bind 语义；不拷贝内容）。
+#[cfg(unix)]
+fn link_dir(dir: &Path, slot: &Path) -> Result<(), MountError> {
+    std::os::unix::fs::symlink(dir, slot).map_err(|err| {
+        MountError::mount(format!(
+            "建挂载软链 {} -> {} 失败（{err}）",
+            slot.display(),
+            dir.display()
+        ))
+    })
+}
+
+/// 本平台没有符号链接 ⇒ 目录挂载不可用（诚实地拒，而不是默默拷贝一份内容）。
+#[cfg(not(unix))]
+fn link_dir(dir: &Path, slot: &Path) -> Result<(), MountError> {
+    let _ = (dir, slot);
+    Err(MountError::mount(
+        "本平台不支持符号链接，目录挂载（{name, dir}）不可用；请改用私有挂载",
+    ))
+}
+
 /// JSON 值的类型名（错误文案用；`serde_json` 的类型名对作者不够直白）。
 fn type_name(value: &Json) -> &'static str {
     match value {
@@ -538,6 +867,62 @@ mod tests {
         .expect("未知键忽略");
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].dir, None, "无 dir = 私有挂载");
+    }
+
+    /// attach 的两个入参：一个空 run 目录 + 一个空 mod 目录。
+    fn attach_env(tag: &str) -> (PathBuf, PathBuf) {
+        let root = temp_dir(tag);
+        let run = root.join("run");
+        fs::create_dir_all(&run).expect("create run dir");
+        let mod_dir = root.join("mod");
+        fs::create_dir_all(&mod_dir).expect("create mod dir");
+        (run, mod_dir)
+    }
+
+    /// `MountStore::attach` 的测试便捷面（pack 只含 `mounts` 段）。
+    fn attach(run: &Path, mod_dir: &Path, mounts: Json) -> Result<MountStore, MountError> {
+        MountStore::attach(run, &pack(mounts), mod_dir)
+    }
+
+    #[test]
+    fn jail_rejects_everything_outside_the_two_roots() {
+        let (run, mod_dir) = attach_env("jail-basic");
+        let store = attach(&run, &mod_dir, json!([{ "name": "w" }])).expect("attach");
+        for bad in [
+            "artifacts/x.md",
+            "mounts",
+            "mounts/",
+            "mounts/other/x",
+            "mounts/w/",
+            "mounts/w//x",
+            "mounts/w/./x",
+            "mounts/w/../x",
+            "mounts/w/a\u{0}b",
+            "/mounts/w/x",
+        ] {
+            match store.locate(bad, Need::File) {
+                Ok(_) => panic!("`{bad}` 必须拒"),
+                Err(err) => assert_eq!(err.code(), codes::JAIL, "`{bad}` → {err}"),
+            }
+        }
+        // File 面拒挂载根本身；Dir 面接受它。
+        assert!(store.locate("mounts/w", Need::File).is_err());
+        let root = store.locate("mounts/w", Need::Dir).expect("挂载根是目录");
+        assert_eq!(root.mount, "w");
+        assert_eq!(
+            root.target,
+            run.join(MOUNTS_DIR)
+                .join("w")
+                .canonicalize()
+                .expect("canonical")
+        );
+        // 父目录不存在 → 拒（r1 不做挂载点内的 mkdir）。
+        assert!(store.locate("mounts/w/nope/x.txt", Need::File).is_err());
+        // 超出段数 / 字节上限 → 拒。
+        let deep = format!("mounts/w/{}", vec!["d"; MOUNT_PATH_MAX_SEGMENTS + 1].join("/"));
+        assert!(store.locate(&deep, Need::File).is_err());
+        let long = format!("mounts/w/{}", "x".repeat(MOUNT_PATH_MAX_BYTES));
+        assert!(store.locate(&long, Need::File).is_err());
     }
 
     #[test]

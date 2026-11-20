@@ -76,7 +76,7 @@ pub mod observe;
 pub mod sqlite;
 
 pub use json::{JsonFileStore, AUTOSAVE_FILE, EVENTS_FILE, INBOX_CURSOR_FILE, INBOX_FILE};
-pub use mounts::{MountError, MountMode, MountSpec};
+pub use mounts::{MountError, MountMode, MountSpec, MountStore};
 #[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteStore, SQLITE_FILE};
 
