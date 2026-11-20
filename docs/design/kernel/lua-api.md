@@ -39,7 +39,7 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 #### 3.1.2 mounts 挂载面（宿主注入的盘上文件桥）
 
-`ygg.fs.*` 是一个面、两个根，**按首段分派**：`artifacts/` 走上一节的既有内存 VFS（逐字节不变），`mounts/` 走本节。首段既不是 `artifacts/` 也不是 `mounts` 的路径一律 `YGG-FS-JAIL`。
+`ygg.fs.*` 是一个面、两个根，**按首段分派**：`artifacts/` 走上一节的既有内存 VFS（逐字节不变），`mounts` / `mounts/` 走本节（本节的所有拒绍一律 `YGG-FS-JAIL`）。**其余首段仍归既有 VFS 门**（`artifacts/` 前缀门的文案与行为一字不改）——旧面的逐字节兼容优先于错误码统一，`YGG-FS-JAIL` 只覆盖挂载面内部的路径。
 
 **路径文法**：沙箱可见的挂载路径只有两种形状——`mounts/<name>`（挂载根本身）与 `mounts/<name>/<rel>`（`<rel>` = 1..=24 个 `/` 分隔段）。`<name>` 取自 `pack.json` 的 `mounts[].name`（声明面见 [mod-package.md §3.2.2](../mod/mod-package.md)），不在声明集内即拒。段**不**套用制品面的 `[A-Za-z0-9._/-]`：狱是**包含性**属性而不是字符集属性，过度收紧会让中文名 / 空格名的业务目录不可用，且不增加安全性。
 
