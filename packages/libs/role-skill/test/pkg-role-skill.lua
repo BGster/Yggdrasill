@@ -636,9 +636,10 @@ run("pkg.role-skill.perf-o1-structural", function()
 
   local ratio = time_tenk / time_one
   print(string.format("perf.role-skill.time_ratio_10k_over_1=%.3f", ratio))
-  -- 1.5 而不是 1.2：1.2 会被 GC 脉冲打成假红（r1 在 quest 的同类指标上实证过，
-  -- 见 `docs/design/packages/quest.md` §5）。判据要能复算，不能靠运气。
-  is_true(ratio <= 1.5, "墙钟比 ≤ 1.5×，实得 " .. string.format("%.3f", ratio))
+  -- 1.55 而不是 1.5：P-K r1 D-8 在同一台机器上两连同命令实测 1.46 / 1.50，判据压着
+  -- 观测红值（S13）；余量按红值 +3.3% 取 1.55。O(N) 回归在本仪器上是 ~10×，判据仍挡得住。
+  -- 1.2 更不行：GC 脉冲会被打成假红（r1 在 quest 的同类指标上实证，见 quest.md §5）。
+  is_true(ratio <= 1.55, "墙钟比 ≤ 1.55×，实得 " .. string.format("%.3f", ratio))
 end)
 
 -- ── 用例 17：包加载（清缓存 = 定义表与订阅面一起归零）────────────────────────
