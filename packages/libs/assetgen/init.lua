@@ -17,6 +17,7 @@ local spec = require("pkg.assetgen.spec")
 local encode = require("pkg.assetgen.encode")
 local texture_algos = require("pkg.assetgen.texture")
 local mesh_algos = require("pkg.assetgen.mesh")
+local raster = require("pkg.assetgen.raster")
 
 local M = { VERSION = "0.1.0" }
 
@@ -171,6 +172,15 @@ end
 --- `assetgen.sound(spec, seed, stream?)` → 音频产物（纯）。
 function M.sound(spec_input, seed, stream)
   return generate("sound", spec_input, seed, stream)
+end
+
+--- `assetgen.raster(mesh, opts)` → 纹理产物（`ch = 4`，画面外 alpha = 0）。
+---
+--- 不消耗随机数：它是网格的一种**投影**，同一份顶点必须逐字节复现同一张图。
+--- 流的名字继承网格的那条（`<mesh.stream>/raster`），让 canon 能区分来源。
+function M.raster(mesh, opts)
+  local product = raster.raster(mesh, opts)
+  return finish("texture", "texture.raster", product, mesh.seed, tostring(mesh.stream) .. "/raster")
 end
 
 --- `assetgen.encode(product, container?)` → 字节串（纯；容器表见契约 §4）。

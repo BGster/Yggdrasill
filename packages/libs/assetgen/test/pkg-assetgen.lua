@@ -540,3 +540,56 @@ run("pkg.assetgen.mesh-caps", function()
     assetgen.mesh({ algo = "mesh.compose", params = { parts = {} } }, "caps")
   end, "空 parts")
 end)
+
+-- ── 用例：栅格化（正交投影 + 三角形填充）────────────────────────────────────
+
+--- 不透明像素计数（`ch = 4`，alpha 在第 4 个通道）。
+local function opaque_count(product)
+  local count = 0
+  for i = 4, #product.bytes, 4 do
+    if product.bytes:byte(i) ~= 0 then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+run("pkg.assetgen.raster-fill", function()
+  local assetgen = fresh()
+  local plate = assetgen.mesh({ algo = "mesh.plane", params = { size = 1000, n = 1 } }, "raster")
+  local image = assetgen.raster(plate, { w = 64, h = 64, scale = 60, fill = 0x40C0FF })
+  eq(image.ch, 4, "raster 产物必须是 RGBA")
+  eq(#image.bytes, 64 * 64 * 4, "#bytes = w*h*ch")
+
+  -- 人算面积：1000mm × 60‰（px/mm）= 60px 见方 → A = 3600。
+  local area = 60 * 60
+  local filled = opaque_count(image)
+  is_true(filled >= (area * 85) // 100, "填充像素数必须 ≥ 0.85·A（实得 " .. filled .. "）")
+  is_true(filled <= area, "填充像素数必须 ≤ A（实得 " .. filled .. "）")
+
+  -- 四角必须透明（板子占了中间 60×60，四角在板外）。
+  for _, corner in ipairs({ { 0, 0 }, { 63, 0 }, { 0, 63 }, { 63, 63 } }) do
+    local at = (corner[2] * 64 + corner[1]) * 4 + 4
+    eq(image.bytes:byte(at), 0, "角 (" .. corner[1] .. "," .. corner[2] .. ") 必须透明")
+  end
+end)
+
+run("pkg.assetgen.raster-input", function()
+  local assetgen = fresh()
+  local plate = assetgen.mesh({ algo = "mesh.plane", params = { size = 1000, n = 1 } }, "raster")
+  expect_error("YGG-PKG-ASSETGEN-PARAM", function()
+    assetgen.raster({ verts = { 0, 0, 0 }, size = { 0, 0, 0 } }, { w = 8, h = 8 })
+  end, "缺 faces")
+  expect_error("YGG-PKG-ASSETGEN-PARAM", function()
+    assetgen.raster(plate, { w = 8, h = 8, scale = 0 })
+  end, "scale=0")
+  expect_error("YGG-PKG-ASSETGEN-PARAM", function()
+    assetgen.raster(plate, { w = 8, h = 8, scale = 10, angle = 256 })
+  end, "angle 越界")
+  -- 旋转与填充色参与产物：同输入两次逐字节相等，改角度就不同。
+  local a = assetgen.raster(plate, { w = 32, h = 32, scale = 30, angle = 0 })
+  local b = assetgen.raster(plate, { w = 32, h = 32, scale = 30, angle = 0 })
+  local c = assetgen.raster(plate, { w = 32, h = 32, scale = 30, angle = 32 })
+  is_true(a.bytes == b.bytes, "同输入两次栅格化必须逐字节相等")
+  is_true(a.bytes ~= c.bytes, "旋转 45° 后的字节必须不同（正方形转 90° 是恒等，不能当锚点）")
+end)

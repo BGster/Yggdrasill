@@ -32,7 +32,7 @@ local MAX_PIXEL_BYTES = 4194304
 local function common(params)
   local w = spec.int(params, "w", 32, 1, 4096)
   local h = spec.int(params, "h", 32, 1, 4096)
-  local ch = spec.int(params, "ch", 3, 1, 4)
+  local ch = spec.range(params, "ch", 3, 1, 4)
   if ch == 2 then
     fail(E.PARAM, "params.ch 必须是 1 / 3 / 4，得到 2")
   end
@@ -40,7 +40,7 @@ local function common(params)
     fail(E.CAP, "w*h*ch 超过单件帽 " .. MAX_PIXEL_BYTES .. " 字节（" .. w .. "×" .. h .. "×" .. ch .. "）")
   end
   return w, h, ch, spec.rgb(params, "color", 0x000000), spec.rgb(params, "color2", 0xFFFFFF),
-    spec.int(params, "alpha", 255, 0, 255)
+    spec.range(params, "alpha", 255, 0, 255)
 end
 
 --- 场值 → 一行字节。
@@ -86,8 +86,8 @@ end
 function M.fbm(params, rng)
   local w, h, ch, base, accent, alpha = common(params)
   local cell = spec.int(params, "cell", 8, 1, 4096)
-  local octaves = spec.int(params, "octaves", 3, 1, 8)
-  local persist = spec.int(params, "persist", 500, 0, 1000)
+  local octaves = spec.range(params, "octaves", 3, 1, 8)
+  local persist = spec.range(params, "persist", 500, 0, 1000)
 
   local grids, spans, weights = {}, {}, {}
   local amp = 32768
@@ -156,8 +156,8 @@ end
 function M.stripes(params, _)
   local w, h, ch, base, accent, alpha = common(params)
   local period = spec.int(params, "period", 8, 1, 4096)
-  local duty = spec.int(params, "duty", 500, 0, 1000)
-  local axis = spec.int(params, "axis", 0, 0, 1)
+  local duty = spec.range(params, "duty", 500, 0, 1000)
+  local axis = spec.range(params, "axis", 0, 0, 1)
   return pack(w, h, ch, base, accent, alpha, function(x, y)
     local at = x
     if axis == 1 then
@@ -174,7 +174,7 @@ end
 function M.gradient(params, _)
   local w, h, ch, base, accent, alpha = common(params)
   local shape = spec.one_of(params, "shape", "linear", { linear = true, radial = true })
-  local axis = spec.int(params, "axis", 0, 0, 2)
+  local axis = spec.range(params, "axis", 0, 0, 2)
   if shape == "radial" then
     local span = mathx.isqrt((w - 1) * (w - 1) + (h - 1) * (h - 1))
     return pack(w, h, ch, base, accent, alpha, function(x, y)
@@ -232,7 +232,7 @@ function M.bricks(params, _)
   local w, h, ch, base, accent, alpha = common(params)
   local bw = spec.int(params, "bw", 16, 2, 4096)
   local bh = spec.int(params, "bh", 8, 2, 4096)
-  local mortar = spec.int(params, "mortar", 1, 0, 64)
+  local mortar = spec.range(params, "mortar", 1, 0, 64)
   local half = bw // 2
   return pack(w, h, ch, base, accent, alpha, function(x, y)
     local row = y // bh
@@ -250,7 +250,7 @@ end
 function M.voronoi(params, rng)
   local w, h, ch, base, accent, alpha = common(params)
   local given = spec.array(params, "sites", nil)
-  local count = spec.int(params, "cells", 8, 1, 64)
+  local count = spec.range(params, "cells", 8, 1, 64)
   local sites = {}
   if given ~= nil then
     count = #given

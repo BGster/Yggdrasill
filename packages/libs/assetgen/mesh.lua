@@ -160,7 +160,7 @@ end
 function M.plane(params, _)
   local size = spec.int(params, "size", 1000, 1, MAX_COORD)
   local n = spec.int(params, "n", 1, 1, 256)
-  local axis = spec.int(params, "axis", 0, 0, 2)
+  local axis = spec.range(params, "axis", 0, 0, 2)
   local count = (n + 1) * (n + 1)
   if count > MAX_VERTS then
     fail(E.CAP, "平面 " .. (n + 1) .. "×" .. (n + 1) .. " 的顶点数超过 " .. MAX_VERTS)
@@ -243,7 +243,7 @@ function M.blob(params, rng)
   local radius = spec.int(params, "radius", 1000, 1, MAX_COORD)
   local segs = spec.int(params, "segs", 12, 3, 64)
   local rings = spec.int(params, "rings", 8, 3, 64)
-  local amp = spec.int(params, "amp", 200, 0, 1000)
+  local amp = spec.range(params, "amp", 200, 0, 1000)
   local count = segs * rings
   if count > MAX_VERTS then
     fail(E.CAP, "位移球 " .. segs .. "×" .. rings .. " 的顶点数超过 " .. MAX_VERTS)
@@ -294,8 +294,8 @@ function M.compose(params, _)
     if type(source) ~= "table" or type(source.verts) ~= "table" or type(source.faces) ~= "table" then
       fail(E.PARAM, "params.parts[" .. index .. "].product 必须是 mesh 产物")
     end
-    local scale = spec.int(part, "scale", 1000, 1, 100000)
-    local turn = spec.int(part, "turn", 0, 0, 255)
+    local scale = spec.range(part, "scale", 1000, 1, 100000)
+    local turn = spec.range(part, "turn", 0, 0, 255)
     local at = spec.array(part, "at", { 0, 0, 0 })
     local phase = (turn * FULL_TURN) // 256
     local ct = mathx.cos_q15(phase)

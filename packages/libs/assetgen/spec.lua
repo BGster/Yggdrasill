@@ -60,6 +60,25 @@ function M.int(params, key, default, low, high)
   return value | 0
 end
 
+--- **参数值**参数：两侧越界都是 `-PARAM`。
+---
+--- 与 `M.int` 的区别是「这是不是资源维度」：像素数 / 顶点数 / 帧数 / 细分数超上界
+--- 要报 `-CAP`（调用方要减尺寸），而角度、占空比、千分比这类**语义值**超上界只是
+--- 写错了参数（改一下数字即可）——两者对调用方的指令不同，码必须分开（契约 §3 I8）。
+function M.range(params, key, default, low, high)
+  local value = params[key]
+  if value == nil then
+    value = default
+  end
+  if not M.is_int(value) then
+    M.fail(M.E.PARAM, "params." .. key .. " 必须是整数，得到 " .. type(value))
+  end
+  if value < low or value > high then
+    M.fail(M.E.PARAM, "params." .. key .. " 必须落在 [" .. low .. ", " .. high .. "]，得到 " .. value)
+  end
+  return value | 0
+end
+
 --- 枚举参数：值不在 `allowed` 里 = `-PARAM`（未知**参数值**不是未知算法）。
 function M.one_of(params, key, default, allowed)
   local value = params[key]
