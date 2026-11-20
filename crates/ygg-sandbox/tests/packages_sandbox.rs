@@ -496,3 +496,69 @@ fn package_sources_use_no_global_outside_the_base_whitelist() {
         );
     }
 }
+
+// ── 用例 ④：`pkg.entity` 导出面键集恰等（I6 的宿主面硬钉）─────────────────
+//
+// 为什么放在真沙箱而不是只在包自测里：`pkg.entity` 的导出面在沙箱里可能少键——
+// 少了就是七包消费方拿到 nil，而这在普通 Lua 的 selftest 里看不出来（那里 `string`
+// 表还在、模块装载路径也不同）。这条与包侧的 `pkg.entity.exports` 是**两道钉子**，
+// 不是一份断言抄两遍：一个钉「实现者改了表」，一个钉「沙箱里可见性与源码一致」。
+//
+// 键集**恰等**：多一个键 = 未申报的能力面（下沉后最容易发生的漂移），少一个键 = 契约
+// §4 的 API 面断裂。
+#[test]
+fn entity_exports_are_exactly_the_seventeen_documented_keys() {
+    let tree = Tree::new("entity-exports");
+    let bundle = tree.load();
+    let sandbox = Sandbox::new().expect("裸沙箱构造");
+    sandbox.modules().set_modules(bundle.modules.clone());
+    sandbox
+        .modules()
+        .set_chunk_paths(bundle.chunk_paths.clone());
+
+    // `pairs` 在 base 白名单里；`table.sort` / `string` 不在了（这正是本用例的前提），
+    // 所以排序交给 Rust 侧做，Lua 只负责把键名拼出来。
+    let chunk = r#"
+        local entity = require("pkg.entity")
+        local out = ""
+        for key in pairs(entity) do
+          out = out .. key .. ","
+        end
+        return out
+    "#;
+    let observed: String = sandbox
+        .lua()
+        .load(chunk)
+        .set_name("@bare/entity-exports")
+        .eval()
+        .unwrap_or_else(|err| panic!("裸沙箱里 require(\"pkg.entity\") 失败：{err}"));
+
+    let mut seen: Vec<&str> = observed.split(',').filter(|s| !s.is_empty()).collect();
+    seen.sort_unstable();
+
+    let mut expected = vec![
+        "VERSION",
+        "attrs",
+        "count",
+        "define",
+        "destroy",
+        "exists",
+        "get",
+        "has",
+        "ids",
+        "install",
+        "schema",
+        "schema_of",
+        "set",
+        "spawn",
+        "tag",
+        "tags",
+        "untag",
+    ];
+    expected.sort_unstable();
+
+    assert_eq!(
+        seen, expected,
+        "pkg.entity 的导出面必须恰为契约 §4 的 17 个键（多/少都红）：{seen:?}"
+    );
+}

@@ -9,7 +9,7 @@
 
 - **不定义属性语义**：生命归零算死、攻击力怎么算、抗性怎么叠加——是 mod 的规则。
 - **不落盘**：持久化格式归 [codec.md](codec.md)；本包只声明 KV 前缀与形状。
-- **不复制内核实体面**：内核实有 **6 面**——`spawn` / `get_attribute` / `set_attribute` / `add_tag` / `remove_tag` / `has_tag`（`crates/ygg-sandbox/src/host_api.rs` 的 `entity_table` 只 `raw_set` 这六次，`crates/ygg-core/src/entity.rs` 的 `EntityStore` 也没有删除面）。P0 版这里写的 `exists` / `destroy` **内核没有**；本包在它之上加 **schema 校验、存活索引、生命周期事件、引用槽**，不实现第二套 id 分配，也不存第二份属性。
+- **不复制内核实体面**：内核实有 **6 面**——`spawn` / `get_attribute` / `set_attribute` / `add_tag` / `remove_tag` / `has_tag`（`crates/ygg-sandbox/src/host_api.rs` 的 `entity_table` 只 `raw_set` 这六次，`crates/ygg-core/src/entity.rs` 的 `EntityStore` **有** `remove` / `remove_attribute` / `iter`，但这些**都不在宿主面上**——Lua 只见这六面，所以「删除」在 Tier 2 无路可走）。P0 版这里写的 `exists` / `destroy` **内核宿主面没有**；本包在它之上加 **schema 校验、存活索引、生命周期事件、引用槽**，不实现第二套 id 分配，也不存第二份属性。
 - **`destroy` 是语义降级，不是内核删除**：宿主没有删除属性/实体的面，所以本包的 `destroy` = 把存活位改写为 `false`（KV 无删除，只能写墓碑）+ 清掉已声明的 tag + 一条事件。**属性留在内核**，靠存活位在每一读口子遮蔽。代价可数：死掉的实体仍占内核内存与本包的两枚墓碑键。补齐这个缺口需要内核新增 `ygg.entity.destroy` / `exists`——已登记在 §8，属 `crates/**` 的改动面，**不在本包**。
 - **不提供查询语言、不建继承树**：没有 `where` 式 DSL，按 tag / schema 的集合查询是唯一查询面；类型 = 已注册的属性 schema，类型差异是数据。
 
@@ -50,7 +50,7 @@ schema 注册表的扁平键（`<n>` = schema 名，`<a>` = 属性名，`<t>` = 
 
 **`seq` 的语义（P0 版写「本包自增」，不准）。** 分配 id 的是内核（`EntityStore::next_id`，只增不减、不复用），本包只记**水位镜像**：`spawn` 后 `seq = max(seq, id)`。它服务两件事：`ids` 的扫描上界，与 codec 的「导入保 id」判定。
 
-**冷启动边界（诚实声明）。** `pkg.entity.seq` 缺失时（包刚接入一个已有存档的局，或 mod 直接调过 `ygg.entity.spawn()`）本包**无法收养**它出生前的实体：内核没有「列 id」面，扫不到就是扫不到。本包只索引自己 spawn 过的实体。
+**冷启动边界（诚实声明）。** `pkg.entity.seq` 缺失时（包刚接入一个已有存档的局，或 mod 直接调过 `ygg.entity.spawn()`）本包**无法收养**它出生前的实体：宿主面没有「列 id」调用（`EntityStore::iter` 在，但没上去），扫不到就是扫不到。本包只索引自己 `spawn` 过的实体。
 
 ### 事件载荷（`ygg.emit` 只收标量，形状必须显式定形）
 
@@ -70,7 +70,7 @@ schema 注册表的扁平键（`<n>` = schema 名，`<a>` = 属性名，`<t>` = 
   - tag 为何也收窄：`destroy` 只能清「已声明的 tag 名单」——内核没有列 tag 面，未声明的 tag 无法枚举也无从摸除，在「同 id 不复用」下会永久占内存。
 - **I4 悬垂引用不是错误**：`destroy(id)` 不遍历、不清理其它实体的引用槽；读悬垂 ref 仍得 id，`exists(ref) == false`。清理归 mod 的语义（「召唤物死亡，主人失去它」是规则）。
 - **I5 存活位是唯一真源**：`pkg.entity.alive.<id>` 是「这个 id 能不能被看到」的唯一判据，**每一读口子都过它**（`get` / `attrs` / `has` / `tags` / `schema_of` / `ids` / `count`），所以死掉的实体在对外面上与不存在**不可区分**。`exists(id)` 只读这一个键（`pkg.entity.alive.<id>`），绝不扫 KV——`ygg.kv` 没有遍历 API，只有 `get` / `set`（[../kernel/state-surface.md](../kernel/state-surface.md) §2.8）。
-  - **墓秃是宿主无删除面的直接代价**：`alive.<id>` 只能 `true` → `false`，`rec.<id>.schema` 只能留在原处（内核也不删属性）。所以一次 `destroy` 恰好留下两枚键，不多少不少——codec 的泄漏用例把这个「恰好」当断言。
+  - **墓秃是宿主无删除面的直接代价**：`alive.<id>` 只能 `true` → `false`，`rec.<id>.schema` 只能留在原处（宿主面没有属性删除调用）。所以一次 `destroy` 恰好留下两枚键，不多少不少——codec 的泄漏用例把这个「恰好」当断言。
 - **I6 生命周期事件恰好一次**：每次 `spawn` 恰好一次 `entity.created`；每次 `destroy` 恰好一次 `entity.destroyed`（二次 `destroy` 返回 `false` 且零事件）；`set` 只在值真的变化时发一次 `entity.attr_changed`（同值写入不发，`math.type` 参与比较）。载荷形状见 §2 的「事件载荷」。
 - **I7 顶层纯度**：包模块顶层只有纯导出，状态改动一律在 `M.install(deps)` 或调用期（对齐 [../mod/mod-package.md](../mod/mod-package.md) 的 `mod.pure-export`）。
 - **I8 无时钟**：实体**不得产生任何时间字段**（沙箱里 `ygg.ticks()` 有 API 无推进者，恒 0；事件 seq 不注入 Lua）。生命周期先后由**宿主派发序**保证，包不做任何时序判断、也不发明时间戳。
@@ -107,6 +107,7 @@ schema 注册表的扁平键（`<n>` = schema 名，`<a>` = 属性名，`<t>` = 
 | 实体按 id 查找 / 更新 | `O(1)` | 实测 **1162.9 ns/op**；N = 1 / 100 / 10000 三档的档间比 **1.07×–1.19×**，断言 **≤ 1.5×**（见下面「阈值为何是 1.5」）。**强约束的落点**：`get` / `set` = 存活位读 + `pkg.entity.rec.<id>.schema` 读 + 内核属性面，无遍历。载体限制：这条跑在 mock 上，能抓到的是**包侧**引入的遍历（例如「按 id 找 schema 时扫一遍 ids」），不是内核面的复杂度。 |
 | 序列化吞吐（实体 / 秒，双向） | 附基准集与耗时 | **不适用**：承包给 [codec.md](codec.md) §5，基准集与口径只在那里定义一次。 |
 | 10k 实体常驻内存 | 给出数字 | 实测 **6637.1 KiB**（包侧 Lua 堆上界）+ **1155576 B**（同量实体的键名 + 值字节和，载体无关）。口径：10k × 8 属性 + 3 tag，`collectgarbage("count")` 前后差 ÷ 1024。P0 写的 `≤ 2 MiB` 是按沙箱内 Rust 侧口径定的阈值，与这个上界口径**不可比**（6.6 MiB 里 mock 的 Lua 表开销占大头）；沙箱硬帽是 `64 MiB`（`sandbox.rs` 的 `SANDBOX_MEMORY_LIMIT`——P0 此处写的 16 MiB 已被 P1 调整，本行对齐）。 |
+| 路径基线（B-2，10⁴ 实体集） | 逐路径给数字、**不设阈值**（机差会把门禁打红） | `PERF entity.paths_*` 七行（spawn / destroy / get / set / get_set_pair / attrs8 / tags3 / ids_10k）；复算命令同上方；说明见 §9 |
 | 泄漏检测 | 导入导出 100 轮内存不增长 | 实测 `spawn` + `destroy` × 100 后：`count` / `#ids` 回起点、`seq` **恰好** +100（id 不复用）、KV 键数 **恰好** +200（每轮两枚墓秃键）、内存 △**0.668%**（断言 ≤ 1%）。口径（比 P0 更强）：P0 写「`entity.index` 条目数回到起点」——在无删除面的 KV 上「键数不变」**不可达**（每次 destroy 必留两枚墓秃键），所以断言改成「**恰好等于** destroy 次数」，同时排掉「每轮多写一个计数键」这类慢性漏。 |
 
 **阈值为何是 1.5（R4 的落地，与契约原文的 1.2 不同，此处明写理由）。** 契约原写「单次调用耗时不随 N 增长（≤ 1.2×）」，但 1.2 是按「无噪声」估的：实测 3 次全量跑的档间比是 1.07 / 1.09 / 1.18，另有一次 1.4× **假红**（1000 次/档时）。噪声源是两个：`os.clock` 的粒度与「全量跑前面已经堆到 12 MB 量级」带来的 GC 脉冲。处置是两步：① 内层轮次提到 5000 × 3 批取中位（把 GC 噪声平均掉）；② 阈值提到 **1.5×**。为何 1.5 仍然有效：真的出现遍历是 **O(N)** 量级（10³–10⁴×），与噪声不在一个数量级；而 1.07–1.19 这个区间里没有任何一档表现出「随 N 单调增长」的形状。
@@ -142,3 +143,89 @@ P0 期这一列是**目标值**；P2 首实现填实测值，偏差回写本表�
 **登记：内核需要 `ygg.entity.destroy` / `ygg.entity.exists`（本需求不实现）。** 本包的 `destroy` 是语义降级（墓秃 + 存活位），代价可数且会随复现项目放大：死掉的实体仍占内核内存与本包两枚 KV 键，且无法真的回收 id。补齐需要改 `crates/**`（内核能力面），属另一条需求的改动面；本需求的红线明确不改 `crates/**`，所以只登记、不实现。同理，内核补面后本包才能**收养**出生前的存量实体（现在只能索引自己 spawn 过的）。
 
 **判据（①②③）。** ① 阻断——在 mod 里自己实现 id 分配或属性存储；在包里写属性语义（「生命归零算死」）；把表的形状偷偷塞进 `attrs`。② 症状——两个游戏各有一份 `next_id`；同一属性在两个游戏里类型不同导致导入失败；`destroy` 之后引用槽被包悄悄改写。③ 确认——本文件存在且被 [../README.md](../README.md) 索引；`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-entity` 的 `cases passed=` 含 18 条 `pkg.entity.*`；§5 五个指标有数字，异常则 file 级断言先红。
+
+## 9. 下沉边界（P-K A1；逐函数去向与硬判据）
+
+**为何有这一节。** 热路径下沉改变了「哪个函数跑在哪层」，而 API 面、事件与墓碑语义必须**一字不变**（I6）。这张表是二者的接缝：每个导出函数的去向都有理由与数字，改包前先看它，而不是「顺手也把它下沉了」。
+
+### 9.1 逐函数去向
+
+判定口径：**只下沉批量形态**（单条按 id 访问仍留 Lua——它仍可内部复用批式面实现 n=1，但 API 形状不变）。「现状」= 包侧 Lua + mock 宿主实测 ns/op（10⁴ 迭代 × 三批中位），数据源 `PERF entity.paths_*`（§5）。
+
+| 导出（签名零变化） | 去向 | 理由 |
+| --- | --- | --- |
+| `install` / `VERSION` / `define` / `schema` | 留 Lua | 装配与 schema 层（Tier 2）；`define` 的「同 spec 幂等且零写」靠 KV 精确写点数断言 |
+| `spawn` | **留 Lua**（批式面 `spawn_batch` 已交付，包内未采用——见 9.6） | 实测：n=1 的帧构造成本 > 省下的 18 次跨边界 |
+| `get` / `set` / `has` / `exists` / `schema_of` / `count` | 留 Lua（n=1 可内部复用批式面） | 单值；语义大头是存活门 + 同值判定 + 事件 |
+| `attrs` / `tags` | **留 Lua**（`attr_fetch` 已交付，包内未采用——见 9.6） | 实测：同上（n=1 不划算） |
+| `ids` | **留 Lua**（`scan` 已交付；包内未采用——见 9.6） | 存活门每 id 一枚 KV 读，扫描省下的只是 `has_tag` 那一次 |
+| `tag` / `untag` | 留 Lua（n=1；批式面 `tag_batch` 供将来批量调用方） | 单条仍是 1 次跨边界 + 1 条事件 |
+| `destroy` | 部分：**索引侧**下沉，墓碑写点不动 | 见 9.3 |
+
+### 9.2 值域不下沉（硬结论）
+
+`number` 是**任意有限 double**，且 `2` 与 `2.0` 是**两个值**（`is_integer` 参与同值判定与事件判定，`tests/packages_sandbox.rs` 用例②钉住）。所以属性值**不得**落到 Q32.32 定点列：`0.1 × 2³² = 429496729.6` 不可整表示（往返即变值），`2`/`2.0` 会塌成一个 i64。属性值只能落在 `Value::Int|Float|Bool|Str` 这条承载上；批式面只负责「把 n 次写合一次」，**不改值的表示**。
+
+### 9.3 墓碑与存活位（写点一字不动）
+
+`destroy` 的可见行为仍是：`alive.<id>` 由 `true` → `false`、`rec.<id>.schema` 留着、已声明 tag 被清、一条 `entity.destroyed`，**恰好两枚 KV 键**（`codec` 的泄漏用例把它当断言）。原生面**不得**改这四个写点，也**不得**用真删（`EntityStore::remove`）代替墓碑——否则 I5「死掉的实体在每一读口子上不可见」会裂成两类可见性。
+
+### 9.4 宿主面新增的批式键（`ygg.entity.*`，键集闭集）
+
+五个：`spawn_batch` / `attr_apply` / `attr_fetch` / `tag_batch` / `scan`（形状见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1）。`despawn_batch` **不交付**——墓碑语义禁止真删（9.3），没有消费者就不该有面。三条纪律：① **一个逐实体 getter 都不新增**（键集闭集断言在 `crates/ygg-sandbox/tests/host_contract.rs`，多一个即红）；② 入参是 **Lua 数组**（铁律② 原文允许「bytes/数组进出」），这样 n=1 热路径不必付 pack 成本，测试夹具也不必写第二份编解码器；③ 新面一律**先校验后改**（整批要么全成、要么零改）。
+
+### 9.5 判据（①②③）
+
+① 阻断——想给本包加一条「更快的按 id 读」而绕开批式面，或把属性值搬进定点列；② 症状——`2` / `2.0` 在沙箱用例②里变成同值，或 `codec` 泄漏用例的「恰好 +200 键」变红；③ 确认——`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-entity` 的 `PERF entity.paths_*` 七行 + `cases passed=` 不回退。
+
+### 9.6 实测裁决：批式面**已交付**，但包内委托**未采纳**（2026-11-21）
+
+**结论先行**：五个批式键在 `ygg.entity` 上落地并有契约用例（11 键闭集 + 五面往返 + 三族错误码），
+但 `pkg.entity` 内部**没有**改用它。理由是实测，不是口味。
+
+**为什么**（同机同 10⁴ 实体集，`PERF entity.paths_*` 三跑中位）：
+
+| 路径 | 委托前 | 委托后（走批式面） | 差 |
+| --- | --- | --- | --- |
+| `get`（n=1 `attr_fetch`） | 748 ns | 3 147 ns | **4.2× 更慢** |
+| `set`（n=1 `attr_apply`） | 2 967 ns | 3 540 ns | 更慢 |
+| `attrs`（8 键 `attr_fetch`） | 2 444 ns | 4 512 ns | 更慢 |
+| `tags`（n=1 `attr_fetch`） | 1 596 ns | 3 289 ns | 更慢 |
+| `ids`（`scan`） | 503 ns/实体 | 602 ns/实体 | 更慢 |
+| `spawn`（`spawn_batch` n=1） | 12 656 ns | 15 310 ns | 更慢 |
+
+**机理（可复算）**：Tier 2 侧构造一次批式帧（外层数组 + 行表 + key 数组，n=1 时 2–3 张表）
+≈ 200–600 ns，而它换掉的跨边界只有 **44–57 ns/次**（`path_costs` 的 `probe.crossing.*`）。
+n=1 时这笔账**必然亏**；n 大时（`ids` 的 10⁴ 个 id）本该赢，但 `ids` 的成本大头是**存活门**
+——每个 id 一枚 `pkg.entity.alive.<id>` 的 KV 读，而墓碑位按 9.3 不能下沉。于是扫描省下的
+只有 `has_tag` 那一次跨边界，构造成本反超。
+
+**两个能翻盘的方向（都不在本需求边界内，需裁决）**：
+
+1. **逐项原生面**（`get_attribute` 级批量 1 次穿越、按位参数，不构造帧）：可省 200–600 ns 的
+   构造费，n=1 才有得赚。代价是它与「禁逐实体 getter」的批式铁律直接冲突（`sim-kernel` §0②），
+   且要再开 4–6 个键。
+2. **存活位搬进原生面**（`EntityStore` 上加 alive 位或原生 alive 位图），让 `ids` 的 10⁴ 次
+   KV 读消失（这是唯一有数量级收益的一条）。代价：墓碑位从「KV 唯一真源」变成双写，
+   直接动 I5 与 `codec` 的「恰好 +200 键」断言——必须由契约层面拍板。
+
+**判据（①②③）**：① 阻断——想靠「把 n=1 的调用包成批式帧」来提速；② 症状——`PERF entity.paths_get`
+从 748 涨到 3 147 ns；③ 确认——上面六行数字 + `cargo test -p ygg-sandbox --test path_costs`
+的穿越系数。
+
+### 9.7 A 路实测（多键/多位姿数组面）：前提被否证（2026-11-21 第二轮）
+
+裁决授权了「多键数组面不算逐实体 getter」并把它作为翻盘路 A。**先量成本，再决定要不要造键**——结论是这条路的收益前提不成立：
+
+| 形状（同一裸 mlua、release、三轮中位） | 每 call 成本 | 与「逐项穿越」对比 |
+| --- | --- | --- |
+| 带 3 参标量调用（`(id, key, value)` 型） | **56.6 ns** | 逐项基线 |
+| 返回两字段表（`{value=…}` 型） | **180.6 ns** | 已贵过 3 次标量调用 |
+| **8 值进 + 8 值出（表形多键面）** | **485.3 ns** | 8 次标量穿越 ≈ 8×40 = **320 ns** ⇒ 表形**更贵** |
+| **8 个标量多返回值** | **19.7 ns** | 唯一真正便宜的批形状 |
+
+**为什么**：表形的成本不在「一次调用」，而在**每值 marshal 两次**（Lua 表 → Rust `Value`、Rust → Lua 表，各一次分配 + 一次类型转换，~60 ns/值）。逐项调用虽然穿 8 次边界，但每次只搬一个标量（~40 ns/值）。**n=1 时表形必亏，n=8 时也亏** —— 与「批式摊薄」的直觉相反，因为表不是零成本容器。
+
+**所以 A 路的预期（`get` 750→150、`attrs` 2444→300）不可达**：`get` 的成本大头是**存活门**（`pkg.entity.alive.<id>` 的 KV 读 + `tostring`/拼接），不批式化就搬不走，而批式化它属于 B 路（存活位下沉，已转 S21）；`attrs` 唯一可行的便宜形状是**标量多返回值 + 注册行序**（19.7 ns 出 + 129 ns 原生读），但那需要「define 时把属性行序注册进原生面」的新面（本需求未授权，且它把 schema 顺序变成原生状态）。
+
+**结论**：A 路在本需求内**不实现**（造了也是负收益的面）。真正可行的两条仍是：① 注册行序 + 多返回值（`attrs` 有 7–10× 空间）；② 存活位下沉（`ids`/`get` 有数量级空间，S21）。两条都要新契约。数字与命令：`cargo test --release -p ygg-sandbox --test path_costs -- --nocapture`。

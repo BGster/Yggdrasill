@@ -15,7 +15,7 @@
 
 **判定三问**（逐能力裁决归属）：逐实体逐帧的热逻辑 → Tier 1；事件驱动的规则与组合 → Tier 2；不变的内容 → Tier 3。
 
-**下沉铁律**（每个 Tier 2→Tier 1 下沉面必须全过）：① 契约先行（本文件或包契约先行改定再实现）；② **批式 API**——bytes/数组进出、单帧单调用，**禁止细粒度逐项 getter**（mlua 边界穿越 ~µs，细粒度调用是负收益）；③ before/after 表（同数据集/同机/三次取中位，原则二）；④ 七包 API 兼容——`pkg-selftest` 全量不回退。
+**下沉铁律**（每个 Tier 2→Tier 1 下沉面必须全过）：① 契约先行（本文件或包契约先行改定再实现）；② **批式 API**——bytes/数组进出、单次调用承载整批，**禁止细粒度逐项 getter**（**铁律的本意是「帧编解码与值搬运随 n 线性增长」，不是「穿越本身贵」**：穿越实测 ~45–57 ns/次带参、~19 ns 零参；而**表形**数组面实测 **485 ns/8 值进出**，反而贵于 8 次逐项穿越（≈320 ns）——见 §5.1 的 `probe.crossing.*` 行。因此：**多键 / 多位姿的数组进出面合法且鼓励**（`attr_get_many(id, keys)` 式），它们不是「逐实体 getter」；真正的逐实体 getter 指「一次调用只服务一个实体的一条属性、且无批量入口」，那是把 n 次成本逐次付清。标量**多返回值**是最便宜的一侧（19.7 ns / 8 个），但它要求调用方静态知道元数——数据驱动的 schema 只能配「注册行序」才用得上）；③ before/after 表（同数据集/同机/三次取中位，原则二）；④ 七包 API 兼容——`pkg-selftest` 全量不回退。
 
 **五不变量**：mod 永在笼内；数据契约先行；确定性是结构不是纪律；能力出口走证据触发（AGENTS.md §1.7）；agent 内省面（快照/回放/state hash/查询）是一等公民。
 
@@ -91,7 +91,7 @@
 | tick 10⁴ 活跃实体 | ≤ 16.6ms | 三次取中位，基准集入册 |
 | snapshot/restore 10⁵ 实体 | ≤ 100ms | 同上 |
 | 回放一致 | 逐 tick hash 一致 | replay 用例（字节对比） |
-| Tier 2 兼容 | `pkg-selftest` 153/0 不回退 | 每次下沉后全量 |
+| Tier 2 兼容 | `pkg-selftest` 155/0 不回退（2026-11-21 实测三次同值；复算命令见 `packages/entity.md` §5） | 每次下沉后全量 |
 | 跨平台 | x86_64 ↔ aarch64 digest 一致 | 当前仅单机（macOS/arm64），结构性论证为整数语义；**实测已排期：Goal 排期总表 S2**，落地前所有跨平台声明引用该排期 |
 
 ### 5.1 实测回填表（数字只落本表，不回写上方阈值）
@@ -104,6 +104,7 @@
 | snapshot 10⁵ 实体 | ≤ 100 ms | **8.351 ms**（帧 7 200 130 B） | 同上 | 1 archetype × 8 attrs |
 | restore 10⁵ 实体 | ≤ 100 ms | **16.633 ms** | 同上 | 含尾 digest 校验 |
 | 回放一致 | 逐 tick hash 全等 | **matched=150/150（快照续跑）、200/200（创世重跑）；first_mismatch=None** | `cargo test -p ygg-sim --test replay_tick_hash` | 含 1 条篡改负例（改 dt +1 ulp 必在该 tick 报失配） |
+| 穿越成本（批式铁律②的实测依据） | — | **0 参 19.5 / 带参 44.6–56.7 / 返回两字段表 178.1 ns/次**（三轮中位） | `cargo test --release -p ygg-sandbox --test path_costs -- --nocapture` | 裸 mlua，release；`probe.crossing.*` 行 |
 | 跨进程 digest | parent == child | **parent_digest = child_digest = `0c6199352032440b`（60 行 trace）** | `cargo test -p ygg-sim --test replay_cross_process` | `current_exe` 子进程 + 临时文件 |
 
 口径：macOS / arm64、`--release`（`[profile.release.package.ygg-sim] opt-level = 3` 单点覆盖，根 `opt-level="s"` 是 wasm 体积面）、三轮各新建 Sim、每轮取逐 tick 中位、再取三轮中位。**实测比 §5.3 的预判（1–3 ms）更快**，余量 30×；不因此下调阈值——阈值是契约线，不是目标值。

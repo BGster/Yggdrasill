@@ -652,3 +652,66 @@ run("pkg.entity.no-time-keys", function()
     end
   end
 end)
+
+-- ── 导出面键集恰等（I6 的硬钉：一个不缺、一个不多）─────────────────────────────
+--
+-- 为什么这条要「恰等」而不是「至少含」：`pkg.entity` 的对外面是七包消费方的契约
+-- （`codec` 逐函数调用它），少一个键是断裂、多一个键是**未申报的能力面**。下沉到
+-- 原生面之后最容易发生的漂移就是「顺手加个批量函数上来」，这条断言把那种改动挡在
+-- 门禁里，而不是等 pm 发现「同一个包两种批量风格」。
+--
+-- 键名全部 ASCII，故升序 = 字节序（`sorted_keys` 用 table.sort，本文件跑在普通 Lua）。
+run("pkg.entity.exports", function()
+  local entity = fresh(new_world())
+  local EXPECTED = {
+    "VERSION",
+    "attrs",
+    "count",
+    "define",
+    "destroy",
+    "exists",
+    "get",
+    "has",
+    "ids",
+    "install",
+    "schema",
+    "schema_of",
+    "set",
+    "spawn",
+    "tag",
+    "tags",
+    "untag",
+  }
+  local seen = sorted_keys(entity)
+
+  -- 双向差集分开报：红的时候要一眼看出是「多」还是「缺」，不要再去手数。
+  local extra = {}
+  local want = {}
+  for i = 1, #EXPECTED do
+    want[EXPECTED[i]] = true
+  end
+  for i = 1, #seen do
+    if not want[seen[i]] then
+      extra[#extra + 1] = seen[i]
+    end
+  end
+  local missing = {}
+  for i = 1, #EXPECTED do
+    local found = false
+    for j = 1, #seen do
+      if seen[j] == EXPECTED[i] then
+        found = true
+      end
+    end
+    if not found then
+      missing[#missing + 1] = EXPECTED[i]
+    end
+  end
+
+  eq(#extra, 0, "导出面多出键（未申报的能力面）：" .. table.concat(extra, ", "))
+  eq(#missing, 0, "导出面缺键（契约 §4 的 API 面）：" .. table.concat(missing, ", "))
+  eq(#seen, #EXPECTED, "键数必须恰等")
+  for i = 1, #EXPECTED do
+    eq(seen[i], EXPECTED[i], "第 " .. i .. " 个键")
+  end
+end)
