@@ -1,4 +1,9 @@
--- 夹具冒烟 · dialogue（1 条）：装载面 + 顶层纯度 + 两个派生事件名。
+-- 夹具冒烟 · dialogue（file 级断言，**不计数**）：装载面 + 顶层纯度 + 两个派生事件名。
+--
+-- # 为什么不计数
+--
+-- 与 `pkg-quest-smoke.lua` 同一条理由（那边写了全文）：载体冒烟不计入「40 + 50」的
+-- 包用例口径，但要硬（`error` ⇒ `file FAIL` ⇒ `ok=0`）。
 --
 -- 与 `pkg-entity-smoke.lua` 成对，理由（`--filter` 需要 mod 侧同名文件接住、
 -- 断言面只钉装载契约）写在那里。
@@ -37,13 +42,10 @@ for _, name in ipairs({
 end
 
 if not ok then
-  check("pkg.dialogue.loadable", function()
-    return "require 触发了 ygg 访问：" .. tostring(dialogue)
-  end)
-  return
+  error("[pkg.dialogue.loadable] require 触发了 ygg 访问：" .. tostring(dialogue), 0)
 end
 
-check("pkg.dialogue.loadable", function()
+do
   local problems = {}
   if type(dialogue) ~= "table" then
     problems[#problems + 1] = "模块必须导出表，实得 " .. type(dialogue)
@@ -78,5 +80,7 @@ check("pkg.dialogue.loadable", function()
   if not ok_install then
     problems[#problems + 1] = "install() 无参必须可调用：" .. tostring(err)
   end
-  return table.concat(problems, "; ")
-end)
+  if #problems > 0 then
+    error("[pkg.dialogue.loadable] " .. table.concat(problems, "; "), 0)
+  end
+end

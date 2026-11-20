@@ -1,4 +1,10 @@
--- 夹具冒烟 · quest（1 条）：装载面 + 顶层纯度 + 派生事件面清单。
+-- 夹具冒烟 · quest（file 级断言，**不计数**）：装载面 + 顶层纯度 + 派生事件面清单。
+--
+-- # 为什么不计数
+--
+-- 包用例的计数口径是「r1 的 40 + 本需求新增的 50」（`packages/README.md` §5），
+-- 本文件是**载体的**冒烟，不是包的行为用例；它一旦计入就会把 90 变成 92。
+-- 判定一样硬：`error` ⇒ `file FAIL` ⇒ 命令 exit 1（`ok=0`），与 perf 文件同一口径。
 --
 -- 与 `pkg-entity-smoke.lua` 成对，理由（`--filter` 需要 mod 侧同名文件接住、
 -- 断言面只钉装载契约）写在那里。
@@ -27,13 +33,10 @@ package.loaded["pkg.quest.types"] = nil
 package.loaded["pkg.quest.flow"] = nil
 
 if not ok then
-  check("pkg.quest.loadable", function()
-    return "require 触发了 ygg 访问：" .. tostring(quest)
-  end)
-  return
+  error("[pkg.quest.loadable] require 触发了 ygg 访问：" .. tostring(quest), 0)
 end
 
-check("pkg.quest.loadable", function()
+do
   local problems = {}
   if type(quest) ~= "table" then
     problems[#problems + 1] = "模块必须导出表，实得 " .. type(quest)
@@ -71,5 +74,7 @@ check("pkg.quest.loadable", function()
   if type(quest.TRANSITIONS) ~= "table" or type(quest.TRANSITIONS.open) ~= "table" then
     problems[#problems + 1] = "TRANSITIONS 必须导出 open 行（迁移表是数据）"
   end
-  return table.concat(problems, "; ")
-end)
+  if #problems > 0 then
+    error("[pkg.quest.loadable] " .. table.concat(problems, "; "), 0)
+  end
+end
