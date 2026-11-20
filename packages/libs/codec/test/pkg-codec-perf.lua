@@ -339,3 +339,34 @@ do
   )
   must(drift <= 0.01, ("100 轮后内存增长 %.3f%% > 1%%"):format(drift * 100))
 end
+
+-- ── ⑤ 键序排序的规模行为（归并排序 O(n log n) vs 旧插入排序 O(n²)）──────────
+--
+-- 口径：同一 `codec` 实例、同一台机、逆序插入逼最坏路径。旧插入排序实测
+-- 2 000 键 51.4 ms、4 000 键 174.8 ms（键数 ×2 ⇒ 耗时 ×3.4，二次行为）。
+-- 这里给**绝对**上界而不是比值：比值在 3.4 与 2.2 之间太窄，机器抖动会打架。
+
+do
+  local target = new_world()
+  local _, codec_w = fresh(target)
+  local function measure(width)
+    local value = {}
+    for i = width, 1, -1 do
+      value[("k%05d"):format(i)] = i
+    end
+    local began = os.clock()
+    codec_w.encode(value)
+    return (os.clock() - began) * 1000
+  end
+  local small = measure(2000)
+  local large = measure(4000)
+  print(
+    ("PERF codec.wide_keys_ms=2000:%.2f/4000:%.2f  (ns/key %.0f/%.0f)"):format(
+      small,
+      large,
+      small * 1e6 / 2000,
+      large * 1e6 / 4000
+    )
+  )
+  must(large <= 40, ("4 000 键耗时 %.2f ms > 40：键序排序退回二次行为？"):format(large))
+end
