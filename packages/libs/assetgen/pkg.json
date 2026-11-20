@@ -1,0 +1,7 @@
+{
+    "schemaVersion": 1,
+    "name": "assetgen",
+    "version": "0.1.0",
+    "deps": [{ "id": "procgen", "version": "0.1.0" }],
+    "contract": "docs/design/packages/assetgen.md"
+}
