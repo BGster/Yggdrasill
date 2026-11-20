@@ -188,18 +188,30 @@ pub fn number_text(value: f64) -> Result<String, CodecFaceError> {
 
     let magnitude = value.abs();
     let allow_exponent = !(1e-4..1e15).contains(&magnitude);
-    let mut chosen: Option<String> = None;
-    for precision in 1..=17 {
-        let candidate = format_g(magnitude, precision);
-        if candidate.parse::<f64>().ok() == Some(magnitude) {
-            let uses_exponent = candidate.contains('e') || candidate.contains('E');
-            if allow_exponent || !uses_exponent {
-                chosen = Some(candidate);
-                break;
-            }
-        }
+
+    // 一次定位「第一个能往返的精度」，不做 1..17 的逐个试探。
+    //
+    // 依据：`%.Pg` 能往返 ⇔ P 位有效数字的十进制串解析回来还是原值 ⇔ P ≥ 该值的
+    // **最短往返位数**。而 Rust 的 `{:e}`（无精度）给的就是最短往返数字，所以
+    // 「第一个能往返的 P」= 它的有效位数——一次格式化即可定位，不必 17 次。
+    let scientific = format!("{magnitude:e}");
+    let (mantissa, exponent) = scientific
+        .split_once('e')
+        .expect("Rust 的 LowerExp 一定带 e");
+    let shortest = mantissa
+        .bytes()
+        .filter(|byte| *byte != b'.')
+        .count()
+        .clamp(1, 17);
+    let e10: i32 = exponent.parse().expect("指数是十进制整数");
+
+    // 量级落在 `[1e-4, 1e15)` 时须用定点形（契约 R3 第 2 条）：若最短位数的形态
+    // 是指数形，就提到 `e10 + 1` 位（多出来的位是零，仍是同一个值）。
+    let mut precision = shortest;
+    if !allow_exponent && (e10 >= precision as i32 || e10 < -4) {
+        precision = ((e10 + 1).max(0) as usize).max(shortest).min(17);
     }
-    let mut text = chosen.unwrap_or_else(|| format_g(magnitude, 17));
+    let mut text = format_g(magnitude, precision);
     text = text.replace('E', "e");
     text = text.replace('+', "");
     if !text.contains('.') && !text.contains('e') {
@@ -219,9 +231,9 @@ pub fn number_text(value: f64) -> Result<String, CodecFaceError> {
 /// 非 ASCII **原样直通**（UTF-8 也好、非法字节也好）：多一层 `\uXXXX` 只多一个
 /// 出错面，确定性判据不需要它。控制字符是 ASCII 定义（`< 0x20` 与 `0x7f`，
 /// 实测 `0x80–0x9f` 不在 Lua `%c` 内）⇒ 走 `\u00xx`（小写四位）。
-pub fn string_text(bytes: &[u8]) -> Vec<u8> {
+fn push_json_string(out: &mut Vec<u8>, bytes: &[u8]) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = Vec::with_capacity(bytes.len() + 2);
+    out.reserve(bytes.len() + 2);
     out.push(b'"');
     let mut start = 0;
     for (index, byte) in bytes.iter().copied().enumerate() {
@@ -253,6 +265,12 @@ pub fn string_text(bytes: &[u8]) -> Vec<u8> {
         out.extend_from_slice(&bytes[start..]);
     }
     out.push(b'"');
+}
+
+/// 字节 → JSON 字符串字面量（独立分配版；面向测试与单值使用）。
+pub fn string_text(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len() + 2);
+    push_json_string(&mut out, bytes);
     out
 }
 
@@ -304,14 +322,11 @@ impl Encoder {
             }
             mlua::Value::String(text) => {
                 let bytes = text.as_bytes();
-                self.push(&string_text(&bytes));
+                push_json_string(&mut self.out, &bytes);
                 Ok(())
             }
             mlua::Value::Table(table) => self.table(table, depth),
-            other => Err(unsupported(format!(
-                "类型 {} 不可编码",
-                other.type_name()
-            ))),
+            other => Err(unsupported(format!("类型 {} 不可编码", other.type_name()))),
         }
     }
 
@@ -358,7 +373,9 @@ impl Encoder {
                     }
                 }
                 mlua::Value::Number(_) => {
-                    return Err(unsupported("表的键必须是正整数或字符串（遇到非整数 number 键）"));
+                    return Err(unsupported(
+                        "表的键必须是正整数或字符串（遇到非整数 number 键）",
+                    ));
                 }
                 mlua::Value::String(text) => {
                     object_count += 1;
@@ -405,7 +422,7 @@ impl Encoder {
                 if position > 0 {
                     self.push(b",");
                 }
-                self.push(&string_text(key));
+                push_json_string(&mut self.out, key);
                 self.push(b":");
                 self.value(value, depth + 1)?;
             }
@@ -484,9 +501,7 @@ impl<'a> Parser<'a> {
             None => return Err(self.fail("意外的输入结束")),
         };
         match byte {
-            b'"' => Ok(Parsed::Value(
-                mlua::Value::String(self.string()?),
-            )),
+            b'"' => Ok(Parsed::Value(mlua::Value::String(self.string()?))),
             b'{' => self.object(depth),
             b'[' => self.array(depth),
             b't' if self.text[self.pos..].starts_with(b"true") => {
@@ -894,10 +909,7 @@ mod tests {
             (b"abc", b"\"abc\""),
             (b"quote\"inside", b"\"quote\\\"inside\""),
             (b"back\\slash", b"\"back\\\\slash\""),
-            (
-                b"tab\tnewline\nreturn\r",
-                b"\"tab\\tnewline\\nreturn\\r\"",
-            ),
+            (b"tab\tnewline\nreturn\r", b"\"tab\\tnewline\\nreturn\\r\""),
             (b"\x08\x0c", b"\"\\b\\f\""),
             (
                 &[0x00, 0x01, 0x1f, 0x7f],
@@ -946,7 +958,10 @@ mod tests {
             encode_text(&lua, "return {i = 1, f = 1.5}"),
             encode_text(&lua, "return {f = 1.5, i = 1}")
         );
-        assert_eq!(encode_text(&lua, "return {i = 1, f = 1.5}"), "{\"f\":1.5,\"i\":1}");
+        assert_eq!(
+            encode_text(&lua, "return {i = 1, f = 1.5}"),
+            "{\"f\":1.5,\"i\":1}"
+        );
         // 整数与浮点分开写（R2）
         assert_eq!(encode_text(&lua, "return {1, 1.0}"), "[1,1.0]");
         // 嵌套 + 空对象
@@ -971,19 +986,23 @@ mod tests {
         let lua = Lua::new();
         let cases = [
             "return nil",
-            "return {1, nil, 3}",   // 洞
+            "return {1, nil, 3}",                // 洞
             "local t = {1}; t[3] = 2; return t", // 洞（最大下标 3，条目 2）
-            "return {1, a = 2}",    // 数组与字符串键混用
-            "return {[1.5] = 1}",   // 非整数键
-            "return {[true] = 1}",  // 布尔键
+            "return {1, a = 2}",                 // 数组与字符串键混用
+            "return {[1.5] = 1}",                // 非整数键
+            "return {[true] = 1}",               // 布尔键
             "return {f = function() end}",
-            "return 0/0",           // NaN
-            "return 1/0",           // +inf
+            "return 0/0",                         // NaN
+            "return 1/0",                         // +inf
             "local t = {}; t.self = t; return t", // 自环
         ];
         for chunk in cases {
             let error = encode_of(&lua, chunk).expect_err(chunk);
-            assert_eq!(error.code(), CODEC_UNSUPPORTED, "chunk 应为值域拒绝：{chunk}");
+            assert_eq!(
+                error.code(),
+                CODEC_UNSUPPORTED,
+                "chunk 应为值域拒绝：{chunk}"
+            );
         }
     }
 
@@ -1015,7 +1034,11 @@ mod tests {
             "return {nested = setmetatable({}, {__index = function() end})}",
         ] {
             let error = encode_of(&lua, chunk).expect_err(chunk);
-            assert_eq!(error.code(), CODEC_UNSUPPORTED, "元表表必须整值回退：{chunk}");
+            assert_eq!(
+                error.code(),
+                CODEC_UNSUPPORTED,
+                "元表表必须整值回退：{chunk}"
+            );
         }
     }
 
@@ -1025,7 +1048,8 @@ mod tests {
         let bytes = encode_of(&lua, "return string.char(0x80, 0x9f, 0xff)").expect("字节串可编码");
         assert_eq!(bytes, b"\"\x80\x9f\xff\"");
         // 控制字符走 \u00xx，0x7f  тоже
-        let control = encode_of(&lua, "return string.char(0, 1, 0x1f, 0x7f)").expect("控制字符可编码");
+        let control =
+            encode_of(&lua, "return string.char(0, 1, 0x1f, 0x7f)").expect("控制字符可编码");
         assert_eq!(control, b"\"\\u0000\\u0001\\u001f\\u007f\"");
     }
 
@@ -1048,7 +1072,12 @@ mod tests {
         ] {
             let value = decode_text(&lua, text).expect("合法 JSON 必须可解");
             let bytes = encode(&value).expect("解出来的值必须可编码");
-            assert_eq!(bytes, text, "往返字节不同：{}", String::from_utf8_lossy(text));
+            assert_eq!(
+                bytes,
+                text,
+                "往返字节不同：{}",
+                String::from_utf8_lossy(text)
+            );
         }
         // `[]` 与 `{}` 是同一个 Lua 值（空表），再编码只能是 `{}`——这是规范执行体
         // 的既有非对称性（Lua 的 `table_kind` 无数组证据时给 object），不是本面的偏差。
@@ -1099,22 +1128,29 @@ mod tests {
         let dropped = decode_text(&lua, b"{\"a\":null,\"b\":1}").expect("对象 null 丢键");
         assert_eq!(encode(&dropped).expect("编码"), b"{\"b\":1}".to_vec());
         assert_eq!(
-            decode_text(&lua, b"[1,null]").expect_err("数组 null 必须被拒").code(),
+            decode_text(&lua, b"[1,null]")
+                .expect_err("数组 null 必须被拒")
+                .code(),
             CODEC_UNSUPPORTED
         );
         // 代理对合成 + 单字节转义
         let value = decode_text(&lua, b"\"\\ud83d\\ude42\\/\\u00e9\"").expect("转义");
-        assert_eq!(encode(&value).expect("编码"), "\"🙂/é\"".as_bytes().to_vec());
+        assert_eq!(
+            encode(&value).expect("编码"),
+            "\"🙂/é\"".as_bytes().to_vec()
+        );
         for bad in [
-            &b"\"\\ud83d\""[..],   // 高位代理无低位
-            b"\"\\ud83dx\"",       // 低位位置不是 \u
-            b"\"\\q\"",            // 非法转义
-            b"\"\\u12\"",          // \u 不足 4 位
-            b"\"\x01\"",           // 未转义控制字符
-            b"\"abc",              // 未闭合
+            &b"\"\\ud83d\""[..], // 高位代理无低位
+            b"\"\\ud83dx\"",     // 低位位置不是 \u
+            b"\"\\q\"",          // 非法转义
+            b"\"\\u12\"",        // \u 不足 4 位
+            b"\"\x01\"",         // 未转义控制字符
+            b"\"abc",            // 未闭合
         ] {
             assert_eq!(
-                decode_text(&lua, bad).expect_err("非法转义/控制字符").code(),
+                decode_text(&lua, bad)
+                    .expect_err("非法转义/控制字符")
+                    .code(),
                 CODEC_UNSUPPORTED,
                 "{}",
                 String::from_utf8_lossy(bad)
@@ -1166,7 +1202,10 @@ mod tests {
         assert_eq!(format_g(100.0, 1), "1e+02");
         assert_eq!(format_g(1e-4, 1), "0.0001");
         assert_eq!(format_g(1e-5, 1), "1e-05");
-        assert_eq!(format_g(1.2345678901234568e17, 17), "1.2345678901234568e+17");
+        assert_eq!(
+            format_g(1.2345678901234568e17, 17),
+            "1.2345678901234568e+17"
+        );
         assert_eq!(format_g(0.1, 17), "0.10000000000000001");
         assert_eq!(format_g(1234.5, 17), "1234.5");
     }
