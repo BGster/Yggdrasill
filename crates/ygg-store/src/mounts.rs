@@ -926,6 +926,143 @@ mod tests {
     }
 
     #[test]
+    fn attach_private_mount_creates_a_real_dir() {
+        let (run, mod_dir) = attach_env("attach-private");
+        let store = attach(&run, &mod_dir, json!([{ "name": "out" }])).expect("attach");
+        let slot = run.join(MOUNTS_DIR).join("out");
+        let meta = fs::symlink_metadata(&slot).expect("挂载点必须存在（声明面 = 目录面）");
+        assert!(
+            meta.is_dir() && !meta.file_type().is_symlink(),
+            "私有挂载是真目录"
+        );
+        let declared: Vec<_> = store.declared().collect();
+        assert_eq!(declared.len(), 1);
+        assert_eq!(declared[0].0, "out");
+        assert_eq!(
+            declared[0].1,
+            slot.canonicalize().expect("canonical").as_path()
+        );
+        assert_eq!(declared[0].2, MountMode::Ro, "缺省是 ro");
+        assert_eq!(store.budget_left(), MOUNT_RUN_WRITE_BUDGET);
+        assert_eq!(store.run_dir(), run.as_path());
+        assert_eq!(store.mounts_root(), run.join(MOUNTS_DIR).as_path());
+        assert_eq!(store.audit_path(), run.join(FS_AUDIT_FILE));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attach_dir_mount_binds_the_host_dir_by_symlink() {
+        let (run, mod_dir) = attach_env("attach-link");
+        let host = mod_dir.join("biz");
+        fs::create_dir_all(&host).expect("create host dir");
+        fs::write(host.join("a.txt"), b"host").expect("write host file");
+        let store = attach(
+            &run,
+            &mod_dir,
+            json!([{ "name": "work", "dir": "biz", "mode": "rw" }]),
+        )
+        .expect("attach");
+        let slot = run.join(MOUNTS_DIR).join("work");
+        assert!(
+            fs::symlink_metadata(&slot)
+                .expect("slot")
+                .file_type()
+                .is_symlink(),
+            "目录挂载是符号链接（bind 语义）"
+        );
+        assert_eq!(
+            fs::read_link(&slot).expect("read_link"),
+            host.canonicalize().expect("canonical")
+        );
+        // 不拷贝内容：挂载点里读到的就是宿主目录那一份。
+        assert_eq!(fs::read(slot.join("a.txt")).expect("read through"), b"host");
+        assert_eq!(store.declared().next().expect("一个挂载点").2, MountMode::Rw);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn re_attach_is_silent_and_writes_nothing() {
+        use std::os::unix::fs::MetadataExt;
+        let (run, mod_dir) = attach_env("attach-idem");
+        let host = mod_dir.join("biz");
+        fs::create_dir_all(&host).expect("create host dir");
+        let spec = json!([{ "name": "work", "dir": "biz" }, { "name": "out" }]);
+        attach(&run, &mod_dir, spec.clone()).expect("first attach");
+        let slot = run.join(MOUNTS_DIR).join("work");
+        let private = run.join(MOUNTS_DIR).join("out");
+        let link_ino = fs::symlink_metadata(&slot).expect("slot").ino();
+        let dir_ino = fs::symlink_metadata(&private).expect("out").ino();
+        fs::write(private.join("keep.txt"), b"k").expect("write into private mount");
+        attach(&run, &mod_dir, spec).expect("re-attach 必须静默通过");
+        assert_eq!(
+            fs::symlink_metadata(&slot).expect("slot").ino(),
+            link_ino,
+            "重载不得重建符号链接（零写入）"
+        );
+        assert_eq!(
+            fs::symlink_metadata(&private).expect("out").ino(),
+            dir_ino,
+            "重载不得重建私有挂载目录（零写入）"
+        );
+        assert!(
+            private.join("keep.txt").exists(),
+            "已存在的挂载内容不得被清空"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attach_conflicts_refuse_with_zero_writes() {
+        let (run, mod_dir) = attach_env("attach-conflict");
+        let host = mod_dir.join("biz");
+        fs::create_dir_all(&host).expect("create host dir");
+        // 槽位已是真目录，声明却是目录挂载 → 冲突；同一 pack 里的另一条
+        // 合法声明也不得被建出来（先全量算现状、再落地）。
+        fs::create_dir_all(run.join(MOUNTS_DIR).join("work")).expect("pre-create slot");
+        match attach(
+            &run,
+            &mod_dir,
+            json!([{ "name": "okmount" }, { "name": "work", "dir": "biz" }]),
+        ) {
+            Ok(_) => panic!("真目录 + dir 声明必须拒"),
+            Err(err) => assert_eq!(err.code(), codes::MOUNT, "{err}"),
+        }
+        assert!(
+            !run.join(MOUNTS_DIR).join("okmount").exists(),
+            "冲突时其余挂载点也不得被创建（零写入）"
+        );
+        // 槽位是软链，声明却是私有挂载 → 冲突。
+        let other = attach_env("attach-conflict-link");
+        fs::create_dir_all(other.0.join(MOUNTS_DIR)).expect("mounts root");
+        std::os::unix::fs::symlink(
+            other.1.join("biz"),
+            other.0.join(MOUNTS_DIR).join("work"),
+        )
+        .expect("pre-create link");
+        match attach(&other.0, &other.1, json!([{ "name": "work" }])) {
+            Ok(_) => panic!("软链 + 私有声明必须拒"),
+            Err(err) => assert_eq!(err.code(), codes::MOUNT, "{err}"),
+        }
+        // 已存在的软链指向别处 → 冲突（不一致）。
+        let third = attach_env("attach-conflict-elsewhere");
+        fs::create_dir_all(third.0.join(MOUNTS_DIR)).expect("mounts root");
+        fs::create_dir_all(third.1.join("biz")).expect("declared host dir");
+        fs::create_dir_all(third.1.join("biz2")).expect("other host dir");
+        std::os::unix::fs::symlink(
+            third.1.join("biz2"),
+            third.0.join(MOUNTS_DIR).join("work"),
+        )
+        .expect("pre-create link");
+        match attach(&third.0, &third.1, json!([{ "name": "work", "dir": "biz" }])) {
+            Ok(_) => panic!("指向别处的软链必须拒"),
+            Err(err) => {
+                assert_eq!(err.code(), codes::MOUNT, "{err}");
+                assert!(err.to_string().contains("不一致"), "{err}");
+            }
+        }
+    }
+
+    #[test]
     fn error_display_puts_the_code_first() {
         // 码在前是调用方契约（Lua 侧与 CLI 回执按首段分派）。
         assert_eq!(
