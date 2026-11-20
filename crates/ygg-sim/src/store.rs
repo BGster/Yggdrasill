@@ -146,10 +146,19 @@ impl ArchetypeStore {
         Ok(idx)
     }
 
-    /// 校验一批「组件 → 列」载荷：行数一致、无重复组件、组件有列。
-    fn check_batch(&self, rows: usize, comps: &[(ComponentId, Column)]) -> SimResult<CompSet> {
+    /// 校验一批载荷：`cols` 是有列组件的载荷，`tags` 是零宽成员；无重复、行数一致。
+    ///
+    /// 为什么 tag 要单列一个参数而不是「带一个空列」：`tag` 在存储里**没有列**（只进位集），
+    /// 给它伪造一个空列会让「列数 = 有值组件数」这条不变量在解码侧消失——而快照与批量帧
+    /// 共用同一个列编解码器，那条不变量是它们能互通的前提。
+    fn check_batch(
+        &self,
+        rows: usize,
+        cols: &[(ComponentId, Column)],
+        tags: &[ComponentId],
+    ) -> SimResult<CompSet> {
         let mut set = 0u128;
-        for (comp, col) in comps {
+        for (comp, col) in cols {
             let bit = 1u128 << comp;
             if set & bit != 0 {
                 return Err(SimError::schema(format!("同一帧里组件 id {comp} 出现两次")));
@@ -169,16 +178,31 @@ impl ArchetypeStore {
                 )));
             }
         }
+        for comp in tags {
+            let bit = 1u128 << comp;
+            if set & bit != 0 {
+                return Err(SimError::schema(format!("同一帧里组件 id {comp} 出现两次")));
+            }
+            set |= bit;
+            if self.registry.type_of(*comp)?.has_column() {
+                return Err(SimError::schema(format!(
+                    "组件 id {comp} 有列，不能作为零宽成员声明（缺载荷）"
+                )));
+            }
+        }
         Ok(set)
     }
 
     /// 列式批量生成：一次追加 `rows` 个实体并返回其 id（升序 = 分配序）。
+    ///
+    /// `cols` 给有列组件的载荷（行数必须 = `rows`），`tags` 给零宽成员（无载荷）。
     pub fn spawn_columns(
         &mut self,
         rows: usize,
-        comps: &[(ComponentId, Column)],
+        cols: &[(ComponentId, Column)],
+        tags: &[ComponentId],
     ) -> SimResult<Vec<EntityId>> {
-        let set = self.check_batch(rows, comps)?;
+        let set = self.check_batch(rows, cols, tags)?;
         let idx = self.ensure_archetype(set)?;
         // 先分配 id（不持桶借用），保证「id 分配序 = 行序」。
         let mut ids = Vec::with_capacity(rows);
@@ -189,7 +213,7 @@ impl ArchetypeStore {
         // 桶内列序（升序组件 id）与载荷序无关：建一次位置映射，避免每行线性搜索。
         let mut order = Vec::with_capacity(arch.cols.len());
         for comp in &arch.col_ids {
-            let pos = comps
+            let pos = cols
                 .iter()
                 .position(|(c, _)| c == comp)
                 .ok_or_else(|| SimError::schema(format!("帧缺少组件 id {comp} 的载荷")))?;
@@ -198,7 +222,7 @@ impl ArchetypeStore {
         for (row, id) in ids.iter().enumerate() {
             for p in 0..arch.cols.len() {
                 let comp = arch.col_ids[p];
-                let src = &comps[order[p]].1;
+                let src = &cols[order[p]].1;
                 arch.cols[p].push_value(&src.value_at(row), comp)?;
             }
             arch.ids.push(*id);
@@ -214,9 +238,10 @@ impl ArchetypeStore {
     pub fn insert_columns(
         &mut self,
         ids: &[EntityId],
-        comps: &[(ComponentId, Column)],
+        cols: &[(ComponentId, Column)],
+        tags: &[ComponentId],
     ) -> SimResult<usize> {
-        let set = self.check_batch(ids.len(), comps)?;
+        let set = self.check_batch(ids.len(), cols, tags)?;
         // ① 全量校验（先校验后改）：实体存在、组件尚未在场、无重复 id。
         let mut plan: Vec<(EntityId, u32, u32, u32)> = Vec::with_capacity(ids.len());
         let mut seen: Vec<EntityId> = Vec::with_capacity(ids.len());
@@ -250,25 +275,22 @@ impl ArchetypeStore {
                         dst.cols[p].push_from(&src.cols[src_pos], local_row as usize, comp)?
                     }
                     None => {
-                        let pos = comps.iter().position(|(c, _)| *c == comp).ok_or_else(|| {
+                        let pos = cols.iter().position(|(c, _)| *c == comp).ok_or_else(|| {
                             SimError::schema(format!("帧缺少组件 id {comp} 的载荷"))
                         })?;
-                        dst.cols[p].push_value(&comps[pos].1.value_at(row_idx), comp)?;
+                        dst.cols[p].push_value(&cols[pos].1.value_at(row_idx), comp)?;
                     }
                 }
             }
             let new_row = dst.ids.len() as u32;
             dst.ids.push(id);
             // 源桶删行（末行填洞）→ 被填洞的实体改索引。
-            match src.swap_remove_row(local_row as usize)? {
-                Some(moved) => {
-                    self.entity_index.insert(moved, (arch_idx, local_row));
-                }
-                None => {}
+            if let Some(moved) = src.swap_remove_row(local_row as usize)? {
+                self.entity_index.insert(moved, (arch_idx, local_row));
             }
             self.entity_index.insert(id, (target, new_row));
         }
-        Ok(ids.len() * comps.len())
+        Ok(ids.len() * cols.len())
     }
 
     /// 批量删除实体（`swap_remove` + 索引同步）。返回实际删除个数。
