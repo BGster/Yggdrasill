@@ -146,7 +146,7 @@ function M.codec()
   return resolve("codec", "pkg.codec", installed and installed.codec or nil, { "encode", "decode" })
 end
 
--- ── 四个键的读写（唯一的 KV 流量入口）──────────────────────────────────────
+-- ── 各键的读写（唯一的 KV 流量入口：三条全局键 + 两份 per-id 键族）─────────
 
 --- 读一个键：`nil` → `default`；非字符串载荷（不是本包写的）即 `-KV`。
 function M.read(key, default)
