@@ -26,8 +26,8 @@ fn lua_selftest_suite_is_present_and_non_empty() {
     let mut cases = 0usize;
     let mut names: Vec<String> = Vec::new();
 
-    let entries = std::fs::read_dir(&dir)
-        .unwrap_or_else(|err| panic!("read {}: {err}", dir.display()));
+    let entries =
+        std::fs::read_dir(&dir).unwrap_or_else(|err| panic!("read {}: {err}", dir.display()));
     for entry in entries {
         let path = entry.expect("dir entry").path();
         if path.extension().and_then(|s| s.to_str()) != Some("lua") {
