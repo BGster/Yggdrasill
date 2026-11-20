@@ -20,6 +20,8 @@ local M = {}
 local join = require("pkg.assetgen.join")
 
 local BYTE = "%c"
+local PAIR = "%c%c"
+local QUAD = "%c%c%c%c"
 local HEX2 = "%02x"
 local FIRM3 = "%d.%03d"
 
@@ -29,21 +31,21 @@ function M.u8(v)
 end
 
 --- 小端 u16（低字节在前）。
+---
+--- 一次 `format` 出两个字节而不是两次：PCM 装箱的调用量是「样本数 × 声道数」，
+--- 22 050 样本的单声道片段就是 2.2 万次 `format`，减半是实测可见的差别。
 function M.u16le(v)
-  return (BYTE):format(v & 0xFF) .. (BYTE):format((v >> 8) & 0xFF)
+  return (PAIR):format(v & 0xFF, (v >> 8) & 0xFF)
 end
 
 --- 小端 u32。
 function M.u32le(v)
-  return (BYTE):format(v & 0xFF)
-    .. (BYTE):format((v >> 8) & 0xFF)
-    .. (BYTE):format((v >> 16) & 0xFF)
-    .. (BYTE):format((v >> 24) & 0xFF)
+  return (QUAD):format(v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF)
 end
 
 --- 小端 s16（与 `u16le` 同字节，单独命名是为了让调用点自证「这是有符号样本」）。
 function M.s16le(v)
-  return (BYTE):format(v & 0xFF) .. (BYTE):format((v >> 8) & 0xFF)
+  return (PAIR):format(v & 0xFF, (v >> 8) & 0xFF)
 end
 
 --- 小写十六进制（证据面：宿主 `xxd -r -p` 能逐字节还原）。

@@ -59,8 +59,8 @@ local ENTRIES = {
 }
 local SEED = "r1-assetgen-digest"
 
-local function build()
-  local bundle = assetgen.bundle(ENTRIES, SEED)
+local function build(seed)
+  local bundle = assetgen.bundle(ENTRIES, seed)
   local lengths = {}
   local hex = {}
   local total = 0
@@ -79,8 +79,9 @@ local function build()
   }
 end
 
-local first = build()
-local second = build()
+local first = build(SEED)
+local second = build(SEED)
+local other = build(SEED .. "-2")
 
 print("pkg.assetgen.lengths=" .. first.lengths)
 print("pkg.assetgen.hex=" .. first.hex)
@@ -109,5 +110,12 @@ run("pkg.assetgen.cross-process-canon", function()
   end
   if #first.hex % 2 ~= 0 then
     error("hex 长度必须是偶数", 0)
+  end
+  -- 异 seed 必须产出不同字节（否则「seed 驱动」这句话就是空的）。
+  if other.hex == first.hex then
+    error("异 seed 的字节证据不得相同", 0)
+  end
+  if other.lengths ~= first.lengths then
+    error("异 seed 的长度应相同（形状由参数决定）：" .. other.lengths .. " vs " .. first.lengths, 0)
   end
 end)

@@ -89,7 +89,7 @@ function M.fbm(params, rng)
   local octaves = spec.range(params, "octaves", 3, 1, 8)
   local persist = spec.range(params, "persist", 500, 0, 1000)
 
-  local grids, spans, weights = {}, {}, {}
+  local grids, widths, steps, weights = {}, {}, {}, {}
   local amp = 32768
   local total = 0
   for o = 1, octaves do
@@ -104,7 +104,8 @@ function M.fbm(params, rng)
       grid[i] = rng:int(0, 255)
     end
     grids[o] = grid
-    spans[o] = { span = span, lx = lx }
+    widths[o] = lx
+    steps[o] = span
     weights[o] = amp
     total = total + amp
     amp = (amp * persist) // 1000
@@ -117,8 +118,8 @@ function M.fbm(params, rng)
     local acc = 0
     for o = 1, octaves do
       local grid = grids[o]
-      local span = spans[o].span
-      local lx = spans[o].lx
+      local span = steps[o]
+      local lx = widths[o]
       local cell_x = x // span
       local cell_y = y // span
       local fx = mathx.smoothstep_q15((x % span) * 32768 // span)

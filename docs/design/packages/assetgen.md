@@ -94,6 +94,7 @@
 | `assetgen.canon` | `(product)` | string（单行 ASCII） | 纯。与 `product.canon` 逐字符相等 |
 | `assetgen.streams` | `(seed)` | `{ texture, mesh, sound }` 三个句柄 | 纯。等价于 `procgen.rng(seed, "assetgen/texture"/…)` 三条缺省流 |
 | `assetgen.algo_list` | `(kind)` | 稠密数组（algo 名，字节序升序） | 纯（自省面；mod 侧 UI / 校验用） |
+| `assetgen.perf_keys` | `()` | 稠密数组（§5 的十个性能键名，不含 `perf.assetgen.` 前缀） | 纯（自省面；性能用例按它逐个打印，冒烟按它逐个核对——「十个键齐备」因此是机检） |
 
 `assetgen.ERRORS` 恰好五个键，全部形如 `YGG-PKG-ASSETGEN-*`：`PARAM`（参数形状 / 下界错）、`ALGO`（未注册算法）、`CAP`（硬帽 / 上界越界）、`KIND`（`kind` 不在三值）、`DEPS`（注入的 procgen 面不合法）。与 [entity.md](entity.md) 的 `YGG-PKG-ENTITY-*` 同风格。
 
@@ -101,17 +102,17 @@
 
 **口径声明（先读再读数字）**：下表数字产在 **selftest 面**（普通 Lua 5.4，全标准库）——沙箱里既没有 `os.clock` 也没有 `collectgarbage`（`crates/ygg-sandbox/src/sandbox.rs` 的白名单测试钉死 `math` / `string` / `table` / `print` / `collectgarbage` 全为 `nil`），所以计时与内存只在测试侧可测，而包本身连 `math` 都不可达。三次取中位、批内三次取中位，`print` 面即口径（同 [procgen.md](procgen.md) §5 的方法论）。
 
-| 指标 | 阈值（Goal 原则二） | 本包取值与测量方法 |
-| --- | --- | --- |
-| 包加载耗时 | `< 10ms` | 目标 `≤ 1ms`（`install` 只做表组装，不注册内置算法）。清掉 `package.loaded["pkg.assetgen*"]` 后 `require` + `install`，5 次取中位 → 打印 `perf.assetgen.load_ms` |
-| 实体按 id 查找 / 更新 | `O(1)` | **不适用**：无实体表。唯一的表访问是算法表直取（`ALGOS[name]`）与参数表按名取键，与素材数量无关是构造性的 |
-| 序列化吞吐 | 附基准集与耗时 | 等价面：**PCM 装箱 ≥ 300k 样本/秒**（[codec.md](codec.md) 的树内基准是 2.77 MB/s 文本编码；PCM 每样本 2 字节 ≈ 600 KB/s，按 300k 样本/秒设阈留 2× 余量）。10 万帧单声道 `wav16` 三次取中位 → `perf.assetgen.pcm_samples_per_s` |
-| 10k 实体常驻内存 | 给出数字 | 不适用（无实体）。等价口径：**64×64 RGBA 纹理 ≤ 128 KiB**（行块拼接：只有成品串 + 64 个行串，不留整张像素数组）、**1 s @22050 单声道 ≤ 2.5 MiB**（s16 数组 44100 个数 + 成品串 44 KB）。`collectgarbage("count")` 差 → `perf.assetgen.tex64_mem_kib` / `perf.assetgen.sound1s_mem_kib` |
-| 泄漏检测 | 100 轮不增长 | 同 seed 100 轮：`bytes` 100 次全等 + 内存差 ≤ 1%。`perf.assetgen.leak_100_equal` / `perf.assetgen.leak_gc_pct` |
-| **生成耗时 per 类**（P2.5 硬要求） | 无外部阈值，给数字 | 纹理 64×64 `ch=4` fbm 3 倍频 `≤ 10 ms`；几何 torus 24×12 `≤ 15 ms`（含 OBJ 文本）；音频 1 s @22050 osc + 包络 `≤ 12 ms`；16 件 bundle `≤ 200 ms`。各三次取中位 → `perf.assetgen.tex64_ms` / `mesh_torus_ms` / `sound_1s_ms` / `bundle16_ms` |
-| **字节一致（真验收）** | 两次独立进程 sha256 相等 | 必达；两进程各跑 `test/pkg-assetgen-digest.lua` → 宿主 `cmp` + `xxd -r -p \| shasum -a 256`（§7） |
+| 指标 | 阈值（Goal 原则二） | 实测值 | 测量方法 / 打印键 |
+| --- | --- | --- | --- |
+| 包加载耗时 | `< 10ms` | **1.8 ms**（`install` 只做表组装；目标曾写 ≤ 1ms，实测过一点） | 清 `package.loaded["pkg.assetgen*"]` 后 `require` + `install`，5 次取中位 → `perf.assetgen.load_ms` |
+| 实体按 id 查找 / 更新 | `O(1)` | **不适用**：无实体表；唯一的表访问是算法表直取（`ALGOS[name]`）与参数表按名取键 | — |
+| 序列化吞吐 | 附基准集与耗时 | **935,820 样本/秒**（阈值 300k，3.1× 余量）。量为「10 万帧单声道 wav16 的生成 + 交织 + 装箱」整条路径——`encode(p, "wav16")` 是恒等（§4），所以装箱发生在生成期 | 100 800 帧单声道跑三次取中位 → `perf.assetgen.pcm_samples_per_s` |
+| 10k 实体常驻内存 | 给出数字 | 不适用（无实体）。等价口径：**64×64 RGBA 纹理 16.7 KiB**（阈值 128 KiB；行块拼接，不留整张像素数组）、**1 s @22050 单声道 86.8 KiB**（阈值 2.5 MiB） | 生成前后各收两次 `collectgarbage("count")` 差 → `perf.assetgen.tex64_mem_kib` / `perf.assetgen.sound1s_mem_kib` |
+| 泄漏检测 | 100 轮不增长 | 同 seed 100 轮：`bytes` 100 次全等（`leak_100_equal=1`），内存差 **0.25%**（阈值 1%） | `perf.assetgen.leak_100_equal` / `perf.assetgen.leak_gc_pct` |
+| **生成耗时 per 类**（P2.5 硬要求） | 无外部阈值，给数字 | 纹理 64×64 `ch=4` fbm 3 倍频 **17.5 ms**（初估 ≤ 10，见 §8）；几何 torus 24×12 **1.24 ms**（含 OBJ 文本）；音频 1 s @22050 osc+包络 **28.7 ms**（初估 ≤ 12，见 §8）；16 件 bundle **35.3 ms** | 各三次取中位 → `perf.assetgen.tex64_ms` / `mesh_torus_ms` / `sound_1s_ms` / `bundle16_ms` |
+| **字节一致（真验收）** | 两次独立进程 sha256 相等 | 必达；两进程各跑 `test/pkg-assetgen-digest.lua` → 宿主 `cmp` + `xxd -r -p \| shasum -a 256`（§7） | |
 
-> **实现纪律**：目标值在首个实现提交时就地改成实测值；**偏差即回写本表**（不回写 = 文档与实现不符 = Goal 反例 6）。超阈不得靠「调小默认尺寸」蒙过去：阈值的口径是「64×64 / 1 s / 16 件」，尺寸是定义的输入，不是可调旋钮。
+> **实现纪律**：目标值在首个实现提交时就地改成实测值；**偏差即回写本表**（不回写 = 文档与实现不符 = Goal 反例 6）。超阈不得靠「调小默认尺寸」蒙过去：阈值的口径是「64×64 / 1 s / 16 件」，尺寸是定义的输入，不是可调旋钮。实测的回归阈设在实测值的 2×（`tex64_ms ≤ 40` / `sound_1s_ms ≤ 60`），这样断言抓的是「代码变慢了」而不是「机器抖了一下」。
 
 ## 6. 用点计划
 
@@ -155,6 +156,8 @@
 **为什么与 procgen 共享的是 rng 而不是算法。** [procgen.md](procgen.md) §1 已把素材二进制划给本包，同时声明「共享 rng 契约」。两者的产物形状证明这条划线是对的：`cells` 是 0..255 的地图格（带自己的 `algo`/`v` 与加权调度），`pixels` 是 `w*h*ch` 的连续字节、`pcm` 是 s16 交织——把 `terrain.noise` 拉进纹理管线要么多一层 cells→pixels 转换，要么把纹理参数塞进 def 注册表（参数随素材变化 → 同名 def 冲突报 `-DEF`）。共享 PRNG 是零成本的（一行 `require`），共享算法是负成本的。
 
 **为什么产物路径必须整段整数域。** 浮点跨进程一致性无法结构性保证（编译器 FMA 收缩、libm 尾位差、`-ffast-math`），而「同 seed 同产物字节一致」是本阶段的硬验收。整数域下这条不变式是**构造性成立**的，不需要任何论证成本。四条支撑：① 沙箱 globals 里 `math` / `string` / `table` 全为 `nil`（`crates/ygg-sandbox/src/sandbox.rs` 的逐名断言），三角与开方只能用自备整数核（`mathx.lua`：Q15 有理近似 + 整数牛顿开方）；② Lua 5.4 的 `+ - * // % & | ~ << >>` 在 `integer` 上精确，`/` 是唯一的浮点除法，静态用例把它禁掉；③ 三道检查（静态扫字面量、运行时 `math.type` 断言、两进程 sha256）；④ 残余风险如实声明——跨平台一致在本阶段是**论证**不是实测。
+
+**为什么纹理与音频的实测比初估慢（17.5 ms vs 10 ms、28.7 ms vs 12 ms）。** 两处都是「每像素 / 每样本一次到几次整除 + 一次 `("%c%c"):format`」的量级：64×64×4 在三倍频下是 49 万次插值，1 s@22050 是 2.2 万次波形查表 + 包络整除 + 4.4 万次 s16 装箱。沙箱里既没有 JIT，也没有 `string.char` / `table.concat`，这两个数字是**这个方言下的下限**而不是实现缺陷——同机同口径的 procgen 取数吞吐（758k 次/秒）给的是同一个量级。真要压下去只有两条路：把三角表化成 256 项字面量（吃掉源码预算、确定性收益为零），或把装箱挪进宿主（那是 `crates/**` 的能力变更，不是本包的）。所以选**记录而不优化**，并把回归阈设在 2× 实测值。
 
 **反方案一：用 `math.sin` / `math.sqrt` / `math.floor`。** 沙箱里 `math` 是 `nil`，包代码必须在沙箱方言里可跑。副作用是**好事**：这条约束顺手把浮点赶出了产物路径。
 

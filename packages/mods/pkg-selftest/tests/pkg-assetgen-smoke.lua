@@ -57,10 +57,13 @@ do
 
   local exports = {
     "algo_list",
+    "bundle",
     "canon",
     "encode",
     "install",
     "mesh",
+    "perf_keys",
+    "raster",
     "sound",
     "streams",
     "texture",
@@ -68,6 +71,35 @@ do
   for i = 1, #exports do
     if type(assetgen[exports[i]]) ~= "function" then
       problems[#problems + 1] = exports[i] .. " 必须是函数"
+    end
+  end
+
+  -- 性能键面：契约 §5 的十个键名（`perf.assetgen.` 前缀之外的完整集合）。
+  local perf_want = {
+    "bundle16_ms",
+    "leak_100_equal",
+    "leak_gc_pct",
+    "load_ms",
+    "mesh_torus_ms",
+    "pcm_samples_per_s",
+    "sound1s_mem_kib",
+    "sound_1s_ms",
+    "tex64_mem_kib",
+    "tex64_ms",
+  }
+  if type(assetgen.perf_keys) == "function" then
+    local got_keys = assetgen.perf_keys()
+    if #got_keys ~= #perf_want then
+      problems[#problems + 1] = "perf_keys 应为 10 个，实得 " .. #got_keys
+    end
+    local seen = {}
+    for i = 1, #got_keys do
+      seen[got_keys[i]] = true
+    end
+    for i = 1, #perf_want do
+      if not seen[perf_want[i]] then
+        problems[#problems + 1] = "perf_keys 缺 " .. perf_want[i]
+      end
     end
   end
 

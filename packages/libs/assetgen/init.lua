@@ -253,6 +253,25 @@ function M.algo_list(kind)
   return names
 end
 
+--- `perf_keys()` → 契约 §5 的十个性能键名（不含 `perf.assetgen.` 前缀）。
+---
+--- 自省面：性能用例按它逐个打印，冒烟按它逐个核对。把键名写进一个函数而不是散在
+--- 用例里，是为了让「§5 的十个键齐备」变成**机检**而不是人去数（Goal 反例 4）。
+function M.perf_keys()
+  return {
+    "load_ms",
+    "pcm_samples_per_s",
+    "tex64_mem_kib",
+    "sound1s_mem_kib",
+    "leak_100_equal",
+    "leak_gc_pct",
+    "tex64_ms",
+    "mesh_torus_ms",
+    "sound_1s_ms",
+    "bundle16_ms",
+  }
+end
+
 --- `streams(seed)` → 三条缺省流句柄（`assetgen.streams` 的用途是「一条 seed 成套」）。
 function M.streams(seed)
   return {
