@@ -53,6 +53,8 @@
 //! [`PackageError`] 一律在**进入内核之前**失败（零副作用），文案风格对齐
 //! [`crate::pack::PackError`]：英文小写、点名 JSON 位置、直接说该写什么。
 
+use std::path::Path;
+
 use serde_json::Value as Json;
 use thiserror::Error as ThisError;
 
@@ -194,12 +196,13 @@ pub struct PackagesSpec {
     packages: Vec<PackageRef>,
 }
 
-/// `pack.json` 的 `packages` 段的拒绝面（文案点名 JSON 位置）。
+/// packages 装载面的拒绝面（文案风格对齐 [`crate::pack::PackError`]：英文小写、
+/// 点名 JSON 位置 / 文件、直接说该写什么）。
 ///
 /// 独立成模块级枚举而不是嵌在 `impl` 里：Rust 的 `impl` 块只容纳关联项，
-/// 而这是两个面（声明面）共用的错误类型。
+/// 而这是声明 / 闭包 / 装配三个面共用的错误类型。
 #[derive(Debug, ThisError)]
-pub enum PackagesSpecError {
+pub enum PackageError {
     /// 段不是数组。
     #[error(
         "pack.json `packages` must be an array like \
@@ -219,20 +222,30 @@ pub enum PackagesSpecError {
     /// 同一 id 声明两次。
     #[error("pack.json `packages` declares \"{id}\" twice")]
     DuplicateId { id: String },
+    /// 包自描述 `pkg.json` 坏了（JSON / 字段 / name ≠ 目录 / 非允许文件）。
+    ///
+    /// 一个包的所有局部问题共用这一条：读者先要知道**是哪个包**，再谈细节；
+    /// 包内字段路径（`deps[0]`）作为 `reason` 的一部分报出。
+    #[error("package \"{id}\" {reason} ({file})")]
+    Package {
+        id: String,
+        reason: String,
+        file: String,
+    },
 }
 
 impl PackagesSpec {
     /// 解析 `pack.json` 的 `packages` 段（`None` = 零包）。
-    pub fn parse(pack: &Json) -> Result<Option<Self>, PackagesSpecError> {
+    pub fn parse(pack: &Json) -> Result<Option<Self>, PackageError> {
         let Some(raw) = pack.get("packages") else {
             return Ok(None);
         };
         let Some(items) = raw.as_array() else {
-            return Err(PackagesSpecError::NotArray);
+            return Err(PackageError::NotArray);
         };
         let refs = parse_refs(items).map_err(|issue| match issue.kind {
-            RefIssueKind::NotObject => PackagesSpecError::EntryNotObject { index: issue.index },
-            RefIssueKind::BadId(id) => PackagesSpecError::BadId {
+            RefIssueKind::NotObject => PackageError::EntryNotObject { index: issue.index },
+            RefIssueKind::BadId(id) => PackageError::BadId {
                 index: issue.index,
                 id,
             },
@@ -240,7 +253,7 @@ impl PackagesSpec {
         let mut seen: Vec<&str> = Vec::with_capacity(refs.len());
         for package in &refs {
             if seen.contains(&package.id()) {
-                return Err(PackagesSpecError::DuplicateId {
+                return Err(PackageError::DuplicateId {
                     id: package.id().to_owned(),
                 });
             }
@@ -265,6 +278,158 @@ impl PackagesSpec {
     /// 是否零依赖（构造面不会给出空表，保留以便调用方免去 `len() == 0`）。
     pub fn is_empty(&self) -> bool {
         self.packages.is_empty()
+    }
+}
+
+/// 包自描述 `packages/libs/<id>/pkg.json`（D6）。
+///
+/// ```json
+/// { "schemaVersion": 1, "name": "fixture", "version": "0.1.0", "deps": [],
+///   "contract": "docs/design/packages/README.md" }
+/// ```
+///
+/// - `name` 必须等于目录名（一个包只有一个名字；两份名字就会分裂成两个包）；
+/// - `version` 是精确 pin（语义见 [`PackageRef::version`]）；
+/// - `deps` 可缺省（= 空数组），是**传递闭包**的唯一来源；
+/// - `contract` 是仓库内相对路径，**存在性**由打包期校验（本函数无 IO），
+///   **形状**（非绝对路径、无 `.` / `..` 段）在这里先拦下。
+///
+/// `pkg.json` 自身进 manifest 的 `packages` 段（它决定解析结果，必须内容寻址），
+/// 但**不进**模块表（不是 Lua）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageManifest {
+    id: String,
+    version: String,
+    deps: Vec<PackageRef>,
+    contract: String,
+}
+
+impl PackageManifest {
+    /// 解析并校验一个包的自描述（一切失败归为 [`PackageError::Package`]）。
+    pub fn parse(id: &str, bytes: &[u8], file: &Path) -> Result<Self, PackageError> {
+        let wrap = |reason: String| PackageError::Package {
+            id: id.to_owned(),
+            reason,
+            file: file.display().to_string(),
+        };
+        let value: Json = serde_json::from_slice(bytes)
+            .map_err(|err| wrap(format!("is not valid JSON: {err}")))?;
+        if !value.is_object() {
+            return Err(wrap("must be a JSON object".to_owned()));
+        }
+        // schemaVersion：契约演进锚（与 manifest.json 同一个做法）。
+        match value.get("schemaVersion").and_then(Json::as_u64) {
+            Some(found) if found == PKG_SCHEMA_VERSION => {}
+            Some(found) => {
+                return Err(wrap(format!(
+                    "declares schemaVersion {found} (this build implements {PKG_SCHEMA_VERSION})"
+                )))
+            }
+            None => {
+                return Err(wrap(format!(
+                    "is missing integer `schemaVersion` (expected {PKG_SCHEMA_VERSION})"
+                )))
+            }
+        }
+        // name：与目录名同源。
+        let Some(name) = value.get("name").and_then(Json::as_str) else {
+            return Err(wrap("is missing string `name`".to_owned()));
+        };
+        if name != id {
+            return Err(wrap(format!(
+                "declares name \"{name}\" but lives in directory \"{id}\" \
+                 (a package has exactly one name)"
+            )));
+        }
+        // version：精确 pin 的另一半，空字符串不算「没要求版本」。
+        let Some(version) = value.get("version").and_then(Json::as_str) else {
+            return Err(wrap("is missing string `version`".to_owned()));
+        };
+        if version.is_empty() {
+            return Err(wrap("declares an empty `version`".to_owned()));
+        }
+        // deps：可缺省；存在即全量校验（与 `packages[]` 同一条规则）。
+        let deps = match value.get("deps") {
+            None | Some(Json::Null) => Vec::new(),
+            Some(raw) => {
+                let Some(items) = raw.as_array() else {
+                    return Err(wrap(
+                        "`deps` must be an array like [{\"id\": \"entity\", \"version\": \"0.1.0\"}]"
+                            .to_owned(),
+                    ));
+                };
+                let refs = parse_refs(items).map_err(|issue| {
+                    wrap(match issue.kind {
+                        RefIssueKind::NotObject => format!(
+                            "`deps[{}]` must be an object with string `id` and `version`",
+                            issue.index
+                        ),
+                        RefIssueKind::BadId(bad) => format!(
+                            "`deps[{}].id` = \"{bad}\" must match {PACKAGE_ID_RULE}",
+                            issue.index
+                        ),
+                    })
+                })?;
+                let mut seen: Vec<&str> = Vec::with_capacity(refs.len());
+                for dep in &refs {
+                    if seen.contains(&dep.id()) {
+                        return Err(wrap(format!(
+                            "declares `deps` entry \"{}\" twice",
+                            dep.id()
+                        )));
+                    }
+                    seen.push(dep.id());
+                }
+                refs
+            }
+        };
+        // contract：仓库内相对路径（存在性属打包期，本函数无 IO）。
+        let Some(contract) = value.get("contract").and_then(Json::as_str) else {
+            return Err(wrap(
+                "is missing string `contract` (a repo-relative path to the package contract)"
+                    .to_owned(),
+            ));
+        };
+        if contract.is_empty() {
+            return Err(wrap("declares an empty `contract`".to_owned()));
+        }
+        if contract.starts_with('/')
+            || contract.contains('\\')
+            || contract
+                .split('/')
+                .any(|segment| segment == "." || segment == "..")
+        {
+            return Err(wrap(format!(
+                "`contract` = \"{contract}\" must be a repo-relative path \
+                 (no leading `/`, no `.` or `..` segments)"
+            )));
+        }
+        Ok(Self {
+            id: id.to_owned(),
+            version: version.to_owned(),
+            deps,
+            contract: contract.to_owned(),
+        })
+    }
+
+    /// 包 id（= 目录名）。
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// 包版本（被 `pack.json` / `deps` 精确 pin 的那一侧）。
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// 传递依赖清单（缺省为空）。
+    pub fn deps(&self) -> &[PackageRef] {
+        &self.deps
+    }
+
+    /// 契约文档的仓库内相对路径。
+    pub fn contract(&self) -> &str {
+        &self.contract
     }
 }
 
