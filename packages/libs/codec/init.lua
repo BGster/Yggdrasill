@@ -449,7 +449,11 @@ function M.encode(value)
     end
     -- `UNSUPPORTED`（值域拒绝 / 带元方法的表）⇒ 落到下面，用 Lua 路径产出规范
     -- 字节与规范文案；其余错误是原生实现的内部失败，必须响（不能静默降级）。
-    if type(text) ~= "string" or not text:find("YGG-CODEC-UNSUPPORTED", 1, true) then
+    --
+    -- 判据必须先 `tostring`：宿主的 runtime error 过 mlua 边界后可能是字符串、
+    -- 也可能是带 `__tostring` 的错误对象（mlua 的两种路径都出现过），直接对
+    -- 错误值调字符串方法会在「错误对象」那一支上炸成另一个错。
+    if not tostring(text):find("YGG-CODEC-UNSUPPORTED", 1, true) then
       fail(E_HOST, "原生面内部失败：" .. tostring(text))
     end
   end
@@ -745,7 +749,8 @@ function M.decode(text)
     if ok then
       return value
     end
-    if type(value) ~= "string" or not value:find("YGG-CODEC-UNSUPPORTED", 1, true) then
+    -- 同 `encode`：先 `tostring` 再找码（宿主错误值未必是字符串）。
+    if not tostring(value):find("YGG-CODEC-UNSUPPORTED", 1, true) then
       fail(E_HOST, "原生面内部失败：" .. tostring(value))
     end
   end
