@@ -67,7 +67,14 @@ function M.one_of(params, key, default, allowed)
     value = default
   end
   if type(value) ~= "string" or allowed[value] == nil then
-    M.fail(M.E.PARAM, "params." .. key .. " 必须是 " .. tostring(default) .. " 之一，得到 " .. tostring(value))
+    local listed = ""
+    for name in pairs(allowed) do
+      if listed ~= "" then
+        listed = listed .. " / "
+      end
+      listed = listed .. tostring(name)
+    end
+    M.fail(M.E.PARAM, "params." .. key .. " 必须是 " .. listed .. " 之一，得到 " .. tostring(value))
   end
   return value
 end
