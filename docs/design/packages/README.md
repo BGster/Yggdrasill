@@ -78,7 +78,8 @@
   为何必须存在这一层：生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远看不到 `pkg.*`（仍为 79/0，这就是回归钉）；而这个夹具的全量计数刚好是可复算的包用例总数。
   - **声明闭包**：`packages` 段声明 `entity` / `codec` / `quest` / `dialogue` / `role-skill` / `procgen` 六包（版本精确 pin）。`pkg.json` 的 `deps` 只表达形状依赖，**闭包由夹具的声明决定**——加一个包 = 夹具 `packages[]` 加一行 + 重算 manifest。
   - **计数口径**：全量 = 90（r1/r2 的 entity 18 + codec 20 + 两个冒烟 + quest 24 + dialogue 26）+ **35**（role-skill 17 + procgen 18）= **125**；逐包复算 `--filter pkg-entity` → 19、`pkg-codec` → 21、`pkg-quest` → 24、`pkg-dialogue` → 26、`pkg-role-skill` → 17、`pkg-procgen` → 18。`--filter` 过滤的是**文件名**，所以每个包在 `tests/` 下都要有一个同名冒烟文件接住，否则该包单独跑会「没有可执行的测试文件」直接 exit 1。
-  - **冒烟不计数**：`tests/pkg-{quest,dialogue}-smoke.lua` 是 **file 级断言**（`error` ⇒ `file FAIL` ⇒ `ok=0`），只钉「包装载面 + 顶层纯度 + 导出面清单」，不复述 API 函数表（那份真源在行为用例里）。不进 `cases passed=` 的理由：包用例的计数口径是「r1 的 40 + 新增的 50」，载体冒烟计入就会让 90 变成 92。
+  - **冒烟不计数**：`tests/pkg-{quest,dialogue,role-skill,procgen}-smoke.lua` 与 `tests/pkg-procgen-digest-smoke.lua` 是 **file 级断言**（`error` ⇒ `file FAIL` ⇒ `ok=0`），只钉「包装载面 + 顶层纯度 + 导出面清单（+ 事件名集合、KV 前缀、摘要格式）」，不复述 API 函数表（那份真源在行为用例里）。不进 `cases passed=` 的理由：包用例的计数口径是「90 + 新增的 35」，载体冒烟计入就会让 125 变成 130。
+  - **为什么每包都要一个 mod 侧冒烟**：`--filter` 对 mod 的 `tests/*.lua` 与包的 `test/*.lua` **同时**过滤，mod 侧筛完为空就「没有可执行的测试文件」直接 exit 1——`--filter pkg-procgen-digest` 这种只命中包内文件的过滤器尤其需要一个同名接应文件。
   - **`entries` 必须非空**：打包工具要求资源包至少一个数据条目（`crates/ygg-sandbox/examples/pack.rs`），所以夹具带一条只为满足该硬要求的探针条目（`data/probe.json`），随后 `manifest.json` 由 `cargo run -p ygg-sandbox --example pack -- packages/mods/pkg-selftest --packages packages/libs` 重算，`sh .pi/tools/manifest-verify.sh --mod packages/mods/pkg-selftest` 复核 `pkg_drift=0`。
 - **性能数字**：每包 §5 五个指标必须给数字口径与测量方法（同数据集 / 同机器 / 跑三次取中位）；P0 期填**目标值**，P2 首实现填实测值，偏差回写契约。
 - **不新增存储层**：实体持久化只有一条路——mod KV 命名空间 + codec。每个包的 KV 前缀在它自己的 §2「持久化位置」列声明，前缀单写者（对齐 `mod-package.md` 的 `mod.kv-prefix-owner`）。
