@@ -190,7 +190,7 @@ RNG.next32 = function(self)
   return M.next32(self)
 end
 
--- ── 取数面（闭区间整数 / [0,1) 浮点 / 抽取 / 置换 / 快照）───────────────────
+-- ── 取数面（闭区间整数 / [0,1) 浮点 / 抽取 / 加权抽取 / 置换 / 快照）─────────────────
 
 --- 整数化：只收整值数字（整值浮点也收，值不变），带小数或越 i64 即 `-PARAM`。
 local function to_int(value, label)
@@ -247,6 +247,48 @@ function M.pick(rng, list)
   return list[M.int(rng, 1, #list)]
 end
 
+--- `rng.weighted(rng, weights)` → `1..#weights` 中的一个**下标**（按权重抽，非均匀）。
+---
+--- **权重是非负整数的相对份数**：不做归一化（归一化必引浮点除法，跨机舍入破
+--- I1），不收小数（要小数请调用方放大成整数）。零权项合法但不可达。
+---
+--- `Σw` 用整数累加（精确，无浮点结合律问题），再走 `int(1, Σw)` 的拒绝采样。
+--- 因此**等权池上 `weighted` 与 `int` 逐值相等**：`pick` 是本函数的特例
+--- （`list[rng:weighted(ones(#list))]`），不是另一个取数面。
+---
+--- 两轮遍历都用下标 `1..n`，不碰 `pairs` / `next`：池序 = 数组声明序，键序遍历
+--- 会让「同 seed 同产物」取决于虚拟机实现。`Σw == 1` 时 `int` 短路、**不取数**。
+function M.weighted(rng, weights)
+  if type(weights) ~= "table" or #weights < 1 then
+    M.fail(M.E.PARAM, "weighted 需要非空数组")
+  end
+  local n = #weights
+  local total = 0
+  for i = 1, n do
+    local weight = to_int(weights[i], "weights[" .. i .. "]")
+    if weight < 0 then
+      M.fail(M.E.PARAM, "weights[" .. i .. "] 必须 ≥ 0（权重是相对份数）")
+    end
+    total = total + weight
+    if total > SPAN32 then
+      M.fail(M.E.RANGE, "权重总和超过 2^32（int 的抽取面宽上限）")
+    end
+  end
+  if total < 1 then
+    M.fail(M.E.PARAM, "权重总和必须 > 0（全零权重没有可抽的项）")
+  end
+  local r = M.int(rng, 1, total)
+  local acc = 0
+  for i = 1, n do
+    acc = acc + (weights[i] | 0) -- 用整数面累加（入参可能是整值浮点）
+    if acc >= r then
+      return i
+    end
+  end
+  -- 不可达：total 是精确和且 r ∈ [1, total]，最后一次累加必 ≥ r
+  M.fail(M.E.PARAM, "weighted 的权重总和与累计不一致")
+end
+
 --- `rng.shuffle(rng, list)` → **新表**（Fisher–Yates，从后往前换）。
 ---
 --- 不原地改：调用方的表常常是 defs 里的参数表，原地洗牌会让「同 seed 同产物」
@@ -300,6 +342,10 @@ end
 
 RNG.pick = function(self, list)
   return M.pick(self, list)
+end
+
+RNG.weighted = function(self, weights)
+  return M.weighted(self, weights)
 end
 
 RNG.shuffle = function(self, list)
