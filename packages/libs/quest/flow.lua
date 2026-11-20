@@ -57,6 +57,10 @@ end
 -- ── 实例：读 / 写 (KV 形状见 store.lua 头注) ────────────────────────────────
 
 --- 读一个实例 → 表（不存在 = `nil`）。`giver` / `taker` 的 0 还原成 `nil`。
+---
+--- meta 的**名字表在实例上**（`quest.inst.<id>.m.names`），不向模板要：读面一旦
+--- 依赖模板，`get` / `advance` / `open_ids` 全部退化回 `O(步数)`——而契约 §5 把
+--- 「按 id 查找 / 更新」钉在 `O(1)`。多一枚键换 O(1) 是这笔账的解法。
 local function read_inst(h, id)
   local kind = S.get(h, S.inst_key(id, "type"))
   if kind == nil then
@@ -64,16 +68,10 @@ local function read_inst(h, id)
   end
   local giver = S.get(h, S.inst_key(id, "giver"))
   local taker = S.get(h, S.inst_key(id, "taker"))
-  local spec = T.read(h, kind)
   local meta = {}
-  if spec ~= nil then
-    for i = 1, #spec.meta_names do
-      local key = spec.meta_names[i]
-      local value = S.get(h, S.inst_key(id, "m." .. key))
-      if value ~= nil then
-        meta[key] = value
-      end
-    end
+  local names = S.split(S.get(h, S.inst_key(id, "m.names")))
+  for i = 1, #names do
+    meta[names[i]] = S.get(h, S.inst_key(id, "m." .. names[i]))
   end
   return {
     id = id,
@@ -97,9 +95,13 @@ end
 
 --- 逐键写 meta（只写调用方真的给了的键；`nil` 值等于缺键，不落盘）。
 local function write_meta(h, id, meta)
+  local names = {}
   for key, value in pairs(meta) do
     S.set(h, S.inst_key(id, "m." .. key), value)
+    names[#names + 1] = key
   end
+  S.sort(names)
+  S.set(h, S.inst_key(id, "m.names"), S.join(names))
 end
 
 --- 读实例并要求存在（`YGG-PKG-QUEST-ID`）。
@@ -202,14 +204,18 @@ function F.assign(h, id, giver, taker)
 end
 
 --- `advance(id)`：步下标恰好 +1；末步转 `done`。返回推进后的 `state`。
+---
+--- 只读**一个**标量（`quest.t.<n>.steps`）而不读整份模板：契约 §5 把 `advance`
+--- 钉在 `O(1)`，读整张步骤表会把它变成 `O(步数)`（模板越大越慢，正是「按 id 更新」
+--- 那条指标要挡的东西）。
 function F.advance(h, id)
   local inst = must_inst(h, id)
   local rule = rule_of(inst.state, "advance")
-  local spec = T.read(h, inst.type)
-  if spec == nil then
+  local count = S.get(h, S.type_key(inst.type, "steps"))
+  if count == nil then
     S.fail(S.E.TYPE, "任务 " .. tostring(id) .. " 的类型 " .. tostring(inst.type) .. " 未注册")
   end
-  if inst.step < #spec.steps then
+  if inst.step < count then
     inst.step = inst.step + 1
     S.set(h, S.inst_key(id, "step"), inst.step)
     h.emit(rule.event, tostring(id) .. "|" .. tostring(inst.step))
@@ -326,17 +332,15 @@ function F.keys(h)
   for i = 1, #ids do
     local id = ids[i]
     add(S.index_key(id))
-    local kind = S.get(h, S.inst_key(id, "type"))
     add(S.inst_key(id, "type"))
     add(S.inst_key(id, "step"))
     add(S.inst_key(id, "state"))
     add(S.inst_key(id, "giver"))
     add(S.inst_key(id, "taker"))
-    local spec = (kind ~= nil) and T.read(h, kind) or nil
-    if spec ~= nil then
-      for m = 1, #spec.meta_names do
-        add(S.inst_key(id, "m." .. spec.meta_names[m]))
-      end
+    add(S.inst_key(id, "m.names"))
+    local names = S.split(S.get(h, S.inst_key(id, "m.names")))
+    for m = 1, #names do
+      add(S.inst_key(id, "m." .. names[m]))
     end
   end
   S.sort(out)

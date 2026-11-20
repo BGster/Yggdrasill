@@ -48,9 +48,9 @@
     {
       "files": [
         {
-          "byteLength": 11776,
+          "byteLength": 12292,
           "path": "quest/flow.lua",
-          "sha256": "687b35b22a54e62c54af8200a90455b5f33309d6672c7ed962f6325256600c3c"
+          "sha256": "f2900c3ff68927e2422df100b3f6c59f93d480ac534daebd59a948e3d9df830b"
         },
         {
           "byteLength": 3967,
