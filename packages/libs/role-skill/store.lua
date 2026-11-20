@@ -48,11 +48,12 @@ function M.fail(code, detail)
   error(code .. ": " .. detail, 0)
 end
 
---- KV 键名（四个键全在这里，前缀 `role.` 由本契约 §2 声明，D10）。
+--- KV 键名（全在这里，前缀 `role.` 由本契约 §2 声明，D10）。
 M.KEY = {
   DEFS = "role.defs",
   SKILLS = "role.skills",
   INDEX = "role.index",
+  WINDOW = "role.window.",
 }
 
 --- 实体记录键：`role.actor.<id>`。
@@ -60,9 +61,25 @@ function M.actor_key(id)
   return "role.actor." .. tostring(id)
 end
 
+--- 近期流键：`role.window.<id>`（独立键族，契约 D12）。
+function M.window_key(id)
+  return M.KEY.WINDOW .. tostring(id)
+end
+
+--- 窗口 ring 的缺省容量（契约 §2 / §4 `window_cap`）。
+M.DEFAULT_WINDOW_CAP = 100
+
 local installed = nil
 
---- 装配：记 `{ host?, entity?, codec?, events? }`（不预读、不预写；契约 I8）。
+--- 装好的窗口容量；未指定 / 未安装 ⇒ 缺省值（纯读，不碰宿主面）。
+function M.window_cap()
+  if installed ~= nil and installed.window_cap ~= nil then
+    return installed.window_cap
+  end
+  return M.DEFAULT_WINDOW_CAP
+end
+
+--- 装配：记 `{ host?, entity?, codec?, events?, window_cap? }`（不预读、不预写；契约 I8）。
 ---
 --- `host` 与 `ygg` 两个键都收：批次里的四个包（entity / codec / quest / dialogue）
 --- 用 `host`，这条统一拼法不该因为一个包的契约草稿换个名字就分裂。
@@ -70,10 +87,18 @@ function M.install(deps)
   if deps ~= nil and type(deps) ~= "table" then
     M.fail(M.E.INSTALL, "install 只收 table 或 nil，得到 " .. type(deps))
   end
+  local cap = type(deps) == "table" and deps.window_cap or nil
+  if cap ~= nil then
+    if type(cap) ~= "number" or cap ~= (cap // 1) or cap < 1 then
+      M.fail(M.E.INSTALL, "window_cap 必须是正整数，得到 " .. tostring(cap))
+    end
+    cap = cap | 0
+  end
   installed = {
     host = type(deps) == "table" and (deps.host or deps.ygg) or nil,
     entity = type(deps) == "table" and deps.entity or nil,
     codec = type(deps) == "table" and deps.codec or nil,
+    window_cap = cap,
   }
   return M
 end

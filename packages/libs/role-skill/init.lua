@@ -14,6 +14,7 @@
 --   `pkg.role_skill.skills`  技能槽位（rank / charges / capacity）
 --   `pkg.role_skill.compose` `effective` 的合成规则（只读，从不写回）
 --   `pkg.role_skill.counters` 事件计数（订阅面 + 显式清零）
+--   `pkg.role_skill.window`  近期流的有界 ring（`window_push` / `window`）
 --
 -- # 沙箱纪律
 --
@@ -25,6 +26,7 @@ local actors = require("pkg.role_skill.actors")
 local skills = require("pkg.role_skill.skills")
 local compose = require("pkg.role_skill.compose")
 local counters = require("pkg.role_skill.counters")
+local window = require("pkg.role_skill.window")
 
 local M = { VERSION = "0.1.0" }
 
@@ -45,11 +47,15 @@ end
 --- KV 键名（全在这里的单源；契约 §2）。
 M.KEY = store.KEY
 
---- 装配：`{ host?, ygg?, entity?, codec?, events? }`。
+--- 窗口 ring 的容量（安装期解析；缺省 100）。契约 §4 那一行是单源，这里是副本。
+M.WINDOW_CAP = store.DEFAULT_WINDOW_CAP
+
+--- 装配：`{ host?, ygg?, entity?, codec?, events?, window_cap? }`。
 ---
 --- 只记 deps、装事件订阅面（`events` 非空时）；不预读定义、不写 KV（I8）。
 function M.install(deps)
   store.install(deps)
+  M.WINDOW_CAP = store.window_cap()
   if type(deps) == "table" and deps.events ~= nil then
     counters.subscribe(deps.events)
   end
@@ -134,6 +140,16 @@ end
 --- `role.set_capacity(id, name, cap)` → 生效后的容量（实例级上限，D13）。
 function M.set_capacity(id, name, cap)
   return skills.set_capacity(id, name, cap)
+end
+
+--- `role.window_push(id, label)` → 推入后的 ring 长度（近期流，I10）。
+function M.window_push(id, label)
+  return window.push(id, label)
+end
+
+--- `role.window(id, label, n)` → 最近 `n` 条里等于 `label` 的条数（纯读）。
+function M.window(id, label, n)
+  return window.count(id, label, n)
 end
 
 return M
