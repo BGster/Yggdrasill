@@ -59,16 +59,44 @@ function M.install(deps)
   return M
 end
 
---- 取本次调用的宿主句柄（`deps.host` 优先，其次 `ygg` 全局）。
-local function host()
+--- 取本次调用的宿主句柄；不存在时返回 nil（不报错）。
+---
+--- 拆成「取」与「要求」两半，是因为 `encode` / `decode` 的语义里**缺宿主不是错**：
+--- 没有原生面就走本包的 Lua 实现，产出字节相同（契约 §4.1 的下沉边界）。
+local function host_or_nil()
   local current = M.deps and M.deps.host or nil
   if current == nil then
     current = ygg
   end
+  return current
+end
+
+--- 取本次调用的宿主句柄（`deps.host` 优先，其次 `ygg` 全局）；缺了就报 `HOST`。
+local function host()
+  local current = host_or_nil()
   if current == nil then
     fail(E_HOST, "ygg 不可达：沙箱外调用需 `install({ host = ... })`")
   end
   return current
+end
+
+--- 原生加速面（可选；契约 §4.1）：无状态、两键齐备才算数，否则返回 nil。
+---
+--- 两键齐备才用，是为了让「半个面」退化成「没有面」——一个只有 `encode` 的实现
+--- 会让 `decode` 静默走另一条路，而两条路的字节相等正是本包唯一要保的性质。
+local function native_face()
+  local current = host_or_nil()
+  if current == nil then
+    return nil
+  end
+  local face = current.codec
+  if type(face) ~= "table" then
+    return nil
+  end
+  if type(face.encode) ~= "function" or type(face.decode) ~= "function" then
+    return nil
+  end
+  return face
 end
 
 --- `codec.sha256(bytes)`：纯 Lua SHA-256（64 位小写 hex）。
@@ -364,6 +392,18 @@ end
 --- 同一个值的两次 `encode` 必须**逐字节**相等（契约 I1）；这条不是「好看」，是
 --- 「同 seed 同产物」在序列化面的同一条纪律。
 function M.encode(value)
+  local face = native_face()
+  if face ~= nil then
+    local ok, text = pcall(face.encode, value)
+    if ok then
+      return text
+    end
+    -- `UNSUPPORTED`（值域拒绝 / 带元方法的表）⇒ 落到下面，用 Lua 路径产出规范
+    -- 字节与规范文案；其余错误是原生实现的内部失败，必须响（不能静默降级）。
+    if type(text) ~= "string" or not text:find("YGG-CODEC-UNSUPPORTED", 1, true) then
+      fail(E_HOST, "原生面内部失败：" .. tostring(text))
+    end
+  end
   local out = {}
   encode_into(value, out, 0, {}, "$")
   return join(out)
@@ -649,6 +689,16 @@ end
 function M.decode(text)
   if type(text) ~= "string" then
     fail(E_TYPE, "decode 只收字符串，得到 " .. type(text))
+  end
+  local face = native_face()
+  if face ~= nil then
+    local ok, value = pcall(face.decode, text)
+    if ok then
+      return value
+    end
+    if type(value) ~= "string" or not value:find("YGG-CODEC-UNSUPPORTED", 1, true) then
+      fail(E_HOST, "原生面内部失败：" .. tostring(value))
+    end
   end
   local length = #text
   local value, pos = parse_value(text, 1, length)
