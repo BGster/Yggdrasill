@@ -17,6 +17,7 @@ local spec = require("pkg.assetgen.spec")
 local encode = require("pkg.assetgen.encode")
 local texture_algos = require("pkg.assetgen.texture")
 local mesh_algos = require("pkg.assetgen.mesh")
+local sound_algos = require("pkg.assetgen.sound")
 local raster = require("pkg.assetgen.raster")
 
 local M = { VERSION = "0.1.0" }
@@ -237,6 +238,7 @@ function M.install(deps)
   end
   register("texture", texture_algos)
   register("mesh", mesh_algos)
+  register("sound", sound_algos)
   return M
 end
 
