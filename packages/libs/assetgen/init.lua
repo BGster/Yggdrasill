@@ -141,11 +141,11 @@ local function finish(kind, algo_name, product, seed, stream)
   return product
 end
 
-local function generate(kind, spec_table, seed, stream)
-  local name, params = spec.algo_of(kind, spec_table)
+local function generate(kind, spec_input, seed, stream)
+  local name, params = spec.algo_of(kind, spec_input)
   local algo = ALGOS[kind][name]
   if algo == nil then
-    fail(E.ALGO, "未注册的算法 " .. tostring(spec_table.algo))
+    fail(E.ALGO, "未注册的算法 " .. tostring(spec_input.algo))
   end
   local flow = stream
   if flow == nil then
@@ -154,22 +154,22 @@ local function generate(kind, spec_table, seed, stream)
   if type(flow) ~= "string" or flow == "" then
     fail(E.PARAM, "stream 必须是非空字符串，得到 " .. type(flow))
   end
-  return finish(kind, spec_table.algo, algo(params, FLOW.rng(seed, flow)), seed, flow)
+  return finish(kind, spec_input.algo, algo(params, FLOW.rng(seed, flow)), seed, flow)
 end
 
 --- `assetgen.texture(spec, seed, stream?)` → 纹理产物（纯）。
-function M.texture(spec_table, seed, stream)
-  return generate("texture", spec_table, seed, stream)
+function M.texture(spec_input, seed, stream)
+  return generate("texture", spec_input, seed, stream)
 end
 
 --- `assetgen.mesh(spec, seed, stream?)` → 几何产物（纯）。
-function M.mesh(spec_table, seed, stream)
-  return generate("mesh", spec_table, seed, stream)
+function M.mesh(spec_input, seed, stream)
+  return generate("mesh", spec_input, seed, stream)
 end
 
 --- `assetgen.sound(spec, seed, stream?)` → 音频产物（纯）。
-function M.sound(spec_table, seed, stream)
-  return generate("sound", spec_table, seed, stream)
+function M.sound(spec_input, seed, stream)
+  return generate("sound", spec_input, seed, stream)
 end
 
 --- `assetgen.encode(product, container?)` → 字节串（纯；容器表见契约 §4）。
