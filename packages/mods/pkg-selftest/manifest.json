@@ -2,7 +2,7 @@
   "entries": [
     {
       "byteLength": 26,
-      "id": "pkg:selftest/probe",
+      "id": "ygg:pkg-selftest/probe",
       "kind": "probe",
       "path": "data/probe.json",
       "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
@@ -83,9 +83,9 @@
     {
       "files": [
         {
-          "byteLength": 36361,
+          "byteLength": 38052,
           "path": "codec/init.lua",
-          "sha256": "b1882755fee9be6cc0f3641891655d27cfd357bb83b1c17d92ec2f9b5803d7be"
+          "sha256": "3dbcbc8db8878bf7bf52df1d1f7ffae639d91d953f54a84356f13ecb013473ee"
         },
         {
           "byteLength": 175,
@@ -138,9 +138,9 @@
     {
       "files": [
         {
-          "byteLength": 29297,
+          "byteLength": 30934,
           "path": "entity/init.lua",
-          "sha256": "0f29b9e14210dd64c7a1469b4590f7eda6d5a9029bba0ae9f120987b1355f84c"
+          "sha256": "b103cfeb4ff2305d0c5fd5b799a8e0db6a0ade200515b70c7b3424ef7f90a67d"
         },
         {
           "byteLength": 139,
@@ -223,9 +223,9 @@
     {
       "files": [
         {
-          "byteLength": 9870,
+          "byteLength": 9876,
           "path": "role-skill/actors.lua",
-          "sha256": "49f451416fe28e9ee4cab0a6db3aa418d00e7d6884f79d9cc7c8114b1704388f"
+          "sha256": "f60d0f93802f655d6b5e8cc25f091d98e44ba3036a743f486dbb073ddc6685c5"
         },
         {
           "byteLength": 3931,
@@ -248,9 +248,9 @@
           "sha256": "f3bc9859d7c126c7695052a7b4aca8aca1ba71122858b77690df643b8b888c1e"
         },
         {
-          "byteLength": 5416,
+          "byteLength": 5432,
           "path": "role-skill/skills.lua",
-          "sha256": "f6a1385fcef1eb55c5dd469abdb9abfe04540c14db28913dc719dc72085756fa"
+          "sha256": "7cb4564675e6b5a0cca97c1a4190b7910219eb006dc6a32206d3ab552adb9a5d"
         },
         {
           "byteLength": 5805,

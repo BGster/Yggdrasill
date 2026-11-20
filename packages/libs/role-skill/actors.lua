@@ -266,7 +266,7 @@ function M.grant(id, role_name)
   end
   record.role = role_name
   M.write_actor(id, record)
-  store.emit("role.granted", { id = id, role = role_name })
+  store.emit("role.granted", tostring(id) .. "|" .. role_name)
   return true
 end
 
@@ -281,7 +281,7 @@ function M.revoke(id, role_name)
   end
   record.role = nil
   M.write_actor(id, record)
-  store.emit("role.revoked", { id = id, role = role_name })
+  store.emit("role.revoked", tostring(id) .. "|" .. role_name)
   return true
 end
 

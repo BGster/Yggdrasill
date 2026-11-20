@@ -80,6 +80,23 @@
   - **冒烟不计数**：`tests/pkg-{quest,dialogue,role-skill,procgen,assetgen}-smoke.lua` 与 `tests/pkg-{procgen,assetgen}-digest-smoke.lua` 是 **file 级断言**（`error` ⇒ `file FAIL` ⇒ `ok=0`），只钉「包装载面 + 顶层纯度 + 导出面清单（+ 事件名集合、KV 前缀、摘要 / canon 行格式）」，不复述 API 函数表（那份真源在行为用例里）。不进 `cases passed=` 的理由：包用例的计数口径是「90 + 新增的 63」，载体冒烟计入就会让 153 变成 158。
   - **为什么每包都要一个 mod 侧冒烟**：`--filter` 对 mod 的 `tests/*.lua` 与包的 `test/*.lua` **同时**过滤，mod 侧筛完为空就「没有可执行的测试文件」直接 exit 1——`--filter pkg-procgen-digest` 这种只命中包内文件的过滤器尤其需要一个同名接应文件。
   - **`entries` 必须非空**：打包工具要求资源包至少一个数据条目（`crates/ygg-sandbox/examples/pack.rs`），所以夹具带一条只为满足该硬要求的探针条目（`data/probe.json`），随后 `manifest.json` 由 `cargo run -p ygg-sandbox --example pack -- packages/mods/pkg-selftest --packages packages/libs` 重算，`sh .pi/tools/manifest-verify.sh --mod packages/mods/pkg-selftest` 复核 `pkg_drift=0`。
+- **沙箱可装载面（r2 入册，包代码的硬边界）：** 包在裸 `Sandbox::new()` 里只拿得到**第一级**面，越级调用会在装载期或调用期 nil-index 崩，而 selftest（普通 Lua）看不出来。两级面把可用名字划清：
+
+  | 级 | 面 | 出处 | 谁可以用 |
+  | --- | --- | --- | --- |
+  | 第一级 | 16 个 base 纯计算函数（`assert` / `error` / `getmetatable` / `ipairs` / `next` / `pairs` / `pcall` / `rawequal` / `rawget` / `rawlen` / `select` / `setmetatable` / `tonumber` / `tostring` / `type` / `xpcall`）+ 字符串方法（经 `getmetatable("").__index`）+ 受控 `require` + `ygg` | `crates/ygg-sandbox/src/sandbox.rs` 的 `BASE_WHITELIST` | **包与 mod 都可以** |
+  | 第二级 | 15 个 `math` 成员（`abs` / `floor` / `ceil` / `sqrt` / `fmod` / `modf` / `tointeger` / `ult` / `min` / `max` / `random` / `huge` / `maxinteger` / `mininteger` / `type`）+ `ygg.ticks` | `crates/ygg-sandbox/src/inject.rs` 的 `install`（**只在 driver 路径**注入） | **只有 mod**；包不得依赖 |
+
+  `string` / `table` / `utf8` / `coroutine` / `math` / `os` / `io` / `package` 与 `dofile` / `loadfile` / `load` / `print` / `rawset` / `collectgarbage` 全为 `nil`（`sandbox.rs` 的 `whitelisted_environment_exposes_only_the_allow_list` 逐名断言）；`debug` 同理——globals 是 deny-by-default 的新表，不在白名单里就取不到。
+  包侧越级的症状与判据：① 阻断——按旧文献写 `table.insert` / `string.format`，或认为「包可以用 `math`」；② 症状——裸沙箱装载期 `attempt to index a nil value (global 'math')`，或 `table` 为 nil 的同类崩；③ 确认——`cargo test -p ygg-sandbox --test packages_sandbox` 三条用例。见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1。
+
+  两条门禁写死在这里（改任何包代码后必跑）：
+
+  ```sh
+  cargo test -p ygg-sandbox --test packages_sandbox                # 用例 ② 裸沙箱装载 / ③ 源码禁名列
+  cargo run -q --example selftest -p ygg-sandbox -- \
+    --mod packages/mods/pkg-selftest --packages packages/libs      # 用例 ① 的生产面（Lua 计数）
+  ```
 - **性能数字**：每包 §5 五个指标必须给数字口径与测量方法（同数据集 / 同机器 / 跑三次取中位）；P0 期填**目标值**，P2 首实现填实测值，偏差回写契约。
 - **不新增存储层**：实体持久化只有一条路——mod KV 命名空间 + codec。每个包的 KV 前缀在它自己的 §2「持久化位置」列声明，前缀单写者（对齐 `mod-package.md` 的 `mod.kv-prefix-owner`）。
 - **前向契约的清偿义务**：P0 期这些契约**没有代码消费者**，按 [../../wiki-governance.md](../../wiki-governance.md) 的判据它们是前向契约（Goal 反例 7 又硬性要求路径就是 `docs/design/packages/<name>.md`）。清偿动作写死在 P2：每包首实现时 `packages/libs/<name>/init.lua` 的头注释写 `docs/design/packages/<name>.md`，指针类语义自那一刻成立。**能力出口**：新能力落 `crates/ygg-*/` 还是 `packages/libs/<name>/`，按 `AGENTS.md` §1.7 判——本文件是能力的规格，不是工作流规则的第二副本。

@@ -29,6 +29,17 @@
 
 **索引是数组而不是集合（D2）。** `{ [id] = true }` 存成 JSON 会变成对象键，读回来所有整数键都是字符串（`"1" ~= 1`），成员判定随即失效；数组保留整数，写入时保持升序 ⇒ 字节稳定。**记录不可删**：KV 没有 delete、也没有遍历面（[../kernel/state-surface.md](../kernel/state-surface.md) §2.8.1 是同一事实），所以 `revoke` / `revoke_skill` 只清引用面，既不删记录也不从 `role.index` 摘除——`role.index` 因此是**只增**的。
 
+### 事件载荷（`ygg.emit` 只收标量，形状必须定形——D11）
+
+| 事件 | 载荷 | 说明 |
+| --- | --- | --- |
+| `role.granted` | `"<id>\|<role>"` | 授予后持有该角色（幂等：已持有不发） |
+| `role.revoked` | `"<id>\|<role>"` | 原本持有、现已撤销 |
+| `role.skill_gained` | `"<id>\|<skill>\|<rank>"` | 首次建立槽位；升级只改 `rank`、不发事件（I3） |
+| `role.skill_lost` | `"<id>\|<skill>"` | 槽位被清；记录本身保留 |
+
+`ygg.emit` 的载荷只收标量（`host_api.rs` 的 `value_from_lua`，与 [quest.md](quest.md) §2 同一事实），所以形状必须是确定的单行串——交一张表会在真内核里被硬拒成 `unsupported payload type: table`，而普通 Lua 的 mock 面吃表，掩蔽就一直测不出来。
+
 ## 3. 不变量
 
 - **I1 薄层**：角色与技能状态只存**引用**（`role` 名、`skills` 名）与**计数**（`rank` / `charges` / `counters`），不复制实体属性袋。
@@ -100,6 +111,7 @@
 - **用例清单（17 条）**：`kv-string-shape` / `grant-idempotent` / `revoke-absent-false` / `grant-unknown-role-errors` / `requires-tags-gate` / `skill-gain-once` / `charge-floor` / `recharge-cap` / `compose-no-writeback` / `compose-custom-order` / `effective-missing-attr-zero` / `counters-increment` / `counters-reset` / `static-no-clock` / `leak-100-rounds` / `perf-o1-structural` / `perf-load`。
 - **计数**：17 条计入 `cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-role-skill` 的 `cases passed=`。载体是 `packages/mods/pkg-selftest/`——生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远是 79/0，这是回归钉。
 - **冒烟不计数**：`tests/pkg-role-skill-smoke.lua` 是 **file 级**断言（`error` ⇒ `file FAIL` ⇒ `ok=0`），不进 `cases passed=`；它接住 `--filter` 的 mod 侧过滤，并钉装载面、导出面清单、事件名集合与 KV 前缀。
+- **真沙箱面不计入 `cases passed=`**：四个派生事件的**载荷形状**（`ygg.emit` 只收标量，D11）由 `cargo test -p ygg-sandbox --test packages_sandbox` 的用例 ① 钉住。它必须单独算：普通 Lua 的 mock `ygg.emit` 吃表，所以表载荷在 `cases passed=` 这一面**测不出来**（本包四处表载荷就是这么活到 r2 才被那个冒烟抓住的，[README.md](README.md) §5「沙箱可装载面」）。
 - **禁止宽松断言**：只断 `effective` 返回了数字、不断它等于基础值加各加成之和，视同没测 I2。
 
 ## 8. 设计依据

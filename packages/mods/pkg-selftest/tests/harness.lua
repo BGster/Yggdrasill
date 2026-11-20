@@ -5,7 +5,8 @@
 -- harness 只服务夹具自己的两条冒烟用例。
 --
 -- 与 `agent-seed` 的 harness 有刻意的三处不同：
---   1. 不注册任何 handler、不 mock 业务域（夹具没有业务域）；
+--   1. 不注册业务 handler、不 mock 业务域（夹具没有业务域）；只补一个**只够装配**
+--      的 `ygg` 替身（见文件末「最小 ygg 替身」）；
 --   2. 不读盘、不起子进程（`io.popen` / `os.getenv` 一概不用）——夹具要在任何
 --      沙箱外环境跑得动；
 --   3. 计数面与包自测**同一个** `__SELFTEST`（`examples/selftest` 的 `counters()`
@@ -36,4 +37,77 @@ function check(name, body)
     S.fail = S.fail + 1
     print("FAIL " .. name .. ": " .. tostring(detail))
   end
+end
+
+-- ── 最小 `ygg` 替身（普通 Lua 里的装配面）───────────────────────────────
+--
+-- `mod.lua` 在真沙箱里跑时 `ygg` 由完整宿主面提供（`crates/ygg-sandbox/src/host_api.rs`）；
+-- 普通 Lua 自检里没有它，所以这里补一个**只够装配**的替身：`on` 收 handler 进表（不派发）、
+-- `narrate` 收行进缓冲、`emit` 照 `value_from_lua` 的口径**只收标量**。
+--
+-- 第三条是有意的严格：普通 Lua 的 mock 若吃表，role-skill 那类「表载荷」缺陷在这一面
+-- 就永远测不出来（真内核报 `unsupported payload type: table`）。真值面仍然是
+-- `packages_sandbox.rs` 的用例 ①——这个替身只是在装载期给 `ygg.on` 一个落点。
+
+local __ygg_handlers = {}
+local __ygg_narrated = {}
+local __ygg_emitted = {}
+
+ygg = {
+  engine_version = "selftest",
+  on = function(name, handler)
+    assert(type(name) == "string" and #name > 0, "ygg.on 需要非空事件名")
+    assert(type(handler) == "function", "ygg.on 需要 handler 函数")
+    local bucket = __ygg_handlers[name]
+    if bucket == nil then
+      bucket = {}
+      __ygg_handlers[name] = bucket
+    end
+    bucket[#bucket + 1] = handler
+  end,
+  narrate = function(text)
+    __ygg_narrated[#__ygg_narrated + 1] = tostring(text)
+  end,
+  emit = function(name, payload)
+    local kind = type(payload)
+    assert(
+      kind ~= "table" and kind ~= "function",
+      "ygg.emit 的载荷只收标量（与 value_from_lua 同口径），得到 " .. kind
+    )
+    __ygg_emitted[#__ygg_emitted + 1] = { name = name, payload = payload }
+  end,
+}
+
+--- 已登记的事件名（升序；装载面断言用）。
+function ygg_event_names()
+  local names = {}
+  for name in pairs(__ygg_handlers) do
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return names
+end
+
+--- 已登记 handler 的条数（`on` 能被调几次的观测面）。
+function ygg_handler_count(name)
+  local bucket = __ygg_handlers[name]
+  return bucket == nil and 0 or #bucket
+end
+
+--- 已收集的叙事行副本。
+function ygg_narrated_lines()
+  local out = {}
+  for i = 1, #__ygg_narrated do
+    out[i] = __ygg_narrated[i]
+  end
+  return out
+end
+
+--- 已收集的派生事件副本。
+function ygg_emitted_events()
+  local out = {}
+  for i = 1, #__ygg_emitted do
+    out[i] = { name = __ygg_emitted[i].name, payload = __ygg_emitted[i].payload }
+  end
+  return out
 end

@@ -5,13 +5,17 @@
 > **定位**：ygg.* 全 API 面签名、返回契约与副作用类别（含接口契约章题与章内导航）。
 > **replaces**：DESIGN §3 章题 + §3.1（L383–402）（搬运基线 `3a2536f`）
 > **上游**：[docs/README.md](../../README.md) · **相关**：[mod-package.md](../mod/mod-package.md) · [action-faces.md](../mod/action-faces.md)
-> **搬运**：以下正文自 DESIGN.md L383–L384 + DESIGN.md L385–L402 逐字迁移，不重写语义。
+> **搬运**：以下正文自 DESIGN.md L383–L384 + DESIGN.md L385–L402 逐字迁移，不重写语义。**唯一例外**：§3.1 的首句按实测更正（见该节末尾的「这一句是更正，不是搬运」）。
 
 ## 3. 接口契约（规范线协议与 API 面）
 
 ### 3.1 Lua 沙箱宿主 API 契约（`ygg.*`）
 
-Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、`utf8`、`coroutine`）外加冻结的 `ygg` 全局表：
+Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-default 的全新表，只有 `BASE_WHITELIST` 的 16 个 base 纯计算函数（`assert` / `error` / `getmetatable` / `ipairs` / `next` / `pairs` / `pcall` / `rawequal` / `rawget` / `rawlen` / `select` / `setmetatable` / `tonumber` / `tostring` / `type` / `xpcall`）、字符串方法（经 `getmetatable("").__index`：`("ab"):upper()` 可达而 `string` 全局为 `nil`）、受控 `require` 与冻结的 `ygg` 全局表。`string` / `table` / `utf8` / `coroutine` / `math` / `os` / `io` / `package` 与 `dofile` / `loadfile` / `load` / `print` / `rawset` / `collectgarbage` 全为 `nil`（`crates/ygg-sandbox/src/sandbox.rs` 的 `whitelisted_environment_exposes_only_the_allow_list` 逐名断言）；`debug` 同理——不在白名单里就取不到。
+
+**两级可用面（包与 mod 的分界）**：第一级 = 上面这张裸沙箱面，`Sandbox::new()` 就有；第二级 = **只有 driver 路径**额外注入的 `inject::install`（`crates/ygg-sandbox/src/inject.rs`）——15 个 `math` 成员（`abs` / `floor` / `ceil` / `sqrt` / `fmod` / `modf` / `tointeger` / `ult` / `min` / `max` / `random` / `huge` / `maxinteger` / `mininteger` / `type`）与 `ygg.ticks`。**包只许用第一级**（越级即裸沙箱装载期炸），**mod 两级都可用**。判据：① 阻断——按旧文献写 `table.insert` / `string.format`，或认为「包可以用 `math`」；② 症状——裸沙箱装载期 `attempt to index a nil value (global 'math')`，或 `table` 为 nil 的同类崩；③ 确认——`cargo test -p ygg-sandbox --test packages_sandbox` 三条用例（①driver / ②裸沙箱 / ③源码禁名列）。
+
+> **这一句是更正，不是搬运**：本节其余正文自 DESIGN 逐字迁移，但原文「只暴露安全标准库（`base`、`table`、`string`、`math`、`utf8`、`coroutine`）」与实测**三个方向都不符**：`table` / `utf8` / `coroutine` / `string` 全局缺席（只余字符串方法），`math` 只在 driver 注入之后在场，`base` 也只是 16 个纯计算子集。按旧句写会在装载期或调用期 nil-index 崩，而 selftest（普通 Lua）看不出来——所以包侧另有一道静态门禁（`packages_sandbox.rs` 用例 ③），边界表归 [../packages/README.md](../packages/README.md) §5。
 
 | API 面 | 签名与返回契约 | 副作用类别（`YGG-MOD-EFFECT`） |
 | --- | --- | --- |
