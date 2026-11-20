@@ -13,6 +13,8 @@
 -- 不可达（`crates/ygg-sandbox/src/sandbox.rs`）。本包因此不用它们。
 
 local rng = require("pkg.procgen.rng")
+local registry = require("pkg.procgen.registry")
+local digest = require("pkg.procgen.digest")
 
 local M = { VERSION = "0.1.0" }
 
@@ -20,6 +22,35 @@ local M = { VERSION = "0.1.0" }
 M.ERRORS = {}
 for key, code in pairs(rng.E) do
   M.ERRORS[key] = code
+end
+
+--- 装配：`{ codec?, defs? }`（`host` 本包不需要——不碰宿主面）。
+---
+--- 幂等：重复装不会把 defs 拌两遍（同 spec 幂等），不会把算法注两份（同名覆盖）。
+function M.install(deps)
+  registry.install(deps)
+  digest.install(deps)
+  return M
+end
+
+--- `procgen.define(name, spec)` → `true`（异 spec 重定义报 `-DEF`）。
+function M.define(name, spec)
+  return registry.define(name, spec)
+end
+
+--- `procgen.algo(name, fn)` → `true`（注册 `fn(params, rng)`）。
+function M.algo(name, fn)
+  return registry.algo(name, fn)
+end
+
+--- `procgen.run(name, seed, stream?)` → 产物表（纯：不写 KV、不发事件）。
+function M.run(name, seed, stream)
+  return registry.run(name, seed, stream)
+end
+
+--- `procgen.hash(value)` → 16 位十六进制摘要（变更检测口径，不是加密）。
+function M.hash(value)
+  return digest.hash(value)
 end
 
 --- `procgen.rng(seed, stream?, state?)` → 命名流句柄（I2：一条流一份状态）。
