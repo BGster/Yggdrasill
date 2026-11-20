@@ -374,15 +374,22 @@ fn install_assets(lua: &Lua, mod_dir: &Path, anchor: &Path) -> Result<usize, Str
         .map_err(|e| e.to_string())?;
 
     // docs/context/scenes.json：reference / scene / reqStage 的 id 解析与读签模拟都要它。
+    // 但它是**本仓自有的 doc 索引**：外部仓（装载别人的 Mod，如 PokeRogue-YGG）没有这份
+    // 文件是常态，而唯一消费方是 agent-seed 的读签用例（外部仓不跑它）⇒ 有则注入、无则跳过。
+    // 「没有」≠「坏了」：文件存在却读不动 / 不是合法 JSON 仍然硬失败（那是真损坏）。
     let scenes_path = repo_root.join("docs/context/scenes.json");
-    let scenes_text = std::fs::read_to_string(&scenes_path)
-        .map_err(|err| format!("read {}: {err}", scenes_path.display()))?;
-    let scenes: Json =
-        serde_json::from_str(&scenes_text).map_err(|err| format!("scenes.json: {err}"))?;
-    let scenes_lua = json_to_lua(lua, &scenes).map_err(|e| e.to_string())?;
-    lua.globals()
-        .set("__SCENES", scenes_lua)
-        .map_err(|e| e.to_string())?;
+    if scenes_path.is_file() {
+        let scenes_text = std::fs::read_to_string(&scenes_path)
+            .map_err(|err| format!("read {}: {err}", scenes_path.display()))?;
+        let scenes: Json =
+            serde_json::from_str(&scenes_text).map_err(|err| format!("scenes.json: {err}"))?;
+        let scenes_lua = json_to_lua(lua, &scenes).map_err(|e| e.to_string())?;
+        lua.globals()
+            .set("__SCENES", scenes_lua)
+            .map_err(|e| e.to_string())?;
+    } else {
+        println!("scenes: 跳过（{} 不存在）", scenes_path.display());
+    }
 
     // pack.json 本身也注入：结构类断言（模块表、entries、tools 声明）要读它。
     let pack_lua = json_to_lua(lua, &pack).map_err(|e| e.to_string())?;
