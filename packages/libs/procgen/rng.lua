@@ -266,7 +266,9 @@ function M.weighted(rng, weights)
   local total = 0
   for i = 1, n do
     -- 标签用**常量**而不用 `"weights[" .. i .. "]"`：后者每次调用要拼 20 个字符串，
-    -- 实测把 1k 次抽样从 1.11 ms 推到 2.19 ms（2×）。失败路径的下标在下面单独拼。
+    -- 实测把 1k 次抽样从 1.11 ms 推到 2.19 ms（2×）。代价是 `to_int` 的失败信息
+    -- 里没有下标（非整值/非数字两类）；负数分支的报错仍然带下标（那是错误路径，
+    -- 拼字符串不花正常路径的钱）。
     local weight = to_int(weights[i], "weights[i]")
     if weight < 0 then
       M.fail(M.E.PARAM, "weights[" .. i .. "] 必须 ≥ 0（权重是相对份数）")
