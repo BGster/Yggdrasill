@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value as Json};
 use ygg_store::mounts::{
     codes, MountError, MountKind, MountMode, MountStore, MOUNT_FILE_MAX_BYTES,
-    MOUNT_LIST_MAX_ENTRIES,
+    MOUNT_LIST_MAX_ENTRIES, MOUNT_RUN_WRITE_BUDGET,
 };
 
 /// 本用例独占的临时目录。
@@ -394,4 +394,110 @@ fn list_shape_is_dense_sorted_and_capped() {
             assert!(err.to_string().contains("16384"), "{err}");
         }
     }
+}
+
+// ============================================================================
+// §性能数字（绝对数字，不做 before/after：本需求不提出任何优化）
+// ============================================================================
+
+/// 三个样本的中位数。
+fn median3(mut samples: [f64; 3]) -> f64 {
+    samples.sort_by(|a, b| a.partial_cmp(b).expect("非 NaN"));
+    samples[1]
+}
+
+/// 一次调用的毫秒数。
+fn time_ms<F: FnMut()>(mut body: F) -> f64 {
+    let started = std::time::Instant::now();
+    body();
+    started.elapsed().as_secs_f64() * 1000.0
+}
+
+/// 三次取样取中位数（各自跑三次 = 每个操作 3 个样本）。
+fn median_ms<F: FnMut()>(mut body: F) -> f64 {
+    median3([
+        time_ms(&mut body),
+        time_ms(&mut body),
+        time_ms(&mut body),
+    ])
+}
+
+/// 故障探测阈值：任何单操作超过它即判定「有隐藏的树扫描」并回炉。
+/// **不是性能目标**——本需求未做优化，不主张任何提速。
+const PERF_FAULT_MS: f64 = 500.0;
+
+#[test]
+fn mount_io_budget_report() {
+    let (run, mod_dir) = attach_env("perf");
+    let host = mod_dir.join("biz");
+    fs::create_dir_all(&host).expect("create host dir");
+    let pack = json!({ "schemaVersion": 1, "mounts": [
+        { "name": "work", "dir": "biz", "mode": "rw" },
+        { "name": "out", "mode": "rw" },
+    ] });
+
+    // ① attach（1 目录挂载 + 1 私有）：三态幂等 ⇒ 后两次是「已存在且一致」路径。
+    let attach_ms = median_ms(|| {
+        MountStore::attach(&run, &pack, &mod_dir).expect("attach");
+    });
+    let mut store = attach(&run, &mod_dir, json!([
+        { "name": "work", "dir": "biz", "mode": "rw" },
+        { "name": "out", "mode": "rw" },
+    ]));
+
+    // ② write 4 MiB（每次满帽写；3 次 = 12 MiB，远在 64 MiB 预算之内）。
+    let payload = vec![b'x'; MOUNT_FILE_MAX_BYTES];
+    let write_ms = median_ms(|| {
+        store
+            .write("mounts/work/payload.bin", &payload)
+            .expect("write 4 MiB");
+    });
+
+    // ③ read 4 MiB。
+    let read_ms = median_ms(|| {
+        let hit = store.read("mounts/work/payload.bin").expect("read 4 MiB");
+        assert_eq!(hit.expect("必须命中").len(), MOUNT_FILE_MAX_BYTES);
+    });
+
+    // ④ stat（对 4 MiB 文件算摘要，等于读一遍）。
+    let stat_ms = median_ms(|| {
+        let stat = store.stat("mounts/work/payload.bin").expect("stat");
+        assert_eq!(stat.bytes, MOUNT_FILE_MAX_BYTES);
+    });
+
+    // ⑤ list：1k 与 4k 条目（各建一次目录，各列三次）。
+    for (count, label) in [(1_000usize, "1k"), (4_000usize, "4k")] {
+        let dir = format!("entries-{label}");
+        fs::create_dir_all(host.join(&dir)).expect("mkdir entries");
+        for index in 0..count {
+            fs::write(host.join(&dir).join(format!("f{index:05}.txt")), b"").expect("write entry");
+        }
+        let path = format!("mounts/work/{dir}");
+        let list_ms = median_ms(|| {
+            let rows = store.list(&path).expect("list");
+            assert_eq!(rows.len(), count);
+        });
+        println!("perf list_{label}_ms={list_ms:.3} (n={count})");
+        assert!(
+            list_ms < PERF_FAULT_MS,
+            "list {label} 耗时 {list_ms:.3} ms 超过故障探测阈值 {PERF_FAULT_MS} ms——存在隐藏的树扫描"
+        );
+    }
+
+    println!("perf attach_ms={attach_ms:.3} (1 dir mount + 1 private)");
+    println!("perf write_4mib_ms={write_ms:.3} ({} bytes)", MOUNT_FILE_MAX_BYTES);
+    println!("perf read_4mib_ms={read_ms:.3} ({} bytes)", MOUNT_FILE_MAX_BYTES);
+    println!("perf stat_4mib_ms={stat_ms:.3} (sha256 over {} bytes)", MOUNT_FILE_MAX_BYTES);
+    for (label, value) in [
+        ("attach", attach_ms),
+        ("write_4mib", write_ms),
+        ("read_4mib", read_ms),
+        ("stat_4mib", stat_ms),
+    ] {
+        assert!(
+            value < PERF_FAULT_MS,
+            "{label} 耗时 {value:.3} ms 超过故障探测阈值 {PERF_FAULT_MS} ms"
+        );
+    }
+    assert_eq!(store.budget_left(), MOUNT_RUN_WRITE_BUDGET - 3 * MOUNT_FILE_MAX_BYTES as u64);
 }

@@ -103,3 +103,16 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 
 **明确不做**：目录递归、通配、rename / delete、mtime / 权限面、流式大文件、并行 I/O、挂载点内的 mkdir（父目录不存在即拒）。
 
+**性能（绝对数字；本需求不做优化，因此不主张任何提速）**——recipe：`cargo test -p ygg-store --release --test mounts -- --nocapture mount_io_budget_report`（macOS / APFS，各取三次中位数）：
+
+| 操作 | 中位数 | 口径 |
+| --- | --- | --- |
+| attach（1 目录挂载 + 1 私有） | 0.067 ms | 「已存在且一致 → 静默通过」路径；每条声明 ≤3 次 syscall |
+| write 4 MiB | 20.190 ms | 含一次真实写 + 一行审计 append |
+| read 4 MiB | 0.327 ms | canonicalize 父 + symlink_metadata + 一次 read |
+| stat 4 MiB | 15.991 ms | 摘要要读全文件（与 `artifacts/` 面同口径） |
+| list 1 000 条目 | 1.047 ms | 不递归、不算摘要 |
+| list 4 000 条目 | 4.745 ms | 同上；>16384 条目 → `YGG-FS-CAP` |
+
+用例只设**故障探测阈值**（任一单操作 > 500 ms 即判定「有隐藏的树扫描」并回炉），**不设性能目标**。
+
