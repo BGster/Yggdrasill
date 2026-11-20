@@ -53,6 +53,7 @@
 //! [`PackageError`] 一律在**进入内核之前**失败（零副作用），文案风格对齐
 //! [`crate::pack::PackError`]：英文小写、点名 JSON 位置、直接说该写什么。
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
@@ -490,6 +491,96 @@ pub fn resolve_root(mod_dir: &Path, explicit: Option<&Path>) -> Result<PathBuf, 
     Err(PackageError::RootUnreadable {
         root: candidate.display().to_string(),
     })
+}
+
+/// 已解析的包文件（相对**包根**的路径 + 它作为模块的名字）。
+///
+/// `pkg.json` 也是包文件（它决定解析结果，必须内容寻址），但它不是模块——
+/// `module` 为 `None` 就是那条分界，不需要第二个类型。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageFile {
+    rel: String,
+    module: Option<String>,
+}
+
+impl PackageFile {
+    /// 相对包根的路径（包 id 打头，如 `fixture/init.lua`）。
+    pub fn rel(&self) -> &str {
+        &self.rel
+    }
+
+    /// 作为模块注册的名字（`pkg.fixture` / `pkg.fixture.words`）；`pkg.json` 为 `None`。
+    pub fn module(&self) -> Option<&str> {
+        self.module.as_deref()
+    }
+}
+
+/// 一个包的解析结果：自描述 + 纳入闭包的文件（按 `rel` 升序）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedPackage {
+    manifest: PackageManifest,
+    files: Vec<PackageFile>,
+}
+
+impl ResolvedPackage {
+    pub fn id(&self) -> &str {
+        self.manifest.id()
+    }
+
+    pub fn version(&self) -> &str {
+        self.manifest.version()
+    }
+
+    pub fn deps(&self) -> &[PackageRef] {
+        self.manifest.deps()
+    }
+
+    pub fn contract(&self) -> &str {
+        self.manifest.contract()
+    }
+
+    /// 纳入闭包的文件（`pkg.json` + 非 `test/**` 的 `*.lua`，按 `rel` 升序）。
+    pub fn files(&self) -> &[PackageFile] {
+        &self.files
+    }
+}
+
+/// 整个闭包的解析结果（包按 id 升序：确定性，不依赖目录枚举序）。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResolvedPackages {
+    packages: Vec<ResolvedPackage>,
+}
+
+impl ResolvedPackages {
+    /// 声明的包（id 升序）。
+    pub fn packages(&self) -> &[ResolvedPackage] {
+        &self.packages
+    }
+
+    pub fn len(&self) -> usize {
+        self.packages.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.packages.is_empty()
+    }
+
+    /// 全部模块文件：`(模块名, 相对包根的路径)`（名字序）。
+    ///
+    /// 这份表就是 D3 的 `name → path` 覆盖表：装载器的 chunk 名从它取（未命中
+    /// 则回落 `path_of`，即现有 `src.*` 行为逐字节不变），selftest 的
+    /// `package.searchers` 也从它生成——**一份解析数据，两个宿主面**。
+    pub fn chunk_paths(&self) -> BTreeMap<String, String> {
+        let mut map = BTreeMap::new();
+        for package in &self.packages {
+            for file in &package.files {
+                if let Some(module) = file.module() {
+                    map.insert(module.to_owned(), file.rel().to_owned());
+                }
+            }
+        }
+        map
+    }
 }
 
 #[cfg(test)]
