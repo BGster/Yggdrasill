@@ -619,3 +619,36 @@ run("pkg.entity.top-level-pure", function()
   is_true(ok, "require 触发了 ygg 访问：" .. tostring(err))
   is_nil(touched, "模块顶层访问了 ygg." .. tostring(touched))
 end)
+
+run("pkg.entity.no-time-keys", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("creature", basic_spec())
+
+  -- 把**全部**写路径跑一遍：schema 注册、spawn、set、tag/untag、destroy。
+  local a = entity.spawn("creature", { hp = 1 }, { "enemy" })
+  entity.set(a, "hp", 2)
+  entity.tag(a, "boss")
+  entity.untag(a, "enemy")
+  local b = entity.spawn("creature", { target = a })
+  entity.destroy(a)
+  entity.destroy(b)
+
+  -- I8 / D6：实体不得带时间戳字段。沙箱里 `ygg.ticks()` 恒 0、事件 seq 不注入
+  -- Lua，所以时间既拿不到也不该被发明；先后由宿主派发序保证。
+  local offenders = {}
+  for key in pairs(world.kv) do
+    if key:find("%.ts$") or key:find("%.time$") or key:find("%d%d%d%d%-%d%d%-%d%d") then
+      offenders[#offenders + 1] = key
+    end
+  end
+  eq(#offenders, 0, "KV 键里不得有时间戳形状：" .. table.concat(offenders, ", "))
+
+  -- 事件载荷同样不得携带时间（载荷是标量，时间只能以数字/字符串形式混进去）。
+  for i = 1, #world.events do
+    local payload = world.events[i].payload
+    if type(payload) == "string" then
+      eq(payload:find("%d%d%d%d%-%d%d%-%d%d") == nil, true, "事件载荷不得带日期")
+    end
+  end
+end)
