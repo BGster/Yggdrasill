@@ -575,6 +575,112 @@ mod tests {
         }
     }
 
+    // ── 遍历器与 encode（需要真 Lua 状态）──────────────────────────────────
+
+    fn encode_of(lua: &Lua, chunk: &str) -> Result<Vec<u8>, CodecFaceError> {
+        let value: mlua::Value = lua.load(chunk).eval().expect("chunk 必须能求值");
+        encode(&value)
+    }
+
+    fn encode_text(lua: &Lua, chunk: &str) -> String {
+        let bytes = encode_of(lua, chunk).expect("合法值必须编码成功");
+        String::from_utf8(bytes).expect("本组用例输出都是 ASCII/UTF-8")
+    }
+
+    #[test]
+    fn arrays_and_objects_emit_canonical_bytes() {
+        let lua = Lua::new();
+        assert_eq!(encode_text(&lua, "return {1, 2, 3}"), "[1,2,3]");
+        // 空表是 object 不是 array：Lua 侧 `table_kind` 在无数组证据时给 object
+        assert_eq!(encode_text(&lua, "return {}"), "{}");
+        // 键序 = 字节序：两种插入序必须同一份字节（契约 I1）
+        assert_eq!(
+            encode_text(&lua, "return {i = 1, f = 1.5}"),
+            encode_text(&lua, "return {f = 1.5, i = 1}")
+        );
+        assert_eq!(encode_text(&lua, "return {i = 1, f = 1.5}"), "{\"f\":1.5,\"i\":1}");
+        // 整数与浮点分开写（R2）
+        assert_eq!(encode_text(&lua, "return {1, 1.0}"), "[1,1.0]");
+        // 嵌套 + 空对象
+        assert_eq!(
+            encode_text(&lua, "return {z = {b = true, a = false}, a = {}}"),
+            "{\"a\":{},\"z\":{\"a\":false,\"b\":true}}"
+        );
+    }
+
+    #[test]
+    fn scalars_at_top_level_encode() {
+        let lua = Lua::new();
+        assert_eq!(encode_text(&lua, "return 1"), "1");
+        assert_eq!(encode_text(&lua, "return 1.0"), "1.0");
+        assert_eq!(encode_text(&lua, "return -0.0"), "0.0");
+        assert_eq!(encode_text(&lua, "return 'x'"), "\"x\"");
+        assert_eq!(encode_text(&lua, "return true"), "true");
+    }
+
+    #[test]
+    fn value_domain_rejections_are_unsupported() {
+        let lua = Lua::new();
+        let cases = [
+            "return nil",
+            "return {1, nil, 3}",   // 洞
+            "local t = {1}; t[3] = 2; return t", // 洞（最大下标 3，条目 2）
+            "return {1, a = 2}",    // 数组与字符串键混用
+            "return {[1.5] = 1}",   // 非整数键
+            "return {[true] = 1}",  // 布尔键
+            "return {f = function() end}",
+            "return 0/0",           // NaN
+            "return 1/0",           // +inf
+            "local t = {}; t.self = t; return t", // 自环
+        ];
+        for chunk in cases {
+            let error = encode_of(&lua, chunk).expect_err(chunk);
+            assert_eq!(error.code(), CODEC_UNSUPPORTED, "chunk 应为值域拒绝：{chunk}");
+        }
+    }
+
+    #[test]
+    fn depth_limit_is_sixty_four() {
+        let lua = Lua::new();
+        let ok = encode_of(
+            &lua,
+            "local t = {}; local head = t; for _ = 1, 64 do local n = {}; t[1] = n; t = n end; return head",
+        );
+        assert!(ok.is_ok(), "64 层必须可编码");
+        let too_deep = encode_of(
+            &lua,
+            "local t = {}; local head = t; for _ = 1, 65 do local n = {}; t[1] = n; t = n end; return head",
+        );
+        assert_eq!(
+            too_deep.expect_err("65 层必须被拒").code(),
+            CODEC_UNSUPPORTED
+        );
+    }
+
+    #[test]
+    fn tables_with_metatables_fall_back_to_the_lua_path() {
+        let lua = Lua::new();
+        for chunk in [
+            "return setmetatable({1}, {})",
+            "return setmetatable({a = 1}, {__index = function() return 9 end})",
+            "return setmetatable({}, {__pairs = function() return function() return nil end end})",
+            "return {nested = setmetatable({}, {__index = function() end})}",
+        ] {
+            let error = encode_of(&lua, chunk).expect_err(chunk);
+            assert_eq!(error.code(), CODEC_UNSUPPORTED, "元表表必须整值回退：{chunk}");
+        }
+    }
+
+    #[test]
+    fn non_utf8_bytes_pass_through_unchanged() {
+        let lua = Lua::new();
+        let bytes = encode_of(&lua, "return string.char(0x80, 0x9f, 0xff)").expect("字节串可编码");
+        assert_eq!(bytes, b"\"\x80\x9f\xff\"");
+        // 控制字符走 \u00xx，0x7f  тоже
+        let control = encode_of(&lua, "return string.char(0, 1, 0x1f, 0x7f)").expect("控制字符可编码");
+        assert_eq!(control, b"\"\\u0000\\u0001\\u001f\\u007f\"");
+    }
+
     #[test]
     fn format_g_follows_the_c_printf_style_rule() {
         // 形态选择的三条边界（C `%g`：P > X ≥ -4 走定点，否则指数）
