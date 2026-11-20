@@ -14,7 +14,9 @@
 
 local entity = require("pkg.entity")
 local codec = require("pkg.codec")
+local quest = require("pkg.quest")
 
--- 装配：两个包的 `install` 都只记 deps（不预读、不预写，契约 I7 / I8）。
+-- 装配：三个包的 `install` 都只记 deps（不预读、不预写，契约 I7 / I8）。
 entity.install()
 codec.install()
+quest.install()
