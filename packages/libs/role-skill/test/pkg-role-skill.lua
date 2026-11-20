@@ -748,6 +748,173 @@ run("pkg.role-skill.capacity-recharge-cap", function()
   eq(role2.skill_state(1, "pp").capacity, nil, "对照世界没有 capacity")
 end)
 
+-- ── 用例 22：窗口推入与计数（含 n=0、无记录、没推过的标签）────────────────────
+
+run("pkg.role-skill.window-push-read", function()
+  local world = new_world()
+  local role = fresh(world)
+
+  eq(role.window(1, "a", 5), 0, "无记录 ⇒ 0")
+  eq(role.window_push(1, "a"), 1, "push 返回推入后的 ring 长度")
+  role.window_push(1, "b")
+  role.window_push(1, "a")
+  role.window_push(1, "a")
+  eq(role.window_push(1, "b"), 5, "五条都在界内")
+  -- ring = a b a a b
+  eq(role.window(1, "a", 5), 3, "最近 5 条里 a 出现 3 次")
+  eq(role.window(1, "b", 5), 2, "b 出现 2 次")
+  eq(role.window(1, "c", 5), 0, "没推过的标签 ⇒ 0")
+  eq(role.window(1, "a", 0), 0, "n=0 ⇒ 0")
+  eq(role.window(1, "a", 3), 2, "只看最近 3 条（a a b）")
+  eq(role.window(1, "a", 2), 1, "最近 2 条是 a b")
+  eq(role.window(1, "b", 1), 1, "最近 1 条是 b")
+  eq(role.window(2, "a", 5), 0, "另一个 actor 的流是空的")
+  is_true(type(world.kv["role.window.1"]) == "string", "窗口载荷是 codec 字符串")
+end)
+
+-- ── 用例 23：窗口回绕（挤掉最旧、长度恒为 cap、载荷体积）──────────────────────
+
+run("pkg.role-skill.window-ring-wrap", function()
+  local world = new_world()
+  local role = fresh(world)
+  local cap = role.WINDOW_CAP
+  eq(cap, 100, "缺省容量 100")
+
+  eq(role.window_push(1, "spell.z"), 1, "第一条")
+  for _ = 2, cap do
+    role.window_push(1, "spell.a")
+  end
+  eq(role.window(1, "spell.z", cap), 1, "满载时最旧的 z 还在")
+
+  eq(role.window_push(1, "spell.a"), cap, "第 cap+1 条：长度恒为 cap")
+  eq(role.window(1, "spell.z", cap), 0, "最旧的 z 被挤掉")
+  eq(role.window(1, "spell.a", cap), cap, "回绕后整条 ring 都是 a")
+
+  local raw = world.kv["role.window.1"]
+  is_true(#raw <= 1024, "100 条载荷 ≤ 1 KiB，实得 " .. #raw .. " B")
+end)
+
+-- ── 用例 24：窗口的 n 边界（n > cap 报错、n 超史合法、参数校验）────────────────
+
+run("pkg.role-skill.window-n-over-cap", function()
+  local world = new_world()
+  local role = fresh(world)
+  local cap = role.WINDOW_CAP
+  role.window_push(1, "a")
+
+  expect_error(role.ERRORS.DEF, function()
+    role.window(1, "a", cap + 1)
+  end, "n > cap ⇒ -DEF（不静默截断）")
+  eq(role.window(1, "a", cap), 1, "n == cap 通过：超史但 ≤ cap ⇒ 统计现有条目")
+  expect_error(role.ERRORS.DEF, function()
+    role.window(1, "a", -1)
+  end, "负 n ⇒ -DEF")
+  expect_error(role.ERRORS.DEF, function()
+    role.window(1, "a", 2.5)
+  end, "小数 n ⇒ -DEF")
+  expect_error(role.ERRORS.DEF, function()
+    role.window(1, "a", "3")
+  end, "字符串 n ⇒ -DEF")
+  expect_error(role.ERRORS.DEF, function()
+    role.window(1, "", 3)
+  end, "空标签 ⇒ -DEF")
+  expect_error(role.ERRORS.DEF, function()
+    role.window_push(1, "")
+  end, "push 空标签 ⇒ -DEF")
+  expect_error(role.ERRORS.DEF, function()
+    role.window_push(1, 7)
+  end, "push 非字符串 ⇒ -DEF")
+
+  -- 安装期容量：小容量也能回绕；n 的判据跟着走
+  local world2 = new_world()
+  local role2 = fresh(world2, nil, 3)
+  eq(role2.WINDOW_CAP, 3, "install({ window_cap = 3 }) 生效")
+  role2.window_push(1, "a")
+  role2.window_push(1, "a")
+  role2.window_push(1, "a")
+  role2.window_push(1, "b")
+  eq(role2.window_push(1, "b"), 3, "cap=3 回绕后长度恒为 3")
+  eq(role2.window(1, "b", 3), 2, "最近 3 条 = a b b")
+  expect_error(role2.ERRORS.DEF, function()
+    role2.window(1, "a", 4)
+  end, "n=4 > cap=3 ⇒ -DEF")
+  expect_error(role2.ERRORS.INSTALL, function()
+    role2.install({ codec = codec, entity = world2.entity, host = world2.host, window_cap = 0 })
+  end, "window_cap 非正整数 ⇒ -INSTALL")
+end)
+
+-- ── 用例 25：窗口与计数器互不干涉（I5 / I10 的隔离）───────────────────────────
+
+run("pkg.role-skill.window-vs-counters", function()
+  local world = new_world()
+  local role = fresh(world, { turn = "entity" })
+  role.skill_define("a", { attrs_spec = {} })
+  role.grant_skill(1, "a")
+  for _ = 1, 3 do
+    world.handlers.turn({ entity = 1 })
+  end
+  eq(role.count(1, "turn"), 3, "三次 turn ⇒ 3")
+
+  role.window_push(1, "a")
+  role.window_push(1, "a")
+  eq(role.count(1, "turn"), 3, "window_push 不动 counters（I10）")
+  eq(role.window(1, "a", 10), 2, "窗口计到 2")
+
+  role.reset_counters(1, "turn")
+  eq(role.count(1, "turn"), 0, "清零生效")
+  eq(role.window(1, "a", 10), 2, "reset_counters 不动窗口（I10）")
+end)
+
+-- ── 用例 26：兼容面台账（19 导出 / 7 错误码 / 4 事件 / 4 KV 键名）───────────────
+
+run("pkg.role-skill.compat-export-face", function()
+  local world = new_world()
+  local role = fresh(world)
+  local exports = {
+    "install",
+    "define",
+    "skill_define",
+    "grant",
+    "revoke",
+    "has",
+    "grant_skill",
+    "revoke_skill",
+    "charge",
+    "recharge",
+    "effective",
+    "compose",
+    "count",
+    "reset_counters",
+    "skills_of",
+    "skill_state",
+    "set_capacity",
+    "window_push",
+    "window",
+  }
+  for i = 1, #exports do
+    eq(type(role[exports[i]]), "function", "导出 " .. exports[i] .. " 必须是函数")
+  end
+  eq(#exports, 19, "导出面 = 既有 14 + 新增 5（I9：只增不减）")
+
+  eq_seq(
+    sorted_keys(role.ERRORS),
+    { "ATTR", "COMPOSE", "DEF", "DEPS", "INSTALL", "KV", "UNKNOWN" },
+    "错误码仍是那 7 个（不新增码族）"
+  )
+  eq_seq(
+    role.EVENTS,
+    { "role.granted", "role.revoked", "role.skill_gained", "role.skill_lost" },
+    "事件面仍是那 4 个名字"
+  )
+
+  local keys = sorted_keys(role.KEY)
+  eq_seq(keys, { "DEFS", "INDEX", "SKILLS", "WINDOW" }, "KV 键名单源 4 条")
+  for i = 1, #keys do
+    is_true(role.KEY[keys[i]]:find("^role%.") ~= nil, "KEY." .. keys[i] .. " 以 role. 开头")
+  end
+  eq(type(role.WINDOW_CAP), "number", "WINDOW_CAP 是数字")
+end)
+
 -- ── 用例 27：一次 effective 的读次数与实体总数无关（O(1) 的结构证据）───────────
 
 run("pkg.role-skill.perf-o1-structural", function()
