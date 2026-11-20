@@ -207,6 +207,29 @@ local function fresh(world)
   return entity, codec
 end
 
+--- 标准 fixture：4 属性（含必填+缺省 / 可选 / 布尔 / 引用）+ 2 tag。
+local function basic_spec()
+  return {
+    attrs = {
+      hp = { type = "number", required = true, default = 100 },
+      title = { type = "string" },
+      alive_flag = { type = "boolean", default = true },
+      target = { type = "ref" },
+    },
+    tags = { enemy = {}, boss = {} },
+  }
+end
+
+--- 升序键列表（测试里允许排序库：这里跑的是普通 Lua，不是沙箱）。
+local function sorted_keys(map)
+  local keys = {}
+  for key in pairs(map) do
+    keys[#keys + 1] = key
+  end
+  table.sort(keys)
+  return keys
+end
+
 -- ── 用例 9：sha256 已知答案（D11）─────────────────────────────────────────────
 --
 -- 向量取自独立实现（`python3 -c "hashlib.sha256"` 与本机 `shasum -a 256` 对拍，
@@ -477,4 +500,170 @@ run("pkg.codec.decode-roundtrip", function()
     same_deep(codec.decode('  { "a" :\t[ 1 , 2 ]\r\n}  '), { a = { 1, 2 } }),
     "空白不影响语义"
   )
+end)
+
+-- ── 用例 10-13：export 形状 / ids 模式 / kv 点名 / checksum 互校 ─────────────
+
+run("pkg.codec.export-shape", function()
+  local world = new_world()
+  local entity, codec = fresh(world)
+  entity.define("creature", basic_spec())
+  local first = entity.spawn("creature", { hp = 7 }, { "enemy" })
+  local second = entity.spawn("creature")
+
+  local bundle = codec.export({ entities = true, ids = "index", mod = "probe" })
+
+  local keys = sorted_keys(bundle)
+  eq(#keys, 5, "bundle 顶层键数")
+  eq(keys[1], "checksum", "bundle 键 1")
+  eq(keys[2], "codec_version", "bundle 键 2")
+  eq(keys[3], "entities", "bundle 键 3")
+  eq(keys[4], "exported_from", "bundle 键 4")
+  eq(keys[5], "kv", "bundle 键 5")
+  eq(bundle.codec_version, "1", "codec_version")
+  eq(bundle.exported_from, "probe", "导出源 = 调用方传入（宿主无 mod 名面，D10）")
+  eq(bundle.checksum, "", "export 不算校验和（那是 checksum/write 的事）")
+
+  eq(#bundle.entities, 2, "两条记录")
+  eq(bundle.entities[1].id, first, "记录按 id 升序")
+  eq(bundle.entities[2].id, second, "记录按 id 升序")
+
+  local record_keys = sorted_keys(bundle.entities[1])
+  eq(#record_keys, 4, "记录键数")
+  eq(record_keys[1], "attrs", "记录键 1")
+  eq(record_keys[2], "id", "记录键 2")
+  eq(record_keys[3], "schema", "记录键 3")
+  eq(record_keys[4], "tags", "记录键 4")
+  eq(bundle.entities[1].schema, "creature", "记录带 schema 名")
+  eq(bundle.entities[1].attrs.hp, 7, "显式值入档")
+  eq(bundle.entities[2].attrs.hp, 100, "缺省值也入档（读回才能重建）")
+  eq(#bundle.entities[1].tags, 1, "tag 数")
+  eq(bundle.entities[1].tags[1], "enemy", "tag 名")
+end)
+
+run("pkg.codec.export-ids-mode", function()
+  local world = new_world()
+  local entity, codec = fresh(world)
+  entity.define("creature", basic_spec())
+  entity.spawn("creature")
+  local target = entity.spawn("creature")
+  entity.spawn("creature")
+
+  local all = codec.export({ entities = true, ids = "index" })
+  eq(#all.entities, entity.count(), 'ids="index" 的条数 = entity.count()')
+  eq(#all.entities, 3, "三条")
+
+  local one = codec.export({ entities = true, ids = { target } })
+  eq(#one.entities, 1, "显式 id 列表只导那几条")
+  eq(one.entities[1].id, target, "导的就是那一条")
+
+  local none = codec.export({ entities = false })
+  eq(#none.entities, 0, "entities=false 不导实体")
+  eq(next(none.entities), nil, "实体段为空表")
+
+  expect_error("YGG-PKG-CODEC-TYPE", function()
+    codec.export({ entities = true, ids = 42 })
+  end, "ids 类型非法")
+end)
+
+run("pkg.codec.export-kv-keys", function()
+  local world = new_world()
+  local _, codec = fresh(world)
+  world.kv["quest.1"] = "main"
+  world.kv["dlg.2"] = 7
+  world.kv["other.3"] = true
+
+  local named = codec.export({ keys = { "quest.1", "dlg.2" } })
+  eq(#sorted_keys(named.kv), 2, "只导点名的两个键（不遍历）")
+  eq(named.kv["quest.1"], "main", "kv 值 1")
+  eq(named.kv["dlg.2"], 7, "kv 值 2")
+  is_nil(named.kv["other.3"], "未点名的键不得入档")
+
+  -- 不传 keys：kv 段为空表，**不**遍历（宿主也没有遍历面）。
+  local bare = codec.export({})
+  eq(next(bare.kv), nil, "不传 keys 则 kv 为空")
+  -- 点名了但不存在的键：跳过，不写 nil（JSON 无 null 槽位）。
+  local missing = codec.export({ keys = { "nope.9" } })
+  eq(next(missing.kv), nil, "不存在的键被跳过")
+end)
+
+run("pkg.codec.checksum-corroboree", function()
+  local bundle = {
+    codec_version = "1",
+    exported_from = "probe",
+    entities = {},
+    kv = {},
+    checksum = "",
+  }
+
+  -- ① 宿主不回 sha256（只 path/bytes）→ 不报错，返回我方值。
+  do
+    local world = new_world()
+    local _, codec = fresh(world)
+    local expected = codec.checksum(bundle)
+    world.fs_sha_mode = nil
+    local out = codec.write("a.json", bundle)
+    eq(out.sha256, expected, "宿主不回值 ⇒ 用包内自算")
+    eq(out.bytes, #world.files["a.json"], "bytes 是实际写入长度")
+  end
+
+  -- ② 宿主回相同的值 → 不报错。
+  do
+    local world = new_world()
+    local _, codec = fresh(world)
+    world.fs_sha_mode = "echo"
+    world.fs_sha_value = codec.checksum(bundle)
+    local out = codec.write("b.json", bundle)
+    eq(out.sha256, world.fs_sha_value, "两套实现一致时不报警")
+  end
+
+  -- ③ 宿主回错值 → YGG-PKG-CODEC-CHECKSUM（不选一个信）。
+  do
+    local world = new_world()
+    local _, codec = fresh(world)
+    world.fs_sha_mode = "wrong"
+    expect_error("YGG-PKG-CODEC-CHECKSUM", function()
+      codec.write("c.json", bundle)
+    end, "宿主 sha256 与包内不一致必须报错")
+  end
+
+  -- checksum 不修改入参（纯读面）。
+  local before = {}
+  for key, value in pairs(bundle) do
+    before[key] = value
+  end
+  local world = new_world()
+  local _, codec = fresh(world)
+  codec.checksum(bundle)
+  eq(bundle.checksum, before.checksum, "checksum 不得改写入参")
+end)
+
+-- ── 用例 20：往返（版本截面归 C5，import 就位后补齐）───────────────────────
+
+run("pkg.codec.import-version-and-roundtrip", function()
+  local world = new_world()
+  local entity, codec = fresh(world)
+  entity.define("creature", basic_spec())
+  entity.spawn("creature", { hp = 5 }, { "boss" })
+  entity.spawn("creature")
+
+  local report = codec.roundtrip("save.json")
+  is_true(report.equal, "往返字节必须逐字相等")
+  eq(report.bytes_in, report.bytes_out, "往返字节数相等")
+  is_true(report.bytes_in > 0, "字节数非零")
+
+  -- 读回就是导出物（读盘 + 校验和都过了一道）。
+  local loaded = codec.read("save.json")
+  eq(#loaded.entities, 2, "读回两条记录")
+  eq(loaded.entities[1].attrs.hp, 5, "读回属性值")
+
+  -- 缺失文件与坏 checksum 是两个不同的码。
+  expect_error("YGG-PKG-CODEC-MISSING", function()
+    codec.read("nope.json")
+  end, "缺失文件")
+  local tampered = world.files["save.json"]:gsub("\"hp\":5", "\"hp\":6")
+  world.files["tampered.json"] = tampered
+  expect_error("YGG-PKG-CODEC-CHECKSUM", function()
+    codec.read("tampered.json")
+  end, "篡改后 checksum 不符")
 end)

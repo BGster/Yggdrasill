@@ -31,6 +31,12 @@ M.deps = nil
 -- 错误码家族 `YGG-PKG-CODEC-<COND>`（契约固定 TYPE / CONFLICT / CHECKSUM；
 -- MISSING / VERSION / HOST 是本实现补齐的家族成员，见 codec.md §8）。
 local E_TYPE = "YGG-PKG-CODEC-TYPE"
+local E_CHECKSUM = "YGG-PKG-CODEC-CHECKSUM"
+local E_MISSING = "YGG-PKG-CODEC-MISSING"
+local E_HOST = "YGG-PKG-CODEC-HOST"
+
+-- 本实现写出的 `codec_version`。跨版本不做迁移（契约 §1：只拒，不猜）。
+local CODEC_VERSION = "1"
 
 --- 报错：`<码>: <细节>`（level 0 = 不夹带调用点，测试按码做子串断言）。
 local function fail(code, detail)
@@ -46,6 +52,18 @@ end
 function M.install(deps)
   M.deps = { host = (type(deps) == "table" and deps.host) or nil }
   return M
+end
+
+--- 取本次调用的宿主句柄（`deps.host` 优先，其次 `ygg` 全局）。
+local function host()
+  local current = M.deps and M.deps.host or nil
+  if current == nil then
+    current = ygg
+  end
+  if current == nil then
+    fail(E_HOST, "ygg 不可达：沙箱外调用需 `install({ host = ... })`")
+  end
+  return current
 end
 
 --- `codec.sha256(bytes)`：纯 Lua SHA-256（64 位小写 hex）。
@@ -590,6 +608,176 @@ function M.checksum(bundle)
   end
   canonical.checksum = ""
   return M.sha256(M.encode(canonical))
+end
+
+-- ── export / write / read / roundtrip ────────────────────────────────────────
+
+--- 顶层浅拷（`checksum` / `write` 都不改入参：契约 §4 都是纯读/写盘面）。
+local function copy_top(map)
+  local out = {}
+  for key, value in pairs(map) do
+    out[key] = value
+  end
+  return out
+end
+
+--- 数值数组升序插入排序（记录 id 必须严格升序：导入侧的「保 id」判定依赖它）。
+local function sort_numbers(items)
+  for i = 2, #items do
+    local value = items[i]
+    local j = i - 1
+    while j >= 1 and items[j] > value do
+      items[j + 1] = items[j]
+      j = j - 1
+    end
+    items[j + 1] = value
+  end
+  return items
+end
+
+--- `codec.export(namespace)`：bundle = 实体记录 + 点名 KV 键。
+---
+--- `namespace`：`{ entities = true|false, ids = "index"|{…}, keys = {…}|nil, mod = "<名>" }`。
+---
+--- 三条形状纪律：
+---   * 记录从 **entity 的 API** 取（`ids` / `schema_of` / `attrs` / `tags`），**不**读
+---     `pkg.entity.*` 任何键——布局单源在 entity，泄漏一个键名就把两个包焊死了；
+---   * `ids = "index"` 走 `entity.ids()`（升序）；给数组则只导那些 id（仍排序）；
+---   * `keys` 是**显式列表**，绝不遍历 KV（宿主没有遍历面，D9）；没点名的键不进包。
+function M.export(ns)
+  if type(ns) ~= "table" then
+    fail(E_TYPE, "export 需要 namespace 表，得到 " .. type(ns))
+  end
+  local current = host()
+
+  local bundle = {
+    codec_version = CODEC_VERSION,
+    exported_from = type(ns.mod) == "string" and ns.mod or "",
+    entities = {},
+    kv = {},
+    checksum = "",
+  }
+
+  if ns.entities ~= false then
+    local ids
+    if ns.ids == nil or ns.ids == "index" then
+      ids = entity.ids()
+    elseif type(ns.ids) == "table" then
+      ids = {}
+      for i = 1, #ns.ids do
+        ids[i] = ns.ids[i]
+      end
+      sort_numbers(ids)
+    else
+      fail(E_TYPE, 'ns.ids 只能是 "index" 或 id 数组，得到 ' .. type(ns.ids))
+    end
+    for i = 1, #ids do
+      local id = ids[i]
+      bundle.entities[i] = {
+        id = id,
+        schema = entity.schema_of(id),
+        attrs = entity.attrs(id),
+        tags = entity.tags(id),
+      }
+    end
+  end
+
+  if ns.keys ~= nil then
+    if type(ns.keys) ~= "table" then
+      fail(E_TYPE, "ns.keys 必须是键数组（不支持前缀/遍历）")
+    end
+    for i = 1, #ns.keys do
+      local key = ns.keys[i]
+      if type(key) ~= "string" then
+        fail(E_TYPE, "ns.keys 的元素必须是字符串键，得到 " .. type(key))
+      end
+      local value = current.kv.get(key)
+      if value ~= nil then
+        bundle.kv[key] = value
+      end
+    end
+  end
+
+  return bundle
+end
+
+--- `codec.write(path, bundle)`：算 checksum → 编码 → 落盘 → 与宿主回值**互校**。
+---
+--- 返回 `{ bytes, sha256 }`，sha256 **是我方算法算的**（它是「写进 bundle 的那个
+--- 值」）。宿主的 sha256 从 P0 的「来源」变成「互校」：一致则无事，不一致报
+--- `YGG-PKG-CODEC-CHECKSUM`——两套实现算出不同字节就说明有一边错了，该报警而不是
+--- 选一个信。不修改入参（写进文件的是副本）。
+function M.write(path, bundle)
+  if type(path) ~= "string" or #path == 0 then
+    fail(E_TYPE, "write 需要一个非空路径字符串")
+  end
+  if type(bundle) ~= "table" then
+    fail(E_TYPE, "write 只收 bundle 表，得到 " .. type(bundle))
+  end
+  local current = host()
+  local digest = M.checksum(bundle)
+  local payload = copy_top(bundle)
+  payload.checksum = digest
+  local text = M.encode(payload)
+
+  local written = current.fs.write(path, text)
+  if type(written) ~= "table" then
+    fail(E_TYPE, "ygg.fs.write 未返回结果表")
+  end
+  local host_digest = written.sha256
+  if type(host_digest) == "string" and #host_digest > 0 and host_digest:lower() ~= digest then
+    fail(
+      E_CHECKSUM,
+      "宿主 sha256 与包内自算不一致（宿主 " .. host_digest .. " / 包内 " .. digest .. "）"
+    )
+  end
+  return { bytes = #text, sha256 = digest }
+end
+
+--- `codec.read(path)`：读盘 → 解码 → **先校 checksum** 再交出去。
+---
+--- 缺失文件与坏档是两个不同的码：`MISSING`（路径/挂载问题）与 `CHECKSUM`
+--- （内容被改过）指向不同的处置，混成一个码就把排查方向抹掉了。
+function M.read(path)
+  local current = host()
+  local text = current.fs.read(path)
+  if text == nil then
+    fail(E_MISSING, "读不到存档：" .. tostring(path))
+  end
+  if type(text) ~= "string" then
+    fail(E_TYPE, "ygg.fs.read 未返回字符串")
+  end
+  local bundle = M.decode(text)
+  if type(bundle) ~= "table" then
+    fail(E_TYPE, "存档顶层必须是 JSON 对象")
+  end
+  if type(bundle.checksum) ~= "string" then
+    fail(E_CHECKSUM, "存档缺 checksum 字段（不能证明未被改过）")
+  end
+  local actual = M.checksum(bundle)
+  if actual ~= bundle.checksum then
+    fail(
+      E_CHECKSUM,
+      "checksum 不符（声明 " .. bundle.checksum .. " / 实算 " .. actual .. "）"
+    )
+  end
+  return bundle
+end
+
+--- `codec.roundtrip(path)`：导 → 写 → 读 → 再编，**比字节**。
+---
+--- `equal` 比的是两份**编码后字节**而非长度：长度相等而字节不同正是「键序漂了」
+--- 或「数字形式漂了」的典型症状，只比长度会漏掉它。
+function M.roundtrip(path)
+  local bundle = M.export({ entities = true, ids = "index", mod = "roundtrip" })
+  local written = M.write(path, bundle)
+  local loaded = M.read(path)
+  -- `write` 不改入参，所以这里重建「写进文件的那份」：同一个 checksum + 同一个编码。
+  local mirror = copy_top(bundle)
+  mirror.checksum = written.sha256
+  local text_in = M.encode(mirror)
+  local text_out = M.encode(loaded)
+  return { bytes_in = #text_in, bytes_out = #text_out, equal = text_in == text_out }
 end
 
 return M
