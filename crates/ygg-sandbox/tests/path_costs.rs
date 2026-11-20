@@ -153,7 +153,7 @@ fn path_costs_are_measured() {
     ygg.raw_set("f3", f3).expect("挂 f3");
     ygg.raw_set("ft", ft).expect("挂 ft");
     ygg.raw_set("kvset", kv_set).expect("挂 kvset");
-    lua.globals().raw_set("ygg", ygg).expect("挂 ygg");
+    lua.globals().raw_set("ygg", &ygg).expect("挂 ygg");
 
     crossing_cost(
         &lua,
@@ -174,6 +174,42 @@ fn path_costs_are_measured() {
         &lua,
         "kv_set_str_value",
         "local f = ygg.kvset local s = 'k' for i = 1, 200000 do f(s, i) end",
+    );
+
+    // 「数组进出」便不便宜是 A 路（多键面）能否赢的**唯一**判据：
+    // 若 n=8 的表参 + 表返回 ≈ 8 次穿越，多键面必然打平；显著更低才成立。
+    let t8 = lua
+        .create_function(|lua, items: mlua::Table| {
+            let mut acc = 0i64;
+            for index in 1..=items.raw_len() {
+                acc += items.raw_get::<i64>(index)?;
+            }
+            let out = lua.create_table()?;
+            for index in 1..=8 {
+                out.raw_set(index, acc)?;
+            }
+            Ok(out)
+        })
+        .expect("注册表参 n=8 面");
+    let multi = lua
+        .create_function(|_, ()| Ok((1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 8i64)))
+        .expect("注册多返回值面");
+    ygg.raw_set("t8", t8).expect("挂 t8");
+    ygg.raw_set("multi", multi).expect("挂 multi");
+    crossing_cost(
+        &lua,
+        "table_arg8_ret_table8",
+        "local f = ygg.t8 local t = {1,2,3,4,5,6,7,8} for _ = 1, 200000 do local out = f(t) end",
+    );
+    crossing_cost(
+        &lua,
+        "multi_ret8",
+        "local f = ygg.multi for _ = 1, 200000 do local a,b,c,d,e,g,h,i = f() end",
+    );
+    crossing_cost(
+        &lua,
+        "scalar_ret8_calls",
+        "local f = ygg.f0 for _ = 1, 1600000 do f() end",
     );
 
     // ── ② `EntityStore` 批量写 / 读（`ygg.entity` 批式面的 after 上限）──────
