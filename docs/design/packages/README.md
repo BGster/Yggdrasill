@@ -21,8 +21,8 @@
 
 | 包 | 契约 | 依赖 | 状态 | 用点覆盖 |
 | --- | --- | --- | --- | --- |
-| entity | [entity.md](entity.md) | 无（薄包 `ygg.entity.*`） | 契约已定 · 代码 P2 待实现 | 3（PokeRogue / CDDA / DCSS） |
-| codec | [codec.md](codec.md) | entity | 契约已定 · 代码 P2 待实现 | 3（CDDA / PokeRogue / DCSS） |
+| entity | [entity.md](entity.md) | 无（薄包 `ygg.entity.*`） | 实现已落地 · test 18 | 3（PokeRogue / CDDA / DCSS） |
+| codec | [codec.md](codec.md) | entity | 实现已落地 · test 20 | 3（CDDA / PokeRogue / DCSS） |
 | quest | [quest.md](quest.md) | entity · codec | 契约已定 · 代码 P2 待实现 | 3（PokeRogue / CDDA / DCSS） |
 | dialogue | [dialogue.md](dialogue.md) | quest | 契约已定 · 代码 P2 待实现 | 3（PokeRogue / CDDA / Saltline） |
 | role-skill | [role-skill.md](role-skill.md) | entity · codec | 契约已定 · 代码 P2 待实现 | 3（PokeRogue / DCSS / CDDA） |
@@ -70,6 +70,7 @@
 - **自测入册**（已落地，条件式）：用例名前缀 `pkg.<name>.`，放在 `<包根>/<本包>/test/*.lua`，由 `cargo run -q --example selftest -- --mod <mod> --packages <包根>` 收集，与 mod 自测进入**同一个** `__SELFTEST` 计数面（`cases passed=` 里一并计）。于是条件式成立——声明的包计入该命令的计数，不声明包的 mod 跑 0 条，生产 mod（`agent-seed`）的 `cases passed=` 不因本机制变化。包自测自带计数垫片，不依赖消费它的 mod 的 harness。
 - **发现机制（P1 已定）**：声明驱动，不靠目录扫描——只有 `pack.json` 的 `packages` 段声明过的包才会被装载，包根由 `--packages` / `$YGG_PACKAGES_ROOT` / `<mod>/../../packages/libs` 解析。完整规则见 [../mod/mod-package.md](../mod/mod-package.md) §3.2.3。
 - **装载面夹具（`fixture`）**：`packages/libs/fixture/` 是**装载面活体夹具**（`pkg.json` + `init.lua` + `words.lua` + `test/pkg-fixture.lua`），**不是能力包**，显式豁免第 ② 节「≥2 个不同游戏用点」硬闸——那道闸针对能力包；夹具的作用是钉住装载契约（多文件 require、缓存身份、chunk 名、纯导出边界），不是提供能力。P2 的六个能力包（entity / codec / quest / dialogue / role-skill / procgen）不受此豁免影响。
+- **消费夹具（`pkg-selftest`，P2 落地）：**`packages/mods/pkg-selftest/` 是一个**声明了 `packages` 段的 Mod**，唯一职责是让包自测能被收集执行（`selftest --mod packages/mods/pkg-selftest --packages packages/libs`）。为何必须存在这一层：生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远看不到 `pkg.*`（仍为 79/0）；而这个夹具的全量计数刚好是可复算的包用例总数。它的 `tests/pkg-{entity,codec}-smoke.lua` 只钉「包装载面 + 顶层纯度」两条，不复述 API 函数表（那份真源在行为用例里）。
 - **性能数字**：每包 §5 五个指标必须给数字口径与测量方法（同数据集 / 同机器 / 跑三次取中位）；P0 期填**目标值**，P2 首实现填实测值，偏差回写契约。
 - **不新增存储层**：实体持久化只有一条路——mod KV 命名空间 + codec。每个包的 KV 前缀在它自己的 §2「持久化位置」列声明，前缀单写者（对齐 `mod-package.md` 的 `mod.kv-prefix-owner`）。
 - **前向契约的清偿义务**：P0 期这些契约**没有代码消费者**，按 [../../wiki-governance.md](../../wiki-governance.md) 的判据它们是前向契约（Goal 反例 7 又硬性要求路径就是 `docs/design/packages/<name>.md`）。清偿动作写死在 P2：每包首实现时 `packages/libs/<name>/init.lua` 的头注释写 `docs/design/packages/<name>.md`，指针类语义自那一刻成立。**能力出口**：新能力落 `crates/ygg-*/` 还是 `packages/libs/<name>/`，按 `AGENTS.md` §1.7 判——本文件是能力的规格，不是工作流规则的第二副本。
