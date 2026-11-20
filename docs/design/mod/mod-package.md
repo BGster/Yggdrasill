@@ -19,11 +19,12 @@
    - `inboxRoutes`：声明 `idField`、`externalIdField`、`kindField`，以及每 kind 的 `{ event, fields[] }` 映射，用于异步 JSONL 收件箱摄入；需要宿主注入提交者身份的动作可声明 `actor` / `actor_session` 布尔（r3，缺省 false = 功能关闭）。
    - `tools`（可选，**Layer 1 能力白名单**）：将 `<namespace>.<name>` 映射到 `{ kind: "cli" | "http", program, args[], timeoutMs, maxOutputBytes, readOnly, resultEvent }`。占位符用 `{{arg}}` 表示调用参数，用 `$ENV{VAR}` 表示宿主侧密钥解析。
    - `mounts`（可选，**宿主侧文件挂载声明**）：数组，每项 `{ name, dir?, mode? }`——把宿主目录 bind 成沙箱可见的 `mounts/<name>/…`（沙箱侧路径文法与读写面见 [lua-api.md §3.1.2](../kernel/lua-api.md)，run 目录落点见 [cli-daemon.md](../host/cli-daemon.md)）。字段与校验见 §3.2.2。
+   - `packages`（可选，**能力包依赖声明**）：数组，每项 `{ id, version }`——声明本 Mod 消费哪些 `packages/libs/<id>/` 下的能力包，包模块以 `pkg.<id>.*` 进同一张模块表（见 [lua-api.md §3.1](../kernel/lua-api.md)）。字段、闭包与失败面见 §3.2.3。
 2. **`data/config.json`（运行时默认值与 Layer 2 发布白名单）**：
    - 依据 `packages/schema/schemas/agent-config.json` 校验。
    - 声明 `play.mode`（`"guide"` | `"goal"`）、`evolution`（`mode`、`allow_paths`、`max_per_run`）、`gates.require_all_green`、`drive`（`maxSteps`、`stagnationLimit`、`decideTimeoutMs`）、`settlement`（`requireNonEmptyEvents`、`requireZeroFailedSteps`、`requireEnding`、`requireInboxConsumed`）、`allowedTools`（**Layer 2 发布白名单**，必须是 `pack.json` `tools` 键的超集），以及可选的 `harness` 适配器元数据。
 3. **`manifest.json`（内容寻址完整性锁）**：
-   - 依据 `packages/schema/schemas/manifest.json` 校验。为每个代码文件与数据资源记录 `{ path, sha256, byteLength }`。经 `./scripts/sync-seed-mod.sh` 维护。
+   - 依据 `packages/schema/schemas/manifest.json` 校验。为每个代码文件与数据资源记录 `{ path, sha256, byteLength }`；声明了 `packages` 段时另有 `packages: [{ id, files[] }]`（路径相对**包根**、以包 id 打头，见 §3.2.3）。经 `./scripts/sync-seed-mod.sh` 维护。
    - `.ygg/mods/agent-seed` 是唯一事实源，`packages/mods/agent-seed -> ../../.ygg/mods/agent-seed` 是相对软链；`./scripts/sync-seed-mod.sh` 重算 manifest，`./scripts/sync-seed-mod.sh --check` 同时核验软链与漂移。绕开单源在软链另一端独立修改会造成双源漂移，禁止验收。
 
 #### 3.2.1 设计依据（Lua 为唯一可执行接口 / Schema 单一来源 / 多文件纯度）
@@ -57,9 +58,41 @@
 
 ① 阻断：声明一个 `dir` 指向不存在 / 非目录 / 断链的路径、重名的 `name`、或 `mode` 取值不在 `ro`/`rw` 内而 attach 仍成功；② 症状：挂载点被隐形创建、或声明错了却只在该次 `ygg.fs.*` 调用时才报错（错误面应在 attach 期、零写入）；③ 确认——`cargo test -p ygg-store --test mounts` 的声明校验与三态幂等用例，以及 `git-ls <run-dir>/mounts/` 显示声明与磁盘一致。
 
+#### 3.2.3 packages 段与包装载面（`pkg.*`）
+
+```json
+"packages": [
+  { "id": "entity", "version": "0.1.0" },
+  { "id": "role-skill", "version": "0.1.0" }
+]
+```
+
+**它是什么**：`packages/libs/<id>/` 下的**能力包**是第二个受控模块命名空间。包模块与本 Mod 的 `src.*` 进**同一张** `ModuleSet`（只是名字前缀不同），所以 `require` 的查表机制一个字不改。
+
+| 面 | 规则 |
+| --- | --- |
+| 声明形状 | 段存在即**全量校验**：每项必须是 `{id, version}` 对象、两字段非空字符串、`id` 匹配 `^[a-z][a-z0-9_-]*$`、同一 `id` 不得重复。段缺失或 `[]` → 零包，manifest 逐字节不变 |
+| **完整闭包** | `packages` 段是**唯一装载清单**。包的 `pkg.json.deps` 只声明依赖关系（用于校验与判环），**不**把未声明的包拉进来；一个 dep 未在本段出现即 `MissingTransitive`。与本仓既有纪律同形：`code.modules` 也必须枚举每一个可 `require` 的模块，没有隐式发现面 |
+| 版本 | **精确 pin**（字符串相等）。不符是**声明错**而非完整性错，文案报双方值。无 `semver` 依赖（零新增依赖惯例）；范围语义等到出现真实消费者再立 |
+| id → 模块名 | `-` 折叠为 `_`：`role-skill` → `pkg.role_skill`。模块名段字符集只有 `[A-Za-z0-9_]`，`pkg.role-skill` 会被 `normalize` 拒掉——折叠是唯一可行映射，不是风格选择 |
+| 文件 → 模块名 | 相对包根去 `.lua` 后按 `/` 拆段，复用 `ygg_modules::name_of_path`（不另写字符规则）：`init.lua` → `pkg.<id>`（包根模块）；`words.lua` → `pkg.<id>.words`；`a/b.lua` → `pkg.<id>.a.b` |
+| 允许的文件 | `pkg.json` + 非 `test/**` 的 `*.lua`。其它任何文件可在**打包期**可读拒绝；`.` 开头的条目静默跳过（`.DS_Store` 等）。`test/**` 是开发面：不进模块表、不进 manifest |
+| 包根 | `--packages` / `$YGG_PACKAGES_ROOT` > `<mod>/../../packages/libs`；不可读**即失败**并点名推导值与两个来源，不静默降级为零包。包根是 **host 环境态**而非 run 身份态，所以本段只写 id/version 不写路径；**内容**由 manifest 的 sha256 钉死（同字节换根行为等价，异字节装载期 hash 失配） |
+| 内容寻址 | `manifest.json` 的 `packages: [{id, files[]}]` 逐文件记录 `{path, sha256, byteLength}`，`path` 相对包根且以包 id 打头（段内因而没有 `.`/`..`）。纳管规则：一个包的全部非 `test/**` 文件 + `pkg.json`，按 `(id, path)` 排序（重算幂等） |
+| 预算 | 模块数与代码总量按 **mod ∪ 包**的**并集**统一判（`MAX_MODULES=128` / 1 MiB），不分开算 |
+| 纯度与 KV | 包模块走同一个装载器，`ShadowBanned` 影子表自动生效：包模块顶层 `ygg.kv.set` / `ygg.on` 等一律拒绝。KV 前缀纪律：包只写 `pkg.<id>.*`（单写者；文档纪律，装载期不校验） |
+
+**失败面**（全在进入内核之前，零副作用）：段不是数组 / 项非对象或缺字段 / id 非法 / 重复 id / 包不存在（报出根下实际有哪些）/ 版本不符（报双方值）/ 缺传递依赖 / 循环（链式文案）/ `pkg.json` 坏（先点名是哪个包）/ manifest 缺段或字节漂移 / 并集超预算。
+
+**诊断面**：`require("pkg.fixture")` 的 chunk 名是**相对包根的真实路径**（`@fixture/init.lua`），不是 `path_of` 会推出的 `pkg/fixture.lua`——否则 traceback 会指一个不存在的文件。
+
+① 阻断：让包源码绕过模块表直接读盘（把包源码复制进每个 mod 目录，改包不重 pack 即静默漂移）、或只声明间接依赖而指望隐式拉包；② 症状：声明的包没生效却无报错（只在运行期表现为一个看似无关的 `NotFound`），或同一包在两个 mod 里装到不同字节；③ 确认——`cargo test -p ygg-sandbox --test pack_packages`（含 8 条拒绝矩阵与纯度负例）、`cargo run --example pack -- <mod> --packages packages/libs` 后 `sh .pi/tools/manifest-verify.sh` 的 `pkg_drift=0`。
+
+**为什么不字面实现「挂入 `package.path`」**：沙箱里**没有** `package` 全局（白名单测试钉死），而且造一个会把「解析顺序」交给 mod 可变状态（同一 seed 两次回放可能装到不同模块，破确定性判据）。所以两个载体两件实事：沙箱 = 模块表注入；普通 Lua（`selftest` / `ygg-lint` 静态面）= `package.searchers` 追加项。两者读**同一份**包索引（`模块名 → 相对包根路径`），结构上不可能漂移。
+
 ### pack 声明变更的连带义务
 
-**因 `pack.json` 声明形状变化而必须改的宿主 `#[cfg(test)]` 断言（含 `crates/ygg-sandbox/examples/egg.rs` 的测试模块）属维护，不是能力扩张**：在同一 commit 改掉，并写明是哪一条声明逼它改。其余一律仍被禁止——生产代码、新宿主能力、任何运行时行为变化。
+**因 `pack.json` 声明形状变化而必须改的宿主 `#[cfg(test)]` 断言（含 `crates/ygg-sandbox/examples/egg.rs` 的测试模块）属维护，不是能力扩张**：在同一 commit 改掉，并写明是哪一条声明逼它改。其余一律仍被禁止——生产代码、新宿主能力、任何运行时行为变化。`packages` 段（§3.2.3）的声明形状变更同受本条约束（不新开节）。
 
 **依据**：声明与断言是同一枚硬币的两面；若“改声明”不算理由，每次声明演进都会撞上“不能改断言”的红线，只能绕道或留下过时断言（后者更贵：它把“测试绿”变成历史遗迹）。但它必须与“顺手把测试改到能过”严格区分——后者是能力扩张。
 

@@ -81,7 +81,7 @@ use ygg_core::transition::{run_transition, TransitionError};
 use crate::fuel::{self, HookFuelMeter};
 use crate::host_api::{self, HostApi, HostHandles, HostToolRunner, MountFs, VfsStore};
 use crate::inject::{self, DeterminismHandle};
-use crate::modules::{ModuleError, ModuleSet};
+use crate::modules::{ModuleError, ModuleSet, ModuleTable};
 use crate::resources::{ResourceError, ResourceTable};
 use crate::sandbox::{Sandbox, ENGINE_VERSION};
 use crate::stdlib;
@@ -203,17 +203,19 @@ struct KernelParts {
     vfs: Rc<RefCell<VfsStore>>,
 }
 
-/// 装载序单一管线（S10 锁定序 + S11 资源步 + r1 模块表；`new` /
-/// `with_resources` / `with_modules` / `with_resources_and_modules` 共享）。
+/// 装载序单一管线（S10 锁定序 + S11 资源步 + r1 模块表 + r2 chunk 覆盖表；`new` /
+/// `with_resources` / `with_modules` / `with_resources_and_modules` /
+/// `with_resources_and_module_table` 共享）。
 ///
 /// `resources = Some(table)` 时在 host API 之后、stdlib 之前安装 `ygg.data`；
 /// `None` 时跳过该步——`KernelFacade::new` 全序行为与 S10 逐字节一致（S10
-/// 测试不加改动保持全绿即本函数的回归证据）。`modules = Some(set)` 时在入口
-/// chunk 之前注入模块表；`None` 时 require 保持空表（单文件 Mod 的既有行为）。
+/// 测试不加改动保持全绿即本函数的回归证据）。`modules = Some(table)` 时在入口
+/// chunk 之前注入模块表与 chunk 名覆盖表；`None` 时 require 保持空表（单文件
+/// Mod 的既有行为）。
 fn build_kernel(
     mod_source: &str,
     resources: Option<&ResourceTable>,
-    modules: Option<ModuleSet>,
+    modules: Option<ModuleTable>,
 ) -> Result<KernelParts, KernelError> {
     // ① 沙箱构造：stdlib 裁剪 + 内存上限 + 白名单环境（ygg 占位表 + require 面就位）。
     let sandbox = Sandbox::new().map_err(KernelError::Sandbox)?;
@@ -248,9 +250,13 @@ fn build_kernel(
     // ⑥ stdlib：命名空间 + fsm + narrative（先于 Mod chunk，注册序即派发序）。
     stdlib::install(&lua).map_err(KernelError::Sandbox)?;
     // ⑥' r1 模块表注入：入口 chunk 之前（入口顶层即可 require）；空模块表时
-    //     跳过——require 面仍在，只是对任何名字可读拒绝。
-    if let Some(set) = modules {
+    //     跳过——require 面仍在，只是对任何名字可读拒绝。r2 的 chunk 名覆盖表
+    //     必须与模块表同一时机注入：入口顶层就 `require("pkg.*")` 时，第一次
+    //     装载就要拿到真实路径，否则首次 traceback 就是假路径。
+    if let Some(table) = modules {
+        let (set, chunk_paths) = table.into_parts();
         sandbox.modules().set_modules(set);
+        sandbox.modules().set_chunk_paths(chunk_paths);
     }
     // ⑦ Mod chunk：装载期注册面收集 Mod handler；失败 = ModLoad。chunk
     //    命名 `@mod.lua`（与 stdlib `@stdlib/<name>` 同法，迭代 C3）：
@@ -340,7 +346,7 @@ impl KernelFacade {
     /// 无资源路径（资源表为空基线）；带资源的多文件 Mod 走
     /// [`KernelFacade::with_resources_and_modules`]。
     pub fn with_modules(mod_source: &str, modules: ModuleSet) -> Result<Self, KernelError> {
-        let parts = build_kernel(mod_source, None, Some(modules))?;
+        let parts = build_kernel(mod_source, None, Some(ModuleTable::new(modules)))?;
         Ok(Self::from_parts(
             parts,
             Rc::new(ResourceTable::empty()),
@@ -368,6 +374,28 @@ impl KernelFacade {
     pub fn with_resources_and_modules(
         mod_source: &str,
         modules: ModuleSet,
+        manifest_bytes: &[u8],
+        schemas: &[(String, String)],
+        resources: &[(String, Vec<u8>)],
+    ) -> Result<Self, KernelError> {
+        Self::with_resources_and_module_table(
+            mod_source,
+            ModuleTable::new(modules),
+            manifest_bytes,
+            schemas,
+            resources,
+        )
+    }
+
+    /// S11 + r2：带资源包的多文件 Mod，且带 chunk 名覆盖表（包模块面）。
+    ///
+    /// 与 [`KernelFacade::with_resources_and_modules`] 同一装载序，差别只在
+    /// 覆盖表：包模块的名字不属于 [`crate::modules::path_of`] 的双射
+    /// （`pkg.fixture` 的真实文件是 `packages/libs/fixture/init.lua`），所以
+    /// traceback 要指到真实文件就必须显式告知。
+    pub fn with_resources_and_module_table(
+        mod_source: &str,
+        modules: ModuleTable,
         manifest_bytes: &[u8],
         schemas: &[(String, String)],
         resources: &[(String, Vec<u8>)],
@@ -407,8 +435,31 @@ impl KernelFacade {
         schemas: &[(String, String)],
         resources: &[(String, Vec<u8>)],
     ) -> Result<Self, KernelError> {
+        Self::restore_with_resources_and_module_table(
+            save_bytes,
+            mod_source,
+            ModuleTable::new(modules),
+            manifest_bytes,
+            schemas,
+            resources,
+        )
+    }
+
+    /// S11 + r2：带 chunk 名覆盖表的读档重建（热载路径的完整形态）。
+    ///
+    /// 与 [`KernelFacade::restore_with_resources_and_modules`] 同一分派：模块
+    /// 文件变了而入口没变时宿主签名会变并走到这里，丢覆盖表只会让 traceback
+    /// 退回假路径——所以两者同进同出。
+    pub fn restore_with_resources_and_module_table(
+        save_bytes: &[u8],
+        mod_source: &str,
+        modules: ModuleTable,
+        manifest_bytes: &[u8],
+        schemas: &[(String, String)],
+        resources: &[(String, Vec<u8>)],
+    ) -> Result<Self, KernelError> {
         let save = SaveFile::from_bytes(save_bytes)?;
-        let mut kernel = Self::with_resources_and_modules(
+        let mut kernel = Self::with_resources_and_module_table(
             mod_source,
             modules,
             manifest_bytes,

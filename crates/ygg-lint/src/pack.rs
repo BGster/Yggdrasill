@@ -73,6 +73,28 @@ pub struct PackReport {
 pub fn lint_pack(
     pack_label: &str,
     pack_json: &str,
+    read: impl FnMut(&str) -> Option<String>,
+) -> PackOutcome {
+    lint_pack_with_packages(pack_label, pack_json, &BTreeMap::new(), read)
+}
+
+/// 带「包模块声明集」的整包检查（r2）。
+///
+/// `package_modules` 是 `模块名 → 展示用路径`（如 `pkg.fixture` →
+/// `fixture/init.lua`），由调用方从 manifest 的 `packages` 段推导。
+///
+/// 为什么它只参与 ⑥（名字解析）而**不**参与 ⑧（不可达警告）：包模块是
+/// 另一个命名空间，本来就不一定从本 Mod 的入口可达，用本入口去判「死模块」
+/// 会给出成片假告警。
+///
+/// 为什么这里只收一张现成的名字表而不在本 crate 里重新解析包：`ygg-lint` 会被
+/// 编进 wasm32，不能依赖 `ygg-sandbox`（那会把 mlua 拉进图）。名字映射的权威
+/// 实现是 `ygg_sandbox::packages::module_prefix` + `module_name`；本表是它在
+/// 静态面上的**投影**，不是第二套规则。
+pub fn lint_pack_with_packages(
+    pack_label: &str,
+    pack_json: &str,
+    package_modules: &BTreeMap<String, String>,
     mut read: impl FnMut(&str) -> Option<String>,
 ) -> PackOutcome {
     let mut diagnostics = Vec::new();
@@ -347,8 +369,12 @@ pub fn lint_pack(
         let source = &sources[path];
         for edge in unit.edges.iter_mut() {
             match normalize(&edge.literal) {
-                Ok(name) => match label_by_name.get(name.as_str()) {
-                    Some(target) => edge.target = Some((*target).to_owned()),
+                Ok(name) => match label_by_name
+                    .get(name.as_str())
+                    .copied()
+                    .or_else(|| package_modules.get(name.as_str()).map(String::as_str))
+                {
+                    Some(target) => edge.target = Some(target.to_owned()),
                     None => diagnostics.push(undeclared_error(path, source, edge, &name)),
                 },
                 Err(cause) => {
@@ -481,6 +507,28 @@ fn walk_edges(
 
 /// `require` 未登记：装载期会以 `not available` 拒绝，这里提前报。
 fn undeclared_error(path: &str, source: &str, edge: &Edge, name: &str) -> Diagnostic {
+    // 包模块（`pkg.*`）的修法完全不同：它们**不进** `code.modules`，而是由
+    // `pack.json` 的 `packages` 段声明整个包（manifest 再逐文件入册）。把
+    // code.modules 的提示照搬到这里，会教作者去做一件装载期根本不接受的事。
+    if let Some(rest) = name.strip_prefix("pkg.") {
+        let id = rest.split('.').next().unwrap_or(rest);
+        return span_diagnostic(
+            path,
+            source,
+            (edge.offset, edge.end),
+            code::MOD_UNDECLARED,
+            Severity::Error,
+            format!(
+                "require(\"{}\") 的目标包模块 `{name}` 未声明\
+                 （pack.json 的 `packages` 段里没有对应的包，装载期会以可读拒绝失败）",
+                edge.literal
+            ),
+            format!(
+                "把 \"{id}\" 加进 pack.json 的 `packages` 段（形如 {{\"id\": \"{id}\", \
+                 \"version\": \"0.1.0\"}}），再运行打包工具重建 manifest"
+            ),
+        );
+    }
     let fix = path_of(name).map_or_else(
         |_| "在 pack.json 的 code.modules 里登记该模块".to_owned(),
         |declared_path| {

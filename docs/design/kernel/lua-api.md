@@ -27,6 +27,17 @@ Lua 5.4 沙箱只暴露安全标准库（`base`、`table`、`string`、`math`、
 | `ygg.fs.{write,read,stat,list}` | 可选宿主注入的两根文件面：`artifacts/<file>`（内存 VFS，dispatch 级回滚）与 `mounts/<name>/<rel>`（挂载桥，写穿磁盘）。`write(path, content)` 返回 `{ path, bytes, sha256 }`。两根的文法、尺寸帽、返回形状与错误码见 [§3.1.2](#312-mounts-挂载面宿主注入的盘上文件桥)。 | 变更调用 **模块顶层禁用** |
 | `ygg.tool.call(tool_id, args_table)` | 可选同步宿主工具桥。挂载时内联执行白名单工具并返回 `{ ok = true, data = { ... } }` 或 `{ ok = false, error = "..." }`。未挂载时返回 `{ ok = false, unmounted = true }`，使 Mod 回退到异步 `meta.tool_calls`。 | **模块顶层禁用** |
 
+**`require` 面（受控装载器，无 `package` 全局）**：`require(name)` 只查宿主注入的**已登记模块表**（`ModuleSet`），不做任何路径拼接；名字是点分标识符（各段字符集 `[A-Za-z0-9_]`），未登记的名字在装载前即可读拒绝。表里有**两个命名空间**：
+
+| 命名空间 | 来源 | 声明面 |
+| --- | --- | --- |
+| `src.*` | 本 Mod 的模块源码 | `pack.json` 的 `code` 段（§3.1 上方） |
+| `pkg.<id>.*` | 能力包 `packages/libs/<id>/` | `pack.json` 的 `packages` 段（见 [mod-package.md §3.2.3](../mod/mod-package.md)） |
+
+沙箱里**没有** `package` 全局（`package.path` / `package.searchers` 均不可见）——这是白名单测试钉死的红线：造一个具体表会把「解析顺序」交给 mod 可变状态，同一 seed 两次回放可能装到不同模块，破确定性判据。所以「挂入 `package.path`」在本仓的两个载体上是两件实事：沙箱 = **模块表注入**（无路径概念，等价物就是 `ModuleSet`）；普通 Lua（`examples/selftest` 与 `ygg-lint` 的静态面）= **`package.searchers` 追加项**（Lua 5.4 的正规扩展点）。两者读**同一份**包索引（`模块名 → 相对包根路径`），结构上不可能漂移。
+
+模块 chunk 顶层一律是纯导出面（`ShadowBanned`），包模块与本 Mod 模块**同受此约束**；chunk 名带真实文件路径，包模块是**相对包根**的真实路径（如 `@fixture/init.lua`），不是 `path_of` 会推出的 `pkg/fixture.lua`。
+
 #### 3.1.1 设计依据（沙箱安全边界 / 语言方言 / 边界划分）
 
 **沙箱的安全边界是六项硬上限，不是建议**：零盘上 I/O、零网络、零时钟、指令燃料上限、内存上限（`16 MiB`）、API 白名单（`safe_stdlib`）与确定性种子 PRNG。

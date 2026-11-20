@@ -47,6 +47,57 @@ pub use ygg_modules::{
     MAX_DEPTH, MAX_MODULES, MAX_NAME_LEN, MAX_SEGMENT_LEN, MODULE_EXTENSION,
 };
 
+/// 装载期的代码面：模块表 + chunk 名覆盖表（r2 D3）。
+///
+/// 两者成对出现是因为它们由**同一份**包解析数据生成
+/// （[`crate::packages::PackageIndex`]）：模块表说「能 require 什么」，覆盖表
+/// 说「报错时报哪个文件」。分成两个参数会让调用方有「传了模块表忘了覆盖表」
+/// 的中间态——那个状态**不报错**，只是 traceback 指到 `path_of` 推导出的假
+/// 路径（`pkg/fixture.lua` 而非 `packages/libs/fixture/init.lua`）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleTable {
+    set: ModuleSet,
+    chunk_paths: std::collections::BTreeMap<String, String>,
+}
+
+impl ModuleTable {
+    /// 只有模块表（现有 `src.*` 面：chunk 名走 [`path_of`] 的默认双射）。
+    pub fn new(set: ModuleSet) -> Self {
+        Self {
+            set,
+            chunk_paths: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// 模块表 + chunk 名覆盖表（包模块面）。
+    pub fn with_chunk_paths(
+        set: ModuleSet,
+        chunk_paths: std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        Self { set, chunk_paths }
+    }
+
+    /// 模块表（装载器唯一可见的代码面）。
+    pub fn set(&self) -> &ModuleSet {
+        &self.set
+    }
+
+    /// chunk 名覆盖表（`模块名 → 相对包根的路径`）。
+    pub fn chunk_paths(&self) -> &std::collections::BTreeMap<String, String> {
+        &self.chunk_paths
+    }
+
+    /// 是否空表（空 = 单文件 Mod）。
+    pub fn is_empty(&self) -> bool {
+        self.set.is_empty()
+    }
+
+    /// 拆开两半（装载管线注入时各走各的口）。
+    pub fn into_parts(self) -> (ModuleSet, std::collections::BTreeMap<String, String>) {
+        (self.set, self.chunk_paths)
+    }
+}
+
 // ───────────────────────── ② Lua 注入口（与 ① 以模块边界隔开） ─────────────────────────
 
 mod binding {
@@ -66,6 +117,13 @@ mod binding {
     /// 状态的销毁顺序因此无关（不会出现「表句柄比状态活得久」的悬垂面）。
     struct ModuleCtx {
         set: ModuleSet,
+        /// 模块名 → chunk 名（相对**包根**的真实路径；D3 的覆盖表）。
+        ///
+        /// 未命中的名字（全部 `src.*`）回落 [`path_of`]，所以现有行为逐字节
+        /// 不变。之所以需要它：`path_of("pkg.fixture")` 会得出
+        /// `pkg/fixture.lua`，而磁盘上是 `packages/libs/fixture/init.lua`——
+        /// chunk 名是**诊断面**（traceback 带真实文件与行号），假路径即缺陷。
+        chunk_paths: std::collections::BTreeMap<String, String>,
         cache: RegistryKey,
         stack: LoadStack,
         budget: LoadBudget,
@@ -116,6 +174,15 @@ mod binding {
             self.ctx.borrow_mut().set = set;
         }
 
+        /// 注入 chunk 名覆盖表（模块名 → 真实相对路径；同一入口 chunk 之前）。
+        ///
+        /// 与 [`ModuleHandle::set_modules`] 分开两个口而不并成一个：模块表是
+        /// 「能 require 什么」，覆盖表只影响「报错时报哪个文件」——后者坏了是
+        /// 诊断降级，不该让前者失效。
+        pub fn set_chunk_paths(&self, paths: std::collections::BTreeMap<String, String>) {
+            self.ctx.borrow_mut().chunk_paths = paths;
+        }
+
         /// 装载期燃料句柄（驱动转交 `fuel::install_with_load_budget`：装载
         /// 消耗独立预算，不挤占单转换预算）。
         pub fn load_budget(&self) -> LoadBudget {
@@ -142,6 +209,7 @@ mod binding {
         let cache = lua.create_table()?;
         let ctx = Rc::new(RefCell::new(ModuleCtx {
             set: ModuleSet::new(),
+            chunk_paths: std::collections::BTreeMap::new(),
             cache: lua.create_registry_value(cache)?,
             stack: LoadStack::new(),
             budget: LoadBudget::new(crate::fuel::FUEL_LOAD_BUDGET),
@@ -196,11 +264,18 @@ mod binding {
             }
         };
 
-        // ③ chunk 名：`@<相对路径>`（traceback 带真实文件与行号）。`path_of`
-        //    与 `normalize` 同源，今天不会失败；仍在**判栈之前**算——否则万一
-        //    两者口径分叉，失败会留下一个存活帧，让后续的循环/深度诊断报出
-        //    一条假链条（r4 报告的健壮性 nit）。
-        let chunk_name = format!("@{}", path_of(&name)?);
+        // ③ chunk 名：`@<相对路径>`（traceback 带真实文件与行号）。先查覆盖表
+        //    （包模块的真实路径不在 `path_of` 的双射里），未命中才回落
+        //    `path_of`——后者与 `normalize` 同源，今天不会失败；仍在**判栈之前**
+        //    算——否则万一两者口径分叉，失败会留下一个存活帧，让后续的循环/深度
+        //    诊断报出一条假链条（r4 报告的健壮性 nit）。
+        let chunk_name = {
+            let override_path = ctx.borrow().chunk_paths.get(&name).cloned();
+            match override_path {
+                Some(rel) => format!("@{rel}"),
+                None => format!("@{}", path_of(&name)?),
+            }
+        };
 
         // ④ 循环 / 深度判栈（纯 Rust；失败不入栈）。
         ctx.borrow_mut().stack.push(&name)?;

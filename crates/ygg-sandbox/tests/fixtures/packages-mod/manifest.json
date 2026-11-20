@@ -1,0 +1,42 @@
+{
+  "code": [
+    {
+      "byteLength": 390,
+      "path": "src/probe.lua",
+      "sha256": "efb784335fe5e91bf2cec15c9cf1c2f164953067218e31d90378dc0dbc79f848"
+    }
+  ],
+  "entries": [
+    {
+      "byteLength": 30,
+      "id": "ygg:probe/state",
+      "kind": "probe",
+      "path": "data/probe.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
+      "sha256": "c2a724581bffd8589c5f175a11d77d68d0da8f1482539405606766964613efdc"
+    }
+  ],
+  "packages": [
+    {
+      "files": [
+        {
+          "byteLength": 1156,
+          "path": "fixture/init.lua",
+          "sha256": "8ae1a2ab4564088b066e626731da1ea207a601e419aa3a5ccbeaabc1d86a2b0f"
+        },
+        {
+          "byteLength": 140,
+          "path": "fixture/pkg.json",
+          "sha256": "eaea85281cc8e1d46f594c5d84ce325c3409b3761e3008f073a0ce6ec2658cf5"
+        },
+        {
+          "byteLength": 574,
+          "path": "fixture/words.lua",
+          "sha256": "6129eb4d4287e1796cd26f3907d67450ae6c46d18f645c0bb8d26e6526a303c7"
+        }
+      ],
+      "id": "fixture"
+    }
+  ],
+  "schemaVersion": 1
+}

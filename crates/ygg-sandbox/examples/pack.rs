@@ -51,6 +51,8 @@ use serde_json::{json, Value as Json};
 use sha2::{Digest, Sha256};
 use ygg_sandbox::host_contract::{AgentContract, InboxRoutes};
 use ygg_sandbox::pack::{self, CodeSpec};
+use ygg_sandbox::packages::{self, PackagesSpec};
+use ygg_schema::manifest::{ManifestPackage, ManifestPackageFile};
 
 /// pack.json 的条目声明面（工具消费的最小集）。
 struct EntryDecl {
@@ -61,11 +63,29 @@ struct EntryDecl {
 }
 
 fn main() {
-    // ① 参数：<mod目录> 必填。
-    let dir = match std::env::args().nth(1) {
-        Some(dir) => PathBuf::from(dir),
+    // ① 参数：<mod目录> 必填；`--packages <dir>` 可选（与 `$YGG_PACKAGES_ROOT` 同义，
+    //    显式参数优先——与装载期的 `packages::resolve_root` 同一条优先级）。
+    let mut dir_arg: Option<PathBuf> = None;
+    let mut packages_arg: Option<PathBuf> = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--packages" => {
+                packages_arg = match args.next() {
+                    Some(value) => Some(PathBuf::from(value)),
+                    None => fail("--packages 需要一个目录参数".to_owned()),
+                };
+            }
+            other if other.starts_with("--") => fail(format!("未知参数：{other}")),
+            other => dir_arg = Some(PathBuf::from(other)),
+        }
+    }
+    let dir = match dir_arg {
+        Some(dir) => dir,
         None => {
-            eprintln!("用法: cargo run -p ygg-sandbox --example pack -- <mod目录>");
+            eprintln!(
+                "用法: cargo run -p ygg-sandbox --example pack -- <mod目录> [--packages <包根目录>]"
+            );
             eprintln!("读取 <mod目录>/pack.json，生成 / 覆写 <mod目录>/manifest.json");
             exit(1);
         }
@@ -177,6 +197,17 @@ fn main() {
         }
     }
 
+    // ④'' r3 packages 段（可选）：声明了就把包文件逐条入册。打包期跑**同一套**
+    //      `resolve` + `index`，所以「打包过了但装载不过」这类分叉在这里就断掉。
+    let packages_spec = match PackagesSpec::parse(&pack) {
+        Ok(spec) => spec,
+        Err(err) => fail(format!("pack.json 的 packages 段非法：{err}")),
+    };
+    let mut manifest_packages: Vec<Json> = Vec::new();
+    if let Some(spec) = &packages_spec {
+        manifest_packages = manifest_packages_for(&dir, spec, packages_arg.as_deref());
+    }
+
     // ⑤ 逐条目：读实际字节 → sha256 小写 hex + byteLength。
     let mut manifest_entries = Vec::with_capacity(entries.len());
     for entry in &entries {
@@ -206,6 +237,9 @@ fn main() {
     if code_spec.is_some() {
         manifest.insert("code".to_owned(), json!(manifest_code));
     }
+    if packages_spec.is_some() {
+        manifest.insert("packages".to_owned(), json!(manifest_packages));
+    }
     let mut out =
         serde_json::to_string_pretty(&Json::Object(manifest)).expect("manifest serialize");
     out.push('\n');
@@ -216,11 +250,116 @@ fn main() {
     let code_note = code_spec.as_ref().map_or(String::new(), |spec| {
         format!(", {} code modules", spec.modules().len())
     });
+    let pkg_note = packages_spec
+        .as_ref()
+        .map_or(String::new(), |spec| format!(", {} packages", spec.len()));
     println!(
-        "manifest 已生成 → {} ({} entries{code_note})",
+        "manifest 已生成 → {} ({} entries{code_note}{pkg_note})",
         manifest_path.display(),
         entries.len()
     );
+}
+
+/// `packages` 段的打包期处理：包根解析 → 闭包 → 读字节 → 条目 → **同一套**
+/// `index` 自校 → manifest 数组。
+///
+/// 返回 `[(id, files[])]` 的 JSON 形态（写盘用）。任何一步失败即 `fail!`。
+fn manifest_packages_for(
+    dir: &Path,
+    spec: &PackagesSpec,
+    packages_arg: Option<&Path>,
+) -> Vec<Json> {
+    let root = match packages::resolve_root(dir, packages_arg) {
+        Ok(root) => root,
+        Err(err) => fail(format!("packages 段校验失败：{err}")),
+    };
+    println!("  packages root {}", root.display());
+    let resolved = match packages::resolve(&root, spec) {
+        Ok(resolved) => resolved,
+        Err(err) => fail(format!("packages 段校验失败：{err}")),
+    };
+    // contract 是仓库内相对路径，必须存在（D6；以包含包根的 `.git` 为锚，
+    // 没有锚点时跳过——临时包根不是仓库）。
+    check_contracts(&root, &resolved);
+    // manifest 条目：包内非 test/** 文件 + pkg.json（resolve 已按 rel 排序）。
+    let mut entries: Vec<ManifestPackage> = Vec::new();
+    for package in resolved.packages() {
+        let mut manifest_files: Vec<ManifestPackageFile> = Vec::new();
+        for file in package.files() {
+            let path = root.join(file.rel());
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(err) => fail(format!("读取 {} 失败: {err}", path.display())),
+            };
+            println!(
+                "  package  {} {} ({} bytes)",
+                package.id(),
+                file.rel(),
+                bytes.len()
+            );
+            manifest_files.push(ManifestPackageFile::new(
+                file.rel(),
+                hex_sha256(&bytes),
+                bytes.len() as u64,
+            ));
+        }
+        entries.push(ManifestPackage::new(package.id(), manifest_files));
+    }
+    // 打包期复用装载期同一套判定（集合双向相等 / 内容寻址）。
+    if let Err(err) = packages::index(&root, &resolved, &entries) {
+        fail(format!("packages 段校验失败：{err}"));
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            json!({
+                "id": entry.id(),
+                "files": entry
+                    .files()
+                    .iter()
+                    .map(|file| json!({
+                        "path": file.path(),
+                        "sha256": file.sha256(),
+                        "byteLength": file.byte_length(),
+                    }))
+                    .collect::<Vec<Json>>(),
+            })
+        })
+        .collect()
+}
+
+/// 校验每个包的 `contract` 在**包含包根的仓库**里存在（打包期，D6）。
+///
+/// 锚点是包根向上的第一个 `.git`（而不是 mod 目录的 `../../..`）：后者依赖
+/// mod 目录的相对深度，对 `crates/**/fixtures/...` 这种浅层夹具直接算错。
+/// 没有锚点（临时包根）就跳过——那不是仓库，不存在「仓库内相对路径」这个概念。
+fn check_contracts(root: &Path, resolved: &packages::ResolvedPackages) {
+    let Some(repo) = ancestor_with_git(root) else {
+        return;
+    };
+    for package in resolved.packages() {
+        let contract = repo.join(package.contract());
+        if !contract.is_file() {
+            fail(format!(
+                "package `{}` 的 contract 声明的文件缺失: {}（pkg.json contract）",
+                package.id(),
+                contract.display()
+            ));
+        }
+    }
+}
+
+/// 向上找第一个带 `.git` 的目录（仓库锚点）。
+fn ancestor_with_git(start: &Path) -> Option<PathBuf> {
+    let mut current = start.canonicalize().ok()?;
+    loop {
+        if current.join(".git").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
 }
 
 /// 解析 entries 声明（字段缺失 / 类型不符 / id 或 path 重复 → 可读错误退出）。

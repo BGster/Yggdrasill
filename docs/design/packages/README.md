@@ -64,9 +64,12 @@
 
 ## 5. 载体与纪律
 
-- **布局**（P1 落地，P0 只声明）：`packages/libs/<name>/init.lua` + 同目录子模块 + `test/`。模块 id 固定 `pkg.<name>`——mod 子模块已占用 `src.*`（`.ygg/mods/agent-seed/src/**` 以 `require("src.core.util")` 形式互相引用）。
-- **纯度**：包模块顶层只允许纯导出（函数与常量），注册 / 写状态 / 输出一律在 `M.install(deps)` 或调用期——与 [../mod/mod-package.md](../mod/mod-package.md) 的 `mod.pure-export` 同一条纪律。**无未声明文件**：包内每个 Lua 文件都必须被宿主 manifest 纳管（P1 的包装载一并做）。
-- **自测入册**：用例名前缀 `pkg.<name>.`，且必须出现在 `cargo run -q --example selftest -- --mod .ygg/mods/agent-seed` 的 `cases passed=` 计数里。**发现机制未定（P1）**：`selftest` 现在只跑 `.ygg/mods/agent-seed/tests/*.lua`，包不在该目录下；是扩装载器扫 `packages/libs/**/test/*.lua` 还是加独立 example，留给 P1 的「包装载 + manifest 纳管」一起定——P0 只钉死「前缀 + 必须计入那条命令」这两条接口事实。
+- **布局**（P1 已落地）：`packages/libs/<name>/pkg.json` + `init.lua` + 同目录子模块 + `test/`。`<name>` 必须匹配 `^[a-z][a-z0-9_-]*$`，它就是包 id（单源，不额外声明）。模块名 = `pkg.<name>`——mod 子模块已占用 `src.*`（`.ygg/mods/agent-seed/src/**` 以 `require("src.core.util")` 形式互相引用）。**连字符规则**：id 里的 `-` 在模块名里折叠为 `_`（`role-skill` → `pkg.role_skill`）——模块名段字符集只有 `[A-Za-z0-9_]`，`pkg.role-skill` 会被 `normalize` 拒掉，折叠是唯一可行映射。同理，**文件名段也不许有连字符**：`attr-v2.lua` 是不可装载的模块路径，打包期即可读拒绝。
+- **`pkg.json`（包自描述，必须存在）**：`{ schemaVersion: 1, name, version, deps?, contract }`。`name` 必须等于目录名；`version` 是**精确 pin**（被 mod 的 `pack.json` `packages[]` 与本包 `deps[]` 引用时都是字符串相等）；`deps` 可缺省（`[{id, version}]`）；`contract` 是仓库内相对路径，必须存在（打包期校验）。它与包内 Lua 文件一样进 manifest 的 `packages` 段（它决定解析结果，必须内容寻址），但**不进**模块表（不是 Lua）。
+- **纯度**：包模块顶层只允许纯导出（函数与常量），注册 / 写状态 / 输出一律在 `M.install(deps)` 或调用期——与 [../mod/mod-package.md](../mod/mod-package.md) 的 `mod.pure-export` 同一条纪律。**无未声明文件**：包内除 `test/**` 外的每个文件都必须被宿主 manifest 的 `packages` 段纳管（已落地；其它文件打包期即拒）。
+- **自测入册**（已落地，条件式）：用例名前缀 `pkg.<name>.`，放在 `<包根>/<本包>/test/*.lua`，由 `cargo run -q --example selftest -- --mod <mod> --packages <包根>` 收集，与 mod 自测进入**同一个** `__SELFTEST` 计数面（`cases passed=` 里一并计）。于是条件式成立——声明的包计入该命令的计数，不声明包的 mod 跑 0 条，生产 mod（`agent-seed`）的 `cases passed=` 不因本机制变化。包自测自带计数垫片，不依赖消费它的 mod 的 harness。
+- **发现机制（P1 已定）**：声明驱动，不靠目录扫描——只有 `pack.json` 的 `packages` 段声明过的包才会被装载，包根由 `--packages` / `$YGG_PACKAGES_ROOT` / `<mod>/../../packages/libs` 解析。完整规则见 [../mod/mod-package.md](../mod/mod-package.md) §3.2.3。
+- **装载面夹具（`fixture`）**：`packages/libs/fixture/` 是**装载面活体夹具**（`pkg.json` + `init.lua` + `words.lua` + `test/pkg-fixture.lua`），**不是能力包**，显式豁免第 ② 节「≥2 个不同游戏用点」硬闸——那道闸针对能力包；夹具的作用是钉住装载契约（多文件 require、缓存身份、chunk 名、纯导出边界），不是提供能力。P2 的六个能力包（entity / codec / quest / dialogue / role-skill / procgen）不受此豁免影响。
 - **性能数字**：每包 §5 五个指标必须给数字口径与测量方法（同数据集 / 同机器 / 跑三次取中位）；P0 期填**目标值**，P2 首实现填实测值，偏差回写契约。
 - **不新增存储层**：实体持久化只有一条路——mod KV 命名空间 + codec。每个包的 KV 前缀在它自己的 §2「持久化位置」列声明，前缀单写者（对齐 `mod-package.md` 的 `mod.kv-prefix-owner`）。
 - **前向契约的清偿义务**：P0 期这些契约**没有代码消费者**，按 [../../wiki-governance.md](../../wiki-governance.md) 的判据它们是前向契约（Goal 反例 7 又硬性要求路径就是 `docs/design/packages/<name>.md`）。清偿动作写死在 P2：每包首实现时 `packages/libs/<name>/init.lua` 的头注释写 `docs/design/packages/<name>.md`，指针类语义自那一刻成立。**能力出口**：新能力落 `crates/ygg-*/` 还是 `packages/libs/<name>/`，按 `AGENTS.md` §1.7 判——本文件是能力的规格，不是工作流规则的第二副本。

@@ -201,3 +201,59 @@ pub fn declared_modules() -> Vec<String> {
         .map(|item| item.as_str().expect("module path").to_owned())
         .collect()
 }
+
+// ───────────────────────── packages 面（r3） ─────────────────────────
+
+/// 入库夹具包目录（`<repo>/packages/libs/fixture`）。
+pub fn fixture_package_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/libs/fixture")
+}
+
+/// 入库 packages 夹具 Mod（`tests/fixtures/packages-mod`）。
+pub fn packages_mod_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packages-mod")
+}
+
+/// 由包闭包现算 manifest 的 `packages` 段（`(id, path)` 序，与打包工具同法）。
+///
+/// 与 [`reseal`] 分开：包根是**外部**输入（一个 Mod 可以消费任意包根），
+/// 而 `reseal` 只重算 Mod 自己拥有的字节。
+pub fn manifest_packages_for(
+    pkg_root: &Path,
+    spec: &ygg_sandbox::packages::PackagesSpec,
+) -> Vec<Json> {
+    let resolved =
+        ygg_sandbox::packages::resolve(pkg_root, spec).expect("包闭包必须可解析（测试脚手架）");
+    resolved
+        .packages()
+        .iter()
+        .map(|package| {
+            let files: Vec<Json> = package
+                .files()
+                .iter()
+                .map(|file| {
+                    let bytes = fs::read(pkg_root.join(file.rel()))
+                        .unwrap_or_else(|err| panic!("read {}: {err}", file.rel()));
+                    json!({
+                        "path": file.rel(),
+                        "sha256": sha256_hex(&bytes),
+                        "byteLength": bytes.len(),
+                    })
+                })
+                .collect();
+            json!({ "id": package.id(), "files": files })
+        })
+        .collect()
+}
+
+/// [`reseal`] + 把包面条目写进同一个 manifest（改了包文件就必须重算）。
+pub fn reseal_with_packages(dir: &Path, pkg_root: &Path) {
+    reseal(dir);
+    let pack = read_json(&dir.join("pack.json"));
+    let spec = ygg_sandbox::packages::PackagesSpec::parse(&pack)
+        .expect("pack.json 的 packages 段必须合法")
+        .expect("pack.json 必须声明 packages 段");
+    let mut manifest = read_json(&dir.join("manifest.json"));
+    manifest["packages"] = json!(manifest_packages_for(pkg_root, &spec));
+    write_json(&dir.join("manifest.json"), &manifest);
+}

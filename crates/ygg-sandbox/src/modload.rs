@@ -25,14 +25,16 @@
 //! 的错误直接进 CLI 报告 / 走查报告，不需要机器分支；内核构造错误仍是
 //! [`KernelError`]（有稳定码映射面），由调用方决定怎么呈现。
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
 use serde_json::Value as Json;
 
 use crate::driver::{KernelError, KernelFacade};
-use crate::modules::ModuleSet;
+use crate::modules::{ModuleSet, ModuleTable};
 use crate::pack::{self, CodeSpec};
+use crate::packages::{self, PackagesSpec};
 
 /// Mod 包内的声明文件名（`entries` / `schemaFiles` / `code` / `agent` / `inboxRoutes`）。
 pub const PACK_FILE: &str = "pack.json";
@@ -43,11 +45,11 @@ pub const MANIFEST_FILE: &str = "manifest.json";
 /// 单文件 Mod 的入口文件名（`code.entry` 缺省时的回落）。
 pub const MOD_SOURCE_FILE: &str = "mod.lua";
 
-/// 一个 Mod 目录装出来的全部装载参数（五件套 + 模块表）。
+/// 一个 Mod 目录装出来的全部装载参数（五件套 + 模块表 + chunk 覆盖表）。
 ///
 /// 字段是「装载参数的完整集合」：入口源码、manifest 字节、schema 文本、资源
-/// 字节、代码模块表。持有它就能反复构造驱动（热载重读、读档重建），不必再碰
-/// 文件系统——这也是宿主侧「签名变了才重读」的实现基础。
+/// 字节、代码模块表、chunk 名覆盖表。持有它就能反复构造驱动（热载重读、读档
+/// 重建），不必再碰文件系统——这也是宿主侧「签名变了才重读」的实现基础。
 #[derive(Debug, Clone)]
 pub struct ModBundle {
     /// 入口 Mod 源码（`code.entry` 或 [`MOD_SOURCE_FILE`]）。
@@ -58,8 +60,16 @@ pub struct ModBundle {
     pub schemas: Vec<(String, String)>,
     /// `(包内相对路径, 字节)` 序列（顺序 = `pack.json` 的 `entries` 声明序）。
     pub resources: Vec<(String, Vec<u8>)>,
-    /// 代码模块表（空 = 单文件 Mod：`require` 对任何名字可读拒绝）。
+    /// 代码模块表（mod 自有 + 并集进来的包模块；空 = 单文件 Mod）。
+    ///
+    /// 包模块与 mod 模块进**同一张**表（只有名字前缀不同：`pkg.*` vs `src.*`），
+    /// 所以 `require` 的查表机制一个字不改。
     pub modules: ModuleSet,
+    /// chunk 名覆盖表（`模块名 → 真实相对路径`；D3）。
+    ///
+    /// 空的含义与 `modules` 为空不同：这里空 = 没有包模块（全部名字走
+    /// `modules::path_of` 的默认双射，即现有行为逐字节不变）。
+    pub chunk_paths: BTreeMap<String, String>,
 }
 
 impl ModBundle {
@@ -88,14 +98,34 @@ impl ModBundle {
         // 模块字节只从 manifest 校验过的模块表取（未登记的模块装载前就失败）。
         let code = CodeSpec::parse(&pack)
             .map_err(|err| format!("{}/{PACK_FILE} 的 code 段非法：{err}", dir.display()))?;
+        // `packages` 段（可选）：声明了就是「本 Mod 依赖若干个能力包」。
+        // 段存在即全量校验，拒绝发生在读取任何包字节之前（零副作用）。
+        let packages_spec = PackagesSpec::parse(&pack)
+            .map_err(|err| format!("{}/{PACK_FILE} 的 packages 段非法：{err}", dir.display()))?;
         let entry_file = code.as_ref().map_or(MOD_SOURCE_FILE, |spec| spec.entry());
         let mod_source = fs::read_to_string(dir.join(entry_file))
             .map_err(|err| format!("读取 {}/{entry_file} 失败：{err}", dir.display()))?;
         let manifest_bytes = fs::read(dir.join(MANIFEST_FILE))
             .map_err(|err| format!("读取 {}/{MANIFEST_FILE} 失败：{err}", dir.display()))?;
-        let modules = match &code {
-            None => ModuleSet::new(),
-            Some(spec) => load_code_modules(dir, spec, &manifest_bytes)?,
+        // manifest 只解析**一次**：`code` 的模块对账与 `packages` 的文件对账
+        // 读同一份登记（分头解析会留下两套失败文案与两次校验开销）。
+        let manifest = if code.is_some() || packages_spec.is_some() {
+            Some(
+                ygg_schema::manifest::parse_manifest(&manifest_bytes)
+                    .map_err(|err| format!("{}/{MANIFEST_FILE} 不合契约：{err}", dir.display()))?,
+            )
+        } else {
+            None
+        };
+        let mod_modules = match (&code, &manifest) {
+            (Some(spec), Some(manifest)) => load_code_modules(dir, spec, manifest)?,
+            _ => ModuleSet::new(),
+        };
+        // ②′④′⑦⑧ packages 段：包根解析 → 闭包 → 三方对账 → 并集。
+        // 全部在进入内核之前完成；失败文案统一前缀（与 code 段同形）。
+        let (modules, chunk_paths) = match (&packages_spec, &manifest) {
+            (Some(spec), Some(manifest)) => load_packages(dir, spec, manifest, &mod_modules)?,
+            _ => (mod_modules, BTreeMap::new()),
         };
 
         // schema 文本按文件内 `$id` 注册（schema 不进 manifest，装载方按 id 供给）。
@@ -137,6 +167,7 @@ impl ModBundle {
             schemas,
             resources,
             modules,
+            chunk_paths,
         })
     }
 
@@ -153,14 +184,19 @@ impl ModBundle {
                 &self.resources,
             )
         } else {
-            KernelFacade::with_resources_and_modules(
+            KernelFacade::with_resources_and_module_table(
                 &self.mod_source,
-                self.modules.clone(),
+                self.module_table(),
                 &self.manifest_bytes,
                 &self.schemas,
                 &self.resources,
             )
         }
+    }
+
+    /// 装载期代码面（模块表 + chunk 覆盖表；两者同进同出，见 [`ModuleTable`]）。
+    fn module_table(&self) -> ModuleTable {
+        ModuleTable::with_chunk_paths(self.modules.clone(), self.chunk_paths.clone())
     }
 
     /// 读档重建（热载 / 续局路径）：与 [`ModBundle::kernel`] 同一分派。
@@ -177,10 +213,10 @@ impl ModBundle {
                 &self.resources,
             )
         } else {
-            KernelFacade::restore_with_resources_and_modules(
+            KernelFacade::restore_with_resources_and_module_table(
                 save_bytes,
                 &self.mod_source,
-                self.modules.clone(),
+                self.module_table(),
                 &self.manifest_bytes,
                 &self.schemas,
                 &self.resources,
@@ -207,12 +243,32 @@ pub fn load_mod(dir: &Path) -> Result<KernelFacade, String> {
 fn load_code_modules(
     dir: &Path,
     spec: &CodeSpec,
-    manifest_bytes: &[u8],
+    manifest: &ygg_schema::manifest::Manifest,
 ) -> Result<ModuleSet, String> {
-    let manifest = ygg_schema::manifest::parse_manifest(manifest_bytes)
-        .map_err(|err| format!("{}/{MANIFEST_FILE} 不合契约：{err}", dir.display()))?;
     let module_bytes = pack::collect_bytes(spec, |rel| fs::read(dir.join(rel)))
         .map_err(|err| format!("{}/code 段读取失败：{err}", dir.display()))?;
     pack::assemble(spec, manifest.code(), &module_bytes)
         .map_err(|err| format!("{}/code 段校验失败：{err}", dir.display()))
+}
+
+/// 包面：包根解析 → 闭包 → manifest 三方对账 → 与 mod 自有模块表并集。
+///
+/// 四步全部在进入内核之前，任一步失败即装载失败并统一前缀（与 `code` 段同形，
+/// 读者不用猜是哪个段坏了）。并集预算与名字冲突在 [`packages::union`] 里收口
+/// ——按并集统算，否则两个各自合法的半边合起来超预算。
+fn load_packages(
+    dir: &Path,
+    spec: &PackagesSpec,
+    manifest: &ygg_schema::manifest::Manifest,
+    mod_modules: &ModuleSet,
+) -> Result<(ModuleSet, BTreeMap<String, String>), String> {
+    let wrap =
+        |err: packages::PackageError| format!("{}/packages 段校验失败：{err}", dir.display());
+    // 包根由本函数自行解析（`$YGG_PACKAGES_ROOT` > `<mod>/../../packages/libs`）
+    // ——CLI 一行不改就能用，工具面需要显式指定时用 `--packages` 自己解。
+    let root = packages::resolve_root(dir, None).map_err(wrap)?;
+    let resolved = packages::resolve(&root, spec).map_err(wrap)?;
+    let index = packages::index(&root, &resolved, manifest.packages()).map_err(wrap)?;
+    let table = packages::union(mod_modules, index).map_err(wrap)?;
+    Ok(table.into_parts())
 }
