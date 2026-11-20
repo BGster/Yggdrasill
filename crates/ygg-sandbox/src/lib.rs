@@ -24,6 +24,7 @@ pub mod inject;
 pub mod modload;
 pub mod modules;
 pub mod pack;
+pub mod packages;
 pub mod playtest;
 pub mod resources;
 pub mod sandbox;
