@@ -1,0 +1,9 @@
+{
+    "schemaVersion": 1,
+    "entries": [],
+    "schemaFiles": [],
+    "packages": [
+        { "id": "entity", "version": "0.1.0" },
+        { "id": "codec", "version": "0.1.0" }
+    ]
+}
