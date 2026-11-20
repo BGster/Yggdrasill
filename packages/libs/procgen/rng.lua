@@ -272,6 +272,24 @@ function M.state(rng)
   return { s[1], s[2], s[3], s[4] }
 end
 
+--- 取一个整数参数：`nil` → `default`；非整数或越 `[low, high]` 即 `-PARAM`。
+---
+--- 参数校验器与 `fail` 同住在叶子（同一个理由：十几行的公共工具不为它单开模块）。
+--- 算法的 `params` 一律经它取——生成器里不接受任何未校验的外部数字。
+function M.param_int(params, key, default, low, high)
+  local value = params[key]
+  if value == nil then
+    value = default
+  end
+  if type(value) ~= "number" or value ~= (value // 1) then
+    M.fail(M.E.PARAM, "params." .. key .. " 必须是整数，得到 " .. tostring(value))
+  end
+  if value < low or value > high then
+    M.fail(M.E.PARAM, "params." .. key .. " 必须落在 [" .. low .. ", " .. high .. "]")
+  end
+  return value | 0
+end
+
 RNG.int = function(self, lo, hi)
   return M.int(self, lo, hi)
 end
