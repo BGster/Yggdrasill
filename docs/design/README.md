@@ -10,7 +10,7 @@
 docs/design/
 ├── README.md          # 本文件：触碰面 → 文件（索引完备性由机检断言）
 ├── kernel/            # ① ygg 内核（crates/ygg-core、crates/ygg-sandbox 本体）
-│   ├── state-machine.md   state-surface.md   events.md
+│   ├── state-machine.md   state-surface.md   events.md   sim-kernel.md
 │   └── wire-protocol.md   lua-api.md         compaction.md
 ├── host/              # ② egg CLI 与 host
 │   ├── cli-daemon.md  serve.md
@@ -31,6 +31,7 @@ docs/design/
 | ① 内核 · payload 文法与尾段链 | [kernel/wire-protocol.md](kernel/wire-protocol.md) | 改 payload 形状 / 改 exec-actor 尾段链之前 | hard-refusal |
 | ① 内核 · `ygg.*` 宿主 API | [kernel/lua-api.md](kernel/lua-api.md) | 新增或修改 `ygg.*` API 之前 | hard-refusal |
 | ① 内核 · 压缩与检查点交接 | [kernel/compaction.md](kernel/compaction.md) | 改压缩水位 / 检查点判定 / 交接产物之前 | silent-drift |
+| ① 内核 · 原生模拟内核（Tier 1） | [kernel/sim-kernel.md](kernel/sim-kernel.md) | 改 tick / ECS 状态 / 快照回放 / 确定性策略 / 热核面下沉之前 | hard-refusal |
 | ② host · CLI 与 daemon 线协议 | [host/cli-daemon.md](host/cli-daemon.md) | 改命令行 / daemon 协议 / 存储与版本兼容面之前 | hard-refusal |
 | ② host · serve 观察面 | [host/serve.md](host/serve.md) | 触碰 serve 任何一行之前 | irreversible |
 | ② host · `.pi/tools` 检测脚本 | [host/harness-tools.md](host/harness-tools.md) | 改或调用 `.pi/tools/*` 与结算机证参数之前 | silent-drift |

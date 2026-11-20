@@ -23,7 +23,7 @@ docs/
 │   ├── copy/                # 文案契约：README + flow / harness / lanes / map-guide / requirements / settlement / core
 └── design/              # 设计契约树（有代码消费者的「改前必守」）——四模块，入口 design/README.md
     ├── README.md              # 树入口：模块 → 文件 → 召回时点（索引完备性由机检断言）
-    ├── kernel/                # ① ygg 内核（6）：state-machine / events（39 口径）/ state-surface / wire-protocol / lua-api / compaction
+    ├── kernel/                # ① ygg 内核（7）：state-machine / events（39 口径）/ state-surface / wire-protocol / lua-api / compaction / sim-kernel
     ├── host/                  # ② egg CLI 与 host（4）：cli-daemon / serve / harness-tools / lanes
     ├── mod/                   # ③ agent-seed mod（6）：mod-package / prompt-surface / tool-bridge / action-faces / identity / testing-strategy
     └── packages/              # ⑤ packages 通用能力层（8）：README + entity / codec / quest / dialogue / role-skill / procgen / assetgen
@@ -66,6 +66,7 @@ docs/
 | [wire-protocol.md](design/kernel/wire-protocol.md) | 逐事件 payload 格式与尾段链 | §3.3 |
 | [lua-api.md](design/kernel/lua-api.md) | ygg.* 全 API 面与副作用类别 | §3 章题 + §3.1 |
 | [compaction.md](design/kernel/compaction.md) | 压缩双入口、水位线、稳定检查点谓词 | §3.6 |
+| [sim-kernel.md](design/kernel/sim-kernel.md) | 三层引擎 Tier 1：确定性 tick/ECS、快照回放 state hash、热核面下沉铁律 | 全文（新） |
 
 ### ② host · egg CLI 与 host
 
