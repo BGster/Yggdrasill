@@ -8,9 +8,12 @@
 --
 -- # 实现纪律（沙箱方言；契约 §8 记着为什么）
 --
--- 1. 沙箱没有 `string` / `table` / `utf8` 全局（`sandbox.rs` 白名单测试钉死）：
---    字符串只能走方法语法，表工具手写。出现标准库表的点式调用即会在真实
---    跑局里崩，而 selftest 看不出来——交付门禁带静态 grep。
+-- 1. 沙箱没有 `string` / `table` / `utf8` / `math` 全局（`sandbox.rs` 白名单测试
+--    钉死）：字符串只能走方法语法，表工具与整/浮判据手写。后四个在**裸**沙箱缺席，
+--    `math` 只在驱动路径由 `inject::install` 注入（`inject.rs`）——包不得依赖那条
+--    注入，否则任何人用 `Sandbox::new()` 直接装包都会在运行期炸。点式调用标准库表
+--    即会在真实跑局里崩，而 selftest 看不出来——交付门禁带静态 grep
+--    （`tests/packages_sandbox.rs` 用例 ③）。
 -- 2. 模块顶层纯：只 local / 常量 / 函数定义。`ygg` 访问一律发生在调用期，经
 --    `host()` 单点取句柄（契约 I8：`install` 不预读、不预写）。
 -- 3. **键序 = 字节序升序**（契约 I1）：不排序就没有确定性，没有确定性就没有
@@ -126,6 +129,37 @@ local function sort_names(items)
   return items
 end
 
+--- 数是不是 Lua 5.4 的 **integer**。
+---
+--- 为什么必须自己判：沙箱不保证注入面那个整/浮类型函数（`math` 只由驱动注入，包不得
+--- 依赖它，见文件头第 1 条），而整数与浮点在算术、比较、`//`、`%`、位运算下完全不可区分
+--- （`1 == 1.0`、`1 // 1 == 1.0 // 1`、`("%d"):format(1) == ("%d"):format(1.0)`）。能
+--- 区分身份的只剩文本形态：Lua 5.4 整数按 `%d` 打印（无 `.`、无 `e`），浮点按 `%.14g`
+--- 打印且「整数形」补 `.0`（`tostring(1)="1"` / `tostring(1.0)="1.0"` /
+--- `tostring(1e15)="1e+15"`）。
+---
+--- 为什么不能写 `v % 1 == 0`：`2.0 % 1 == 0.0`，整值浮点会被吞成整型。而本包的 KV/JSON
+--- 面里 `1` 与 `1.0` 是**两个字节串**，吞掉一次就是字节稳定当场破。
+---
+--- 只用 `:byte` 不引入 pattern：`string` 全局在沙箱缺席，但字符串方法经
+--- `getmetatable("").__index` 可达（与 `entity` 的 `name_ok` 同一风格）。
+---
+--- 残留依赖（如实声明）：判据依赖 `tostring` 的 `%.14g`——与 `number_text` 里
+--- `NUMBER_FORMATS` 的 `%g` 是**同一依赖面**，不是新增风险类别。
+local function is_integer(v)
+  if type(v) ~= "number" or v - v ~= 0 then -- 非数 / ±inf / NaN 一律 false
+    return false
+  end
+  local text = tostring(v)
+  for i = 1, #text do
+    local b = text:byte(i)
+    if b == 46 or b == 101 then -- '.' / 'e'
+      return false
+    end
+  end
+  return true
+end
+
 -- ── encode：确定性 JSON ────────────────────────────────────────────────────
 
 -- 字符串转义表（`\u00XX` 之外的控制字符与引号/反斜杠）。
@@ -195,10 +229,10 @@ local function number_text(value)
   if value ~= value then
     fail(E_TYPE, "NaN 不是可编码的值")
   end
-  if value == math.huge or value == -math.huge then
+  if value - value ~= 0 then
     fail(E_TYPE, "±inf 不是可编码的值")
   end
-  if math.type(value) == "integer" then
+  if is_integer(value) then
     return tostring(value)
   end
   if value == 0.0 then
@@ -235,7 +269,7 @@ local function table_kind(value, path)
   local max_index = 0
   for key in pairs(value) do
     if type(key) == "number" then
-      if math.type(key) ~= "integer" or key < 1 then
+      if not is_integer(key) or key < 1 then
         fail(E_TYPE, "表的键必须是正整数或字符串（在 " .. path .. " 遇到 " .. tostring(key) .. "）")
       end
       array_count = array_count + 1
@@ -828,13 +862,13 @@ local CONFLICT_POLICIES = { skip = true, overwrite = true, rename = true }
 --- 一条依赖边，收益小于一条边（契约 §1.4）。
 local function value_ok(kind, value)
   if kind == "number" then
-    return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+    return type(value) == "number" and value - value == 0
   elseif kind == "string" then
     return type(value) == "string"
   elseif kind == "boolean" then
     return type(value) == "boolean"
   elseif kind == "ref" then
-    return type(value) == "number" and math.type(value) == "integer" and value >= 1
+    return type(value) == "number" and is_integer(value) and value >= 1
   end
   return false
 end
@@ -849,7 +883,7 @@ local function compile_record(record, index)
     fail(E_TYPE, at .. " 不是表")
   end
   local id = record.id
-  if type(id) ~= "number" or math.type(id) ~= "integer" or id < 1 then
+  if type(id) ~= "number" or not is_integer(id) or id < 1 then
     fail(E_TYPE, at .. " 的 id 必须是正整数")
   end
   if type(record.schema) ~= "string" then
