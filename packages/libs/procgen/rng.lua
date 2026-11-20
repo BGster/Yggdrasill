@@ -44,7 +44,10 @@ local FNV_PRIME = 0x100000001B3
 local MIX_A = 0xBF58476D1CE4E5B9
 local MIX_B = 0x94D049BB133111EB
 local M32 = 0xFFFFFFFF
+local SPAN32 = 0x100000000
 local GOLDEN = 0x9E3779B9
+local I64_MAX = 0x7FFFFFFFFFFFFFFF
+local FLOAT_SCALE = 1 / 16777216 -- 2^-24：`float` 的 24 位粒度
 
 -- ── 32 位原语 ────────────────────────────────────────────────────────────────
 
@@ -172,7 +175,7 @@ end
 function M.next32(rng)
   local s = state_of(rng)
   local result = mul32(rotl32(mul32(s[2], 5), 7), 9)
-  local t = (s[1] << 9) & M32
+  local t = (s[2] << 9) & M32
   s[3] = s[3] ~ s[1]
   s[4] = s[4] ~ s[2]
   s[2] = s[2] ~ s[3]
@@ -185,6 +188,108 @@ end
 -- 句柄方法与模块函数**同一个函数**：`rng.int(rng, 1, 6)` 与 `rng:int(1, 6)` 都对。
 RNG.next32 = function(self)
   return M.next32(self)
+end
+
+-- ── 取数面（闭区间整数 / [0,1) 浮点 / 抽取 / 置换 / 快照）───────────────────
+
+--- 整数化：只收整值数字（整值浮点也收，值不变），带小数或越 i64 即 `-PARAM`。
+local function to_int(value, label)
+  if type(value) ~= "number" or value ~= (value // 1) then
+    M.fail(M.E.PARAM, label .. " 必须是整数，得到 " .. tostring(value))
+  end
+  if value > I64_MAX or value < -I64_MAX then
+    M.fail(M.E.PARAM, label .. " 超出 64 位整数域")
+  end
+  return value | 0
+end
+
+--- `rng.int(rng, lo, hi)` → `[lo, hi]` 闭区间整数。
+---
+--- **拒绝采样**，不是取模：`limit = 2^32 - (2^32 %% span)`，抽到 `r < limit` 为止。
+--- 取模会让小的余数面偏多，而「同 seed 同产物」的验收里偏差是**静默**的（序列
+--- 依然可复现，只是分布偏了）。`span == 1` 直接返回 `lo`，**不取数**——单面区间
+--- 消耗一个随机数是纯浪费，且会让「插一个常量参数」改变后续序列。
+function M.int(rng, lo, hi)
+  local first = to_int(lo, "lo")
+  local last = to_int(hi, "hi")
+  if first > last then
+    M.fail(M.E.RANGE, "int 的 lo > hi（" .. first .. " > " .. last .. "）")
+  end
+  local span = last - first + 1
+  if span <= 0 then
+    M.fail(M.E.RANGE, "int 的区间宽溢出 64 位")
+  end
+  if span > SPAN32 then
+    M.fail(M.E.RANGE, "int 的区间宽 " .. span .. " 超过 2^32")
+  end
+  if span == 1 then
+    return first
+  end
+  local limit = SPAN32 - (SPAN32 % span)
+  while true do
+    local draw = M.next32(rng)
+    if draw < limit then
+      return first + (draw % span)
+    end
+  end
+end
+
+--- `rng.float(rng)` → `[0, 1)`，24 位粒度（`(next32 >> 8) * 2^-24`，f64 精确可表）。
+function M.float(rng)
+  return (M.next32(rng) >> 8) * FLOAT_SCALE
+end
+
+--- `rng.pick(rng, list)` → 列表中的一个元素（空表或非数组 = `-PARAM`）。
+function M.pick(rng, list)
+  if type(list) ~= "table" or #list < 1 then
+    M.fail(M.E.PARAM, "pick 需要非空数组")
+  end
+  return list[M.int(rng, 1, #list)]
+end
+
+--- `rng.shuffle(rng, list)` → **新表**（Fisher–Yates，从后往前换）。
+---
+--- 不原地改：调用方的表常常是 defs 里的参数表，原地洗牌会让「同 seed 同产物」
+--- 取决于谁先跑（第一次调用改了共享状态）。
+function M.shuffle(rng, list)
+  if type(list) ~= "table" then
+    M.fail(M.E.PARAM, "shuffle 需要数组，得到 " .. type(list))
+  end
+  local out = {}
+  for i = 1, #list do
+    out[i] = list[i]
+  end
+  for i = #out, 2, -1 do
+    local j = M.int(rng, 1, i)
+    out[i], out[j] = out[j], out[i]
+  end
+  return out
+end
+
+--- `rng.state(rng)` → 四整数**副本**（改它不影响句柄；存档续生成靠它）。
+function M.state(rng)
+  local s = state_of(rng)
+  return { s[1], s[2], s[3], s[4] }
+end
+
+RNG.int = function(self, lo, hi)
+  return M.int(self, lo, hi)
+end
+
+RNG.float = function(self)
+  return M.float(self)
+end
+
+RNG.pick = function(self, list)
+  return M.pick(self, list)
+end
+
+RNG.shuffle = function(self, list)
+  return M.shuffle(self, list)
+end
+
+RNG.state = function(self)
+  return M.state(self)
 end
 
 return M
