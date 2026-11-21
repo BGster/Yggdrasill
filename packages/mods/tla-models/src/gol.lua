@@ -79,7 +79,7 @@ end
 --- schema 注册 + 不变量注册（幂等）。
 function M.install()
   entity.define(SCHEMA, {
-    fields = {
+    attrs = {
       x = { type = "number", required = true },
       y = { type = "number", required = true },
       alive = { type = "boolean", required = true },
