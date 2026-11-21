@@ -9,6 +9,7 @@
 //! - ID 从 1 起严格单调分配（`new()` + `spawn`，无零值缺省起点；
 //!   宿主注入序分歧不产生遍历序分歧，威胁 #4）。
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -383,6 +384,357 @@ impl EntityStore {
     pub fn revision(&self) -> u64 {
         self.revision
     }
+
+    /// 查询（S24）：`selector` 决定存活集与输出序。
+    ///
+    /// 序：无 `order` ⇒ **id 升序**（`BTreeMap` 序遍历）；有 `order` ⇒ `(值, id)` 升序
+    /// （`desc` 只反转值序，**id 兜底不反转**；缺属性排最后）。
+    pub fn select(&mut self, selector: &Selector) -> Vec<&Entity> {
+        let mut rows: Vec<&Entity> = self
+            .entities
+            .values()
+            .filter(|entity| selector.matches(entity))
+            .collect();
+        self.apply_order(&mut rows, selector);
+        rows
+    }
+
+    /// `order` 排序（键预取一次，比较只读键：k 行 = k 次属性查 + 一次排序）。
+    fn apply_order<'a>(&self, rows: &mut Vec<&'a Entity>, selector: &Selector) {
+        let Some(order) = &selector.order else {
+            return;
+        };
+        let mut keyed: Vec<(Option<QueryValue<'a>>, &'a Entity)> = rows
+            .iter()
+            .map(|entity| (entity.query_value(&order.attr), *entity))
+            .collect();
+        keyed.sort_unstable_by(|(left, a), (right, b)| {
+            compare_order_keys(left, right, order.descending).then(a.id.cmp(&b.id))
+        });
+        *rows = keyed.into_iter().map(|(_, entity)| entity).collect();
+    }
+}
+
+// ============================================================================
+// 通用实体查询引擎（S24；契约 `docs/design/packages/entity.md` §9.8）
+// ============================================================================
+//
+// 语义住在 core（无 VM 可单测）：选择器、比较矩阵与序遍历都在这里，宿主侧只做文法
+// 解码（`host_api::entity_query_selector`）与两阶段材质化。这样「跨族比较是假不是
+// 错」「缺属性一律假」「`is` 管存在性」这几条裁断不会随宿主重构漂。
+
+/// 比较运算（PostgREST 族裁剪版的**执行形态**）。
+///
+/// `not` 不是独立 op，它是 [`Predicate::negated`] 上的前缀修饰；`in` 在谓词层展开
+/// （任一元素 `eq` 成立即真）。所以枚举里**没有算术臂**——浮点不可结合性无从发生
+/// （确定性论证第一条，v1 §4）。
+#[derive(Clone, Debug, PartialEq)]
+pub enum CompareOp {
+    Eq(Value),
+    Neq(Value),
+    Gt(Value),
+    Gte(Value),
+    Lt(Value),
+    Lte(Value),
+    /// 标量数组，任一 `eq` 成立即真；**空数组恒假**。
+    In(Vec<Value>),
+    /// `*` 唯一通配符、四形态（[`like_shape`]）；越界形态在解码期已拒。
+    Like(String),
+    /// `like` + **ASCII** 小写折叠（Unicode 折叠表是版本相关依赖，不做）。
+    ILike(String),
+    /// **存在性测试**：唯一不受「缺属性 ⇒ 假」管辖的 op。
+    Is(IsTest),
+}
+
+/// `is` 的四种测试（`null` = 不在场、`notnull` = 在场、`true`/`false` = 在场且布尔相等）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IsTest {
+    Null,
+    NotNull,
+    True,
+    False,
+}
+
+impl IsTest {
+    /// 解码 `is` 的操作数文本（`null` / `notnull` / `true` / `false`）。
+    pub fn of(text: &str) -> Option<Self> {
+        match text {
+            "null" => Some(Self::Null),
+            "notnull" => Some(Self::NotNull),
+            "true" => Some(Self::True),
+            "false" => Some(Self::False),
+            _ => None,
+        }
+    }
+
+    fn holds(self, found: Option<&Value>) -> bool {
+        match self {
+            Self::Null => found.is_none(),
+            Self::NotNull => found.is_some(),
+            Self::True => found == Some(&Value::Bool(true)),
+            Self::False => found == Some(&Value::Bool(false)),
+        }
+    }
+}
+
+impl CompareOp {
+    /// 存储值在场时的求值（缺属性由 [`Predicate::matches`] 先判）。
+    ///
+    /// 「跨族 ⇒ 假」对**所有** op 成立（含 `neq`）：跨族比较不是错误（扫描中报错会
+    /// 产出半截结果），故 `neq` 不是全关系——契约明写。
+    pub fn matches(&self, stored: &Value) -> bool {
+        match self {
+            Self::Eq(v) => value_compare(stored, v) == Some(Ordering::Equal),
+            Self::Neq(v) => value_compare(stored, v).is_some_and(|ord| ord != Ordering::Equal),
+            Self::Gt(v) => value_compare(stored, v) == Some(Ordering::Greater),
+            Self::Gte(v) => matches!(
+                value_compare(stored, v),
+                Some(Ordering::Greater | Ordering::Equal)
+            ),
+            Self::Lt(v) => value_compare(stored, v) == Some(Ordering::Less),
+            Self::Lte(v) => matches!(
+                value_compare(stored, v),
+                Some(Ordering::Less | Ordering::Equal)
+            ),
+            Self::In(list) => list
+                .iter()
+                .any(|v| value_compare(stored, v) == Some(Ordering::Equal)),
+            Self::Like(pattern) => match stored {
+                Value::Str(text) => like_matches(text, pattern),
+                _ => false,
+            },
+            Self::ILike(pattern) => match stored {
+                Value::Str(text) => ilike_matches(text, pattern),
+                _ => false,
+            },
+            Self::Is(test) => test.holds(Some(stored)),
+        }
+    }
+}
+
+/// `like` 的四种合法形态（v2 §4「越窄越好」：四形态各对应一条线性扫描原语，
+/// 零正则、零回溯、零 ReDoS 面）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LikeShape {
+    /// 无 `*`（≡ `eq`）。
+    Exact,
+    /// `P*`
+    Prefix,
+    /// `*S`
+    Suffix,
+    /// `*C*`
+    Contains,
+}
+
+/// 判 `like` 形态；`None` = 越界形态（解码期按 `YGG-ENTITY-FRAME` 拒）。
+///
+/// 合法：无 `*` / `P*` / `*S` / `*C*`，且**字面段非空**——裸 `*` 与 `**` 不属于四形态
+/// 中任何一种（字面段为空 = 「全匹配」，与笔误不可区分）。`*` 不可转义：要匹配字面
+/// `*` 用 `eq`。
+pub fn like_shape(pattern: &str) -> Option<LikeShape> {
+    let stars = pattern.bytes().filter(|byte| *byte == b'*').count();
+    match stars {
+        0 => Some(LikeShape::Exact),
+        1 if pattern.starts_with('*') => non_empty(&pattern[1..]).map(|()| LikeShape::Suffix),
+        1 if pattern.ends_with('*') => {
+            non_empty(&pattern[..pattern.len() - 1]).map(|()| LikeShape::Prefix)
+        }
+        2 if pattern.starts_with('*') && pattern.ends_with('*') => {
+            non_empty(&pattern[1..pattern.len() - 1]).map(|()| LikeShape::Contains)
+        }
+        _ => None,
+    }
+}
+
+fn non_empty(part: &str) -> Option<()> {
+    if part.is_empty() {
+        None
+    } else {
+        Some(())
+    }
+}
+
+/// `like` 匹配（越界形态保守为假——解码期已拒，此处不 panic）。
+pub fn like_matches(haystack: &str, pattern: &str) -> bool {
+    match like_shape(pattern) {
+        Some(LikeShape::Exact) => haystack == pattern,
+        Some(LikeShape::Prefix) => haystack.starts_with(&pattern[..pattern.len() - 1]),
+        Some(LikeShape::Suffix) => haystack.ends_with(&pattern[1..]),
+        Some(LikeShape::Contains) => haystack.contains(&pattern[1..pattern.len() - 1]),
+        None => false,
+    }
+}
+
+/// `ilike`：两侧都做 ASCII 折叠后走同一套形态匹配（`*` 是 ASCII，形态不变）。
+pub fn ilike_matches(haystack: &str, pattern: &str) -> bool {
+    like_matches(
+        &haystack.to_ascii_lowercase(),
+        &pattern.to_ascii_lowercase(),
+    )
+}
+
+/// 跨族比较的唯一判据（v1 §2.3 矩阵）：**同族**返回值序，**跨族**返回 `None`
+/// （调用方按「假」处置）。
+///
+/// `Int × Float` 按 f64 提升值比较（`|i| > 2⁵³` 亦如此）；`NaN` 不可达（写入路径三处
+/// 拒绝），故 `partial_cmp` 的 `None` 只会因跨族出现。不给 `Value` 实现 `PartialOrd`：
+/// 跨族语义不该长成 `Ord`。
+pub fn value_compare(a: &Value, b: &Value) -> Option<Ordering> {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => Some(x.cmp(y)),
+        (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y),
+        (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)),
+        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y),
+        (Value::Bool(x), Value::Bool(y)) => Some(x.cmp(y)),
+        (Value::Str(x), Value::Str(y)) => Some(x.cmp(y)),
+        _ => None,
+    }
+}
+
+/// 查询取值：真属性借用；`id` 伪属性就地构造（`Value::Int`，零分配）。
+///
+/// `id` 是**保留伪属性**（v1 §2.1 修订 ③）：真属性名 `id` 因此在 `where` / `order`
+/// 里不可寻址，换来 `query` 对 `scan(lo, hi, tag)` 的语义覆盖。超出 `i64` 的 id 视同
+/// 不在场（Lua 整数也表达不了）。
+pub enum QueryValue<'a> {
+    Attr(&'a Value),
+    Id(Value),
+}
+
+impl QueryValue<'_> {
+    pub fn value(&self) -> &Value {
+        match self {
+            Self::Attr(value) => value,
+            Self::Id(value) => value,
+        }
+    }
+}
+
+impl Entity {
+    /// 查询取值（`where` / `order` 的同一出处）：`id` 伪属性 + 真属性。
+    pub fn query_value(&self, attr: &str) -> Option<QueryValue<'_>> {
+        if attr == "id" {
+            i64::try_from(self.id)
+                .ok()
+                .map(|id| QueryValue::Id(Value::Int(id)))
+        } else {
+            self.attribute(attr).map(QueryValue::Attr)
+        }
+    }
+}
+
+/// 一条谓词：属性名 + 运算 + `not.` 前缀。
+#[derive(Clone, Debug, PartialEq)]
+pub struct Predicate {
+    pub attr: String,
+    pub op: CompareOp,
+    pub negated: bool,
+}
+
+impl Predicate {
+    pub fn new(attr: impl Into<String>, op: CompareOp) -> Self {
+        Self {
+            attr: attr.into(),
+            op,
+            negated: false,
+        }
+    }
+
+    /// `not.` 前缀修饰：取**整个谓词**的反，但**不翻**「缺属性 ⇒ 假」（v2 §1.2）。
+    pub fn negate(mut self) -> Self {
+        self.negated = true;
+        self
+    }
+
+    /// 求值：`is` 管存在性，其余 op 对缺属性一律假。
+    pub fn matches(&self, entity: &Entity) -> bool {
+        let found = entity.query_value(&self.attr);
+        if let CompareOp::Is(test) = &self.op {
+            return test.holds(found.as_ref().map(QueryValue::value)) != self.negated;
+        }
+        let Some(found) = found else {
+            return false;
+        };
+        self.op.matches(found.value()) != self.negated
+    }
+}
+
+/// `order`：属性名 + 方向（族拼写 `field.asc` / `field.desc`；缺省 `asc`）。
+#[derive(Clone, Debug, PartialEq)]
+pub struct Order {
+    pub attr: String,
+    pub descending: bool,
+}
+
+/// 查询选择器（`ygg.entity.query(selector)` 的解码结果）。
+///
+/// 四个字段对应四个顶层键（多一个即 `FRAME`：拼错 `whre` 是错误，不是无过滤）。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Selector {
+    /// tag 过滤（最便宜，先于 `where`）。
+    pub tag: Option<String>,
+    /// 隐式 AND 的谓词表，**保持解码序**（重排会把「写的序」变成隐形性能旋钮）。
+    pub predicates: Vec<Predicate>,
+    /// 输出序（`None` = id 升序）。
+    pub order: Option<Order>,
+    /// 投影键（空 = 裸 id 数组）。
+    pub select: Vec<String>,
+}
+
+impl Selector {
+    /// 存活判定：tag 先判、谓词数组序短路。
+    pub fn matches(&self, entity: &Entity) -> bool {
+        if let Some(tag) = &self.tag {
+            if !entity.has_tag(tag) {
+                return false;
+            }
+        }
+        self.predicates.iter().all(|pred| pred.matches(entity))
+    }
+}
+
+/// 排序的**值族**（v2 §5：三族，整浮同族）：`Num < Bool < Str`。
+pub fn sort_family(value: &Value) -> u8 {
+    match value {
+        Value::Int(_) | Value::Float(_) => 0,
+        Value::Bool(_) => 1,
+        Value::Str(_) => 2,
+    }
+}
+
+/// 跨族全序（`order` 用）：同族按值序，跨族按 [`sort_family`]。
+/// 同族数值恒有 `Some`（`NaN` 不可达），`unwrap_or(Equal)` 只是形式兜底。
+pub fn value_sort_cmp(a: &Value, b: &Value) -> Ordering {
+    match sort_family(a).cmp(&sort_family(b)) {
+        Ordering::Equal => match (a, b) {
+            (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+            (Value::Str(x), Value::Str(y)) => x.cmp(y),
+            _ => value_compare(a, b).unwrap_or(Ordering::Equal),
+        },
+        other => other,
+    }
+}
+
+/// `(值, id)` 序的比较：缺属性排最后（nulls last，与方向无关），值序按方向反转，
+/// **id 兜底永不反转**（v2 §5）。
+fn compare_order_keys(
+    left: &Option<QueryValue<'_>>,
+    right: &Option<QueryValue<'_>>,
+    descending: bool,
+) -> Ordering {
+    match (left, right) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(x), Some(y)) => {
+            let ord = value_sort_cmp(x.value(), y.value());
+            if descending {
+                ord.reverse()
+            } else {
+                ord
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -616,5 +968,291 @@ mod tests {
         assert_eq!(restored.next_entity_id(), 2);
         // spawn(+1) + set_attribute(+1) = revision 2（全字段序列化含 revision）
         assert_eq!(restored.revision(), 2);
+    }
+
+    // ── 查询引擎（S24）─────────────────────────────────────────────────────
+
+    /// 建一个实体（属性袋 + tag 名单）。
+    fn seeded(id: EntityId, attrs: &[(&str, Value)], tags: &[&str]) -> Entity {
+        let mut entity = Entity::new(id);
+        for (name, value) in attrs {
+            entity.set_attribute(*name, value.clone()).unwrap();
+        }
+        for tag in tags {
+            entity.add_tag(*tag);
+        }
+        entity
+    }
+
+    /// 四族矩阵（v1 §2.3）：同族有值序，**跨族一律 `None`**（调用方按假处置）。
+    #[test]
+    fn value_compare_matrix_is_within_family_only() {
+        let int = Value::Int(2);
+        let float = Value::Float(2.0);
+        let boolean = Value::Bool(true);
+        let text = Value::Str("2".into());
+
+        assert_eq!(value_compare(&int, &Value::Int(3)), Some(Ordering::Less));
+        assert_eq!(
+            value_compare(&float, &Value::Float(2.5)),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            value_compare(&Value::Bool(false), &boolean),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            value_compare(&Value::Str("a".into()), &Value::Str("b".into())),
+            Some(Ordering::Less)
+        );
+        // 整浮同族 + 双向：2 == 2.0（f64 提升值比较）
+        assert_eq!(value_compare(&int, &float), Some(Ordering::Equal));
+        assert_eq!(value_compare(&float, &int), Some(Ordering::Equal));
+        // 整浮身份仍不同：`eq 2` 命中 `2.0`，但 `eq "2"` 不命中任何数值
+        assert!(CompareOp::Eq(Value::Int(2)).matches(&float));
+        assert!(!CompareOp::Eq(Value::Str("2".into())).matches(&int));
+        // 跨族四例
+        for (a, b) in [
+            (&int, &boolean),
+            (&float, &text),
+            (&boolean, &text),
+            (&text, &int),
+        ] {
+            assert_eq!(value_compare(a, b), None, "{a:?} × {b:?} 必须跨族");
+        }
+    }
+
+    /// G1（v2 §6）：10 个 op + `not` 前缀的**命中 / 未命中 / 跨族**三态。
+    /// 不做 11×4 穷举（语义只有一份 = [`CompareOp::matches`]）：这里钉「每条 op 的
+    /// 接线」与三类边界——跨族、空 `in`、`in` 的任一命中。
+    #[test]
+    fn where_op_semantics_cover_all_ops() {
+        let mut store = EntityStore::new();
+        let id = store.spawn().unwrap();
+        store.set_attribute(id, "hp", Value::Int(50)).unwrap();
+        store
+            .set_attribute(id, "name", Value::Str("orc".into()))
+            .unwrap();
+        let entity = store.get(id).unwrap();
+
+        let cases: Vec<(&str, &str, CompareOp, bool)> = vec![
+            ("eq hit", "hp", CompareOp::Eq(Value::Int(50)), true),
+            ("eq miss", "hp", CompareOp::Eq(Value::Int(51)), false),
+            (
+                "eq cross",
+                "hp",
+                CompareOp::Eq(Value::Str("50".into())),
+                false,
+            ),
+            ("neq hit", "hp", CompareOp::Neq(Value::Int(51)), true),
+            ("neq miss", "hp", CompareOp::Neq(Value::Int(50)), false),
+            (
+                "neq cross",
+                "hp",
+                CompareOp::Neq(Value::Str("50".into())),
+                false,
+            ),
+            ("gt hit", "hp", CompareOp::Gt(Value::Int(49)), true),
+            ("gt miss", "hp", CompareOp::Gt(Value::Int(50)), false),
+            ("gte hit", "hp", CompareOp::Gte(Value::Float(50.0)), true),
+            ("gte miss", "hp", CompareOp::Gte(Value::Int(51)), false),
+            ("lt hit", "hp", CompareOp::Lt(Value::Int(51)), true),
+            ("lt miss", "hp", CompareOp::Lt(Value::Int(50)), false),
+            ("lte hit", "hp", CompareOp::Lte(Value::Int(50)), true),
+            ("lte miss", "hp", CompareOp::Lte(Value::Float(49.5)), false),
+            (
+                "in hit",
+                "hp",
+                CompareOp::In(vec![Value::Int(1), Value::Int(50)]),
+                true,
+            ),
+            ("in miss", "hp", CompareOp::In(vec![Value::Int(1)]), false),
+            ("in empty", "hp", CompareOp::In(Vec::new()), false),
+            ("like hit", "name", CompareOp::Like("or*".into()), true),
+            ("like miss", "name", CompareOp::Like("rz*".into()), false),
+            ("ilike hit", "name", CompareOp::ILike("OR*".into()), true),
+            ("ilike miss", "name", CompareOp::ILike("rc*".into()), false),
+            ("is notnull", "hp", CompareOp::Is(IsTest::NotNull), true),
+            ("is null", "hp", CompareOp::Is(IsTest::Null), false),
+        ];
+        for (label, attr, op, expected) in cases {
+            let predicate = Predicate::new(attr, op);
+            assert_eq!(predicate.matches(entity), expected, "{label}");
+            // `not.` 是整谓词取反：在场时逐条翻转
+            assert_eq!(
+                predicate.clone().negate().matches(entity),
+                !expected,
+                "not.{label}"
+            );
+        }
+        // `is.true` / `is.false` = 在场且布尔相等（不是「真值性」）
+        store.set_attribute(id, "boss", Value::Bool(true)).unwrap();
+        store.set_attribute(id, "hp", Value::Int(1)).unwrap();
+        let entity = store.get(id).unwrap();
+        assert!(Predicate::new("boss", CompareOp::Is(IsTest::True)).matches(entity));
+        assert!(!Predicate::new("hp", CompareOp::Is(IsTest::True)).matches(entity));
+        assert!(Predicate::new("hp", CompareOp::Is(IsTest::False)).matches(entity) == false);
+    }
+
+    /// 缺属性：除 `is` 外一律假——**含 `neq`**（v1 §2.3 的裁断）
+    #[test]
+    fn missing_attribute_is_false_even_for_neq() {
+        let store = EntityStore::new();
+        let mut store = store;
+        let id = store.spawn().unwrap();
+        let entity = store.get(id).unwrap();
+        assert!(!Predicate::new("hp", CompareOp::Eq(Value::Int(1))).matches(entity));
+        assert!(!Predicate::new("hp", CompareOp::Neq(Value::Int(1))).matches(entity));
+        assert!(!Predicate::new("hp", CompareOp::Gt(Value::Int(0))).matches(entity));
+        assert!(!Predicate::new("hp", CompareOp::Lte(Value::Int(9))).matches(entity));
+        assert!(!Predicate::new("hp", CompareOp::In(vec![Value::Int(1)])).matches(entity));
+        assert!(!Predicate::new("hp", CompareOp::Like("*x*".into())).matches(entity));
+        assert!(!Predicate::new("hp", CompareOp::ILike("*x*".into())).matches(entity));
+    }
+
+    /// G4（v2 §6）：`is` **不受**「缺属性 ⇒ 假」管辖
+    #[test]
+    fn is_null_and_notnull_are_presence() {
+        let mut store = EntityStore::new();
+        let present = store.spawn().unwrap();
+        let absent = store.spawn().unwrap();
+        store.set_attribute(present, "hp", Value::Int(0)).unwrap();
+        assert!(
+            Predicate::new("hp", CompareOp::Is(IsTest::Null)).matches(store.get(absent).unwrap())
+        );
+        assert!(!Predicate::new("hp", CompareOp::Is(IsTest::NotNull))
+            .matches(store.get(absent).unwrap()));
+        assert!(Predicate::new("hp", CompareOp::Is(IsTest::NotNull))
+            .matches(store.get(present).unwrap()));
+        assert!(
+            !Predicate::new("hp", CompareOp::Is(IsTest::Null)).matches(store.get(present).unwrap())
+        );
+    }
+
+    /// G5（v2 §6）：`not.lt.100` 对**缺属性**仍假（`not.` 不翻这条）
+    #[test]
+    fn not_prefix_keeps_absent_false() {
+        let mut store = EntityStore::new();
+        let id = store.spawn().unwrap();
+        let entity = store.get(id).unwrap();
+        assert!(!Predicate::new("hp", CompareOp::Lt(Value::Int(100)))
+            .negate()
+            .matches(entity));
+        assert!(!Predicate::new("hp", CompareOp::Eq(Value::Int(1)))
+            .negate()
+            .matches(entity));
+        // 在场时 `not.lt.100` ≡ `gte.100`
+        store.set_attribute(id, "hp", Value::Int(100)).unwrap();
+        let entity = store.get(id).unwrap();
+        assert!(Predicate::new("hp", CompareOp::Lt(Value::Int(100)))
+            .negate()
+            .matches(entity));
+    }
+
+    /// `like` / `ilike` 的**四形态**与越界拒绝（v2 §4）
+    #[test]
+    fn like_shapes_are_exactly_four() {
+        assert_eq!(like_shape("orc"), Some(LikeShape::Exact));
+        assert_eq!(like_shape("orc*"), Some(LikeShape::Prefix));
+        assert_eq!(like_shape("*orc"), Some(LikeShape::Suffix));
+        assert_eq!(like_shape("*orc*"), Some(LikeShape::Contains));
+        for bad in ["*", "**", "a*b", "a*b*", "*a*b", "a**"] {
+            assert_eq!(like_shape(bad), None, "`{bad}` 必须是越界形态");
+        }
+        assert!(like_matches("goblin", "gob*"));
+        assert!(like_matches("goblin", "*lin"));
+        assert!(like_matches("goblin", "*obl*"));
+        assert!(like_matches("goblin", "goblin"));
+        assert!(!like_matches("goblin", "lin"));
+        assert!(!like_matches("goblin", "goblins*"));
+        // `ilike` 只做 ASCII 折叠（大小写不敏感仅限 ASCII）
+        assert!(!like_matches("Goblin", "gob*"));
+        assert!(ilike_matches("Goblin", "gob*"));
+        assert!(ilike_matches("goblin", "GOBLIN"));
+        assert!(!ilike_matches("goblin", "GOBLINS*"));
+    }
+
+    /// 确定性第二条：序遍历（乱序 `insert` 也按 id 升序出）
+    #[test]
+    fn select_orders_by_id_under_shuffled_insert() {
+        let mut store = EntityStore::new();
+        for id in [7u64, 1, 9, 3] {
+            store.insert(Entity::new(id)).unwrap();
+        }
+        let selector = Selector::default();
+        let ids: Vec<u64> = store
+            .select(&selector)
+            .into_iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![1, 3, 7, 9]);
+    }
+
+    /// `id` 是保留伪属性：可过滤 id 区间，且**真属性名 `id` 因此不可寻址**
+    #[test]
+    fn id_pseudo_attribute_filters() {
+        let mut store = EntityStore::new();
+        for _ in 0..5 {
+            store.spawn().unwrap();
+        }
+        // 真属性 `id` 存在也不参与查询（伪属性优先）
+        store.set_attribute(1, "id", Value::Int(999)).unwrap();
+        let mut query = |op: CompareOp| {
+            let selector = Selector {
+                predicates: vec![Predicate::new("id", op)],
+                ..Selector::default()
+            };
+            store
+                .select(&selector)
+                .into_iter()
+                .map(|entity| entity.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(query(CompareOp::Gte(Value::Int(3))), vec![3, 4, 5]);
+        assert_eq!(query(CompareOp::Lt(Value::Int(3))), vec![1, 2]);
+        assert_eq!(query(CompareOp::Eq(Value::Int(999))), Vec::<u64>::new());
+        assert_eq!(query(CompareOp::Is(IsTest::Null)), Vec::<u64>::new());
+        assert_eq!(
+            query(CompareOp::In(vec![Value::Int(2), Value::Int(4)])),
+            vec![2, 4]
+        );
+    }
+
+    /// `order`：值同 ⇒ id 升序（asc/desc 都不反转）、缺属性排最后、跨族固定族序
+    #[test]
+    fn order_tiebreak_nulls_last_and_family_rank() {
+        let mut store = EntityStore::new();
+        store
+            .insert(seeded(1, &[("hp", Value::Int(7))], &[]))
+            .unwrap();
+        store
+            .insert(seeded(2, &[("hp", Value::Int(7))], &[]))
+            .unwrap();
+        store.insert(seeded(3, &[], &[])).unwrap();
+        store
+            .insert(seeded(4, &[("hp", Value::Int(2))], &[]))
+            .unwrap();
+        store
+            .insert(seeded(5, &[("hp", Value::Str("x".into()))], &[]))
+            .unwrap();
+
+        let mut ordered = |descending: bool| {
+            let selector = Selector {
+                order: Some(Order {
+                    attr: "hp".into(),
+                    descending,
+                }),
+                ..Selector::default()
+            };
+            store
+                .select(&selector)
+                .into_iter()
+                .map(|entity| entity.id)
+                .collect::<Vec<_>>()
+        };
+        // 2 < 7 = 7（id 兜底 1 < 2）< "x"（族序 Num < Str）< 缺属性
+        assert_eq!(ordered(false), vec![4, 1, 2, 5, 3]);
+        // desc 只反转**值序**：族序随之反转，7 = 7 的 id 兜底仍是升序，缺属性仍在最后
+        assert_eq!(ordered(true), vec![5, 1, 2, 4, 3]);
     }
 }
