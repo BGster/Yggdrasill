@@ -1,4 +1,4 @@
--- `pkg.textframe.perf` —— 契约 `docs/design/packages/textframe.md` §5 的五指标 / 八键。
+-- `pkg.textframe.perf` —— 契约 `docs/design/packages/textframe.md` §5 的五指标 / 九键。
 --
 -- # 基准集（固定，不是可调旋钮）
 --
@@ -114,7 +114,32 @@ run("pkg.textframe.perf", function()
   print(("perf.textframe.put_ns=%.1f"):format(put_ns))
   is_true(put_ns < 5000, ("单格写 < 5µs，实得 %.1fns"):format(put_ns))
 
-  -- ③④⑦ 帧合成吞吐 / vs 手搓（3 次取中位，每次 2000 帧）
+  -- ③ 整帧 blit（一层 80×24 精灵覆盖层叠到世界区上，2000 次 × 3 中位）
+  -- 形态取 Saltline `src/view/sprites.lua` 的实况：稀疏写入，约 1/20 的格子有字。
+  local base = tf.frame(w, h)
+  local layer = tf.frame(w, h)
+  for i = 1, w * h do
+    if i % 20 == 0 then
+      layer.cells[i] = "*"
+    end
+  end
+  local blit_us = 0
+  do
+    local runs = {}
+    for r = 1, 3 do
+      local began = os.clock()
+      for _ = 1, 2000 do
+        tf.blit(base, layer, 1, 1)
+      end
+      runs[r] = (os.clock() - began) * 1000 * 1000 / 2000
+    end
+    table.sort(runs)
+    blit_us = runs[2]
+  end
+  print(("perf.textframe.blit_us=%.1f"):format(blit_us))
+  is_true(blit_us <= 500, ("整帧 blit ≤ 500µs，实得 %.1fµs"):format(blit_us))
+
+  -- ④⑦ 帧合成吞吐 / vs 手搓（3 次取中位，每次 2000 帧）
   local function bench(fn)
     local runs = {}
     for r = 1, 3 do
@@ -161,7 +186,7 @@ run("pkg.textframe.perf", function()
   -- ⑥ 泄漏：100 轮后内存差 + 逐字符相等
   collectgarbage()
   collectgarbage()
-  local base = collectgarbage("count")
+  local mem_base = collectgarbage("count")
   local first = table.concat(tf.to_lines(buf), "\n")
   local equal = 1
   for _ = 1, 100 do
@@ -172,8 +197,8 @@ run("pkg.textframe.perf", function()
   collectgarbage()
   local after = collectgarbage("count")
   local leak_pct = 0
-  if base > 0 then
-    leak_pct = (after - base) / base * 100
+  if mem_base > 0 then
+    leak_pct = (after - mem_base) / mem_base * 100
   end
   print(("perf.textframe.leak_gc_pct=%.3f"):format(leak_pct))
   print(("perf.textframe.leak_100_equal=%d"):format(equal))

@@ -41,6 +41,7 @@ end
 local PERF_KEYS = {
   "load_ms",
   "put_ns",
+  "blit_us",
   "compose_us",
   "throughput_fps",
   "frame_kib",

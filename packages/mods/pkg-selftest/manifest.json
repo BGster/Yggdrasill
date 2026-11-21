@@ -273,9 +273,9 @@
           "sha256": "49575614b201a44ba65210902be2b791f1e8b73804740dd4bfce66f9f91979c0"
         },
         {
-          "byteLength": 2117,
+          "byteLength": 2130,
           "path": "textframe/init.lua",
-          "sha256": "4c7cbdfa2fe56e7f444a36a2de70a60ae9bb0b1ab39a66e639d9ca3044168eaf"
+          "sha256": "1ffb0cdf55e01b058f7396f76d76757001b7aa05ba863ba0ec10fd9b7f5e26d4"
         },
         {
           "byteLength": 129,

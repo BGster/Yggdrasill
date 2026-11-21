@@ -174,7 +174,7 @@ end)
 run("pkg.textframe.exports-shape", function()
   eq(sorted_keys(tf), "ERRORS,VERSION,blit,frame,install,perf_keys,put,stack,to_lines", "导出面")
   eq(sorted_keys(E), "CELL,PARAM,RANGE,SHAPE", "错误码面")
-  eq(#tf.perf_keys(), 8, "perf_keys 八键")
+  eq(#tf.perf_keys(), 9, "perf_keys 九键")
 end)
 
 return S

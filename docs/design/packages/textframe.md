@@ -55,7 +55,7 @@
 | `textframe.blit` | `(dst, src, ox, oy)` | `dst` | 写：`src` 的清格跳过、其余覆盖 `dst`（后写胜），越界裁剪 |
 | `textframe.to_lines` | `(buf)` | `h` 行数组 | 纯（新表；每行恰 `w` 字符、不 trim）；行宽 ≠ `w` ⇒ `-CELL` |
 | `textframe.stack` | `(blocks)` | 行数组 | 纯（块序 = 行序；`nil` 块跳过） |
-| `textframe.perf_keys` | `()` | 8 个键名的稠密数组 | 纯（自省面：自测按它逐个打印，冒烟按它逐个核对——「八键齐备」因此是机检） |
+| `textframe.perf_keys` | `()` | 9 个键名的稠密数组 | 纯（自省面：自测按它逐个打印，冒烟按它逐个核对——「九键齐备」因此是机检） |
 | `textframe.ERRORS` | — | 4 键表 | 常量 |
 
 `textframe.ERRORS` 恰好四键，全部形如 `YGG-PKG-TEXTFRAME-*`：`PARAM`（`w` / `h` 不是 ≥1 的整数）、`RANGE`（`put` 坐标越界）、`CELL`（单元格不是恰 1 字节）、`SHAPE`（传入的不是帧缓冲 / 行数组）。与 [entity.md](entity.md) 的 `YGG-PKG-ENTITY-*`、[assetgen.md](assetgen.md) 的五码同风格。
@@ -71,12 +71,13 @@
 | 指标 | 阈值 | debug（门禁面） | release（生产面） | 测量方法 / 打印键 |
 | --- | --- | --- | --- | --- |
 | 包加载耗时 | `< 10 ms` | **0.28 ms** | **0.16 ms** | 清 `package.loaded["pkg.textframe*"]` 后 `require` + `install`，5 次取中位 → `perf.textframe.load_ms` |
-| 单格写 | `O(1)`，`< 5 µs` | **1.13 µs** | **0.31 µs** | 10 万次 `put` 计时（`put` 内无整表扫描，是结构性的 O(1)）→ `perf.textframe.put_ns` |
-| 帧合成耗时 | `≤ 1000 µs` | **350 µs**（348–353） | **95–97 µs** | `to_lines` + `stack` 跑 2000 帧 × 3 次取中位；区间是跨次运行的中位波动 → `perf.textframe.compose_us` |
+| 单格写 | `O(1)`，`< 5 µs` | **1.12 µs** | **0.31 µs** | 10 万次 `put` 计时（`put` 内无整表扫描，是结构性的 O(1)）→ `perf.textframe.put_ns` |
+| 整帧 blit | `≤ 500 µs` | **115 µs** | **32 µs** | 一层 80×24 稀疏覆盖层（每 20 格一个字，同 Saltline `sprites.lua` 的实况）叠到世界区上，2000 次 × 3 中位 → `perf.textframe.blit_us` |
+| 帧合成耗时 | `≤ 1000 µs` | **350 µs**（348–363） | **95–99 µs** | `to_lines` + `stack` 跑 2000 帧 × 3 次取中位；区间是跨次运行的中位波动 → `perf.textframe.compose_us` |
 | 帧合成吞吐 | 给数字 | **2 850 帧/秒** | **10 300–10 500 帧/秒** | `1000 / compose_ms` → `perf.textframe.throughput_fps` |
 | vs 手搓对照 | `≤ 2.0×` | **1.64×** | **1.30×** | 同面跑 naive `out = out .. ch` 版 → `perf.textframe.vs_naive` |
-| 每帧常驻内存 | `≤ 8 KiB` | **4.65 KiB** | **4.65 KiB** | 100 帧常驻后两次 `collectgarbage("count")` 差 ÷ 100 → `perf.textframe.frame_kib` |
-| 泄漏检测 | `≤ 1%` 且逐字符相等 | **0.64% / 1** | **0.64% / 1** | 100 轮同输入 `compose`：内存差占比 + 每轮与第 1 轮逐字符相等 → `perf.textframe.leak_gc_pct` / `perf.textframe.leak_100_equal` |
+| 每帧常驻内存 | `≤ 8 KiB` | **4.0–4.7 KiB** | **4.0–4.7 KiB** | 100 帧常驻后两次 `collectgarbage("count")` 差 ÷ 100 → `perf.textframe.frame_kib` |
+| 泄漏检测 | `≤ 1%` 且逐字符相等 | **0.62–0.64% / 1** | **0.62–0.64% / 1** | 100 轮同输入 `compose`：内存差占比 + 每轮与第 1 轮逐字符相等 → `perf.textframe.leak_gc_pct` / `perf.textframe.leak_100_equal` |
 
 **对照（需求点名要的那个数字，如实记）**：本包在 `w = 80` 上**没有**赢过手搓的 `out = out .. ch`（debug 1.64× / release 1.30×）。这个宽度下二次项的常数还没长出来，而两两合并要多付一张 `parts` 表的存取。它的价值在**增长性**：`w` 翻倍时 naive 是 O(n²) 的四倍退化，两两合并是 O(n·log n)。所以阈值定 2×，抓的是「拼接路径退化」，不是「比手搓快」——后者在本尺寸下本来就不成立。
 
@@ -116,8 +117,8 @@
   15. `exports-shape`——导出面恰好 8 键 + `ERRORS` 恰好 4 码；
   16. `oracle-saltline-frame`——把 r4 适配器的逻辑内联成 oracle，80×24 + 6 HUD 行 → 30 行，与 `to_lines`+`stack` 逐字符相等；
   17. `purity-determinism`——100 轮同输入同输出、无全局写、无 `package.loaded` 改动；
-  18. `perf`——按 `perf_keys()` 逐个打印 §5 的八个键并断言阈值（含 `vs_naive` 对照比）。
-- **mod 侧载体冒烟不进计数**（file 级 `error` ⇒ `file FAIL` ⇒ `ok=0`）：`packages/mods/pkg-selftest/tests/pkg-textframe-smoke.lua` 钉「装载面 + 顶层纯度 + `ERRORS` 码集 + 导出面清单 + 八个 `perf.textframe.*` 键名 + 空白帧行宽不 trim」。
+  18. `perf`——按 `perf_keys()` 逐个打印 §5 的九个键并断言阈值（含 `blit_us` 与 `vs_naive` 对照比）。
+- **mod 侧载体冒烟不进计数**（file 级 `error` ⇒ `file FAIL` ⇒ `ok=0`）：`packages/mods/pkg-selftest/tests/pkg-textframe-smoke.lua` 钉「装载面 + 顶层纯度 + `ERRORS` 码集 + 导出面清单 + 九个 `perf.textframe.*` 键名 + 空白帧行宽不 trim」。
 - **为什么必须有 mod 侧同名文件**：`--filter` 对 mod 的 `tests/*.lua` 与包的 `test/*.lua` **同时**过滤，mod 侧筛完为空即「没有可执行的测试文件」exit 1（[README.md](README.md) §5）。
 - **禁止宽松断言**：只断「两次长度相同」不逐字符 `==`，视同没测 I6；只断「`blit` 不报错」不对最终字符，视同没测 I3；把 oracle 从被测算式里 import 进去（自证）视同没测。
 
