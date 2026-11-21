@@ -95,11 +95,11 @@
 | snapshot/restore 10⁵ 实体 | ≤ 100ms | 同上 |
 | 回放一致 | 逐 tick hash 一致 | replay 用例（字节对比） |
 | Tier 2 兼容 | `pkg-selftest` 199/0 不回退（S-25 在树基线 2026-11-21；复算命令见 `packages/entity.md` §5） | 每次下沉后全量 |
-| 跨平台 | x86_64 ↔ aarch64 digest 一致 | 当前仅单机（macOS/arm64），结构性论证为整数语义；**实测已排期：Goal 排期总表 S2**，落地前所有跨平台声明引用该排期 |
+| 跨平台 | x86_64 ↔ aarch64 digest 一致 | **已实测（2026-11-22 S2 三腿矩阵，commit 613b0de）**：linux/arm64（VM 原生）+ linux/amd64（Rosetta 翻译执行）+ macOS/arm64（裸机）三腿 × debug∧release 双 profile，全部哈希逐字节全等（见 §5.1「跨平台三腿 digest」行；amd64 腿性能/时序类断言的登记差异按模拟器边界处理，不入哈希结论） |
 
 ### 5.1 实测回填表（数字只落本表，不回写上方阈值）
 
-阈值是契约线，**实测不回流去改阈值**（未达线即回炉，见 I4）。每行必须带可复算命令；跨平台行引用 Goal 排期总表 S2，落地前不得声称已测。
+阈值是契约线，**实测不回流去改阈值**（未达线即回炉，见 I4）。每行必须带可复算命令；跨平台行由 S2 三腿 Docker 矩阵实测背书（2026-11-22，见下方「跨平台三腿 digest」行）。
 
 | 指标 | 阈值 | 实测（三轮取中位） | 方法（可复算） | 备注 |
 | --- | --- | --- | --- | --- |
@@ -108,10 +108,11 @@
 | restore 10⁵ 实体 | ≤ 100 ms | **16.633 ms** | 同上 | 含尾 digest 校验 |
 | 回放一致 | 逐 tick hash 全等 | **matched=150/150（快照续跑）、200/200（创世重跑）；first_mismatch=None** | `cargo test -p ygg-sim --test replay_tick_hash` | 含 1 条篡改负例（改 dt +1 ulp 必在该 tick 报失配） |
 | 穿越成本（批式铁律②的实测依据） | — | **0 参 19.5 / 带参 44.6–56.7 / 返回两字段表 178.1 ns/次**（三轮中位） | `cargo test --release -p ygg-sandbox --test path_costs -- --nocapture` | 裸 mlua，release；`probe.crossing.*` 行 |
-| 跨进程 digest | parent == child | **parent_digest = child_digest = `0c6199352032440b`（60 行 trace）** | `cargo test -p ygg-sim --test replay_cross_process` | `current_exe` 子进程 + 临时文件 |
+| 跨进程 digest | parent == child | **parent_digest = child_digest = `ba8070ac5c67faa4`（60 行 trace；613b0de 实测）** | `cargo test -p ygg-sim --test replay_cross_process` | `current_exe` 子进程 + 临时文件；前批在案值 `0c6199352032440b` 随批代码更替（该断言只锚 parent==child，值随 sim 语义演进而变，三腿同步同值见下行） |
 | tick 10⁴（F64Bits 档，R1′） | ≤ 16.6 ms（I4 同线） | **0.527 ms**（三轮 0.592 / 0.523 / 0.527；p95 0.813–0.531，max 0.980–0.553） | `cargo test --release -p ygg-sim --test perf_tick perf_tick_10k_f64bits -- --nocapture` | workload 同 Number 档形状；负载为位串搬运（读→pack∘unpack 归一→写），≈I64 档（同 8B/值线性搬运），2026-11-21 实测 |
 | spawn 10⁴×8attr（Rust 侧，R1′ 双档） | — | **I64 档 212.5 ns/entity**（259.7/209.7/212.5）vs **F64Bits 档 226.8 ns/entity**（217.0/226.8/227.1） | `cargo test --release -p ygg-sim --test perf_spawn_10k_8attrs_both_kinds -- --nocapture` | A1 §1.7 范式（release 三轮中位）；F64Bits +6.7%，位串直入列不落 codec 文本；2026-11-21 实测 |
 | snapshot/restore 10⁵（F64Bits 档，R1′） | ≤ 100 ms 双向 | **8.951 / 17.367 ms**（帧 7 200 130 B，与 I64 档**同字节数**；I64 档同轮 8.785 / 17.070，差 +1.9% / +1.7%） | `cargo test --release -p ygg-sim --test perf_snapshot_restore_100k_f64bits -- --nocapture` | hash 路径对照口径：Tier 2 浮点进状态面必走 codec 文本（≥30 MiB/s 在案），位串 8B LE 直进帧 + FNV 折叠；2026-11-21 实测 |
+| 跨平台三腿 digest（S2，2026-11-22） | 三腿 × debug∧release 逐字节全等 | **same_process `c50030402fe00c70`、from_genesis `1e9199cad033e0cb`、cross_process `ba8070ac5c67faa4`、②′ harness `8eac25735ddc7611`（clerk 对照路在 613b0de 产出 `lastSimHash=unset`，三腿同值，登记见 Run 工件）**——三腿全等 | `cargo test -p ygg-sim --test replay_tick_hash [--release] -- --nocapture` ∧ `cargo test -p ygg-sim --test replay_cross_process [--release] -- --nocapture` ∧ `cargo build --release --example egg` 后 `YGG_PACKAGES_ROOT=packages/libs packages/mods/superagent/test/final-verify.sh`；腿=colima 0.10.1（vz+Rosetta，docker 29.2.1）内 `rust:1.99.1-bookworm` 派生镜像 ×2 + macOS 裸机；rustc/cargo 三腿同版 1.99.1；矩阵元数据与逐哈希比对表见 Run r-20261121-171149-c2b2 工件 s2-dev.md | linux/amd64 腿为 Rosetta 翻译执行（非裸金属）：覆盖面如实声明为「模拟 x86_64」；该腿登记 3 条 serve SSE/IO 时序用例失败与 pkg-codec-perf 吞吐低于阈值（2498–2528 < 3000 entities/s），均属模拟层性能/时序边界，非哈希差异；2026-11-22 实测 |
 
 口径：macOS / arm64、`--release`（`[profile.release.package.ygg-sim] opt-level = 3` 单点覆盖，根 `opt-level="s"` 是 wasm 体积面）、三轮各新建 Sim、每轮取逐 tick 中位、再取三轮中位。**实测比 §5.3 的预判（1–3 ms）更快**，余量 30×；不因此下调阈值——阈值是契约线，不是目标值。
 
@@ -144,4 +145,5 @@
 - **为什么 hash 每次真编码一遍快照**：等式 `state_hash == fnv1a64(快照字节去尾 digest)` 只有在真的编码时才可执行。另写快路径（遍历列直接算 hash）会让两条路径在「加了一个字段」时静默分叉，症状是「存档能读、回放对不上」——最难查的一类故障。代价在 §5.1：10⁴ 实体 tick 仍只用 0.553 ms，远低于 16.6 ms 预算。
 - **为什么位串列（R1′，2026-11-21）**：50× 线的实体态承载需要内核侧的 8B 定宽浮点路径——Tier 2 浮点今日进状态面必走 codec 文本（format_g，≥30 MiB/s 在案），逐实体逐帧的文本往返是数量级错配。位串列把浮点确定性从「环境纪律」改写成**结构事实**：内核对位串只做存储、拷贝、归一（±0→+0、任意 NaN 载荷→单一 quiet NaN）与字节级 hash，浮点环境差异（FTZ/DAZ、x87 扩展精度）在结构上不可达——`src/bits.rs` 是唯一 `f64` 豁免面且被扫描断言零算术运算符（I2 修宪 + R1′）。数字锚点：A1 §5.3/§5.5（sim 列式 128 ns/entity < 255 ns 门槛，EntityStore 616 > 255 ⇒ 位串列是 50× 线唯一已知承载）；授权锚点：用户 2026-11-21「不留旧账」+ A1 §9.3 六处改定批复。实测对照（§5.1）：tick 0.527 ms ≈ I64 档 0.526 ms，帧字节两档同 7 200 130 B。不声称端到端 74×（那是 Lua 批量面 slice 的数字）；不声称对原始 Lua 值无损（无损是对 v1 所存 Q32.32 值而言）。
 - **①②③ 判据**（每个下沉面）：① 被阻动作=该面性能预算不达或需宿主资源；② 症状=对比表数字；③ 确认=digest/帧率/吞吐实测。
+- **为什么 Docker 三腿（S2，2026-11-22）**：跨平台确定性此前只有结构性论证（整数语义、种子构建期常量、位串零算术豁免面）——论证能证明「不该漂」，证明不了「没漂」：编译器后端在异架构上的代码生成（指令调度、FMA 合并、libm 内联）是论证覆盖不到的自由变量。三腿矩阵（linux/arm64 VM 原生 ∧ linux/amd64 Rosetta 翻译 ∧ macOS 裸机 × debug∧release）以约 10 分钟容器构建 + 每腿全量测试的成本把这个自由变量钉进实测：哈希逐字节全等 ⇒ 跨平台声明从论证级升实测级（§5/§5.1）；若现差异，测试金字塔天然给出分层定位（引擎 replay / Lua 串哈希 KAT / mod ②′）。amd64 腿用 Rosetta 翻译而非裸金属（本机无 x86 真机），覆盖声明如实收窄为「模拟 x86_64」；模拟层的性能/时序类断言（SSE 窗口等待、吞吐阈值）在翻译层下出现的登记差异不触碰哈希等价结论——性能阈值本是机器相对量，矩阵只对「同源哈希」作断言。成本与隔离：双派生镜像 + 独立 target 卷，宿主检出零改动零污染。
 - **驱动面 KernelFacade 的模块化拆分（S-25 批六）**：`driver.rs` 由单文件 1682 行（800 行上限的 2.1×）拆为 `driver/` 目录 6 文件——mod.rs 装配（模块文档 + `KernelFacade` 结构体 13 个全私有字段 + `apply_save` 跨面件 + `resource_error_to_kernel` 触面件 + 4 个 `mod` 声明 + 四出口 `pub use`）+ error（`code` 五稳定错误码 + `KernelError` 全块）/ build（燃料常量 + `KernelParts`/`build_kernel` 装配管线 + 8 构造器 + `from_parts`/`restore`）/ dispatch（信封命令 save·load·state·log + `cmd_event` 事件机 + 转换助手×7）/ surface（状态字节 + vfs×6 + 挂载/工具/sim 面）+ tests.rs（21 测整块随迁）。**载荷决策（结构性）**：字段可见性只向下流动——`KernelFacade` 住 mod.rs（=driver 根），子模块按 Rust 可见性子树规则直读私有字段，零 `pub(super)`/`pub(crate)` 放宽（批五 entity 同法）；跨面件归位装配面（编译器终审两法之②）：`apply_save` 触 build/dispatch 两簇（restore 族 + cmd_load）住 mod.rs，`resource_error_to_kernel` 被 build 簇调用而 `KernelError` 住 error.rs——兄弟模块不可见彼此私有项，随构造簇归位 mod.rs。外部面零变化：`lib.rs` `pub mod driver` 不动，四出口 `KernelFacade`/`KernelError`/`code`/`DEFAULT_FUEL_BUDGET` 经 mod.rs `pub use` 保路径（外部引用零 diff）。这是**纯搬移**，不是重写：非空行多集守恒（白名单=各面 use 头+装配+impl 包装+模块 doc 内联 link 2 处全路径化，doc-only），21 测逐名守恒 + `--lib` 112/0，七门禁 before/after 逐项相等（before 在 6023d5c 复跑取证）。拆分动机只有一个：单文件超限使子系统边界不可读——拆分后「驱动 = 门面状态根（mod.rs）+ 错误/构造/派发/宿主侧面四件 + 测试」的形状与装载序叙述一一对应（批一 egg.rs、批二 serve、批三 host_api、批四 host_contract、批五 entity 同法）。
