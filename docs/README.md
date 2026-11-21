@@ -25,7 +25,7 @@ docs/
     ├── README.md              # 树入口：模块 → 文件 → 召回时点（索引完备性由机检断言）
     ├── kernel/                # ① ygg 内核（7）：state-machine / events（39 口径）/ state-surface / wire-protocol / lua-api / compaction / sim-kernel
     ├── host/                  # ② egg CLI 与 host（4）：cli-daemon / serve / harness-tools / lanes
-    ├── mod/                   # ③ agent-seed mod（6）：mod-package / prompt-surface / tool-bridge / action-faces / identity / testing-strategy
+    ├── mod/                   # ③ agent-seed mod（7）：mod-package / prompt-surface / tool-bridge / action-faces / identity / testing-strategy / superagent-game
     └── packages/              # ⑤ packages 通用能力层（9）：README + entity / codec / quest / dialogue / role-skill / procgen / assetgen / textframe
 ```
 

@@ -1,0 +1,31 @@
+#!/bin/sh
+# superagent-convert —— 信封 ↔ harness CLI 语法的薄转换器（P4 适配器参考件）。
+#
+# 定位（计划 §3）：出向工具 `superagent.agent_call` 的 program。宿主在飞工具桥
+# 以 `--text/--agent/--session` 占位实参调起本脚本（pack.json tools 段声明），
+# 本脚本把它翻译成目标 harness 的一次调用，把 stdout 原样交回（宿主以
+# resultEvent=harness.replied 回投）。换 harness = 换 pack.json 的 program，
+# mod 业务层零改动。
+#
+# 用法（stub 面，与 pack.json args 模板一致）：
+#   superagent-convert stub --text <正文> --agent <id> [--session <会话>]
+#
+# 确定性：stub 目标 = 同目录 stub-harness（echo agent，同输入同输出）；
+# 非零退出/超时由宿主工具语义接管（失败信封 → mod 记 agent.error，不重试）。
+set -eu
+
+mode="${1-}"
+shift || true
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+case "$mode" in
+    stub)
+        # stub：直接转投同目录 stub-harness（参数透传，引号保全空格）。
+        exec "$here/stub-harness" "$@"
+        ;;
+    *)
+        echo "superagent-convert: 未知目标 '$mode'（合法：stub）" >&2
+        exit 2
+        ;;
+esac

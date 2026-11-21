@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "ygg:superagent/world",
+      "kind": "world",
+      "schema": "https://yggdrasill.dev/schemas/v1/superagent-world.json",
+      "path": "data/world.json"
+    },
+    {
+      "id": "ygg:superagent/envelope",
+      "kind": "envelope",
+      "schema": "https://yggdrasill.dev/schemas/v1/superagent-envelope.json",
+      "path": "data/envelope.json"
+    },
+    {
+      "id": "ygg:superagent/config",
+      "kind": "config",
+      "schema": "https://yggdrasill.dev/schemas/v1/superagent-config.json",
+      "path": "data/config.json"
+    }
+  ],
+  "schemaFiles": [
+    "schemas/superagent-world.json",
+    "schemas/superagent-envelope.json",
+    "schemas/superagent-config.json"
+  ],
+  "agent": {
+    "entryEvent": "event.start",
+    "choiceEvent": "ygg.choice_selected",
+    "summaryEvent": "agent.summary",
+    "endingPrefix": "【结局",
+    "metaKey": "summary",
+    "rejectionPrefixes": [
+      "【拒绝】"
+    ],
+    "replayPrefix": "【重放】",
+    "defaultPayload": "0"
+  },
+  "inboxRoutes": {
+    "externalIdField": "externalId",
+    "payloadField": "payload",
+    "extMarker": "@ext=",
+    "agent.chat": {
+      "action": "agent.chat",
+      "fields": [
+        "externalId",
+        "agent",
+        "text",
+        "session",
+        "refs"
+      ],
+      "actor": true,
+      "actor_session": true,
+      "write": {
+        "flag": "requirement",
+        "shape": "named"
+      }
+    },
+    "agent.action": {
+      "action": "agent.action",
+      "fields": [
+        "externalId",
+        "agent",
+        "text",
+        "session",
+        "refs"
+      ]
+    },
+    "quest.delivery": {
+      "action": "quest.delivery",
+      "fields": [
+        "externalId",
+        "agent",
+        "text",
+        "session",
+        "refs"
+      ]
+    },
+    "quest.custom": {
+      "action": "quest.custom",
+      "fields": [
+        "externalId",
+        "agent",
+        "text",
+        "session",
+        "refs"
+      ]
+    },
+    "harness.ping": {
+      "action": "harness.ping",
+      "fields": [
+        "externalId",
+        "agent",
+        "text",
+        "session",
+        "refs"
+      ]
+    },
+    "agent.error": {
+      "action": "agent.error",
+      "fields": [
+        "externalId",
+        "agent",
+        "text",
+        "session",
+        "refs"
+      ]
+    }
+  },
+  "tools": {
+    "superagent.agent_call": {
+      "kind": "cli",
+      "program": "packages/mods/superagent/adapter/superagent-convert",
+      "args": [
+        "stub",
+        "--text",
+        "{{text}}",
+        "--agent",
+        "{{agent}}",
+        "--session",
+        "{{session}}"
+      ],
+      "timeoutMs": 30000,
+      "inlineWaitMs": 5000,
+      "maxOutputBytes": 4096,
+      "readOnly": true,
+      "resultEvent": "harness.replied"
+    }
+  },
+  "mounts": [
+    {
+      "name": "biz",
+      "dir": "/tmp/ygg-p4-mount",
+      "mode": "rw"
+    }
+  ],
+  "packages": [
+    {
+      "id": "entity",
+      "version": "0.1.0"
+    },
+    {
+      "id": "codec",
+      "version": "0.1.0"
+    },
+    {
+      "id": "quest",
+      "version": "0.1.0"
+    },
+    {
+      "id": "dialogue",
+      "version": "0.1.0"
+    },
+    {
+      "id": "role-skill",
+      "version": "0.1.0"
+    },
+    {
+      "id": "procgen",
+      "version": "0.1.0"
+    }
+  ],
+  "panel": {
+    "entry": "panel/index.html"
+  },
+  "code": {
+    "entry": "mod.lua",
+    "modules": [
+      "src/agents.lua",
+      "src/cast.lua",
+      "src/clock.lua",
+      "src/custom.lua",
+      "src/items.lua",
+      "src/quests.lua",
+      "src/simframe.lua",
+      "src/world.lua"
+    ]
+  }
+}

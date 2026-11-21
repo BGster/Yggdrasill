@@ -1,0 +1,177 @@
+{
+  "bureau": "超级中介局",
+  "seedText": "superagent-bureau-v1",
+  "tuning": {
+    "dayStep": 1,
+    "askPatienceCost": 1,
+    "deadlineGraceDays": 0
+  },
+  "npcs": [
+    {
+      "key": "archivist",
+      "name": "文姝",
+      "title": "档案科主任",
+      "kind": "client",
+      "patience": 3,
+      "briefing": "档案科的卷宗积压了：三号档案压在最底层，需要有人取回并登记归档。"
+    },
+    {
+      "key": "captain",
+      "name": "铁崖",
+      "title": "外勤队长",
+      "kind": "client",
+      "patience": 3,
+      "briefing": "外勤刚回局，巡检记录还是草稿，要按新格式誊成正式报告。"
+    },
+    {
+      "key": "quartermaster",
+      "name": "细雨",
+      "title": "器材管理员",
+      "kind": "client",
+      "patience": 3,
+      "briefing": "器材台账和实物对不上，需要一趟盘点并把差异写成清单。"
+    }
+  ],
+  "clerks": [
+    {
+      "key": "clerk-mo",
+      "name": "墨尘",
+      "title": "在局文员",
+      "kind": "clerk"
+    },
+    {
+      "key": "clerk-lin",
+      "name": "林间",
+      "title": "在局文员",
+      "kind": "clerk"
+    }
+  ],
+  "items": [
+    {
+      "key": "seal",
+      "name": "局印",
+      "category": "tool",
+      "weight": 1,
+      "holder": "archivist"
+    },
+    {
+      "key": "dossier",
+      "name": "三号卷宗",
+      "category": "doc",
+      "weight": 2,
+      "holder": "archivist"
+    },
+    {
+      "key": "logbook",
+      "name": "巡检簿",
+      "category": "doc",
+      "weight": 1,
+      "holder": "captain"
+    },
+    {
+      "key": "ledger",
+      "name": "器材台账",
+      "category": "doc",
+      "weight": 1,
+      "holder": "quartermaster"
+    }
+  ],
+  "roles": [
+    {
+      "name": "bureau.client",
+      "spec": {
+        "attrs_spec": {
+          "patience": 3
+        }
+      }
+    },
+    {
+      "name": "bureau.clerk",
+      "spec": {
+        "attrs_spec": {
+          "diligence": 2
+        }
+      }
+    }
+  ],
+  "skills": [
+    {
+      "name": "filing",
+      "spec": {
+        "attrs_spec": {
+          "order": 1
+        }
+      }
+    },
+    {
+      "name": "fieldcraft",
+      "spec": {
+        "attrs_spec": {
+          "mobility": 1
+        }
+      }
+    },
+    {
+      "name": "bookkeeping",
+      "spec": {
+        "attrs_spec": {
+          "order": 1
+        }
+      }
+    }
+  ],
+  "questTypes": [
+    {
+      "name": "archive-fetch",
+      "steps": ["accept", "work", "deliver"],
+      "deadlineDays": 3
+    },
+    {
+      "name": "field-report",
+      "steps": ["accept", "work", "deliver"],
+      "deadlineDays": 4
+    },
+    {
+      "name": "inventory-audit",
+      "steps": ["accept", "work", "deliver"],
+      "deadlineDays": 3
+    }
+  ],
+  "commissions": [
+    {
+      "key": "c1",
+      "type": "archive-fetch",
+      "giver": "archivist",
+      "title": "取回三号档案",
+      "rewardSkill": "filing"
+    },
+    {
+      "key": "c2",
+      "type": "field-report",
+      "giver": "captain",
+      "title": "誊写巡检报告",
+      "rewardSkill": "fieldcraft"
+    },
+    {
+      "key": "c3",
+      "type": "inventory-audit",
+      "giver": "quartermaster",
+      "title": "盘点器材差异",
+      "rewardSkill": "bookkeeping"
+    }
+  ],
+  "copy": {
+    "prologue": [
+      "超级中介局，晨钟敲过。业务日历翻到第一页。",
+      "你是本局调度员：委托人在堂上候着，委托单压在案头，外线 agent 在队列里待命。",
+      "三系统就位——人物（委托人与文员）、道具（局印与卷宗）、任务（委托单）各归其位。"
+    ],
+    "boardPrompt": "调度台：业务日第 {day} 天；可接委托 {open} 单。点一支香（数字选动作）。",
+    "askLine": "{name}（{title}）：{briefing}",
+    "askDown": "{name}（{title}）已把话说完，不再多言。",
+    "closeEnding": "【结局·打烊】业务日第 {day} 天收工：接单 {taken}、交付 {delivered}、弃单 {abandoned}。局印归匣，明日再开。",
+    "noCommission": "案头没有可接的委托了。",
+    "takeOk": "接单：{title}（委托人 {giver}，承接 {taker}），限时 {deadline} 个业务日。",
+    "deliverOk": "交付：{title} 已结清（业务日第 {day} 天）。报酬：{taker} 获技能 {skill}。"
+  }
+}
