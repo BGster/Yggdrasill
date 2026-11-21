@@ -126,3 +126,12 @@ unused_imports，glob 转发语义链与 egg 目录化同理，先例 `src/drive
 pkg_sources+count_in_sources、entity 的 basic_spec、assetgen 的 BUNDLE_ENTRIES/OSC/samples_of），
 骑片 helper 随主题走；Rust 侧 `--list` 前后剥模块段前缀集合 diff=∅、件头「32 测」陈旧计按
 before 实测纠偏为 34。
+
+**selftest 红的取证规约（S27，r-20261121-200642-ddb1）。** 门禁/复跑的 selftest 输出必须**全量落盘**
+（完整 stdout+stderr 重定向到文件）；判红时从全量 log 提取三段——① 全部 `FAIL ` 行（行为用例名+详情）；
+② 全部 `file FAIL` 行（perf 文件+error）；③ 末三行（`---` / `cases passed=` / `ok=`）。
+**禁止只留计数行**：runner 两种失败形状都会打印名字（行为用例 `FAIL <name>: <detail>`，非中止式、
+文件跑完；perf 文件 `file FAIL <file>: <err>`，计数行仍是 `failed=0`）——S27 之前两次 182/1 观测
+「只剩计数、无名字」的成因是采集端把 stdout 过滤到只剩末两行，不是 runner 缺陷；失败例名是定向修复的
+唯一入口证据，缺它只能停在「环境嫌疑」定性。另注：两种失败形状不可混淆——`cases passed=N failed=M
+(M>0)` = 行为用例；`failed=0` + `file FAIL` + `ok=0` = perf 文件阈值被打穿。
