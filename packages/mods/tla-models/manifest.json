@@ -1,14 +1,14 @@
 {
   "code": [
     {
-      "byteLength": 12639,
+      "byteLength": 12956,
       "path": "src/ewd998.lua",
-      "sha256": "832508a02e36e590c3ab650b82e0e6325fe4fe78223b842bcd451e85f64a27a7"
+      "sha256": "93d5eea024ef179215966d968d5ac100b4115f026b02b59e6bb863e7cb6c7864"
     },
     {
-      "byteLength": 6909,
+      "byteLength": 7841,
       "path": "src/gol.lua",
-      "sha256": "4a0c1ae337380ed491998f4eb7892a35ba0fe8c9dde9b585866450ac0c823bef"
+      "sha256": "fab1834b040fdcad0bb7e87b7e85ce426816b4bb795e48d51682749bd3d7f689"
     },
     {
       "byteLength": 2890,
@@ -16,14 +16,14 @@
       "sha256": "b5571b42b93c5e1d701c61829cb4cb47c8534ac2d00528f2d6dccef18eeb9ad5"
     },
     {
-      "byteLength": 11015,
+      "byteLength": 12313,
       "path": "src/klotski.lua",
-      "sha256": "7b3ae802fc5f00a66016a5508efbfcc94140731a27073b0d898c7b5958ba57aa"
+      "sha256": "6a0d62bc11b973f43157270aeec1ecc8c5d6cad955371292e1c6fe5248e78313"
     },
     {
-      "byteLength": 10357,
+      "byteLength": 10516,
       "path": "src/replay.lua",
-      "sha256": "16bc5bf2125329851beaa0fa490634d38a3b70a0f3d6000c9cb9640a750b30cf"
+      "sha256": "e3a680c49d0d42161443ffc4910767c4c903d881a673db55356879f6b0bee475"
     },
     {
       "byteLength": 3934,
@@ -33,12 +33,12 @@
   ],
   "entries": [
     {
-      "byteLength": 840,
+      "byteLength": 1695,
       "id": "ygg:tla/trace/gol",
       "kind": "data",
       "path": "data/traces/gol.json",
       "schema": "https://yggdrasill.dev/schemas/v1/tla-trace.json",
-      "sha256": "ae8f942a9a2d12ccb08504a553bf8c2b70a5cf1f8e71ae5dc507ee9a35a84702"
+      "sha256": "a26dbe5a947b0615ab3042f766e3df117cc2be909fd30470cd3f68a04471a5a0"
     },
     {
       "byteLength": 406,
@@ -54,7 +54,7 @@
       "kind": "data",
       "path": "data/traces/klotski.json",
       "schema": "https://yggdrasill.dev/schemas/v1/tla-trace.json",
-      "sha256": "2d62f0059355d318d86b01812cc3a753d2a71eb7191603f38e864e86ba16b172"
+      "sha256": "48c36c620a4898a51ffb1929a47bf0cc7f5bc82b724b3a1f671d10c731b37a4f"
     },
     {
       "byteLength": 776,
