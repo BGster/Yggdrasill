@@ -178,6 +178,11 @@ run("pkg.textframe.perf", function()
       kept[i] = tf.stack({ tf.to_lines(buf), hud })
     end
     eq(#kept, 100, "常驻测量持有 100 帧")
+    -- **先整收一次再读**：`collectgarbage("count")` 的差值会把「这 100 轮循环里
+    -- 还没被回收的瞬时垃圾」一并算进来，而 GC 什么时候跑取决于进入本用例时的堆大小
+    -- （跨文件耦合：实测同一份代码在前序包多分配约 1 MB 时从 4.6 涨到 13.7 KiB/帧）。
+    -- 本条要量的是「留下 100 帧」的**活**内存，所以差值必须在一次整收之后取。
+    collectgarbage()
     frame_kib = (collectgarbage("count") - m0) / 100
   end
   print(("perf.textframe.frame_kib=%.2f"):format(frame_kib))

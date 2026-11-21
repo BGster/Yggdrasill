@@ -76,7 +76,7 @@
 | 帧合成耗时 | `≤ 1000 µs` | **350 µs**（348–363） | **95–99 µs** | `to_lines` + `stack` 跑 2000 帧 × 3 次取中位；区间是跨次运行的中位波动 → `perf.textframe.compose_us` |
 | 帧合成吞吐 | 给数字 | **2 850 帧/秒** | **10 300–10 500 帧/秒** | `1000 / compose_ms` → `perf.textframe.throughput_fps` |
 | vs 手搓对照 | `≤ 2.0×` | **1.64×** | **1.30×** | 同面跑 naive `out = out .. ch` 版 → `perf.textframe.vs_naive` |
-| 每帧常驻内存 | `≤ 8 KiB` | **4.0–4.7 KiB** | **4.0–4.7 KiB** | 100 帧常驻后两次 `collectgarbage("count")` 差 ÷ 100 → `perf.textframe.frame_kib` |
+| 每帧常驻内存 | `≤ 8 KiB` | **3.04 KiB** | **3.04 KiB** | 100 帧常驻后**整收一次**再取 `collectgarbage("count")` 差 ÷ 100 → `perf.textframe.frame_kib`（S-24 改法，见 §8 末条） |
 | 泄漏检测 | `≤ 1%` 且逐字符相等 | **0.62–0.64% / 1** | **0.62–0.64% / 1** | 100 轮同输入 `compose`：内存差占比 + 每轮与第 1 轮逐字符相等 → `perf.textframe.leak_gc_pct` / `perf.textframe.leak_100_equal` |
 
 **对照（需求点名要的那个数字，如实记）**：本包在 `w = 80` 上**没有**赢过手搓的 `out = out .. ch`（debug 1.64× / release 1.30×）。这个宽度下二次项的常数还没长出来，而两两合并要多付一张 `parts` 表的存取。它的价值在**增长性**：`w` 翻倍时 naive 是 O(n²) 的四倍退化，两两合并是 O(n·log n)。所以阈值定 2×，抓的是「拼接路径退化」，不是「比手搓快」——后者在本尺寸下本来就不成立。
@@ -134,3 +134,5 @@
 **反方案四：`require("pkg.assetgen.join")` 复用拼接器。** 十几行的两两合并，换来一条 `textframe → assetgen` 依赖边与一次跨包契约耦合；而 codec / quest / entity / dialogue / assetgen 五处都已各自持有同一份（[assetgen.md](assetgen.md) §8 已裁过同一个问题）。复制这三行是更便宜的一侧。
 
 **判据（①②③）。** ① 阻断——把「哪个字给哪个地形」或「谁压谁」写进包；在包里折行 / 算显示宽度 / 造第二份摘要；用 `pairs` 决定行序。② 症状——同一条帧在 mod 侧和解析侧宽度差一格，`cmp` 静默假绿；`t-saltline-golden` 的 10 帧漂移；沙箱里 `attempt to index a nil value (global 'table')`。③ 确认——本文件被 [../README.md](../README.md) 索引；`--filter pkg-textframe` 的 `cases passed=18`；§5 的五个 `perf.textframe.*` 键齐备。
+
+**S-24 实测发现的口径缺陷（测量方法修正，非阈值移动）**：原口径是「`m0` → 建 100 帧 → 读 `count`」，差值里**混入了这 100 轮还没被回收的瞬时垃圾**，而 GC 什么时候跑取决于**进入本用例时的堆大小**——`pkg-entity` 的查询面（`ygg.entity.query` 的包面自测 + 两条 perf 行）让前序堆多出约 1 MB 之后，同一份 textframe 代码从 **4.65 KiB/帧** 报到 **13.73 KiB/帧**（阈值 8），跨文件耦合打红了门禁。处置是**把差值挪到一次整收之后**（`collectgarbage()` 再读 `count`）：本条要量的是「留下 100 帧」的**活**内存，整收后瞬时垃圾不计入。改后 debug/release 两面都是 **3.04 KiB/帧**（原 4.0–4.7 里有约 1.6 KiB 是垃圾），阈值不变、口径更严。
