@@ -155,3 +155,18 @@ kv:{entries,revision}, pending_choice}`。mod 自己的状态在 `kv.entries`；
 
 ---
 
+## 设计依据
+
+**serve 模块化拆分（2026-11-21，r-20261121-075019-b04d）**：`examples/serve/mod.rs` 单文件
+3135 行 = 800 行硬上限的 3.9 倍，按原则六纯搬移拆为 `examples/serve/` 目录（mod.rs + 生产 6 件
+http/sse/locate/handlers/roots/panels + 测试 4 件 tests_common/tests_http/tests_data/tests_registry_sse，
+11 文件全部 ≤800 行，最大 tests_registry_sse 457 行）。
+
+**依据**：零逻辑变更——子文件 `use super::*` 取父名空间，mod.rs 根级 `pub(crate)` glob 再导出保
+serve 平铺名空间（egg 目录化先例同法）；随迁 `super::→crate::` 恰 7 处（watcher/locate/handlers/panels
+的 COORDINATION_FILE/read_meta/read_json/retired_seed_name_reason/PACK_FILE），留守 2 处
+（run_serve 的 home_dir、check_run_id 的 is_valid_run_id）不动；`serve_source_has_no_write_path`
+守卫同 commit 从 `include_str!("mod.rs")` 扩为 concat 全部 7 个生产文件（mod.rs 置尾保分段标记，
+覆盖只增不缩，禁则串不变）。拆分前后用例数守恒（egg 158 / workspace 581 / pkg selftest 199 /
+agent-seed 79）与冒烟响应体 sha 逐字节同值即门禁判据。
+
