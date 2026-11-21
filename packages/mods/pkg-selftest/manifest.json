@@ -268,14 +268,14 @@
     {
       "files": [
         {
-          "byteLength": 7301,
+          "byteLength": 7809,
           "path": "textframe/grid.lua",
-          "sha256": "9fc8accb059f9d6ccf6a399527b4190b96bf0e93ce0ea804a82d2783f71596a4"
+          "sha256": "477961ebd8bb3d82a85f29eb52f92642e9ccbaf83a3a0bf38e504823479ac636"
         },
         {
-          "byteLength": 2103,
+          "byteLength": 2117,
           "path": "textframe/init.lua",
-          "sha256": "75291933bfa1bf91ad43dd8c13208a5eada5094d6bb5ac99f474c0c1d56b1a3d"
+          "sha256": "4c7cbdfa2fe56e7f444a36a2de70a60ae9bb0b1ab39a66e639d9ca3044168eaf"
         },
         {
           "byteLength": 129,

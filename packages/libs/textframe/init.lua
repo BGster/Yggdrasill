@@ -46,6 +46,7 @@ local PERF_KEYS = {
   "frame_kib",
   "leak_gc_pct",
   "leak_100_equal",
+  "vs_naive",
 }
 
 function M.perf_keys()

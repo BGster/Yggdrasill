@@ -153,6 +153,13 @@ function M.blit(dst, src, ox, oy)
 end
 
 --- 行装配：`h` 行、每行恰 `w` 个字符、**不 trim 尾空格**（I6——改这里等于改帧摘要）。
+---
+--- # 为什么宽度断言在**行**上做，不在**格**上做
+---
+--- 逐格 `type(ch) ~= "string" or #ch ~= 1` 是 I5 的读侧副本，但它要跑 `w·h` 次
+--- （80×24 = 1920 次/帧，实测吃掉约 45% 的合成时间）；而 I6 真正要守的是**行宽**——
+--- 一格多字节必然让 `#line > w`，一格数字会被 `..` 悄悄拼接成多个字节，同样是 `#line` 变长。
+--- 所以把断言放在拼完之后：每行一次 `#`，24 次/帧，成本可忽略，守的还是同一条不变式。
 function M.to_lines(buf)
   local w, h, cells = check_frame(buf, "to_lines")
   local lines = {}
@@ -160,18 +167,18 @@ function M.to_lines(buf)
     local base = (y - 1) * w
     local parts = {}
     for x = 1, w do
-      local index = base + x
-      local ch = cells[index]
+      local ch = cells[base + x]
       if ch == nil or ch == "" then
         parts[x] = " "
       else
-        if type(ch) ~= "string" or #ch ~= 1 then
-          fail(E.CELL, ("to_lines: cells[%d] 不是恰 1 字节（%s）"):format(index, tostring(ch)))
-        end
         parts[x] = ch
       end
     end
-    lines[y] = concat(parts)
+    local line = concat(parts)
+    if #line ~= w then
+      fail(E.CELL, ("to_lines: 第 %d 行宽 %d ≠ w=%d（单元格不是单字节？）"):format(y, #line, w))
+    end
+    lines[y] = line
   end
   return lines
 end

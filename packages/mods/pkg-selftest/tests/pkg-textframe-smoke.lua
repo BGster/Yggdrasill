@@ -16,7 +16,7 @@
 --
 -- ① 顶层不碰宿主面（`ygg.*` 访问即红）；② 导出面清单（7 函数 + 2 常量表）；
 -- ③ `ERRORS` 四码的**码集**（跨包契约：用例按码做子串断言，改名会在别处静默失效）；
--- ④ `perf_keys` 七键齐备（§5 的打印键，改表不打印即静默少指标）；
+-- ④ `perf_keys` 八键齐备（§5 的打印键，改表不打印即静默少指标）；
 -- ⑤ **行宽不 trim**——这是与 mod 侧 golden 帧的唯一接缝（I6），在载体层再钉一次：
 --    空白帧的每一行必须是 `w` 个空格，不是空串。
 
@@ -82,11 +82,12 @@ do
     "load_ms",
     "put_ns",
     "throughput_fps",
+    "vs_naive",
   }
   if type(textframe.perf_keys) == "function" then
     local got_keys = textframe.perf_keys()
     if #got_keys ~= #perf_want then
-      problems[#problems + 1] = "perf_keys 应为 7 个，实得 " .. #got_keys
+      problems[#problems + 1] = "perf_keys 应为 8 个，实得 " .. #got_keys
     end
     local seen = {}
     for i = 1, #got_keys do
