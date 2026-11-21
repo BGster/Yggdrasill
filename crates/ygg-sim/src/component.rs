@@ -14,7 +14,7 @@
 //!    这在 10² 量级是无意义的开销。
 //! 3. **类型词汇单源**。四个 Tier 2 属性类型字面量（`number` / `string` / `boolean` / `ref`）
 //!    与 [`AttrType::label`] 逐字相同，`tests/determinism_scan.rs` 扫
-//!    `packages/libs/entity/init.lua` 并断言两侧一致——改一侧即红（assetgen 的
+//!    `packages/libs/entity/schema.lua`（批十一目录化后字面量随 `value_ok` 迁入）并断言两侧一致——改一侧即红（assetgen 的
 //!    `rng-not-copied` 同范式）。`tag` 是 Tier 1 追加的第五词汇（Tier 2 侧写作
 //!    `tags.<name>`，无值标记）。
 

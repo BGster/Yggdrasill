@@ -380,7 +380,7 @@ fn type_vocabulary_matches_entity_package() {
     let entity_lua = crate_dir()
         .parent()
         .and_then(|crates| crates.parent())
-        .map(|root| root.join("packages/libs/entity/init.lua"))
+        .map(|root| root.join("packages/libs/entity/schema.lua"))
         .expect("仓根可解析");
     let text = std::fs::read_to_string(&entity_lua)
         .unwrap_or_else(|err| panic!("读不到 {}：{err}", entity_lua.display()));
@@ -400,7 +400,7 @@ fn type_vocabulary_matches_entity_package() {
         }
         assert!(
             text.contains(&quoted),
-            "entity.md/init.lua 里找不到类型字面量 {quoted}（Tier 1 与 Tier 2 词汇已分叉）"
+            "entity/schema.lua 里找不到类型字面量 {quoted}（Tier 1 与 Tier 2 词汇已分叉）"
         );
         checked += 1;
     }
