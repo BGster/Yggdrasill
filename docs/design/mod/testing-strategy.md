@@ -105,3 +105,12 @@ S-25 批二 serve 面再拆 11 文件，egg/43 + serve/11 全部 ≤800 行，�
 **依据**：纯搬移零逻辑变更——测试 mod 跟随所属子系统入同目录（`identity/tests.rs` 等），
 `use super::*` 语义链不断（子模块经父 glob 取根名集），`use super::{…}` 显式清单原样可解析；
 拆分前后用例数守恒（egg 158 / workspace 560 / pkg selftest 199 / agent-seed 79）即门禁判据。
+
+**宿主集成测试面目录化（2026-11-21，r-20261121-142302-3a26）**：`tests/host_contract.rs` 单文件
+1089 行 = 22 个用例跨面杂居，按契约面拆为 `tests/host_contract/` 目录（main.rs 装配 + 五契约面：
+narrative 输出面 / adhoc 即席写 / gates 拒绝路径 / entity_face 14 键闭集+batch+lifecycle /
+entity_query selector 语法面，全部 ≤500 行）；`tests/<name>/main.rs` 官方规则保单测试目标，
+目标名 `host_contract` 不变，23 个 tests 目标计数守恒（22 单文件 + 1 目录化）。
+**依据**：纯搬移零逻辑变更——22 用例逐名守恒（`--list` 前后剥模块前缀集合 diff = ∅）即门禁判据；
+根 use 头逐字节不动，子文件 `use super::*;` 一行即足（玩具 crate 复刻实验：rustc 不报根
+unused_imports，glob 转发语义链与 egg 目录化同理，先例 `src/driver/tests.rs`）。
