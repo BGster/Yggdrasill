@@ -49,7 +49,8 @@
 ## 3. 路由与观察面
 
 - **面板**：`pack.json panel.entry = panel/index.html`；serve iframe 托管于 `/panel/<run-id>/index.html`，页面拉 `/api/runs/<id>/events` 渲染 `agent.dialogue` / 任务事件行 + `/api/stream` SSE 变更触发刷新。serve 零写端点（0b 红线）——对话**绝不**经 serve 下行。
-- **机器可读投影**：对话行/台账双写 `ygg.emit`（`agent.dialogue` / `agent.recorded` / `item.transferred`，载荷全标量），事件页与重放对账都读它。
+- **机器可读投影**：对话行/台账双写 `ygg.emit`（`agent.dialogue` / `agent.recorded` / `item.transferred`，载荷全标量），事件页与重放对账都读它。带 `ygg.choice` 的 handler 不 emit（宿主 D1 语义：choice 前的派生事件被丢弃）——板面动作的对话行落 `pkg.dialogue` 线程 KV，经 `agent.summary` 的 `meta.dlg = {threads, lines}` 读出；入向 handler（无 choice）的行走事件页。
+- **线程键约定**（cast.lua）：NPC = `cast.<npc key>`，外线 agent = `agent.<agent-id>`，委托 = `q.<quest key>`。报酬成长 = 交付单点调 `reward(taker_id, skill)`：首授 `grant_skill`，再授 `recharge` 回满格；外部 agent 台账 `sg.agent.<id> = chats|deliveries`。
 
 ## 4. 验收映射（契约 §五 P4）
 

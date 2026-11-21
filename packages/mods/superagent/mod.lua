@@ -24,6 +24,7 @@ local ENVELOPE = ygg.data("ygg:superagent/envelope")
 
 local world = require("src.world")
 local clock = require("src.clock")
+local cast = require("src.cast")
 
 -- ============================================================================
 -- §2 包装配：install 只记 deps / 注注册表（不预读模板、不写 KV）。
@@ -129,6 +130,7 @@ ygg.on("event.start", function()
   -- 不 emit（机器可读投影归无 choice 的入向 handler，见设计文档 §3）。
   clock.advance()
   present_board()
+  return report  -- 真内核忽略 handler 返回值；selftest 拿它做铺场断言
 end)
 
 -- ── 选择路由（choiceEvent = 宿主保留路由；payload = 1 起序号）────────────────
@@ -156,8 +158,9 @@ ACTIONS["bureau.ask"] = function()
   local left = world.spend_patience(target, WORLD.tuning.askPatienceCost)
   if briefing ~= nil and #briefing > 0 then
     ygg.narrate(fill(WORLD.copy.askLine, { name = name, title = title, briefing = briefing }))
-    -- D1：带任务板的 handler 不 emit（对话行投影在 C2 走 pkg.dialogue 线程 KV；
-    -- 事件页投影归无 choice 的入向 handler）。
+    -- C2 起对话落 pkg.dialogue 线程（线程键 cast.<key>；D1：带任务板的 handler
+    -- 不 emit，行投影经线程 KV 与 summary meta 读出）。
+    cast.talk(target, tostring(name), tostring(briefing))
   end
   if left == 0 then
     ygg.narrate(fill(WORLD.copy.askDown, { name = name, title = title }))
@@ -221,6 +224,9 @@ ygg.on("agent.summary", function()
     day = clock.day(),
     simHash = clock.sim_hash(),
   })
+  -- 对话线计（观察面：线程数/总行数；C2 人物系统投影）。
+  local threads, lines = cast.threads_stat()
+  ygg.meta("dlg", { threads = threads, lines = lines })
   ygg.meta("sim_hash", clock.sim_hash())
 end)
 

@@ -96,7 +96,8 @@
     "modules": [
       "src/simframe.lua",
       "src/clock.lua",
-      "src/world.lua"
+      "src/world.lua",
+      "src/cast.lua"
     ]
   }
 }
