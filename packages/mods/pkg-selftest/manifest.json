@@ -83,14 +83,39 @@
     {
       "files": [
         {
-          "byteLength": 42936,
+          "byteLength": 9216,
+          "path": "codec/bundle.lua",
+          "sha256": "d1f170f5df5538ed52186a52369d0071424be6ef40efbcbe32eef0417eef71dd"
+        },
+        {
+          "byteLength": 9947,
+          "path": "codec/importing.lua",
+          "sha256": "913473408b61eacad53c4ca5b0fa12523e42be0d0d533066a4f21019de7ad275"
+        },
+        {
+          "byteLength": 4915,
           "path": "codec/init.lua",
-          "sha256": "6c3283e00f2b5efcb106b112a64d88479eb0d77b59f6961c7c7d41050be57803"
+          "sha256": "f8f3fd28d9206be877dfaec3f5b4af38c863d14f1ee011ca653afc67817b6887"
+        },
+        {
+          "byteLength": 9634,
+          "path": "codec/jsondec.lua",
+          "sha256": "c94e62ba3e44aa9010db6f1898a8fc271075566fd06751167475d4c859bcd2e5"
+        },
+        {
+          "byteLength": 13522,
+          "path": "codec/jsonenc.lua",
+          "sha256": "65d0550a487dc04870da61fa7ca7f97bc78d3f980c28efb703aeda98e216c24c"
         },
         {
           "byteLength": 175,
           "path": "codec/pkg.json",
           "sha256": "d51fb876bcf1caf84f7c0a935e7a880b54789c3a7c0941ac89865b21f08aeb4f"
+        },
+        {
+          "byteLength": 4619,
+          "path": "codec/runtime.lua",
+          "sha256": "91b65b92cf1f9e48f0117a0c596b5cdb743fb321fc460332c78a2535b120946a"
         },
         {
           "byteLength": 5449,
@@ -138,14 +163,34 @@
     {
       "files": [
         {
-          "byteLength": 36122,
+          "byteLength": 6821,
+          "path": "entity/base.lua",
+          "sha256": "663ee329f148702efbce2cc44c6a01dbf681229d15ff8d0bdd8b0c1ce5053c5f"
+        },
+        {
+          "byteLength": 5171,
           "path": "entity/init.lua",
-          "sha256": "9e53f07e55000ca305b478e852949c72bfa82254e269ca4c87775b1db1101880"
+          "sha256": "a75c2e749c3b8b4c0551051ce95d749e23b778c63fbe41b4dfc085c87e2853a1"
         },
         {
           "byteLength": 139,
           "path": "entity/pkg.json",
           "sha256": "5cd9d1faba637a37afc9725852af8e2ebcc9689e2bb70c02ddd054e31b0be310"
+        },
+        {
+          "byteLength": 5641,
+          "path": "entity/query.lua",
+          "sha256": "9d2d9a7519d398ded3a58ebe0b5e89e9b29f705587677c2e84b318779be211ef"
+        },
+        {
+          "byteLength": 13605,
+          "path": "entity/record.lua",
+          "sha256": "40648f004ba8d3b00c90d5a5215ea682d9b8ef2092a2e84289b39ba2dcb37c59"
+        },
+        {
+          "byteLength": 11853,
+          "path": "entity/schema.lua",
+          "sha256": "946ecf13ea3e890fe66a9e18b52c4686f36f9c8a7d0856f340e2f5115907140d"
         }
       ],
       "id": "entity"

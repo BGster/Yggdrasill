@@ -75,7 +75,7 @@ bundle（导出物，也是导入物的唯一形状）：
 | `export` | 不动 | 成本在逐实体 `pkg.entity` 面调用，属 Tier 2 布局，已排期 S20 |
 | `checksum` / `write` / `read` / `import` / `roundtrip` | 不动（内部那次 `encode` 顺带变快） | S16 已修：`write` 删 sha256 互校（两侧是不同字节，永假）→ 校回执字节数；本包只承诺 `encode`/`decode` 两行数字 |
 
-**委托与回退（包侧唯一改动，`init.lua` 的 `M.encode` / `M.decode` 两处）**：面在场 ⇒ `pcall` 调原生，成功即返回；面缺席 ⇒ 直接走 Lua 路径。两条都由测试钉住：
+**委托与回退（包侧唯一改动，`init.lua` 的 `M.encode` / `M.decode` 两处）**：面在场 ⇒ `pcall` 调原生，成功即返回；面缺席 ⇒ 直接走 Lua 路径。两条都由测试钉住（批十一拆分后：委托随 `encode` / `decode` 主体迁入 `jsonenc.lua` / `jsondec.lua`，装配面仍由 `init.lua` 导出，12 键不变）：
 - **缺席**是既有契约（裸沙箱只有 `ygg = { engine_version }`，`crates/ygg-sandbox/tests/packages_sandbox.rs` 用例 ② 断言该路径的字节）；
 - **在场**由 `cargo test -p ygg-sandbox --test codec_face` 与 `--test codec_bench` 断言（键集闭集、同面 before/after、差分字节相等）。
 
@@ -155,7 +155,9 @@ bundle（导出物，也是导入物的唯一形状）：
 **性能上的一条硬教训（写在这里是因为它会重犯）。** Lua 字符串不可变，`out = out .. part` 写在循环里就是 O(n²)：1.6 MB 的 bundle 跑了 **43 秒**（0.04 MB/s）。同时，逐字节 `sub(i, i)` 拼接会为同一份文本产出**百万级片段**，内存与拼接两头都掌不住。两处都改掉之后 encode 到 **2.77 MB/s**（69×）。结论：在这个沙箱里，「看上去无害的字符串相加」是本包第一个要怀疑的对象；拼接只写在两两合并或先批量再合并的形态里。
 
 **为什么“同一份实现”变成了两份，而规范仍然只有一份（P-K A2 的裁决，2026-11）。** 下沉的载体是宿主面 `ygg.codec.*`（[kernel/lua-api.md §3.1.4](../kernel/lua-api.md)），不是 Tier 1 快照编码器：`ygg-sim` 没有 mlua（拿不到 Lua 值）、`src/**` 禁浮点 token（JSON 数字的最短往返必须有 `f64`）、快照是带尾 digest 的二进制列帧（本包的容器是 JSON 文本，是存档兼容面）。于是「Rust 一份 + Lua 一份」是结构事实，不是选择。
-它之所以不构成第二条规范，靠三条纪律而不是自觉：① 规范的唯一处仍是本文 I1 与 `init.lua` 的那四个函数（原生面被定义为**符合实现**）；② 判据是**逐字节相等**且由差分用例钉住（语料 = 行为用例值形状 + 边界集 + 10⁴ 实体集 + 2 000 fuzz；改任一侧必跑 `cargo test -p ygg-sandbox --test codec_face`）；③ 原生面拒绝的输入（值域错 / 带元方法的表）**回退 Lua 重跑**，于是错误文案只有一处来源——不维护第二套字符串契约。
+它之所以不构成第二条规范，靠三条纪律而不是自觉：① 规范的唯一处仍是本文 I1 与 `init.lua` 导出的那四个函数（主体在 `jsonenc.lua` / `jsondec.lua`；原生面被定义为**符合实现**）；② 判据是**逐字节相等**且由差分用例钉住（语料 = 行为用例值形状 + 边界集 + 10⁴ 实体集 + 2 000 fuzz；改任一侧必跑 `cargo test -p ygg-sandbox --test codec_face`）；③ 原生面拒绝的输入（值域错 / 带元方法的表）**回退 Lua 重跑**，于是错误文案只有一处来源——不维护第二套字符串契约。
 反方案：换二进制容器（内存里再快 2–3×，但存档格式换代、旧档全部不可读，而本文 §1 明确「不做版本迁移」）；或让 Tier 1 快照编码器兼职（三条结构证据都不允许）。这两条都在计划稿 §2.3/§3.1 算过账，结论是**不值得**：≥30 MiB/s 的判据已经用兼容格式过线，换容器买不到这个需求需要的任何东西。另注（R1′ 修宪，sim-kernel I2）：`ygg-sim` 的浮点 token 豁免面仅限 `src/bits.rs` 的位串搬运，与本文的 JSON 浮点格式化无关。
 
 **判据（①②③）。** ① 阻断——同一实体在两个游戏里用两套序列化；导入冲突策略隐式（靠 id 大小碰运气）；checksum 缺失导致半读的坏档被接受；只改原生或只改 Lua 就交付。② 症状——读档两次实体翻倍；同一份 bundle 在两台机器上字节不同导致「存档校验失败」查不出原因；坏档只报「某个字段是 nil」。③ 确认——本文件被索引；`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-codec` 的 `cases passed=` 含 20 条 `pkg.codec.*`；§5 吞吐表有 before/after 数字与复算命令。
+
+**Lua 包面的模块化拆分（S-25 批十一）。** `codec` 的 Lua 侧由单文件 `init.lua` 1206 行（800 上限的 1.5×）拆为 6 文件：`init.lua` 装配与转口（12 键逐键不变）+ `runtime`（错误码 / `fail` / `CODEC_VERSION` / deps 记位与宿主句柄，共享单源叶子）+ `jsonenc`（encode 与骨架工具 `join` / `sort_names` / `is_integer`，兄弟模块唯一取用点）+ `jsondec`（decode 与解析器骨架）+ `bundle`（checksum / export / write / read / roundtrip）+ `importing`（两阶段 import）；`sha256.lua` 先例不动。依赖向无环 `runtime ← {jsonenc, jsondec} ← bundle ← importing`，`bundle` / `importing` → `pkg.entity` 是包间边（同原单文件 top-level require）。这是**纯搬移**：函数体逐字节（非空行多集校验残差 = 9 行，全部是授权差异——7 行跨模块引用改经 require 名 + deps 座 2 行），导出表面逐键不变。两处装配层器件：① deps 记位落 `runtime` 的 `installed` 座，`init.lua` 的 `M.install` 同步公开字段 `M.deps` 别名（观察面不变，`codec_bench` / 调度处仍可断言）；② `bundle` / `importing` 的 `pkg.entity` 引用改为**调用期转发代理**——单文件时代 capture 在被 `fresh()` 清掉的 `init.lua` 里，拆分后 capture 点在子模块，代理保住「清 `pkg.codec` / `pkg.entity` 两键即重捕获当前实例」的消费者契约（`pkg-codec-perf` 的 `fresh()` 靠它）。行为守恒：pkg-selftest 199/0（`--filter pkg-codec` 21、`--filter pkg-entity` 29 逐包不变）、superagent 183/0、agent-seed 79/0、Saltline golden 帧 digest D0==D1 逐字节（cmp 10/10）。拆分动机与内核侧（批一 egg.rs、批九 host_contract）同一条：单文件超限使 encode / parser / bundle / import 边界不可读。
