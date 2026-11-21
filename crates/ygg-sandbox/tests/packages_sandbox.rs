@@ -509,7 +509,7 @@ fn package_sources_use_no_global_outside_the_base_whitelist() {
 // 键集**恰等**：多一个键 = 未申报的能力面（下沉后最容易发生的漂移），少一个键 = 契约
 // §4 的 API 面断裂。
 #[test]
-fn entity_exports_are_exactly_the_seventeen_documented_keys() {
+fn entity_exports_are_exactly_the_eighteen_documented_keys() {
     let tree = Tree::new("entity-exports");
     let bundle = tree.load();
     let sandbox = Sandbox::new().expect("裸沙箱构造");
@@ -549,6 +549,7 @@ fn entity_exports_are_exactly_the_seventeen_documented_keys() {
         "has",
         "ids",
         "install",
+        "query",
         "schema",
         "schema_of",
         "set",
@@ -561,6 +562,6 @@ fn entity_exports_are_exactly_the_seventeen_documented_keys() {
 
     assert_eq!(
         seen, expected,
-        "pkg.entity 的导出面必须恰为契约 §4 的 17 个键（多/少都红）：{seen:?}"
+        "pkg.entity 的导出面必须恰为契约 §4 的 18 个键（多/少都红）：{seen:?}"
     );
 }

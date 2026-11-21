@@ -54,6 +54,8 @@ end
 local function new_world()
   local kv = {}
   local store = { next_id = 1, attrs = {}, tags = {} }
+  -- S-24 查询面：记录器（回放固定出表；本文件量的是**包侧**成本，引擎由 path_costs 给）
+  local query_reply = nil
   local host = {
     kv = {
       get = function(key)
@@ -120,10 +122,19 @@ local function new_world()
         store.tags[id] = nil
         return true
       end,
+      query = function(_)
+        if query_reply ~= nil then
+          return query_reply
+        end
+        return { count = 0, ids = {} }
+      end,
     },
     emit = function() end,
   }
   local world = { kv = kv, host = host }
+  world.set_query_reply = function(reply)
+    query_reply = reply
+  end
   --- 内核侧存活条数（S9 新增轴：KV 墓碑键与内核残留是两件事，各断言各的）。
   world.live_count = function()
     local n = 0
@@ -359,3 +370,62 @@ do
   -- 留下来」这类回归（≥0.6%）仍会被抓住。
   must(drift <= 0.005, ("100 轮后内存增长 %.3f%% > 0.5%%"):format(drift * 100))
 end
+
+-- ── ⑤ query 的**包侧**成本（S-24）────────────────────────────────────────────
+--
+-- 口径（先读再读数字）：mock 的 `query` 是**记录器**（回放固定出表），所以这里量的
+-- 是包自己加的那一段——逐字透传的 1 次穿越，与 schema 后过滤的逐 id KV 读。
+-- **引擎成本（选 / 材质化 / 索引）不在 Lua 侧可测**：它由
+-- `crates/ygg-sandbox/tests/path_costs.rs` 的 `probe.query_face.*`（真沙箱端到端）
+-- 与 `probe.entitystore.select_*`（原生侧）给出，两边数字不许混用。
+do
+  local probe = new_world()
+  local lib = fresh(probe)
+  lib.define("bench", bench_schema())
+  local pool = {}
+  for i = 1, 10000 do
+    pool[i] = lib.spawn("bench", { hp = i })
+  end
+  probe.set_query_reply({ count = #pool, ids = pool })
+
+  -- ① 透传：无 schema ⇒ 1 次穿越 + 出表原样回
+  local plain = {}
+  for batch = 1, 3 do
+    local began = os.clock()
+    for _ = 1, 20 do
+      lib.query({ where = { hp = "gte.0" } })
+    end
+    plain[batch] = (os.clock() - began) / 20 * 1e9
+  end
+  print(
+    ("PERF entity.query_forward_ns=%.0f ns/call  (无 schema：1 次穿越，出表原样回)"):format(
+      median3(plain[1], plain[2], plain[3])
+    )
+  )
+
+  -- ② schema 后过滤：1 万条 id 逐条读 `rec.<id>.schema`（这就是 v1 §7 明写的「无进账」那档）
+  local filtered = {}
+  for batch = 1, 3 do
+    local began = os.clock()
+    for _ = 1, 5 do
+      lib.query({ schema = "bench" })
+    end
+    filtered[batch] = (os.clock() - began) / 5 * 1e9
+  end
+  print(
+    ("PERF entity.query_schema_filter_10k_ns=%.0f ns/call  (1 万条 id × 1 次 KV 读/条；无回退也无进账)"):format(
+      median3(filtered[1], filtered[2], filtered[3])
+    )
+  )
+  must(pool[#pool] == 10000, "10k 查询基准未建成")
+  -- 显式放手：1 万条 id + 池子是 ~900 KiB 的**活**数据，而后面 `pkg-textframe-perf`
+  -- 的「每帧常驻」用的是 `collectgarbage("count")` 差值——不清就会把这份池子算进
+  -- 它的增量里（实测 4.65→13.73 KiB/帧）。跨文件的常驻测量必须互不背账。
+  probe.set_query_reply(nil)
+  for i = 1, #pool do
+    pool[i] = nil
+  end
+  pool = nil
+end
+collectgarbage()
+collectgarbage()
