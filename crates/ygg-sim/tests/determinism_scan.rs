@@ -114,6 +114,58 @@ const fn is_word_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
+/// 位串搬运面（sim-kernel I2 修宪）的路径后缀：全 crate 唯一的 `f64` 类型词豁免文件。
+const BITS_FACE: &str = "src/bits.rs";
+
+fn is_bits_face(path: &Path) -> bool {
+    path.ends_with(BITS_FACE)
+}
+
+/// 把字符串字面量的内容替换成占位（算术字符检查只看代码，不看错误消息文本）。
+/// 输入必须是 `strip_comments` 的产物（转义对 `\"` 已被原样保留，这里跳两字节）。
+fn strip_strings(code: &str) -> String {
+    let bytes = code.as_bytes();
+    let mut out = String::with_capacity(code.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'"' {
+            out.push('"');
+            index += 1;
+            while index < bytes.len() && bytes[index] != b'"' {
+                if bytes[index] == b'\\' && index + 1 < bytes.len() {
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            if index < bytes.len() {
+                out.push('"');
+                index += 1;
+            }
+            continue;
+        }
+        out.push(byte as char);
+        index += 1;
+    }
+    out
+}
+
+/// bits.rs 白名单面的算术禁令：剥注释与字符串、去掉返回箭头 `->` 后，
+/// 不得出现 `+ - * / %` 五个运算符字符（位运算与比较不受限——它们不是浮点运算，
+/// 见 sim-kernel I2 与 `src/bits.rs` 头注）。
+fn arithmetic_findings(code: &str) -> Vec<String> {
+    let no_strings = strip_strings(code);
+    let no_arrows = no_strings.replace("->", " ");
+    let mut findings = Vec::new();
+    for (at, ch) in no_arrows.char_indices() {
+        if matches!(ch, '+' | '-' | '*' | '/' | '%') {
+            findings.push(format!("算术运算符字符 {ch:?} at byte {at}"));
+        }
+    }
+    findings
+}
+
 /// 浮点字面量 / 浮点转换的命中列表（空 = 干净）。
 fn float_findings(code: &str) -> Vec<String> {
     let mut findings = Vec::new();
@@ -175,24 +227,44 @@ fn float_findings(code: &str) -> Vec<String> {
     findings
 }
 
-/// R1：模拟态禁浮点（`src/**/*.rs`，剥注释后）。
+/// R1′：模拟态禁浮点（`src/**/*.rs`，剥注释后）。
+///
+/// 位串搬运面 `src/bits.rs`（sim-kernel I2）是唯一的 `f64`/`f32` 类型词豁免文件：
+/// 它只做 pack/unpack/is_canonical/order_key 的位搬运，豁免面内浮点字面量与浮点函数
+/// 照旧禁，且另断言算术运算符字符零命中（`arithmetic_findings`）。
 #[test]
 fn r1_no_float_in_simulation_code() {
     let files = source_files();
     let mut findings = Vec::new();
+    let mut bits_faces = 0usize;
     for path in &files {
         let text = std::fs::read_to_string(path).expect("读源码");
         let code = strip_comments(&text);
+        let whitelisted = is_bits_face(path);
+        if whitelisted {
+            bits_faces += 1;
+        }
         for finding in float_findings(&code) {
+            // 豁免面只放行 f64/f32 类型词本身（pack/unpack 签名与 to_bits/from_bits）；
+            // 「浮点字面量」「指数字面量」「浮点函数」三类照旧禁。
+            if whitelisted && (finding == "出现 f64" || finding == "出现 f32") {
+                continue;
+            }
             findings.push(format!("{}: {finding}", path.display()));
+        }
+        if whitelisted {
+            for finding in arithmetic_findings(&code) {
+                findings.push(format!("{}: {finding}", path.display()));
+            }
         }
     }
     println!(
-        "determinism_scan.r1 files={} hits={}",
+        "determinism_scan.r1_prime files={} bits_faces={bits_faces} hits={}",
         files.len(),
         findings.len()
     );
-    assert!(findings.is_empty(), "R1 命中：{findings:#?}");
+    assert_eq!(bits_faces, 1, "f64 豁免面必须恰好一个文件：{BITS_FACE}");
+    assert!(findings.is_empty(), "R1′ 命中：{findings:#?}");
 }
 
 /// R2：不读时钟 / 不起线程 / 不起进程（wasm 可见性也依赖这一条）。

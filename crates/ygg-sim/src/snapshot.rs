@@ -40,6 +40,7 @@
 use std::collections::BTreeMap;
 
 use crate::archetype::{Archetype, Column};
+use crate::bits;
 use crate::canonical::{FrameReader, FrameWriter};
 use crate::component::{AttrType, CompSet, ComponentDef, ComponentId, EntityId, Registry};
 use crate::error::{SimError, SimResult};
@@ -200,6 +201,11 @@ fn write_column(writer: &mut FrameWriter, column: &Column) {
                 writer.raw(&buf[start..end]);
             }
         }
+        Column::F64Bits(values) => {
+            for value in values {
+                writer.u64(*value);
+            }
+        }
     }
 }
 
@@ -357,6 +363,7 @@ fn empty_column(ty: AttrType) -> Option<Column> {
             off: vec![0],
             buf: Vec::new(),
         }),
+        AttrType::F64Bits => Some(Column::F64Bits(Vec::new())),
         AttrType::Tag => None,
     }
 }
@@ -400,6 +407,20 @@ fn read_column(
                 let end = u32::try_from(buf.len())
                     .map_err(|_| SimError::frame(format!("组件 id {comp} 的字符串列超出 4 GiB")))?;
                 off.push(end);
+            }
+        }
+        Column::F64Bits(values) => {
+            values.reserve(row_n);
+            for _ in 0..row_n {
+                // 读边界 fail-closed：非 canonical（-0、非规范 NaN 载荷）即拒——
+                // 列内存只收 pack 的像（sim-kernel I2）。
+                let raw = reader.u64()?;
+                if !bits::is_canonical(raw) {
+                    return Err(SimError::frame(format!(
+                        "组件 id {comp} 的位串列出现非 canonical 位串：0x{raw:016X}"
+                    )));
+                }
+                values.push(raw);
             }
         }
     }

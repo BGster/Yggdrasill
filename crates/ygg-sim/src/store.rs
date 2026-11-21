@@ -36,6 +36,7 @@ fn column_for(ty: AttrType) -> Option<Column> {
             off: vec![0],
             buf: Vec::new(),
         }),
+        AttrType::F64Bits => Some(Column::F64Bits(Vec::new())),
         AttrType::Tag => None,
     }
 }

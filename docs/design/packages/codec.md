@@ -83,7 +83,7 @@ bundle（导出物，也是导入物的唯一形状）：
 
 **差分门禁（改任一侧都必须跑）**：`cargo test -p ygg-sandbox --test codec_face`。语料 = `pkg-codec.lua` 行为用例的全部值形状 + 边界集（`1` vs `1.0`、`-0.0`、NaN/±inf、深度 64/65、环、`\u0000`/`\u007f`、代理对、非法转义、残留字节）+ 10⁴ 实体集 + 2 000 个 fuzz 值；判据是**双向**：`native_encode(v) == lua_encode(v)` 逐字节，且 `native_decode(t)` 与 `lua_decode(t)` 深度等价（含数字子类型）。附加一条：合法语料直调 `codec_face::encode/decode` 必须 `Ok`——否则「把合法值误判为非法」会让包静默回退，字节相等看不出来，只丢性能。
 
-**与 Tier 1 快照编码器的关系**：复用它的**规范序纪律**（键/名按 UTF-8 字节序升序，[kernel/sim-kernel.md §2](../kernel/sim-kernel.md) 的「复用排序规范 ≠ 复用文本容器」），**不**复用它的容器：`ygg-sim` 无 mlua（拿不到 Lua 值）、`src/**` 禁浮点 token（`f64` 数字格式化放不进去）、快照是带 magic 与尾 digest 的二进制列帧（本包的对外格式是 JSON 文本，是存档兼容面）。两者的一致性用**同一份 fixture** 钉住（`crates/ygg-sim/fixtures/canonical-order.json`，两个消费者各断言一次），而不是互相引用说法。
+**与 Tier 1 快照编码器的关系**：复用它的**规范序纪律**（键/名按 UTF-8 字节序升序，[kernel/sim-kernel.md §2](../kernel/sim-kernel.md) 的「复用排序规范 ≠ 复用文本容器」），**不**复用它的容器：`ygg-sim` 无 mlua（拿不到 Lua 值）、`src/**` 禁浮点 token（`f64` 数字格式化放不进去；R1′ 修宪后豁免面仅限 `src/bits.rs` 的位串搬运，与本文的 JSON 格式化无关）、快照是带 magic 与尾 digest 的二进制列帧（本包的对外格式是 JSON 文本，是存档兼容面）。两者的一致性用**同一份 fixture** 钉住（`crates/ygg-sim/fixtures/canonical-order.json`，两个消费者各断言一次），而不是互相引用说法。
 
 **判据**：① 阻断——只改一侧（原生或 Lua）就交付；用二进制容器换吞吐（破存档兼容）；把 `UNSUPPORTED` 改成静默返回半截字节；② 症状——同一输入两条路径字节不同、带 `__pairs` 的表编码结果漂移、旧档 `read` 报 `CHECKSUM` 不符；③ 确认——`cargo test -p ygg-sandbox --test codec_face`（差分全绿 + 无误拒）、`--test codec_bench`（`codec_native.encode_mbps ≥ 30` 且同面打印 `codec_lua.*`）、`pkg-selftest` 的 `cases passed=155 failed=0`。
 
@@ -156,6 +156,6 @@ bundle（导出物，也是导入物的唯一形状）：
 
 **为什么“同一份实现”变成了两份，而规范仍然只有一份（P-K A2 的裁决，2026-11）。** 下沉的载体是宿主面 `ygg.codec.*`（[kernel/lua-api.md §3.1.4](../kernel/lua-api.md)），不是 Tier 1 快照编码器：`ygg-sim` 没有 mlua（拿不到 Lua 值）、`src/**` 禁浮点 token（JSON 数字的最短往返必须有 `f64`）、快照是带尾 digest 的二进制列帧（本包的容器是 JSON 文本，是存档兼容面）。于是「Rust 一份 + Lua 一份」是结构事实，不是选择。
 它之所以不构成第二条规范，靠三条纪律而不是自觉：① 规范的唯一处仍是本文 I1 与 `init.lua` 的那四个函数（原生面被定义为**符合实现**）；② 判据是**逐字节相等**且由差分用例钉住（语料 = 行为用例值形状 + 边界集 + 10⁴ 实体集 + 2 000 fuzz；改任一侧必跑 `cargo test -p ygg-sandbox --test codec_face`）；③ 原生面拒绝的输入（值域错 / 带元方法的表）**回退 Lua 重跑**，于是错误文案只有一处来源——不维护第二套字符串契约。
-反方案：换二进制容器（内存里再快 2–3×，但存档格式换代、旧档全部不可读，而本文 §1 明确「不做版本迁移」）；或让 Tier 1 快照编码器兼职（三条结构证据都不允许）。这两条都在计划稿 §2.3/§3.1 算过账，结论是**不值得**：≥30 MiB/s 的判据已经用兼容格式过线，换容器买不到这个需求需要的任何东西。
+反方案：换二进制容器（内存里再快 2–3×，但存档格式换代、旧档全部不可读，而本文 §1 明确「不做版本迁移」）；或让 Tier 1 快照编码器兼职（三条结构证据都不允许）。这两条都在计划稿 §2.3/§3.1 算过账，结论是**不值得**：≥30 MiB/s 的判据已经用兼容格式过线，换容器买不到这个需求需要的任何东西。另注（R1′ 修宪，sim-kernel I2）：`ygg-sim` 的浮点 token 豁免面仅限 `src/bits.rs` 的位串搬运，与本文的 JSON 浮点格式化无关。
 
 **判据（①②③）。** ① 阻断——同一实体在两个游戏里用两套序列化；导入冲突策略隐式（靠 id 大小碰运气）；checksum 缺失导致半读的坏档被接受；只改原生或只改 Lua 就交付。② 症状——读档两次实体翻倍；同一份 bundle 在两台机器上字节不同导致「存档校验失败」查不出原因；坏档只报「某个字段是 nil」。③ 确认——本文件被索引；`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-codec` 的 `cases passed=` 含 20 条 `pkg.codec.*`；§5 吞吐表有 before/after 数字与复算命令。

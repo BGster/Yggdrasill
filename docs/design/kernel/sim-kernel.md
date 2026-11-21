@@ -32,14 +32,14 @@
 
 | 对象 | 形状 | 说明 |
 | --- | --- | --- |
-| `SimState` | `{ tick: u64, world: ArchetypeStore, resources: KV<u64> }` | 模拟态全量；**模拟态禁浮点**（定点政策见 I2） |
+| `SimState` | `{ tick: u64, world: ArchetypeStore, resources: KV<u64> }` | 模拟态全量；浮点运算禁入模拟态（I2：位串列仅搬运不算术） |
 | 组件 | 列式 SoA，按 archetype 分桶；组件 schema 与 Tier 2 属性袋同源形状 | 数据形状单源：包契约即 schema 来源 |
 | `Snapshot` | 确定性编码全量字节（复用 codec 编码序） | restore 后 state hash 必须与原运行一致 |
 | `ReplayLog` | `{ seed, inputs: [(tick, input)] }` | 输入日志；回放 = restore + 逐 tick 重放 |
 
-**「复用 codec 编码序」= 复用排序规范，不是复用文本容器**（本句是该行的判准，改快照容器前先读）。上表 `Snapshot` 行的「编码序」指 codec 契约里那四条**序**的性质——键/组件名按字节序、整数标量定宽 LE、无浮点、版本前置——而不是「快照是一段确定性 JSON 文本」。Tier 1 快照是**二进制列帧**（`magic | fmt_version | flags | tick | next_entity | 组件名表 | resources | archetype 段 | 尾 digest`），理由是可算的：10⁵ 实体 8 属性转 JSON 文本约 12 MB，`serde_json` 编码 ~150–300 MB/s ⇒ 40–80 ms **仅编码**，再加一次哈希即逼近 §5 的 100 ms 线；同期二进制列拷贝 ≤10 ms。且文本容器要把「数值的十进制文本形态」变成契约的一部分（`-0.0` / `1e3` / 尾随零），那是给确定性凭空加一条待测边界。
+**「复用 codec 编码序」= 复用排序规范，不是复用文本容器**（本句是该行的判准，改快照容器前先读）。上表 `Snapshot` 行的「编码序」指 codec 契约里那四条**序**的性质——键/组件名按字节序、整数标量与位串定宽 LE、无浮点运算、版本前置——而不是「快照是一段确定性 JSON 文本」。Tier 1 快照是**二进制列帧**（`magic | fmt_version | flags | tick | next_entity | 组件名表 | resources | archetype 段 | 尾 digest`），理由是可算的：10⁵ 实体 8 属性转 JSON 文本约 12 MB，`serde_json` 编码 ~150–300 MB/s ⇒ 40–80 ms **仅编码**，再加一次哈希即逼近 §5 的 100 ms 线；同期二进制列拷贝 ≤10 ms。且文本容器要把「数值的十进制文本形态」变成契约的一部分（`-0.0` / `1e3` / 尾随零），那是给确定性凭空加一条待测边界。
 
-**JSON 文本容器归宿主面，不归这里**（P-K A2）：`pkg.codec` 的 `encode`/`decode` 已下沉到 `crates/ygg-sandbox/src/codec_face.rs` 的 `ygg.codec.*` 面（契约 [lua-api.md §3.1.4](lua-api.md)），它复用的是上一条的**序**，容器仍是 JSON 文本（存档兼容面）。`ygg-sim` 保持零 mlua、零浮点 token、二进制帧不变——两侧的序由同一份 fixture 钉住（`crates/ygg-sim/fixtures/canonical-order.json`，两个消费者各断言一次）。
+**JSON 文本容器归宿主面，不归这里**（P-K A2）：`pkg.codec` 的 `encode`/`decode` 已下沉到 `crates/ygg-sandbox/src/codec_face.rs` 的 `ygg.codec.*` 面（契约 [lua-api.md §3.1.4](lua-api.md)），它复用的是上一条的**序**，容器仍是 JSON 文本（存档兼容面）。`ygg-sim` 保持零 mlua、零浮点运算 token（位串搬运面 `bits.rs` 豁免，见 I2）、二进制帧不变——两侧的序由同一份 fixture 钉住（`crates/ygg-sim/fixtures/canonical-order.json`，两个消费者各断言一次）。
 
 **尾 digest 就是 state hash**：帧末 8 字节小端 = `fnv1a64(帧去尾 digest)` = `hash()` 的返回值。于是 `restore(b)` 的校验与 `hash()` 的取值是**同一个数、同一次计算**——不存在「restore 通过了但 hash 不同」这种要第三种解释的状态。
 
@@ -48,13 +48,14 @@
 | Tier 2（[../packages/entity.md](../packages/entity.md) §2） | Tier 1（`crates/ygg-sim`） | 存储列 | 边界规则 |
 | --- | --- | --- | --- |
 | `type = "number"` | `AttrType::Number { frac_bits }`（缺省 32） | `Column::I64` | 内核只保证 `i64` 与位宽声明；Q32.32 是**跨面约定**，`frac_bits` 只被 Lua 面换算助手消费 |
+| `number`（位串承载，R1′ 宿主面词汇 `f64bits`） | `AttrType::F64Bits` | `Column::F64Bits`（u64 位串 8B/值 LE） | 写入即归一（±0→+0、任意 NaN→单一 quiet NaN），读回非 canonical 即 `YGG-SIM-FRAME`；整/浮身份（`2` vs `2.0`）不归内核，随调用面 vtype 元数据走 |
 | `type = "string"` | `AttrType::Str` | `Column::Bytes`（`off` + `buf`） | UTF-8 字节序原样，内核不做规范化 |
 | `type = "boolean"` | `AttrType::Bool` | `Column::U8` | 只允许 0/1，其余值 restore 即 `YGG-SIM-FRAME` |
 | `type = "ref"` | `AttrType::Ref` | `Column::U64` | `0` = 无引用（实体 id 从 1 起）；悬垂 ref 不自动修（谁引用谁是游戏语义） |
 | `tags.<t>`（无值标记） | `AttrType::Tag` | 无列（只进 archetype key） | |
 | `required` / `default` | **不下沉** | — | 存在性/缺省校验属 Tier 2 schema 层；内核不做业务校验（§1「不内嵌游戏语义」） |
 
-**`frac_bits` 的作用域（诚实声明）**：内核**不解释小数位**——它只存 `i64`。`frac_bits` 是 schema 元数据，今天是**声明面**（供 Lua 面换算助手与将来按面声明使用），不是运算面；不要以为内核会按 `frac_bits = 16` 去做 Q16.16 运算。
+**`frac_bits` 的作用域（诚实声明）**：内核**不解释小数位**——它只存 `i64`。`frac_bits` 是 schema 元数据，今天是**声明面**（供 Lua 面换算助手与将来按面声明使用），不是运算面；不要以为内核会按 `frac_bits = 16` 去做 Q16.16 运算。F64Bits 同样不解释值语义，内核只认 canonical 位串（归一规则见 `crates/ygg-sim/src/bits.rs`）。
 
 **行序与删除语义**：archetype 内行是 **dense 插入序**，删除一律 `swap_remove`（末行填洞）并同步 `entity_index`；组件**注册后永不移除**（Registry 只增），`restore` 按**组件名升序**重排内部 id ⇒ **内部 id 不是持久事实**（快照与 hash 只认名称与行序）。这条是回放对「换行策略」耦合的唯一定义处：改 despawn 策略即改逐 tick hash。
 
@@ -64,7 +65,7 @@
 ## 3. 不变量
 
 - **I1 确定性**：同 seed + 同 ReplayLog → 逐 tick 状态字节一致（跨 tick 数、跨进程）。
-- **I2 定点政策**：模拟数值默认 i64 定点（Q32.32 或按面声明）；浮点禁入模拟态；`x86_64`/`aarch64` 语义由整数运算保证（跨平台矩阵见 §5）。
+- **I2 定点政策与位串承载**：模拟**数值运算**默认 i64 定点（Q32.32 或按面声明）；位串列（`AttrType::F64Bits`）承载的 IEEE 754 double **仅搬运不算术**——内核对位串只做存储、拷贝、规范化（±0 与 NaN 载荷归一）与字节级 hash，禁止算术/超越运算；模拟态仍禁浮点运算；`x86_64`/`aarch64` 语义由整数运算与位搬运保证（跨平台矩阵见 §5）。
 - **I3 回放闭环**：`restore(snapshot) + replay(log)` → 每 tick `state hash` 与原始运行逐值一致。
 - **I4 容量线**：10⁴ 活跃实体单 tick ≤ 16.6ms（目标线；实测表进 §5，未达即回炉）。
 - **I5 隔离**：模拟态不读时钟/外部随机源——随机数仅由 seed 流派生（与 procgen rng 契约同源单份）。
@@ -93,7 +94,7 @@
 | tick 10⁴ 活跃实体 | ≤ 16.6ms | 三次取中位，基准集入册 |
 | snapshot/restore 10⁵ 实体 | ≤ 100ms | 同上 |
 | 回放一致 | 逐 tick hash 一致 | replay 用例（字节对比） |
-| Tier 2 兼容 | `pkg-selftest` 155/0 不回退（2026-11-21 实测三次同值；复算命令见 `packages/entity.md` §5） | 每次下沉后全量 |
+| Tier 2 兼容 | `pkg-selftest` 199/0 不回退（S-25 在树基线 2026-11-21；复算命令见 `packages/entity.md` §5） | 每次下沉后全量 |
 | 跨平台 | x86_64 ↔ aarch64 digest 一致 | 当前仅单机（macOS/arm64），结构性论证为整数语义；**实测已排期：Goal 排期总表 S2**，落地前所有跨平台声明引用该排期 |
 
 ### 5.1 实测回填表（数字只落本表，不回写上方阈值）
@@ -125,7 +126,7 @@
 ## 7. 自测与验收
 
 - replay 字节一致用例（restore + replay 逐 tick hash）；
-- 定点政策静态检查（模拟 crate 禁浮点字面量，同 assetgen 扫描范式）；
+- 定点政策静态检查（模拟 crate 禁浮点字面量与浮点算术；`src/bits.rs` 位串搬运面按白名单豁免——determinism_scan R1′，同 assetgen 扫描范式）；
 - 八包 API 兼容回归（`pkg-selftest` 全量）；
 - 字面三件套全绿；
 - 每个下沉面一表：before/after（同数据集/同机/三次中位）。

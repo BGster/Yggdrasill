@@ -7,7 +7,8 @@
 //! # 四条不变量（违反即破确定性，不是风格问题）
 //!
 //! 1. **模拟态零浮点**（I2）：数值一律 `i64` 定点（[`fixed`]），模拟态里不存在 `f32`/`f64`
-//!    字段、不存在带小数的字面量、不存在 `as f64` 转换。理由不是「浮点慢」，而是浮点
+//!    字段、不存在带小数的字面量、不存在 `as f64` 转换；位串列（[`bits`]）承载的
+//!    IEEE 754 double 仅搬运不算术（sim-kernel I2 修宪，见 [`bits`] 头注）。理由不是「浮点慢」，而是浮点
 //!    的**求和顺序**会改结果：a+b+c 与 a+(b+c) 在 x86 与 aarch64 上可以不同，
 //!    而整数加法的结合律是数学事实。`tests/determinism_scan.rs` 的 R1 用正则钉死源码。
 //! 2. **不读时钟、不读外部随机源**（I5）：`dt` 只来自 `step(dt)` 的参数并进输入日志；
@@ -35,6 +36,7 @@
 #![forbid(unsafe_code)]
 
 pub mod archetype;
+pub mod bits;
 pub mod canonical;
 pub mod component;
 pub mod error;
