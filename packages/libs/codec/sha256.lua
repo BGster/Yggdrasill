@@ -1,5 +1,11 @@
 -- `pkg.codec.sha256` —— 纯 Lua 5.4 的 SHA-256（字节串 → 64 位小写 hex）。
 --
+-- S19 起本文件是**规范执行体 + 缺面回退体**：宿主 `ygg.codec.sha256` 在场时
+-- `runtime.M.sha256` 按键独立地委托原生（`face.sha256` 为 function 即用）；
+-- 本文件仍是字节产出的规范与差分门禁的执行体，地位与 encode/decode 的 Lua
+-- 体相同（契约 §4.1 下沉边界表）——旧宿主只有 encode/decode 两键或裸沙箱
+-- 无面时，摘要仍由这里产出，逐字节不变。
+--
 -- 契约：`docs/design/packages/codec.md` §4「checksum 的 sha256 来源」（D11 已回写：
 -- P0 的「FNV-1a 降级路径」退役——纯 Lua sha256 就位 + P1 挂载桥已落地，宿主
 -- `fs.write` 的 sha256 由「来源」变「互校」）。

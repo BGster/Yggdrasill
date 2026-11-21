@@ -81,7 +81,25 @@ local function native_face()
   return face
 end
 
---- `codec.sha256(bytes)`：纯 Lua SHA-256（64 位小写 hex）。
+--- sha256 的按键独立探测（S19）：`face.sha256` 为 function 即用，否则 nil。
+---
+--- **不与 `native_face()` 的 encode/decode 双键门耦合**：「半个面退成没有面」
+--- 原则扩展到键粒度——旧宿主只有 encode/decode 两键时，sha256 自动落回本包
+--- 纯 Lua 实现（`pkg.codec.sha256`），不报错、不硬凑。摘要键与编解码键的
+--- 退化域彼此独立，各有各的差分门禁背书（契约 §4.1 S19 行）。
+local function native_sha256()
+  local current = host_or_nil()
+  if current == nil then
+    return nil
+  end
+  local face = current.codec
+  if type(face) == "table" and type(face.sha256) == "function" then
+    return face.sha256
+  end
+  return nil
+end
+
+--- `codec.sha256(bytes)`：类型门 + 原生委托（S19）+ 纯 Lua 回退体。
 ---
 --- 为何自己写而不取宿主 `fs.write` 的回值：那一值只能**落盘之后**得到，而
 --- `checksum(bundle)` 必须在落盘前就能算（导出侧要把校验和写进 bundle 本体），
@@ -90,9 +108,24 @@ end
 ---
 --- 输入域在包边界收窄：非字符串（表 / 函数 / nil）在进哈希前就报
 --- `YGG-PKG-CODEC-TYPE`，而不是变成 `tostring(table)` 这种带地址的字节。
+--- 类型门**先行于委托**：文案单源（本包的码），原生面不复制第二套字符串契约。
+---
+--- 委托范式同 `jsonenc.M.encode`：`pcall` 成功即返回；非 UNSUPPORTED 错误 →
+--- `E_HOST` 不回退（原生实现内部失败必须响，静默降级会把 bug 藏成性能问题）。
+--- 判据先 `tostring`：宿主 runtime error 过 mlua 边界可能是错误对象。
 function M.sha256(bytes)
   if type(bytes) ~= "string" then
     fail(E_TYPE, "sha256 只收字符串，得到 " .. type(bytes))
+  end
+  local native = native_sha256()
+  if native ~= nil then
+    local ok, hex = pcall(native, bytes)
+    if ok then
+      return hex
+    end
+    if not tostring(hex):find("YGG-CODEC-UNSUPPORTED", 1, true) then
+      fail(E_HOST, "原生面内部失败：" .. tostring(hex))
+    end
   end
   return sha256.sha256(bytes)
 end

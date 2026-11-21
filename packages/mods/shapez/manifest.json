@@ -55,9 +55,9 @@
     {
       "files": [
         {
-          "byteLength": 9216,
+          "byteLength": 9283,
           "path": "codec/bundle.lua",
-          "sha256": "d1f170f5df5538ed52186a52369d0071424be6ef40efbcbe32eef0417eef71dd"
+          "sha256": "5bf691c09c4c592ef1bad61517184feb0b2ef4b28da134b0dc1bc0c9d353453b"
         },
         {
           "byteLength": 9947,
@@ -85,14 +85,14 @@
           "sha256": "d51fb876bcf1caf84f7c0a935e7a880b54789c3a7c0941ac89865b21f08aeb4f"
         },
         {
-          "byteLength": 4619,
+          "byteLength": 6064,
           "path": "codec/runtime.lua",
-          "sha256": "91b65b92cf1f9e48f0117a0c596b5cdb743fb321fc460332c78a2535b120946a"
+          "sha256": "4964cd02d6484887b3a5c0b9c2eef3d2e0ee03574d601639378755ba56a85839"
         },
         {
-          "byteLength": 5449,
+          "byteLength": 5905,
           "path": "codec/sha256.lua",
-          "sha256": "f1bf35ecaa3a964887d8e34cffa081e79e18ef0a1446ffb1e5fdcd86cf3a669b"
+          "sha256": "18ab3f5295befc4f1f1fcc6af7ee3ddd6baf704705c81bce5efc9a9382f2b119"
         }
       ],
       "id": "codec"
