@@ -137,6 +137,7 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 
 用例只设**故障探测阈值**（任一单操作 > 500 ms 即判定「有隐藏的树扫描」并回炉），**不设性能目标**。
 
+**持久化端口的模块化拆分（S-25 批七）**：`ygg-store` 的 `mounts.rs` 由单文件 1629 行（800 行上限的 2.0×）拆为 `mounts/` 目录 4 文件：mod.rs（模块 doc + 9 常量 + 错误码 + `MountError` + 4 个结果类型 + 装配）、declare.rs（`MountMode`/`MountSpec`/`parse_mounts` + 声明面私有帮手）、store.rs（`MountStore` 定义 + 三个 impl 块 + 伴生私有类型 + 落点帮手）及其子模 store/tests.rs（22 个内嵌测整迁）。这是**纯搬移**，不是重写；载荷决策只有一条：`MountStore` 的六个私有字段被三个 impl 的全部方法触达，struct 与三 impl 必须**同文件**（拆出 io.rs 即 E0616，唯一出路是 `pub(super)` 放宽，不做）；其余私有帮手按「单文件私有随主、跨文件私有归父模块」落位，零可见性放宽。内嵌测归 store 之子而非 mod 之子：22 测直呼 `locate` / `Need` / `Located`（原单文件的模块作用域访问面），而 `locate` 触及 `MountStore` 私有字段、归 mod.rs 即 E0616（父不可见子私有字段，编译器终审实证）——零放宽约束下唯一解是 tests 并入持有私有面的 store 子树。行为不变量由门禁计数守恒背书：workspace 581、egg 158、sandbox lib 112、pkg selftest 199、agent-seed 79、superagent 183，七门禁 before/after 逐项相等，`cargo test -p ygg-store` 74 例守恒；crate-root 8 符号与 `mounts::` 模块路径（含 `mounts::codes`，宿主侧 fs.rs 的 doc 对齐引用它）零变化。
 
 #### 3.1.3 sim 模拟内核面（宿主注入）
 
