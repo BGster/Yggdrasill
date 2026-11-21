@@ -72,8 +72,8 @@
 | --- | --- | --- | --- | --- |
 | 包加载耗时 | `< 10 ms` | **0.28 ms** | **0.16 ms** | 清 `package.loaded["pkg.textframe*"]` 后 `require` + `install`，5 次取中位 → `perf.textframe.load_ms` |
 | 单格写 | `O(1)`，`< 5 µs` | **1.13 µs** | **0.31 µs** | 10 万次 `put` 计时（`put` 内无整表扫描，是结构性的 O(1)）→ `perf.textframe.put_ns` |
-| 帧合成耗时 | `≤ 1000 µs` | **350 µs** | **95 µs** | `to_lines` + `stack` 跑 2000 帧 × 3 次取中位 → `perf.textframe.compose_us` |
-| 帧合成吞吐 | 给数字 | **2 850 帧/秒** | **10 400 帧/秒** | `1000 / compose_ms` → `perf.textframe.throughput_fps` |
+| 帧合成耗时 | `≤ 1000 µs` | **350 µs**（348–353） | **95–97 µs** | `to_lines` + `stack` 跑 2000 帧 × 3 次取中位；区间是跨次运行的中位波动 → `perf.textframe.compose_us` |
+| 帧合成吞吐 | 给数字 | **2 850 帧/秒** | **10 300–10 500 帧/秒** | `1000 / compose_ms` → `perf.textframe.throughput_fps` |
 | vs 手搓对照 | `≤ 2.0×` | **1.64×** | **1.30×** | 同面跑 naive `out = out .. ch` 版 → `perf.textframe.vs_naive` |
 | 每帧常驻内存 | `≤ 8 KiB` | **4.65 KiB** | **4.65 KiB** | 100 帧常驻后两次 `collectgarbage("count")` 差 ÷ 100 → `perf.textframe.frame_kib` |
 | 泄漏检测 | `≤ 1%` 且逐字符相等 | **0.64% / 1** | **0.64% / 1** | 100 轮同输入 `compose`：内存差占比 + 每轮与第 1 轮逐字符相等 → `perf.textframe.leak_gc_pct` / `perf.textframe.leak_100_equal` |

@@ -189,18 +189,22 @@ function M.stack(blocks)
     fail(E.SHAPE, "stack: blocks 必须是表（" .. type(blocks) .. "）")
   end
   local out = {}
+  local n = 0
   for i = 1, #blocks do
     local block = blocks[i]
     if block ~= nil then
       if type(block) ~= "table" then
         fail(E.SHAPE, ("stack: blocks[%d] 不是行数组（%s）"):format(i, type(block)))
       end
+      -- 计数器代替 `out[#out + 1]`：每行一次 `#` 是这条路径上唯一的可去开销，
+      -- 而它是**每帧**都走的（Saltline 每帧 30 行）。
       for j = 1, #block do
         local line = block[j]
         if type(line) ~= "string" then
           fail(E.SHAPE, ("stack: blocks[%d][%d] 不是字符串（%s）"):format(i, j, type(line)))
         end
-        out[#out + 1] = line
+        n = n + 1
+        out[n] = line
       end
     end
   end
