@@ -68,7 +68,7 @@ pub mod json;
 /// 规范正文见 `docs/design/kernel/lua-api.md` §3.1.2。
 pub mod mounts;
 /// 只读观察面（serve 这类不持锁观察者的读取面；写面仍归 `RunStore`）。
-/// 函数集与零写入纪律的文档见模块头；测试锁见 `observe::observe_tests`。
+/// 函数集与零写入纪律的文档见模块头；测试锁见 `observe::tests`。
 pub mod observe;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
