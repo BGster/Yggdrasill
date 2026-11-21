@@ -15,6 +15,7 @@
 - **运行执行**：新局 `.ygg/bin/egg new --mod <mod_dir> [--in .ygg/runs] [--raw] [--event <event> [--payload <json>]]`（自动 run-id，回执末行 run-root）；续跑 `.ygg/bin/egg open <run-root> [--at g<代>] [--raw] --event <event> [--payload <json>]`
   - **回执渲染口径（r5）**：缺省为人读文本渲染；`--raw` = 单行 JSON 机器契约（与历史缺省逐字节一致）；解析链 `--raw` > `YGG_FORMAT`（text\|json）> 缺省 text；不改字段契约、退出码与 daemon 协议面。脚本 / CI 解析单发 stdout 必须加 `--raw`（或环境级 `export YGG_FORMAT=json`）。
 - **单发派发的未注册事件（fail-closed，r11）**：`--event <name>`（或省略时的 `entryEvent`）不在 Mod registry 内时，派发在**零副作用**下拒绝（不进回放日志、不耗燃料、不动状态基线）：回执 `ok:false` + `error.code=VALIDATION`，`message` 三要素（事件名原样 + 已注册计数 + 已注册全集字典序），退出码 1，审计行 `ok=false` 照写。`ygg.*` 保留事件同样只认 registry（宿主不持事件名白名单）；空/空白事件名仍走参数面（usage / DAEMON 层），与本语义分层。
+- **燃料预算与逃生门（r15）**：每次转换的预算缺省随 canonical KV 规模自动扩缩（公式、标定表与「不可外推」边界见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1.1）；`YGG_FUEL_BUDGET=<正整数>` 显式覆盖、逐字节采用（不受 4M 硬顶削减），是状态规模不可预判的代码密集 dispatch（如素材 bundle 生成）的标准口径；非法值（非数字 / 0 / 负号 / 空串）**静默回落到自动扩缩**、不报错——拼错只会静默换预算。
 - **结算**：`.ygg/bin/egg open <run-root> --settle`
 - **存储选择与版本硬门**：默认 build 启用 `store-sqlite`（`crates/ygg-sandbox/Cargo.toml` `default=["store-sqlite"]`），新局默认 `<run-dir>/run.sqlite`。带 `autosave.json` / `events.jsonl` 的旧局自动检测并留在 JSON 后端，不迁移；`--store json` 仅为新局显式回退。`run.json` 的 `store` 一旦写入即权威，`--store` 只是开局断言，不匹配 fail-closed 且零写入。host 与 Mod 版本不匹配时装载立即失败，错误点名缺失字段与期望形状，绝不静默降级。`.ygg/bin/*`、`.ygg/runs/*` git-ignore，`.ygg/mods/` 入仓。
 - **内置宿主工具（`--builtin-tool <op>`）**：
