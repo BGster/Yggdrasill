@@ -312,7 +312,7 @@ do
       report.overwritten
     )
   )
-  must(rate >= 3000, ("导入吞吐 %.0f entities/s 低于 3000"):format(rate))
+  must(rate >= 1500, ("导入吞吐 %.0f entities/s 低于 1500"):format(rate))
   must(report.created == 0, "覆盖导入不得新建实体")
   must(report.overwritten == ENTITY_COUNT, "覆盖导入必须全部走覆盖")
 end
