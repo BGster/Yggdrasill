@@ -46,8 +46,8 @@
       "fields": [
         "externalId",
         "agent",
-        "session",
         "text",
+        "session",
         "refs"
       ],
       "actor": true,
@@ -62,8 +62,8 @@
       "fields": [
         "externalId",
         "agent",
-        "session",
         "text",
+        "session",
         "refs"
       ]
     },
@@ -72,8 +72,8 @@
       "fields": [
         "externalId",
         "agent",
-        "session",
         "text",
+        "session",
         "refs"
       ]
     },
@@ -82,8 +82,8 @@
       "fields": [
         "externalId",
         "agent",
-        "session",
         "text",
+        "session",
         "refs"
       ]
     },
@@ -92,8 +92,8 @@
       "fields": [
         "externalId",
         "agent",
-        "session",
         "text",
+        "session",
         "refs"
       ]
     },
@@ -102,8 +102,8 @@
       "fields": [
         "externalId",
         "agent",
-        "session",
         "text",
+        "session",
         "refs"
       ]
     }
@@ -167,6 +167,7 @@
   "code": {
     "entry": "mod.lua",
     "modules": [
+      "src/agents.lua",
       "src/cast.lua",
       "src/clock.lua",
       "src/custom.lua",

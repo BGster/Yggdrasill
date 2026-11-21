@@ -21,7 +21,6 @@
 -- 模块顶层纯；KV 键前缀 `sg.`；文案全部来自 `ygg.data("ygg:superagent/world")`
 -- 装载期快照（本文件不写字面文案）。
 
-local simframe = require("src.simframe")
 local pkg_entity = require("pkg.entity")
 local pkg_role = require("pkg.role_skill")
 local pkg_procgen = require("pkg.procgen")
@@ -159,21 +158,15 @@ function M.seed()
   local seed = pkg_procgen.hash(world.seedText)
   h.kv.set(K.seed, seed)
 
-  -- ② 世界规模进 sim（批式；降级 = 诚实账 + 计 0）。
+  -- ② sim 世界归钟单点所有（clock.advance 首拍重建「名册 + 在办」规模）；
+  -- 这里只记名册数供开局叙述。降级探测照旧（诚实账）。
   local roster_count = #world.npcs + #world.clerks + #world.items
-  local spawned, next_id, degraded = 0, 0, false
-  local ok, report = pcall(function()
-    return h.sim.spawn_batch(simframe.spawn_entities(roster_count))
+  local degraded = false
+  local sim_ok = pcall(function()
+    h.sim.status()
   end)
-  if ok and type(report) == "table" then
-    spawned = report.spawned or 0
-    next_id = report.next_id or 0
-  else
+  if not sim_ok then
     degraded = true
-    h.narrate("[SIM-UNMOUNTED] 世界规模未进模拟内核（宿主未挂 sim），KV 铺场照常")
-  end
-  h.kv.set("sg.sim_spawned", tostring(spawned))
-  if degraded then
     h.kv.set("sg.sim_degraded", true)
   end
 
@@ -237,8 +230,7 @@ function M.seed()
   h.kv.set(K.seeded, true)
   return {
     seed = seed,
-    sim_spawned = spawned,
-    sim_next_id = next_id,
+    roster = roster_count,
     npcs = npc_keys,
     items = item_keys,
     degraded = degraded,

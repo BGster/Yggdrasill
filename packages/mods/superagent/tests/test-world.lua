@@ -6,6 +6,7 @@
 
 local world = require("src.world")
 local clock = require("src.clock")
+local simframe = require("src.simframe")
 
 check("world.registry.seeded-roster-readable", function()
   -- 开局派发与铺场断言归 test-a-setup（文件名序先行）；这里验已铺态的不变量。
@@ -100,6 +101,26 @@ check("world.board.presented-on-entry", function()
     return "任务板应有 问询/收工 两支，实得 " .. table.concat(choice.options, ",")
   end
   return nil
+end)
+
+check("world.simframe.fnv-matches-published-vectors", function()
+  local problems = {}
+  if simframe.digest("") ~= 0xCBF29CE484222325 then
+    problems[#problems + 1] = "FNV 空串向量不符"
+  end
+  if simframe.digest("a") ~= 0xAF63DC4C8601EC8C then
+    problems[#problems + 1] = "FNV 'a' 向量不符"
+  end
+  if simframe.digest("foobar") ~= 0x85944171F73967E8 then
+    problems[#problems + 1] = "FNV 'foobar' 向量不符"
+  end
+  local frame = simframe.despawn_one(7)
+  local n = frame:byte(1) | (frame:byte(2) << 8) | (frame:byte(3) << 16) | (frame:byte(4) << 24)
+  local id = frame:byte(5)
+  if n ~= 1 or id ~= 7 or #frame ~= 4 + 8 + 8 then
+    problems[#problems + 1] = "despawn 帧形错（n/id/长度）"
+  end
+  return table.concat(problems, "; ")
 end)
 
 check("world.join.roundtrips-name-table", function()

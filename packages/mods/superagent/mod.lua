@@ -29,6 +29,7 @@ local cast = require("src.cast")
 local quests = require("src.quests")
 local custom = require("src.custom")
 local items = require("src.items")
+local agents = require("src.agents")
 
 -- ============================================================================
 -- §2 包装配：install 只记 deps / 注注册表（不预读模板、不写 KV）。
@@ -135,15 +136,16 @@ ygg.on("event.start", function()
     ygg.narrate(prologue[i])
   end
   ygg.narrate("铺场：seed=" .. tostring(report.seed)
-    .. " sim=" .. tostring(report.sim_spawned)
+    .. " 名册=" .. tostring(report.roster)
     .. " NPC=" .. tostring(#report.npcs)
     .. " 道具=" .. tostring(#report.items)
     .. "；" .. clock.sim_status_line())
   -- 宿主 D1 语义：ygg.choice 之前的 emit 被丢弃——带任务板的 handler 只叙述，
   -- 不 emit（机器可读投影归无 choice 的入向 handler，见设计文档 §3）。
-  clock.advance()
+  -- 先开单再走首拍：sim 世界首建规模 = 名册 + 在办（open 数进世界）。
   local opened = quests.open_all(WORLD)
   ygg.narrate("委托开单：" .. tostring(opened.opened) .. " 单在板（限期见单）。")
+  clock.advance()
   present_board()
   return report  -- 真内核忽略 handler 返回值；selftest 拿它做铺场断言
 end)
@@ -364,6 +366,7 @@ ygg.on("agent.summary", function()
     requirementCount = 0,
     day = clock.day(),
     simHash = clock.sim_hash(),
+    lastSimHash = ygg.kv.get("sg.last_sim_hash") or "unset",
     quests = {
       open = quests.open_count(),
       done = #quests.completed(),
@@ -381,52 +384,17 @@ end)
 --    C5 起 agents.lua 承接校验 / 幂等 / 路由，此处先立诚实占位——
 --    未接线的 kind 到场必须给人读交代，不静默吞行）。
 -- ============================================================================
-local INBOX_KINDS = {}
-for i = 1, #ENVELOPE.kinds do
-  INBOX_KINDS[ENVELOPE.kinds[i].kind] = ENVELOPE.kinds[i].wire
-end
-
---- 信封线载荷 → 段数组（wire 段序 = fields；身份段 |actor= / |actor_session=
---- 由宿主注在最后，按前缀识别后剔除）。
-local function wire_segments(payload)
-  local out = {}
-  for seg in (tostring(payload) .. "|"):gmatch("([^|]*)|") do
-    out[#out + 1] = seg
-  end
-  -- 身份段剥离（宿主是唯一盖章方；段值形如 actor=<id>）。
-  while #out > 0 do
-    local last = out[#out]
-    if last:find("actor=", 1, true) == 1 then
-      out[#out] = nil
-    else
-      break
-    end
-  end
-  return out
-end
-
--- 信封 kind → wire 段名序（fields 声明序 = data/envelope.json kinds[].wire）。
+-- 信封 kind → wire 段名序（fields 声明序 = data/envelope.json kinds[].wire；
+-- 解析体在 agents.lua——本文件只持装载期映射）。
 local KIND_FIELDS = {}
 for i = 1, #ENVELOPE.kinds do
   KIND_FIELDS[ENVELOPE.kinds[i].kind] = ENVELOPE.kinds[i].wire
 end
 
---- 信封线载荷 → 字段表（按 kind 的 wire 序对位；缺段 = 空串）。
-local function wire_fields(kind, payload)
-  local segs = wire_segments(payload)
-  local fields = KIND_FIELDS[kind] or {}
-  local out = {}
-  for i = 1, #fields do
-    out[fields[i]] = segs[i] or ""
-  end
-  out._segments = segs
-  return out
-end
-
 -- C4 接线：quest.custom（信封模板 → quest.define）。无 choice → emit 存活，
 -- 机器可读投影在这里落（D1 语义）。
 ygg.on("quest.custom", function(payload)
-  local env = wire_fields("quest.custom", payload)
+  local env = agents.fields("quest.custom", payload, KIND_FIELDS)
   local ok, result = pcall(custom.define, env.text)
   if not ok then
     ygg.narrate("【拒绝】自定义任务模板被拒：" .. tostring(result))
@@ -437,16 +405,25 @@ ygg.on("quest.custom", function(payload)
   ygg.emit("agent.recorded", "custom|" .. result.name .. "|" .. tostring(result.steps))
 end)
 
-for kind in pairs(INBOX_KINDS) do
-  if kind ~= "quest.custom" then
-    ygg.on(kind, function(payload)
-      ygg.narrate("[INBOX-UNBOUND] " .. kind .. " 信封已入队但适配器未接线（C5 落地 agents.lua）：" .. tostring(payload))
-      ygg.emit("agent.recorded", kind .. "|unbound")
-    end)
-  end
+-- 入向路由表：kind → agents.lua 处理体（quest.custom 例外：任务系统能力出口）。
+local INBOX_HANDLERS = {
+  ["agent.chat"] = agents.handle_chat,
+  ["agent.action"] = agents.handle_action,
+  ["quest.delivery"] = agents.handle_delivery,
+  ["harness.ping"] = agents.handle_ping,
+  ["agent.error"] = agents.handle_error,
+}
+
+for kind, handler in pairs(INBOX_HANDLERS) do
+  ygg.on(kind, function(payload)
+    handler(payload, KIND_FIELDS)
+  end)
 end
 
--- 出向工具回执（tools 段 resultEvent；C5 起 agents.lua 落账 → 交付）。
+-- 工具回执（resultEvent=harness.replied；宿主 inline 回投）→ 落账/交付。
+-- sim.hash 落 KV（进程内状态跨进程不可见；重放对账从 summary meta 读）。
 ygg.on("harness.replied", function(payload)
-  ygg.narrate("[INBOX-UNBOUND] harness.replied 工具回执未接线（C5 落地）：" .. tostring(payload))
+  agents.handle_reply(payload)
+  ygg.kv.set("sg.last_sim_hash", clock.sim_hash())
+  ygg.meta("sim_hash", clock.sim_hash())
 end)

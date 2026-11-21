@@ -19,6 +19,9 @@
 -- 模块顶层纯；`ygg` 只在函数体内经 `host()` 单点取。所有键前缀 `sg.`
 -- （本 mod 命名空间，单写者）。
 
+local pkg_quest = require("pkg.quest")
+local simframe = require("src.simframe")
+
 local M = { VERSION = "1.0.0" }
 
 local DAY_KEY = "sg.day"
@@ -26,6 +29,52 @@ local STEP_CODE = "YGG-SIM-UNMOUNTED"
 
 local function host()
   return ygg
+end
+
+--- 名册规模（world.json 的 npcs+clerks+items；装载期数据直读，不经 world 模块
+--- ——clock 不依赖业务模块，防 require 环）。
+local function roster_count()
+  local world = host().data("ygg:superagent/world")
+  return #world.npcs + #world.clerks + #world.items
+end
+
+--- 在办委托数（quest 状态直读；前缀 sg.comms 名表归 quests.lua 单写者，此处只读）。
+local function open_count()
+  local h = host()
+  local raw = h.kv.get("sg.comms")
+  if type(raw) ~= "string" or #raw == 0 then
+    return 0
+  end
+  local n = 0
+  for key in (raw .. "\n"):gmatch("([^\n]*)\n") do
+    if #key > 0 then
+      local id = h.kv.get("sg.comm." .. key)
+      local inst = id ~= nil and pkg_quest.get(id) or nil
+      if inst ~= nil and inst.state == "open" then
+        n = n + 1
+      end
+    end
+  end
+  return n
+end
+
+--- 进程内首拍：把 sim 世界重建到「名册 + 在办」的规模。
+---
+--- sim 是进程内状态（egg 每进程以常量种子重建，世界只在构造它的进程里存在），
+--- 跨进程的规模真源是 KV；每个进程的第一拍据此重建，之后 settle 的 despawn
+--- 才有实体可注销——sim.hash 因此携带游戏进度（tick + 世界规模），重放断言
+--- 不是常数。
+local function ensure_world(h)
+  -- sim 面没有 tick 键（10 键：step/hash/snapshot/restore/批式三面/status/trace/
+  -- replay）——tick 经 status() 读（两面同形，selftest mock 与真内核一致）。
+  local status = h.sim.status()
+  if type(status) == "table" and (status.tick or 0) ~= 0 then
+    return nil
+  end
+  local rows = roster_count() + open_count()
+  local report = h.sim.spawn_batch(simframe.spawn_entities(rows))
+  h.kv.set("sg.sim_top", tostring(report.next_id or rows))
+  return rows
 end
 
 --- 当前业务日（0 = 开局钟未走）。
@@ -40,13 +89,15 @@ end
 --- dt 固定 1（定点闸门收整数）；步长调参走 world.json 的 tuning（此处只走一步）。
 function M.advance()
   local h = host()
-  local ok = pcall(function()
+  local ok, err = pcall(function()
+    ensure_world(h)
     h.sim.step(1)
   end)
   local day = (h.kv.get(DAY_KEY) or 0) + 1
   h.kv.set(DAY_KEY, day)
   if not ok then
-    h.narrate("[SIM-UNMOUNTED] 业务钟降级：本步未进模拟内核（宿主未挂 sim），KV 计日照走 day=" .. tostring(day))
+    h.narrate("[SIM-UNMOUNTED] 业务钟降级：本步未进模拟内核（宿主未挂 sim 或世界重建失败），KV 计日照走 day="
+      .. tostring(day) .. "；宿主面细节：" .. tostring(err))
   end
   return day, not ok
 end

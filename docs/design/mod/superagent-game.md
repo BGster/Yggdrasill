@@ -33,7 +33,7 @@
 
 ## 2. 信封接口（多 Agent Harness，不绑死一家）
 
-**通用 JSON 信封**（全标量字段，D11 标量律；声明账 = `data/envelope.json`，与 pack.json `inboxRoutes` 逐条对账）：
+**通用 JSON 信封**（全标量字段，D11 标量律；声明账 = `data/envelope.json`，与 pack.json `inboxRoutes` 逐条对账；**wire 段序统一 `externalId,agent,text,session,refs`**——text 第三段，宿主 named 写命令按「首段=agent、余段=text」填记录，`--requirement 'agent-7|正文'` 直接可用）：
 
 ```json
 {"v":1,"kind":"agent.chat","externalId":"<唯一幂等键>","agent":"<agent-id>","session":"<opaque>","text":"<单行正文>","refs":"<逗号分隔实体/任务ref>","ts":<int毫秒>}
@@ -90,6 +90,8 @@
 - **世界铺场走「sim 裸实体批 + KV 实体面」双层**：sim 批帧让世界规模进 Tier 1 状态哈希（重放断言非常数）；人物/道具的语义数据（属性袋/角色）落 KV 面的三系统包。带列 sim 帧（Number/Str/Bool/Ref/Tag）不用——三系统数据形状全落 KV/entity/派生事件面（计划 §4「热核面 (b) 预计零项」），且沙箱方言里手写列载荷编码只添第二份编解码器风险。sim 帧 builder 只产裸实体批一种形状（FNV-1a 64 与 canonical.rs / procgen 跨语言同源）。
 - **quest.delivery 与工具回执分线**：`harness.replied` 是出向工具的 `resultEvent`（宿主 inline 回投事件），不是 inbox kind；六类 kind 与计划 §3 信封一一对应。两条线在 agents.lua 汇合到同一套交付落账。
 - **确定性优先**：出向工具用 `inlineWaitMs>0`（同进程就地回投）而非脱体 worker（墙上时钟序）；业务钟 sim 步数由事件序决定，不用墙上时钟——「同信封序列重放 sim.hash 逐字节相等」因此可逐字节复算。
+- **sim 世界归钟单点所有（C5 修订）**：sim 是进程内状态——世界只在构造它的进程里存在，跨进程的规模真源是 KV。每个进程的**首拍**（`clock.advance`）把世界重建到「名册 9 + 在办单数」，结算（交付/弃单）再注销一个记录实体：sim.hash 因此携带 (tick, 世界规模)，同信封序列同哈希、异序列异哈希——重放断言被实证为**非常数**（交付局 8eac2573… ≠ 空世界常数 2ac4f679…，双跑逐字节相等）。信封（五类入向 kind）各走一拍；嵌套的 harness.replied 不加拍（与触发信封同日）。
+- **回执绑定回退**：信封 refs 未指委托时（`--requirement` 只有 agent/text 两段），交付上下文 = 该 agent 自己接的在办单（taker 实体反查，v1 约定一次只背一单）。钉死的事实链：调用登记 `sg.call.<id> = ext|agent|context` → 回执两端切分解析（output 可含竖线）→ 成功按登记交付、失败 agent.error 记账不重试（R2）。
 - **mod 层组织（三系统 × 包复用）**：人物 = `pkg.entity` schema spawn + `pkg.role_skill` 角色/技能 + `pkg.dialogue` 线程；道具 = 属性袋 + 转移语义（mod 层 set + `item.transferred`）+ `pkg.codec` 存档往返；任务 = `pkg.quest` 模板/实例/推进 + `pkg.dialogue` 节点文案单副本。全部 (c) mod 层，零新包（§1.7 判据：每能力恰一用点不立包）。
 
 维护责任 = 改 `packages/mods/superagent/**` 的执行者；触发 = 任一相关 commit（同分支就地改写本文）；检查 = `tests/` 自测用例 + 终验四条冒烟（§4）。

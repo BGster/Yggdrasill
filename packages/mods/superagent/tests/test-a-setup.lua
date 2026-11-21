@@ -10,9 +10,9 @@ check("setup.event-start.seeds-and-presents-board", function()
   if report == nil then
     return "event.start 无返回报告"
   end
-  if (report.sim_spawned or 0) ~= 9 then
-    problems[#problems + 1] = "sim 铺场数应为 9（3 NPC+2 文员+4 道具），实得 "
-      .. tostring(report.sim_spawned)
+  if (report.roster or 0) ~= 9 then
+    problems[#problems + 1] = "名册应为 9（3 NPC+2 文员+4 道具），实得 "
+      .. tostring(report.roster)
   end
   if #report.npcs ~= 5 then
     problems[#problems + 1] = "NPC 注册应为 5，实得 " .. tostring(#report.npcs)
@@ -21,8 +21,10 @@ check("setup.event-start.seeds-and-presents-board", function()
     problems[#problems + 1] = "道具注册应为 4，实得 " .. tostring(#report.items)
   end
   local batches = ygg_spawn_batches()
-  if #batches ~= 1 or batches[1] ~= 9 then
-    problems[#problems + 1] = "spawn_batch 应恰一批 9 行，实得 " .. tostring(#batches) .. " 批"
+  -- sim 世界归钟：开局拍重建「名册 9 + 在办 3」= 12。
+  if #batches ~= 1 or batches[1] ~= 12 then
+    problems[#problems + 1] = "首拍 spawn 应恰一批 12 行（名册+在办），实得 "
+      .. tostring(#batches) .. " 批 " .. tostring(batches[1])
   end
   -- 种子确定性：同数据同摘要（282ab700b111a01a 是 world.json 的既证值）。
   if report.seed ~= "282ab700b111a01a" then

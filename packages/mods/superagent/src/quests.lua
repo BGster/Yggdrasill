@@ -27,6 +27,7 @@ local cast = require("src.cast")
 local pkg_role = require("pkg.role_skill")
 local pkg_quest = require("pkg.quest")
 local pkg_entity = require("pkg.entity")
+local simframe = require("src.simframe")
 
 local M = { VERSION = "1.0.0" }
 
@@ -178,6 +179,39 @@ function M.open_all(world)
   return { opened = #keys, ids = ids }
 end
 
+--- `register(key, id, taker_spec, deadline_days)` → 快照。
+---
+--- 把一个**已开**的 quest 实例（如自定义任务的直开实例）纳进委托账（键名
+--- 空间仍归本文件单写者）。deadline_days 缺省 = 0（不限期）。
+function M.register(key, id, taker_spec, deadline_days)
+  local h = host()
+  if h.kv.get(K.comm .. key) ~= nil then
+    error("YGG-MOD-QUEST-DUP: 委托 key 重复注册：" .. tostring(key), 0)
+  end
+  local ref = 0
+  if taker_spec ~= nil and taker_spec ~= "" then
+    ref = M.taker_ref(taker_spec)
+    pkg_quest.assign(id, nil, ref)
+  end
+  local day = h.kv.get("sg.day") or 0
+  h.kv.set(K.comm .. key, id)
+  h.kv.set(ckey(K.taker, key), ref)
+  h.kv.set(ckey(K.deadline, key), day + (deadline_days or 0))
+  local merged = {}
+  local existing_text = h.kv.get(K.comms)
+  if type(existing_text) == "string" and #existing_text > 0 then
+    for existing in (existing_text .. "\n"):gmatch("([^\n]*)\n") do
+      if #existing > 0 then
+        merged[#merged + 1] = existing
+      end
+    end
+  end
+  merged[#merged + 1] = key
+  sort(merged)
+  h.kv.set(K.comms, join_newline(merged))
+  return M.snapshot(key)
+end
+
 --- 委托 key 名表（升序）。
 function M.keys()
   return name_table(host().kv.get(K.comms))
@@ -203,6 +237,26 @@ function M.snapshot(key)
     deadline = h.kv.get(ckey(K.deadline, key)) or 0,
     open = inst.state == "open",
   }
+end
+
+--- 结算清账：从 sim 世界注销一个记录实体（世界规模随游戏进度走——sim.hash
+--- 因此携带结算数：同信封序列同哈希、异序列异哈希，重放断言非常数）。
+--- 降级（宿主未挂 sim）= 诚实账一行，顶 id 照走（KV 真源不回退）。
+local function settle_sim_one(h)
+  local top = tonumber(h.kv.get("sg.sim_top") or "0") or 0
+  if top < 1 then
+    return false
+  end
+  local ok, err = pcall(function()
+    h.sim.despawn_batch(simframe.despawn_one(top))
+  end)
+  h.kv.set("sg.sim_top", tostring(top - 1))
+  if not ok then
+    h.narrate("[SIM-UNMOUNTED] 结算清账未进模拟内核（宿主未挂 sim），KV 顶 id 照走 "
+      .. tostring(top - 1) .. "；宿主面细节：" .. tostring(err))
+    return false
+  end
+  return true
 end
 
 --- 统计读改（taken|delivered|abandoned）。
@@ -247,6 +301,7 @@ function M.enforce_deadlines(today)
       pkg_quest.abandon(snap.id, "deadline")
       h.kv.set(ckey(K.taker, keys[i]), 0)
       bump("abandoned")
+      settle_sim_one(h)
       dropped[#dropped + 1] = keys[i]
     end
   end
@@ -340,10 +395,32 @@ function M.advance_step(key)
   return pkg_quest.advance(snap.id)
 end
 
---- `deliver(key)` → 结果表（state=done + 报酬描述）；调用方负责叙述。
+--- `deliver(key)` → 结果表（state=done + 报酬描述）；key 缺省 = 第一个可交付单。
+---
+--- 推进口径：从**任意**未-done 状态循环推进到 done（I3 终态由包面钉死：
+--- done 上再 advance 会被包面拒绝）。报酬与投影归 finalize，本函数只推一步职责。
 function M.deliver(key)
-  local h = host()
   local snap = key ~= nil and key ~= "" and M.snapshot(key) or M.deliverable()
+  if snap == nil then
+    return nil
+  end
+  if not snap.open then
+    error("YGG-MOD-QUEST-STATE: 委托 " .. tostring(snap.key) .. " 不在 open（终态唯一）", 0)
+  end
+  local state = pkg_quest.advance(snap.id)
+  while state ~= "done" do
+    state = pkg_quest.advance(snap.id)
+  end
+  return M.finalize(snap.key)
+end
+
+--- `finalize(key)` → 结果表；对已 done 的单做报酬 + 交付落账（不推进）。
+---
+--- deliver 与 harness 回执两条交付路径共用这一个落账点（计费纪律：一次交付
+--- 恰一次调用；grant 第二次是零写、recharge 有界、投影是幂等名表）。
+function M.finalize(key)
+  local h = host()
+  local snap = M.snapshot(key)
   if snap == nil then
     return nil
   end
@@ -354,15 +431,12 @@ function M.deliver(key)
       skill = world.commissions[i].rewardSkill
     end
   end
-  local state = pkg_quest.advance(snap.id) -- work → deliver
-  if state ~= "done" then
-    state = pkg_quest.advance(snap.id) -- deliver → done
-  end
   local reward = ""
   if snap.taker ~= 0 and skill ~= "" then
     reward = cast.reward(snap.taker, skill)
   end
   bump("delivered")
+  settle_sim_one(h)
   -- 持久投影：完成单名表（quest.completed 派生事件不落盘——sqlite/json 两后端
   -- 只记顶层步——这条名表是「已交付」的机器可查事实，随存档往返）。
   local completed = {}
@@ -374,10 +448,19 @@ function M.deliver(key)
       end
     end
   end
-  completed[#completed + 1] = snap.key
+  local present = false
+  for i = 1, #completed do
+    if completed[i] == snap.key then
+      present = true
+      break
+    end
+  end
+  if not present then
+    completed[#completed + 1] = snap.key
+  end
   sort(completed)
   h.kv.set("sg.completed", join_newline(completed))
-  return { key = snap.key, id = snap.id, state = state, reward = reward, skill = skill }
+  return { key = snap.key, id = snap.id, state = "done", reward = reward, skill = skill }
 end
 
 -- ── 任务板 ──────────────────────────────────────────────────────────────────
@@ -394,6 +477,24 @@ function M.completed()
     end
   end
   return out
+end
+
+--- `find_by_taker(entity_id)` → 该承接者名下第一个在办委托快照 | nil。
+---
+--- 回执绑定回退用：信封 refs 为空时，「这个 agent 来话」的交付上下文 =
+--- 它自己接的单（一个 agent 同时至多背一单是本局约定，v1 取第一个在办）。
+function M.find_by_taker(entity_id)
+  if entity_id == nil or entity_id == 0 then
+    return nil
+  end
+  local keys = M.keys()
+  for i = 1, #keys do
+    local snap = M.snapshot(keys[i])
+    if snap ~= nil and snap.open and snap.taker == entity_id then
+      return snap
+    end
+  end
+  return nil
 end
 
 --- `open_count()` → open 状态委托数（任务板读数）。

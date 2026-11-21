@@ -89,6 +89,16 @@ function M.spawn_entities(count)
   return head .. u64(fnv1a64(head))
 end
 
+--- `despawn_one(id)` → 注销单实体帧（`u32 n=1 | u64 id | 尾 digest`；despawn
+--- 帧无魔数头——sim.despawn_batch 的读取从行数直入，与 spawn 头格式不同）。
+function M.despawn_one(id)
+  if type(id) ~= "number" or id ~= (id // 1) or id < 1 then
+    error("YGG-MOD-SIMFRAME-ID: 实体 id 必须是正整数，得到 " .. tostring(id), 0)
+  end
+  local head = u32(1) .. u64(id)
+  return head .. u64(fnv1a64(head))
+end
+
 --- `fnv1a64(bytes)` 的导出副本（自测直接对向量；不重复造第二份算法）。
 function M.digest(bytes)
   return fnv1a64(bytes)
