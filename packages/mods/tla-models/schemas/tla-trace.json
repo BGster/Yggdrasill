@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ygg tla-trace golden track",
+  "description": "S26-4 TLA+ 模型黄金轨道（动作向量 + 逐拍哈希 + 锚 + 终态快照）。method=KAT 声明黄金值来源为手算步表对账（tla2tools 不可达，见 docs/design/mod/tla-models.md §黄金轨道）。",
+  "type": "object",
+  "required": ["model", "track", "method", "actions", "hashes", "anchors", "final"],
+  "additionalProperties": false,
+  "properties": {
+    "model": {
+      "type": "string",
+      "enum": ["gol", "twophase", "klotski", "ewd998"]
+    },
+    "track": { "type": "string", "minLength": 1 },
+    "method": {
+      "type": "string",
+      "enum": ["KAT"],
+      "description": "黄金值口径：KAT=手算步表（B 法）。若未来 tla2tools 可达并做 TLC 对账，扩展枚举 TLC。"
+    },
+    "source": { "type": "string" },
+    "note": { "type": "string" },
+    "actions": {
+      "type": "array",
+      "items": { "type": ["string", "null"] },
+      "description": "动作向量：step(model, action) 的显式动作输入；null = stutter 步。"
+    },
+    "hashes": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+      "description": "逐拍指纹：procgen.hash(snapshot())（16 位十六进制 FNV-1a 64 over codec.encode）。"
+    },
+    "anchors": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+      "description": "tick（4 的倍数）→ 锚哈希（tla.anchor.<model>.<tick> 的黄金值）。"
+    },
+    "final": { "type": "object", "description": "终态规范快照（模型 snapshot() 表）。" }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "model": "twophase",
+  "track": "twophase",
+  "method": "KAT",
+  "source": "tlaplus/Examples@~/tmp/tla-examples",
+  "note": "MCTwoPhase 4 态循环（p,c: 00->10->11->01->00）",
+  "actions": ["producer","consumer","producer","consumer"],
+  "hashes": ["1e732fe784d31c23","98735b291265006e","4d67ab126bae9407","de9eb18113bf675a"],
+  "anchors": {"4":"de9eb18113bf675a"},
+  "final": {"c":0,"p":0,"x":0}
+}

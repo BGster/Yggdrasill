@@ -1,0 +1,11 @@
+{
+  "model": "klotski",
+  "track": "klotski",
+  "method": "KAT",
+  "source": "tlaplus/Examples@~/tmp/tla-examples",
+  "note": "开局三步：双 unit 下滑 + 横件下滑（手算步表）",
+  "actions": ["e=1,4|d=0,-1","e=2,4|d=0,-1","e=1,3|d=0,-1"],
+  "hashes": ["a8e02ee06ca36369","af96199658d74e58","c7687327873e19d3"],
+  "anchors": [],
+  "final": {"pieces":[{"kind":"v2","ox":0,"oy":0},{"kind":"u","ox":0,"oy":4},{"kind":"sq","ox":1,"oy":0},{"kind":"v2","ox":0,"oy":2},{"kind":"h2","ox":1,"oy":3},{"kind":"v2","ox":3,"oy":0},{"kind":"u","ox":1,"oy":4},{"kind":"u","ox":2,"oy":4},{"kind":"v2","ox":3,"oy":2},{"kind":"u","ox":3,"oy":4}]}
+}

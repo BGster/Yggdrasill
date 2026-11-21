@@ -1,0 +1,191 @@
+{
+  "code": [
+    {
+      "byteLength": 12639,
+      "path": "src/ewd998.lua",
+      "sha256": "832508a02e36e590c3ab650b82e0e6325fe4fe78223b842bcd451e85f64a27a7"
+    },
+    {
+      "byteLength": 6909,
+      "path": "src/gol.lua",
+      "sha256": "4a0c1ae337380ed491998f4eb7892a35ba0fe8c9dde9b585866450ac0c823bef"
+    },
+    {
+      "byteLength": 2890,
+      "path": "src/inv.lua",
+      "sha256": "b5571b42b93c5e1d701c61829cb4cb47c8534ac2d00528f2d6dccef18eeb9ad5"
+    },
+    {
+      "byteLength": 11015,
+      "path": "src/klotski.lua",
+      "sha256": "7b3ae802fc5f00a66016a5508efbfcc94140731a27073b0d898c7b5958ba57aa"
+    },
+    {
+      "byteLength": 10357,
+      "path": "src/replay.lua",
+      "sha256": "16bc5bf2125329851beaa0fa490634d38a3b70a0f3d6000c9cb9640a750b30cf"
+    },
+    {
+      "byteLength": 3934,
+      "path": "src/twophase.lua",
+      "sha256": "71e782c171861733bf80e6bbaf40cbd658b3ea05873e48ce5de95d0fc27cd7a0"
+    }
+  ],
+  "entries": [
+    {
+      "byteLength": 840,
+      "id": "ygg:tla/trace/gol",
+      "kind": "data",
+      "path": "data/traces/gol.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/tla-trace.json",
+      "sha256": "ae8f942a9a2d12ccb08504a553bf8c2b70a5cf1f8e71ae5dc507ee9a35a84702"
+    },
+    {
+      "byteLength": 406,
+      "id": "ygg:tla/trace/twophase",
+      "kind": "data",
+      "path": "data/traces/twophase.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/tla-trace.json",
+      "sha256": "f37c96ca204adc969c24904152f308d8140d91f7b4b3fd3766bafc06759fcc70"
+    },
+    {
+      "byteLength": 645,
+      "id": "ygg:tla/trace/klotski",
+      "kind": "data",
+      "path": "data/traces/klotski.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/tla-trace.json",
+      "sha256": "2d62f0059355d318d86b01812cc3a753d2a71eb7191603f38e864e86ba16b172"
+    },
+    {
+      "byteLength": 776,
+      "id": "ygg:tla/trace/ewd998",
+      "kind": "data",
+      "path": "data/traces/ewd998.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/tla-trace.json",
+      "sha256": "3ea6d7bd4a9725b984ba59c03c0af995ea95136183517707383123e9513de8f7"
+    }
+  ],
+  "packages": [
+    {
+      "files": [
+        {
+          "byteLength": 9283,
+          "path": "codec/bundle.lua",
+          "sha256": "5bf691c09c4c592ef1bad61517184feb0b2ef4b28da134b0dc1bc0c9d353453b"
+        },
+        {
+          "byteLength": 9947,
+          "path": "codec/importing.lua",
+          "sha256": "913473408b61eacad53c4ca5b0fa12523e42be0d0d533066a4f21019de7ad275"
+        },
+        {
+          "byteLength": 4915,
+          "path": "codec/init.lua",
+          "sha256": "f8f3fd28d9206be877dfaec3f5b4af38c863d14f1ee011ca653afc67817b6887"
+        },
+        {
+          "byteLength": 9634,
+          "path": "codec/jsondec.lua",
+          "sha256": "c94e62ba3e44aa9010db6f1898a8fc271075566fd06751167475d4c859bcd2e5"
+        },
+        {
+          "byteLength": 13522,
+          "path": "codec/jsonenc.lua",
+          "sha256": "65d0550a487dc04870da61fa7ca7f97bc78d3f980c28efb703aeda98e216c24c"
+        },
+        {
+          "byteLength": 175,
+          "path": "codec/pkg.json",
+          "sha256": "d51fb876bcf1caf84f7c0a935e7a880b54789c3a7c0941ac89865b21f08aeb4f"
+        },
+        {
+          "byteLength": 6064,
+          "path": "codec/runtime.lua",
+          "sha256": "4964cd02d6484887b3a5c0b9c2eef3d2e0ee03574d601639378755ba56a85839"
+        },
+        {
+          "byteLength": 5905,
+          "path": "codec/sha256.lua",
+          "sha256": "18ab3f5295befc4f1f1fcc6af7ee3ddd6baf704705c81bce5efc9a9382f2b119"
+        }
+      ],
+      "id": "codec"
+    },
+    {
+      "files": [
+        {
+          "byteLength": 6821,
+          "path": "entity/base.lua",
+          "sha256": "663ee329f148702efbce2cc44c6a01dbf681229d15ff8d0bdd8b0c1ce5053c5f"
+        },
+        {
+          "byteLength": 5171,
+          "path": "entity/init.lua",
+          "sha256": "a75c2e749c3b8b4c0551051ce95d749e23b778c63fbe41b4dfc085c87e2853a1"
+        },
+        {
+          "byteLength": 139,
+          "path": "entity/pkg.json",
+          "sha256": "5cd9d1faba637a37afc9725852af8e2ebcc9689e2bb70c02ddd054e31b0be310"
+        },
+        {
+          "byteLength": 5641,
+          "path": "entity/query.lua",
+          "sha256": "9d2d9a7519d398ded3a58ebe0b5e89e9b29f705587677c2e84b318779be211ef"
+        },
+        {
+          "byteLength": 13605,
+          "path": "entity/record.lua",
+          "sha256": "40648f004ba8d3b00c90d5a5215ea682d9b8ef2092a2e84289b39ba2dcb37c59"
+        },
+        {
+          "byteLength": 11853,
+          "path": "entity/schema.lua",
+          "sha256": "946ecf13ea3e890fe66a9e18b52c4686f36f9c8a7d0856f340e2f5115907140d"
+        }
+      ],
+      "id": "entity"
+    },
+    {
+      "files": [
+        {
+          "byteLength": 5412,
+          "path": "procgen/algos/layout.lua",
+          "sha256": "31c7918e6783b185eb5fcac0b074bb9e1e09ea9e7d71b2db8b0b99578690f8f3"
+        },
+        {
+          "byteLength": 5607,
+          "path": "procgen/algos/terrain.lua",
+          "sha256": "3296d5da06b76faaabe74ec2770c0103125b76964ef95f6804c67258e13d9718"
+        },
+        {
+          "byteLength": 2728,
+          "path": "procgen/digest.lua",
+          "sha256": "6ca1a556bb1bbf429fbcb1edffdb19aaad68c3be13402ef25cd7ed4a0aaef097"
+        },
+        {
+          "byteLength": 2504,
+          "path": "procgen/init.lua",
+          "sha256": "a70dbe771d50af18760ea518e9dcecb7c02a607bea687eedea89030ed3b21a0e"
+        },
+        {
+          "byteLength": 178,
+          "path": "procgen/pkg.json",
+          "sha256": "b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
+        },
+        {
+          "byteLength": 6750,
+          "path": "procgen/registry.lua",
+          "sha256": "0acc45a8b037fad86347dd2bfce991fa6375f302ecfa0ebe4c305bdfc0462ef7"
+        },
+        {
+          "byteLength": 13639,
+          "path": "procgen/rng.lua",
+          "sha256": "74e223a782333a5dd89c229c5f2e6ff63a367e4f7396402ca73ad6340430770c"
+        }
+      ],
+      "id": "procgen"
+    }
+  ],
+  "schemaVersion": 1
+}
