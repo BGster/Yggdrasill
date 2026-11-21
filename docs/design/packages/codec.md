@@ -81,7 +81,7 @@ bundle（导出物，也是导入物的唯一形状）：
 
 **两个错误码的边界**：`YGG-CODEC-UNSUPPORTED`（值域拒绝，或值里出现带元方法的表）⇒ 包**回退 Lua 路径重跑**，于是错误文案只有一处来源（本包的 `fail(...)`），不维护第二套字符串契约；`YGG-CODEC-INTERNAL`（原生实现内部失败）⇒ 包报 `YGG-PKG-CODEC-HOST` 并**不回退**（缺陷必须响，静默降级会把 bug 藏成「性能偶尔不达标」）。带元方法的表整值回退是刻意的：Lua 的 `pairs` 与 `t[i]` 分别会走 `__pairs` / `__index`，复刻它们等于「编码过程中执行 Lua 代码」。
 
-**差分门禁（改任一侧都必须跑）**：`cargo test -p ygg-sandbox --test codec_face`。语料 = `pkg-codec.lua` 行为用例的全部值形状 + 边界集（`1` vs `1.0`、`-0.0`、NaN/±inf、深度 64/65、环、`\u0000`/`\u007f`、代理对、非法转义、残留字节）+ 10⁴ 实体集 + 2 000 个 fuzz 值；判据是**双向**：`native_encode(v) == lua_encode(v)` 逐字节，且 `native_decode(t)` 与 `lua_decode(t)` 深度等价（含数字子类型）。附加一条：合法语料直调 `codec_face::encode/decode` 必须 `Ok`——否则「把合法值误判为非法」会让包静默回退，字节相等看不出来，只丢性能。
+**差分门禁（改任一侧都必须跑）**：`cargo test -p ygg-sandbox --test codec_face`。语料 = `pkg-codec.lua` 及其兄弟件（`test/pkg-codec/`，S-25 批十三拆分后行为用例的所在）行为用例的全部值形状 + 边界集（`1` vs `1.0`、`-0.0`、NaN/±inf、深度 64/65、环、`\u0000`/`\u007f`、代理对、非法转义、残留字节）+ 10⁴ 实体集 + 2 000 个 fuzz 值；判据是**双向**：`native_encode(v) == lua_encode(v)` 逐字节，且 `native_decode(t)` 与 `lua_decode(t)` 深度等价（含数字子类型）。附加一条：合法语料直调 `codec_face::encode/decode` 必须 `Ok`——否则「把合法值误判为非法」会让包静默回退，字节相等看不出来，只丢性能。
 
 **与 Tier 1 快照编码器的关系**：复用它的**规范序纪律**（键/名按 UTF-8 字节序升序，[kernel/sim-kernel.md §2](../kernel/sim-kernel.md) 的「复用排序规范 ≠ 复用文本容器」），**不**复用它的容器：`ygg-sim` 无 mlua（拿不到 Lua 值）、`src/**` 禁浮点 token（`f64` 数字格式化放不进去；R1′ 修宪后豁免面仅限 `src/bits.rs` 的位串搬运，与本文的 JSON 格式化无关）、快照是带 magic 与尾 digest 的二进制列帧（本包的对外格式是 JSON 文本，是存档兼容面）。两者的一致性用**同一份 fixture** 钉住（`crates/ygg-sim/fixtures/canonical-order.json`，两个消费者各断言一次），而不是互相引用说法。
 

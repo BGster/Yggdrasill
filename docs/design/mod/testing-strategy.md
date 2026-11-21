@@ -114,3 +114,15 @@ entity_query selector 语法面，全部 ≤500 行）；`tests/<name>/main.rs` 
 **依据**：纯搬移零逻辑变更——22 用例逐名守恒（`--list` 前后剥模块前缀集合 diff = ∅）即门禁判据；
 根 use 头逐字节不动，子文件 `use super::*;` 一行即足（玩具 crate 复刻实验：rustc 不报根
 unused_imports，glob 转发语义链与 egg 目录化同理，先例 `src/driver/tests.rs`）。
+
+**测试件连拆八件归位（2026-11-21，r-20261121-170022-4615）**：七包自测主件 837~1129 行越 800
+硬上限（原则六授权 500/800），用例段按主题连续切片搬入 `test/pkg-<pkg>/<theme>.lua` 兄弟件——
+形态 `return function(C) local … = C.… <连续行段原字节> end`，主件尾部 `local C = {…}` +
+`dofile(PKG_ROOT .. …)(C)` 装配，执行次序 = 装配次序；主件路径不变，runner 对 `test/` 的
+非递归采集面不扰（兄弟件不单独入册）。同法目录化 `tests/kernel_facade.rs`（1071 行 →
+`tests/kernel_facade/` 七文件，`tests/<name>/main.rs` 保单目标名，34 用例逐名守恒）。
+**依据**：纯搬移零逻辑变更——Lua 静态 `run("` 名 multiset 逐包 diff=∅（185 注册面）+ 运行时
+`cases passed=199 failed=0` 前后相等即判据；跨片 helper 上移主件经 C 注入（dialogue/quest 的
+pkg_sources+count_in_sources、entity 的 basic_spec、assetgen 的 BUNDLE_ENTRIES/OSC/samples_of），
+骑片 helper 随主题走；Rust 侧 `--list` 前后剥模块段前缀集合 diff=∅、件头「32 测」陈旧计按
+before 实测纠偏为 34。
