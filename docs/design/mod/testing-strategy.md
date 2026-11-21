@@ -76,7 +76,7 @@ cargo run -q --example selftest -- --mod .ygg/mods/agent-seed --fixture armed   
 
 Rust 侧只留一个**门禁薄壳**（`crates/ygg-sandbox/tests/agent_seed_semantics.rs`，属包 `ygg-sandbox`）：它不重复
 任何行为断言，只断言 Lua 套件仍存在且非空——因为宿主三套门禁的第三条被硬编码成
-`cargo test -p ygg-sandbox --test agent_seed_semantics`（见 `examples/egg.rs` 的 `verify_gates`），
+`cargo test -p ygg-sandbox --test agent_seed_semantics`（见 `examples/egg/` 的 `verify_gates`），
 而 egg.rs 是 non-negotiable host。壳与门禁命令**同包同名**，不存在包名不符。
 
 ## 6. 设计依据（外部仓装载：可选注入优先于全局前置）

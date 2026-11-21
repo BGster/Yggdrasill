@@ -153,7 +153,7 @@ cargo test --example egg -p ygg-sandbox
 cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs
 ```
 
-第二条不可省：Cargo 的 `--workspace` 不编译 example target 的单元测试，`crates/ygg-sandbox/examples/egg.rs` 中持久化原子性、reset、热载与结算策略断言不会因只跑 workspace 而执行。`cargo check`、`verify-suite --mode fast`、过滤测试、单测选择或 `YGG_VERIFY_COMMANDS` 覆盖各有合法用途，但只能证明其自身，不能替代字面三件套。
+第二条不可省：Cargo 的 `--workspace` 不编译 example target 的单元测试，`crates/ygg-sandbox/examples/egg/` 中持久化原子性、reset、热载与结算策略断言不会因只跑 workspace 而执行。`cargo check`、`verify-suite --mode fast`、过滤测试、单测选择或 `YGG_VERIFY_COMMANDS` 覆盖各有合法用途，但只能证明其自身，不能替代字面三件套。
 
 第三条是 **Lua 自检套件**（`--mod packages/mods/pkg-selftest`），不是 Rust 集成测试：v3 收口刻意删除了 `crates/ygg-sandbox/tests/selftest.rs`（`git log -S"--test selftest"` → `b4beaf7 feat(goal v3): 收口`），旧命令实测 `error: no test target named 'selftest' in 'ygg-sandbox' package`（exit=101）。判据保留：① 阻止「改了 `crates/**` 只跑 workspace 就称验收」（workspace 看不见 example target，也看不见 Mod 语义）；② 症状是 example target 断言或 Lua 侧包语义静默回归而 `cargo test --workspace` 仍绿；③ 确认 = 三条命令的真实退出码与用例数（`cases passed=<n> failed=<n>`）逐条记录，不以 `cargo check` / 过滤测试 / `YGG_VERIFY_COMMANDS` 替代。
 

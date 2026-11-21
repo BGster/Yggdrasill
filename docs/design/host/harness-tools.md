@@ -144,7 +144,7 @@ exit 码与 §1 同表；**「检测发现问题」永远 exit 0 + `ok=false`**�
 | trash 根 | `--trash-root` | `$YGG_SESSIONS_TRASH` → `$HOME/.pi/agent/sessions-trash` |
 | 仓库根 | `--repo` | 脚本所在 git toplevel |
 
-`cwd-slug` = cwd 去前导 `/` 后把 `/` 换成 `-`（与宿主 `cwd_slug` 同口径，见 `crates/ygg-sandbox/examples/egg.rs`）。**注意**：会话库是**主工作区**的库，泳道 worktree 的 cwd-slug 不同——跨泳道调用必须显式 `--sessions-root` 指向主工作区库。
+`cwd-slug` = cwd 去前导 `/` 后把 `/` 换成 `-`（与宿主 `cwd_slug` 同口径，见 `crates/ygg-sandbox/examples/egg/`）。**注意**：会话库是**主工作区**的库，泳道 worktree 的 cwd-slug 不同——跨泳道调用必须显式 `--sessions-root` 指向主工作区库。
 
 ### 4.2 可复制命令样例
 
