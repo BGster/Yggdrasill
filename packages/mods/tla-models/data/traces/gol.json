@@ -4,8 +4,111 @@
   "method": "KAT",
   "source": "tlaplus/Examples@~/tmp/tla-examples",
   "note": "blinker 竖->横->竖（Python 独立推导+手算双推导一致）",
-  "actions": ["step","step","step","step"],
-  "hashes": ["2c73944fae9fa791","528f0292c307838b","2c73944fae9fa791","528f0292c307838b"],
-  "anchors": {"4":"528f0292c307838b"},
-  "final": {"cells":[{"alive":false,"x":1,"y":1},{"alive":true,"x":2,"y":1},{"alive":false,"x":3,"y":1},{"alive":false,"x":4,"y":1},{"alive":false,"x":1,"y":2},{"alive":true,"x":2,"y":2},{"alive":false,"x":3,"y":2},{"alive":false,"x":4,"y":2},{"alive":false,"x":1,"y":3},{"alive":true,"x":2,"y":3},{"alive":false,"x":3,"y":3},{"alive":false,"x":4,"y":3},{"alive":false,"x":1,"y":4},{"alive":false,"x":2,"y":4},{"alive":false,"x":3,"y":4},{"alive":false,"x":4,"y":4}],"n":4}
+  "init": {
+    "alive": [
+      "2,1",
+      "2,2",
+      "2,3"
+    ]
+  },
+  "actions": [
+    "step",
+    "step",
+    "step",
+    "step"
+  ],
+  "hashes": [
+    "2c73944fae9fa791",
+    "528f0292c307838b",
+    "2c73944fae9fa791",
+    "528f0292c307838b"
+  ],
+  "anchors": {
+    "4": "528f0292c307838b"
+  },
+  "final": {
+    "cells": [
+      {
+        "alive": false,
+        "x": 1,
+        "y": 1
+      },
+      {
+        "alive": true,
+        "x": 2,
+        "y": 1
+      },
+      {
+        "alive": false,
+        "x": 3,
+        "y": 1
+      },
+      {
+        "alive": false,
+        "x": 4,
+        "y": 1
+      },
+      {
+        "alive": false,
+        "x": 1,
+        "y": 2
+      },
+      {
+        "alive": true,
+        "x": 2,
+        "y": 2
+      },
+      {
+        "alive": false,
+        "x": 3,
+        "y": 2
+      },
+      {
+        "alive": false,
+        "x": 4,
+        "y": 2
+      },
+      {
+        "alive": false,
+        "x": 1,
+        "y": 3
+      },
+      {
+        "alive": true,
+        "x": 2,
+        "y": 3
+      },
+      {
+        "alive": false,
+        "x": 3,
+        "y": 3
+      },
+      {
+        "alive": false,
+        "x": 4,
+        "y": 3
+      },
+      {
+        "alive": false,
+        "x": 1,
+        "y": 4
+      },
+      {
+        "alive": false,
+        "x": 2,
+        "y": 4
+      },
+      {
+        "alive": false,
+        "x": 3,
+        "y": 4
+      },
+      {
+        "alive": false,
+        "x": 4,
+        "y": 4
+      }
+    ],
+    "n": 4
+  }
 }

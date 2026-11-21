@@ -139,10 +139,11 @@ function M.tick(mod, action)
   return { tick = tick, hash = hash }
 end
 
---- `run_track(model, actions)`：reset 后逐动作推进（action=nil 的洞 =
---- stutter）。返回 `{ ticks, hashes, final }`。
-function M.run_track(mod, actions)
-  M.reset(mod)
+--- `run_track(model, actions, opts?)`：reset（opts 透传模型，如 gol 的
+--- pattern 参数）后逐动作推进（action=nil 的洞 = stutter）。返回
+--- `{ ticks, hashes, final }`。
+function M.run_track(mod, actions, opts)
+  M.reset(mod, opts)
   local ticks = {}
   local hashes = {}
   for i = 1, #actions do
@@ -184,13 +185,14 @@ end
 -- ── 对账 ─────────────────────────────────────────────────────────────────────
 
 --- `verify_track(model, actions, golden)`：双局重放对账 + 黄金值对照。
---- golden = `{ hashes?, anchors?, final? }`（final 为快照表或 nil）。
---- 返回违例明细字符串数组（空 = 绿）；任何一锚一哈希一字节不等都点名。
---- 本函数同时是红例②的执行面：golden 被篡改一字节即非空。
+--- golden = `{ init?, hashes?, anchors?, final? }`（init = reset 的 opts，
+--- 缺省 = 规范初态；final 为快照表或 nil）。返回违例明细字符串数组
+--- （空 = 绿）；任何一锚一哈希一字节不等都点名。本函数同时是红例②的
+--- 执行面：golden 被篡改一字节即非空。
 function M.verify_track(mod, actions, golden)
   local violations = {}
-  local run_a = M.run_track(mod, actions)
-  local run_b = M.run_track(mod, actions)
+  local run_a = M.run_track(mod, actions, golden.init)
+  local run_b = M.run_track(mod, actions, golden.init)
   if not deep_eq(run_a, run_b) then
     violations[#violations + 1] = "dual-run: 两局 ticks/hashes/final 不等"
   end
@@ -238,8 +240,7 @@ function M.tamper(mod, actions, golden, mutate)
   local dirty = {}
   for key, value in pairs(golden) do
     dirty[key] = value
-  end
-  if mutate == "hash1" and golden.hashes ~= nil and golden.hashes[1] ~= nil then
+  end  if mutate == "hash1" and golden.hashes ~= nil and golden.hashes[1] ~= nil then
     local flipped = golden.hashes[1]
     local head = flipped:sub(1, 1)
     flipped = (head == "0" and "1" or "0") .. flipped:sub(2)

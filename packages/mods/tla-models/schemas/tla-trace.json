@@ -18,6 +18,10 @@
     },
     "source": { "type": "string" },
     "note": { "type": "string" },
+    "init": {
+      "type": "object",
+      "description": "本轨 reset 的 opts（如 gol 的 pattern 参数）；缺省 = 规范初态。"
+    },
     "actions": {
       "type": "array",
       "items": { "type": ["string", "null"] },
