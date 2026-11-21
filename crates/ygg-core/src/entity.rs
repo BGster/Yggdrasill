@@ -522,10 +522,20 @@ mod tests {
         assert!(removed.has_tag("enemy"), "tag 也随记录一起回收");
         assert_eq!(store.next_entity_id(), watermark, "真删不得回收 id 水位");
         assert_eq!(store.revision(), revision_before + 1, "真删计一次变更");
-        assert!(!store.contains(doomed), "真删后 contains = false（exists 的 store 层语义）");
+        assert!(
+            !store.contains(doomed),
+            "真删后 contains = false（exists 的 store 层语义）"
+        );
         assert!(store.get(doomed).is_none());
-        assert!(store.remove(doomed).is_none(), "幂等：二次删除返回 None、不报错");
-        assert_eq!(store.revision(), revision_before + 1, "幂等删除不涨 revision");
+        assert!(
+            store.remove(doomed).is_none(),
+            "幂等：二次删除返回 None、不报错"
+        );
+        assert_eq!(
+            store.revision(),
+            revision_before + 1,
+            "幂等删除不涨 revision"
+        );
 
         let next = store.spawn().unwrap();
         assert_ne!(next, doomed, "I1：id 永不复用");
