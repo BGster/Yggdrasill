@@ -295,7 +295,11 @@ pub(crate) fn handle_artifacts(shared: &ServeShared, run_id: &str) -> Response {
 
 /// `GET /api/runs/<id>/artifacts/<path..>`——制品原文（`validate_artifact_path` 门复用；
 /// 读侧封顶 1 MiB → 413）。
-pub(crate) fn handle_artifact_content(shared: &ServeShared, run_id: &str, artifact_path: &str) -> Response {
+pub(crate) fn handle_artifact_content(
+    shared: &ServeShared,
+    run_id: &str,
+    artifact_path: &str,
+) -> Response {
     if let Err(response) = check_run_id(run_id) {
         return response;
     }

@@ -447,12 +447,11 @@ fn check_run_id(run_id: &str) -> Result<(), Response> {
 #[cfg(test)]
 mod tests_common;
 #[cfg(test)]
-mod tests_http;
-#[cfg(test)]
 mod tests_data;
+#[cfg(test)]
+mod tests_http;
 #[cfg(test)]
 mod tests_registry_sse;
 
 #[cfg(test)]
 pub(crate) use tests_common::*;
-

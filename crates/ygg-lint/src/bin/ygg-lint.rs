@@ -116,7 +116,8 @@ fn main() {
 /// 映射规则与装载期的 `ygg_sandbox::packages` **同一条**（`init` 是包根模块、
 /// 路径段以 `.` 连接、id 的连字符折叠为下划线），此处是它在静态面上的投影：
 /// `ygg-lint` 会被编进 wasm32，不能依赖 `ygg-sandbox`（那会把 mlua 拉进图），
-/// 所以映射在这里是重写的十行而不是复用调用——权威实现仍在 packages.rs。
+/// 所以映射在这里是重写的十行而不是复用调用——权威实现仍在 `packages` 模块
+/// （`declare.rs` 的 `module_prefix` 与 `closure.rs` 的 `module_name`，S-25 批八拆分）。
 ///
 /// manifest 缺失 / 不可读 / 无 `packages` 段 ⇒ 空表（不是错误：单文件 Mod 与
 /// 不声明包的 Mod 都走这条，它们本来就没有包名字面）。

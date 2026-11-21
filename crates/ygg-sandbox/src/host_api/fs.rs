@@ -283,7 +283,7 @@ pub(super) fn install_fs(
     //      从 1 开始的**稠密数组**。
     let fs_table = lua.create_table()?;
 
-    let fs_write = Rc::clone(&state);
+    let fs_write = Rc::clone(state);
     fs_table.raw_set(
         "write",
         lua.create_function(
@@ -317,7 +317,7 @@ pub(super) fn install_fs(
         )?,
     )?;
 
-    let fs_read = Rc::clone(&state);
+    let fs_read = Rc::clone(state);
     fs_table.raw_set(
         "read",
         lua.create_function(move |lua, path: String| -> Result<LuaValue, Error> {
@@ -342,7 +342,7 @@ pub(super) fn install_fs(
         })?,
     )?;
 
-    let fs_stat = Rc::clone(&state);
+    let fs_stat = Rc::clone(state);
     fs_table.raw_set(
         "stat",
         lua.create_function(move |lua, path: String| -> Result<Table, Error> {
@@ -381,7 +381,7 @@ pub(super) fn install_fs(
         })?,
     )?;
 
-    let fs_list = Rc::clone(&state);
+    let fs_list = Rc::clone(state);
     fs_table.raw_set(
         "list",
         lua.create_function(move |lua, prefix: Option<String>| -> Result<Table, Error> {

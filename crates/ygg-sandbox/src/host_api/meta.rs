@@ -152,7 +152,7 @@ pub(super) fn install_meta(
     // ---- ygg.meta（结构化回执面，TD1）：不进 calls 缓冲、不回放、不改 core
     //      trait；驱动转换结束后 take_meta 拼进信封。key 长度/类型与非有限值
     //      在调用点 fail-fast 拒绝（与 ygg.emit 同纪律）。----
-    let st = Rc::clone(&state);
+    let st = Rc::clone(state);
     ygg.raw_set(
         "meta",
         lua.create_function(

@@ -125,7 +125,7 @@ pub(super) fn install_narrate(
     ygg: &Table,
 ) -> Result<(), Error> {
     // ---- ygg.on（装载期注册；seal 后以双检 + 原位桩拒绝，D-S9-1 / D-S9-4）----
-    let st = Rc::clone(&state);
+    let st = Rc::clone(state);
     ygg.raw_set(
         "on",
         lua.create_function(
@@ -141,7 +141,7 @@ pub(super) fn install_narrate(
     )?;
 
     // ---- ygg.emit（收集面：校验 + fail-fast 后追加，D-S9-2）----
-    let st = Rc::clone(&state);
+    let st = Rc::clone(state);
     ygg.raw_set(
         "emit",
         lua.create_function(
@@ -160,7 +160,7 @@ pub(super) fn install_narrate(
     )?;
 
     // ---- ygg.narrate（收集面，D-S9-2）----
-    let st = Rc::clone(&state);
+    let st = Rc::clone(state);
     ygg.raw_set(
         "narrate",
         lua.create_function(move |_, line: String| -> Result<(), Error> {
@@ -170,7 +170,7 @@ pub(super) fn install_narrate(
     )?;
 
     // ---- ygg.choice（收集 + sentinel 终止，D-S9-3）----
-    let st = Rc::clone(&state);
+    let st = Rc::clone(state);
     ygg.raw_set(
         "choice",
         lua.create_function(
