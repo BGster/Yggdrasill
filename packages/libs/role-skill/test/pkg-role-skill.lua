@@ -945,10 +945,16 @@ run("pkg.role-skill.perf-o1-structural", function()
   end
 
   -- ① 1k actor（各 1 角色 + 6 技能）的载荷常驻内存
+  -- 解耦钉子（S22）：先预载 3000 条合成记录（≈3× 被测载荷）再取基线——宿主环境与
+  -- 注入资产（PokeRogue 面 952 技能定义 + 11 份资源）连同预载全部计入基线，判据
+  -- 只量被测 1000 条新记录的增量。若绝对口径回潮或注入漏进判据，读数跳到
+  -- ~4-5 MiB 即红：解耦是被钉住的显式语义，不是仪器巧合。（seed 的两参是
+  -- count,last：被测段 = 1000 条新记录，id 3001..4000，与预载不重叠。）
+  seed(3000, 1)
   collectgarbage("collect")
   collectgarbage("collect")
   local before_mem = collectgarbage("count")
-  seed(1000)
+  seed(4000, 3001)
   -- 读之前显式回收：`collectgarbage("count")` 含**未回收**的垃圾，而 seed 里每次
   -- `codec.encode` 都产一张临时表 —— 不回收时这个数随进程 GC 步进漂移（S8 实测同一
   -- 命令三次得 505.7 / 714.4 / 1098.4 KiB；普通 Lua 对照 live 面：老包 333.3 / 新包
@@ -957,7 +963,7 @@ run("pkg.role-skill.perf-o1-structural", function()
   collectgarbage("collect")
   local mem_kib = collectgarbage("count") - before_mem
   print(string.format("perf.role-skill.mem_1k_actors_kib=%.1f", mem_kib))
-  is_true(mem_kib <= 1024, "1k actor 载荷 ≤ 1 MiB，实得 " .. string.format("%.1f", mem_kib) .. " KiB")
+  is_true(mem_kib <= 1024, "1k actor 载荷增量 ≤ 1 MiB（差值口径：基线含宿主与注入资产），实得 " .. string.format("%.1f", mem_kib) .. " KiB")
 
   -- ② 三档读次数与墙钟
   local function measure(count)

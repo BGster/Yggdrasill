@@ -100,7 +100,7 @@
 | 包加载耗时 | `< 10ms` | 目标 `≤ 1ms`；**实测 0.913 ms**（清掉全部 `pkg.role_skill*` 后 `require` + `install({ codec })`，5 次取中位、批内三次取中位；S8 面三次取中位 0.870–0.968 ms——S8 多加载了一个 `window` 子模块）。打印 `perf.role-skill.load_ms` |
 | 实体按 id 查找 / 更新 | `O(1)` | **强约束**，用**结构证据**而不是只看墙钟：一次 `effective` 的 `kv.get` 次数在 N = 1 / 100 / 10k 三档**恒为 3**（记录 + 角色定义表 + 技能定义表），打印 `perf.role-skill.kv_ops_per_effective=3`；墙钟比 `t(10k)/t(1)` **实测 1.021×**（S8 面三次取中位 1.018–1.051），打印 `perf.role-skill.time_ratio_10k_over_1`。判据写 `≤ 1.55×`（S13：1.5 被 P-K r1 D-8 实测 1.50 摸到边界——同命令两连 1.46/1.50 一红一绿，余量按红值 +3.3%；1.2 会被 GC 脉冲打成假红，r1 在 [quest.md](quest.md) §5 的同类指标上实证过） |
 | 序列化吞吐（实体 / 秒，双向） | 附基准集与耗时 | **不适用**：`role` 前缀由 [codec.md](codec.md) §5 基准集覆盖 |
-| 10k 实体常驻内存 | 给出数字 | 1k actor（各 1 角色 + 6 技能）**实测 339.5 KiB**（目标 `≤ 1 MiB`，硬帽 `16 MiB`；`collectgarbage("count")` 差，**读前显式 `collect`**——见下注①）。打印 `perf.role-skill.mem_1k_actors_kib` |
+| 10k 实体常驻内存 | 给出数字 | 1k actor（各 1 角色 + 6 技能）**实测载荷增量 300.8 KiB**（目标 `≤ 1 MiB`，硬帽 `16 MiB`；**差值口径**：基线含宿主与注入资产，判据只量被测 1k 的增量——S22 预载 3000 条合成记录钉住该语义，见注①；`collectgarbage("count")` 差，**读前显式 `collect`**，三轮同值）。两面同值：仓内 selftest 面 / PokeRogue 注入面（952 技能定义计入基线）均 **300.8 KiB**，读数一致即解耦成立。打印 `perf.role-skill.mem_1k_actors_kib` |
 | 泄漏检测 | 导入导出 100 轮内存不增长 | 100 轮 `grant_skill → revoke_skill` 后：技能集回零、`role.index` 条目数不变、KV 键数不变，内存差 **0.144%**（≤ 1%；S8 面三次同值）。打印 `perf.role-skill.leak_delta_pct` |
 | 读面 / 实例容量 / 窗口（**S8 新增面**） | 与既有 `charge` **同带**（`≤ 1.0×` / `≤ 1.5×` / `≤ 2.5×` / `≤ 4.0×`） | 同一 actor、`charge` 作基准（余量 1e9 ⇒ 恒走写路）：`skills_of` **0.573×**、`skill_state` **0.567×**（判据 `≤ 1.0×`）、`set_capacity` **1.003×**（`≤ 1.5×`）、`window`(n=100) **2.209×**（`≤ 2.5×`）、`window_push` **3.641×**（`≤ 4.0×`；`recharge` 2.083× 作参考）。**结构证据**（与实体总数无关）：`skills_of`/`skill_state`/`window` 各 **1 次 `kv.get`**，`window_push` **1 get + 1 set**，`set_capacity` **2 get + 1 set**（与 `charge` 同形）。窗口载荷 100 条 = **901 B**（上限判据 `≤ 1 KiB`），`window_cap=100`。全部打印 `perf.role-skill.ratio_<面>` / `window_payload_bytes` / `window_cap` |
 
@@ -111,6 +111,8 @@
 - **`window` 每次读全载荷**：`window(id, label, n)` 是 1 次 `kv.get` + 整个 ring 的解码（100 条 ≈ 901 B）⇒ 同带 2.209×；k 个标签要 k 次读（DCSS 25 技能 ≈ 2.2 ms/回合，原型 89 µs × 25）。要收敛成 1 次读需要一条「整窗口」读面（`window_of`），那会多一份不变量与用例——本轮不做（交付报告 §不做）。
 
 注① **内存那行在 S8 改了读数口径**（改的是仪器，不是阈值）：`collectgarbage("count")` 含**未回收**的垃圾，而 `seed` 里每次 `codec.encode` 都产一张临时表，不回收时该数随进程 GC 步进漂移——S8 实测同一条命令三次得 **505.7 / 714.4 / 1098.4 KiB**，而普通 Lua 对照的 live 面（两次 `collect` 后）老包 **333.3** / 新包 **332.6 KiB**（差 0.2%，证明 S8 的三面不是内存回归）。所以判据在 `collectgarbage("count")` 之前加两次 `collectgarbage("collect")`，量的才是「载荷常驻」。
+
+注①（S22 补钉）**内存判据是差值口径**：取基线前先 `seed(3000, 1)` 预载 ≈3× 被测载荷，被测段 `seed(4000, 3001)` 铺 1000 条新记录（id 3001..4000，与预载不重叠）——宿主环境与注入资产（PokeRogue 面 952 技能定义 + 11 份 `ygg.data` 资源）连同预载全部计入基线，「注入不进判据」由此从仪器巧合升级为被钉住的显式语义（基线漏进判据时读数 ~4-5 MiB 即红）。钉后两面实测同值 **300.8 KiB**（各三轮同值）；钉前对照（S22 取证期 df64ef8）：仓内 339.5 / 注入面 331.6 KiB。
 
 ## 6. 用点计划
 
