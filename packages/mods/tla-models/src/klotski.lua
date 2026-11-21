@@ -303,8 +303,8 @@ function M.snapshot()
   for i = 1, #list do
     local min = i
     for j = i + 1, #list do
-      local a, b = list[i], list[j]
-      if b.ox < a.ox or (b.ox == a.ox and (b.oy < a.oy or (b.oy == a.oy and b.kind < a.kind))) then
+      local b, m = list[j], list[min]
+      if b.ox < m.ox or (b.ox == m.ox and (b.oy < m.oy or (b.oy == m.oy and b.kind < m.kind))) then
         min = j
       end
     end
