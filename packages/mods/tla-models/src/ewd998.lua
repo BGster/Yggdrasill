@@ -27,6 +27,10 @@ M.N = N
 
 local SCHEMA = "tla.node"
 
+--- reset 期刷新的节点 id 缓存（ids_by_node[i]；热路径免 KV 全扫——旧版
+--- id_of 每调用一次 entity.ids() 的 O(seq) 扫描，是 PERF 首测 1ms/拍的主因）。
+local ids_by_node = nil
+
 --- 沙箱方言：模块顶层纯；ygg 经 host() 单点取。
 local function host()
   return ygg
@@ -36,8 +40,11 @@ local function all_ids()
   return entity.ids(nil, SCHEMA)
 end
 
---- i 号节点的实体 id（reset 的 spawn 序 = i 升序，id 连续可推）。
+--- i 号节点的实体 id（reset 期缓存；O(1) 热路径）。
 local function id_of(i)
+  if ids_by_node ~= nil then
+    return ids_by_node[i]
+  end
   local ids = all_ids()
   for k = 1, #ids do
     if entity.get(ids[k], "id") == i then
@@ -233,12 +240,14 @@ end
 --- `reset()`：钉规范初态（全 active / 全 white / 计数与在途全 0 /
 --- token(0,0,black)；契约 §语义子集声明裁剪域）。
 function M.reset()
+  ids_by_node = nil
   local ids = all_ids()
   for i = 1, #ids do
     entity.destroy(ids[i])
   end
+  ids_by_node = {}
   for i = 0, N - 1 do
-    entity.spawn(SCHEMA, {
+    ids_by_node[i] = entity.spawn(SCHEMA, {
       id = i, active = true, color = "white", counter = 0, pending = 0,
     })
   end

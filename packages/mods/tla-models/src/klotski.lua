@@ -26,6 +26,10 @@ local SCHEMA = "tla.piece"
 local W, H = 4, 5
 M.W, M.H = W, H
 
+--- reset 期刷新的实体 id 缓存（同 gol/ewd998：实体集合只在 reset 变化，
+--- 热路径免 O(seq) KV 扫）。
+local ids_cache = nil
+
 --- kind → cells 偏移（源 Klotski 集合的件形归纳）。
 local KINDS = {
   v2 = { { 0, 0 }, { 0, 1 } },
@@ -53,9 +57,13 @@ local function in_pos(x, y)
   return x >= 0 and x < W and y >= 0 and y < H
 end
 
---- 全部件 id（升序）。
+--- 全部件 id（升序；热路径走 reset 期缓存）。
 local function piece_ids()
-  return entity.ids(nil, SCHEMA)
+  if ids_cache ~= nil then
+    return ids_cache
+  end
+  ids_cache = entity.ids(nil, SCHEMA)
+  return ids_cache
 end
 
 --- 一件的 cells（kind 偏移 + (ox,oy) 展开），数组 {{x,y},...}。
@@ -192,10 +200,12 @@ end
 
 --- `reset()`：钉源 Init 十件布局（旧件全拆重建）。
 function M.reset()
+  ids_cache = nil
   local ids = piece_ids()
   for i = 1, #ids do
     entity.destroy(ids[i])
   end
+  ids_cache = nil
   for i = 1, #INIT do
     entity.spawn(SCHEMA, { kind = INIT[i][1], ox = INIT[i][2], oy = INIT[i][3] })
   end
@@ -256,18 +266,50 @@ function M.step(action)
   return moved
 end
 
---- 启用动作枚举：每空格 × 每（界内且被占的）方向；stutter 恒在尾。
---- 输出升序（字符串序 = auto_tick 的确定选择域）。
+--- 启用动作枚举：每空格 × 每（界内且被占的）方向，且过 **free 全过滤**
+--- （源 update 逐字：m = cells−d 不出界 ∧ 不撞他件——缺此过滤会把
+--- 被挡候选列进选择域，auto 掷中即 BLOCKED，S26-4 测试期实捉）。
+--- stutter 恒在；输出升序（字符串序 = auto_tick 的确定选择域）。
 function M.auto_actions()
-  local occ = occupy_map(nil)
+  local ids = piece_ids()
+  local cells_of = {}
+  local occ = {}
+  for i = 1, #ids do
+    local cs = piece_cells(ids[i])
+    cells_of[ids[i]] = cs
+    for j = 1, #cs do
+      occ[cs[j][1] .. "," .. cs[j][2]] = ids[i]
+    end
+  end
   local out = { "stutter" }
   for y = 0, H - 1 do
     for x = 0, W - 1 do
       if not occ[x .. "," .. y] then
         for i = 1, #DIRS do
-          local sx, sy = x + DIRS[i][1], y + DIRS[i][2]
-          if in_pos(sx, sy) and occ[sx .. "," .. sy] then
-            out[#out + 1] = "e=" .. x .. "," .. y .. "|d=" .. DIRS[i][1] .. "," .. DIRS[i][2]
+          local dx, dy = DIRS[i][1], DIRS[i][2]
+          local sx, sy = x + dx, y + dy
+          local pid = nil
+          if in_pos(sx, sy) then
+            pid = occ[sx .. "," .. sy]
+          end
+          if pid ~= nil then
+            local free = true
+            local cs = cells_of[pid]
+            for k = 1, #cs do
+              local mx, my = cs[k][1] - dx, cs[k][2] - dy
+              if not in_pos(mx, my) then
+                free = false
+                break
+              end
+              local holder = occ[mx .. "," .. my]
+              if holder ~= nil and holder ~= pid then
+                free = false
+                break
+              end
+            end
+            if free then
+              out[#out + 1] = "e=" .. x .. "," .. y .. "|d=" .. dx .. "," .. dy
+            end
           end
         end
       end

@@ -25,14 +25,22 @@ M.N = N
 
 local SCHEMA = "tla.cell"
 
+--- reset 期刷新的实体 id 缓存（step/snapshot 热路径免扫；实体集合只在
+--- reset 变化，step 只写属性不动集合）。
+local ids_cache = nil
+
 --- 坐标 → 键（`x,y`），实体复用与查重的单一口径。
 local function coord_key(x, y)
   return x .. "," .. y
 end
 
---- 全部活实体 id（升序）。
+--- 全部活实体 id（升序；热路径走 reset 期缓存）。
 local function cell_ids()
-  return entity.ids(nil, SCHEMA)
+  if ids_cache ~= nil then
+    return ids_cache
+  end
+  ids_cache = entity.ids(nil, SCHEMA)
+  return ids_cache
 end
 
 -- ── 不变量（TypeOK 的运行期移植）────────────────────────────────────────────
@@ -40,9 +48,11 @@ end
 --- TypeOK：`grid \in [Pos -> BOOLEAN]`。实体面检查四条：
 --- ①格数恰 N²；②每个 (x,y) 是 1..N 的整数；③alive 是布尔；
 --- ④坐标无重复（同格双实体 = 非法态红例的检出点）。
+--- 本检查走**新鲜扫描**（不走 ids 缓存）：不变量面必须看见外部锻造
+--- （红例直接 spawn/set）；缓存只护 step/snapshot 热路径。
 local function check_type_ok()
   local violations = {}
-  local ids = cell_ids()
+  local ids = entity.ids(nil, SCHEMA)
   local seen = {}
   local n = #ids
   if n ~= N * N then
@@ -104,10 +114,12 @@ end
 --- `reset(opts?)`：钉规范初态。opts.alive = {"x,y", ...} 为开局的活格
 --- （缺省全灭）。旧实体全拆重建（实体集合换血，与 shapez reset 同法）。
 function M.reset(opts)
+  ids_cache = nil
   local ids = cell_ids()
   for i = 1, #ids do
     entity.destroy(ids[i])
   end
+  ids_cache = nil
   local alive = {}
   if opts ~= nil and type(opts.alive) == "table" then
     for i = 1, #opts.alive do
@@ -123,29 +135,37 @@ end
 
 -- ── 规则（源 Next 逐字对齐）────────────────────────────────────────────────
 
---- `sc(p)`：出界或死格 = 0，否则 1（源 CASE 四分支合流）。
-local function sc(x, y)
+--- `sc(p)`：出界或死格 = 0，否则 1（源 CASE 四分支合流）；grid = 一次读入
+--- 的整表快照（grid[(y-1)*N+x] = true/false），热路径免逐邻实体扫描。
+local function sc(grid, x, y)
   if x < 1 or y < 1 or x > N or y > N then
     return 0
   end
-  return M.alive_at(x, y) and 1 or 0
+  return (grid[(y - 1) * N + x] == true) and 1 or 0
 end
 
 --- `score(p)`：8 邻域 sc 之和（无 math/table 库，直排 8 项）。
-local function score(x, y)
-  return sc(x - 1, y - 1) + sc(x, y - 1) + sc(x + 1, y - 1)
-    + sc(x - 1, y) + sc(x + 1, y)
-    + sc(x - 1, y + 1) + sc(x, y + 1) + sc(x + 1, y + 1)
+local function score(grid, x, y)
+  return sc(grid, x - 1, y - 1) + sc(grid, x, y - 1) + sc(grid, x + 1, y - 1)
+    + sc(grid, x - 1, y) + sc(grid, x + 1, y)
+    + sc(grid, x - 1, y + 1) + sc(grid, x, y + 1) + sc(grid, x + 1, y + 1)
 end
 
---- 下一代活格键集（先整表求值再落盘——原 Next 的 grid' 是单步全量替换，
---- 逐格原地写会串代）。
+--- 下一代活格键集：整表**一次**读入（16 实体各 1 次 attrs 批读），表上求值，
+--- 再落盘（源 Next 的 grid' 是单步全量替换，逐格原地写会串代）。
 local function next_generation()
+  local ids = cell_ids()
+  local grid = {}
+  for i = 1, #ids do
+    local attrs = entity.attrs(ids[i])
+    grid[(attrs.y - 1) * N + attrs.x] = attrs.alive == true
+  end
   local alive_next = {}
   for y = 1, N do
     for x = 1, N do
-      local s = score(x, y)
-      if (M.alive_at(x, y) and (s == 2 or s == 3)) or (not M.alive_at(x, y) and s == 3) then
+      local here = grid[(y - 1) * N + x] == true
+      local s = score(grid, x, y)
+      if (here and (s == 2 or s == 3)) or (not here and s == 3) then
         alive_next[coord_key(x, y)] = true
       end
     end
@@ -176,16 +196,17 @@ function M.auto_actions()
   return { "stutter", "step" }
 end
 
---- `snapshot()`：规范快照（cells 按 y,x 升序的数组；键名固定 = 哈希 KAT 面）。
+--- `snapshot()`：规范快照（cells 按 y,x 升序的数组；一次 attrs 批读/实体，
+--- 键名固定 = 哈希 KAT 面）。
 function M.snapshot()
   local ids = cell_ids()
   local by_coord = {}
   for i = 1, #ids do
-    local id = ids[i]
-    by_coord[coord_key(entity.get(id, "y"), entity.get(id, "x"))] = {
-      x = entity.get(id, "x"),
-      y = entity.get(id, "y"),
-      alive = entity.get(id, "alive") == true,
+    local attrs = entity.attrs(ids[i])
+    by_coord[coord_key(attrs.y, attrs.x)] = {
+      x = attrs.x,
+      y = attrs.y,
+      alive = attrs.alive == true,
     }
   end
   local cells = {}
