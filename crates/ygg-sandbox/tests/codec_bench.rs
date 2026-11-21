@@ -218,6 +218,23 @@ fn codec_native_before_after_on_the_same_surface() {
         decode_native.call::<mlua::Value>(()).expect("原生 decode");
         decode_native_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
     }
+    // sha256（S19 第三键）：同一份 bundle 文本的摘要，同面同进程。
+    let sha256_native: mlua::Function = lua
+        .load("local codec = require('pkg.codec'); return function() return codec.sha256(TEXT) end")
+        .eval()
+        .expect("sha256 闭包（原生）");
+    let mut sha256_native_samples = [0.0f64; 3];
+    let mut sha256_native_hex = String::new();
+    for round in 0..3 {
+        let began = Instant::now();
+        sha256_native_hex = sha256_native.call::<String>(()).expect("原生 sha256");
+        sha256_native_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
+    }
+    assert_eq!(
+        sha256_native_hex.len(),
+        64,
+        "原生 sha256 必须返回 64 位 hex"
+    );
 
     // ── before：把面藏起来（Lua 径）────────────────────────────────────────
     let switch_to_lua = r#"
@@ -255,6 +272,17 @@ fn codec_native_before_after_on_the_same_surface() {
         decode_lua.call::<mlua::Value>(()).expect("Lua decode");
         decode_lua_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
     }
+    let sha256_lua: mlua::Function = lua
+        .load("local codec = require('pkg.codec'); return function() return codec.sha256(TEXT) end")
+        .eval()
+        .expect("sha256 闭包（lua）");
+    let mut sha256_lua_samples = [0.0f64; 3];
+    let mut sha256_lua_hex = String::new();
+    for round in 0..3 {
+        let began = Instant::now();
+        sha256_lua_hex = sha256_lua.call::<String>(()).expect("Lua sha256");
+        sha256_lua_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
+    }
 
     // ── 字节相等（before/after 必须同一份字节，否则「快」没有意义）──────────
     let native_bytes: mlua::LuaString = lua
@@ -273,6 +301,11 @@ fn codec_native_before_after_on_the_same_surface() {
         "原生径与 Lua 径的字节必须相等（同面 before/after 的前提）"
     );
     assert_eq!(native_bytes.as_bytes().to_vec(), text_bytes);
+    // sha256 双径同值（字节相等在同一面上顺带断言一次）。
+    assert_eq!(
+        sha256_native_hex, sha256_lua_hex,
+        "原生与 Lua 径的摘要必须逐字节相等"
+    );
 
     let encode_native_ms = median3(encode_native_samples);
     let encode_lua_ms = median3(encode_lua_samples);
@@ -283,6 +316,10 @@ fn codec_native_before_after_on_the_same_surface() {
     let encode_lua_mbps = mib_per_second(size, encode_lua_ms);
     let decode_native_mbps = mib_per_second(size, decode_native_ms);
     let decode_lua_mbps = mib_per_second(size, decode_lua_ms);
+    let sha256_native_ms = median3(sha256_native_samples);
+    let sha256_lua_ms = median3(sha256_lua_samples);
+    let sha256_native_mbps = mib_per_second(size, sha256_native_ms);
+    let sha256_lua_mbps = mib_per_second(size, sha256_lua_ms);
 
     println!(
         "PERF codec_lua.encode_mbps={encode_lua_mbps:.2} ({encode_lua_ms:.1} ms; samples {:.1}/{:.1}/{:.1})",
@@ -299,6 +336,18 @@ fn codec_native_before_after_on_the_same_surface() {
         encode_native_mbps / encode_lua_mbps,
         decode_native_mbps / decode_lua_mbps
     );
+    println!(
+        "PERF codec_lua.sha256_mbps={sha256_lua_mbps:.2} ({sha256_lua_ms:.1} ms; samples {:.1}/{:.1}/{:.1})",
+        sha256_lua_samples[0], sha256_lua_samples[1], sha256_lua_samples[2]
+    );
+    println!(
+        "PERF codec_native.sha256_mbps={sha256_native_mbps:.2} ({sha256_native_ms:.1} ms; samples {:.1}/{:.1}/{:.1})",
+        sha256_native_samples[0], sha256_native_samples[1], sha256_native_samples[2]
+    );
+    println!(
+        "PERF codec.sha256_speedup={:.2}x",
+        sha256_native_mbps / sha256_lua_mbps
+    );
 
     assert!(
         encode_native_mbps >= TARGET_MIB_PER_SECOND,
@@ -307,5 +356,9 @@ fn codec_native_before_after_on_the_same_surface() {
     assert!(
         decode_native_mbps >= TARGET_MIB_PER_SECOND,
         "原生 decode {decode_native_mbps:.2} MiB/s < {TARGET_MIB_PER_SECOND}（Lua 径 {decode_lua_mbps:.2}）"
+    );
+    assert!(
+        sha256_native_mbps >= TARGET_MIB_PER_SECOND,
+        "原生 sha256 {sha256_native_mbps:.2} MiB/s < {TARGET_MIB_PER_SECOND}（Lua 径 {sha256_lua_mbps:.2}）"
     );
 }

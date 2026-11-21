@@ -166,10 +166,11 @@ function M.write(path, bundle)
     fail(E_TYPE, "ygg.fs.write 未返回结果表")
   end
   -- 写入完整性只校**字节数**（截断 / 半写）。内容面不在这里重哈希：宿主 `fs.write`
-  -- 自己算 `sha256(content)` 并挂在 VFS 条目上（`ygg.fs.stat` 可查），而本包的纯 Lua
-  -- sha256 是 ~0.8 MB/s（S19 才下沉）——每写一遍就再哈希整份文本等于把存档耗时翻倍
-  -- （实测 66 KiB=90 ms、上限 256 KiB=285 ms）。「档没被改过」的证据仍由 `read` 的
-  -- 强制 checksum（I4）在越信任边界时复核；S16 前的互校对象是两份不同字节，永假。
+  -- 自己算 `sha256(content)` 并挂在 VFS 条目上（`ygg.fs.stat` 可查），而本包的 sha256
+  -- 自 S19 起经 `ygg.codec.sha256` 原生化（无面宿主落回纯 Lua ~0.8 MB/s）——每写一遍
+  -- 就再哈希整份文本仍是一次冗余全文遍历（纯 Lua 时代实测 66 KiB=90 ms、上限
+  -- 256 KiB=285 ms）。「档没被改过」的证据仍由 `read` 的强制 checksum（I4）在越
+  -- 信任边界时复核；S16 前的互校对象是两份不同字节，永假。
   if type(written.bytes) == "number" and written.bytes ~= #text then
     fail(E_CHECKSUM, "写入字节数不符（宿主 " .. written.bytes .. " / 期望 " .. #text .. "）")
   end

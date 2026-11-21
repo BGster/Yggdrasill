@@ -30,7 +30,7 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 | `ygg.fsm.*` / `ygg.narrative.*` | 内嵌 Lua 标准库辅助，用于扁平有限状态机（`fsm.define`、`fsm.current`、`fsm.on_event`）与故事节点（`narrative.node`、`narrative["goto"]`；点形式 `narrative.goto` 是 Lua 5.4 语法错误，由 `YGG-R3` 捕获）。 | `define` / `node` / `goto` **模块顶层禁用** |
 | `ygg.fs.{write,read,stat,list}` | 可选宿主注入的两根文件面：`artifacts/<file>`（内存 VFS，dispatch 级回滚）与 `mounts/<name>/<rel>`（挂载桥，写穿磁盘）。`write(path, content)` 返回 `{ path, bytes, sha256 }`。两根的文法、尺寸帽、返回形状与错误码见 [§3.1.2](#312-mounts-挂载面宿主注入的盘上文件桥)。 | 变更调用 **模块顶层禁用** |
 | `ygg.sim.*` | 可选宿主注入的**原生模拟内核面**（Tier 1）：`step` / `hash` / `snapshot` / `restore` / `spawn_batch` / `despawn_batch` / `insert_batch` / `status` / `trace` / `replay`——恰好 10 个键，**一个逐实体 getter 都没有**（批式铁律：bytes/数组进出、单帧单调用）。全部字节帧带尾 digest，坏帧先拒后改。未挂载时**每个函数**抛 `YGG-SIM-UNMOUNTED`（不是 `nil` / `false`）。形状、`16 位小写 hex` 与错误码见 [§3.1.3](#313-sim-模拟内核面宿主注入)。 | 查询允许；变更调用 **模块顶层禁用**（静态 `YGG-MOD-EFFECT` 规则与宿主激活同批接，排期 S1；本行运行期面已注册，未挂载即拒） |
-| `ygg.codec.*` | 可选的**确定性 JSON 编解码面**（Tier 2 `pkg.codec` 的原生加速面）：`encode(value)` → 确定性 JSON 文本、`decode(text)` → Lua 值——恰好 2 个键，**一个逐节点 getter 都没有**（批式铁律：一个值整包进出，一次调用一次穿越）。产出字节与 `pkg.codec` 的 Lua 实现**逐字节相等**；值域拒绍与带元方法的表一律 `YGG-CODEC-UNSUPPORTED`（调用方据此回退 Lua 路径）。**未注入时 `ygg.codec` 整表缺席**（本面无状态，缺席即「走 Lua 路径」，不是错误态）。形状、字节过面与两码见 [§3.1.4](#314-codec-确定性-json-编解码面宿主注入)。 | 纯 |
+| `ygg.codec.*` | 可选的**确定性 JSON 编解码面**（Tier 2 `pkg.codec` 的原生加速面）：`encode(value)` → 确定性 JSON 文本、`decode(text)` → Lua 值、`sha256(bytes)` → 64 位小写 hex（S19 起）——恰好 3 个键，**一个逐节点 getter 都没有**（批式铁律：一个值整包进出，一次调用一次穿越）。产出字节与 `pkg.codec` 的 Lua 实现**逐字节相等**；值域拒绍与带元方法的表一律 `YGG-CODEC-UNSUPPORTED`（调用方据此回退 Lua 路径）。**未注入时 `ygg.codec` 整表缺席**（本面无状态，缺席即「走 Lua 路径」，不是错误态）。形状、字节过面与两码见 [§3.1.4](#314-codec-确定性-json-编解码面宿主注入)。 | 纯 |
 | `ygg.tool.call(tool_id, args_table)` | 可选同步宿主工具桥。挂载时内联执行白名单工具并返回 `{ ok = true, data = { ... } }` 或 `{ ok = false, error = "..." }`。未挂载时返回 `{ ok = false, unmounted = true }`，使 Mod 回退到异步 `meta.tool_calls`。 | **模块顶层禁用** |
 
 **`require` 面（受控装载器，无 `package` 全局）**：`require(name)` 只查宿主注入的**已登记模块表**（`ModuleSet`），不做任何路径拼接；名字是点分标识符（各段字符集 `[A-Za-z0-9_]`），未登记的名字在装载前即可读拒绝。表里有**两个命名空间**：
@@ -185,12 +185,15 @@ despawn_batch: u32 n | u64 ids[n]
 
 `ygg.codec.*` 是 Tier 2 [packages/codec.md](../packages/codec.md) §4.1「下沉边界」的原生加速面：包的 Lua 实现仍是**规范执行体**，本面是它的**符合实现**——任一合法输入的产出字节必须与 Lua 路径**逐字节相等**（差分门禁见包契约 §4.1）。注入点是 `host_api::install`（`crates/ygg-sandbox/src/host_api/mod.rs` 调用 `codec_face::install`），**没有实例、没有 CLI 激活**：本面无状态，不需要 `egg.rs` 那一层宿主激活（与 `ygg.sim.*` 的 `set_sim` 注入面区别就在这里）。
 
-**两个键，一个逐节点 getter 都没有**（批式铁律 ②：mlua 边界穿越 ~µs，逐节点访问是负收益）：
+**三个键，一个逐节点 getter 都没有**（批式铁律 ②：mlua 边界穿越 ~µs，逐节点访问是负收益）：
 
 | 键 | 签名 | 返回 | 副作用 |
 | --- | --- | --- | --- |
 | `encode` | `ygg.codec.encode(value)` | string（确定性 JSON 文本，原始字节） | 纯 |
 | `decode` | `ygg.codec.decode(text)` | Lua 值（与 `pkg.codec.decode` 同构） | 纯 |
+| `sha256`（S19） | `ygg.codec.sha256(bytes)` | string（64 位小写 hex，与 `pkg.codec.sha256` 逐字对齐） | 纯 |
+
+**`sha256` 是按键独立的第三键（S19）**：摘要形状 = 字节串进（原始字节，不要求 UTF-8）、64 位小写 hex 出——不用「返回 raw 32 字节」的反方案，那会让包侧还得用 Lua 补 hex，热路径白下沉。整串进出，不做 streaming / incremental。实现复用 `sha2`（RustCrypto，`ygg-store` 的 `artifact.rs::sha256_hex` 同 crate 先例），hex 编码复用状态哈希的同一编码器（crate 内单一 hex 源）。包侧对它的退化探测**不与 encode/decode 的双键门耦合**：`face.sha256` 为 function 才走原生，旧宿主只有两键时 sha256 自动落回包侧纯 Lua 实现（`runtime.lua` 的按键独立探测，R5）。
 
 **字节过面不要求 UTF-8**：`encode` 返回、`decode` 收的都是 Lua string 的**原始字节**（Rust 侧 `mlua::String` / `create_string(&[u8])`）。按 `String` 收会让含非 UTF-8 字节的合法载荷在参数转换处就失败——把「编码问题」降级成「参数类型问题」，与 §3.1.3 的字节帧同一条纪律。
 
@@ -202,6 +205,6 @@ despawn_batch: u32 n | u64 ids[n]
 
 **为什么带元方法的表不回退以外的处理**：Lua 侧的 `pairs` 会走 `__pairs`、`value[key]` 会穿 `__index`（本机 Lua 5.4 实测），而复刻这两条意味着「编码过程中执行 Lua 代码」——纯函数就变成可重入、可报错、可侧效。整值回退是语义正确且契约允许（包契约 I7：带元表的表可编码，元表不进字节）的唯一低成本选择。
 
-**判据**：① 阻断——把本面扩成逐节点 getter（N 次穿越），或让 `UNSUPPORTED` 静默返回半截字节，或让面自成一个「规范」（不复刻包的四条序规则）；② 症状——大对象编码出现 N 次穿越；带 `__pairs` 的表编码结果与 Lua 路径不同；同一输入两次调用的字节不同；③ 确认——`cargo test -p ygg-sandbox --test codec_face`（键集闭集 = 2 / 缺席即走 Lua / 元方法回退 / 差分字节相等）与 `--test codec_bench`（同面 before/after）与包侧 `pkg-selftest` 的 155/0。
+**判据**：① 阻断——把本面扩成逐节点 getter（N 次穿越），或让 `UNSUPPORTED` 静默返回半截字节，或让面自成一个「规范」（不复刻包的四条序规则）；② 症状——大对象编码出现 N 次穿越；带 `__pairs` 的表编码结果与 Lua 路径不同；同一输入两次调用的字节不同；③ 确认——`cargo test -p ygg-sandbox --test codec_face`（键集闭集 = 3 / 缺席即走 Lua / 元方法回退 / 差分字节相等 / sha256 双径与 KAT / 半面退化）与 `--test codec_bench`（同面 before/after）与包侧 `pkg-selftest` 的 155/0。
 
 **原生加速面的模块化拆分（S-25 批十）**：`codec_face` 由单文件 1212 行（800 行上限的 1.5×）拆为 `codec_face/` 目录 4 文件（mod.rs 两码与错误契约 + install 装配，number 数值文本，encoder 编码产出含转义，parser 解析）。这是**纯搬移**，不是重写：两码、错误契约、五个生产区块与 397 行内嵌 15 测逐字节原样随域迁移，外部路径零变化（`ygg_sandbox::codec_face::*` 消费点逐一 grep 复验，`pub mod codec_face;` 未动）。行为不变量由门禁计数守恒背书：workspace 581、egg 158、--lib 112（测试名剥前缀集合 diff=∅）、差分门禁 7、pkg selftest 199、agent-seed 79、superagent 183 与 Saltline digest `727b0ca2` 逐字节相等；clippy 警告集合 before/after 相等（既有 2 债务随域迁不修）。拆分动机与批三同源：单文件超限使六段边界不可读——「面 = 契约错误与安装（mod）+ 数值文本（number）+ 编码产出含转义（encoder）+ 解析（parser）」的形状与本节的区块叙述一一对应。

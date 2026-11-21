@@ -37,7 +37,10 @@ pub fn state_hash(facade: &KernelFacade) -> Result<String, SnapshotError> {
 }
 
 /// SHA-256 摘要的小写十六进制编码（零依赖面：不引入 hex crate）。
-fn hex_sha256(bytes: &[u8]) -> String {
+///
+/// 两个消费者：状态哈希（[`state_hash`]）与 `ygg.codec.sha256` 原生键
+/// （`codec_face/digest.rs`，S19 起）——crate 内单一 hex 源。
+pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {
