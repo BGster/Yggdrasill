@@ -9,7 +9,7 @@
 
 - **不定义属性语义**：生命归零算死、攻击力怎么算、抗性怎么叠加——是 mod 的规则。
 - **不落盘**：持久化格式归 [codec.md](codec.md)；本包只声明 KV 前缀与形状。
-- **不复制内核实体面**：内核实有 **8 面**——`spawn` / `get_attribute` / `set_attribute` / `add_tag` / `remove_tag` / `has_tag` 六面，加 S9 交付的**控制面两键** `exists(id)` / `destroy(id)`（`crates/ygg-sandbox/src/host_api/` 的 `entity_table` `raw_set` 这八次；`crates/ygg-core/src/entity.rs` 的 `EntityStore` 里 `remove_attribute` / `iter` 仍在 store 层、**不在宿主面上**——它们没有消费者）。本包在它之上加 **schema 校验、生命周期事件、引用槽**，不实现第二套 id 分配，不存第二份属性，**也不镜像存活位**。
+- **不复制内核实体面**：内核实有 **8 面**——`spawn` / `get_attribute` / `set_attribute` / `add_tag` / `remove_tag` / `has_tag` 六面，加 S9 交付的**控制面两键** `exists(id)` / `destroy(id)`（`crates/ygg-sandbox/src/host_api/` 的 `entity_table` `raw_set` 这八次；`crates/ygg-core/src/entity/` 的 `EntityStore` 里 `remove_attribute` / `iter` 仍在 store 层、**不在宿主面上**——它们没有消费者）。本包在它之上加 **schema 校验、生命周期事件、引用槽**，不实现第二套 id 分配，不存第二份属性，**也不镜像存活位**。
 - **`destroy` 是内核真删，不是墓碑降级**（S9）：`ygg.entity.destroy(id)` → `EntityStore::remove`，属性 + tag + 记录**一并回收**；分配水位（`next_id`）不动 ⇒ I1「id 永不复用」是**分配**性质，与本体是否永存无关。存活真源因此只有一个 = 内核存在性（I5），本包不再写任何 `alive` 位。**旧档边界（不兼容，不写迁移）**：本改动前产生的、含 `pkg.entity` 状态的存档里，死亡实体的内核记录还在，升级后会被读成存活——须重开一局；一次性 purge 登记在 §8（S9-b）。
 - **不提供查询语言、不建继承树**：没有 `where` 式 DSL，按 tag / schema 的集合查询是唯一查询面；类型 = 已注册的属性 schema，类型差异是数据。
 
@@ -151,6 +151,8 @@ P0 期这一列是**目标值**；P2 首实现填实测值，偏差回写本表�
 
 **判据（①②③）。** ① 阻断——在 mod 里自己实现 id 分配或属性存储；在包里写属性语义（「生命归零算死」）；把表的形状偷偷塞进 `attrs`。② 症状——两个游戏各有一份 `next_id`；同一属性在两个游戏里类型不同导致导入失败；`destroy` 之后引用槽被包悄悄改写。③ 确认——本文件存在且被 [../README.md](../README.md) 索引；`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-entity` 的 `cases passed=` 为 **29**（26 条 `pkg.entity.*` 行为用例 + `pkg-entity-paths` 的 2 条 + S9 的 `pkg.entity.destroy-reclaims-kernel-record`；S-24 的 `entity.query` 是其中 8 条；perf 文件按 file 级断言计入 `ok=`、不进这个计数）；§5 七个指标有数字，异常则 file 级断言先红。
 
+**entity 内核模块的模块化拆分（S-25 批五）**：`entity` 由单文件 1928 行（800 行上限的 2.4×）拆为 `entity/` 目录 7 文件——mod.rs 装配（模块文档 + `EntityStore` 结构体与手写 `Clone`/`PartialEq`/`Default` + `AttrIndex` + cfg(test) `index_bucket` 观察面 + 5 个 `mod` 声明 + 全量 `pub use` 20 个 pub 符号）+ value（值域）/ store（Entity/StateError/S9 变更面）/ compare（比较矩阵）/ selector（S24 语义类型）/ index（select/apply_order+序机器+IndexKey+probe 内件+执行块）五个子系统文件 + tests.rs（26 测整块随迁）。**载荷决策（结构性）**：字段可见性只向下流动——`indices/entities/next_id/revision` 被 S9 面、执行块、index_bucket 三处触达，`EntityStore` 结构体+手写 trait impl 必须住 mod.rs（=entity 根），`AttrIndex` 是 `indices` 字段类型同住；跨面件归位装配面（编译器终审）：`impl IsTest`（selector 面 `holds` 调用）、`index_entity`（store 写面）、`ensure_index`（tests 面）三件随迁 mod.rs——子模块可见父模块私有项，零 `pub(super)`/`pub(crate)` 放宽（批四 json_kind 同法）；`select`/`apply_order` 随执行块入 index.rs 是唯一保零放宽的拓扑（归 store 或 selector 均致 `pub(super)` 或 E0624）。这是**纯搬移**，不是重写：非空行多集守恒（原 1789 + 白名单净增 38 = 新 1826，白名单=各面 use 头+装配+包装），`ygg_core::entity::{…}` 平铺 pub 路径经 re-export 逐字节不变（ygg-sandbox 9 符号、ygg-core 内部 6 符号零改动），26 测逐名守恒 + 129 条 assert 规范化逐条相等（tests.rs dedent 后 rustfmt 重排 4 条 assert 换行，零逻辑变更）。行为不变量由门禁计数守恒背书：workspace 581、egg 158、pkg selftest 199、agent-seed 79、superagent 183，五门禁 before/after 逐项相等（before 在 ed7f820 复跑取证）。拆分动机只有一个：单文件超限使子系统边界不可读——拆分后「entity = 状态根（mod.rs）+ 值域/变更面/比较/选择器/索引执行五面 + 测试」的形状与 §2/§4/§9 的分段叙述一一对应（批一 egg.rs、批二 serve、批三 host_api、批四 host_contract 同法）。
+
 ## 9. 下沉边界（P-K A1；逐函数去向与硬判据）
 
 **为何有这一节。** 热路径下沉改变了「哪个函数跑在哪层」，而 API 面、事件与墓碑语义必须**一字不变**（I6）——这条约束只管**下沉轮**；S9 的 `destroy` 语义修订是另一件事（见 I5 / 9.3），改了就得改契约，不是静默改行为。这张表是二者的接缝：每个导出函数的去向都有理由与数字，改包前先看它，而不是「顺手也把它下沉了」。
@@ -255,7 +257,7 @@ n=1 时这笔账**必然亏**；n 大时（`ids` 的 10⁴ 个 id）本该赢，
 | `order` | `field` / `field.asc` / `field.desc`；值同 ⇒ id 升序兜底（asc/desc 都不反转）；缺属性排最后 |
 | `schema` | **包面专有**（内核面不认识它，见下文「包面加什么」） |
 
-**五条语义裁断**（都在 core 的 `crates/ygg-core/src/entity.rs`，无 VM 可单测）：
+**五条语义裁断**（都在 core 的 `crates/ygg-core/src/entity/`，无 VM 可单测）：
 
 1. **`is` 管存在性、其余 op 对缺属性一律假，且 `not.` 不翻**——否则 `neq` 与 `not.eq` 会分叉出两套缺失语义。
 2. **跨族比较是假，不是错**（含 `neq`）：扫描中报错会产出半截结果。整浮同族：`eq 2` 命中 `2.0`。
@@ -271,7 +273,7 @@ n=1 时这笔账**必然亏**；n 大时（`ids` 的 10⁴ 个 id）本该赢，
 
 **确定性（by construction，五条）**：① `CompareOp` 里**没有算术臂**——浮点不可结合性无从发生；② id 序遍历（`BTreeMap::values()`，乱序 `insert` 也不改）；③ 浮点只 `partial_cmp` 比较（`-0.0` 已在写入口规范化），不参与运算；④ 单线程（`Rc ⇒ !Send` + mlua 未启 `send`，且整次查询是**一个** mlua 调用，宿主无法中途插入第二个）；⑤ 索引 (值, id) 序 + 增量 ≡ 重建。**不做运行期断言**：负向 trait bound 无法表达，写了就是不可证伪的测试。
 
-**载体选择（§1.7 的能力出口）**：语义（选择器 / 比较矩阵 / 序遍历 / 走索引判定）全在 `crates/ygg-core/src/entity.rs`——无 VM 可单测，语义不随宿主重构漂；宿主 `crates/ygg-sandbox/src/host_api/` 只做**文法解码 + 两阶段材质化**（借用纪律同 `attr_fetch`：阶段 1 持借用零 Lua 调用，阶段 2 只建表，`count` 复用长度）。错误码**不新增族**：文法/形状错 `YGG-ENTITY-FRAME`、值域错 `YGG-ENTITY-VALUE`。
+**载体选择（§1.7 的能力出口）**：语义（选择器 / 比较矩阵 / 序遍历 / 走索引判定）全在 `crates/ygg-core/src/entity/`——无 VM 可单测，语义不随宿主重构漂；宿主 `crates/ygg-sandbox/src/host_api/` 只做**文法解码 + 两阶段材质化**（借用纪律同 `attr_fetch`：阶段 1 持借用零 Lua 调用，阶段 2 只建表，`count` 复用长度）。错误码**不新增族**：文法/形状错 `YGG-ENTITY-FRAME`、值域错 `YGG-ENTITY-VALUE`。
 
 **包面加什么、不加什么**（判据 = 「包能加上一样内核没有的东西」）：加**两样**——`schema` 门（`YGG-PKG-ENTITY-SCHEMA`；schema 是 KV 里的 `rec.<id>.schema`，**不是内核状态**，放进内核面 = 第二个 schema 注册表，违 I3）与未声明键门 / 结构态类型门（`YGG-PKG-ENTITY-ATTR`，复用 `value_ok`）。一句话：**包面把类型错变成错误，内核面把类型错变成假**。三档成本：
 
