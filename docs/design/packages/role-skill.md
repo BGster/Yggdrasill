@@ -26,7 +26,7 @@
 
 `attrs_spec` = `{ <attr 名> = <number 加成> }`；`requires` = `{ tags = { … }, role = "…" }`（只校验**引用面**能否建立）。
 
-**载荷一律是字符串（D1）。** 宿主 `ygg.kv` 只收四个标量（`crates/ygg-core/src/entity.rs` 的 `Value`；表会被 `value_from_lua` 拒成 `unsupported payload type`），所以每个键的值都是 `codec.encode` 的确定性 JSON 文本，读回时 `codec.decode`。全部 KV 流量收口在 `store.lua` 一个模块里（换编码口径只改一处）。
+**载荷一律是字符串（D1）。** 宿主 `ygg.kv` 只收四个标量（`crates/ygg-core/src/entity/` 的 `Value`；表会被 `value_from_lua` 拒成 `unsupported payload type`），所以每个键的值都是 `codec.encode` 的确定性 JSON 文本，读回时 `codec.decode`。全部 KV 流量收口在 `store.lua` 一个模块里（换编码口径只改一处）。
 
 **索引是数组而不是集合（D2）。** `{ [id] = true }` 存成 JSON 会变成对象键，读回来所有整数键都是字符串（`"1" ~= 1`），成员判定随即失效；数组保留整数，写入时保持升序 ⇒ 字节稳定。**记录不可删**：KV 没有 delete、也没有遍历面（[../kernel/state-surface.md](../kernel/state-surface.md) §2.8.1 是同一事实），所以 `revoke` / `revoke_skill` 只清引用面，既不删记录也不从 `role.index` 摘除——`role.index` 因此是**只增**的。
 
