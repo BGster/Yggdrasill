@@ -28,6 +28,7 @@
 #### 2.11.2 Mod 不自己做 IO，也不重复应用结果
 
 - **Mod 从不自己做 IO**：无进程、无网络、无直接文件系统调用。它只发布请求（`meta.tool_calls`）、应用结果（`tool.result`）；唯一可碰的文件面是宿主中介的 `ygg.fs` VFS（run 相对、路径夹紧），`vfs.write` 与 artifact 探针共用同一份有界台账。宿主无 `ygg.fs` 时 `vfs.write` 记同一行台账并叙述 `[VFS LEDGER ONLY]`，不得声称已写盘——两种宿主形态下 KV 与叙述必须一致。
+- **挂载桥激活语义（S-1，2026-11-21）**：`ygg.fs.*` 的 `mounts/` 面由宿主在 CLI 两内核构造点（开局 / 热载）装配（`activate_host_faces`：现读 `pack.json` 的 `mounts` 段 → `MountStore::attach` → `set_mount_fs`，用户授权账 charter 2026-11-21「允许」）——真 CLI 里声明了 mounts 的 mod 写盘即写穿 `<run>/mounts/`（审计落 `fs.jsonl`），不再 `YGG-FS-UNMOUNTED`；热载重 attach 走三态幂等，失败沿用旧内核。未接桥的宿主形态（库内裸 `KernelFacade`）仍统一报 `YGG-FS-UNMOUNTED`：码在首段，`nil` 与「文件不存在」不可分辨的静默降级被禁止。
 - **结果幂等**：携带已应用过 `external_id` 的 `tool.result` 是**重放**——叙述 `[REPLAY:TOOL]`，不改任何状态，`pending` 计数绝不重复扣减；同一 call 收到**不同的终态**是冲突，不是覆盖，必须显式报冲突而非静默采用后到的那个。
 - **其余不变量已各有权威，本节不复制**：双层白名单与凭据见本节上文；receipt / reactive 职责边界、探针失败是警告、机证与人证同级、截断必须诚实见 [state-machine.md](../kernel/state-machine.md) §2.9.2；`k=v;` 输出形状与结算 cross-check 接入点见 [harness-tools.md](../host/harness-tools.md) §2、§3.2。
 

@@ -84,7 +84,7 @@
 
 **noise/DSP/几何行不在首个需求范围内**：该行是契约承诺的**后续面**，验收归 Goal 排期总表（建议 S3：各面 buffer 吞吐数字 + 八包不回退）。首个需求只交付 `step / snapshot / restore / hash / bulk ops / replay`；读到本行时不得据此宣称 noise 面已存在。
 
-宿主注册范式与 fs 桥同款：库侧 `driver.rs` 注入（可改），CLI 激活触点在 `egg.rs`（宿主面——**改动走用户授权账，与 U1 六行同笔**）。
+宿主注册范式与 fs 桥同款：库侧 `driver.rs` 注入（可改），CLI 激活触点在 `egg.rs`（宿主面——**改动走用户授权账，与 U1 六行同笔**）。**激活触点已接（S-1，2026-11-21，charter GOAL AUTH「允许」）**：开局与热载两构造点调 `activate_host_faces`（`Sim::new(固定常量种子 20261121)` → `set_sim`；失败语义 = 开局 fail-closed、热载沿用旧内核），`ygg.sim.*` 十键在真 CLI 已可用；确定性种子来自固定常量，per-run seed 属后续需求。
 
 ## 5. 性能预算与验收
 

@@ -2435,6 +2435,7 @@ end)
             port: None,
             panel_dir: None,
             poll_ms: None,
+            packages: None,
         };
         let mut session = crate::Session::open(&args).expect("第二写者开局");
         let receipt = session.dispatch_event(event, payload);
