@@ -48,6 +48,9 @@ pub enum AttrType {
     Ref,
     /// `tags.<name>`：零宽组件，只进 archetype key，不产生列。
     Tag,
+    /// 位串承载的 IEEE 754 double（sim-kernel I2 修宪）：`u64` 位串列，仅搬运不算术，
+    /// 归一与序键见 [`crate::bits`]；与 Tier 2 无字面量对账（R1′ 宿主面词汇）。
+    F64Bits,
 }
 
 impl AttrType {
@@ -59,10 +62,11 @@ impl AttrType {
             AttrType::Bool => "boolean",
             AttrType::Ref => "ref",
             AttrType::Tag => "tag",
+            AttrType::F64Bits => "f64bits",
         }
     }
 
-    /// 线格式的类型字节（快照与批量帧共用）：1..4 + 5 = Tag。
+    /// 线格式的类型字节（快照与批量帧共用）：1..4 + 5 = Tag + 6 = F64Bits。
     pub const fn wire_tag(self) -> u8 {
         match self {
             AttrType::Number { .. } => 1,
@@ -70,6 +74,7 @@ impl AttrType {
             AttrType::Bool => 3,
             AttrType::Ref => 4,
             AttrType::Tag => 5,
+            AttrType::F64Bits => 6,
         }
     }
 
@@ -83,9 +88,10 @@ impl AttrType {
             3 => AttrType::Bool,
             4 => AttrType::Ref,
             5 => AttrType::Tag,
+            6 => AttrType::F64Bits,
             other => {
                 return Err(SimError::frame(format!(
-                    "未知的组件类型字节：{other}（合法 1..=5）"
+                    "未知的组件类型字节：{other}（合法 1..=6）"
                 )))
             }
         })
@@ -130,6 +136,13 @@ impl ComponentDef {
     /// 便捷构造：`tag`（零宽）。
     pub const fn tag() -> Self {
         Self { ty: AttrType::Tag }
+    }
+
+    /// 便捷构造：位串承载 double（写入边界归一，仅搬运不算术；sim-kernel I2）。
+    pub const fn f64_bits() -> Self {
+        Self {
+            ty: AttrType::F64Bits,
+        }
     }
 }
 

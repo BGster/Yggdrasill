@@ -17,6 +17,7 @@
 //! `entity_index`，于是「被填洞的行 = 原末行」是显式语义而不是实现巧合——改掉它即改逐
 //! tick hash（回放对行序强耦合，见 `store.rs` 头注）。
 
+use crate::bits::{is_canonical, pack, unpack};
 use crate::component::{CompSet, ComponentId, EntityId};
 use crate::error::{SimError, SimResult};
 
@@ -31,6 +32,9 @@ pub enum Column {
     U8(Vec<u8>),
     /// `string`：前缀偏移 + 连续字节。
     Bytes { off: Vec<u32>, buf: Vec<u8> },
+    /// 位串列（sim-kernel I2）：IEEE 754 double 的 canonical 位串，8B/值 LE。
+    /// 内核只存储/拷贝/规范化/hash，不算术（[`crate::bits`]）。
+    F64Bits(Vec<u64>),
 }
 
 impl Column {
@@ -44,6 +48,7 @@ impl Column {
                 off: vec![0],
                 buf: Vec::new(),
             },
+            Column::F64Bits(_) => Column::F64Bits(Vec::new()),
         }
     }
 
@@ -54,6 +59,7 @@ impl Column {
             Column::U64(v) => v.len(),
             Column::U8(v) => v.len(),
             Column::Bytes { off, .. } => off.len().saturating_sub(1),
+            Column::F64Bits(v) => v.len(),
         }
     }
 
@@ -82,6 +88,14 @@ impl Column {
                 })?;
                 off.push(end);
             }
+            // 写入边界归一（sim-kernel I2）：`ValueRef::Bits` 携带原始 double 位串，
+            // 入列前经 pack∘unpack 归一（纯位搬运：from_bits/to_bits 都是 mov）——
+            // pack 输出恒 canonical（±0→+0、任意 NaN→NAN_BITS）。
+            (Column::F64Bits(v), ValueRef::Bits(raw)) => {
+                let bits = pack(unpack(*raw));
+                debug_assert!(is_canonical(bits));
+                v.push(bits);
+            }
             (column, value) => {
                 return Err(SimError::schema(format!(
                     "组件 id {comp} 的列类型与值不符：列={} 值={}",
@@ -99,6 +113,7 @@ impl Column {
             (Column::I64(dst), Column::I64(src)) => dst.push(src[row]),
             (Column::U64(dst), Column::U64(src)) => dst.push(src[row]),
             (Column::U8(dst), Column::U8(src)) => dst.push(src[row]),
+            (Column::F64Bits(dst), Column::F64Bits(src)) => dst.push(src[row]),
             (
                 Column::Bytes { off, buf },
                 Column::Bytes {
@@ -128,6 +143,7 @@ impl Column {
             Column::I64(v) => ValueRef::I64(v[row]),
             Column::U64(v) => ValueRef::U64(v[row]),
             Column::U8(v) => ValueRef::U8(v[row]),
+            Column::F64Bits(v) => ValueRef::Bits(v[row]),
             Column::Bytes { off, buf } => {
                 ValueRef::Bytes(&buf[off[row] as usize..off[row + 1] as usize])
             }
@@ -144,6 +160,9 @@ impl Column {
                 v.swap_remove(row);
             }
             Column::U8(v) => {
+                v.swap_remove(row);
+            }
+            Column::F64Bits(v) => {
                 v.swap_remove(row);
             }
             Column::Bytes { off, buf } => {
@@ -173,6 +192,7 @@ impl Column {
             Column::U64(_) => "u64",
             Column::U8(_) => "u8",
             Column::Bytes { .. } => "bytes",
+            Column::F64Bits(_) => "f64bits",
         }
     }
 }
@@ -188,6 +208,8 @@ pub enum ValueRef<'a> {
     U8(u8),
     /// 字符串字节。
     Bytes(&'a [u8]),
+    /// 位串（IEEE 754 double 的**原始**位串；写入边界由内核归一为 canonical，sim-kernel I2）。
+    Bits(u64),
 }
 
 impl ValueRef<'_> {
@@ -197,6 +219,7 @@ impl ValueRef<'_> {
             ValueRef::U64(_) => "u64",
             ValueRef::U8(_) => "u8",
             ValueRef::Bytes(_) => "bytes",
+            ValueRef::Bits(_) => "f64bits",
         }
     }
 }

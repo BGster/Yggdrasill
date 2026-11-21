@@ -455,6 +455,21 @@ fn frame_from_reader(
                 }
                 Column::Bytes { off, buf }
             }
+            AttrType::F64Bits => {
+                let mut values = Vec::with_capacity(rows);
+                for _ in 0..rows {
+                    // 读边界 fail-closed：非 canonical（-0、非规范 NaN 载荷）即拒
+                    // （sim-kernel I2：列内存只收 pack 的像）。
+                    let raw = reader.u64()?;
+                    if !crate::bits::is_canonical(raw) {
+                        return Err(SimError::frame(format!(
+                            "组件 id {id} 的位串列出现非 canonical 位串：0x{raw:016X}"
+                        )));
+                    }
+                    values.push(raw);
+                }
+                Column::F64Bits(values)
+            }
         };
         cols.push((id, column));
     }

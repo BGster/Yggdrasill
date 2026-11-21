@@ -23,7 +23,12 @@ use crate::error::{SimError, SimResult};
 pub const MAGIC: [u8; 8] = *b"YGGSIM\0\x01";
 
 /// 帧格式版本（与 [`MAGIC`] 里的主版本独立：主版本变了魔数变，布局微调变这里）。
-pub const FMT_VERSION: u16 = 1;
+///
+/// 历史：1 = 首版（列型 1..5，Number/Str/Bool/Ref/Tag）；2 = R1′ 位串列（新增列型 6 =
+/// F64Bits，其余布局不变）。读取器收 {1, 2}：v1 帧原语义兼容（组件表 type 字节
+/// 断言 ≤ 5，见 `snapshot::decode`），同名组件类型冲突由 `Registry::register` 检查
+/// fail-closed。
+pub const FMT_VERSION: u16 = 2;
 
 /// 追加式帧写入器（只增字节，最后一次性补 digest）。
 #[derive(Debug, Default)]
@@ -109,12 +114,19 @@ impl FrameWriter {
 pub struct FrameReader<'a> {
     buf: &'a [u8],
     pos: usize,
+    /// 帧头里读到的 `fmt_version`（快照 decode 按它做 v1/v2 分发）。
+    version: u16,
 }
 
 impl<'a> FrameReader<'a> {
-    /// 打开帧并校验魔数与版本（版本不符即拒：换布局必须换版本，静默兼容会让旧档读成新世界）。
+    /// 打开帧并校验魔数与版本（写入器只产出 [`FMT_VERSION`]；读取器收历史版本集
+    /// {1, 2}——旧档原语义兼容，更老/更新的版本一律拒：静默兼容会让旧档读成新世界）。
     pub fn open(buf: &'a [u8]) -> SimResult<Self> {
-        let mut reader = Self { buf, pos: 0 };
+        let mut reader = Self {
+            buf,
+            pos: 0,
+            version: 0,
+        };
         let magic = reader.raw(8)?;
         if magic != MAGIC {
             return Err(SimError::frame(format!(
@@ -122,11 +134,12 @@ impl<'a> FrameReader<'a> {
             )));
         }
         let version = reader.u16()?;
-        if version != FMT_VERSION {
+        if version != 1 && version != 2 {
             return Err(SimError::frame(format!(
-                "帧格式版本不符：得到 {version}，期望 {FMT_VERSION}"
+                "帧格式版本不符：得到 {version}，可读 {{1, 2}}（本写入器产出 {FMT_VERSION}）"
             )));
         }
+        reader.version = version;
         let flags = reader.u16()?;
         if flags != 0 {
             return Err(SimError::frame(format!(
@@ -134,6 +147,11 @@ impl<'a> FrameReader<'a> {
             )));
         }
         Ok(reader)
+    }
+
+    /// 帧头里的 `fmt_version`（1 或 2；[`FrameReader::open`] 已验过）。
+    pub const fn version(&self) -> u16 {
+        self.version
     }
 
     /// 已消费字节数。

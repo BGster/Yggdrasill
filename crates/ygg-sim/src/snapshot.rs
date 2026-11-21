@@ -4,12 +4,12 @@
 //!
 //! ```text
 //! magic       8B   "YGGSIM\0\x01"
-//! fmt_version 2B   LE = 1
+//! fmt_version 2B   LE = 2（读取器收 {1,2}：v1 原语义兼容，见下）
 //! flags       2B   LE = 0
 //! tick        8B   LE
 //! next_entity 8B   LE
 //! comp_n      4B   LE
-//!   × comp_n: name_len 2B | name UTF-8 | type 1B(1..5) | frac_bits 1B
+//!   × comp_n: name_len 2B | name UTF-8 | type 1B(1..6) | frac_bits 1B
 //!            （按 name 字节序升序；下面的 archetype 段按**这个表的序**引用组件）
 //! res_n       4B   LE            （键升序）
 //!   × res_n: key 8B | value 8B
@@ -19,9 +19,18 @@
 //! arch_n      4B   LE            （按「升序组件名串联」的字节序升序）
 //!   × arch_n: comp_cnt 2B | comp_idx 2B×comp_cnt | row_n 4B
 //!            | ids: u64×row_n  | 每列载荷（顺序 = comp_idx 顺序）:
-//!                 I64/U64: 8B×row_n     U8: 1B×row_n     Bytes: (len 4B | bytes)×row_n
+//!                 I64/U64/F64Bits: 8B×row_n   U8: 1B×row_n   Bytes: (len 4B | bytes)×row_n
 //! digest      8B   LE  = fnv1a64(前面全部字节) = state hash
 //! ```
+//!
+//! # 版本史（`fmt_version` 的语义）
+//!
+//! - **v1**（2026-11-21）：列型 1..5（Number/Str/Bool/Ref/Tag）。读取时 type 字节
+//!   断言 ≤ 5——v1 帧不含位串列，类型字节 6 属于损坏或伪造，fail-closed。
+//! - **v2**（R1′，本版）：新增列型 6 = F64Bits（u64 位串 8B/值 LE），其余布局不变。
+//!   旧代码读 v2 帧被版本检查拒（fail-closed）；新代码读 v1 帧原语义，Number 列照旧
+//!   `I64`。跨 fmt_version 的 state hash **不承诺相等**（帧格式版本化的本义）；
+//!   v1 读入后以 v2 重编码为准（`tests/snapshot_roundtrip.rs` 的 v1 幂等用例钉住）。
 //!
 //! # 三条硬性质（`tests/snapshot_roundtrip.rs` 逐条钉住）
 //!
@@ -40,6 +49,7 @@
 use std::collections::BTreeMap;
 
 use crate::archetype::{Archetype, Column};
+use crate::bits;
 use crate::canonical::{FrameReader, FrameWriter};
 use crate::component::{AttrType, CompSet, ComponentDef, ComponentId, EntityId, Registry};
 use crate::error::{SimError, SimResult};
@@ -200,12 +210,18 @@ fn write_column(writer: &mut FrameWriter, column: &Column) {
                 writer.raw(&buf[start..end]);
             }
         }
+        Column::F64Bits(values) => {
+            for value in values {
+                writer.u64(*value);
+            }
+        }
     }
 }
 
 /// 解码一帧快照（先全量校验，任何不符都 fail-closed）。
 pub fn decode(bytes: &[u8]) -> SimResult<SnapshotState> {
     let mut reader = FrameReader::open(bytes)?;
+    let fmt = reader.version();
     let tick = reader.u64()?;
     let next_id = reader.u64()?;
 
@@ -221,6 +237,12 @@ pub fn decode(bytes: &[u8]) -> SimResult<SnapshotState> {
             .map_err(|err| SimError::frame(format!("组件名不是合法 UTF-8：{err}")))?
             .to_string();
         let tag = reader.u8()?;
+        // v1 帧不含位串列：type 字节 6 只在 v2 起合法（损坏或伪造即拒，fail-closed）。
+        if fmt == 1 && tag > 5 {
+            return Err(SimError::frame(format!(
+                "v1 帧不包含类型字节 {tag}（位串列自 v2 起，可读 {{1, 2}} 但 v1 域是 1..=5）"
+            )));
+        }
         let frac_bits = reader.u8()?;
         let ty = AttrType::from_wire(tag, frac_bits)?;
         registry.register(&name, ComponentDef { ty })?;
@@ -357,6 +379,7 @@ fn empty_column(ty: AttrType) -> Option<Column> {
             off: vec![0],
             buf: Vec::new(),
         }),
+        AttrType::F64Bits => Some(Column::F64Bits(Vec::new())),
         AttrType::Tag => None,
     }
 }
@@ -400,6 +423,20 @@ fn read_column(
                 let end = u32::try_from(buf.len())
                     .map_err(|_| SimError::frame(format!("组件 id {comp} 的字符串列超出 4 GiB")))?;
                 off.push(end);
+            }
+        }
+        Column::F64Bits(values) => {
+            values.reserve(row_n);
+            for _ in 0..row_n {
+                // 读边界 fail-closed：非 canonical（-0、非规范 NaN 载荷）即拒——
+                // 列内存只收 pack 的像（sim-kernel I2）。
+                let raw = reader.u64()?;
+                if !bits::is_canonical(raw) {
+                    return Err(SimError::frame(format!(
+                        "组件 id {comp} 的位串列出现非 canonical 位串：0x{raw:016X}"
+                    )));
+                }
+                values.push(raw);
             }
         }
     }
