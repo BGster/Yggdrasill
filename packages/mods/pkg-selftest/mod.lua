@@ -23,6 +23,7 @@ local dialogue = require("pkg.dialogue")
 local procgen = require("pkg.procgen")
 local role_skill = require("pkg.role_skill")
 local assetgen = require("pkg.assetgen")
+local textframe = require("pkg.textframe")
 
 -- 声明闭包的同构清单：装配顺序即本表顺序，`#PACKAGES` 就是冒烟收尾行里的 N。
 -- 它刻意**不是**一份手抄的数字——加一个包 = 表里加一项，冒烟收尾行自动跟上一格，
@@ -36,6 +37,7 @@ local PACKAGES = {
   procgen,
   role_skill,
   assetgen,
+  textframe,
 }
 
 -- 装配：包的 `install` 都只记 deps / 注注册表（不预读、不预写，契约 I7 / I8）。
@@ -176,6 +178,15 @@ ygg.on("pkg.smoke", function()
     .. tostring(#algos)
     .. " canon="
     .. assetgen.canon(texture)
+
+  -- ── textframe：字符网格 → 行（纯导出，不接宿主面）────────────────────────
+  -- 空格换 `_` 再叙述：断言串里带尾空格是不可见的脆断言。
+  local tf = textframe.frame(4, 2)
+  textframe.put(tf, 1, 1, "A")
+  textframe.put(tf, 4, 2, "Z")
+  local rows = textframe.stack({ textframe.to_lines(tf), { "HUD" } })
+  local probe = (rows[1] .. "|" .. rows[2] .. "|" .. rows[3]):gsub(" ", "_")
+  lines[#lines + 1] = "pkg.textframe ok rows=" .. tostring(#rows) .. " cells=" .. probe
 
   lines[#lines + 1] = "pkg.smoke packages=" .. tostring(#PACKAGES)
   for i = 1, #lines do

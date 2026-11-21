@@ -1,0 +1,6 @@
+{
+    "schemaVersion": 1,
+    "name": "textframe",
+    "version": "0.1.0",
+    "contract": "docs/design/packages/textframe.md"
+}

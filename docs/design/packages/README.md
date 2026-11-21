@@ -23,13 +23,14 @@
 
 | 包 | 契约 | 依赖 | 状态 | 用点覆盖 |
 | --- | --- | --- | --- | --- |
-| entity | [entity.md](entity.md) | 无（薄包 `ygg.entity.*`） | 实现已落地 · test 18 | 4（PokeRogue / CDDA / DCSS / Saltline，P3 交付实证） |
-| codec | [codec.md](codec.md) | entity | 实现已落地 · test 20 | 4（CDDA / PokeRogue / DCSS / Saltline，P3 交付实证） |
+| entity | [entity.md](entity.md) | 无（薄包 `ygg.entity.*`） | 实现已落地 · test 21 | 4（PokeRogue / CDDA / DCSS / Saltline，P3 交付实证） |
+| codec | [codec.md](codec.md) | entity | 实现已落地 · test 21 | 4（CDDA / PokeRogue / DCSS / Saltline，P3 交付实证） |
 | quest | [quest.md](quest.md) | entity · codec | 实现已落地 · test 24 | 4（PokeRogue / CDDA / DCSS / Saltline，P3 交付实证） |
 | dialogue | [dialogue.md](dialogue.md) | quest | 实现已落地 · test 26 | 3（PokeRogue / CDDA / Saltline） |
 | role-skill | [role-skill.md](role-skill.md) | entity · codec | 实现已落地 · test 28 | 4（PokeRogue / DCSS / CDDA / Saltline，P3 交付实证） |
-| procgen | [procgen.md](procgen.md) | codec（仅摘要面） | 实现已落地 · test 18 | 4（CDDA / DCSS / Saltline / PokeRogue，P3 交付实证） |
+| procgen | [procgen.md](procgen.md) | codec（仅摘要面） | 实现已落地 · test 25 | 4（CDDA / DCSS / Saltline / PokeRogue，P3 交付实证） |
 | assetgen | [assetgen.md](assetgen.md) | procgen（**仅 rng 面**） | 实现已落地 · test 28 | 3（Saltline / CDDA·导出面 / PokeRogue；DCSS 字符渲染不消费像素未兑现用点，P3-3 G-6 裁定 2026-11-21） |
+| textframe | [textframe.md](textframe.md) | 无（纯导出，零依赖） | 实现已落地 · test 18 | 3（Saltline 实证替换 / CDDA 指认 / DCSS 指认；PokeRogue 图形化无字符网格，见契约 §6） |
 
 ## 3. 依赖序
 
@@ -41,6 +42,7 @@
 - `role-skill` 依赖 `entity` + `codec`：角色/技能只存引用与计数，属性袋归 entity，存档归 codec。
 - `procgen` 依赖 `codec`（**仅摘要面**）：`procgen.hash` 借 [codec.md](codec.md) I1 的确定性编码口径，不自己写第二份编码器；PRNG 本身只依赖确定性种子（不依赖其它包），可以最先落地。它是唯一一个「产物不落 KV、defs 也不落 KV」的包——`defs` 由安装期注入 + 运行期注册表（[procgen.md](procgen.md) §2）。
 - `assetgen` 依赖 `procgen`（**仅 rng 面**）：只用 `procgen.rng` / `procgen.state` / `procgen.next32`，不调 `define` / `run` / `hash`——素材产物不是 procgen 的 def，也不借它的 FNV 当摘要（[assetgen.md](assetgen.md) §1）。共享的是 rng 契约，不是生成算法：procgen 产 `cells`（地图格），assetgen 产 `pixels` / `pcm` / 顶点表。
+- `textframe` **无依赖**：字符网格只碰整数下标与字符串拼接，不碰实体 / 序列化 / 随机。它是依赖图上唯一的孤点（零入边零出边），有意的——[textframe.md](textframe.md) §3 I8。
 
 ## 4. 契约章节模板
 
@@ -77,8 +79,8 @@
     --mod packages/mods/pkg-selftest --packages packages/libs [--filter pkg-<name>]
   ```
   为何必须存在这一层：生产 Mod（`agent-seed`）不声明包，它的 `cases passed=` 永远看不到 `pkg.*`（仍为 79/0，这就是回归钉）；而这个夹具的全量计数刚好是可复算的包用例总数。
-  - **声明闭包**：`packages` 段声明 `entity` / `codec` / `quest` / `dialogue` / `role-skill` / `procgen` / `assetgen` 七包（版本精确 pin）。`pkg.json` 的 `deps` 只表达形状依赖，**闭包由夹具的声明决定**——加一个包 = 夹具 `packages[]` 加一行 + 重算 manifest。
-  - **计数口径**（S9 实测，命令见下）：全量 = **173**；逐包复算 `--filter pkg-entity` → 21、`pkg-codec` → 21、`pkg-quest` → 24、`pkg-dialogue` → 26、`pkg-role-skill` → 28、`pkg-procgen` → 25、`pkg-assetgen` → 28（七个数据相加 = 173，自洽——任一侧漂移就对不上）。沿革：旧记的「90 + 35 + 28 = 153」（entity 19 / procgen 18）与 S7 前的实测 **156**（entity 20 / procgen 20）差 3；S7 的 5 条 `weighted` 把 procgen 推到 25、全量推到 161；S8 的 11 条（读面 2 / 实例容量 4 / 窗口 4 / 兼容面 1）把 role-skill 推到 28、全量推到 172；S9 的 1 条（`pkg.entity.destroy-reclaims-kernel-record`，另有 1 条改写）把 entity 推到 21、全量推到 173。`--filter` 过滤的是**文件名**，所以每个包在 `tests/` 下都要有一个同名冒烟文件接住，否则该包单独跑会「没有可执行的测试文件」直接 exit 1。
+  - **声明闭包**：`packages` 段声明 `entity` / `codec` / `quest` / `dialogue` / `role-skill` / `procgen` / `assetgen` / `textframe` 八包（版本精确 pin）。`pkg.json` 的 `deps` 只表达形状依赖，**闭包由夹具的声明决定**——加一个包 = 夹具 `packages[]` 加一行 + 重算 manifest。
+  - **计数口径**（S6 实测，命令见下）：全量 = **191**；逐包复算 `--filter pkg-entity` → 21、`pkg-codec` → 21、`pkg-quest` → 24、`pkg-dialogue` → 26、`pkg-role-skill` → 28、`pkg-procgen` → 25、`pkg-assetgen` → 28、`pkg-textframe` → 18（八个数据相加 = 191，自洽——任一侧漂移就对不上）。沿革：旧记的「90 + 35 + 28 = 153」（entity 19 / procgen 18）与 S7 前的实测 **156**（entity 20 / procgen 20）差 3；S7 的 5 条 `weighted` 把 procgen 推到 25、全量推到 161；S8 的 11 条（读面 2 / 实例容量 4 / 窗口 4 / 兼容面 1）把 role-skill 推到 28、全量推到 172；S9 的 1 条（`pkg.entity.destroy-reclaims-kernel-record`，另有 1 条改写）把 entity 推到 21、全量推到 173；S6 的 18 条（textframe 首实现，5 项指标 8 个性能键）把全量推到 191。`--filter` 过滤的是**文件名**，所以每个包在 `tests/` 下都要有一个同名冒烟文件接住，否则该包单独跑会「没有可执行的测试文件」直接 exit 1。
   - **冒烟不计数**：`tests/pkg-{quest,dialogue,role-skill,procgen,assetgen}-smoke.lua` 与 `tests/pkg-{procgen,assetgen}-digest-smoke.lua` 是 **file 级断言**（`error` ⇒ `file FAIL` ⇒ `ok=0`），只钉「包装载面 + 顶层纯度 + 导出面清单（+ 事件名集合、KV 前缀、摘要 / canon 行格式）」，不复述 API 函数表（那份真源在行为用例里）。不进 `cases passed=`：包用例的计数口径是 161（见上），冒烟计入会把它抬高。
   - **为什么每包都要一个 mod 侧冒烟**：`--filter` 对 mod 的 `tests/*.lua` 与包的 `test/*.lua` **同时**过滤，mod 侧筛完为空就「没有可执行的测试文件」直接 exit 1——`--filter pkg-procgen-digest` 这种只命中包内文件的过滤器尤其需要一个同名接应文件。
   - **`entries` 必须非空**：打包工具要求资源包至少一个数据条目（`crates/ygg-sandbox/examples/pack.rs`），所以夹具带一条只为满足该硬要求的探针条目（`data/probe.json`），随后 `manifest.json` 由 `cargo run -p ygg-sandbox --example pack -- packages/mods/pkg-selftest --packages packages/libs` 重算，`sh .pi/tools/manifest-verify.sh --mod packages/mods/pkg-selftest` 复核 `pkg_drift=0`。
@@ -90,7 +92,7 @@
   | 第二级 | 15 个 `math` 成员（`abs` / `floor` / `ceil` / `sqrt` / `fmod` / `modf` / `tointeger` / `ult` / `min` / `max` / `random` / `huge` / `maxinteger` / `mininteger` / `type`）+ `ygg.ticks` | `crates/ygg-sandbox/src/inject.rs` 的 `install`（**只在 driver 路径**注入） | **只有 mod**；包不得依赖 |
 
   `string` / `table` / `utf8` / `coroutine` / `math` / `os` / `io` / `package` 与 `dofile` / `loadfile` / `load` / `print` / `rawset` / `collectgarbage` 全为 `nil`（`sandbox.rs` 的 `whitelisted_environment_exposes_only_the_allow_list` 逐名断言）；`debug` 同理——globals 是 deny-by-default 的新表，不在白名单里就取不到。
-  包侧越级的症状与判据：① 阻断——按旧文献写 `table.insert` / `string.format`，或认为「包可以用 `math`」；② 症状——裸沙箱装载期 `attempt to index a nil value (global 'math')`，或 `table` 为 nil 的同类崩；③ 确认——`cargo test -p ygg-sandbox --test packages_sandbox` 三条用例。见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1。
+  包侧越级的症状与判据：① 阻断——按旧文献写 `table.insert` / `string.format`，或认为「包可以用 `math`」；② 症状——裸沙箱装载期 `attempt to index a nil value (global 'math')`，或 `table` 为 nil 的同类崩；③ 确认——`cargo test -p ygg-sandbox --test packages_sandbox` 四条用例。见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1。
 
   两条门禁写死在这里（改任何包代码后必跑）：
 
