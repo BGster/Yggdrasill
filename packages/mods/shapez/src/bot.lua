@@ -15,9 +15,11 @@
 -- 同 seed 双局重推同决策，逐锚 + 终态快照比对即重放闭环。
 --
 -- 长局剧本 `run(cfg)`：决策 tick 段（可带周期存读档）→ 拆建循环段（纯
--- spawn/destroy 高水位，压 S23）。闭环模式（`closed`）= 首 save 拍前
--- extend/demolish 一律空转（无带无洞），使 save→load 续跑局的 id 致密重排
--- 与原局逐位相等（test-f「k 拍前零传送带」约束的 bot 版）。
+-- spawn/destroy 高水位，压 S23）。闭环模式（`closed`）= 零销毁轨：demolish
+-- 全程空转、首存拍（含）前 extend 也空转 ⇒ 每个存拍世界都零带零洞（id 致密），
+-- save→load 续跑局的致密重排与原局逐位相等（importing「保 id」语义 = 致密
+-- 重排，洞位 id 不在存档契约内——test-f「k 拍前零传送带」约束的 bot 版）。
+-- 拆建高频创销压力由非闭环轨（churn 段 + 无存档双局重放）承担。
 --
 -- 探针纪律：生产沙箱 deny `os`/`collectgarbage`——本模块**零引用**，计时与
 -- 内存读数由调用面经 `cfg.clock` / `cfg.gc` 注入（selftest 注 os.clock 与
@@ -103,10 +105,26 @@ local function cell_free(x, y)
   return true
 end
 
---- 带链延伸：抽一条活路径 → 端点直行或转弯落一格新带。返回 id | nil。
+--- 首带种子格（无带世界的确定性落格；远离原点探针区，预闭段不涉足）。
+local SEED_CELLS = { { 50, 50 }, { 51, 50 }, { 52, 50 }, { 53, 50 } }
+
+--- 带链延伸：无带时落首带种子；有带时抽一条活路径 → 端点直行/转弯落一格。
+--- 返回 id | nil。
 local function do_extend(rng, cap)
+  if entity.count() >= cap then
+    return nil
+  end
   local starts, paths = path_starts()
-  if #starts == 0 or entity.count() >= cap then
+  if #starts == 0 then
+    for i = 1, #SEED_CELLS do
+      local cell = SEED_CELLS[i]
+      if cell_free(cell[1], cell[2]) then
+        local rot = rng:int(0, 3)
+        local id = entity.spawn("sz.belt", { x = cell[1], y = cell[2], rot = rot }, { belt = true })
+        belts.bump_layout()
+        return id
+      end
+    end
     return nil
   end
   local startid = starts[rng:int(1, #starts)]
@@ -248,7 +266,8 @@ end
 ---   churn       拆建循环段轮数（默认 0）
 ---   closed      闭环模式：首 save 拍前 extend/demolish 空转（默认 false）
 ---   save_every  每 N 拍 save→reset→load→续跑（0 = 关；需 reset/save_path）
----   save_path   存档路径（save_every > 0 时必填）
+---   save_path   存档路径前缀（save_every > 0 时必填；实存 = `<prefix>.<世界拍>`
+---               ——逐拍可寻址，续跑局按拍回取）
 ---   reset       重置回调（`reset_all()` 同款：清 KV/实体，留 handler 与文件）
 ---   caps        { belts, procs, miners } 稳态上限（防 tick 热路径稳态膨胀）
 ---   clock       毫秒探针（缺省空）
@@ -287,14 +306,18 @@ function M.run(cfg)
   }
   local world = h.data("ygg:shapez/world")
   simtick.setup(world, seed)
+  -- 流名与周期存档节拍一律用**世界拍**（KV sz.tick）：续跑局载入后从 k+1
+  -- 继续，与原局同流同决策（闭环重放的序钟）。
+  local t0 = h.kv.get("sz.tick") or 0
   report.mem.build = gc()
   local exec_cap = caps.belts + caps.procs + caps.miners + 8
 
   for t = 1, ticks do
-    local rng = procgen.rng(seed, "bot." .. t)
+    local wt = t0 + t
+    local rng = procgen.rng(seed, "bot." .. wt)
     local action = ACTIONS[rng:weighted(WEIGHTS)]
     report.actions[action] = report.actions[action] + 1
-    local pre_closed = cfg.closed and save_every > 0 and t < save_every
+    local pre_closed = cfg.closed and save_every > 0 and wt <= save_every
     local hit = nil
     if action == "extend" then
       if not pre_closed and entity.count() < exec_cap then
@@ -304,7 +327,7 @@ function M.run(cfg)
         end
       end
     elseif action == "demolish" then
-      if not pre_closed then
+      if not cfg.closed then -- 闭环轨零销毁：洞位 id 不在存读档契约内（保 id=致密重排）
         hit = do_demolish(rng)
         if hit then
           report.actions.demolish_hit = report.actions.demolish_hit + 1
@@ -318,32 +341,34 @@ function M.run(cfg)
         end
       end
     else -- savepoint：纯读快照探针（无 KV 写）
-      report.marks[#report.marks + 1] = { tick = t, hash = procgen.hash(simtick.snapshot()) }
+      report.marks[#report.marks + 1] = { tick = wt, hash = procgen.hash(simtick.snapshot()) }
     end
     if hit == nil and action ~= "savepoint" then
       report.actions.noop = report.actions.noop + 1
     end
-    local t0 = clock()
+    local t0c = clock()
     local tr = simtick.tick()
-    local t1 = clock()
+    local t1c = clock()
     if tr.anchor ~= nil then
       report.anchors[#report.anchors + 1] = { tick = tr.tick, hash = tr.anchor }
     end
     if cfg.profile then
-      report.tick_ms[#report.tick_ms + 1] = t1 - t0
+      report.tick_ms[#report.tick_ms + 1] = t1c - t0c
     end
-    -- 周期存读档（save→reset→load→续跑；进程内缓存连续性见契约 §2.7 注记）
-    if save_every > 0 and t % save_every == 0 then
+    -- 周期存读档（save→reset→load→续跑；末拍不存——拍后无续跑可言）。
+    -- 进程内缓存连续性注记见契约 §2.7：path 态不进档是 v2 既定登记，
+    -- 闭环等价的硬判据在首存拍前的零带零洞剧本（closed）。
+    if save_every > 0 and wt % save_every == 0 and wt < t0 + ticks then
       local s0 = clock()
-      savegame.save(cfg.save_path)
+      savegame.save(cfg.save_path .. "." .. wt)
       local s1 = clock()
       cfg.reset()
-      savegame.load(cfg.save_path)
+      savegame.load(cfg.save_path .. "." .. wt)
       local s2 = clock()
       report.saves.count = report.saves.count + 1
       report.saves.save_ms = report.saves.save_ms + (s1 - s0)
       report.saves.load_ms = report.saves.load_ms + (s2 - s1)
-      report.mem[#report.mem + 1] = { at = t, phase = "saveload", kb = gc() }
+      report.mem[#report.mem + 1] = { at = wt, phase = "saveload", kb = gc() }
     end
   end
 
