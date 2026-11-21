@@ -365,7 +365,7 @@ fn saved_saves_decode_and_reencode_byte_identically() {
 }
 
 #[test]
-fn key_set_is_exactly_encode_and_decode() {
+fn key_set_is_exactly_encode_decode_and_sha256() {
     let (lua, _cases) = build();
     let ygg: Table = lua.globals().get("ygg").expect("ygg 表");
     let face: Table = ygg.get("codec").expect("ygg.codec 表");
@@ -376,8 +376,183 @@ fn key_set_is_exactly_encode_and_decode() {
     keys.sort();
     assert_eq!(
         keys,
-        vec!["decode".to_string(), "encode".to_string()],
-        "ygg.codec 的键集是闭集（契约 §3.1.4：恰好 2 个，没有逐节点 getter）"
+        vec![
+            "decode".to_string(),
+            "encode".to_string(),
+            "sha256".to_string()
+        ],
+        "ygg.codec 的键集是闭集（契约 §3.1.4：恰好 3 个，没有逐节点 getter）"
+    );
+}
+
+/// 面径的 `ygg.codec.sha256`（走 mlua 包装，原始字节进）。
+fn face_sha256(lua: &Lua, bytes: &[u8]) -> Result<String, mlua::Error> {
+    let function: Function = lua
+        .load("return function(b) return ygg.codec.sha256(b) end")
+        .eval()?;
+    let text = lua.create_string(bytes)?;
+    function.call(text)
+}
+
+/// Lua 径的 `pkg.codec.sha256`（临时摘掉 `ygg.codec` 逼它走纯 Lua 回退体）。
+fn lua_sha256(lua: &Lua, bytes: &[u8]) -> Result<String, mlua::Error> {
+    let function: Function = lua
+        .load(
+            r#"
+            local codec = require("pkg.codec")
+            return function(b)
+              local saved = ygg.codec
+              ygg.codec = nil
+              local ok, out = pcall(codec.sha256, b)
+              ygg.codec = saved
+              if not ok then error(out, 0) end
+              return out
+            end
+            "#,
+        )
+        .eval()?;
+    let text = lua.create_string(bytes)?;
+    function.call(text)
+}
+
+/// sha256 双径差分：填充边界集 + 语料字符串 + 64 KiB 伪随机，逐字节相等
+/// （契约 §4.1 S19 行：两条路径对任一输入产出同一份 hex）。
+#[test]
+fn sha256_matches_the_lua_path_byte_for_byte() {
+    let (lua, cases) = build();
+    // 边界集：填充前一格 / 跨块 / 整块 / 整块±1 / 更大长度。
+    let mut corpus: Vec<Vec<u8>> = [0usize, 1, 31, 55, 56, 63, 64, 65, 127, 128]
+        .iter()
+        .map(|&size| (0..size).map(|index| (index % 251) as u8).collect())
+        .collect();
+    // 64 KiB 伪随机（LCG，确定性）：整块多轮 + 非对齐尾，覆盖差分门禁的
+    // 「≤ 64 KiB 保 Lua 径可跑」上限。
+    let mut state: u64 = 0x519_2_0_2_6;
+    let mut random = Vec::with_capacity(65_536);
+    for _ in 0..65_536 {
+        state = state
+            .wrapping_mul(6_364_136_223_846_79_3005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        random.push((state >> 33) as u8);
+    }
+    corpus.push(random);
+    // 语料里的字符串值形状（同 encode 差分共语料：字符串是摘要的真实输入域）。
+    let corpus_text: mlua::LuaString = lua
+        .load(
+            r#"
+            return function(cases)
+              local out = {}
+              for _, case in pairs(cases) do
+                if type(case) == "table" then
+                  for _, value in pairs(case) do
+                    if type(value) == "string" then out[#out + 1] = value end
+                  end
+                end
+              end
+              return table.concat(out, "\n")
+            end
+            "#,
+        )
+        .eval::<Function>()
+        .expect("语料提取器")
+        .call::<mlua::LuaString>(cases)
+        .expect("语料字符串提取");
+    corpus.push(corpus_text.as_bytes().to_vec());
+
+    assert!(corpus.len() >= 12, "语料不足：{}", corpus.len());
+    for bytes in &corpus {
+        let native = face_sha256(&lua, bytes).expect("面径 sha256 不应拒绝字符串");
+        let fallback = lua_sha256(&lua, bytes).expect("Lua 径 sha256");
+        assert_eq!(native, fallback, "双径字节不等（len={}）", bytes.len());
+        assert_eq!(native.len(), 64, "len={}", bytes.len());
+    }
+}
+
+/// FIPS 180-4 附录 B + 填充边界向量，双径双向钉（面径与回退体各自对上
+/// 发布值；差分测的是相等，这条钉的是绝对值）。
+#[test]
+fn sha256_known_answer_vectors_pin_both_paths() {
+    let lua_state = build().0;
+    let vectors: &[(&str, &str)] = &[
+        (
+            "",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ),
+        (
+            "abc",
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        ),
+        (
+            "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+        ),
+    ];
+    for (input, expected) in vectors {
+        let face = face_sha256(&lua_state, input.as_bytes()).expect("面径");
+        let fallback = lua_sha256(&lua_state, input.as_bytes()).expect("Lua 径");
+        assert_eq!(&face, expected, "面径 KAT（input={input:?}）");
+        assert_eq!(&fallback, expected, "回退体 KAT（input={input:?}）");
+    }
+}
+
+/// 半面退化：宿主只有 encode/decode 两键（旧宿主）⇒ `face.sha256` 缺席，
+/// 包的 sha256 **按键独立**落回纯 Lua，不报错、产出钉值（R5）。
+#[test]
+fn sha256_falls_back_to_lua_on_a_half_face() {
+    let (lua, _cases) = build();
+    let hex: String = lua
+        .load(
+            r#"
+            local codec = require("pkg.codec")
+            local saved = ygg.codec
+            ygg.codec = { encode = saved.encode, decode = saved.decode }
+            local ok, out = pcall(codec.sha256, "abc")
+            ygg.codec = saved
+            if not ok then error(out, 0) end
+            return out
+            "#,
+        )
+        .eval()
+        .expect("半面必须落回 Lua 而不是报错");
+    assert_eq!(
+        hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "半面上的 sha256 必须与钉值相等"
+    );
+}
+
+/// 面的自保分支：非字符串进面 ⇒ `YGG-CODEC-UNSUPPORTED`；包侧类型门先行，
+/// 消费者看到的仍是 `YGG-PKG-CODEC-TYPE`（文案单源）。
+#[test]
+fn sha256_rejects_non_strings_and_the_package_gate_stays_the_single_source() {
+    let (lua, _cases) = build();
+    let message: String = lua
+        .load(
+            r#"
+            local ok, err = pcall(ygg.codec.sha256, 42)
+            if ok then error("面必须拒绝数字", 0) end
+            return tostring(err)
+            "#,
+        )
+        .eval()
+        .expect("面径拒绝");
+    assert!(
+        message.contains("YGG-CODEC-UNSUPPORTED"),
+        "面径错误码必须是 UNSUPPORTED：{message}"
+    );
+    let package_message: String = lua
+        .load(
+            r#"
+            local codec = require("pkg.codec")
+            local ok, err = pcall(codec.sha256, 42)
+            if ok then error("包必须拒绝数字", 0) end
+            return tostring(err)
+            "#,
+        )
+        .eval()
+        .expect("包径拒绝");
+    assert!(
+        package_message.starts_with("YGG-PKG-CODEC-TYPE"),
+        "包侧文案必须仍是自己的码：{package_message}"
     );
 }
 

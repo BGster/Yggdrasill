@@ -9,7 +9,8 @@
 //! `packages/libs/codec/init.lua` 那四个函数上，本模块的每一个字节都必须与它相等
 //! （判据 = `crates/ygg-sandbox/tests/codec_face.rs` 的差分字节相等）。
 //!
-//! 面只做两件事：`encode(value) -> string`、`decode(text) -> value`。**一个逐节点
+//! 面的主项是 `encode(value) -> string`、`decode(text) -> value`（S19 起另带
+//! 摘要键 `sha256(bytes) -> 64 位小写 hex`，见 [`digest`]）。**一个逐节点
 //! getter 都没有**（批式铁律：一个值整包进出，一次调用一次穿越）。
 //!
 //! # 为什么放在 `ygg-sandbox` 而不是 `ygg-sim`
@@ -33,6 +34,7 @@
 
 use mlua::Lua;
 
+mod digest;
 mod encoder;
 mod number;
 mod parser;
@@ -98,11 +100,15 @@ pub(crate) fn internal(detail: impl Into<String>) -> CodecFaceError {
 
 // ── 面安装 ───────────────────────────────────────────────────────────────────
 
-/// 装 `ygg.codec.*`（2 键闭集）。
+/// 装 `ygg.codec.*`（3 键闭集：`encode` / `decode` / `sha256`）。
 ///
 /// 与 `ygg.sim.*` 的区别写在契约里：本面**没有** unmounted 态——它无状态、无实例，
 /// 缺面时的语义是明确的一条（调用方走 Lua 路径，产出字节相同）。因此这里不需要
 /// 「表始终注册 + 抛码」那套；`host_api::install` 装上就一直在场。
+///
+/// `sha256` 是按键独立的第三键（S19）：包侧 `runtime.lua` 对它单独探测
+/// `face.sha256` 为 function 才走原生——旧宿主只有 encode/decode 两键时，sha256
+/// 自动落回包侧纯 Lua 实现，不会因「半个面」而报错。
 pub fn install(lua: &Lua) -> Result<(), mlua::Error> {
     let ygg: mlua::Table = lua.globals().raw_get("ygg")?;
     let table = lua.create_table()?;
@@ -136,6 +142,29 @@ pub fn install(lua: &Lua) -> Result<(), mlua::Error> {
         },
     )?;
     table.raw_set("decode", decode_function)?;
+
+    // sha256（S19 第三键）：字节串进、64 位小写 hex 出。类型门在包侧先行，
+    // 这里的 Unsupported 分支只是面的自保（与 decode 同一条对称防御）。
+    let sha256_function = lua.create_function(
+        |lua: &Lua, bytes: mlua::Value| -> Result<mlua::LuaString, mlua::Error> {
+            let bytes = match &bytes {
+                // 字节过面：原始字节，不要求 UTF-8（摘要的输入域是字节串）。
+                mlua::Value::String(bytes) => bytes.as_bytes().to_vec(),
+                _ => {
+                    return Err(mlua::Error::runtime(
+                        CodecFaceError::Unsupported(format!(
+                            "sha256 只收字符串，得到 {}",
+                            bytes.type_name()
+                        ))
+                        .to_message(),
+                    ))
+                }
+            };
+            let hex = digest::sha256(&bytes);
+            lua.create_string(&hex)
+        },
+    )?;
+    table.raw_set("sha256", sha256_function)?;
     ygg.raw_set("codec", table)?;
     Ok(())
 }

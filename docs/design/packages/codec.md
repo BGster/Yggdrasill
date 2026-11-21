@@ -71,11 +71,11 @@ bundle（导出物，也是导入物的唯一形状）：
 | 面 | 去向 | 理由 |
 | --- | --- | --- |
 | `encode` / `decode` 的字节产出 | **下沉**（面在场时由原生计算） | 逐节点成本 `964 ns/节点`（10k 实体实测），是解释器常数项；原生侧同遍历 `22 ns/节点` |
-| `sha256` | 不动 | 另一条热路径（纯 Lua FIPS 180-4），已排期 S19 |
+| `sha256` | **下沉**（S19：面在场时由原生计算，`ygg.codec.sha256`） | 另一条热路径（契约面读数 0.810 MB/s，import 复核份额的大头）；**按键独立退化**——包侧只探 `face.sha256` 为 function，旧宿主只有 encode/decode 两键时自动落回纯 Lua |
 | `export` | 不动 | 成本在逐实体 `pkg.entity` 面调用，属 Tier 2 布局，已排期 S20 |
 | `checksum` / `write` / `read` / `import` / `roundtrip` | 不动（内部那次 `encode` 顺带变快） | S16 已修：`write` 删 sha256 互校（两侧是不同字节，永假）→ 校回执字节数；本包只承诺 `encode`/`decode` 两行数字 |
 
-**委托与回退（包侧唯一改动，`init.lua` 的 `M.encode` / `M.decode` 两处）**：面在场 ⇒ `pcall` 调原生，成功即返回；面缺席 ⇒ 直接走 Lua 路径。两条都由测试钉住（批十一拆分后：委托随 `encode` / `decode` 主体迁入 `jsonenc.lua` / `jsondec.lua`，装配面仍由 `init.lua` 导出，12 键不变）：
+**委托与回退（包侧唯一改动，`init.lua` 的 `M.encode` / `M.decode` 与 `runtime.lua` 的 `M.sha256` 三处）**：面在场 ⇒ `pcall` 调原生，成功即返回；面缺席 ⇒ 直接走 Lua 路径。两条都由测试钉住（批十一拆分后：encode/decode 委托随主体迁入 `jsonenc.lua` / `jsondec.lua`，sha256 委托在 `runtime.lua` 的包装体上按键独立探测；装配面仍由 `init.lua` 导出，12 键不变）：
 - **缺席**是既有契约（裸沙箱只有 `ygg = { engine_version }`，`crates/ygg-sandbox/tests/packages_sandbox.rs` 用例 ② 断言该路径的字节）；
 - **在场**由 `cargo test -p ygg-sandbox --test codec_face` 与 `--test codec_bench` 断言（键集闭集、同面 before/after、差分字节相等）。
 
