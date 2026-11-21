@@ -182,7 +182,7 @@ S9 起 `destroy` 的可见行为是：**内核记录真删**（属性 + tag + �
 
 ### 9.4 宿主面新增的批式键（`ygg.entity.*`，键集闭集）
 
-五个：`spawn_batch` / `attr_apply` / `attr_fetch` / `tag_batch` / `scan`（形状见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1）。`despawn_batch` **不交付**——没有消费者就不该有面（S9 的 `destroy(id)` 已覆盖单条真删；批式真删等真正有批量死亡的消费者再议）。三条纪律：① **一个逐实体数据 getter 都不新增**（键集闭集断言在 `crates/ygg-sandbox/tests/host_contract.rs`，多一个即红；S9 的两个**控制面单标量键** `exists` / `destroy` 是例外且已入表，理由见 9.3：存在性位不搬运数据，批式化它按 9.7 实测必亏）；② 入参是 **Lua 数组**（铁律② 原文允许「bytes/数组进出」），这样 n=1 热路径不必付 pack 成本，测试夹具也不必写第二份编解码器；③ 新面一律**先校验后改**（整批要么全成、要么零改）。
+五个：`spawn_batch` / `attr_apply` / `attr_fetch` / `tag_batch` / `scan`（形状见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1）。`despawn_batch` **不交付**——没有消费者就不该有面（S9 的 `destroy(id)` 已覆盖单条真删；批式真删等真正有批量死亡的消费者再议）。三条纪律：① **一个逐实体数据 getter 都不新增**（键集闭集断言在 `crates/ygg-sandbox/tests/host_contract/entity_face.rs`，多一个即红；S9 的两个**控制面单标量键** `exists` / `destroy` 是例外且已入表，理由见 9.3：存在性位不搬运数据，批式化它按 9.7 实测必亏）；② 入参是 **Lua 数组**（铁律② 原文允许「bytes/数组进出」），这样 n=1 热路径不必付 pack 成本，测试夹具也不必写第二份编解码器；③ 新面一律**先校验后改**（整批要么全成、要么零改）。
 
 ### 9.5 判据（①②③）
 
