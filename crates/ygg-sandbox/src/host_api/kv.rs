@@ -16,7 +16,7 @@ pub(super) fn install_kv(
     // ---- ygg.kv.*（即席状态写：core 把关方法，门拒绝为可读 mlua 错误；
     //      句柄经 HostState.handles 现取现用，字段即真实读取面）----
     let kv_table = lua.create_table()?;
-    let kv_get = Rc::clone(&state);
+    let kv_get = Rc::clone(state);
     kv_table.raw_set(
         "get",
         lua.create_function(move |lua, key: String| -> Result<LuaValue, Error> {
@@ -28,7 +28,7 @@ pub(super) fn install_kv(
             })
         })?,
     )?;
-    let kv_set = Rc::clone(&state);
+    let kv_set = Rc::clone(state);
     kv_table.raw_set(
         "set",
         lua.create_function(

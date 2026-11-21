@@ -51,7 +51,7 @@ pub(super) fn install_entity(
 ) -> Result<(), Error> {
     // ---- ygg.entity.*（即席状态写；get 类 miss = nil / false，写类 miss = 可读错误）----
     let entity_table = lua.create_table()?;
-    let ent_spawn = Rc::clone(&state);
+    let ent_spawn = Rc::clone(state);
     entity_table.raw_set(
         "spawn",
         lua.create_function(move |_, ()| -> Result<i64, Error> {
@@ -63,7 +63,7 @@ pub(super) fn install_entity(
             i64::try_from(id).map_err(|_| Error::runtime("entity id overflow"))
         })?,
     )?;
-    let ent_get = Rc::clone(&state);
+    let ent_get = Rc::clone(state);
     entity_table.raw_set(
         "get_attribute",
         lua.create_function(
@@ -80,7 +80,7 @@ pub(super) fn install_entity(
             },
         )?,
     )?;
-    let ent_set = Rc::clone(&state);
+    let ent_set = Rc::clone(state);
     entity_table.raw_set(
         "set_attribute",
         lua.create_function(
@@ -95,7 +95,7 @@ pub(super) fn install_entity(
             },
         )?,
     )?;
-    let ent_has = Rc::clone(&state);
+    let ent_has = Rc::clone(state);
     entity_table.raw_set(
         "has_tag",
         lua.create_function(move |_, (id, tag): (u64, String)| -> Result<bool, Error> {
@@ -103,7 +103,7 @@ pub(super) fn install_entity(
             Ok(ent_get_tag(&entities, id, &tag))
         })?,
     )?;
-    let ent_add = Rc::clone(&state);
+    let ent_add = Rc::clone(state);
     entity_table.raw_set(
         "add_tag",
         lua.create_function(move |_, (id, tag): (u64, String)| -> Result<bool, Error> {
@@ -115,7 +115,7 @@ pub(super) fn install_entity(
             Ok(changed)
         })?,
     )?;
-    let ent_remove = Rc::clone(&state);
+    let ent_remove = Rc::clone(state);
     entity_table.raw_set(
         "remove_tag",
         lua.create_function(move |_, (id, tag): (u64, String)| -> Result<bool, Error> {
@@ -131,7 +131,7 @@ pub(super) fn install_entity(
     //
     // 入参是 Lua 数组（铁律② 原文「bytes/数组进出」）：n=1 的热路径不必付 pack 成本，
     // 测试夹具也不必写第二份编解码器。五面一律**先校验后改**。
-    let ent_spawn_batch = Rc::clone(&state);
+    let ent_spawn_batch = Rc::clone(state);
     entity_table.raw_set(
         "spawn_batch",
         lua.create_function(move |lua, rows: Table| -> Result<Table, Error> {
@@ -168,7 +168,7 @@ pub(super) fn install_entity(
         })?,
     )?;
 
-    let ent_attr_apply = Rc::clone(&state);
+    let ent_attr_apply = Rc::clone(state);
     entity_table.raw_set(
         "attr_apply",
         lua.create_function(move |lua, ops: Table| -> Result<Table, Error> {
@@ -207,7 +207,7 @@ pub(super) fn install_entity(
         })?,
     )?;
 
-    let ent_attr_fetch = Rc::clone(&state);
+    let ent_attr_fetch = Rc::clone(state);
     entity_table.raw_set(
         "attr_fetch",
         lua.create_function(move |lua, queries: Table| -> Result<Table, Error> {
@@ -256,7 +256,7 @@ pub(super) fn install_entity(
         })?,
     )?;
 
-    let ent_tag_batch = Rc::clone(&state);
+    let ent_tag_batch = Rc::clone(state);
     entity_table.raw_set(
         "tag_batch",
         lua.create_function(move |_, ops: Table| -> Result<usize, Error> {
@@ -284,7 +284,7 @@ pub(super) fn install_entity(
         })?,
     )?;
 
-    let ent_scan = Rc::clone(&state);
+    let ent_scan = Rc::clone(state);
     entity_table.raw_set(
         "scan",
         lua.create_function(
@@ -325,7 +325,7 @@ pub(super) fn install_entity(
     // 8 次逐项穿越 ≈320 ns）。两键**不新增错误码**：三族（FRAME / VALUE / ID）
     // 只属批式面——批式拒绝是为了「整批零副作用」，单条删除没有半截状态，
     // 缺失 id 是正常答案（`false`），不是错误（契约：kernel/lua-api.md §3.1）。
-    let ent_exists = Rc::clone(&state);
+    let ent_exists = Rc::clone(state);
     entity_table.raw_set(
         "exists",
         lua.create_function(move |_, id: u64| -> Result<bool, Error> {
@@ -334,7 +334,7 @@ pub(super) fn install_entity(
             Ok(present)
         })?,
     )?;
-    let ent_destroy = Rc::clone(&state);
+    let ent_destroy = Rc::clone(state);
     entity_table.raw_set(
         "destroy",
         lua.create_function(move |_, id: u64| -> Result<bool, Error> {
@@ -349,7 +349,7 @@ pub(super) fn install_entity(
     //
     // 两阶段材质化（借用纪律同 `attr_fetch`）：阶段 1 持借用、零 Lua 调用（拷 id 与
     // 投影值的连续 Vec）；阶段 2 无借用、只建表。`count` 复用阶段 1 长度，不重数。
-    let ent_query = Rc::clone(&state);
+    let ent_query = Rc::clone(state);
     entity_table.raw_set(
         "query",
         lua.create_function(move |lua, selector: Table| -> Result<Table, Error> {

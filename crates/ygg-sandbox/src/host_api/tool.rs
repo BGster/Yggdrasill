@@ -86,7 +86,7 @@ pub(super) fn install_tool(
 ) -> Result<(), Error> {
     // ---- ygg.tool.*（同步宿主工具桥：装载期由影子表禁止，转换期按挂载态执行或回退）----
     let tool_table = lua.create_table()?;
-    let tool_call = Rc::clone(&state);
+    let tool_call = Rc::clone(state);
     tool_table.raw_set(
         "call",
         lua.create_function(
