@@ -134,10 +134,11 @@ fn lines_of(reply: &Json) -> Vec<String> {
 /// 两边都拿它当锚点。
 const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
-/// 冒烟叙述行（**逐字**）。七行一包一行，最后一行是收尾。
+/// 冒烟叙述行（**逐字**）。八行一包一行，最后一行是收尾。
 ///
 /// 它们与 r2 计划 §6.5 的六包原文逐字节相同（含 `sha=ba7816bf…15ad`、
-/// `next32=726839672`、`hash=14b44f969c391c53`），只多了 assetgen 一行与 N=7
+/// `next32=726839672`、`hash=14b44f969c391c53`），只多了 assetgen / textframe
+/// 两行与 N=8
 /// ——改口径等价于改契约，必须同提交改这份清单。
 fn smoke_lines() -> Vec<String> {
     [
@@ -148,14 +149,15 @@ fn smoke_lines() -> Vec<String> {
         "pkg.role-skill ok granted=true has=true atk=3".to_owned(),
         "pkg.procgen ok next32=726839672 hash=14b44f969c391c53".to_owned(),
         "pkg.assetgen ok algos=7 canon=kind=texture algo=texture.fbm v=1 seed=smoke stream=assetgen/texture/fbm w=4 h=4 ch=1 bytes=16".to_owned(),
-        "pkg.smoke packages=7".to_owned(),
+        "pkg.textframe ok rows=3 cells=A___|___Z|HUD".to_owned(),
+        "pkg.smoke packages=8".to_owned(),
     ]
     .into_iter()
     .collect()
 }
 
 #[test]
-fn seven_packages_load_and_run_in_the_real_sandbox() {
+fn packages_load_and_run_in_the_real_sandbox() {
     let tree = Tree::new("driver");
     let bundle = tree.load();
     let mut kernel = bundle.kernel().expect("内核构造");

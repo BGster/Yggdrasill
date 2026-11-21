@@ -264,6 +264,26 @@
         }
       ],
       "id": "role-skill"
+    },
+    {
+      "files": [
+        {
+          "byteLength": 7301,
+          "path": "textframe/grid.lua",
+          "sha256": "9fc8accb059f9d6ccf6a399527b4190b96bf0e93ce0ea804a82d2783f71596a4"
+        },
+        {
+          "byteLength": 2103,
+          "path": "textframe/init.lua",
+          "sha256": "75291933bfa1bf91ad43dd8c13208a5eada5094d6bb5ac99f474c0c1d56b1a3d"
+        },
+        {
+          "byteLength": 129,
+          "path": "textframe/pkg.json",
+          "sha256": "743f4e43990f2abdff9dfbda84b6caa787241557987f5b5ef9e078a524a90b22"
+        }
+      ],
+      "id": "textframe"
     }
   ],
   "schemaVersion": 1

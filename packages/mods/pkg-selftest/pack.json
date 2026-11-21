@@ -37,6 +37,10 @@
         {
             "id": "assetgen",
             "version": "0.1.0"
+        },
+        {
+            "id": "textframe",
+            "version": "0.1.0"
         }
     ]
 }
