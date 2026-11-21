@@ -25,11 +25,16 @@
 //! 只有两条：数字必须为正（否则没量到东西），以及**数量级护栏**（10⁴ 批量写 < 200 ms）。
 //! 后者抓的是「不小心写成 O(n²)」这类缺陷，不是性能阈値——阈值属于 `sim-kernel` §5 与本包 §5。
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Instant;
 
-use mlua::{Lua, Value as LuaValue};
-use ygg_core::entity::{EntityStore, Value};
+use mlua::{Function, Lua, Value as LuaValue};
+use ygg_core::entity::{CompareOp, EntityStore, Predicate, Selector, Value};
+use ygg_core::kv::KvStore;
+use ygg_sandbox::host_api::{install as install_host, HostHandles};
+use ygg_sandbox::sandbox::Sandbox;
 
 const ATTRS: [&str; 8] = [
     "hp", "max_hp", "attack", "defense", "speed", "level", "exp", "weight",
@@ -116,6 +121,108 @@ fn store_bulk_read() -> f64 {
     // `store` 在这里只读借用：上面的闭包是 FnMut 但只持有不可变借用，需要显式延长生命周期
     assert_eq!(store.len(), ROWS);
     ns
+}
+
+/// **真实沙箱端到端**：`ygg.entity.query` 一次跨界（解码 + 选 + 材质化 + 穿越）。
+///
+/// 与 before 的真沙箱口径（S9 `paths_ids_10k` = 234 ns/实体）对齐：同机、同规模
+/// （10⁴ 实体 × 三属性），数据集由 Rust 侧直接写进宿主句柄（与 `spawn_batch` 的终态相同）。
+fn query_face_cost(selector_literal: &str) -> f64 {
+    let sandbox = Sandbox::new().expect("sandbox construction");
+    let lua = sandbox.lua();
+    let handles = HostHandles {
+        kv: Rc::new(RefCell::new(KvStore::new())),
+        entities: Rc::new(RefCell::new(EntityStore::new())),
+    };
+    let store = Rc::clone(&handles.entities);
+    let host = install_host(lua, handles).expect("host api install");
+    {
+        let mut store = store.borrow_mut();
+        for row in 0..ROWS {
+            let id = store.spawn().expect("id 空间足够 10⁴");
+            store
+                .set_attribute(id, "hp", Value::Int(row as i64))
+                .expect("属性写入不该失败");
+            store
+                .set_attribute(id, "speed", Value::Int((row as i64 * 7) % 10_000))
+                .expect("属性写入不该失败");
+            store
+                .set_attribute(id, "kind", Value::Str(format!("k{}", row % 16)))
+                .expect("属性写入不该失败");
+        }
+    }
+    let call = lua
+        .load(format!(
+            "local f = ygg.entity.query return function() return f({selector_literal}) end"
+        ))
+        .eval::<Function>()
+        .expect("编译查询包装");
+    let ns = bench(|| {
+        let _ = call.call::<LuaValue>(()).expect("query 不该失败");
+    });
+    drop(host);
+    drop(sandbox);
+    ns
+}
+
+/// 查询面探针的数据集（10⁴ 实体 × 三属性；`kind` 低基数，`hp`/`speed` 近全 distinct）。
+fn store_query_rows() -> EntityStore {
+    let mut store = EntityStore::new();
+    for row in 0..ROWS {
+        let id = store.spawn().expect("id 空间足够 10⁴");
+        store
+            .set_attribute(id, "hp", Value::Int(row as i64))
+            .expect("属性写入不该失败");
+        store
+            .set_attribute(id, "speed", Value::Int((row as i64 * 7) % 10_000))
+            .expect("属性写入不该失败");
+        store
+            .set_attribute(id, "kind", Value::Str(format!("k{}", row % 16)))
+            .expect("属性写入不该失败");
+    }
+    store
+}
+
+/// `select` 全扫（列活物）：v1 §5 的「列活物」档 after 上限。
+fn store_select_ids() -> f64 {
+    let mut store = store_query_rows();
+    let selector = Selector::default();
+    bench(|| {
+        let rows = store.select(&selector);
+        assert_eq!(rows.len(), ROWS, "列活物必须真的列全");
+    })
+}
+
+/// `select` 两谓词跨两个属性 ⇒ 按 v2 §3 回**全扫**（v1 §5 的「属性筛 2 谓词」档）。
+fn store_select_where2() -> f64 {
+    let mut store = store_query_rows();
+    let selector = Selector {
+        predicates: vec![
+            Predicate::new("hp", CompareOp::Lte(Value::Int(5_000))),
+            Predicate::new("speed", CompareOp::Gt(Value::Int(5_000))),
+        ],
+        ..Selector::default()
+    };
+    bench(|| {
+        let rows = store.select(&selector);
+        assert!(
+            rows.len() < ROWS,
+            "谓词必须真的筛掉一些（否则量的是全命中）"
+        );
+    })
+}
+
+/// `select` 单属性区间 ⇒ **走索引**（首建摊入第一轮，三轮中位取的是已建后的稳态）。
+fn store_select_indexed() -> f64 {
+    let mut store = store_query_rows();
+    let selector = Selector {
+        predicates: vec![Predicate::new("hp", CompareOp::Gte(Value::Int(9_000)))],
+        ..Selector::default()
+    };
+    bench(|| {
+        let rows = store.select(&selector);
+        assert_eq!(rows.len(), 1_000, "hp ∈ [9000, 10⁴) 恰好 1000 条");
+    })
 }
 
 #[test]
@@ -212,6 +319,21 @@ fn path_costs_are_measured() {
         "local f = ygg.f0 for _ = 1, 1600000 do f() end",
     );
 
+    // 「一次跨界吐 10⁴ 个整数」的每元素下限：建表 + 逐元素写入。S-24 的 before/after
+    // 表里唯一没实测过的系数就是它（12 ns/元素），所以先钉住再算倍数。
+    let fill_chunk = lua
+        .load("local t = {} for i = 1, 10000 do t[i] = i end return t")
+        .into_function()
+        .expect("编译填充脚本");
+    let fill_ns = bench(|| {
+        let _ = fill_chunk.call::<LuaValue>(()).expect("填充调用");
+    });
+    println!(
+        "probe.crossing.array_fill_10k_ns={:.1} ns/element  ({:.3} ms/10\u{2074})",
+        fill_ns / ROWS as f64,
+        fill_ns / 1e6
+    );
+
     // ── ② `EntityStore` 批量写 / 读（`ygg.entity` 批式面的 after 上限）──────
     let spawn_ns = store_bulk_spawn();
     let read_ns = store_bulk_read();
@@ -224,6 +346,54 @@ fn path_costs_are_measured() {
         "probe.entitystore.bulk_read_10k_ms={:.3}  → {:.1} ns/entity",
         read_ns / 1e6,
         read_ns / ROWS as f64
+    );
+
+    // ── ③ 查询面（S-24）：全扫 / 两谓词全扫 / 单属性区间走索引 ────────────────
+    let select_ids_ns = store_select_ids();
+    let select_where2_ns = store_select_where2();
+    let select_indexed_ns = store_select_indexed();
+    println!(
+        "probe.entitystore.select_ids_10k_ns={:.1} ns/query  ({:.3} ms)",
+        select_ids_ns,
+        select_ids_ns / 1e6
+    );
+    println!(
+        "probe.entitystore.select_where2_10k_ns={:.1} ns/query  ({:.3} ms)",
+        select_where2_ns,
+        select_where2_ns / 1e6
+    );
+    println!(
+        "probe.entitystore.select_indexed_10k_ns={:.1} ns/query  ({:.3} ms)",
+        select_indexed_ns,
+        select_indexed_ns / 1e6
+    );
+
+    // ── ④ 端到端（真实沙箱 + 一次跨界）：after 的「面」口径，与 before 真沙箱
+    //     口径（S9 `paths_ids_10k` 234 ns/实体）可直接比 ─────────────────────
+    let face_ids = query_face_cost("{}");
+    let face_where2 = query_face_cost("{ where = { hp = \"lte.5000\", speed = \"gt.5000\" } }");
+    let face_indexed = query_face_cost("{ where = { hp = \"gte.9000\" } }");
+    // 同一结果集的**全扫**对照：补一条恒真的 `id` 谓词 ⇒ 两个属性 ⇒ 回全扫
+    let face_scan_same = query_face_cost("{ where = { hp = \"gte.9000\", id = \"gte.0\" } }");
+    println!(
+        "probe.query_face.ids_10k_ns={:.1}  ({:.3} ms)",
+        face_ids,
+        face_ids / 1e6
+    );
+    println!(
+        "probe.query_face.where2_10k_ns={:.1}  ({:.3} ms)",
+        face_where2,
+        face_where2 / 1e6
+    );
+    println!(
+        "probe.query_face.indexed_10k_ns={:.1}  ({:.3} ms)",
+        face_indexed,
+        face_indexed / 1e6
+    );
+    println!(
+        "probe.query_face.scan_same_10k_ns={:.1}  ({:.3} ms)",
+        face_scan_same,
+        face_scan_same / 1e6
     );
 
     // 数字必须为正 + 数量级护栏（抓 O(n²)，不是性能阈值）。

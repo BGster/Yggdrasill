@@ -74,6 +74,8 @@ schema 注册表的扁平键（`<n>` = schema 名，`<a>` = 属性名，`<t>` = 
   - **旧档边界**：S9 前的存档里死亡实体的内核记录还在（当时用 `alive=false` 遮蔽），升级后会被读成存活——**不兼容、不写迁移**，重开一局；一次性 purge 登记在 §8（S9-b）。
 - **I6 生命周期事件恰好一次**：每次 `spawn` 恰好一次 `entity.created`；每次 `destroy` 恰好一次 `entity.destroyed`（二次 `destroy` 返回 `false` 且零事件）；`set` 只在值真的变化时发一次 `entity.attr_changed`（同值写入不发，`math.type` 参与比较）。载荷形状见 §2 的「事件载荷」。
 - **I7 顶层纯度**：包模块顶层只有纯导出，状态改动一律在 `M.install(deps)` 或调用期（对齐 [../mod/mod-package.md](../mod/mod-package.md) 的 `mod.pure-export`）。
+- **I9 查询序确定性**（S-24）：无 `order` ⇒ **id 升序**；有 `order` ⇒ `(值, id)` 升序——值同以 id 兜底（`asc`/`desc` 都不反转），缺属性排最后（与方向无关），跨族按固定族序 `Num < Bool < Str`。索引是**剪枝结构**：候选集出表后仍逐条跑谓词，所以索引路径与全扫路径**逐值逐序相等**（差分用例 `index_path_equals_scan_path`）；增量维护的索引 ≡ 从零重建（`index_incremental_equals_rebuild`）。
+- **I10 查询是只读面**（S-24）：`entity.query` 不改任何状态（零写入、零事件）；`schema` 后过滤只读 `rec.<id>.schema`，不写 KV。内核属性索引是**派生结构**（`#[serde(skip)]` + 手写 `Clone`/`PartialEq` 丢索引）：不进存档字节、不进规范快照，`SAVE_FORMAT_VERSION` 不动。
 - **I8 无时钟**：实体**不得产生任何时间字段**（沙箱里 `ygg.ticks()` 有 API 无推进者，恒 0；事件 seq 不注入 Lua）。生命周期先后由**宿主派发序**保证，包不做任何时序判断、也不发明时间戳。
 
 ## 4. API 面
@@ -93,6 +95,7 @@ schema 注册表的扁平键（`<n>` = schema 名，`<a>` = 属性名，`<t>` = 
 | `entity.tags` | `(id)` | `{tag, …}`（升序） | 纯读；**导出侧所需**（P0 版漏此面：codec 要把一条记录的 tag 全取出来，而宿主无列 tag 面） |
 | `entity.schema_of` | `(id)` | `schema\|nil` | 纯读（死之或不存在 = `nil`） |
 | `entity.ids` / `entity.count` | `(tag?, schema?)` | `{id, …}`（升序）/ number | 纯读；O(n)，n = 存活实体数 |
+| `entity.query` | `(selector)` | `{count, ids}` 或 `{count, rows}` | 纯读（一次内核穿越，零写入零事件）；`schema` 键是包面专有（见 §9.8） |
 
 副作用类别沿用 [../kernel/lua-api.md](../kernel/lua-api.md) 的分类：`纯读` / `写` / `写 + 事件`。`写` 类在模块顶层调用即被 `YGG-MOD-EFFECT` 拒绝。
 
@@ -109,6 +112,7 @@ schema 注册表的扁平键（`<n>` = schema 名，`<a>` = 属性名，`<t>` = 
 | 序列化吞吐（实体 / 秒，双向） | 附基准集与耗时 | **不适用**：承包给 [codec.md](codec.md) §5，基准集与口径只在那里定义一次。 |
 | 10k 实体常驻内存 | 给出数字 | 实测 **5557.0 KiB**（包侧 Lua 堆上界；S9 起每实体少一枚 `alive.<id>` 键，同口径比 S9 前 6637.1 低 1080 KiB）+ **1155576 B**（同量实体的键名 + 值字节和，载体无关）。口径：10k × 8 属性 + 3 tag，`collectgarbage("count")` 前后差 ÷ 1024。P0 写的 `≤ 2 MiB` 是按沙箱内 Rust 侧口径定的阈值，与这个上界口径**不可比**（6.6 MiB 里 mock 的 Lua 表开销占大头）；沙箱硬帽是 `64 MiB`（`sandbox.rs` 的 `SANDBOX_MEMORY_LIMIT`——P0 此处写的 16 MiB 已被 P1 调整，本行对齐）。 |
 | 路径基线（B-2，10⁴ 实体集） | 逐路径给数字、**不设阈值**（机差会把门禁打红） | `PERF entity.paths_*` 七行（spawn / destroy / get / set / get_set_pair / attrs8 / tags3 / ids_10k）；复算命令同上方；说明见 §9 |
+| 查询（S-24 `entity.query`） | 见 §9.8 分档；**不设阈值**（与 `paths_*` 同款纪律：机差会把门禁打红） | **真沙箱端到端**（`crates/ygg-sandbox/tests/path_costs.rs` 的 `probe.query_face.*`，`--release` 三跑取中位）：`ids_10k` **0.333 ms** / `where2_10k` **0.241 ms** / `indexed_10k` **0.067 ms** / `scan_same_10k` **0.159 ms**。**原生侧**（`probe.entitystore.select_*_10k`）：全扫 **37 µs** / 两谓词全扫 **164 µs** / 单属性区间走索引 **42 µs**。**包侧**（`PERF entity.query_forward_ns` / `query_schema_filter_10k_ns`）：转发 **350 ns/call**、schema 后过滤 10⁴ 条 **1.18 ms/call**。数组填充系数 `probe.crossing.array_fill_10k_ns` = **8.3 ns/元素**（Lua 内建表）。before/after 与分档口径见 §9.8 |
 | 泄漏检测 | 导入导出 100 轮内存不增长 | 实测 `spawn` + `destroy` × 100 后：`count` / `#ids` 回起点、`seq` **恰好** +100（id 不复用）、**内核残留回零**（S9 新轴：真删之后 mock 的 `store` 里一条记录都不剩）、KV 键数 **恰好** +100（每轮一枚：`rec.<id>.schema`；`alive.<id>` 位 S9 退役）、内存 △**0.071%**（断言 ≤ 0.5%）。口径（比 P0 更强）：P0 写「`entity.index` 条目数回到起点」——在无删除面的 KV 上「键数不变」**不可达**（每次 destroy 必留一枚 rec 键），所以断言改成「**恰好等于** destroy 次数」，同时排掉「每轮多写一个计数键」这类慢性漏；S9 起再加一条**内核侧**的「回到起点」，把「KV 残留」与「内核残留」分开断言（前者是宿主没删除面的可数代价，后者必须为零）。 |
 
 **阈值为何是 2.0（R4 落地 1.5，S9 复测再抬——两次都明写理由）。** 契约原写「单次调用耗时不随 N 增长（≤ 1.2×）」，但 1.2 是按「无噪声」估的：实测 3 次全量跑的档间比是 1.07 / 1.09 / 1.18，另有一次 1.4× **假红**（1000 次/档时）。噪声源是两个：`os.clock` 的粒度与「全量跑前面已经堆到 12 MB 量级」带来的 GC 脉冲。处置是两步：① 内层轮次提到 5000 × 3 批取中位（把 GC 噪声平均掉）；② 阈值提到 **1.5×**。为何 1.5 仍然有效：真的出现遍历是 **O(N)** 量级（10³–10⁴×），与噪声不在一个数量级；而 1.07–1.19 这个区间里没有任何一档表现出「随 N 单调增长」的形状。
@@ -145,7 +149,7 @@ P0 期这一列是**目标值**；P2 首实现填实测值，偏差回写本表�
 
 **已交付（S9，2026-11-21）：`ygg.entity.exists` / `ygg.entity.destroy`。** 见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1 与本文 §1 / I5：`destroy` = 内核真删（属性 + tag + 记录一并回收，水位不动），存活真源 = 内核存在性（零 KV 键）。两条**后续**（都不在本需求边界，另立需求）：① 残留的 `rec.<id>.schema` 键归零——把 schema 搬进内核保留属性（名首字符 `.` 落在 schema 名文法 `^[A-Za-z_]…` 之外，包不可撞名），随真删自动回收；或补 `ygg.kv.remove(key)` 面。② **S9-b 旧档一次性 purge**：S9 前的存档里死亡实体的内核记录还在，升级后会被读成存活；迁移只能挂在**写路径**（读路径触发会撞 `modules.rs` 的 `ShadowBanned` 运行时影子表，把今天合法的「模块顶层 `pkg.entity.exists`」变成错误），≈12 行 + 版本标记键。内核 iter 仍未上宿主面——所以「收养出生前的存量实体」仍做不到。
 
-**判据（①②③）。** ① 阻断——在 mod 里自己实现 id 分配或属性存储；在包里写属性语义（「生命归零算死」）；把表的形状偷偷塞进 `attrs`。② 症状——两个游戏各有一份 `next_id`；同一属性在两个游戏里类型不同导致导入失败；`destroy` 之后引用槽被包悄悄改写。③ 确认——本文件存在且被 [../README.md](../README.md) 索引；`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-entity` 的 `cases passed=` 为 **21**（含 18 条 `pkg.entity.*` 行为用例 + `pkg-entity-paths` 的 2 条 + S9 新增的 `pkg.entity.destroy-reclaims-kernel-record`；perf 文件按 file 级断言计入 `ok=`、不进这个计数）；§5 六个指标有数字，异常则 file 级断言先红。
+**判据（①②③）。** ① 阻断——在 mod 里自己实现 id 分配或属性存储；在包里写属性语义（「生命归零算死」）；把表的形状偷偷塞进 `attrs`。② 症状——两个游戏各有一份 `next_id`；同一属性在两个游戏里类型不同导致导入失败；`destroy` 之后引用槽被包悄悄改写。③ 确认——本文件存在且被 [../README.md](../README.md) 索引；`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-entity` 的 `cases passed=` 为 **29**（26 条 `pkg.entity.*` 行为用例 + `pkg-entity-paths` 的 2 条 + S9 的 `pkg.entity.destroy-reclaims-kernel-record`；S-24 的 `entity.query` 是其中 8 条；perf 文件按 file 级断言计入 `ok=`、不进这个计数）；§5 七个指标有数字，异常则 file 级断言先红。
 
 ## 9. 下沉边界（P-K A1；逐函数去向与硬判据）
 
@@ -214,6 +218,7 @@ n=1 时这笔账**必然亏**；n 大时（`ids` 的 10⁴ 个 id）本该赢，
    KV 读消失（这是唯一有数量级收益的一条）。代价：墓碑位从「KV 唯一真源」变成双写，
    直接动 I5 与泄漏用例的键数断言——必须由契约层面拍板。——**S9 已用更便宜的方式解了这条**：
    存活真源直接改成内核存在性（`exists`），既不新增 alive 位也不双写，KV 键反而从 2 枚降到 1 枚。
+   ③ **S-24 把这一条彻底关掉**：`ygg.entity.query({})` 一次跨界列活物（§9.8），动机消失——见 §9.8 末段的「S-21 正式关闭」。
 
 **判据（①②③）**：① 阻断——想靠「把 n=1 的调用包成批式帧」来提速；② 症状——`PERF entity.paths_get`
 从 748 涨到 3 147 ns；③ 确认——上面六行数字 + `cargo test -p ygg-sandbox --test path_costs`
@@ -235,3 +240,64 @@ n=1 时这笔账**必然亏**；n 大时（`ids` 的 10⁴ 个 id）本该赢，
 **所以 A 路的预期（`get` 750→150、`attrs` 2444→300）不可达**：`get` 的成本大头是**存活门**（S9 前 = `pkg.entity.alive.<id>` 的 KV 读 + `tostring`/拼接；S9 起 = 内核存在性读，拼接没了），不批式化就搬不走；`attrs` 唯一可行的便宜形状是**标量多返回值 + 注册行序**（19.7 ns 出 + 129 ns 原生读），但那需要「define 时把属性行序注册进原生面」的新面（本需求未授权，且它把 schema 顺序变成原生状态）。
 
 **结论**：A 路在本需求内**不实现**（造了也是负收益的面）。真正可行的两条仍是：① 注册行序 + 多返回值（`attrs` 有 7–10× 空间）；② 存活位下沉（`ids`/`get` 有数量级空间，S21）。两条都要新契约。数字与命令：`cargo test --release -p ygg-sandbox --test path_costs -- --nocapture`。
+
+### 9.8 通用实体查询面（S-24，2026-11-21；`ygg.entity.query` + `entity.query`）
+
+**为什么有它**（§1.7 三要素的第 1 条 = 被阻的是谁）：① 「列活物」在包侧是**每实体一次存活门跨界**（`ids` 的 10⁴ 次穿越，真沙箱实测 234 ns/实体 ⇒ 2.34 ms）；② **属性谓词根本没有面**——mod 只能先 `ids()` 全量、再逐实体 `get_attribute`（440.9 ns/键），「hp ≤ 100 的敌人」最省写法约 11 ms。S-24 把两件事一起解：一次跨界、内核进程内选、**可走索引时走索引**。
+
+**面形状**（权威在 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1；这里只记包的接缝）：
+
+| selector 键 | 语义 |
+| --- | --- |
+| `tag` | 先于 `where` 的最便宜过滤 |
+| `where` | **属性名 → 谓词**的映射（同键多条 = 隐式 AND）；字符串态 `"op.operand"` 糖 + 结构态 `{op=…, value=…}` 精确逃生口；op 族 `eq/neq/gt/gte/lt/lte/in/like/ilike/is` + `not.` 前缀 |
+| `select` | 缺省 = **裸 id 数组**；非空 = 行表（行恒带 `id`，缺属性不设键） |
+| `order` | `field` / `field.asc` / `field.desc`；值同 ⇒ id 升序兜底（asc/desc 都不反转）；缺属性排最后 |
+| `schema` | **包面专有**（内核面不认识它，见下文「包面加什么」） |
+
+**五条语义裁断**（都在 core 的 `crates/ygg-core/src/entity.rs`，无 VM 可单测）：
+
+1. **`is` 管存在性、其余 op 对缺属性一律假，且 `not.` 不翻**——否则 `neq` 与 `not.eq` 会分叉出两套缺失语义。
+2. **跨族比较是假，不是错**（含 `neq`）：扫描中报错会产出半截结果。整浮同族：`eq 2` 命中 `2.0`。
+3. **`like` 只认四形态**（无 `*` / `P*` / `*S` / `*C*`，且字面段非空）：四形态各对应一条线性扫描原语，零正则、零回溯、零 ReDoS 面；`ilike` 只做 ASCII 折叠（Unicode 折叠表是版本相关依赖）。
+4. **不分页、不 JOIN**：一次全回、`count` 即总数；跨包关联属 mod 语义（I4 同款纪律）。
+5. **`id` 是保留伪属性**（真属性名 `id` 因此在 `where`/`order` 里不可寻址）——换来 `query` 对 `scan(lo, hi, tag)` 的语义覆盖。
+
+**索引（惰性首建 + 写点增量维护）**。按键有序索引：值 → id 列表，四段 `Num < Float(位序化 u64) < Bool < Str`，桶内 id 升序。可走索引的条件只有一条：**所有谓词落在同一属性、每条都可索引（`eq`/`gt`/`gte`/`lt`/`lte`/`in`）、且无 `not.`**；出现 `neq` / `like` / `ilike` / `is` 或 **≥2 个属性**一律回全扫（补集与存在性无法从桶枚举；「最选择性键 + 残余过滤」要基数统计 = 引入代价模型）。`id` 上的谓词直接走 `BTreeMap::range`（零构建）。三条设计依据：
+
+- **为什么进 `EntityStore` 而不是宿主侧**：宿主 6 个写键各要记得调一次增量补丁，漏一处 = **静默错答**（查询引擎最坏的故障形态）；放进内核是唯一能让「每个写点必须维护」成为结构约束的位置（五处补丁与 `revision += 1` 同行）。
+- **为什么不「标脏 + 下次重建」**：重建 10⁴ 实体 ≈ 0.3 ms，**比不建索引的全扫（0.15 ms）还贵 2×**，写多读少的循环里是净负。
+- **索引是剪枝结构，不是权威**：候选集出表后仍逐条跑谓词，所以「索引路径 ≡ 全扫路径」是构造性的（差分用例 `index_path_equals_scan_path` 钉死逐值逐序；`index_incremental_equals_rebuild` 钉住「增量 ≡ 从零重建」）。
+
+**确定性（by construction，五条）**：① `CompareOp` 里**没有算术臂**——浮点不可结合性无从发生；② id 序遍历（`BTreeMap::values()`，乱序 `insert` 也不改）；③ 浮点只 `partial_cmp` 比较（`-0.0` 已在写入口规范化），不参与运算；④ 单线程（`Rc ⇒ !Send` + mlua 未启 `send`，且整次查询是**一个** mlua 调用，宿主无法中途插入第二个）；⑤ 索引 (值, id) 序 + 增量 ≡ 重建。**不做运行期断言**：负向 trait bound 无法表达，写了就是不可证伪的测试。
+
+**载体选择（§1.7 的能力出口）**：语义（选择器 / 比较矩阵 / 序遍历 / 走索引判定）全在 `crates/ygg-core/src/entity.rs`——无 VM 可单测，语义不随宿主重构漂；宿主 `crates/ygg-sandbox/src/host_api.rs` 只做**文法解码 + 两阶段材质化**（借用纪律同 `attr_fetch`：阶段 1 持借用零 Lua 调用，阶段 2 只建表，`count` 复用长度）。错误码**不新增族**：文法/形状错 `YGG-ENTITY-FRAME`、值域错 `YGG-ENTITY-VALUE`。
+
+**包面加什么、不加什么**（判据 = 「包能加上一样内核没有的东西」）：加**两样**——`schema` 门（`YGG-PKG-ENTITY-SCHEMA`；schema 是 KV 里的 `rec.<id>.schema`，**不是内核状态**，放进内核面 = 第二个 schema 注册表，违 I3）与未声明键门 / 结构态类型门（`YGG-PKG-ENTITY-ATTR`，复用 `value_ok`）。一句话：**包面把类型错变成错误，内核面把类型错变成假**。三档成本：
+
+| selector | 包的额外工作 | 穿越 | 出表 |
+| --- | --- | --- | --- |
+| 无 `schema` | 剥掉 `schema` 键后逐字透传 | **1** | 透传 `{count, ids\|rows}` |
+| 有 `schema`，无 `select` | 幸存者逐个 `kv.get("rec."..id..".schema")` 比对 | **1** + R 次 KV 读 | `{count, ids}` |
+| 有 `schema`，有 `select` | 同上，**行表原地滤行**（行上已带 id） | **1** + R 次 KV 读 | `{count, rows}` |
+
+字符串态的操作数类型由内核判（跨族即假），包**不二次解析**谓词文本——那会造出第二份文法真源。
+
+**S-21 正式关闭（`query ⊃ scan`，I5 修宪取消）**：S21 的内容是「给内核加存活位、与 KV 双写」，动机是 `ids()` 每实体一次存活门。本面把动机**整体消掉**：`EntityStore::iter()` 就是活物集（S9 真删后表里没有死物），列活物 = 一次迭代 + 一次数组填充 + 一次跨界。所以「I5 需要修宪」**不再需要**：真源仍唯一（内核表），本面**不可能**与 `exists` 分歧——它读同一张表、同一扇门；双写方案反而会引入分歧面。`where = { id = "gte.10" }` 让 `query` 成为 `scan(lo, hi, tag)` 的语义超集（Tier 2 的水位过滤不必再开面）。§9.6 的翻盘方向 ② 就此作废。
+
+**before/after（同机同数据集，10⁴ 实体）**：
+
+| 档 | before（在案实测，口径见下） | after（端到端 = 真沙箱 + 一次跨界） | 比 |
+| --- | --- | --- | --- |
+| 列活物 | **2.34 ms**（真沙箱 S9 `PERF entity.paths_ids_10k`，234 ns/实体） | **0.333 ms**（`probe.query_face.ids_10k`） | **7.0×** |
+| 属性筛 2 谓词 | **~11 ms**（S9 前口径的构成式：`ids` 2.34 + 10⁴×2 次 `get_attribute` 8.8） | **0.241 ms**（`probe.query_face.where2_10k`） | **~46×** |
+| 同结果集：全扫 vs 走索引 | 0.159 ms（`scan_same_10k`，1000 行结果） | **0.067 ms**（`indexed_10k`） | **2.4×** |
+
+**口径纪律（不许只报最好档）**：
+
+- **7.0× 是最诚实的那档**，不是 v1 §5 估算的 15×。估算用 Lua 侧 `t[i] = i` 的 8.3 ns/元素（`probe.crossing.array_fill_10k_ns`），而 **Rust→Lua 每元素材质化实测 ≈ 30 ns**（`create_sequence_from` 吐 10⁴ 条 ≈ 0.28 ms）——两者差的是「跨界建表」与「Lua 内建表」的不同价钱。想再压这档只能减元素个数（`select` 投影不改变 id 数组的规模），不是引擎能优化项。
+- **属性筛档的 before 是构成式**（`ids` + 逐实体读，两个在案数字相加），after 是**一次端到端测量**：不同源，故标注「构成式对照」，不当单跑比较。
+- **全命中 + 投影 2 键档不重测**：v1 §5 已按 mlua 行表 marshal 的固定价（183.9 ns/行）如实分档为约 4.8×——它是 mlua 的价，不是引擎可优化项。
+- 原生侧（不含跨界）：全扫 **37 µs** / 两谓词全扫 **164 µs** / 单属性区间走索引 **42 µs**；数组填充 **8.3 ns/元素**。复算：`cargo test --release -p ygg-sandbox --test path_costs -- --nocapture` × 3 取中位。
+
+**判据（①②③）**：① 阻断——在 mod 里手搓「全量 ids + 逐实体属性读」来筛选择集，或给包加一个「更快的按属性查」私面（那会变成第二份引擎，语义必然漂）；② 症状——`probe.query_face.*` 任一行退化一个数量级，或 `index_path_equals_scan_path` 差分变红（索引与全扫分家）；③ 确认——`--filter pkg-entity` 的 `cases passed=` 为 **29**、`probe.query_face.*` 四行有数字、`cargo test --workspace` 不回退。

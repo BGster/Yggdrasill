@@ -85,6 +85,7 @@ local function new_world()
   local exists_reads = 0
   local store = { next_id = 1, attrs = {}, tags = {} }
   local events = {}
+  local queries = {}
   local world = { kv = kv, store = store, events = events, kv_writes = 0 }
 
   local entity = {
@@ -148,6 +149,15 @@ local function new_world()
       store.tags[id] = nil
       return true
     end,
+    -- S-24 查询面：**记录器**（记下收到的 selector、回放 `world.query_reply`）。
+    -- 刻意不实现第二份引擎——两套语义必然漂，而本包只该证明「透传与后过滤」。
+    query = function(selector)
+      queries[#queries + 1] = selector
+      if world.query_reply ~= nil then
+        return world.query_reply
+      end
+      return { count = 0, ids = {} }
+    end,
   }
 
   world.host = {
@@ -173,6 +183,7 @@ local function new_world()
   world.kv_reads_now = function()
     return kv_reads
   end
+  world.queries = queries
   world.exists_reads_now = function()
     return exists_reads
   end
@@ -727,6 +738,7 @@ run("pkg.entity.exports", function()
     "has",
     "ids",
     "install",
+    "query",
     "schema",
     "schema_of",
     "set",
@@ -767,4 +779,154 @@ run("pkg.entity.exports", function()
   for i = 1, #EXPECTED do
     eq(seen[i], EXPECTED[i], "第 " .. i .. " 个键")
   end
+end)
+
+-- ── 用例 S-24：`entity.query`（内核查询面的包面 = 透传 + schema 后过滤）──────────
+--
+-- mock 只做**记录器**（记 selector、回放固定出表）：本文件要证的是「透传逐字」与
+-- 「后过滤只按 KV 的 schema 记录」，不是第二份引擎的语义（那会与内核漂）。
+
+run("pkg.entity.query-forwards-selector-verbatim", function()
+  local world = new_world()
+  local entity = fresh(world)
+  local where = { hp = "gte.10", kind = { op = "in", value = { "orc", "rat" } } }
+  local reply = { count = 2, ids = { 1, 2 } }
+  world.query_reply = reply
+  local got = entity.query({ tag = "enemy", where = where, order = "hp.desc", select = { "hp" } })
+
+  eq(#world.queries, 1, "无 schema ⇒ 恰 1 次穿越")
+  local sent = world.queries[1]
+  eq(sent.tag, "enemy")
+  eq(sent.where, where, "`where` 逐字透传（同一张表，不重建）")
+  eq(sent.order, "hp.desc")
+  eq(#sent.select, 1, "`select` 原样")
+  eq(sent.select[1], "hp")
+  is_nil(sent.schema, "`schema` 不是内核键")
+  eq(got, reply, "出表原样回（包不重造形态）")
+end)
+
+run("pkg.entity.query-strips-schema-key", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("monster", { attrs = { hp = { type = "number" } } })
+  local id = entity.spawn("monster", { hp = 10 })
+  world.query_reply = { count = 1, ids = { id } }
+  local got = entity.query({ schema = "monster", where = { hp = "gte.10" } })
+
+  eq(#world.queries, 1)
+  is_nil(world.queries[1].schema, "`schema` 必须在跨界前剥掉（内核不认这个键）")
+  eq(world.queries[1].where.hp, "gte.10", "其余字段逐字保留")
+  eq(got.count, 1)
+  eq(got.ids[1], id)
+end)
+
+run("pkg.entity.query-schema-filters-by-kv-record", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("monster", { attrs = { hp = { type = "number" } } })
+  entity.define("npc", { attrs = { hp = { type = "number" } } })
+  local a = entity.spawn("monster", { hp = 10 })
+  local b = entity.spawn("npc", { hp = 20 })
+  local c = entity.spawn("monster", { hp = 30 })
+  world.query_reply = { count = 3, ids = { a, b, c } }
+
+  local got = entity.query({ schema = "monster" })
+  eq(got.count, 2, "只剩 monster 的两条")
+  eq(got.ids[1], a)
+  eq(got.ids[2], c)
+  eq(#world.queries, 1, "id 形态：1 次穿越 + R 次 KV 读")
+end)
+
+run("pkg.entity.query-select-filters-rows-in-place", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("monster", { attrs = { hp = { type = "number" } } })
+  entity.define("npc", { attrs = { hp = { type = "number" } } })
+  local a = entity.spawn("monster", { hp = 10 })
+  local b = entity.spawn("npc", { hp = 20 })
+  local c = entity.spawn("monster", { hp = 30 })
+  world.query_reply = {
+    count = 3,
+    rows = { { id = a, hp = 10 }, { id = b, hp = 20 }, { id = c, hp = 30 } },
+  }
+
+  local got = entity.query({ schema = "monster", select = { "hp" } })
+  eq(got.count, 2)
+  eq(#got.rows, 2)
+  eq(got.rows[1].id, a)
+  eq(got.rows[2].hp, 30, "行表原地过滤，投影值不重取")
+  eq(#world.queries, 1, "行形态不二次穿越（再走 attr_fetch 只是多一次材质化）")
+  eq(world.queries[1].select[1], "hp")
+end)
+
+run("pkg.entity.query-undeclared-attr-rejected", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("monster", { attrs = { hp = { type = "number" } } })
+
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.query({ schema = "monster", where = { hp = "gte.1", speed = "gt.1" } })
+  end, "where 的未声明属性")
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.query({ schema = "monster", select = { "hp", "speed" } })
+  end, "select 的未声明属性")
+  eq(#world.queries, 0, "门在查询之前：零穿越")
+
+  -- `id` 是内核保留伪属性（不在 schema 里），必须放过——否则 `where = { id = ... }` 不可用
+  world.query_reply = { count = 0, ids = {} }
+  entity.query({ schema = "monster", where = { id = "gte.1" } })
+  eq(#world.queries, 1)
+end)
+
+run("pkg.entity.query-unknown-schema-rejected", function()
+  local world = new_world()
+  local entity = fresh(world)
+  expect_error("YGG-PKG-ENTITY-SCHEMA", function()
+    entity.query({ schema = "ghost" })
+  end, "未注册 schema")
+  expect_error("YGG-PKG-ENTITY-SCHEMA", function()
+    entity.query({ schema = 5 })
+  end, "schema 非字符串")
+  eq(#world.queries, 0, "零穿越")
+end)
+
+run("pkg.entity.query-empty-result-keeps-shape", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("monster", { attrs = { hp = { type = "number" } } })
+
+  world.query_reply = { count = 0, ids = {} }
+  local got = entity.query({ schema = "monster" })
+  eq(got.count, 0, "count 恒在（空结果可判）")
+  eq(type(got.ids), "table")
+  eq(#got.ids, 0)
+  is_nil(got.rows, "id 形态不带 rows")
+
+  world.query_reply = { count = 0, rows = {} }
+  local rows = entity.query({ schema = "monster", select = { "hp" } })
+  eq(rows.count, 0)
+  eq(type(rows.rows), "table")
+  is_nil(rows.ids, "行形态不带 ids")
+end)
+
+run("pkg.entity.query-schema-operand-type", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("monster", {
+    attrs = { hp = { type = "number" }, title = { type = "string" } },
+  })
+
+  -- 结构态的类型门：number 属性收到字符串操作数 ⇒ 错（内核面会变成「跨族即假」）
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.query({ schema = "monster", where = { hp = { op = "gte", value = "ten" } } })
+  end, "number 属性收到字符串操作数")
+  expect_error("YGG-PKG-ENTITY-ATTR", function()
+    entity.query({ schema = "monster", where = { hp = { op = "in", value = { 1, "two" } } } })
+  end, "in 的元素类型不相容")
+  eq(#world.queries, 0, "门在查询之前")
+
+  -- 相容的操作数放过；字符串态的类型由内核判（跨族即假），包不二次解析
+  world.query_reply = { count = 0, ids = {} }
+  entity.query({ schema = "monster", where = { hp = "gte.10", title = "eq.x" } })
+  eq(#world.queries, 1)
 end)
