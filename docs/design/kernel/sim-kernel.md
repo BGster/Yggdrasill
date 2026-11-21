@@ -109,6 +109,9 @@
 | 回放一致 | 逐 tick hash 全等 | **matched=150/150（快照续跑）、200/200（创世重跑）；first_mismatch=None** | `cargo test -p ygg-sim --test replay_tick_hash` | 含 1 条篡改负例（改 dt +1 ulp 必在该 tick 报失配） |
 | 穿越成本（批式铁律②的实测依据） | — | **0 参 19.5 / 带参 44.6–56.7 / 返回两字段表 178.1 ns/次**（三轮中位） | `cargo test --release -p ygg-sandbox --test path_costs -- --nocapture` | 裸 mlua，release；`probe.crossing.*` 行 |
 | 跨进程 digest | parent == child | **parent_digest = child_digest = `0c6199352032440b`（60 行 trace）** | `cargo test -p ygg-sim --test replay_cross_process` | `current_exe` 子进程 + 临时文件 |
+| tick 10⁴（F64Bits 档，R1′） | ≤ 16.6 ms（I4 同线） | **0.527 ms**（三轮 0.592 / 0.523 / 0.527；p95 0.813–0.531，max 0.980–0.553） | `cargo test --release -p ygg-sim --test perf_tick perf_tick_10k_f64bits -- --nocapture` | workload 同 Number 档形状；负载为位串搬运（读→pack∘unpack 归一→写），≈I64 档（同 8B/值线性搬运），2026-11-21 实测 |
+| spawn 10⁴×8attr（Rust 侧，R1′ 双档） | — | **I64 档 212.5 ns/entity**（259.7/209.7/212.5）vs **F64Bits 档 226.8 ns/entity**（217.0/226.8/227.1） | `cargo test --release -p ygg-sim --test perf_spawn_10k_8attrs_both_kinds -- --nocapture` | A1 §1.7 范式（release 三轮中位）；F64Bits +6.7%，位串直入列不落 codec 文本；2026-11-21 实测 |
+| snapshot/restore 10⁵（F64Bits 档，R1′） | ≤ 100 ms 双向 | **8.951 / 17.367 ms**（帧 7 200 130 B，与 I64 档**同字节数**；I64 档同轮 8.785 / 17.070，差 +1.9% / +1.7%） | `cargo test --release -p ygg-sim --test perf_snapshot_restore_100k_f64bits -- --nocapture` | hash 路径对照口径：Tier 2 浮点进状态面必走 codec 文本（≥30 MiB/s 在案），位串 8B LE 直进帧 + FNV 折叠；2026-11-21 实测 |
 
 口径：macOS / arm64、`--release`（`[profile.release.package.ygg-sim] opt-level = 3` 单点覆盖，根 `opt-level="s"` 是 wasm 体积面）、三轮各新建 Sim、每轮取逐 tick 中位、再取三轮中位。**实测比 §5.3 的预判（1–3 ms）更快**，余量 30×；不因此下调阈值——阈值是契约线，不是目标值。
 
@@ -139,4 +142,5 @@
 - **为什么名称键控（内部 id 不进快照/hash）**：`ComponentId` 是注册序的副产物，而注册序是宿主装载序的副产物——把 id 写进存档等于把「装载顺序」变成持久契约，跨进程/跨版本必然分叉。改成名称键控后，同一世界在两种注册顺序下给出**逐字节相同**的快照与 hash（`snapshot_roundtrip::id_order_independent` 实测：内部 id 0 vs 4，字节与 hash 全同）。代价是一次按名称排序的编码（每个 archetype 段几十字节的元数据），相对列载荷可忽略。
 - **为什么结构操作延迟到 tick 边界**：系统迭代列的同时增删行，会让「这一帧里到底有哪些行」依赖遍历进度——同一份代码在 `Vec` 增长/搬移下给出不同结果。延迟到边界 FIFO 应用后，系统看到的行集与行序在整帧内稳定，且换进/换出顺序可复算（回放的逐 tick hash 依赖它）。反方案（就地增删 + 索引失效重查）不是更快，只是把确定性换成了「跑两次看看」。
 - **为什么 hash 每次真编码一遍快照**：等式 `state_hash == fnv1a64(快照字节去尾 digest)` 只有在真的编码时才可执行。另写快路径（遍历列直接算 hash）会让两条路径在「加了一个字段」时静默分叉，症状是「存档能读、回放对不上」——最难查的一类故障。代价在 §5.1：10⁴ 实体 tick 仍只用 0.553 ms，远低于 16.6 ms 预算。
+- **为什么位串列（R1′，2026-11-21）**：50× 线的实体态承载需要内核侧的 8B 定宽浮点路径——Tier 2 浮点今日进状态面必走 codec 文本（format_g，≥30 MiB/s 在案），逐实体逐帧的文本往返是数量级错配。位串列把浮点确定性从「环境纪律」改写成**结构事实**：内核对位串只做存储、拷贝、归一（±0→+0、任意 NaN 载荷→单一 quiet NaN）与字节级 hash，浮点环境差异（FTZ/DAZ、x87 扩展精度）在结构上不可达——`src/bits.rs` 是唯一 `f64` 豁免面且被扫描断言零算术运算符（I2 修宪 + R1′）。数字锚点：A1 §5.3/§5.5（sim 列式 128 ns/entity < 255 ns 门槛，EntityStore 616 > 255 ⇒ 位串列是 50× 线唯一已知承载）；授权锚点：用户 2026-11-21「不留旧账」+ A1 §9.3 六处改定批复。实测对照（§5.1）：tick 0.527 ms ≈ I64 档 0.526 ms，帧字节两档同 7 200 130 B。不声称端到端 74×（那是 Lua 批量面 slice 的数字）；不声称对原始 Lua 值无损（无损是对 v1 所存 Q32.32 值而言）。
 - **①②③ 判据**（每个下沉面）：① 被阻动作=该面性能预算不达或需宿主资源；② 症状=对比表数字；③ 确认=digest/帧率/吞吐实测。
