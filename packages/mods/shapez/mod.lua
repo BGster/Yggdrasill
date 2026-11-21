@@ -26,6 +26,7 @@ local hub = require("src.hub")
 local simtick = require("src.simtick")
 local mapgen = require("src.mapgen")
 local savegame = require("src.savegame")
+local bot = require("src.bot")
 
 -- ============================================================================
 -- §2 包装配：install 只记 deps / 注注册表（不预读模板、不写 KV）。
@@ -138,6 +139,49 @@ ygg.on("sz.place.miner", function(payload)
     .. " 产形=" .. patch.subshape .. patch.color)
 end)
 
+-- ── 拆除直发面（v3 唯一新入口；"kind|x,y"）──────────────────────────────
+-- kind ∈ belt|proc|miner（hub 不拆）；同格多实体取 id 最小者
+-- （simtick.resolve 同款纪律）。kv 无删除面：`rec.<id>.schema` 墓碑与
+-- `sz.path.<startid>` 失效带是 S23 巡检对象（shapez-game.md §2.7）。
+ygg.on("sz.demolish", function(payload)
+  local head = tostring(payload):match("^([^|]+)|")
+  local xyr = tostring(payload):match("|([^|]+)$")
+  local x, y
+  if xyr ~= nil then
+    x, y = xyr:match("^(-?%d+),(-?%d+)$")
+  end
+  x = tonumber(x)
+  y = tonumber(y)
+  if head == nil or x == nil then
+    ygg.narrate("【拒绝】sz.demolish 载荷应为 \"belt|x,y\"（kind ∈ belt|proc|miner）")
+    return
+  end
+  local schema = ({ belt = "sz.belt", proc = "sz.processor", miner = "sz.miner" })[head]
+  if schema == nil then
+    ygg.narrate("【拒绝】sz.demolish 未知类别：" .. head)
+    return
+  end
+  local target = nil
+  local list = entity.ids(nil, schema) -- 升序：首个命中即 id 最小者
+  for i = 1, #list do
+    local id = list[i]
+    if entity.get(id, "x") == x and entity.get(id, "y") == y then
+      target = id
+      break
+    end
+  end
+  if target == nil then
+    ygg.narrate("【拒绝】sz.demolish 该格无 " .. head .. "：" .. x .. "," .. y)
+    return
+  end
+  if not entity.destroy(target) then
+    ygg.narrate("【拒绝】sz.demolish 拆除失败：" .. head .. " @" .. x .. "," .. y)
+    return
+  end
+  belts.bump_layout()
+  ygg.narrate("拆毁 " .. head .. "：" .. tostring(target) .. " @" .. x .. "," .. y)
+end)
+
 -- ── tick 直发面："n" = 走 n 拍（缺省 1）──────────────────────────────────────
 ygg.on("sz.tick", function(payload)
   local n = tonumber(payload) or 1
@@ -170,4 +214,4 @@ ygg.on("shapez.summary", function()
   h.meta("sim_hash", hash)
 end)
 
-return { shapes = shapes, belts = belts, processors = processors, hub = hub, simtick = simtick, mapgen = mapgen, savegame = savegame }
+return { shapes = shapes, belts = belts, processors = processors, hub = hub, simtick = simtick, mapgen = mapgen, savegame = savegame, bot = bot }

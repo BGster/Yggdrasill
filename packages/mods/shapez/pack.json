@@ -34,7 +34,8 @@
       "src/hub.lua",
       "src/simtick.lua",
       "src/mapgen.lua",
-      "src/savegame.lua"
+      "src/savegame.lua",
+      "src/bot.lua"
     ]
   }
 }
