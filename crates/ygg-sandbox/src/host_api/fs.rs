@@ -116,7 +116,7 @@ pub struct VfsFile {
 /// 2. **`revision` 只增**：每次成功写 +1；宿主据此判断「有没有新东西要 flush」。
 /// 3. **`dirty` 是落盘水位**：写完即入集合，宿主 `take_dirty()` 排空并写进
 ///    `RunStore::artifact_put`。它随 dispatch 级 savepoint 基线一起克隆/还原，
-///    所以失败 dispatch 里写的文件**不会**漏到盘上（见 `driver::cmd_event`）。
+///    所以失败 dispatch 里写的文件**不会**漏到盘上（见 `dispatch::cmd_event`）。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VfsStore {
     files: BTreeMap<String, VfsFile>,

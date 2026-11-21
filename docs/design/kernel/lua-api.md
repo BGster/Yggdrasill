@@ -140,7 +140,7 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 
 #### 3.1.3 sim 模拟内核面（宿主注入）
 
-`ygg.sim.*` 是 Tier 1（`crates/ygg-sim`，契约 [sim-kernel.md](sim-kernel.md)）在 Lua 侧的**唯一**进出口。它和 `ygg.fs` 的 `mounts/` 面同款纪律：库侧 `set_sim(...)` 注入（`driver.rs`），CLI 激活触点在 `egg.rs`（宿主面改动走用户授权账，**排期 S1**）；本需求交付「表始终注册 + 未挂载降级」，**不**在宿主里注入实例。
+`ygg.sim.*` 是 Tier 1（`crates/ygg-sim`，契约 [sim-kernel.md](sim-kernel.md)）在 Lua 侧的**唯一**进出口。它和 `ygg.fs` 的 `mounts/` 面同款纪律：库侧 `set_sim(...)` 注入（`driver/`），CLI 激活触点在 `egg.rs`（宿主面改动走用户授权账，**排期 S1**）；本需求交付「表始终注册 + 未挂载降级」，**不**在宿主里注入实例。
 
 **十个键，一个逐键 getter 都没有**（批式铁律 ②：穿越实测 45–57 ns/带参调用；批式的优势来自 per-entity 摊薄，不是「逐项调用负收益」）。键集是**闭集**——多一个键即红（`tests/sim_face.rs` 的键集断言），这条断言的作用是防止未来退化回逐项访问：
 

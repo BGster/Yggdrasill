@@ -1,0 +1,390 @@
+use std::collections::BTreeMap;
+
+use serde_json::{json, Map as JsonMap, Value as Json};
+
+use ygg_core::bus::{HandlerError, PendingChoice};
+use ygg_core::entity::Value;
+use ygg_core::event::Event;
+use ygg_core::save::{SaveError, SaveFile};
+use ygg_core::transition::{run_transition, TransitionError};
+
+use super::{code, KernelError, KernelFacade};
+use crate::fuel;
+use crate::sandbox::ENGINE_VERSION;
+
+impl KernelFacade {
+    /// 唯一同步入口（A1）：命令分发 + JSON 信封封装。域错误以信封返回
+    /// （永不 throw）；重入 dispatch = 驱动 bug → INTERNAL（不静默递归）。
+    pub fn dispatch(&mut self, cmd: &str, payload_json: &str) -> String {
+        if self.dispatching {
+            return error_envelope(code::INTERNAL, "re-entrant dispatch detected (driver bug)");
+        }
+        self.dispatching = true;
+        let reply = self.dispatch_inner(cmd, payload_json);
+        self.dispatching = false;
+        reply
+    }
+
+    /// 命令分发（保留名 `save/load/state/log/drain`；其余一律按外部事件名
+    /// 进入转换路径 [`KernelFacade::cmd_event`]）。
+    ///
+    /// TD1：入口先清空结构化 meta——上一条回执的 meta 不得残留到本条
+    /// （尤其不得让保留命令的回执带上上一条事件的 meta）。
+    fn dispatch_inner(&mut self, cmd: &str, payload_json: &str) -> String {
+        self.host.clear_meta();
+        match cmd {
+            "save" => self.cmd_save(),
+            "load" => self.cmd_load(payload_json),
+            "state" => self.cmd_state(),
+            "log" => self.cmd_log(),
+            // 派生事件已在转换内 FIFO 排空：drain 恒空（线格式兼容保留）。
+            "drain" => json!({"ok": true, "drained": []}).to_string(),
+            _ => self.cmd_event(cmd, payload_json),
+        }
+    }
+
+    /// `save`：完整状态快照（实体表 + KV + pending_choice，B3）序列化为
+    /// bytes（确定性序）后原样解析回 Json 嵌入信封——信封内容与存档
+    /// bytes 逐字段一致（读档方可直接把 `save` 字段作为 load payload）。
+    fn cmd_save(&mut self) -> String {
+        let save = SaveFile::new(
+            ENGINE_VERSION,
+            self.entities.borrow().clone(),
+            self.kv.borrow().clone(),
+            self.pending_choice.clone(),
+        );
+        let outcome = save
+            .to_bytes()
+            .and_then(|bytes| serde_json::from_slice::<Json>(&bytes).map_err(SaveError::Json));
+        match outcome.map_err(KernelError::Save) {
+            Ok(parsed) => json!({"ok": true, "save": parsed}).to_string(),
+            Err(err) => error_envelope(code::INTERNAL, err),
+        }
+    }
+
+    /// `load`：payload = 存档 JSON 字符串；版本/内容不符 → VALIDATION
+    /// 信封（EngineMismatch / SaveError），成功覆写后 `{"ok":true,
+    /// "restored":true,"pendingChoice":<同 state 形态>}`——待决选择
+    /// 随存档往返（B3），读档方零额外 dispatch 即可恢复提示面（A1）。
+    fn cmd_load(&mut self, payload_json: &str) -> String {
+        let save = match SaveFile::from_bytes(payload_json.as_bytes()) {
+            Ok(save) => save,
+            Err(err) => return error_envelope(code::VALIDATION, format!("load rejected: {err}")),
+        };
+        match self.apply_save(&save) {
+            Ok(()) => json!({
+                "ok": true,
+                "restored": true,
+                "pendingChoice": self.pending_choice.as_ref().map(choice_to_json),
+            })
+            .to_string(),
+            Err(KernelError::EngineMismatch { saved, current }) => error_envelope(
+                code::VALIDATION,
+                format!("load rejected: engine version mismatch: save written by `{saved}`, current engine `{current}`"),
+            ),
+            Err(err) => error_envelope(code::INTERNAL, err),
+        }
+    }
+
+    /// `state`：诊断面——引擎/实体/KV 版本号 + 快照字节数 + 待决选择。
+    fn cmd_state(&self) -> String {
+        let snapshot_bytes = match self.canonical_state_bytes() {
+            Ok(bytes) => bytes,
+            Err(err) => return error_envelope(code::INTERNAL, err),
+        };
+        json!({
+            "ok": true,
+            "engineVersion": ENGINE_VERSION,
+            "revision": self.entities.borrow().revision(),
+            "kvRevision": self.kv.borrow().revision(),
+            // 加性诊断键（同 `kvRevision` 的性质，不是状态）：VFS 的写代数与
+            // 件数。`state` 信封的消费方（`agent.rs::print_state` / 测试）都按
+            // 键取值，没有严格键集比较，所以加键不破线格式。
+            "vfsRevision": self.vfs.borrow().revision(),
+            "vfsFiles": self.vfs.borrow().len(),
+            "snapshotBytes": snapshot_bytes.len(),
+            "pendingChoice": self.pending_choice.as_ref().map(choice_to_json),
+        })
+        .to_string()
+    }
+
+    /// `log`：外部事件日志（仅外部事件；驱动旁路面，不入档）。
+    fn cmd_log(&self) -> String {
+        json!({"ok": true, "log": self.external_log}).to_string()
+    }
+
+    /// 本转换的燃料预算（r13 自动扩缩的唯壹取值点，`cmd_event` 步骤④消费）：
+    ///
+    /// - 显式 `YGG_FUEL_BUDGET`（进程 env）最优先、精确采用、不受 cap 削减；
+    /// - 缺省/非法 → [`crate::fuel::auto_budget`]：线性 + 地板 + 硬顶，
+    ///   `clamp(4600 × kv_len, 100k, 4M)`（r15 重标定斜率；标定表与「不可
+    ///   外推」边界见该函数文档）。
+    ///
+    /// `kv.len()` 是 canonical KV 条目总数（`BTreeMap::len` O(1)），**每转换
+    /// 现读、零缓存**：预算只依赖转换起点的 canonical 状态规模，回放/续局
+    /// 重建同状态 → 同预算序列 → 同结局；预算不入 save、不入状态哈希。因子
+    /// 取 `kv.len()` 是 mod 无关的充分统计（域键约定只归 mod，P3 宿主零语义），
+    /// 标定与取值论证见 [`crate::fuel::auto_budget`]。斜率只升不降于 r13 的
+    /// 2000/键：新公式对每个 kv_len 都 ≥ 旧值，改前能过的 dispatch 改后必过
+    /// （燃料只影响杀/不杀；结构性不回退，回归表测见
+    /// `r15_slope_covers_reference_peak_and_never_lowers_the_r13_formula`）。
+    fn transition_budget(&self) -> u64 {
+        fuel::resolve_budget(
+            std::env::var("YGG_FUEL_BUDGET").ok().as_deref(),
+            self.kv.borrow().len(),
+        )
+    }
+
+    /// 事件转换路径（非保留名命令）：registry 预检（fail-closed）→ payload
+    /// 解析（标量门）→ 外部事件构造 → 外部日志 → 燃料重置 → snapshot-out
+    /// 转换 → 信封回包。
+    fn cmd_event(&mut self, name: &str, payload_json: &str) -> String {
+        // ⓪⁻ registry 预检（fail-closed 门面侧）：未注册事件名在**一切副作用
+        //    之前**拒绝——不进外部日志（③）、不耗燃料（④）、不动状态基线（⑤）。
+        //    「事件不存在」先于「序号越界 / 载荷非法」（registry 是运行时唯一
+        //    事实，宿主不持事件名白名单：`ygg.*` 保留事件同走本预检，已注册者
+        //    天然通过）。先 `collect` 再判断：`event_names()` 借用 `&self.registry`，
+        //    收集完即释放，错误分支才能继续用 `self`。
+        //    文案三要素：事件名原样 + 已注册计数 + 全集（字典序）——Agent 一次
+        //    往返即可自纠（与 daemon unknown-op 全列合法 op 同先例）。
+        let names: Vec<&str> = self.registry.event_names().collect();
+        if !names.contains(&name) {
+            return error_envelope(
+                code::VALIDATION,
+                format!(
+                    "未注册事件 `{name}`：本 Mod 已注册 {} 个事件：{}",
+                    names.len(),
+                    names.join("、")
+                ),
+            );
+        }
+        // ⓪ `ygg.choice_selected` 域内校验（A2）：待决选择存在时，序号
+        //    必须是 1..=options_len 的整数——越界/非整数 = 可读 VALIDATION
+        //    （玩家视角「选项不存在」，不进内核转换、不耗燃料、不改状态）。
+        if name == "ygg.choice_selected" {
+            if let Some(choice) = &self.pending_choice {
+                let n = choice.options().len();
+                let index = serde_json::from_str::<Json>(payload_json)
+                    .ok()
+                    .and_then(|v| v.as_i64());
+                if !matches!(index, Some(i) if (1..=n as i64).contains(&i)) {
+                    return error_envelope(
+                        code::VALIDATION,
+                        format!("选项不存在：有效范围 1..{n}"),
+                    );
+                }
+            }
+        }
+        // ① payload 标量门：JSON 解析失败或非标量（嵌套对象/数组/null）
+        //    → VALIDATION（core Value 只有四标量）。
+        let payload_value: Json = match serde_json::from_str(payload_json) {
+            Ok(value) => value,
+            Err(err) => {
+                return error_envelope(
+                    code::VALIDATION,
+                    format!("event payload is not valid JSON: {err}"),
+                )
+            }
+        };
+        let payload = match json_payload_to_value(&payload_value) {
+            Ok(value) => value,
+            Err(message) => return error_envelope(code::VALIDATION, message),
+        };
+        // ② 外部事件构造（判据先于燃料扣除；失败 → VALIDATION）。
+        let event = match Event::external(name.to_owned(), payload.clone()) {
+            Ok(event) => event,
+            Err(err) => return error_envelope(code::VALIDATION, err),
+        };
+        // ③ 外部日志（仅外部事件；派生事件由回放重放时自动再产生）。
+        self.external_log.push(json!({
+            "name": event.name(),
+            "payload": value_to_json(&payload),
+        }));
+        // ④ 燃料预算每转换重置（D-B1：转换内级联共享同一预算）。r13：预算
+        //    取 [`Self::transition_budget`]——显式 env 最优先；否则按转换起点
+        //    的 canonical 状态规模自动扩缩（`kv.len()` O(1) 现读，零缓存：
+        //    回放/续局重建同状态 → 同预算序列）。
+        self.fuel_meter.reset(self.transition_budget());
+        // ⑤ dispatch 级 savepoint，**取点**：校验（⓪①②）全过、副作用
+        //    （③ 日志、④ 燃料）已落之后，转换开始之前——在此冻结 canonical
+        //    的两块状态面基线。基线是 canonical 的**副本**（不是换出）：
+        //    handler 的即席写经 host 桥 `Rc` 直落 canonical，而 `ygg.kv.get`
+        //    / `ygg.entity.*` 的读路径同样直读 canonical——换出会让转换期的
+        //    handler 读到空表。实体基线同时充当 `run_transition` 的
+        //    `&mut EntityStore` 形参（该形参在 facade 路径下只作 revision
+        //    记账诱饵，handler 从不持有它的引用）。借用均为语句级临时
+        //    `Ref`/`RefMut`，不跨越 `run_transition` 存活。
+        let mut baseline = self.entities.borrow().clone();
+        let kv_baseline = self.kv.borrow().clone();
+        // VFS 与 kv 同法：基线是 canonical 的**副本**，不是换出（换出会让转换期的
+        // `ygg.fs.read` 读到空表）；`VfsStore` 自身 `Clone`，`dirty` 集也随基线
+        // 克隆，所以失败 dispatch 里 `ygg.fs.write` 过的路径不会漏进下一次 flush。
+        let vfs_baseline = self.vfs.borrow().clone();
+        let outcome = run_transition(
+            &mut baseline,
+            &mut self.registry,
+            &mut self.fuel_meter,
+            event,
+        );
+        // ⑤' D1：无论转换成败都取走本次 dispatch 的警告（choice 前置丢弃
+        // 面；每 dispatch 至多一条，drain 即清空，不泄漏到后续 dispatch）。
+        let warning = self.host.take_dispatch_warning();
+        // ⑤'' TD1：meta 同样无论成败都 drain（两条路径不留残渣），但只在
+        // 成功信封里露出——错误信封不夹带 Mod 侧数据。
+        let meta = self.host.take_meta();
+        // ⑥ 裁定：成功 = **提交**（丢弃基线——canonical 保留本次全部写入）；
+        //    失败 = **先还原 canonical、再返回信封**。还原语句必须落在错误
+        //    分支内、且先于该分支的返回（`map_transition_error` 只把错误映射
+        //    成信封，不碰状态）；把它挪到 match 之后（错误分支已返回，不可
+        //    达）或只写在成功分支，savepoint 就完全不生效。
+        let result = match outcome {
+            Ok(result) => {
+                drop(baseline);
+                drop(kv_baseline);
+                result
+            }
+            Err(err) => {
+                *self.entities.borrow_mut() = baseline;
+                *self.kv.borrow_mut() = kv_baseline;
+                // 必须落在错误分支内、且先于该分支的返回：失败步的文件不能
+                // 出现在 `ygg.fs.list` 里，否则 Mod 会拿半个状态上的产物做判定。
+                *self.vfs.borrow_mut() = vfs_baseline;
+                return map_transition_error(err);
+            }
+        };
+        self.pending_choice = result.pending_choice().cloned();
+        // ⑦ 信封：revision 在转换结束后从 canonical 现读
+        //    （TransitionResult.revision_after 为快照克隆的冻结诊断值，
+        //    不进信封——统一 store 代决的 revision 口径）。
+        let revision = self.entities.borrow().revision();
+        let mut envelope = json!({
+            "ok": true,
+            "event": result.external().name(),
+            "narrative": result.narrative(),
+            "pendingChoice": self.pending_choice.as_ref().map(choice_to_json),
+            "eventsProcessed": result.events_processed(),
+            "eventsDerived": result.events_derived(),
+            "eventsDropped": result.events_dropped(),
+            "revision": revision,
+        });
+        // D1：加性可选键——仅在非空时写入（serde_json 字典序键序，确定性
+        // 不变：同输入 → 同警告 → 同字节）。
+        if let Some(warning) = warning {
+            envelope["warnings"] = json!([warning]);
+        }
+        // TD1：加性可选键——结构化 meta（Mod 自报数据，与叙事分离）。
+        // 键序 = BTreeMap 遍历序 → serde_json 默认 Map（BTreeMap）序：
+        // 同输入同字节，不依赖 Mod 的写入次序。
+        if !meta.is_empty() {
+            envelope["meta"] = meta_to_json(&meta);
+        }
+        envelope.to_string()
+    }
+}
+
+/// 转换错误 → 稳定码信封（A1：下游按码分支，message 只作人读定位）。
+///
+/// Handler 面（mlua 桥把 Lua 侧错误包成 HandlerError）按文案归类：
+/// "fuel exhausted"（VM 指令计量耗尽经 Lua 错误浮出）→ FUEL_EXHAUSTED；
+/// "sandbox denied" / "memory error"（模块拒绝桩 / 内存上限）→
+/// SANDBOX_DENIED；其余 handler 错误 → VALIDATION。NotExternal 为不可能
+/// 路径（外部事件构造先行判据）→ INTERNAL。
+fn map_transition_error(err: TransitionError) -> String {
+    match err {
+        TransitionError::Fuel(fuel) => error_envelope(
+            code::FUEL_EXHAUSTED,
+            format!(
+                "fuel exhausted: requested {}, remaining {}",
+                fuel.requested, fuel.remaining
+            ),
+        ),
+        TransitionError::Handler(HandlerError(msg)) => {
+            if msg.starts_with("unregistered event") {
+                // 未注册事件（bus fail-closed；外部名已被门面预检拦截，走到这里的
+                // 都是派生面：handler `ygg.emit` 了未注册名）→ VALIDATION。显式
+                // 分支钉住码面，不依赖末尾兜底；消息带 bus 稳定前缀 + 事件名。
+                error_envelope(code::VALIDATION, msg)
+            } else if msg.contains("fuel exhausted") {
+                error_envelope(code::FUEL_EXHAUSTED, msg)
+            } else if msg.contains("sandbox denied") || msg.contains("memory error") {
+                error_envelope(code::SANDBOX_DENIED, msg)
+            } else {
+                error_envelope(code::VALIDATION, msg)
+            }
+        }
+        TransitionError::NotExternal(name) => error_envelope(
+            code::INTERNAL,
+            format!("internal bug: transition input must be an external event, got `{name}`"),
+        ),
+    }
+}
+
+/// JSON payload → core `Value`（标量门）：Bool / Number（整数优先取 i64，
+/// 其余按 f64）/ String 直通；嵌套对象、数组、null → 可读 VALIDATION 文案。
+fn json_payload_to_value(value: &Json) -> Result<Value, String> {
+    match value {
+        Json::Bool(b) => Ok(Value::Bool(*b)),
+        Json::Number(n) => match n.as_i64() {
+            Some(i) => Ok(Value::Int(i)),
+            None => Ok(Value::Float(n.as_f64().unwrap_or_default())),
+        },
+        Json::String(s) => Ok(Value::Str(s.clone())),
+        other => Err(format!(
+            "event payload must be a scalar, got {}",
+            json_type_name(other)
+        )),
+    }
+}
+
+/// JSON 值类型名（payload 标量门的可读报错文案）。
+fn json_type_name(value: &Json) -> &'static str {
+    match value {
+        Json::Null => "null",
+        Json::Bool(_) => "boolean",
+        Json::Number(_) => "number",
+        Json::String(_) => "string",
+        Json::Array(_) => "array",
+        Json::Object(_) => "object",
+    }
+}
+
+/// core `Value` → JSON（诊断/日志序列化面）：四标量直通；Float 非有限值
+/// 经 `Number::from_f64` 落 `null`（信封永不携带非法 JSON 数值——事件构造
+/// 门已拒绝非有限值，此为序列化层纵深）。
+fn value_to_json(value: &Value) -> Json {
+    match value {
+        Value::Int(i) => (*i).into(),
+        Value::Float(f) => serde_json::Number::from_f64(*f)
+            .map(Json::Number)
+            .unwrap_or(Json::Null),
+        Value::Bool(b) => (*b).into(),
+        Value::Str(s) => s.as_str().into(),
+    }
+}
+
+/// 结构化 meta → JSON 对象（TD1）：键序 = `BTreeMap` 序遍历（确定性；
+/// serde_json 默认无 `preserve_order`，`Map` 也是 `BTreeMap`，两重保险）。
+fn meta_to_json(meta: &BTreeMap<String, Json>) -> Json {
+    let mut map = JsonMap::new();
+    for (key, value) in meta {
+        map.insert(key.clone(), value.clone());
+    }
+    Json::Object(map)
+}
+
+/// 待决选择 → JSON（prompt + options 序保真）。
+fn choice_to_json(choice: &PendingChoice) -> Json {
+    json!({
+        "prompt": choice.prompt(),
+        "options": choice.options(),
+    })
+}
+
+/// 成功信封碎片无统一形态（各命令字段不同），错误信封统一于此。
+fn error_envelope(code_str: &str, message: impl std::fmt::Display) -> String {
+    json!({
+        "ok": false,
+        "error": {"code": code_str, "message": message.to_string()},
+    })
+    .to_string()
+}
