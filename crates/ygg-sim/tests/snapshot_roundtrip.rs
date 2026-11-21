@@ -197,3 +197,157 @@ fn corrupt_bytes_are_rejected_not_panicked() {
         snapshot::hash_of(&snapshot::encode(5, &resources(), &rng(), &store))
     );
 }
+
+/// 把 v2 帧改写成同语义的 v1 帧（只动 `fmt_version` 字节并重算尾 digest）。
+///
+/// 前提：世界只含 v1 类型（本文件的 fixture 全部满足）；F64Bits 列在 v1 域不存在。
+fn to_v1_frame(v2: &[u8]) -> Vec<u8> {
+    let mut frame = v2[..v2.len() - 8].to_vec();
+    assert_eq!(&frame[8..10], &2u16.to_le_bytes(), "输入必须是 v2 帧");
+    frame[8] = 1;
+    frame[9] = 0;
+    let digest = fnv1a64(&frame);
+    frame.extend_from_slice(&digest.to_le_bytes());
+    frame
+}
+
+/// v1 兼容读取 + v2 重编码逐字节幂等（sim-kernel §2 版本史：跨 fmt_version 的 hash
+/// 不承诺相等；承诺的是「v1 读入 → v2 存 → 再读 → 再存逐字节相等 + 逐值等于 v1」）。
+#[test]
+fn v1_frame_reads_and_reencodes_byte_identical() {
+    let store = fixture(ORDER_A);
+    let v2 = snapshot::encode(5, &resources(), &rng(), &store);
+    let v1 = to_v1_frame(&v2);
+    // v1 帧可读，语义与原世界逐值相同
+    let decoded = snapshot::decode(&v1).unwrap();
+    assert_eq!(decoded.tick, 5);
+    assert_eq!(decoded.resources, resources());
+    assert_eq!(decoded.store.entity_count(), 3);
+    assert_eq!(decoded.store.archetype_count(), 2);
+    let pos = decoded.store.registry().id_of("Pos").unwrap();
+    assert_eq!(
+        decoded.store.value_of(1, pos).unwrap(),
+        ygg_sim::archetype::ValueRef::I64(ONE)
+    );
+    // v1 读入 → v2 存：逐字节等于原 v2 帧（版本字节是唯一差异，encode 恒写当前版）
+    let again = snapshot::encode(
+        decoded.tick,
+        &decoded.resources,
+        &decoded.rng,
+        &decoded.store,
+    );
+    assert_eq!(again, v2, "v1 语义状态以 v2 重编码必须逐字节可复现");
+    // 再读 → 再存：幂等
+    let reread = snapshot::decode(&again).unwrap();
+    let third = snapshot::encode(reread.tick, &reread.resources, &reread.rng, &reread.store);
+    assert_eq!(third, v2);
+}
+
+/// v1 帧里的类型字节 6 必拒（v1 域是 1..=5；损坏或伪造 fail-closed）。
+#[test]
+fn v1_frame_with_bits_tag_is_rejected() {
+    let store = fixture(ORDER_A);
+    let mut v1 = to_v1_frame(&snapshot::encode(5, &resources(), &rng(), &store));
+    // 组件表第一项的 type 字节：28(magic|ver|flags|tick|next) + 4(comp_n)
+    // + 2(name_len) + name 长度。「Alive」按字节序排第一，长度 5。
+    let type_at = 28 + 4 + 2 + 5;
+    assert_eq!(
+        v1[type_at], 3,
+        "Alive 是 boolean（tag 3）——对账失败说明布局变了"
+    );
+    v1[type_at] = 6;
+    let payload_len = v1.len() - 8;
+    let digest = fnv1a64(&v1[..payload_len]);
+    v1[payload_len..].copy_from_slice(&digest.to_le_bytes());
+    let err = snapshot::decode(&v1).unwrap_err();
+    assert_eq!(err.code(), codes::FRAME, "v1 帧不得携带位串列类型：{err}");
+    // 同样的篡改在 v2 帧里是合法的（6 = F64Bits）——拒的是版本域不是类型本身
+    let mut v2 = snapshot::encode(5, &resources(), &rng(), &store);
+    v2[type_at] = 6;
+    let payload_len = v2.len() - 8;
+    let digest = fnv1a64(&v2[..payload_len]);
+    v2[payload_len..].copy_from_slice(&digest.to_le_bytes());
+    // 同样的篡改在 v2 帧里类型字节本身合法（6 = F64Bits）；boolean 列载荷按
+    // 位串列形状去读必然字节错位 → 仍是 fail-closed（FRAME），但那是载荷形状错误，
+    // 不是 v1 域拒绝——拒的是版本域不是类型本身。
+    assert_eq!(snapshot::decode(&v2).unwrap_err().code(), codes::FRAME);
+}
+
+/// 位串列的三条硬性质（字节稳定 / 往返幂等 / 名称键控）在 F64Bits 上同样成立。
+#[test]
+fn f64bits_columns_are_stable_idempotent_and_id_independent() {
+    fn bits_fixture(order: &[&str]) -> ArchetypeStore {
+        let mut store = ArchetypeStore::new();
+        let mut ids: BTreeMap<&str, u32> = BTreeMap::new();
+        for name in order {
+            let def = match *name {
+                "Pos" => ComponentDef::number(),
+                "Gauge" => ComponentDef::f64_bits(),
+                "Enemy" => ComponentDef::tag(),
+                other => panic!("bits_fixture 未声明组件 {other}"),
+            };
+            ids.insert(name, store.register(name, def).unwrap());
+        }
+        // 桶 A：Pos + Gauge（位串列含 ±Inf / 次正规 / 大负数 / 归一 NaN）
+        store
+            .spawn_columns(
+                2,
+                &[
+                    (ids["Pos"], Column::I64(vec![ONE, -ONE])),
+                    (
+                        ids["Gauge"],
+                        Column::F64Bits(vec![
+                            0x7FF0_0000_0000_0000, // +Inf
+                            0x0000_0000_0000_0001, // 次正规
+                        ]),
+                    ),
+                ],
+                &[],
+            )
+            .unwrap();
+        // 桶 B：Gauge + Enemy（tag 无列）
+        store
+            .spawn_columns(
+                1,
+                &[(ids["Gauge"], Column::F64Bits(vec![0xFFEF_FFFF_FFFF_FFFF]))],
+                &[ids["Enemy"]],
+            )
+            .unwrap();
+        store
+    }
+    const BITS_ORDER_A: &[&str] = &["Pos", "Gauge", "Enemy"];
+    const BITS_ORDER_B: &[&str] = &["Enemy", "Pos", "Gauge"];
+
+    let a = bits_fixture(BITS_ORDER_A);
+    let first = snapshot::encode(9, &resources(), &rng(), &a);
+    // ① 字节稳定
+    let second = snapshot::encode(9, &resources(), &rng(), &a);
+    assert_eq!(first, second, "同态两次编码必须逐字节相同（含位串列）");
+    // ② 往返幂等 + 位串逐值读回
+    let decoded = snapshot::decode(&first).unwrap();
+    let again = snapshot::encode(
+        decoded.tick,
+        &decoded.resources,
+        &decoded.rng,
+        &decoded.store,
+    );
+    assert_eq!(again, first, "restore(b).snapshot() == b（含位串列）");
+    let gauge = decoded.store.registry().id_of("Gauge").unwrap();
+    assert_eq!(
+        decoded.store.value_of(1, gauge).unwrap(),
+        ygg_sim::archetype::ValueRef::Bits(0x7FF0_0000_0000_0000)
+    );
+    assert_eq!(
+        decoded.store.value_of(3, gauge).unwrap(),
+        ygg_sim::archetype::ValueRef::Bits(0xFFEF_FFFF_FFFF_FFFF)
+    );
+    // ③ 名称键控：两种注册序 → 字节与 hash 全同
+    let b = bits_fixture(BITS_ORDER_B);
+    assert_ne!(
+        a.registry().id_of("Gauge").unwrap(),
+        b.registry().id_of("Gauge").unwrap()
+    );
+    let bytes_b = snapshot::encode(9, &resources(), &rng(), &b);
+    assert_eq!(bytes_b, first, "注册顺序不得改变快照字节");
+    assert_eq!(snapshot::hash_of(&bytes_b), snapshot::hash_of(&first));
+}
