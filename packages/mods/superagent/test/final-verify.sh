@@ -113,6 +113,7 @@ fi
 PORT=17890
 "$EGG" serve --port $PORT > /tmp/ygg-p4-serve.log 2>&1 &
 serve_pid=$!
+serve_spawn_rc=$?
 serve_ok=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
@@ -135,9 +136,11 @@ else
     fail "③ serve 未就绪（/tmp/ygg-p4-serve.log）"
 fi
 kill "$serve_pid" 2>/dev/null || true
-wait "$serve_pid" 2>/dev/null || true
+{ wait "$serve_pid" 2>/dev/null && serve_wait_rc=0; } || serve_wait_rc=$?
 
 # ── 收口 ────────────────────────────────────────────────────────────────────
+# serve 进程账（spawn/wait 退出码自证：非零只入审计不判失败——serve 被 kill 是预期路径）。
+note "serve spawn_rc=${serve_spawn_rc:-?} wait_rc=${serve_wait_rc:-skipped}"
 if [ "$fails" -eq 0 ]; then
     note "FINAL-VERIFY: 4/4 PASS"
     exit 0
