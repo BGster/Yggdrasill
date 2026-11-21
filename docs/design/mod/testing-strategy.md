@@ -77,7 +77,9 @@ cargo run -q --example selftest -- --mod .ygg/mods/agent-seed --fixture armed   
 Rust 侧只留一个**门禁薄壳**（`crates/ygg-sandbox/tests/agent_seed_semantics.rs`，属包 `ygg-sandbox`）：它不重复
 任何行为断言，只断言 Lua 套件仍存在且非空——因为宿主三套门禁的第三条被硬编码成
 `cargo test -p ygg-sandbox --test agent_seed_semantics`（见 `examples/egg/` 的 `verify_gates`），
-而 egg.rs 是 non-negotiable host。壳与门禁命令**同包同名**，不存在包名不符。
+而 egg 宿主（`examples/egg/` 目录：`main.rs` 装配序 + 43 个按子系统切分的兄弟模块）是 non-negotiable
+host——目录化是纯搬移拆分（r-20261121-045703-10d8，44 文件、全部 ≤800 行），门禁与用例数零变化。
+壳与门禁命令**同包同名**，不存在包名不符。
 
 ## 6. 设计依据（外部仓装载：可选注入优先于全局前置）
 
@@ -96,3 +98,9 @@ doc 索引当成所有仓的装载前置。注入的其余面（`__ASSETS` / `__
 Lua 一条用例都没跑；③ 确认——`cargo run -q --example selftest -- --mod <外部仓>/mod --packages <本仓>/packages/libs`
 打印 `scenes: 跳过（…）` 且 mod 自有测试文件全 `file ok`；把该文件写成非法 JSON 则仍报
 `资源装载失败：scenes.json: …`。
+
+**egg 宿主目录化（2026-11-21，r-20261121-045703-10d8）**：宿主单文件 13619 行 = 800 行硬上限的
+17.0 倍，按原则六用户授权「多做模块化拆分」拆为 `examples/egg/` 目录（生产 30 + 测试 14）。
+**依据**：纯搬移零逻辑变更——测试 mod 跟随所属子系统入同目录（`identity/tests.rs` 等），
+`use super::*` 语义链不断（子模块经父 glob 取根名集），`use super::{…}` 显式清单原样可解析；
+拆分前后用例数守恒（egg 158 / workspace 560 / pkg selftest 199 / agent-seed 79）即门禁判据。
