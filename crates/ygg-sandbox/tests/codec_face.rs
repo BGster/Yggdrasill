@@ -48,8 +48,18 @@ fn build() -> (Lua, Table) {
     lua.globals().raw_set("ygg", ygg).expect("挂 ygg");
     ygg_sandbox::codec_face::install(&lua).expect("装 ygg.codec");
 
+    register_module(&lua, "pkg.entity.base", "entity/base.lua").expect("装 pkg.entity.base");
+    register_module(&lua, "pkg.entity.schema", "entity/schema.lua").expect("装 pkg.entity.schema");
+    register_module(&lua, "pkg.entity.record", "entity/record.lua").expect("装 pkg.entity.record");
+    register_module(&lua, "pkg.entity.query", "entity/query.lua").expect("装 pkg.entity.query");
     register_module(&lua, "pkg.entity", "entity/init.lua").expect("装 pkg.entity");
     register_module(&lua, "pkg.codec.sha256", "codec/sha256.lua").expect("装 pkg.codec.sha256");
+    register_module(&lua, "pkg.codec.runtime", "codec/runtime.lua").expect("装 pkg.codec.runtime");
+    register_module(&lua, "pkg.codec.jsonenc", "codec/jsonenc.lua").expect("装 pkg.codec.jsonenc");
+    register_module(&lua, "pkg.codec.jsondec", "codec/jsondec.lua").expect("装 pkg.codec.jsondec");
+    register_module(&lua, "pkg.codec.bundle", "codec/bundle.lua").expect("装 pkg.codec.bundle");
+    register_module(&lua, "pkg.codec.importing", "codec/importing.lua")
+        .expect("装 pkg.codec.importing");
     register_module(&lua, "pkg.codec", "codec/init.lua").expect("装 pkg.codec");
     lua.load("require('pkg.codec').install()")
         .exec()
