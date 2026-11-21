@@ -619,13 +619,17 @@ impl KernelFacade {
     ///
     /// - 显式 `YGG_FUEL_BUDGET`（进程 env）最优先、精确采用、不受 cap 削减；
     /// - 缺省/非法 → [`crate::fuel::auto_budget`]：线性 + 地板 + 硬顶，
-    ///   `clamp(2000 × kv_len, 100k, 4M)`。
+    ///   `clamp(4600 × kv_len, 100k, 4M)`（r15 重标定斜率；标定表与「不可
+    ///   外推」边界见该函数文档）。
     ///
     /// `kv.len()` 是 canonical KV 条目总数（`BTreeMap::len` O(1)），**每转换
     /// 现读、零缓存**：预算只依赖转换起点的 canonical 状态规模，回放/续局
     /// 重建同状态 → 同预算序列 → 同结局；预算不入 save、不入状态哈希。因子
     /// 取 `kv.len()` 是 mod 无关的充分统计（域键约定只归 mod，P3 宿主零语义），
-    /// 标定与取值论证见 [`crate::fuel::auto_budget`]。
+    /// 标定与取值论证见 [`crate::fuel::auto_budget`]。斜率只升不降于 r13 的
+    /// 2000/键：新公式对每个 kv_len 都 ≥ 旧值，改前能过的 dispatch 改后必过
+    /// （燃料只影响杀/不杀；结构性不回退，回归表测见
+    /// `r15_slope_covers_reference_peak_and_never_lowers_the_r13_formula`）。
     fn transition_budget(&self) -> u64 {
         fuel::resolve_budget(
             std::env::var("YGG_FUEL_BUDGET").ok().as_deref(),

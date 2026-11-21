@@ -64,34 +64,45 @@ pub const FUEL_LOAD_BUDGET: u64 = 50_000_000;
 pub const FUEL_LOAD_EXHAUSTED_MESSAGE: &str =
     "fuel exhausted: module load budget consumed (instruction meter)";
 
-/// r13 预算自动扩缩：每条 KV 条目的预算增量。
+/// 预算自动扩缩：每条 KV 条目的预算增量（r13 立式，r15 重标定）。
 ///
-/// 标定依据（r13 方案 §0.2，本局 unify-map-and-agent-seed 只读实测）：kv_len≈292
-/// 的局面 `requirement.list` 在 100k 地板下必死，~340–411 区间在 500k 下放行
-/// → 全量 list 渲染 ≈ 1.22k VM 指令/kv 条目（含 fill 模板 gsub、每行 trace 的
-/// KV 桥调用）。斜率取 2000/条 ≈ 实测值的 ~1.6× 安全系数：seq 39 局面
-/// （kv_len=292）预算 584k > 已证放行点 500k，seq 79 局面（kv_len=450）900k。
-/// 误差留痕：配了真正的 mod 工作负载后若实测最小放行预算与本斜率偏差 >2×，
-/// 先调本常量并在本注释补标定数据（测试 `autoscale_slope_calibration_documents_per_entry_cost`
-/// 输出同形工作负载的指令级实测，供复核）。
-pub const FUEL_AUTOSCALE_PER_ENTRY: u64 = 2_000;
+/// 标定法两次同形：实测最小放行预算（即该 dispatch 的指令成本）÷ kv_len，
+/// 再乘 1.6 安全系数取整。
+///
+/// - r13（KV 渲染负载，agent-seed）：1.22k 指令/键 → 2,000。
+/// - **r15（实体密集负载，交付仓 PokeRogue 默认预算失败局面）**：drive 走查
+///   峰值 dispatch 676,002 指令 @ kv_len=235（13 实体，208 条 `pkg.entity.*`
+///   键）→ 2,877/键 × 1.6 = 4,603 → **4,600**。
+///
+/// 跨 mod 对照（r15 同批实测，均为最小放行预算）：CDDA 87,002 @ kv_len=234
+/// （372/键）、Saltline 正常帧 128,005 @ 336（381/键）、其 `game.bundle` 单
+/// dispatch 952,002 @ 98（9,714/键——写素材不写 KV，状态公式覆盖不了，走
+/// `YGG_FUEL_BUDGET` 逃生门）。**每键成本跨 mod 差 7.6×、每实体成本差 45×**
+/// ——本斜率是尾样本安全余量，不是成本模型，不可外推：新 mod 实测最小放行
+/// 预算超出本斜率时按同法重标定。
+///
+/// 误差留痕：任何**实测击杀**（合法 dispatch 在默认预算下 `fuel exhausted`）
+/// 都是重标定触发线——r15 的教训是 1.44× 偏差（2,877/2,000）即已致命，旧文
+/// 「偏差 >2× 才重标定」的 2× 门槛定得过宽。测试
+/// `autoscale_slope_calibration_documents_per_entry_cost` 输出同形工作负载的
+/// 指令级实测，供复核。
+pub const FUEL_AUTOSCALE_PER_ENTRY: u64 = 4_600;
 
-/// r13 预算自动扩缩：硬顶。扩缩只升不降的另一端——顶格后死循环击杀仍有限
+/// 预算自动扩缩：硬顶。扩缩只升不降的另一端——顶格后死循环击杀仍有限
 /// （4M 指令 ÷ [`FUEL_HOOK_GRANULARITY`] = 4k 次 hook；S12 实测 hook 开销比
 /// ≈ ×2.0，`while true` 在顶格预算下仍是毫秒–十毫秒级被杀）：击杀语义
-/// 保留、上限仍有限，死循环保护不因扩缩而弱化。覆盖 kv_len ≤ 2000（≈120+
-/// 条累计需求，远超 req_capacity=32 的 open 操作域；只被常驻超长局的历史
-/// 累积触及——超长局的根治是 mod 侧历史归档，见 r13 方案 §4）。
+/// 保留、上限仍有限，死循环保护不因扩缩而弱化。覆盖 kv_len ≤ 869
+/// （4,000,000 ÷ 4,600；r15 之前是 ≤2000——线性区随斜率收窄，顶格值不变）。
 pub const FUEL_AUTOSCALE_CAP: u64 = 4_000_000;
 
-/// r13 预算自动扩缩公式：**线性 + 地板 + 硬顶**（纯函数，独立表测）。
+/// r13 自动扩缩公式（r15 重标定斜率）：**线性 + 地板 + 硬顶**（纯函数，独立表测）。
 ///
 /// ```text
-/// auto_budget(kv_len) = clamp(2000 × kv_len, 100_000, 4_000_000)
+/// auto_budget(kv_len) = clamp(4,600 × kv_len, 100_000, 4_000_000)
 /// ```
 ///
-/// - 地板 = [`crate::driver::DEFAULT_FUEL_BUDGET`]：空局/小局行为零变化
-///   （auto(0) = 地板，既有击杀/回滚测试不感知）。
+/// - 地板 = [`crate::driver::DEFAULT_FUEL_BUDGET`]：空局/极小局行为零变化
+///   （auto(0) = 地板；kv_len ≤ 21 仍在地板上，22 起进入线性段）。
 /// - 状态规模因子取 `kv.len()`（canonical KV 条目总数，`BTreeMap::len`
 ///   O(1)，在转换起点现读）：它是 **mod 无关的充分统计**——每需求 ≈17 键、
 ///   每提案 ≈8–11 键，宿主不读 `req.count` / 不扫 `prop.*.status`（域键
@@ -102,7 +113,7 @@ pub const FUEL_AUTOSCALE_CAP: u64 = 4_000_000;
 ///   状态 → 同预算序列；预算不入 save、不入状态哈希，只影响「杀或不杀」，
 ///   与现有 env 语义同类。
 pub fn auto_budget(kv_entries: usize) -> u64 {
-    // 饱和乘：纯函数对全输入域无 panic（usize::MAX × 2000 溢出 → 钳到 cap）。
+    // 饱和乘：纯函数对全输入域无 panic（usize::MAX × 4600 溢出 → 钳到 cap）。
     let scaled = (kv_entries as u64).saturating_mul(FUEL_AUTOSCALE_PER_ENTRY);
     crate::driver::DEFAULT_FUEL_BUDGET
         .max(scaled)
@@ -379,26 +390,72 @@ mod tests {
 
     #[test]
     fn auto_budget_table_floor_linear_cap() {
-        // 地板：空局与小局都 = 契约默认（小局行为零变化）。
+        // 地板：空局与极小局 = 契约默认（kv_len ≤ 21 仍在地板上）。
         assert_eq!(auto_budget(0), 100_000);
         assert_eq!(auto_budget(1), 100_000);
-        assert_eq!(auto_budget(50), 100_000); // 50×2000 = 100k，恰在地板上
+        assert_eq!(auto_budget(21), 100_000); // 21×4600 = 96.6k，仍在地板下
+        assert_eq!(auto_budget(22), 101_200); // 22×4600 = 101.2k，进入线性段
+        assert_eq!(auto_budget(50), 230_000); // 50×4600 = 230k
                                               // 线性段：斜率 = FUEL_AUTOSCALE_PER_ENTRY。
-        assert_eq!(auto_budget(51), 102_000);
-        assert_eq!(auto_budget(292), 584_000); // r13 方案 §0.2 seq 39 标定点
-        assert_eq!(auto_budget(411), 822_000); // seq 68 标定点
-        assert_eq!(auto_budget(450), 900_000); // seq 79 标定点
-                                               // 硬顶：恰在顶点与远超顶点都钳在 cap（顶格后击杀仍有限）。
+        assert_eq!(auto_budget(51), 234_600);
+        assert_eq!(auto_budget(235), 1_081_000); // r15 标定锚：r1 峰值 676,002@235
+        assert_eq!(auto_budget(292), 1_343_200); // r13 seq 39 局面（旧斜率 584k）
+        assert_eq!(auto_budget(411), 1_890_600); // r13 seq 68 局面（旧斜率 822k）
+        assert_eq!(auto_budget(450), 2_070_000); // r13 seq 79 局面（旧斜率 900k）
+        assert_eq!(auto_budget(869), 3_997_400); // 线性区上沿（< cap）
+                                                 // 硬顶：恰在顶点与远超顶点都钳在 cap（顶格后击杀仍有限）。
+        assert_eq!(auto_budget(870), FUEL_AUTOSCALE_CAP);
         assert_eq!(auto_budget(2_000), FUEL_AUTOSCALE_CAP);
         assert_eq!(auto_budget(10_000), FUEL_AUTOSCALE_CAP);
         assert_eq!(auto_budget(usize::MAX), FUEL_AUTOSCALE_CAP);
         // 单调不减：任意升序对，预算不降（历史累积只高估、永不误杀）。
         let mut prev = 0;
-        for entries in [0, 10, 100, 500, 1000, 1999, 2000, 5000, 100_000] {
+        for entries in [
+            0, 10, 21, 22, 100, 500, 869, 870, 1000, 1999, 2000, 5000, 100_000,
+        ] {
             let budget = auto_budget(entries);
             assert!(budget >= prev, "auto_budget must be monotonic");
             assert!(budget >= 100_000 && budget <= FUEL_AUTOSCALE_CAP);
             prev = budget;
+        }
+    }
+
+    #[test]
+    fn r15_slope_covers_reference_peak_and_never_lowers_the_r13_formula() {
+        // r15 标定锚：交付仓 PokeRogue 的峰值 dispatch 676,002 @ kv_len=235 必须
+        // 在新斜率下留 ≥1.5× 余量（1.6× 政策取整后的实测值 4,600/键）。
+        assert_eq!(auto_budget(235), 1_081_000);
+        assert!(
+            auto_budget(235) * 2 >= 676_002 * 3,
+            "r1 reference worst dispatch (676,002) must keep >=1.5x headroom"
+        );
+        // 只升不降：新公式对每个 kv_len 都 ≥ 旧公式（r13 斜率 2000/键同界）——
+        // 改前能过的 dispatch 改后必过（燃料只影响杀/不杀，不回退是结构性保证）。
+        for entries in [
+            0usize,
+            1,
+            21,
+            22,
+            50,
+            51,
+            235,
+            292,
+            411,
+            450,
+            869,
+            870,
+            1_000,
+            2_000,
+            10_000,
+            usize::MAX,
+        ] {
+            let old = crate::driver::DEFAULT_FUEL_BUDGET
+                .max((entries as u64).saturating_mul(2_000))
+                .min(FUEL_AUTOSCALE_CAP);
+            assert!(
+                auto_budget(entries) >= old,
+                "auto_budget({entries}) must not regress below the r13 slope"
+            );
         }
     }
 
@@ -414,12 +471,12 @@ mod tests {
         assert_eq!(resolve_budget(Some("  500000  "), 0), 500_000);
         // 非法 → 自动扩缩：非数字 / 负号 / 0 / 空串 / 缺省。
         assert_eq!(resolve_budget(Some("abc"), 0), 100_000);
-        assert_eq!(resolve_budget(Some("abc"), 1000), 2_000_000);
-        assert_eq!(resolve_budget(Some("-5"), 1000), 2_000_000);
-        assert_eq!(resolve_budget(Some("0"), 1000), 2_000_000);
-        assert_eq!(resolve_budget(Some(""), 1000), 2_000_000);
-        assert_eq!(resolve_budget(Some("   "), 1000), 2_000_000);
-        assert_eq!(resolve_budget(None, 1000), 2_000_000);
+        assert_eq!(resolve_budget(Some("abc"), 1000), 4_000_000);
+        assert_eq!(resolve_budget(Some("-5"), 1000), 4_000_000);
+        assert_eq!(resolve_budget(Some("0"), 1000), 4_000_000);
+        assert_eq!(resolve_budget(Some(""), 1000), 4_000_000);
+        assert_eq!(resolve_budget(Some("   "), 1000), 4_000_000);
+        assert_eq!(resolve_budget(None, 1000), 4_000_000);
         // 缺省/非法回落 = auto_budget 同值（同一公式，不是第二套计算）。
         for entries in [0usize, 50, 292, 411, 2000] {
             assert_eq!(
@@ -438,8 +495,8 @@ mod tests {
         // 「1000 次 KV 桥调用同形」的工作负载，读 remaining() 得精确指令消耗
         // ——桥 Rust 侧不耗 VM 指令，stub 与真桥在指令计量下同价。断言双界：
         // ① 填充工作负载必须在地地板预算内完成（否则事件一开局就自死）；
-        // ② 1000 条的指令成本 ×2 后必须仍低于 kv_len=1000 的扩缩预算 2M
-        //   （斜率 2000/条 对该负载形态的覆盖性）。
+        // ② 1000 条的指令成本 ×2 后必须仍低于 kv_len=1000 的扩缩预算
+        //   （新斜率 4600/条 → 4M 封顶；斜率对该负载形态的覆盖性）。
         let (sb, meter) = sandbox_with_fuel(FUEL_AUTOSCALE_CAP);
         sb.lua()
             .load(
@@ -461,8 +518,9 @@ mod tests {
             "fill workload must fit the floor budget (100k): {used}"
         );
         assert!(
-            used * 2 < 2_000_000,
-            "1000-entry cost {used} must be covered by the scaled budget 2M (slope 2000/entry)"
+            used * 2 < auto_budget(1_000),
+            "1000-entry cost {used} must be covered by the scaled budget {:?} (slope {FUEL_AUTOSCALE_PER_ENTRY}/entry)",
+            auto_budget(1_000)
         );
     }
 }
