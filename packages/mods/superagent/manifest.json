@@ -1,0 +1,233 @@
+{
+  "code": [
+    {
+      "byteLength": 2978,
+      "path": "src/clock.lua",
+      "sha256": "525b5b0759e8929f7602d72e3af830aa0e78bfafb4dbd804ee2b81753e544095"
+    },
+    {
+      "byteLength": 4072,
+      "path": "src/simframe.lua",
+      "sha256": "41f8c13c4d36a72f3bee1a17950d22f67f7d43f9e9099696dc498300e3127b9b"
+    },
+    {
+      "byteLength": 9161,
+      "path": "src/world.lua",
+      "sha256": "064d2ce47c24d757af38d07718950fd830a2adf38f3ffde01f8c50ab008b4d34"
+    }
+  ],
+  "entries": [
+    {
+      "byteLength": 4305,
+      "id": "ygg:superagent/world",
+      "kind": "world",
+      "path": "data/world.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/superagent-world.json",
+      "sha256": "4c403f1d423bde541fd7582e505feed2a56ff8051bcf8384950baa7fd56c78cb"
+    },
+    {
+      "byteLength": 2295,
+      "id": "ygg:superagent/envelope",
+      "kind": "envelope",
+      "path": "data/envelope.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/superagent-envelope.json",
+      "sha256": "3e9b5941e65b3ea1a967d2a8a62c3c4e05b7f967aa63311162baa76fc60eb327"
+    },
+    {
+      "byteLength": 421,
+      "id": "ygg:superagent/config",
+      "kind": "config",
+      "path": "data/config.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/superagent-config.json",
+      "sha256": "974f09a4b7b99f734813551984c8ffa13c148face0a2a0e63612c4f772c09072"
+    }
+  ],
+  "packages": [
+    {
+      "files": [
+        {
+          "byteLength": 42936,
+          "path": "codec/init.lua",
+          "sha256": "6c3283e00f2b5efcb106b112a64d88479eb0d77b59f6961c7c7d41050be57803"
+        },
+        {
+          "byteLength": 175,
+          "path": "codec/pkg.json",
+          "sha256": "d51fb876bcf1caf84f7c0a935e7a880b54789c3a7c0941ac89865b21f08aeb4f"
+        },
+        {
+          "byteLength": 5449,
+          "path": "codec/sha256.lua",
+          "sha256": "f1bf35ecaa3a964887d8e34cffa081e79e18ef0a1446ffb1e5fdcd86cf3a669b"
+        }
+      ],
+      "id": "codec"
+    },
+    {
+      "files": [
+        {
+          "byteLength": 5600,
+          "path": "dialogue/dispatch.lua",
+          "sha256": "949dcc3ff2b6133b2596457c31686fafdcce725acf58808119f6ec40d4ad1c50"
+        },
+        {
+          "byteLength": 7582,
+          "path": "dialogue/handlers.lua",
+          "sha256": "3dc56195c8da0960b7d66ca7cbf46acbcbb54cdbffca22024914f245320c95c7"
+        },
+        {
+          "byteLength": 6785,
+          "path": "dialogue/init.lua",
+          "sha256": "0d3e108ba7643679a14d3c3f72e90ffaff3bb641558babcc5b18d4ce65c323a6"
+        },
+        {
+          "byteLength": 4745,
+          "path": "dialogue/memory.lua",
+          "sha256": "b8c4e52ab275c7e678b7c79fd3f3b84f7d75b7cf3a9e12242a4b11fc14023615"
+        },
+        {
+          "byteLength": 180,
+          "path": "dialogue/pkg.json",
+          "sha256": "1d4ed8fec98962fd9c3201c8137a49dc646d64de42718b596f79ca63efaddb03"
+        },
+        {
+          "byteLength": 9239,
+          "path": "dialogue/store.lua",
+          "sha256": "99ae62f4e00f1d49607d313f19d53f93324a5104c578532e9c07ebfb5c574aa4"
+        }
+      ],
+      "id": "dialogue"
+    },
+    {
+      "files": [
+        {
+          "byteLength": 36122,
+          "path": "entity/init.lua",
+          "sha256": "9e53f07e55000ca305b478e852949c72bfa82254e269ca4c87775b1db1101880"
+        },
+        {
+          "byteLength": 139,
+          "path": "entity/pkg.json",
+          "sha256": "5cd9d1faba637a37afc9725852af8e2ebcc9689e2bb70c02ddd054e31b0be310"
+        }
+      ],
+      "id": "entity"
+    },
+    {
+      "files": [
+        {
+          "byteLength": 5412,
+          "path": "procgen/algos/layout.lua",
+          "sha256": "31c7918e6783b185eb5fcac0b074bb9e1e09ea9e7d71b2db8b0b99578690f8f3"
+        },
+        {
+          "byteLength": 5607,
+          "path": "procgen/algos/terrain.lua",
+          "sha256": "3296d5da06b76faaabe74ec2770c0103125b76964ef95f6804c67258e13d9718"
+        },
+        {
+          "byteLength": 2728,
+          "path": "procgen/digest.lua",
+          "sha256": "6ca1a556bb1bbf429fbcb1edffdb19aaad68c3be13402ef25cd7ed4a0aaef097"
+        },
+        {
+          "byteLength": 2504,
+          "path": "procgen/init.lua",
+          "sha256": "a70dbe771d50af18760ea518e9dcecb7c02a607bea687eedea89030ed3b21a0e"
+        },
+        {
+          "byteLength": 178,
+          "path": "procgen/pkg.json",
+          "sha256": "b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
+        },
+        {
+          "byteLength": 6750,
+          "path": "procgen/registry.lua",
+          "sha256": "0acc45a8b037fad86347dd2bfce991fa6375f302ecfa0ebe4c305bdfc0462ef7"
+        },
+        {
+          "byteLength": 13639,
+          "path": "procgen/rng.lua",
+          "sha256": "74e223a782333a5dd89c229c5f2e6ff63a367e4f7396402ca73ad6340430770c"
+        }
+      ],
+      "id": "procgen"
+    },
+    {
+      "files": [
+        {
+          "byteLength": 12292,
+          "path": "quest/flow.lua",
+          "sha256": "f2900c3ff68927e2422df100b3f6c59f93d480ac534daebd59a948e3d9df830b"
+        },
+        {
+          "byteLength": 3967,
+          "path": "quest/init.lua",
+          "sha256": "2b7d366c369e5097d5e088958ee59a98094ff980e836cb032306fec8699a9c07"
+        },
+        {
+          "byteLength": 236,
+          "path": "quest/pkg.json",
+          "sha256": "87b7e2f8902171508c38b5c5d386dd9474a0d0bf95fdb38c4a0454ce6e15c77b"
+        },
+        {
+          "byteLength": 9294,
+          "path": "quest/store.lua",
+          "sha256": "2d6f99b0ebc291d4e6b899412611aee41f043be109950511d25c4c7462c2a37f"
+        },
+        {
+          "byteLength": 8072,
+          "path": "quest/types.lua",
+          "sha256": "fb6743d85a23caf250682df5c86d7c6114bc946228837565c3cb3ae229a016f4"
+        }
+      ],
+      "id": "quest"
+    },
+    {
+      "files": [
+        {
+          "byteLength": 11915,
+          "path": "role-skill/actors.lua",
+          "sha256": "eab1f6c3afbee783cad5f928a3384d7cb76f1003c17c76df82ed4eb8b1b458a1"
+        },
+        {
+          "byteLength": 3931,
+          "path": "role-skill/compose.lua",
+          "sha256": "183e52a707b3a1d31642c752cad86275dba3d1a18859bed83bf22bb527b04111"
+        },
+        {
+          "byteLength": 4606,
+          "path": "role-skill/counters.lua",
+          "sha256": "bad78ece1876104000f76cf71cd2ea1bb6152707a33c2fb1b8807c14cfa5d0a5"
+        },
+        {
+          "byteLength": 5613,
+          "path": "role-skill/init.lua",
+          "sha256": "57a4ec09ae5452b04f0521f90c2c101ee6dc602683616ca0650a928d9e2656ab"
+        },
+        {
+          "byteLength": 246,
+          "path": "role-skill/pkg.json",
+          "sha256": "f3bc9859d7c126c7695052a7b4aca8aca1ba71122858b77690df643b8b888c1e"
+        },
+        {
+          "byteLength": 7984,
+          "path": "role-skill/skills.lua",
+          "sha256": "ded3b4770171f8377dc724e5643f2b53cf22ecde5a49638ca3dd2ed5f54cbf5c"
+        },
+        {
+          "byteLength": 6569,
+          "path": "role-skill/store.lua",
+          "sha256": "187655c62634feb35a31e7aacf07a92ea377e57ef9a7b0706894d4a37b3fce23"
+        },
+        {
+          "byteLength": 3442,
+          "path": "role-skill/window.lua",
+          "sha256": "f80e8364e53412b9a7aa240e917a195750f859ee7a96364e386826ec12f57753"
+        }
+      ],
+      "id": "role-skill"
+    }
+  ],
+  "schemaVersion": 1
+}

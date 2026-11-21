@@ -1,0 +1,57 @@
+{
+  "v": 1,
+  "fields": {
+    "v": "信封协议版本（恒为 1；整数）",
+    "kind": "信封种类（kinds 枚举之一）",
+    "externalId": "幂等键：同一键重放只记一次（全 kind 唯一）",
+    "agent": "agent 身份串（harness 侧 id；无空白、无竖线）",
+    "session": "harness 会话 id（不透明标量；可空串）",
+    "text": "正文/载荷描述（单行；竖线会被宿主清洗）",
+    "refs": "逗号分隔的实体/任务 ref（可空串）",
+    "ts": "harness 侧时间戳（整数毫秒；可省）"
+  },
+  "kinds": [
+    {
+      "kind": "agent.chat",
+      "means": "agent 经对话通道发言（适配器→游戏）",
+      "wire": ["externalId", "agent", "session", "text", "refs"],
+      "actor": true,
+      "actor_session": true
+    },
+    {
+      "kind": "agent.action",
+      "means": "agent 申报一个游戏动作（接单/干活意向）",
+      "wire": ["externalId", "agent", "session", "text", "refs"]
+    },
+    {
+      "kind": "quest.delivery",
+      "means": "agent 申报交付回执（refs 首段 = 委托 key）",
+      "wire": ["externalId", "agent", "session", "text", "refs"]
+    },
+    {
+      "kind": "quest.custom",
+      "means": "自定义任务模板描述符（text = 模板语法串）",
+      "wire": ["externalId", "agent", "session", "text", "refs"]
+    },
+    {
+      "kind": "harness.ping",
+      "means": "harness 存活探测（游戏只记台账不改状态）",
+      "wire": ["externalId", "agent", "session", "text", "refs"]
+    },
+    {
+      "kind": "agent.error",
+      "means": "agent/harness 错误上报（入对话线程记账）",
+      "wire": ["externalId", "agent", "session", "text", "refs"]
+    }
+  ],
+  "outbound": {
+    "tool": "superagent.agent_call",
+    "resultEvent": "harness.replied",
+    "resultWire": "<call_id>|<tool_id>|<status>|<code>|<output>|<external_id>"
+  },
+  "notes": [
+    "本文件是信封接口的 mod 侧声明账：kinds/wire 与 pack.json inboxRoutes 逐条对账（tests/test-agents.lua 钉死）。",
+    "全部字段是标量（D11 标量律）；线载荷 = wire 数组序用竖线连接，缺段以空串占位、尾部空段剔除。",
+    "actor / actor_session 段由宿主注入（宿主是唯一盖章方），排在 wire 段之后。"
+  ]
+}
