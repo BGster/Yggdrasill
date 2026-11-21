@@ -17,7 +17,7 @@
 
 逻辑形状（代码看见的）：`types.<name>` = 流程模板、`inst.<id>` = 实例、`index` = id 集合、`seq` = 已分配的最大 id。
 
-**物理落点（KV 只收标量——D10）**：宿主 `ygg.kv.set` 经 `value_from_lua` 只接受四个标量型（`crates/ygg-sandbox/src/host_api.rs:568`），表写入即 `unsupported payload type: table`。所以「表值」的四个字段全部落成**扁平标量键 + 一个换行名表**（与 [entity.md](entity.md) §2 同一套形状）：
+**物理落点（KV 只收标量——D10）**：宿主 `ygg.kv.set` 经 `value_from_lua` 只接受四个标量型（`crates/ygg-sandbox/src/host_api/value.rs:35`），表写入即 `unsupported payload type: table`。所以「表值」的四个字段全部落成**扁平标量键 + 一个换行名表**（与 [entity.md](entity.md) §2 同一套形状）：
 
 | 键 | 值 | 说明 |
 | --- | --- | --- |

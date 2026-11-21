@@ -1,4 +1,10 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
+
+use mlua::{Error, Lua, Table, Value as LuaValue};
+
+use super::HostState;
 use ygg_schema::validate::sha256_hex;
 
 /// 挂载点里一项的类型（= `ygg.fs.stat` / `ygg.fs.list` 回执里的 `kind` 取值源）。
@@ -260,4 +266,362 @@ pub(super) fn validate_vfs_path(path: &str) -> Result<(), String> {
         return Err(format!("路径不得含 `..`（目录穿越；当前是 `{path}`）"));
     }
     Ok(())
+}
+
+/// `ygg.fs.*` 注册(内容寻址小文件面;原文迁入)。
+pub(super) fn install_fs(
+    lua: &Lua,
+    state: &Rc<RefCell<HostState>>,
+    ygg: &Table,
+) -> Result<(), Error> {
+    // ---- ygg.fs.*（内容寻址的小文件面：写经 VfsStore，读 / 列是纯读）。
+    //      `fs.write` 在模块顶层被影子表拒绍（effects::BANNED_TABLE_MEMBERS），
+    //      `fs.read` / `fs.stat` / `fs.list` 是纯读，任何相位都允许。
+    //      合约：write 的参数类型必须是 (String, String)——不猜、不隐式转换
+    //      （mlua 自己的 arity/type 报错已够人读）；read miss = nil；stat miss
+    //      = `{exists=false,bytes=0,sha256=""}`（**恒回表，永不 nil**）；list 是
+    //      从 1 开始的**稠密数组**。
+    let fs_table = lua.create_table()?;
+
+    let fs_write = Rc::clone(&state);
+    fs_table.raw_set(
+        "write",
+        lua.create_function(
+            move |lua, (path, content): (String, String)| -> Result<Table, Error> {
+                let out = lua.create_table()?;
+                // 首段分派：`mounts` 走挂载桥（写穿磁盘 + 审计），其余走旧内存 VFS。
+                if is_mount_path(&path) {
+                    let bridge = Rc::clone(&fs_write.borrow().mount);
+                    let mut slot = bridge.borrow_mut();
+                    let Some(bridge) = slot.as_mut() else {
+                        return Err(Error::runtime(unmounted_message("fs.write", &path)));
+                    };
+                    let written = bridge
+                        .write(&path, content.as_bytes())
+                        .map_err(Error::runtime)?;
+                    out.raw_set("path", written.path)?;
+                    out.raw_set("bytes", written.bytes)?;
+                    out.raw_set("sha256", written.sha256)?;
+                    return Ok(out);
+                }
+                let vfs = Rc::clone(&fs_write.borrow().vfs);
+                let file = vfs
+                    .borrow_mut()
+                    .put(&path, content.as_bytes())
+                    .map_err(Error::runtime)?;
+                out.raw_set("path", path)?;
+                out.raw_set("bytes", file.bytes.len())?;
+                out.raw_set("sha256", file.sha256)?;
+                Ok(out)
+            },
+        )?,
+    )?;
+
+    let fs_read = Rc::clone(&state);
+    fs_table.raw_set(
+        "read",
+        lua.create_function(move |lua, path: String| -> Result<LuaValue, Error> {
+            if is_mount_path(&path) {
+                let bridge = Rc::clone(&fs_read.borrow().mount);
+                let slot = bridge.borrow();
+                let Some(bridge) = slot.as_ref() else {
+                    return Err(Error::runtime(unmounted_message("fs.read", &path)));
+                };
+                let hit = bridge.read(&path).map_err(Error::runtime)?;
+                return Ok(match hit {
+                    Some(bytes) => LuaValue::String(lua.create_string(&bytes)?),
+                    None => LuaValue::Nil, // miss = nil（与旧面同口径）
+                });
+            }
+            let vfs = Rc::clone(&fs_read.borrow().vfs);
+            let hit = vfs.borrow().get(&path).map(|file| file.bytes.clone());
+            Ok(match hit {
+                Some(bytes) => LuaValue::String(lua.create_string(&bytes)?),
+                None => LuaValue::Nil, // miss = nil，不 throw
+            })
+        })?,
+    )?;
+
+    let fs_stat = Rc::clone(&state);
+    fs_table.raw_set(
+        "stat",
+        lua.create_function(move |lua, path: String| -> Result<Table, Error> {
+            let out = lua.create_table()?;
+            if is_mount_path(&path) {
+                let bridge = Rc::clone(&fs_stat.borrow().mount);
+                let slot = bridge.borrow();
+                let Some(bridge) = slot.as_ref() else {
+                    return Err(Error::runtime(unmounted_message("fs.stat", &path)));
+                };
+                let stat = bridge.stat(&path).map_err(Error::runtime)?;
+                out.raw_set("exists", stat.exists)?;
+                out.raw_set("bytes", stat.bytes)?;
+                out.raw_set("sha256", stat.sha256)?;
+                out.raw_set("kind", stat.kind.as_str())?;
+                return Ok(out);
+            }
+            let vfs = Rc::clone(&fs_stat.borrow().vfs);
+            let hit = vfs
+                .borrow()
+                .get(&path)
+                .map(|file| (file.bytes.len(), file.sha256.clone()));
+            match hit {
+                Some((bytes, sha256)) => {
+                    out.raw_set("exists", true)?;
+                    out.raw_set("bytes", bytes)?;
+                    out.raw_set("sha256", sha256)?;
+                }
+                None => {
+                    out.raw_set("exists", false)?;
+                    out.raw_set("bytes", 0)?;
+                    out.raw_set("sha256", String::new())?;
+                }
+            }
+            Ok(out)
+        })?,
+    )?;
+
+    let fs_list = Rc::clone(&state);
+    fs_table.raw_set(
+        "list",
+        lua.create_function(move |lua, prefix: Option<String>| -> Result<Table, Error> {
+            let out = lua.create_table()?;
+            // 无参 = 旧面（字节级不变）；有参且以 `mounts` 起头 = 挂载面；
+            // 其余前缀 → 拒（不做「按前缀列 artifacts」的第二套遍历语义）。
+            if let Some(path) = prefix {
+                if !is_mount_path(&path) {
+                    return Err(Error::runtime(format!(
+                        "{}: ygg.fs.list 的前缀必须以 `mounts` 起头（当前是 `{path}`）",
+                        ygg_fs_code::JAIL
+                    )));
+                }
+                let bridge = Rc::clone(&fs_list.borrow().mount);
+                let slot = bridge.borrow();
+                let Some(bridge) = slot.as_ref() else {
+                    return Err(Error::runtime(unmounted_message("fs.list", &path)));
+                };
+                let rows = bridge.list(&path).map_err(Error::runtime)?;
+                for (index, row) in rows.into_iter().enumerate() {
+                    let table = lua.create_table()?;
+                    table.raw_set("name", row.name)?;
+                    table.raw_set("path", row.path)?;
+                    table.raw_set("bytes", row.bytes)?;
+                    table.raw_set("sha256", String::new())?; // 不算摘要（键在场、值留白）
+                    table.raw_set("kind", row.kind.as_str())?;
+                    out.raw_set(index + 1, table)?; // 稠密数组：1..=n
+                }
+                return Ok(out);
+            }
+            let vfs = Rc::clone(&fs_list.borrow().vfs);
+            let rows = vfs.borrow().snapshot(); // 已按 BTreeMap 序
+            for (index, (path, bytes, sha256)) in rows.into_iter().enumerate() {
+                let row = lua.create_table()?;
+                row.raw_set("path", path)?;
+                row.raw_set("bytes", bytes)?;
+                row.raw_set("sha256", sha256)?;
+                out.raw_set(index + 1, row)?; // **稠密数组**：1..=n
+            }
+            Ok(out)
+        })?,
+    )?;
+
+    ygg.raw_set("fs", fs_table)?;
+
+    Ok(())
+}
+
+// ============================================================================
+// §crate 内单测：`VfsStore` 的账本（revision / dirty / load）与路径门向量表
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 路径门向量表——**与 `ygg-store/src/lib.rs` 的同名用例逐字同步**。
+    ///
+    /// 两份门的存在是有意的（`ygg-store` 是 dev-dependency，运行时无权调用）；
+    /// 这份向量表就是漂移锤子：规则只改一边时必有一侧红。
+    fn path_gate_vectors() -> (Vec<String>, Vec<String>) {
+        let max_ok = format!(
+            "artifacts/{}.md",
+            "a".repeat(VFS_PATH_MAX_BYTES - VFS_PREFIX.len() - 3)
+        );
+        let too_long = format!(
+            "artifacts/{}.md",
+            "a".repeat(VFS_PATH_MAX_BYTES - VFS_PREFIX.len() - 2)
+        );
+        let accepted = vec![
+            "artifacts/a.md".to_owned(),
+            "artifacts/notes/x.md".to_owned(),
+            "artifacts/a.b-c_d/e.md".to_owned(),
+            "artifacts/0.md".to_owned(),
+            "artifacts/a/b/c/d.md".to_owned(),
+            max_ok,
+        ];
+        let rejected = vec![
+            "artifacts/".to_owned(),
+            "artifacts//x".to_owned(),
+            "artifacts/x/".to_owned(),
+            "artifacts/../x".to_owned(),
+            "artifacts/a/../../x".to_owned(),
+            "artifacts/a..b".to_owned(),
+            "artifact/x".to_owned(),
+            "/artifacts/x".to_owned(),
+            "artifacts/a b.md".to_owned(),
+            "artifacts/a\\b.md".to_owned(),
+            "artifacts/a|b.md".to_owned(),
+            "artifacts/a@b.md".to_owned(),
+            too_long,
+            String::new(),
+            "artifacts".to_owned(),
+        ];
+        (accepted, rejected)
+    }
+
+    #[test]
+    fn path_gate_accepts_legal_shapes() {
+        let (accepted, _) = path_gate_vectors();
+        for path in accepted {
+            validate_vfs_path(&path).unwrap_or_else(|reason| {
+                panic!("`{path}`（{} 字节）必须放行：{reason}", path.len())
+            });
+        }
+        // 边界自证：最长向量恰好是上限（否则「刚好 128」根本没被测到）。
+        assert_eq!(
+            format!(
+                "artifacts/{}.md",
+                "a".repeat(VFS_PATH_MAX_BYTES - VFS_PREFIX.len() - 3)
+            )
+            .len(),
+            VFS_PATH_MAX_BYTES
+        );
+    }
+
+    #[test]
+    fn path_gate_rejects_illegal_shapes() {
+        let (_, rejected) = path_gate_vectors();
+        for path in rejected {
+            let reason = validate_vfs_path(&path).expect_err(&format!("`{path}` 必须被拒"));
+            assert!(!reason.is_empty(), "拒绝必须带人读原因");
+        }
+    }
+
+    /// `put` 的账本：revision +1、入 dirty、内容与摘要正确。
+    #[test]
+    fn put_bookkeeps_revision_and_dirty() {
+        let mut vfs = VfsStore::default();
+        assert!(vfs.is_empty());
+        let file = vfs.put("artifacts/a.md", b"first").expect("写入");
+        assert_eq!(file.bytes, b"first".to_vec());
+        assert_eq!(file.sha256.len(), 64, "小写十六进制 64 字符");
+        assert_eq!(vfs.len(), 1);
+        assert_eq!(vfs.revision(), 1);
+        assert_eq!(
+            vfs.get("artifacts/a.md").map(|f| f.bytes.clone()),
+            Some(b"first".to_vec())
+        );
+
+        // 覆盖写：仍然只有一件，revision 继续增。
+        vfs.put("artifacts/a.md", b"second").expect("覆盖");
+        assert_eq!(vfs.len(), 1);
+        assert_eq!(vfs.revision(), 2);
+        assert_eq!(
+            vfs.get("artifacts/a.md").map(|f| f.bytes.clone()),
+            Some(b"second".to_vec())
+        );
+    }
+
+    /// `put` 的两道门：坏路径 / 超限内容都不建键、不动 revision。
+    #[test]
+    fn put_rejects_bad_path_and_oversize_content() {
+        let mut vfs = VfsStore::default();
+        let err = vfs.put("artifacts/../x", b"y").expect_err("穿越必须被拒");
+        assert!(err.starts_with("ygg.fs.write 拒绝："), "{err}");
+        let over = vec![0u8; VFS_CONTENT_MAX_BYTES + 1];
+        let err = vfs
+            .put("artifacts/big.md", &over)
+            .expect_err("超限必须被拒");
+        assert!(err.contains("256 KiB"), "错误必须给出上限：{err}");
+        // 恰好上限放行（否则边界不可验证）。
+        vfs.put("artifacts/max.md", &vec![0u8; VFS_CONTENT_MAX_BYTES])
+            .expect("恰好上限必须放行");
+        assert_eq!(vfs.len(), 1, "被拒的写不得建键");
+        assert_eq!(vfs.revision(), 1, "被拒的写不得动 revision");
+    }
+
+    /// `load` 是预载面：不 dirty、不动 revision（它不是本次会话的写入）。
+    #[test]
+    fn load_is_not_dirty_and_does_not_bump_revision() {
+        let mut vfs = VfsStore::default();
+        vfs.load("artifacts/pre.md", b"preset", "deadbeef");
+        assert_eq!(vfs.len(), 1);
+        assert_eq!(vfs.revision(), 0, "预载不得当成本次写入");
+        assert!(vfs.take_dirty().is_empty(), "预载不得入 dirty");
+        assert_eq!(
+            vfs.get("artifacts/pre.md").map(|f| f.sha256.clone()),
+            Some("deadbeef".to_owned()),
+            "预载的摘要原样接受（不重算——盘上那份才是权威）"
+        );
+        // 非法路径的预载静默跳过：不建键，也不污染键空间。
+        vfs.load("../escape.md", b"x", "y");
+        assert_eq!(vfs.len(), 1);
+    }
+
+    /// `take_dirty` 按 `BTreeMap` 序排空，且排空后不复报。
+    #[test]
+    fn take_dirty_is_ordered_and_drains() {
+        let mut vfs = VfsStore::default();
+        for path in ["artifacts/z.md", "artifacts/a.md", "artifacts/m.md"] {
+            vfs.put(path, path.as_bytes()).expect("写入");
+        }
+        let dirty = vfs.take_dirty();
+        assert_eq!(
+            dirty
+                .iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["artifacts/a.md", "artifacts/m.md", "artifacts/z.md"]
+        );
+        assert!(vfs.take_dirty().is_empty(), "排空后不得重复上报");
+        assert_eq!(vfs.len(), 3, "排空 dirty 不删文件");
+    }
+
+    /// `snapshot`（=`ygg.fs.list` 的回执形状）按路径升序，与写入序无关。
+    #[test]
+    fn snapshot_is_sorted_by_path() {
+        let mut vfs = VfsStore::default();
+        for path in ["artifacts/b.md", "artifacts/a.md"] {
+            vfs.put(path, b"x").expect("写入");
+        }
+        let rows: Vec<String> = vfs
+            .snapshot()
+            .into_iter()
+            .map(|(path, bytes, sha)| format!("{path}:{bytes}:{}", sha.len()))
+            .collect();
+        assert_eq!(rows, vec!["artifacts/a.md:1:64", "artifacts/b.md:1:64"]);
+    }
+
+    /// 克隆语义：`VfsStore` 整体可克隆（savepoint 基线的加载前提）——
+    /// 副本与原件独立，改副本不影响原件。
+    #[test]
+    fn clone_is_an_independent_snapshot() {
+        let mut vfs = VfsStore::default();
+        vfs.put("artifacts/a.md", b"one").expect("写入");
+        let mut baseline = vfs.clone();
+        vfs.put("artifacts/b.md", b"two").expect("后续写入");
+        assert_eq!(vfs.len(), 2);
+        assert_eq!(baseline.len(), 1, "基线必须冻结在克隆时点");
+        assert_eq!(baseline.revision(), 1);
+        // dirty 也随基线克隆：基线里只有克隆时点那一条，所以回滚到它
+        // **不会**把失败步的路径带进下一次 flush。
+        assert_eq!(
+            baseline
+                .take_dirty()
+                .iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["artifacts/a.md"]
+        );
+    }
 }

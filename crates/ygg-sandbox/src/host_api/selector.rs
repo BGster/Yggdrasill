@@ -1,10 +1,8 @@
+use super::entity::entity_frame;
 use super::entity_decode::{entity_array, entity_value_arg};
 use super::lua_type_name;
-use super::{entity_frame, entity_id_error, entity_value};
 use mlua::{Error, Table, Value as LuaValue};
-use ygg_core::entity::{
-    like_shape, normalize_f64, CompareOp, IsTest, Order, Predicate, Selector, Value,
-};
+use ygg_core::entity::{like_shape, CompareOp, IsTest, Order, Predicate, Selector, Value};
 
 /// `query(selector)` 的完整解码；返回即全部校验完毕（扫描前零副作用）。
 ///

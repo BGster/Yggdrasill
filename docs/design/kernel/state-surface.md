@@ -66,7 +66,7 @@
 
 | 候选时序源 | 沙箱内读面 | 单调性 | 能排两次写的先后吗 | 证据 |
 | --- | --- | --- | --- | --- |
-| `KvStore::revision`（存档信封的 `kv.revision`） | **无**：`ygg` 只装 `kv.get` / `kv.set` 两个方法 | **不可判**：仅**实际状态变更** +1，同值覆写幂等不计 | 不能 | `crates/ygg-core/src/kv.rs:8-9`（语义）、`crates/ygg-sandbox/src/host_api.rs:806`（装面只此两法，见 `:780` / `:792`） |
+| `KvStore::revision`（存档信封的 `kv.revision`） | **无**：`ygg` 只装 `kv.get` / `kv.set` 两个方法 | **不可判**：仅**实际状态变更** +1，同值覆写幂等不计 | 不能 | `crates/ygg-core/src/kv.rs:8-9`（语义）、`crates/ygg-sandbox/src/host_api/kv.rs:32`（装面只此两法，见 `:11` / `:20`） |
 | `ygg.ticks()` | **有**（返回 `u64`），但**无推进者** | 名义单调，生产路径恒 0 | 不能 | `crates/ygg-sandbox/src/inject.rs:282`（安装）、`:94`（唯一推进路径 `advance_ticks`，全仓零生产调用）、`:118`（初值 0）、`:506`（唯一单测，只经宿主句柄推进） |
 | 事件 `seq`（回执首行 `seq N`） | **无**：宿主信封字段，不注入 Lua | — | 不能 | `crates/ygg-sandbox/src/inject.rs:112`（`install` 的安装面只有 math 白名单 + `ygg.ticks`） |
 | serve 观察面的 `kv.revision` | 宿主 HTTP 只读面，**Mod / Lua 不可达** | — | 不能（不是 Mod 内判据） | [serve.md](../host/serve.md)（存档信封 `{kv:{entries,revision}}`） |

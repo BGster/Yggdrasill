@@ -43,7 +43,7 @@
 | `role.skill_gained` | `"<id>\|<skill>\|<rank>"` | 首次建立槽位；升级只改 `rank`、不发事件（I3） |
 | `role.skill_lost` | `"<id>\|<skill>"` | 槽位被清；记录本身保留 |
 
-`ygg.emit` 的载荷只收标量（`host_api.rs` 的 `value_from_lua`，与 [quest.md](quest.md) §2 同一事实），所以形状必须是确定的单行串——交一张表会在真内核里被硬拒成 `unsupported payload type: table`，而普通 Lua 的 mock 面吃表，掩蔽就一直测不出来。
+`ygg.emit` 的载荷只收标量（`host_api/value.rs` 的 `value_from_lua`，与 [quest.md](quest.md) §2 同一事实），所以形状必须是确定的单行串——交一张表会在真内核里被硬拒成 `unsupported payload type: table`，而普通 Lua 的 mock 面吃表，掩蔽就一直测不出来。
 
 ## 3. 不变量
 

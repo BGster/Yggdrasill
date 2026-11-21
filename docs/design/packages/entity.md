@@ -9,7 +9,7 @@
 
 - **不定义属性语义**：生命归零算死、攻击力怎么算、抗性怎么叠加——是 mod 的规则。
 - **不落盘**：持久化格式归 [codec.md](codec.md)；本包只声明 KV 前缀与形状。
-- **不复制内核实体面**：内核实有 **8 面**——`spawn` / `get_attribute` / `set_attribute` / `add_tag` / `remove_tag` / `has_tag` 六面，加 S9 交付的**控制面两键** `exists(id)` / `destroy(id)`（`crates/ygg-sandbox/src/host_api.rs` 的 `entity_table` `raw_set` 这八次；`crates/ygg-core/src/entity.rs` 的 `EntityStore` 里 `remove_attribute` / `iter` 仍在 store 层、**不在宿主面上**——它们没有消费者）。本包在它之上加 **schema 校验、生命周期事件、引用槽**，不实现第二套 id 分配，不存第二份属性，**也不镜像存活位**。
+- **不复制内核实体面**：内核实有 **8 面**——`spawn` / `get_attribute` / `set_attribute` / `add_tag` / `remove_tag` / `has_tag` 六面，加 S9 交付的**控制面两键** `exists(id)` / `destroy(id)`（`crates/ygg-sandbox/src/host_api/` 的 `entity_table` `raw_set` 这八次；`crates/ygg-core/src/entity.rs` 的 `EntityStore` 里 `remove_attribute` / `iter` 仍在 store 层、**不在宿主面上**——它们没有消费者）。本包在它之上加 **schema 校验、生命周期事件、引用槽**，不实现第二套 id 分配，不存第二份属性，**也不镜像存活位**。
 - **`destroy` 是内核真删，不是墓碑降级**（S9）：`ygg.entity.destroy(id)` → `EntityStore::remove`，属性 + tag + 记录**一并回收**；分配水位（`next_id`）不动 ⇒ I1「id 永不复用」是**分配**性质，与本体是否永存无关。存活真源因此只有一个 = 内核存在性（I5），本包不再写任何 `alive` 位。**旧档边界（不兼容，不写迁移）**：本改动前产生的、含 `pkg.entity` 状态的存档里，死亡实体的内核记录还在，升级后会被读成存活——须重开一局；一次性 purge 登记在 §8（S9-b）。
 - **不提供查询语言、不建继承树**：没有 `where` 式 DSL，按 tag / schema 的集合查询是唯一查询面；类型 = 已注册的属性 schema，类型差异是数据。
 
@@ -271,7 +271,7 @@ n=1 时这笔账**必然亏**；n 大时（`ids` 的 10⁴ 个 id）本该赢，
 
 **确定性（by construction，五条）**：① `CompareOp` 里**没有算术臂**——浮点不可结合性无从发生；② id 序遍历（`BTreeMap::values()`，乱序 `insert` 也不改）；③ 浮点只 `partial_cmp` 比较（`-0.0` 已在写入口规范化），不参与运算；④ 单线程（`Rc ⇒ !Send` + mlua 未启 `send`，且整次查询是**一个** mlua 调用，宿主无法中途插入第二个）；⑤ 索引 (值, id) 序 + 增量 ≡ 重建。**不做运行期断言**：负向 trait bound 无法表达，写了就是不可证伪的测试。
 
-**载体选择（§1.7 的能力出口）**：语义（选择器 / 比较矩阵 / 序遍历 / 走索引判定）全在 `crates/ygg-core/src/entity.rs`——无 VM 可单测，语义不随宿主重构漂；宿主 `crates/ygg-sandbox/src/host_api.rs` 只做**文法解码 + 两阶段材质化**（借用纪律同 `attr_fetch`：阶段 1 持借用零 Lua 调用，阶段 2 只建表，`count` 复用长度）。错误码**不新增族**：文法/形状错 `YGG-ENTITY-FRAME`、值域错 `YGG-ENTITY-VALUE`。
+**载体选择（§1.7 的能力出口）**：语义（选择器 / 比较矩阵 / 序遍历 / 走索引判定）全在 `crates/ygg-core/src/entity.rs`——无 VM 可单测，语义不随宿主重构漂；宿主 `crates/ygg-sandbox/src/host_api/` 只做**文法解码 + 两阶段材质化**（借用纪律同 `attr_fetch`：阶段 1 持借用零 Lua 调用，阶段 2 只建表，`count` 复用长度）。错误码**不新增族**：文法/形状错 `YGG-ENTITY-FRAME`、值域错 `YGG-ENTITY-VALUE`。
 
 **包面加什么、不加什么**（判据 = 「包能加上一样内核没有的东西」）：加**两样**——`schema` 门（`YGG-PKG-ENTITY-SCHEMA`；schema 是 KV 里的 `rec.<id>.schema`，**不是内核状态**，放进内核面 = 第二个 schema 注册表，违 I3）与未声明键门 / 结构态类型门（`YGG-PKG-ENTITY-ATTR`，复用 `value_ok`）。一句话：**包面把类型错变成错误，内核面把类型错变成假**。三档成本：
 

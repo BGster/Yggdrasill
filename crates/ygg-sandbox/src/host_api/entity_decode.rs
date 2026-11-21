@@ -1,6 +1,6 @@
+use super::entity::{entity_frame, entity_value};
 use super::lua_type_name;
 use super::value_from_lua;
-use super::{entity_frame, entity_id_error, entity_value};
 use mlua::{Error, Table, Value as LuaValue};
 use ygg_core::entity::Value;
 

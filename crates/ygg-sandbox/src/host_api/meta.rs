@@ -1,6 +1,10 @@
 use super::lua_type_name;
 use super::value_from_lua;
-use mlua::{Error, Table, Value as LuaValue};
+use mlua::{Error, Lua, Table, Value as LuaValue};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use super::HostState;
 use serde_json::{Map as JsonMap, Value as MetaValue};
 use ygg_core::entity::{normalize_f64, Value};
 
@@ -137,4 +141,29 @@ fn meta_table_to_json(table: &Table, depth: usize) -> Result<MetaValue, Error> {
         map.insert(key, meta_value_from_lua(&item, depth)?);
     }
     Ok(MetaValue::Object(map))
+}
+
+/// `ygg.meta` 注册(TD1;原文迁入)。
+pub(super) fn install_meta(
+    lua: &Lua,
+    state: &Rc<RefCell<HostState>>,
+    ygg: &Table,
+) -> Result<(), Error> {
+    // ---- ygg.meta（结构化回执面，TD1）：不进 calls 缓冲、不回放、不改 core
+    //      trait；驱动转换结束后 take_meta 拼进信封。key 长度/类型与非有限值
+    //      在调用点 fail-fast 拒绝（与 ygg.emit 同纪律）。----
+    let st = Rc::clone(&state);
+    ygg.raw_set(
+        "meta",
+        lua.create_function(
+            move |_, (key, payload): (LuaValue, LuaValue)| -> Result<(), Error> {
+                let name = meta_key_from_lua(&key)?;
+                let value = meta_value_from_lua(&payload, 0)?;
+                st.borrow_mut().meta.insert(name, value);
+                Ok(())
+            },
+        )?,
+    )?;
+
+    Ok(())
 }
