@@ -16,14 +16,16 @@ local WORLD = ygg.data("ygg:shapez/world")
 local function seed_scenario()
   reset_all()
   ygg_dispatch("event.start")
-  ygg_dispatch("sz.place.hub", "4,2,0")
-  ygg_dispatch("sz.place.belt", "2,2,0")
-  ygg_dispatch("sz.place.belt", "3,2,0")
-  ygg_dispatch("sz.place.miner", "1,2,0")
+  ygg_dispatch("sz.place.hub", "4,4,0")
+  ygg_dispatch("sz.place.belt", "2,1,0")
+  ygg_dispatch("sz.place.belt", "3,1,0")
+  ygg_dispatch("sz.place.belt", "4,1,1")
+  ygg_dispatch("sz.place.belt", "4,2,1")
+  ygg_dispatch("sz.place.belt", "4,3,1")
+  ygg_dispatch("sz.place.miner", "1,1,0")
   ygg_dispatch("sz.place.belt", "2,0,0")
   ygg_dispatch("sz.place.proc", "cutter|3,0,0")
   ygg_dispatch("sz.place.belt", "4,0,1")
-  ygg_dispatch("sz.place.belt", "4,1,1")
   ygg_dispatch("sz.place.miner", "1,0,0")
 end
 
@@ -51,7 +53,7 @@ check("belts.try-accept-spacing-invariant", function()
   -- A 线路径：带 (2,2),(3,2)，起点 = id 较小者（先放的 (2,2)）
   assert_eq(1, 1, "路径数占位")
   local rows = belts.snapshot()
-  assert_eq(#rows, 3, "三条路径（A线2带 + miner→cutter 间单带 + cutter出料2带）")
+  assert_eq(#rows, 3, "三条路径（A线5带 + miner→cutter 间单带 + cutter出料单带）")
   local a = paths[rows[1].start]
   assert_true(a ~= nil, "A 线路径在场")
   assert_true(belts.can_accept(a), "空路径可收")
@@ -91,17 +93,16 @@ check("belts.replay-10k-anchors-equal", function()
   local function run_and_collect()
     seed_scenario()
     local anchors = {}
-    local last = simtick.snapshot()
     for i = 1, 10000 do
       simtick.tick()
       if i % 500 == 0 then
         anchors[#anchors + 1] = procgen.hash(simtick.snapshot())
       end
     end
-    return anchors, codec.encode(simtick.snapshot()), last
+    return anchors, codec.encode(simtick.snapshot())
   end
-  local anchors_a, final_a, _mid_a = run_and_collect()
-  local anchors_b, final_b, _mid_b = run_and_collect()
+  local anchors_a, final_a = run_and_collect()
+  local anchors_b, final_b = run_and_collect()
   assert_eq(#anchors_a, 20, "10⁴/500 = 20 锚")
   for i = 1, #anchors_a do
     assert_eq(anchors_b[i], anchors_a[i], "锚 " .. i .. " 重放相等（I3）")
