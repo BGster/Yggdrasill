@@ -170,6 +170,7 @@
       "src/cast.lua",
       "src/clock.lua",
       "src/custom.lua",
+      "src/items.lua",
       "src/quests.lua",
       "src/simframe.lua",
       "src/world.lua"

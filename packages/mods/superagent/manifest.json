@@ -16,6 +16,11 @@
       "sha256": "d314246f10d43d1f3f345d7f95cb8e203404fecf9d6737637cda50bd3d3bf7e5"
     },
     {
+      "byteLength": 7045,
+      "path": "src/items.lua",
+      "sha256": "78903010a418c4dcbfe888e646df09873cb483829b639a9d85e96054b80cadda"
+    },
+    {
       "byteLength": 13701,
       "path": "src/quests.lua",
       "sha256": "2c409d8ad9eac87b47c4d70fde1b8929d6864e32b4cdabcb3d6f8e416f8e84aa"

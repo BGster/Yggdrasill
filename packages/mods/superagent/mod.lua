@@ -28,6 +28,7 @@ local clock = require("src.clock")
 local cast = require("src.cast")
 local quests = require("src.quests")
 local custom = require("src.custom")
+local items = require("src.items")
 
 -- ============================================================================
 -- §2 包装配：install 只记 deps / 注注册表（不预读模板、不写 KV）。
@@ -330,6 +331,23 @@ end)
 
 ygg.on("commission.deliver", function(payload)
   ACTIONS["commission.deliver"](payload)
+end)
+
+-- 道具交接（headless 直发面；无 choice → emit 存活，走事件投影）。
+ygg.on("bureau.handover", function(payload)
+  local bar = (type(payload) == "string") and payload:find("|", 1, true) or nil
+  if bar == nil then
+    ygg.narrate("【拒绝】交接载荷应为 \"<道具key>|<持有者key>\"（JSON 标量）。")
+    return
+  end
+  local item_key = payload:sub(1, bar - 1)
+  local to_key = payload:sub(bar + 1)
+  local ok, result = pcall(items.transfer, item_key, to_key)
+  if not ok then
+    ygg.narrate("【拒绝】交接被拒：" .. tostring(result))
+    return
+  end
+  ygg.narrate("交接完成：" .. item_key .. " → " .. to_key .. "。")
 end)
 
 -- ── 摘要（summaryEvent：只读，daemon / 面板读它；不落 narrative）────────────
