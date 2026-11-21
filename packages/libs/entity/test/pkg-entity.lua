@@ -82,6 +82,7 @@ local function new_world()
   local kv = {}
   local kv_writes = 0
   local kv_reads = 0
+  local exists_reads = 0
   local store = { next_id = 1, attrs = {}, tags = {} }
   local events = {}
   local world = { kv = kv, store = store, events = events, kv_writes = 0 }
@@ -134,6 +135,19 @@ local function new_world()
       local set = store.tags[id]
       return set ~= nil and set[tag] == true
     end,
+    -- S9 控制面两键的替身：存在性 = store 里还有这条记录。
+    exists = function(id)
+      exists_reads = exists_reads + 1
+      return store.attrs[id] ~= nil
+    end,
+    destroy = function(id)
+      if store.attrs[id] == nil then
+        return false
+      end
+      store.attrs[id] = nil
+      store.tags[id] = nil
+      return true
+    end,
   }
 
   world.host = {
@@ -158,6 +172,9 @@ local function new_world()
   end
   world.kv_reads_now = function()
     return kv_reads
+  end
+  world.exists_reads_now = function()
+    return exists_reads
   end
   return world
 end
@@ -464,37 +481,73 @@ run("pkg.entity.destroyed-once", function()
   local ev = events_named(world, "entity.destroyed")
   eq(#ev, 1, "恰好一条 entity.destroyed")
   eq(ev[1].payload, id, "载荷就是 id")
-  eq(world.kv["pkg.entity.alive." .. id], false, "存活位改写为 false（墓秃）")
-  eq(#entity.tags(id), 0, "destroy 清掉已声明的 tag")
+  -- S9：存活位退役（键压根不写），内核侧才是真相——记录整条不在。
+  eq(world.kv["pkg.entity.alive." .. id], nil, "不再写 pkg.entity.alive.<id>（S9 位退役）")
+  eq(world.store.attrs[id], nil, "内核记录随真删消失")
+  eq(world.store.tags[id], nil, "tag 集合随记录一起回收")
+  eq(#entity.tags(id), 0, "destroy 之后读不到任何 tag")
 
   -- 二次 destroy：`false` 且零事件（事件恰好一次的另一个方向）。
   eq(entity.destroy(id), false, "二次 destroy 返回 false")
   eq(#events_named(world, "entity.destroyed"), 1, "二次 destroy 不得发事件")
 end)
 
-run("pkg.entity.exists-reads-index", function()
+run("pkg.entity.exists-reads-kernel", function()
   local world = new_world()
   local entity = fresh(world)
   entity.define("creature", basic_spec())
   local id = entity.spawn("creature", { hp = 9 }, { "enemy" })
 
-  -- I5 的硬要求：只读存活位，绝不扫键。用 mock 的**读计数**钉：一次 exists 只
-  -- 该有一个 KV 读（扫键的实现会在这里现形）。
-  local reads_before = world.kv_reads_now()
+  -- I5 的硬要求：真源只有一个（内核查），**零 KV 读**、绝不扫键。用 mock 的两个
+  -- 读计数钉死：exists 一次 = 一次存在性读 + 0 次 KV 读（S9 前是 1 次 KV 读）。
+  local kv_before = world.kv_reads_now()
+  local exists_before = world.exists_reads_now()
   is_true(entity.exists(id), "存活实体 exists = true")
-  eq(world.kv_reads_now() - reads_before, 1, "exists 必须只读一个键")
+  eq(world.kv_reads_now() - kv_before, 0, "exists 不得读 KV（S9：真源在内核）")
+  eq(world.exists_reads_now() - exists_before, 1, "exists 必须问一次内核存在性")
 
   is_true(entity.destroy(id), "destroy")
   eq(entity.exists(id), false, "死亡后 exists = false")
   eq(entity.exists(999), false, "从未存在过的 id = false（不报错）")
 
-  -- 墓秃对外不可见：四个读口子一致遮蔽。
+  -- 真删对外不可见：四个读口子一致遮蔽（不再是同一条记录 + 遮蔽位）。
   is_nil(entity.get(id, "hp"), "get(dead) = nil")
   eq(next(entity.attrs(id)), nil, "attrs(dead) 是空表")
   is_nil(entity.schema_of(id), "schema_of(dead) = nil")
   eq(entity.has(id, "enemy"), false, "has(dead) = false")
-  -- 属性本身留在内核（无删除面，D3）——这正是「墓秃只能遮蔽」的代价。
-  eq(world.store.attrs[id].hp, 9, "属性仍在内核（无删除面）")
+end)
+
+run("pkg.entity.destroy-reclaims-kernel-record", function()
+  local world = new_world()
+  local entity = fresh(world)
+  entity.define("creature", basic_spec())
+
+  -- 基线：先走一轮 spawn+destroy，把 count 这类「首次写才出现」的常量键建起来；
+  -- 之后一轮的增量才是**残留**（否则会把建键算进 destroy 的账）。
+  local function key_count()
+    local n = 0
+    for _ in pairs(world.kv) do
+      n = n + 1
+    end
+    return n
+  end
+  local warm = entity.spawn("creature", { hp = 1 })
+  is_true(entity.destroy(warm), "warmup destroy")
+  local keys_before = key_count()
+
+  local id = entity.spawn("creature", { hp = 9 }, { "enemy" })
+  local keys_spawned = key_count()
+  eq(keys_spawned - keys_before, 1, "spawn 只新增 rec.<id>.schema（count/seq 已存在）")
+
+  is_true(entity.destroy(id), "destroy")
+  eq(world.store.attrs[id], nil, "属性袋已被回收（r2-G4 的「永占内存」归零）")
+  eq(world.store.tags[id], nil, "tag 集合已被回收")
+  eq(entity.count(), 0, "count 归零")
+  eq(#entity.ids(), 0, "#ids 归零")
+  -- 残留恰好 1 枚 KV 键（rec.<id>.schema）：KV 无删除面，这是可数的剩余代价（I5）。
+  eq(key_count() - keys_spawned, 0, "destroy 自己不新增任何键（alive 位已退役）")
+  eq(key_count() - keys_before, 1, "一轮 spawn+destroy 的净残留恰好 1 枚（rec.schema）")
+  eq(world.kv["pkg.entity.rec." .. id .. ".schema"], "creature", "残留的就是 rec 的 schema 键")
 end)
 
 run("pkg.entity.ids-count", function()

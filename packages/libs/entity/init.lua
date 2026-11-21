@@ -31,7 +31,6 @@ local K = {
   schemas_rev = "pkg.entity.schemas_rev",
   schema = "pkg.entity.schema.",
   rec = "pkg.entity.rec.",
-  alive = "pkg.entity.alive.",
   count = "pkg.entity.count",
   seq = "pkg.entity.seq",
 }
@@ -525,19 +524,22 @@ function M.schema(name)
   return copy_spec(spec)
 end
 
--- ── 存活索引与计数器（§2 的 index 行：逐 id 一标量位 + 计数 + 水位）────────────
+-- ── 存活判定与计数器（§2 的 index 行：内核存在性 + 计数 + 水位）──────────────
 --
--- KV 没有删除也没有遍历，所以「存活集合」不能存成一张表：存成**逐 id 的布尔位**。
--- 位一旦写过就只能改写（`true` → `false`），于是死亡实体在 KV 里留下一个墓碑位，
--- 而**对外不可见**由 `alive()` 门在每一读口子上兑现（契约 I5 / D3）。
+-- 存活真源 = **内核存在性**（`ygg.entity.exists`，S9 起）：真删之后记录整条不在，
+-- 「死」与「不存在」在内核里就是同一件事，包不再镜像任何位。所以不会出现
+-- 「内核已删、包说活」的两套可见性（契约 I5）。`count` / `seq` 仍是派生标量：
+-- 计数换 O(1) 的 `count()`，水位当 `ids` 的扫描上界。
 
-local function alive_key(id)
-  return K.alive .. tostring(id)
-end
-
---- 存活判定：一次 KV 读，绝不扫键（契约 I5 的力气花在这里）。
+--- 存活判定：一次内核存在性读（BTreeMap 查），零 KV 读、绝不扫键（契约 I5）。
+---
+--- 非数字 / 非整数 id 一律「不在世」（保持 S9 前的探询口径：`exists` 是 mod 的
+--- 问路面，`nil` / 字符串不该让宿主面的 u64 参数转换抛错）。
 local function alive(h, id)
-  return h.kv.get(alive_key(id)) == true
+  if type(id) ~= "number" or id % 1 ~= 0 then
+    return false
+  end
+  return h.entity.exists(id)
 end
 
 --- 计数器增减（缺失 = 0；负数收敛到 0，不做断言——计数是派生值，不是真源）。
@@ -663,7 +665,7 @@ function M.spawn(schema_name, attrs, tags)
   for i = 1, #tag_list do
     h.entity.add_tag(id, tag_list[i])
   end
-  h.kv.set(alive_key(id), true)
+  -- 存活位不再落 KV（S9）：存活 = 内核存在性，spawn 出来就在世。
   shift(h, K.count, 1)
   local seq = h.kv.get(K.seq)
   if type(seq) ~= "number" or seq < id then
@@ -817,7 +819,7 @@ function M.untag(id, tag_name)
   return tag_write(id, tag_name, false)
 end
 
---- `entity.exists(id)`：一次 KV 读存活位，**绝不扫键**（契约 I5）。
+--- `entity.exists(id)`：一次内核存在性读，**零 KV 读、绝不扫键**（契约 I5）。
 function M.exists(id)
   return alive(host(), id)
 end
@@ -868,25 +870,21 @@ function M.ids(tag_filter, schema_filter)
   return out
 end
 
---- `entity.destroy(id)`：把实体从存活集合里摘掉（**不**遍历、**不清**引用）。
+--- `entity.destroy(id)`：**内核真删**（属性 + tag + 记录一并回收），**不**遍历、**不清**引用。
 ---
---- 三件主机事实决定了这个形状：
----   * 内核没有 `destroy` 面（6 面里没有）——所以属性只能留在内核，靠存活位遮蔽；
----   * KV 没有删除——所以存活位只能 `true` → `false`（墓碑），不能消失；
+--- 三次契约修订（S9）确定了这个形状：
+---   * 内核有 `destroy` 面了——所以销毁 = `EntityStore::remove`，不再靠存活位遮蔽；
+---   * KV 仍无删除——所以 `rec.<id>.schema` 留着（每次 destroy 恰好留 1 枚键，见 I5）；
 ---   * 引用的清理归 mod 语义（「召唤物死亡，主人失去它」是规则），包不代决（契约 I4）。
 function M.destroy(id)
   local h = host()
   if not alive(h, id) then
     return false
   end
-  local spec = require_spec(h, h.kv.get(K.rec .. id .. ".schema"))
-  h.kv.set(alive_key(id), false)
+  -- 真删（属性 / tag / 记录一起走）。返回值的 false 分支不必处理：存活门刚证过它在世；
+  -- 就算内核侧已先一步删掉（绕过包的直呼），这里的 false 也只是「已经不在了」。
+  h.entity.destroy(id)
   shift(h, K.count, -1)
-  -- 清掉已声明的 tag：属性没有删除面（那是内核缺口，已登记），但标签有，不擦就
-  -- 会在「同 id 不复用」的前提下永远占着内存。
-  for i = 1, #spec.tags do
-    h.entity.remove_tag(id, spec.tags[i].name)
-  end
   h.emit("entity.destroyed", id)
   return true
 end
