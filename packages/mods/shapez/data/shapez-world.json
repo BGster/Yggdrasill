@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "tuning": {
+    "ticksPerSecond": 60,
+    "beltSpeedMilli": 2000,
+    "itemSpacingMilli": 630,
+    "minerSpeedMilli": 400,
+    "processorCycle": { "cutter": 4, "stacker": 8, "rotater": 1, "trash": 0 },
+    "anchorEveryTicks": 500
+  },
+  "levels": [
+    { "level": 1, "shape": "CuCuCuCu", "required": 10, "reward": "cutter_and_trash" },
+    { "level": 2, "shape": "----CuCu", "required": 20, "reward": "no_reward" },
+    { "level": 3, "shape": "RuRuRuRu", "required": 30, "reward": "balancer" },
+    { "level": 4, "shape": "RuRu----", "required": 30, "reward": "rotater" },
+    { "level": 5, "shape": "Cu----Cu", "required": 75, "reward": "tunnel" }
+  ],
+  "patches": [
+    { "x": 0, "y": 0, "radius": 2, "subshape": "C", "color": "u" },
+    { "x": 8, "y": 0, "radius": 2, "subshape": "R", "color": "u" }
+  ]
+}
