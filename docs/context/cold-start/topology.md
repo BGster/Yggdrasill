@@ -1,7 +1,7 @@
 # Yggdrasill · Monorepo 模块拓扑与依赖白名单
 > **id** cold-start/topology · **幕** cold-start · **触发** 冷启动 / 改仓库结构前
 > **读不到代价** irreversible（依赖白名单误改）
-> **ver** 36a3cd
+> **ver** bf79dd
 
 > **定位**：仓库目录拓扑全景与 5 条硬性依赖不变量的唯一清单。
 > **replaces**：CONTEXT §4（L97–133）（搬运基线 `3a2536f`）
@@ -16,7 +16,7 @@ Yggdrasill/
 │   ├── ygg-core/        # 纯确定性内核：实体表、事件总线、迁移驱动器（零内部依赖；仅 serde/serde_json/thiserror）
 │   ├── ygg-modules/     # 纯多文件 Lua 模块路径解析与副作用禁用清单（零依赖叶 crate）
 │   ├── ygg-schema/      # Manifest SHA-256 内容寻址与 JSON Schema 校验（仅依赖 ygg-core）
-│   ├── ygg-store/       # 运行持久化端口：SQLite 默认（run.sqlite + VFS）与遗留 JSON 后端（仅作为 ygg-sandbox 示例的 dev 依赖）；observe.rs = serve 只读观察面
+│   ├── ygg-store/       # 运行持久化端口：SQLite 默认（run.sqlite + VFS）与遗留 JSON 后端（仅作为 ygg-sandbox 示例的 dev 依赖）；observe/ = serve 只读观察面
 │   ├── ygg-sandbox/     # 确定性 Lua 5.4 VM（mlua）、宿主 API 白名单、ygg stdlib、ModBundle 加载器、宿主 CLI（examples/agent/，含 serve.rs 只读观察台与 assets/panel 内置两级列表页）
 │   ├── ygg-lint/        # 静态 AST 检查器（full_moon）：YGG-R1/R2/R3、YGG-MOD-EFFECT、YGG-PARSE（仅依赖 ygg-modules，零内核/VM 依赖）
 │   ├── ygg-sim/         # Tier 1 原生模拟内核：tick 循环、列式 ECS、确定性快照/回放/state hash（零内部依赖；运行时依赖仅 thiserror，且必须能编到 wasm32）
