@@ -11,9 +11,19 @@
       "sha256": "f671f750cafb8edad673ef5fb102bd6d458eb79e05bdfa903e8c0ab8ce45926d"
     },
     {
+      "byteLength": 10316,
+      "path": "src/mapgen.lua",
+      "sha256": "09c6056ce45a2bdfee3d253bd139a19f4fc06dc7b5cb3bd8a3beb565fdf504d9"
+    },
+    {
       "byteLength": 9087,
       "path": "src/processors.lua",
       "sha256": "7854c05de63e6016ecaf997d7f7114538a3047fb29b0157d3a686b122ed7f5c8"
+    },
+    {
+      "byteLength": 6108,
+      "path": "src/savegame.lua",
+      "sha256": "c089ca3f9406e19cb4352a882843e89ffebd97749a584cb15675f2a15ed273cb"
     },
     {
       "byteLength": 11416,
@@ -21,19 +31,19 @@
       "sha256": "9b465c143b86ed89b70e0bbd3fbfa92873a672b92faed7a61785332c87b5cdb0"
     },
     {
-      "byteLength": 6869,
+      "byteLength": 7431,
       "path": "src/simtick.lua",
-      "sha256": "088b8181b66662590192ca9b845cc2514af53c3a3581204fc675a16c30fd7d36"
+      "sha256": "54385edde6b5f191855da27b4a4f38b68eab5f0d22653bf626c30c117fdf75fb"
     }
   ],
   "entries": [
     {
-      "byteLength": 836,
+      "byteLength": 681,
       "id": "ygg:shapez/world",
       "kind": "world",
       "path": "data/shapez-world.json",
       "schema": "https://yggdrasill.dev/schemas/v1/shapez-world.json",
-      "sha256": "292ebf9fe824cec8de553f7d3b57c86171c36ab5ece93367386e834b94dddbab"
+      "sha256": "e7ed1a0bd46ca4c6503ed72ba80b76520c423df19ccb06f47c12b7615abdc480"
     }
   ],
   "packages": [

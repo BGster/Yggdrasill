@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "shapez v1 world data",
+  "title": "shapez v2 world data",
   "type": "object",
-  "required": ["schemaVersion", "tuning", "levels", "patches"],
+  "required": ["schemaVersion", "tuning", "levels"],
   "additionalProperties": false,
   "properties": {
     "schemaVersion": { "const": 1 },
@@ -48,21 +48,6 @@
           "shape": { "type": "string", "pattern": "^(-|[RC SW][rgbypwu-]){4}(:(-|[RCSW][rgbypwu-]){4}){0,3}$" },
           "required": { "type": "integer", "minimum": 1 },
           "reward": { "type": "string" }
-        }
-      }
-    },
-    "patches": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["x", "y", "radius", "subshape", "color"],
-        "additionalProperties": false,
-        "properties": {
-          "x": { "type": "integer" },
-          "y": { "type": "integer" },
-          "radius": { "type": "integer", "minimum": 1 },
-          "subshape": { "enum": ["C", "R", "S", "W"] },
-          "color": { "enum": ["r", "g", "b", "y", "p", "w", "u"] }
         }
       }
     }

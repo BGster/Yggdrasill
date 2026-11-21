@@ -1,27 +1,24 @@
 -- `tests/test-z-scenario.lua` —— 计划验收③：最小玩法场景脚本化用例。
 --
--- 场景：hub(4,4)；A 线 miner(1,1)→belt(2,1),(3,1),(4,1),(4,2),(4,3)→hub 产
--- CuCuCuCu 过 1→2（矿机须在圆斑 r=2 内）；B 线 miner(1,0)→belt(2,0)→cutter(3,0)
--- →belt(4,0) 跨路径移交入 A 线→hub，产 ----CuCu（2 级目标）与
+-- 场景（v2 地理白盒派生）：Cu 斑（chunk -1,0）circles[1] 圆心 C；A 线
+-- miner@C rot1 → belt@(C↓) → hub@(C↓↓) 产 CuCuCuCu 过 1→2；B 线 miner@(C→)
+-- rot1 → cutter@(C→↓) rot2 出料正向交割进 hub，产 ----CuCu（2 级目标）与
 -- CuCu----（非目标，收下不计数）过 2→3。
 -- 断言：过级 tick 界、事件恰一次、计数口径、放置面拒绝路径。
 
 local hub = require("src.hub")
+local mapgen = require("src.mapgen")
 
 local function seed_scenario()
   reset_all()
   ygg_dispatch("event.start")
-  ygg_dispatch("sz.place.hub", "4,4,0")
-  ygg_dispatch("sz.place.belt", "2,1,0")
-  ygg_dispatch("sz.place.belt", "3,1,0")
-  ygg_dispatch("sz.place.belt", "4,1,1")
-  ygg_dispatch("sz.place.belt", "4,2,1")
-  ygg_dispatch("sz.place.belt", "4,3,1")
-  ygg_dispatch("sz.place.miner", "1,1,0")
-  ygg_dispatch("sz.place.belt", "2,0,0")
-  ygg_dispatch("sz.place.proc", "cutter|3,0,0")
-  ygg_dispatch("sz.place.belt", "4,0,1")
-  ygg_dispatch("sz.place.miner", "1,0,0")
+  local c = mapgen.ensure_chunk(-1, 0)[1].circles[1]
+  local cx, cy = -16 + c[1], c[2]
+  ygg_dispatch("sz.place.hub", cx .. "," .. (cy + 2) .. ",0")
+  ygg_dispatch("sz.place.belt", cx .. "," .. (cy + 1) .. ",1")
+  ygg_dispatch("sz.place.miner", cx .. "," .. cy .. ",1")
+  ygg_dispatch("sz.place.proc", "cutter|" .. (cx + 1) .. "," .. (cy + 1) .. ",2")
+  ygg_dispatch("sz.place.miner", (cx + 1) .. "," .. cy .. ",1")
 end
 
 local function count_events(name)
@@ -51,9 +48,15 @@ check("scenario.place-rejections", function()
   assert_error("YGG-MOD-HUB-ONE", function()
     hub.place(9, 9, 0)
   end, "一局一台")
-  -- 矿机离斑拒绝（斑在 (0,0) r=2 与 (8,0) r=2；(5,5) 都不在）
+  -- 矿机离斑拒绝：白盒派生一个确定斑外的格（Cu 圆心正上方 6 格起逐格北上，
+  -- 首个不中即用——确定性且与斑表同步）
+  local c = mapgen.ensure_chunk(-1, 0)[1].circles[1]
+  local ox, oy = -16 + c[1], c[2] - 6
+  while mapgen.patch_at(ox, oy) ~= nil do
+    oy = oy - 1
+  end
   local before = #ygg_narrated_lines()
-  ygg_dispatch("sz.place.miner", "5,5,0")
+  ygg_dispatch("sz.place.miner", ox .. "," .. oy .. ",0")
   local lines = ygg_narrated_lines()
   assert_eq(#lines, before + 1, "拒绝行恰一条")
   assert_true(lines[#lines]:find("【拒绝】", 1, true) ~= nil, "拒绝前缀")
