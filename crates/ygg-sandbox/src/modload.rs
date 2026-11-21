@@ -80,6 +80,19 @@ impl ModBundle {
     /// 三方对账（声明 ↔ manifest 登记 ↔ 实际字节，全部在装载前）→ ⑤ schema
     /// 文本按文件内 `$id` 注册 → ⑥ 资源字节按 `entries` 声明序读。
     pub fn load(dir: &Path) -> Result<Self, String> {
+        Self::load_with_packages_root(dir, None)
+    }
+
+    /// [`load`](Self::load) 的显式包根变体（CLI `--packages` 装载路径）。
+    ///
+    /// `None` = 沿用 [`packages::resolve_root`] 既有优先级（explicit >
+    /// 环境变量 `$YGG_PACKAGES_ROOT` > `<mod>/../../packages/libs` 布局推导）；
+    /// `Some(root)` = 显式根直接生效。既有调用点（tests / 工具面）继续走
+    /// [`load`]，签名零改动。
+    pub fn load_with_packages_root(
+        dir: &Path,
+        packages_root: Option<&Path>,
+    ) -> Result<Self, String> {
         if !dir.is_dir() {
             return Err(format!("mod 目录不存在或不可读：{}", dir.display()));
         }
@@ -124,7 +137,9 @@ impl ModBundle {
         // ②′④′⑦⑧ packages 段：包根解析 → 闭包 → 三方对账 → 并集。
         // 全部在进入内核之前完成；失败文案统一前缀（与 code 段同形）。
         let (modules, chunk_paths) = match (&packages_spec, &manifest) {
-            (Some(spec), Some(manifest)) => load_packages(dir, spec, manifest, &mod_modules)?,
+            (Some(spec), Some(manifest)) => {
+                load_packages(dir, spec, manifest, &mod_modules, packages_root)?
+            }
             _ => (mod_modules, BTreeMap::new()),
         };
 
@@ -261,12 +276,14 @@ fn load_packages(
     spec: &PackagesSpec,
     manifest: &ygg_schema::manifest::Manifest,
     mod_modules: &ModuleSet,
+    explicit: Option<&Path>,
 ) -> Result<(ModuleSet, BTreeMap<String, String>), String> {
     let wrap =
         |err: packages::PackageError| format!("{}/packages 段校验失败：{err}", dir.display());
-    // 包根由本函数自行解析（`$YGG_PACKAGES_ROOT` > `<mod>/../../packages/libs`）
-    // ——CLI 一行不改就能用，工具面需要显式指定时用 `--packages` 自己解。
-    let root = packages::resolve_root(dir, None).map_err(wrap)?;
+    // 包根解析（`explicit` > `$YGG_PACKAGES_ROOT` > `<mod>/../../packages/libs`，
+    // 见 [`packages::resolve_root`]）——CLI 缺省一行不改就能用，`--packages` 时
+    // 显式根直接生效。
+    let root = packages::resolve_root(dir, explicit).map_err(wrap)?;
     let resolved = packages::resolve(&root, spec).map_err(wrap)?;
     let index = packages::index(&root, &resolved, manifest.packages()).map_err(wrap)?;
     let table = packages::union(mod_modules, index).map_err(wrap)?;

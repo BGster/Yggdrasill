@@ -299,6 +299,10 @@ enum OpenStyle {
 #[derive(Clone)]
 struct Args {
     mod_dir: Option<PathBuf>,
+    /// `--packages <目录>`：能力包根显式覆盖。语义零新增：优先级沿用
+    /// `resolve_root` 既有 explicit > 环境变量 `$YGG_PACKAGES_ROOT` > 布局推导。
+    /// 仅 new / open 装载路径消费；其余模式接受但忽略。
+    packages: Option<PathBuf>,
     /// 开局方式（new/open；serve 与 --builtin-tool 模式为 None）。
     open_style: Option<OpenStyle>,
     /// 局目录（存档目录即身份）。new = `<in>/<自动 id>`（开局前为空，由
@@ -550,6 +554,7 @@ impl BuiltinTool {
 
 fn parse_args() -> Args {
     let mut mod_dir: Option<PathBuf> = None;
+    let mut packages: Option<PathBuf> = None;
     let mut positional: Vec<String> = Vec::new();
     let mut open_style: Option<OpenStyle> = None;
     let mut runs_parent: Option<PathBuf> = None;
@@ -622,6 +627,7 @@ fn parse_args() -> Args {
                  回退到指定存档点用 `egg open <run-root> --at g<代>`",
             ),
             "--in" => runs_parent = Some(PathBuf::from(next_value(&mut iter, "--in"))),
+            "--packages" => packages = Some(PathBuf::from(next_value(&mut iter, "--packages"))),
             "--force" => force = true,
             "--at" => {
                 at_seen = true;
@@ -810,6 +816,7 @@ fn parse_args() -> Args {
             port,
             panel_dir,
             poll_ms,
+            packages,
         };
     }
 
@@ -864,6 +871,7 @@ fn parse_args() -> Args {
             port,
             panel_dir,
             poll_ms,
+            packages,
         };
     }
 
@@ -983,6 +991,7 @@ fn parse_args() -> Args {
         port,
         panel_dir,
         poll_ms,
+        packages,
     }
 }
 
@@ -1122,6 +1131,8 @@ fn usage(code: i32) -> ! {
                      schemas/*.json / data/*.json）。new 必填；open 可省略
                      （改读 run.json 记录的本局 mod 路径，两者都没有则报错）
   --in <目录>        new 的 runs 父目录（默认 ./runs；自动 id 落在其下）
+  --packages <目录>  能力包根显式覆盖（缺省 = 环境变量 $YGG_PACKAGES_ROOT >
+                     <mod>/../../packages/libs 布局推导；仅装载路径消费）
   --force            new 的显式重置许可：目录已有旧产物时按新局重置（归档留证据）
   --at g<代>         open 的回退存档点（如 g0 / g3；代 = sqlite generation）。
                      取该代末快照建新代续跑，旧代证据全留库；JSON 局拒绝（无代概念）
@@ -1822,6 +1833,9 @@ struct Session {
     resumed: bool,
     /// `--harness` 适配器覆盖（供进程内内置工具 `archive-sessions` 读取）。
     harness: Option<String>,
+    /// `--packages` 显式包根（开局与热载传同一值；`None` = 沿用
+    /// `resolve_root` 既有优先级）。
+    packages_root: Option<PathBuf>,
     /// 本进程的提交者身份（旗标 > 环境变量，见 [`resolve_identity`]）。
     /// daemon 模式下请求字段可在其上按链补充；drain 派发用**记录自带**身份，
     /// 不用本字段（谁写的行归谁）。
@@ -1886,7 +1900,7 @@ impl Session {
         };
 
         // 先装载（失败即退出，run 目录不留空壳），再建 run 目录接管产物。
-        let bundle = ModBundle::load(&mod_dir)?;
+        let bundle = ModBundle::load_with_packages_root(&mod_dir, args.packages.as_deref())?;
         let mut kernel = kernel_from(&bundle)?;
         // 激活触点（S-1）：开局装配失败 = 装载失败同语义（fail-closed 退出）。
         // attach 只落 <run>/mounts/ 壳（不产 autosave/events/sqlite 产物），
@@ -1948,6 +1962,7 @@ impl Session {
             summary_cache: None,
             resumed: false,
             harness: args.harness.clone(),
+            packages_root: args.packages.clone(),
             identity: resolve_identity_or_usage(args),
         };
         session.mount_tool_runner();
@@ -2541,35 +2556,40 @@ impl Session {
         // ② 新包重装载 + 回灌（一次原子构造；失败即回滚到旧驱动）。
         //    契约（agent / inboxRoutes / drive）也在这一步现读：任一项不合法即整体
         //    判定热载失败——**不**存在「内核换了、契约沿用旧的」半更新态。
-        let outcome = ModBundle::load(&self.mod_dir).and_then(|bundle| {
-            let contract = AgentContract::load(&self.mod_dir)?;
-            let inbox_routes = InboxRoutes::load(&self.mod_dir)?;
-            let limits = DriveLimits::load(&self.mod_dir.join(&self.config_rel))?;
-            let settlement = SettlementPolicy::load(&self.mod_dir.join(&self.config_rel))?;
-            // 工具白名单也是契约：热载同一把尺（半声明 / 未放行 = 整体热载失败，
-            // 不存在「内核换了、工具声明沿用旧的」半更新态）。
-            let tools = ToolRegistry::load(&self.mod_dir)?;
-            let tool_access = ToolAccess::load(&self.mod_dir.join(&self.config_rel))?;
-            require_tool_allowlist(&tools, &tool_access, &self.mod_dir.join(&self.config_rel))?;
-            restore_from(&bundle, save_text.as_bytes()).map(|kernel| {
-                (
-                    kernel,
-                    contract,
-                    inbox_routes,
-                    limits,
-                    settlement,
-                    tools,
-                    tool_access,
-                )
-            })
-        });
+        let outcome =
+            ModBundle::load_with_packages_root(&self.mod_dir, self.packages_root.as_deref())
+                .and_then(|bundle| {
+                    let contract = AgentContract::load(&self.mod_dir)?;
+                    let inbox_routes = InboxRoutes::load(&self.mod_dir)?;
+                    let limits = DriveLimits::load(&self.mod_dir.join(&self.config_rel))?;
+                    let settlement = SettlementPolicy::load(&self.mod_dir.join(&self.config_rel))?;
+                    // 工具白名单也是契约：热载同一把尺（半声明 / 未放行 = 整体热载失败，
+                    // 不存在「内核换了、工具声明沿用旧的」半更新态）。
+                    let tools = ToolRegistry::load(&self.mod_dir)?;
+                    let tool_access = ToolAccess::load(&self.mod_dir.join(&self.config_rel))?;
+                    require_tool_allowlist(
+                        &tools,
+                        &tool_access,
+                        &self.mod_dir.join(&self.config_rel),
+                    )?;
+                    restore_from(&bundle, save_text.as_bytes()).map(|kernel| {
+                        (
+                            kernel,
+                            contract,
+                            inbox_routes,
+                            limits,
+                            settlement,
+                            tools,
+                            tool_access,
+                        )
+                    })
+                });
         match outcome {
             Ok((mut kernel, contract, inbox_routes, limits, settlement, tools, tool_access)) => {
                 // 激活触点（S-1 热载）：新 pack 可能变 mounts 声明 → 重 attach
                 //（三态幂等，零新建状态）；失败 = 整体热载失败，沿用旧内核
                 //（与契约现读同待遇，不分裂「内核换了、桥没换」的半更新态）。
-                if let Err(message) =
-                    activate_host_faces(&mut kernel, &self.run_dir, &self.mod_dir)
+                if let Err(message) = activate_host_faces(&mut kernel, &self.run_dir, &self.mod_dir)
                 {
                     self.notices
                         .push(format!("热载失败，沿用旧 mod 继续：{message}"));
@@ -7572,6 +7592,7 @@ mod legacy_seed_refusal_tests {
     /// 只在 `mod_dir` 上有差异的宿主参数（本模块不派发，其余字段钉成「续局单发」）。
     fn args(mod_dir: Option<PathBuf>) -> Args {
         Args {
+            packages: None,
             mod_dir,
             open_style: Some(crate::OpenStyle::Open),
             run_root: PathBuf::from("ygg-runs-should-not-be-touched/r1"),
@@ -9493,6 +9514,7 @@ mod multiscript_hot_reload_tests {
     /// 的假象。默认后端归 `persistence_reset_semantics_tests` 的 `r10*` 专测。
     fn args_for(dir: &Path, run_id: &str) -> Args {
         Args {
+            packages: None,
             mod_dir: Some(dir.to_path_buf()),
             open_style: Some(crate::OpenStyle::New),
             run_root: dir.join("runs").join(run_id),
@@ -9940,6 +9962,7 @@ end)
     /// 默认后端（`store: None`）的回归是 `r10*` 系列，二者不合并。
     fn probe_args(mod_dir: &Path, runs_root: &Path, run_id: &str, resume: bool) -> Args {
         Args {
+            packages: None,
             mod_dir: Some(mod_dir.to_path_buf()),
             open_style: Some(if resume {
                 crate::OpenStyle::Open
@@ -11036,6 +11059,7 @@ end)
     /// 单发 / 只观察共用的宿主参数（`store` 钉住 JSON：本节断言都在文件面）。
     fn tool_args(mod_dir: &Path, runs_root: &Path, run_id: &str) -> Args {
         Args {
+            packages: None,
             mod_dir: Some(mod_dir.to_path_buf()),
             open_style: Some(crate::OpenStyle::New),
             run_root: runs_root.join(run_id),
@@ -11745,6 +11769,7 @@ end)
 
     fn vfs_args(mod_dir: Option<&Path>, runs_root: &Path, run_id: &str, resume: bool) -> Args {
         Args {
+            packages: None,
             mod_dir: mod_dir.map(Path::to_path_buf),
             open_style: Some(if resume {
                 crate::OpenStyle::Open
@@ -12417,6 +12442,7 @@ end)
 
     fn daemon_args(mod_dir: &Path, runs_root: &Path, run_id: &str) -> Args {
         Args {
+            packages: None,
             mod_dir: Some(mod_dir.to_path_buf()),
             open_style: Some(crate::OpenStyle::New),
             run_root: runs_root.join(run_id),
@@ -13177,6 +13203,7 @@ end)
         session: Option<String>,
     ) -> Args {
         Args {
+            packages: None,
             mod_dir: Some(mod_dir.to_path_buf()),
             open_style: Some(crate::OpenStyle::New),
             run_root: runs_root.join(run_id),
