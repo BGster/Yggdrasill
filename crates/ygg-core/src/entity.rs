@@ -501,6 +501,41 @@ mod tests {
     }
 
     #[test]
+    fn remove_keeps_the_id_watermark_so_ids_are_never_reused() {
+        // S9 锚：真删回收「本体」，但**不回收 id**——`remove` 只动实体表与 `revision`，
+        // `next_id` 是独立水位。所以 I1（id 永不复用）与「本体是否永存」无关：
+        // 宿主面 `ygg.entity.destroy` 正是建在这条性质上的（回收面不该破分配纪律）。
+        let mut store = EntityStore::new();
+        let first = store.spawn().unwrap();
+        let doomed = store.spawn().unwrap();
+        store.set_attribute(doomed, "hp", Value::Int(5)).unwrap();
+        store.add_tag(doomed, "enemy").unwrap();
+        let watermark = store.next_entity_id();
+        let revision_before = store.revision();
+
+        let removed = store.remove(doomed).expect("在场实体必须被移除");
+        assert_eq!(
+            removed.attribute("hp"),
+            Some(&Value::Int(5)),
+            "属性随记录一起返回（真删而不是丢引用）"
+        );
+        assert!(removed.has_tag("enemy"), "tag 也随记录一起回收");
+        assert_eq!(store.next_entity_id(), watermark, "真删不得回收 id 水位");
+        assert_eq!(store.revision(), revision_before + 1, "真删计一次变更");
+        assert!(!store.contains(doomed), "真删后 contains = false（exists 的 store 层语义）");
+        assert!(store.get(doomed).is_none());
+        assert!(store.remove(doomed).is_none(), "幂等：二次删除返回 None、不报错");
+        assert_eq!(store.revision(), revision_before + 1, "幂等删除不涨 revision");
+
+        let next = store.spawn().unwrap();
+        assert_ne!(next, doomed, "I1：id 永不复用");
+        assert!(
+            next > doomed && next > first,
+            "删后新 id 必须更大：{next} vs doomed={doomed}"
+        );
+    }
+
+    #[test]
     fn store_mutators_reject_missing_entity() {
         let mut store = EntityStore::new();
         assert!(matches!(

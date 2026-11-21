@@ -594,9 +594,10 @@ fn meta_rejects_bad_keys_and_shapes_readably() {
 
 // ── `ygg.entity.*` 批式面（P-K A1；铁律②「数组进出、单次调用承载整批」）──────────
 
-/// 键集是**闭集**：六个单条面 + 五个批式面，多一个即红（防退化成逐实体 getter）。
+/// 键集是**闭集**：六个单条面 + 五个批式面 + 两个控制面（`exists` / `destroy`，S9），
+/// 多一个即红（防退化成逐实体数据 getter；控制面是单标量、不搬数据）。
 #[test]
-fn entity_face_keys_are_exactly_the_eleven_documented_keys() {
+fn entity_face_keys_are_exactly_the_thirteen_documented_keys() {
     let mut rig = Rig::new();
     rig.load_phase(
         r#"
@@ -620,6 +621,8 @@ fn entity_face_keys_are_exactly_the_eleven_documented_keys() {
         "add_tag",
         "attr_apply",
         "attr_fetch",
+        "destroy",
+        "exists",
         "get_attribute",
         "has_tag",
         "remove_tag",
@@ -632,7 +635,7 @@ fn entity_face_keys_are_exactly_the_eleven_documented_keys() {
     expected.sort_unstable();
     assert_eq!(
         seen, expected,
-        "ygg.entity 的键集必须恰为这 11 个：{seen:?}"
+        "ygg.entity 的键集必须恰为这 13 个：{seen:?}"
     );
 }
 
@@ -766,4 +769,66 @@ fn entity_batch_face_rejects_before_mutating() {
         lines[2]
     );
     assert_eq!(lines[3], "AFTER:1", "被拒的批不得留下半截写入");
+}
+
+// ── `ygg.entity.exists` / `ygg.entity.destroy`（S9 控制面两键）──────────────────
+
+/// 存在性是内核真源的读面，真删是它的写面：两键合起来把「死亡」表达成
+/// **记录不存在**（而不是墓碑位遮蔽），且删除幂等、缺失 id 不报错。
+///
+/// 钉住的四件事：① `exists` 真/假/从未存在；② `destroy` 首次 true、二次 false、
+/// 未知 id false（不抛错）；③ 真删之后宿主直读 store：属性 / tag / 记录一起没了；
+/// ④ I1——删后 `spawn` 拿到更大的 id（水位不动）。
+#[test]
+fn entity_lifecycle_exists_and_destroy_are_the_liveness_pair() {
+    let mut rig = Rig::new();
+    rig.load_phase(
+        r#"
+        ygg.on("evt.life", function()
+            local id = ygg.entity.spawn()
+            ygg.entity.set_attribute(id, "hp", 7)
+            ygg.entity.add_tag(id, "enemy")
+            ygg.narrate("ALIVE:" .. tostring(ygg.entity.exists(id)))
+            ygg.narrate("GHOST:" .. tostring(ygg.entity.exists(999)))
+
+            local first = ygg.entity.destroy(id)
+            local second = ygg.entity.destroy(id)
+            local missing = ygg.entity.destroy(999)
+            ygg.narrate("DESTROY:" .. tostring(first) .. ","
+                .. tostring(second) .. "," .. tostring(missing))
+
+            ygg.narrate("AFTER:" .. tostring(ygg.entity.exists(id)))
+            ygg.narrate("HP:" .. tostring(ygg.entity.get_attribute(id, "hp")))
+            ygg.narrate("TAG:" .. tostring(ygg.entity.has_tag(id, "enemy")))
+
+            local fresh = ygg.entity.spawn()
+            ygg.narrate("FRESH:" .. tostring(fresh) .. ">?old")
+        end)
+    "#,
+    );
+    let mut registry = rig.seal_and_register();
+    let result = rig.run_full(&mut registry, "evt.life", Value::Int(0));
+    assert_eq!(
+        result.narrative(),
+        [
+            "ALIVE:true".to_string(),
+            "GHOST:false".to_string(),
+            "DESTROY:true,false,false".to_string(),
+            "AFTER:false".to_string(),
+            "HP:nil".to_string(),
+            "TAG:false".to_string(),
+            "FRESH:2>?old".to_string(),
+        ]
+    );
+
+    // 宿主侧直读：真删就是真删——记录不在表里，属性与 tag 随记录一起回收。
+    let entities = rig.handles.entities.borrow();
+    assert_eq!(entities.len(), 1, "只剩删后新分配的那一条：{entities:?}");
+    assert!(!entities.contains(1), "实体 1 必须整条消失");
+    assert!(entities.contains(2), "删后 spawn 拿到的必须是新 id 2");
+    assert_eq!(
+        entities.next_entity_id(),
+        3,
+        "水位不动也不复用（I1）：remove 不碰 next_id"
+    );
 }

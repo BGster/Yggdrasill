@@ -1708,6 +1708,33 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         )?,
     )?;
 
+    // ---- 控制面两键（S9）：存在性 + 真删 ------------------------------------
+    //
+    // 形状是「单标量进出」：各吃一个 u64、回一个 bool，n=1 热路径不必构造帧
+    // （批式化它按 packages/entity.md §9.7 实测是负收益：表形 485 ns/8 值贵过
+    // 8 次逐项穿越 ≈320 ns）。两键**不新增错误码**：三族（FRAME / VALUE / ID）
+    // 只属批式面——批式拒绝是为了「整批零副作用」，单条删除没有半截状态，
+    // 缺失 id 是正常答案（`false`），不是错误（契约：kernel/lua-api.md §3.1）。
+    let ent_exists = Rc::clone(&state);
+    entity_table.raw_set(
+        "exists",
+        lua.create_function(move |_, id: u64| -> Result<bool, Error> {
+            let entities = entities_of(&ent_exists);
+            let present = entities.borrow().contains(id);
+            Ok(present)
+        })?,
+    )?;
+    let ent_destroy = Rc::clone(&state);
+    entity_table.raw_set(
+        "destroy",
+        lua.create_function(move |_, id: u64| -> Result<bool, Error> {
+            let entities = entities_of(&ent_destroy);
+            // 真删：属性 / tag / 记录一并回收；`next_id` 不动 ⇒ id 永不复用（I1）。
+            let removed = entities.borrow_mut().remove(id).is_some();
+            Ok(removed)
+        })?,
+    )?;
+
     ygg.raw_set("entity", entity_table)?;
 
     install_sim(lua, &state)?;
