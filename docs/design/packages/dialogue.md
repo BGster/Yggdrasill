@@ -18,7 +18,7 @@
 
 逻辑形状（代码看见的）：`event` = 运行时消息帧、`handlers.<type>` = 注册序的 handler 数组、`threads.<key>` = 线程轮次、`dlg.seq` = 轮次计数。
 
-**物理落点（KV 只收标量——D10）**：宿主 `ygg.kv.set` 经 `value_from_lua` 只接受四个标量型（`crates/ygg-sandbox/src/host_api.rs:568`），表写入即 `unsupported payload type: table`。所以「表值」的字段全部落成**扁平标量键 + 换行名表**：
+**物理落点（KV 只收标量——D10）**：宿主 `ygg.kv.set` 经 `value_from_lua` 只接受四个标量型（`crates/ygg-sandbox/src/host_api/value.rs:35`），表写入即 `unsupported payload type: table`。所以「表值」的字段全部落成**扁平标量键 + 换行名表**：
 
 | 键 | 值 | 说明 |
 | --- | --- | --- |

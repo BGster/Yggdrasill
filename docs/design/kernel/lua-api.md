@@ -56,6 +56,8 @@ Lua 5.4 沙箱**不暴露任何标准库表**：globals 是一张 deny-by-defaul
 
 **判据**：① 阻断——向白名单添加未在 `safe_stdlib` 里的标准库面、引入非确定性来源（时钟/随机/环境读）、或把 AST 分析搬进 `ygg-sandbox`；② 症状——同一 seed 两次回放产出不同回执，或 `YGG-MOD-EFFECT` 在加载期未拒绝顶层副作用；③ 确认——`cargo test --workspace`（含 `ygg-lint` 与沙箱语义用例）与 `cargo run -q -p ygg-lint -- --path <mod>`。
 
+**宿主装配体的模块化拆分（S-25 批三）**：`host_api` 由单文件 2880 行（800 行上限的 3.6×）拆为 `host_api/` 目录 11 文件（mod.rs 装配 + value/narrate/fs/tool/kv/entity/entity_decode/selector/sim/meta 十面）。这是**纯搬移**，不是重写：每个面的注册闭包、错误码、校验规则逐字节原样迁移，`install()` 拆为逐面 `install_*` 薄函数后注册序不变（on/emit/narrate/choice → meta → fs → tool → kv → entity → sim → codec）。行为不变量由门禁计数守恒背书：workspace 581、egg 158、pkg selftest 199、agent-seed 79、superagent 183,五门禁 before/after 逐项相等；`pub` 符号集不变（`ygg_fs_code` 嵌套模块等既有路径逐字节保留,批一 egg.rs、批二 serve 同法）。拆分动机只有一个：单文件超限使面边界不可读——十一个文件各归其面后,「宿主面 = 装配（mod.rs）+ 十个独立面文件」的形状与 §3.1.2–3.1.4 的分面叙述一一对应。
+
 #### 3.1.2 mounts 挂载面（宿主注入的盘上文件桥）
 
 `ygg.fs.*` 是一个面、两个根，**按首段分派**：`artifacts/` 走上一节的既有内存 VFS（逐字节不变），`mounts` / `mounts/` 走本节（本节的所有拒绍一律 `YGG-FS-JAIL`）。**其余首段仍归既有 VFS 门**（`artifacts/` 前缀门的文案与行为一字不改）——旧面的逐字节兼容优先于错误码统一，`YGG-FS-JAIL` 只覆盖挂载面内部的路径。
@@ -178,7 +180,7 @@ despawn_batch: u32 n | u64 ids[n]
 
 #### 3.1.4 codec 确定性 JSON 编解码面（宿主注入）
 
-`ygg.codec.*` 是 Tier 2 [packages/codec.md](../packages/codec.md) §4.1「下沉边界」的原生加速面：包的 Lua 实现仍是**规范执行体**，本面是它的**符合实现**——任一合法输入的产出字节必须与 Lua 路径**逐字节相等**（差分门禁见包契约 §4.1）。注入点是 `host_api::install`（`crates/ygg-sandbox/src/host_api.rs` 调用 `codec_face::install`），**没有实例、没有 CLI 激活**：本面无状态，不需要 `egg.rs` 那一层宿主激活（与 `ygg.sim.*` 的 `set_sim` 注入面区别就在这里）。
+`ygg.codec.*` 是 Tier 2 [packages/codec.md](../packages/codec.md) §4.1「下沉边界」的原生加速面：包的 Lua 实现仍是**规范执行体**，本面是它的**符合实现**——任一合法输入的产出字节必须与 Lua 路径**逐字节相等**（差分门禁见包契约 §4.1）。注入点是 `host_api::install`（`crates/ygg-sandbox/src/host_api/mod.rs` 调用 `codec_face::install`），**没有实例、没有 CLI 激活**：本面无状态，不需要 `egg.rs` 那一层宿主激活（与 `ygg.sim.*` 的 `set_sim` 注入面区别就在这里）。
 
 **两个键，一个逐节点 getter 都没有**（批式铁律 ②：mlua 边界穿越 ~µs，逐节点访问是负收益）：
 

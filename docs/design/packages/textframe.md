@@ -8,7 +8,7 @@
 ## 1. 边界（这个包不做什么）
 
 - **不决定画什么**：地形 / 实体的字形映射、谁压谁（DCSS 的 `mon > item > player`）、HUD 文案全是**数据与规则**，归 mod。本包只认「一格一个字符」。
-- **不做颜色 / 属性格**：宿主叙事面只吃一个字符串（`crates/ygg-sandbox/src/host_api.rs` 的 `move |_, line: String|`），颜色靠字形区分（Saltline `src/view/cast.lua` 的 6 档字形集）。属性格没有消费者。
+- **不做颜色 / 属性格**：宿主叙事面只吃一个字符串（`crates/ygg-sandbox/src/host_api/narrate.rs` 的 `move |_, line: String|`），颜色靠字形区分（Saltline `src/view/cast.lua` 的 6 档字形集）。属性格没有消费者。
 - **不折行、不做宽字符**：四个复现的网格都是**定宽 + 截断/补齐**，没有一处在包里做词级折行；`wcwidth` / 全角双列 / 组合字符一律不做（§8 反方案一）。
 - **不测 HUD / 状态行的宽度**：`stack` 只搬运行数组。Saltline 的 HUD 行含中文、DCSS 的状态行是 UTF-8 文本，它们**原样穿过**本包——包内一次也不数多字节字符。
 - **不做摘要**：帧摘要归 [codec.md](codec.md) 的 `sha256`。第二份哈希就是分叉起点（同 [assetgen.md](assetgen.md) §1 的纪律）。
@@ -130,7 +130,7 @@
 
 **反方案一：收 `wrap` / `pad` / `wcwidth`。** 四个复现都是**定宽网格 + 截断补齐**：DCSS 的 `util.upad` 是「超宽截断、不足补空格」，Saltline 的 HUD 行宽是构建期固定词条，CDDA 的行由 `grid.size` 决定。词级折行在本仓**没有一个消费者**——写进包就是把「别人可能用得上」当成需求。至于宽字符：本包连 `string` 库都不可达，数不清码位，也就无从测显示宽度（这条约束顺手把「全角占两列」的问题挡在包外，由需要它的 mod 自己解决）。
 **反方案二：收 `digest` / `canon`。** 帧的变更检测已经在用 [codec.md](codec.md) 的 `sha256`（Saltline `t-saltline-perf` 的 `last_frame_digest`）。再实现一份摘要 = 第二份指纹，两处不一致时无法判定谁对。
-**反方案三：收颜色 / 属性格。** 宿主叙事面只接受一个字符串（`host_api.rs` 的 `move |_, line: String|`）；属性格写进包，四个复现里没有一处能把它送到屏上——**形状没有消费者就是负担**。要上色只能是宿主面变更，那是内核能力，不是本包。
+**反方案三：收颜色 / 属性格。** 宿主叙事面只接受一个字符串（`host_api/narrate.rs` 的 `move |_, line: String|`）；属性格写进包，四个复现里没有一处能把它送到屏上——**形状没有消费者就是负担**。要上色只能是宿主面变更，那是内核能力，不是本包。
 **反方案四：`require("pkg.assetgen.join")` 复用拼接器。** 十几行的两两合并，换来一条 `textframe → assetgen` 依赖边与一次跨包契约耦合；而 codec / quest / entity / dialogue / assetgen 五处都已各自持有同一份（[assetgen.md](assetgen.md) §8 已裁过同一个问题）。复制这三行是更便宜的一侧。
 
 **判据（①②③）。** ① 阻断——把「哪个字给哪个地形」或「谁压谁」写进包；在包里折行 / 算显示宽度 / 造第二份摘要；用 `pairs` 决定行序。② 症状——同一条帧在 mod 侧和解析侧宽度差一格，`cmp` 静默假绿；`t-saltline-golden` 的 10 帧漂移；沙箱里 `attempt to index a nil value (global 'table')`。③ 确认——本文件被 [../README.md](../README.md) 索引；`--filter pkg-textframe` 的 `cases passed=18`；§5 的五个 `perf.textframe.*` 键齐备。
