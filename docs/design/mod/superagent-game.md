@@ -17,6 +17,18 @@
 
 **业务钟**：一个动作 = 一个业务日 = `ygg.sim.step(1)` + KV `sg.day` +1。sim 是进程内状态（egg 常量种子重建），日的真源是 KV；sim.step 的职责是让 Tier 1 状态哈希随进度移动。委托限期 = 开单日 + `deadlineDays`（业务日），逾期自动 `quest.abandon`（R4 收口）。
 
+**委托流转事件（headless 直发面，载荷是 JSON 标量串）**：
+
+| 事件 | 载荷 | 语义 |
+| --- | --- | --- |
+| `commission.take` | `"<key>\|clerk:<文员key>"` 或 `"<key>\|ext:<agent-id>"` | 接单；taker 是实体 ref（外部 agent 首触 spawn 占位实体，字符串身份留台账） |
+| `commission.work` | `"<key>"`（缺省 = 第一个在办单） | 干活：业务文件写 `mounts/biz/<prefix>-<key>.txt` + 回读逐字节校验 + advance；降级写 `artifacts/biz/` 并叙述 `[FS-DEGRADED]` |
+| `commission.deliver` | `"<key>\|<备注>"` | advance 至 done（I3 恰一次）+ 报酬成长 + `sg.completed` 名表投影 |
+
+载荷用法：`--event commission.take --payload '"c1|clerk:clerk-mo"'`（payload 必须是 JSON 标量）。
+
+**自定义任务描述符**（`quest.custom` 信封的 text 字段）：`<type-name>\|<step-id>:<guide>\|…`；类型名 `^[a-z][a-z0-9-]{2,31}$`、1..=8 步、guide 非空 ≤64 字节；非法拒 `YGG-MOD-CUSTOM-FORMAT`，异 spec 重定义由包面拒（`YGG-PKG-QUEST-TYPE`）。翻译器 = `src/custom.lua`（计划 §7 E2 的能力出口）。
+
 **降级诚实账**：裸 `KernelFacade`（playtest / selftest）未挂 sim/fs 桥——叙述一行 `[SIM-UNMOUNTED]`，KV 语义照走，绝不静默假装（工具桥 `[VFS LEDGER ONLY]` 同款纪律）。
 
 ## 2. 信封接口（多 Agent Harness，不绑死一家）
@@ -49,7 +61,7 @@
 ## 3. 路由与观察面
 
 - **面板**：`pack.json panel.entry = panel/index.html`；serve iframe 托管于 `/panel/<run-id>/index.html`，页面拉 `/api/runs/<id>/events` 渲染 `agent.dialogue` / 任务事件行 + `/api/stream` SSE 变更触发刷新。serve 零写端点（0b 红线）——对话**绝不**经 serve 下行。
-- **机器可读投影**：对话行/台账双写 `ygg.emit`（`agent.dialogue` / `agent.recorded` / `item.transferred`，载荷全标量），事件页与重放对账都读它。带 `ygg.choice` 的 handler 不 emit（宿主 D1 语义：choice 前的派生事件被丢弃）——板面动作的对话行落 `pkg.dialogue` 线程 KV，经 `agent.summary` 的 `meta.dlg = {threads, lines}` 读出；入向 handler（无 choice）的行走事件页。
+- **机器可读投影**：对话行/台账双写 `ygg.emit`（`agent.dialogue` / `agent.recorded` / `item.transferred`，载荷全标量），事件页与重放对账都读它。带 `ygg.choice` 的 handler 不 emit（宿主 D1 语义：choice 前的派生事件被丢弃）——板面动作的对话行落 `pkg.dialogue` 线程 KV，经 `agent.summary` 的 `meta.dlg = {threads, lines}` 读出；入向 handler（无 choice）的行走事件页。**派生事件不落盘**（sqlite/json 两后端只记顶层步）——持久投影走 KV 名表（`sg.completed`）+ summary meta（`quests={open,done,abandoned}`）；「quest.completed 在场」的证据链 = 包面 I6 恰一次 emit（自检断言）+ done 态 + 投影读数。
 - **线程键约定**（cast.lua）：NPC = `cast.<npc key>`，外线 agent = `agent.<agent-id>`，委托 = `q.<quest key>`。报酬成长 = 交付单点调 `reward(taker_id, skill)`：首授 `grant_skill`，再授 `recharge` 回满格；外部 agent 台账 `sg.agent.<id> = chats|deliveries`。
 
 ## 4. 验收映射（契约 §五 P4）
