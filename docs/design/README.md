@@ -17,7 +17,8 @@ docs/design/
 │   └── harness-tools.md  lanes.md
 ├── mod/               # ③ agent-seed mod
 │   ├── mod-package.md  prompt-surface.md  tool-bridge.md
-│   └── action-faces.md  identity.md  testing-strategy.md  superagent-game.md
+│   ├── action-faces.md  identity.md  testing-strategy.md  superagent-game.md
+│   └── shapez-game.md
 └── packages/          # ⑤ packages 通用能力层（9）：README + entity / codec / quest / dialogue / role-skill / procgen / assetgen / textframe
 ```
 
@@ -42,6 +43,7 @@ docs/design/
 | ④ mod · 测试策略（纯 Lua 自检） | [mod/testing-strategy.md](mod/testing-strategy.md) | 改 `tests/**` 或 `selftest.rs` 之前 | silent-gap |
 | ③ mod · 三层动作面 | [mod/action-faces.md](mod/action-faces.md) | 新增或移动一个动作面之前 | silent-drift |
 | ③ mod · superagent 游戏（P4） | [mod/superagent-game.md](mod/superagent-game.md) | 改 `packages/mods/superagent/**` 任一行之前 | silent-drift |
+| ③ mod · shapez 游戏（S26-1） | [mod/shapez-game.md](mod/shapez-game.md) | 改 `packages/mods/shapez/**` 任一行之前 | silent-drift |
 | ③ mod · 身份与权限 | [mod/identity.md](mod/identity.md) | 改执行者台账 / 身份判定 / profile 之前 | silent-drift |
 
 ### ⑤ packages · 通用能力层（可复用的引擎能力，契约先于实现）
