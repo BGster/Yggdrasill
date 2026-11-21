@@ -161,7 +161,12 @@ pub(crate) fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 }
 
 /// 数值查询参数：缺省 / 非法 / 钳制（§9.4 query 数值钳制）。
-pub(crate) fn query_usize(query: &str, key: &str, default: usize, max: usize) -> Result<usize, Response> {
+pub(crate) fn query_usize(
+    query: &str,
+    key: &str,
+    default: usize,
+    max: usize,
+) -> Result<usize, Response> {
     match query_param(query, key) {
         None | Some("") => Ok(default),
         Some(raw) => raw
