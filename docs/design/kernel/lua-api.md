@@ -201,3 +201,5 @@ despawn_batch: u32 n | u64 ids[n]
 **为什么带元方法的表不回退以外的处理**：Lua 侧的 `pairs` 会走 `__pairs`、`value[key]` 会穿 `__index`（本机 Lua 5.4 实测），而复刻这两条意味着「编码过程中执行 Lua 代码」——纯函数就变成可重入、可报错、可侧效。整值回退是语义正确且契约允许（包契约 I7：带元表的表可编码，元表不进字节）的唯一低成本选择。
 
 **判据**：① 阻断——把本面扩成逐节点 getter（N 次穿越），或让 `UNSUPPORTED` 静默返回半截字节，或让面自成一个「规范」（不复刻包的四条序规则）；② 症状——大对象编码出现 N 次穿越；带 `__pairs` 的表编码结果与 Lua 路径不同；同一输入两次调用的字节不同；③ 确认——`cargo test -p ygg-sandbox --test codec_face`（键集闭集 = 2 / 缺席即走 Lua / 元方法回退 / 差分字节相等）与 `--test codec_bench`（同面 before/after）与包侧 `pkg-selftest` 的 155/0。
+
+**原生加速面的模块化拆分（S-25 批十）**：`codec_face` 由单文件 1212 行（800 行上限的 1.5×）拆为 `codec_face/` 目录 4 文件（mod.rs 两码与错误契约 + install 装配，number 数值文本，encoder 编码产出含转义，parser 解析）。这是**纯搬移**，不是重写：两码、错误契约、五个生产区块与 397 行内嵌 15 测逐字节原样随域迁移，外部路径零变化（`ygg_sandbox::codec_face::*` 消费点逐一 grep 复验，`pub mod codec_face;` 未动）。行为不变量由门禁计数守恒背书：workspace 581、egg 158、--lib 112（测试名剥前缀集合 diff=∅）、差分门禁 7、pkg selftest 199、agent-seed 79、superagent 183 与 Saltline digest `727b0ca2` 逐字节相等；clippy 警告集合 before/after 相等（既有 2 债务随域迁不修）。拆分动机与批三同源：单文件超限使六段边界不可读——「面 = 契约错误与安装（mod）+ 数值文本（number）+ 编码产出含转义（encoder）+ 解析（parser）」的形状与本节的区块叙述一一对应。

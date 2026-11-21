@@ -66,7 +66,7 @@ bundle（导出物，也是导入物的唯一形状）：
 
 ### 4.1 下沉边界（原生加速面与回退）
 
-序列化的**字节产出**（`encode` / `decode`）下沉到宿主面 `ygg.codec.{encode,decode}`（契约 [kernel/lua-api.md §3.1.4](../kernel/lua-api.md#314-codec-确定性-json-编解码面宿主注入)，实现 `crates/ygg-sandbox/src/codec_face.rs`）。包内 Lua 实现**不下沉、不删**：它是**规范执行体**（本文 I1 的可执行形态），原生面是它的**符合实现**。两者之间唯一的判据是**逐字节相等**，不是「功能一致」。
+序列化的**字节产出**（`encode` / `decode`）下沉到宿主面 `ygg.codec.{encode,decode}`（契约 [kernel/lua-api.md §3.1.4](../kernel/lua-api.md#314-codec-确定性-json-编解码面宿主注入)，实现 `crates/ygg-sandbox/src/codec_face/`）。包内 Lua 实现**不下沉、不删**：它是**规范执行体**（本文 I1 的可执行形态），原生面是它的**符合实现**。两者之间唯一的判据是**逐字节相等**，不是「功能一致」。
 
 | 面 | 去向 | 理由 |
 | --- | --- | --- |
