@@ -154,11 +154,13 @@ use ygg_sandbox::host_contract::{
     SettlementPolicy, ToolAccess, ToolKind, ToolRegistry, ToolSpec, WriteShape, CONTRACT_DOC,
 };
 use ygg_sandbox::modload::ModBundle;
-use ygg_sandbox::HostToolRunner;
+use ygg_sandbox::{HostToolRunner, MountEntry, MountFs, MountKind, MountStat, MountWritten};
 // 持久化端口（`crates/ygg-store`）：状态事实（存档 / 事件日志 / inbox / 位移 /
 // 重置）全部经它读写。**锁、run.json、settlement.json、coordination.* 仍留在
 // 宿主**——那是跨进程共识与报告面，两后端必须完全一致。
-use ygg_store::{Backend, RunStore, StepDraft, Tick, AUTOSAVE_FILE, INBOX_FILE, SQLITE_FILE_NAME};
+use ygg_store::{
+    Backend, MountStore, RunStore, StepDraft, Tick, AUTOSAVE_FILE, INBOX_FILE, SQLITE_FILE_NAME,
+};
 
 /// serve 模式（常驻只读观察台，r8）：HTTP 面板 + 零写入观察面。
 /// 路由表只有结构名（runs/saves/events/artifacts/panel），无一个 mod 事件名（P2/P3）。
@@ -1432,6 +1434,90 @@ fn restore_from(bundle: &ModBundle, save_bytes: &[u8]) -> Result<KernelFacade, S
         .map_err(|err| format!("内核重装载失败：{err}"))
 }
 
+/// CLI 固定的 sim 种子（激活触点 S-1）。
+///
+/// 固定常量 = 确定性可复现；per-run seed 属后续需求，不在此处发明。
+const SIM_CLI_SEED: u64 = 20261121;
+
+/// 把 `ygg_store::MountStore` 接成沙箱挂载桥（宿主侧适配器；形状与
+/// `tests/mounts.rs` 的 `StoreBridge` 同型——examples 不能 use tests，就地重写）。
+struct CliMountBridge {
+    store: MountStore,
+}
+
+fn bridge_kind(kind: ygg_store::MountKind) -> MountKind {
+    match kind {
+        ygg_store::MountKind::File => MountKind::File,
+        ygg_store::MountKind::Dir => MountKind::Dir,
+        ygg_store::MountKind::Missing => MountKind::Missing,
+    }
+}
+
+impl MountFs for CliMountBridge {
+    fn read(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+        self.store.read(path).map_err(|err| err.to_string())
+    }
+
+    fn write(&mut self, path: &str, content: &[u8]) -> Result<MountWritten, String> {
+        let written = self
+            .store
+            .write(path, content)
+            .map_err(|err| err.to_string())?;
+        Ok(MountWritten {
+            path: written.path,
+            bytes: written.bytes,
+            sha256: written.sha256,
+        })
+    }
+
+    fn stat(&self, path: &str) -> Result<MountStat, String> {
+        let stat = self.store.stat(path).map_err(|err| err.to_string())?;
+        Ok(MountStat {
+            exists: stat.exists,
+            bytes: stat.bytes,
+            sha256: stat.sha256,
+            kind: bridge_kind(stat.kind),
+        })
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<MountEntry>, String> {
+        let rows = self.store.list(path).map_err(|err| err.to_string())?;
+        Ok(rows
+            .into_iter()
+            .map(|row| MountEntry {
+                name: row.name,
+                path: row.path,
+                bytes: row.bytes,
+                kind: bridge_kind(row.kind),
+            })
+            .collect())
+    }
+}
+
+/// 激活触点（S-1，用户授权账：charter 2026-11-21「允许」）：把既有库面装配进
+/// 内核——fs 桥（`pack.json` 的 `mounts` 段 → `MountStore::attach` →
+/// `set_mount_fs`）与 sim（固定常量种子 → `set_sim`）。
+///
+/// 语义零新增：不声明 mounts 的 mod，attach 幂等通过；sim 表常注册，未注入
+/// 才会 `YGG-SIM-UNMOUNTED`。调用方定失败语义：
+/// - 开局：`?` 传播 = 装载失败同语义（fail-closed 退出）；
+/// - 热载：失败沿用旧内核（与契约现读同待遇）。
+fn activate_host_faces(
+    kernel: &mut KernelFacade,
+    run_dir: &Path,
+    mod_dir: &Path,
+) -> Result<(), String> {
+    let pack_text = fs::read_to_string(mod_dir.join(PACK_FILE))
+        .map_err(|err| format!("读取 {}/{PACK_FILE} 失败：{err}", mod_dir.display()))?;
+    let pack: Json = serde_json::from_str(&pack_text)
+        .map_err(|err| format!("{}/{PACK_FILE} 不是合法 JSON：{err}", mod_dir.display()))?;
+    let store = MountStore::attach(run_dir, &pack, mod_dir)
+        .map_err(|err| format!("挂载桥装配失败：{err}"))?;
+    kernel.set_mount_fs(Some(Box::new(CliMountBridge { store })));
+    kernel.set_sim(Some(Box::new(ygg_sim::Sim::new(SIM_CLI_SEED))));
+    Ok(())
+}
+
 /// 单文件监视快照（热载变更判据：mtime + 字节数）。
 ///
 /// mtime 是**宿主侧**运行时信息，不涉内核确定性面（内核只消费事件与状态）；
@@ -1801,7 +1887,11 @@ impl Session {
 
         // 先装载（失败即退出，run 目录不留空壳），再建 run 目录接管产物。
         let bundle = ModBundle::load(&mod_dir)?;
-        let kernel = kernel_from(&bundle)?;
+        let mut kernel = kernel_from(&bundle)?;
+        // 激活触点（S-1）：开局装配失败 = 装载失败同语义（fail-closed 退出）。
+        // attach 只落 <run>/mounts/ 壳（不产 autosave/events/sqlite 产物），
+        // 不影响后文的产物探测与 --force 判定。
+        activate_host_faces(&mut kernel, &run_dir, &mod_dir)?;
         // host 契约是**必填面**：事件名 / inbox 路由 / 结算口径 / 推进阈值全部来自
         // Mod 声明，缺任何一项即装载期失败（宿主不保留任何默认值，fail-closed）。
         let contract = AgentContract::load(&mod_dir)?;
@@ -2474,7 +2564,22 @@ impl Session {
             })
         });
         match outcome {
-            Ok((kernel, contract, inbox_routes, limits, settlement, tools, tool_access)) => {
+            Ok((mut kernel, contract, inbox_routes, limits, settlement, tools, tool_access)) => {
+                // 激活触点（S-1 热载）：新 pack 可能变 mounts 声明 → 重 attach
+                //（三态幂等，零新建状态）；失败 = 整体热载失败，沿用旧内核
+                //（与契约现读同待遇，不分裂「内核换了、桥没换」的半更新态）。
+                if let Err(message) =
+                    activate_host_faces(&mut kernel, &self.run_dir, &self.mod_dir)
+                {
+                    self.notices
+                        .push(format!("热载失败，沿用旧 mod 继续：{message}"));
+                    self.reload = Some(Reload {
+                        reloaded: false,
+                        source: "watch",
+                        message: Some(message),
+                    });
+                    return;
+                }
                 self.kernel = kernel;
                 // 换了 Mod 就换了契约（事件名 / inbox 路由 / 摘要约定 / 推进阈值 / 工具声明）。
                 self.contract = contract;
