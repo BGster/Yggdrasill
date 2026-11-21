@@ -6,27 +6,26 @@
 
 local belts = require("src.belts")
 local simtick = require("src.simtick")
+local mapgen = require("src.mapgen")
 local codec = require("pkg.codec")
 local procgen = require("pkg.procgen")
 
 local WORLD = ygg.data("ygg:shapez/world")
 
---- 开一局标准场景：hub(4,2)；A 线 miner(1,2)→belt(2,2),(3,2)→hub；
---- B 线 miner(1,0)→belt(2,0)→cutter(3,0)→belt(4,0),(4,1)→hub。
+--- 开一局标准场景（v2 地理白盒派生）：Cu 斑（chunk -1,0）circles[1] 圆心 C
+--- （圆心与四臂恒命中，整数椭圆判据）；miner1@C rot1 → belt@(C↓) rot1 →
+--- hub@(C↓↓)；miner2@(C→) rot1 → cutter@(C→↓) rot2（出料正向交割进 A 线带 →
+--- hub，跨路径移交）。共 1 带 1 路径。
 local function seed_scenario()
   reset_all()
   ygg_dispatch("event.start")
-  ygg_dispatch("sz.place.hub", "4,4,0")
-  ygg_dispatch("sz.place.belt", "2,1,0")
-  ygg_dispatch("sz.place.belt", "3,1,0")
-  ygg_dispatch("sz.place.belt", "4,1,1")
-  ygg_dispatch("sz.place.belt", "4,2,1")
-  ygg_dispatch("sz.place.belt", "4,3,1")
-  ygg_dispatch("sz.place.miner", "1,1,0")
-  ygg_dispatch("sz.place.belt", "2,0,0")
-  ygg_dispatch("sz.place.proc", "cutter|3,0,0")
-  ygg_dispatch("sz.place.belt", "4,0,1")
-  ygg_dispatch("sz.place.miner", "1,0,0")
+  local c = mapgen.ensure_chunk(-1, 0)[1].circles[1]
+  local cx, cy = -16 + c[1], c[2]
+  ygg_dispatch("sz.place.hub", cx .. "," .. (cy + 2) .. ",0")
+  ygg_dispatch("sz.place.belt", cx .. "," .. (cy + 1) .. ",1")
+  ygg_dispatch("sz.place.miner", cx .. "," .. cy .. ",1")
+  ygg_dispatch("sz.place.proc", "cutter|" .. (cx + 1) .. "," .. (cy + 1) .. ",2")
+  ygg_dispatch("sz.place.miner", (cx + 1) .. "," .. cy .. ",1")
 end
 
 check("belts.constants-kat", function()
@@ -50,10 +49,9 @@ check("belts.try-accept-spacing-invariant", function()
   seed_scenario()
   local c = belts.constants(WORLD.tuning)
   local paths = belts.ensure()
-  -- A 线路径：带 (2,2),(3,2)，起点 = id 较小者（先放的 (2,2)）
-  assert_eq(1, 1, "路径数占位")
+  -- 新场景拓扑：单带单路径（割刀出料经收件口跨入同一路径，不成新路）
   local rows = belts.snapshot()
-  assert_eq(#rows, 3, "三条路径（A线5带 + miner→cutter 间单带 + cutter出料单带）")
+  assert_eq(#rows, 1, "单带单路径")
   local a = paths[rows[1].start]
   assert_true(a ~= nil, "A 线路径在场")
   assert_true(belts.can_accept(a), "空路径可收")
@@ -75,9 +73,10 @@ end)
 check("belts.chain-topology", function()
   seed_scenario()
   local paths = belts.ensure()
-  -- A 线：两带成一路径；拆带重放拓扑（reset 后重建）
+  -- 新场景拓扑：单带成一路径；割刀出料经收件口跨入同一路径（不成第二路）
   local rows = belts.snapshot()
-  assert_eq(#rows, 3, "三路径")
+  assert_eq(#rows, 1, "单带单路径")
+  assert_eq(#paths[rows[1].start].belts, 1, "路径含恰一条带")
   _ = paths
   -- 独立单带（不逆风规则）：指向邻居带正面的带仍自成一路径后经收件口移交
   reset_all()

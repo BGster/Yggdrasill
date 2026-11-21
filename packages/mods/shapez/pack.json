@@ -32,7 +32,9 @@
       "src/belts.lua",
       "src/processors.lua",
       "src/hub.lua",
-      "src/simtick.lua"
+      "src/simtick.lua",
+      "src/mapgen.lua",
+      "src/savegame.lua"
     ]
   }
 }

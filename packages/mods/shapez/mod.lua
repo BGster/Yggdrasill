@@ -24,6 +24,8 @@ local belts = require("src.belts")
 local processors = require("src.processors")
 local hub = require("src.hub")
 local simtick = require("src.simtick")
+local mapgen = require("src.mapgen")
+local savegame = require("src.savegame")
 
 -- ============================================================================
 -- §2 包装配：install 只记 deps / 注注册表（不预读模板、不写 KV）。
@@ -66,22 +68,16 @@ local function parse_xyr(payload)
   return tonumber(x), tonumber(y), tonumber(rot)
 end
 
---- 资源斑查找：命中圆内返回斑表（数组序首个）。
+--- 资源斑查找：v2 = mapgen 分块 procgen（seed 流隔离；懒生成由放置触发）。
+--- 命中返回斑表（patch 序×圆序首中，先到先得复刻源重叠裁决）。
 local function patch_at(x, y)
-  for i = 1, #WORLD.patches do
-    local p = WORLD.patches[i]
-    local dx = x - p.x
-    local dy = y - p.y
-    if dx * dx + dy * dy <= p.radius * p.radius then
-      return p
-    end
-  end
-  return nil
+  return mapgen.patch_at(x, y)
 end
 
 -- ── 开局：装配 + hub 铺场（幂等；场景搭建走放置直发面）──────────────────────
-ygg.on("event.start", function()
-  simtick.setup(WORLD)
+ygg.on("event.start", function(payload)
+  local seed = tostring(payload or "")
+  simtick.setup(WORLD, seed)
   local goal = hub.current_goal(WORLD)
   ygg.narrate("shapez v1 开局：tick=" .. tostring(ygg.kv.get("sz.tick") or 0)
     .. " level=" .. tostring(goal and goal.level or "?")
@@ -174,4 +170,4 @@ ygg.on("shapez.summary", function()
   h.meta("sim_hash", hash)
 end)
 
-return { shapes = shapes, belts = belts, processors = processors, hub = hub, simtick = simtick }
+return { shapes = shapes, belts = belts, processors = processors, hub = hub, simtick = simtick, mapgen = mapgen, savegame = savegame }

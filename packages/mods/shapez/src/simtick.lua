@@ -17,6 +17,7 @@ local entity = require("pkg.entity")
 local belts = require("src.belts")
 local processors = require("src.processors")
 local hub = require("src.hub")
+local mapgen = require("src.mapgen")
 
 local M = { VERSION = "1.0.0" }
 
@@ -74,21 +75,35 @@ local SCHEMAS = {
   },
 }
 
---- `setup(world)`：schema 注册 + 常量 + hub 装配。幂等。
-function M.setup(world)
-  local h = host()
-  if h.kv.get("sz.setup") == nil then
-    for name, spec in pairs(SCHEMAS) do
-      entity.define(name, spec)
-    end
-    h.kv.set("sz.setup", true)
+--- `register_schemas()`：schema 注册段（load 复用面：只 define，不落
+--- `sz.setup`——它由存档回写）。`entity.define` 同 spec 幂等零写。
+function M.register_schemas()
+  for name, spec in pairs(SCHEMAS) do
+    entity.define(name, spec)
   end
+end
+
+--- `mount(world)`：运行时常量挂载（setup 与 savegame.load 共用）。
+function M.mount(world)
   M.C = belts.constants(world.tuning)
   M.WORLD = world
   M.CYCLE = world.tuning.processorCycle
   M.C.cycle_of = function(kind)
     return M.CYCLE[kind] or 0
   end
+end
+
+--- `setup(world, seed?)`：schema 注册 + 种子守护 + 常量 + hub 装配。幂等。
+--- `seed` = event.start 载荷串（首局落 `sz.seed`；first-wins，读档局以档为准）。
+function M.setup(world, seed)
+  local h = host()
+  if h.kv.get("sz.setup") == nil then
+    M.register_schemas()
+    h.kv.set("sz.setup", true)
+  end
+  mapgen.register()
+  mapgen.ensure_seed(seed)
+  M.mount(world)
   hub.setup(world)
 end
 

@@ -75,6 +75,7 @@ local __meta = {}
 local __pending = nil
 local __sim_ticks = 0
 local __ents = { next = 0, recs = {} }
+local __files = {}
 
 -- ── 最小 `ygg` 替身 ─────────────────────────────────────────────────────────
 
@@ -237,6 +238,19 @@ ygg = {
       return { tick = __sim_ticks, hash = "mock" .. __sim_ticks }
     end,
   },
+
+  -- 宿主 fs 面替身（v2 存档经 pkg.codec 间接消费；内存 VFS，字节回执同口径）。
+  fs = {
+    write = function(path, text)
+      assert(type(path) == "string" and #path > 0, "ygg.fs.write 需要非空路径")
+      assert(type(text) == "string", "ygg.fs.write 只收文本")
+      __files[path] = text
+      return { bytes = #text }
+    end,
+    read = function(path)
+      return __files[path]
+    end,
+  },
 }
 
 -- ── 读回面 / 重置面 ─────────────────────────────────────────────────────────
@@ -281,6 +295,7 @@ function ygg_meta_all()
 end
 
 --- 开新一局：清状态、留 handler。belts 缓存靠指纹（实体换血）自动失效。
+--- `__files`（fs 替身）**不随局重置**——存档是局外物，读档局要读上一局写的字节。
 function reset_all()
   for key in pairs(__kv) do
     __kv[key] = nil

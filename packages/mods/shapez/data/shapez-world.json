@@ -14,9 +14,5 @@
     { "level": 3, "shape": "RuRuRuRu", "required": 30, "reward": "balancer" },
     { "level": 4, "shape": "RuRu----", "required": 30, "reward": "rotater" },
     { "level": 5, "shape": "Cu----Cu", "required": 75, "reward": "tunnel" }
-  ],
-  "patches": [
-    { "x": 0, "y": 0, "radius": 2, "subshape": "C", "color": "u" },
-    { "x": 8, "y": 0, "radius": 2, "subshape": "R", "color": "u" }
   ]
 }
