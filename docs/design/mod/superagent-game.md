@@ -66,6 +66,8 @@
 
 ## 4. 验收映射（契约 §五 P4）
 
+**一键终验**：`YGG_PACKAGES_ROOT=packages/libs packages/mods/superagent/test/final-verify.sh`（四条冒烟脚本化，全绿 EXIT=0；执行序 ①开局→②headless 任务流→④挂载→重放对账→③全链+serve——共享挂载的写序敏感：④ 必须先于 B/C 重放局）。
+
 | 验收 | 实现面 | 冒烟 |
 | --- | --- | --- |
 | 开一局 | 五件套 + 开局铺场 | `egg new --mod packages/mods/superagent --in /tmp/ygg-p4-runs --event event.start` EXIT=0 |
