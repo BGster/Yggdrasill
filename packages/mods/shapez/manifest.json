@@ -21,9 +21,9 @@
       "sha256": "7854c05de63e6016ecaf997d7f7114538a3047fb29b0157d3a686b122ed7f5c8"
     },
     {
-      "byteLength": 6108,
+      "byteLength": 6249,
       "path": "src/savegame.lua",
-      "sha256": "c089ca3f9406e19cb4352a882843e89ffebd97749a584cb15675f2a15ed273cb"
+      "sha256": "8a5361a76860c90ee6dcb46a87b626b1f1c5ba0029bb81be2b4147c9bc1b3b4c"
     },
     {
       "byteLength": 11416,
