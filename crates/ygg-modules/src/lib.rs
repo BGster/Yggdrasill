@@ -108,6 +108,8 @@ pub mod effects {
         ("entity", "set_attribute"),
         ("entity", "add_tag"),
         ("entity", "remove_tag"),
+        // S9：真删是写面（一次调用回收属性 / tag / 记录，与 `set_attribute` 同类）。
+        ("entity", "destroy"),
         // 写宿主状态（与 `kv.set` 同类：一次调用就产生跨事件的副作用）；
         // `fs.read` / `fs.stat` / `fs.list` 是纯读，不列（见下面 PURE_READ 表）。
         ("fs", "write"),
@@ -135,6 +137,8 @@ pub mod effects {
         ("kv", "get"),
         ("entity", "has_tag"),
         ("entity", "get_attribute"),
+        // S9：存在性位是读面（`EntityStore::contains`，不写状态）。
+        ("entity", "exists"),
         // `ygg.fs` 的读面（这三条不列进 `banned()` 也已是放行态；列在这里是为了
         // 让 `YGG-MOD-EFFECT` 的报错能点名「这些在顶层是合法的」，免得作者把
         // 合法写法当成违规自己改掉）。`fs.write` 不在其中——它列进了禁止面。

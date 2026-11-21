@@ -108,10 +108,30 @@ local function new_world()
         local set = store.tags[id]
         return set ~= nil and set[tag] == true
       end,
+      -- S9 控制面两键的替身：存在性 = store 里还有这条记录。
+      exists = function(id)
+        return store.attrs[id] ~= nil
+      end,
+      destroy = function(id)
+        if store.attrs[id] == nil then
+          return false
+        end
+        store.attrs[id] = nil
+        store.tags[id] = nil
+        return true
+      end,
     },
     emit = function() end,
   }
   local world = { kv = kv, host = host }
+  --- 内核侧存活条数（S9 新增轴：KV 墓碑键与内核残留是两件事，各断言各的）。
+  world.live_count = function()
+    local n = 0
+    for _ in pairs(store.attrs) do
+      n = n + 1
+    end
+    return n
+  end
   world.key_count = function()
     local n = 0
     for _ in pairs(kv) do
@@ -260,23 +280,28 @@ do
     )
   )
   -- R4 的处置：契约写的 1.2× 是按「无噪声」估的，实测档间噪声到 1.19×（3 次全量
-  -- 跑：1.07/1.09/1.18，另一次 1.4× 假红），1.2 会随机器状态随机打红。阈值改
-  -- **1.5×**，理由可算：真的出现遍历时档间差是 O(N) 量级（10³–10⁴×），1.5 仍能
-  -- 一眼抓住；而 1.5 以下只是噪声。这是把阀值提到噪声之上，**不是**把断言删掉。
+  -- 跑：1.07/1.09/1.18，另一次 1.4× 假红），1.2 会随机器状态随机打红。阈值先改
+  -- **1.5×**；S9 复测发现 1.5 已贴在噪声上沿——**同机同命令**跑出来了：
+  --   · S9 前（base e6dbb9a）3 跑：1.47 / 1.42 / 1.38（N=10000 档 1760/1711/1694 ns）
+  --   · S9 后 4 跑：1.43 / 1.48 / 1.51 / 1.43（N=10000 档 1457/1441/1497/1457 ns）
+  -- 逐档**绝对耗时**降了 ~15%（存活门从 KV 读换成内核存在性读），档间比却没动，
+  -- 所以这条 spread 是机器噪声（堆到 10k 实体后的 GC 脉冲），不是遍历。阈值再抬到
+  -- **2.0×**：真的出现遍历时档间差是 O(N) 量级（10³–10⁴×），2.0 仍能一眼抓住。
+  -- 这是把阀值提到噪声之上，**不是**把断言删掉。
   must(
-    hi / lo <= 1.5,
-    ("按 id 的耗时随 N 增长（%.2f× > 1.5×）：get/set 里出现了遍历"):format(hi / lo)
+    hi / lo <= 2.0,
+    ("按 id 的耗时随 N 增长（%.2f× > 2.0×）：get/set 里出现了遍历"):format(hi / lo)
   )
 end
 
 -- ── ④ 100 轮泄漏：结构判据（强）+ 内存判据（弱）─────────────────────────────
 --
--- 结构判据的**实现在这里比计划稿更强**（计划稿写「KV 键数前后相等」）：spawn+destroy
--- 在宿主上必然留下墓秃——KV 没有删除面，`alive.<id>` 只能 true→false，`rec.<id>.schema`
--- 只能留在原处。于是正确的不等式是「墓秃数**恰好等于** destroy 次数」：
---   · count / #ids 回到起点（存活集合不漏）
---   · seq 恰好 +ROUNDS（id 不复用，I1）
---   · KV 键数恰好 +2×ROUNDS（每轮两个墓秃键：rec.<id>.schema + alive.<id>）
+-- 结构判据是**双轴**的（S9 改定口径）：
+--   · 内核侧回归零：真删之后 `store` 里一条记录都不该剩（S9 前每轮留一条带属性的记录，
+--     这正是 r2-G4 的「死亡怪物永占内存」）；
+--   · KV 侧恰好 +ROUNDS：KV 没有删除面，`rec.<id>.schema` 只能留在原处，而 S9 起
+--     `alive.<id>` 位退役（存活真源 = 内核存在性），所以墓碑键从每轮 2 枚降到 1 枚。
+--   · count / #ids 回到起点（存活集合不漏）、seq 恰好 +ROUNDS（id 不复用，I1）。
 -- 「恰好相等」比「不变」强：它同时排掉「每轮多写一个计数键」这种慢性漏。
 
 do
@@ -288,6 +313,7 @@ do
   local base_ids = #lib.ids()
   local base_seq = world.kv["pkg.entity.seq"]
   local base_keys = world.key_count()
+  local base_live = world.live_count()
   local base_rev = world.kv["pkg.entity.schemas_rev"]
 
   collectgarbage("collect")
@@ -306,8 +332,12 @@ do
     ("seq 应恰好 +%d（id 不复用），实得 %s"):format(ROUNDS, tostring(world.kv["pkg.entity.seq"]))
   )
   must(
-    world.key_count() == base_keys + 2 * ROUNDS,
-    ("KV 键数应恰好 +%d个墓秃键，实得 +%d"):format(2 * ROUNDS, world.key_count() - base_keys)
+    world.live_count() == base_live,
+    ("内核残留应回零：%d ≠ %d"):format(world.live_count(), base_live)
+  )
+  must(
+    world.key_count() == base_keys + ROUNDS,
+    ("KV 键数应恰好 +%d 枚墓碑键（rec 唯一），实得 +%d"):format(ROUNDS, world.key_count() - base_keys)
   )
   must(
     world.kv["pkg.entity.schemas_rev"] == base_rev,
@@ -315,13 +345,17 @@ do
   )
   local drift = (mem1 - mem0) / (mem0 > 0 and mem0 or 1)
   print(
-    ("PERF entity.leak_ok=%s  (%d 轮 spawn+destroy：count/#ids 回零，seq +%d，KV +%d 键, 内存 △%.3f%%)"):format(
+    ("PERF entity.leak_ok=%s  (%d 轮 spawn+destroy：count/#ids 回零，内核残留 %d，seq +%d，KV +%d 键, 内存 △%.3f%%)"):format(
       "true",
       ROUNDS,
+      base_live,
       ROUNDS,
-      2 * ROUNDS,
+      ROUNDS,
       drift * 100
     )
   )
-  must(drift <= 0.01, ("100 轮后内存增长 %.3f%% > 1%%"):format(drift * 100))
+  -- 阈值 S9 收紧 1% → 0.5%：S9 前实测 0.640%（每轮留一条带属性的内核记录），S9 后
+  -- 实测 0.071%（真删，记录不堆）。0.5% 给机差/GC 脉冲留 7× 余量，同时保证「又把记录
+  -- 留下来」这类回归（≥0.6%）仍会被抓住。
+  must(drift <= 0.005, ("100 轮后内存增长 %.3f%% > 0.5%%"):format(drift * 100))
 end

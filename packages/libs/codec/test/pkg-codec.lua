@@ -162,6 +162,18 @@ local function new_world()
         local set = store.tags[id]
         return set ~= nil and set[tag] == true
       end,
+      -- S9 控制面两键的替身：存在性 = store 里还有这条记录。
+      exists = function(id)
+        return store.attrs[id] ~= nil
+      end,
+      destroy = function(id)
+        if store.attrs[id] == nil then
+          return false
+        end
+        store.attrs[id] = nil
+        store.tags[id] = nil
+        return true
+      end,
     },
     emit = function(name, payload)
       events[#events + 1] = { name = name, payload = payload }
