@@ -165,6 +165,23 @@ local function try_eject_one(id, resolve)
   return false
 end
 
+--- 矿机出料：不受 progress 门（那是产量累加器，非忙态）；out1 有料即射。
+local function try_eject_miner(id, resolve)
+  local out1 = entity.get(id, "out1")
+  if out1 == nil or out1 == "" then
+    return false
+  end
+  local rot = entity.get(id, "rot")
+  local fx = entity.get(id, "x") + belts.DIRX[rot]
+  local fy = entity.get(id, "y") + belts.DIRY[rot]
+  local acceptor = resolve(fx, fy)
+  if acceptor ~= nil and acceptor(out1) then
+    entity.set(id, "out1", "")
+    return true
+  end
+  return false
+end
+
 --- `tick(c, resolve)`：全部处理器 + 矿机各推进一步（id 升序）。
 --- resolve(fx, fy) → fn(item_key) → boolean | nil（simtick 装配的落点裁决）。
 function M.tick(c, resolve)
@@ -222,7 +239,7 @@ function M.tick(c, resolve)
       end
       entity.set(id, "progress", progress)
     end
-    try_eject_one(id, resolve)
+    try_eject_miner(id, resolve)
   end
 end
 

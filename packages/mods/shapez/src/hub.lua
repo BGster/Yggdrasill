@@ -119,17 +119,17 @@ function M.deliver(world, item_key)
   local levelup = false
   if got >= goal.required then
     levelup = true
+    quest.advance(goal.quest_id) -- → completed（本级恰一次，I3）
+    h.kv.set(LEVEL_KEY, goal.level + 1) -- 末级也照增（源：过末级进 freeplay）
+    h.kv.set(GOT_KEY, 0)
     local next_def = level_of(world, goal.level + 1)
     if next_def ~= nil then
-      quest.advance(goal.quest_id) -- → completed（本级恰一次，I3）
       local qid = quest.open(LEVEL_TYPE, { meta = {
         level = next_def.level,
         shape = next_def.shape,
         required = next_def.required,
       } })
       h.kv.set(QUEST_KEY, qid)
-      h.kv.set(GOT_KEY, 0)
-      h.kv.set(LEVEL_KEY, next_def.level)
     end
     h.emit("sz.levelup", goal.shape .. "|" .. goal.level)
   end
