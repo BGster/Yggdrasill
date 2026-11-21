@@ -53,9 +53,9 @@
 | `textframe.frame` | `(w, h)` | 帧缓冲 `{ w, h, cells = {} }` | 纯（新表）；`-PARAM` |
 | `textframe.put` | `(buf, x, y, ch)` | `buf` | 写：单格；`ch = nil` 清格；`-RANGE` / `-CELL` / `-SHAPE` |
 | `textframe.blit` | `(dst, src, ox, oy)` | `dst` | 写：`src` 的清格跳过、其余覆盖 `dst`（后写胜），越界裁剪 |
-| `textframe.to_lines` | `(buf)` | `h` 行数组 | 纯（新表；每行恰 `w` 字符、不 trim） |
+| `textframe.to_lines` | `(buf)` | `h` 行数组 | 纯（新表；每行恰 `w` 字符、不 trim）；行宽 ≠ `w` ⇒ `-CELL` |
 | `textframe.stack` | `(blocks)` | 行数组 | 纯（块序 = 行序；`nil` 块跳过） |
-| `textframe.perf_keys` | `()` | 5 个键名的稠密数组 | 纯（自省面：自测按它逐个打印，冒烟按它逐个核对——「五键齐备」因此是机检） |
+| `textframe.perf_keys` | `()` | 8 个键名的稠密数组 | 纯（自省面：自测按它逐个打印，冒烟按它逐个核对——「八键齐备」因此是机检） |
 | `textframe.ERRORS` | — | 4 键表 | 常量 |
 
 `textframe.ERRORS` 恰好四键，全部形如 `YGG-PKG-TEXTFRAME-*`：`PARAM`（`w` / `h` 不是 ≥1 的整数）、`RANGE`（`put` 坐标越界）、`CELL`（单元格不是恰 1 字节）、`SHAPE`（传入的不是帧缓冲 / 行数组）。与 [entity.md](entity.md) 的 `YGG-PKG-ENTITY-*`、[assetgen.md](assetgen.md) 的五码同风格。
@@ -64,19 +64,25 @@
 
 ## 5. 性能预算
 
-**口径声明（先读再读数字）**：数字产在 **selftest 面**（普通 Lua，全标准库）——沙箱里既没有 `os.clock` 也没有 `collectgarbage`，计时与内存只在测试侧可测。三次取中位，`print` 面即口径（同 [assetgen.md](assetgen.md) §5 的方法论）。**基准集固定**：`80×24` 世界区 + `6` 行 HUD = 30 行帧（= Saltline 的 `TUNING.world.view_w/view_h` + HUD 六行，与 r4 适配器同形的输入）。
+**口径声明（先读再读数字）**：数字产在 **selftest 面**（普通 Lua，全标准库）——沙箱里既没有 `os.clock` 也没有 `collectgarbage`，计时与内存只在测试侧可测。三次取中位，`print` 面即口径（同 [assetgen.md](assetgen.md) §5 的方法论）。**基准集固定**：`80×24` 世界区 + `6` 行 HUD = 30 行帧（= Saltline 的 `TUNING.world.view_w/view_h` + HUD 六行，与 r4 适配器同形的输入）。尺寸是定义的输入，不是可调旋钮。
 
-| 指标 | 阈值（Goal 原则二） | 实测值 | 测量方法 / 打印键 |
-| --- | --- | --- | --- |
-| 包加载耗时 | `< 10 ms` | **参考 44 µs**（`/tmp` scratch，Lua 5.5；selftest 面见 §7） | 清 `package.loaded["pkg.textframe*"]` 后 `require` + `install`，5 次取中位 → `perf.textframe.load_ms` |
-| 单格写 | `O(1)` | **参考 62 ns/次**（同 scratch） | 结构断言（`put` 内无整表扫描）+ 10 万次 `put` 计时 → `perf.textframe.put_ns` |
-| 帧合成吞吐 | `≥ 10k 帧/秒`（= `≤ 100 µs/帧`） | **参考 77.3 µs/帧**（`/tmp` scratch，2000 帧 × 3 中位；占 Saltline 引擎帧 `0.2886 ms` 的 27%） | `to_lines` + `stack` 跑 2000 帧取中位 → `perf.textframe.compose_us` / `perf.textframe.throughput_fps` |
-| 每帧常驻内存 | `≤ 8 KiB` | **参考 3.4 KiB/帧**（100 帧常驻 336.6 KiB，同 scratch） | 生成前后各收两次 `collectgarbage("count")` 差 ÷ 100 → `perf.textframe.frame_kib` |
-| 泄漏检测 | 100 轮不增长（`≤ 1%` 且逐字符相等） | **目标 1 / 0** | 100 轮同输入 `compose`：内存差占比 + 100 份行数组与第 1 份逐字符相等 → `perf.textframe.leak_gc_pct` / `perf.textframe.leak_100_equal` |
+**两个数字面（这是本表最容易读错的地方）**：门禁命令是 `cargo run -q --example selftest`（**debug**），生产跑的是 release（Saltline 的 `t-saltline-perf` 就是 release）。同一用例两面差约 3.7×。所以**绝对帽按慢的那面（debug）标定**，两列都记：只记 release 会让 debug 门禁每跑必红，只记 debug 又会让「10k 帧/秒」这句话失去意义。
 
-**对照（不以「能跑」代替数字）**：同一基准集跑「本包 `compose`」vs「手搓 `out = out .. ch` 参照实现」，断言本包 **≤ 1.5×** 参照实现——反向只可能是拼接器写错（scratch 实测 1.08×，即两两合并版更快）。参照实现同时充当**正确性 oracle**：两者产出的 30 行必须逐字符相等（§7 `oracle-saltline-frame`）。
+| 指标 | 阈值 | debug（门禁面） | release（生产面） | 测量方法 / 打印键 |
+| --- | --- | --- | --- | --- |
+| 包加载耗时 | `< 10 ms` | **0.28 ms** | **0.16 ms** | 清 `package.loaded["pkg.textframe*"]` 后 `require` + `install`，5 次取中位 → `perf.textframe.load_ms` |
+| 单格写 | `O(1)`，`< 5 µs` | **1.13 µs** | **0.31 µs** | 10 万次 `put` 计时（`put` 内无整表扫描，是结构性的 O(1)）→ `perf.textframe.put_ns` |
+| 帧合成耗时 | `≤ 1000 µs` | **350 µs** | **95 µs** | `to_lines` + `stack` 跑 2000 帧 × 3 次取中位 → `perf.textframe.compose_us` |
+| 帧合成吞吐 | 给数字 | **2 850 帧/秒** | **10 400 帧/秒** | `1000 / compose_ms` → `perf.textframe.throughput_fps` |
+| vs 手搓对照 | `≤ 2.0×` | **1.64×** | **1.30×** | 同面跑 naive `out = out .. ch` 版 → `perf.textframe.vs_naive` |
+| 每帧常驻内存 | `≤ 8 KiB` | **4.65 KiB** | **4.65 KiB** | 100 帧常驻后两次 `collectgarbage("count")` 差 ÷ 100 → `perf.textframe.frame_kib` |
+| 泄漏检测 | `≤ 1%` 且逐字符相等 | **0.64% / 1** | **0.64% / 1** | 100 轮同输入 `compose`：内存差占比 + 每轮与第 1 轮逐字符相等 → `perf.textframe.leak_gc_pct` / `perf.textframe.leak_100_equal` |
 
-> **实现纪律**：目标值在首个实现提交就地改成实测值；**偏差即回写本表**（不回写 = 文档与实现不符）。回归阈设在实测值的 2×（`compose_us ≤ 2× 实测`），这样断言抓的是「代码变慢了」，不是「机器抖了一下」。
+**对照（需求点名要的那个数字，如实记）**：本包在 `w = 80` 上**没有**赢过手搓的 `out = out .. ch`（debug 1.64× / release 1.30×）。这个宽度下二次项的常数还没长出来，而两两合并要多付一张 `parts` 表的存取。它的价值在**增长性**：`w` 翻倍时 naive 是 O(n²) 的四倍退化，两两合并是 O(n·log n)。所以阈值定 2×，抓的是「拼接路径退化」，不是「比手搓快」——后者在本尺寸下本来就不成立。
+
+**一次被实测推翻的实现选择（留痕）**：`to_lines` 起初逐格断言 `type(ch) == "string" and #ch == 1`（I5 的读侧副本，1920 次/帧），release 面实测吃掉约 45% 的合成时间（132 µs → 去掉后 93 µs）。改成**每行拼完断言一次 `#line == w`**：24 次/帧，守的还是 I6——一格多字节必然让 `#line > w`；一格数字会被 `..` 拼成多个字节，同样被 `#line` 抓住。
+
+> **实现纪律**：目标值在首个实现提交后就地改成实测值。本表已由 S6 首实现回写；C1 时记的 `参考值`（`/tmp` scratch、standalone Lua 5.5：77.3 µs/帧、3.4 KiB/帧）**偏乐观**——那份 scratch 没有 `stack` 的表分配，也不是 mlua 的 Lua 5.4。偏差如实登记于此，回归阈取实测的 2×。
 
 ## 6. 用点计划
 
@@ -90,7 +96,7 @@
 
 ## 7. 自测与验收
 
-- **用例名前缀**：`pkg.textframe.`；载体 `packages/libs/textframe/test/pkg-textframe.lua`；perf 用例名 `pkg.textframe.perf`。
+- **用例名前缀**：`pkg.textframe.`；载体三个文件（同 codec / entity / quest 的先例——每个文件自带计数垫片，独立可跑）：`test/pkg-textframe.lua`（用例 1–7、14–15）、`test/pkg-textframe-compose.lua`（8–13、16–17）、`test/pkg-textframe-perf.lua`（18）。`--filter pkg-textframe` 同时命中三者。
 - **进哪条命令的计数**：`cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-textframe` 的 `cases passed=` = **18**；全量 = **191**（173 + 18）。
 - **用例清单（18 条）**：
   1. `frame-blank`——`frame(4,3)` 三行四空格，`cells` 为空表；
@@ -110,8 +116,8 @@
   15. `exports-shape`——导出面恰好 8 键 + `ERRORS` 恰好 4 码；
   16. `oracle-saltline-frame`——把 r4 适配器的逻辑内联成 oracle，80×24 + 6 HUD 行 → 30 行，与 `to_lines`+`stack` 逐字符相等；
   17. `purity-determinism`——100 轮同输入同输出、无全局写、无 `package.loaded` 改动；
-  18. `perf`——按 `perf_keys()` 逐个打印 §5 的五个键并断言阈值。
-- **mod 侧载体冒烟不进计数**（file 级 `error` ⇒ `file FAIL` ⇒ `ok=0`）：`packages/mods/pkg-selftest/tests/pkg-textframe-smoke.lua` 钉「装载面 + 顶层纯度 + `ERRORS` 码集 + 导出面清单 + 五个 `perf.textframe.*` 键名」。
+  18. `perf`——按 `perf_keys()` 逐个打印 §5 的八个键并断言阈值（含 `vs_naive` 对照比）。
+- **mod 侧载体冒烟不进计数**（file 级 `error` ⇒ `file FAIL` ⇒ `ok=0`）：`packages/mods/pkg-selftest/tests/pkg-textframe-smoke.lua` 钉「装载面 + 顶层纯度 + `ERRORS` 码集 + 导出面清单 + 八个 `perf.textframe.*` 键名 + 空白帧行宽不 trim」。
 - **为什么必须有 mod 侧同名文件**：`--filter` 对 mod 的 `tests/*.lua` 与包的 `test/*.lua` **同时**过滤，mod 侧筛完为空即「没有可执行的测试文件」exit 1（[README.md](README.md) §5）。
 - **禁止宽松断言**：只断「两次长度相同」不逐字符 `==`，视同没测 I6；只断「`blit` 不报错」不对最终字符，视同没测 I3；把 oracle 从被测算式里 import 进去（自证）视同没测。
 
