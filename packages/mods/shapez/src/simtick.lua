@@ -99,10 +99,8 @@ end
 --- `resolve(fx, fy)` → fn(item_key) → boolean | nil。
 --- 同格多实体取 id 最小者；空项只进 trash / 邻带（hub 不收空项）。
 function M.resolve(fx, fy)
-  local h = host()
-
   -- belt：邻路收件口
-  local belt_ids = h.entity.ids("sz.belt")
+  local belt_ids = entity.ids(nil, "sz.belt")
   local belt_id = nil
   for i = 1, #belt_ids do
     local id = belt_ids[i]
@@ -118,7 +116,7 @@ function M.resolve(fx, fy)
   local hub_here = hid ~= nil and entity.get(hid, "x") == fx and entity.get(hid, "y") == fy
 
   -- processor / miner / trash（入料口）
-  local proc_ids = h.entity.ids("sz.processor")
+  local proc_ids = entity.ids(nil, "sz.processor")
   local proc_id = nil
   for i = 1, #proc_ids do
     local id = proc_ids[i]
@@ -128,7 +126,7 @@ function M.resolve(fx, fy)
       end
     end
   end
-  local miner_ids = h.entity.ids("sz.miner")
+  local miner_ids = entity.ids(nil, "sz.miner")
   local miner_id = nil
   for i = 1, #miner_ids do
     local id = miner_ids[i]

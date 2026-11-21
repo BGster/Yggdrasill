@@ -15,7 +15,7 @@
 -- 方向约定沿用 belts.DIRX/DIRY；入料口 = 背面格（pos - DIR[rot]），
 -- 出料口 = 正面格（pos + DIR[rot]）。
 --
--- 沙箱方言：模块顶层纯；ygg 经 host() 单点取。
+-- 沙箱方言：模块顶层纯；实体面走 pkg.entity（宿主 14 键面不直碰）。
 
 local entity = require("pkg.entity")
 local belts = require("src.belts")
@@ -24,10 +24,6 @@ local shapes = require("src.shapes")
 local M = { VERSION = "1.0.0" }
 
 local Q32 = 4294967296
-
-local function host()
-  return ygg
-end
 
 local function fail(code, detail)
   error("YGG-MOD-PROC-" .. code .. ": " .. detail, 0)
@@ -71,8 +67,7 @@ function M.place_miner(x, y, rot, patch)
 end
 
 local function scan(schema)
-  local ids = host().entity.ids(schema)
-  return ids
+  return entity.ids(nil, schema)
 end
 
 --- `at(schema, x, y)` → id | nil（该格上的该类实体）。
@@ -143,12 +138,17 @@ end
 -- 推进
 -- ============================================================================
 
---- 单台前向出料：out1 优先，出一件/成功即止；返回是否移出。
+--- 单台前向出料：out1 优先；仅空闲（progress == 0）时出（产物在加工期占槽不可射）。
+--- out2 缺席（矿机单槽）时跳过晋升。返回是否移出。
 local function try_eject_one(id, resolve)
+  local progress = entity.get(id, "progress") or 0
+  if progress ~= 0 then
+    return false
+  end
   local out1 = entity.get(id, "out1")
-  if out1 == "" then
+  if out1 == nil or out1 == "" then
     local out2 = entity.get(id, "out2")
-    if out2 ~= "" then
+    if out2 ~= nil and out2 ~= "" then
       entity.set(id, "out1", out2)
       entity.set(id, "out2", "")
     end
@@ -183,26 +183,30 @@ function M.tick(c, resolve)
       local in2 = entity.get(id, "in2")
       local needed = inputs_needed(kind)
       local ready = in1 ~= "" and (needed == 1 or in2 ~= "")
-      local progress = entity.get(id, "progress")
-      if ready and progress == 0 then
-        -- 投产：消耗输入
+      local progress = entity.get(id, "progress") or 0
+      local out1 = entity.get(id, "out1")
+      local out2 = entity.get(id, "out2") or ""
+      if ready and progress == 0 and (out1 == nil or out1 == "") and out2 == "" then
+        -- 开工即算产物并占槽（源：完成时输出进 ejector 槽；v1 收敛为开工占用）
+        local outs = outputs_of(kind, in1, in2)
         entity.set(id, "in1", "")
         if needed == 2 then
           entity.set(id, "in2", "")
         end
-      end
-      if ready then
-        progress = progress + c.processor_step_q(c.cycle_of(kind))
+        entity.set(id, "out1", outs[1] or "")
+        entity.set(id, "out2", outs[2] or "")
+        progress = c.processor_step_q(c.cycle_of(kind))
         if progress > Q32 then
           progress = Q32
         end
         entity.set(id, "progress", progress)
-        if progress == Q32 and entity.get(id, "out1") == "" and entity.get(id, "out2") == "" then
-          local outs = outputs_of(kind, in1, in2)
-          entity.set(id, "out1", outs[1] or "")
-          entity.set(id, "out2", outs[2] or "")
-          entity.set(id, "progress", 0)
+      elseif progress > 0 then
+        -- 加工中：推进；到满即空闲（产物已在槽上）
+        progress = progress + c.processor_step_q(c.cycle_of(kind))
+        if progress >= Q32 then
+          progress = 0
         end
+        entity.set(id, "progress", progress)
       end
     end
   end
@@ -224,9 +228,8 @@ end
 
 --- `snapshot()` → 处理器+矿机状态行（重放哈希输入；id 升序）。
 function M.snapshot()
-  local h = host()
   local out = {}
-  local ids = h.entity.ids("sz.processor")
+  local ids = entity.ids(nil, "sz.processor")
   for i = 1, #ids do
     local id = ids[i]
     out[#out + 1] = {
@@ -236,7 +239,7 @@ function M.snapshot()
       out1 = entity.get(id, "out1"), out2 = entity.get(id, "out2"),
     }
   end
-  local mids = h.entity.ids("sz.miner")
+  local mids = entity.ids(nil, "sz.miner")
   for i = 1, #mids do
     local id = mids[i]
     out[#out + 1] = {

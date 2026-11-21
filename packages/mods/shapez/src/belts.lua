@@ -22,6 +22,7 @@
 -- 沙箱方言：模块顶层纯；ygg 只经 host() 单点取；无标准库表/math。
 
 local codec = require("pkg.codec")
+local entity = require("pkg.entity")
 
 local M = { VERSION = "1.0.0" }
 
@@ -49,7 +50,7 @@ function M.constants(tuning)
   if type(tps) ~= "number" or tps < 1 then
     fail("TUNING", "ticksPerSecond 必须正整数")
   end
-  return {
+  local c = {
     q32 = Q32,
     spacing_q = (tuning.itemSpacingMilli * Q32) // (1000 * 1),
     belt_step_q = (tuning.beltSpeedMilli * Q32) // (1000 * tps),
@@ -61,6 +62,9 @@ function M.constants(tuning)
       return (tuning.beltSpeedMilli * Q32) // (1000 * tps * cycle)
     end,
   }
+  -- 同步缓存：can_accept / try_accept 在无 tick 直调时也有常量可用
+  M.constants_cache = c
+  return c
 end
 
 -- ============================================================================
@@ -72,11 +76,11 @@ local layout_version_seen = nil
 local belt_fingerprint_seen = nil
 
 local function entity_ids(schema)
-  return host().entity.ids(schema)
+  return entity.ids(nil, schema)
 end
 
 local function get_attr(id, key)
-  return host().entity.get(id, key)
+  return entity.get(id, key)
 end
 
 local function belt_of(id)
@@ -139,15 +143,6 @@ local function predecessors_of(bid, belts, tiles)
   return out
 end
 
-local function load_path_state(startid)
-  local raw = host().kv.get("sz.path." .. startid)
-  if type(raw) ~= "string" or #raw == 0 then
-    return { spacing_q = 0, items = {} }
-  end
-  local state = codec.decode(raw)
-  return { spacing_q = state.s, items = state.i }
-end
-
 local function save_path_state(startid, path)
   host().kv.set("sz.path." .. startid, codec.encode({ s = path.spacing_q, i = path.items }))
 end
@@ -199,9 +194,18 @@ function M.ensure()
         front_x = last.x + M.DIRX[last.rot],
         front_y = last.y + M.DIRY[last.rot],
       }
-      local state = load_path_state(startid)
-      path.spacing_q = state.spacing_q
-      path.items = state.items
+      local fresh = true
+      local raw = host().kv.get("sz.path." .. startid)
+      if type(raw) == "string" and #raw > 0 then
+        fresh = false
+        local state = codec.decode(raw)
+        path.spacing_q = state.s
+        path.items = state.i
+      end
+      if fresh then
+        -- 源 init 语义：空路径 spacing = 全长（首件可直落任意深度）
+        path.spacing_q = path.total_q
+      end
       paths[startid] = path
     end
   end
@@ -220,9 +224,14 @@ function M.ensure()
         front_x = b.x + M.DIRX[b.rot],
         front_y = b.y + M.DIRY[b.rot],
       }
-      local state = load_path_state(bid)
-      path.spacing_q = state.spacing_q
-      path.items = state.items
+      local raw = host().kv.get("sz.path." .. bid)
+      if type(raw) == "string" and #raw > 0 then
+        local state = codec.decode(raw)
+        path.spacing_q = state.s
+        path.items = state.i
+      else
+        path.spacing_q = path.total_q
+      end
       paths[bid] = path
     end
   end

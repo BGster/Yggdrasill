@@ -19,7 +19,7 @@ local belts = require("src.belts")
 
 local M = { VERSION = "1.0.0" }
 
-local LEVEL_TYPE = "shapez.level"
+local LEVEL_TYPE = "shapez-level"
 local HUB_ID_KEY = "sz.hub_id"
 local LEVEL_KEY = "sz.level"
 local GOT_KEY = "sz.got"

@@ -122,19 +122,24 @@ ygg.on("sz.place.proc", function(payload)
     ygg.narrate("【拒绝】sz.place.proc 载荷应为 \"cutter|sticky|x,y,rot\"")
     return
   end
-  if head == "miner" then
-    local patch = patch_at(x, y)
-    if patch == nil then
-      ygg.narrate("【拒绝】矿机必须落在资源斑内：" .. x .. "," .. y)
-      return
-    end
-    local id = processors.place_miner(x, y, rot, patch)
-    ygg.narrate("miner 落位：" .. tostring(id) .. " @" .. x .. "," .. y
-      .. " 产形=" .. patch.subshape .. patch.color)
-    return
-  end
   local id = processors.place(head, x, y, rot)
   ygg.narrate(head .. " 落位：" .. tostring(id) .. " @" .. x .. "," .. y)
+end)
+
+ygg.on("sz.place.miner", function(payload)
+  local x, y, rot = parse_xyr(payload)
+  if x == nil then
+    ygg.narrate("【拒绝】sz.place.miner 载荷应为 \"x,y,rot\"")
+    return
+  end
+  local patch = patch_at(x, y)
+  if patch == nil then
+    ygg.narrate("【拒绝】矿机必须落在资源斑内：" .. x .. "," .. y)
+    return
+  end
+  local id = processors.place_miner(x, y, rot, patch)
+  ygg.narrate("miner 落位：" .. tostring(id) .. " @" .. x .. "," .. y
+    .. " 产形=" .. patch.subshape .. patch.color)
 end)
 
 -- ── tick 直发面："n" = 走 n 拍（缺省 1）──────────────────────────────────────
