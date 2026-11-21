@@ -69,6 +69,7 @@ end
 
 local paths_cache = nil -- { [startid] = path }
 local layout_version_seen = nil
+local belt_fingerprint_seen = nil
 
 local function entity_ids(schema)
   return host().entity.ids(schema)
@@ -160,10 +161,13 @@ end
 function M.ensure()
   local h = host()
   local version = h.kv.get("sz.layout_v") or 0
-  if paths_cache ~= nil and layout_version_seen == version then
+  local ids = entity_ids("sz.belt")
+  -- 指纹 = 带数 + 最大 id：KV 被整体重置（selftest reset）时版本号回 0，
+  -- 但实体集合已换血——指纹失配同样强制重建。
+  local fingerprint = #ids .. ":" .. (ids[#ids] or 0)
+  if paths_cache ~= nil and layout_version_seen == version and belt_fingerprint_seen == fingerprint then
     return paths_cache
   end
-  local ids = entity_ids("sz.belt")
   local belts = {}
   local tiles = {}
   for i = 1, #ids do
@@ -225,6 +229,7 @@ function M.ensure()
 
   paths_cache = paths
   layout_version_seen = version
+  belt_fingerprint_seen = fingerprint
   return paths
 end
 
