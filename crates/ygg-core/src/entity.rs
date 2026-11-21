@@ -217,11 +217,40 @@ impl Entity {
 /// `spawn` / `insert` / `remove` / `set_attribute` 写入即计；标签增删与属性删除仅在
 /// 成员关系 / 键实际改变时计。所有存量实体变更只能经本层把关方法进行
 /// （无直接可变实体借用出口），变更语义因此单点可审计。
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EntityStore {
     entities: BTreeMap<EntityId, Entity>,
     next_id: EntityId,
     revision: u64,
+    /// 属性索引（S24 v2 §2）：按需惰性首建、写点增量维护。
+    ///
+    /// **不是状态**：`#[serde(skip)]` + 手写 `PartialEq` / `Clone` 同时挡三个面——存档
+    /// 字节逐字节不变（`SAVE_FORMAT_VERSION` 不动）、规范快照走 `entities()` 视图本就不经
+    /// 过它、`save.rs` 的 `assert_eq!(save, restored)` 不会把「有索引 vs 无索引」判不等。
+    #[serde(skip)]
+    indices: BTreeMap<String, AttrIndex>,
+}
+
+impl Clone for EntityStore {
+    /// 克隆**丢弃索引**（v2 §2.2）：索引是派生结构，重建比搬运便宜，而「带索引的克隆」
+    /// 会把一份缓存变成可见语义。
+    fn clone(&self) -> Self {
+        Self {
+            entities: self.entities.clone(),
+            next_id: self.next_id,
+            revision: self.revision,
+            indices: BTreeMap::new(),
+        }
+    }
+}
+
+impl PartialEq for EntityStore {
+    /// 比较**忽略索引**（派生比较会把「有索引 vs 无索引」判不等，见字段注释）。
+    fn eq(&self, other: &Self) -> bool {
+        self.entities == other.entities
+            && self.next_id == other.next_id
+            && self.revision == other.revision
+    }
 }
 
 impl Default for EntityStore {
@@ -238,10 +267,13 @@ impl EntityStore {
             entities: BTreeMap::new(),
             next_id: 1,
             revision: 0,
+            indices: BTreeMap::new(),
         }
     }
 
     /// 分配新 ID（从 1 起严格单调递增——确定性，research §3 威胁 #4）并插入空实体。
+    ///
+    /// 索引零工作：新实体没有属性，而索引只登记**在场属性的值**（v2 §2.2 的五个写点之一）。
     pub fn spawn(&mut self) -> Result<EntityId, StateError> {
         let id = self.next_id;
         self.next_id = id.checked_add(1).ok_or(StateError::IdSpaceExhausted)?;
@@ -259,6 +291,7 @@ impl EntityStore {
         self.next_id = self
             .next_id
             .max(id.checked_add(1).ok_or(StateError::IdSpaceExhausted)?);
+        self.index_entity(&entity, true);
         self.entities.insert(id, entity);
         self.revision += 1;
         Ok(())
@@ -275,7 +308,8 @@ impl EntityStore {
     /// 删除实体；返回被删实体（不存在时 `None` 且不计变更）。
     pub fn remove(&mut self, id: EntityId) -> Option<Entity> {
         let removed = self.entities.remove(&id);
-        if removed.is_some() {
+        if let Some(entity) = &removed {
+            self.index_entity(entity, false);
             self.revision += 1;
         }
         removed
@@ -299,7 +333,23 @@ impl EntityStore {
             .get_mut(&id)
             .ok_or(StateError::NoSuchEntity(id))?;
         if entity.attribute(&name) == Some(&value) {
-            return Ok(()); // 幂等写：状态未变，不计变更
+            return Ok(()); // 幂等写：状态未变，不计变更（索引零工作）
+        }
+        // 非有限值在**任何副作用之前**拒（`Entity::set_attribute` 的同一道门，提前到
+        // 索引补丁之前：先改索引再报错会留下与实体表不一致的索引）。
+        if let Value::Float(f) = &value {
+            if !f.is_finite() {
+                return Err(StateError::NonFiniteF64 {
+                    entity_id: id,
+                    attribute: name,
+                });
+            }
+        }
+        if let Some(index) = self.indices.get_mut(&name) {
+            if let Some(old) = entity.attribute(&name) {
+                index.remove(&IndexKey::of(old), id);
+            }
+            index.insert(IndexKey::of(&value), id);
         }
         entity.set_attribute(name, value)?;
         self.revision += 1;
@@ -317,13 +367,18 @@ impl EntityStore {
             .get_mut(&id)
             .ok_or(StateError::NoSuchEntity(id))?;
         let removed = entity.remove_attribute(name);
-        if removed.is_some() {
+        if let Some(value) = &removed {
+            if let Some(index) = self.indices.get_mut(name) {
+                index.remove(&IndexKey::of(value), id);
+            }
             self.revision += 1;
         }
         Ok(removed)
     }
 
     /// 把关加标签；实际改变成员关系才计变更。
+    ///
+    /// 标签不碰索引：属性索引与 tag 无关（v2 §2.2 末句）。
     pub fn add_tag(&mut self, id: EntityId, tag: impl Into<String>) -> Result<bool, StateError> {
         let entity = self
             .entities
@@ -389,12 +444,25 @@ impl EntityStore {
     ///
     /// 序：无 `order` ⇒ **id 升序**（`BTreeMap` 序遍历）；有 `order` ⇒ `(值, id)` 升序
     /// （`desc` 只反转值序，**id 兜底不反转**；缺属性排最后）。
+    ///
+    /// **`&mut self` 的理由**：可走索引的谓词会惰性首建该属性的索引（v2 §2.2）；v1 §3.1
+    /// 写的 `&self` 在带索引的形态下不可实现（无内部可变性，而把索引放宿主侧已被 v2
+    /// 否证）。候选集出来以后不再变——索引路径与全扫路径都逐条跑
+    /// [`Selector::matches`]，索引只是剪枝。
     pub fn select(&mut self, selector: &Selector) -> Vec<&Entity> {
-        let mut rows: Vec<&Entity> = self
-            .entities
-            .values()
-            .filter(|entity| selector.matches(entity))
-            .collect();
+        let candidates = self.index_candidates(selector);
+        let mut rows: Vec<&Entity> = match &candidates {
+            Some(ids) => ids
+                .iter()
+                .filter_map(|id| self.entities.get(id))
+                .filter(|entity| selector.matches(entity))
+                .collect(),
+            None => self
+                .entities
+                .values()
+                .filter(|entity| selector.matches(entity))
+                .collect(),
+        };
         self.apply_order(&mut rows, selector);
         rows
     }
@@ -734,6 +802,430 @@ fn compare_order_keys(
                 ord
             }
         }
+    }
+}
+
+// ── 属性索引（S24 v2 §2：惰性首建 + 写点增量维护）─────────────────────────
+//
+// 选型与已否证的两条路（v2 §2.2 逐条论证过，此处只留结论）：
+// ① 不「标脏 + 下次重建」——重建 10⁴ 实体 ≈ 0.3 ms，**比不建索引的全扫（0.15 ms）
+//    还贵 2×**，写多读少的循环里是净负；
+// ② 不放宿主侧（`Rc<RefCell<QueryIndex>>`）——那样失效即重建回到①，而增量补丁要在
+//    宿主 6 个写键上各调一次，漏一处 = 静默错答。放进 `EntityStore` 是唯一能让
+//    「每个写点必须维护」成为结构约束的位置（五处补丁与 `revision += 1` 同行）。
+
+/// 索引键：四种标量族各占一段，族序即变体声明序（`Num < Float < Bool < Str`）。
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IndexKey {
+    Num(i64),
+    /// 浮点段的键是**位序化 `u64`**（升序 u64 序 = 数值序）：零新依赖、逐位确定。
+    Float(u64),
+    Bool(bool),
+    Str(String),
+}
+
+impl IndexKey {
+    pub fn of(value: &Value) -> Self {
+        match value {
+            Value::Int(number) => Self::Num(*number),
+            Value::Float(number) => Self::Float(Self::float_bits(*number)),
+            Value::Bool(flag) => Self::Bool(*flag),
+            Value::Str(text) => Self::Str(text.clone()),
+        }
+    }
+
+    /// f64 → 单调 u64（负数取反、非负数翻符号位）。`NaN` 不可达（写入路径三处已拒）。
+    fn float_bits(x: f64) -> u64 {
+        let bits = x.to_bits();
+        if bits >> 63 == 1 {
+            !bits
+        } else {
+            bits | (1 << 63)
+        }
+    }
+
+    /// [`IndexKey::float_bits`] 的逆。
+    fn float_of(bits: u64) -> f64 {
+        f64::from_bits(if bits >> 63 == 1 {
+            bits ^ (1 << 63)
+        } else {
+            !bits
+        })
+    }
+}
+
+/// 单属性的有序索引：值 → id 列表（**桶内 id 升序**，`binary_search` 插）。
+#[derive(Clone, Debug, Default, PartialEq)]
+struct AttrIndex {
+    buckets: BTreeMap<IndexKey, Vec<EntityId>>,
+}
+
+impl AttrIndex {
+    fn insert(&mut self, key: IndexKey, id: EntityId) {
+        let bucket = self.buckets.entry(key).or_default();
+        if let Err(at) = bucket.binary_search(&id) {
+            bucket.insert(at, id);
+        }
+    }
+
+    fn remove(&mut self, key: &IndexKey, id: EntityId) {
+        if let Some(bucket) = self.buckets.get_mut(key) {
+            if let Ok(at) = bucket.binary_search(&id) {
+                bucket.remove(at);
+            }
+            if bucket.is_empty() {
+                self.buckets.remove(key);
+            }
+        }
+    }
+}
+
+/// 比较谓词要的序关系集合（`eq` / `gt` / `gte` / `lt` / `lte` 各一条）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Want {
+    Eq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
+
+impl Want {
+    fn holds(self, ord: Ordering) -> bool {
+        match self {
+            Self::Eq => ord == Ordering::Equal,
+            Self::Gt => ord == Ordering::Greater,
+            Self::Gte => ord != Ordering::Less,
+            Self::Lt => ord == Ordering::Less,
+            Self::Lte => ord != Ordering::Greater,
+        }
+    }
+}
+
+/// 一条谓词在索引上的候选区间（四段上的**并集**；AND = 两两求交）。
+///
+/// 它是**剪枝结构**，不是权威：候选集出表后仍逐条跑 [`Selector::matches`]。所以区间
+/// 只须是超集，而 I2 差分用例钉住「索引路径 ≡ 全扫路径」逐值逐序相等。
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Probe {
+    num: Vec<(i64, i64)>,
+    float: Vec<(u64, u64)>,
+    boolean: Vec<bool>,
+    text: Vec<String>,
+}
+
+impl Probe {
+    /// 并（`in` 的元素之间）。
+    fn union(&self, other: &Self) -> Self {
+        let mut out = self.clone();
+        out.num.extend_from_slice(&other.num);
+        out.float.extend_from_slice(&other.float);
+        out.boolean.extend_from_slice(&other.boolean);
+        out.text.extend_from_slice(&other.text);
+        out.num.sort_unstable();
+        out.float.sort_unstable();
+        out.boolean.sort_unstable();
+        out.text.sort_unstable();
+        out
+    }
+
+    /// 交（同一属性上的多条谓词 = 隐式 AND；`gte`+`lte` 在这里收成一个区间）。
+    fn intersect(&self, other: &Self) -> Self {
+        Self {
+            num: intersect_spans(&self.num, &other.num),
+            float: intersect_spans(&self.float, &other.float),
+            boolean: self
+                .boolean
+                .iter()
+                .copied()
+                .filter(|flag| other.boolean.contains(flag))
+                .collect(),
+            text: self
+                .text
+                .iter()
+                .filter(|text| other.text.contains(text))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// 数值段区间：`hit` 吃「该段的存储值」，`want` 非 `eq` 时真值区必是半线。
+    ///
+    /// 浮点段的二分域必须裁到 **`[bits(-∞), bits(+∞)]`**：位序化把 NaN 模式推到全域两端
+    /// （`Float(u64::MAX)` 是 NaN 位型），全 u64 域上真值区的单调查性不成立。写入路径
+    /// 本就拒非有限值 ⇒ 可达键全在这个闭区间内。
+    fn numeric_spans(value: &Value, want: Want) -> (Option<(i64, i64)>, Option<(u64, u64)>) {
+        let hit = |stored: &Value| value_compare(stored, value).is_some_and(|ord| want.holds(ord));
+        let num = monotone_span(i64::MIN as i128, i64::MAX as i128, |raw| {
+            hit(&Value::Int(raw as i64))
+        })
+        .map(|(lo, hi)| (lo as i64, hi as i64));
+        let float = monotone_span(
+            IndexKey::float_bits(f64::NEG_INFINITY) as i128,
+            IndexKey::float_bits(f64::INFINITY) as i128,
+            |raw| hit(&Value::Float(IndexKey::float_of(raw as u64))),
+        )
+        .map(|(lo, hi)| (lo as u64, hi as u64));
+        (num, float)
+    }
+}
+
+/// 两个闭区间列表的交（两两求交，丢空）。列表长度 = `in` 的元素数，量级极小。
+fn intersect_spans<T: Copy + Ord>(left: &[(T, T)], right: &[(T, T)]) -> Vec<(T, T)> {
+    let mut out = Vec::new();
+    for (lo_a, hi_a) in left {
+        for (lo_b, hi_b) in right {
+            let lo = (*lo_a).max(*lo_b);
+            let hi = (*hi_a).min(*hi_b);
+            if lo <= hi {
+                out.push((lo, hi));
+            }
+        }
+    }
+    out
+}
+
+/// 单调真值区的二分（`hit` 必须单调 = 真值区是**前/后缀**）。
+/// `None` = 全假；`Some((真区下界, 上界))`。
+///
+/// 只在索引路径的**探测建立期**跑（每次 ≤ 126 轮），不在扫描热路径上。
+fn monotone_span(lo0: i128, hi0: i128, hit: impl Fn(i128) -> bool) -> Option<(i128, i128)> {
+    if hit(hi0) {
+        if hit(lo0) {
+            return Some((lo0, hi0));
+        }
+        let (mut lo, mut hi) = (lo0, hi0);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if hit(mid) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        return Some((hi, hi0));
+    }
+    if !hit(lo0) {
+        return None;
+    }
+    let (mut lo, mut hi) = (lo0, hi0);
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if hit(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Some((lo0, lo))
+}
+
+/// 一条谓词的可索引探测；`None` = 不可索引（`neq` / `like` / `ilike` / `is`、`not.`、
+/// 以及 Str/Bool 上的**序**比较——补集与存在性无法从桶枚举，v2 §3 回全扫）。
+fn probe_of(op: &CompareOp) -> Option<Probe> {
+    let (value, want) = match op {
+        CompareOp::Eq(value) => (value, Want::Eq),
+        CompareOp::Gt(value) => (value, Want::Gt),
+        CompareOp::Gte(value) => (value, Want::Gte),
+        CompareOp::Lt(value) => (value, Want::Lt),
+        CompareOp::Lte(value) => (value, Want::Lte),
+        CompareOp::In(values) => return in_probe(values),
+        CompareOp::Neq(_) | CompareOp::Like(_) | CompareOp::ILike(_) | CompareOp::Is(_) => {
+            return None
+        }
+    };
+    let mut probe = Probe::default();
+    match value {
+        Value::Int(_) | Value::Float(_) if want == Want::Eq => {
+            // `eq` 是**点**（Int 段最多两处：整/浮同族的舍入原像），不做二分：
+            // 单调二分要求真值区是半线，点不是。
+            probe.num = int_preimage(value);
+            probe.float = float_preimage(value);
+        }
+        Value::Int(_) | Value::Float(_) => {
+            let (num, float) = Probe::numeric_spans(value, want);
+            probe.num.extend(num);
+            probe.float.extend(float);
+        }
+        Value::Bool(flag) => {
+            if want != Want::Eq {
+                return None;
+            }
+            probe.boolean.push(*flag);
+        }
+        Value::Str(text) => {
+            if want != Want::Eq {
+                return None;
+            }
+            probe.text.push(text.clone());
+        }
+    }
+    Some(probe)
+}
+
+/// `in`：逐元素 `eq` 的并；**空数组的探测是空集**（与「恒假」一致）。
+fn in_probe(values: &[Value]) -> Option<Probe> {
+    let mut probe: Option<Probe> = None;
+    for value in values {
+        let one = probe_of(&CompareOp::Eq(value.clone()))?;
+        probe = Some(match probe {
+            None => one,
+            Some(acc) => acc.union(&one),
+        });
+    }
+    Some(probe.unwrap_or_default())
+}
+
+/// Int 段上「与 `value` 数值相等」的点集。
+fn int_preimage(value: &Value) -> Vec<(i64, i64)> {
+    match value {
+        Value::Int(number) => vec![(*number, *number)],
+        Value::Float(number) => {
+            // `(i as f64) == f` 的原像是**舍入原像**（|f| ≥ 2⁵³ 时可能有两个整数），
+            // 候选只需 base-1/base/base+1（`as` 饱和，故用 saturating 运算）。
+            let base = *number as i64;
+            let mut out: Vec<(i64, i64)> = Vec::new();
+            for candidate in [base.saturating_sub(1), base, base.saturating_add(1)] {
+                if (candidate as f64) == *number && !out.contains(&(candidate, candidate)) {
+                    out.push((candidate, candidate));
+                }
+            }
+            out
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Float 段上「与 `value` 数值相等」的点集（整浮同族：`Int(i)` 命中 `f = i as f64`）。
+fn float_preimage(value: &Value) -> Vec<(u64, u64)> {
+    let number = match value {
+        Value::Int(number) => *number as f64,
+        Value::Float(number) => *number,
+        _ => return Vec::new(),
+    };
+    let bits = IndexKey::float_bits(number);
+    vec![(bits, bits)]
+}
+
+impl EntityStore {
+    /// 走索引判定（v2 §3 一句话可背）：**所有谓词落在同一属性、每条都可索引、且无
+    /// `not.`** ⇒ 候选 id 集（升序去重）；其余一律 `None` = 全扫。
+    ///
+    /// 空 `where` 也回全扫（那就是列活物，v1 原路径）。`id` 伪属性走
+    /// `entities.range()`——`BTreeMap` 本身就是 id 索引，零构建。
+    fn index_candidates(&mut self, selector: &Selector) -> Option<Vec<EntityId>> {
+        let first = selector.predicates.first()?;
+        if selector
+            .predicates
+            .iter()
+            .any(|predicate| predicate.attr != first.attr || predicate.negated)
+        {
+            return None;
+        }
+        let mut probe: Option<Probe> = None;
+        for predicate in &selector.predicates {
+            let one = probe_of(&predicate.op)?;
+            probe = Some(match probe {
+                None => one,
+                Some(acc) => acc.intersect(&one),
+            });
+        }
+        let probe = probe?;
+        if first.attr == "id" {
+            return Some(self.id_candidates(&probe));
+        }
+        self.ensure_index(&first.attr);
+        Some(self.collect_candidates(&first.attr, &probe))
+    }
+
+    /// 惰性首建某属性的索引（已建则零工作）。
+    ///
+    /// **增量维护只作用在已建索引上**：未建属性的写不付代价，首建时一次性扫全表——
+    /// 两向拼起来仍是「增量 ≡ 从零重建」（I1 差分用例就是这个命题）。
+    fn ensure_index(&mut self, attr: &str) {
+        if self.indices.contains_key(attr) {
+            return;
+        }
+        let mut index = AttrIndex::default();
+        for entity in self.entities.values() {
+            if let Some(value) = entity.attribute(attr) {
+                index.insert(IndexKey::of(value), entity.id);
+            }
+        }
+        self.indices.insert(attr.to_owned(), index);
+    }
+
+    /// 从索引取候选 id（升序、去重）。
+    fn collect_candidates(&self, attr: &str, probe: &Probe) -> Vec<EntityId> {
+        let Some(index) = self.indices.get(attr) else {
+            return Vec::new();
+        };
+        let mut out: Vec<EntityId> = Vec::new();
+        for (lo, hi) in &probe.num {
+            for (_, ids) in index.buckets.range(IndexKey::Num(*lo)..=IndexKey::Num(*hi)) {
+                out.extend_from_slice(ids);
+            }
+        }
+        for (lo, hi) in &probe.float {
+            for (_, ids) in index
+                .buckets
+                .range(IndexKey::Float(*lo)..=IndexKey::Float(*hi))
+            {
+                out.extend_from_slice(ids);
+            }
+        }
+        for flag in &probe.boolean {
+            if let Some(ids) = index.buckets.get(&IndexKey::Bool(*flag)) {
+                out.extend_from_slice(ids);
+            }
+        }
+        for text in &probe.text {
+            if let Some(ids) = index.buckets.get(&IndexKey::Str(text.clone())) {
+                out.extend_from_slice(ids);
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    /// `id` 上的谓词：直接走 `BTreeMap` 键区间（零索引构建）。
+    /// 超出 `i64` 的 id 在 `where` 里恒假（[`QueryValue`] 的同一裁断）。
+    fn id_candidates(&self, probe: &Probe) -> Vec<EntityId> {
+        let mut out: Vec<EntityId> = Vec::new();
+        for (lo, hi) in &probe.num {
+            let lo = (*lo).max(1);
+            if *hi < lo {
+                continue;
+            }
+            let (Ok(lo), Ok(hi)) = (u64::try_from(lo), u64::try_from(*hi)) else {
+                continue;
+            };
+            out.extend(self.entities.range(lo..=hi).map(|(id, _)| *id));
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    /// 实体级索引补丁（`insert` / `remove` 两处：属性表整体进出）。
+    fn index_entity(&mut self, entity: &Entity, add: bool) {
+        for (name, index) in self.indices.iter_mut() {
+            let Some(value) = entity.attribute(name) else {
+                continue;
+            };
+            if add {
+                index.insert(IndexKey::of(value), entity.id);
+            } else {
+                index.remove(&IndexKey::of(value), entity.id);
+            }
+        }
+    }
+
+    /// 测试观察面：某属性某键的桶（**桶内 id 升序**是 I3 的断言对象）。
+    #[cfg(test)]
+    fn index_bucket(&self, attr: &str, key: &IndexKey) -> Option<&[EntityId]> {
+        self.indices.get(attr)?.buckets.get(key).map(Vec::as_slice)
     }
 }
 
@@ -1254,5 +1746,183 @@ mod tests {
         assert_eq!(ordered(false), vec![4, 1, 2, 5, 3]);
         // desc 只反转**值序**：族序随之反转，7 = 7 的 id 兜底仍是升序，缺属性仍在最后
         assert_eq!(ordered(true), vec![5, 1, 2, 4, 3]);
+    }
+
+    // ── 索引（S24 v2 §6 的 I1/I2/I3）───────────────────────────────────────
+
+    /// 一个选择器的 id 出表（两条路径的比较样板）。
+    fn ids_of(store: &mut EntityStore, selector: &Selector) -> Vec<EntityId> {
+        store
+            .select(selector)
+            .into_iter()
+            .map(|entity| entity.id)
+            .collect()
+    }
+
+    fn one_predicate(op: CompareOp) -> Selector {
+        Selector {
+            predicates: vec![Predicate::new("hp", op)],
+            ..Selector::default()
+        }
+    }
+
+    /// 浮点段按**数值序**（位序化 u64），且段序 `Num < Float < Bool < Str`
+    #[test]
+    fn index_keys_follow_numeric_order() {
+        let keys: Vec<IndexKey> = [-3.5, -2.0, -1e-9, 0.0, 1e-9, 1.0, 2.0]
+            .iter()
+            .map(|x| IndexKey::of(&Value::Float(*x)))
+            .collect();
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(keys, sorted, "浮点段必须按数值序（位序化 u64）");
+        assert!(IndexKey::Num(i64::MAX) < IndexKey::Float(0));
+        assert!(IndexKey::Float(0) < IndexKey::Bool(false));
+        assert!(IndexKey::Bool(true) < IndexKey::Str(String::new()));
+    }
+
+    /// I3（v2 §6）：乱序 `insert` 后桶内仍 id 升序
+    #[test]
+    fn index_buckets_are_id_ascending() {
+        let mut store = EntityStore::new();
+        for id in [7u64, 1, 9, 3] {
+            store
+                .insert(seeded(id, &[("hp", Value::Int(5))], &[]))
+                .unwrap();
+        }
+        store.ensure_index("hp");
+        assert_eq!(
+            store.index_bucket("hp", &IndexKey::Num(5)),
+            Some([1u64, 3, 7, 9].as_slice())
+        );
+    }
+
+    /// I2（v2 §6）：**索引路径 ≡ 全扫路径**逐值逐序相等。
+    ///
+    /// 两条路径的造法：给同一条选择器补一条必然成立的 `id >= 0` ⇒ 两个不同属性 ⇒
+    /// 按 v2 §3 强制回全扫；除谓词表之外两选择器逐字相同。
+    #[test]
+    fn index_path_equals_scan_path() {
+        let mut store = EntityStore::new();
+        store
+            .insert(seeded(1, &[("hp", Value::Int(50))], &[]))
+            .unwrap();
+        store
+            .insert(seeded(2, &[("hp", Value::Float(50.0))], &[]))
+            .unwrap();
+        store
+            .insert(seeded(3, &[("hp", Value::Int(7))], &[]))
+            .unwrap();
+        store.insert(seeded(4, &[], &[])).unwrap();
+        store
+            .insert(seeded(5, &[("hp", Value::Str("50".into()))], &[]))
+            .unwrap();
+
+        let ops = vec![
+            CompareOp::Eq(Value::Int(50)),
+            CompareOp::Gte(Value::Int(7)),
+            CompareOp::Lt(Value::Float(50.0)),
+            CompareOp::Lte(Value::Int(50)),
+            CompareOp::In(vec![Value::Int(7), Value::Str("50".into())]),
+            CompareOp::In(Vec::new()),
+        ];
+        for op in ops {
+            let indexed = one_predicate(op.clone());
+            let mut scanned = indexed.clone();
+            scanned
+                .predicates
+                .push(Predicate::new("id", CompareOp::Gte(Value::Int(0))));
+            let via_index = ids_of(&mut store, &indexed);
+            let via_scan = ids_of(&mut store, &scanned);
+            assert_eq!(via_index, via_scan, "{op:?} 的两条路径必须逐值逐序相等");
+        }
+        // 索引路径真的建了索引（否则上面那组用例是空转）
+        assert!(store.indices.contains_key("hp"));
+        // 命中值的逐条核对（不是「两条路径一起错」）
+        assert_eq!(
+            ids_of(&mut store, &one_predicate(CompareOp::Eq(Value::Int(50)))),
+            vec![1, 2]
+        );
+        assert_eq!(
+            ids_of(&mut store, &one_predicate(CompareOp::Lte(Value::Int(50)))),
+            vec![1, 2, 3]
+        );
+        assert_eq!(
+            ids_of(
+                &mut store,
+                &one_predicate(CompareOp::Lt(Value::Float(50.0)))
+            ),
+            vec![3]
+        );
+    }
+
+    /// I1（v2 §6）：随机写 200 次（spawn / insert / set / remove_attr / destroy）后，
+    /// **增量索引 ≡ 从零重建**。重建侧 = 克隆体（`Clone` 丢索引 ⇒ 首查即从零建）。
+    #[test]
+    fn index_incremental_equals_rebuild() {
+        let mut store = EntityStore::new();
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..5 {
+            store.spawn().unwrap();
+        }
+        let probe_selector = one_predicate(CompareOp::Gte(Value::Int(0)));
+        // 先建索引：后续 200 次写全部走增量维护
+        ids_of(&mut store, &probe_selector);
+
+        let values = [
+            Value::Int(1),
+            Value::Int(50),
+            Value::Float(2.5),
+            Value::Float(-0.0),
+            Value::Str("x".into()),
+            Value::Bool(true),
+        ];
+        for step in 0..200 {
+            let roll = next() % 5;
+            let target = (next() % 10 + 1) as EntityId;
+            let value = values[(next() % 6) as usize].clone();
+            match roll {
+                0 => {
+                    store.spawn().unwrap();
+                }
+                1 => {
+                    let _ = store.insert(seeded(target, &[("hp", value)], &[]));
+                }
+                2 => {
+                    let _ = store.set_attribute(target, "hp", value);
+                }
+                3 => {
+                    let _ = store.remove_attribute(target, "hp");
+                }
+                _ => {
+                    store.remove(target);
+                }
+            }
+            // 读写交错：只写不读测不出「增量维护漏一处」的交错形状
+            if step % 20 == 0 {
+                ids_of(&mut store, &probe_selector);
+            }
+        }
+
+        let ops = [
+            CompareOp::Eq(Value::Int(50)),
+            CompareOp::Gte(Value::Int(1)),
+            CompareOp::Lt(Value::Float(2.5)),
+            CompareOp::In(vec![Value::Int(1), Value::Str("x".into())]),
+        ];
+        let mut rebuilt = store.clone();
+        assert!(rebuilt.indices.is_empty(), "克隆必须丢掉索引（重建侧前提）");
+        for op in ops {
+            let selector = one_predicate(op.clone());
+            let incremental = ids_of(&mut store, &selector);
+            let from_scratch = ids_of(&mut rebuilt, &selector);
+            assert_eq!(incremental, from_scratch, "{op:?}：增量索引 ≡ 从零重建");
+        }
     }
 }
