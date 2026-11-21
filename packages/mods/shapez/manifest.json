@@ -6,9 +6,9 @@
       "sha256": "b7d2974efc7c582f4e7d31cbf2ba8d56567ad243208a60fbfc1a40ed851ce27f"
     },
     {
-      "byteLength": 12871,
+      "byteLength": 14294,
       "path": "src/bot.lua",
-      "sha256": "7d7002feabc924dafaad652091657134c983a3c03fb74b34a6259323fb1c2c8c"
+      "sha256": "fe598dc3e27df3c5c75f998112778010ca6d7ac01bd44a1ce02d865ecc8866e9"
     },
     {
       "byteLength": 4765,
