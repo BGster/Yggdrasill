@@ -28,6 +28,7 @@ pub mod pack;
 pub mod packages;
 pub mod playtest;
 pub mod resources;
+pub mod rt;
 pub mod sandbox;
 pub mod stdlib;
 

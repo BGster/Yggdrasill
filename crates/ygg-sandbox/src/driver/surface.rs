@@ -96,4 +96,10 @@ impl KernelFacade {
     pub fn sim_handle(&self) -> std::rc::Rc<std::cell::RefCell<Option<Box<ygg_sim::Sim>>>> {
         self.host.sim_handle()
     }
+
+    /// 取实时宿主面句柄（S31 R1；常驻宿主逐帧闩锁输入快照与帧号走这条，
+    /// 不经 Lua 边界）。返回与 `ygg.rt.*` 投影**同一个** `Rc`。
+    pub fn rt_handle(&self) -> std::rc::Rc<std::cell::RefCell<crate::host_api::RtFrame>> {
+        self.host.rt_handle()
+    }
 }

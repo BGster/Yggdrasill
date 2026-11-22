@@ -72,12 +72,14 @@ mod fs;
 mod kv;
 mod meta;
 mod narrate;
+mod rt;
 mod selector;
 mod sim;
 mod tool;
 mod value;
 
 pub use entity::*;
+pub use rt::{RT_DEFAULT_HZ, RT_DEFAULT_MAX_CATCHUP, RT_HZ_MAX, RT_KEY_MAX, RT_MAX_CATCHUP_CAP, RtFrame, RtInput, RtMode};
 pub use entity_decode::*;
 pub use fs::*;
 // `pub mod ygg_fs_code` 嵌套模块原路径保留(项本身 pub,glob 已含;显式列出为自证)。
@@ -150,6 +152,10 @@ pub struct HostState {
     /// **不在 `HostHandles` 里**（与 `vfs` 同一条纪律）：句柄是外部构造点，加字段会破
     /// `crates/ygg-sandbox/tests` 与 stdlib 的既有构造；Sim 只是 `install` 自建的空槽。
     sim: Rc<RefCell<Option<Box<ygg_sim::Sim>>>>,
+    /// 实时宿主面（S31 R1；`ygg.rt.*` 的共享背面）：每帧被宿主闩锁的快照 +
+    /// 调度参数。`install` 自建（缺省 run 模式），引擎/宿主经 [`HostApi::rt_handle`]
+    /// 拿同一个 `Rc` 逐帧写入。
+    rt: Rc<RefCell<rt::RtFrame>>,
     /// 当前执行相位（装载期 `Loading`，封口后待机 `Idle`，handler 执行期间 `Transition`）。
     phase: Phase,
     sealed: bool,
@@ -182,6 +188,7 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         tool_runner: Rc::new(RefCell::new(None)),
         mount: Rc::new(RefCell::new(None)),
         sim: Rc::new(RefCell::new(None)),
+        rt: Rc::new(RefCell::new(rt::RtFrame::default())),
         phase: Phase::Loading,
         sealed: false,
         // per-kernel sentinel：内核种子派生（splitmix64 四轮），Mod 面不可预测
@@ -210,6 +217,8 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     install_entity(lua, &state, &ygg)?;
 
     install_sim(lua, &state)?;
+    // `ygg.rt.*`（S31 R1：实时宿主面；config 装载期限定，loop/input 只读投影）。
+    rt::install_rt(lua, &state)?;
     // `ygg.codec.*`（Tier 2 pkg.codec 的原生加速面；契约 lua-api.md §3.1.4）。
     // 无状态、无实例，所以没有 `set_*` 注入面，也不需要 CLI 激活。
     crate::codec_face::install(lua)?;
@@ -232,6 +241,9 @@ impl HostApi {
             s.sealed = true;
             s.phase = Phase::Idle;
         }
+        // `ygg.rt.config` 同一条装载期限定（S31 R1）：seal 后原位替换为可读
+        // 报错桩——帧调度参数一局一套，运行期不得改。
+        rt::seal_rt(lua)?;
         let ygg: Table = lua.globals().raw_get("ygg")?;
         let stub = lua.create_function(|_, _: (String, Function)| -> Result<(), Error> {
             Err(Error::runtime(SEALED_MESSAGE))
@@ -306,6 +318,11 @@ impl HostApi {
     /// 取文件挂载桥句柄（驱动层共享）。
     pub fn mount_fs_handle(&self) -> Rc<RefCell<Option<Box<dyn MountFs>>>> {
         Rc::clone(&self.state.borrow().mount)
+    }
+
+    /// 取实时宿主面句柄（`ygg.rt.*` 的共享 `Rc`；宿主/引擎逐帧写入，Mod 只读）。
+    pub fn rt_handle(&self) -> Rc<RefCell<rt::RtFrame>> {
+        Rc::clone(&self.state.borrow().rt)
     }
 
     /// 注入或卸载模拟内核实例（`ygg.sim.*` 的宿主面，Tier 1）。
