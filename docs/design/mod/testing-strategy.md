@@ -89,7 +89,7 @@ doc 索引当成所有仓的装载前置。注入的其余面（`__ASSETS` / `__
 
 **依据**：`repo_root` 由 `ancestor_with_git(--mod)` 求出，外部仓（装载别人的 Mod，如 `PokeRogue-YGG`）
 自然没有本仓的 `docs/context/scenes.json`；该文件的唯一消费方是 agent-seed 的读签用例
-（`tests/surface.lua` 的 `scenes 表 reference 段` 断言），外部仓不会跑 agent-seed 的测试。
+（`tests/surface-tree.lua` 的 `scenes 表 reference 段` 断言；S32 拆分后自 `tests/surface.lua` 迁入），外部仓不会跑 agent-seed 的测试。
 「没有」与「坏了」必须分开：`is_file()` 为假 → 跳过并打印一行 `scenes: 跳过（… 不存在）`；
 文件存在却读不动或不是合法 JSON → 仍然 `资源装载失败`，否则真损坏会被静默跳过。
 

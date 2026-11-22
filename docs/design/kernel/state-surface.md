@@ -77,9 +77,9 @@
 
 | 范例 | 键 | 单写口 |
 | --- | --- | --- |
-| `src/core/clock.lua:6` | `settings.clock_seq` | `M.bump()`，唯一调用点在 `src/view/render.lua` 的重入守卫（每次 Mod 派发恰好一次） |
+| `src/core/clock.lua:6` | `settings.clock_seq` | `M.bump()`，唯一调用点在 `src/view/render/screen.lua` 的重入守卫（S32 拆分前为 `src/view/render.lua`）（每次 Mod 派发恰好一次） |
 | `src/domain/lanes.lua:169-170` | `lane.seq` | 泳道分配时自增 |
-| `src/runtime/tools.lua:175` | `tool.seq.*` | 工具调用序号分配 |
+| `src/runtime/tools/parse.lua:135`（S32 拆分前为 `src/runtime/tools.lua:175`） | `tool.seq.*` | 工具调用序号分配 |
 
 **历史成本**（同一结论在代码注释里已有一份非权威副本：`src/core/clock.lua:14-17`、`src/domain/readsig.lua:11-14`）：r3 规划「签名新鲜度」时先走「验票制」（记下序号再比较），正是被上表前三格依次作废，改走「销票制」——作用域边界主动清 KV，于是「键非空」本身即「本作用域内已读」，不需要时钟、也不需要比序号。任何「读一个宿主时钟来判先后」的方案，在这条路径上已经失败过一次。
 
