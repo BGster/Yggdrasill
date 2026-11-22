@@ -3,9 +3,9 @@
 > **id** host/rt-face · **模块** ② egg CLI 与 host · **触发** 改 `ygg.rt.*` / `crates/ygg-sandbox/src/rt.rs` / `examples/rt/` / 帧循环调度或录制回放语义之前
 > **读不到代价** silent-drift（帧链哈希口径或规范串字节漂移 → 回放证据链失效，已录制的局全部不可回放）
 
-> **定位**：常驻实时宿主（`examples/rt/`）+ `ygg.rt.*` Lua 面 + 帧循环/输入/**渲染面**/录制回放的确定性契约。渲染面（`ygg.rt.frame` 五键 + PPM/SSE 双通道 + 帧 digest 旁路 KAT）已落地（S31-R2）；音频面（`ygg.rt.audio`）属 S31 R3 轮（Schedule: r-20261122-022804-06aa §5）。
+> **定位**：常驻实时宿主（`examples/rt/`）+ `ygg.rt.*` Lua 面 + 帧循环/输入/**渲染面**/**音频面**/录制回放的确定性契约。渲染面（`ygg.rt.frame` 五键 + PPM/SSE 双通道 + 帧 digest 旁路 KAT）已落地（S31-R2）；音频面（`ygg.rt.audio` 三键 + 帧末混音 + WAV 通道 + 混音 digest 旁路 KAT）已落地（S31-R3）。
 > **上游**：[docs/README.md](../../README.md) · **相关**：[cli-daemon.md](cli-daemon.md) · [serve.md](serve.md) · [sim-kernel.md](../kernel/sim-kernel.md)（ReplayLog 证伪先例）
-> **落地**：S31-R1（commit `28cf93a`…`6692e17`，分支 `feature/s31-rt-r1`）· S31-R2（分支 `feature/s31-rt-r2`，基线 `f22a07f`）
+> **落地**：S31-R1（commit `28cf93a`…`6692e17`，分支 `feature/s31-rt-r1`）· S31-R2（分支 `feature/s31-rt-r2`，基线 `f22a07f`）· S31-R3（分支 `feature/s31-rt-r3`，基线 `767ce68`）
 
 ## 1. 宿主形态（D1）
 
@@ -40,12 +40,12 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 ### 2.3 帧记录（`FrameRecord`，JSONL 一行一帧）
 
 ```json
-{"dt_ms":17,"hash":"<64hex>","input":"k=-;p=-;r=-;m=0,0,0","n":1,"state":"<64hex>","hash":"<64hex>"}
+{"audio":"<64hex>","dt_ms":17,"frame":"<w>x<h>|<64hex>","hash":"<64hex>","input":"k=-;p=-;r=-;m=0,0,0","n":1,"state":"<64hex>"}
 ```
 
-字段序 = 字典序（serde_json 默认 Map = BTreeMap，与驱动信封同口径）→ 同记录同字节。`state` = 每帧 `dispatch("save","")` 信封 `save` 字段重序列化字节的 SHA-256（覆盖实体+KV+pending_choice；`canonical_state_bytes` 只有实体面，KV 才是 mod 游戏状态的大头）。
+字段序 = 字典序（serde_json 默认 Map = BTreeMap，与驱动信封同口径；`audio` < `dt_ms` < `frame` < `hash`）→ 同记录同字节。`state` = 每帧 `dispatch("save","")` 信封 `save` 字段重序列化字节的 SHA-256（覆盖实体+KV+pending_choice；`canonical_state_bytes` 只有实体面，KV 才是 mod 游戏状态的大头）。
 
-可选字段 `frame`（S31-R2 加性；present 过才有，无则**整键缺席**——R1 录制行字节逐字节不变）：值为 `"<w>x<h>|<64hex 全幅 digest>"`（本帧末次 present；同帧多次 present 末次为准）。回放**严格对表**：录有实无/录无实有/同有不同值均 mismatch——Mod 渲染行为漂移 = 该红的证据。
+可选字段 `frame`（S31-R2 加性；present 过才有）与 `audio`（S31-R3 加性；本帧有活动 voice 才有）——无则**整键缺席**（R1 录制行字节逐字节不变）。`frame` = `"<w>x<h>|<64hex 全幅 digest>"`（本帧末次 present；同帧多次 present 末次为准）；`audio` = 本帧窗口 digest（§2.5 规范序）。回放**严格对表**（三闸，I8/I9）：录有实无/录无实有/同有不同值均 mismatch——Mod 渲染或音频行为漂移 = 该红的证据。
 
 ### 2.4 渲染面数据形状（S31-R2）
 
@@ -54,6 +54,16 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 - **帧 digest 规范序**：`SHA256("ygg.rt.frame.v1|<w>x<h>|" ++ RGBA8 行主序顶行在前原始字节)`——尺寸入前像防异形同字节碰撞。KAT 钉值（python3 hashlib 预算法独立复算，`tests/frame_face.rs` 逐字节钉）：K1 2×2 全 0x102030FF = `e659996d…4860e53a`；K2 4×3 黑底+中行红 = `a7402522…b6d042a`；K3 K2+blit 2×1 绿@(1,1) = `496e8c20…9a66c`；K4 4×3 全红（span(−1,−1,9,9)≡clear——钳制语义被钉）= `d6c3d184…2dfc45d`。
 - **脏区**：写并集最小外包矩形；present 读出后**复位**（无写 = nil）；clear = 全幅。
 - **输出双通道**（读侧，零确定性影响）：PPM 落盘（`--ppm <目录>` → `f%06d.ppm`，P6 头 `P6\n<w> <h>\n255\n`+RGB 弃 alpha，帧号即名零索引文件）+ 内嵌预览端口（`--preview <端口>`：GET `/` canvas 页、GET `/stream` SSE 推 base64 RGBA、POST `/api/input` 输入回注——回注走 `InputDevice::at` 既有入口、仅录制模式消费，录制语义不变）。
+
+### 2.5 音频面数据形状（S31-R3）
+
+- **单混音面**（`open` 装载期开，v1 一面，再开 `YGG-RT-OPENED`），rate ∈ 8000..=48000 缺省 22050（= Saltline bundle sr），**ch 固定 1**（Saltline 10 条全单声道，mono 下 pan 无定义——ch=2+pan 同轮才有意义，推 S30+）。
+- **voice**：`play(h, pcm, {gain})` 入队即刻播——pcm = s16 小端单声道串（assetgen `sound.*` 直喂，0 < 样本数 ≤ rate×10s），gain 千分比整数 0..=2000 缺省 1000，**入队时烘焙**（`s·gain/1000` 截断除法后饱和钳到 i16，后改不追溯 = 确定性）；voice 整数 1 起、号不回收；并发 ≤ 64 超限 `YGG-RT-AUDIO-CAP`。`stop(h, v)` **帧内生效**（已混完/未知 voice = no-op Ok——v1 不留墓碑）。
+- **窗口样本数 = I1 镜像**：`samples(n) = ⌊logical_n·rate/1000⌋ − ⌊logical_{n−1}·rate/1000⌋`——纯整数零漂移；22050@60Hz 每 1000ms 恰 22050 样本（KAT 钉）。play→混入延迟 = **0 帧**（handler 内 play 当帧窗口即混出；混音序 = 帧序 = 录制序）。
+- **混音 = 饱和整数加法**（assetgen `sound.mix` 先例：voice = 同帧同起点的时间对齐层，逐层整数和、[-32768,32767] 钳制、不做二次归一）；voice 跨帧续播（cursor 推进，混完出队）。
+- **混音 digest 规范序**：`SHA256("ygg.rt.audio.v1|<rate>x1|" ++ 本帧窗口 s16 小端字节)`——rate 与 ch 入前像防异率同字节碰撞。本帧无活动 voice → 窗口照写静音进整局流（WAV 时长不失真）、`FrameRecord.audio` **整键缺席**（镜像 frame 键规则）。KAT 钉值（python3 hashlib 预算独立复算，`tests/audio_face.rs` 逐字节钉）：A1 单 voice 帧 1 窗口 = `03b13be1…989b9ebd`；A2 饱和上下界 = `2c7290cc…fa017af`；A3 gain 烘焙 = `7e8ff0e2…658d263d`；A4 22050 样本整局流 = `605c7efe…9adee76f`；A5 其 WAV 全文件 = `89536fd6…2692318`；A6/A7 端到端 4 帧 fire 会话与 WAV = `2da8c094…2542e72a9b` / `40727177…b31b0424`。
+- **WAV 通道**（读侧，零确定性影响）：`--audio <路径>` = 整局混音流单 WAV（44 字节 RIFF 头关停时定稿 + s16 小端交织；assetgen `wav16` 恒等先例：`byteRate = sr·ch·2`、`blockAlign = ch·2`）。Mod 未 open 音频面则不写文件（无采样率即无流——R1/R2 mod 走音频无关通道）。回放侧同序重派 = 同字节（两次重放 `cmp` 全等钉住）。
+- **live-out 裁决**：cpal 拒绝（零新增依赖红线 + 回调线程属墙钟域契约外不可钉验收 + digest 可验的 WAV 通道已覆盖目标）；人耳抽验 = 事后 `afplay`（不进热循环不进代码）。
 
 ## 3. 不变量
 
@@ -65,6 +75,7 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 - **I6 录制即可回放**：截断录制（错误帧之前的部分）回放到同位同红；回放不产生录制副作用。
 - **I7 渲染零混色直写**（S31-R2）：clear/span/blit 全部直写覆盖、零 alpha 混色；越界静默钳制（零面积 no-op）；全整数参数（浮点 = `YGG-RT-SHAPE`）。混色属 R3+ 裁决，最小面不预支。
 - **I8 帧 digest 不入链**（S31-R2，D9）：`FrameRecord.frame` 是旁路证据线——链公式 I2 的输入元组零变化；回放对 frame 字段**严格对表**（录有实无/录无实有/不同值均 mismatch），与 I2 的链哈希比对并列成双闸。失败帧不留半帧证据（present 未达即无 frame 字段；派发入口清捕获槽）。
+- **I9 混音 digest 不入链**（S31-R3）：`FrameRecord.audio` 同为旁路证据线（D9 同构）——链公式 I2 输入元组零变化，R1/R2 旧录制行字节零回退；回放对 audio 字段**严格对表**（同 I8 三负例语义），与 I2/I8 并列三闸。混音挂在 dispatch **成功后**（失败帧不留半帧混音证据，voice 残留随循环即停自然终结）；音频面是宿主旁路状态，天然不入 `state_digest`（同帧缓冲）。
 
 ## 4. API 面（`ygg.rt.*`）
 
@@ -80,12 +91,15 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 | `ygg.rt.frame.span` | 运行期写 | `span(h,x,y,w,hh,rgba)` 实心矩形段；x/y 可负、越界钳制（零面积 no-op）；负 w/hh = `YGG-RT-SHAPE`；rgba = i64 打包 0xRRGGBBAA 直写不混色 |
 | `ygg.rt.frame.blit` | 运行期写 | `blit(h,x,y,w,bytes)` bytes = RGBA8 行串（len 必须为 w×4 正整数倍，否则 `YGG-RT-SHAPE`）；直写覆盖、越界钳制 |
 | `ygg.rt.frame.present` | 运行期写 | `present(h) → {digest, dirty, frame}`；digest = 全幅 SHA-256（§2.4 规范序）；dirty = 自上帧 present 以来写并集矩形（无写 nil，读后复位）；同帧多次 present 合法，末次为准（旁路捕获槽进 `FrameRecord.frame`） |
+| `ygg.rt.audio.open` | **仅装载期** | `open({rate=?}) → handle`（整数 1 起；v1 单混音面，再开 `YGG-RT-OPENED`）；rate∈8000..=48000 缺省 22050；ch 固定 1；seal 后 `YGG-RT-SEALED`（与 config/frame.open 同禁令）；形状闭集（只收 `rate` 键） |
+| `ygg.rt.audio.play` | 运行期写 | `play(h, pcm, gain?) → voice`；pcm = s16 小端单声道串（0<样本数≤rate×10s，奇数字节/空 = `YGG-RT-SHAPE`）；gain 千分比整数 0..=2000 缺省 1000（入队时烘焙）；voice 整数 1 起；并发 ≤64 超限 `YGG-RT-AUDIO-CAP`；play→混入 = 0 帧 |
+| `ygg.rt.audio.stop` | 运行期写 | `stop(h, v)` 即刻静默（帧内生效——本帧窗口即无贡献）；已混完/未知 voice = no-op Ok（v1 不留墓碑） |
 
 配置合流优先级：**CLI > Mod 装载期声明 > 默认**（`examples/rt/` 合流点）。run 模式下 `ygg.rt.*` 照常注册（表始终在）：input 读到中性快照、loop.info 报 mode=run——单一代码路径，不静默降级。
 
 ### 4.1 `examples/rt` CLI
 
-`<mod目录> [--frames N|--duration S] --record <路径> | --replay <路径>` + `--hz/--max-catchup/--event/--input/--boot/--fuel/--ppm/--preview`。stdout 单 JSON 摘要（`ok/mode/frames/fpsDispatch/droppedFrames/hashHead/firstMismatch`）；退出码 0/1/2。`--frames` 不限速（吞吐口径）；`--duration` 按 hz 实时节拍；`--event` 可指到既有 run 模式事件（兼容桥，如 Saltline `game.tick`）；`--boot` 循环前单次派发启动事件；`--ppm <目录>` present 帧落盘（S31-R2）；`--preview <端口>` 内嵌预览端口（S31-R2；不挂 serve——D10）。
+`<mod目录> [--frames N|--duration S] --record <路径> | --replay <路径>` + `--hz/--max-catchup/--event/--input/--boot/--fuel/--ppm/--preview/--audio`。stdout 单 JSON 摘要（`ok/mode/frames/fpsDispatch/droppedFrames/hashHead/firstMismatch`）；退出码 0/1/2。`--frames` 不限速（吞吐口径）；`--duration` 按 hz 实时节拍；`--event` 可指到既有 run 模式事件（兼容桥，如 Saltline `game.tick`）；`--boot` 循环前单次派发启动事件；`--ppm <目录>` present 帧落盘（S31-R2）；`--preview <端口>` 内嵌预览端口（S31-R2；不挂 serve——D10）；`--audio <路径>` 整局混音流单 WAV（S31-R3，未 open 音频面则不写文件）。
 
 ### 4.2 预览端口（S31-R2）
 
@@ -93,7 +107,7 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 
 ## 5. 确定性契约（声明收窄）
 
-只证「**同 seed + 同录制 → 逐帧同哈希链**」，不证「两次直播同哈希」（直播输入到达本质非确定）。内核 seed 是编译期常量（`inject::KERNEL_RNG_SEED`），不进录制文件。燃料耗尽是确定性事件（VM 指令计数确定）：录制与回放同位复现（`rt_fuel_exhaustion_is_deterministic_and_replay_reproduces_it`）。证伪语义 = first_mismatch（仿 ygg-sim ReplayLog）：篡改任一 dt / 键序 / 配置 → 恰在被篡帧红（`rt_replay_catches_tampered_*` 三例）。
+只证「**同 seed + 同录制 → 逐帧同哈希链**」，不证「两次直播同哈希」（直播输入到达本质非确定）。内核 seed 是编译期常量（`inject::KERNEL_RNG_SEED`），不进录制文件。燃料耗尽是确定性事件（VM 指令计数确定）：录制与回放同位复现（`rt_fuel_exhaustion_is_deterministic_and_replay_reproduces_it`）。证伪语义 = first_mismatch（仿 ygg-sim ReplayLog）：篡改任一 dt / 键序 / 配置 → 恰在被篡帧红（`rt_replay_catches_tampered_*` 三例）。音频面同域：录制→回放链全等 ∧ audio 字段全等 ∧ 两次重放 WAV 字节全等（`audio_end_to_end_fire_wav_pins_and_absence_rule` + Leg B `cmp` 实测三钉）。
 
 ## 6. 性能预算（实测，方法在列）
 
@@ -107,8 +121,12 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 | **渲染面 host 上界（S31-R2）** | **52364 千像素/s**（60 帧 320×200 全帧 span 化 73.3ms，release） | `cargo test -p ygg-sandbox --release --test frame_face frame_throughput -- --nocapture`（同测试 dev 模式 ≈90fps 亦达标；CI 只设灾难下限 500ms/2000ms 不卡阈值） |
 | **渲染面端到端 fps_dispatch（S31-R2）** | **780.5–786.4**（320×200 全帧 = 320 列×3 span+1 blit+present，release；三跑同 hashHead）；dev 构建 80.8–84.2 亦达标 | `examples/rt <320×200 fixture mod> --frames 60 --record`（2026-11-22，同构 mod 形状见 `tests/frame_face.rs::FRAME_THROUGHPUT_MOD`） |
 | **帧 digest 成本（S31-R2）** | 全幅 256KB SHA-256 含于上界口径内（73.3ms/60 帧 = 1.2ms/帧全含：960 span+digest+快照） | 同上 |
+| **混音成本（S31-R3）** | 64 voice 满载 × 600 帧（dev）实测 < 0.5ms/帧登记停阈值（测试打印实测 µs/帧；CI 只断言灾难下界 500µs/帧） | `cargo test -p ygg-sandbox --test audio_face audio_mix_latency -- --nocapture`（2026-11-22，dev 构建） |
+| **Leg A 真桥 fps_dispatch（S31-R3 复测）** | **154.3**（Saltline 同 mod 同事件桥 120 帧，vs R1 基线 155.4 同量级；零派发错误零弃帧）；同录制回放 120/120 链全等 | `YGG_PACKAGES_ROOT=<repo>/packages/libs ./target/debug/examples/rt ~/WorkHub/Saltline-YGG --boot game.boot --fuel 4000000 --event game.tick --frames 120 --record`（2026-11-22，dev） |
+| **R1 回放链复跑（S31-R3）** | 10s 实时录制 600 帧 @60.0fps 零弃帧；回放 **600/600** 链全等（3.9s，与 R1 证据同口径） | 同上 `--duration 10 --record` → `--replay` |
+| **Leg B 实弹一局（S31-R3）** | 1800 帧（30s）60 次开火+鼠标转向：链全等 ∧ audio 字段全等（480 帧有键）∧ 两次重放 WAV `cmp` 字节全等；30s 恰 661500 样本（零漂移）；`afplay` 人耳抽验通过 | `examples/rt tests/fixtures/rt-audio-demo --frames 1800 --record --audio <wav> --input <jsonl>` → 两次 `--replay --audio`（dev 构建 fps_dispatch 87.0，R2 同量级渲染面 dev 80.8–84.2） |
 
-预算声明：每帧非 Lua 宿主开销 = 1 次 dispatch（转换+信封）+ 1 次 save 信封序列化 + 2 次 SHA-256（状态摘要+链推进）；S31-R2 渲染帧另加全幅 digest（present 时）+ 输出快照（仅 present 过的帧）——780 fps 实测余量 ≥ 13×（780/60）。R3 音频面的预算增量在其轮的实测节追加本表。
+预算声明：每帧非 Lua 宿主开销 = 1 次 dispatch（转换+信封）+ 1 次 save 信封序列化 + 2 次 SHA-256（状态摘要+链推进）；S31-R2 渲染帧另加全幅 digest（present 时）+ 输出快照（仅 present 过的帧）——780 fps 实测余量 ≥ 13×（780/60）；S31-R3 音频帧另加帧末混音（voice 取头饱和累加+窗口 digest，仅 voice 活动帧）——64 voice 满载实测 < 0.5ms/帧登记停阈值（实测节见上表）。
 
 ## 7. 设计依据
 
@@ -123,3 +141,20 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 - **D9 帧 digest 不入链（S31-R2）**：链公式 I2 的输入元组（H(n−1)|n|dt|规范串|状态摘要）零变化——链动即废 R1 录制（回放确定性红线）；位图证据走 `FrameRecord.frame` 独立字段线，与 D4 双层证据并列第三线；回放严格对表（录有实无/录无实有均 mismatch）使「Mod 渲染行为漂移」可证伪。
 - **D10 预览端口内嵌而非挂 serve（S31-R2）**：serve 契约 = 零内核不连运行进程；推帧数据源在 rt 进程，挂 serve 须先造 serve↔rt IPC 桥 = 破坏观察面架构。内嵌 `examples/rt/preview.rs`（std TcpListener+HTTP/SSE，仿 serve/http.rs 先例，零新增依赖）；输入回注走 `InputDevice::at` 既有入口仅录制模式消费——回放语义不变。
 - **D11 五键闭集零混色（S31-R2）**：直写覆盖、越界钳制、全整数参数；调色板/精灵语义留 Mod 侧（Saltline mat×shade 查表零开销；精灵列程 blit + 深度遮挡 `f<dist[col]` 是 Mod 逻辑）——host 不持渲染语义，五键闭集不膨胀；混色（alpha blend）属 R3+ 裁决，最小面不预支。
+- **D12 三键最小面 + cpal 拒绝（S31-R3）**：open/play/stop 闭集——gain 入队烘焙后改不追溯（确定性）；stop 无墓碑（混完/未知 = no-op，v1 不保留全生命周期登记）；ch 固定 1（Saltline 10 条全单声道，pan 无定义，ch=2+pan 同轮才有意义）。live-out 拒 cpal：(a) 零新增依赖红线（跨平台音频驱动栈）；(b) 回调线程属墙钟域，契约外不可钉验收；(c) digest 可验的 WAV 通道已覆盖 R3 目标。S30 若需人耳在环 <50ms 再启白名单论证；预览端口 SSE 推音频（WebAudio，零依赖）列 S30 可选项。
+- **D13 帧同步混音 + 静音窗口照写（S31-R3）**：混音挂 dispatch_frame 帧末（present 槽旁）——handler 内 play 当帧窗口即混出（play→混入 = 0 帧），stop 帧内生效；混音序 = 帧序 = 录制序，录制即真源。无活动 voice 的帧窗口照写静音进整局流（WAV 时长不失真：30s 录制恰 661500 样本实测钉住），audio 键整键缺席（镜像 frame 键规则）——证据缺席 ≠ 时间缺席。
+
+## 8. Saltline 改造点八条 × 落地核对（S31-R3 附表）
+
+| # | 项 | host 侧 | Saltline 侧 |
+| --- | --- | --- | --- |
+| ① | rt 输入映射 ACTIONS | 就绪（R1 输入面+桥 154.3fps 复测） | 待 S30 |
+| ② | dt 定点积分 | 就绪（I1 定步 dt+logical_ms） | 待 S30（weapons.lua now 已 ms 口径，接 logical_ms 最小） |
+| ③ | cast→span+调色板 | 就绪（780fps@320×200 实测） | 待 S30（列数据映射+调色板数据化） |
+| ④ | sprites→RGBA | 就绪（blit） | 待 S30（展开器，assetgen raster 源） |
+| ⑤ | compose→present+hud | 就绪（present） | 待 S30（移植） |
+| ⑥ | golden 双轨 | 就绪（K1–K4+回放严格对表三负例） | 待 S30（bitmap golden） |
+| ⑦ | weather 不动 | — | 本轮 Leg A 回归即验（154.3fps 零派发错误） |
+| ⑧ | 武器/天气挂 audio.play | **就绪（S31-R3 交付面：三键+帧末混音+WAV）** | bundle 10 条+事件表已在（`src/assets/bundle.lua`）；挂接待 S30 |
+
+结论：host 侧就绪 **8/8**（⑥机制⑦免改计入）；Saltline 侧 8/8 待 S30。S31-R3 新增交付 = ⑧面 + 全链证据（Leg B 实弹一局）。真 mod 实弹的结构性障碍如实声明：`Saltline-YGG/mod.lua:601` 解析链非 JSON 非数字 → index=1，unmodified 下不可选动作 → 射击不可达；unmodified 双腿 smoke 已钉（Leg A 桥回归 + Leg B fixture 实弹）。

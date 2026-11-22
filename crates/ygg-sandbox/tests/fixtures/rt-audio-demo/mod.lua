@@ -1,34 +1,25 @@
 -- rt-audio-demo（S31-R3）：rt 面四件全走通的实弹一局——cast 列 span +
--- 精灵 blit + 鼠标 dx 转向列偏移 + 开火键→ygg.rt.audio.play（波形 = Saltline
--- bundle sfx_rifle_shot 参数子集，整数参数只读引用：sr=22050 ms=120 ch=1
--- amp=900 lp=620，src/assets/bundle.lua）。demo 证据跑法（rt-face.md §6）：
---   cargo run -p ygg-sandbox --example rt -- tests/fixtures/rt-audio-demo \
+-- 精灵 blit + 鼠标 dx 转向列偏移 + 开火键→ygg.rt.audio.play。
+-- 波形参数抄 Saltline bundle sfx_rifle_shot（sr=22050 ms=120 ch=1 amp=900
+-- lp=620，src/assets/bundle.lua 整数参数只读引用）：mod 沙箱白名单无
+-- string/table 库，故波形以 64 字节种子 × 整周期 `..` 拼装（32 样本 × 80
+-- 周期 = 2560 样本 ≈ 116ms，形状 = 衰减爆裂，非逐样本复刻）。
+-- demo 证据跑法（rt-face.md §6）：
+--   cargo run -p ygg-sandbox --example rt -- crates/ygg-sandbox/tests/fixtures/rt-audio-demo \
 --     --frames 1800 --record /tmp/r3-rec.jsonl --audio /tmp/r3-rec.wav \
---     --input tests/fixtures/rt-audio-demo/input-30s.jsonl
--- 回放（两次重放 WAV 字节全等）：
---   ... --replay /tmp/r3-rec.jsonl --audio /tmp/r3-rep.wav
+--     --input crates/ygg-sandbox/tests/fixtures/rt-audio-demo/input-30s.jsonl
+-- 回放两次 WAV 字节全等：
+--   ... --replay /tmp/r3-rec.jsonl --audio /tmp/r3-rep1.wav   （再跑 rep2）
 local h = ygg.rt.frame.open({w = 320, h = 200})
 local a = ygg.rt.audio.open({rate = 22050})
 
--- Saltline bundle SOUNDS[1] 参数（只读引用）：sfx_rifle_shot 噪声爆
--- 整数 LCG 噪声 + 一阶低通（lp/22050 定点比），s16 小端单声道。
-local SR, MS, AMP, LP = 22050, 120, 900, 620
-local seed = 4711
-local function shot_pcm()
-  local n = (SR * MS) // 1000
-  local acc, parts = 0, {}
-  for _ = 1, n do
-    seed = (seed * 1103515245 + 12345) % 2147483648
-    local white = (seed % 65536) - 32768
-    acc = acc + (white - acc) * LP // SR
-    local v = acc * AMP // 32768
-    if v > 32767 then v = 32767 elseif v < -32768 then v = -32768 end
-    local u = v % 65536
-    parts[#parts + 1] = string.char(u % 256, u // 256)
-  end
-  return table.concat(parts)
-end
-local SHOT = shot_pcm()
+-- 32 样本衰减爆裂（s16 小端手写字面量，amp=900 域内整数）。
+local SEED = "\x84\x03\x10\xfc\xae\x02\x5a\xfd\x02\x02\xe2\xfd\x8c\x01\x38\xfe" ..
+             "\xd4\x00\x9a\xfe\x62\x00\x34\xff\x10\x00\xf4\xff\xe0\xff\xd0\xff" ..
+             "\x9a\x01\x30\xfc\x7c\x01\xaa\xfd\x06\x01\x52\xfe\xce\x00\x1e\xff" ..
+             "\x8a\x00\xe2\xff\x56\x00\x9a\xff\x2a\x00\x52\xff\x04\x00\x12\x00"
+local SHOT = SEED
+for _ = 2, 80 do SHOT = SHOT .. SEED end  -- 32×80 = 2560 样本 ≈ 116ms@22050
 
 local yaw = 0
 ygg.on("rt.tick", function()
