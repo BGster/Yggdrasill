@@ -108,4 +108,10 @@ impl KernelFacade {
     pub fn frame_handle(&self) -> std::rc::Rc<std::cell::RefCell<crate::frame::FrameFace>> {
         self.host.frame_handle()
     }
+
+    /// 取音频面句柄（S31 R3；Mod 经 `ygg.rt.audio.*` 写，引擎每帧帧末混音、
+    /// 宿主关停时取整局流出 WAV，不经 Lua 边界）。与 Lua 面同一个 `Rc`。
+    pub fn audio_handle(&self) -> std::rc::Rc<std::cell::RefCell<crate::audio::AudioFace>> {
+        self.host.audio_handle()
+    }
 }

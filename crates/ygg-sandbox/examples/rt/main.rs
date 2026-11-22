@@ -23,6 +23,9 @@
 //!   --fuel N            显式燃料预算（写 YGG_FUEL_BUDGET：env 最优先语义不变）
 //!   --ppm <目录>        帧落盘通道：present 过的帧写 <目录>/f%06d.ppm
 //!                       （P6；headless/selftest/KAT 证据）
+//!   --audio <路径>      混音落盘通道（S31-R3）：整局混音流单 WAV（44 字节头
+//!                       关停时定稿 + s16 小端单声道；Mod 未 open 音频面则
+//!                       不写文件——无采样率即无流）
 //!   --preview <端口>    内嵌预览端口（127.0.0.1:端口）：GET / 页面、
 //!                       GET /stream SSE 推帧、POST /api/input 输入回注
 //!                       （回注仅录制模式消费；回放确定性不受影响）
@@ -59,7 +62,7 @@ fn usage_error(message: &str) -> ! {
         "error: {message}\n\n用法: cargo run -p ygg-sandbox --example rt -- <mod目录> \
          [--frames N|--duration S] [--record <路径>|--replay <路径>] [--hz N] \
          [--max-catchup N] [--event <名>] [--input <路径>] [--fuel N] \
-         [--ppm <目录>] [--preview <端口>]"
+         [--ppm <目录>] [--preview <端口>] [--audio <路径>]"
     );
     exit(2);
 }
@@ -131,6 +134,7 @@ fn main() {
     let mut fuel: Option<u64> = None;
     let mut ppm: Option<PathBuf> = None;
     let mut preview_port: Option<u16> = None;
+    let mut audio: Option<PathBuf> = None;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--hz" => {
@@ -174,6 +178,7 @@ fn main() {
                 });
             }
             "--ppm" => ppm = Some(PathBuf::from(next_value(&mut args, "--ppm"))),
+            "--audio" => audio = Some(PathBuf::from(next_value(&mut args, "--audio"))),
             "--preview" => {
                 let value = next_value(&mut args, "--preview");
                 preview_port = Some(match value.parse::<u16>() {
@@ -270,9 +275,35 @@ fn main() {
             &path,
             ppm.as_deref(),
             preview.as_ref(),
+            audio.as_deref(),
         ),
-        (_, Some(path)) => run_replay(&mut kernel, cfg, &path, ppm.as_deref(), preview.as_ref()),
+        (_, Some(path)) => run_replay(
+            &mut kernel,
+            cfg,
+            &path,
+            ppm.as_deref(),
+            preview.as_ref(),
+            audio.as_deref(),
+        ),
         _ => unreachable!("arg gate 保证二选一"),
+    }
+}
+
+/// 混音落盘通道（读侧，零确定性影响）：Mod open 过音频面 → 整局流定稿 WAV。
+/// 未 open（无采样率）= 不写文件（无流可写；R1/R2 mod 走音频无关通道）。
+fn emit_audio_output(kernel: &KernelFacade, audio: Option<&Path>) {
+    let Some(path) = audio else {
+        return;
+    };
+    let face = kernel.audio_handle();
+    let face = face.borrow();
+    let Some(rate) = face.rate() else {
+        eprintln!("音频面未 open（无 ygg.rt.audio.open）：不写 WAV（{}）", path.display());
+        return;
+    };
+    if let Err(err) = ygg_sandbox::audio::write_wav(path, rate, face.session()) {
+        eprintln!("WAV 写盘失败（{}）：{err}", path.display());
+        std::process::exit(1);
     }
 }
 
@@ -333,6 +364,7 @@ fn run_record(
     path: &Path,
     ppm: Option<&Path>,
     preview: Option<&preview::PreviewHandle>,
+    audio: Option<&Path>,
 ) -> ! {
     let mut host = RtHost::new(cfg.clone());
     if let Some(script) = input {
@@ -394,6 +426,8 @@ fn run_record(
         eprintln!("录制写盘失败：{err}");
         exit(1);
     }
+    // 混音通道（S31-R3）：整局流定稿 WAV（截断录制同理——关停时的流即证据）。
+    emit_audio_output(kernel, audio);
     let fps = records.len() as f64 / wall.as_secs_f64().max(f64::EPSILON);
     let mut summary = json!({
         "ok": failure.is_none(),
@@ -410,6 +444,9 @@ fn run_record(
     if let Some(err) = &failure {
         summary["error"] = json!(err.to_string());
     }
+    if let Some(path) = audio {
+        summary["audio"] = json!(path.display().to_string());
+    }
     println!("{summary}");
     exit(if failure.is_none() { 0 } else { 1 });
 }
@@ -422,6 +459,7 @@ fn run_replay(
     path: &Path,
     ppm: Option<&Path>,
     preview: Option<&preview::PreviewHandle>,
+    audio: Option<&Path>,
 ) -> ! {
     let records = match read_records(path) {
         Ok(records) => records,
@@ -445,6 +483,8 @@ fn run_replay(
         }
     }
     let wall = started.elapsed();
+    // 混音通道（S31-R3）：回放侧整局流定稿 WAV（同录制同序重派 = 同字节）。
+    emit_audio_output(kernel, audio);
     let ok = first_mismatch.is_none() && dispatch_error.is_none();
     let mut summary = json!({
         "ok": ok,
@@ -464,6 +504,9 @@ fn run_replay(
     }
     if let Some(err) = dispatch_error {
         summary["error"] = json!(err);
+    }
+    if let Some(path) = audio {
+        summary["audio"] = json!(path.display().to_string());
     }
     println!("{summary}");
     exit(if ok { 0 } else { 1 });

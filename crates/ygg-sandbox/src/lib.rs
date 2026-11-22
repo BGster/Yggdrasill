@@ -17,6 +17,7 @@
 
 pub mod codec_face;
 pub mod driver;
+pub mod audio;
 pub mod frame;
 pub mod fuel;
 pub mod hash;

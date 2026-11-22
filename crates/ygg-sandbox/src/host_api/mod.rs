@@ -67,6 +67,7 @@ use crate::inject::splitmix64;
 
 // ---- 模块化拆分 shim(S-25 批三 C1:纯搬移;既有路径逐字节不变)----
 mod entity;
+mod audio;
 mod entity_decode;
 mod frame;
 mod fs;
@@ -163,6 +164,10 @@ pub struct HostState {
     /// 渲染面（S31 R2；`ygg.rt.frame.*` 的共享背面）：Mod 经五键写，引擎每帧
     /// 读旁路捕获槽收进 `FrameRecord.frame`（不入链，D9），宿主读快照出双通道。
     frame: Rc<RefCell<crate::frame::FrameFace>>,
+    /// 音频面（S31 R3；`ygg.rt.audio.*` 的共享背面）：Mod 经三键写（open/
+    /// play/stop），引擎每帧帧末混音收进 `FrameRecord.audio`（不入链，I9），
+    /// 宿主关停时取整局流出 WAV。`install` 自建。
+    audio: Rc<RefCell<crate::audio::AudioFace>>,
     /// 当前执行相位（装载期 `Loading`，封口后待机 `Idle`，handler 执行期间 `Transition`）。
     phase: Phase,
     sealed: bool,
@@ -197,6 +202,7 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         sim: Rc::new(RefCell::new(None)),
         rt: Rc::new(RefCell::new(rt::RtFrame::default())),
         frame: Rc::new(RefCell::new(crate::frame::FrameFace::new())),
+        audio: Rc::new(RefCell::new(crate::audio::AudioFace::new())),
         phase: Phase::Loading,
         sealed: false,
         // per-kernel sentinel：内核种子派生（splitmix64 四轮），Mod 面不可预测
@@ -229,6 +235,8 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     rt::install_rt(lua, &state)?;
     // `ygg.rt.frame.*`（S31 R2：渲染面五键；open 装载期限定，写键运行期）。
     frame::install_frame(lua, &state)?;
+    // `ygg.rt.audio.*`（S31 R3：音频面三键；open 装载期限定，play/stop 运行期）。
+    audio::install_audio(lua, &state)?;
     // `ygg.codec.*`（Tier 2 pkg.codec 的原生加速面；契约 lua-api.md §3.1.4）。
     // 无状态、无实例，所以没有 `set_*` 注入面，也不需要 CLI 激活。
     crate::codec_face::install(lua)?;
@@ -339,6 +347,12 @@ impl HostApi {
     /// 旁路捕获槽与输出快照走这条，与 `ygg.rt.*` 投影同一个 `Rc`）。
     pub fn frame_handle(&self) -> Rc<RefCell<crate::frame::FrameFace>> {
         Rc::clone(&self.state.borrow().frame)
+    }
+
+    /// 取音频面句柄（S31 R3；Mod 经 `ygg.rt.audio.*` 写，引擎每帧帧末混音、
+    /// 宿主关停时取整局流出 WAV——与 `ygg.rt.*` 投影同一个 `Rc`）。
+    pub fn audio_handle(&self) -> Rc<RefCell<crate::audio::AudioFace>> {
+        Rc::clone(&self.state.borrow().audio)
     }
 
     /// 注入或卸载模拟内核实例（`ygg.sim.*` 的宿主面，Tier 1）。
