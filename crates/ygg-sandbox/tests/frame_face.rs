@@ -197,6 +197,7 @@ fn frame_record_line_field_is_additive_and_byte_stable() {
         state: "0".repeat(64),
         hash: "1".repeat(64),
         frame: None,
+        audio: None,
     };
     // R1 形状：无 frame 键（行字节与 R1 逐字节同口径）。
     let line = base.to_line().expect("to_line");

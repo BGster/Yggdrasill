@@ -15,6 +15,7 @@
 //! 装载前收口成 `ModuleSet`）；r3 填充 `modload`（Mod 目录 → 内核的**唯一装载口**：
 //! 走查与实跑共用同一份读盘/对账/构造语义，宿主侧 IO 只在这里）。
 
+pub mod audio;
 pub mod codec_face;
 pub mod driver;
 pub mod frame;

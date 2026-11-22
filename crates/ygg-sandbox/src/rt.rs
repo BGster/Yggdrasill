@@ -218,13 +218,18 @@ pub struct FrameRecord {
     /// `<w>x<h>|<全幅 digest>`。旁路证据线（D9）——**不入链**：链公式与
     /// R1 录制字节零变化；回放严格对表（录有实无/录无实有均 mismatch）。
     pub frame: Option<String>,
+    /// 帧混音证据（S31 R3，**可选**；本帧有活动 voice 才有）：本帧窗口的
+    /// `SHA256("ygg.rt.audio.v1|<rate>x1|" ++ s16 字节)`。旁路证据线（I9，
+    /// D9 同构）——**不入链**：链公式与 R1 录制字节零变化；回放严格对表
+    /// （录有实无/录无实有均 mismatch）。无活动 voice → 整键缺席。
+    pub audio: Option<String>,
 }
 
 impl FrameRecord {
     /// JSONL 行（serde_json 默认 Map = BTreeMap 字典序，同记录同字节——
     /// 与驱动信封同一确定性口径；不引 serde derive 依赖，字段手写）。
-    /// `frame` 有则写入（字典序落在 `dt_ms` 与 `hash` 之间）；无则整键缺席
-    /// ——R1 录制（无渲染面）行字节逐字节不变。
+    /// `frame`/`audio` 有则写入（字典序落在各自位：audio < dt_ms < frame <
+    /// hash）；无则整键缺席——R1/R2 录制（无渲染/音频面）行字节逐字节不变。
     pub fn to_line(&self) -> Result<String, RtError> {
         let mut line = json!({
             "n": self.n,
@@ -235,6 +240,9 @@ impl FrameRecord {
         });
         if let Some(frame) = &self.frame {
             line["frame"] = json!(frame);
+        }
+        if let Some(audio) = &self.audio {
+            line["audio"] = json!(audio);
         }
         serde_json::to_string(&line)
             .map_err(|err| RtError::Record(format!("记录序列化失败：{err}")))
@@ -266,6 +274,15 @@ impl FrameRecord {
                 ))
             }
         };
+        let audio = match &value["audio"] {
+            Json::Null => None,
+            Json::String(text) => Some(text.clone()),
+            _ => {
+                return Err(RtError::Record(
+                    "记录 `audio` 字段非字符串（混音证据为 64hex 窗口摘要）".to_owned(),
+                ))
+            }
+        };
         Ok(Self {
             n,
             dt_ms,
@@ -273,6 +290,7 @@ impl FrameRecord {
             state: field("state")?,
             hash: field("hash")?,
             frame,
+            audio,
         })
     }
 }
@@ -349,7 +367,8 @@ impl RtHost {
     }
 
     /// 回放模式一步：dt 与输入都来自录制记录（同序重派），重算链哈希与
-    /// 渲染证据并与录制比对——链哈希或帧字段任一失配即首处失配。
+    /// 渲染/混音证据并与录制比对——链哈希、frame、audio 任一失配即首处
+    /// 失配（三闸：I2 链 ∧ D9 渲染严格对表 ∧ I9 混音严格对表）。
     pub fn step_replay(
         &mut self,
         facade: &mut KernelFacade,
@@ -358,21 +377,30 @@ impl RtHost {
         let input = RtInput::parse(&record.input).map_err(RtError::Record)?;
         let actual = self.dispatch_frame(facade, record.n, record.dt_ms, &input)?;
         self.next_n = record.n + 1;
-        // 链哈希比对（I2）+ 帧渲染证据严格对表（D9）：录有实无/录无实有/
-        // 同有不同值均 mismatch——Mod 渲染行为漂移 = 该红的证据。
+        // 链哈希比对（I2）+ 帧渲染证据严格对表（D9）+ 帧混音证据严格对表
+        // （I9）：录有实无/录无实有/同有不同值均 mismatch——Mod 渲染或音频
+        // 行为漂移 = 该红的证据。
         let hash_match = actual.hash == record.hash;
         let frame_match = actual.frame == record.frame;
-        let (expected, actual_key) = if hash_match {
+        let audio_match = actual.audio == record.audio;
+        // 失配报告按闸序取第一处：链哈希 → frame → audio（链哈希全等时
+        // frame 键单独成证；frame 同样全等时 audio 键单独成证）。
+        let (expected, actual_key) = if !hash_match {
+            (record.hash.clone(), actual.hash)
+        } else if !frame_match {
             (
                 record.frame.clone().unwrap_or_else(|| "-".to_owned()),
                 actual.frame.clone().unwrap_or_else(|| "-".to_owned()),
             )
         } else {
-            (record.hash.clone(), actual.hash)
+            (
+                record.audio.clone().unwrap_or_else(|| "-".to_owned()),
+                actual.audio.clone().unwrap_or_else(|| "-".to_owned()),
+            )
         };
         Ok(ReplayStep {
             n: record.n,
-            matched: hash_match && frame_match,
+            matched: hash_match && frame_match && audio_match,
             expected,
             actual: actual_key,
         })
@@ -467,6 +495,16 @@ impl RtHost {
             let taken = face.borrow_mut().take_presented().map(|p| p.record_key());
             taken
         };
+        // 帧混音（S31 R3 旁路，不入链——I9）：帧末按 I1 镜像窗口混出本帧
+        // s16 样本；handler 内 play 的 voice 当帧窗口即混出（play→混入 = 0
+        // 帧），stop 帧内生效。失败路径不会走到这里（提前 return）——失败
+        // 帧不留半帧混音证据，voice 残留随循环即停自然终结。
+        let audio = {
+            let logical = facade.rt_handle().borrow().logical_ms;
+            let face = facade.audio_handle();
+            let mut mix = face.borrow_mut();
+            mix.mix_frame(logical).map(|m| m.digest)
+        };
         self.chain =
             hex_sha256(format!("{}|{n}|{dt_ms}|{canonical}|{state}", self.chain).as_bytes());
         Ok(FrameRecord {
@@ -476,6 +514,7 @@ impl RtHost {
             state,
             hash: self.chain.clone(),
             frame,
+            audio,
         })
     }
 }
