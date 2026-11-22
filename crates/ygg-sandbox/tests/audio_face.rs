@@ -73,10 +73,22 @@ end)
 fn record_audio_e2e() -> Vec<FrameRecord> {
     let mut kernel = KernelFacade::new(RT_AUDIO_MOD).expect("kernel");
     let mut host = RtHost::new(RtConfig::default());
-    host.input_at(2, InputEvent { down: vec![32], ..Default::default() })
-        .expect("schedule down");
-    host.input_at(3, InputEvent { up: vec![32], ..Default::default() })
-        .expect("schedule up");
+    host.input_at(
+        2,
+        InputEvent {
+            down: vec![32],
+            ..Default::default()
+        },
+    )
+    .expect("schedule down");
+    host.input_at(
+        3,
+        InputEvent {
+            up: vec![32],
+            ..Default::default()
+        },
+    )
+    .expect("schedule up");
     let mut sink = Vec::new();
     let done = record_frames(&mut kernel, &mut host, 4, &mut sink).expect("record 4");
     assert_eq!(done, 4);
@@ -96,14 +108,22 @@ fn audio_window_sequence_is_i1_mirror_and_pins_22050_per_second() {
         "窗口序列 = ⌊logical·rate/1000⌋ 差分"
     );
     // 1000ms 积分恰 22050（telescoping：⌊1000·22050/1000⌋ − ⌊0⌋）。
-    assert_eq!(window_samples(0, 1000, 22050), 22050, "每 1000ms 恰 22050 样本");
+    assert_eq!(
+        window_samples(0, 1000, 22050),
+        22050,
+        "每 1000ms 恰 22050 样本"
+    );
     assert_eq!(window_samples(0, 1000, 8000), 8000, "rate=8000 下界同构");
     assert_eq!(window_samples(0, 1000, 48000), 48000, "rate=48000 上界同构");
 
     // AudioFace 60 帧整局流长度 = 22050 字节×2；单 voice 4 样本仅帧 1 活动
     // （帧 2..60 无 voice = 键缺席，静音照入整局流）。
     let mut face = AudioFace::new();
-    assert_eq!(face.open(None).expect("open"), 1, "缺省 rate=22050、handle 1 起");
+    assert_eq!(
+        face.open(None).expect("open"),
+        1,
+        "缺省 rate=22050、handle 1 起"
+    );
     assert_eq!(face.rate(), Some(22050));
     let pcm = s16le(&[600, -600, 1200, -1200]);
     assert_eq!(face.play(&pcm, 1000).expect("play"), 1);
@@ -158,7 +178,10 @@ fn audio_kat_pins_saturation_and_gain_bake() {
     face.play(&s16le(&[0, 20000]), 2000).expect("v2");
     let mix = face.mix_frame(16).expect("digest");
     assert_eq!(mix.digest, A3, "A3：烘焙 KAT（40000 → 钳 32767）");
-    assert!(face.session()[..4].contains(&0xDC), "s16le 0x05DC=1500 小端含 DC");
+    assert!(
+        face.session()[..4].contains(&0xDC),
+        "s16le 0x05DC=1500 小端含 DC"
+    );
 }
 
 /// 22050 样本整局流钉（A4）+ WAV 头与全文件钉（A5）——字节级恒等。
@@ -181,12 +204,32 @@ fn audio_session_and_wav_pins_22050_samples() {
     assert_eq!(&wav[8..12], b"WAVE");
     assert_eq!(&wav[12..16], b"fmt ");
     assert_eq!(u32::from_le_bytes(wav[16..20].try_into().unwrap()), 16);
-    assert_eq!(u16::from_le_bytes(wav[20..22].try_into().unwrap()), 1, "PCM");
-    assert_eq!(u16::from_le_bytes(wav[22..24].try_into().unwrap()), 1, "ch=1");
+    assert_eq!(
+        u16::from_le_bytes(wav[20..22].try_into().unwrap()),
+        1,
+        "PCM"
+    );
+    assert_eq!(
+        u16::from_le_bytes(wav[22..24].try_into().unwrap()),
+        1,
+        "ch=1"
+    );
     assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 22050);
-    assert_eq!(u32::from_le_bytes(wav[28..32].try_into().unwrap()), 44100, "byteRate");
-    assert_eq!(u16::from_le_bytes(wav[32..34].try_into().unwrap()), 2, "blockAlign");
-    assert_eq!(u16::from_le_bytes(wav[34..36].try_into().unwrap()), 16, "bits");
+    assert_eq!(
+        u32::from_le_bytes(wav[28..32].try_into().unwrap()),
+        44100,
+        "byteRate"
+    );
+    assert_eq!(
+        u16::from_le_bytes(wav[32..34].try_into().unwrap()),
+        2,
+        "blockAlign"
+    );
+    assert_eq!(
+        u16::from_le_bytes(wav[34..36].try_into().unwrap()),
+        16,
+        "bits"
+    );
     assert_eq!(&wav[36..40], b"data");
     assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 44100);
     assert_eq!(wav.len(), 44 + 44100);
@@ -208,7 +251,10 @@ fn audio_open_is_closed_shape_single_face_and_seal_time_only() {
     assert!(matches!(face3.open(Some(7999)), Err(AudioError::Shape(_))));
     assert!(matches!(face3.open(Some(48001)), Err(AudioError::Shape(_))));
     // 未 open 就 play = 可读拒绝（handle 校验同族）。
-    assert!(matches!(face3.play(&s16le(&[1]), 1000), Err(AudioError::Shape(_))));
+    assert!(matches!(
+        face3.play(&s16le(&[1]), 1000),
+        Err(AudioError::Shape(_))
+    ));
 
     // Lua 面：未知键/浮点 rate 装载期即可读拒绝（ModLoad 失败携带拒绝码）。
     let bad = match KernelFacade::new("ygg.rt.audio.open({ what = 1 })") {
@@ -221,7 +267,8 @@ fn audio_open_is_closed_shape_single_face_and_seal_time_only() {
         Ok(_) => panic!("浮点 rate 必须拒绝"),
     };
     assert!(bad2.contains("YGG-RT-SHAPE"), "{bad2}");
-    let bad3 = match KernelFacade::new("ygg.rt.audio.open({ rate = 22050 }) ygg.rt.audio.open({})") {
+    let bad3 = match KernelFacade::new("ygg.rt.audio.open({ rate = 22050 }) ygg.rt.audio.open({})")
+    {
         Err(err) => err.to_string(),
         Ok(_) => panic!("再开必须拒绝"),
     };
@@ -247,16 +294,35 @@ end)
 fn audio_play_shape_is_closed_set() {
     let mut face = AudioFace::new();
     face.open(Some(22050)).expect("open");
-    assert!(matches!(face.play(&[], 1000), Err(AudioError::Shape(_))), "空 pcm 拒绝");
-    assert!(matches!(face.play(&[0x58], 1000), Err(AudioError::Shape(_))), "奇数字节拒绝");
+    assert!(
+        matches!(face.play(&[], 1000), Err(AudioError::Shape(_))),
+        "空 pcm 拒绝"
+    );
+    assert!(
+        matches!(face.play(&[0x58], 1000), Err(AudioError::Shape(_))),
+        "奇数字节拒绝"
+    );
     let oversize = vec![0u8; 22050 * 2 * 10 + 2];
-    assert!(matches!(face.play(&oversize, 1000), Err(AudioError::Shape(_))), "超 rate×10s 拒绝（220501 样本）");
+    assert!(
+        matches!(face.play(&oversize, 1000), Err(AudioError::Shape(_))),
+        "超 rate×10s 拒绝（220501 样本）"
+    );
     let exactly_10s = vec![0u8; 22050 * 2 * 10];
-    face.play(&exactly_10s, 1000).expect("恰 10s 合法（独占 voice 槽）");
+    face.play(&exactly_10s, 1000)
+        .expect("恰 10s 合法（独占 voice 槽）");
     face.stop(1);
-    assert!(matches!(face.play(&s16le(&[1]), -1), Err(AudioError::Shape(_))));
-    assert!(matches!(face.play(&s16le(&[1]), 2001), Err(AudioError::Shape(_))));
-    assert!(matches!(face.play(&s16le(&[1]), 0), Ok(_)), "gain=0 = 静音 voice 合法");
+    assert!(matches!(
+        face.play(&s16le(&[1]), -1),
+        Err(AudioError::Shape(_))
+    ));
+    assert!(matches!(
+        face.play(&s16le(&[1]), 2001),
+        Err(AudioError::Shape(_))
+    ));
+    assert!(
+        matches!(face.play(&s16le(&[1]), 0), Ok(_)),
+        "gain=0 = 静音 voice 合法"
+    );
     // voice 整数 1 起、跨 play 递增。
     assert_eq!(face.play(&s16le(&[1]), 1000).expect("v"), 3, "1,2 已用");
     // Lua 面浮点 gain / 非串 pcm 可读拒绝（经内核 handler）。
@@ -275,11 +341,16 @@ end)
     let mut host = RtHost::new(RtConfig::default());
     let mut sink = Vec::new();
     record_frames(&mut kernel, &mut host, 1, &mut sink).expect("frame");
-    let save: serde_json::Value =
-        serde_json::from_str(&kernel.dispatch("save", "")).expect("save");
+    let save: serde_json::Value = serde_json::from_str(&kernel.dispatch("save", "")).expect("save");
     let kv = &save["save"]["kv"]["entries"];
-    assert!(kv["e1"].as_str().unwrap_or("").contains("YGG-RT-SHAPE"), "{kv:?}");
-    assert!(kv["e2"].as_str().unwrap_or("").contains("YGG-RT-SHAPE"), "{kv:?}");
+    assert!(
+        kv["e1"].as_str().unwrap_or("").contains("YGG-RT-SHAPE"),
+        "{kv:?}"
+    );
+    assert!(
+        kv["e2"].as_str().unwrap_or("").contains("YGG-RT-SHAPE"),
+        "{kv:?}"
+    );
     assert_eq!(kv["v"], json_str("played"), "合法 play 通过");
 }
 
@@ -296,7 +367,10 @@ fn audio_voice_cap_is_64_and_release_reopens() {
     for v in 1..=64i64 {
         assert_eq!(face.play(&pcm, 1000).expect("play"), v);
     }
-    assert!(matches!(face.play(&pcm, 1000), Err(AudioError::Cap(_))), "第 65 个 CAP");
+    assert!(
+        matches!(face.play(&pcm, 1000), Err(AudioError::Cap(_))),
+        "第 65 个 CAP"
+    );
     assert_eq!(face.active_voices(), AUDIO_MAX_VOICES);
     // stop 释放一槽 → 可再 play。
     face.stop(7);
@@ -318,8 +392,7 @@ end)
     let mut host = RtHost::new(RtConfig::default());
     let mut sink = Vec::new();
     record_frames(&mut kernel, &mut host, 1, &mut sink).expect("frame");
-    let save: serde_json::Value =
-        serde_json::from_str(&kernel.dispatch("save", "")).expect("save");
+    let save: serde_json::Value = serde_json::from_str(&kernel.dispatch("save", "")).expect("save");
     let cap_err = save["save"]["kv"]["entries"]["cap_err"]
         .as_str()
         .unwrap_or("")
@@ -329,7 +402,11 @@ end)
     face.mix_frame(16).expect("mix");
     assert_eq!(face.active_voices(), 0, "全部混完出队");
     for v in 66..=129i64 {
-        assert_eq!(face.play(&pcm, 1000).expect("play"), v, "voice 号不回收不复用");
+        assert_eq!(
+            face.play(&pcm, 1000).expect("play"),
+            v,
+            "voice 号不回收不复用"
+        );
     }
 }
 
@@ -347,7 +424,7 @@ fn audio_stop_is_frame_scoped_and_silence_window_still_appends() {
     assert_eq!(sha(face.session()), sha(&vec![0u8; 352 * 2]), "全零字节");
     face.stop(v); // 已出队再 stop = no-op
     face.stop(999); // 从未存在的 voice = no-op
-    // 未 stop 的对照：同 play 不 stop → 当帧有 digest。
+                    // 未 stop 的对照：同 play 不 stop → 当帧有 digest。
     let mut face2 = AudioFace::new();
     face2.open(Some(22050)).expect("open");
     face2.play(&pcm, 1000).expect("play");
@@ -371,7 +448,10 @@ fn audio_additive_key_r1_r2_lines_byte_stable() {
     // R1/R2 形状：无 audio 键，行字节与既有口径逐字节一致。
     let line = base.to_line().expect("to_line");
     assert!(!line.contains("audio"), "无混音无 audio 键：{line}");
-    assert_eq!(ygg_sandbox::rt::FrameRecord::from_line(&line).expect("from_line"), base);
+    assert_eq!(
+        ygg_sandbox::rt::FrameRecord::from_line(&line).expect("from_line"),
+        base
+    );
     // audio 键落位字典序：audio < dt_ms < frame < hash。
     let mut with_both = base.clone();
     with_both.frame = Some("4x3|ab".to_owned());
@@ -399,7 +479,10 @@ fn audio_additive_key_r1_r2_lines_byte_stable() {
         record_frames(&mut kernel, &mut host, 5, &mut sink).expect("record");
         sink
     };
-    assert!(records.iter().all(|r| r.audio.is_none()), "无音频 mod audio 全缺席");
+    assert!(
+        records.iter().all(|r| r.audio.is_none()),
+        "无音频 mod audio 全缺席"
+    );
     let mut kernel = KernelFacade::new(RT_PLAIN_MOD).expect("kernel");
     let mut host = RtHost::new(RtConfig::default());
     let result = replay_records(&mut kernel, &mut host, &records);
@@ -413,15 +496,32 @@ fn audio_additive_key_r1_r2_lines_byte_stable() {
 fn audio_end_to_end_fire_wav_pins_and_absence_rule() {
     let records = record_audio_e2e();
     // 缺席规则：帧 1/3/4 无 voice = audio 键缺席；帧 2（fire 当帧）有 digest。
-    assert!(records[0].audio.is_none(), "帧 1 无 voice：{:?}", records[0].audio);
-    assert_eq!(records[1].audio.as_deref(), Some(A8_FRAME2), "帧 2 fire 当帧混入");
-    assert!(records[2].audio.is_none() && records[3].audio.is_none(), "3/4 帧静默");
+    assert!(
+        records[0].audio.is_none(),
+        "帧 1 无 voice：{:?}",
+        records[0].audio
+    );
+    assert_eq!(
+        records[1].audio.as_deref(),
+        Some(A8_FRAME2),
+        "帧 2 fire 当帧混入"
+    );
+    assert!(
+        records[2].audio.is_none() && records[3].audio.is_none(),
+        "3/4 帧静默"
+    );
     // play 返回 voice 记 KV（同帧完成 = 0 帧延迟语义的证据面）。
     {
         let mut kernel = KernelFacade::new(RT_AUDIO_MOD).expect("kernel");
         let mut host = RtHost::new(RtConfig::default());
-        host.input_at(2, InputEvent { down: vec![32], ..Default::default() })
-            .expect("schedule");
+        host.input_at(
+            2,
+            InputEvent {
+                down: vec![32],
+                ..Default::default()
+            },
+        )
+        .expect("schedule");
         let mut sink = Vec::new();
         record_frames(&mut kernel, &mut host, 2, &mut sink).expect("record 2");
         let save: serde_json::Value =
@@ -435,10 +535,22 @@ fn audio_end_to_end_fire_wav_pins_and_absence_rule() {
     // 录制侧整局流：1455 样本（352+375+375+353），A6 钉值；WAV A7 钉值。
     let mut kernel = KernelFacade::new(RT_AUDIO_MOD).expect("kernel");
     let mut host = RtHost::new(RtConfig::default());
-    host.input_at(2, InputEvent { down: vec![32], ..Default::default() })
-        .expect("schedule");
-    host.input_at(3, InputEvent { up: vec![32], ..Default::default() })
-        .expect("schedule");
+    host.input_at(
+        2,
+        InputEvent {
+            down: vec![32],
+            ..Default::default()
+        },
+    )
+    .expect("schedule");
+    host.input_at(
+        3,
+        InputEvent {
+            up: vec![32],
+            ..Default::default()
+        },
+    )
+    .expect("schedule");
     let mut sink = Vec::new();
     record_frames(&mut kernel, &mut host, 4, &mut sink).expect("record 4");
     let face = kernel.audio_handle();

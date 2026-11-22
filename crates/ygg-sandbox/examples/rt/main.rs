@@ -298,7 +298,10 @@ fn emit_audio_output(kernel: &KernelFacade, audio: Option<&Path>) {
     let face = kernel.audio_handle();
     let face = face.borrow();
     let Some(rate) = face.rate() else {
-        eprintln!("音频面未 open（无 ygg.rt.audio.open）：不写 WAV（{}）", path.display());
+        eprintln!(
+            "音频面未 open（无 ygg.rt.audio.open）：不写 WAV（{}）",
+            path.display()
+        );
         return;
     };
     if let Err(err) = ygg_sandbox::audio::write_wav(path, rate, face.session()) {

@@ -83,11 +83,7 @@ pub(super) fn install_audio(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result
             "play",
             lua.create_function(
                 move |_,
-                      (handle, pcm, gain): (
-                    LuaValue,
-                    LuaValue,
-                    LuaValue,
-                )|
+                      (handle, pcm, gain): (LuaValue, LuaValue, LuaValue)|
                       -> Result<i64, Error> {
                     let handle = want_int("handle", &handle)?;
                     let raw = match &pcm {

@@ -66,8 +66,8 @@ use ygg_core::kv::KvStore;
 use crate::inject::splitmix64;
 
 // ---- 模块化拆分 shim(S-25 批三 C1:纯搬移;既有路径逐字节不变)----
-mod entity;
 mod audio;
+mod entity;
 mod entity_decode;
 mod frame;
 mod fs;

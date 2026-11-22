@@ -183,7 +183,9 @@ impl AudioFace {
         // 入队时烘焙（后改不追溯 = 确定性）：s32 中间量不溢出
         // （32767×2000 = 6.55e7 < 2^31），除法截断向零、末端饱和钳制。
         let baked: Vec<i16> = pcm
-            .as_chunks::<2>().0.iter()
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| {
                 let s = i16::from_le_bytes([chunk[0], chunk[1]]) as i32;
                 (s * gain as i32 / 1000).clamp(-32768, 32767) as i16
