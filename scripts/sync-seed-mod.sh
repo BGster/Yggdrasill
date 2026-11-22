@@ -156,7 +156,28 @@ if [ "$check_only" = "yes" ]; then
     fi
     rm -f "$tmp_manifest"
     trap - EXIT INT TERM
-    echo "完成：单源软链 $seed_dir -> $expected_target 与 $project_dir/manifest.json 校验通过"
+    # S38：盘上→声明完备性（S32 事故根因——新拆分文件未入 pack.json code.modules，
+    # 声明→盘上方向校验恒绿，egg run 装载才白名单拒）。src/ 全域 lua 与 modules 差集非空即红。
+    undeclared=$(python3 - "$project_dir" <<'PYCHK'
+import json,os,sys
+root=sys.argv[1]
+pack=json.load(open(os.path.join(root,"pack.json")))
+declared=set(pack.get("code",{}).get("modules",[]))
+for dirpath,_,files in os.walk(os.path.join(root,"src")):
+    for f in files:
+        if f.endswith(".lua"):
+            rel=os.path.relpath(os.path.join(dirpath,f),root)
+            if rel not in declared:
+                print(rel)
+PYCHK
+)
+    if [ -n "$undeclared" ]; then
+        echo "错误：src/ 存在未声明进 pack.json code.modules 的模块（盘上→声明完备性失败）：" >&2
+        printf '%s\n' "$undeclared" | sed 's/^/  - /' >&2
+        echo "  请补声明后运行 ./scripts/sync-seed-mod.sh 重算" >&2
+        exit 1
+    fi
+    echo "完成：单源软链 $seed_dir -> $expected_target 与 $project_dir/manifest.json 校验通过（含盘上→声明完备性）"
     exit 0
 fi
 
