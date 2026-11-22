@@ -13,7 +13,7 @@ docs/design/
 │   ├── state-machine.md   state-surface.md   events.md   sim-kernel.md
 │   └── wire-protocol.md   lua-api.md         compaction.md
 ├── host/              # ② egg CLI 与 host
-│   ├── cli-daemon.md  serve.md
+│   ├── cli-daemon.md  serve.md  rt-face.md
 │   └── harness-tools.md  lanes.md
 ├── mod/               # ③ agent-seed mod
 │   ├── mod-package.md  prompt-surface.md  tool-bridge.md
@@ -35,6 +35,7 @@ docs/design/
 | ① 内核 · 原生模拟内核（Tier 1） | [kernel/sim-kernel.md](kernel/sim-kernel.md) | 改 tick / ECS 状态 / 快照回放 / 确定性策略 / 热核面下沉之前 | hard-refusal |
 | ② host · CLI 与 daemon 线协议 | [host/cli-daemon.md](host/cli-daemon.md) | 改命令行 / daemon 协议 / 存储与版本兼容面之前 | hard-refusal |
 | ② host · serve 观察面 | [host/serve.md](host/serve.md) | 触碰 serve 任何一行之前 | irreversible |
+| ② host · rt 实时宿主面 | [host/rt-face.md](host/rt-face.md) | 改 `ygg.rt.*` / rt 引擎 / `examples/rt` / 帧循环或录制回放语义之前 | silent-drift |
 | ② host · `.pi/tools` 检测脚本 | [host/harness-tools.md](host/harness-tools.md) | 改或调用 `.pi/tools/*` 与结算机证参数之前 | silent-drift |
 | ② host · 泳道池与进度投影 | [host/lanes.md](host/lanes.md) | 改泳道池 / worktree 停放 / 进度投影之前 | silent-drift |
 | ③ mod · 包契约与多文件纯度 | [mod/mod-package.md](mod/mod-package.md) | 改 `pack.json` / `manifest` / 多文件纯度契约之前 | hard-refusal |
