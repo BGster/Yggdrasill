@@ -79,9 +79,12 @@ mod tool;
 mod value;
 
 pub use entity::*;
-pub use rt::{RT_DEFAULT_HZ, RT_DEFAULT_MAX_CATCHUP, RT_HZ_MAX, RT_KEY_MAX, RT_MAX_CATCHUP_CAP, RtFrame, RtInput, RtMode};
 pub use entity_decode::*;
 pub use fs::*;
+pub use rt::{
+    RtFrame, RtInput, RtMode, RT_DEFAULT_HZ, RT_DEFAULT_MAX_CATCHUP, RT_HZ_MAX, RT_KEY_MAX,
+    RT_MAX_CATCHUP_CAP,
+};
 // `pub mod ygg_fs_code` 嵌套模块原路径保留(项本身 pub,glob 已含;显式列出为自证)。
 pub use fs::ygg_fs_code;
 use kv::*;

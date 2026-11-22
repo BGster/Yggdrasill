@@ -63,9 +63,7 @@ fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> String {
 
 /// 输入调度 JSONL 一行的解析（`mouse` 可选二元/三元数组，buttons 省略 = 不变）。
 fn input_event_from_json(value: &Json) -> Result<(u64, InputEvent), String> {
-    let frame = value["frame"]
-        .as_u64()
-        .ok_or("缺 `frame` 或非非负整数")?;
+    let frame = value["frame"].as_u64().ok_or("缺 `frame` 或非非负整数")?;
     let parse_codes = |name: &str| -> Result<Vec<i64>, String> {
         match value[name].as_array() {
             None => Ok(Vec::new()),
@@ -247,8 +245,7 @@ fn run_record(
     let started = Instant::now();
     let mut records: Vec<FrameRecord> = Vec::new();
     let mut failure: Option<RtError> = None;
-    let dropped;
-    match frames {
+    let dropped = match frames {
         Some(limit) => {
             // 不限速批跑：直跑 N 帧，fps = 派发吞吐（35.9 进程派发基线的
             // 直接可比口径——基线同样无节拍）。
@@ -261,7 +258,7 @@ fn run_record(
                     }
                 }
             }
-            dropped = 0;
+            0u64
         }
         None => {
             // 实时节拍：Pacer 承接欠账，落后补帧封顶，超出弃账计数。
@@ -290,9 +287,9 @@ fn run_record(
                     std::thread::sleep(rest);
                 }
             }
-            dropped = pacer.dropped_frames();
+            pacer.dropped_frames()
         }
-    }
+    };
     let wall = started.elapsed();
     if let Err(err) = write_records(path, &records) {
         eprintln!("录制写盘失败：{err}");
@@ -368,8 +365,8 @@ fn load_input_script(host: &mut RtHost, path: &Path) -> Result<(), String> {
         }
         let value: Json = serde_json::from_str(line)
             .map_err(|err| format!("第 {} 行不是合法 JSON：{err}", index + 1))?;
-        let (frame, event) = input_event_from_json(&value)
-            .map_err(|err| format!("第 {} 行：{err}", index + 1))?;
+        let (frame, event) =
+            input_event_from_json(&value).map_err(|err| format!("第 {} 行：{err}", index + 1))?;
         host.input_at(frame, event)
             .map_err(|err| format!("第 {} 行：{err}", index + 1))?;
     }

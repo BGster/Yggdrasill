@@ -61,7 +61,7 @@ fn rt_dt_sequence_is_floor_difference_and_integrates_to_real_time() {
     );
     // 任意 hz：一秒的帧积分 = 1000ms（无浮点、无墙钟入值）。
     for hz in [1u32, 30, 60, 120, 1000] {
-        let total: i64 = (1..=u64::from(hz)).map(|n| i64::from(dt_for_frame(n, hz))).sum();
+        let total: i64 = (1..=u64::from(hz)).map(|n| dt_for_frame(n, hz)).sum();
         assert_eq!(total, 1000, "hz={hz} 一秒积分应为 1000ms");
     }
     assert_eq!(dt_for_frame(1, 1), 1000, "hz=1 退化：单帧 1000ms");
@@ -74,21 +74,50 @@ fn rt_input_snapshot_folds_net_edges_in_canonical_order() {
     // 同帧注入乱序键：down 5,2,1 + up 3（未按下）→ pressed=[1,2,5]（升序）、
     // released=[]（3 本来就没按下，非沿）。
     device
-        .at(1, InputEvent { down: vec![5, 2], ..Default::default() })
+        .at(
+            1,
+            InputEvent {
+                down: vec![5, 2],
+                ..Default::default()
+            },
+        )
         .expect("schedule");
     device
-        .at(1, InputEvent { down: vec![1], up: vec![3], ..Default::default() })
+        .at(
+            1,
+            InputEvent {
+                down: vec![1],
+                up: vec![3],
+                ..Default::default()
+            },
+        )
         .expect("schedule");
     let snap = device.snapshot_for(1).expect("snapshot");
-    assert_eq!(snap.pressed, vec![1, 2, 5], "pressed 规范序（注入乱序被排序）");
+    assert_eq!(
+        snap.pressed,
+        vec![1, 2, 5],
+        "pressed 规范序（注入乱序被排序）"
+    );
     assert!(snap.released.is_empty(), "未按下键的 up 不是沿");
     assert_eq!(snap.held, vec![1, 2, 5]);
     // 帧内 down+up 同键 = 净零折叠：第 2 帧 down 7 + up 7 → 两侧都不出现。
     device
-        .at(2, InputEvent { down: vec![7], ..Default::default() })
+        .at(
+            2,
+            InputEvent {
+                down: vec![7],
+                ..Default::default()
+            },
+        )
         .expect("schedule");
     device
-        .at(2, InputEvent { up: vec![7], ..Default::default() })
+        .at(
+            2,
+            InputEvent {
+                up: vec![7],
+                ..Default::default()
+            },
+        )
         .expect("schedule");
     let snap2 = device.snapshot_for(2).expect("snapshot");
     assert!(
@@ -98,15 +127,37 @@ fn rt_input_snapshot_folds_net_edges_in_canonical_order() {
     assert!(!snap2.held.contains(&7));
     // 帧内 up+down 同键（按住中抬起又按下）= 净零：两侧都不出现。同帧
     // 序歧义（单事件内同键 down+up）在注入时点即拒绝，这里用两次注入保序。
-    assert!(matches!(
-        device.at(3, InputEvent { up: vec![5], down: vec![5], ..Default::default() }),
-        Err(RtError::Input(_))
-    ), "单事件同键 down+up 歧义即拒");
+    assert!(
+        matches!(
+            device.at(
+                3,
+                InputEvent {
+                    up: vec![5],
+                    down: vec![5],
+                    ..Default::default()
+                }
+            ),
+            Err(RtError::Input(_))
+        ),
+        "单事件同键 down+up 歧义即拒"
+    );
     device
-        .at(3, InputEvent { up: vec![5], ..Default::default() })
+        .at(
+            3,
+            InputEvent {
+                up: vec![5],
+                ..Default::default()
+            },
+        )
         .expect("schedule");
     device
-        .at(3, InputEvent { down: vec![5], ..Default::default() })
+        .at(
+            3,
+            InputEvent {
+                down: vec![5],
+                ..Default::default()
+            },
+        )
         .expect("schedule");
     let snap2b = device.snapshot_for(3).expect("snapshot");
     assert!(
@@ -116,21 +167,47 @@ fn rt_input_snapshot_folds_net_edges_in_canonical_order() {
     assert!(snap2b.held.contains(&5), "帧末仍按住");
     // 鼠标：位移累加、掩码后写胜。
     device
-        .at(3, InputEvent { mouse_dx: 3, mouse_dy: -1, ..Default::default() })
+        .at(
+            3,
+            InputEvent {
+                mouse_dx: 3,
+                mouse_dy: -1,
+                ..Default::default()
+            },
+        )
         .expect("schedule");
     device
-        .at(3, InputEvent { mouse_dx: 2, mouse_buttons: Some(2), ..Default::default() })
+        .at(
+            3,
+            InputEvent {
+                mouse_dx: 2,
+                mouse_buttons: Some(2),
+                ..Default::default()
+            },
+        )
         .expect("schedule");
     let snap3 = device.snapshot_for(3).expect("snapshot");
     assert_eq!((snap3.mouse_dx, snap3.mouse_dy), (5, -1), "帧内位移累加");
     assert_eq!(snap3.mouse_buttons, 2, "掩码后写胜");
     // 越界键码在注入时点即拒绝（错误前移，不留到帧中）。
     assert!(matches!(
-        device.at(4, InputEvent { down: vec![0], ..Default::default() }),
+        device.at(
+            4,
+            InputEvent {
+                down: vec![0],
+                ..Default::default()
+            }
+        ),
         Err(RtError::Input(_))
     ));
     assert!(matches!(
-        device.at(4, InputEvent { down: vec![65], ..Default::default() }),
+        device.at(
+            4,
+            InputEvent {
+                down: vec![65],
+                ..Default::default()
+            }
+        ),
         Err(RtError::Input(_))
     ));
 }
@@ -168,13 +245,32 @@ fn rt_record_then_replay_hash_chain_matches_frame_by_frame() {
     let records = {
         let mut kernel = KernelFacade::new(RT_MOD).expect("kernel");
         let mut host = RtHost::new(RtConfig::default());
-        host.input_at(2, InputEvent { down: vec![4, 1], ..Default::default() })
-            .expect("schedule");
+        host.input_at(
+            2,
+            InputEvent {
+                down: vec![4, 1],
+                ..Default::default()
+            },
+        )
+        .expect("schedule");
         // 同帧 1 重复 down：仍单沿（已按下的 down 不重复计沿）。
-        host.input_at(2, InputEvent { down: vec![1, 9], ..Default::default() })
-            .expect("schedule");
-        host.input_at(5, InputEvent { up: vec![4], mouse_dx: 6, ..Default::default() })
-            .expect("schedule");
+        host.input_at(
+            2,
+            InputEvent {
+                down: vec![1, 9],
+                ..Default::default()
+            },
+        )
+        .expect("schedule");
+        host.input_at(
+            5,
+            InputEvent {
+                up: vec![4],
+                mouse_dx: 6,
+                ..Default::default()
+            },
+        )
+        .expect("schedule");
         let mut sink = Vec::new();
         let done = record_frames(&mut kernel, &mut host, 10, &mut sink).expect("record 10");
         assert_eq!(done, 10);
@@ -233,7 +329,10 @@ fn rt_record_file_roundtrip_and_tamper_visibility() {
     // 篡改文件：缺字段行 → 解析层可读拒绝（不静默跳，报错点名字段）。
     std::fs::write(&path, "{\"n\":1,\"dt_ms\":16}\n").expect("tamper");
     let err = read_records(&path).expect_err("缺字段必须拒");
-    assert!(err.to_string().contains("字段"), "缺字段报错点名字段：{err}");
+    assert!(
+        err.to_string().contains("字段"),
+        "缺字段报错点名字段：{err}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -266,8 +365,14 @@ fn rt_replay_catches_tampered_key_order_at_first_mismatch() {
     let mut records = {
         let mut kernel = KernelFacade::new(RT_MOD).expect("kernel");
         let mut host = RtHost::new(RtConfig::default());
-        host.input_at(3, InputEvent { down: vec![2, 1], ..Default::default() })
-            .expect("schedule");
+        host.input_at(
+            3,
+            InputEvent {
+                down: vec![2, 1],
+                ..Default::default()
+            },
+        )
+        .expect("schedule");
         let mut sink = Vec::new();
         record_frames(&mut kernel, &mut host, 5, &mut sink).expect("record");
         sink
@@ -341,7 +446,11 @@ fn rt_run_mode_coexists_with_rt_mode_on_same_mod() {
     // ① run 模式证：单发派发 game.tick（egg --drive 同面）——dt=1 退化。
     let mut kernel = KernelFacade::new(RT_MOD).expect("kernel");
     let info_before = rt_info(&kernel);
-    assert_eq!(info_before["mode"], json!("run"), "未进 rt 循环前 = run 模式");
+    assert_eq!(
+        info_before["mode"],
+        json!("run"),
+        "未进 rt 循环前 = run 模式"
+    );
     assert_eq!(info_before["n"], json!(0));
     let _ = reply_ok(&kernel.dispatch("game.tick", "1"));
     let _ = reply_ok(&kernel.dispatch("game.tick", "2"));
@@ -373,8 +482,9 @@ fn rt_run_mode_coexists_with_rt_mode_on_same_mod() {
 fn rt_pacer_catchup_is_capped() {
     let t0 = Instant::now();
     let target = Duration::from_nanos(1_000_000_000 / 60);
-    let due_of = |elapsed: Duration| u32::try_from(elapsed.as_nanos() / target.as_nanos())
-        .unwrap_or(u32::MAX);
+    let due_of = |elapsed: Duration| {
+        u32::try_from(elapsed.as_nanos() / target.as_nanos()).unwrap_or(u32::MAX)
+    };
     let mut pacer = Pacer::new(60, 4);
     assert_eq!(pacer.tick(t0), 1, "首拍先跑 1 帧（起点无积压）");
     // 停 100ms：due 帧欠账被封顶到 4，超出弃掉并计数。
@@ -382,11 +492,19 @@ fn rt_pacer_catchup_is_capped() {
     let due1 = due_of(Duration::from_millis(100));
     assert!(due1 > 4, "100ms 欠账超过补帧上限（due={due1}）");
     assert_eq!(pacer.tick(t1), 4, "补帧上限 = max_catchup");
-    assert_eq!(pacer.dropped_frames(), u64::from(due1 - 4), "弃帧 = due − cap");
+    assert_eq!(
+        pacer.dropped_frames(),
+        u64::from(due1 - 4),
+        "弃帧 = due − cap"
+    );
     // 正常节拍（一拍一帧）：不再弃。
     let t2 = t1 + target;
     assert_eq!(pacer.tick(t2), 1);
-    assert_eq!(pacer.dropped_frames(), u64::from(due1 - 4), "正常节拍零弃帧");
+    assert_eq!(
+        pacer.dropped_frames(),
+        u64::from(due1 - 4),
+        "正常节拍零弃帧"
+    );
     // 长停 1s：仍只补 4、余者弃（elapsed 恰为 1s——t2 后无积压）。
     let t3 = t2 + Duration::from_secs(1);
     let due3 = due_of(Duration::from_secs(1));
@@ -448,7 +566,10 @@ end)
         "装载期 config 可用"
     );
     // rt 引擎按 (hz=5) 跑：dt 全 200。
-    let mut host = RtHost::new(RtConfig { hz: 5, ..RtConfig::default() });
+    let mut host = RtHost::new(RtConfig {
+        hz: 5,
+        ..RtConfig::default()
+    });
     let mut sink = Vec::new();
     record_frames(&mut kernel, &mut host, 2, &mut sink).expect("frames at 5hz");
     assert_eq!(sink[0].dt_ms, 200, "hz=5 定步 dt=200");
@@ -475,7 +596,10 @@ end)
         sink
     };
     let mut kernel = KernelFacade::new(RT_MOD).expect("kernel");
-    let mut host = RtHost::new(RtConfig { hz: 120, ..RtConfig::default() });
+    let mut host = RtHost::new(RtConfig {
+        hz: 120,
+        ..RtConfig::default()
+    });
     let result = replay_records(&mut kernel, &mut host, &records);
     let mismatch = result.first_mismatch.expect("hz 换配置回放必红");
     assert_eq!(mismatch.n, 1, "调度参数入链：配置篡改第 1 帧即红");
@@ -525,5 +649,11 @@ fn run_mode_held(kernel: &KernelFacade) -> serde_json::Value {
 /// 用例间共享类型而无需完整构造）。
 #[allow(dead_code)]
 fn frame_record_shape(record: &FrameRecord) -> (u64, i64, &str, &str, &str) {
-    (record.n, record.dt_ms, &record.input, &record.state, &record.hash)
+    (
+        record.n,
+        record.dt_ms,
+        &record.input,
+        &record.state,
+        &record.hash,
+    )
 }

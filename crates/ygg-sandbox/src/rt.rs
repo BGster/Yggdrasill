@@ -27,7 +27,7 @@ use serde_json::{json, Value as Json};
 
 use crate::driver::KernelFacade;
 use crate::hash::hex_sha256;
-use crate::host_api::{RT_DEFAULT_HZ, RT_DEFAULT_MAX_CATCHUP, RT_KEY_MAX, RtInput, RtMode};
+use crate::host_api::{RtInput, RtMode, RT_DEFAULT_HZ, RT_DEFAULT_MAX_CATCHUP, RT_KEY_MAX};
 
 /// rt.tick 载荷构造（`n=<n>;dt=<dt>;` + 输入规范串）——录制/回放逐字节
 /// 一致的唯一载荷拼串点（**单点收口**：两处拼串必漂移）。
@@ -513,8 +513,10 @@ fn state_digest(facade: &mut KernelFacade, n: u64) -> Result<String, RtError> {
         });
     }
     let save = &envelope["save"];
-    let bytes = serde_json::to_vec(save)
-        .map_err(|err| RtError::State { n, message: err.to_string() })?;
+    let bytes = serde_json::to_vec(save).map_err(|err| RtError::State {
+        n,
+        message: err.to_string(),
+    })?;
     Ok(hex_sha256(&bytes))
 }
 
@@ -534,8 +536,8 @@ pub fn write_records(path: &Path, records: &[FrameRecord]) -> Result<(), RtError
 
 /// 读录制文件（空文件 = 空录制；任何一行不合法即错误——不静默跳）。
 pub fn read_records(path: &Path) -> Result<Vec<FrameRecord>, RtError> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|err| RtError::Record(format!("读取失败：{err}")))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|err| RtError::Record(format!("读取失败：{err}")))?;
     let mut records = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
