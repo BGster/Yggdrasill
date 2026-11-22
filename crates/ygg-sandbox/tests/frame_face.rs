@@ -6,6 +6,8 @@
 //! `SHA256("ygg.rt.frame.v1|<w>x<h>|" ++ RGBA8 行主序顶行在前原始字节)`），
 //! 与计划稿钉值截断（前 8/后 7 位）逐项比对一致。
 
+use std::time::{Duration, Instant};
+
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::frame::{frame_digest, write_ppm, FrameError, FrameFace, Rect, FRAME_MAX_EDGE};
 use ygg_sandbox::rt::{record_frames, replay_records, RtConfig, RtHost};
@@ -95,27 +97,28 @@ fn frame_shape_and_open_rejections_are_typed() {
     let mut face = open(4, 3);
     assert_eq!(
         face.span(0, 0, -1, 1, RED),
-        Err(FrameError::Shape("span 宽高必须非负，得到 w=-1,h=1".to_owned()))
+        Err(FrameError::Shape(
+            "span 宽高必须非负，得到 w=-1,h=1".to_owned()
+        ))
     );
     assert_eq!(
         face.span(0, 0, 1, -1, RED),
-        Err(FrameError::Shape("span 宽高必须非负，得到 w=1,h=-1".to_owned()))
+        Err(FrameError::Shape(
+            "span 宽高必须非负，得到 w=1,h=-1".to_owned()
+        ))
     );
     assert!(matches!(
         face.blit(0, 0, 2, &[0, 0, 0, 0, 0]),
         Err(FrameError::Shape(_))
     ));
+    assert!(matches!(face.blit(0, 0, 2, &[]), Err(FrameError::Shape(_))));
     assert!(matches!(
-        face.blit(0, 0, 2, &[]),
+        face.blit(0, 0, 0, &[0, 0, 0, 0]),
         Err(FrameError::Shape(_))
     ));
-    assert!(matches!(face.blit(0, 0, 0, &[0, 0, 0, 0]), Err(FrameError::Shape(_))));
     // 再开 = Opened；越界尺寸 = Shape。
     assert_eq!(face.open(2, 2), Err(FrameError::Opened));
-    assert!(matches!(
-        face.open(0, 3),
-        Err(FrameError::Shape(_))
-    ));
+    assert!(matches!(face.open(0, 3), Err(FrameError::Shape(_))));
     assert!(matches!(
         face.open(1, FRAME_MAX_EDGE + 1),
         Err(FrameError::Shape(_))
@@ -152,7 +155,12 @@ fn frame_dirty_unions_writes_and_present_resets() {
     face.clear(RED).expect("clear");
     assert_eq!(
         face.present(7).expect("present").dirty,
-        Some(Rect { x: 0, y: 0, w: 8, h: 6 })
+        Some(Rect {
+            x: 0,
+            y: 0,
+            w: 8,
+            h: 6
+        })
     );
 }
 
@@ -170,7 +178,11 @@ fn frame_ppm_bytes_are_pinned() {
     assert_eq!(&bytes[..11], b"P6\n2 1\n255\n", "P6 头逐字节");
     assert_eq!(bytes.len(), 11 + 2 * 3, "载荷 = w×h×3（弃 alpha）");
     assert_eq!(&bytes[11..14], &[0x10, 0x20, 0x30], "首像素 RGB");
-    assert_eq!(&bytes[14..17], &[0x00, 0x00, 0x00], "次像素 RGB（open 缺省零）");
+    assert_eq!(
+        &bytes[14..17],
+        &[0x00, 0x00, 0x00],
+        "次像素 RGB（open 缺省零）"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -189,7 +201,10 @@ fn frame_record_line_field_is_additive_and_byte_stable() {
     // R1 形状：无 frame 键（行字节与 R1 逐字节同口径）。
     let line = base.to_line().expect("to_line");
     assert!(!line.contains("frame"), "无 present 无 frame 键：{line}");
-    assert_eq!(ygg_sandbox::rt::FrameRecord::from_line(&line).expect("from_line"), base);
+    assert_eq!(
+        ygg_sandbox::rt::FrameRecord::from_line(&line).expect("from_line"),
+        base
+    );
     // frame 字段字典序：dt_ms < frame < hash。
     let mut with_frame = base.clone();
     with_frame.frame = Some(format!("4x3|{}", K4));
@@ -332,10 +347,96 @@ ygg.on("boom", function() ygg.rt.frame.span(1, 0, 0, 1, 1, 0xFF0000FF) end)
 fn frame_digest_distinguishes_shape_and_is_stable() {
     let black_2x2 = vec![0x0000_00FF; 4];
     let black_1x4 = vec![0x0000_00FF; 4];
-    assert_eq!(frame_digest(2, 2, &black_2x2), frame_digest(2, 2, &black_2x2));
+    assert_eq!(
+        frame_digest(2, 2, &black_2x2),
+        frame_digest(2, 2, &black_2x2)
+    );
     assert_ne!(
         frame_digest(2, 2, &black_2x2),
         frame_digest(1, 4, &black_1x4),
         "同字节异形必须不同 digest（尺寸入前像）"
+    );
+}
+
+/// 吞吐实测 fixture mod（§6 预算表数据源）：320×200 全帧 cast 同形——
+/// 320 列 ×（天/墙/地 3 span）+ 1 blit + present。
+const FRAME_THROUGHPUT_MOD: &str = r#"
+local h = ygg.rt.frame.open({w = 320, h = 200})
+ygg.on("rt.tick", function()
+  ygg.rt.frame.clear(h, 0x182838FF)
+  for col = 0, 319 do
+    local wall = 40 + (col * 37) % 90
+    local top = (200 - wall) // 2
+    ygg.rt.frame.span(h, col, 0, 1, top, 0x0A1428FF)
+    ygg.rt.frame.span(h, col, top, 1, wall, 0xB04A28FF)
+    ygg.rt.frame.span(h, col, top + wall, 1, 200 - top - wall, 0x204030FF)
+  end
+  ygg.rt.frame.blit(h, 100, 90, 6,
+    "\222\184\135\255\222\184\135\255\222\184\135\255\222\184\135\255\222\184\135\255\222\184\135\255")
+  ygg.rt.frame.present(h)
+end)
+"#;
+
+const SPRITE_TAN: [u8; 24] = [
+    0xDE, 0xB8, 0x87, 0xFF, 0xDE, 0xB8, 0x87, 0xFF, 0xDE, 0xB8, 0x87, 0xFF, 0xDE, 0xB8, 0x87, 0xFF,
+    0xDE, 0xB8, 0x87, 0xFF, 0xDE, 0xB8, 0x87, 0xFF,
+];
+
+/// 吞吐实测（rt-face.md §6 预算表数据源；CI 只设灾难下限，不卡阈值）。
+/// 双口径（计划 §5）：① host 上界 = Rust 直调缓冲 API（无 Lua）320×200
+/// 全帧 span 化（320×3 段）× 60 帧 → 像素/s；② 端到端代理 = fixture mod
+/// 同形全帧 `record_frames` 60 帧 → fps_dispatch 口径（CLI 真数另由
+/// examples/rt 实跑同 mod 同形录取）。
+#[test]
+fn frame_throughput_320x200_full_frame_measured() {
+    // ① host 上界（无 Lua）。
+    let mut face = FrameFace::new();
+    face.open(320, 200).expect("open");
+    let frames = 60u64;
+    let started = Instant::now();
+    for f in 0..frames {
+        face.clear(0x1828_38FF).expect("clear");
+        for col in 0..320i64 {
+            let wall = 40 + (col * 37) % 90;
+            let top = (200 - wall) / 2;
+            face.span(col, 0, 1, top, 0x0A14_28FF).expect("sky");
+            face.span(col, top, 1, wall, 0xB04A_28FF).expect("wall");
+            face.span(col, top + wall, 1, 200 - top - wall, 0x2040_30FF)
+                .expect("floor");
+        }
+        face.blit(100, 90, 6, &SPRITE_TAN).expect("blit");
+        face.present(f + 1).expect("present");
+    }
+    let host_elapsed = started.elapsed();
+    let px_per_s = 320usize * 200 * frames as usize;
+    let host_kpx = px_per_s as f64 / 1000.0 / host_elapsed.as_secs_f64();
+    println!(
+        "throughput host-upper-bound: 60帧 320x200 全帧span化 = {host_elapsed:.1?} → {host_kpx:.0} 千像素/s"
+    );
+    // 灾难下限分模式（计划 500ms 口径 = release；debug 无内联慢一个量级，
+    // 实测 ≈90fps 仍达标，只防灾难不卡阈值）。
+    let floor = if cfg!(debug_assertions) { 2000 } else { 500 };
+    assert!(
+        host_elapsed < Duration::from_millis(floor),
+        "host 上界灾难下限：60 帧 {host_elapsed:.1?} ≥ {floor}ms"
+    );
+
+    // ② 端到端代理（fixture mod，同形 320×200 全帧 + present 证据）。
+    let mut kernel = KernelFacade::new(FRAME_THROUGHPUT_MOD).expect("kernel");
+    let mut host = RtHost::new(RtConfig::default());
+    let mut sink = Vec::new();
+    let started = Instant::now();
+    let done = record_frames(&mut kernel, &mut host, 60, &mut sink).expect("record 60");
+    let e2e_elapsed = started.elapsed();
+    let fps = done as f64 / e2e_elapsed.as_secs_f64();
+    println!("throughput e2e-proxy: 60帧 fps_dispatch ≈ {fps:.1}");
+    assert_eq!(done, 60);
+    assert!(
+        e2e_elapsed < Duration::from_millis(if cfg!(debug_assertions) { 2000 } else { 500 }),
+        "e2e 灾难下限：60 帧 {e2e_elapsed:.1?}"
+    );
+    assert!(
+        sink.iter().all(|r| r.frame.is_some()),
+        "每帧都有 present 证据（全帧渲染路径真实发生）"
     );
 }

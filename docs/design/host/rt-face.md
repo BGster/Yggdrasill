@@ -3,9 +3,9 @@
 > **id** host/rt-face · **模块** ② egg CLI 与 host · **触发** 改 `ygg.rt.*` / `crates/ygg-sandbox/src/rt.rs` / `examples/rt/` / 帧循环调度或录制回放语义之前
 > **读不到代价** silent-drift（帧链哈希口径或规范串字节漂移 → 回放证据链失效，已录制的局全部不可回放）
 
-> **定位**：常驻实时宿主（`examples/rt/`）+ `ygg.rt.*` Lua 面 + 帧循环/输入/录制回放的确定性契约。渲染面（`ygg.rt.frame`）与音频面（`ygg.rt.audio`）属 S31 计划 R2/R3 轮（Schedule: r-20261122-022804-06aa §5，验收标准已在该计划锁定——scheduled，不在本契约内展开）。
+> **定位**：常驻实时宿主（`examples/rt/`）+ `ygg.rt.*` Lua 面 + 帧循环/输入/**渲染面**/录制回放的确定性契约。渲染面（`ygg.rt.frame` 五键 + PPM/SSE 双通道 + 帧 digest 旁路 KAT）已落地（S31-R2）；音频面（`ygg.rt.audio`）属 S31 R3 轮（Schedule: r-20261122-022804-06aa §5）。
 > **上游**：[docs/README.md](../../README.md) · **相关**：[cli-daemon.md](cli-daemon.md) · [serve.md](serve.md) · [sim-kernel.md](../kernel/sim-kernel.md)（ReplayLog 证伪先例）
-> **落地**：S31-R1（commit `28cf93a`…`6692e17`，分支 `feature/s31-rt-r1`）
+> **落地**：S31-R1（commit `28cf93a`…`6692e17`，分支 `feature/s31-rt-r1`）· S31-R2（分支 `feature/s31-rt-r2`，基线 `f22a07f`）
 
 ## 1. 宿主形态（D1）
 
@@ -45,6 +45,16 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 
 字段序 = 字典序（serde_json 默认 Map = BTreeMap，与驱动信封同口径）→ 同记录同字节。`state` = 每帧 `dispatch("save","")` 信封 `save` 字段重序列化字节的 SHA-256（覆盖实体+KV+pending_choice；`canonical_state_bytes` 只有实体面，KV 才是 mod 游戏状态的大头）。
 
+可选字段 `frame`（S31-R2 加性；present 过才有，无则**整键缺席**——R1 录制行字节逐字节不变）：值为 `"<w>x<h>|<64hex 全幅 digest>"`（本帧末次 present；同帧多次 present 末次为准）。回放**严格对表**：录有实无/录无实有/同有不同值均 mismatch——Mod 渲染行为漂移 = 该红的证据。
+
+### 2.4 渲染面数据形状（S31-R2）
+
+- **缓冲**：单面（`open` 装载期开，v1 只 Saltline 一面，再开 `YGG-RT-OPENED`），w,h ∈ 1..=4096（≤64MiB 封顶）；像素 = `u32` 打包 `0xRRGGBBAA`（大端字节即 RGBA8 序），行主序、顶行在前；跨帧持久（不 clear = 上帧残留，仍确定）。
+- **写入语义**：clear/span/blit 全部**直写覆盖零混色**（Saltline 墙/天/地全不透明；混色属 R3+ 裁决，最小面不预支）；x/y/w/hh 逐参钳到缓冲界（越界静默裁掉、零面积 no-op——射线柱超屏是常态非错误）；负 w/hh、浮点参数、blit 长度非 w×4 正整数倍 → `YGG-RT-SHAPE`。
+- **帧 digest 规范序**：`SHA256("ygg.rt.frame.v1|<w>x<h>|" ++ RGBA8 行主序顶行在前原始字节)`——尺寸入前像防异形同字节碰撞。KAT 钉值（python3 hashlib 预算法独立复算，`tests/frame_face.rs` 逐字节钉）：K1 2×2 全 0x102030FF = `e659996d…4860e53a`；K2 4×3 黑底+中行红 = `a7402522…b6d042a`；K3 K2+blit 2×1 绿@(1,1) = `496e8c20…9a66c`；K4 4×3 全红（span(−1,−1,9,9)≡clear——钳制语义被钉）= `d6c3d184…2dfc45d`。
+- **脏区**：写并集最小外包矩形；present 读出后**复位**（无写 = nil）；clear = 全幅。
+- **输出双通道**（读侧，零确定性影响）：PPM 落盘（`--ppm <目录>` → `f%06d.ppm`，P6 头 `P6\n<w> <h>\n255\n`+RGB 弃 alpha，帧号即名零索引文件）+ 内嵌预览端口（`--preview <端口>`：GET `/` canvas 页、GET `/stream` SSE 推 base64 RGBA、POST `/api/input` 输入回注——回注走 `InputDevice::at` 既有入口、仅录制模式消费，录制语义不变）。
+
 ## 3. 不变量
 
 - **I1 定步 dt 零墙钟**：`dt_ms(n) = ⌊n·1000/hz⌋ − ⌊(n−1)·1000/hz⌋`——纯函数 of (n,hz)，零浮点；60Hz 时 16/17 交替、每 60 帧积分恰 1000ms。墙钟只决定一拍跑几帧（Pacer），从不决定 dt 值；墙钟时间戳只入回执元数据，永不入哈希。
@@ -53,6 +63,8 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 - **I4 帧是沿的粒度**：快照 = 帧初/帧末按住集的差集；帧内同键 down+up（或 up+down）净零，两侧都不出现；单事件内同键 down+up 属歧义（帧内序无定义），注入时点即拒绝。多事件按注入序应用。
 - **I5 循环即停**：帧派发失败（VALIDATION / FUEL_EXHAUSTED / 信封错误）循环终止，无「跳帧续跑」语义；失败帧在 rt 面上不留残渣（帧号/逻辑钟回退）。
 - **I6 录制即可回放**：截断录制（错误帧之前的部分）回放到同位同红；回放不产生录制副作用。
+- **I7 渲染零混色直写**（S31-R2）：clear/span/blit 全部直写覆盖、零 alpha 混色；越界静默钳制（零面积 no-op）；全整数参数（浮点 = `YGG-RT-SHAPE`）。混色属 R3+ 裁决，最小面不预支。
+- **I8 帧 digest 不入链**（S31-R2，D9）：`FrameRecord.frame` 是旁路证据线——链公式 I2 的输入元组零变化；回放对 frame 字段**严格对表**（录有实无/录无实有/不同值均 mismatch），与 I2 的链哈希比对并列成双闸。失败帧不留半帧证据（present 未达即无 frame 字段；派发入口清捕获槽）。
 
 ## 4. API 面（`ygg.rt.*`）
 
@@ -63,12 +75,21 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 | `ygg.rt.input.keys` | 运行期只读 | `→ {held=位串, pressed={…}, released={…}}`（升序；held 位串与规范串 k= 段同源） |
 | `ygg.rt.input.mouse` | 运行期只读 | `→ {dx, dy, buttons}` |
 | `ygg.rt.input.time` | 运行期只读 | `→ 逻辑 ms`（逐帧 dt 累加，含本帧） |
+| `ygg.rt.frame.open` | **仅装载期** | `open({w,h}) → handle`（整数 1 起；v1 单面，再开 `YGG-RT-OPENED`）；w,h∈1..=4096；seal 后 `YGG-RT-SEALED`（与 config 同一条运行期禁令）；形状闭集（只收 w/h 键） |
+| `ygg.rt.frame.clear` | 运行期写 | `clear(h, rgba)` 全缓冲填 rgba；脏区 = 全幅 |
+| `ygg.rt.frame.span` | 运行期写 | `span(h,x,y,w,hh,rgba)` 实心矩形段；x/y 可负、越界钳制（零面积 no-op）；负 w/hh = `YGG-RT-SHAPE`；rgba = i64 打包 0xRRGGBBAA 直写不混色 |
+| `ygg.rt.frame.blit` | 运行期写 | `blit(h,x,y,w,bytes)` bytes = RGBA8 行串（len 必须为 w×4 正整数倍，否则 `YGG-RT-SHAPE`）；直写覆盖、越界钳制 |
+| `ygg.rt.frame.present` | 运行期写 | `present(h) → {digest, dirty, frame}`；digest = 全幅 SHA-256（§2.4 规范序）；dirty = 自上帧 present 以来写并集矩形（无写 nil，读后复位）；同帧多次 present 合法，末次为准（旁路捕获槽进 `FrameRecord.frame`） |
 
 配置合流优先级：**CLI > Mod 装载期声明 > 默认**（`examples/rt/` 合流点）。run 模式下 `ygg.rt.*` 照常注册（表始终在）：input 读到中性快照、loop.info 报 mode=run——单一代码路径，不静默降级。
 
 ### 4.1 `examples/rt` CLI
 
-`<mod目录> [--frames N|--duration S] --record <路径> | --replay <路径>` + `--hz/--max-catchup/--event/--input/--boot/--fuel`。stdout 单 JSON 摘要（`ok/mode/frames/fpsDispatch/droppedFrames/hashHead/firstMismatch`）；退出码 0/1/2。`--frames` 不限速（吞吐口径）；`--duration` 按 hz 实时节拍；`--event` 可指到既有 run 模式事件（兼容桥，如 Saltline `game.tick`）；`--boot` 循环前单次派发启动事件。
+`<mod目录> [--frames N|--duration S] --record <路径> | --replay <路径>` + `--hz/--max-catchup/--event/--input/--boot/--fuel/--ppm/--preview`。stdout 单 JSON 摘要（`ok/mode/frames/fpsDispatch/droppedFrames/hashHead/firstMismatch`）；退出码 0/1/2。`--frames` 不限速（吞吐口径）；`--duration` 按 hz 实时节拍；`--event` 可指到既有 run 模式事件（兼容桥，如 Saltline `game.tick`）；`--boot` 循环前单次派发启动事件；`--ppm <目录>` present 帧落盘（S31-R2）；`--preview <端口>` 内嵌预览端口（S31-R2；不挂 serve——D10）。
+
+### 4.2 预览端口（S31-R2）
+
+`127.0.0.1:<端口>`：`GET /` = 演示页（canvas putImageData + 键盘回注）；`GET /stream` = SSE `data: {"n","w","h","rgba":<base64>}`（最新胜出——慢客户端自然丢帧，预览尽力而为面）；`POST /api/input` = 输入回注（`{down,up,mouse}` → `InputDevice::at(next_n,…)`，与 `--input` 脚本同一入口；仅录制模式消费——回放确定性红线）。线程纪律：accept 线程只收字节（mpsc 单向），帧快照由主循环发布（Mutex 槽），零 unsafe、零 Rc 过线程、零新增依赖。
 
 ## 5. 确定性契约（声明收窄）
 
@@ -83,8 +104,11 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 | 10s 实时录制 | 600 帧 @ **59.9 fps**、零弃帧（hz=60 节拍合规） | 同上 `--duration 10 --record`；输入调度 7 事件 |
 | 10s 录制回放 | 600/600 帧哈希链全等，3.9s | `--replay`（每帧含全状态 save 序列化+SHA-256） |
 | 轻载 mod 吞吐上界 | 7858 fps（smoke mod 单帧仅 KV 累加） | `--frames 60` |
+| **渲染面 host 上界（S31-R2）** | **52364 千像素/s**（60 帧 320×200 全帧 span 化 73.3ms，release） | `cargo test -p ygg-sandbox --release --test frame_face frame_throughput -- --nocapture`（同测试 dev 模式 ≈90fps 亦达标；CI 只设灾难下限 500ms/2000ms 不卡阈值） |
+| **渲染面端到端 fps_dispatch（S31-R2）** | **780.5–786.4**（320×200 全帧 = 320 列×3 span+1 blit+present，release；三跑同 hashHead）；dev 构建 80.8–84.2 亦达标 | `examples/rt <320×200 fixture mod> --frames 60 --record`（2026-11-22，同构 mod 形状见 `tests/frame_face.rs::FRAME_THROUGHPUT_MOD`） |
+| **帧 digest 成本（S31-R2）** | 全幅 256KB SHA-256 含于上界口径内（73.3ms/60 帧 = 1.2ms/帧全含：960 span+digest+快照） | 同上 |
 
-预算声明：每帧非 Lua 宿主开销 = 1 次 dispatch（转换+信封）+ 1 次 save 信封序列化 + 2 次 SHA-256（状态摘要+链推进）——60Hz 预算内余量 ≥ 2.5×（155.4/60）。R2 渲染面（span/blit）与 R3 音频面的预算增量在各自轮的实测节追加本表。
+预算声明：每帧非 Lua 宿主开销 = 1 次 dispatch（转换+信封）+ 1 次 save 信封序列化 + 2 次 SHA-256（状态摘要+链推进）；S31-R2 渲染帧另加全幅 digest（present 时）+ 输出快照（仅 present 过的帧）——780 fps 实测余量 ≥ 13×（780/60）。R3 音频面的预算增量在其轮的实测节追加本表。
 
 ## 7. 设计依据
 
@@ -96,3 +120,6 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 - **D6 不引 serde derive**：FrameRecord 五字段手写 JSON——`serde_json` 既有依赖内闭环，依赖白名单零新增。
 - **D7 `--event` 兼容桥**：rt 宿主可驱动任何已注册事件（缺省 rt.tick）——run 模式 mod 无需改造即可进 rt 循环（Saltline 实测通道），R3 的 Saltline 改造点清单照计划执行。
 - **D8 catch-up 弃账**：补帧封顶 max_catchup、超出弃账（含零头清空）——防螺旋死亡；弃帧数只入回执元数据。
+- **D9 帧 digest 不入链（S31-R2）**：链公式 I2 的输入元组（H(n−1)|n|dt|规范串|状态摘要）零变化——链动即废 R1 录制（回放确定性红线）；位图证据走 `FrameRecord.frame` 独立字段线，与 D4 双层证据并列第三线；回放严格对表（录有实无/录无实有均 mismatch）使「Mod 渲染行为漂移」可证伪。
+- **D10 预览端口内嵌而非挂 serve（S31-R2）**：serve 契约 = 零内核不连运行进程；推帧数据源在 rt 进程，挂 serve 须先造 serve↔rt IPC 桥 = 破坏观察面架构。内嵌 `examples/rt/preview.rs`（std TcpListener+HTTP/SSE，仿 serve/http.rs 先例，零新增依赖）；输入回注走 `InputDevice::at` 既有入口仅录制模式消费——回放语义不变。
+- **D11 五键闭集零混色（S31-R2）**：直写覆盖、越界钳制、全整数参数；调色板/精灵语义留 Mod 侧（Saltline mat×shade 查表零开销；精灵列程 blit + 深度遮挡 `f<dist[col]` 是 Mod 逻辑）——host 不持渲染语义，五键闭集不膨胀；混色（alpha blend）属 R3+ 裁决，最小面不预支。
