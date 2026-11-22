@@ -231,7 +231,7 @@ test("叙述面与源码的 docs/design 指针：逐来源账守恒 + 锚点全�
     end
   end
 
-  local expected = { ["beats-settlement.json"] = 3, ["tools.lua"] = 2 }
+  local expected = { ["beats-settlement.json"] = 3, ["reactive.lua"] = 2 } -- S32：tools.lua 拆分后，原 tools.lua 的两处 docs/design 指针随 reactive_deps/receipt_deps 注释迁入 reactive.lua，账目不变仅换载体名。
   local keys = {}
   for k in pairs(ledger) do
     keys[#keys + 1] = k
