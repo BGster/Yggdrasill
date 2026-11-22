@@ -21,6 +21,11 @@
 //!                       "mouse":[dx,dy,buttons?]}（录制模式可配）
 //!   --boot <事件>       循环前单次派发的启动事件（如 Saltline 的 game.boot）
 //!   --fuel N            显式燃料预算（写 YGG_FUEL_BUDGET：env 最优先语义不变）
+//!   --ppm <目录>        帧落盘通道：present 过的帧写 <目录>/f%06d.ppm
+//!                       （P6；headless/selftest/KAT 证据）
+//!   --preview <端口>    内嵌预览端口（127.0.0.1:端口）：GET / 页面、
+//!                       GET /stream SSE 推帧、POST /api/input 输入回注
+//!                       （回注仅录制模式消费；回放确定性不受影响）
 //! ```
 //!
 //! # stdout 契约（机器面；单 JSON 摘要）
@@ -47,11 +52,14 @@ use ygg_sandbox::rt::{
     RtConfig, RtError, RtHost,
 };
 
+mod preview;
+
 fn usage_error(message: &str) -> ! {
     eprintln!(
         "error: {message}\n\n用法: cargo run -p ygg-sandbox --example rt -- <mod目录> \
          [--frames N|--duration S] [--record <路径>|--replay <路径>] [--hz N] \
-         [--max-catchup N] [--event <名>] [--input <路径>] [--fuel N]"
+         [--max-catchup N] [--event <名>] [--input <路径>] [--fuel N] \
+         [--ppm <目录>] [--preview <端口>]"
     );
     exit(2);
 }
@@ -121,6 +129,8 @@ fn main() {
     let mut input: Option<PathBuf> = None;
     let mut boot: Option<String> = None;
     let mut fuel: Option<u64> = None;
+    let mut ppm: Option<PathBuf> = None;
+    let mut preview_port: Option<u16> = None;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--hz" => {
@@ -163,6 +173,14 @@ fn main() {
                     _ => usage_error("--fuel 需要正整数（VM 指令预算）"),
                 });
             }
+            "--ppm" => ppm = Some(PathBuf::from(next_value(&mut args, "--ppm"))),
+            "--preview" => {
+                let value = next_value(&mut args, "--preview");
+                preview_port = Some(match value.parse::<u16>() {
+                    Ok(v) if v > 0 => v,
+                    _ => usage_error("--preview 需要 1..=65535 的端口"),
+                });
+            }
             other => usage_error(&format!("未知旗标 `{other}`")),
         }
     }
@@ -194,6 +212,30 @@ fn main() {
         }
     };
 
+    // ①′输出通道：PPM 目录（缺则建）与预览端口（绑定失败即可读退出）。
+    if let Some(dir) = &ppm {
+        if let Err(err) = std::fs::create_dir_all(dir) {
+            eprintln!("PPM 目录创建失败（{:?}）：{err}", dir);
+            exit(1);
+        }
+    }
+    let preview = match preview_port {
+        Some(port) => match preview::spawn(port) {
+            Ok(handle) => {
+                eprintln!(
+                    "预览端口：http://{}/（SSE /stream · 回注 /api/input）",
+                    handle.addr
+                );
+                Some(handle)
+            }
+            Err(err) => {
+                eprintln!("预览端口绑定失败（端口 {port}）：{err}");
+                exit(1);
+            }
+        },
+        None => None,
+    };
+
     // ② 配置合流：CLI > Mod 装载期声明（ygg.rt.config）> 默认。
     let (face_hz, face_catchup) = {
         let frame = kernel.rt_handle();
@@ -219,14 +261,69 @@ fn main() {
         }
     }
     match (record, replay) {
-        (Some(path), _) => run_record(&mut kernel, cfg, input, frames, duration_ms, &path),
-        (_, Some(path)) => run_replay(&mut kernel, cfg, &path),
+        (Some(path), _) => run_record(
+            &mut kernel,
+            cfg,
+            input,
+            frames,
+            duration_ms,
+            &path,
+            ppm.as_deref(),
+            preview.as_ref(),
+        ),
+        (_, Some(path)) => run_replay(&mut kernel, cfg, &path, ppm.as_deref(), preview.as_ref()),
         _ => unreachable!("arg gate 保证二选一"),
     }
 }
 
+/// 帧输出双通道（读侧，零确定性影响）：present 过的帧 → PPM 落盘 + 预览发布。
+fn emit_frame_outputs(
+    kernel: &KernelFacade,
+    n: u64,
+    ppm: Option<&Path>,
+    preview: Option<&preview::PreviewHandle>,
+) {
+    let Some(snap) = kernel.frame_handle().borrow().snapshot() else {
+        return;
+    };
+    if let Some(dir) = ppm {
+        let path = dir.join(format!("f{n:06}.ppm"));
+        if let Err(err) = ygg_sandbox::frame::write_ppm(&path, &snap) {
+            eprintln!("PPM 写盘失败（{}）：{err}", path.display());
+        }
+    }
+    if let Some(pv) = preview {
+        pv.publish(n, &snap);
+    }
+}
+
+/// 一步共用体：排空预览回注（录制模式）→ 派发一帧 → present 过则出双通道。
+/// 回注拒绝只警告不中断（尽力而为面；确定性录制不受影响）。
+fn step_and_emit(
+    host: &mut RtHost,
+    kernel: &mut KernelFacade,
+    preview: Option<&preview::PreviewHandle>,
+    ppm: Option<&Path>,
+) -> Result<FrameRecord, RtError> {
+    if let Some(pv) = preview {
+        for event in pv.drain_inputs() {
+            let n = host.next_n();
+            if let Err(err) = host.input_at(n, event) {
+                eprintln!("预览回注被拒：{err}");
+            }
+        }
+    }
+    let record = host.step_record(kernel)?;
+    if record.frame.is_some() {
+        emit_frame_outputs(kernel, record.n, ppm, preview);
+    }
+    Ok(record)
+}
+
 /// 录制模式。`--frames N` = 不限速批跑（fps_dispatch 吞吐口径，直接对比
 /// 35.9 进程派发基线）；`--duration S` = 60Hz 实时节拍（Pacer 承接欠账）。
+/// 输出通道：present 过的帧 → PPM/预览（读侧）；预览输入回注每帧顶排空。
+#[allow(clippy::too_many_arguments)]
 fn run_record(
     kernel: &mut KernelFacade,
     cfg: RtConfig,
@@ -234,6 +331,8 @@ fn run_record(
     frames: Option<u64>,
     duration_ms: Option<u64>,
     path: &Path,
+    ppm: Option<&Path>,
+    preview: Option<&preview::PreviewHandle>,
 ) -> ! {
     let mut host = RtHost::new(cfg.clone());
     if let Some(script) = input {
@@ -250,7 +349,7 @@ fn run_record(
             // 不限速批跑：直跑 N 帧，fps = 派发吞吐（35.9 进程派发基线的
             // 直接可比口径——基线同样无节拍）。
             while host.next_n() <= limit {
-                match host.step_record(kernel) {
+                match step_and_emit(&mut host, kernel, preview, ppm) {
                     Ok(record) => records.push(record),
                     Err(err) => {
                         failure = Some(err);
@@ -271,7 +370,7 @@ fn run_record(
                 }
                 let due_frames = pacer.tick(now);
                 for _ in 0..due_frames {
-                    match host.step_record(kernel) {
+                    match step_and_emit(&mut host, kernel, preview, ppm) {
                         Ok(record) => records.push(record),
                         Err(err) => {
                             failure = Some(err);
@@ -316,7 +415,14 @@ fn run_record(
 }
 
 /// 回放模式：读录制逐帧重派 + 哈希链比对，first_mismatch 证伪语义。
-fn run_replay(kernel: &mut KernelFacade, cfg: RtConfig, path: &Path) -> ! {
+/// 输出通道照常出帧（读侧）；预览回注不消费（回放确定性红线）。
+fn run_replay(
+    kernel: &mut KernelFacade,
+    cfg: RtConfig,
+    path: &Path,
+    ppm: Option<&Path>,
+    preview: Option<&preview::PreviewHandle>,
+) -> ! {
     let records = match read_records(path) {
         Ok(records) => records,
         Err(err) => {
@@ -331,6 +437,13 @@ fn run_replay(kernel: &mut KernelFacade, cfg: RtConfig, path: &Path) -> ! {
         first_mismatch,
         dispatch_error,
     } = replay_records(kernel, &mut host, &records);
+    // 回放无逐帧钩子（replay_records 收口在先）；把末帧快照补发给双通道
+    // （录制末帧 present 过 = 回放同位也 present 过，快照一致）。
+    if let Some(last) = records.last() {
+        if last.frame.is_some() && first_mismatch.is_none() && dispatch_error.is_none() {
+            emit_frame_outputs(kernel, last.n, ppm, preview);
+        }
+    }
     let wall = started.elapsed();
     let ok = first_mismatch.is_none() && dispatch_error.is_none();
     let mut summary = json!({

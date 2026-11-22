@@ -102,4 +102,10 @@ impl KernelFacade {
     pub fn rt_handle(&self) -> std::rc::Rc<std::cell::RefCell<crate::host_api::RtFrame>> {
         self.host.rt_handle()
     }
+
+    /// 取帧渲染面句柄（S31 R2；Mod 经 `ygg.rt.frame.*` 写，引擎每帧读旁路
+    /// 捕获槽 + 宿主读输出快照，不经 Lua 边界）。与 Lua 面同一个 `Rc`。
+    pub fn frame_handle(&self) -> std::rc::Rc<std::cell::RefCell<crate::frame::FrameFace>> {
+        self.host.frame_handle()
+    }
 }

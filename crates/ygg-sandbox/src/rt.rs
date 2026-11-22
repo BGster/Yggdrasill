@@ -214,24 +214,34 @@ pub struct FrameRecord {
     pub state: String,
     /// 帧链哈希（含前帧链、调度参数与输入字节）。
     pub hash: String,
+    /// 帧渲染证据（S31 R2，**可选**；present 过才有）：本帧末次 present 的
+    /// `<w>x<h>|<全幅 digest>`。旁路证据线（D9）——**不入链**：链公式与
+    /// R1 录制字节零变化；回放严格对表（录有实无/录无实有均 mismatch）。
+    pub frame: Option<String>,
 }
 
 impl FrameRecord {
     /// JSONL 行（serde_json 默认 Map = BTreeMap 字典序，同记录同字节——
-    /// 与驱动信封同一确定性口径；不引 serde derive 依赖，五字段手写）。
+    /// 与驱动信封同一确定性口径；不引 serde derive 依赖，字段手写）。
+    /// `frame` 有则写入（字典序落在 `dt_ms` 与 `hash` 之间）；无则整键缺席
+    /// ——R1 录制（无渲染面）行字节逐字节不变。
     pub fn to_line(&self) -> Result<String, RtError> {
-        serde_json::to_string(&json!({
+        let mut line = json!({
             "n": self.n,
             "dt_ms": self.dt_ms,
             "input": self.input,
             "state": self.state,
             "hash": self.hash,
-        }))
-        .map_err(|err| RtError::Record(format!("记录序列化失败：{err}")))
+        });
+        if let Some(frame) = &self.frame {
+            line["frame"] = json!(frame);
+        }
+        serde_json::to_string(&line)
+            .map_err(|err| RtError::Record(format!("记录序列化失败：{err}")))
     }
 
     /// 从 JSON 行重建（缺字段/类型不符即可读错误——录制文件可能被手改，
-    /// 解析不静默吞）。
+    /// 解析不静默吞）。`frame` 容缺失（R1 录制无此字段）。
     pub fn from_line(line: &str) -> Result<Self, RtError> {
         let value: Json = serde_json::from_str(line)
             .map_err(|err| RtError::Record(format!("不是合法帧记录：{err}")))?;
@@ -247,12 +257,22 @@ impl FrameRecord {
         let dt_ms = value["dt_ms"]
             .as_i64()
             .ok_or_else(|| RtError::Record("记录缺 `dt_ms` 字段或非整数".to_owned()))?;
+        let frame = match &value["frame"] {
+            Json::Null => None,
+            Json::String(text) => Some(text.clone()),
+            _ => {
+                return Err(RtError::Record(
+                    "记录 `frame` 字段非字符串（渲染证据为 `w>x<h>|<64hex>` 串）".to_owned(),
+                ))
+            }
+        };
         Ok(Self {
             n,
             dt_ms,
             input: field("input")?,
             state: field("state")?,
             hash: field("hash")?,
+            frame,
         })
     }
 }
@@ -328,8 +348,8 @@ impl RtHost {
         Ok(record)
     }
 
-    /// 回放模式一步：dt 与输入都来自录制记录（同序重派），重算链哈希
-    /// 与录制比对——不一致即首处失配。
+    /// 回放模式一步：dt 与输入都来自录制记录（同序重派），重算链哈希与
+    /// 渲染证据并与录制比对——链哈希或帧字段任一失配即首处失配。
     pub fn step_replay(
         &mut self,
         facade: &mut KernelFacade,
@@ -338,18 +358,32 @@ impl RtHost {
         let input = RtInput::parse(&record.input).map_err(RtError::Record)?;
         let actual = self.dispatch_frame(facade, record.n, record.dt_ms, &input)?;
         self.next_n = record.n + 1;
+        // 链哈希比对（I2）+ 帧渲染证据严格对表（D9）：录有实无/录无实有/
+        // 同有不同值均 mismatch——Mod 渲染行为漂移 = 该红的证据。
+        let hash_match = actual.hash == record.hash;
+        let frame_match = actual.frame == record.frame;
+        let (expected, actual_key) = if hash_match {
+            (
+                record.frame.clone().unwrap_or_else(|| "-".to_owned()),
+                actual.frame.clone().unwrap_or_else(|| "-".to_owned()),
+            )
+        } else {
+            (record.hash.clone(), actual.hash)
+        };
         Ok(ReplayStep {
             n: record.n,
-            matched: actual.hash == record.hash,
-            expected: record.hash.clone(),
-            actual: actual.hash,
+            matched: hash_match && frame_match,
+            expected,
+            actual: actual_key,
         })
     }
 
-    /// 单帧核心：闩锁 rt 面 → 派发 → 全状态摘要 → 链推进。
+    /// 单帧核心：闩锁 rt 面 → 派发 → 全状态摘要 → 链推进（旁：帧渲染证据
+    /// 捕获，D9 不入链）。
     ///
     /// 失败时 rt 面的帧号/逻辑钟回退（失败帧不留残渣——循环即停，但
-    /// 面上不留半步状态）。
+    /// 面上不留半步状态）；渲染面同理**不留半帧证据**：派发入口先清 present
+    /// 捕获槽，失败路径不产生 FrameRecord。
     fn dispatch_frame(
         &mut self,
         facade: &mut KernelFacade,
@@ -357,6 +391,12 @@ impl RtHost {
         dt_ms: i64,
         input: &RtInput,
     ) -> Result<FrameRecord, RtError> {
+        // 渲染面旁路：先清上一帧残留的 present 捕获槽（上一帧已收走；
+        // 这里防御 run 模式同进程混派的时序——槽内只能有本帧的 present）。
+        {
+            let face = facade.frame_handle();
+            face.borrow_mut().take_presented();
+        }
         let canonical = input.canonical();
         // 闩锁 rt 面（mode/input/n/逻辑钟都在派发**前**就位：handler 看到的
         // 是本帧自己的帧号与含本帧 dt 的逻辑时刻）；prev 值捕获供失败回退。
@@ -420,6 +460,13 @@ impl RtHost {
             });
         }
         let state = state_digest(facade, n)?;
+        // 帧渲染证据（D9 旁路，不入链）：本帧末次 present 的 `<w>x<h>|<digest>`；
+        // present 未达 = None（半帧不留证据）。
+        let frame = {
+            let face = facade.frame_handle();
+            let taken = face.borrow_mut().take_presented().map(|p| p.record_key());
+            taken
+        };
         self.chain =
             hex_sha256(format!("{}|{n}|{dt_ms}|{canonical}|{state}", self.chain).as_bytes());
         Ok(FrameRecord {
@@ -428,6 +475,7 @@ impl RtHost {
             input: canonical,
             state,
             hash: self.chain.clone(),
+            frame,
         })
     }
 }

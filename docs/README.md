@@ -74,7 +74,7 @@ docs/
 | --- | --- | --- |
 | [cli-daemon.md](design/host/cli-daemon.md) | egg CLI、builtin 工具、daemon 协议、summary Schema | §3.5 |
 | [serve.md](design/host/serve.md) | serve 观察面全契约（CLI/面板/API/SSE/安全） | §3.7 |
-| [rt-face.md](design/host/rt-face.md) | rt 实时宿主面全契约（帧循环/输入/录制回放/确定性/性能预算） | — |
+| [rt-face.md](design/host/rt-face.md) | rt 实时宿主面全契约（帧循环/输入/渲染面五键/录制回放/确定性/性能预算） | — |
 | [harness-tools.md](design/host/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | harness 机证 |
 | [lanes.md](design/host/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
 

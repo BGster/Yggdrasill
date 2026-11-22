@@ -68,6 +68,7 @@ use crate::inject::splitmix64;
 // ---- 模块化拆分 shim(S-25 批三 C1:纯搬移;既有路径逐字节不变)----
 mod entity;
 mod entity_decode;
+mod frame;
 mod fs;
 mod kv;
 mod meta;
@@ -159,6 +160,9 @@ pub struct HostState {
     /// 调度参数。`install` 自建（缺省 run 模式），引擎/宿主经 [`HostApi::rt_handle`]
     /// 拿同一个 `Rc` 逐帧写入。
     rt: Rc<RefCell<rt::RtFrame>>,
+    /// 渲染面（S31 R2；`ygg.rt.frame.*` 的共享背面）：Mod 经五键写，引擎每帧
+    /// 读旁路捕获槽收进 `FrameRecord.frame`（不入链，D9），宿主读快照出双通道。
+    frame: Rc<RefCell<crate::frame::FrameFace>>,
     /// 当前执行相位（装载期 `Loading`，封口后待机 `Idle`，handler 执行期间 `Transition`）。
     phase: Phase,
     sealed: bool,
@@ -192,6 +196,7 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         mount: Rc::new(RefCell::new(None)),
         sim: Rc::new(RefCell::new(None)),
         rt: Rc::new(RefCell::new(rt::RtFrame::default())),
+        frame: Rc::new(RefCell::new(crate::frame::FrameFace::new())),
         phase: Phase::Loading,
         sealed: false,
         // per-kernel sentinel：内核种子派生（splitmix64 四轮），Mod 面不可预测
@@ -222,6 +227,8 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     install_sim(lua, &state)?;
     // `ygg.rt.*`（S31 R1：实时宿主面；config 装载期限定，loop/input 只读投影）。
     rt::install_rt(lua, &state)?;
+    // `ygg.rt.frame.*`（S31 R2：渲染面五键；open 装载期限定，写键运行期）。
+    frame::install_frame(lua, &state)?;
     // `ygg.codec.*`（Tier 2 pkg.codec 的原生加速面；契约 lua-api.md §3.1.4）。
     // 无状态、无实例，所以没有 `set_*` 注入面，也不需要 CLI 激活。
     crate::codec_face::install(lua)?;
@@ -326,6 +333,12 @@ impl HostApi {
     /// 取实时宿主面句柄（`ygg.rt.*` 的共享 `Rc`；宿主/引擎逐帧写入，Mod 只读）。
     pub fn rt_handle(&self) -> Rc<RefCell<rt::RtFrame>> {
         Rc::clone(&self.state.borrow().rt)
+    }
+
+    /// 取帧渲染面句柄（S31 R2；Mod 经 `ygg.rt.frame.*` 写，宿主/引擎读——
+    /// 旁路捕获槽与输出快照走这条，与 `ygg.rt.*` 投影同一个 `Rc`）。
+    pub fn frame_handle(&self) -> Rc<RefCell<crate::frame::FrameFace>> {
+        Rc::clone(&self.state.borrow().frame)
     }
 
     /// 注入或卸载模拟内核实例（`ygg.sim.*` 的宿主面，Tier 1）。
