@@ -320,7 +320,7 @@ fn audio_play_shape_is_closed_set() {
         Err(AudioError::Shape(_))
     ));
     assert!(
-        matches!(face.play(&s16le(&[1]), 0), Ok(_)),
+        face.play(&s16le(&[1]), 0).is_ok(),
         "gain=0 = 静音 voice 合法"
     );
     // voice 整数 1 起、跨 play 递增。
