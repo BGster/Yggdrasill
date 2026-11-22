@@ -60,7 +60,7 @@ test("五层架构：模块只住在五层内、entry 不在模块表、声明�
   local code = __PACK.code
   local modules = code.modules
   assert_true(type(modules) == "table", "code.modules must be an array")
-  assert_eq(#modules, 30, "the mod declares 30 modules")
+  assert_eq(#modules, 45, "the mod declares 45 modules（S32 拆分后）")
 
   local entry = code.entry
   local layers = {}
