@@ -11,8 +11,9 @@
 -- 供重放对账（I3）在同一进程内开两局。模块内缓存的失效靠 belts 指纹
 -- （带数+最大 id）——reset 后实体集合换血即强制重建。
 --
--- 已知缺口（selftest.rs 头注同款）：driver 层事务回滚 / fuel / D1 choice 语义
--- 不在此覆盖。`ygg.choice` 记 pending 后正常返回。
+-- 已知缺口（selftest.rs 头注同款）：driver 层事务回滚 / D1 choice 语义
+-- 不在此覆盖。（原列举中的燃料项已随 S34 燃料退役不复存在。）
+-- `ygg.choice` 记 pending 后正常返回。
 
 local S = rawget(_G, "__SELFTEST")
 if type(S) ~= "table" then

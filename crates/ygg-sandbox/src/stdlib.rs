@@ -152,9 +152,8 @@ mod tests {
             end)
         "#);
         let external = Event::external("event.enter", Value::Int(0)).expect("external event");
-        let result: TransitionResult =
-            run_transition(&mut rig.store, &mut rig.registry, external)
-                .expect("transition succeeds");
+        let result: TransitionResult = run_transition(&mut rig.store, &mut rig.registry, external)
+            .expect("transition succeeds");
         // 路由序：enter → goto intro（派生 1）→ intro body 叙述并 goto
         // scene（派生 2）→ scene body 叙述。FIFO 级联序 = 叙述序。
         assert_eq!(result.narrative(), ["node:intro", "node:scene"]);

@@ -116,8 +116,9 @@ export function parseEnvelope(raw: string): Envelope {
 }
 
 /** 稳定错误码速查（driver.rs `code` 模块面；判断一律比对字符串）：
- *  `OK` / `VALIDATION` / `FUEL_EXHAUSTED` / `SANDBOX_DENIED` / `KV_LIMIT` /
- *  `ENGINE_MISMATCH` / `INTERNAL`。本包不导出常量表——消费方按码字符串比对即可。
+ *  `OK` / `VALIDATION` / `SANDBOX_DENIED` / `KV_LIMIT` /
+ *  `ENGINE_MISMATCH` / `INTERNAL`（原 `FUEL_EXHAUSTED` 已随 S34 燃料退役
+ *  从稳定码清单收缩）。本包不导出常量表——消费方按码字符串比对即可。
  */
 
 // ── 回放 fixture 结构 ────────────────────────────────────────────────────
