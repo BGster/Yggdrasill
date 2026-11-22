@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::frame::{frame_digest, write_ppm, FrameError, FrameFace, Rect, FRAME_MAX_EDGE};
-use ygg_sandbox::rt::{record_frames, replay_records, RtConfig, RtHost};
+use ygg_sandbox::rt::{
+    record_frames, replay_records, FrameRecord, RtConfig, RtHost,
+};
 
 const RED: u32 = 0xFF00_00FF;
 const GREEN: u32 = 0x0000_00FF;
@@ -356,6 +358,94 @@ fn frame_digest_distinguishes_shape_and_is_stable() {
         frame_digest(1, 4, &black_1x4),
         "同字节异形必须不同 digest（尺寸入前像）"
     );
+}
+
+/// 回放严格对表负例 mod 族（D9）：四者 KV 面逐字节相同（链哈希全等），
+/// 渲染面不同——frame 字段单独成为证据，链哈希掩护不了渲染漂移。
+const DRIFT_KV_ONLY: &str = r#"
+ygg.on("rt.tick", function()
+  ygg.kv.set("beat", tostring((tonumber(ygg.kv.get("beat") or "0") + 1)))
+end)
+"#;
+
+const DRIFT_RED: &str = r#"
+local h = ygg.rt.frame.open({w = 4, h = 3})
+ygg.on("rt.tick", function()
+  ygg.rt.frame.clear(h, 0x000000FF)
+  ygg.rt.frame.span(h, 0, 1, 4, 1, 0xFF0000FF)
+  ygg.rt.frame.present(h)
+  ygg.kv.set("beat", tostring((tonumber(ygg.kv.get("beat") or "0") + 1)))
+end)
+"#;
+
+const DRIFT_BLUE: &str = r#"
+local h = ygg.rt.frame.open({w = 4, h = 3})
+ygg.on("rt.tick", function()
+  ygg.rt.frame.clear(h, 0x000000FF)
+  ygg.rt.frame.span(h, 0, 1, 4, 1, 0x0000FFFF)
+  ygg.rt.frame.present(h)
+  ygg.kv.set("beat", tostring((tonumber(ygg.kv.get("beat") or "0") + 1)))
+end)
+"#;
+
+fn record_with(mod_source: &str, frames: u64) -> Vec<FrameRecord> {
+    let mut kernel = KernelFacade::new(mod_source).expect("kernel");
+    let mut host = RtHost::new(RtConfig::default());
+    let mut sink = Vec::new();
+    let done = record_frames(&mut kernel, &mut host, frames, &mut sink).expect("record");
+    assert_eq!(done, frames);
+    sink
+}
+
+/// 录有实无：录制侧 present、回放侧不画（KV 同面）→ 首帧 mismatch，且
+/// 链哈希本身全等（expected 是 frame 键而非 64hex）——渲染漂移被抓。
+#[test]
+fn frame_replay_strict_table_catches_missing_frames() {
+    let records = record_with(DRIFT_RED, 3);
+    assert!(records.iter().all(|r| r.frame.is_some()));
+    let mut kernel = KernelFacade::new(DRIFT_KV_ONLY).expect("kernel");
+    let mut host = RtHost::new(RtConfig::default());
+    let result = replay_records(&mut kernel, &mut host, &records);
+    assert!(!result.ok(), "录有实无必须红：{result:?}");
+    let step = result.first_mismatch.expect("first_mismatch");
+    assert_eq!(step.n, 1, "首帧即红");
+    assert!(step.expected.starts_with("4x3|"), "expected = 录制的 frame 键：{}", step.expected);
+    assert_eq!(step.actual, "-", "actual = 无 present");
+}
+
+/// 录无实有：R1 形状录制（无渲染）遇 R2 形状 mod（present）→ 同样红
+/// ——Mod 加了渲染行为 = 行为漂移，证据链必抓。
+#[test]
+fn frame_replay_strict_table_catches_unexpected_frames() {
+    let records = record_with(DRIFT_KV_ONLY, 3);
+    assert!(records.iter().all(|r| r.frame.is_none()));
+    let mut kernel = KernelFacade::new(DRIFT_RED).expect("kernel");
+    let mut host = RtHost::new(RtConfig::default());
+    let result = replay_records(&mut kernel, &mut host, &records);
+    assert!(!result.ok(), "录无实有必须红：{result:?}");
+    let step = result.first_mismatch.expect("first_mismatch");
+    assert_eq!(step.n, 1);
+    assert_eq!(step.expected, "-");
+    assert!(step.actual.starts_with("4x3|"), "actual = 回放侧 frame 键：{}", step.actual);
+}
+
+/// 同有不同值（篡改缓冲）：红墙换蓝墙，KV 面不变 → frame 键不同 → 红。
+#[test]
+fn frame_replay_strict_table_catches_tampered_buffer() {
+    let records = record_with(DRIFT_RED, 3);
+    let mut kernel = KernelFacade::new(DRIFT_BLUE).expect("kernel");
+    let mut host = RtHost::new(RtConfig::default());
+    let result = replay_records(&mut kernel, &mut host, &records);
+    assert!(!result.ok(), "同有不同值必须红：{result:?}");
+    let step = result.first_mismatch.expect("first_mismatch");
+    assert_eq!(step.n, 1);
+    assert_ne!(step.expected, step.actual);
+    assert!(step.expected.starts_with("4x3|") && step.actual.starts_with("4x3|"));
+    // 交叉验证：KV-only 与 KV-only 全等（负例 mod 族的阴性对照）。
+    let clean = record_with(DRIFT_KV_ONLY, 3);
+    let mut kernel = KernelFacade::new(DRIFT_KV_ONLY).expect("kernel");
+    let mut host = RtHost::new(RtConfig::default());
+    assert!(replay_records(&mut kernel, &mut host, &clean).ok());
 }
 
 /// 吞吐实测 fixture mod（§6 预算表数据源）：320×200 全帧 cast 同形——
