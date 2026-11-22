@@ -113,7 +113,7 @@ end
 #### 2.9.2 现行效应及折叠边界
 
 - **`auto_dispatch`**：`proposal.accept(analysis)` 或 `gate.approve(plan)` 的 handler 用 `hooks.mark_auto_dispatch(index)` 只标记刚就绪的需求；效应仅在本回合无待决提案、无待决门禁、无冲突且有空闲 job 槽时派发这一条。`requirement.add` 的 draft 永不自动派发；`gate.reject` / `proposal.reject` 不派生；`gate.approve(accept) -> done` 不派生，释放槽位由主代理决定。不得新增 `derive.auto` 开关形成第二旁路。
-- **`tools.receipt`**：`src/runtime/tools.lua` 在 `tool.result` 到达后只 latch `tool.notified.<call_id>` 并叙述一次，不触碰 `req.*` / `prop.*` / 门禁 / 泳道 / 阶段状态。KV 标量依赖与 latch 幂等保证 replay 两次内收敛，绝不出现第二条 `[TOOL SETTLED]`。
+- **`tools.receipt`**：`src/runtime/tools/reactive.lua` 在（S32 拆分前为 `src/runtime/tools.lua`） `tool.result` 到达后只 latch `tool.notified.<call_id>` 并叙述一次，不触碰 `req.*` / `prop.*` / 门禁 / 泳道 / 阶段状态。KV 标量依赖与 latch 幂等保证 replay 两次内收敛，绝不出现第二条 `[TOOL SETTLED]`。
 - **`tools.reactive`**：成功 `tool.result`（`status ok`、`code 0`）由紧随 receipt 注册的第二个效应折叠进领域 KV；它与 receipt 共享同一 `flush_effects`，但不共享职责。反应器只能写 KV 与叙述，不得 render/choice、改阶段或提案/门禁状态，也不得 `flow.refuse`——拒绝前缀会被宿主计为失败步，使事实探针伪装成 Mod 拒绝。`vfs.write` 是真实事件处理器而非反应器，故可使用 `reject_payload`。
 - **失败探针是警告，不是门禁**：`[LANE PROBE FAILED]`（`commits=0` 或 `clean=0`）只叙述并留下 `lane.<k>.probe.*` 查询面；接入 `gates.gate_problem()` 会让一棵脏树永久死锁 `coordinate.submit` / `review.note`，且没有「撤销探针」动作。冲突雷达是唯一例外：它经 `props.req_do_conflict` 写 `req.<i>.conflict`，进入 `req_conflict_total` 并阻塞派发/收口，只有 `requirement.resolve` 清除。
 - **机证与人证同级**：`gate.verify_suite` 与 `verify.submit` 写同一 KV、省一回合，但不更高级；必须保留 `verify.source`，且只能在 settle 相位、`gate_problem() == nil` 时记录 `passed=1`。报告不得把机器路径描述为高于人工声明。

@@ -56,9 +56,9 @@
       "sha256": "80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
     },
     {
-      "byteLength": 41088,
+      "byteLength": 825,
       "path": "src/domain/wire.lua",
-      "sha256": "178bcdd99785bd5d056535b0236a42ace54b4dedefe747c4c9295204878ad4c9"
+      "sha256": "82ef7fa8cc16b59f58c67fcba9edab692f12573828210cdcf15192647847b51f"
     },
     {
       "byteLength": 11388,
@@ -131,9 +131,9 @@
       "sha256": "c4e68ff43a5da46bb48165396bb2a16621a7048321c690b140938cd862b1442a"
     },
     {
-      "byteLength": 52459,
+      "byteLength": 9297,
       "path": "src/runtime/tools.lua",
-      "sha256": "091b9c2810ea1c11f2d55a710c16e3a50b2bec385332031102ad16d8fa27796c"
+      "sha256": "b76f57e095b7f0792a56e350dc9d49894c284d8e2db8f8b6ad975744333a0764"
     },
     {
       "byteLength": 1875,
@@ -146,9 +146,9 @@
       "sha256": "26bcc8b5e20dcd3338c092da3076fe036e58b1ec0a265a67929389cf7cb28f83"
     },
     {
-      "byteLength": 44691,
+      "byteLength": 1658,
       "path": "src/view/render.lua",
-      "sha256": "00c80b7c3aaece57b7e8288c6ccccc65c4d7b0ed4b7d307ca8676b681c32277a"
+      "sha256": "c0d20abee1af96650dea033231c987f0471b62117ea336521b783b0cffe90108"
     }
   ],
   "entries": [

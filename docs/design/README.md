@@ -2,7 +2,7 @@
 > **定位**：`docs/design/` 是**「改之前必须遵守的契约」**——判据是**有代码消费者**（playbook JSON 的 `basis`/`source`、`src/**` 注释、crates 测试与注释按路径引用它）。行为叙事与产品定位不在此树，见 [../context/README.md](../context/README.md)。
 > **replaces**：r6 前的 18 文件平铺形态（`docs/design/<topic>.md`）。平铺路径已退役，**不留软链**；历史与理由在 git。
 > **判据**：[../wiki-governance.md](../wiki-governance.md)「design / context 二分判据」——本文件只是它的导航投影，不复制正文。
-> **上游**：[../README.md](../README.md)（顶层索引） · **机检**：`.ygg/mods/agent-seed/tests/surface.lua` 的 docs/design 树索引用例（目录/文件计数、索引双向相等、id 双射、指针锚存在性）与 `tests/modpkg.lua` 的 `AGENTS.md §3` 路由用例（用例名以测试文件为准，本文不维护叙述名）
+> **上游**：[../README.md](../README.md)（顶层索引） · **机检**：`.ygg/mods/agent-seed/tests/surface-tree.lua` 的 docs/design 树索引用例（S32 拆分后自 `tests/surface.lua` 迁入，用例内容不变）（目录/文件计数、索引双向相等、id 双射、指针锚存在性）与 `tests/modpkg.lua` 的 `AGENTS.md §3` 路由用例（用例名以测试文件为准，本文不维护叙述名）
 
 ## 目录树
 
