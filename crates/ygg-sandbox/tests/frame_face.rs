@@ -10,9 +10,7 @@ use std::time::{Duration, Instant};
 
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::frame::{frame_digest, write_ppm, FrameError, FrameFace, Rect, FRAME_MAX_EDGE};
-use ygg_sandbox::rt::{
-    record_frames, replay_records, FrameRecord, RtConfig, RtHost,
-};
+use ygg_sandbox::rt::{record_frames, replay_records, FrameRecord, RtConfig, RtHost};
 
 const RED: u32 = 0xFF00_00FF;
 const GREEN: u32 = 0x0000_00FF;
@@ -409,7 +407,11 @@ fn frame_replay_strict_table_catches_missing_frames() {
     assert!(!result.ok(), "录有实无必须红：{result:?}");
     let step = result.first_mismatch.expect("first_mismatch");
     assert_eq!(step.n, 1, "首帧即红");
-    assert!(step.expected.starts_with("4x3|"), "expected = 录制的 frame 键：{}", step.expected);
+    assert!(
+        step.expected.starts_with("4x3|"),
+        "expected = 录制的 frame 键：{}",
+        step.expected
+    );
     assert_eq!(step.actual, "-", "actual = 无 present");
 }
 
@@ -426,7 +428,11 @@ fn frame_replay_strict_table_catches_unexpected_frames() {
     let step = result.first_mismatch.expect("first_mismatch");
     assert_eq!(step.n, 1);
     assert_eq!(step.expected, "-");
-    assert!(step.actual.starts_with("4x3|"), "actual = 回放侧 frame 键：{}", step.actual);
+    assert!(
+        step.actual.starts_with("4x3|"),
+        "actual = 回放侧 frame 键：{}",
+        step.actual
+    );
 }
 
 /// 同有不同值（篡改缓冲）：红墙换蓝墙，KV 面不变 → frame 键不同 → 红。
