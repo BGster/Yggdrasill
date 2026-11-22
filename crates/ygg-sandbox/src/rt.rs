@@ -113,11 +113,14 @@ pub struct InputEvent {
 /// **没有 Lua 侧写入口**——Mod 伪造输入 = 破坏回放证据链（结构性缺席，
 /// rt-face.md 不变量 I3）。R1 的输入来自调度脚本（`--input`）与测试；
 /// 实时人入（预览端口回注）按计划归 R2。
+///
+/// 同帧多事件按**注入序**应用；单事件内同时含同键 down 与 up 属歧义
+/// 输入（帧内序无定义），注入时点即拒绝——拆成两次注入或换帧。
 #[derive(Default)]
 pub struct InputDevice {
     down: BTreeSet<i64>,
     mouse_buttons: i64,
-    schedule: BTreeMap<u64, InputEvent>,
+    schedule: BTreeMap<u64, Vec<InputEvent>>,
 }
 
 impl InputDevice {
@@ -131,7 +134,8 @@ impl InputDevice {
         }
     }
 
-    /// 在第 `frame` 帧注入事件（键码越界即拒绝——错误前移到注入时点）。
+    /// 在第 `frame` 帧注入事件（键码越界 / 同帧同键 up+down 歧义即拒绝
+    /// ——错误前移到注入时点）。
     pub fn at(&mut self, frame: u64, event: InputEvent) -> Result<(), RtError> {
         for code in event.down.iter().chain(event.up.iter()) {
             Self::validate_code(*code)?;
@@ -141,59 +145,57 @@ impl InputDevice {
                 return Err(RtError::Input(format!("鼠标按键掩码为负：{buttons}")));
             }
         }
-        // 校验全过后才落槽：同帧多事件叠合（down/up 并集、鼠标位移累加、
-        // 掩码后写胜）。
-        let slot = self.schedule.entry(frame).or_default();
-        slot.down.extend(event.down);
-        slot.up.extend(event.up);
-        slot.mouse_dx += event.mouse_dx;
-        slot.mouse_dy += event.mouse_dy;
-        if event.mouse_buttons.is_some() {
-            slot.mouse_buttons = event.mouse_buttons;
+        // 同帧同键 down+up 混在单事件里 = 帧内序无定义（先 down 后 up 与
+        // 先 up 后 down 语义相反）——拒绝，拆两次注入。
+        for code in &event.down {
+            if event.up.contains(code) {
+                return Err(RtError::Input(format!(
+                    "同帧同键 {code} 同时 down 与 up（帧内序歧义）：拆成两次注入"
+                )));
+            }
         }
+        // 校验全过后才落槽：同帧多事件按注入序应用（snapshot_for 逐个消费）。
+        self.schedule.entry(frame).or_default().push(event);
         Ok(())
     }
 
-    /// 第 `frame` 帧的输入快照：消费调度表里 `≤ frame` 的全部事件，帧内
-    /// 折叠（净沿），键序升序（BTreeSet 天然序 = 规范序）。
+    /// 第 `frame` 帧的输入快照：消费调度表里 `≤ frame` 的全部事件，取
+    /// **帧初/帧末差集**为沿（帧内同键 down+up 或 up+down = 净零，两侧都
+    /// 不出现——一帧一条规范记录，帧是沿的粒度），键序升序（BTreeSet
+    /// 天然序 = 规范序）。
     pub fn snapshot_for(&mut self, frame: u64) -> Result<RtInput, RtError> {
         let due: Vec<u64> = self.schedule.range(..=frame).map(|(k, _)| *k).collect();
-        let mut pressed = BTreeSet::new();
-        let mut released = BTreeSet::new();
+        let before: BTreeSet<i64> = self.down.clone();
         let mut dx = 0i64;
         let mut dy = 0i64;
         let mut buttons = self.mouse_buttons;
         for key in due {
             // due 取自同一张表的 range 快照，缺席只能来自并发改写（不存在：
-            // 单线程 Rc 面）；缺席即跳过而非 panic。
-            let Some(event) = self.schedule.remove(&key) else {
+            // 单线程 Rc 面）；缺席即跳过而非 panic。键码已在注入时校验。
+            let Some(events) = self.schedule.remove(&key) else {
                 continue;
             };
-            // 折叠：帧内同键 down+up = 净零（两侧都不出现）；已按下的
-            // down 不是沿；未按下的 up 不是沿。
-            for code in event.down {
-                if self.down.insert(code) {
-                    pressed.insert(code);
+            // 注入序逐事件应用；单事件内先 down 后 up（歧义组合已在
+            // 注入时拒绝，这里剩下的是无歧义序列）。
+            for event in events {
+                for code in event.down {
+                    self.down.insert(code);
                 }
-                released.remove(&code);
-            }
-            for code in event.up {
-                if self.down.remove(&code) {
-                    released.insert(code);
+                for code in event.up {
+                    self.down.remove(&code);
                 }
-                pressed.remove(&code);
-            }
-            dx += event.mouse_dx;
-            dy += event.mouse_dy;
-            if let Some(b) = event.mouse_buttons {
-                buttons = b;
+                dx += event.mouse_dx;
+                dy += event.mouse_dy;
+                if let Some(b) = event.mouse_buttons {
+                    buttons = b;
+                }
             }
         }
         self.mouse_buttons = buttons;
         Ok(RtInput {
             held: self.down.iter().copied().collect(),
-            pressed: pressed.into_iter().collect(),
-            released: released.into_iter().collect(),
+            pressed: self.down.difference(&before).copied().collect(),
+            released: before.difference(&self.down).copied().collect(),
             mouse_dx: dx,
             mouse_dy: dy,
             mouse_buttons: buttons,
