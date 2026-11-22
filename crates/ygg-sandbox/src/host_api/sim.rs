@@ -98,7 +98,7 @@ pub(super) fn install_sim(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result<(
     let st = Rc::clone(state);
     table.raw_set(
         "restore",
-        lua.create_function(move |lua, bytes: mlua::String| -> Result<Table, Error> {
+        lua.create_function(move |lua, bytes: mlua::LuaString| -> Result<Table, Error> {
             let slot = Rc::clone(&st.borrow().sim);
             let (tick, len, hash) = {
                 let mut guard = slot.borrow_mut();
@@ -119,7 +119,7 @@ pub(super) fn install_sim(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result<(
     let st = Rc::clone(state);
     table.raw_set(
         "spawn_batch",
-        lua.create_function(move |lua, frame: mlua::String| -> Result<Table, Error> {
+        lua.create_function(move |lua, frame: mlua::LuaString| -> Result<Table, Error> {
             let slot = Rc::clone(&st.borrow().sim);
             let (spawned, next_id) = {
                 let mut guard = slot.borrow_mut();
@@ -139,7 +139,7 @@ pub(super) fn install_sim(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result<(
     let st = Rc::clone(state);
     table.raw_set(
         "despawn_batch",
-        lua.create_function(move |lua, frame: mlua::String| -> Result<Table, Error> {
+        lua.create_function(move |lua, frame: mlua::LuaString| -> Result<Table, Error> {
             let slot = Rc::clone(&st.borrow().sim);
             let removed = {
                 let mut guard = slot.borrow_mut();
@@ -158,7 +158,7 @@ pub(super) fn install_sim(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result<(
     let st = Rc::clone(state);
     table.raw_set(
         "insert_batch",
-        lua.create_function(move |lua, frame: mlua::String| -> Result<Table, Error> {
+        lua.create_function(move |lua, frame: mlua::LuaString| -> Result<Table, Error> {
             let slot = Rc::clone(&st.borrow().sim);
             let (entities, values) = {
                 let mut guard = slot.borrow_mut();
@@ -226,7 +226,9 @@ pub(super) fn install_sim(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result<(
     table.raw_set(
         "replay",
         lua.create_function(
-            move |lua, (snapshot, log): (mlua::String, mlua::String)| -> Result<Table, Error> {
+            move |lua,
+                  (snapshot, log): (mlua::LuaString, mlua::LuaString)|
+                  -> Result<Table, Error> {
                 let slot = Rc::clone(&st.borrow().sim);
                 let report = {
                     let guard = slot.borrow();
