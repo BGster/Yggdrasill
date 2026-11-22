@@ -61,6 +61,31 @@
       "sha256": "82ef7fa8cc16b59f58c67fcba9edab692f12573828210cdcf15192647847b51f"
     },
     {
+      "byteLength": 7030,
+      "path": "src/domain/wire/evolution.lua",
+      "sha256": "b4de77a96d06048d230221d87936e82d58cd5a2d24e6b502c2d352556d55231a"
+    },
+    {
+      "byteLength": 12428,
+      "path": "src/domain/wire/intake.lua",
+      "sha256": "103e925562f7a3cfa448e70967899d7a49a70a125611e7629b7bf28314b97d10"
+    },
+    {
+      "byteLength": 14757,
+      "path": "src/domain/wire/proposal.lua",
+      "sha256": "6a4fe668fbb061aafba4f88e2b3781066c40c1d76b744b9c46d71730aaac5d5a"
+    },
+    {
+      "byteLength": 8691,
+      "path": "src/domain/wire/settlement.lua",
+      "sha256": "57b1456c18bf05ad44528847b7f7a1beb62a4e0b7bcd9f6dc13a9a475b22bee4"
+    },
+    {
+      "byteLength": 151,
+      "path": "src/domain/wire/state.lua",
+      "sha256": "a0d99a1b8caa0905a34f52173661ea24db5660e362d9af14d7a8e79c4a02c6a9"
+    },
+    {
       "byteLength": 11388,
       "path": "src/handlers/intake/actions.lua",
       "sha256": "ba92a43121d9be93e32114620d03772d4cc8ad099252d47b29dff80503b298ab"
@@ -136,6 +161,36 @@
       "sha256": "b76f57e095b7f0792a56e350dc9d49894c284d8e2db8f8b6ad975744333a0764"
     },
     {
+      "byteLength": 5645,
+      "path": "src/runtime/tools/auto.lua",
+      "sha256": "ea18092b3421b727c0fd26c1701fc331321652a91b9974e2394243bc06df2459"
+    },
+    {
+      "byteLength": 9042,
+      "path": "src/runtime/tools/bridge.lua",
+      "sha256": "6617a29cf7bd5d1632d7103259fd9ac766d4980a56073d28663369436af85ee1"
+    },
+    {
+      "byteLength": 12202,
+      "path": "src/runtime/tools/parse.lua",
+      "sha256": "44b5ffd847018621d93730b1e960f6e4fa084547464f2e1db9cfc092d440cc47"
+    },
+    {
+      "byteLength": 17736,
+      "path": "src/runtime/tools/reactive.lua",
+      "sha256": "82c8994c0ae2cbd2db9176cdbbc787aef2205c529d0ff76f45fa2e934912ee5d"
+    },
+    {
+      "byteLength": 153,
+      "path": "src/runtime/tools/state.lua",
+      "sha256": "ab2c865084f2d3e0f7ced14226716ce3034d4dc2c6d4c88ddbb00b9b06a7c3e3"
+    },
+    {
+      "byteLength": 4776,
+      "path": "src/runtime/tools/sync.lua",
+      "sha256": "c44449a03b08cbe2278b4dbccb2174b7e66532530831df4e10d2d3e3631f9791"
+    },
+    {
       "byteLength": 1875,
       "path": "src/view/guide.lua",
       "sha256": "96a816d8897425354b6a2ce849b756d2d2c10f93f1f5dc2496db018b5d95fe57"
@@ -149,6 +204,26 @@
       "byteLength": 1658,
       "path": "src/view/render.lua",
       "sha256": "c0d20abee1af96650dea033231c987f0471b62117ea336521b783b0cffe90108"
+    },
+    {
+      "byteLength": 16358,
+      "path": "src/view/render/mapview.lua",
+      "sha256": "de3e42645524674a4220a7a3c1d99ee65288159441826b4fa67a3824fa68b030"
+    },
+    {
+      "byteLength": 17756,
+      "path": "src/view/render/reqlist.lua",
+      "sha256": "d1c9aca03e774f5a5a4195645e3950070d972f5bcee9379f4ef26b2b671450c3"
+    },
+    {
+      "byteLength": 12878,
+      "path": "src/view/render/screen.lua",
+      "sha256": "421bb36396b02ba8029ec637fff25d6b96adf6c6217b6c22badf476640f6d635"
+    },
+    {
+      "byteLength": 165,
+      "path": "src/view/render/state.lua",
+      "sha256": "ea5d316f18314a9dee1afda1e43d9b74e74e795fca991fa6d2208eb1396b4e10"
     }
   ],
   "entries": [
