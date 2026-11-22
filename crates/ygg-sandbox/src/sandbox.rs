@@ -22,10 +22,8 @@
 //!   模块表由驱动在入口 chunk 之前注入（[`Sandbox::modules`] 句柄），装载期
 //!   与运行期（handler 内部）都能 require。空表时 `require` 对任何名字给可读
 //!   拒绝（单文件 Mod 的既有行为不变）。
-//! - **燃料计量**（D-继承-2 / D-B1）：正式燃料落 [`crate::fuel`] 模块
-//!   （`set_hook` 指令计数 + 每转换共享预算），经 `fuel::install(&Lua, budget)`
-//!   在沙箱构造后接入——构造本体不内建任何 hook（S8 amendment：S7 的临时
-//!   10M hook 是先行证明，正式燃料落地即移除，双计量防线归一）。
+//! - **无燃料计量**（S34 裁定）：燃料机制整体退役——构造本体不内建任何
+//!   hook，也不再接入任何计量面（原正式燃料接点随 S34 机制移除）。
 //! - **确定性种子**：`luai_makeseed` 构建期常量覆盖（workspace 根
 //!   `.cargo/config.toml`，D-继承-3）——本 crate 的种子锚测试实证「同进程两个
 //!   Lua 状态对同序插入产出相同 `pairs` 迭代序」；跨进程一致性归 S12
@@ -75,8 +73,7 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
-    /// 按默认约束构造沙箱：stdlib 裁剪 + 64 MB 内存上限 + 白名单环境
-    /// （燃料计量经 `fuel::install` 在构造后接入）。
+    /// 按默认约束构造沙箱：stdlib 裁剪 + 64 MB 内存上限 + 白名单环境。
     pub fn new() -> Result<Self, Error> {
         Self::build(SANDBOX_MEMORY_LIMIT)
     }
@@ -114,7 +111,7 @@ impl Sandbox {
         Ok(Self { lua, modules })
     }
 
-    /// 内部 Lua 句柄（后续 slice 的 fuel/inject/host 面经此接线；
+    /// 内部 Lua 句柄（inject/host 面经此接线；
     /// 状态哈希等消费面在 S10+ 才出现，本 slice 不再扩 API）。
     pub fn lua(&self) -> &Lua {
         &self.lua

@@ -20,7 +20,6 @@
 //!   --input <路径>      输入调度 JSONL：{"frame":N,"down":[..],"up":[..],
 //!                       "mouse":[dx,dy,buttons?]}（录制模式可配）
 //!   --boot <事件>       循环前单次派发的启动事件（如 Saltline 的 game.boot）
-//!   --fuel N            显式燃料预算（写 YGG_FUEL_BUDGET：env 最优先语义不变）
 //!   --ppm <目录>        帧落盘通道：present 过的帧写 <目录>/f%06d.ppm
 //!                       （P6；headless/selftest/KAT 证据）
 //!   --audio <路径>      混音落盘通道（S31-R3）：整局混音流单 WAV（44 字节头
@@ -61,7 +60,7 @@ fn usage_error(message: &str) -> ! {
     eprintln!(
         "error: {message}\n\n用法: cargo run -p ygg-sandbox --example rt -- <mod目录> \
          [--frames N|--duration S] [--record <路径>|--replay <路径>] [--hz N] \
-         [--max-catchup N] [--event <名>] [--input <路径>] [--fuel N] \
+         [--max-catchup N] [--event <名>] [--input <路径>] \
          [--ppm <目录>] [--preview <端口>] [--audio <路径>]"
     );
     exit(2);
@@ -131,7 +130,6 @@ fn main() {
     let mut replay: Option<PathBuf> = None;
     let mut input: Option<PathBuf> = None;
     let mut boot: Option<String> = None;
-    let mut fuel: Option<u64> = None;
     let mut ppm: Option<PathBuf> = None;
     let mut preview_port: Option<u16> = None;
     let mut audio: Option<PathBuf> = None;
@@ -170,13 +168,6 @@ fn main() {
             "--replay" => replay = Some(PathBuf::from(next_value(&mut args, "--replay"))),
             "--input" => input = Some(PathBuf::from(next_value(&mut args, "--input"))),
             "--boot" => boot = Some(next_value(&mut args, "--boot")),
-            "--fuel" => {
-                let value = next_value(&mut args, "--fuel");
-                fuel = Some(match value.parse::<u64>() {
-                    Ok(v) if v > 0 => v,
-                    _ => usage_error("--fuel 需要正整数（VM 指令预算）"),
-                });
-            }
             "--ppm" => ppm = Some(PathBuf::from(next_value(&mut args, "--ppm"))),
             "--audio" => audio = Some(PathBuf::from(next_value(&mut args, "--audio"))),
             "--preview" => {
@@ -195,10 +186,6 @@ fn main() {
     // 帧数/时限门只约束录制模式；回放不需要节拍参数。
     if record.is_some() && frames.is_some() == duration_ms.is_some() {
         usage_error("录制模式需要 --frames / --duration 恰好给一个");
-    }
-    if let Some(budget) = fuel {
-        // 显式预算：与 env 直设同语义（resolve_budget env 最优先）。
-        std::env::set_var("YGG_FUEL_BUDGET", budget.to_string());
     }
 
     // ① 装载：ModBundle（与宿主实跑同一份语义）→ 内核。

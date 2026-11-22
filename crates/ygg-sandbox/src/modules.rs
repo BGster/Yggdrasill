@@ -32,8 +32,6 @@
 //!   禁止面（清单在 [`ygg_modules::effects`]）被原位换为拒绝桩，执行完恢复。
 //!   这样「文件怎么拆」不影响 handler 派发序，重构保行为；也正因为模块纯了，
 //!   `require` 才能在任何时机调用。入口 chunk **不**受此约束（入口就是装配清单）。
-//! - **装载期独立燃料**（[`crate::fuel::LoadBudget`]）：模块装载消耗装载预算，
-//!   不挤占单转换预算——否则模块越多、每次转换可用步数越少（隐性退化）。
 //! - **错误**：装载器自判的拒绝（名字非法 / 未登记 / 循环 / 超深）带**调用点**
 //!   （`src/a.lua:3: ...`）与 require 链；模块 chunk 自身的错误按 Lua 原生错误链
 //!   浮出（每层 `path:line:` 前缀 + traceback 即链条）。两者最终都由驱动统一
@@ -107,7 +105,6 @@ mod binding {
     use mlua::{Error, Function, Lua, MultiValue, RegistryKey, Table, Value};
 
     use super::{effects, normalize, path_of, LoadStack, ModuleError, ModuleSet};
-    use crate::fuel::LoadBudget;
 
     /// 装载上下文：`Rc<RefCell>` 单实例，require 闭包与驱动句柄共享。
     ///
@@ -126,7 +123,6 @@ mod binding {
         chunk_paths: std::collections::BTreeMap<String, String>,
         cache: RegistryKey,
         stack: LoadStack,
-        budget: LoadBudget,
     }
 
     /// 缓存命中（`Ok(None)` = 未装载过）。
@@ -183,12 +179,6 @@ mod binding {
             self.ctx.borrow_mut().chunk_paths = paths;
         }
 
-        /// 装载期燃料句柄（驱动转交 `fuel::install_with_load_budget`：装载
-        /// 消耗独立预算，不挤占单转换预算）。
-        pub fn load_budget(&self) -> LoadBudget {
-            self.ctx.borrow().budget.clone()
-        }
-
         /// 已登记模块数（诊断面）。
         pub fn module_count(&self) -> usize {
             self.ctx.borrow().set.len()
@@ -212,7 +202,6 @@ mod binding {
             chunk_paths: std::collections::BTreeMap::new(),
             cache: lua.create_registry_value(cache)?,
             stack: LoadStack::new(),
-            budget: LoadBudget::new(crate::fuel::FUEL_LOAD_BUDGET),
         }));
         let require = {
             let ctx = Rc::clone(&ctx);
@@ -283,13 +272,9 @@ mod binding {
         // ⑤ 执行：影子表覆盖 chunk 的**整个执行期**（含它自己嵌套 require 的
         //    子树——嵌套层再装一层 guard，恢复是严格栈序，外层不受影响）。
         //    guard 在闭包结束（= chunk 返回或抛错）时 Drop，成败都恢复。
-        //    装载期预算由 require 边界进出（hook 据此分流，不挤占转换预算）。
         let outcome: Result<MultiValue, Error> = {
-            let budget = ctx.borrow().budget.clone();
-            budget.begin();
             let outcome = ShadowBanned::install(lua)
                 .and_then(|_guard| lua.load(code).set_name(chunk_name).call(()));
-            budget.end();
             outcome
         };
 

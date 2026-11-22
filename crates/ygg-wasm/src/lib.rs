@@ -3,8 +3,9 @@
 //! 对外契约（D-A1 线格式，语义面单一镜像 `crates/ygg-sandbox/src/driver.rs`）：
 //! - **唯一同步入口** [`YggKernel::dispatch`]：`dispatch(cmd, payload) -> String`
 //!   返回 A1 JSON 信封原文——成功 `{"ok":true,...}`；域错误
-//!   `{"ok":false,"error":{"code","message"}}`，稳定码 `FUEL_EXHAUSTED /
-//!   SANDBOX_DENIED / VALIDATION / KV_LIMIT / INTERNAL`。**域错误永不 throw**
+//!   `{"ok":false,"error":{"code","message"}}`，稳定码 `SANDBOX_DENIED /
+//!   VALIDATION / KV_LIMIT / INTERNAL`（原燃料耗尽码已随 S34 燃料退役从
+//!   稳定码清单收缩）。**域错误永不 throw**
 //!   （返回值即信封）。空壳注记的 `kernel_drain_events()` 自由函数导出面由
 //!   `dispatch("drain","")` 承载（保留命令，线格式不变）。
 //! - **便捷镜像** [`YggKernel::save`] / [`YggKernel::load`] /

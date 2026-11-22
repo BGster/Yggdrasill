@@ -11,7 +11,7 @@
 --   3. `sim.spawn_batch` **真解码**帧字节（魔数/版本/flags/rows/组件数/尾 digest
 --      逐段校验）——编帧 bug 在这一面当场红，而不是被「什么都收」的 mock 吞掉。
 --
--- 已知缺口（selftest.rs 头注同款）：driver 层事务回滚 / fuel / 存档 receipt /
+-- 已知缺口（selftest.rs 头注同款）：driver 层事务回滚 / 存档 receipt /
 -- D1 choice 语义不在此覆盖。`ygg.choice` 在替身里记 pending 后**正常返回**
 -- （真内核是 sentinel 终止 + 丢弃先续 emit——两处差异由真实跑局暴露）。
 

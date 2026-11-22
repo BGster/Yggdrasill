@@ -12,7 +12,7 @@
 一个 Mod 包目录包含：
 
 1. **`pack.json`（编写与宿主契约声明）**：
-   - `id`、`version`、`engineVersion`（semver 范围）、`seed`、`limits`（`maxFuelPerDispatch`、`maxCascadeDepth`、`maxMemoryBytes`）。
+   - `id`、`version`、`engineVersion`（semver 范围）、`seed`、`limits`（`maxCascadeDepth`、`maxMemoryBytes`；原 `maxFuelPerDispatch` 是 spec-only 键、crates 零解析，已随 S34 燃料退役从清单删除）。
    - `code`（可选）：`{ "entry": "mod.lua", "modules": ["src/core/util.lua", ...] }`。当存在时，`entry` 不得出现在 `modules` 中，且每个模块 chunk 顶层由 `ygg_modules::effects` 强制为纯。
    - `entries`：声明式资源清单（数组，每项 `{ id, kind, schema, path }`），逻辑资源按域拆片声明：一个 `agent-config`（`data/config.json`）+ 若干 `scene-texts-fragment`（`data/texts/*.json`，由 `mod.lua` 装配回 TEXTS）+ 若干 `agent-playbook-fragment`（`原 playbook 目录（已删除）*.json`）；片段数随内容演进，以 `pack.json` 为准。
    - `agent`：8 个必填字段（`entryEvent`、`choiceEvent`、`summaryEvent`、`endingPrefix`、`metaKey`、`rejectionPrefixes`、`replayPrefix`、`defaultPayload`）。

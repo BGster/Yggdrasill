@@ -39,7 +39,7 @@
 | # | 缺口 | 为什么不可自动化 | 真实跑局时的观测点 |
 | --- | --- | --- | --- |
 | 1 | **事务回滚**（handler 抛错 → 该次 dispatch 的全部改动回滚） | 回滚由宿主事务包裹实现，Lua 替身没有事务边界 | 制造一次 handler 报错，检查 `autosave.json` 与 `events.jsonl` 是否只多出一条 `ok=false` |
-| 2 | **fuel 预算**（`maxSteps` / `stallLimit` / 每步燃料） | 燃料由宿主 hook 计量，Lua 侧无 hook | 长跑一局，看是否在预期步数内触发 `[FUEL]` / 停驻 |
+| 2 | **长跑停驻**（`maxSteps` / `stallLimit`） | 原燃料由宿主 hook 计量；S34 燃料已整体退役，宿主不再计量 | 长跑一局，确认不再有宿主截停；Mod 自身的 maxSteps/stallLimit 逻辑照测 |
 | 3 | **save receipt 结构 / `state_hash`** | `save` 信封与状态哈希是 driver 产物 | `egg open <run> --event save` 的 `kv.entries` 与 `state_hash`；跨机同序比对 |
 | 4 | **事件路由 fail-closed**（未知事件不产生副作用） | 路由表在宿主，Lua 只按名字注册 handler | 发一个未声明事件，确认 `ok=false` 且 `save` 无变更 |
 | 5 | **双装载面**（项目目录与 `packages/mods/agent-seed` 软链都能装载） | 自检只装载一次，且走普通 Lua 而非 `ModBundle` | `egg new --mod packages/mods/agent-seed/` 能正常起局 |
@@ -50,7 +50,7 @@
 
 ## 4. 白盒边界
 
-`fire(event, payload)` 直接调用 mod 注册的 handler，**不经过** driver 的 FIFO、事务、fuel、
+`fire(event, payload)` 直接调用 mod 注册的 handler，**不经过** driver 的 FIFO、事务、
 `ygg.choice` 哨兵。因此断言的对象是「handler 与 effect 的行为」，不是「一次真实推进」。
 
 写用例时遵守：

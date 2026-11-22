@@ -7,7 +7,6 @@ use ygg_core::kv::KvStore;
 use ygg_core::save::SaveFile;
 
 use super::{resource_error_to_kernel, KernelError, KernelFacade};
-use crate::fuel::{self, HookFuelMeter};
 use crate::host_api::{self, HostApi, HostHandles, VfsStore};
 use crate::inject::{self, DeterminismHandle};
 use crate::modules::{ModuleSet, ModuleTable};
@@ -15,24 +14,10 @@ use crate::resources::ResourceTable;
 use crate::sandbox::Sandbox;
 use crate::stdlib;
 
-/// 每次 dispatch 事件转换的燃料预算（转换边界全额重置，D-B1 每转换共享）。
-pub const DEFAULT_FUEL_BUDGET: u64 = 100_000;
-
-/// 运行期预算解析（r13 起纯函数化到 [`crate::fuel::resolve_budget`]，此处只
-/// 剩构造期入口）：`YGG_FUEL_BUDGET` 为正整数时**显式最优先、精确采用、
-/// 不受 cap 削减**；非法值或缺省回落自动扩缩 [`crate::fuel::auto_budget`]
-/// （构造期 KV 尚未建立，`kv_entries = 0` → 地板 [`DEFAULT_FUEL_BUDGET`]，
-/// 与旧契约行为逐字节一致；每个转换的真实预算在 `cmd_event` 步骤④ 由
-/// [`KernelFacade::transition_budget`] 现读 `kv.len()` 重算）。
-fn fuel_budget() -> u64 {
-    fuel::resolve_budget(std::env::var("YGG_FUEL_BUDGET").ok().as_deref(), 0)
-}
-
 /// S10/S11 装载管线的构件包（[`build_kernel`] 产出、
 /// [`KernelFacade::from_parts`] 消费；字段顺序即生命周期挂靠面）。
 struct KernelParts {
     sandbox: Sandbox,
-    fuel_meter: HookFuelMeter,
     determinism: DeterminismHandle,
     host: HostApi,
     registry: HandlerRegistry,
@@ -59,17 +44,12 @@ fn build_kernel(
     // ① 沙箱构造：stdlib 裁剪 + 内存上限 + 白名单环境（ygg 占位表 + require 面就位）。
     let sandbox = Sandbox::new().map_err(KernelError::Sandbox)?;
     let lua = sandbox.lua().clone();
-    // ② 正式燃料：转换预算 + 装载预算分流（hook 按 require 边界判相位），
-    //    转换边界 reset 转换预算。
-    let fuel_meter =
-        fuel::install_with_load_budget(&lua, fuel_budget(), sandbox.modules().load_budget())
-            .map_err(KernelError::Sandbox)?;
-    // ③ 确定性注入：math 精确集 + 内核种子 random + ygg.ticks。
+    // ② 确定性注入：math 精确集 + 内核种子 random + ygg.ticks。
     let determinism = inject::install(&lua).map_err(KernelError::Sandbox)?;
-    // ④ canonical store 先建：host 桥句柄与驱动共享同一 Rc（统一 store）。
+    // ③ canonical store 先建：host 桥句柄与驱动共享同一 Rc（统一 store）。
     let entities = Rc::new(RefCell::new(EntityStore::new()));
     let kv = Rc::new(RefCell::new(KvStore::new()));
-    // ⑤ host API：装载期 ygg 完整面（on/emit/narrate/choice/kv/entity/fs）。
+    // ④ host API：装载期 ygg 完整面（on/emit/narrate/choice/kv/entity/fs）。
     let host = host_api::install(
         &lua,
         HostHandles {
@@ -78,17 +58,17 @@ fn build_kernel(
         },
     )
     .map_err(KernelError::Sandbox)?;
-    // ⑤'' VFS：`install` 自建、与 Lua 阴面同一个 `Rc`。驱动必须拿它才能做
+    // ④'' VFS：`install` 自建、与 Lua 阴面同一个 `Rc`。驱动必须拿它才能做
     //       dispatch 级 savepoint（失败步里 `ygg.fs.write` 过的文件不得漏到盘上）。
     let vfs = host.vfs_handle();
-    // ⑤' S11 资源步：ygg.data 只读数据面（host 之后、stdlib 之前、
+    // ④' S11 资源步：ygg.data 只读数据面（host 之后、stdlib 之前、
     // Mod chunk 之前——Mod 顶层即可读资源）。
     if let Some(table) = resources {
         crate::resources::install(&lua, table).map_err(KernelError::Sandbox)?;
     }
-    // ⑥ stdlib：命名空间 + fsm + narrative（先于 Mod chunk，注册序即派发序）。
+    // ⑤ stdlib：命名空间 + fsm + narrative（先于 Mod chunk，注册序即派发序）。
     stdlib::install(&lua).map_err(KernelError::Sandbox)?;
-    // ⑥' r1 模块表注入：入口 chunk 之前（入口顶层即可 require）；空模块表时
+    // ⑤' r1 模块表注入：入口 chunk 之前（入口顶层即可 require）；空模块表时
     //     跳过——require 面仍在，只是对任何名字可读拒绝。r2 的 chunk 名覆盖表
     //     必须与模块表同一时机注入：入口顶层就 `require("pkg.*")` 时，第一次
     //     装载就要拿到真实路径，否则首次 traceback 就是假路径。
@@ -97,7 +77,7 @@ fn build_kernel(
         sandbox.modules().set_modules(set);
         sandbox.modules().set_chunk_paths(chunk_paths);
     }
-    // ⑦ Mod chunk：装载期注册面收集 Mod handler；失败 = ModLoad。chunk
+    // ⑥ Mod chunk：装载期注册面收集 Mod handler；失败 = ModLoad。chunk
     //    命名 `@mod.lua`（与 stdlib `@stdlib/<name>` 同法，迭代 C3）：
     //    handler 报错 traceback 携带 mod 侧位置，排障不再只见 Lua 桥行号
     //    （迭代 D2 实证收口：mlua `CallbackError.traceback` 在 Rust 回调
@@ -106,7 +86,7 @@ fn build_kernel(
     if let Err(err) = lua.load(mod_source.to_owned()).set_name("@mod.lua").exec() {
         return Err(KernelError::ModLoad(err.to_string()));
     }
-    // ⑧ 分相收口：seal（运行期注册禁令）→ 注册转出进注册表。
+    // ⑦ 分相收口：seal（运行期注册禁令）→ 注册转出进注册表。
     //    只封 `ygg.on`——`require` 不在装载期边界上（模块顶层是纯导出面，
     //    执行时机不影响派发序，见 `crate::modules::ShadowBanned`）。
     host.seal(&lua).map_err(KernelError::Sandbox)?;
@@ -114,7 +94,6 @@ fn build_kernel(
     host.register_into(&mut registry, "mod");
     Ok(KernelParts {
         sandbox,
-        fuel_meter,
         determinism,
         host,
         registry,
@@ -273,7 +252,6 @@ impl KernelFacade {
     fn from_parts(parts: KernelParts, resources: Rc<ResourceTable>, mod_source: &str) -> Self {
         Self {
             _sandbox: parts.sandbox,
-            fuel_meter: parts.fuel_meter,
             _determinism: parts.determinism,
             host: parts.host,
             registry: parts.registry,

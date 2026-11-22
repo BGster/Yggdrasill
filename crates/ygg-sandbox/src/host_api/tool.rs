@@ -218,13 +218,11 @@ mod tests {
         let mut registry = HandlerRegistry::new();
         host.register_into(&mut registry, "mod");
         let mut entities = EntityStore::new();
-        let mut fuel = crate::fuel::install(&lua, 10_000).expect("fuel");
 
         // 1) 未挂载：返回 unmounted = true, ok = false, code = -1
         ygg_core::transition::run_transition(
             &mut entities,
             &mut registry,
-            &mut fuel,
             Event::external("test.call", Value::Str("mock.ok".to_owned())).expect("event"),
         )
         .expect("unmounted transition");
@@ -243,11 +241,9 @@ mod tests {
 
         // 2) 挂载后成功调用：ok = true, unmounted = false, code = 0, data 映射回传
         host.set_tool_runner(Some(Box::new(MockRunner)));
-        fuel.reset(10_000);
         ygg_core::transition::run_transition(
             &mut entities,
             &mut registry,
-            &mut fuel,
             Event::external("test.call", Value::Str("mock.ok".to_owned())).expect("event"),
         )
         .expect("mounted ok transition");
@@ -265,11 +261,9 @@ mod tests {
         );
 
         // 3) 挂载后返回 Err：ok = false, unmounted = false, code = 1, error 回传
-        fuel.reset(10_000);
         ygg_core::transition::run_transition(
             &mut entities,
             &mut registry,
-            &mut fuel,
             Event::external("test.call", Value::Str("mock.fail".to_owned())).expect("event"),
         )
         .expect("mounted err transition");

@@ -22,7 +22,7 @@ use std::path::Path;
 
 use crate::hash::hex_sha256;
 
-/// 单边上限：w,h ∈ 1..=4096（≤64MiB 封顶，fuel/GC 理由）。
+/// 单边上限：w,h ∈ 1..=4096（≤64MiB 封顶，内存/GC 理由）。
 pub const FRAME_MAX_EDGE: i64 = 4096;
 
 /// 渲染面错误（Lua 面转 `{YGG-RT-SHAPE}|{YGG-RT-OPENED}: 文案` 可读错误）。

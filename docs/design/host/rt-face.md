@@ -71,7 +71,7 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 - **I2 帧链哈希**：`H(n) = SHA256(H(n−1)|n|dt|规范串|全状态摘要)`；genesis = `SHA256("ygg.rt.v1|event=…|hz=…")`——调度参数入链，换 hz/换事件回放第 1 帧即红。
 - **I3 输入单源**：输入只从宿主（`InputDevice` 调度/后续预览端口）进，**无 Lua 写入口**。Mod 伪造输入 = 破坏回放证据链，结构性缺席。
 - **I4 帧是沿的粒度**：快照 = 帧初/帧末按住集的差集；帧内同键 down+up（或 up+down）净零，两侧都不出现；单事件内同键 down+up 属歧义（帧内序无定义），注入时点即拒绝。多事件按注入序应用。
-- **I5 循环即停**：帧派发失败（VALIDATION / FUEL_EXHAUSTED / 信封错误）循环终止，无「跳帧续跑」语义；失败帧在 rt 面上不留残渣（帧号/逻辑钟回退）。
+- **I5 循环即停**：帧派发失败（VALIDATION / 信封错误）循环终止，无「跳帧续跑」语义；失败帧在 rt 面上不留残渣（帧号/逻辑钟回退）。（原列举中的燃料耗尽码已随 S34 燃料退役从错误面消失。）
 - **I6 录制即可回放**：截断录制（错误帧之前的部分）回放到同位同红；回放不产生录制副作用。
 - **I7 渲染零混色直写**（S31-R2）：clear/span/blit 全部直写覆盖、零 alpha 混色；越界静默钳制（零面积 no-op）；全整数参数（浮点 = `YGG-RT-SHAPE`）。混色属 R3+ 裁决，最小面不预支。
 - **I8 帧 digest 不入链**（S31-R2，D9）：`FrameRecord.frame` 是旁路证据线——链公式 I2 的输入元组零变化；回放对 frame 字段**严格对表**（录有实无/录无实有/不同值均 mismatch），与 I2 的链哈希比对并列成双闸。失败帧不留半帧证据（present 未达即无 frame 字段；派发入口清捕获槽）。
@@ -99,7 +99,7 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 
 ### 4.1 `examples/rt` CLI
 
-`<mod目录> [--frames N|--duration S] --record <路径> | --replay <路径>` + `--hz/--max-catchup/--event/--input/--boot/--fuel/--ppm/--preview/--audio`。stdout 单 JSON 摘要（`ok/mode/frames/fpsDispatch/droppedFrames/hashHead/firstMismatch`）；退出码 0/1/2。`--frames` 不限速（吞吐口径）；`--duration` 按 hz 实时节拍；`--event` 可指到既有 run 模式事件（兼容桥，如 Saltline `game.tick`）；`--boot` 循环前单次派发启动事件；`--ppm <目录>` present 帧落盘（S31-R2）；`--preview <端口>` 内嵌预览端口（S31-R2；不挂 serve——D10）；`--audio <路径>` 整局混音流单 WAV（S31-R3，未 open 音频面则不写文件）。
+`<mod目录> [--frames N|--duration S] --record <路径> | --replay <路径>` + `--hz/--max-catchup/--event/--input/--boot/--ppm/--preview/--audio`（原 `--fuel` 旗已随 S34 燃料退役删除，传入即 usage error exit 2）。stdout 单 JSON 摘要（`ok/mode/frames/fpsDispatch/droppedFrames/hashHead/firstMismatch`）；退出码 0/1/2。`--frames` 不限速（吞吐口径）；`--duration` 按 hz 实时节拍；`--event` 可指到既有 run 模式事件（兼容桥，如 Saltline `game.tick`）；`--boot` 循环前单次派发启动事件；`--ppm <目录>` present 帧落盘（S31-R2）；`--preview <端口>` 内嵌预览端口（S31-R2；不挂 serve——D10）；`--audio <路径>` 整局混音流单 WAV（S31-R3，未 open 音频面则不写文件）。
 
 ### 4.2 预览端口（S31-R2）
 
@@ -107,13 +107,13 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 
 ## 5. 确定性契约（声明收窄）
 
-只证「**同 seed + 同录制 → 逐帧同哈希链**」，不证「两次直播同哈希」（直播输入到达本质非确定）。内核 seed 是编译期常量（`inject::KERNEL_RNG_SEED`），不进录制文件。燃料耗尽是确定性事件（VM 指令计数确定）：录制与回放同位复现（`rt_fuel_exhaustion_is_deterministic_and_replay_reproduces_it`）。证伪语义 = first_mismatch（仿 ygg-sim ReplayLog）：篡改任一 dt / 键序 / 配置 → 恰在被篡帧红（`rt_replay_catches_tampered_*` 三例）。音频面同域：录制→回放链全等 ∧ audio 字段全等 ∧ 两次重放 WAV 字节全等（`audio_end_to_end_fire_wav_pins_and_absence_rule` + Leg B `cmp` 实测三钉）。
+只证「**同 seed + 同录制 → 逐帧同哈希链**」，不证「两次直播同哈希」（直播输入到达本质非确定）。内核 seed 是编译期常量（`inject::KERNEL_RNG_SEED`），不进录制文件。（原「燃料耗尽是确定性事件」条款与其负例测试已随 S34 燃料退役删除——确定性链上少一个变量而非多一个。）证伪语义 = first_mismatch（仿 ygg-sim ReplayLog）：篡改任一 dt / 键序 / 配置 → 恰在被篡帧红（`rt_replay_catches_tampered_*` 三例）。音频面同域：录制→回放链全等 ∧ audio 字段全等 ∧ 两次重放 WAV 字节全等（`audio_end_to_end_fire_wav_pins_and_absence_rule` + Leg B `cmp` 实测三钉）。
 
 ## 6. 性能预算（实测，方法在列）
 
 | 口径 | 数值 | 方法 |
 | --- | --- | --- |
-| **fps_dispatch（Saltline 同 mod 同事件桥）** | **155.4**（120 帧 game.tick 全回合推进，不限速，含 boot） | `YGG_PACKAGES_ROOT=… ./target/debug/examples/rt ~/WorkHub/Saltline-YGG --boot game.boot --fuel 4000000 --event game.tick --frames 120 --record …`（2026-11-22，dev 构建，M 系列） |
+| **fps_dispatch（Saltline 同 mod 同事件桥）** | **155.4**（120 帧 game.tick 全回合推进，不限速，含 boot） | `YGG_PACKAGES_ROOT=… ./target/debug/examples/rt ~/WorkHub/Saltline-YGG --boot game.boot --fuel 4000000 --event game.tick --frames 120 --record …`（2026-11-22，dev 构建，M 系列；**历史命令含已退役 `--fuel` 旗**——S34 起旗已删，复测命令不再带） |
 | 基线（每帧一进程） | 35.9（Saltline-YGG/docs/stats.md：60 次 `egg open` 1.67s） | 同文档 A5·P3 口径 |
 | 10s 实时录制 | 600 帧 @ **59.9 fps**、零弃帧（hz=60 节拍合规） | 同上 `--duration 10 --record`；输入调度 7 事件 |
 | 10s 录制回放 | 600/600 帧哈希链全等，3.9s | `--replay`（每帧含全状态 save 序列化+SHA-256） |
@@ -122,7 +122,7 @@ n=<帧号>;dt=<毫秒>;<输入规范串>
 | **渲染面端到端 fps_dispatch（S31-R2）** | **780.5–786.4**（320×200 全帧 = 320 列×3 span+1 blit+present，release；三跑同 hashHead）；dev 构建 80.8–84.2 亦达标 | `examples/rt <320×200 fixture mod> --frames 60 --record`（2026-11-22，同构 mod 形状见 `tests/frame_face.rs::FRAME_THROUGHPUT_MOD`） |
 | **帧 digest 成本（S31-R2）** | 全幅 256KB SHA-256 含于上界口径内（73.3ms/60 帧 = 1.2ms/帧全含：960 span+digest+快照） | 同上 |
 | **混音成本（S31-R3）** | 64 voice 满载 × 600 帧（dev）实测 < 0.5ms/帧登记停阈值（测试打印实测 µs/帧；CI 只断言灾难下界 500µs/帧） | `cargo test -p ygg-sandbox --test audio_face audio_mix_latency -- --nocapture`（2026-11-22，dev 构建） |
-| **Leg A 真桥 fps_dispatch（S31-R3 复测）** | **154.3**（Saltline 同 mod 同事件桥 120 帧，vs R1 基线 155.4 同量级；零派发错误零弃帧）；同录制回放 120/120 链全等 | `YGG_PACKAGES_ROOT=<repo>/packages/libs ./target/debug/examples/rt ~/WorkHub/Saltline-YGG --boot game.boot --fuel 4000000 --event game.tick --frames 120 --record`（2026-11-22，dev） |
+| **Leg A 真桥 fps_dispatch（S31-R3 复测）** | **154.3**（Saltline 同 mod 同事件桥 120 帧，vs R1 基线 155.4 同量级；零派发错误零弃帧）；同录制回放 120/120 链全等 | `YGG_PACKAGES_ROOT=<repo>/packages/libs ./target/debug/examples/rt ~/WorkHub/Saltline-YGG --boot game.boot --fuel 4000000 --event game.tick --frames 120 --record`（2026-11-22，dev；**历史命令含已退役 `--fuel` 旗**——S34 起旗已删，复测命令不再带） |
 | **R1 回放链复跑（S31-R3）** | 10s 实时录制 600 帧 @60.0fps 零弃帧；回放 **600/600** 链全等（3.9s，与 R1 证据同口径） | 同上 `--duration 10 --record` → `--replay` |
 | **Leg B 实弹一局（S31-R3）** | 1800 帧（30s）60 次开火+鼠标转向：链全等 ∧ audio 字段全等（480 帧有键）∧ 两次重放 WAV `cmp` 字节全等；30s 恰 661500 样本（零漂移）；`afplay` 人耳抽验通过 | `examples/rt tests/fixtures/rt-audio-demo --frames 1800 --record --audio <wav> --input <jsonl>` → 两次 `--replay --audio`（dev 构建 fps_dispatch 87.0，R2 同量级渲染面 dev 80.8–84.2） |
 

@@ -170,11 +170,9 @@ fn forged_sentinel_error_is_not_swallowed() {
     );
     let mut registry = rig.seal_and_register();
     let mut driver_store = EntityStore::new();
-    let mut fuel_meter = rig.fuel.clone();
     let err = run_transition(
         &mut driver_store,
         &mut registry,
-        &mut fuel_meter,
         Event::external("evt.forge", Value::Int(0)).unwrap(),
     )
     .expect_err("forged sentinel must surface as a handler error");

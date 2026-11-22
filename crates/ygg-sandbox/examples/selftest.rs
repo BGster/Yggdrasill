@@ -5,8 +5,8 @@
 //! - 这里跑的是**普通 Lua 解释器**，不是内核沙箱。mod 的 `src/**` 与 `mod.lua`
 //!   原样加载（走 `package.path`，不注入 pack.json 的 module 影子表），`ygg.*`
 //!   由 `tests/harness.lua` 提供一个可控 mock。
-//! - 因此**不覆盖** driver 层语义：事务回滚、fuel 预算、save receipt 结构 /
-//!   state_hash、事件路由 fail-closed。这四类由真实跑局暴露，属已知缺口。
+//! - 因此**不覆盖** driver 层语义：事务回滚、save receipt 结构 /
+//!   state_hash、事件路由 fail-closed。这几类由真实跑局暴露，属已知缺口。
 //! - 不修改宿主源码：只读 mod 目录、注入资源、执行 Lua。
 //!
 //! 用法：`cargo run -q --example selftest -- --mod .ygg/mods/agent-seed [--filter <substr>]`

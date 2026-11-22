@@ -43,11 +43,9 @@ fn kv_nan_rejected_with_readable_error() {
     );
     let mut registry = rig.seal_and_register();
     let mut driver_store = EntityStore::new();
-    let mut fuel_meter = rig.fuel.clone();
     let err = run_transition(
         &mut driver_store,
         &mut registry,
-        &mut fuel_meter,
         Event::external("evt.nan", Value::Int(0)).unwrap(),
     )
     .expect_err("NaN kv set must fail the transition");

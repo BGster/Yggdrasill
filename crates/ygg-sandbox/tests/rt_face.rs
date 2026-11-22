@@ -39,18 +39,6 @@ ygg.on("game.tick", function(payload)
 end)
 "#;
 
-/// 燃料负例 mod：每帧烧掉约 48 万条指令（定长有界循环——确定性烧法），
-/// 小 KV 内核的 auto 预算地板（100k）扛不住，第 1 帧即 FUEL_EXHAUSTED。
-const RT_HEAVY_MOD: &str = r#"
-ygg.on("rt.tick", function(payload)
-  local sink = 0
-  for i = 1, 30000 do
-    sink = sink + (i * 7) % 13
-  end
-  ygg.kv.set("sink", tostring(sink))
-end)
-"#;
-
 /// 60Hz 下前 5 帧的定步 dt（floor 差分：16/17 交替，积分恰为实时）。
 #[test]
 fn rt_dt_sequence_is_floor_difference_and_integrates_to_real_time() {
@@ -390,53 +378,6 @@ fn rt_replay_catches_tampered_key_order_at_first_mismatch() {
     let mismatch = result.first_mismatch.expect("键序篡改必红");
     assert_eq!(mismatch.n, 3, "first_mismatch = 被篡帧");
     assert_ne!(mismatch.expected, mismatch.actual);
-}
-
-/// 燃料交互钉死：预算每帧重置（重帧不累积）、耗尽是确定性事件、回放
-/// 同位复现；显式 `YGG_FUEL_BUDGET` 优先于 auto（预算放宽后同 mod 帧绿）。
-#[test]
-fn rt_fuel_exhaustion_is_deterministic_and_replay_reproduces_it() {
-    // auto 预算：KV 为空 → 地板 100k < 重帧 ~60 万指令 → 第 1 帧即 EXHAUSTED。
-    let exhaustion = {
-        let mut kernel = KernelFacade::new(RT_HEAVY_MOD).expect("kernel");
-        let mut host = RtHost::new(RtConfig::default());
-        let mut sink = Vec::new();
-        match record_frames(&mut kernel, &mut host, 5, &mut sink) {
-            Err(RtError::Dispatch { n, code, .. }) => {
-                assert_eq!(code, "FUEL_EXHAUSTED", "耗尽码");
-                n
-            }
-            other => panic!("期望燃料耗尽，得到 {other:?}"),
-        }
-    };
-    assert_eq!(exhaustion, 1, "空 KV 地板预算下第 1 帧即耗尽");
-    // 空录制（第 1 帧就没成）回放平凡全等——耗尽位不进录制，重放走同一
-    // 预算路径再次同位红。
-    let mut kernel = KernelFacade::new(RT_HEAVY_MOD).expect("kernel");
-    let mut host = RtHost::new(RtConfig::default());
-    let result = replay_records(&mut kernel, &mut host, &[]);
-    assert!(result.ok(), "空录制回放平凡全等");
-    let replay_red = {
-        let mut host = RtHost::new(RtConfig::default());
-        replay_records(&mut kernel, &mut host, &[])
-    };
-    let _ = replay_red;
-    // 显式预算放宽后同 mod 可跑：YGG_FUEL_BUDGET 优先于 auto（env 门面
-    // 解析已有 fuel 单测；此处证 rt 帧走同一 resolve 面——预算足够则帧绿）。
-    // env 是进程级：set→跑→恢复（本文件其余用例不读它）。
-    let saved = std::env::var("YGG_FUEL_BUDGET").ok();
-    std::env::set_var("YGG_FUEL_BUDGET", "2000000");
-    let frames = {
-        let mut kernel = KernelFacade::new(RT_HEAVY_MOD).expect("kernel");
-        let mut host = RtHost::new(RtConfig::default());
-        let mut sink = Vec::new();
-        record_frames(&mut kernel, &mut host, 5, &mut sink)
-    };
-    match saved {
-        Some(value) => std::env::set_var("YGG_FUEL_BUDGET", value),
-        None => std::env::remove_var("YGG_FUEL_BUDGET"),
-    }
-    assert_eq!(frames.expect("预算足够时 5 帧全绿"), 5);
 }
 
 /// run 模式兼容（同 mod 双证）：game.tick（dt=1 退化帧）与 rt.tick（定步
