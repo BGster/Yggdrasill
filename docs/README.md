@@ -24,7 +24,7 @@ docs/
 └── design/              # 设计契约树（有代码消费者的「改前必守」）——四模块，入口 design/README.md
     ├── README.md              # 树入口：模块 → 文件 → 召回时点（索引完备性由机检断言）
     ├── kernel/                # ① ygg 内核（7）：state-machine / events（39 口径）/ state-surface / wire-protocol / lua-api / compaction / sim-kernel
-    ├── host/                  # ② egg CLI 与 host（4）：cli-daemon / serve / harness-tools / lanes
+    ├── host/                  # ② egg CLI 与 host（5）：cli-daemon / serve / rt-face / harness-tools / lanes
     ├── mod/                   # ③ agent-seed mod（9）：mod-package / prompt-surface / tool-bridge / action-faces / identity / testing-strategy / superagent-game / shapez-game / tla-models
     └── packages/              # ⑤ packages 通用能力层（9）：README + entity / codec / quest / dialogue / role-skill / procgen / assetgen / textframe
 ```
@@ -74,6 +74,7 @@ docs/
 | --- | --- | --- |
 | [cli-daemon.md](design/host/cli-daemon.md) | egg CLI、builtin 工具、daemon 协议、summary Schema | §3.5 |
 | [serve.md](design/host/serve.md) | serve 观察面全契约（CLI/面板/API/SSE/安全） | §3.7 |
+| [rt-face.md](design/host/rt-face.md) | rt 实时宿主面全契约（帧循环/输入/录制回放/确定性/性能预算） | — |
 | [harness-tools.md](design/host/harness-tools.md) | .pi/tools 检测脚本契约、注册面与无 egg 参数约定 | harness 机证 |
 | [lanes.md](design/host/lanes.md) | 泳道池认领/释放/分支命名与实时投影 | §2.10 |
 
@@ -115,7 +116,7 @@ docs/
 - **新执行者（plan/development 前）**：[CONTEXT.md](CONTEXT.md)（壳）→ [context/README.md](context/README.md)（召回入口：时点 → 文件）→ [context/cold-start/vocabulary.md](context/cold-start/vocabulary.md) → 当前幕对应的 `context/acts/<act>.md` 与 `context/req-acts/<stage>.md` → [context/rituals/dispatch.md](context/rituals/dispatch.md) → 本需求触碰的子系统契约文件（入口 [design/README.md](design/README.md)，按 kernel / host / mod / packages 四模块取；见 brief 的 `Mandatory references:` 行；plan 对照 playbook run_machine/actions，development 再对照 gates/live_evidence）。
 - **决策检索**：没有决策台账也没有编号——逐条裁决都写在它治理的那份文件的「设计依据」段（规范 + 依据 + 三问判据）。从 [design/README.md](design/README.md)（触碰面 → 文件）或 [wiki-governance.md](wiki-governance.md)（治理法则）进。
 - **门禁核验**：[requirement-story.md](context/story/requirement-story.md)（九幕/转场）+ [state-surface.md](design/kernel/state-surface.md)（拒绝面）+ [context/req-acts/integration.md](context/req-acts/integration.md)（集成分工）。
-- **CLI/契约/serve 开发**：[cli-daemon.md](design/host/cli-daemon.md)、[action-faces.md](design/mod/action-faces.md)、[wire-protocol.md](design/kernel/wire-protocol.md)、[serve.md](design/host/serve.md)。
+- **CLI/契约/serve 开发**：[cli-daemon.md](design/host/cli-daemon.md)、[action-faces.md](design/mod/action-faces.md)、[wire-protocol.md](design/kernel/wire-protocol.md)、[serve.md](design/host/serve.md)、[rt-face.md](design/host/rt-face.md)。
 
 ## 旧式引用解析
 
