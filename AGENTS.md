@@ -156,7 +156,7 @@ The user runs real-data verification and pastes the output; synthetic data under
    the deliverable is rejected as unfinished; schedule items have exactly two states, `scheduled` and
    `done`; a schedule that only grows without draining fails the Goal's completion criteria. Evidence
    discipline still applies: a “discovery” must be measured, defective, or user-named — no speculative
-   wish lists. ① Blocked action: closing a discovery by filing it as future work, or shipping a
+   wish lists. ① Blocked action: closing a discovery by filing it as future work, or closing it verbally («已登记» said in chat/report without writing the schedule row); a row's status is updated in the same change that lands the implementation, or shipping a
    deliverable that parks one; ② Symptom: deferred wording without a schedule ID, or a schedule item
    without acceptance criteria, or a schedule that never drains; ③ Confirmation: before delivery
    `grep -nE "遗留|后续需求|待优化|future work|TODO" <artifact>` returns zero hits (the master schedule and
