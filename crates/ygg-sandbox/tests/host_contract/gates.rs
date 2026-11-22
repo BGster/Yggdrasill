@@ -36,11 +36,9 @@ fn unsupported_payload_type_rejected_readably() {
     );
     let mut registry = rig.seal_and_register();
     let mut driver_store = EntityStore::new();
-    let mut fuel_meter = rig.fuel.clone();
     let err = run_transition(
         &mut driver_store,
         &mut registry,
-        &mut fuel_meter,
         Event::external("evt.bad", Value::Int(0)).unwrap(),
     )
     .expect_err("table payload must be rejected");

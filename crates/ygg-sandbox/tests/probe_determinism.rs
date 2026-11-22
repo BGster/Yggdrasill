@@ -7,21 +7,13 @@
 //!    派生事件由重放自动再产生）。
 //! 2. `probe_two_lua_states_same_seed`——跨 facade RNG 序列相等（D-B5
 //!    splitmix64 + KERNEL_RNG_SEED，经完整 facade 链路含 random 消费 Mod）。
-//! 3. `probe_fuel_exhaustion_negative`——FRD:67 验收锚：无限循环 Mod
-//!    到 FUEL_EXHAUSTED 信封（燃料杀循环的永久负例探针）。
-//! 4. `probe_golden_vector`——golden-vector 基线（`fixtures/golden_vector.json`，
+//! 3. `probe_golden_vector`——golden-vector 基线（`fixtures/golden_vector.json`，
 //!    include_str! 编译期嵌入）：Mod + 事件序列 + 期望叙事 + 期望状态哈希
 //!    四元组钉死整条确定性链（装载、stdlib、handler、状态、叙事、
-//!    canonical bytes、SHA-256）。
-//! 5. `probe_fuel_granularity_overhead_documents_default`——燃料 hook 粒度
-//!    开销实测（D-继承-2 n 值义务清偿，S12 检查点代决交付）。**本探针量的是
-//!    开销比，不是确定性**：对固定 Lua 工作负载分别测（a）裸 Sandbox
-//!    （无 hook）与（b）fuel::install（粒度 = FUEL_HOOK_GRANULARITY = 1000）
-//!    及（c）探针自装 hook 粒度 100 的墙钟时间，取多次运行最小值算比值；
-//!    断言为宽松 sanity 界（hooked < 20× bare）以避免 CI 计时抖动翻绿翻红；
-//!    实测比值经 println! 落入测试输出作为数据记录（工件 Performance
-//!    Considerations / Design History 引用本输出）。
-//! 6. `probe_scale_cost_baseline_documents_shard_decision`——规模成本基线
+//!    canonical bytes、SHA-256）。（原探针 3「燃料耗尽负例」随 S34 燃料
+//!    退役删除——FRD:67 锚由裁定本身取代；原探针 5「hook 粒度开销」的
+//!    度量对象不复存在，同批删除。）
+//! 4. `probe_scale_cost_baseline_documents_shard_decision`——规模成本基线
 //!    （D17 串行确定性内核决策的实证锚）：10k 实体下单事件 dispatch 与
 //!    全量 save 的墙钟成本，取多次运行最小值；断言为宽松 sanity 界
 //!    （防 O(N)/转换成本在快照/实体结构改动时悄然恶化一个数量级以上），
@@ -43,16 +35,11 @@
 //! 残余缺口：`wasm-bindgen-test` 浏览器泳道（真实浏览器 wasm 实例重放同一
 //! 断言）仍未实现，不得静默吸收。
 
-use std::cell::Cell;
-use std::rc::Rc;
 use std::time::Instant;
 
-use mlua::{HookTriggers, VmState};
 use serde_json::{json, Value as Json};
-use ygg_sandbox::driver::{code, KernelFacade};
-use ygg_sandbox::fuel;
+use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::hash::state_hash;
-use ygg_sandbox::sandbox::Sandbox;
 
 /// 探针 Mod：KV 写 + 实体写（入哈希）+ 叙事（入回放）+ 派生事件（FIFO 级联）
 /// ——覆盖「同事件序列 → 同状态」链路上的全部写入面。
@@ -167,26 +154,6 @@ end)
 }
 
 #[test]
-fn probe_fuel_exhaustion_negative() {
-    // FRD:67 验收锚（永久探针化）：无限循环 Mod → VM 指令计量耗尽 →
-    // FUEL_EXHAUSTED 信封（域错误不 throw；D-继承-2 set_hook 燃料）。
-    const LOOP_MOD: &str = r#"
-ygg.on("event.forever", function()
-  while true do end
-end)
-"#;
-    let mut kernel = KernelFacade::new(LOOP_MOD).expect("facade");
-    let reply = kernel.dispatch("event.forever", "0");
-    let parsed = parse(&reply);
-    assert_eq!(parsed["ok"], json!(false), "reply: {reply}");
-    assert_eq!(
-        parsed["error"]["code"],
-        json!(code::FUEL_EXHAUSTED),
-        "infinite loop must die by fuel (FRD:67): {reply}"
-    );
-}
-
-#[test]
 fn probe_golden_vector() {
     // golden-vector 基线：fixture 四元组（mod_source / event_sequence /
     // expected_narrative / expected_state_hash）编译期嵌入，回放必须逐项
@@ -239,84 +206,6 @@ fn probe_golden_vector() {
     assert_eq!(
         hash_a, expected_hash,
         "state hash must reproduce the pinned golden hash (FR9 native)"
-    );
-}
-
-#[test]
-fn probe_fuel_granularity_overhead_documents_default() {
-    // D-继承-2 n 值义务清偿（S12 检查点代决交付）：对固定 Lua 工作负载实测
-    // 指令计数 hook 的开销比。**口径声明**：本探针量的是开销比（perf 计量），
-    // 不是确定性——计时不确定性对本探针是可接受的（数据取多次运行最小值，
-    // 比值只用于文档化默认值依据）；断言为宽松 sanity 界（hooked < 20×
-    // bare）防 CI 计时抖动，实测数据以 println! 落入测试输出为准。
-    const WORKLOAD: &str = "local s = 0 for i = 1, 300000 do s = s + i end return s";
-    const EXPECTED: i64 = 45_000_150_000; // Σ 1..=300000
-    const RUNS: u32 = 5;
-    // 探针预算取天文量级（1<<62），hook 永不耗尽——纯计量、不触发终止。
-    const PROBE_BUDGET: u64 = 1u64 << 62;
-
-    /// 逐次计时取最小值（最小值对系统抖动最鲁棒，适合比值口径）。
-    fn min_run_micros(lua: &mlua::Lua) -> u128 {
-        // 预热一次（首次执行含 chunk 编译/加载摊销）。
-        let warm: i64 = lua.load(WORKLOAD).eval().expect("workload eval");
-        assert_eq!(warm, EXPECTED, "workload result must be the fixed sum");
-        let mut min = u128::MAX;
-        for _ in 0..RUNS {
-            let start = Instant::now();
-            let v: i64 = lua.load(WORKLOAD).eval().expect("workload eval");
-            let micros = start.elapsed().as_micros();
-            assert_eq!(v, EXPECTED, "workload result must be stable across runs");
-            min = min.min(micros);
-        }
-        min
-    }
-
-    // (a) 裸 Sandbox：Sandbox::new 单独给出无 hook Lua（S8 已移除临时 hook，
-    //     无燃料面——基准线）。
-    let bare = Sandbox::new().expect("bare sandbox");
-    let bare_us = min_run_micros(bare.lua());
-
-    // (b) 出厂路径：fuel::install（粒度 = FUEL_HOOK_GRANULARITY = 1000）。
-    let g1000 = Sandbox::new().expect("g1000 sandbox");
-    let _meter = fuel::install(g1000.lua(), PROBE_BUDGET).expect("fuel install");
-    let g1000_us = min_run_micros(g1000.lua());
-
-    // (c) 对照数据点：粒度 100（探针自装 hook，闭包语义同 fuel::install，
-    //     仅粒度不同）——展示「低粒度开销更高」的实测形态。
-    let g100 = Sandbox::new().expect("g100 sandbox");
-    let budget = Rc::new(Cell::new(PROBE_BUDGET));
-    let counter = Rc::clone(&budget);
-    g100.lua()
-        .set_hook(
-            HookTriggers::new().every_nth_instruction(100),
-            move |_, _| {
-                let left = counter.get().saturating_sub(100);
-                counter.set(left);
-                if left == 0 {
-                    Err(mlua::Error::runtime("probe budget exhausted"))
-                } else {
-                    Ok(VmState::Continue)
-                }
-            },
-        )
-        .expect("probe g100 hook install");
-    let g100_us = min_run_micros(g100.lua());
-
-    let ratio = |hooked: u128| hooked as f64 / bare_us.max(1) as f64;
-    let r1000 = ratio(g1000_us);
-    let r100 = ratio(g100_us);
-    println!(
-        "[fuel-granularity] overhead measurement (min of {RUNS} runs, 300k-iteration workload):"
-    );
-    println!("[fuel-granularity]   bare           = {bare_us} us");
-    println!("[fuel-granularity]   granularity 1000 = {g1000_us} us  (ratio x{r1000:.2})");
-    println!("[fuel-granularity]   granularity  100 = {g100_us} us  (ratio x{r100:.2})");
-
-    // 宽松 sanity 界（20×）：只排除「hook 开销灾难性」的回归，不做精确
-    // 计时断言（CI 计时抖动不构成失败面）。数据记录以 println! 输出为准。
-    assert!(
-        g100_us < bare_us.saturating_mul(20),
-        "hooked workload must stay under 20x bare (bare={bare_us}us, g100={g100_us}us)"
     );
 }
 

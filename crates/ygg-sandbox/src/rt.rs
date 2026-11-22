@@ -14,10 +14,8 @@
 //!   ygg-sim `ReplayLog`）：篡改任一 dt / 键序 / 状态路径必被抓。
 //! - **声明收窄**：只证「同 seed + 同录制 → 逐帧同哈希链」，不证「两次
 //!   直播同哈希」（直播输入到达本质非确定）。内核 seed 是编译期常量
-//!   （`inject::KERNEL_RNG_SEED`），无需进录制文件。
-//! - **燃料**：零新机制——每帧一次 dispatch 就是既有「每转换预算重置」
-//!   面（`YGG_FUEL_BUDGET` 显式优先 / `auto_budget` 兜底），耗尽是确定性
-//!   事件，录制与回放同位复现（负例钉住）。
+//!   （`inject::KERNEL_RNG_SEED`），无需进录制文件。（原「燃料耗尽是
+//!   确定性事件」条款随 S34 燃料退役移除——链上少一个变量。）
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -67,7 +65,7 @@ impl Default for RtConfig {
 /// 引擎错误（可读文案，循环即停：rt 帧没有「跳过一帧继续跑」的语义）。
 #[derive(Debug)]
 pub enum RtError {
-    /// 帧派发被驱动拒绝（含 VALIDATION 未注册事件 / FUEL_EXHAUSTED）。
+    /// 帧派发被驱动拒绝（含 VALIDATION 未注册事件等信封错误）。
     Dispatch {
         n: u64,
         code: String,
@@ -309,7 +307,7 @@ pub struct ReplayStep {
 pub struct ReplayResult {
     pub frames_checked: u64,
     pub first_mismatch: Option<ReplayStep>,
-    /// 回放中途的派发错误（录制合法但重放撞上 FUEL_EXHAUSTED 等）。
+    /// 回放中途的派发错误（录制合法但重放撞上信封错误等）。
     pub dispatch_error: Option<String>,
 }
 

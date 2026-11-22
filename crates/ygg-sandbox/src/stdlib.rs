@@ -19,9 +19,9 @@
 //!   Mod 完成 ygg.on 注册——注册序即派发序，stdlib 路由先于 Mod handler）。
 //!
 //! 装载序全景（[`crate::driver::KernelFacade::new`] 承载）：
-//! `Sandbox::new` → `fuel::install` → `inject::install` →
+//! `Sandbox::new` → `inject::install` →
 //! `host_api::install` → `stdlib::install` → Mod chunk → `host.seal` →
-//! `register_into`。
+//! `register_into`。（原序中的正式燃料安装步已随 S34 燃料退役移除。）
 
 use include_dir::include_dir;
 use mlua::{Lua, Table};
@@ -67,7 +67,6 @@ pub fn install(lua: &Lua) -> Result<(), mlua::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fuel::{self, HookFuelMeter};
     use crate::host_api::{self, HostHandles};
     use crate::inject;
     use crate::sandbox::Sandbox;
@@ -87,14 +86,12 @@ mod tests {
         _host: host_api::HostApi,
         lua: Lua,
         registry: HandlerRegistry,
-        meter: HookFuelMeter,
         store: EntityStore,
     }
 
     fn rig(mod_source: &str) -> Rig {
         let sandbox = Sandbox::new().expect("sandbox construction");
         let lua = sandbox.lua().clone();
-        let meter = fuel::install(&lua, 100_000).expect("fuel install");
         let _inject = inject::install(&lua).expect("determinism install");
         let host = host_api::install(
             &lua,
@@ -114,7 +111,6 @@ mod tests {
             _host: host,
             lua,
             registry,
-            meter,
             store: EntityStore::new(),
         }
     }
@@ -157,7 +153,7 @@ mod tests {
         "#);
         let external = Event::external("event.enter", Value::Int(0)).expect("external event");
         let result: TransitionResult =
-            run_transition(&mut rig.store, &mut rig.registry, &mut rig.meter, external)
+            run_transition(&mut rig.store, &mut rig.registry, external)
                 .expect("transition succeeds");
         // 路由序：enter → goto intro（派生 1）→ intro body 叙述并 goto
         // scene（派生 2）→ scene body 叙述。FIFO 级联序 = 叙述序。

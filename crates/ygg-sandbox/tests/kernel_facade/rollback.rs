@@ -65,21 +65,22 @@ end)
 }
 
 #[test]
-fn fuel_exhaustion_rolls_back_writes() {
-    // 矩阵 #3：燃料耗尽（VM 指令计量面）与 handler 报错同等对待——写过的
-    // KV 与实体全部回滚。
+fn interrupted_after_writes_rolls_back_entity_and_kv() {
+    // 矩阵 #3（S34 改造）：中断源原为燃料耗尽（VM 指令计量面）；燃料退役后
+    // 触发器改为「写后 Lua error 中断」——中断面无论形态，写过的 KV 与实体
+    // 同样全部回滚（事务原子性覆盖保留）。
     const BURN_MOD: &str = r#"
 ygg.on("event.burn", function()
   ygg.kv.set("burned", 1)
   local id = ygg.entity.spawn()
   ygg.entity.set_attribute(id, "hp", 1)
-  while true do end
+  error("boom after writes")
 end)
 "#;
     let mut kernel = KernelFacade::new(BURN_MOD).expect("kernel construction");
     assert_eq!(
         reply_error_code(&kernel.dispatch("event.burn", "0")),
-        "FUEL_EXHAUSTED"
+        "VALIDATION"
     );
     assert_eq!(
         saved_entities(&mut kernel),

@@ -19,32 +19,14 @@
 //!   `crates/ygg-sandbox/src/driver.rs` 模块文档「dispatch 原子性」）。
 //!   本 crate 的假 handler 用例仍以「无事务」形态验证 core 自身契约；
 //!   转换前后的 `revision_before/after` 与计数是诊断面；
-//! - **燃料预算每转换共享**（D-B1）：per-dispatch 重置会让互发 handler 永动；
-//!   计量面抽象为 [`FuelMeter`] trait，具体计量（Lua 指令级计数）由沙箱
-//!   crate 实现（trait 反转同 D-继承-4，本 crate 不依赖沙箱）。
+//! - **无燃料计量**（S34 裁定）：燃料机制整体退役（用户裁定「限制远大于
+//!   收益」），转换驱动不再携带计量面——handler 错误是唯一的转换中断源。
 
 use std::collections::VecDeque;
 
 use crate::bus::{HandlerError, HandlerRegistry, NarrationSink, PendingChoice};
 use crate::entity::EntityStore;
 use crate::event::Event;
-
-/// 燃料计量面（D-B1：每转换共享预算，超支即拒绝）。
-///
-/// 实现方约定：`charge` 只做记账与超支判定，不做执行——执行在调用方
-/// （[`run_transition`] 在 charge 成功后才派发事件）。`remaining` 语义由
-/// 实现方定义（M0 沙箱侧 = 剩余指令额度）。
-pub trait FuelMeter {
-    fn charge(&mut self, units: u64) -> Result<(), FuelExhausted>;
-}
-
-/// 燃料超支（thiserror，白名单内）。
-#[derive(Debug, thiserror::Error)]
-#[error("fuel exhausted: requested {requested}, remaining {remaining}")]
-pub struct FuelExhausted {
-    pub requested: u64,
-    pub remaining: u64,
-}
 
 /// 转换错误（thiserror，白名单内）。
 #[derive(Debug, thiserror::Error)]
@@ -53,8 +35,6 @@ pub enum TransitionError {
     NotExternal(String),
     #[error(transparent)]
     Handler(#[from] HandlerError),
-    #[error(transparent)]
-    Fuel(#[from] FuelExhausted),
 }
 
 /// 转换结果：输出缓冲、pending_choice、事件计数与 revision 边界（诊断面）。
@@ -158,9 +138,9 @@ impl NarrationSink for TransitionDriver {
 
 /// 执行一次 `(state, event) → state'` 转换（FR2 单点收口）。
 ///
-/// 流程：外部事件判据先于燃料扣除 → 外部事件派发 → 排空循环
-/// （每轮先查 pending_choice 终结 → FIFO 出队 → 扣 1 单位燃料 → 派发）。
-/// 燃料超支或 handler 错误即中断传播（无事务面，不回滚已执行部分）。
+/// 流程：外部事件判据先行 → 外部事件派发 → 排空循环
+/// （每轮先查 pending_choice 终结 → FIFO 出队 → 派发）。
+/// handler 错误即中断传播（无事务面，不回滚已执行部分）。
 ///
 /// **事务边界归调用方**：本函数只驱动派发，不改写 `store` 之外的状态，也
 /// 不持有状态所有权（`store` 是借来的形参）。Lua facade 路径下 handler 的
@@ -170,17 +150,16 @@ impl NarrationSink for TransitionDriver {
 pub fn run_transition(
     store: &mut EntityStore,
     registry: &mut HandlerRegistry,
-    fuel: &mut dyn FuelMeter,
     external: Event,
 ) -> Result<TransitionResult, TransitionError> {
-    // 外部事件判据先于燃料扣除（D-B1：派生事件不能作为转换输入——否则
+    // 外部事件判据先行（D-B1：派生事件不能作为转换输入——否则
     // 回放日志「仅外部事件」的前提崩塌）。
     if !external.is_external() {
         return Err(TransitionError::NotExternal(external.name().to_owned()));
     }
     let revision_before = store.revision();
     let mut driver = TransitionDriver::new();
-    dispatch(registry, fuel, &external, &mut driver)?;
+    dispatch(registry, &external, &mut driver)?;
     let mut events_processed = 1;
     let mut events_dropped = 0;
     loop {
@@ -193,7 +172,7 @@ pub fn run_transition(
         let Some(event) = driver.queue.pop_front() else {
             break;
         };
-        dispatch(registry, fuel, &event, &mut driver)?;
+        dispatch(registry, &event, &mut driver)?;
         events_processed += 1;
     }
     Ok(TransitionResult {
@@ -208,14 +187,12 @@ pub fn run_transition(
     })
 }
 
-/// 单事件派发：先扣 1 单位燃料，成功后才触发 handler（超支即中断，D-B1）。
+/// 单事件派发：触发 handler（handler 错误即中断，D-B1）。
 fn dispatch(
     registry: &mut HandlerRegistry,
-    fuel: &mut dyn FuelMeter,
     event: &Event,
     driver: &mut TransitionDriver,
 ) -> Result<(), TransitionError> {
-    fuel.charge(1)?;
     registry.handle_event(event.name(), event, driver)?;
     Ok(())
 }
@@ -229,36 +206,6 @@ mod tests {
     use std::rc::Rc;
 
     type Log = Rc<RefCell<Vec<String>>>;
-
-    /// 预算燃料表：逐次扣减，不足即超支。
-    struct BudgetFuel {
-        remaining: u64,
-        charged_calls: usize,
-    }
-
-    impl BudgetFuel {
-        fn new(remaining: u64) -> Self {
-            Self {
-                remaining,
-                charged_calls: 0,
-            }
-        }
-    }
-
-    impl FuelMeter for BudgetFuel {
-        fn charge(&mut self, units: u64) -> Result<(), FuelExhausted> {
-            self.charged_calls += 1;
-            if units > self.remaining {
-                return Err(FuelExhausted {
-                    requested: units,
-                    remaining: self.remaining,
-                });
-            }
-            self.remaining -= units;
-            Ok(())
-        }
-    }
-
     /// handler 脚本动作：叙述 / 选择 / 发派生事件。
     enum Action {
         Narrate(&'static str),
@@ -312,11 +259,9 @@ mod tests {
         let mut reg = HandlerRegistry::new();
         let log: Log = Rc::new(RefCell::new(Vec::new()));
         reg.register("m", "evt.start", scripted("h1", vec![], &log));
-        let mut fuel = BudgetFuel::new(10);
         let result = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::external("evt.start", Value::Str("go".into())).unwrap(),
         )
         .unwrap();
@@ -345,11 +290,9 @@ mod tests {
         );
         reg.register("m", "evt.d2", scripted("h_d2", vec![], &log));
         reg.register("m", "evt.d1", scripted("h_d1", vec![], &log));
-        let mut fuel = BudgetFuel::new(10);
         let result = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::external("evt.start", Value::Int(0)).unwrap(),
         )
         .unwrap();
@@ -391,11 +334,9 @@ mod tests {
             "evt.loop",
             scripted("c1", vec![Action::Narrate("third")], &log),
         );
-        let mut fuel = BudgetFuel::new(10);
         let result = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::external("evt.start", Value::Int(0)).unwrap(),
         )
         .unwrap();
@@ -429,11 +370,9 @@ mod tests {
             ),
         );
         reg.register("m", "evt.after", scripted("h_after", vec![], &log));
-        let mut fuel = BudgetFuel::new(10);
         let result = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::external("evt.ask", Value::Int(0)).unwrap(),
         )
         .unwrap();
@@ -446,48 +385,6 @@ mod tests {
         assert_eq!(result.events_dropped(), 1);
         assert_eq!(result.events_derived(), 1);
         assert_eq!(*log.borrow(), vec!["h:evt.ask".to_string()]);
-    }
-
-    #[test]
-    fn fuel_exhaustion_halts_drain_and_propagates() {
-        let mut store = EntityStore::new();
-        let mut reg = HandlerRegistry::new();
-        let log: Log = Rc::new(RefCell::new(Vec::new()));
-        // 外部(1) + 派生 evt.a(1) = 预算 2；派发 evt.b 扣费时超支
-        reg.register(
-            "m",
-            "evt.start",
-            scripted(
-                "ext",
-                vec![Action::Emit("evt.a"), Action::Emit("evt.b")],
-                &log,
-            ),
-        );
-        reg.register("m", "evt.a", scripted("ha", vec![], &log));
-        reg.register("m", "evt.b", scripted("hb", vec![], &log));
-        let mut fuel = BudgetFuel::new(2);
-        let err = run_transition(
-            &mut store,
-            &mut reg,
-            &mut fuel,
-            Event::external("evt.start", Value::Int(0)).unwrap(),
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            TransitionError::Fuel(FuelExhausted {
-                requested: 1,
-                remaining: 0
-            })
-        ));
-        assert_eq!(fuel.remaining, 0);
-        // 无事务面：已派发部分不回滚（ext 与 ha 已执行，hb 未执行）
-        // ——core 自身契约：本函数不改写调用方的回滚决策；facade 层另有
-        // dispatch 级 savepoint（`ygg-sandbox::driver::cmd_event`），两者不矛盾。
-        assert_eq!(
-            *log.borrow(),
-            vec!["ext:evt.start".to_string(), "ha:evt.a".to_string()]
-        );
     }
 
     #[test]
@@ -505,11 +402,9 @@ mod tests {
         let mut store = EntityStore::new();
         let mut reg = HandlerRegistry::new();
         reg.register("m", "evt.bad", Box::new(Failing));
-        let mut fuel = BudgetFuel::new(10);
         let err = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::external("evt.bad", Value::Int(0)).unwrap(),
         )
         .unwrap_err();
@@ -517,24 +412,20 @@ mod tests {
     }
 
     #[test]
-    fn derived_input_rejected_before_any_fuel_charge() {
+    fn derived_input_rejected_before_any_dispatch() {
         let mut store = EntityStore::new();
         let mut reg = HandlerRegistry::new();
         let log: Log = Rc::new(RefCell::new(Vec::new()));
         reg.register("m", "evt.d", scripted("h", vec![], &log));
-        let mut fuel = BudgetFuel::new(5);
         let err = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::derived("evt.d", Value::Int(1)).unwrap(),
         )
         .unwrap_err();
         // 派生输入被拒（D-B1：转换输入只能是外部事件）
         assert!(matches!(err, TransitionError::NotExternal(name) if name == "evt.d"));
-        // 先于燃料扣除：计数与余额均未动
-        assert_eq!(fuel.charged_calls, 0);
-        assert_eq!(fuel.remaining, 5);
+        // 先于任何派发：handler 未执行
         assert!(log.borrow().is_empty());
     }
 
@@ -546,11 +437,9 @@ mod tests {
         reg.register("m", "evt.tick", scripted("h", vec![], &log));
         let id = store.spawn().unwrap();
         assert_eq!(store.revision(), 1);
-        let mut fuel = BudgetFuel::new(10);
         let r1 = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::external("evt.tick", Value::Int(0)).unwrap(),
         )
         .unwrap();
@@ -562,7 +451,6 @@ mod tests {
         let r2 = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::external("evt.tick", Value::Int(0)).unwrap(),
         )
         .unwrap();
@@ -593,11 +481,9 @@ mod tests {
         reg.register("m", "evt.d1", scripted("h_d1", vec![], &log));
         reg.register("m", "evt.d2", scripted("h_d2", vec![], &log));
         reg.register("m", "evt.d3", scripted("h_d3", vec![], &log));
-        let mut fuel = BudgetFuel::new(10);
         let result = run_transition(
             &mut store,
             &mut reg,
-            &mut fuel,
             Event::external("evt.start", Value::Int(0)).unwrap(),
         )
         .unwrap();

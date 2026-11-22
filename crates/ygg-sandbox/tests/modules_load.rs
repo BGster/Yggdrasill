@@ -3,11 +3,10 @@
 //! 覆盖 require 契约：同状态同 globals 共享、只经返回值跨模块、缓存与 table
 //! 身份、`nil`/无返回值 → `true` 且只执行一次、chunk 名（错误文本带真实文件
 //! 与行号）、循环与深度的可读链条、**调用时机不受装载期限制**（封的只是注册
-//! 面，见 `host.seal`）、装载期独立燃料预算（不挤占单转换预算）。
+//! 面，见 `host.seal`）。（原「装载期独立燃料预算」覆盖项已随 S34 燃料退役删除。）
 
 use serde_json::{json, Value as Json};
-use ygg_sandbox::driver::{KernelError, KernelFacade, DEFAULT_FUEL_BUDGET};
-use ygg_sandbox::fuel::{self, LoadBudget};
+use ygg_sandbox::driver::{KernelError, KernelFacade};
 use ygg_sandbox::modules::ModuleSet;
 use ygg_sandbox::sandbox::Sandbox;
 
@@ -283,58 +282,6 @@ end)
     // 装载结束后（= seal 之后）的 dispatch 里 require 仍然可用。
     let parsed = reply_ok(&kernel.dispatch("probe", "0"));
     assert_eq!(parsed["narrative"], json!(["late=util;kind=function"]));
-}
-
-#[test]
-fn load_fuel_is_independent_of_the_transition_budget() {
-    // 装载期烧掉远超单转换预算（DEFAULT_FUEL_BUDGET = 100k 指令单位）的模块：
-    // 若装载与转换共享预算，这里会在装载期以 fuel exhausted 失败。
-    let heavy = format!(
-        "local x = 0 for i = 1, {} do x = x + i end return x",
-        DEFAULT_FUEL_BUDGET * 2
-    );
-    let mut kernel = KernelFacade::with_modules(
-        r#"
-local n = require("src.heavy")
-ygg.on("probe", function() ygg.narrate("heavy=" .. tostring(n > 0)) end)
-"#,
-        modules(&[("src.heavy", heavy.as_str())]),
-    )
-    .expect("heavy module loads under the load budget");
-
-    // 转换预算未被装载期挤占：本条 dispatch 正常工作（且在满载预算下）。
-    let parsed = reply_ok(&kernel.dispatch("probe", "0"));
-    assert_eq!(parsed["narrative"], json!(["heavy=true"]));
-}
-
-#[test]
-fn load_budget_exhaustion_is_reported_and_leaves_the_transition_budget_alone() {
-    let sandbox = Sandbox::new().expect("sandbox construction");
-    let load = LoadBudget::new(2_000);
-    let meter =
-        fuel::install_with_load_budget(sandbox.lua(), 50_000, load.clone()).expect("fuel install");
-
-    // 装载期：独立预算耗尽 → 装载面文案（不冒充转换预算）。
-    load.begin();
-    let msg = sandbox
-        .lua()
-        .load("local x = 0 for i = 1, 100000 do x = x + i end")
-        .exec()
-        .expect_err("load budget must be drained")
-        .to_string();
-    load.end();
-    assert!(
-        msg.contains("module load budget consumed"),
-        "load-phase message expected: {msg}"
-    );
-    assert!(
-        !msg.contains("transition budget"),
-        "load phase must not report as transition exhaustion: {msg}"
-    );
-
-    // 转换预算一单位未动（装载期消耗只记在装载预算上）。
-    assert_eq!(meter.remaining(), 50_000, "transition budget untouched");
-    assert_eq!(load.remaining(), 0, "load budget drained");
 }
 
 #[test]

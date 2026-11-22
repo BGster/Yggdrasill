@@ -1,9 +1,10 @@
 //! ygg-sandbox：mlua Lua 5.4 确定性沙箱
-//! （燃料计量、host API 白名单、ygg stdlib 嵌入、KernelFacade JSON 信封 API）。
+//! （host API 白名单、ygg stdlib 嵌入、KernelFacade JSON 信封 API；原燃料
+//! 计量面已于 S34 整体退役）。
 //!
 //! S1 空壳占位（D-补充-2）；S7–S12 逐 slice 扩展模块声明。
-//! S7 填充 `sandbox`（沙箱构造 + 负例）；S8 填充 `fuel`（正式燃料）与
-//! `inject`（确定性注入）；S9 填充 `host_api`（收集-回放桥 + 分相）；
+//! S7 填充 `sandbox`（沙箱构造 + 负例）；S8 填充 `inject`（确定性注入；
+//! 同 slice 落地的正式燃料模块后于 S34 整体退役）；S9 填充 `host_api`（收集-回放桥 + 分相）；
 //! S10 填充 `driver`（KernelFacade：装载序 + 事件转换 + 存读档信封面）与
 //! `stdlib`（include_dir 嵌入 + 语义装载序）；S11 填充 `resources`
 //! 【S11 改名说明：原拟名 `data`，避让 Lua 侧 `ygg.data` API 名——模块名
@@ -19,7 +20,6 @@ pub mod audio;
 pub mod codec_face;
 pub mod driver;
 pub mod frame;
-pub mod fuel;
 pub mod hash;
 pub mod host_api;
 pub mod host_contract;

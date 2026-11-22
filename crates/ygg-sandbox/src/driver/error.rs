@@ -8,8 +8,6 @@ use crate::modules::ModuleError;
 
 /// 信封错误码（稳定字符串契约，A1 线格式；下游按码分支不解析 message）。
 pub mod code {
-    /// 燃料耗尽（内核派发税或 VM 指令计量任一面触发）。
-    pub const FUEL_EXHAUSTED: &str = "FUEL_EXHAUSTED";
     /// 沙箱拒绝（模块装载拒绝、内存超限等沙箱结构面拒绝）。
     pub const SANDBOX_DENIED: &str = "SANDBOX_DENIED";
     /// 校验拒绝（payload 非标量、事件构造失败、未注册事件、handler 报错、

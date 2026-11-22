@@ -3,10 +3,8 @@
 //!
 //! - **装载序**（S10 锁定，S11 扩展资源步，r1 扩展模块表；管线单一收口于
 //!   `build_kernel`）：`Sandbox::new`（stdlib 裁剪 + 内存上限 + 白名单环境）
-//!   → `fuel::install_with_load_budget`（正式燃料，每 dispatch 面重置
-//!   [`DEFAULT_FUEL_BUDGET`]；装载期记独立预算
-//!   [`crate::fuel::FUEL_LOAD_BUDGET`]）→ `inject::install`（math 精确集 + 内核种子
-//!   random + ticks）→ `host_api::install`（装载期 `ygg` 完整面）→
+//!   → `inject::install`（math 精确集 + 内核种子
+//!   random + ticks；原序中的正式燃料安装步已随 S34 燃料退役移除）→ `host_api::install`（装载期 `ygg` 完整面）→
 //!   `resources::install`（S11：`ygg.data` 只读数据面——host 之后、stdlib 之前、
 //!   Mod chunk 之前，Mod 顶层即可读资源）→ `stdlib::install`（S10 stdlib：先于
 //!   Mod chunk，注册序即派发序）→ **模块表注入**（r1：`ModuleHandle::set_modules`,
@@ -72,7 +70,6 @@ use ygg_core::entity::EntityStore;
 use ygg_core::kv::KvStore;
 use ygg_core::save::SaveFile;
 
-use crate::fuel::HookFuelMeter;
 use crate::host_api::{HostApi, VfsStore};
 use crate::inject::DeterminismHandle;
 use crate::resources::{ResourceError, ResourceTable};
@@ -87,7 +84,6 @@ mod surface;
 #[cfg(test)]
 mod tests;
 
-pub use build::DEFAULT_FUEL_BUDGET;
 pub use error::{code, KernelError};
 
 /// 内核驱动门面：Mod 装载 + 事件转换 + 存读档 + 诊断面的单一入口
@@ -95,7 +91,6 @@ pub use error::{code, KernelError};
 pub struct KernelFacade {
     /// Lua 状态持有者（字段存活期 = VM 存活期；运行期经 host 桥间接使用）。
     _sandbox: Sandbox,
-    fuel_meter: HookFuelMeter,
     /// 确定性注入句柄（时钟推进当前无驱动级调用面——ticks 只增不推，
     /// 句柄持有以固定 RNG/ticks 状态生命周期；S12 探针按需消费）。
     _determinism: DeterminismHandle,

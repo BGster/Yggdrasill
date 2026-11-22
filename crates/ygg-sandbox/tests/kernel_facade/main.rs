@@ -18,7 +18,7 @@
 //! （B2：选择 = 新外部事件），不受保留名限制。
 
 use serde_json::{json, Value as Json};
-use ygg_sandbox::driver::{KernelError, KernelFacade, DEFAULT_FUEL_BUDGET};
+use ygg_sandbox::driver::{KernelError, KernelFacade};
 use ygg_sandbox::sandbox::ENGINE_VERSION;
 /// 玩家选择门 Mod：入口事件挂起 choice；respond 事件按序号叙述选择结果。
 const GATE_MOD: &str = r#"
@@ -75,7 +75,7 @@ fn saved_kv(kernel: &mut KernelFacade) -> Json {
 
 mod diagnostics;
 mod envelope;
-mod fuel_errors;
+mod error_mapping;
 mod persistence;
 mod rollback;
 mod stdlib;

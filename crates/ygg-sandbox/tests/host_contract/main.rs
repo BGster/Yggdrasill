@@ -4,7 +4,7 @@
 //! 收集-回放的相对序等价、注册序、KV/实体即席写与门拒绝、seal 禁令、
 //! payload 类型拒绝。
 //!
-//! 测试形态（每项一致）：`Sandbox::new()` → `fuel::install` →
+//! 测试形态（每项一致）：`Sandbox::new()` →
 //! `inject::install` → `host_api::install`（持 [`HostHandles`]）→ 装载期
 //! Lua chunk 经 `ygg.on` 注册 handler → `seal` → `register_into` → 转换驱动。
 //! 输出断言取**两个互补面**：
@@ -34,13 +34,9 @@ use ygg_core::entity::{EntityStore, Value};
 use ygg_core::event::Event;
 use ygg_core::kv::KvStore;
 use ygg_core::transition::{run_transition, TransitionError, TransitionResult};
-use ygg_sandbox::fuel::{self, HookFuelMeter};
 use ygg_sandbox::host_api::{install as install_host, HostApi, HostHandles};
 use ygg_sandbox::inject::{self, DeterminismHandle};
 use ygg_sandbox::sandbox::Sandbox;
-
-/// 测试燃料预算：派发税 + VM 指令计量共享，对短 handler 序列绰绰有余。
-const FUEL_BUDGET: u64 = 10_000;
 
 /// 记录型 sink：narrative / choices / emitted 三面各自按到达序收集。
 #[derive(Default)]
@@ -66,11 +62,10 @@ impl NarrationSink for RecordingSink {
     }
 }
 
-/// 完整测试台架：全程持有 Sandbox / fuel / inject / handles（Rc 存活面——
+/// 完整测试台架：全程持有 Sandbox / inject / handles（Rc 存活面——
 /// 在移交 install 前克隆出本侧句柄，见 [`Rig::new`]）。
 struct Rig {
     sandbox: Sandbox,
-    fuel: HookFuelMeter,
     _inject: DeterminismHandle,
     host: HostApi,
     handles: HostHandles,
@@ -80,7 +75,6 @@ impl Rig {
     fn new() -> Self {
         let sandbox = Sandbox::new().expect("sandbox construction");
         let lua = sandbox.lua();
-        let fuel_meter = fuel::install(lua, FUEL_BUDGET).expect("fuel install");
         let determinism = inject::install(lua).expect("determinism install");
         let handles = HostHandles {
             kv: Rc::new(RefCell::new(KvStore::new())),
@@ -94,7 +88,6 @@ impl Rig {
         let host = install_host(lua, handles).expect("host api install");
         Rig {
             sandbox,
-            fuel: fuel_meter,
             _inject: determinism,
             host,
             handles: local_handles,
@@ -129,11 +122,9 @@ impl Rig {
         payload: Value,
     ) -> TransitionResult {
         let mut driver_store = EntityStore::new();
-        let mut fuel_meter = self.fuel.clone();
         run_transition(
             &mut driver_store,
             registry,
-            &mut fuel_meter,
             Event::external(event, payload).expect("external event"),
         )
         .unwrap_or_else(|err| panic!("transition `{event}` failed: {err}"))

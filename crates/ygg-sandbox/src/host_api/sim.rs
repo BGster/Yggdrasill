@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// 装载期安装完整 `ygg` 面（D-S9-1）。必须在 `Sandbox` 构造之后调用
-/// （依赖 build 创建的 `ygg` 占位表；fuel / inject 之后再装本面不冲突——
+/// （依赖 build 创建的 `ygg` 占位表；inject 之后再装本面不冲突——
 /// 各自 raw_set 不同成员）。
 /// 未挂载时的统一表述（码在首段，与 `YGG-FS-UNMOUNTED` 同一处置）。
 fn sim_unmounted(what: &str) -> String {

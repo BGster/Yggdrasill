@@ -9,7 +9,7 @@ use ygg_core::save::{SaveError, SaveFile};
 use ygg_core::transition::{run_transition, TransitionError};
 
 use super::{code, KernelError, KernelFacade};
-use crate::fuel;
+
 use crate::sandbox::ENGINE_VERSION;
 
 impl KernelFacade {
@@ -113,34 +113,12 @@ impl KernelFacade {
         json!({"ok": true, "log": self.external_log}).to_string()
     }
 
-    /// 本转换的燃料预算（r13 自动扩缩的唯壹取值点，`cmd_event` 步骤④消费）：
-    ///
-    /// - 显式 `YGG_FUEL_BUDGET`（进程 env）最优先、精确采用、不受 cap 削减；
-    /// - 缺省/非法 → [`crate::fuel::auto_budget`]：线性 + 地板 + 硬顶，
-    ///   `clamp(4600 × kv_len, 100k, 4M)`（r15 重标定斜率；标定表与「不可
-    ///   外推」边界见该函数文档）。
-    ///
-    /// `kv.len()` 是 canonical KV 条目总数（`BTreeMap::len` O(1)），**每转换
-    /// 现读、零缓存**：预算只依赖转换起点的 canonical 状态规模，回放/续局
-    /// 重建同状态 → 同预算序列 → 同结局；预算不入 save、不入状态哈希。因子
-    /// 取 `kv.len()` 是 mod 无关的充分统计（域键约定只归 mod，P3 宿主零语义），
-    /// 标定与取值论证见 [`crate::fuel::auto_budget`]。斜率只升不降于 r13 的
-    /// 2000/键：新公式对每个 kv_len 都 ≥ 旧值，改前能过的 dispatch 改后必过
-    /// （燃料只影响杀/不杀；结构性不回退，回归表测见
-    /// `r15_slope_covers_reference_peak_and_never_lowers_the_r13_formula`）。
-    fn transition_budget(&self) -> u64 {
-        fuel::resolve_budget(
-            std::env::var("YGG_FUEL_BUDGET").ok().as_deref(),
-            self.kv.borrow().len(),
-        )
-    }
-
     /// 事件转换路径（非保留名命令）：registry 预检（fail-closed）→ payload
-    /// 解析（标量门）→ 外部事件构造 → 外部日志 → 燃料重置 → snapshot-out
+    /// 解析（标量门）→ 外部事件构造 → 外部日志 → snapshot-out
     /// 转换 → 信封回包。
     fn cmd_event(&mut self, name: &str, payload_json: &str) -> String {
         // ⓪⁻ registry 预检（fail-closed 门面侧）：未注册事件名在**一切副作用
-        //    之前**拒绝——不进外部日志（③）、不耗燃料（④）、不动状态基线（⑤）。
+        //    之前**拒绝——不进外部日志（③）、不动状态基线（④）。
         //    「事件不存在」先于「序号越界 / 载荷非法」（registry 是运行时唯一
         //    事实，宿主不持事件名白名单：`ygg.*` 保留事件同走本预检，已注册者
         //    天然通过）。先 `collect` 再判断：`event_names()` 借用 `&self.registry`，
@@ -160,7 +138,7 @@ impl KernelFacade {
         }
         // ⓪ `ygg.choice_selected` 域内校验（A2）：待决选择存在时，序号
         //    必须是 1..=options_len 的整数——越界/非整数 = 可读 VALIDATION
-        //    （玩家视角「选项不存在」，不进内核转换、不耗燃料、不改状态）。
+        //    （玩家视角「选项不存在」，不进内核转换、不改状态）。
         if name == "ygg.choice_selected" {
             if let Some(choice) = &self.pending_choice {
                 let n = choice.options().len();
@@ -190,7 +168,7 @@ impl KernelFacade {
             Ok(value) => value,
             Err(message) => return error_envelope(code::VALIDATION, message),
         };
-        // ② 外部事件构造（判据先于燃料扣除；失败 → VALIDATION）。
+        // ② 外部事件构造（判据先行；失败 → VALIDATION）。
         let event = match Event::external(name.to_owned(), payload.clone()) {
             Ok(event) => event,
             Err(err) => return error_envelope(code::VALIDATION, err),
@@ -200,13 +178,8 @@ impl KernelFacade {
             "name": event.name(),
             "payload": value_to_json(&payload),
         }));
-        // ④ 燃料预算每转换重置（D-B1：转换内级联共享同一预算）。r13：预算
-        //    取 [`Self::transition_budget`]——显式 env 最优先；否则按转换起点
-        //    的 canonical 状态规模自动扩缩（`kv.len()` O(1) 现读，零缓存：
-        //    回放/续局重建同状态 → 同预算序列）。
-        self.fuel_meter.reset(self.transition_budget());
-        // ⑤ dispatch 级 savepoint，**取点**：校验（⓪①②）全过、副作用
-        //    （③ 日志、④ 燃料）已落之后，转换开始之前——在此冻结 canonical
+        // ④ dispatch 级 savepoint，**取点**：校验（⓪①②）全过、副作用
+        //    （③ 日志）已落之后，转换开始之前——在此冻结 canonical
         //    的两块状态面基线。基线是 canonical 的**副本**（不是换出）：
         //    handler 的即席写经 host 桥 `Rc` 直落 canonical，而 `ygg.kv.get`
         //    / `ygg.entity.*` 的读路径同样直读 canonical——换出会让转换期的
@@ -220,19 +193,14 @@ impl KernelFacade {
         // `ygg.fs.read` 读到空表）；`VfsStore` 自身 `Clone`，`dirty` 集也随基线
         // 克隆，所以失败 dispatch 里 `ygg.fs.write` 过的路径不会漏进下一次 flush。
         let vfs_baseline = self.vfs.borrow().clone();
-        let outcome = run_transition(
-            &mut baseline,
-            &mut self.registry,
-            &mut self.fuel_meter,
-            event,
-        );
-        // ⑤' D1：无论转换成败都取走本次 dispatch 的警告（choice 前置丢弃
+        let outcome = run_transition(&mut baseline, &mut self.registry, event);
+        // ④' D1：无论转换成败都取走本次 dispatch 的警告（choice 前置丢弃
         // 面；每 dispatch 至多一条，drain 即清空，不泄漏到后续 dispatch）。
         let warning = self.host.take_dispatch_warning();
-        // ⑤'' TD1：meta 同样无论成败都 drain（两条路径不留残渣），但只在
+        // ④'' TD1：meta 同样无论成败都 drain（两条路径不留残渣），但只在
         // 成功信封里露出——错误信封不夹带 Mod 侧数据。
         let meta = self.host.take_meta();
-        // ⑥ 裁定：成功 = **提交**（丢弃基线——canonical 保留本次全部写入）；
+        // ⑤ 裁定：成功 = **提交**（丢弃基线——canonical 保留本次全部写入）；
         //    失败 = **先还原 canonical、再返回信封**。还原语句必须落在错误
         //    分支内、且先于该分支的返回（`map_transition_error` 只把错误映射
         //    成信封，不碰状态）；把它挪到 match 之后（错误分支已返回，不可
@@ -253,7 +221,7 @@ impl KernelFacade {
             }
         };
         self.pending_choice = result.pending_choice().cloned();
-        // ⑦ 信封：revision 在转换结束后从 canonical 现读
+        // ⑥ 信封：revision 在转换结束后从 canonical 现读
         //    （TransitionResult.revision_after 为快照克隆的冻结诊断值，
         //    不进信封——统一 store 代决的 revision 口径）。
         let revision = self.entities.borrow().revision();
@@ -285,27 +253,17 @@ impl KernelFacade {
 /// 转换错误 → 稳定码信封（A1：下游按码分支，message 只作人读定位）。
 ///
 /// Handler 面（mlua 桥把 Lua 侧错误包成 HandlerError）按文案归类：
-/// "fuel exhausted"（VM 指令计量耗尽经 Lua 错误浮出）→ FUEL_EXHAUSTED；
 /// "sandbox denied" / "memory error"（模块拒绝桩 / 内存上限）→
 /// SANDBOX_DENIED；其余 handler 错误 → VALIDATION。NotExternal 为不可能
 /// 路径（外部事件构造先行判据）→ INTERNAL。
 fn map_transition_error(err: TransitionError) -> String {
     match err {
-        TransitionError::Fuel(fuel) => error_envelope(
-            code::FUEL_EXHAUSTED,
-            format!(
-                "fuel exhausted: requested {}, remaining {}",
-                fuel.requested, fuel.remaining
-            ),
-        ),
         TransitionError::Handler(HandlerError(msg)) => {
             if msg.starts_with("unregistered event") {
                 // 未注册事件（bus fail-closed；外部名已被门面预检拦截，走到这里的
                 // 都是派生面：handler `ygg.emit` 了未注册名）→ VALIDATION。显式
                 // 分支钉住码面，不依赖末尾兜底；消息带 bus 稳定前缀 + 事件名。
                 error_envelope(code::VALIDATION, msg)
-            } else if msg.contains("fuel exhausted") {
-                error_envelope(code::FUEL_EXHAUSTED, msg)
             } else if msg.contains("sandbox denied") || msg.contains("memory error") {
                 error_envelope(code::SANDBOX_DENIED, msg)
             } else {
