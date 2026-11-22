@@ -19,6 +19,7 @@
 //!   --replay <路径>     回放模式：读录制逐帧重派 + 哈希链比对（first_mismatch）
 //!   --input <路径>      输入调度 JSONL：{"frame":N,"down":[..],"up":[..],
 //!                       "mouse":[dx,dy,buttons?]}（录制模式可配）
+//!   --boot <事件>       循环前单次派发的启动事件（如 Saltline 的 game.boot）
 //!   --fuel N            显式燃料预算（写 YGG_FUEL_BUDGET：env 最优先语义不变）
 //! ```
 //!
@@ -120,6 +121,7 @@ fn main() {
     let mut record: Option<PathBuf> = None;
     let mut replay: Option<PathBuf> = None;
     let mut input: Option<PathBuf> = None;
+    let mut boot: Option<String> = None;
     let mut fuel: Option<u64> = None;
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -155,6 +157,7 @@ fn main() {
             "--record" => record = Some(PathBuf::from(next_value(&mut args, "--record"))),
             "--replay" => replay = Some(PathBuf::from(next_value(&mut args, "--replay"))),
             "--input" => input = Some(PathBuf::from(next_value(&mut args, "--input"))),
+            "--boot" => boot = Some(next_value(&mut args, "--boot")),
             "--fuel" => {
                 let value = next_value(&mut args, "--fuel");
                 fuel = Some(match value.parse::<u64>() {
@@ -205,7 +208,18 @@ fn main() {
         event: event.unwrap_or_else(|| "rt.tick".to_owned()),
     };
 
-    // ③ 录制或回放。
+    // ③ 录制或回放（boot 事件在循环前单次派发——启动初始化不逐帧重做）。
+    if let Some(boot_event) = boot {
+        let reply = kernel.dispatch(&boot_event, "1");
+        let envelope: Json = serde_json::from_str(&reply).unwrap_or(json!({"ok": false}));
+        if envelope["ok"] != Json::Bool(true) {
+            eprintln!(
+                "启动事件 {boot_event} 失败：{}",
+                envelope["error"]["message"].as_str().unwrap_or("未知")
+            );
+            exit(1);
+        }
+    }
     match (record, replay) {
         (Some(path), _) => run_record(&mut kernel, cfg, input, frames, duration_ms, &path),
         (_, Some(path)) => run_replay(&mut kernel, cfg, &path),
