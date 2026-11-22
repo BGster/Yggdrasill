@@ -4,7 +4,6 @@ use super::compare::{value_compare, CompareOp};
 use super::selector::{QueryValue, Selector};
 use super::store::Entity;
 use super::value::{EntityId, Value};
-use super::AttrIndex;
 use super::EntityStore;
 
 impl EntityStore {
