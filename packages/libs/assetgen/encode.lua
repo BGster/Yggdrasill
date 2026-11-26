@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/encode.lua` —— 容器装箱（WAV16 / PCM16 / BMP24 / OBJ / hex / raw）。
 --
--- 契约：`docs/design/packages/assetgen.md` §2 / §4（`assetgen.encode` 的容器表）。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §2 / §4（`assetgen.encode` 的容器表）。
 --
 -- # 为什么手写而不是复用 `codec`
 --

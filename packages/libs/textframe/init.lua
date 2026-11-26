@@ -1,6 +1,6 @@
 -- `packages/libs/textframe/init.lua` —— 包根模块 `pkg.textframe`：**纯导出面**。
 --
--- 契约：`docs/design/packages/textframe.md`。顶层只有 `local` / `require` / 函数与
+-- 契约：`openwiki/contracts/packages/textframe.md`。顶层只有 `local` / `require` / 函数与
 -- 常量定义（I7）；本包没有装配期状态，`install` 只为夹具的同构调用面而存在。
 --
 -- # 分工

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:964d6a246e7881a74d688fbadbbb3ba8d4f05aae05c252197f2b964b59035f88",
+  "claims": [
+    {
+      "id": "claim_116c0aa66b58469b807e9f16abf5de60",
+      "statement": "The game is driven by events into a playable state machine, and the same `ygg.*` surface is shared by the game being played and the agent harness playing it.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/event.rs",
+          "version": "repo-file-v1:sha256:2796175d251218383278f7b04047c2ec9530c67462e197f7c0026f2457a0ee77"
+        }
+      ]
+    },
+    {
+      "id": "claim_648e73ade9664adf91fa0f6f3ebc3ed4",
+      "statement": "The three systems have a one-way dependency: mods and packages touch the kernel only through `ygg.*`, the kernel carries zero game semantics, and the host assembles and forwards without re-judging.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-lint/src/rules.rs",
+          "version": "repo-file-v1:sha256:2105b328f68111524911e7a2c33c6372aff011a172a40b028eaac515eadfe60e"
+        }
+      ]
+    },
+    {
+      "id": "claim_2a4a452673094899bffab13bfa7db6fc",
+      "statement": "One process dispatches exactly one event (`--event`), and there is deliberately no `--events`, timeline replay script or settlement loop: read the receipt, then decide.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/egg/main.rs",
+          "version": "repo-file-v1:sha256:9f43cb524964c329c11c2b30156979adae8c581086671acae53e44a59bd91c6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_5221187110204b3d8427372c06304f87",
+      "statement": "`egg serve` starts on 127.0.0.1:7800 with an empty root registry, accepts roots via `POST /api/roots`, and is observation only — never a write channel into run state.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/roots.rs",
+          "version": "repo-file-v1:sha256:6358e0167babc774f39aa14ec284a4eba677af3f815eb72e21cda8ffb067e63b"
+        }
+      ]
+    },
+    {
+      "id": "claim_5dd13c666e7341efbce69e68273f3cf4",
+      "statement": "The harness rules and all receipt copy live in `.ygg/mods/agent-seed/`, whose `pack.json` declares the config, texts and tool faces the host loads.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/pack.json",
+          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
+        }
+      ]
+    },
+    {
+      "id": "claim_7287ff4f265d409891227e1c79b32d2a",
+      "statement": "The workspace map is the eight `ygg-*` crates plus the Lua packages, the agent-seed mod, the schema files and the run directory — the page map groups those same things as contracts and operating pages.",
+      "evidence": [
+        {
+          "resource": "repo://Cargo.toml",
+          "version": "repo-file-v1:sha256:7ce7b9f3cea20c4ffc523a058abb4f0904e1e1fa754b1e18e28ab05c2c9b9683"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

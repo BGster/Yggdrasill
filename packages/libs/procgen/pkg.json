@@ -3,5 +3,5 @@
     "name": "procgen",
     "version": "0.1.0",
     "deps": [{ "id": "codec", "version": "0.1.0" }],
-    "contract": "docs/design/packages/procgen.md"
+    "contract": "openwiki/contracts/packages/procgen.md"
 }

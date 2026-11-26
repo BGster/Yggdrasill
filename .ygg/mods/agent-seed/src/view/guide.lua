@@ -1,4 +1,4 @@
--- src/guide.lua —— 阶段提示壳（playbook 已于 2026-11-15 退役，规则正文在 docs/）。
+-- src/guide.lua —— 阶段提示壳（playbook 已于 2026-11-15 退役，规则正文在 openwiki/）。
 --
 -- 纯导出模块：顶层只做 require / 定义（不注册、不写状态、不输出）；
 -- 资源由入口 install(deps) 注入。本模块唯一写的 KV 前缀：无（只读）。

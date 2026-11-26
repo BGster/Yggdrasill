@@ -86,7 +86,7 @@ fn write_pkg(libs: &Path, id: &str, version: &str, deps: &[(&str, &str)]) {
         dir.join("pkg.json"),
         format!(
             r#"{{"schemaVersion": 1, "name": "{id}", "version": "{version}",
-                 "deps": [{}], "contract": "docs/design/packages/README.md"}}"#,
+                 "deps": [{}], "contract": "openwiki/contracts/packages/README.md"}}"#,
             deps_json.join(", ")
         ),
     )
@@ -279,7 +279,7 @@ fn pkg_load_budget_stays_under_ten_milliseconds() {
             dir.join("pkg.json"),
             format!(
                 r#"{{"schemaVersion": 1, "name": "{id}", "version": "0.1.0", "deps": [],
-                     "contract": "docs/design/packages/README.md"}}"#
+                     "contract": "openwiki/contracts/packages/README.md"}}"#
             ),
         )
         .expect("write pkg.json");

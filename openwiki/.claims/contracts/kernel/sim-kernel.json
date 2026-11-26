@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e87095797fd238d2f25903403b5899f711fef96f6c5232efa0ac68f3c7dcf5ca",
+  "claims": [
+    {
+      "id": "claim_e0aab49f9b054212bc6d0af0583e37b4",
+      "statement": "模拟态 = `{tick, world, resources}`，结构与行为分家：tick 推进由系统注册制驱动（系统列表是数据），浮点运算禁入模拟态。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/sim.rs",
+          "version": "repo-file-v1:sha256:ba6be1c5830c505ef5ba9cd94675955f67ad7065583bc4758f177beb4c613222"
+        }
+      ]
+    },
+    {
+      "id": "claim_28b1ea80aeab44438a2dd2f0b8406400",
+      "statement": "模拟数值默认 i64 定点（Q32.32 跨面约定）；`F64Bits` 位串列只做存储/拷贝/归一（±0→+0、任意 NaN→单一 quiet NaN）与字节级 hash，禁止算术运算。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/bits.rs",
+          "version": "repo-file-v1:sha256:89d5c25a814f4adbafb2646505c5a952d187d33c40dabe00e9f367e954f8d0e7"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/fixed.rs",
+          "version": "repo-file-v1:sha256:a94edbb5e3311cc166b2aea3ca2abdf46397708e69b08580b985042f12f1471d"
+        }
+      ]
+    },
+    {
+      "id": "claim_e9f2320fbe9a4cbc83d9eb07aacd5cb3",
+      "statement": "state hash = 帧去尾 digest 的 FNV-1a 64，与快照同源一次计算；向量表与 `pkg.procgen.rng.fnv64` 双向断言，全仓仅一份实现。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/fixtures/fnv64-vectors.json",
+          "version": "repo-file-v1:sha256:87f777b7817bdeb9a1c1b696c66e5d21c14c4aa34d4d47544e37ffcbd150dbcb"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/hash.rs",
+          "version": "repo-file-v1:sha256:8499480d919fe6a565e48327978a57be4190d22643308fb61b932995d2f72bb7"
+        }
+      ]
+    },
+    {
+      "id": "claim_733cb98d0cd94bac80e3e08e3cd6b017",
+      "statement": "快照是二进制列帧（magic | fmt_version | flags | tick | next_entity | 组件名表 | resources | archetype 段 | 尾 digest）；序的规范由 `canonical-order.json` 单份 fixture 钉住，二进制与 codec 两个消费者各断言一次。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/fixtures/canonical-order.json",
+          "version": "repo-file-v1:sha256:bc8cbb754d213eb6aca6da2ae8f2f51fc830b732c237a31bda8abb00aebafcf4"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_9b4dfc26dff343fda6581dc7e7baeb6b",
+      "statement": "archetype 内行是 dense 插入序，删除走 `swap_remove`（末行填洞）并同步 `entity_index`；组件注册后永不移除，restore 按组件名升序重排内部 id —— 内部 id 不是持久事实。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/store.rs",
+          "version": "repo-file-v1:sha256:0dfe19846fa42d417ce44cf4d9025c0806f02c05be3537b8b8537294ce8fee4d"
+        }
+      ]
+    },
+    {
+      "id": "claim_fdc4f5f927f94cc6ae7344cd90c75d07",
+      "statement": "内部 id 不进快照/hash：同一世界在两种注册顺序下（内部 id 0 vs 4）快照字节与 hash 全等（`id_order_independent` 用例）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/tests/snapshot_roundtrip.rs",
+          "version": "repo-file-v1:sha256:a1fde32f95ba60ae3794dab80952e003a7d107034da38228dec42441f373d3b3"
+        }
+      ]
+    },
+    {
+      "id": "claim_e806f42974124d7385cefdf41528b632",
+      "statement": "回放闭环：restore + replay 逐 tick hash 全等（快照续跑 150/150、创世重跑 200/200），并含篡改负例（dt +1 ulp 必在该 tick 报失配）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/tests/replay_tick_hash.rs",
+          "version": "repo-file-v1:sha256:8c180fd26831247f91772be71fda3d8cae75300fb0253067d4b7fbf10b92537a"
+        }
+      ]
+    },
+    {
+      "id": "claim_f96a86367924466bb36ff8c7178cd448",
+      "statement": "性能门禁：tick 10⁴ 实体 ≤16.6 ms（实测 0.553 ms）、snapshot/restore 10⁵ 实体 ≤100 ms（8.351 / 16.633 ms），数字来自同文件 perf 测的三轮中位。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/tests/perf_tick.rs",
+          "version": "repo-file-v1:sha256:b07fb8b124144ad786f0248ec47f6f5e6c21c06d20882620433553b647280a4e"
+        }
+      ]
+    },
+    {
+      "id": "claim_c16277b16ffe45f1ba85bd9b338287b5",
+      "statement": "跨进程 digest 断言 parent == child（当前值 `ba8070ac5c67faa4`，60 行 trace）；跨平台三腿矩阵（linux/arm64 原生 + linux/amd64 Rosetta + macOS/arm64）逐字节全等。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/tests/replay_cross_process.rs",
+          "version": "repo-file-v1:sha256:9d14041ada4c67f91b32ceae3049641885cf0f56911449694d823b657371a961"
+        }
+      ]
+    },
+    {
+      "id": "claim_00d5f054be634529816615198682baa9",
+      "statement": "确定性是结构而非纪律：静态扫描禁止模拟 crate 出现浮点字面量与浮点算术（`bits.rs` 位串搬运面按白名单豁免），保证浮点环境差异在结构上不可达。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/tests/determinism_scan.rs",
+          "version": "repo-file-v1:sha256:7252dcdbfa43c6fa860f461f4c6b0ee03965ad0ff88d857971c180e172267853"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

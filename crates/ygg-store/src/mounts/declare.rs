@@ -58,7 +58,7 @@ impl MountSpec {
     }
 }
 
-/// 解析并校验 `pack.json` 的 `mounts` 段（`docs/design/mod/mod-package.md` §3.2.2）。
+/// 解析并校验 `pack.json` 的 `mounts` 段（`openwiki/contracts/mod/mod-package.md` §3.2.2）。
 ///
 /// 规则（顺序即报错顺序；**任一条违规 → `YGG-FS-MOUNT`，零写入**）：
 /// ① 段缺失或 `[]` → 零挂载；段存在但不是数组 / 元素不是对象 → 拒；
@@ -226,5 +226,5 @@ fn type_name(value: &Json) -> &'static str {
 }
 
 // ============================================================================
-// §crate 内单测：声明面逐条钉规则（`docs/design/mod/mod-package.md` §3.2.2）
+// §crate 内单测：声明面逐条钉规则（`openwiki/contracts/mod/mod-package.md` §3.2.2）
 // ============================================================================

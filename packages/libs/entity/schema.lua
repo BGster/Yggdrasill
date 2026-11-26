@@ -1,6 +1,6 @@
 -- `pkg.entity.schema` —— spec 的编译、比较、落盘与 memo（`define` 的语义核心）。
 --
--- 契约：`docs/design/packages/entity.md` §2 / I3。批十一拆分（纯搬移）：内部规范形
+-- 契约：`openwiki/contracts/packages/entity.md` §2 / I3。批十一拆分（纯搬移）：内部规范形
 -- 只由本模块读写，对外形每次重建（`M.schema` 返回深副本）；`memo` 与 `memo_sync`
 -- 住这里（单源），record / query 经 require 取用。`value_ok` 是写路径值域判据的
 -- 唯一出处（spawn / set / query 的类型门都从这里取）。

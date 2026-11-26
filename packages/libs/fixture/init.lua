@@ -1,6 +1,6 @@
 -- fixture 包根模块（`pkg.fixture`）：**纯导出面**。
 --
--- 这是 packages 装载面的活体夹具（不是能力包）。它由 `docs/design/packages/README.md`
+-- 这是 packages 装载面的活体夹具（不是能力包）。它由 `openwiki/contracts/packages/README.md`
 -- §5 登记，显式豁免 P0「≥2 个不同游戏用点」硬闸——那道闸针对能力包；夹具的作用
 -- 是钉住装载契约，不是提供能力。
 --

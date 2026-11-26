@@ -2,7 +2,7 @@
 
 320×200 一帧 cast 同形投影（天/墙/地列 span + 精灵列 blit + present）。
 与 `tests/frame_face.rs::FRAME_THROUGHPUT_MOD` 同形——吞吐真数见
-`docs/design/host/rt-face.md` §6。
+`openwiki/contracts/host/rt-face.md` §6。
 
 用途：`examples/rt --ppm/--preview` 的可复现 demo 证据通道：
 

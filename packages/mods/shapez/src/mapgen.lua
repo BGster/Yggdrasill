@@ -1,6 +1,6 @@
 -- `src/mapgen.lua` —— 分块地图 procgen（源 map_chunk.js 的 v2 等价面）。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §2.5）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §2.5）
 --
 -- 纯 Lua over `pkg.procgen` 包面（包面零改）：每 chunk 一条命名流
 -- `chunk.<cx>.<cy>`，`procgen.run` 以 `sz.seed` 为种子——流隔离（procgen I2）

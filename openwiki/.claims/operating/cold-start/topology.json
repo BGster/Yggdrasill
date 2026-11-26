@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:9ad179ea7056a884e0b1f22353b92b3f8ea71e23f2389164d016252f1816287f",
+  "claims": [
+    {
+      "id": "claim_aa863f656d044d4ab5108eb91ab78d2f",
+      "statement": "`ygg-core` may depend only on serde, serde_json and thiserror; a VM, schema validator, IO or platform API inside it breaks the kernel's determinism guarantee.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/Cargo.toml",
+          "version": "repo-file-v1:sha256:3308fb0941edbfd337ef801a950a6c826c96ef30ade03f4fc03a1d42e476a412"
+        }
+      ]
+    },
+    {
+      "id": "claim_641435bf9104475ba5e485b6a864ed66",
+      "statement": "`ygg-lint` carries no `ygg-*` kernel dependency, which keeps static AST checks buildable without `mlua` or the store.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-lint/Cargo.toml",
+          "version": "repo-file-v1:sha256:1febd634c5fb69b4b0f2c00baba3551e7c0f560095d2f7c9a44829632a0fb5aa"
+        }
+      ]
+    },
+    {
+      "id": "claim_7615a906a9d945b9a7803f03efd94b46",
+      "statement": "SQLite reaches the CLI only through dev-dependencies of the native host binary, so `ygg-wasm` and `ygg-lint` dependency trees stay free of `rusqlite` and filesystem crates.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/Cargo.toml",
+          "version": "repo-file-v1:sha256:c2c3218b039e3d43af621c14c530e327f828a5b220f39399000e2515c44e9df7"
+        }
+      ]
+    },
+    {
+      "id": "claim_c87e38b90e5744c9889a2db032650b6d",
+      "statement": "`ygg-sim` depends on no other `ygg-*` crate and only on `thiserror` at runtime, so it can compile to `wasm32-unknown-unknown` and reach the browser via `ygg-wasm → ygg-sandbox → ygg-sim`.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/Cargo.toml",
+          "version": "repo-file-v1:sha256:fd64194d66768974d9d80a1a46d324286f67c5b505b67ee1c3153ba5a80a9924"
+        }
+      ]
+    },
+    {
+      "id": "claim_e02fdfa944c14d7db6bf16d7651e003f",
+      "statement": "Resource-format contracts live only in `packages/schema/schemas/`, read by both the TypeScript (ajv) and Rust (jsonschema) sides; an inline copy on either side is the drift this rule forbids.",
+      "evidence": [
+        {
+          "resource": "repo://packages/schema/schemas/manifest.json",
+          "version": "repo-file-v1:sha256:fac476463ec0557c0113809aa6c9ada86f3228d67fcdbd8025214f22a168ffbd"
+        }
+      ]
+    },
+    {
+      "id": "claim_42defa4e9b1d432a9c9489a24e81a870",
+      "statement": "The canonical workflow mod lives physically only at `.ygg/mods/agent-seed`; `packages/mods/agent-seed` is a relative symbolic link to it, so a second physical copy under `packages/mods/` is a violation.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/pack.json",
+          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
+        }
+      ]
+    },
+    {
+      "id": "claim_725fedadbf894878a2d694d00d03cef4",
+      "statement": "The native host binary lives at `crates/ygg-sandbox/examples/egg/`, which is the only place where the store and its dev-dependencies are linked.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/egg/main.rs",
+          "version": "repo-file-v1:sha256:9f43cb524964c329c11c2b30156979adae8c581086671acae53e44a59bd91c6d"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

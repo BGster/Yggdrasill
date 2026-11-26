@@ -6,5 +6,5 @@
         { "id": "entity", "version": "0.1.0" },
         { "id": "codec", "version": "0.1.0" }
     ],
-    "contract": "docs/design/packages/quest.md"
+    "contract": "openwiki/contracts/packages/quest.md"
 }

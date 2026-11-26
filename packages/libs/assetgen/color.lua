@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/color.lua` —— `0xRRGGBB` 整数的通道运算（调色）。
 --
--- 契约：`docs/design/packages/assetgen.md` §2（纹理 `ch` 三值的来源）。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §2（纹理 `ch` 三值的来源）。
 --
 -- 颜色在产物路径上是**一个整数**而不是三元素数组：数组会让每个像素多一次表访问
 -- （64×64×4 就是 16k 次），而整数解包只是两次位运算。千分比权重（`1000` = 1.0）

@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:ed9a06c644d74a260229d91b149265c6826c10158c53a4bfa6f7e05096562ece",
+  "claims": [
+    {
+      "id": "claim_dc95055132084f9fa2f618cca41644ba",
+      "statement": "`rt.tick` 载荷是全整数规范串 `n=<帧号>;dt=<毫秒>;k=<位串|->;p=<csv|->;r=<csv|->;m=<dx>,<dy>,<buttons>`，由 `rt::frame_payload` 单点构造（录制与回放共用）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/rt.rs",
+          "version": "repo-file-v1:sha256:c53162561ded72ce67b1d7b4dda9d7f5e7fd7ad7fe5f06f9f1d81f43ceb5dfa8"
+        }
+      ]
+    },
+    {
+      "id": "claim_af78f872873841dbbe4b52d4506367ad",
+      "statement": "`RtInput::parse` 是 `canonical` 的严格逆：重建后再规范化必须逐字节等于输入，键序未升/段缺失/非整数一律拒绝。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/rt.rs",
+          "version": "repo-file-v1:sha256:c53162561ded72ce67b1d7b4dda9d7f5e7fd7ad7fe5f06f9f1d81f43ceb5dfa8"
+        }
+      ]
+    },
+    {
+      "id": "claim_7ec432731bfb4365ae7c8a55a1d0653e",
+      "statement": "帧链哈希 `H(n) = SHA256(H(n−1)|n|dt|规范串|全状态摘要)`，genesis 把 `event` 与 `hz` 纳入前像；定步 `dt_ms(n) = ⌊n·1000/hz⌋ − ⌊(n−1)·1000/hz⌋` 零浮点、零墙钟。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/rt.rs",
+          "version": "repo-file-v1:sha256:c53162561ded72ce67b1d7b4dda9d7f5e7fd7ad7fe5f06f9f1d81f43ceb5dfa8"
+        }
+      ]
+    },
+    {
+      "id": "claim_6c21914c781e4a5abcfadd6ae8720ef5",
+      "statement": "帧 digest 规范序 = `SHA256(\"ygg.rt.frame.v1|<w>x<h>|\" ++ RGBA8 行主序原始字节)`，尺寸入前像；渲染写入 clear/span/blit 均为直写覆盖零混色、越界静默钳制、浮点参数报 `YGG-RT-SHAPE`。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/frame.rs",
+          "version": "repo-file-v1:sha256:598ffb241f6095e35ddd6fdb9f1ad2d8b4a66adab6cb7f6555e2a4bfd060b6f2"
+        }
+      ]
+    },
+    {
+      "id": "claim_a2a35bbd0ecf489caa7e93d46870e03d",
+      "statement": "音频面为单混音面、ch 固定 1、rate 8000..=48000 缺省 22050；play 的 gain 千分比在入队时烘焙（`s·gain/1000` 截断后饱和钳到 i16），voice 号不回收，并发 ≤64 超限报 `YGG-RT-AUDIO-CAP`。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/audio.rs",
+          "version": "repo-file-v1:sha256:b8e894872ab0e1d6b390d8525a99faca5b2f2688c5d998cf25314d3ddf419421"
+        }
+      ]
+    },
+    {
+      "id": "claim_cd4257a07ee24a3b970c444ef600027f",
+      "statement": "混音窗口样本数 `samples(n) = ⌊logical_n·rate/1000⌋ − ⌊logical_{n−1}·rate/1000⌋`，混音为饱和整数加法；混音 digest 规范序含 rate 与 ch；无活动 voice 的帧窗口照写静音、`FrameRecord.audio` 整键缺席。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/audio.rs",
+          "version": "repo-file-v1:sha256:b8e894872ab0e1d6b390d8525a99faca5b2f2688c5d998cf25314d3ddf419421"
+        }
+      ]
+    },
+    {
+      "id": "claim_52bb4937c3d04d70b0952b4acb41cbf9",
+      "statement": "帧 digest 与混音 digest 都是旁路证据线：链公式输入元组零变化，回放对 `frame`/`audio` 字段严格对表（录有实无、录无实有、值不同均 mismatch）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/rt.rs",
+          "version": "repo-file-v1:sha256:c53162561ded72ce67b1d7b4dda9d7f5e7fd7ad7fe5f06f9f1d81f43ceb5dfa8"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/tests/frame_face.rs",
+          "version": "repo-file-v1:sha256:d12bd3b6b7e7b2f70fb5f426df9892741a2fc8d6f1d1b9aa7f128d8d59aff37b"
+        }
+      ]
+    },
+    {
+      "id": "claim_4ccccee580b74d04bb5a3b9e23c60948",
+      "statement": "输入只从宿主 `InputDevice`（调度脚本 / 预览端口回注）进入，无 Lua 写入口；`ygg.rt.config` / `frame.open` / `audio.open` 仅装载期可调，seal 后原位替换为 `YGG-RT-SEALED` 报错桩。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/rt.rs",
+          "version": "repo-file-v1:sha256:c53162561ded72ce67b1d7b4dda9d7f5e7fd7ad7fe5f06f9f1d81f43ceb5dfa8"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

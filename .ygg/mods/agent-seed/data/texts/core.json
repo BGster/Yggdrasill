@@ -1,20 +1,20 @@
 {
   "scenes": {
-    "prologue": "[BOOT · 引擎就绪] 引擎 {{engine}}，相位 {{stage}}，演进偏好 {{mode}}（仅叙述）。双层元工作流叙事正文见 docs/context/acts/prologue.md。\n  [READ FIRST · prologue] 本幕必读 1 件：\n  · docs/context/cold-start/vocabulary.md (ver 16b47f) —— 冷启动 / 读懂任何动作名｜读不到：hard-refusal\n  → 读毕签名：config.set read.cold-start/vocabulary=16b47f",
-    "charter": "[立局 · 第 {{batch}} 批前] 章程：「{{title}}」｜目标：{{goal}}｜成功判据：{{success}}。幕台词正文见 docs/context/acts/charter.md。\n  [READ FIRST · charter] 本幕必读 1 件：\n  · docs/context/acts/charter.md (ver daf05b) —— 进入立局幕 / `charter.set` / `run.begin`｜读不到：hard-refusal\n  → 读毕签名：config.set read.acts/charter=daf05b",
-    "coordinate": "[协调] 任务「{{title}}」：{{goal}} | {{count}} 条需求（{{open}} 进行中）| {{pending}} 条待受理。协调层三事（派发/受理/门禁）正文见 docs/context/acts/coordinate.md。\n  [READ FIRST · coordinate] 本幕必读 2 件：\n  · docs/context/acts/coordinate.md (ver 94346e) —— 进入协调幕 / 每次派发前｜读不到：hard-refusal\n  · docs/context/req-acts/intake.md (ver c8584b) —— 立项 / 派发 plan 前｜读不到：hard-refusal\n  → 读毕签名：config.set read.acts/coordinate=94346e\n  → 读毕签名：config.set read.req-acts/intake=c8584b",
-    "settle": "[盘点] 任务「{{title}}」：{{count}} 条需求（{{done}} 终态）| require_all_green {{gates}}。四项齐备自动进发布幕；正文见 docs/context/acts/settle.md。\n  [READ FIRST · settle] 本幕必读 2 件：\n  · docs/context/acts/settle.md (ver 124a0d) —— `coordinate.submit` 成功｜读不到：hard-refusal\n  · docs/context/rituals/cleanup.md (ver 677201) —— `review.note` 批结算 / 退役前｜读不到：hard-refusal\n  → 读毕签名：config.set read.acts/settle=124a0d\n  → 读毕签名：config.set read.rituals/cleanup=677201",
-    "release": "[发布] 第 {{batch}} 批 · 任务「{{title}}」{{declared}}。声明本批结果后 review.note 批结算/退役；正文见 docs/context/acts/release.md。\n  [READ FIRST · release] 本幕必读 2 件：\n  · docs/context/acts/release.md (ver b7bced) —— 盘点四项齐备后｜读不到：hard-refusal\n  · docs/context/acts/retired.md (ver ed4b6a) —— `run.retire` 武装后的最后一次 `review.note`｜读不到：silent-drift\n  → 读毕签名：config.set read.acts/release=b7bced\n  → 读毕签名：config.set read.acts/retired=ed4b6a"
+    "prologue": "[BOOT · 引擎就绪] 引擎 {{engine}}，相位 {{stage}}，演进偏好 {{mode}}（仅叙述）。双层元工作流叙事正文见 openwiki/operating/acts/prologue.md。\n  [READ FIRST · prologue] 本幕必读 1 件：\n  · openwiki/operating/cold-start/vocabulary.md (ver 89b3cc) —— 冷启动 / 读懂任何动作名｜读不到：hard-refusal\n  → 读毕签名：config.set read.cold-start/vocabulary=89b3cc",
+    "charter": "[立局 · 第 {{batch}} 批前] 章程：「{{title}}」｜目标：{{goal}}｜成功判据：{{success}}。幕台词正文见 openwiki/operating/acts/charter.md。\n  [READ FIRST · charter] 本幕必读 1 件：\n  · openwiki/operating/acts/charter.md (ver f31aff) —— 进入立局幕 / `charter.set` / `run.begin`｜读不到：hard-refusal\n  → 读毕签名：config.set read.acts/charter=f31aff",
+    "coordinate": "[协调] 任务「{{title}}」：{{goal}} | {{count}} 条需求（{{open}} 进行中）| {{pending}} 条待受理。协调层三事（派发/受理/门禁）正文见 openwiki/operating/acts/coordinate.md。\n  [READ FIRST · coordinate] 本幕必读 2 件：\n  · openwiki/operating/acts/coordinate.md (ver 901b98) —— 进入协调幕 / 每次派发前｜读不到：hard-refusal\n  · openwiki/operating/req-acts/intake.md (ver 5b49a1) —— 立项 / 派发计划前｜读不到：hard-refusal\n  → 读毕签名：config.set read.acts/coordinate=901b98\n  → 读毕签名：config.set read.req-acts/intake=5b49a1",
+    "settle": "[盘点] 任务「{{title}}」：{{count}} 条需求（{{done}} 终态）| require_all_green {{gates}}。四项齐备自动进发布幕；正文见 openwiki/operating/acts/settle.md。\n  [READ FIRST · settle] 本幕必读 2 件：\n  · openwiki/operating/acts/settle.md (ver 2d930d) —— `coordinate.submit` 成功｜读不到：hard-refusal\n  · openwiki/operating/rituals/cleanup.md (ver dcf923) —— `review.note` 批结算 / 退役前｜读不到：hard-refusal\n  → 读毕签名：config.set read.acts/settle=2d930d\n  → 读毕签名：config.set read.rituals/cleanup=dcf923",
+    "release": "[发布] 第 {{batch}} 批 · 任务「{{title}}」{{declared}}。声明本批结果后 review.note 批结算/退役；正文见 openwiki/operating/acts/release.md。\n  [READ FIRST · release] 本幕必读 2 件：\n  · openwiki/operating/acts/release.md (ver e4515e) —— 盘点四项齐备后｜读不到：hard-refusal\n  · openwiki/operating/acts/retired.md (ver 65eeba) —— `run.retire` 武装后的最后一次 `review.note`｜读不到：silent-drift\n  → 读毕签名：config.set read.acts/release=e4515e\n  → 读毕签名：config.set read.acts/retired=65eeba"
   },
   "endings": {
     "done": "[ENDING · run retired] 任务「{{title}}」——{{count}} 条需求（{{done}} 条终态），{{batch}} 个已结算批次；复盘评分 {{score}}/5，演进候选 {{candidates}}（保留/筛除）。一句话教训：{{lesson}}"
   },
   "prompts": {
-    "charter": "下一步：修订章程（charter.set），三件套齐备后开工（run.begin）？（幕语义：docs/context/acts/charter.md）",
-    "coordinate": "下一步：受理提案、过门禁、派发，还是收口进盘点（coordinate.submit）？（幕语义：docs/context/acts/coordinate.md）",
-    "settle": "盘点：门禁全绿了吗？依次验证 → 演进登记 → 会话 → 待办。（幕语义：docs/context/acts/settle.md）",
-    "release": "发布：声明本批结果（release.confirm / release.skip）后 review.note 批结算；run.retire 武装时它是终局。（幕语义：docs/context/acts/release.md）",
-    "retired": "本局已退役：只读查询（map / requirement.list）。（幕语义：docs/context/acts/retired.md）"
+    "charter": "下一步：修订章程（charter.set），三件套齐备后开工（run.begin）？（幕语义：openwiki/operating/acts/charter.md）",
+    "coordinate": "下一步：受理提案、过门禁、派发，还是收口进盘点（coordinate.submit）？（幕语义：openwiki/operating/acts/coordinate.md）",
+    "settle": "盘点：门禁全绿了吗？依次验证 → 演进登记 → 会话 → 待办。（幕语义：openwiki/operating/acts/settle.md）",
+    "release": "发布：声明本批结果（release.confirm / release.skip）后 review.note 批结算；run.retire 武装时它是终局。（幕语义：openwiki/operating/acts/release.md）",
+    "retired": "本局已退役：只读查询（map / requirement.list）。（幕语义：openwiki/operating/acts/retired.md）"
   },
   "options": {
     "dispatch": "requirement.dispatch — dispatch by readiness order ({{count}} candidates, jobs {{jobs}}/{{cap}}, head {{id}})",

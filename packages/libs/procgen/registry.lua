@@ -1,6 +1,6 @@
 -- `packages/libs/procgen/registry.lua` —— defs / algo 注册表 + `run`。
 --
--- 契约：`docs/design/packages/procgen.md`（I4 生成器纯函数化 / I5 参数化而非分支 /
+-- 契约：`openwiki/contracts/packages/procgen.md`（I4 生成器纯函数化 / I5 参数化而非分支 /
 -- I6 版本进入哈希 / I7 顶层纯度）。
 --
 -- # defs 不进 KV（契约 §2 的回写结论）

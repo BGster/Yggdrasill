@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:f68a321ac61f96ac73432c9f580455c4f2cc5964cfadd69864edb2fec7704c95",
+  "claims": [
+    {
+      "id": "claim_a88cc7140d3b44d3a917bc1bfb71a73f",
+      "statement": "Delivery cleanliness is five machine counts — dirty, unpushed, stash, conflict debris and fmt — and a receipt quoting only the words `working tree clean` is not evidence; the `ok=` line must be pasted.",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/git-delivery-check.sh",
+          "version": "repo-file-v1:sha256:1992c3628a1b4475c985c6c229e9b8aaa7c41a59dc6ca3b87e89aa28eee819a3"
+        }
+      ]
+    },
+    {
+      "id": "claim_e81c7c2e26b14207bfa2d05de86d900d",
+      "statement": "The cleanliness check is advisory rather than a gate: it writes no KV and blocks no other requirement, and `unpushed.count=-1` is a deliberate sentinel distinguishing an unpushed branch from a verified-equal one.",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/git-delivery-check.sh",
+          "version": "repo-file-v1:sha256:1992c3628a1b4475c985c6c229e9b8aaa7c41a59dc6ca3b87e89aa28eee819a3"
+        }
+      ]
+    },
+    {
+      "id": "claim_083386bed3644e69bfecd9a0076e07b3",
+      "statement": "Dispatch parameters live in a git-ignored `.env.local`; the main session must source it in the same shell and map the model and thinking variables into the spawn call, never printing their values into a brief, artifact or commit.",
+      "evidence": [
+        {
+          "resource": "repo://.gitignore",
+          "version": "repo-file-v1:sha256:f248ed0f515053a2dc4593d1b203b9e769636672bf99c60ae2f7098ddcd49ac0"
+        }
+      ]
+    },
+    {
+      "id": "claim_7746029f38984bd485132b02b7982cbd",
+      "statement": "The executor ledger is a self-declared audit trail, not an identity check: `proposal.submit` does not consult it, an unregistered id only shows as unregistered in `requirement.list`, and a handover must carry `<id>|<reason>`.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/executor.lua",
+          "version": "repo-file-v1:sha256:892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
+        }
+      ]
+    },
+    {
+      "id": "claim_ab2524fc99224731b4b6cabcf17821f0",
+      "statement": "The brief text emitted at runtime is a projection: the fact head keeps state variables while the policy body is a pointer to the operating page, so the page stays the single authority and the JSON never restates the rules.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-harness.json",
+          "version": "repo-file-v1:sha256:f4668324db3f7a38379a970e57e48cfa83be2530a7a9a56a9502f57322144aed"
+        }
+      ]
+    },
+    {
+      "id": "claim_f01c92264d40425bb14a794537917651",
+      "statement": "A negative or quantitative claim is only evidence when a method that could have returned the opposite produced it: `command -v` proves a missing PATH command, while `ls scripts/*lint*` can never prove a missing cargo crate.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/review.lua",
+          "version": "repo-file-v1:sha256:f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
+        }
+      ]
+    },
+    {
+      "id": "claim_3d24f3bda7d34620bccb7c3d32d20cf2",
+      "statement": "Each subagent task runs in the background and the main session does not wait on it; a synchronous wait is allowed only when the next action strictly depends on the result and nothing else can be advanced.",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/todo-check.sh",
+          "version": "repo-file-v1:sha256:64046b70f8b2454da70f83d557568af533cef5ff2b4a082c6490279823ae4934"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

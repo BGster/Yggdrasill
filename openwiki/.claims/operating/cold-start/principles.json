@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:83ec40d99d4e992221e229f63031a1fc5fef57bb9db20cd0a4fa25c90bc30261",
+  "claims": [
+    {
+      "id": "claim_80fa7dd22d2941cda847f3c4c38d257d",
+      "statement": "Every dispatch is a transactional step `(state, event) -> state'`: a handler error or fuel exhaustion rolls back all entity and KV writes made during that dispatch, so a partial step is not observable.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/transition.rs",
+          "version": "repo-file-v1:sha256:3c371e1e065a8009854f69bd2bc9466b9bca03e51311c1b21f878b164ea89904"
+        }
+      ]
+    },
+    {
+      "id": "claim_4300955702914f8ea58495053d5cf08d",
+      "statement": "In the SQLite store the event-log row and the state snapshot commit in one transaction, which is what makes P1's rollback promise hold across a crash rather than only in memory.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-store/src/sqlite/mod.rs",
+          "version": "repo-file-v1:sha256:b11d6400b10ed21856d2c3f51b8564b49bc14dc521ae88fd7fc61397b9e7959b"
+        }
+      ]
+    },
+    {
+      "id": "claim_fe481fb4008244679b396452549bbcc5",
+      "statement": "The host knows nothing about a specific mod's event names or phases: everything arrives through `pack.json` and `data/config.json`, and a missing or malformed contract field fails at load time with no fallback default.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/pack.rs",
+          "version": "repo-file-v1:sha256:e844db8d3f543a0c416ad26834f5ad55691dc0e0df829df0591cf25c6272553c"
+        }
+      ]
+    },
+    {
+      "id": "claim_c6d99ae9ca7c4c77a364e18be97f1050",
+      "statement": "Top-level purity is enforced twice — statically by `ygg-lint` and again at load by the sandbox — so a support module that registers a handler at `require` time is rejected instead of silently changing dispatch order.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-lint/src/rules.rs",
+          "version": "repo-file-v1:sha256:2105b328f68111524911e7a2c33c6372aff011a172a40b028eaac515eadfe60e"
+        }
+      ]
+    },
+    {
+      "id": "claim_f9f6987cf9554442b9f86316d8ec7084",
+      "statement": "`packages/schema/schemas/` is the single authority for JSON shapes, shared by the Rust host and the TypeScript client; a shape written twice is the drift P5 forbids.",
+      "evidence": [
+        {
+          "resource": "repo://packages/schema/schemas/manifest.json",
+          "version": "repo-file-v1:sha256:fac476463ec0557c0113809aa6c9ada86f3228d67fcdbd8025214f22a168ffbd"
+        }
+      ]
+    },
+    {
+      "id": "claim_460f2bacba444ec78b712ca7a09978a5",
+      "statement": "Reactive effects must converge before `ygg.choice` is emitted, bounded by `MAX_PASSES = 4`, because emitting a choice ends the dispatch and discards queued built-in events.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/runtime/flow.lua",
+          "version": "repo-file-v1:sha256:c4e68ff43a5da46bb48165396bb2a16621a7048321c690b140938cd862b1442a"
+        }
+      ]
+    },
+    {
+      "id": "claim_9aa93f93dccf41e58c713af3045f1b26",
+      "statement": "Sandbox defaults are strict — no IO, no clock, deterministic PRNG, fuel cap — and the local host capabilities (`ygg.fs`, `ygg.tool.call`) are injected traits, so a mod without them degrades rather than corrupting state.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:2f56be31bfe2605a1a53eaed09b45539bb75442ab339bfe8f121812b9662e12e"
+        }
+      ]
+    },
+    {
+      "id": "claim_b9a24fe15c4e4a62a7afd1b84c79ad44",
+      "statement": "Secret values live only in `.env` / `.env.local`, both ignored: the committed surface may name `YGG_LLM_*` or `YGG_SUBAGENT_MODEL` but never their values, and `settings.*` is explicitly not a secret vault.",
+      "evidence": [
+        {
+          "resource": "repo://.gitignore",
+          "version": "repo-file-v1:sha256:f248ed0f515053a2dc4593d1b203b9e769636672bf99c60ae2f7098ddcd49ac0"
+        }
+      ]
+    },
+    {
+      "id": "claim_7a809e06dd324283a660bd59aa64b3d2",
+      "statement": "The host holds no domain semantics — only generic mechanisms (storage, events, routing, raw data) — so a requirement or gate concept appearing on the host surface is a layering error rather than a feature.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_contract/mod.rs",
+          "version": "repo-file-v1:sha256:5dcc35fd82f670a020a561c6de1b8f07d0ea27aca7b82fc4fc1dc8d0a8b06636"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

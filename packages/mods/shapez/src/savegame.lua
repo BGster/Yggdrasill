@@ -1,6 +1,6 @@
 -- `src/savegame.lua` —— 存档信封（P4 superagent 信封先例）。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §2.6）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §2.6）
 --
 -- 信封 = `codec.export(ns)`，`ns={entities=true, ids="index", keys=点名键集, mod="shapez"}`。
 -- 点名键三族（D9 显式点名；ygg.kv 无遍历面 → 动态键全部**构造性枚举**）：

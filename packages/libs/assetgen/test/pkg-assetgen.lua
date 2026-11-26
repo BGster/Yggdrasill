@@ -1,4 +1,4 @@
--- `pkg.assetgen.*` 自测。契约 `docs/design/packages/assetgen.md` §7。
+-- `pkg.assetgen.*` 自测。契约 `openwiki/contracts/packages/assetgen.md` §7。
 --
 -- # 为什么自带计数垫片
 --

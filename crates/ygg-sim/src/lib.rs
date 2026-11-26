@@ -1,6 +1,6 @@
 //! Yggdrasill Tier 1 原生模拟内核（确定性 tick / 列式 ECS / 快照 / 回放 / state hash）。
 //!
-//! 契约：`docs/design/kernel/sim-kernel.md`（本 crate 是它的**唯一**载体，逐节引用写在
+//! 契约：`openwiki/contracts/kernel/sim-kernel.md`（本 crate 是它的**唯一**载体，逐节引用写在
 //! 各模块头注里）。本文件只做一件事：把「为什么这个 crate 这样写」的四条不变量钉在
 //! crate 级，使后续执行者不必重推。
 //!

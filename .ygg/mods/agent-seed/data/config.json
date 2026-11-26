@@ -67,16 +67,16 @@
   },
   "readGate": {
     "ver": {
-      "cold-start/vocabulary": "16b47f",
-      "acts/charter": "daf05b",
-      "acts/coordinate": "94346e",
-      "req-acts/intake": "c8584b",
-      "acts/settle": "124a0d",
-      "rituals/cleanup": "677201",
-      "acts/release": "b7bced",
-      "acts/retired": "ed4b6a",
-      "req-acts/delivery": "2affff",
-      "req-acts/integration": "279117"
+      "cold-start/vocabulary": "89b3cc",
+      "acts/charter": "f31aff",
+      "acts/coordinate": "901b98",
+      "req-acts/intake": "5b49a1",
+      "acts/settle": "2d930d",
+      "rituals/cleanup": "dcf923",
+      "acts/release": "e4515e",
+      "acts/retired": "65eeba",
+      "req-acts/delivery": "625a0d",
+      "req-acts/integration": "bdc79a"
     },
     "reqActs": {
       "plan": [

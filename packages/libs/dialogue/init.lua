@@ -1,4 +1,4 @@
--- `pkg.dialogue` —— 实体间对话事件总线（机制层包）。契约：`docs/design/packages/dialogue.md`。
+-- `pkg.dialogue` —— 实体间对话事件总线（机制层包）。契约：`openwiki/contracts/packages/dialogue.md`。
 --
 -- # 这个包做什么
 --

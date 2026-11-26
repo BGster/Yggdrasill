@@ -1,6 +1,6 @@
 -- `packages/libs/role-skill/store.lua` —— 四个 KV 键的唯一读写口 + 依赖解析。
 --
--- 契约：`docs/design/packages/role-skill.md` §2（数据形状）/ I1（薄层）。
+-- 契约：`openwiki/contracts/packages/role-skill.md` §2（数据形状）/ I1（薄层）。
 --
 -- # KV 只收标量
 --
@@ -15,7 +15,7 @@
 --
 -- # 记录不可删
 --
--- KV 没有 delete、也没有遍历面（`docs/design/kernel/state-surface.md` §2.8.1 是同一
+-- KV 没有 delete、也没有遍历面（`openwiki/contracts/kernel/state-surface.md` §2.8.1 是同一
 -- 事实）。所以 `revoke` / `revoke_skill` 只清**引用面**，既不删记录，也不从
 -- `role.index` 摘除——这不是省事，是唯一能做的事；写成「删除」的那版代码会在第一次
 -- 调用时就找不到 API。

@@ -19,7 +19,7 @@ for _, id in ipairs({ "flow", "requirements", "lanes", "map-guide", "settlement"
 end
 
 local CONFIG = ygg.data("ygg:agent/config")
--- playbook 已于 2026-11-15 整体退役：规则正文归位 docs/context 与 docs/design，
+-- playbook 已于 2026-11-15 整体退役：规则正文归位 openwiki/operating 与 openwiki/contracts，
 -- Mod 只保留状态机 + 回执 + 指路。此处保留空壳，避免 view 层判空分支。
 local PLAYBOOK = { sections = {} }
 

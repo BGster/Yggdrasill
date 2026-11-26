@@ -1,6 +1,6 @@
 -- `pkg.entity.query` —— 通用查询的包面与两道门（schema 面；S-24）。
 --
--- 契约：`docs/design/packages/entity.md` §9.8。批十一拆分（纯搬移）：schema 门与
+-- 契约：`openwiki/contracts/packages/entity.md` §9.8。批十一拆分（纯搬移）：schema 门与
 -- 未声明键门在**任何查询之前**完成；类型错在这里变成错误，内核面把类型错变成假。
 -- spec / memo 经 `pkg.entity.schema` 取用（单源）。
 

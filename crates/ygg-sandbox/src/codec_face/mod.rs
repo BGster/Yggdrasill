@@ -1,7 +1,7 @@
 //! `ygg.codec.*` —— 确定性 JSON 编解码的宿主面（原生加速面）。
 //!
-//! 契约：`docs/design/kernel/lua-api.md` §3.1.4（面形状 / 字节过面 / 两码）与
-//! `docs/design/packages/codec.md` §4.1（下沉边界：谁下沉、谁回退、差分门禁）。
+//! 契约：`openwiki/contracts/kernel/lua-api.md` §3.1.4（面形状 / 字节过面 / 两码）与
+//! `openwiki/contracts/packages/codec.md` §4.1（下沉边界：谁下沉、谁回退、差分门禁）。
 //!
 //! # 这个面是什么、不是什么
 //!

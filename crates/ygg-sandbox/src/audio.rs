@@ -1,6 +1,6 @@
 //! rt 音频面（S31 R3）：AudioFace 单混音面 + 帧窗混音 + WAV 编码。
 //!
-//! 契约 `docs/design/host/rt-face.md` 音频面节。职责边界（与渲染面同拆分形）：
+//! 契约 `openwiki/contracts/host/rt-face.md` 音频面节。职责边界（与渲染面同拆分形）：
 //! - 本文件 = **纯 Rust 混音面**（无 mlua）：open/play/stop 语义、帧窗样本
 //!   序列（I1 镜像）、饱和整数混音（assetgen `sound.mix` 先例）、逐帧 digest
 //!   规范序、WAV 44 字节头编码。

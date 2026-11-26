@@ -1,7 +1,7 @@
 {
   "beats": {
     "review_ok": "[REVIEW RECORDED] {{score}}/5 — {{lesson}}",
-    "settlement_evolution_usage": "settlement.evolution 载荷：artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=…][|todo=…]；summary 必填且不得含 |，只认这四个可选段。详见 docs/context/acts/settle.md（登记载荷与拒绝面）。",
+    "settlement_evolution_usage": "settlement.evolution 载荷：artifact|summary[|c=<kept>/<screened>[|cls=<kind>:<n>,...]][|sessions=…][|todo=…]；summary 必填且不得含 |，只认这四个可选段。详见 openwiki/operating/acts/settle.md（登记载荷与拒绝面）。",
     "settlement_evolution_ok": "[EVOLUTION REGISTERED] {{summary}} | candidates {{candidates}} (kept/screened) | classes {{classes}}. Sessions and todo are settled in the same transaction when their segments are present; review.note archives single-source and closes the run.",
     "settlement_evolution_missing": "evolution registration is missing: run settlement.evolution first; summary must be non-empty after trim (artifact may stay empty when c=0/0).",
     "settlement_evolution_default_summary": "candidates screened against the evolution chapter",
@@ -26,10 +26,10 @@
     "settlement_todo_ok": "main-session todo list cleared: re-checked to 0 items (basis: {{verified_by}}).",
     "settlement_todo_payload": "0|main session todo list re-checked to 0 items (done + historical included)",
     "settlement_todo_usage": "settlement.todo payload \"remaining|verified_by\": exactly two segments, remaining exactly 0, verified_by non-empty and <= 120 chars.",
-    "settlement_todo_segment": "todo=0/<verified_by：主会话 todo 复核为 0 项（含完成与历史）；政策见 docs/context/rituals/cleanup.md §2>",
+    "settlement_todo_segment": "todo=0/<verified_by：主会话 todo 复核为 0 项（含完成与历史）；政策见 openwiki/operating/rituals/cleanup.md §2>",
     "settlement_todo_segment_bad": "the settlement.evolution todo= segment must be `<remaining>/<verified_by>`: remaining exactly 0, verified_by non-empty and <= 120 chars.",
     "settlement_verify_first": "record all-green evidence with verify.submit first, then register the three settlement tasks (all of them in the review stage).",
-    "settlement_sessions_unsetted_hint": "[SESSIONS CLEANUP PENDING] subagent sessions remaining={{remaining}} — review.note stays blocked. 政策见 docs/context/rituals/cleanup.md §1；用 settlement.sessions 或 settlement.evolution 的 sessions= 段声明，remaining 必须为 0。",
+    "settlement_sessions_unsetted_hint": "[SESSIONS CLEANUP PENDING] subagent sessions remaining={{remaining}} — review.note stays blocked. 政策见 openwiki/operating/rituals/cleanup.md §1；用 settlement.sessions 或 settlement.evolution 的 sessions= 段声明，remaining 必须为 0。",
     "review_batch_ok": "[BATCH {{batch}} SETTLED] score {{score}}/5 — {{lesson}}; evolution archived to the rolling slot; batch counter -> {{next}}; back to coordinate — the resident run waits for the next batch.",
     "settlement_artifact_no_vfs": "artifact {{artifact}} cannot be verified: the host VFS is not mounted — non-empty registration refused (no settlement written, no archive side effects)",
     "settlement_artifact_absent": "artifact {{artifact}} does not exist in the mounted VFS — registration refused (no settlement written, no archive side effects)",
@@ -42,17 +42,17 @@
     "release_skip_usage": "release.skip 载荷 = 非空理由（本批无需发布的显式声明）",
     "release_confirm_payload": "master@1a2b3c4d|v2026.11.12.1",
     "release_skip_payload": "本批无需发布：纯文档/测试批次，无 develop→master 合并",
-    "docs_maintenance_due": "[DOCS MAINTENANCE DUE] batch {{batch}}: the CONTEXT/DESIGN pass is the main session's OWN work — 见 docs/wiki-governance.md §6；解除：config.set docs.maintenance.done={{batch}}",
+    "docs_maintenance_due": "[DOCS MAINTENANCE DUE] batch {{batch}}: the CONTEXT/DESIGN pass is the main session's OWN work — 见 openwiki/governance.md §6；解除：config.set docs.maintenance.done={{batch}}",
     "docs_maintenance_still_due": "[DOCS MAINTENANCE STILL DUE] batch {{batch}} — obligation unchanged; clearing needs config.set docs.maintenance.done={{batch}}",
     "docs_maintenance_blocked": "docs-maintenance/due: batch {{batch}} left the docs wiki unreviewed (CONTEXT/DESIGN upkeep is the main session's own work, not a dispatched requirement). Do the pass, then clear: {{command}}",
     "docs_maintenance_cleared": "[DOCS MAINTENANCE CLEARED] batch {{batch}} — the wiki pass is declared done; the batch boundary is unblocked",
     "docs_maintenance_bad_batch": "docs.maintenance.done must equal the outstanding batch ({{due}}), or be empty to clear explicitly; got \"{{got}}\"",
-    "tools_unregistered_hint": "[TOOLS UNREGISTERED] settlement checks are running on human attestation. Register `config.set tools.root=<dir>` (e.g. the checkout's .pi/tools) to enable machine cross-checks via harness.todo-check / harness.sessions-count. Without an egg environment, run the scripts manually per docs/design/host/harness-tools.md.",
+    "tools_unregistered_hint": "[TOOLS UNREGISTERED] settlement checks are running on human attestation. Register `config.set tools.root=<dir>` (e.g. the checkout's .pi/tools) to enable machine cross-checks via harness.todo-check / harness.sessions-count. Without an egg environment, run the scripts manually per openwiki/contracts/host/harness-tools.md.",
     "tools_root_missing": "[TOOLS ROOT MISSING] settlement.{{item}}: tools.root is not registered — falling back to human attestation. Register `config.set tools.root=<dir>` to enable the machine cross-check.",
     "tools_script_missing": "[TOOLS SCRIPT MISSING] settlement.{{item}}: the harness script could not be resolved or executed ({{detail}}) — falling back to human attestation. Check that the registered tools.root points at a checkout containing .pi/tools/.",
     "tools_check_refused": "settlement.{{item}}: the machine cross-check contradicts the declaration ({{detail}}). Reconcile the actual state before declaring; the registration was not written.",
     "tools_check_passed": "[TOOLS CHECK OK] settlement.{{item}}: machine cross-check agrees with the declaration ({{detail}}).",
-    "sessions_parent_missing": "[SESSIONS PARENT MISSING] settlement.sessions: no parent session id supplied — the machine cross-check needs it. Append the optional 4th segment `|parent=<session_id>` to the settlement.sessions payload, or register the parent via context and run sessions-count.sh manually (docs/design/host/harness-tools.md).",
-    "todo_session_missing": "[TODO SESSION MISSING] settlement.todo: no session id resolvable (PI_SESSION_ID unset) — falling back to human attestation. Export PI_SESSION_ID for the main session, or run todo-check.sh --session <id> manually (docs/design/host/harness-tools.md)."
+    "sessions_parent_missing": "[SESSIONS PARENT MISSING] settlement.sessions: no parent session id supplied — the machine cross-check needs it. Append the optional 4th segment `|parent=<session_id>` to the settlement.sessions payload, or register the parent via context and run sessions-count.sh manually (openwiki/contracts/host/harness-tools.md).",
+    "todo_session_missing": "[TODO SESSION MISSING] settlement.todo: no session id resolvable (PI_SESSION_ID unset) — falling back to human attestation. Export PI_SESSION_ID for the main session, or run todo-check.sh --session <id> manually (openwiki/contracts/host/harness-tools.md)."
   }
 }

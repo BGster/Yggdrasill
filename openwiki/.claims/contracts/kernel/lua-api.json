@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:ac6e02d67f994675abb686eef062f3368c3757acf75683ad1655d9ff09edb355",
+  "claims": [
+    {
+      "id": "claim_fc2ef176a2da437395a4f9245308918e",
+      "statement": "沙箱 globals 是 deny-by-default 新表，只放 16 个 base 纯计算函数 + 字符串方法 + 受控 `require` + 冻结的 `ygg` 表；`string`/`table`/`utf8`/`coroutine`/`math`/`os`/`io`/`package`/`debug`/`dofile`/`loadfile`/`load`/`print`/`rawset`/`collectgarbage` 全为 `nil`（逐名断言钉死）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e98fefcb31fe3956aecb63196f6e3c5e303b4419a0ec4f159029229f1145a883"
+        }
+      ]
+    },
+    {
+      "id": "claim_f027ca4044004181a49c6c3de7432182",
+      "statement": "第二级面只由 driver 路径注入：15 个 `math` 成员 + `ygg.ticks`；裸沙箱 `Sandbox::new()` 没有这层，因此包只许用第一级。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/inject.rs",
+          "version": "repo-file-v1:sha256:9875a2894e75be2d5e5f08e8343f79a4c7c8bcbc23cbce40d0073c18f340234c"
+        }
+      ]
+    },
+    {
+      "id": "claim_7264d7a108734263b1eeda1bbef5cd6c",
+      "statement": "宿主面装配按面拆分，`install` 拆为逐面薄函数，注册序为 on → emit → narrate → choice → meta → fs → tool → kv → entity → sim → codec。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_api/mod.rs",
+          "version": "repo-file-v1:sha256:ea58f495d789a3b84c85590afcb0fb00143c3e6f1b9a8ffa89fe74e1b9bea9e8"
+        }
+      ]
+    },
+    {
+      "id": "claim_4887c84ac5bc4df382a946c14678e580",
+      "statement": "挂载路径只有 `mounts/<name>` 与 `mounts/<name>/<rel>` 两种形状；拒绍包括首段不匹配、名字未声明、段为空/./../NUL/控制符、超 512 字节或 >24 段、canonicalize 后越出冻结根、末段是软链、父目录缺失。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-store/src/mounts/declare.rs",
+          "version": "repo-file-v1:sha256:248dedb3ad26565e0791b7e9d9d1ed057534f895d715b135e067257727159fe5"
+        },
+        {
+          "resource": "repo://crates/ygg-store/src/mounts/store.rs",
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
+        }
+      ]
+    },
+    {
+      "id": "claim_c6392812de3b4f1d80b74980a9d1530c",
+      "statement": "尺寸帽：单件 4 MiB（读写对称）、每次 attach 累计写 64 MiB（进程级不落盘）、路径 512 字节、段数 24、单次 list 16384 条；超限 `YGG-FS-CAP` 拒绍而不截断。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-store/src/mounts/store.rs",
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
+        }
+      ]
+    },
+    {
+      "id": "claim_acfbc8c4486c4708baceddc5df0beaa7",
+      "statement": "审计行落 `<run-dir>/fs.jsonl`，`seq` 文件内 1 起单调且无墙钟；`fs.write.rejected` 也登记（含 `reason`），写成功而审计 append 失败报 `YGG-FS-AUDIT`。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-store/src/mounts/store.rs",
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
+        }
+      ]
+    },
+    {
+      "id": "claim_fccd7bb45bc24c6595659e81441ef492",
+      "statement": "`mounts/` 面写穿磁盘、不回滚；`artifacts/` 面保持 dispatch 级事务（失败回滚内存 VFS）；canonical state 不含挂载内容，`state_hash` 与回放不读它。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-store/src/mounts/store.rs",
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
+        }
+      ]
+    },
+    {
+      "id": "claim_041f076d473b4ff0a82bce84a79f8614",
+      "statement": "`ygg.sim.*` 恰好 10 个键（step/hash/snapshot/restore/spawn_batch/despawn_batch/insert_batch/status/trace/replay），键集闭集由 `sim_face` 断言；未注入实例时每个函数抛 `YGG-SIM-UNMOUNTED` 而非返回 `nil`。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_api/sim.rs",
+          "version": "repo-file-v1:sha256:969f902e211db64d964fb14edb16f0c9d833957b47ebf63b29dc8057aabeb121"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/tests/sim_face.rs",
+          "version": "repo-file-v1:sha256:6824fdbae9dec92b7ab3df055f17b466b251af9a42f6daefb5e99612f7519519"
+        }
+      ]
+    },
+    {
+      "id": "claim_c771770ab0614abf8b1cd88d33799077",
+      "statement": "`ygg.codec.*` 恰好 3 个键（encode/decode/sha256），无状态、无实例、无 `UNMOUNTED` 码：未注入时整表缺席，调用方直接走 Lua 路径且产出字节相等。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/codec_face/digest.rs",
+          "version": "repo-file-v1:sha256:1a30e9243f0ad37b6a33564be0fc8d8f2c4d800af65fa0d50896d33a6ec36272"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/codec_face/mod.rs",
+          "version": "repo-file-v1:sha256:fdc7e3ff605f6e30a9313072896381c1268bdf772a4845b13cadffee388db641"
+        }
+      ]
+    },
+    {
+      "id": "claim_f48e99735f374d028d551af1c5dbe134",
+      "statement": "`require` 只查宿主注入的 `ModuleSet`（`src.*` 与 `pkg.<id>.*` 两个命名空间），不做路径拼接；沙箱内无 `package` 全局，模块顶层是纯导出面（`ShadowBanned`）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:2f56be31bfe2605a1a53eaed09b45539bb75442ab339bfe8f121812b9662e12e"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

@@ -1,7 +1,7 @@
 -- packages/mods/shapez/mod.lua
 -- 《shapez v1 核心循环》——S26-1 的可运行模拟 Mod（装配入口）。
 --
--- 契约：docs/design/mod/shapez-game.md（核心循环 / 定点口径 / 验收映射）。
+-- 契约：openwiki/contracts/mod/shapez-game.md（核心循环 / 定点口径 / 验收映射）。
 -- 形态：headless 模拟面（事件直发驱动；v2 接视口/面板）。核心循环 =
 -- 矿机产形 → 传送带定点推进 → 切割/堆叠/旋转 → hub 交付 → 过级。
 --

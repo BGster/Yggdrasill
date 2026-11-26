@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:25019eacde4e8a8b015da73df12e72f05127a373f027bdd3abbd41deeb0f06a2",
+  "claims": [
+    {
+      "id": "claim_b1c3dd9215ae4f5ea1f44e8b18946ee8",
+      "statement": "`KvStore::revision` 只在**实际状态变更**时 +1，同值覆写幂等不计；沙箱内无读面（`ygg` 只装 `kv.get` / `kv.set`），因此它不能用来排两次写的先后。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/kv.rs",
+          "version": "repo-file-v1:sha256:57d2f73c07910493530bae28867ff8aae5118c21c6e1f1ead1985f2502d72e09"
+        }
+      ]
+    },
+    {
+      "id": "claim_3df7106b465c49af852449a954d8e703",
+      "statement": "`ygg.ticks()` 可读（返回 u64，初值 0）但**无推进者**：`advance_ticks` 全仓零生产调用，生产路径恒 0，读它静默成功、不报错、不拒绝。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/inject.rs",
+          "version": "repo-file-v1:sha256:9875a2894e75be2d5e5f08e8343f79a4c7c8bcbc23cbce40d0073c18f340234c"
+        }
+      ]
+    },
+    {
+      "id": "claim_6d517d41665745d8886f2014b2734c4d",
+      "statement": "安装面只有 math 白名单 + `ygg.ticks`，事件 `seq` 是宿主信封字段、不注入 Lua；因此沙箱内没有任何宿主提供的可读单调序号。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/inject.rs",
+          "version": "repo-file-v1:sha256:9875a2894e75be2d5e5f08e8343f79a4c7c8bcbc23cbce40d0073c18f340234c"
+        }
+      ]
+    },
+    {
+      "id": "claim_ae93a8a130d8491b8800f974a3496b3b",
+      "statement": "可用时序面是 `ygg.kv` 自维护计数器：`settings.clock_seq`（`M.bump()` 唯一调用点在 `src/view/render/screen.lua` 重入守卫，每次派发恰好一次）、`lane.seq`（泳道分配时自增）、`tool.seq.*`（工具调用序号）；三条硬要求：单写口、每次派发恰好 +1、可从同一份 KV 复算。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/core/clock.lua",
+          "version": "repo-file-v1:sha256:e187c3244e693e122d098facbcb06a949abb6814ae26b5180c1afd4d22c1c88d"
+        },
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/lanes.lua",
+          "version": "repo-file-v1:sha256:4e18502d655d90dbb2bc784176320ba27b9b538fae0b2212b31433770ad3255c"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f510a0afce5428eb84e774cf5502e8c",
+      "statement": "`open·done` 是终态只读：除 `list` / `amend` / `split` / `merge` 外全部拒绍，旁路迁移也不开写面。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/gate_actions.lua",
+          "version": "repo-file-v1:sha256:57a7afcbd359ec03a13cd5ee177463c825fb987fac080e029b3efbb067bbd51e"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f2a6546f5224978a7a5c0c3a5e95ab2",
+      "statement": "`docs.maintenance.due` **非空即阻塞下一次 `coordinate.submit`**，解除方式只有 `config.set docs.maintenance.done=<等值批次>`（空值 = 显式放弃）。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_60d1ce7230124290a7699404528bce3c",
+      "statement": "持久化状态只存在于 Rust（`ygg.kv` / `ygg.entity`）；Lua 局部与全局变量在单次 dispatch 内是临时的，`YGG-R2` 标记未持久化的实体句柄。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-store/src/artifact.rs",
+          "version": "repo-file-v1:sha256:7c9fe54d8e1bd03740205cbfdda6cffec2a975b6a65340d767364175a5cae014"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

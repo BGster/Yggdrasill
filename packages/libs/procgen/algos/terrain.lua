@@ -1,6 +1,6 @@
 -- `packages/libs/procgen/algos/terrain.lua` —— 地形生成器（整数域，两张产物）。
 --
--- 契约：`docs/design/packages/procgen.md` I5（参数化而非分支）/ §2（产物形状由
+-- 契约：`openwiki/contracts/packages/procgen.md` I5（参数化而非分支）/ §2（产物形状由
 -- algo 决定）。本模块只产出**内容**：`algo` 与 `v` 由 `registry.run` 统一附着。
 --
 -- # 为什么只用整数与稠密数组

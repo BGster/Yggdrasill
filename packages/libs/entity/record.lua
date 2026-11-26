@@ -1,6 +1,6 @@
 -- `pkg.entity.record` —— 存活判定、计数器与实体生命周期（spawn…destroy 17 API）。
 --
--- 契约：`docs/design/packages/entity.md` §4。批十一拆分（纯搬移）：spec / memo 经
+-- 契约：`openwiki/contracts/packages/entity.md` §4。批十一拆分（纯搬移）：spec / memo 经
 -- `pkg.entity.schema` 取用（value_ok / spec_error / memo / memo_sync 单源）；词典
 -- util 与宿主句柄经 `pkg.entity.base` 取用。存活真源 = 内核存在性（契约 I5）。
 

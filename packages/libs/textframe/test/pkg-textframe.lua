@@ -1,5 +1,5 @@
 -- `pkg.textframe.*` 自测（一）：网格与行装配 + 错误面 + 导出面。
--- 契约 `docs/design/packages/textframe.md` §2 / §3 / §7 的用例 1–7、14–15。
+-- 契约 `openwiki/contracts/packages/textframe.md` §2 / §3 / §7 的用例 1–7、14–15。
 --
 -- # 为什么自带计数垫片
 --

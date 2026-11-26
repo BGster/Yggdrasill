@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/mathx.lua` —— 整数数学核（产物路径「零浮点」的支点）。
 --
--- 契约：`docs/design/packages/assetgen.md` §3 I1 / §8。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §3 I1 / §8。
 --
 -- 沙箱 globals 里 `math` 表**不可达**（`crates/ygg-sandbox/src/sandbox.rs` 的逐名
 -- 断言钉死），所以三角与开方只能自备。这不是障碍而是收获：整数域让「同 seed 同

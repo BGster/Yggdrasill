@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/raster.lua` —— 网格 → 纹理：正交投影 + 三角形填充。
 --
--- 契约：`docs/design/packages/assetgen.md` §4（`assetgen.raster`）/ §6（几何的第二用点）。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §4（`assetgen.raster`）/ §6（几何的第二用点）。
 --
 -- # 为什么它是几何的第二个用点
 --

@@ -1,6 +1,6 @@
 -- `src/hub.lua` —— 交付判定与过级（hub + hub_goals 的 v1 等价面）。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §5）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §5）
 --
 -- 源 hub_goals.js（576 行）的关卡面：当前级目标形状 + 交付计数 + 过级。
 -- 关卡实例 = `pkg.quest` 实例（类型 `shapez.level`，meta：level/shape/required），

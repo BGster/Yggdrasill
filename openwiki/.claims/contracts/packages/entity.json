@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:0a0281a53e2e9b7f82c41b3f1fca36d5c0a44857e63b5c28cdb1a41ddeeea6b7",
+  "claims": [
+    {
+      "id": "claim_0910f15f8daf497d84017b85566f1275",
+      "statement": "Harness-owned id allocation stays in the kernel: `next_id` starts at 1, is dense, monotonic and never reused, and persist/snapshot keeps it; packages/entity mirrors the watermark only (`pkg.entity.seq`).",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/entity/init.lua",
+          "version": "repo-file-v1:sha256:d923b970f52bea5f3562ea7e67ee0b2313c9b42616586df3a4d3ec5d62f8d1e6"
+        }
+      ]
+    },
+    {
+      "id": "claim_a15e3b286d9743129e7f0b8d0c6d8c71",
+      "statement": "Entities are stored as loose attributes collected under a schema rather than a fixed class hierarchy; every schema field is declared in the package manifest and a field defined out-of-tree is ungoverned.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/entity/pkg.json",
+          "version": "repo-file-v1:sha256:6d97b2b70eb22c2198fedee00ae5f06c915aadc9a67036432c30e63870ee77e7"
+        }
+      ]
+    },
+    {
+      "id": "claim_119a822d4e334211bdb5ac520fa1fb50",
+      "statement": "Invariants I2 (narrow `Value` domain, so no float/int identity split is possible) and I3 (`define`/`set`/`tag` only enter the declared property domain, otherwise `YGG-PKG-ENTITY-ATTR` / `YGG-PKG-ENTITY-SCHEMA`) are the only two gates the package adds; semantics stay in the mod.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/entity/record.lua",
+          "version": "repo-file-v1:sha256:6785f8b32aca959bbc56df448555a4e510a5f0ac4cbee5699de98877ea2d60ac"
+        }
+      ]
+    },
+    {
+      "id": "claim_9b101d65bcfb4ffb96b117d950a4a851",
+      "statement": "The 29-case count is pinned in the in-repo selftest fixture rather than duplicated in prose: `--filter pkg-entity` reports 29 (26 `pkg.entity.*` behaviour cases plus `pkg-entity-paths`' two and the S9 destroy case).",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/pkg-selftest/tests/pkg-entity-smoke.lua",
+          "version": "repo-file-v1:sha256:b6eb6bdc579bff4d6abadd82dacb9839bc97fa49ddc324d0b74d200adc58b46f"
+        }
+      ]
+    },
+    {
+      "id": "claim_4178202c87ae47fc889cb686878aaee4",
+      "statement": "The selftest driver that produces those per-package numbers is `cargo run -q --example selftest -p ygg-sandbox -- --mod packages/mods/pkg-selftest --packages packages/libs [--filter pkg-<name>]`; the full run is 199 cases passed across the eight packages.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e98fefcb31fe3956aecb63196f6e3c5e303b4419a0ec4f159029229f1145a883"
+        }
+      ]
+    },
+    {
+      "id": "claim_056824410084424297c0449f1f4296b7",
+      "statement": "The perf figures (`entity.load`, `entity.get_set`, `entity.memory`, `entity.leak`, `entity.paths_*`, `entity.query_face.*`) are asserted by the package's own perf file, so the table cannot drift from the code.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/entity/test/pkg-entity-perf.lua",
+          "version": "repo-file-v1:sha256:e1cde893408882258b0a44c339b88f931dba4fff702126e15ce749dfd982e1ca"
+        }
+      ]
+    },
+    {
+      "id": "claim_201992fa254943f7ae8503ae3ba38735",
+      "statement": "`entity.query`'s selector grammar (`tag` / `where` / `select` / `order` / `schema`) is decoded in the kernel's entity query surface and only wrapped here, which is why the package resolves it in `query.lua`.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/entity/query.lua",
+          "version": "repo-file-v1:sha256:b9e3d8d734c3af807b6aea5ff338a374d3e4c0af972914050186e20e82bb9b9e"
+        }
+      ]
+    },
+    {
+      "id": "claim_6a24652ef7684ca59b720266c87da376",
+      "statement": "The host-facing entity face is exactly `exists` and `destroy` plus the six structural keys, matching the kernel's eight-key `entity_table`; query results are validated against the contract cases rather than against prose.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/tests/host_contract/entity_face.rs",
+          "version": "repo-file-v1:sha256:67ad298335788a98d67adb44e5dc372e381fe53e28e5065ce82956122c5a082b"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

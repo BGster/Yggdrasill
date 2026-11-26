@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/mesh.lua` —— 几何产物：参数化基元 + 变换组合。
 --
--- 契约：`docs/design/packages/assetgen.md` §2（b）/ §3 I8。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §2（b）/ §3 I8。
 --
 -- # 单位与坐标系
 --

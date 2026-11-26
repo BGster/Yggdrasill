@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:1a900f4f657da9f938272714480278a7fda9ad2b08213a28db19047e4c0cba39",
+  "claims": [
+    {
+      "id": "claim_23b56b892c4844d2bb3fbbacc8e1c26e",
+      "statement": "I1 通道封闭：handler 只有两条执行路径——`builtin:<name>`（mod 注册的 Lua 函数）与 `agent`（经 `ygg.tool.call` 的工具桥）；包内出现第二个 egress 即违规。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/dispatch.lua",
+          "version": "repo-file-v1:sha256:949dcc3ff2b6133b2596457c31686fafdcce725acf58808119f6ec40d4ad1c50"
+        },
+        {
+          "resource": "repo://packages/libs/dialogue/handlers.lua",
+          "version": "repo-file-v1:sha256:3dc56195c8da0960b7d66ca7cbf46acbcbb54cdbffca22024914f245320c95c7"
+        }
+      ]
+    },
+    {
+      "id": "claim_9a668b241aab4e25879a2742325fda9d",
+      "statement": "I2 回退链必存在：`agent` handler 超时或返回 `ok=false` 回退到同 type 的 `builtin`；未注册则 emit `dialogue.failed`（`reason=\"unbound\"`）并把错误挂回执 meta，不静默吞掉。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/dispatch.lua",
+          "version": "repo-file-v1:sha256:949dcc3ff2b6133b2596457c31686fafdcce725acf58808119f6ec40d4ad1c50"
+        }
+      ]
+    },
+    {
+      "id": "claim_0a9d7100a126428e9a3769d70eb8191d",
+      "statement": "I3 环深度帽：同步嵌套 emit 深度 ≤ `max_depth`（缺省 4），超限 emit `dialogue.depth_capped` 并停链；宿主无级联深度帽（`max_cascade_depth` 在 crates 里无实现），所以本包的帽是这条链唯一守卫。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/dispatch.lua",
+          "version": "repo-file-v1:sha256:949dcc3ff2b6133b2596457c31686fafdcce725acf58808119f6ec40d4ad1c50"
+        },
+        {
+          "resource": "repo://packages/libs/dialogue/store.lua",
+          "version": "repo-file-v1:sha256:8186605f2ecb96b1bd05c64a45a96c5bc34d87d4e5e586e4c3c26b8c95c24dac"
+        }
+      ]
+    },
+    {
+      "id": "claim_ed93e423bbc84fde9e7b4ad97c5e9895",
+      "statement": "KV 只收标量，所以表值全部落成扁平标量键 + 换行名表：`dlg.seq` / `dlg.types` / `dlg.h.<type>.names`（注册序不排序）/ `dlg.keys` / `dlg.thread.<key>.t.<i>.{who,text,seq}`；`who=0` 表示系统而非 nil。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/memory.lua",
+          "version": "repo-file-v1:sha256:b8c4e52ab275c7e678b7c79fd3f3b84f7d75b7cf3a9e12242a4b11fc14023615"
+        },
+        {
+          "resource": "repo://packages/libs/dialogue/store.lua",
+          "version": "repo-file-v1:sha256:8186605f2ecb96b1bd05c64a45a96c5bc34d87d4e5e586e4c3c26b8c95c24dac"
+        }
+      ]
+    },
+    {
+      "id": "claim_4990f24ddd444d32bc87067c967ab164",
+      "statement": "`dlg.keys` 是宿主无遍历面的补救索引：没有它，线程历史导出与 I4 泄漏检测都不可达。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/memory.lua",
+          "version": "repo-file-v1:sha256:b8c4e52ab275c7e678b7c79fd3f3b84f7d75b7cf3a9e12242a4b11fc14023615"
+        },
+        {
+          "resource": "repo://packages/libs/dialogue/store.lua",
+          "version": "repo-file-v1:sha256:8186605f2ecb96b1bd05c64a45a96c5bc34d87d4e5e586e4c3c26b8c95c24dac"
+        }
+      ]
+    },
+    {
+      "id": "claim_17b168d6d34b4838bcb53760ba1317d3",
+      "statement": "函数不进 KV：KV 只存 `{kind,name,opts}`，闭包进模块局部 `REGISTRY`（键 = `type..\":\"..name`）；重载后 KV 有 spec 而函数缺失 = 未绑定，走回退链并发 `dialogue.failed`。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/handlers.lua",
+          "version": "repo-file-v1:sha256:3dc56195c8da0960b7d66ca7cbf46acbcbb54cdbffca22024914f245320c95c7"
+        }
+      ]
+    },
+    {
+      "id": "claim_49b5f43341e94f009a7fd7b4d232fd6b",
+      "statement": "API 面含 `on`/`off`/`emit`/`say`/`history`/`register_adapter`/`adapters`/`frame`/`handlers`/`threads`/`keys`，错误码面 `YGG-PKG-DIALOGUE-<INSTALL|TYPE|DUP|UNBOUND|WINDOW|DEPTHCFG|HOST>`。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/init.lua",
+          "version": "repo-file-v1:sha256:e479b0004581096fa458256ccba3586011f13cd4dc0505215614143de3870228"
+        }
+      ]
+    },
+    {
+      "id": "claim_d3d4995ad23e43faa1a43fdaf0562e5f",
+      "statement": "包依赖声明为 `quest`（唯一直接依赖），任务事件名 `quest.advanced` 等带点者被直接当 dialogue 的 type 用，不做字符串改写。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/pkg.json",
+          "version": "repo-file-v1:sha256:215051b3685818937285a4c2f24c1b14ce61fc562e8819d6426049fff03e6cc6"
+        }
+      ]
+    },
+    {
+      "id": "claim_483f75bd39c543a4a21361fa532887e5",
+      "statement": "验收 26 条（`--filter pkg-dialogue` → `cases passed=26`）；禁止宽松断言——只断「调用成功」不断回退链走过几跳，视同没测 I2。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/dialogue/test/pkg-dialogue.lua",
+          "version": "repo-file-v1:sha256:e06ec85ba2c6d6620a46c2d48962810b5478327cc6e31e2d99169f20fbb1ec5c"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

@@ -1,6 +1,6 @@
 -- `src/replay.lua` —— 轨道驱动：哈希链 / KV 锚 / 双局对账（S26-4 黄金轨道面）。
 --
--- 契约：docs/design/mod/tla-models.md §轨道驱动。轨道驱动 =
+-- 契约：openwiki/contracts/mod/tla-models.md §轨道驱动。轨道驱动 =
 -- `reset(model)` 建规范初态 → `tick(model, action)` 执行一次 TLA 动作
 -- （\E 非确定性显式化为动作选择输入；stutter = 无动作的显式步型）→
 -- 每拍 `procgen.hash(snapshot())` 落哈希链、每 N 拍落 KV 锚

@@ -1,4 +1,4 @@
--- `pkg.codec` —— 确定性 JSON 编解码与存档往返。契约：`docs/design/packages/codec.md`。
+-- `pkg.codec` —— 确定性 JSON 编解码与存档往返。契约：`openwiki/contracts/packages/codec.md`。
 --
 -- # 这个包做什么
 --

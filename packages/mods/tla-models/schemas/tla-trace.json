@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ygg tla-trace golden track",
-  "description": "S26-4 TLA+ 模型黄金轨道（动作向量 + 逐拍哈希 + 锚 + 终态快照）。method=KAT 声明黄金值来源为手算步表对账（tla2tools 不可达，见 docs/design/mod/tla-models.md §黄金轨道）。",
+  "description": "S26-4 TLA+ 模型黄金轨道（动作向量 + 逐拍哈希 + 锚 + 终态快照）。method=KAT 声明黄金值来源为手算步表对账（tla2tools 不可达，见 openwiki/contracts/mod/tla-models.md §黄金轨道）。",
   "type": "object",
   "required": ["model", "track", "method", "actions", "hashes", "anchors", "final"],
   "additionalProperties": false,

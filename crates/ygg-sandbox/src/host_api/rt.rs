@@ -1,5 +1,5 @@
 //! `ygg.rt.*` 实时宿主面（S31 R1：帧循环 + 输入面；契约
-//! `docs/design/host/rt-face.md`）。
+//! `openwiki/contracts/host/rt-face.md`）。
 //!
 //! - **帧循环是宿主的，不是 Mod 的**：常驻宿主（`examples/rt/`）每帧派发一次
 //!   `rt.tick` 事件（载荷 = 全整数规范串），Mod 只在 handler 里读

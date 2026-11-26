@@ -1,6 +1,6 @@
 -- `packages/libs/procgen/init.lua` —— 包根模块 `pkg.procgen`：**纯导出面**。
 --
--- 契约：`docs/design/packages/procgen.md`。顶层只有 `local` / `require` / 函数定义
+-- 契约：`openwiki/contracts/packages/procgen.md`。顶层只有 `local` / `require` / 函数定义
 -- （I7）；注册与状态改动一律在 `M.install(deps)` 或调用期。
 --
 -- 本文件是包的**面**，实现分在四个子模块里：

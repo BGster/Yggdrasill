@@ -1,5 +1,5 @@
 # 回归门禁：本地门禁的 CI 投影（读：playbook `gates` 章）。
-# crates 触改时另按 docs/design/state-machine.md §2.11 跑字面三件套。
+# crates 触改时另按 openwiki/contracts/kernel/state-machine.md §2.11 跑字面三件套。
 #
 # 与 deploy-pages 的分工：本文件只做**校验**，不产出部署物；deploy-pages 只做
 # wasm + 前端构建与 Pages 发布。两者共享同一套 toolchain 版本与供应链 pin 纪律

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:2e381c02f6ea0af4e3c727dffe519f25ab9156a059da9540332c9425bd872dd6",
+  "claims": [
+    {
+      "id": "claim_e818de35ed3244a6ae8a7438eb2a2db8",
+      "statement": "Receipts are split into one JSON fragment per domain under `data/texts/` — `core.json` carries scene-level lines, menus and endings, while `beats-*.json` carry behavioural beats — and the knowledge base indexes them without keeping a second verbatim copy.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
+          "version": "repo-file-v1:sha256:032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
+        }
+      ]
+    },
+    {
+      "id": "claim_fd9eefc44f0d4bbe9905c035f0fa3b43",
+      "statement": "The protocol prefixes are contract, not prose: `pack.json` declares `rejectionPrefixes` (`[REJECTED:ACTION]`, `[REJECTED:PAYLOAD]`, `[BLOCKED:TODO]`), `replayPrefix` (`[REPLAY`) and the default payload, and tests match them literally.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/pack.json",
+          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
+        }
+      ]
+    },
+    {
+      "id": "claim_b21ec12ea326453d983954e9851b48c7",
+      "statement": "A receipt that explains a policy — «because … therefore next time …» — is drift: policy belongs to the operating pages, receipts belong to the mod.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
+          "version": "repo-file-v1:sha256:032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
+        }
+      ]
+    },
+    {
+      "id": "claim_f75a8a93e1764878a54ed1c2b5936793",
+      "statement": "Each fragment owns one receipt domain: settlement owns `verify_*`, `settlement_*`, `release_*` and `review_*` strings, so a new key must be added to its owning fragment rather than to a shared pile.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-settlement.json",
+          "version": "repo-file-v1:sha256:d777378318474bcd55d09a322c339bdfecb95ceb922d08d48820a4998680ad8d"
+        }
+      ]
+    },
+    {
+      "id": "claim_adad3905f08f4bd78d87d1470ff2c4e9",
+      "statement": "Changing wording means editing the `data/texts/*.json` source and re-running the seed-mod sync plus the gates — never maintaining a parallel copy in the knowledge base.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/sync-seed-mod.sh",
+          "version": "repo-file-v1:sha256:1b0b2ef079ec71ab3bf86e81e769f88e74e50da02fdf7dc29b06accaf56cfb8d"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

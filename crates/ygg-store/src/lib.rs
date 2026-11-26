@@ -65,7 +65,7 @@ use std::path::Path;
 pub mod json;
 /// 文件挂载桥的宿主侧端口（`pack.json` 的 `mounts` 段 → `<run-dir>/mounts/`）：
 /// 声明解析 · 路径狱 · 尺寸帽 · `fs.jsonl` 审计行 · 磁盘 IO。
-/// 规范正文见 `docs/design/kernel/lua-api.md` §3.1.2。
+/// 规范正文见 `openwiki/contracts/kernel/lua-api.md` §3.1.2。
 pub mod mounts;
 /// 只读观察面（serve 这类不持锁观察者的读取面；写面仍归 `RunStore`）。
 /// 函数集与零写入纪律的文档见模块头；测试锁见 `observe::tests`。

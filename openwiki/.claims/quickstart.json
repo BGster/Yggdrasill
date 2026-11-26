@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:d5ab94f2c64a6d0ecdd0c6ed25f24d93fe19e3e10e834958390163485ac72a42",
+  "claims": [
+    {
+      "id": "claim_98d2a47fe69a456ba25e1a99ce1c6904",
+      "statement": "The must-read set is declared by `readPlan` in the mod's `data/config.json` and generated from `scenes.json`: prologue → vocabulary, charter → charter, coordinate → coordinate + intake, settle → settle + cleanup, release → release + retired, plus the nine requirement stages mapping onto intake, delivery and integration.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
+          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
+        }
+      ]
+    },
+    {
+      "id": "claim_31b10db3072a4e5896ff51ff6a43e7ba",
+      "statement": "Understanding-only pages are registered as `reference`: they reach `readPlan` never, produce no `[READ FIRST]` block and carry no signature obligation — registering them only keeps the machine-checked links resolvable.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/gen-scene-readfirst.py",
+          "version": "repo-file-v1:sha256:c4cb14b5c78fc91632cfc0c78e8357d9079c55447c2e403650441899477712fc"
+        }
+      ]
+    },
+    {
+      "id": "claim_23dad494ac0a4567a7ece8697a33e418",
+      "statement": "Moving an id from `reference` into `scene` or `reqStage` is the single-point way to make a page gated; the generator and the gate follow automatically, so no second edit is needed anywhere.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/gen-scene-readfirst.py",
+          "version": "repo-file-v1:sha256:c4cb14b5c78fc91632cfc0c78e8357d9079c55447c2e403650441899477712fc"
+        }
+      ]
+    },
+    {
+      "id": "claim_84582b5a9324413eadc8ffcdfaf10804",
+      "statement": "This hub is a router, not a rule: a summary, a receipt or a previous run's habit is a route and a digest, and acting from one instead of the body it points to is the most common violation of this knowledge base.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/readset.lua",
+          "version": "repo-file-v1:sha256:df76356f64895385ef32e93f53b138a0e95e0885f371388b99f2ff5f95a7e860"
+        }
+      ]
+    },
+    {
+      "id": "claim_0362201904dd48888a869e5d8cbb7697",
+      "statement": "Every row of the time-point table resolves to a page that exists, and a broken route is a stop-and-report rather than a licence to improvise.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
+          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

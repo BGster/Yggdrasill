@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/bytes.lua` —— 字节装箱原语（整数 → 字节串）。
 --
--- 契约：`docs/design/packages/assetgen.md` §2（三类产物的 `bytes`）/ §8。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §2（三类产物的 `bytes`）/ §8。
 --
 -- # 沙箱方言
 --

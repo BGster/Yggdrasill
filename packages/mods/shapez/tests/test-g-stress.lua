@@ -1,6 +1,6 @@
 -- `tests/test-g-stress.lua` —— v3 长局压测（bot 台 + 五指标仪表盘 + 残留键口径）。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §2.7）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §2.7）
 --
 -- 档位（计划 §4）：`SHAPEZ_STRESS=full` → 全量档（10⁴ 拍 / 10⁴ 拆建轮 /
 -- 100 轮存读档画像 / 10⁴ 档吞吐三读数，显式命令不进默认门禁）；缺省 fast

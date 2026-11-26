@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:12cba1c466344ac550aa7adc42c0ae46d824e15fbf581112832ce3015d60c3c3",
+  "claims": [
+    {
+      "id": "claim_37ed891a8ced4baea6a584ff96bf0370",
+      "statement": "事件 = 名称 + 规范 payload + 来源标志；`Origin::External`（玩家输入/宿主注入）是回放日志的唯一记录对象，`Origin::Derived`（handler 执行期发出）回放时自动再产生。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/event.rs",
+          "version": "repo-file-v1:sha256:2796175d251218383278f7b04047c2ec9530c67462e197f7c0026f2457a0ee77"
+        }
+      ]
+    },
+    {
+      "id": "claim_a654ea2d379c4b3f85e265c76906ca26",
+      "statement": "事件 payload 复用 `Value`：浮点构造即拒非有限值（NaN/±∞）、`-0.0` 入构造即归一为 `0.0`、编码侧手写 `Serialize` 兑底，使跨平台数字编码只有一种形式。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/entity/value.rs",
+          "version": "repo-file-v1:sha256:892c9a1aa679cf33263731cc756b8b1e0d2d1d57631ecffcffd9900418658873"
+        },
+        {
+          "resource": "repo://crates/ygg-core/src/event.rs",
+          "version": "repo-file-v1:sha256:2796175d251218383278f7b04047c2ec9530c67462e197f7c0026f2457a0ee77"
+        }
+      ]
+    },
+    {
+      "id": "claim_ce47c7929c0c43b89388d1dfb8a97f39",
+      "statement": "触发注册表规范序 = 注册序（事件名 `BTreeMap` 分桶 + 桶内 `Vec`），每条注册持稳定键 `(mod id, 注册序号)`，全程无哈希容器参与。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/bus.rs",
+          "version": "repo-file-v1:sha256:8bdaef5df9bc8921dd7b34877958e31bef196bc98ac1a80c64e3f396ba59123a"
+        }
+      ]
+    },
+    {
+      "id": "claim_3049043b936b454e892262cab05e0b2b",
+      "statement": "派发面 fail-closed：未注册事件名一律 `Err`；注册仅发生在 Mod 装载期（handler 集 = 装载的纯函数），运行期拦截的权威执行面在 host API。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/bus.rs",
+          "version": "repo-file-v1:sha256:8bdaef5df9bc8921dd7b34877958e31bef196bc98ac1a80c64e3f396ba59123a"
+        }
+      ]
+    },
+    {
+      "id": "claim_a5a162f1d64b474993aad9cfa83457dd",
+      "statement": "两个 sink：`EventSink` 为派生事件出口（per-transition FIFO），`NarrationSink` 的 `narrate` 为纯输出累积、`choose` 以 `PendingChoice` 设入内核状态并终结当前 handler，handler 本体不直接触达内核状态。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/bus.rs",
+          "version": "repo-file-v1:sha256:8bdaef5df9bc8921dd7b34877958e31bef196bc98ac1a80c64e3f396ba59123a"
+        }
+      ]
+    },
+    {
+      "id": "claim_8dee7f00997646248fd64637750b4988",
+      "statement": "Mod 的 registry 声明了剧情/操作/基础设施三类事件（含 `ygg.narrative.goto` 渲染事件）；运行期 registry 是 fail-closed 的运行时唯一事实。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/mod.lua",
+          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

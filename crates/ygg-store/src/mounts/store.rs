@@ -211,7 +211,7 @@ impl MountStore {
 
     /// 路径狱（**唯一实现**）：`mounts/<name>` 与 `mounts/<name>/<rel>` 之外一律拒。
     ///
-    /// 拒绝条件（顺序即报错顺序，逐条对应 `docs/design/kernel/lua-api.md` §3.1.2）：
+    /// 拒绝条件（顺序即报错顺序，逐条对应 `openwiki/contracts/kernel/lua-api.md` §3.1.2）：
     /// ① 不以 `mounts/` 起头；② `<name>` 未声明；③ 任一段为空 / `.` / `..` / 含
     /// NUL 或 ASCII 控制字符；④ 路径 > 512 字节或 `<rel>` 段数 > 24；⑤ canonicalize
     /// 后必须按**路径分量**落在冻结根内；⑥ 末段不得是软链；⑦ 父目录必须存在。

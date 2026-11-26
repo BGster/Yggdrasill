@@ -1,6 +1,6 @@
 -- `src/gol.lua` —— GameOfLife N=4（确定性 CA；TLA 惯用法：唯一后继）。
 --
--- 契约：docs/design/mod/tla-models.md §映射表。源：tlaplus/Examples
+-- 契约：openwiki/contracts/mod/tla-models.md §映射表。源：tlaplus/Examples
 -- `specifications/GameOfLife/GameOfLife.tla`（TLC 实测 65536/131072/1，
 -- 引自源仓 manifest.json）。
 --

@@ -1,7 +1,7 @@
 -- packages/mods/tla-models/mod.lua
 -- 《TLA+ 模型移植复现》——S26-4 的形式化模型台（装配入口）。
 --
--- 契约：docs/design/mod/tla-models.md（映射表 / 语义子集边界 / 验收映射）。
+-- 契约：openwiki/contracts/mod/tla-models.md（映射表 / 语义子集边界 / 验收映射）。
 -- 形态：headless 模型台（事件直发驱动）。四个教科书级 TLA 模型
 -- （GameOfLife / TwoPhase / Klotski / EWD998）各移植为
 -- 「状态变量 + 初始谓词 + Next 关系 + 不变量」，与引擎

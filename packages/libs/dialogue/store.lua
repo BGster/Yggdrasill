@@ -22,7 +22,7 @@
 -- `off` 只改名表一行，被删 handler 的键是**显式登记的墓碑**（同名重注册会覆盖它们，
 -- 于是墓碑不会无限长）。注册序存在名表里（不排序），执行序 = 名表序 = I7。
 --
--- 前缀单写者：本包只写 `dlg.` 前缀（`docs/design/mod/mod-package.md` §3.2.3）。
+-- 前缀单写者：本包只写 `dlg.` 前缀（`openwiki/contracts/mod/mod-package.md` §3.2.3）。
 
 local S = {}
 

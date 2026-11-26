@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/init.lua` —— 包根模块 `pkg.assetgen`：导出面。
 --
--- 契约：`docs/design/packages/assetgen.md`（§4 API 面 / §3 不变量）。
+-- 契约：`openwiki/contracts/packages/assetgen.md`（§4 API 面 / §3 不变量）。
 --
 -- 顶层只有 `local` / `require` / 函数与常量定义（I7）：算法表的**组装**在
 -- `M.install(deps)` 里做，装载期不写任何状态。未装时算法表为空，一切 generate

@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:f119d03ab91f222384dc3be4a9d891e2ee7d8417d8aeb026d5343fc3b39e4398",
+  "claims": [
+    {
+      "id": "claim_02cdadcf303c4807943051b66d459ab2",
+      "statement": "执行者台账 `settings.executor.<rN>.<stage>` 是权责权威（谁执行了这一幕），同一 (需求, 阶段) 换人或跨阶段交接必须带原因；占位 id（main/default/unregistered）在恢复决策中被过滤。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/executor.lua",
+          "version": "repo-file-v1:sha256:892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
+        }
+      ]
+    },
+    {
+      "id": "claim_cb9d52e39ee7481eb53f982cbe06faae",
+      "statement": "身份章解析链 `--actor` > `YGG_ACTOR` > daemon 请求字段（session 对称），宿主只在声明路由盖章；调用方伪造保留段 = `ACTOR_FORGED`，零 dispatch、零持久化。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/egg/identity/tests.rs",
+          "version": "repo-file-v1:sha256:16baf94c4787d3eca6b84465b9d504c6409fa0e689e5707c09ca323dbb57e763"
+        }
+      ]
+    },
+    {
+      "id": "claim_b3e13fc38634481d93ec8154346fbdd3",
+      "statement": "Mod 对 `exec=` vs `actor=` 做三态互证 `[verified]` / `[mismatch:actor=…]` / `[unverified]`，**识别不拒绝**；`actor_session` 纯审计字段、永不参与判定；首条带身份的成功写认领不可变 `opener_actor`。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire/proposal.lua",
+          "version": "repo-file-v1:sha256:6a4fe668fbb061aafba4f88e2b3781066c40c1d76b744b9c46d71730aaac5d5a"
+        }
+      ]
+    },
+    {
+      "id": "claim_4d583cb70048408d9284acfe3cf9dc52",
+      "statement": "stamp-only 路由（`inboxRoutes`）只声明 `actor: true`、不声明 `write`，所以身份章的准入面扩到 `config.set` / `gate.approve` / `coordinate.submit`，而写面（CLI 写命令绑定）一字不动；三个 handler 顶部先调 `wire.strip_identity_tail` 再解析。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/system/config.lua",
+          "version": "repo-file-v1:sha256:e80f0c83d14a339f02f6a5ff690055a9d0e8f9ee348317590f98b4dc6392eacf"
+        }
+      ]
+    },
+    {
+      "id": "claim_a07f5583cd9c4010ae053baf3d4ef292",
+      "statement": "读签语义是「执行这个动作的人读过」：载体是侧键 `settings.read_actor.<doc>`（值 `ver|scene|seq`），与 `settings.read_index` 一并冻结，由 `readsig.sign` 同事务写、`forget` 与 7 处 `clear()` 同事务清。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
+          "version": "repo-file-v1:sha256:c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
+        }
+      ]
+    },
+    {
+      "id": "claim_161c4afccd9c41ca9be8fa18fdac1b3d",
+      "statement": "读签身份链：宿主章（直接派发）→ 无章但 `HUMAN.entry == \"ticket\"` → 降级 any-signer 并叙事告明；无章且非票据则拒；`read-gate/other-actor` 只管非空签署人，旧存档空签署人不参与判定。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
+          "version": "repo-file-v1:sha256:c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
+        }
+      ]
+    },
+    {
+      "id": "claim_85e5698bc40a433c9c7b15fe09850dc3",
+      "statement": "`req_bump_rev` 在同一事务里调 `readsig.clear()`，所以 amend / 两路打回之后报的是覆盖维 `read-gate/missing`，「签名早于新 rev」在 amend 路径上结构性不可达；主体维已删除，现行判据 = 覆盖 / 新鲜 / 遗忘 + 按人。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_7065a82e58cc413b9e94ef01f288f280",
+      "statement": "`coordinate.submit` 的批边界身份判定降为覆盖检查（不要求身份载体）：若按缺章 fail-closed，`goal` 局永远关不掉这一批；降级后与人机门禁共用同一 `gates.read_problem`。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
+          "version": "repo-file-v1:sha256:c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

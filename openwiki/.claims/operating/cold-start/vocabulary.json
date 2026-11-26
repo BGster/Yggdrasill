@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:2d980df578605baba8cd0374ff111d66d2b1865b2f6116cc44a204eaddc69fce",
+  "claims": [
+    {
+      "id": "claim_356108d17f194f75b1685d2bcc299714",
+      "statement": "A requirement has only two true states, `open` and `done`; `split`, `merged` and `dropped` are `closed_reason` values, so the nine displayed stages are a projection over `plan_ok`, `job`, `gate` and `integrating` rather than stored states.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_1505c87a4b614cb68689c27dc5638195",
+      "statement": "The executor ledger records which subagent id ran which stage of which requirement; switching id across a stage boundary needs an explicit `<new_id>|<reason>`, and placeholder ids are filtered out of resume decisions.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/executor.lua",
+          "version": "repo-file-v1:sha256:892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
+        }
+      ]
+    },
+    {
+      "id": "claim_fad49342a78a4cf48df94dec90ebf18d",
+      "statement": "A dispatched job carries a self-contained `subagentAction` (brief, deltaPrompt, fullFallbackBrief, worktreePath, artifactPath, submitCommand), which is what lets any harness adapter run the lane without reimplementing the workflow.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_contract/agent.rs",
+          "version": "repo-file-v1:sha256:7ec3f76b35f0ace53ada339cabe4173b2533ae6e1498f1d45af65395ad8560cf"
+        }
+      ]
+    },
+    {
+      "id": "claim_f56ecd29a7584f7299d7a2c0f6de4c97",
+      "statement": "Lanes form a bounded persistent pool of git worktrees; claiming resets the branch to `HEAD` while keeping untracked build caches, and releasing parks on detached `HEAD` so no branch is ever locked.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/lanes.lua",
+          "version": "repo-file-v1:sha256:f769fca7e56708a4e45ed4907ab3755af673a8ecb9b133715d5282ebcb7972a5"
+        }
+      ]
+    },
+    {
+      "id": "claim_c29e81cb23f3486283121fcd3eef53cb",
+      "statement": "Run artifacts live in an in-archive VFS table inside `run.sqlite`, addressed as `artifacts/*` and exposed to Lua through `ygg.fs.*` with SHA-256 integrity.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-store/src/sqlite/mod.rs",
+          "version": "repo-file-v1:sha256:b11d6400b10ed21856d2c3f51b8564b49bc14dc521ae88fd7fc61397b9e7959b"
+        }
+      ]
+    },
+    {
+      "id": "claim_a13e621aeb384ae49b8fa2daba6b4273",
+      "statement": "The tools registry is self-declared through `config.set tools.*`: `tools.root` acts as the machine-evidence switch, session keys carry the main-session identity because the sandbox cannot read process env, and an unregistered tool is a readable refusal at its consumption point.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/system/config.lua",
+          "version": "repo-file-v1:sha256:e80f0c83d14a339f02f6a5ff690055a9d0e8f9ee348317590f98b4dc6392eacf"
+        }
+      ]
+    },
+    {
+      "id": "claim_22fc02aaae8245d5a67ca11c63ffbe2e",
+      "statement": "A run has two states, `live` and `retired`, with `charter`, coordinate, `settle` and `release` as micro-phases; retirement is reachable only when `run.retire` armed the run, so requirement `done` and run `retired` are homonyms rather than the same concept.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
+          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
+        }
+      ]
+    },
+    {
+      "id": "claim_b6356aec8a5a4832a26d84961d04fa27",
+      "statement": "A stable checkpoint is the only point where context compaction and a structured handover are safe, because in-flight subagent output is not otherwise recoverable.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/readsig.lua",
+          "version": "repo-file-v1:sha256:9237f057c27b24313b3eb14034fee45f274563ff16ecb1b7de50c187e062aea9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

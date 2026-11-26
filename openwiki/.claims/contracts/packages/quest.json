@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:b014575673610327112767ce196c36e27d3ee31eb1a220c13acc167e7549bc11",
+  "claims": [
+    {
+      "id": "claim_8d531fd92c2a4bafa1dcabde2a1dbdb9",
+      "statement": "Quest types and instances are split: an instance stores only its type name plus the current step index, so editing a template's steps never rewrites existing instance data (I1).",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/quest/init.lua",
+          "version": "repo-file-v1:sha256:7581d8869fa87960f9fa5a51ce55d767f39cf8f1dcaef3cbeae8b9e2fc0989b9"
+        }
+      ]
+    },
+    {
+      "id": "claim_b7f6695789264a898a388801c5748b07",
+      "statement": "KV stores scalars only, so every logical table field is flattened into named scalar keys with newline-joined name lists — the same shape entity uses, and the reason a `nil` `on_enter` lands as an empty string.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/quest/init.lua",
+          "version": "repo-file-v1:sha256:7581d8869fa87960f9fa5a51ce55d767f39cf8f1dcaef3cbeae8b9e2fc0989b9"
+        }
+      ]
+    },
+    {
+      "id": "claim_617932756a1244cb9c773dba485ed19d",
+      "statement": "Advancement is monotonic (`advance` only +1) and terminal states are one-way: any primitive after `done`/`abandoned` raises `YGG-PKG-QUEST-TERMINAL`, while an explicit `jump` leaves a `quest.jumped` record so history stays auditable.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/quest/init.lua",
+          "version": "repo-file-v1:sha256:7581d8869fa87960f9fa5a51ce55d767f39cf8f1dcaef3cbeae8b9e2fc0989b9"
+        }
+      ]
+    },
+    {
+      "id": "claim_dc4e92a8f0e44a6c9d3f8961d891c43d",
+      "statement": "The derived event surface is fixed at four names plus `quest.jumped`; they ride `ygg.emit`'s internal derived-event channel and are not kernel events, so a package can never expand the kernel event face.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/quest/init.lua",
+          "version": "repo-file-v1:sha256:7581d8869fa87960f9fa5a51ce55d767f39cf8f1dcaef3cbeae8b9e2fc0989b9"
+        }
+      ]
+    },
+    {
+      "id": "claim_babd739a235d4b08bc2173b135a3e2c7",
+      "statement": "The 24-case count (20 behaviour + 4 perf) is pinned by the package's own fixture, and the event assertion is set equality rather than containment, which is what makes I6 testable.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/quest/test/pkg-quest.lua",
+          "version": "repo-file-v1:sha256:65cfae7cd6833b42567165b426959798db64bb54e30caec0c2bcea23505921b2"
+        }
+      ]
+    },
+    {
+      "id": "claim_28b6cb0567e743b392d408ee6442d1df",
+      "statement": "The smoke file is a file-level assertion that keeps the package loadable from the consuming fixture even when `--filter` targets mod-side files; it carries no counted cases.",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/pkg-selftest/tests/pkg-quest-smoke.lua",
+          "version": "repo-file-v1:sha256:c33529cb14fda5ee427fa20803cb3bb56d40765a68eec2316a51dbadcb12cbdd"
+        }
+      ]
+    },
+    {
+      "id": "claim_b16fa17fc74f40f8854c846136218765",
+      "statement": "`ygg.kv.set` accepts only four scalar kinds through `value_from_lua` (a table write fails with `unsupported payload type: table`), which is the host-side fact the flat-key layout is derived from.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_api/value.rs",
+          "version": "repo-file-v1:sha256:a9ab87c5d72032aaad3fcab339563d5719b1d77d659954832003cba4649102e0"
+        }
+      ]
+    },
+    {
+      "id": "claim_acfc91b9cb9344a982315b8105ad2692",
+      "statement": "The package declares its own dependencies and requires only codec's key-naming surface plus a host handle, so `quest.keys` can be handed to `codec.export` without the package owning serialization.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/quest/pkg.json",
+          "version": "repo-file-v1:sha256:b5f543aa72f548253c3e139fe0550a0648d2026800b94bd4937a3da741c1aa18"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:7f5e9423f2ee506e23369b438f7c91660d711efdfe86f4ca74ff0554c9b71bf1",
+  "claims": [
+    {
+      "id": "claim_30c3229014024dcda76f43d35f194e17",
+      "statement": "The product's core is a pure functional transition engine `(state, event) -> state'`; everything playable is data plus Lua over that engine, which is why a text adventure and a tactics RPG share one kernel.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/lib.rs",
+          "version": "repo-file-v1:sha256:d03d81542da24b3985df9e8f1a8444f271cc61959757ebee2e99039d78602732"
+        }
+      ]
+    },
+    {
+      "id": "claim_6d693d9406484bdf90c06a8d8ce58754",
+      "statement": "Content supply scales because a small orthogonal mod contract (Lua 5.4 logic plus schema-checked JSON) is paired with a generation and checking pipeline (`ygg-lint` and playtest), so a natural-language premise can compile into a playable mod.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-lint/src/lib.rs",
+          "version": "repo-file-v1:sha256:4e9724a512a19a40beaba842bdf64953dd323101f96fb579c24eb0532aad84da"
+        }
+      ]
+    },
+    {
+      "id": "claim_9eb1f311de8d42a68308d1deef6785b1",
+      "statement": "The kernel is render-free and platform-IO-free, so the same code compiles to WebAssembly for the browser, links natively into Godot, and runs on a server.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-wasm/src/lib.rs",
+          "version": "repo-file-v1:sha256:b0d0b9fd43f8c02722bb1a8a0dc969144da2c495bd1b69a91c75d13da0681a9a"
+        }
+      ]
+    },
+    {
+      "id": "claim_e97bed7846884b8abb1697d76b8b3a8c",
+      "statement": "The second product identity treats multi-agent software coordination as a playable mod: `agent-seed` is that mod, and the harness is the engine it runs on.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/pack.json",
+          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
+        }
+      ]
+    },
+    {
+      "id": "claim_c3e4e5f9b1824809acbdadc71aa67f4b",
+      "statement": "Each dispatch returns a full narrative receipt with an explicit `pendingChoice` whitelist, so protocol constraint replaces prompt-only discipline against context-window decay.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire.lua",
+          "version": "repo-file-v1:sha256:82ef7fa8cc16b59f58c67fcba9edab692f12573828210cdcf15192647847b51f"
+        }
+      ]
+    },
+    {
+      "id": "claim_a770802851da4df9a53014e4dc0a8e31",
+      "statement": "Coordination has two layers: a main coordinator splits requirements, dispatches executors into isolated persistent worktrees, accepts proposals serially, passes two human gates, and settles each run with a structured review.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_contract/settlement.rs",
+          "version": "repo-file-v1:sha256:4cd6d2a286f0753c9614f3bd50158575c5b717d81b624e46cc83c9e2f73bfa37"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

@@ -35,9 +35,9 @@
     "default_req_payload": "add a requirement|write the title and description here, pipe-separated (third segment = external idempotency id, fourth segment = deps r1,r2)",
     "handover_goal": "[DECISION HANDOVER] play.mode = goal: the main agent reads the full receipt and then dispatches by itself (never the default first option, never a script); acceptance and both gates still take one real action and one validation each, evidence standards unchanged. The closing review must account for the delegated scope.",
     "handover_guide": "[DECISION HANDOVER] play.mode = guide: every following step is confirmed by a human (reply with the index); milestone actions still need the menu ticket.",
-    "prologue_common": "序幕：受理与两道门禁各需一次真实动作与核验，永不跳过；需求可异步追加。叙事与策略正文见 docs/context/acts/prologue.md。",
-    "coordinate_common": "协调幕：受理提案 → 过门禁 → 派发 → coordinate.submit。正文与人机门禁说明见 docs/context/acts/coordinate.md。",
-    "stage_prompt_missing": "(the prompt for this node is missing: check <node>_common in data/texts/beats-flow.json and docs/context/acts/)",
+    "prologue_common": "序幕：受理与两道门禁各需一次真实动作与核验，永不跳过；需求可异步追加。叙事与策略正文见 openwiki/operating/acts/prologue.md。",
+    "coordinate_common": "协调幕：受理提案 → 过门禁 → 派发 → coordinate.submit。正文与人机门禁说明见 openwiki/operating/acts/coordinate.md。",
+    "stage_prompt_missing": "(the prompt for this node is missing: check <node>_common in data/texts/beats-flow.json and openwiki/operating/acts/)",
     "evolution_auto": "evolution auto: preference marker only (cap {{cap}}, paths {{paths}}) — no auto-rewrite, no revision requests registered; suggestions still go through the separate settlement.evolution registration.",
     "evolution_none": "0/0",
     "evolution_artifact_none": "(empty)",
@@ -59,9 +59,9 @@
     "default_task_success": "（未设成功判据）",
     "phase_expected": "该动作需要微状态「{{expected}}」（当前「{{current}}」）",
     "settle_ready": "[SETTLE READY] 盘点四项齐备（验证/演进登记/会话清理/待办清理）——自动进入发布幕",
-    "charter_common": "立局幕：三件套齐备后 run.begin 开工（章程随之锁定）。正文见 docs/context/acts/charter.md。",
-    "settle_common": "盘点幕四项：验证 → 演进登记 → 会话清理 → 待办清理，齐备自动转发布幕。正文见 docs/context/acts/settle.md；清理政策见 docs/context/rituals/cleanup.md。",
-    "release_common": "发布幕：release.confirm（master@<sha>|批次 tag）或 release.skip（理由），已声明即可 review.note 批结算/退役。正文见 docs/context/acts/release.md。",
-    "retired_common": "退役终态：业务事件全拒；map.show / requirement.list 只读查询仍可用。正文见 docs/context/acts/retired.md。"
+    "charter_common": "立局幕：三件套齐备后 run.begin 开工（章程随之锁定）。正文见 openwiki/operating/acts/charter.md。",
+    "settle_common": "盘点幕四项：验证 → 演进登记 → 会话清理 → 待办清理，齐备自动转发布幕。正文见 openwiki/operating/acts/settle.md；清理政策见 openwiki/operating/rituals/cleanup.md。",
+    "release_common": "发布幕：release.confirm（master@<sha>|批次 tag）或 release.skip（理由），已声明即可 review.note 批结算/退役。正文见 openwiki/operating/acts/release.md。",
+    "retired_common": "退役终态：业务事件全拒；map.show / requirement.list 只读查询仍可用。正文见 openwiki/operating/acts/retired.md。"
   }
 }

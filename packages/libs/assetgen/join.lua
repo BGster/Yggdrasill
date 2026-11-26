@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/join.lua` —— 字符串两两合并（沙箱里 `table.concat` 不可达）。
 --
--- 契约：`docs/design/packages/assetgen.md` §2 / §8。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §2 / §8。
 --
 -- # 为什么不写 `out = out .. chunk`
 --

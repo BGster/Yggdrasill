@@ -1,6 +1,6 @@
 -- `src/klotski.lua` —— SlidingPuzzles（Klotski 4×5；组合谜题 + CHOOSE 唯一化）。
 --
--- 契约：docs/design/mod/tla-models.md §映射表。源：tlaplus/Examples
+-- 契约：openwiki/contracts/mod/tla-models.md §映射表。源：tlaplus/Examples
 -- `specifications/SlidingPuzzles/SlidingPuzzles.tla`（源仓 manifest 无全量
 -- 状态数，runtime 00:00:05；81 步最优系源注，本移植只承诺格步语义）。
 --

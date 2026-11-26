@@ -1,6 +1,6 @@
 -- `src/simtick.lua` —— tick 信封：一拍 = 矿机/处理器/传送带 + sim.step + 锚定。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §6）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §6）
 --
 -- 源 game_root tick 循环 + dynamic_tickrate 的 v1 等价面：
 -- 一个 tick = 1/60s（世界 tuning 的 ticksPerSecond）。推进序（确定性铁律）：

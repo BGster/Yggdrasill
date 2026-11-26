@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:93609e9c995d53c379cc9cf813596df9c8ffd7f71c7db1bbe338b8e1ada781d5",
+  "claims": [
+    {
+      "id": "claim_fc1028ae02ea4abf97a2018a20c0d980",
+      "statement": "Every KV payload is a `codec.encode` JSON string (the host KV only accepts scalars), and all KV traffic is funnelled through `store.lua`, so changing the encoding changes exactly one module.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/role-skill/store.lua",
+          "version": "repo-file-v1:sha256:ee2287f922778f08219e62a6dee7eb5b600eabc37633e089b58f78bb54557ea1"
+        }
+      ]
+    },
+    {
+      "id": "claim_59e2786a0d9d4958a300d940930013b8",
+      "statement": "`role.index` is a dense ascending integer array rather than `{ id = true }`: a JSON object would return every integer key as a string, silently breaking membership tests, and KV has no delete or iteration face, so revoke only clears references and the index is append-only.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/role-skill/actors.lua",
+          "version": "repo-file-v1:sha256:98fc11eb947080ee54480a8f891141bfa42f5efa786a0f5bc464a0bef936502e"
+        }
+      ]
+    },
+    {
+      "id": "claim_77f51ddf068d408d97052e2fec08dc34",
+      "statement": "Bonuses are composed at read time (`effective` = base + role bonus + skill bonuses in ascending name order) and never written back into the entity attribute bag: writing back would make unequipping require undoing history, and `rank` deliberately does not scale the bonus.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/role-skill/compose.lua",
+          "version": "repo-file-v1:sha256:7145ff2eaae13df13b5477ae9fa2a9cdadf34aeb1ff35c8947fe0269451f74eb"
+        }
+      ]
+    },
+    {
+      "id": "claim_0db8609ed12e4036bdfdb9c5811e4c37",
+      "statement": "The sliding window is a separate key family from the actor record: keeping it separate keeps the record's key set exactly `role`/`skills`/`counters`, avoids rewriting the whole ring on every `charge`, and cannot be derived from the monotonic `counters`.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/role-skill/window.lua",
+          "version": "repo-file-v1:sha256:45542f418517f2d52a85e909f84adaf9d7067e56e071b828be87a9637d8b1063"
+        }
+      ]
+    },
+    {
+      "id": "claim_35d6dbd2eb7f4a1db9b34906bcb5cbf4",
+      "statement": "Counters only increase and handlers return without writing when an id or record cannot be resolved, so a statistics event can never create a record out of thin air; event subscriptions install once, otherwise a double install doubles every counter.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/role-skill/counters.lua",
+          "version": "repo-file-v1:sha256:ae70ecf67322b3490ba50fc46a5a35f605bbf802795e884b541ede1c3cceac9d"
+        }
+      ]
+    },
+    {
+      "id": "claim_0e1c09337ec747a884ecd29c13ef1b7a",
+      "statement": "`role.effective` costs exactly three `kv.get` calls at any actor count (record plus two definition tables), which is the structural evidence behind the O(1) claim rather than a wall-clock ratio alone.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/role-skill/init.lua",
+          "version": "repo-file-v1:sha256:3615359df0a2a43be1dd7cebb2240263bc30ddea00fe1c4776fdd9576bac58db"
+        }
+      ]
+    },
+    {
+      "id": "claim_a24781ae325b44faa9aae6eeb1a0c545",
+      "statement": "The 28 counted cases (17 pre-S8 plus 11 S8 cases) are pinned by the fixture, and the compatibility assertion (`capacity-recharge-cap`) checks that the three-argument `recharge` returns byte-identical payloads.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/role-skill/test/pkg-role-skill.lua",
+          "version": "repo-file-v1:sha256:7a9cdae2b0c022e1e6a165621a3c712866b2e3d83a29be3d83ec1188b2561486"
+        }
+      ]
+    },
+    {
+      "id": "claim_a9f45b01c7c74a14a5f46efae59772cb",
+      "statement": "The smoke file pins the export face (19 exports), the four event names and the four KV prefixes, and because the mock `ygg.emit` accepts tables, the real scalar-payload shape is checked separately by `cargo test -p ygg-sandbox --test packages_sandbox`.",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/pkg-selftest/tests/pkg-role-skill-smoke.lua",
+          "version": "repo-file-v1:sha256:26418cbc2e4824d293f022e7445d288473eced81090dcc0bf4fbd4d3c2a66193"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

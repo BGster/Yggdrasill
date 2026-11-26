@@ -1,4 +1,4 @@
--- `pkg.role-skill.*` 自测。契约 `docs/design/packages/role-skill.md` §7。
+-- `pkg.role-skill.*` 自测。契约 `openwiki/contracts/packages/role-skill.md` §7。
 --
 -- # 为什么自带 mock 与计数
 --

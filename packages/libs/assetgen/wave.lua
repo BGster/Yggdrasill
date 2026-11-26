@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/wave.lua` —— 波形核：Q15 相位 → [-32768, 32767]。
 --
--- 契约：`docs/design/packages/assetgen.md` §2（c）/ §3 I1。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §2（c）/ §3 I1。
 --
 -- # 为什么相位是 1/65536 转的单位
 --

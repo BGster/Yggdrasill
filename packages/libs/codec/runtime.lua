@@ -1,7 +1,7 @@
 -- `pkg.codec.runtime` —— codec 的共享座：错误码、`fail`、`CODEC_VERSION`、deps 记位
 -- 与宿主句柄（host 三件）。
 --
--- 契约：`docs/design/packages/codec.md`。批十一拆分的叶子模块：`fail` / `E_*` /
+-- 契约：`openwiki/contracts/packages/codec.md`。批十一拆分的叶子模块：`fail` / `E_*` /
 -- `CODEC_VERSION` / deps 存放只住这一处（共享 local 禁止抄第二份），其余模块经
 -- `require("pkg.codec.runtime")` 取用。装配范式同 `sha256.lua`；沙箱方言纪律与包
 -- 整体设计见 `init.lua` 头注与契约 §8。

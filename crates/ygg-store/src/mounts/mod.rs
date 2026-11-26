@@ -8,7 +8,7 @@
 //! `<run-dir>/fs.jsonl` 和 `<run-dir>/artifacts/` 同族，于是落在这里；沙箱侧只
 //! 保留一个注入 trait（`ygg_sandbox::host_api::MountFs`，与 `HostToolRunner` 同
 //! 型），经 `[dev-dependencies]` 在测试里接到本模块上——依赖方向不变（store 仍
-//! 不进 wasm32 / lint 的依赖图，见 `docs/context/cold-start/topology.md` 的不变量）。
+//! 不进 wasm32 / lint 的依赖图，见 `openwiki/operating/cold-start/topology.md` 的不变量）。
 //!
 //! # 四件事的归属
 //!
@@ -19,8 +19,8 @@
 //! - **路径狱**：沙箱可见的挂载路径只有 `mounts/<name>` 与 `mounts/<name>/<rel>`。
 //! - **审计行**：每次写（成功与被拒）追加一行 `<run-dir>/fs.jsonl`。
 //!
-//! 规范正文在 `docs/design/kernel/lua-api.md` §3.1.2 与
-//! `docs/design/mod/mod-package.md` §3.2.2；本文件是实现，不是第二个真源。
+//! 规范正文在 `openwiki/contracts/kernel/lua-api.md` §3.1.2 与
+//! `openwiki/contracts/mod/mod-package.md` §3.2.2；本文件是实现，不是第二个真源。
 
 use std::fmt;
 

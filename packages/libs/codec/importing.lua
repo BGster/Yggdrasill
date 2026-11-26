@@ -1,6 +1,6 @@
 -- `pkg.codec.importing` —— import：两阶段（validate → apply）三种冲突策略。
 --
--- 契约：`docs/design/packages/codec.md` §4。批十一拆分（纯搬移）：validate 的
+-- 契约：`openwiki/contracts/packages/codec.md` §4。批十一拆分（纯搬移）：validate 的
 -- 记录校验取 spec 经 `pkg.entity` 的 API（包间依赖边，同原单文件）；checksum 与
 -- copy_top 取自 `pkg.codec.bundle`（单源）；is_integer / sort_names 取自 jsonenc。
 -- 「保 id」、引用不重写（I6）、kv 不写回（D9）见 `M.import` 头注。

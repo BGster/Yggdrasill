@@ -1,6 +1,6 @@
 -- `packages/libs/role-skill/compose.lua` —— `effective` 的合成规则（**只读，从不写回**）。
 --
--- 契约：`docs/design/packages/role-skill.md` §3 I2 / §4 的 `effective` 与 `compose`。
+-- 契约：`openwiki/contracts/packages/role-skill.md` §3 I2 / §4 的 `effective` 与 `compose`。
 --
 -- # 为什么是合成而不是写回
 --

@@ -1,4 +1,4 @@
--- `pkg.quest` —— 任务类型、实例与委托关系（机制层包）。契约：`docs/design/packages/quest.md`。
+-- `pkg.quest` —— 任务类型、实例与委托关系（机制层包）。契约：`openwiki/contracts/packages/quest.md`。
 --
 -- # 这个包做什么
 --

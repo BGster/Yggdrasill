@@ -1,4 +1,4 @@
--- `pkg.entity` —— 实体与属性袋（机制层包）。契约：`docs/design/packages/entity.md`。
+-- `pkg.entity` —— 实体与属性袋（机制层包）。契约：`openwiki/contracts/packages/entity.md`。
 --
 -- # 这个包做什么
 --
@@ -22,7 +22,7 @@
 --    一切「集合」都落成「逐项标量键 + 一个名字枚举键」，见 §2 的物理落点表。
 --
 
--- 前缀单写者：本包只写 `pkg.entity.*`（`docs/design/mod/mod-package.md` §3.2.3）。
+-- 前缀单写者：本包只写 `pkg.entity.*`（`openwiki/contracts/mod/mod-package.md` §3.2.3）。
 
 -- # 文件切分（批十一；纯搬移，装配范式同 quest 三件套）
 --

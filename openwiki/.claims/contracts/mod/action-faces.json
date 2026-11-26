@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:0f0e6dfc48507a6622eaaa0a49eb01ecb94f8cddd37ff0e832d4f35fb0ccb184",
+  "claims": [
+    {
+      "id": "claim_d209e522fe7743e79d9e1b5c2e5a0226",
+      "statement": "`event` 是唯一的状态推进货币：`(state, event) -> state'` 全有或全无；`op` 是状态推进之外的 8 个宿主旁路能力，`action` 只决定模型用哪个动词说话、不决定状态。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/mod.lua",
+          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
+        },
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/runtime/flow.lua",
+          "version": "repo-file-v1:sha256:c4e68ff43a5da46bb48165396bb2a16621a7048321c690b140938cd862b1442a"
+        }
+      ]
+    },
+    {
+      "id": "claim_f2f587504b374050a36ab0b88a50f0be",
+      "statement": "三条硬不变量：I1 任何 `action` 不得绕过 `op=dispatch` → Mod handler 改状态；I2 适配器绝不直接写 `run.sqlite` / `settings.*` / `req.*` / `stage`（`stage` 由 `ygg.fsm` 独占写）；I3 回执带 `[REJECTED:*]` / `[BLOCKED:*]` 必须原样回贴、停止后续编排。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/readset.lua",
+          "version": "repo-file-v1:sha256:df76356f64895385ef32e93f53b138a0e95e0885f371388b99f2ff5f95a7e860"
+        },
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/runtime/flow.lua",
+          "version": "repo-file-v1:sha256:c4e68ff43a5da46bb48165396bb2a16621a7048321c690b140938cd862b1442a"
+        }
+      ]
+    },
+    {
+      "id": "claim_a1926f63c0da45bbb04ba0ebb51d40f4",
+      "statement": "`approve_gate` / `reject_gate` 是唯一合法的单 event 别名（A2）：其准入理由是 `reqId` 必填防止「漏 reqId 时去批门禁队列里下一个待批门」的批错需求，且空 note 必须产出 `\"rN|\"` 而不是 `\"rN\"`。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/gate_actions.lua",
+          "version": "repo-file-v1:sha256:57a7afcbd359ec03a13cd5ee177463c825fb987fac080e029b3efbb067bbd51e"
+        }
+      ]
+    },
+    {
+      "id": "claim_9c47de4a137e465c919a8b21ca3c0612",
+      "statement": "拒绝前缀分四类：动作不在其阶段 / 人类动作被直派 → `[REJECTED:ACTION]`；载荷非法 → `[REJECTED:PAYLOAD]`；前置未满足 → `[BLOCKED:TODO]`；全部原位重渲染且登记在 `pack.json` 的 `agent.rejectionPrefixes`，宿主据此不记失败步。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/gate_actions.lua",
+          "version": "repo-file-v1:sha256:57a7afcbd359ec03a13cd5ee177463c825fb987fac080e029b3efbb067bbd51e"
+        }
+      ]
+    },
+    {
+      "id": "claim_663426f91cf84199a47651cec303a06e",
+      "statement": "`proposal.accept` 串行且必须点名：一次只受理一条，`rev != req.<i>.rev` 即 stale 拒绝（旧提案永不覆盖更新的决定），rebase 提案只在无其他待决提案时受理。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/proposals.lua",
+          "version": "repo-file-v1:sha256:bc1968de25c6cd923a459414b7fcddc2db93c5040c4d4cb37aaa88a30ef7f408"
+        }
+      ]
+    },
+    {
+      "id": "claim_6dd90d2e48e94171be89cacf8f00ad72",
+      "statement": "`requirement.dispatch` 按就绪序派发（draft → plan；ready → development·lane 且开发依赖全 done），job 上限 4；无候选或槽位已满属正常的 `[DISPATCH] 0 candidates` 回执，幂等且不计失败步。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/requirement_ops.lua",
+          "version": "repo-file-v1:sha256:e7e020d146871cc99d3807f9e1347c345799722d240741ecd8d0a42aedd958ca"
+        }
+      ]
+    },
+    {
+      "id": "claim_7fb5455ee5594e58b7c99d81a948096d",
+      "statement": "`event` 全集 39 个：`grep -rho 'ygg\\.on(\"[a-z._]*\"' .ygg/mods/agent-seed` 得 38，`stage.advance` 由 `ygg.fsm.define`（`crates/ygg-sandbox/stdlib/fsm.lua`）转手注册，38+1=39。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire/intake.lua",
+          "version": "repo-file-v1:sha256:103e925562f7a3cfa448e70967899d7a49a70a125611e7629b7bf28314b97d10"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

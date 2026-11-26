@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/sound.lua` —— 音频产物：s16 采样数组 + 包络 + 归一。
 --
--- 契约：`docs/design/packages/assetgen.md` §2（c）/ §3 I8。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §2（c）/ §3 I8。
 --
 -- # 三层：原始样本 → 包络 → 归一
 --

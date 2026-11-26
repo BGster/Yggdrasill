@@ -122,7 +122,7 @@ fn pkg_err(id: &str, text: &str) -> String {
 fn pkg_json(extra: &str) -> String {
     format!(
         r#"{{"schemaVersion": 1, "name": "fixture", "version": "0.1.0",
-                 "contract": "docs/design/packages/README.md"{extra}}}"#
+                 "contract": "openwiki/contracts/packages/README.md"{extra}}}"#
     )
 }
 
@@ -134,7 +134,7 @@ fn package_manifest_parses_the_documented_shape_and_defaults_deps_to_empty() {
     assert_eq!(bare.id(), "fixture");
     assert_eq!(bare.version(), "0.1.0");
     assert!(bare.deps().is_empty());
-    assert_eq!(bare.contract(), "docs/design/packages/README.md");
+    assert_eq!(bare.contract(), "openwiki/contracts/packages/README.md");
 
     // deps 与 packages[] 同形（共用 PackageRef 与 parse_refs）。
     let with_deps = PackageManifest::parse(
@@ -151,7 +151,7 @@ fn package_manifest_parses_the_documented_shape_and_defaults_deps_to_empty() {
 #[test]
 fn package_manifest_rejects_a_name_that_differs_from_its_directory() {
     let text = r#"{"schemaVersion": 1, "name": "other", "version": "0.1.0",
-                       "contract": "docs/design/packages/README.md"}"#;
+                       "contract": "openwiki/contracts/packages/README.md"}"#;
     let err = pkg_err("fixture", text);
     assert_eq!(
         err,
@@ -218,7 +218,7 @@ fn package_manifest_rejects_bad_json_schema_version_and_missing_fields() {
     let err = pkg_err(
         "fixture",
         r#"{"schemaVersion": 2, "name": "fixture", "version": "0.1.0",
-                "contract": "docs/design/packages/README.md"}"#,
+                "contract": "openwiki/contracts/packages/README.md"}"#,
     );
     assert!(
         err.contains("declares schemaVersion 2 (this build implements 1)"),
@@ -228,7 +228,7 @@ fn package_manifest_rejects_bad_json_schema_version_and_missing_fields() {
     let err = pkg_err(
         "fixture",
         r#"{"schemaVersion": 1, "name": "fixture",
-                "contract": "docs/design/packages/README.md"}"#,
+                "contract": "openwiki/contracts/packages/README.md"}"#,
     );
     assert!(err.contains("is missing string `version`"), "{err}");
     // 缺 contract。
@@ -261,7 +261,7 @@ fn write_pkg(root: &Path, id: &str, version: &str, deps: &[(&str, &str)], files:
         .collect();
     let pkg = format!(
         r#"{{ "schemaVersion": 1, "name": "{id}", "version": "{version}",
-                 "deps": [{}], "contract": "docs/design/packages/README.md" }}"#,
+                 "deps": [{}], "contract": "openwiki/contracts/packages/README.md" }}"#,
         deps_json.join(", ")
     );
     fs::write(dir.join(PKG_FILE), pkg).expect("write pkg.json");

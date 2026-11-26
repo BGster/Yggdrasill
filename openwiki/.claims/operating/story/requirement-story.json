@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:a1e60d1f585def91a1cbb950ffe9575a7d9f519c01b4f779b175775ad48924d8",
+  "claims": [
+    {
+      "id": "claim_0d4b2c00a7a74198a66080f995235995",
+      "statement": "A requirement walks nine micro-states — 立项, 计划中, 计划门禁, 待开发, 开发中, 交付受理, 验收门禁, 集成, done — and the ninth is terminal.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_726d7bbfbf6e4c58993017500dca0020",
+      "statement": "All three push-back paths (`proposal.reject`, `gate.reject`, `integration.reject`) land on 待开发 with `plan_ok` kept, `job` cleared and the lane released — R6 in one sentence.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_f4d68d9aa2244feb8d1ca27aaa3feac8",
+      "statement": "The delivery-acceptance stage is deliberately asymmetric: a plan proposal goes straight from its gate to 待开发, while a development delivery gets one extra serial review stage at the coordination layer.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_bc9430054829485aadd2392f5f55b2d1",
+      "statement": "Submitting a development delivery does not release the lane (R7); only rejection or confirmation does, which keeps the worktree tied to the requirement until the outcome is known.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_898a276004c84db4bda765c8e9c79450",
+      "statement": "Accepting a delivery re-checks freshness — `gate_rev` must equal `rev` — so an amended requirement cannot be approved against a stale gate revision.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/proposals.lua",
+          "version": "repo-file-v1:sha256:bc1968de25c6cd923a459414b7fcddc2db93c5040c4d4cb37aaa88a30ef7f408"
+        }
+      ]
+    },
+    {
+      "id": "claim_7e23ce89ba294ed987d70fc0772fa073",
+      "statement": "`blocked` (conflict or `needs_amend`) is an overlay that `req_display()` lays over `req_phase()`, never a tenth micro-state.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
+          "version": "repo-file-v1:sha256:c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
+        }
+      ]
+    },
+    {
+      "id": "claim_402d41d0c5484553b21059a0fba1ff3b",
+      "statement": "The stage names on this page match `scenes.json`'s `reqStage` ordering exactly, so the read-plan and the state machine never disagree about what stage a requirement is in.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
+          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

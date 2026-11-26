@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:23c8879d432b2a12d898e263eedebc27d16c0f179a02219f4b4a198ebfb6278c",
+  "claims": [
+    {
+      "id": "claim_7248b269dba041649e67480dc689b90c",
+      "statement": "Retirement is entered only by arming `run.retire` and then running the final `review.note`; unarmed, the same call settles the batch instead, so retirement is a decision made before the closing call, not during it.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/review.lua",
+          "version": "repo-file-v1:sha256:f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
+        }
+      ]
+    },
+    {
+      "id": "claim_d5cde9d90a4a45f9a8ae4cb33a83aa89",
+      "statement": "`live → retired` is the kernel's only true transition; every phase label the receipts show is a self-loop inside the live state, which is why an upgrade can start a new run id rather than migrate an old one.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/transition.rs",
+          "version": "repo-file-v1:sha256:3c371e1e065a8009854f69bd2bc9466b9bca03e51311c1b21f878b164ea89904"
+        }
+      ]
+    },
+    {
+      "id": "claim_19ed99edbbec4fe0a9dd340c45792272",
+      "statement": "The ending prefix `[ENDING · run retired]` is declared by the pack key `agent.endingPrefix`, so the visible ending and the settled state cannot drift apart without a pack change.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/pack.json",
+          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
+        }
+      ]
+    },
+    {
+      "id": "claim_e1bd3c78e0c646a2814e0e84a5e2b98c",
+      "statement": "`--settle` writes `settlement.json` with four switches — events non-empty, no failed step, ending present, inbox consumed — and `ok=true` requires all four, so a run that merely narrated an ending is not settled.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/egg/settlement.rs",
+          "version": "repo-file-v1:sha256:4a79673394fd2cdf4f91560c98550d6b09220e04b9fd8be07e8636b040793eb4"
+        }
+      ]
+    },
+    {
+      "id": "claim_8d54d533baa24ad788664bf0da7278ca",
+      "statement": "Settling an open standing run early is harmless but does not settle it: it reports `reached=open, ok=false` and returns to running, because the predicate is state, not the fact that the command ran.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/egg/paths.rs",
+          "version": "repo-file-v1:sha256:29e1a2cc2738fc1693dfc706263dc9a89f82d5db40de0a63e18d8b28525dab63"
+        }
+      ]
+    },
+    {
+      "id": "claim_c40c000fcd6a4e3485e584276cbd740d",
+      "statement": "After retirement every business event is refused while `map.show` and `requirement.list` keep answering: the run stays inspectable, it just stops being steerable.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/review.lua",
+          "version": "repo-file-v1:sha256:f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
+        }
+      ]
+    },
+    {
+      "id": "claim_6a5920cf1f2946b293b656d22830ce11",
+      "statement": "The main session must drain the todo list (including completed and historical entries) before closing, because state carried into the next run is a second, unversioned record of what happened.",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/todo-check.sh",
+          "version": "repo-file-v1:sha256:64046b70f8b2454da70f83d557568af533cef5ff2b4a082c6490279823ae4934"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}
