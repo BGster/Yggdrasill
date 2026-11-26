@@ -163,9 +163,9 @@ fn rejects_bad_packages_declarations() {
 fn rejects_unresolvable_package_declarations() {
     // ⑤ 包不存在：同时点名包根与实际有哪些（作者不用猜目录名）。
     let err =
-        Scenario::new("r-unknown").reject_with(json!([{ "id": "quest", "version": "0.1.0" }]));
+        Scenario::new("r-unknown").reject_with(json!([{ "id": "alpha", "version": "0.1.0" }]));
     assert!(
-        err.contains("package \"quest\" is not a package under"),
+        err.contains("package \"alpha\" is not a package under"),
         "{err}"
     );
     assert!(err.contains("(found: fixture)"), "{err}");
@@ -176,13 +176,13 @@ fn rejects_unresolvable_package_declarations() {
     assert!(err.contains("is required at version 9.9.9"), "{err}");
     assert!(err.contains("declares 0.1.0"), "{err}");
 
-    // ⑦ 缺传递依赖：quest 依赖 codec，但 `packages` 段只列了 quest。
+    // ⑦ 缺传递依赖：alpha 依赖 beta，但 `packages` 段只列了 alpha。
     let scenario = Scenario::new("r-closure");
-    write_pkg(&scenario.libs(), "quest", "0.1.0", &[("codec", "0.1.0")]);
-    write_pkg(&scenario.libs(), "codec", "0.1.0", &[]);
-    let err = scenario.reject_with(json!([{ "id": "quest", "version": "0.1.0" }]));
+    write_pkg(&scenario.libs(), "alpha", "0.1.0", &[("beta", "0.1.0")]);
+    write_pkg(&scenario.libs(), "beta", "0.1.0", &[]);
+    let err = scenario.reject_with(json!([{ "id": "alpha", "version": "0.1.0" }]));
     assert!(
-        err.contains("depends on \"codec\" which the mod's `packages` section"),
+        err.contains("depends on \"beta\" which the mod's `packages` section"),
         "{err}"
     );
 
@@ -265,11 +265,11 @@ fn pkg_load_budget_stays_under_ten_milliseconds() {
     let scenario = Scenario::new("budget");
     let libs = scenario.libs();
     let ids = [
-        "codec",
+        "beta",
         "dialogue",
         "entity",
         "procgen",
-        "quest",
+        "alpha",
         "role-skill",
     ];
     for id in ids {
