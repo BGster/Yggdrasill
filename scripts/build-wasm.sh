@@ -23,9 +23,7 @@
 # 产物：crates/ygg-wasm/pkg/（ygg_wasm.js 胶水 + ygg_wasm_bg.wasm + .d.ts）。
 # 可选后处理：PATH 上有 wasm-opt（binaryen ≥118）时自动 -Oz（EH 兼容实证与
 #   环境变量开关见下方 wasm-opt 段注释）。
-# 活链验证：
-#   node crates/ygg-wasm/smoke.mjs                # B1 活链（资源包 + 叙事 + 存读档）
-#   node crates/ygg-wasm/verify-determinism.mjs   # FR-9 wasm 侧双跑哈希等价（M1 C2）
+# 活链验证：宿主侧用例驱动（跨端哈希等价随 M4.3 双端矩阵落地）。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -112,7 +110,7 @@ fi
 #      优化级别必崩：`unimplemented DCE control flow structure`
 #      （DeadCodeElimination.cpp:179）。
 #   3. binaryen 133（brew）：-Oz/-O2 成功（本模块 3,060,338 → 2,734,045 字节，
-#      -10.6%），优化产物过 smoke + verify-determinism 活链，golden 哈希不变。
+#      -10.6%）。
 # 管线取 -Oz；YGG_WASM_OPT=off 关闭，=on 令失败致命（默认 auto：找到即用，
 # 失败降级为未优化产物并告警，不阻断构建）。
 YGG_WASM_OPT="${YGG_WASM_OPT:-auto}"   # auto | on | off
@@ -146,6 +144,6 @@ if [ "$YGG_WASM_OPT" != "off" ]; then
 fi
 
 ls -la crates/ygg-wasm/pkg/
-echo "==> done. live-chain checks: node crates/ygg-wasm/smoke.mjs && node crates/ygg-wasm/verify-determinism.mjs"
+echo "==> done. wasm module built: crates/ygg-wasm/pkg/"
 
 

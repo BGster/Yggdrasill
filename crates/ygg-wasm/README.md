@@ -52,14 +52,11 @@ const envelope = kernel.dispatch("event.start", "0");
 
 ## 活链验证
 
+捆绑模块（`wasm-pack` 产物）由宿主侧用例驱动；跨端哈希等价用例随 M4.3 双端矩阵落地。
+目前在仓库内可跑的验证是 crate 自身用例：
+
 ```sh
-node crates/ygg-wasm/smoke.mjs           # 装载 packages/mods/test-adventure，
-                                         # dispatch event.start，断言叙事 +
-                                         # 选择挂起 + 存读档往返
-node crates/ygg-wasm/verify-determinism.mjs
-                                         # FR-9 wasm 侧双跑（M1 C2）：golden-vector
-                                         # 同序列经 wasm 内核双跑，哈希必须等于
-                                         # fixture 钉死的 native 基线
+cargo test -p ygg-wasm
 ```
 
 ## 体积快照（M1 C2 时点）
@@ -69,7 +66,6 @@ node crates/ygg-wasm/verify-determinism.mjs
 - **wasm-opt 已兼容（M1 C2 实证）**：wasm-bindgen 剥掉 target-features 元
   数据，须显式传特性旗（脚本头注有实测集）；binaryen 117（wasm-pack 缓存
   版）优化必崩（DCE 对 try_table 未实现路径），binaryen 133 -Oz 成功：
-  3,060,338 → 2,734,045 字节（-10.6%），优化产物过 smoke +
-  verify-determinism 活链，golden 哈希不变。`scripts/build-wasm.sh` 在
+  3,060,338 → 2,734,045 字节（-10.6%）。`scripts/build-wasm.sh` 在
   PATH 上有 wasm-opt 时自动 -Oz（`YGG_WASM_OPT=off/on` 可关/令致命）。
 - 体积回归门（twiggy/wasm-tools 入 CI）按 research §7 留 M1 泳道，非门禁。
