@@ -294,15 +294,12 @@ required = [
     'openwiki/overview.md',
     'openwiki/governance.md',
     'openwiki/quickstart.md',
-    'openwiki/operating/scenes.json',
-    'openwiki/operating/cold-start/vocabulary.md',
-    'openwiki/operating/cold-start/principles.md',
-    # r12：决策台账已解散（逐条裁决落进它治理的文档的「设计依据」段），archive/ 不再存在
-    # r6：设计契约树的树入口（三模块的枚举由 agent_seed_semantics 的索引集合相等用例负责，
-    # 那处才是权威；这里只登记入口，避免两处清单互相追平）
     'openwiki/architecture/README.md',
-    # r6：行为叙事归位后的代表文件（理解性，不拦门禁；其余两份由 scenes.json 的 reference 段机检）
-    'openwiki/operating/story/requirement-story.md',
+    'openwiki/operating/vocabulary.md',
+    'openwiki/operating/build.md',
+    'openwiki/operating/dev-workflow.md',
+    'openwiki/operating/example-pack.md',
+    'openwiki/operating/h5-host.md',
 ]
 for rel in required:
     fp = os.path.join(repo, rel)

@@ -26,13 +26,12 @@ and scripts; native systems are registered by the host. A second entity store, a
 pack reaching around `world.*` is a violation.
 
 **1.4 Rules are sandboxed and budgeted.** Packs get no `os`, `io`, `debug`, `package`, `load*` or `coroutine`, and no
-float math; every host→Lua entry runs under an instruction budget, so a runaway script is an error, not a hang; a
-failed entry leaves world bytes unchanged (rollback, never half-applied state).
+float math; every host→Lua entry runs under an instruction budget reset per entry, so a runaway script is an error, not
+a hang; a failed entry leaves world bytes unchanged (rollback, never half-applied state).
 
-**1.5 Read the authoritative body before touching a subsystem.** Contracts in `openwiki/contracts/**` are the rule for
-that subsystem; a receipt, a summary, a previous session's habit or this file is a route. A missing page, a moved file
-or a body contradicting the index is a **stop-and-report** — never a licence to proceed from memory. Pages that still
-name `egg` / `serve` / `agent-seed` are historical: the kernel SDK rewrite is tracked as its own milestone.
+**1.5 Read the authoritative body before touching a subsystem.** `openwiki/contracts/**` is the rule for that
+subsystem; a receipt, a summary, a previous session's habit or this file is a route. A missing page, a moved file or a
+body contradicting the index is a **stop-and-report** — never a licence to proceed from memory.
 
 **1.6 Stop on violation.** When a constraint was bypassed, stop everything and list what you changed, what you ran and
 which output is unverified; then wait for the user. Never back-fill the record first.
@@ -42,9 +41,9 @@ which output is unverified; then wait for the user. Never back-fill the record f
 **1.8 Self-evolution has exactly two exits: this file (cold-start ruling) or the code (machine enforcement)** — no side
 scripts, no wrappers, no checkers shipped as patches; scripts may only perform read-only queries. Every evolution needs
 all three: the action blocked, the visible violation symptom, one runnable confirmation. New capability lands in
-`crates/ygg-*/` (kernel semantics) or `<pack-root>/<name>/` (pure Lua over `world.*`) in the same commit as its
-contract, its tests and its perf numbers (`openwiki/contracts/packages/README.md`). The in-repo `packages/libs`
-corpus retired in M2.5; a package capability now lands in the pack that consumes it, not in this repo.
+`crates/ygg-*/` (kernel semantics) or in the pack that consumes it (pure Lua over `world.*`) in the same commit as its
+contract, its tests and its perf numbers (`openwiki/contracts/kernel/packaging.md`). The in-repo `packages/libs` corpus
+retired in M2.5; there is no library shelf in this repo.
 
 **1.9 No claim without its method — absence and counts included.** "Never existed" and "16 occurrences" are unproven
 until a method that could have returned the opposite produced them: run it, paste the output, name the method. An
@@ -68,31 +67,36 @@ cargo build --workspace
 cargo test --workspace          # the executable surface of this repo
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+
+# the reference pack: self-test, golden hashes, host image
+cargo run -q --example selftest -p ygg-sandbox -- --mod packs/example
+cargo run -q --example golden   -p ygg-sandbox -- packs/example --check packs/example/golden.json
+cargo run -q --example image    -p ygg-host    -- packs/example --out hosts/h5/pack.image.js --check
 ```
 
-Wasm target (needs a WASI SDK; `/opt/wasi-sdk` is the config default, this machine keeps it under `~/.local`):
+Wasm build (needs a WASI SDK; `/opt/wasi-sdk` is the config default, this machine keeps it under `~/.local`);
+`scripts/build-wasm.sh` wraps it and ends with the node smoke lane:
 
 ```bash
-W="$HOME/.local/wasi-sdk-34.0-arm64-macos"
-CC_wasm32_unknown_unknown="$W/bin/clang" CXX_wasm32_unknown_unknown="$W/bin/clang++" \
-AR_wasm32_unknown_unknown="$W/bin/llvm-ar" \
-CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-Ctarget-feature=+reference-types \
- -Lnative=$W/share/wasi-sysroot/lib/wasm32-wasip1/eh \
- -Lnative=$W/share/wasi-sysroot/lib/wasm32-wasip1 \
- -lstatic=c++abi -lstatic=unwind -lstatic=wasi-emulated-process-clocks -lstatic=c" \
-cargo build --target wasm32-unknown-unknown -p ygg-wasm
+WASI_SDK_PATH="$HOME/.local/wasi-sdk-34.0-arm64-macos" bash scripts/build-wasm.sh
+node scripts/wasm-lane.mjs        # 50 ticks + replay, byte-identical to golden.json
 ```
 
 ## 3. Prompt-surface index
 
 | Moment | Authoritative route |
 | --- | --- |
-| Entry — whole tree / time point → page | `openwiki/overview.md`, `openwiki/quickstart.md` |
+| Entry — whole tree / first run | `openwiki/overview.md`, `openwiki/quickstart.md` |
 | Contract tree / what a subsystem must not change | `openwiki/architecture/README.md` → `openwiki/contracts/**` |
-| World model, hash and replay | `openwiki/contracts/kernel/sim-kernel.md` |
-| Events, state surface, compaction | `openwiki/contracts/kernel/events.md`, `state-surface.md`, `compaction.md` |
-| Lua facade and protocol | `openwiki/contracts/kernel/lua-api.md`, `openwiki/contracts/kernel/wire-protocol.md` |
-| Capability carrier (kernel crate vs Lua package) | `openwiki/contracts/packages/README.md` |
+| World model, systems, commands | `openwiki/contracts/kernel/world.md` |
+| Fixed point, frames, hash, RNG streams | `openwiki/contracts/kernel/determinism.md` |
+| Lua facade, budget, rollback | `openwiki/contracts/kernel/lua-api.md`, `openwiki/contracts/kernel/sandbox.md` |
+| Snapshot / event log / replay | `openwiki/contracts/kernel/persistence.md` |
+| Pack layout, manifest, capabilities | `openwiki/contracts/kernel/packaging.md` |
+| Error codes and their boundary | `openwiki/contracts/kernel/errors.md` |
+| Wire protocol / C ABI / wasm binding / image | `openwiki/contracts/host/protocol.md`, `bindings.md`, `image.md` |
+| Build, gates, branches, zero debt | `openwiki/operating/build.md`, `openwiki/operating/dev-workflow.md` |
+| Reference pack / browser host / glossary | `openwiki/operating/example-pack.md`, `h5-host.md`, `vocabulary.md` |
 | Why a ruling exists / how to add one | the 「设计依据」 section of the page the ruling governs (`openwiki/governance.md`) |
 
 `openwiki/ver.json` is the single ver ledger (`scripts/wiki-ver.sh`); a page carries no `ver` line. Closure, link and
@@ -111,5 +115,6 @@ This repository has a generated `openwiki/` evidence index. It is optional just-
 - Treat source code and tests as authoritative. A brief's unknowns and review items are verification gaps, not automatic requirements.
 - Prefer the narrowest quiet validation that proves the changed behavior. Preserve complete failure output.
 
-Use the repository's documented maintenance process to refresh generated pages after source changes. Check its configuration and completed runs before relying on automatic updates. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and let OpenWiki regenerate.
+Use the repository's documented maintenance process to refresh generated pages after source changes. Check its configuration and completed runs before relying on automatic updates. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
+
 <!-- OPENWIKI:END -->
