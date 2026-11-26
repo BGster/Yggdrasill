@@ -48,7 +48,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-harness.json",
-          "version": "repo-file-v1:sha256:84588d31f24905bf517eb588354122abc773e8f2ccfcd01327b89edcbb7252df"
+          "version": "repo-file-v1:sha256:f4668324db3f7a38379a970e57e48cfa83be2530a7a9a56a9502f57322144aed"
         }
       ]
     },

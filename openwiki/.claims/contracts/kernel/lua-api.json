@@ -38,11 +38,11 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-store/src/mounts/declare.rs",
-          "version": "repo-file-v1:sha256:6dd7a4e131e9714ba511df39c823520636ebbcd023243652519b224564e1d9be"
+          "version": "repo-file-v1:sha256:248dedb3ad26565e0791b7e9d9d1ed057534f895d715b135e067257727159fe5"
         },
         {
           "resource": "repo://crates/ygg-store/src/mounts/store.rs",
-          "version": "repo-file-v1:sha256:5119a1de753c122b7e505d6168f5b5aea174f6b5682e3ba1c6661245c5d68e40"
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
         }
       ]
     },
@@ -52,7 +52,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-store/src/mounts/store.rs",
-          "version": "repo-file-v1:sha256:5119a1de753c122b7e505d6168f5b5aea174f6b5682e3ba1c6661245c5d68e40"
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
         }
       ]
     },
@@ -62,7 +62,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-store/src/mounts/store.rs",
-          "version": "repo-file-v1:sha256:5119a1de753c122b7e505d6168f5b5aea174f6b5682e3ba1c6661245c5d68e40"
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
         }
       ]
     },
@@ -72,7 +72,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-store/src/mounts/store.rs",
-          "version": "repo-file-v1:sha256:5119a1de753c122b7e505d6168f5b5aea174f6b5682e3ba1c6661245c5d68e40"
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
         }
       ]
     },
@@ -96,11 +96,11 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/src/codec_face/digest.rs",
-          "version": "repo-file-v1:sha256:ac5a2a1af1c798048e89ef734cfd4fa22ca79f8d0ff13e7879f162b62101f1dc"
+          "version": "repo-file-v1:sha256:1a30e9243f0ad37b6a33564be0fc8d8f2c4d800af65fa0d50896d33a6ec36272"
         },
         {
           "resource": "repo://crates/ygg-sandbox/src/codec_face/mod.rs",
-          "version": "repo-file-v1:sha256:b381c6b7eaa238d2eee52ffdb6c71c71278e24b112f312f71a32ec97f0b080ab"
+          "version": "repo-file-v1:sha256:fdc7e3ff605f6e30a9313072896381c1268bdf772a4845b13cadffee388db641"
         }
       ]
     },

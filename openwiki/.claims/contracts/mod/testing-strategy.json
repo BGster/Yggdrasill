@@ -8,11 +8,11 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/tests/harness.lua",
-          "version": "repo-file-v1:sha256:1798a12f63db61cce6ec1518096a420f8a109e68f4db49bf7bd8ab27c36a0999"
+          "version": "repo-file-v1:sha256:85a5f20d8c428316385436efabcf45f5dce2d077f7aba4e33e24f113e4066f0c"
         },
         {
           "resource": "repo://crates/ygg-sandbox/examples/selftest.rs",
-          "version": "repo-file-v1:sha256:f9058eef5cfd9e5e03f0f0adb43d7e8cd8edd66ada2da9b48c18c9db8d073025"
+          "version": "repo-file-v1:sha256:1e5b3e4ad932cbaedeae6d80f972fb5c88ddb292e57510d2fc9d05d5bbe99ccb"
         }
       ]
     },
@@ -22,7 +22,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/examples/selftest.rs",
-          "version": "repo-file-v1:sha256:f9058eef5cfd9e5e03f0f0adb43d7e8cd8edd66ada2da9b48c18c9db8d073025"
+          "version": "repo-file-v1:sha256:1e5b3e4ad932cbaedeae6d80f972fb5c88ddb292e57510d2fc9d05d5bbe99ccb"
         }
       ]
     },
@@ -72,7 +72,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/tests/fixtures.lua",
-          "version": "repo-file-v1:sha256:c7a29bb4a8b2940d37598a8c03e8a6683602617f6e253db74e34e4a3d8e46e66"
+          "version": "repo-file-v1:sha256:ad7b70199ca44c7270d8d57119170e3cff7f90fa8143c53d928ffcbb56553576"
         }
       ]
     }

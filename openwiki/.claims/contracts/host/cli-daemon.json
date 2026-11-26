@@ -8,11 +8,11 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/examples/egg/args.rs#L300-L320",
-          "version": "repo-lines-v1:sha256:459f6a3a6a10abd942ab9af3a81064ba4b05809c45bb1cadab95f0f3c3b56aff:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFhODgxM2ZiNzIwMGU3NDFiZTBmOWFlMGUzODgwZWI4NWNkMGY1ZGVlY2MwYjU5OTA0YmMxZmFmN2QyNDkxMDIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMxNjYyZTBjNDg2YmUyNmY3Y2QzMDVjZTQ2ZjI0ODAyYmZhOWM1M2RmZWVlM2YwNWY4YzcwMTFjNjk4Yjg1OTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNlOGQ2MmVjMTdiNjdkNTEyNDMwZDY4M2RiNmIzY2YwMjVhNThmOGIyNjZhYWNjMmM1MWZhZWQwODJmZWRkYTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRmOWQzZGFiZWQ4NGI3NDAxOGVjNmUwNzg4MmE5NWZkZDA1N2EyMDRiZDRhMGUxNmE2YTRmZTFiNDA4MDMyYjUifQ"
+          "version": "repo-file-v1:sha256:1590f0c1dcc84bd424dda16cbfff109f75f77098af6d2245e6ad33ca7fdd8e50"
         },
         {
           "resource": "repo://crates/ygg-sandbox/examples/egg/args.rs#L55-L60",
-          "version": "repo-lines-v1:sha256:ee6c6e3dd7035c3eb17a13e1e2496266053626f6ff278db3ee80be596354d9f0:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWI0N2Q1ZWZmMWQyNDg5MThlMzJhNmQyMDg3OTFiMDVhMzQ5M2IxOGNiZmFmNGM3NWM2MjRlZTZjMjFjNmMzNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFjNDQwNGUwNmM5MWFiN2JlNmUyYmJhMGE0NzBjMmIyZTQ0ZmY2MzZlZDNlNGZlYTliZDIyZWRmOTAxN2Q1OCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNjZkOWY4ZTcwNTM5NDBhZjU5MmE4N2ZiNWQzZGFlMDk0ZWE1MDUwYzYzM2JiNWMwMTExOTI5NmY4NTU2MzE0NyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2ExMDBmN2QyOWE3M2Q2OTBmNGRlMTc0NThiNWFlZWI2ZTk4MjFkYWI3ZjkwZjZiYjQ5MmIyMjcwZWUyNDdjNCJ9"
+          "version": "repo-file-v1:sha256:1590f0c1dcc84bd424dda16cbfff109f75f77098af6d2245e6ad33ca7fdd8e50"
         }
       ]
     },
@@ -36,7 +36,7 @@
         },
         {
           "resource": "repo://crates/ygg-store/src/lib.rs",
-          "version": "repo-file-v1:sha256:7a4f071c53ba2df5c568f0e77950e53de26eb50c5e195d4f0bdd069abca19f50"
+          "version": "repo-file-v1:sha256:f0b65e9853e903812a383c624a7d685a7ce9d579541fdf121047e38a09a493bb"
         }
       ]
     },
@@ -76,7 +76,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-store/src/mounts/store.rs#L47-L90",
-          "version": "repo-lines-v1:sha256:31f4124d326097d59df6a3b2f36e1c4dddee2828087c5ef70a16c9f4167e45c7:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhZDA1ZDhiOWI4YTEzYWI4OTZhMDQ1ZTA3ZDQzMWEzMzNlYTVkYWIxNzFjMzAwNWRhZDg5NmM5M2UwN2Q5MTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRlYTgwNzkzZjZiMGY2MDcyY2E4MDgwODNjNmYzNDY4YWQ4NGE4NjQxZGJlNzJjNzhkODY1NGYzNzIzNzEwMjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM1NjQzYmUwYWY0NDM3YjRlZTg0ZTQ5ZTBhOWJkZDcwNzM3YjQyNjdjMzA0YTI1Y2YzOWRlNzQ3YTAzMDAzOTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY4ZmFjM2UwYTM4MmI4NjU5OGE2OWI4ZGFhYTliMDllYzdiNDczNTIzOTk5N2UzMDNmZjFjNTliNmNmOTk4YWMifQ"
+          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
         }
       ]
     }

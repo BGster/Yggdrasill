@@ -37,8 +37,12 @@
       "statement": "The two-stage merge discipline — iteration integration on develop and the round-level develop→master merge — must never run in the same step, because a master merge before every feature has landed merges a state that was never verified end to end.",
       "evidence": [
         {
-          "resource": "repo://docs/context/acts/release.md",
-          "version": "repo-file-v1:sha256:a5bdf17c4622c70b36c87359af06ca26d6f98a68b615e2281b8089e4d62065a5"
+          "resource": "repo://.pi/tools/git-integrate.sh",
+          "version": "repo-file-v1:sha256:66ace2623d7981c85aaa2d5126d0d56374b273a6fd431616849cacc7e46096c5"
+        },
+        {
+          "resource": "repo://.pi/tools/git-release.sh",
+          "version": "repo-file-v1:sha256:8db2044acc584a2d55e22da807946f59193dde64189ae7d05b2d76979c6dabdd"
         }
       ]
     },
@@ -47,8 +51,8 @@
       "statement": "`develop` and `master` synchronise by reset only (`git reset --hard master` then `--force-with-lease`), never by rebasing develop or merging master back into it: the no-fast-forward topology is the rollback history.",
       "evidence": [
         {
-          "resource": "repo://docs/context/acts/release.md",
-          "version": "repo-file-v1:sha256:a5bdf17c4622c70b36c87359af06ca26d6f98a68b615e2281b8089e4d62065a5"
+          "resource": "repo://.pi/tools/git-release.sh",
+          "version": "repo-file-v1:sha256:8db2044acc584a2d55e22da807946f59193dde64189ae7d05b2d76979c6dabdd"
         }
       ]
     },
@@ -57,8 +61,8 @@
       "statement": "The merge ritual ends with `git push origin master` and an unpushed trunk counts as an incomplete merge — a local merge that never reached origin is not a release.",
       "evidence": [
         {
-          "resource": "repo://docs/context/acts/release.md",
-          "version": "repo-file-v1:sha256:a5bdf17c4622c70b36c87359af06ca26d6f98a68b615e2281b8089e4d62065a5"
+          "resource": "repo://.pi/tools/git-release.sh",
+          "version": "repo-file-v1:sha256:8db2044acc584a2d55e22da807946f59193dde64189ae7d05b2d76979c6dabdd"
         }
       ]
     },
@@ -67,8 +71,8 @@
       "statement": "Deployment accepts master refs only and every deployment is reported and approved before it runs; there is no override switch, because deployment is the one write that leaves this machine.",
       "evidence": [
         {
-          "resource": "repo://docs/context/acts/release.md",
-          "version": "repo-file-v1:sha256:a5bdf17c4622c70b36c87359af06ca26d6f98a68b615e2281b8089e4d62065a5"
+          "resource": "repo://.github/workflows/deploy-pages.yml",
+          "version": "repo-file-v1:sha256:58443e163b0edee75077dde3cf870c435d0db04615ca0786d470ea5009629007"
         }
       ]
     },
@@ -77,8 +81,8 @@
       "statement": "A Mod or host binary upgrade lands after settlement and starts a new run id — old run directories are never migrated or adopted, so a failed load is answered with a new run rather than a repair attempt.",
       "evidence": [
         {
-          "resource": "repo://docs/context/acts/settle.md",
-          "version": "repo-file-v1:sha256:6ff5eae4f17b486d30c83bddc70960af932b09f7b3828ba3e94046a6d7ed2e9e"
+          "resource": "repo://crates/ygg-sandbox/examples/egg/paths.rs",
+          "version": "repo-file-v1:sha256:29e1a2cc2738fc1693dfc706263dc9a89f82d5db40de0a63e18d8b28525dab63"
         }
       ]
     }

@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/role-skill/store.lua",
-          "version": "repo-file-v1:sha256:187655c62634feb35a31e7aacf07a92ea377e57ef9a7b0706894d4a37b3fce23"
+          "version": "repo-file-v1:sha256:ee2287f922778f08219e62a6dee7eb5b600eabc37633e089b58f78bb54557ea1"
         }
       ]
     },
@@ -18,7 +18,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/role-skill/actors.lua",
-          "version": "repo-file-v1:sha256:eab1f6c3afbee783cad5f928a3384d7cb76f1003c17c76df82ed4eb8b1b458a1"
+          "version": "repo-file-v1:sha256:98fc11eb947080ee54480a8f891141bfa42f5efa786a0f5bc464a0bef936502e"
         }
       ]
     },
@@ -28,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/role-skill/compose.lua",
-          "version": "repo-file-v1:sha256:183e52a707b3a1d31642c752cad86275dba3d1a18859bed83bf22bb527b04111"
+          "version": "repo-file-v1:sha256:7145ff2eaae13df13b5477ae9fa2a9cdadf34aeb1ff35c8947fe0269451f74eb"
         }
       ]
     },
@@ -38,7 +38,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/role-skill/window.lua",
-          "version": "repo-file-v1:sha256:f80e8364e53412b9a7aa240e917a195750f859ee7a96364e386826ec12f57753"
+          "version": "repo-file-v1:sha256:45542f418517f2d52a85e909f84adaf9d7067e56e071b828be87a9637d8b1063"
         }
       ]
     },
@@ -48,7 +48,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/role-skill/counters.lua",
-          "version": "repo-file-v1:sha256:bad78ece1876104000f76cf71cd2ea1bb6152707a33c2fb1b8807c14cfa5d0a5"
+          "version": "repo-file-v1:sha256:ae70ecf67322b3490ba50fc46a5a35f605bbf802795e884b541ede1c3cceac9d"
         }
       ]
     },
@@ -58,7 +58,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/role-skill/init.lua",
-          "version": "repo-file-v1:sha256:57a4ec09ae5452b04f0521f90c2c101ee6dc602683616ca0650a928d9e2656ab"
+          "version": "repo-file-v1:sha256:3615359df0a2a43be1dd7cebb2240263bc30ddea00fe1c4776fdd9576bac58db"
         }
       ]
     },
@@ -68,7 +68,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/role-skill/test/pkg-role-skill.lua",
-          "version": "repo-file-v1:sha256:3759a1d7a444931a751638cdaede22c310b0fd68d843fc3986fc5e2ac2c95441"
+          "version": "repo-file-v1:sha256:7a9cdae2b0c022e1e6a165621a3c712866b2e3d83a29be3d83ec1188b2561486"
         }
       ]
     },

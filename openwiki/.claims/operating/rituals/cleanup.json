@@ -47,8 +47,12 @@
       "statement": "Without egg the two cleanups are performed by the main session on its own discipline and recorded in the batch settlement; only the machine block disappears, never the policy.",
       "evidence": [
         {
-          "resource": "repo://docs/context/rituals/fallback.md",
-          "version": "repo-file-v1:sha256:975bbf7c39073f027aad67fe2e4dd708ae8558541892c5d9904b5a5e3f5a929e"
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire/settlement.lua",
+          "version": "repo-file-v1:sha256:57b1456c18bf05ad44528847b7f7a1beb62a4e0b7bcd9f6dc13a9a475b22bee4"
+        },
+        {
+          "resource": "repo://.pi/tools/sessions-count.sh",
+          "version": "repo-file-v1:sha256:263c3a4f0a5f86d9e4a874bbd1594e597fd2cc910aad72ccbf35199d15061c9e"
         }
       ]
     }

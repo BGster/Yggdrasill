@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/entity/init.lua",
-          "version": "repo-file-v1:sha256:a75c2e749c3b8b4c0551051ce95d749e23b778c63fbe41b4dfc085c87e2853a1"
+          "version": "repo-file-v1:sha256:d923b970f52bea5f3562ea7e67ee0b2313c9b42616586df3a4d3ec5d62f8d1e6"
         }
       ]
     },
@@ -18,7 +18,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/entity/pkg.json",
-          "version": "repo-file-v1:sha256:5cd9d1faba637a37afc9725852af8e2ebcc9689e2bb70c02ddd054e31b0be310"
+          "version": "repo-file-v1:sha256:6d97b2b70eb22c2198fedee00ae5f06c915aadc9a67036432c30e63870ee77e7"
         }
       ]
     },
@@ -28,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/entity/record.lua",
-          "version": "repo-file-v1:sha256:40648f004ba8d3b00c90d5a5215ea682d9b8ef2092a2e84289b39ba2dcb37c59"
+          "version": "repo-file-v1:sha256:6785f8b32aca959bbc56df448555a4e510a5f0ac4cbee5699de98877ea2d60ac"
         }
       ]
     },
@@ -68,7 +68,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/entity/query.lua",
-          "version": "repo-file-v1:sha256:9d2d9a7519d398ded3a58ebe0b5e89e9b29f705587677c2e84b318779be211ef"
+          "version": "repo-file-v1:sha256:b9e3d8d734c3af807b6aea5ff338a374d3e4c0af972914050186e20e82bb9b9e"
         }
       ]
     },

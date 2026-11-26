@@ -18,7 +18,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-lint/src/lib.rs",
-          "version": "repo-file-v1:sha256:f088cf95f187fa397e2c3aa383e21013235f6e0adc0c13eb147ffb9bb0ec8974"
+          "version": "repo-file-v1:sha256:4e9724a512a19a40beaba842bdf64953dd323101f96fb579c24eb0532aad84da"
         }
       ]
     },

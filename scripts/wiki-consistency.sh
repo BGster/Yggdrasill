@@ -2,7 +2,8 @@
 # wiki-consistency.sh —— openwiki 闭包核验（只读）+ 场景签名验真（--attest）。
 #
 # 纯命令行契约（rev3 / harness 机证）：不读 config、不读局 KV、不依赖 egg。
-# 默认模式：校验 openwiki/overview.md 索引内的相对链接逐一存在 + 必备文件清单存在 + AGENTS.md 行数预算。
+# 默认模式：校验 openwiki/overview.md 索引内的相对链接逐一存在 + 必备文件清单存在 +
+# AGENTS.md 行数预算 + claims 证据闭包（仓内文件存在且 sha256 一致）。
 # --attest：核验某局事件日志里的 `read.<doc-id>=<ver>` 签名声明与 `openwiki/ver.json`
 #           当前的 ver 以及它的历史版本是否一致（`--run <dir>` 必填 —— 脚本不猜「最新局」）。
 #
@@ -20,11 +21,13 @@
 #   --max-history <n>  每个文件回溯的历史版本上限，缺省 50。
 #
 # 输出 · 默认（exit 0，k=v）：
-#   links=<n>;broken=<k>;first=<relpath|->;ok=<0|1>
+#   links=<n>;broken=<k>;first=<relpath|->;agents=<n>/<budget>;claims=<n>;claims_bad=<k>;ok=<0|1>
 #   links  = 索引内相对 markdown 链接总数（(http/https/# 开头的外链与锚点不计）。
 #   broken = 链接目标文件不存在 / 必备文件缺失的总数。
 #   first  = 第一个 broken 的相对路径（无 = -）。仓库内文档路径，非业务数据。
-#   ok     = 1 当且仅当 broken=0。
+#   claims = openwiki/.claims/** 内 claim 总数；claims_bad = 证据不解析/版本哈希不符的 claim 数
+#            （证据指向 openwiki/ 自身亦计坏——生成页不能自证）。
+#   ok     = 1 当且仅当 broken=0、agents≤预算、claims_bad=0、claims>0。
 #
 # 输出 · --attest（exit 0，k=v）：
 #   claims=<n>;forged=<k>;stale=<s>;first=<doc-id|->;ok=<0|1>
@@ -315,7 +318,41 @@ agents_lines = 0
 agents_path = os.path.join(repo, "AGENTS.md")
 if os.path.exists(agents_path):
     agents_lines = sum(1 for _ in open(agents_path, encoding="utf-8"))
-print("%d;%d;%s;%d" % (checked, broken, first, agents_lines))
+# claims 证据闭包：openwiki/.claims/**/*.json 里每条 evidence 必须解析到仓内真实文件，
+# 且 `version` 的 sha256 与当前字节一致——页面被引用内容改动后证据会失真。
+# 2026-11-26 事故：docs/ 整树删除后 6 条 evidence 仍指 `repo://docs/context/…`，
+# 提交侧无校验、留到下一次 update run 才暴露；这里把它变成默认模式的 fail。
+import glob, hashlib
+try:
+    import json
+except Exception:
+    json = None
+claims_total = 0
+claims_bad = 0
+if json is not None:
+    for cf in sorted(glob.glob(os.path.join(repo, 'openwiki/.claims/**/*.json'), recursive=True)):
+        try:
+            data = json.load(open(cf, 'r', encoding='utf-8'))
+        except Exception:
+            claims_bad += 1
+            continue
+        for claim in data.get('claims', []):
+            claims_total += 1
+            for ev in claim.get('evidence', []):
+                res = str(ev.get('resource', ''))
+                if not res.startswith('repo://'):
+                    claims_bad += 1
+                    continue
+                rel = res[len('repo://'):]
+                rel = rel.split('#')[0] or rel
+                fp = os.path.join(repo, rel)
+                if rel.startswith('openwiki/') or not os.path.isfile(fp):
+                    claims_bad += 1
+                    continue
+                want = 'repo-file-v1:sha256:' + hashlib.sha256(open(fp, 'rb').read()).hexdigest()
+                if str(ev.get('version', '')) != want:
+                    claims_bad += 1
+print("%d;%d;%s;%d;%d;%d" % (checked, broken, first, agents_lines, claims_total, claims_bad))
 PYEOF
 )
 
@@ -327,15 +364,17 @@ LINKS=$(printf '%s' "$RESULT" | cut -d';' -f1)
 BROKEN=$(printf '%s' "$RESULT" | cut -d';' -f2)
 FIRST=$(printf '%s' "$RESULT" | cut -d';' -f3)
 AGENTS=$(printf '%s' "$RESULT" | cut -d';' -f4)
+CLAIMS=$(printf '%s' "$RESULT" | cut -d';' -f5)
+CBAD=$(printf '%s' "$RESULT" | cut -d';' -f6)
 AGENTS_BUDGET=160
 
-if [ "$BROKEN" -eq 0 ] && [ "${AGENTS:-0}" -le "$AGENTS_BUDGET" ]; then OK=1; else OK=0; fi
+if [ "$BROKEN" -eq 0 ] && [ "${AGENTS:-0}" -le "$AGENTS_BUDGET" ] && [ "${CBAD:-1}" -eq 0 ] && [ "${CLAIMS:-0}" -gt 0 ]; then OK=1; else OK=0; fi
 
 if [ "$AS_JSON" -eq 1 ]; then
-  printf '{"links":%s,"broken":%s,"first":"%s","agents":%s,"agents_budget":%s,"ok":%s}\n' \
-    "$LINKS" "$BROKEN" "$FIRST" "${AGENTS:-0}" "$AGENTS_BUDGET" "$OK"
+  printf '{"links":%s,"broken":%s,"first":"%s","agents":%s,"agents_budget":%s,"claims":%s,"claims_bad":%s,"ok":%s}\n' \
+    "$LINKS" "$BROKEN" "$FIRST" "${AGENTS:-0}" "$AGENTS_BUDGET" "${CLAIMS:-0}" "${CBAD:-0}" "$OK"
 else
-  printf 'links=%s;broken=%s;first=%s;agents=%s/%s;ok=%s\n' \
-    "$LINKS" "$BROKEN" "$FIRST" "${AGENTS:-0}" "$AGENTS_BUDGET" "$OK"
+  printf 'links=%s;broken=%s;first=%s;agents=%s/%s;claims=%s;claims_bad=%s;ok=%s\n' \
+    "$LINKS" "$BROKEN" "$FIRST" "${AGENTS:-0}" "$AGENTS_BUDGET" "${CLAIMS:-0}" "${CBAD:-0}" "$OK"
 fi
 exit 0

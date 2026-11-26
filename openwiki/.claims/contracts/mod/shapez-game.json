@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/shapez/mod.lua",
-          "version": "repo-file-v1:sha256:41a1134d9c0ef02315e56e9aaad9a6f7761e178643123af27699572bc5023862"
+          "version": "repo-file-v1:sha256:8e7c3f367c08cc8cfde4aff16627bf693e05cfa5d78ee92fa393f093dd4886cc"
         },
         {
           "resource": "repo://packages/mods/shapez/pack.json",
@@ -22,7 +22,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/shapez/src/shapes.lua",
-          "version": "repo-file-v1:sha256:9b465c143b86ed89b70e0bbd3fbfa92873a672b92faed7a61785332c87b5cdb0"
+          "version": "repo-file-v1:sha256:db8d9912af7e05ac8055bf9bce231b2b4aea8489c86ccf6320cfaefd55103cc8"
         }
       ]
     },
@@ -32,7 +32,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/shapez/src/belts.lua",
-          "version": "repo-file-v1:sha256:b7d2974efc7c582f4e7d31cbf2ba8d56567ad243208a60fbfc1a40ed851ce27f"
+          "version": "repo-file-v1:sha256:24d664e1e002366f3cd78078e9950d83f8625890f6f8752006cac3768357c670"
         }
       ]
     },
@@ -42,7 +42,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/shapez/src/simtick.lua",
-          "version": "repo-file-v1:sha256:54385edde6b5f191855da27b4a4f38b68eab5f0d22653bf626c30c117fdf75fb"
+          "version": "repo-file-v1:sha256:ff1fd51b93a8d511c40db0ed9d1e6539a779636528c9c8e166cfe07ce877c7e8"
         }
       ]
     },
@@ -52,7 +52,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/shapez/src/hub.lua",
-          "version": "repo-file-v1:sha256:f671f750cafb8edad673ef5fb102bd6d458eb79e05bdfa903e8c0ab8ce45926d"
+          "version": "repo-file-v1:sha256:0e71309ec63998e46ace41f01526a2765529762f131babf182ddc99669e5632c"
         }
       ]
     },
@@ -62,7 +62,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/shapez/src/mapgen.lua",
-          "version": "repo-file-v1:sha256:09c6056ce45a2bdfee3d253bd139a19f4fc06dc7b5cb3bd8a3beb565fdf504d9"
+          "version": "repo-file-v1:sha256:af55977a672bf489fbc023f227c68270c8d00c8535b1462c596511dbf744947d"
         }
       ]
     },
@@ -72,7 +72,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/shapez/src/savegame.lua",
-          "version": "repo-file-v1:sha256:8a5361a76860c90ee6dcb46a87b626b1f1c5ba0029bb81be2b4147c9bc1b3b4c"
+          "version": "repo-file-v1:sha256:1697745163bc4d2eacd2f50f78bf8f40884af87dde3dafded31de74175608f57"
         }
       ]
     },
@@ -82,7 +82,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/shapez/src/bot.lua",
-          "version": "repo-file-v1:sha256:fe598dc3e27df3c5c75f998112778010ca6d7ac01bd44a1ce02d865ecc8866e9"
+          "version": "repo-file-v1:sha256:804eb8f2df7e56978a7723258d0d2c7961656a815f613d0777e7b0146eb13fef"
         }
       ]
     },
@@ -96,7 +96,7 @@
         },
         {
           "resource": "repo://packages/mods/shapez/tests/test-g-stress.lua",
-          "version": "repo-file-v1:sha256:0570b0a987a8844094f9a48dc1de333c072761d8bb0df12bf1c40ceee05fefa2"
+          "version": "repo-file-v1:sha256:003f103fda85c0016fe22d0122bf1f30b8bf893b6f14b2abd43b63978482a6e2"
         }
       ]
     }

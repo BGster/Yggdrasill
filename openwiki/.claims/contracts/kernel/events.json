@@ -62,7 +62,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/mod.lua",
-          "version": "repo-file-v1:sha256:93bac2ec2ef9f3c15ac523b38dd7284bb0d6c65d583d88fb72c7890527054898"
+          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
         }
       ]
     }

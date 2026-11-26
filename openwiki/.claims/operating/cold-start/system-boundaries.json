@@ -48,7 +48,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/src/domain/readset.lua",
-          "version": "repo-file-v1:sha256:b0324022fe2412cb1402340f48855b281dd0e6b96d4a62f1c10958567f54a915"
+          "version": "repo-file-v1:sha256:df76356f64895385ef32e93f53b138a0e95e0885f371388b99f2ff5f95a7e860"
         }
       ]
     },

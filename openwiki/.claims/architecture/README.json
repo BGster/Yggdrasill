@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/tests/surface-tree.lua#L47-L70",
-          "version": "repo-lines-v1:sha256:6e3c777ac2de02817f62d44cb03ccdc30c488c75e997d0dd26bf9556b3993881:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2NjIyZjc1NzFmOWM2ODYzNzdmZmU5NzE4NzUzZmIwNGE0YWFiYTNlNmVlNmFiMDNkMDQ5Y2EyOWI3YzU1MmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkNTA5MzU5MDdkM2Y0Zjk4YjZlNGEyMDM0Y2M2ZDI5ZDQ0YmFmZDRlMGYxODg3MTJkMTQwYzdhZTM2OTIwNWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA4YzExZTM1NTNjYWVmN2IyZGRkMzBlZDEyNDhlZTBmZjkzOTQzMDVmM2ViZjE2NzFjNjU2ZTJlOThhZDljYmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ3N2JlNmQ2ODg3MzEyYzNhM2U5MDhlZDczNWY4MDQwNDNmZDAwYjQzNGQ5MDQ3NTQxOGQ1NmI0MjVlYjA0OTUifQ"
+          "version": "repo-file-v1:sha256:5ddf3ed2fe32b56f82dfe53831dd19ec959bf1a78e99b1ca10db9cb812d15e01"
         }
       ]
     },
@@ -18,7 +18,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/tests/surface-tree.lua#L86-L130",
-          "version": "repo-lines-v1:sha256:0ad19b977f31f512cfccb186cfb861d344ac92de705a60cdc9fadef82a843fee:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlNmM5MmRmZjhlNDJkNWRiNGVjMmZmZDQ4OWRlMzNjMGEzNzBiZTVmNWIyNzY1YjhkNGE2MWJhZmM0OTI4NTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI3ZDI5MTY0MTBhMDVjYzcwOWY1OGM2Zjc1NjY0MzlmYzIwZDA4YmI1ZThkNmVmYzVhZGZlNmFjMTA4YjJkNzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRmNzY3ZWI3YTc1OTEwOGI5ZmRiYjFhMDU5ZjdjNmY2ZThlOWI0Mjc4NzdlYjBiN2YwZTA3NDFlOGQ4ZjlkMWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZmZDdhNDZlYmVlMThkNmZjN2E1ZjdmNzA5NGVlYzVlMDhhYzFjMjZlY2RhZDE3ODhlNTc3YzIxMWVjOTNkOGMifQ"
+          "version": "repo-file-v1:sha256:5ddf3ed2fe32b56f82dfe53831dd19ec959bf1a78e99b1ca10db9cb812d15e01"
         }
       ]
     },
@@ -28,11 +28,11 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/tests/modpkg.lua#L90-L115",
-          "version": "repo-lines-v1:sha256:bf31e3af5a828b731def2b8466402e452ea8bbc7d0c3f10795f81cdd2cc0e63a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5YTRkODA1ODM0NGYxZjRhYTRiN2NjODc1YmQ3NzRlYzY3ZTY0M2ViZmQ3ZTAxMWMzMzQzNDI5MTMyMzNiMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhODYxMjcyNzY1ZWQxZWI4NGJhZGE3ZjQyMjUzNjcwZGZkNDQ5NDVmNGVkZTY3OWI1YTNlOGM2YTMxZWM4NzIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjOWE3MmQ5MGJjNjkxNjY4MzNjNDg0YWU5YTgzN2EzNmJlYmU5NjA3ZDc4OTEyZjRkZTVmOTA0OTdmZWFlOGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjllMDFjYTJiMmIwOTMyNjA2MmM1NzdlNzYzODEwZDUwMTk5NGQyYTA4Y2E0MGZjYzc4ZDA5ZThmOTE3MGExNWUifQ"
+          "version": "repo-file-v1:sha256:62daa616515c190147f202429c05a1daca561137e0d38c79b145b508a246bdc1"
         },
         {
           "resource": "repo://AGENTS.md",
-          "version": "repo-file-v1:sha256:0c7eef7205c9320195791fb02dae7a094f164c7b677d34d430c2daffaac5feec"
+          "version": "repo-file-v1:sha256:cb3a9b153f675543dd4c5f3984d071f6d67156feafc189101a9e7e1201d501d4"
         }
       ]
     },
@@ -42,7 +42,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/mod.lua",
-          "version": "repo-file-v1:sha256:93bac2ec2ef9f3c15ac523b38dd7284bb0d6c65d583d88fb72c7890527054898"
+          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
         },
         {
           "resource": "repo://crates/ygg-core/src/lib.rs",

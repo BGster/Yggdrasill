@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/tla-models/mod.lua",
-          "version": "repo-file-v1:sha256:bf5c60455277f45a794527218e71b0e4839bb45b35c268716bf0cd183e7ae1c5"
+          "version": "repo-file-v1:sha256:95ac79d0493c56a39b0510cca7755ccc65e16688bae68a7f9e9a517947f7463d"
         },
         {
           "resource": "repo://packages/mods/tla-models/pack.json",
@@ -22,7 +22,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/tla-models/src/replay.lua",
-          "version": "repo-file-v1:sha256:e3a680c49d0d42161443ffc4910767c4c903d881a673db55356879f6b0bee475"
+          "version": "repo-file-v1:sha256:9b48589d85fa445fe9ed6e880c57fcaef6c63d94f223c9abc9b42ba2ca478fed"
         }
       ]
     },
@@ -36,7 +36,7 @@
         },
         {
           "resource": "repo://packages/mods/tla-models/src/replay.lua",
-          "version": "repo-file-v1:sha256:e3a680c49d0d42161443ffc4910767c4c903d881a673db55356879f6b0bee475"
+          "version": "repo-file-v1:sha256:9b48589d85fa445fe9ed6e880c57fcaef6c63d94f223c9abc9b42ba2ca478fed"
         }
       ]
     },
@@ -46,7 +46,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/tla-models/src/inv.lua",
-          "version": "repo-file-v1:sha256:b5571b42b93c5e1d701c61829cb4cb47c8534ac2d00528f2d6dccef18eeb9ad5"
+          "version": "repo-file-v1:sha256:d14276974f67a2f4f5d4af7b243c44888683dabba7816ed3f0a6a05f4b150a42"
         }
       ]
     },
@@ -56,11 +56,11 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/tla-models/src/gol.lua",
-          "version": "repo-file-v1:sha256:fab1834b040fdcad0bb7e87b7e85ce426816b4bb795e48d51682749bd3d7f689"
+          "version": "repo-file-v1:sha256:37bf82d8e2ec480b16bc47870c952cf83e95397e84546a119737035fa1052cdd"
         },
         {
           "resource": "repo://packages/mods/tla-models/src/klotski.lua",
-          "version": "repo-file-v1:sha256:6a0d62bc11b973f43157270aeec1ecc8c5d6cad955371292e1c6fe5248e78313"
+          "version": "repo-file-v1:sha256:47e3c0bccb73ff8e3cb32b175d1a2f33778cdb5aa7e2a3a4b3e6f56363e4c6c7"
         }
       ]
     },
@@ -84,7 +84,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/tla-models/src/replay.lua",
-          "version": "repo-file-v1:sha256:e3a680c49d0d42161443ffc4910767c4c903d881a673db55356879f6b0bee475"
+          "version": "repo-file-v1:sha256:9b48589d85fa445fe9ed6e880c57fcaef6c63d94f223c9abc9b42ba2ca478fed"
         }
       ]
     },
@@ -94,7 +94,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/tla-models/src/ewd998.lua",
-          "version": "repo-file-v1:sha256:93d5eea024ef179215966d968d5ac100b4115f026b02b59e6bb863e7cb6c7864"
+          "version": "repo-file-v1:sha256:87be1a1b536aef807c1d03fd83eafc8cd142a6d5dd137441e7c481bbf56d68bc"
         }
       ]
     }

@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/superagent/mod.lua",
-          "version": "repo-file-v1:sha256:a264f7d975a5369873b53f56fbbbd439e9d737c12c83ff9b818cd4ebc484631f"
+          "version": "repo-file-v1:sha256:e2e9288075b81db9927dcd49429aa6465e9e534e3fe416b62f00b59f58ab4257"
         },
         {
           "resource": "repo://packages/mods/superagent/pack.json",
@@ -80,7 +80,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/superagent/panel/index.html",
-          "version": "repo-file-v1:sha256:2ec66e2e9486c7a7d5912e25e15988abe14c31d9ac90186a7a108671718f2a5e"
+          "version": "repo-file-v1:sha256:d8f90130d0dc75a56c5ad89d099dddfd25607334cdf94d09f6131d214d9c5b9e"
         }
       ]
     },

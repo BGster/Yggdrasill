@@ -66,7 +66,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/examples/serve/mod.rs",
-          "version": "repo-file-v1:sha256:b943fff303341d0ca9b551f27048199ce5ed309be37d766ea40a00339aca6ff4"
+          "version": "repo-file-v1:sha256:1efb813c7aa9074a3398836ea7655143b17c9a0a3acdf84b03d8dc59f126079a"
         },
         {
           "resource": "repo://crates/ygg-sandbox/examples/serve/tests_registry_sse.rs",

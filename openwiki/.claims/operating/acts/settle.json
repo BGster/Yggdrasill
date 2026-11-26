@@ -48,7 +48,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/config.json",
-          "version": "repo-file-v1:sha256:23263ec07b27ed3687a4f81132bf8dfaacc01a2fbf657ea3ea615dbb383921e4"
+          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
         }
       ]
     },

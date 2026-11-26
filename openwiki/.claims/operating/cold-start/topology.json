@@ -38,7 +38,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sim/Cargo.toml",
-          "version": "repo-file-v1:sha256:b4330b06099d156677dce2d504a6067e337547481c54fc519467545c81243ecc"
+          "version": "repo-file-v1:sha256:fd64194d66768974d9d80a1a46d324286f67c5b505b67ee1c3153ba5a80a9924"
         }
       ]
     },

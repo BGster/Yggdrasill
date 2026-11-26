@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://scripts/gen-scene-readfirst.py",
-          "version": "repo-file-v1:sha256:2df05b925a13b695809e365659eb349cfb696718aa6d757a18fdbc3d2fc74b0b"
+          "version": "repo-file-v1:sha256:c4cb14b5c78fc91632cfc0c78e8357d9079c55447c2e403650441899477712fc"
         }
       ]
     },
@@ -18,7 +18,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
-          "version": "repo-file-v1:sha256:e8ed1a1e4f56fdfe79b3f5155d9e9673fce94a4c468b13d527d2a6a9651c8710"
+          "version": "repo-file-v1:sha256:c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
         }
       ]
     },
@@ -38,7 +38,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-harness.json",
-          "version": "repo-file-v1:sha256:84588d31f24905bf517eb588354122abc773e8f2ccfcd01327b89edcbb7252df"
+          "version": "repo-file-v1:sha256:f4668324db3f7a38379a970e57e48cfa83be2530a7a9a56a9502f57322144aed"
         }
       ]
     }

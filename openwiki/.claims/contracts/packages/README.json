@@ -8,11 +8,11 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/entity/pkg.json",
-          "version": "repo-file-v1:sha256:5cd9d1faba637a37afc9725852af8e2ebcc9689e2bb70c02ddd054e31b0be310"
+          "version": "repo-file-v1:sha256:6d97b2b70eb22c2198fedee00ae5f06c915aadc9a67036432c30e63870ee77e7"
         },
         {
           "resource": "repo://packages/libs/role-skill/pkg.json",
-          "version": "repo-file-v1:sha256:f3bc9859d7c126c7695052a7b4aca8aca1ba71122858b77690df643b8b888c1e"
+          "version": "repo-file-v1:sha256:3ad0ac0e1cb2c8dfb2d2c8725af86209db60c45ef85915d02a03b1883c161cb6"
         }
       ]
     },
@@ -22,11 +22,11 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/codec/pkg.json",
-          "version": "repo-file-v1:sha256:d51fb876bcf1caf84f7c0a935e7a880b54789c3a7c0941ac89865b21f08aeb4f"
+          "version": "repo-file-v1:sha256:aeb0c70a6a64aa2ed8b4ba031da9d170553751b31297dadc27d5f67f2229f259"
         },
         {
           "resource": "repo://packages/libs/procgen/pkg.json",
-          "version": "repo-file-v1:sha256:b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
+          "version": "repo-file-v1:sha256:cdef84821f8c931e7430a2db1344819d9e1ecc1e6375f8685c793e7ee47b0686"
         }
       ]
     },
@@ -36,11 +36,11 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/entity/init.lua",
-          "version": "repo-file-v1:sha256:a75c2e749c3b8b4c0551051ce95d749e23b778c63fbe41b4dfc085c87e2853a1"
+          "version": "repo-file-v1:sha256:d923b970f52bea5f3562ea7e67ee0b2313c9b42616586df3a4d3ec5d62f8d1e6"
         },
         {
           "resource": "repo://packages/libs/entity/pkg.json",
-          "version": "repo-file-v1:sha256:5cd9d1faba637a37afc9725852af8e2ebcc9689e2bb70c02ddd054e31b0be310"
+          "version": "repo-file-v1:sha256:6d97b2b70eb22c2198fedee00ae5f06c915aadc9a67036432c30e63870ee77e7"
         }
       ]
     },
@@ -88,11 +88,11 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/assetgen/pkg.json",
-          "version": "repo-file-v1:sha256:b33e4227f13cb64108807b51c8db289ab4c0c3c5de8d04eac138b6085536a5ec"
+          "version": "repo-file-v1:sha256:3a5d545104906bcf6b1e08fa44e13ce442ae3714b4a29f6b8b90624d34a67a11"
         },
         {
           "resource": "repo://packages/libs/textframe/pkg.json",
-          "version": "repo-file-v1:sha256:743f4e43990f2abdff9dfbda84b6caa787241557987f5b5ef9e078a524a90b22"
+          "version": "repo-file-v1:sha256:7f4eb2916fa368cd07319997617c231bad7fcd9961aba53431c35e4e152087b9"
         }
       ]
     },

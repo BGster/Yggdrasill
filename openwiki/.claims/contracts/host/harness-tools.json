@@ -52,11 +52,11 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/config.json",
-          "version": "repo-file-v1:sha256:23263ec07b27ed3687a4f81132bf8dfaacc01a2fbf657ea3ea615dbb383921e4"
+          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
         },
         {
           "resource": "repo://.ygg/mods/agent-seed/mod.lua",
-          "version": "repo-file-v1:sha256:93bac2ec2ef9f3c15ac523b38dd7284bb0d6c65d583d88fb72c7890527054898"
+          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
         }
       ]
     },
@@ -75,12 +75,12 @@
       "statement": "跨 harness 冻结面 = 脚本名 + argv 旗标表 + 输出方言 + exit 码表 + 注册键名 + 参数约定；演进只增不改名。本次知识面迁移把这两个文档工具改名为 `wiki-consistency.sh` / `scripts/wiki-ver.sh`，索引改读 `openwiki/overview.md`、版本改读 `openwiki/ver.json`。",
       "evidence": [
         {
-          "resource": "repo://.pi/tools/docs-consistency.sh",
-          "version": "repo-file-v1:sha256:fb5e7dab9080d2bc7c2036aebac759721c02b9303f4869c8e5d1ef198d860414"
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:576d6d8d7378ceaa9788ed455217c7465a3556edea1fce36797be6b71927a583"
         },
         {
-          "resource": "repo://scripts/docs-ver.sh",
-          "version": "repo-file-v1:sha256:84dd07f7d86dda772602d237e08021954a457f9255af1dc617a5c22ea7d2b804"
+          "resource": "repo://scripts/wiki-ver.sh",
+          "version": "repo-file-v1:sha256:4f86231f653a41d271d5d6d5eae4cd072ed1cb2365bb9ac131aef0346e0e8d65"
         }
       ]
     }

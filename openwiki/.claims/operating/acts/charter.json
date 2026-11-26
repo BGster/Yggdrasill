@@ -48,7 +48,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
-          "version": "repo-file-v1:sha256:e8ed1a1e4f56fdfe79b3f5155d9e9673fce94a4c468b13d527d2a6a9651c8710"
+          "version": "repo-file-v1:sha256:c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
         }
       ]
     },
@@ -68,7 +68,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
-          "version": "repo-file-v1:sha256:fc153c67709cf5d7b6dc2a9dddbb50061b7e4effd324455f052e51cc0fec1279"
+          "version": "repo-file-v1:sha256:032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
         }
       ]
     },

@@ -8,11 +8,11 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/assetgen/init.lua",
-          "version": "repo-file-v1:sha256:7fd6ed3b440082ab9397d1c5a52a404c6c3dadf5bb0c5f2c6895176d23a61e48"
+          "version": "repo-file-v1:sha256:37bf5c0762d5ea3738261ce1df693341be9af694db502f09c95ef425e9b84521"
         },
         {
           "resource": "repo://packages/libs/assetgen/spec.lua",
-          "version": "repo-file-v1:sha256:3ab3e7d3d22f5d77d8405a496c1de4d8ad4ee8beef6d46b2e6868215eb120f28"
+          "version": "repo-file-v1:sha256:afd9605a398ca9ac9223aa477c3e25d66e38e49330f6242db9bf6f421f19d70b"
         }
       ]
     },
@@ -22,11 +22,11 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/assetgen/sound.lua",
-          "version": "repo-file-v1:sha256:af87b3a5a2a9ef5bad4f9c823569f899530b32850ea2791d2ef0a1240facad36"
+          "version": "repo-file-v1:sha256:911eeb17ee159e190a4358aea497a0f57b8eb79563dbe500a8bc4fe4e50236f6"
         },
         {
           "resource": "repo://packages/libs/assetgen/texture.lua",
-          "version": "repo-file-v1:sha256:f32eb7978c82607c366b4ca663498c539dad4bad73213423ebc2bd7d4f5f791d"
+          "version": "repo-file-v1:sha256:0d159899715ef9bc31852ea1f64063ffd4cf41fde3ef475cedecc7326c9b99f0"
         }
       ]
     },
@@ -36,7 +36,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/assetgen/spec.lua",
-          "version": "repo-file-v1:sha256:3ab3e7d3d22f5d77d8405a496c1de4d8ad4ee8beef6d46b2e6868215eb120f28"
+          "version": "repo-file-v1:sha256:afd9605a398ca9ac9223aa477c3e25d66e38e49330f6242db9bf6f421f19d70b"
         }
       ]
     },
@@ -46,11 +46,11 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/assetgen/encode.lua",
-          "version": "repo-file-v1:sha256:17663008f111628e5ccc1b40ad6d05d0ffabbff7db4c12e199fd8a6a8fd7c858"
+          "version": "repo-file-v1:sha256:fec656b42c87e91bc02dcc71fb1c3d9c25896c6ad75afc07e2231da03d90c187"
         },
         {
           "resource": "repo://packages/libs/assetgen/init.lua",
-          "version": "repo-file-v1:sha256:7fd6ed3b440082ab9397d1c5a52a404c6c3dadf5bb0c5f2c6895176d23a61e48"
+          "version": "repo-file-v1:sha256:37bf5c0762d5ea3738261ce1df693341be9af694db502f09c95ef425e9b84521"
         }
       ]
     },
@@ -64,7 +64,7 @@
         },
         {
           "resource": "repo://packages/libs/assetgen/mathx.lua",
-          "version": "repo-file-v1:sha256:4133c3719792595148415a6cd19fb84dfe982d19bb8625b51e17b7480944cb75"
+          "version": "repo-file-v1:sha256:972e32a20e8d515885ffff619cd6953d3cba7887aee92a3bed37d27a7fe33d93"
         }
       ]
     },
@@ -74,11 +74,11 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/assetgen/init.lua",
-          "version": "repo-file-v1:sha256:7fd6ed3b440082ab9397d1c5a52a404c6c3dadf5bb0c5f2c6895176d23a61e48"
+          "version": "repo-file-v1:sha256:37bf5c0762d5ea3738261ce1df693341be9af694db502f09c95ef425e9b84521"
         },
         {
           "resource": "repo://packages/libs/procgen/pkg.json",
-          "version": "repo-file-v1:sha256:b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
+          "version": "repo-file-v1:sha256:cdef84821f8c931e7430a2db1344819d9e1ecc1e6375f8685c793e7ee47b0686"
         }
       ]
     },
@@ -88,7 +88,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/assetgen/bytes.lua",
-          "version": "repo-file-v1:sha256:3ec697a4347aa203800b1389665f0af48289d7188a65622b862c8f7225fcd02f"
+          "version": "repo-file-v1:sha256:a71f040ae2052eb01b6c62a74d8679b5b1a133b7a93ceff9025dae8ce54abaea"
         }
       ]
     },
@@ -102,7 +102,7 @@
         },
         {
           "resource": "repo://packages/libs/assetgen/test/pkg-assetgen.lua",
-          "version": "repo-file-v1:sha256:29f138d83c21a3882fafe4dde5cdcaf8dce4089ba2f0d6b7e065416177612f7e"
+          "version": "repo-file-v1:sha256:308fe468e309a73fb8e55c063a2fce31b5d91cbb1738de6ba91d71b9e4219775"
         }
       ]
     }

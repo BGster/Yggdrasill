@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/procgen/rng.lua",
-          "version": "repo-file-v1:sha256:74e223a782333a5dd89c229c5f2e6ff63a367e4f7396402ca73ad6340430770c"
+          "version": "repo-file-v1:sha256:0667173ba6216baa4004d06b96682e8ccff1876b4667ecf98abad324ca37afd6"
         }
       ]
     },
@@ -18,7 +18,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/procgen/rng.lua",
-          "version": "repo-file-v1:sha256:74e223a782333a5dd89c229c5f2e6ff63a367e4f7396402ca73ad6340430770c"
+          "version": "repo-file-v1:sha256:0667173ba6216baa4004d06b96682e8ccff1876b4667ecf98abad324ca37afd6"
         }
       ]
     },
@@ -28,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/procgen/algos/layout.lua",
-          "version": "repo-file-v1:sha256:31c7918e6783b185eb5fcac0b074bb9e1e09ea9e7d71b2db8b0b99578690f8f3"
+          "version": "repo-file-v1:sha256:5e63d84a3893cd91ad5999a16c7de20b4952c8f0a4a9e695f11c54a3c990797b"
         }
       ]
     },
@@ -38,7 +38,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/procgen/registry.lua",
-          "version": "repo-file-v1:sha256:0acc45a8b037fad86347dd2bfce991fa6375f302ecfa0ebe4c305bdfc0462ef7"
+          "version": "repo-file-v1:sha256:71fa02afc567098b7f179b6b1ba05aa6f7fc587938fe8997fd3c1e51086522a2"
         }
       ]
     },
@@ -48,7 +48,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/procgen/test/pkg-procgen.lua",
-          "version": "repo-file-v1:sha256:080041d95b0b5ed05cd6c2b86359754724683fda9aad6931fc221c29ceb54e4a"
+          "version": "repo-file-v1:sha256:c5878aa425436d11a6e87f24ce937940750432f0f3a10e9a2fd233e99cf9243b"
         }
       ]
     },
@@ -68,7 +68,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/procgen/init.lua",
-          "version": "repo-file-v1:sha256:a70dbe771d50af18760ea518e9dcecb7c02a607bea687eedea89030ed3b21a0e"
+          "version": "repo-file-v1:sha256:1ae2513f9aae45c02938baeeb107d274c0d629ba66a8f731743e5ce58be3ded3"
         }
       ]
     },
@@ -78,7 +78,7 @@
       "evidence": [
         {
           "resource": "repo://packages/libs/procgen/digest.lua",
-          "version": "repo-file-v1:sha256:6ca1a556bb1bbf429fbcb1edffdb19aaad68c3be13402ef25cd7ed4a0aaef097"
+          "version": "repo-file-v1:sha256:25a2f391541091ba99ceef3692e97d47c56ffab7f8b9ea003d6d4aa71e2d002c"
         }
       ]
     }

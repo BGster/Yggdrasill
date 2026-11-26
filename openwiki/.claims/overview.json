@@ -18,7 +18,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-lint/src/rules.rs",
-          "version": "repo-file-v1:sha256:9a71a4407bdaa6809ba5aa2324dc841650876e886d5f3c8f73b52e9106974801"
+          "version": "repo-file-v1:sha256:2105b328f68111524911e7a2c33c6372aff011a172a40b028eaac515eadfe60e"
         }
       ]
     },
@@ -58,7 +58,7 @@
       "evidence": [
         {
           "resource": "repo://Cargo.toml",
-          "version": "repo-file-v1:sha256:b900f153157b2214bb2af956a1d96c845911dc44a54272afbd9a45c9899685e1"
+          "version": "repo-file-v1:sha256:7ce7b9f3cea20c4ffc523a058abb4f0904e1e1fa754b1e18e28ab05c2c9b9683"
         }
       ]
     }

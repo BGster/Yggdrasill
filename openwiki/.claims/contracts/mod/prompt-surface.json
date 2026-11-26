@@ -8,11 +8,11 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
-          "version": "repo-file-v1:sha256:fc153c67709cf5d7b6dc2a9dddbb50061b7e4effd324455f052e51cc0fec1279"
+          "version": "repo-file-v1:sha256:032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
         },
         {
           "resource": "repo://.ygg/mods/agent-seed/mod.lua",
-          "version": "repo-file-v1:sha256:93bac2ec2ef9f3c15ac523b38dd7284bb0d6c65d583d88fb72c7890527054898"
+          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
         }
       ]
     },
@@ -32,7 +32,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/src/view/guide.lua",
-          "version": "repo-file-v1:sha256:96a816d8897425354b6a2ce849b756d2d2c10f93f1f5dc2496db018b5d95fe57"
+          "version": "repo-file-v1:sha256:2082ef1b572723ef5cfb1f9a74825f4edab7d3e7c593ae716ad198404a65f5af"
         }
       ]
     },
@@ -42,7 +42,7 @@
       "evidence": [
         {
           "resource": "repo://scripts/gen-scene-readfirst.py",
-          "version": "repo-file-v1:sha256:2df05b925a13b695809e365659eb349cfb696718aa6d757a18fdbc3d2fc74b0b"
+          "version": "repo-file-v1:sha256:c4cb14b5c78fc91632cfc0c78e8357d9079c55447c2e403650441899477712fc"
         }
       ]
     },
@@ -52,7 +52,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/tests/surface.lua",
-          "version": "repo-file-v1:sha256:1b62ccca75801a43d546a481f6591117063253d505deb34495e8ad8408b6eb0a"
+          "version": "repo-file-v1:sha256:99f199fc31200d24a63c8f379c6de082c7033a17cfe8907afd9ff125ff47dd30"
         }
       ]
     },
@@ -62,7 +62,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-harness.json",
-          "version": "repo-file-v1:sha256:84588d31f24905bf517eb588354122abc773e8f2ccfcd01327b89edcbb7252df"
+          "version": "repo-file-v1:sha256:f4668324db3f7a38379a970e57e48cfa83be2530a7a9a56a9502f57322144aed"
         }
       ]
     }

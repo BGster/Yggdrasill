@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
-          "version": "repo-file-v1:sha256:fc153c67709cf5d7b6dc2a9dddbb50061b7e4effd324455f052e51cc0fec1279"
+          "version": "repo-file-v1:sha256:032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
         }
       ]
     },
@@ -28,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
-          "version": "repo-file-v1:sha256:fc153c67709cf5d7b6dc2a9dddbb50061b7e4effd324455f052e51cc0fec1279"
+          "version": "repo-file-v1:sha256:032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
         }
       ]
     },
@@ -38,7 +38,7 @@
       "evidence": [
         {
           "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-settlement.json",
-          "version": "repo-file-v1:sha256:2bb6b98d8475714dad5c74284e917cf3dcfe1c59fffaf092401750ebce4cd604"
+          "version": "repo-file-v1:sha256:d777378318474bcd55d09a322c339bdfecb95ceb922d08d48820a4998680ad8d"
         }
       ]
     },
@@ -48,7 +48,7 @@
       "evidence": [
         {
           "resource": "repo://scripts/sync-seed-mod.sh",
-          "version": "repo-file-v1:sha256:360a23af3bedf62ddbc7a465d69bcfa5348cccd3dd825c31279291793e703679"
+          "version": "repo-file-v1:sha256:1b0b2ef079ec71ab3bf86e81e769f88e74e50da02fdf7dc29b06accaf56cfb8d"
         }
       ]
     }

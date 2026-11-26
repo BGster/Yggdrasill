@@ -42,7 +42,7 @@
       "evidence": [
         {
           "resource": "repo://scripts/sync-seed-mod.sh",
-          "version": "repo-file-v1:sha256:360a23af3bedf62ddbc7a465d69bcfa5348cccd3dd825c31279291793e703679"
+          "version": "repo-file-v1:sha256:1b0b2ef079ec71ab3bf86e81e769f88e74e50da02fdf7dc29b06accaf56cfb8d"
         }
       ]
     },
