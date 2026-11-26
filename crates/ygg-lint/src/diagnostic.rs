@@ -42,6 +42,14 @@ pub mod code {
     /// 早（不必真的装载）也更完整（懒加载没走到也一样报）。两份清单只有一份
     /// （[`ygg_modules::effects`]）。
     pub const MOD_EFFECT: &str = "YGG-MOD-EFFECT";
+    /// 沙箱白名单面（单文件与 `--pack` 都跑）：引用了环境装配时被摘掉的全局
+    /// （`os` / `io` / `debug` / `package` …）、`math` 收窄表外的成员
+    /// （`math.sin` …），或用了浮点幂 `^`。
+    ///
+    /// 与 `ygg-sandbox` 的 deny-by-default 环境是**同一条不变量**的两套执行面：
+    /// 装载期白名单拦的是真的调用，这条在编辑期就报——不必执行、也不必真的
+    /// 跑到那一行（懒加载分支里同样报）。
+    pub const STD: &str = "YGG-STD";
 }
 
 /// 一条 lint 诊断（line/column 由 offset 推导，均 1 起、字节列口径；

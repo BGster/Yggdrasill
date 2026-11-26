@@ -39,7 +39,9 @@ use ygg_modules::{
 
 use crate::diagnostic::{code, Diagnostic, Severity};
 use crate::locate::line_col;
-use crate::rules::{call_path, effects_for_ast, parse_gate, string_argument, string_literal_value};
+use crate::rules::{
+    call_path, effects_for_ast, parse_gate, std_for_ast, string_argument, string_literal_value,
+};
 
 /// 整包检查结果：要么这本来就是个单文件 Mod，要么有一份报告。
 #[derive(Debug)]
@@ -322,17 +324,19 @@ pub fn lint_pack_with_packages(
         sources.insert(path.to_owned(), source.to_owned());
     }
 
-    // ⑤ 逐文件：独立 parse（不拼接）→ 解析门 + 副作用面 + 依赖面。
+    // ⑤ 逐文件：独立 parse（不拼接）→ 解析门 + 白名单面 + 副作用面 + 依赖面。
     //
-    // L1 主防线（`YGG-MOD-EFFECT`）**只对模块**：模块 chunk 顶层是「装载期就会
-    // 执行的面」，而入口本来就是装配清单（注册 / 初始化是它的职责）。哪边是
-    // 入口在 ①–④ 已经判完（`code.entry` 与 `code.modules` 不允许重叠），这里只
-    // 按路径区分，不看内容猜测。
+    // 白名单面（`YGG-STD`）对**入口与模块都跑**：`os` / `io` 在入口同样是 nil，
+    // 「入口是装配清单」不是放开全局库的理由。L1 主防线（`YGG-MOD-EFFECT`）
+    // **只对模块**：模块 chunk 顶层是「装载期就会执行的面」，而入口本来就是装配
+    // 清单（注册 / 初始化是它的职责）。哪边是入口在 ①–④ 已经判完（`code.entry`
+    // 与 `code.modules` 不允许重叠），这里只按路径区分，不看内容猜测。
     let mut units: BTreeMap<String, Unit> = BTreeMap::new();
     for (path, source) in &sources {
         let mut unit = Unit::default();
         match parse_gate(path, source) {
             Ok(ast) => {
+                diagnostics.extend(std_for_ast(path, source, &ast));
                 if entry.as_deref() != Some(path.as_str()) {
                     diagnostics.extend(effects_for_ast(path, source, &ast));
                 }
