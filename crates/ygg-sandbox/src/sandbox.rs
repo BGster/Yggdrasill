@@ -39,10 +39,12 @@ use std::rc::Rc;
 use mlua::{
     Error, Function, HookTriggers, Lua, LuaOptions, MultiValue, StdLib, Table, Value, VmState,
 };
+use ygg_sim::component::{ComponentId, EntityId};
 use ygg_sim::error::SimError;
 use ygg_sim::sim::Sim;
 
 use crate::modules::{self, ModuleHandle};
+use crate::world_ops::{self, WorldOp};
 
 /// 引擎版本（`ygg.engine_version` 占位面 + S5 存档双版本号的引擎侧取值源）。
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -250,13 +252,21 @@ pub struct Sandbox {
 
 /// 一次宿主推进的结果（[`Sandbox::step`]）。
 ///
-/// 只给**终值**：`tick` 是内核时钟（绝对序号，与本次推进了几 tick 无关），
-/// `hash` 是该时刻的规范状态哈希（快照帧尾的 fnv1a64）。中间每 tick 的状态
-/// 不返回——回放证据要的是「同一序列到同一终态」，不是逐步回执。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// 给**终值与增量**：`tick` 是内核时钟（绝对序号，与本次推进了几 tick 无关），
+/// `hash` 是该时刻的规范状态哈希（快照帧尾的 fnv1a64）；`changed` 是本次推进里
+/// **真的变过的格** `(实体, 组件)`，按 `(eid, cid)` 升序去重。中间每 tick 的状态
+/// 不返回——回放证据要的是「同一序列到同一终态」，不是逐步回执；而增量面只要
+/// 「谁变了」，不要「怎么变的」。
+///
+/// `changed` 的来源是内核 undo 日志（[`ygg_sim::Sim::changed`]）：不另装仪器，
+/// 所以不存在「某个写点忘了报」。同一格多次写（多 tick 或多次写回）只算一条；
+/// 结构操作（生成/删除/加列/摘列）不产生条目——协议层的 `delta` 因此看不见结构变更。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StepReport {
     pub tick: u64,
     pub hash: u64,
+    /// 本次推进写过的格 `(实体, 组件)`（升序去重）。
+    pub changed: Vec<(EntityId, ComponentId)>,
 }
 
 /// 宿主推进面的唯一错误类型。
@@ -436,13 +446,35 @@ impl Sandbox {
             .as_mut()
             .ok_or_else(|| SimError::Unmounted(String::from("Sandbox::step")))?;
         // 借用在整个循环里不放：这是 `WORLD_BUSY` 的物理来源。
+        let mut changed: Vec<(EntityId, ComponentId)> = Vec::new();
         for _ in 0..ticks {
             sim.step(dt)?;
+            // 每 tick 一拍：内核的 `changed` 只描述刚刚完成的那次事务。
+            changed.extend_from_slice(sim.changed());
         }
+        changed.sort_unstable();
+        changed.dedup();
         Ok(StepReport {
             tick: sim.tick(),
             hash: sim.hash(),
+            changed,
         })
+    }
+
+    /// 宿主批量写面：一整批 [`WorldOp`] **要么全成、要么全回**。
+    ///
+    /// 返回实际生效的写次数（值写入按格计，结构操作按受影响实体计）。
+    /// 校验与落笔全在 [`world_ops`]（内核语义的唯一实现）——宿主面只把协议结构
+    /// 翻译成 `WorldOp`，不在这里也不在宿主里复刻一份校验。
+    ///
+    /// 推进中（`step` 持有内核槽）调用得到 `WORLD_BUSY` 可读错误，与 `world.*` 同源。
+    pub fn apply(&mut self, ops: &[WorldOp]) -> Result<usize, StepError> {
+        let slot = Rc::clone(&self.sim);
+        let mut guard = slot.borrow_mut();
+        let sim = guard
+            .as_mut()
+            .ok_or_else(|| SimError::Unmounted(String::from("Sandbox::apply")))?;
+        world_ops::apply_ops(sim, ops).map(|report| report.writes)
     }
 
     /// 当前世界时钟（内核 tick；未挂载 = `YGG-SIM-UNMOUNTED`）。

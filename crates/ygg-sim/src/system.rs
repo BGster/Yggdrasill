@@ -297,6 +297,19 @@ impl SystemSet {
         out
     }
 
+    /// 系统表 `(名, 阶段)`（**执行序**）：宿主 `ready.systems` 的唯一来源。
+    pub fn list(&self) -> Vec<(&str, Stage)> {
+        let mut out = Vec::with_capacity(self.entries.len());
+        for stage in Stage::ALL {
+            for (entry_stage, decl, _) in &self.entries {
+                if *entry_stage == stage {
+                    out.push((decl.name.as_str(), stage));
+                }
+            }
+        }
+        out
+    }
+
     /// 按阶段序、阶段内注册序执行一遍。
     ///
     /// 借用纪律：每次调用只 `borrow_mut` 一个系统，绝不跨系统持有。

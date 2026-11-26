@@ -27,3 +27,4 @@ pub mod packages;
 pub mod resources;
 pub mod sandbox;
 pub mod stdlib;
+pub mod world_ops;

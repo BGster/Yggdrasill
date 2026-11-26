@@ -37,6 +37,7 @@
 //! 天然不在事务里。
 
 use crate::archetype::{replace_bytes, Archetype, Column};
+use crate::component::{ComponentId, EntityId};
 
 /// 一格旧值（列内表示；`Bytes` 是该行的字节副本）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,12 +88,19 @@ impl CellValue {
     }
 }
 
-/// 一条日志：`(桶下标, 列下标, 行号, 写前值)`。
+/// 一条日志：`(桶下标, 列下标, 行号, 实体, 组件, 写前值)`。
+///
+/// `eid` / `cid` 与 `arch` / `pos` / `row` 是**同一格的两套坐标**：前者是语义坐标
+/// （跨结构操作稳定），后者是存储坐标（`rewind` 复原要的就是它）。两套都记，是因为
+/// 它们各自服务一个消费者：`rewind` 逆序回放写回列，`cells` 汇总本步写过的格给
+/// 宿主（[`crate::Sim::changed`]）——后者若现算，结构操作搬过行之后就对不上了。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CellWrite {
     pub(crate) arch: u32,
     pub(crate) pos: u32,
     pub(crate) row: u32,
+    pub(crate) eid: EntityId,
+    pub(crate) cid: ComponentId,
     pub(crate) old: CellValue,
 }
 
@@ -104,13 +112,38 @@ pub(crate) struct Journal {
 
 impl Journal {
     /// 登记一次即将发生的写（调用方必须在真正写列之前调用）。
-    pub(crate) fn record(&mut self, arch: u32, pos: u32, row: u32, old: CellValue) {
+    pub(crate) fn record(
+        &mut self,
+        arch: u32,
+        pos: u32,
+        row: u32,
+        eid: EntityId,
+        cid: ComponentId,
+        old: CellValue,
+    ) {
         self.entries.push(CellWrite {
             arch,
             pos,
             row,
+            eid,
+            cid,
             old,
         });
+    }
+
+    /// 本事务写过的格 `(实体, 组件)`：按 `(eid, cid)` 升序、同一格只出现一次。
+    ///
+    /// 这是「本步写了什么」的唯一来源：宿主增量（`ygg/1` 的 `delta`）不另设仪器面，
+    /// 而是把 undo 日志投影一遍——同一格写十次仍是一条，顺序由报告契约固定。
+    pub(crate) fn cells(&self) -> Vec<(EntityId, ComponentId)> {
+        let mut out: Vec<(EntityId, ComponentId)> = self
+            .entries
+            .iter()
+            .map(|write| (write.eid, write.cid))
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 
     /// 条目数（诊断与测试用）。

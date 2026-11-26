@@ -1059,7 +1059,9 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "ygg-sandbox",
  "ygg-schema",
+ "ygg-sim",
 ]
 
 [[package]]

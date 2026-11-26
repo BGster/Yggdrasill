@@ -46,16 +46,17 @@ use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
 use mlua::{Error, Function, Lua, MultiValue, Scope, Table, Value as LuaValue};
-use ygg_sim::archetype::{Archetype, Column, ValueRef};
+use ygg_sim::archetype::{Column, ValueRef};
 use ygg_sim::component::{AttrType, ComponentDef, ComponentId, EntityId, Registry};
 use ygg_sim::error::SimError;
 use ygg_sim::query::{RowSet, MAX_QUERY};
 use ygg_sim::sim::Sim;
-use ygg_sim::store::ArchetypeStore;
 use ygg_sim::system::{Stage, SystemCtx, SystemDecl};
 
 use super::marshal::{sim_fixed_arg, sim_unmounted};
 use super::HostState;
+use crate::sandbox::StepError;
+use crate::world_ops::{self, WorldOp};
 
 /// 重入码（`world.*` 在内核槽已被独占时被调用；与 `YGG-SIM-UNMOUNTED` 同一处置）。
 pub const WORLD_BUSY: &str = "YGG-WORLD-BUSY";
@@ -76,6 +77,11 @@ fn world_unmounted(what: &str) -> Error {
 
 /// `SimError` → Lua 错误：**码在首段**（与 `ygg` 的 `sim.*` 同一口径，外部可 grep 可断言）。
 fn sim_to_lua(e: SimError) -> Error {
+    Error::runtime(e.to_string())
+}
+
+/// `StepError` → Lua 错误：内核码（`YGG-SIM-*`）原样上浮，本面自有码（`E_STEP_*`）也带首段。
+fn step_to_lua(e: StepError) -> Error {
     Error::runtime(e.to_string())
 }
 
@@ -790,14 +796,21 @@ pub(super) fn install_world(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result
                         true,
                     )?
                 };
-                let ids = sim
-                    .world_mut()
-                    .spawn_columns(1, &cols, &tags)
-                    .map_err(sim_to_lua)?;
-                ids.first()
+                let report = world_ops::apply_ops(
+                    sim,
+                    &[WorldOp::Spawn {
+                        rows: 1,
+                        cols,
+                        tags,
+                    }],
+                )
+                .map_err(step_to_lua)?;
+                let id = report
+                    .spawned
+                    .first()
                     .copied()
-                    .ok_or_else(|| sim_to_lua(SimError::state("spawn 未返回实体 id")))
-                    .and_then(entity_to_lua)
+                    .ok_or_else(|| sim_to_lua(SimError::state("spawn 未返回实体 id")))?;
+                entity_to_lua(id)
             })
         })?,
     )?;
@@ -809,8 +822,9 @@ pub(super) fn install_world(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result
         lua.create_function(move |_, id: LuaValue| -> Result<i64, Error> {
             let id = entity_of(id, "world.despawn")?;
             with_sim_mut(&st, "world.despawn", |sim| {
-                let removed = sim.world_mut().despawn_ids(&[id]).map_err(sim_to_lua)?;
-                Ok(i64::try_from(removed).unwrap_or(i64::MAX))
+                let report = world_ops::apply_ops(sim, &[WorldOp::Despawn { ids: vec![id] }])
+                    .map_err(step_to_lua)?;
+                Ok(i64::try_from(report.writes).unwrap_or(i64::MAX))
             })
         })?,
     )?;
@@ -833,11 +847,16 @@ pub(super) fn install_world(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result
                             true,
                         )?
                     };
-                    let written = sim
-                        .world_mut()
-                        .insert_columns(&[id], &cols, &tags)
-                        .map_err(sim_to_lua)?;
-                    Ok(i64::try_from(written).unwrap_or(i64::MAX))
+                    let report = world_ops::apply_ops(
+                        sim,
+                        &[WorldOp::Insert {
+                            ids: vec![id],
+                            cols,
+                            tags,
+                        }],
+                    )
+                    .map_err(step_to_lua)?;
+                    Ok(i64::try_from(report.writes).unwrap_or(i64::MAX))
                 })
             },
         )?,
@@ -862,11 +881,18 @@ pub(super) fn install_world(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result
                         )?
                     };
                     debug_assert!(tags.is_empty(), "world.set 已在 payload_of 里拒绝 tag");
-                    let store = sim.world_mut();
-                    for (comp, column) in &cols {
-                        store.set_many(*comp, &[id], column).map_err(sim_to_lua)?;
-                    }
-                    Ok(i64::try_from(cols.len()).unwrap_or(i64::MAX))
+                    // 一个组件一条 `Set`：整批一个事务——多组件写也只有全成/全回两种结局。
+                    let ops: Vec<WorldOp> = cols
+                        .into_iter()
+                        .map(|(col, values)| WorldOp::Set {
+                            ids: vec![id],
+                            col,
+                            values,
+                        })
+                        .collect();
+                    let count = ops.len();
+                    world_ops::apply_ops(sim, &ops).map_err(step_to_lua)?;
+                    Ok(i64::try_from(count).unwrap_or(i64::MAX))
                 })
             },
         )?,
@@ -924,10 +950,10 @@ pub(super) fn install_world(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result
 
     // ---- world.remove(id, { "hp" }) -> n ----
     //
-    // 内核没有「摘列」API：`ArchetypeStore` 的 `by_key` / `entity_index` 是私有派生面，
-    // 摘掉一列必须重建它们，而唯一的重建口是 `from_parts`。于是本函数的工作序是
-    // 「克隆 → 拆件 → 搬行 → 重建 → 换回」，**代价 O(实体数)**（不是热路径 API）。
-    // 克隆保证「拒绝不留半改」：任何一步失败，原 store 一个字节都没动。
+    // 摘列的实现在内核（`ArchetypeStore::remove_components`）：`by_key` / `entity_index`
+    // 是私有派生面，摘掉一列必须重建它们，而唯一的重建口是 `from_parts`——那是内核语义，
+    // 不是本面的决定。本面只做「名字 → 组件 id」与批量写面的转译，校验与落笔全在
+    // [`crate::world_ops`]（与宿主 `submit` 面同一份实现）。
     let st = Rc::clone(state);
     world.raw_set(
         "remove",
@@ -935,11 +961,22 @@ pub(super) fn install_world(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result
             move |_, (id, names): (LuaValue, Table)| -> Result<i64, Error> {
                 let id = entity_of(id, "world.remove")?;
                 with_sim_mut(&st, "world.remove", |sim| {
-                    let slots = {
+                    let cids: Vec<ComponentId> = {
                         let world = st.borrow();
                         slots_of(sim.world().registry(), &world.world, &names, "world.remove")?
+                            .iter()
+                            .map(|slot| slot.comp)
+                            .collect()
                     };
-                    remove_components(sim.world_mut(), id, &slots)
+                    let report = world_ops::apply_ops(
+                        sim,
+                        &[WorldOp::Remove {
+                            ids: vec![id],
+                            cids,
+                        }],
+                    )
+                    .map_err(step_to_lua)?;
+                    Ok(i64::try_from(report.writes).unwrap_or(i64::MAX))
                 })
             },
         )?,
@@ -1176,94 +1213,6 @@ fn top_each(
     })?;
     Ok(i64::try_from(visited).unwrap_or(i64::MAX))
 }
-
-/// 从实体上摘掉若干组件（`world.remove` 的实现；`O(实体数)`，非热路径）。
-fn remove_components(
-    store: &mut ArchetypeStore,
-    id: EntityId,
-    slots: &[Slot],
-) -> Result<i64, Error> {
-    // ① 先校验后改：实体在、每个组件都在场。
-    let (arch_idx, row) = store.locate(id).map_err(sim_to_lua)?;
-    let arch = &store.archetypes()[arch_idx as usize];
-    for slot in slots {
-        if arch.key & slot.bit() == 0 {
-            return Err(sim_to_lua(SimError::schema(format!(
-                "实体 {id} 没有组件 `{}`，不能移除",
-                slot.name
-            ))));
-        }
-    }
-    let removed_bits: u128 = slots.iter().fold(0, |acc, slot| acc | slot.bit());
-
-    // ② 拆件（克隆上操作：失败时原 store 一字未动）。
-    let (registry, mut archetypes, next_id) = store.clone().into_parts();
-
-    // ③ 建/找目标桶：位集严格收缩 ⇒ 目标桶键必与源桶不同。
-    let (target_key, target_cols) = {
-        let src = &archetypes[arch_idx as usize];
-        if src.key & !removed_bits == src.key {
-            return Err(sim_to_lua(SimError::state(
-                "remove 的目标桶与源桶相同（位集应当严格收缩）",
-            )));
-        }
-        let mut col_ids: Vec<ComponentId> = Vec::with_capacity(src.col_ids.len());
-        let mut cols: Vec<Column> = Vec::with_capacity(src.col_ids.len());
-        for (p, comp) in src.col_ids.iter().enumerate() {
-            if removed_bits & (1u128 << comp) != 0 {
-                continue;
-            }
-            col_ids.push(*comp);
-            cols.push(src.cols[p].empty_like());
-        }
-        (src.key & !removed_bits, (col_ids, cols))
-    };
-    let target_idx = match archetypes.iter().position(|a| a.key == target_key) {
-        Some(idx) => idx,
-        None => {
-            archetypes.push(Archetype::new(target_key, target_cols.0, target_cols.1));
-            archetypes.len() - 1
-        }
-    };
-
-    // ④ 搬行：目标桶只追加不删，源桶摘尾填洞（索引在⑤统一重建）。
-    {
-        let (src, dst) = split_two(&mut archetypes, arch_idx as usize, target_idx);
-        for p in 0..src.col_ids.len() {
-            let comp = src.col_ids[p];
-            if removed_bits & (1u128 << comp) != 0 {
-                continue;
-            }
-            let q = dst.col_pos(comp).ok_or_else(|| {
-                sim_to_lua(SimError::state(format!(
-                    "目标桶缺少组件 id {comp} 的列（remove 建桶失败）"
-                )))
-            })?;
-            dst.cols[q]
-                .push_from(&src.cols[p], row as usize, comp)
-                .map_err(sim_to_lua)?;
-        }
-        dst.ids.push(id);
-        src.swap_remove_row(row as usize).map_err(sim_to_lua)?;
-    }
-
-    // ⑤ 重建 `by_key` / `entity_index`（两者都是私有派生面，只有这条口）。
-    *store = ArchetypeStore::from_parts(registry, archetypes, next_id).map_err(sim_to_lua)?;
-    Ok(i64::try_from(slots.len()).unwrap_or(i64::MAX))
-}
-
-/// 从 `&mut [T]` 里同时取两个**不相交**的可变借用（无 `unsafe`）。
-fn split_two<T>(items: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
-    debug_assert_ne!(a, b, "split_two 的两个下标必须不同");
-    if a < b {
-        let (left, right) = items.split_at_mut(b);
-        (&mut left[a], &mut right[0])
-    } else {
-        let (left, right) = items.split_at_mut(a);
-        (&mut right[0], &mut left[b])
-    }
-}
-
 /// `world.log(fmt, ...)` 的排版器：**经字符串元表**调 `string.format`。
 ///
 /// M2 起 `string` 表已是沙箱全局（[`crate::sandbox`] 的 `LIBRARY_WHITELIST`），

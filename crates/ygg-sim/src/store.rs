@@ -213,7 +213,10 @@ impl ArchetypeStore {
     /// 为什么 tag 要单列一个参数而不是「带一个空列」：`tag` 在存储里**没有列**（只进位集），
     /// 给它伪造一个空列会让「列数 = 有值组件数」这条不变量在解码侧消失——而快照与批量帧
     /// 共用同一个列编解码器，那条不变量是它们能互通的前提。
-    pub(crate) fn check_batch(
+    ///
+    /// 公开面：这是「生成/加列」两个写面的载荷合法性单点，沙箱的批量操作预检
+    /// （[`Self::validate_insert`]）也走这里，不再另写一份。
+    pub fn check_batch(
         &self,
         rows: usize,
         cols: &[(ComponentId, Column)],
@@ -303,39 +306,7 @@ impl ArchetypeStore {
         cols: &[(ComponentId, Column)],
         tags: &[ComponentId],
     ) -> SimResult<usize> {
-        let set = self.check_batch(ids.len(), cols, tags)?;
-        // ① 全量校验（先校验后改）：实体存在、组件尚未在场、无重复 id。
-        //
-        // 重复检测用「排序 + 相邻扫描」而不是 `Vec::contains`（后者是 O(n²)：10⁴ 行约
-        // 5·10⁷ 次比较，而行数由调用方的帧决定、没有上界）。但**报错口径不变**：仍在
-        // 输入序的循环里、`locate` 之后抛出——「未知 id 先于重复 id」的优先级与此前逐字相同。
-        let mut sorted: Vec<EntityId> = ids.to_vec();
-        sorted.sort_unstable();
-        let mut dups: Vec<EntityId> = sorted
-            .windows(2)
-            .filter(|pair| pair[0] == pair[1])
-            .map(|pair| pair[0])
-            .collect();
-        dups.dedup();
-        // 已见过一次的重复候选（只有真的重复时非空，量级是个位数）。
-        let mut repeated: Vec<EntityId> = Vec::new();
-        let mut plan: Vec<(EntityId, CompSet)> = Vec::with_capacity(ids.len());
-        for id in ids.iter() {
-            let (arch_idx, _) = self.locate(*id)?;
-            if !dups.is_empty() && dups.binary_search(id).is_ok() {
-                if repeated.contains(id) {
-                    return Err(SimError::entity(format!("同一帧里实体 id {id} 出现两次")));
-                }
-                repeated.push(*id);
-            }
-            let key = self.archetypes[arch_idx as usize].key;
-            if key & set != 0 {
-                return Err(SimError::schema(format!(
-                    "实体 {id} 已有所插入的组件（insert 只加列，不覆盖）"
-                )));
-            }
-            plan.push((*id, key | set));
-        }
+        let plan = self.plan_insert(ids, cols, tags)?;
         // ①b 建目标桶：**校验全部通过之后**才落笔。
         //
         // `ensure_archetype` 是写操作（新建桶）；把它留在①的循环里，一个注定被拒的帧
@@ -385,15 +356,68 @@ impl ArchetypeStore {
         Ok(ids.len() * cols.len())
     }
 
+    /// 批量加列的只读预检：算出「实体 → 目标位集」计划，一字不写。
+    ///
+    /// 批量写面（沙箱 `WorldOp`）在整批落笔前调 [`Self::validate_insert`]，与本函数共用
+    /// 同一段校验：先校验后改才是原子的，而校验不能有两份（两份就会分叉）。
+    fn plan_insert(
+        &self,
+        ids: &[EntityId],
+        cols: &[(ComponentId, Column)],
+        tags: &[ComponentId],
+    ) -> SimResult<Vec<(EntityId, CompSet)>> {
+        let set = self.check_batch(ids.len(), cols, tags)?;
+        // ① 全量校验（先校验后改）：实体存在、组件尚未在场、无重复 id。
+        //
+        // 重复检测用「排序 + 相邻扫描」而不是 `Vec::contains`（后者是 O(n²)：10⁴ 行约
+        // 5·10⁷ 次比较，而行数由调用方的帧决定、没有上界）。但**报错口径不变**：仍在
+        // 输入序的循环里、`locate` 之后抛出——「未知 id 先于重复 id」的优先级与此前逐字相同。
+        let mut sorted: Vec<EntityId> = ids.to_vec();
+        sorted.sort_unstable();
+        let mut dups: Vec<EntityId> = sorted
+            .windows(2)
+            .filter(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+            .collect();
+        dups.dedup();
+        // 已见过一次的重复候选（只有真的重复时非空，量级是个位数）。
+        let mut repeated: Vec<EntityId> = Vec::new();
+        let mut plan: Vec<(EntityId, CompSet)> = Vec::with_capacity(ids.len());
+        for id in ids.iter() {
+            let (arch_idx, _) = self.locate(*id)?;
+            if !dups.is_empty() && dups.binary_search(id).is_ok() {
+                if repeated.contains(id) {
+                    return Err(SimError::entity(format!("同一帧里实体 id {id} 出现两次")));
+                }
+                repeated.push(*id);
+            }
+            let key = self.archetypes[arch_idx as usize].key;
+            if key & set != 0 {
+                return Err(SimError::schema(format!(
+                    "实体 {id} 已有所插入的组件（insert 只加列，不覆盖）"
+                )));
+            }
+            plan.push((*id, key | set));
+        }
+        Ok(plan)
+    }
+
+    /// 批量加列的只读预检（外部写面的整批预检入口）。
+    pub fn validate_insert(
+        &self,
+        ids: &[EntityId],
+        cols: &[(ComponentId, Column)],
+        tags: &[ComponentId],
+    ) -> SimResult<()> {
+        self.plan_insert(ids, cols, tags).map(|_| ())
+    }
+
     /// 批量删除实体（`swap_remove` + 索引同步）。返回实际删除个数。
     ///
     /// 重复 id 只删一次（第二次查找落空 = 幂等），不报错——批量帧的幂等性比「发现调用方
     /// 重复了」更有价值（回放时同一帧可能被重放）。
     pub fn despawn_ids(&mut self, ids: &[EntityId]) -> SimResult<usize> {
-        // 先校验后改：任何一个 id 不存在即整体拒绍。
-        for id in ids {
-            self.locate(*id)?;
-        }
+        self.validate_despawn(ids)?;
         let mut removed = 0;
         for id in ids {
             let Some((arch_idx, row)) = self.entity_index.remove(id) else {
@@ -406,6 +430,109 @@ impl ArchetypeStore {
             removed += 1;
         }
         Ok(removed)
+    }
+
+    /// 批量删除的只读预检：任何一个 id 不存在即整批拒绍（与 [`Self::despawn_ids`] 同一段校验）。
+    pub fn validate_despawn(&self, ids: &[EntityId]) -> SimResult<()> {
+        for id in ids {
+            self.locate(*id)?;
+        }
+        Ok(())
+    }
+
+    /// 摘除组件的只读预检：实体存在、每个组件都在场。
+    ///
+    /// 与 [`Self::remove_components`] 共用同一段校验：前者是批量写面落笔前的预检，
+    /// 后者在写前再调一次（两道门，同一份代码）。
+    pub fn validate_remove(&self, id: EntityId, cids: &[ComponentId]) -> SimResult<()> {
+        let (arch_idx, _) = self.locate(id)?;
+        let key = self.archetypes[arch_idx as usize].key;
+        for comp in cids {
+            if key & (1u128 << comp) == 0 {
+                let name = self.registry.name_of(*comp)?;
+                return Err(SimError::schema(format!(
+                    "实体 {id} 没有组件 `{name}`，不能移除"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// 从实体上摘掉若干组件（把行迁到位集缩小的桶里）。返回摘掉的组件数。
+    ///
+    /// 实现是「克隆桶表上拆件 + 最后一次 `from_parts` 重建派生面」：`O(世界)`——
+    /// 「卡在移除一个组件」从来不是热路径，而快照一致性值得这一次克隆。
+    pub fn remove_components(&mut self, id: EntityId, cids: &[ComponentId]) -> SimResult<usize> {
+        self.validate_remove(id, cids)?;
+        let (arch_idx, row) = self.locate(id)?;
+        let removed_bits: u128 = cids.iter().fold(0u128, |acc, comp| acc | (1u128 << comp));
+
+        // ① 拆件（克隆上操作：失败时原 store 一字未动）。
+        let (registry, mut archetypes, next_id) = self.clone().into_parts();
+
+        // ② 建/找目标桶：位集严格收缩 ⇒ 目标桶键必与源桶不同。
+        let (target_key, target_cols) = {
+            let src = &archetypes[arch_idx as usize];
+            if src.key & !removed_bits == src.key {
+                return Err(SimError::state(
+                    "remove 的目标桶与源桶相同（位集应当严格收缩）",
+                ));
+            }
+            let mut col_ids: Vec<ComponentId> = Vec::with_capacity(src.col_ids.len());
+            let mut cols: Vec<Column> = Vec::with_capacity(src.col_ids.len());
+            for (pos, comp) in src.col_ids.iter().enumerate() {
+                if removed_bits & (1u128 << comp) != 0 {
+                    continue;
+                }
+                col_ids.push(*comp);
+                cols.push(src.cols[pos].empty_like());
+            }
+            (src.key & !removed_bits, (col_ids, cols))
+        };
+        let target_idx = match archetypes.iter().position(|arch| arch.key == target_key) {
+            Some(idx) => idx,
+            None => {
+                archetypes.push(Archetype::new(target_key, target_cols.0, target_cols.1));
+                archetypes.len() - 1
+            }
+        };
+
+        // ③ 搬行：目标桶只追加不删，源桶摘尾填洞（索引在④统一重建）。
+        {
+            let (src, dst) = split_pair(&mut archetypes, arch_idx, target_idx as u32);
+            for pos in 0..src.col_ids.len() {
+                let comp = src.col_ids[pos];
+                if removed_bits & (1u128 << comp) != 0 {
+                    continue;
+                }
+                let dst_pos = dst.col_pos(comp).ok_or_else(|| {
+                    SimError::state(format!("目标桶缺少组件 id {comp} 的列（remove 建桶失败）"))
+                })?;
+                dst.cols[dst_pos].push_from(&src.cols[pos], row as usize, comp)?;
+            }
+            dst.ids.push(id);
+            src.swap_remove_row(row as usize)?;
+        }
+
+        // ④ 重建 `by_key` / `entity_index`（两者都是私有派生面，只有这条口）。
+        *self = ArchetypeStore::from_parts(registry, archetypes, next_id)?;
+        Ok(cids.len())
+    }
+
+    /// 本事务已登记写过的格 `(实体, 组件)`（去重升序；事务外为空）。
+    ///
+    /// 来源是 undo 日志，而不是在各个写点再装一份仪器：日志本来就记了每一格，
+    /// 再让 `set_many`/`for_each_mut` 各报一次就是第二份真相（两分会静默）。
+    pub fn written_cells(&self) -> Vec<(EntityId, ComponentId)> {
+        self.journal
+            .as_ref()
+            .map(Journal::cells)
+            .unwrap_or_default()
+    }
+
+    /// 是否在事务里（`Sim::transact` 的嵌套判定）。
+    pub(crate) fn in_tx(&self) -> bool {
+        self.journal.is_some()
     }
 
     /// 拆成 (注册表, 桶, next_id)（快照写出用）。

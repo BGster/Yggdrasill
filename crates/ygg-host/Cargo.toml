@@ -5,19 +5,25 @@ edition.workspace = true
 description = "Yggdrasill ygg/1 线协议的信封层：JSON Schema + Rust 类型 + 边界浮点拒收"
 
 # 依赖纪律（计划稿 artifacts/w2-m3-protocol-plan.md §0 决策 2/3/4）：
-# - 运行时**只有**三件：serde（信封结构的 derive）、serde_json（v1 唯一的线格式，
-#   也是边界浮点拒收要看的 `Number` 面）、thiserror（错误面）。不引 sha2 / base64 /
-#   jsonschema——摘要与 base64 在协议层只是**字符串搬运**，校验与编解码在各自的
-#   crate（ygg-schema / 绑定层）里，协议层不持有世界（决策 4）。
+# - **信封模块（`proto`）零内核依赖**：它只做字段契约，组件 id / 实体 id 是本地别名
+#   （`EntityId` / `ComponentId`），非 Rust 宿主拿到的是一份可独立阅读的契约。
+# - **会话模块（`session`）必须持有内核**：一个会话 = 一个世界实例（决策 5），
+#   它要 `Loaded`（ygg-sandbox）与内核列/值类型（ygg-sim）。因此 M3.2 起本 crate
+#   对这两个内部 crate 有运行时依赖——**仅 `session` 模块使用**，`proto` 一行不碰。
+#   绑定层（plan §3 步 3）是第一个外部的会话消费方。
+# - 运行时依赖除上面两者外**只有**三件：serde（信封结构的 derive）、serde_json（v1
+#   唯一的线格式，也是边界浮点拒收要看的 `Number` 面）、thiserror（错误面）。不引
+#   sha2 / base64 / jsonschema——摘要与 base64 在协议层只是**字符串搬运**（base64
+#   在本 crate 里是 session.rs 的私有实现，零依赖），协议层不持有世界的语义。
 # - `serde_json` 不得开启 `preserve_order`：信封的键序必须与 serde 的声明序一致，
 #   否则 schema 与 Rust 两侧的「同一份字节」无从对账（与 ygg-core / ygg-store 同款约束）。
-# - **不依赖 ygg-sim / ygg-sandbox**：信封是宿主与内核之间的边界，不是内核的类型面；
-#   一旦依赖内核，宿主侧（TS / GDScript / C#）就再也拿不到一份可独立阅读的契约。
-#   组件 id / 实体 id 因此在本 crate 里是本地别名（见 proto.rs 的 `EntityId`）。
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# 会话模块的内核依赖（`Session` 持有 `Loaded`；见上方依赖纪律）。二者都 `forbid(unsafe_code)`。
+ygg-sandbox = { path = "../ygg-sandbox" }
+ygg-sim = { path = "../ygg-sim" }
 
 # 唯一的 dev-dependency：schema 一致性用例用 ygg-schema 的 ValidatorSet 校验
 # `packages/schema/protocol/ygg-1.schema.json`（draft 2020-12 锁定、离线、无 format 断言）。

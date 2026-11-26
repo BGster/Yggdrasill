@@ -266,7 +266,7 @@ impl RowSet<'_> {
                 "只读遍历（for_each）不能写入：结构外写入请走 for_each_mut",
             ));
         }
-        self.record_old(pos, row);
+        self.record_old(slot, pos, row);
         match self.cols.get_mut(pos as usize) {
             Some(col) => col.set_value(row, &ValueRef::I64(value), comp),
             // 上一行刚探过一次：`ColsRef` 只有共享/独占两种，没有第二种「不可写」。
@@ -303,7 +303,7 @@ impl RowSet<'_> {
                 "只读遍历（for_each）不能写入：结构外写入请走 for_each_mut",
             ));
         }
-        self.record_old(pos, row);
+        self.record_old(slot, pos, row);
         match self.cols.get_mut(pos as usize) {
             Some(col) => col.set_value(row, &value, comp),
             None => Err(SimError::schema(
@@ -315,7 +315,8 @@ impl RowSet<'_> {
     /// 事务内写前登记：把 `pos` 列第 `row` 行的旧值记进 undo 日志。
     ///
     /// 不在 step 里（`journal == None`）⇒ 空操作；只读视图（`for_each`）没有日志可记。
-    fn record_old(&mut self, pos: u32, row: usize) {
+    /// `slot` 只用来取组件 id（日志的语义坐标），写回用的仍是 `pos`/`row` 存储坐标。
+    fn record_old(&mut self, slot: usize, pos: u32, row: usize) {
         let Some(journal) = self.journal.as_deref_mut() else {
             return;
         };
@@ -323,6 +324,8 @@ impl RowSet<'_> {
             self.arch,
             pos,
             row as u32,
+            self.ids[row],
+            self.comps[slot],
             CellValue::read(self.cols.get(pos as usize), row),
         );
     }
@@ -569,6 +572,42 @@ impl ArchetypeStore {
         ids: &[EntityId],
         values: &Column,
     ) -> SimResult<usize> {
+        let plan = self.plan_set(comp, ids, values)?;
+        // 写面拆分：同 `for_each_mut`。
+        let (archetypes, mut journal) = self.split_write();
+        for (i, (arch_idx, row)) in plan.into_iter().enumerate() {
+            let arch = &mut archetypes[arch_idx as usize];
+            let pos = arch.col_pos(comp).ok_or_else(|| {
+                SimError::schema(format!(
+                    "实体 {} 所在 archetype 没有组件 id {comp} 的列",
+                    ids[i]
+                ))
+            })?;
+            if let Some(journal) = journal.as_deref_mut() {
+                journal.record(
+                    arch_idx,
+                    pos as u32,
+                    row,
+                    ids[i],
+                    comp,
+                    CellValue::read(&arch.cols[pos], row as usize),
+                );
+            }
+            arch.cols[pos].set_value(row as usize, &values.value_at(i), comp)?;
+        }
+        Ok(ids.len())
+    }
+
+    /// `set_many` 的只读预检：算出「桶下标 → 行号」计划，一字不写。
+    ///
+    /// 批量写面（沙箱 `WorldOp`）落笔前调 [`Self::validate_set`]，与本函数共用同一段
+    /// 校验：先校验后改才是原子的，而校验不能有两份（两份就会分叉）。
+    fn plan_set(
+        &self,
+        comp: ComponentId,
+        ids: &[EntityId],
+        values: &Column,
+    ) -> SimResult<Vec<(u32, u32)>> {
         if values.len() != ids.len() {
             return Err(SimError::schema(format!(
                 "组件 id {comp} 的载荷有 {} 行，id 表有 {} 个",
@@ -598,27 +637,17 @@ impl ArchetypeStore {
             }
             plan.push((arch_idx, row));
         }
-        // 写面拆分：同 `for_each_mut`。
-        let (archetypes, mut journal) = self.split_write();
-        for (i, (arch_idx, row)) in plan.into_iter().enumerate() {
-            let arch = &mut archetypes[arch_idx as usize];
-            let pos = arch.col_pos(comp).ok_or_else(|| {
-                SimError::schema(format!(
-                    "实体 {} 所在 archetype 没有组件 id {comp} 的列",
-                    ids[i]
-                ))
-            })?;
-            if let Some(journal) = journal.as_deref_mut() {
-                journal.record(
-                    arch_idx,
-                    pos as u32,
-                    row,
-                    CellValue::read(&arch.cols[pos], row as usize),
-                );
-            }
-            arch.cols[pos].set_value(row as usize, &values.value_at(i), comp)?;
-        }
-        Ok(ids.len())
+        Ok(plan)
+    }
+
+    /// 批量写的只读预检（外部写面的整批预检入口）。
+    pub fn validate_set(
+        &self,
+        comp: ComponentId,
+        ids: &[EntityId],
+        values: &Column,
+    ) -> SimResult<()> {
+        self.plan_set(comp, ids, values).map(|_| ())
     }
 
     /// 批量读：按 `ids` 的顺序把某组件值追加到 `out`（`out` 必须是空列，追加语义）。

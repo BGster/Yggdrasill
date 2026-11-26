@@ -57,6 +57,7 @@ use crate::packages::{self, PackagesSpec};
 use crate::resources::{self, ResourceError, ResourceTable};
 use crate::sandbox::{Sandbox, StepError, StepReport};
 use crate::stdlib;
+use crate::world_ops::WorldOp;
 
 /// Mod 包内的声明文件名（`entries` / `schemaFiles` / `code` / `packages`）。
 pub const PACK_FILE: &str = "pack.json";
@@ -286,6 +287,14 @@ pub struct Loaded {
     resources: Rc<ResourceTable>,
     /// 装载的 Mod 源码（诊断只读面）。
     mod_source: String,
+    /// 装载参数的内存形态：复算 / 重建直接拿它当输入，**不再读盘**。
+    bundle: ModBundle,
+    /// `manifest.json` 字节的 SHA-256（hex）：协议 `hello.pack_hash` 的对账对象。
+    ///
+    /// 它是**声明面**的指纹，不是世界帧：同一份 manifest 逐字节同值，脚本改一行
+    /// 不动它。宿主能比对的是「我载的是不是你以为的那份声明」；脚本身份由装载
+    /// 参数本身（源码 + 模块表 + 资源）承载。
+    manifest_hash: String,
 }
 
 impl Loaded {
@@ -309,6 +318,15 @@ impl Loaded {
     /// 资源表构建**先于任何 Lua 状态**（fail-fast：预算 / 寻址 / 校验失败零 Lua
     /// 侧副作用）；空模块表跳过模块注入（`require` 面对任何名字可读拒绝）。
     pub fn from_bundle(bundle: &ModBundle) -> Result<Self, LoadError> {
+        Self::build(bundle, inject::KERNEL_RNG_SEED)
+    }
+
+    /// [`from_bundle`](Self::from_bundle) 的显式种子变体：**同一份装载参数、另起一条
+    /// 内核谱系**。
+    ///
+    /// 真实用途只有一个：复算（`replay`）必须在一个「干净但同源」的内核上重跑历史，
+    /// 种子来自日志头而不是内核常量；顺带让测试能在同一进程里并排两条谱系。
+    fn build(bundle: &ModBundle, seed: u64) -> Result<Self, LoadError> {
         // ① 资源表 fail-fast（manifest 解析也在这里，失败先于 VM）。
         let table =
             ResourceTable::build(&bundle.manifest_bytes, &bundle.schemas, &bundle.resources)?;
@@ -318,7 +336,7 @@ impl Loaded {
         let lua = sandbox.lua().clone();
         // ③ 世界内核挂上：任何内核实例出生起就有世界（`world.*` 无静默降级面），
         //    种子取内核常量同一谱系。
-        sandbox.set_sim(Some(Box::new(Sim::new(inject::KERNEL_RNG_SEED))));
+        sandbox.set_sim(Some(Box::new(Sim::new(seed))));
         let sim = sandbox.sim_handle();
         // ④ 确定性注入：math 精确集 + **世界流** random（时间不在这里）。
         //    次序不弹：注入在 set_sim 之后，闭包拿到的槽才是有世界的那一个；
@@ -356,6 +374,8 @@ impl Loaded {
             host,
             resources: Rc::new(table),
             mod_source: bundle.mod_source.clone(),
+            bundle: bundle.clone(),
+            manifest_hash: crate::hash::hex_sha256(&bundle.manifest_bytes),
         })
     }
 
@@ -406,9 +426,55 @@ impl Loaded {
         self.sandbox.tick()
     }
 
+    /// 当前状态哈希（世界帧的 FNV-1a 64 摘要；与快照字节同源）。
+    pub fn hash(&self) -> Result<u64, StepError> {
+        self.sandbox.hash()
+    }
+
     /// 装载的 Mod 源码（诊断只读面）。
     pub fn mod_source(&self) -> &str {
         &self.mod_source
+    }
+
+    /// `manifest.json` 字节的 SHA-256（hex）：`hello.pack_hash` 的对账对象
+    /// （见字段 [`manifest_hash`](Self) 的口径说明）。
+    pub fn manifest_hash(&self) -> &str {
+        &self.manifest_hash
+    }
+
+    /// 装载参数（内存形态）：复算 / 重建的输入，不必再碰文件系统。
+    pub fn bundle(&self) -> &ModBundle {
+        &self.bundle
+    }
+
+    /// 世界内核是否已 `seal`。
+    ///
+    /// 内核自己不在 `step` 里拦「未 seal」（`seal` 收的是系统图，不是时间门），
+    /// 所以这是**宿主面的判定输入**：未 seal 的世界不得推进时间（协议 `ready.sealed`）。
+    pub fn sealed(&self) -> bool {
+        self.sim
+            .borrow()
+            .as_ref()
+            .is_some_and(|sim| sim.is_sealed())
+    }
+
+    /// 同装载参数、另起一条内核谱系（复算用；见 [`build`](Self::build)）。
+    pub fn fork_with_seed(&self, seed: u64) -> Result<Self, LoadError> {
+        Self::build(&self.bundle, seed)
+    }
+
+    /// 上一步 / 上一次批量写动过的单元格（**已排序去重**）：`(实体 id, 组件 id)`。
+    pub fn changed(&self) -> Vec<(u64, u32)> {
+        self.sim
+            .borrow()
+            .as_ref()
+            .map_or_else(Vec::new, |sim| sim.changed().to_vec())
+    }
+
+    /// **宿主批量写面**：一批 [`WorldOp`] 走内核的「先全验、后落笔」实现
+    /// （与 Lua `world.*` 同一份代码，见 [`crate::world_ops`]）。
+    pub fn apply(&mut self, ops: &[WorldOp]) -> Result<usize, StepError> {
+        self.sandbox.apply(ops)
     }
 
     /// 只读资源表（资源不可变，无写面外溢）。

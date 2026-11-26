@@ -105,6 +105,12 @@ pub struct Sim {
     trace: Option<Vec<(u64, u64)>>,
     recorder: Option<ReplayLog>,
     rng: RngRegistry,
+    /// 上次成功事务写过的格 `(实体, 组件)`（升序去重）。
+    ///
+    /// 只在事务成功时刷新、失败时清空：它描述「刚刚发生的那一件事」的状态，
+    /// 不是累计面也不是事件流。来源是 undo 日志（[`ArchetypeStore::written_cells`]），
+    /// 所以不存在「某个写点忘了报」这类漏报。
+    changed: Vec<(EntityId, ComponentId)>,
 }
 
 impl Sim {
@@ -122,6 +128,7 @@ impl Sim {
             trace: None,
             recorder: None,
             rng: RngRegistry::new(seed),
+            changed: Vec::new(),
         }
     }
 
@@ -196,6 +203,21 @@ impl Sim {
         self.systems.names()
     }
 
+    /// 系统表 `(名, 阶段)`（**执行序**）：宿主 `ready` 帧的唯一来源。
+    ///
+    /// 只走 `SystemSet`：内核之外再存一张系统表就是第二份真相。
+    pub fn systems(&self) -> Vec<(&str, Stage)> {
+        self.systems.list()
+    }
+
+    /// 上次成功事务写过的格 `(实体, 组件)`（升序去重；事务外或有错时为空）。
+    ///
+    /// 增量回执的**唯一**来源：宿主不需要（也不允许）在各个写点另装仪器，
+    /// 逐格旧值本来就已经进了 undo 日志。
+    pub fn changed(&self) -> &[(EntityId, ComponentId)] {
+        &self.changed
+    }
+
     /// 推进一 tick，返回该 tick 结束时的 state hash。
     ///
     /// # 失败 = 什么都没发生
@@ -210,6 +232,8 @@ impl Sim {
         self.state.world.begin_tx();
         match self.step_inner(dt) {
             Ok(digest) => {
+                // 增量面必须在 commit 之前取：`commit_tx` 会丢掉整本 undo 日志。
+                self.changed = self.state.world.written_cells();
                 self.state.world.commit_tx();
                 Ok(digest)
             }
@@ -222,6 +246,36 @@ impl Sim {
                 self.pending.clear();
                 if let Some(log) = &mut self.recorder {
                     log.truncate_records(log_mark);
+                }
+                // 失败即什么都没写：增量面不能留下一个「看起来写了」的回执。
+                self.changed.clear();
+                Err(err)
+            }
+        }
+    }
+
+    /// 宿主批量写面的事务边界：**先全量校验、后落笔**由调用方保证，
+    /// 这里只负责「要么全成、要么全回」并把增量面刷新到 [`Sim::changed`]。
+    ///
+    /// 允许嵌套：在 `step` 的事务里调用时不再开新事务（也不回滚）——
+    /// 失败会被外层 `step` 整批回滚，回滚所有权始终在最外层。
+    pub fn transact<R>(&mut self, write: impl FnOnce(&mut Sim) -> SimResult<R>) -> SimResult<R> {
+        let outer = !self.state.world.in_tx();
+        if outer {
+            self.state.world.begin_tx();
+        }
+        match write(self) {
+            Ok(value) => {
+                self.changed = self.state.world.written_cells();
+                if outer {
+                    self.state.world.commit_tx();
+                }
+                Ok(value)
+            }
+            Err(err) => {
+                if outer {
+                    self.state.world.rollback_tx();
+                    self.changed.clear();
                 }
                 Err(err)
             }
