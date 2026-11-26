@@ -165,17 +165,12 @@ fn packages_load_in_a_bare_sandbox_without_determinism_injection() {
 // ── 用例 ③：静态面（包的源码不得出现白名单外的全局）───────────────────
 
 /// 裸沙箱缺席的**命名空间表**（出现 `<名>.` 即视为一次点式调用）。
-const NAMESPACE_GLOBALS: [&str; 9] = [
-    "coroutine",
-    "debug",
-    "io",
-    "math",
-    "os",
-    "package",
-    "string",
-    "table",
-    "utf8",
-];
+///
+/// M2 起 `string` / `table` / `utf8` 已由 `Sandbox::build` 露出（纯计算面），
+/// 于是不再「缺席」、也不再禁——本列只留**仍不可达**的四张表加 `math`。
+/// `math` 留着是有意的：它在裸沙箱里确实仍是 `nil`（由 `inject` 在装载面
+/// 从零构造），而包不该做浮点定量（定量只在定点域：`world.isqrt` / 定点算）。
+const NAMESPACE_GLOBALS: [&str; 6] = ["coroutine", "debug", "io", "math", "os", "package"];
 
 /// 裸沙箱缺席的**函数**（出现 `<名>(` 即视为一次调用）。
 const FUNCTION_GLOBALS: [&str; 6] = [

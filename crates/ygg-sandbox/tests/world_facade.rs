@@ -52,8 +52,9 @@ fn int(table: &Table, key: &str) -> i64 {
 }
 
 /// Lua 侧共用前缀：`probe` 把 `pcall` 捕获的错误截成首行（多行是 traceback），
-/// `join` 替代 `table.concat`（沙箱的 `string`/`table`/`math` 全局都是 `nil`，
-/// 只剩字符串值方法可达——`line:find` 能用的就是元表）。
+/// `join` 手写拼接（本文件不装 `inject`，所以 `math` 仍是 `nil`；`string` / `table`
+/// 自 M2 起已是沙箱全局，但这里的脚手架保持手写——它要在「有无库表」两种沙箱下
+/// 都跑得动）。
 const HELPERS: &str = r#"
 local function first_line(text)
   local line = tostring(text)

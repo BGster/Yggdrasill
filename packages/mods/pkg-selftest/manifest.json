@@ -68,9 +68,9 @@
           "sha256": "3dc56195c8da0960b7d66ca7cbf46acbcbb54cdbffca22024914f245320c95c7"
         },
         {
-          "byteLength": 6792,
+          "byteLength": 6921,
           "path": "dialogue/init.lua",
-          "sha256": "e479b0004581096fa458256ccba3586011f13cd4dc0505215614143de3870228"
+          "sha256": "1f26d97ac6647e358eeffb8d6b6546023dd15e40a6d408e18a5679db892c58ee"
         },
         {
           "byteLength": 4745,
@@ -173,9 +173,9 @@
           "sha256": "f2900c3ff68927e2422df100b3f6c59f93d480ac534daebd59a948e3d9df830b"
         },
         {
-          "byteLength": 3974,
+          "byteLength": 4024,
           "path": "quest/init.lua",
-          "sha256": "7581d8869fa87960f9fa5a51ce55d767f39cf8f1dcaef3cbeae8b9e2fc0989b9"
+          "sha256": "df0b6092c693d9d8eeb1384b2a382dc5ed752390046403ee4f334fad95b1a520"
         },
         {
           "byteLength": 243,

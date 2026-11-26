@@ -117,10 +117,10 @@ generated: { by: "pi", at: "2026-11-26T05:58:54.950Z" }
 
   | 级 | 面 | 出处 | 谁可以用 |
   | --- | --- | --- | --- |
-  | 第一级 | 16 个 base 纯计算函数（`assert` / `error` / `getmetatable` / `ipairs` / `next` / `pairs` / `pcall` / `rawequal` / `rawget` / `rawlen` / `select` / `setmetatable` / `tonumber` / `tostring` / `type` / `xpcall`）+ 字符串方法（经 `getmetatable("").__index`）+ 受控 `require` + `ygg` | `crates/ygg-sandbox/src/sandbox.rs` 的 `BASE_WHITELIST` | **包与 mod 都可以** |
-  | 第二级 | 15 个 `math` 成员（`abs` / `floor` / `ceil` / `sqrt` / `fmod` / `modf` / `tointeger` / `ult` / `min` / `max` / `random` / `huge` / `maxinteger` / `mininteger` / `type`）+ `ygg.ticks` | `crates/ygg-sandbox/src/inject.rs` 的 `install`（**只在 driver 路径**注入） | **只有 mod**；包不得依赖 |
+  | 第一级 | 14 个 base 纯计算函数（`assert` / `error` / `getmetatable` / `ipairs` / `next` / `pairs` / `rawequal` / `rawget` / `rawlen` / `select` / `setmetatable` / `tonumber` / `tostring` / `type`）+ 两枚内核 `pcall` / `xpcall` shim（预算哨兵不可吞）+ 三张计算库表 `string`（已摘 `dump`）/ `table` / `utf8` + 字符串方法（经 `getmetatable("").__index`）+ 受控 `require` + `ygg` | `crates/ygg-sandbox/src/sandbox.rs` 的 `BASE_WHITELIST` / `LIBRARY_WHITELIST` | **包与 mod 都可以** |
+  | 第二级 | 14 个 `math` 成员（`abs` / `floor` / `ceil` / `fmod` / `modf` / `tointeger` / `ult` / `min` / `max` / `random` / `huge` / `maxinteger` / `mininteger` / `type`）+ `ygg.ticks` | `crates/ygg-sandbox/src/inject.rs` 的 `install`（**只在 driver 路径**注入） | **只有 mod**；包不得依赖 |
 
-  `string` / `table` / `utf8` / `coroutine` / `math` / `os` / `io` / `package` 与 `dofile` / `loadfile` / `load` / `print` / `rawset` / `collectgarbage` 全为 `nil`（`whitelisted_environment_exposes_only_the_allow_list` 逐名断言）。包侧越级的症状：按旧文献写 `table.insert` / `string.format`，或以为「包可以用 `math`」——裸沙箱装载期 `attempt to index a nil value (global 'math')`。见 [../kernel/lua-api.md](../kernel/lua-api.md) §3.1。
+  `math` / `coroutine` / `os` / `io` / `package` / `debug` 与 `dofile` / `loadfile` / `load` / `print` / `rawset` / `collectgarbage` 仍为 `nil`（`whitelisted_environment_exposes_only_the_allow_list` 逐名断言）；`string` / `table` / `utf8` 自 M2 起在第一级（包也能用）。`math.sqrt` 刻意不在面内（定量用 `world.isqrt`），`math.random` 走世界内核流所以回放可复现。包侧越级的症状：以为「包可以用 `math`」或按旧文献用 `coroutine`——裸沙箱装载期 `attempt to index a nil value (global 'math')`。见 [../kernel/lua-api.md](../kernel/lua-api.md) §1。
 
   两条门禁（改任何包代码后必跑）：
 

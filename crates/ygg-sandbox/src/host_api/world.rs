@@ -1003,6 +1003,20 @@ pub(super) fn install_world(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result
         })?,
     )?;
 
+    // ---- world.isqrt（定点平方根：定量距离比较的唯一入口）----
+    //
+    // 为什么在 world 面而不是 `math.sqrt`：定量规则必须留在 Q32.32 定点域
+    // （D-B5）。内核里唯一可以接受的平方根是定点逐位法（`ygg_sim::fixed::isqrt`，
+    // 只有移位/比较/减法，native/wasm 位一致），它的结果还是定点值，于是
+    // 「比距离」与「算坐标」永远在同一个数域里。浮点 sqrt 不进 `math`。
+    world.raw_set(
+        "isqrt",
+        lua.create_function(move |_, value: LuaValue| -> Result<i64, Error> {
+            let x = sim_fixed_arg(value, "world.isqrt")?;
+            ygg_sim::fixed::isqrt(x).map_err(sim_to_lua)
+        })?,
+    )?;
+
     // ---- world.log(fmt, ...) ----
     let log_format: Function = lua.load(LOG_FORMAT_SRC).eval()?;
     let log_tostring: Function = lua.globals().raw_get("tostring")?;
@@ -1252,10 +1266,10 @@ fn split_two<T>(items: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
 
 /// `world.log(fmt, ...)` 的排版器：**经字符串元表**调 `string.format`。
 ///
-/// 沙箱的 `string` / `table` / `math` 全局都是 `nil`（`BASE_WHITELIST` 只留纯计算
-/// 子集，见 `crate::sandbox`），所以 `string.format` 取不到名字；但字符串值的元表
-/// 方法一直在（`("x"):format()` 可达），因此用这个一次性编译的包装器取到同一个
-/// 排版能力——**不另造格式化器**。
+/// M2 起 `string` 表已是沙箱全局（[`crate::sandbox`] 的 `LIBRARY_WHITELIST`），
+/// 但这个一次性编译的包装器留着：它走的是**字符串值元表**那条路（`("x"):format()`），
+/// 于是排版能力与「库表是否露头」脱钩——以后收紧或放宽库表白名单不必再动日志面。
+/// 排版语义与 `string.format` 同一实现，**不另造格式化器**。
 const LOG_FORMAT_SRC: &str = "return function(fmt, ...) return tostring(fmt):format(...) end";
 
 /// `world.log(fmt, ...)`：结果进环形缓冲（[`WORLD_LOG_CAP`]），由宿主经

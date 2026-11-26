@@ -9,30 +9,36 @@
 //! - **内存上限**：`Lua::set_memory_limit(SANDBOX_MEMORY_LIMIT)`——超限分配
 //!   触发 `Error::MemoryError`（mlua 文档语义），负例测试实证。
 //! - **白名单环境**（deny-by-default）：构造全新 globals 表并 `Lua::set_globals`
-//!   整体替换——原 globals（含 ALL_SAFE 加载的 io/string/table/math/package 等）
-//!   自此不可达。新表只暴露三类面：base 纯计算子集（[`BASE_WHITELIST`]：无
+//!   整体替换——原 globals 里的 io/os/package/debug/coroutine 与原始 `math` 库
+//!   自此不可达。新表只暴露四类面：base 纯计算子集（[`BASE_WHITELIST`]：无
 //!   dofile/loadfile/load/print/rawset/collectgarbage——文件系统、任意编译与
-//!   GC 干预面全部拒之门外）；`require` 受控模块面（r1：按已登记模块表装载
-//!   同 Mod 的其它文件，其它一切名字可读拒绝；调用时机不设边界——实现见
-//!   [`crate::modules`]，见下）；`ygg = { engine_version }` host API 占位（完整
-//!   host API 落 S9/S10）。首个 host API 面刻意极小：M0 骨架期不预支 S9 的
-//!   白名单决策。
+//!   GC 干预面全部拒之门外）；标准库计算表（[`LIBRARY_WHITELIST`]：
+//!   `string` / `table` / `utf8`，`string.dump` 已摘）；受控 `require`（r1：按
+//!   已登记模块表装载同 Mod 的其它文件，其它一切名字可读拒绝；实现见
+//!   [`crate::modules`]）；`ygg = { engine_version }` host API 占位（完整 host
+//!   API 落 S9/S10）。`math` 不在新表里由本函数放：它由 [`crate::inject`]
+//!   从零构造（精确子集 + 世界流 random）。
 //! - **require 面**（r1）：不在本文件直接实现——[`crate::modules::install`]
 //!   装上「查已登记模块表 + 缓存 + 循环/深度判栈 + 副作用影子表」的装载器；
 //!   模块表由驱动在入口 chunk 之前注入（[`Sandbox::modules`] 句柄），装载期
 //!   与运行期（handler 内部）都能 require。空表时 `require` 对任何名字给可读
 //!   拒绝（单文件 Mod 的既有行为不变）。
-//! - **无燃料计量**（S34 裁定）：燃料机制整体退役——构造本体不内建任何
-//!   hook，也不再接入任何计量面（原正式燃料接点随 S34 机制移除）。
+//! - **指令预算**（M2）：`set_global_hook` 每 [`BUDGET_QUANTUM`] 条字节码计一次
+//!   燃料，耗尽抛内核哨兵（[`BudgetExhausted`]）；`pcall` / `xpcall` 换成内核
+//!   shim（[`install_catch_shims`]）——
+//!   预算是「宿主入口的燃料」，不是可捕获的异常面（旧 S34 退役的是**事件/
+//!   信封式**燃料计量，本机制是 VM 级指令计数，两回事）。
 //! - **确定性种子**：`luai_makeseed` 构建期常量覆盖（workspace 根
 //!   `.cargo/config.toml`，D-继承-3）——本 crate 的种子锚测试实证「同进程两个
 //!   Lua 状态对同序插入产出相同 `pairs` 迭代序」；跨进程一致性归 S12
 //!   golden-vector。状态哈希路径依旧绝不消费 `pairs()` 序（D-继承-5 纵深）。
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use mlua::{Error, Lua, LuaOptions, StdLib, Value};
+use mlua::{
+    Error, Function, HookTriggers, Lua, LuaOptions, MultiValue, StdLib, Table, Value, VmState,
+};
 use ygg_sim::error::SimError;
 use ygg_sim::sim::Sim;
 
@@ -50,6 +56,9 @@ pub const SANDBOX_MEMORY_LIMIT: usize = 64 * 1024 * 1024;
 /// （任意编译——装载期后动态生成代码会破坏「handler 集是装载纯函数」，D-B4）、
 /// `print`（输出必须走 host API narrate，S9）、`rawset`（绕过元语义写）、
 /// `collectgarbage`（GC 干预面，与内存上限语义交叉）。
+///
+/// `pcall` / `xpcall` 不在这里：它们由 [`install_catch_shims`] 换成内核 shim
+/// （同一个语义，但预算哨兵不可被脚本吞掉）。
 const BASE_WHITELIST: &[&str] = &[
     "assert",
     "error",
@@ -57,7 +66,6 @@ const BASE_WHITELIST: &[&str] = &[
     "ipairs",
     "next",
     "pairs",
-    "pcall",
     "rawequal",
     "rawget",
     "rawlen",
@@ -66,8 +74,163 @@ const BASE_WHITELIST: &[&str] = &[
     "tonumber",
     "tostring",
     "type",
-    "xpcall",
 ];
+
+/// 放行的标准库表（`StdLib::ALL_SAFE` 已经加载好，这里只决定「露不露」）。
+///
+/// 规则代码连字符串都拼不起来的日子到此为止：`string` / `table` / `utf8` 是
+/// 纯计算面（无 IO、无时钟、无堆外可变量），露出来不会动摇确定性。
+/// `math` 不在本表：它由 [`crate::inject`] **从零构造**（精确子集 + 世界 rng 流），
+/// 绝不 raw_get 原始库表——那会把超越函数一并夹带进来。
+const LIBRARY_WHITELIST: &[&str] = &["string", "table", "utf8"];
+
+/// 指令预算的计量粒度（每 N 条字节码一次 hook）。
+///
+/// 1000 条：小到 `while true do end` 在毫秒级被截断，大到 hook 自身的开销
+/// （一次 Rust 闭包调用）摊薄到可忽略。
+pub const BUDGET_QUANTUM: u32 = 1000;
+
+/// 单次宿主入口的默认指令预算。
+///
+/// 2e6 条：比任何合法规则的一个 tick 宽出两个数量级（10k 次迭代的循环约 1e5 条），
+/// 又小到失控循环在数十毫秒内被截断。
+pub const DEFAULT_INSTRUCTION_BUDGET: u64 = 2_000_000;
+
+/// 单次入口的预算硬上限（宿主也不能把预算调到「实质无限」）。
+pub const MAX_INSTRUCTION_BUDGET: u64 = 64_000_000;
+
+/// 预算耗尽的稳定错误码（`Display` 的首段，外部可 grep、可断言）。
+pub const CODE_BUDGET: &str = "E_BUDGET";
+
+/// 指令预算耗尽——**内核拥有的哨兵**。
+///
+/// 为什么是一个类型而不是一个字符串：字符串是可伪造、可匹配的值，脚本只要
+/// `if type(e) == "string" and e:find("E_BUDGET")` 就能把预算中止识别出来并
+/// 「换个写法重试」。这里的哨兵变成 Lua 侧的**不透明 userdata**（Rust 回调
+/// 抛错一律包进内核的错误对象），脚本既看不懂也伪造不出；`pcall` / `xpcall`
+/// 的 shim 又按预算状态无条��重抛（见 [`install_catch_shims`]），于是「捕获后
+/// 继续跑」在 VM 里没有落点。宿主侧仍拿到**类型化**的错误
+/// （[`budget_exhausted`]），码在首段。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "E_BUDGET: 指令预算耗尽（本次入口上限 {limit} 条）；规则代码必须终止，\
+     预算中止不是可捕获的正常控制流"
+)]
+pub struct BudgetExhausted {
+    /// 本次入口的预算上限（诊断面：作者要知道「多少条算多」）。
+    pub limit: u64,
+}
+
+impl BudgetExhausted {
+    /// 稳定错误码。
+    pub fn code(&self) -> &'static str {
+        CODE_BUDGET
+    }
+}
+
+/// 从 mlua 错误里取出预算哨兵（`None` = 该错误不是预算耗尽）。
+///
+/// 宿主入口只需要这一个判定：`Err` 不为空就是 `E_BUDGET`，不需要解析错误文本
+/// （文本是给人看的，判定不看文本）。
+pub fn budget_exhausted(err: &Error) -> Option<&BudgetExhausted> {
+    err.downcast_ref::<BudgetExhausted>()
+}
+
+/// 预算状态（hook 与 pcall shim 共享同一个 `Rc`）。
+struct InstructionBudget {
+    /// 本次入口的上限。
+    limit: Cell<u64>,
+    /// 还剩余的指令数（按 [`BUDGET_QUANTUM`] 递减）。
+    remaining: Cell<u64>,
+    /// 是否已耗尽（**粘滞**：一旦置位就一直中止，直到宿主重置预算）。
+    exhausted: Cell<bool>,
+}
+
+impl InstructionBudget {
+    fn new(limit: u64) -> Self {
+        Self {
+            limit: Cell::new(limit.min(MAX_INSTRUCTION_BUDGET)),
+            remaining: Cell::new(limit.min(MAX_INSTRUCTION_BUDGET)),
+            exhausted: Cell::new(false),
+        }
+    }
+
+    fn reset(&self) {
+        self.remaining.set(self.limit.get());
+        self.exhausted.set(false);
+    }
+
+    fn set_limit(&self, limit: u64) {
+        self.limit.set(limit.min(MAX_INSTRUCTION_BUDGET));
+        self.reset();
+    }
+
+    fn error(&self) -> Error {
+        Error::external(BudgetExhausted {
+            limit: self.limit.get(),
+        })
+    }
+}
+
+/// 装预算 hook（`set_global_hook`，**不是** `set_hook`）。
+///
+/// `set_global_hook` 在主状态上装，对所有 chunk / 所有函数生效；`set_hook` 是
+/// per-thread + per-function-mask，在一个全新状态上等于什么都没装。
+fn install_budget_hook(lua: &Lua, budget: Rc<InstructionBudget>) -> Result<(), Error> {
+    let triggers = HookTriggers::new().every_nth_instruction(BUDGET_QUANTUM);
+    lua.set_global_hook(triggers, move |_, _| {
+        let remaining = budget.remaining.get();
+        if remaining < u64::from(BUDGET_QUANTUM) {
+            // 归零 + 置位：此后每次 hook 都立即中止，所以「捕获后接着算」
+            // 最多再跑一个 quantum 就又被打断——不存在可绕过的窗口。
+            budget.remaining.set(0);
+            budget.exhausted.set(true);
+            return Err(budget.error());
+        }
+        budget.remaining.set(remaining - u64::from(BUDGET_QUANTUM));
+        Ok(VmState::Continue)
+    })
+}
+
+/// 把 `pcall` / `xpcall` 换成内核 shim：真身照旧做受保护调用，但**预算中止
+/// 不允许被返回值化**。
+///
+/// 真身是从「旧 globals」里取出来的（`fresh` 里不放真身，脚本也就拿不到它）；
+/// 判定依据是共享的预算状态而不是错误值本身——错误值的类型可以是任何东西，
+/// 状态只有一个。
+fn install_catch_shims(
+    lua: &Lua,
+    fresh: &Table,
+    old: &Table,
+    budget: Rc<InstructionBudget>,
+) -> Result<(), Error> {
+    for name in ["pcall", "xpcall"] {
+        let real: Function = old.raw_get(name)?;
+        let budget = Rc::clone(&budget);
+        let shim = lua.create_function(move |_, args: MultiValue| {
+            let returned: MultiValue = real.call(args)?;
+            // 粘滞标记：只要本次入口的预算耗尽过，受保护调用的「成功」返回值
+            // 就不是成功——把它重新变成错误。这条路径不需要认识错误值，
+            // 所以脚本没有任何办法让它失效。
+            if budget.exhausted.get() {
+                return Err(budget.error());
+            }
+            Ok(returned)
+        })?;
+        fresh.raw_set(name, shim)?;
+    }
+    Ok(())
+}
+
+/// `string.dump` 摘除（在真表上摘，露出的就是摘过的同一张表）。
+///
+/// 它把函数序列化成字节码：既是内核实现细节的出口，也是「把代码当数据
+/// 排出去」的通道。其余 `string` 成员全部有界、纯计算。
+fn strip_string_dump(globals: &Table) -> Result<(), Error> {
+    let string: Table = globals.raw_get("string")?;
+    string.raw_set("dump", Value::Nil)?;
+    Ok(())
+}
 
 /// 构造完成的确定性沙箱（一个 [`Sandbox`] 持有一个独立 Lua 状态；
 /// 测试与 VM 状态绝不跨转换共享——research Precedents 4307ee5 教训）。
@@ -81,6 +244,8 @@ pub struct Sandbox {
     /// 面在宿主 `step` 的窗口之外才取得借用；窗口内（系统体里回手调 `world.*`）
     /// 借用冲突被 `world.rs` 翻成可读的 `WORLD_BUSY`，不是 `RefCell` panic。
     sim: Rc<RefCell<Option<Box<Sim>>>>,
+    /// 指令预算状态（与 hook、pcall shim 共享同一个 `Rc`）。
+    budget: Rc<InstructionBudget>,
 }
 
 /// 一次宿主推进的结果（[`Sandbox::step`]）。
@@ -157,6 +322,21 @@ impl Sandbox {
             let value: Value = old.raw_get(*name)?;
             fresh.raw_set(*name, value)?;
         }
+        // ③b 标准库表白名单：`string` / `table` / `utf8` 原样露出（纯计算面）。
+        for name in LIBRARY_WHITELIST {
+            let lib: Table = old.raw_get(*name)?;
+            fresh.raw_set(*name, lib)?;
+        }
+        // ③c `string.dump` 摘掉（见 [`strip_string_dump`]）。
+        strip_string_dump(&old)?;
+
+        // ③d 指令预算 hook：**必须早于任何库/Mod 代码**——hook 装晚了，先跑
+        //     的代码不计量（`stdlib::install` 在 modload 里，晚于本函数）。
+        let budget = Rc::new(InstructionBudget::new(DEFAULT_INSTRUCTION_BUDGET));
+        install_budget_hook(&lua, Rc::clone(&budget))?;
+
+        // ③e 预算中止不可捕获：`pcall` / `xpcall` 换成内核 shim。
+        install_catch_shims(&lua, &fresh, &old, Rc::clone(&budget))?;
 
         // ④ require 面：受控模块装载器（r1）。空模块表就位——未注入模块的
         //    沙箱对任何名字都给可读拒绝（白名单面不放行外部模块）；模块表由
@@ -174,7 +354,33 @@ impl Sandbox {
             lua,
             modules,
             sim: Rc::new(RefCell::new(None)),
+            budget,
         })
+    }
+
+    /// 重置指令预算（**每次宿主入口之前调一次**）。
+    ///
+    /// 预算的语义是「一次入口的总燃料」而不是「每 chunk 各一份」：派生调用
+    /// （handler 里再 `require`、再进别的系统体）共享同一个计数器，否则
+    /// 「多包几层就不受限」就是一条可绕路。
+    pub fn reset_budget(&self) {
+        self.budget.reset();
+    }
+
+    /// 设定本次入口的指令预算（超 [`MAX_INSTRUCTION_BUDGET`] 按上限夹断并重置）。
+    pub fn set_instruction_budget(&self, instructions: u64) {
+        self.budget.set_limit(instructions);
+    }
+
+    /// 本次入口的指令预算上限。
+    pub fn instruction_budget(&self) -> u64 {
+        self.budget.limit.get()
+    }
+
+    /// 预算是否已耗尽（**状态判定，不解析错误文本**：宿主入口只需看这一个值
+    /// 配 [`budget_exhausted`]）。
+    pub fn budget_exhausted(&self) -> bool {
+        self.budget.exhausted.get()
     }
 
     /// 内部 Lua 句柄（inject/host 面经此接线；
@@ -306,18 +512,23 @@ mod tests {
         let kind: String = lua.load("return type(pairs)").eval().unwrap();
         assert_eq!(kind, "function");
         // deny-by-default：OS（stdlib 裁剪层）与其余被替换 globals 不可达。
-        for name in [
-            "os",
-            "io",
-            "package",
-            "string",
-            "table",
-            "math",
-            "coroutine",
-            "utf8",
-        ] {
+        for name in ["os", "io", "package", "math", "coroutine"] {
             let absent: bool = lua.load(format!("return {name} == nil")).eval().unwrap();
             assert!(absent, "{name} must be absent from the sandbox globals");
+        }
+        // 纯计算表白名单：`string` / `table` / `utf8` 露头（不再“连字符串都拼
+        // 不起来”），且摘掉了 `string.dump`。
+        for name in ["string", "table", "utf8"] {
+            let kind: String = lua.load(format!("return type({name})")).eval().unwrap();
+            assert_eq!(kind, "table", "{name} must be exposed");
+        }
+        let dump: bool = lua.load("return string.dump == nil").eval().unwrap();
+        assert!(dump, "string.dump must be stripped");
+        // 预算中止不可捕获：`pcall` / `xpcall` 仍是函数（内核 shim），
+        // 但不是旧 globals 里的真身——真身不出现在环境里。
+        for name in ["pcall", "xpcall"] {
+            let kind: String = lua.load(format!("return type({name})")).eval().unwrap();
+            assert_eq!(kind, "function", "{name} shim must be installed");
         }
         // 白名单排除面：文件系统 / 任意编译 / print / rawset / GC 干预。
         for name in [

@@ -7,9 +7,9 @@
 --
 -- # 实现纪律（沙箱方言）
 --
--- 1. **没有标准库表**：沙箱 globals 里 `string` / `table` / `math` 全为 nil
---    （`crates/ygg-sandbox/src/sandbox.rs` 的白名单测试钉死）。拼接 / 切分 /
---    排序手写在 `store.lua`，只用方法语法（`("x"):find(…)`）。
+-- 1. **标准库表可用**（M2 起）：`string` / `table` / `utf8` 已由沙箱露出，`math` 是
+--    精确子集（无 `sqrt` / 超越函数）。拼接 / 切分 / 排序仍是 `store.lua` 里的手写
+--    实现（方法语法 `("x"):find(…)` 照用）——改用库表属于包迁移（M2.7）。
 -- 2. **模块顶层纯**：只有 local / 常量 / 函数定义。所有 `ygg` 访问都在被调用的
 --    函数体里，经 `store.host()` 单点取句柄（契约 I8）。
 -- 3. **KV 只收标量**：没有表、没有删除、没有遍历（`crates/ygg-core/src/kv.rs`），

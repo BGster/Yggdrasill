@@ -312,12 +312,14 @@ impl Loaded {
         // ② 沙箱：stdlib 裁剪 + 内存上限 + 白名单环境。
         let mut sandbox = Sandbox::new()?;
         let lua = sandbox.lua().clone();
-        // ③ 确定性注入：math 精确集 + 内核种子 random（时间不在这里）。
-        let _determinism = inject::install(&lua)?;
-        // ④ 世界内核挂上：任何内核实例出生起就有世界（`world.*` 无静默降级面），
-        //    种子取内核常量同一谱系——世界 rng 流与 math.random 同源。
+        // ③ 世界内核挂上：任何内核实例出生起就有世界（`world.*` 无静默降级面），
+        //    种子取内核常量同一谱系。
         sandbox.set_sim(Some(Box::new(Sim::new(inject::KERNEL_RNG_SEED))));
         let sim = sandbox.sim_handle();
+        // ④ 确定性注入：math 精确集 + **世界流** random（时间不在这里）。
+        //    次序不弹：注入在 set_sim 之后，闭包拿到的槽才是有世界的那一个；
+        //    反过来也成立（槽是 `Rc`，后装也看得见），但先挂后注更好读。
+        inject::install(&lua, Rc::clone(&sim))?;
         // ⑤ host API：ygg.kv / ygg.codec / world.*（与 VM 共享 KV 句柄）。
         let host = host_api::install(
             &lua,
@@ -336,6 +338,9 @@ impl Loaded {
             sandbox.modules().set_chunk_paths(chunk_paths);
         }
         // ⑨ 入口 chunk：`@mod.lua` 命名让 traceback 携带 mod 侧位置。
+        //    预算先重置：装载面是**第一个**宿主入口，之前 build 里装 hook 之后
+        //    跑的库代码已经花掉一些余额，入口从满额起算才可复现。
+        sandbox.reset_budget();
         lua.load(&bundle.mod_source)
             .set_name("@mod.lua")
             .exec()
