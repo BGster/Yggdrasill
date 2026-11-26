@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:3adb8c900d3ccc11c51509398de6d7c0f6d3480af6b6fe43659f541ff877db6e",
+  "claims": [
+    {
+      "id": "claim_bbd9bd966997458bbea62a3d5d31da8f",
+      "statement": "世界是唯一权威状态（tick、archetype 集、RNG 流表、KV）；实体是 u64 id，组件是带名字与固定宽度的列，同集实体的组件集合构成一个 archetype。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/archetype.rs",
+          "version": "repo-file-v1:sha256:a6d4219a1f70babda80eba9c365b21c5fe34438d5e815394069940c8bf3c93b5"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/lib.rs",
+          "version": "repo-file-v1:sha256:aa6381314d87aabd7b5278b5a8ce79bfe04f1b278859539ddb979fd344ef7ee0"
+        }
+      ]
+    },
+    {
+      "id": "claim_c3e8c94d89464cc6abfb187755483e17",
+      "statement": "tick 是单调递增步号，dt 是宿主给出的毫秒时长且不参与物理；pending 的结构变更在 tick 边界统一落地。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/sim.rs",
+          "version": "repo-file-v1:sha256:b13732b4d433a0305669467c07580ad0cbb737073688ec69fbdfe61fc09880aa"
+        }
+      ]
+    },
+    {
+      "id": "claim_9c1ae5ef0a9047d5883fcf84c849a245",
+      "statement": "seal 封盘登记系统表与组件表，此后注册报 SEALED；系统必需声明 stage（pre/rules/post）及 reads/writes，同阶段写写冲突在 seal 时被拒。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/install.rs",
+          "version": "repo-file-v1:sha256:c665c0e4a45cc760c7d95f0300dbde050505d33051d7a67fb9f5d4aa431d8fb1"
+        }
+      ]
+    },
+    {
+      "id": "claim_578ef37aa8a745fcb4ce106b3ac1d6c0",
+      "statement": "指令预算是单次 Lua 入口最多执行的指令数（默认 2,000,000），每次入口进入时重置，按指令计数不看墻钟。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_3f2f668983ef4e02b3113828041073ea",
+      "statement": "协议帧是单条 JSON，用 type 字段区分 13 个线上 tag；step 一次产出 events 与 delta 两条帧。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/proto.rs",
+          "version": "repo-file-v1:sha256:0be98fb65b4f327739f2480c9d8512cab5959cf08727991b7bdd4bba8f4d1f7b"
+        }
+      ]
+    },
+    {
+      "id": "claim_10fc8c630f0245f794a717e9c648e558",
+      "statement": "镜像是装载源（六键 JSON），pack_hash 是 manifest 文本的 sha256；快照是运行态二进制，二者不同。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        }
+      ]
+    },
+    {
+      "id": "claim_d0349feb217c4f45a03287815bfda558",
+      "statement": "会话三态 Fresh/Ready/Closed；同一世界可以换会话（Open 快照）继续。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_1b90aef9d1634626a245fff29e3b7e52",
+      "statement": "装载序写死在 Loaded::build 里：资源表→沙箱→世界→注入→宿主面→资源面→标准库→模块→入口。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_f12962cf7a5b4404ac3f66b8b8ebdaa8",
+      "statement": "金值是固定种子下逐 tick 的 hash 列表，用来钉住确定性；哈希输入面只含 tick、组件表、archetype 内容、RNG 流与结构。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/golden.json",
+          "version": "repo-file-v1:sha256:996c8becde9a604ea1725d536e3661503a14cddb167e50a4cb3b44cacab26031"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

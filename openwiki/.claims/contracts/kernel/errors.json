@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:92f851cc1f18e8e6f114d1e6749f679a6a622e43d7b25ce25626c4db5a129e8e",
+  "claims": [
+    {
+      "id": "claim_3b4e4359a06f4db4833342468858487e",
+      "statement": "内核码 YGG-SIM-* 共八枚（UNMOUNTED/FIXED/FRAME/FORMAT/SCHEMA/ENTITY/STATE/SEALED），声明在 ygg-sim，上层只映射不改写。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/error.rs",
+          "version": "repo-file-v1:sha256:d527e1064c5d5cfe08d682f8dde15fa5efa7239610253a9e7b6d6c3c8a505310"
+        }
+      ]
+    },
+    {
+      "id": "claim_1a29ea1199b54fbcaa6b405280c9f66a",
+      "statement": "FRAME 与 FORMAT 分开：前者是文件损坏、后者是版本不支持，宿主话术不同；store 侧对 FORMAT 映射为 E_STORE_FORMAT。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/error.rs",
+          "version": "repo-file-v1:sha256:d527e1064c5d5cfe08d682f8dde15fa5efa7239610253a9e7b6d6c3c8a505310"
+        }
+      ]
+    },
+    {
+      "id": "claim_563d894682a64fe0926c79e0259b3319",
+      "statement": "规则面自有码共七枚：E_STEP_TICKS、E_STEP_NO_COMMANDS、E_STEP_UNKNOWN_COMMAND、E_STEP_REFUSED、E_STEP_RAISED、E_STEP_BUDGET、E_STEP_COMMAND_VALUE。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_64bd86477a6c46f1967dcde97b03823f",
+      "statement": "内核码在规则面原样上浮（StepError::Sim 保留 YGG-SIM-* 原文），规则面只叠加自己的七枚码，不翻译内核码。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/values.rs",
+          "version": "repo-file-v1:sha256:5bd9a84ad2b48cb83a9ad9378e11d5df743e9c3e7234aa1755269b94fe78466a"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_a39384eca9c54d918973e15bc1441b24",
+      "statement": "协议码 E_* 六枚（E_PROTOCOL/E_PACK/E_RULE/E_BUDGET/E_STATE/E_STORE_FORMAT）；step_code、load_code、sim_code 是唯一翻译点且 match 穷尽，不用通配符兜底。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_1bba4b3beaff42d9a89198de4274633e",
+      "statement": "映射口径：ZeroTicks/CommandValue 为 E_PROTOCOL；Budget 为 E_BUDGET；NoCommandSurface/UnknownCommand 与 FRAME/STATE/UNMOUNTED 为 E_STATE；REFUSED/RAISED 与 SCHEMA/ENTITY/FIXED/SEALED 为 E_RULE；FORMAT 为 E_STORE_FORMAT。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

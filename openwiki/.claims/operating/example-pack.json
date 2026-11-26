@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:55467491077ff68b34c1d0d8a3080dbc765ecd48fb3704cba9c50cb16d253f0a",
+  "claims": [
+    {
+      "id": "claim_27ada92db3644f058aa627b891ecded2",
+      "statement": "main.lua 演示装配序：声明组件 → 造世界（spawn）→ 注册系统（turn/ai/combat）→ world.seal → 命令面 → return { commands = … } 作为入口声明面。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/src/main.lua",
+          "version": "repo-file-v1:sha256:19e511dbf6b6ceb29f7476ba2d6aff578f0b59d1baa38ca677f022aa1f15d0fc"
+        }
+      ]
+    },
+    {
+      "id": "claim_f45e174d65f84af0968eaef8344a1be1",
+      "statement": "units.lua 声明四个组件 pos/hp/team/moved（均为 i64），并每行最左空地给 0 队、最右给 1 队；moved 是独立列而非塞进 pos 高位。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/src/units.lua",
+          "version": "repo-file-v1:sha256:e39dea40a3ff8a96dea5275c2a67df9eab6e7346a81e9e57cc169d3270d5fdba"
+        }
+      ]
+    },
+    {
+      "id": "claim_9d27e388c65c4965b6bcf0c235cefe9c",
+      "statement": "board.lua 用 ygg.data 读 data/board.json（10×5，中间四格为墙），坐标编码为 x*1000+y，DIRECTIONS 固定为东南西北。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/data/board.json",
+          "version": "repo-file-v1:sha256:ab4e7792f436fbbc79a2744817660282d0e3c67a81bc96b9d4077f4dd756c5e5"
+        },
+        {
+          "resource": "repo://packs/example/src/board.lua",
+          "version": "repo-file-v1:sha256:337148f7ab5014e2b2a12c2fbd3eee6be08c66f6075859fb7df08947701c8fc3"
+        }
+      ]
+    },
+    {
+      "id": "claim_c847feaad8e74c7d9f7fe8e182f73b9c",
+      "statement": "turn.lua 注册 stage=rules 的系统，每 tick 只让 tick%count+1 这一个单位行动，跑完复位 moved。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/src/turn.lua",
+          "version": "repo-file-v1:sha256:51fce3c3cbbf9e6369194e8cf5b40b45f1f393e856b9949d3a8693034ea17d51"
+        }
+      ]
+    },
+    {
+      "id": "claim_0a1b9753b32f46f7abe600c28d6a6130",
+      "statement": "ai.lua 的 step_toward 在距离≤1 时原地，否则只进严格更近的空格，并列时用 host.rng(\"ai.move\") 取一格。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/src/ai.lua",
+          "version": "repo-file-v1:sha256:39b4eb7caa9d0967dd1f6e11ccef4292e3e9bc78f1e2b577ef7de19d518ab35e"
+        }
+      ]
+    },
+    {
+      "id": "claim_1fdc274ac4f1480bad371bfb3795dbb3",
+      "statement": "combat.lua 的 resolve 在无相邻敌对各时一格不写，hp 归零走 ctx.despawn（tick 边界落地），避免 delta 虚胖。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/src/combat.lua",
+          "version": "repo-file-v1:sha256:c9a35e55fb12b021e8ab857f4286e14d568c669ae1ce04fdc4bee66fe2c77aa2"
+        }
+      ]
+    },
+    {
+      "id": "claim_d95c66247780447d971e807211ca1aa4",
+      "statement": "command.lua 的 move 要求整数且 |dx|+|dy|==1、目标格开放且无人；拒绝一律返回 false 加原因且不改状态。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/src/command.lua",
+          "version": "repo-file-v1:sha256:70f38d391842e4edcd173201619191088aafe06d6fe0747303c58781fed03ae1"
+        }
+      ]
+    },
+    {
+      "id": "claim_88e796e5b1d44e6db2656c888c4555c7",
+      "statement": "参考包自测共 12 例，含非法步距拒绝与贴脸不横跳两条回归用例。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/test/turn.lua",
+          "version": "repo-file-v1:sha256:f04f459c40b4aa5796eba7d6430a1a45a016d41a8a6f57eea6189634036efd0d"
+        }
+      ]
+    },
+    {
+      "id": "claim_c16a78c2d50c4a8e8f91a7f94e6d58f5",
+      "statement": "参考包不包含渲染/输入/音频/存档/网络/多包组合/热重载，这些在宿主侧或不在 v1 范围。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/pack.json",
+          "version": "repo-file-v1:sha256:94136a9b68ea7b948acc1b3527acd00efb38512c66d16660f66c807d755ce9ff"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

@@ -1,34 +1,80 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:061b079235bd91c033ec4d450ca8b342a099c317bbc2b0faf454377fc0cdf460",
+  "pageVersion": "sha256:9e54aad3ef266787c4f26961e9cf82461a662bf6705d001e7ca96ffc2c40728e",
   "claims": [
     {
-      "id": "claim_123a4c63f74d46bf8d8bb6652d1dc591",
-      "statement": "AGENTS.md 的契约路由表由 modpkg.lua 校验：路由行数量固定，且目标路径的一级目录必须在 kernel/host/mod（或 README.md）白名单内。",
+      "id": "claim_c1dee170086b4d8b9a876d40da0c45bc",
+      "statement": "内核按消费者分三段：host 负责把外部请求翻成一次世界推进并翻回帧，rules 用 Lua 只通过 world.* 触碰世界，world 负责列存状态、推进、随机流、快照与哈希。",
       "evidence": [
         {
-          "resource": "repo://AGENTS.md",
-          "version": "repo-file-v1:sha256:0e7e183b9735ac5d432a7b6bb9bda74c22ca88a75150cfca89e1342ab868d2dd"
+          "resource": "repo://crates/ygg-sandbox/src/lib.rs",
+          "version": "repo-file-v1:sha256:b41a71838f4ebb9c1e92a3faecd38363b84869a8969a6f5994dae540bb6eab6b"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/lib.rs",
+          "version": "repo-file-v1:sha256:aa6381314d87aabd7b5278b5a8ce79bfe04f1b278859539ddb979fd344ef7ee0"
         }
       ]
     },
     {
-      "id": "claim_7b124e30832e4f5981e7ca67ad083118",
-      "statement": "三组不是文档分类而是物理边界：内核语义在 crates/ygg-core 与 crates/ygg-sandbox 本体，host 面是 egg CLI 与 serve/rt，mod 面是 .ygg/mods/agent-seed 的 Lua 面。",
+      "id": "claim_95c09a3657e7465ba532c0cb4b271afc",
+      "statement": "段归属的判定法是「换掉宿主引擎这段代码要不要改」：要改的属于 host，不改的属于 rules 或 world。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_f395e5b9b62f4bf09a3dbce4afdcb94f",
+      "statement": "ygg-core 只持有不属于列存世界的标量状态（环境 KV 与四型值），不参与 tick 哈希；ygg-sim 完全不持有 KV。",
       "evidence": [
         {
           "resource": "repo://crates/ygg-core/src/lib.rs",
-          "version": "repo-file-v1:sha256:d03d81542da24b3985df9e8f1a8444f271cc61959757ebee2e99039d78602732"
+          "version": "repo-file-v1:sha256:c7ca0e3867c4b17b40ed55413490852d7703bf7fa291bef23b3fe0f359e97c16"
         },
         {
-          "resource": "repo://crates/ygg-sandbox/src/lib.rs",
-          "version": "repo-file-v1:sha256:29ccc21da46768db549af4bc38d3e78384813ee113a0c655b742dd04528f3366"
+          "resource": "repo://crates/ygg-sim/src/sim.rs",
+          "version": "repo-file-v1:sha256:b13732b4d433a0305669467c07580ad0cbb737073688ec69fbdfe61fc09880aa"
+        }
+      ]
+    },
+    {
+      "id": "claim_d78becfcaa774749aa1dae1b05ed910c",
+      "statement": "wiki-ver.sh 校验每页 id 唯一、ver 与 openwiki/ver.json 账本一致、站内链接可解析；wiki-consistency.sh 校验 AGENTS.md 行数预算、路由目标存在与 claims 证据可解析。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+        },
+        {
+          "resource": "repo://scripts/wiki-ver.sh",
+          "version": "repo-file-v1:sha256:4f86231f653a41d271d5d6d5eae4cd072ed1cb2365bb9ac131aef0346e0e8d65"
+        }
+      ]
+    },
+    {
+      "id": "claim_adbfd5488bf64b3b98c46aa14bb93d67",
+      "statement": "新增契约页必须同时更新本索引页与 AGENTS.md 的提示面路由表，两处都是消费者实际会读到的入口。",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:6bd54735da82f5301cfc4cfaaf20f264af55ac80522c335269c74e004a18b58a"
+        },
+        {
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T05:58:54.950Z"
+    "at": "2026-11-26T07:10:30.723Z"
   }
 }

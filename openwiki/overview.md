@@ -1,136 +1,112 @@
 ---
 type: "Reference"
-title: "Yggdrasill 知识库"
+title: "Yggdrasill 内核 SDK — 定位与宪法"
 openwiki_generated: true
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-26T05:58:54.950Z
+    at: 2026-11-26T07:10:30.723Z
 sources:
-  - id: openwiki-source-8339725b1afcf7133cd86688
-    resource: repo://.ygg/mods/agent-seed/pack.json
+  - id: openwiki-source-8037e2358a2c4f9b2c722a11
+    resource: repo://AGENTS.md
   - id: openwiki-source-651d1fb6c9e49916a916ab51
     resource: repo://Cargo.toml
-  - id: openwiki-source-8774eec48fcb6d9c1cb2563e
-    resource: repo://crates/ygg-core/src/event.rs
+  - id: openwiki-source-682e02a9e393e886de83488d
+    resource: repo://crates/ygg-host/src/session.rs
   - id: openwiki-source-683c84ca41d2dbee8643a1d8
     resource: repo://crates/ygg-lint/src/rules.rs
-  - id: openwiki-source-a4a7569ab993da998f5988fd
-    resource: repo://crates/ygg-sandbox/examples/egg/main.rs
-  - id: openwiki-source-b09b7c233d20c123d81292ab
-    resource: repo://crates/ygg-sandbox/examples/serve/roots.rs
-generated: { by: "pi", at: "2026-11-26T05:58:54.950Z" }
+  - id: openwiki-source-3ce02e4845420a1c74760ca3
+    resource: repo://crates/ygg-sandbox/src/modload.rs
+  - id: openwiki-source-8c02dd48d2aed1554766f57a
+    resource: repo://crates/ygg-sim/src/lib.rs
+  - id: openwiki-source-fe085e18d1b6157ca615fbb7
+    resource: repo://packages/schema/protocol/parity-script.json
+  - id: openwiki-source-dfe0e9598ad418e75d354f01
+    resource: repo://packs/example/golden.json
+  - id: openwiki-source-c105d9c13b085511821f0969
+    resource: repo://scripts/wasm-lane.mjs
+generated: { by: "pi", at: "2026-11-26T07:10:30.723Z" }
 ---
 
-> **id** overview · **触发** 每次新会话开工、不确定「这是什么仓库」时
-> **读不到代价** silent-drift（把地图当规则、或按记忆讲系统分层）
+# Yggdrasill 内核 SDK — 定位与宪法
 
-# Yggdrasill 知识库
+> **id** `overview` · **模块** 中枢 · **触发** 第一次进本仓、判断「这件事该不该由内核做」、给新人讲这是什么
+> **读不到代价** `silent-drift`（把渲染、联网、Agent 编排塞进内核，界一破就很难收回）
 
-**一句话**：Yggdrasill 是一个用 Lua 写游戏、用事件把游戏推进成可玩状态机、并让 Agent 在同一个契约面里「自己造世界」的 harness。仓库同时是**引擎**和**它自己的第一个玩家**——两边共用一套 `ygg.*` 面。
+Yggdrasill 是一个**可嵌入的游戏内核 SDK**：宿主引擎驱动它，它负责世界与规则，两者之间只有一份 JSON 协议。
 
-## 1. 三个系统，一套契约
+内核不渲染、不含物理、不碰输入与音频、不做资源导入、不联网、不编排 Agent。它只保证一件事：**同一个包、同一个种子、同一串命令，任何载体跑出逐字节相同的轨迹。**
 
-| 系统 | 是什么 | 代码位置 | 契约页 |
-| --- | --- | --- | --- |
-| **内核（kernel）** | 状态、事件、KV、快照、压缩、WASM、规则检查；只认注册面，不认游戏语义 | `crates/ygg-{core,schema,modules,sandbox,wasm,store,lint,sim}` | [architecture/README.md](architecture/README.md) → `contracts/kernel/` |
-| **宿主（host）** | 把内核装进可用产品：`egg` CLI、daemon、`serve` 观察面、泳道池、工具桥 | `crates/ygg-sandbox/examples/egg/`、`crates/ygg-store` | `contracts/host/` |
-| **Mod（agent-seed）** | 一局的所有规则与文案：剧本、门禁、派发、结算、身份、Proposal | `.ygg/mods/agent-seed/` | `contracts/mod/` |
-| **包（packages）** | 可复用的 Lua 能力（实体、对话、任务、程序化、资产、编解码、文本帧）与示例 mod | `packages/libs/`、`packages/mods/` | `contracts/packages/` |
+## 1. 三层结构
 
-三层之间的关系是**单向依赖**：mod 与包只经 `ygg.*` 面触内核，内核零游戏语义；宿主只装配与转发，不改判语义。这条边界不是风格问题，是可在代码里指认的接缝——见 [architecture/README.md](architecture/README.md)。
-
-## 2. 冷启动
-
-```bash
-# 构建 + 安装（幂等；macOS 上脚本会自己 ad-hoc 签名，否则首次执行被内核杀成 exit 137）
-scripts/install-egg.sh
-
-# 开局：--mod 指 mod 目录，--in 指 run 根，event.start 发首事件；输出末行 run-root: <path>
-ROOT="$(.ygg/bin/egg new --mod .ygg/mods/agent-seed --in .ygg/runs --event event.start | tail -1 | sed 's/^run-root: //')"
-A=".ygg/bin/egg open $ROOT"
-$A --event charter.set --payload '"<标题>|<目标>|<成功判据>"'
-$A --event run.begin
-
-# 观察（只读；127.0.0.1:7800；空根启动，POST /api/roots 注册根）
-.ygg/bin/egg serve
-curl -X POST http://127.0.0.1:7800/api/roots -H 'Content-Type: application/json' -d '{"root": "<repo>/.ygg/runs"}'
-
-# 推进：交互驱动（人选题），或逐事件直发
-$A --drive stdin
-$A --event map.show          # 操作视图 + 全部章节索引，payload 忽略
-$A --event config.set --payload '"play.mode=goal"'   # 仅在用户授权后
+```
+宿主引擎（Godot / Unity / H5 / TapTap / 你自己的服务）
+        │  ygg/1 协议（JSON 帧，13 个 tag）
+        ▼
+ygg-host      会话、状态机、镜像装载、错误映射          ← 集成层
+        ▼
+ygg-sandbox   Lua 沙箱：预算、白名单、命令面、原子 step  ← 规则运行时
+        ▼
+ygg-sim       列式世界：archetype、定点、RNG 流、哈希    ← 世界权威
+ygg-core      KV
 ```
 
-**一次进程只发一个事件**（`--event` 单次）；没有、也不会有 `--events` 批量入口、时间线重放脚本或结算循环。读完回执再决定下一步。暂停 = 输入 `q` 或结束 stdin；非法输出、超时、`HUMAN[:reason]` 都会安全暂停而不自动选 1。
+`ygg-pack`（原 `ygg-modules`）管包格式与纯性扫描，`ygg-lint` 管静态检查，`ygg-schema` 管 JSON Schema，`ygg-wasm` / `ygg-capi` 是两个绑定载体。**只有 `ygg-host` 面向宿主**，其余 crate 不认识「宿主」这个词。
 
-## 3. 仓库地图
+## 2. 宪法表
 
-```text
-crates/            内核与宿主（Rust；8 个 workspace crate）
-crates/ygg-sandbox/examples/egg/   egg CLI：new / open / serve / daemon / verify …
-packages/libs/     可复用 Lua 包（八包，各有契约页与 selftest）
-packages/mods/     示例与测试 mod（shapez / superagent / tla-models / test-adventure / pkg-selftest）
-packages/schema/   JSON Schema 四件（manifest / agent-config / scene-texts / scene-texts-fragment）
-.ygg/mods/agent-seed/   Agent harness 本体：剧本数据、门禁、文案、测试
-.ygg/runs/         run 产出（不进 git）
-scripts/           安装、契约同步、场景 readPlan 生成、版本账本、文档闭包
-openwiki/          本知识库（生成物：页面 + claims；不手改生成页）
-```
-
-## 4. 权威顺序
-
-**源码与测试 > `openwiki/contracts/` > `openwiki/operating/` > 仓库根 `AGENTS.md` > 其余一切**（历史计划稿、会话记录、旧文档快照）。一句话：行为以代码为准，契约页解释代码，操作页约束做法，`AGENTS.md` 只留冷启动与不可逆红线。详见 [governance.md](governance.md) §1。
-
-## 5. 完整页面地图
-
-### 中枢
-
-| 页面 | 用途 |
+| 内核负责 | 内核不负责 |
 | --- | --- |
-| [overview.md](overview.md) | 本页：身份、三系统、冷启动、地图 |
-| [quickstart.md](quickstart.md) | 按「这一刻」找页：召回入口 |
-| [governance.md](governance.md) | 知识库自己的宪法：边界、`ver` 账本、签名、批结算维护 |
+| 世界的权威状态（实体/组件/archetype/KV） | 渲染、动画、UI |
+| 时间推进（`step`，tick 与 dt 由宿主给） | 物理、碰撞、寻路 |
+| 确定性（Q32.32 定点、规范字节、逐 tick 哈希、命名 RNG 流） | 输入采集、音频播放 |
+| Lua 规则沙箱（能力授予、指令预算、原子回滚） | 资源导入/解码（贴图、模型、音频） |
+| 快照 / 事件日志 / 回放 | 网络同步、房间、匹配 |
+| 包格式与装载序 | Agent 编排、prompt、工具调用 |
+| 集成协议 `ygg/1` 与三载体绑定 | 观察面 UI（面板、SSE、地图） |
 
-### 契约（`contracts/`，解释「系统是什么」）
+**判定法**：换一个宿主引擎（比如把 H5 换成 Godot），这段代码要不要改？要改 → 宿主侧；不改 → 内核侧。
 
-| 分组 | 页面 |
-| --- | --- |
-| 索引 | [architecture/README.md](architecture/README.md) — 触碰面 → 契约页 |
-| kernel | [state-machine](contracts/kernel/state-machine.md) · [state-surface](contracts/kernel/state-surface.md) · [events](contracts/kernel/events.md) · [wire-protocol](contracts/kernel/wire-protocol.md) · [lua-api](contracts/kernel/lua-api.md) · [compaction](contracts/kernel/compaction.md) · [sim-kernel](contracts/kernel/sim-kernel.md) |
-| host | [cli-daemon](contracts/host/cli-daemon.md) · [serve](contracts/host/serve.md) · [lanes](contracts/host/lanes.md) · [rt-face](contracts/host/rt-face.md) · [harness-tools](contracts/host/harness-tools.md) |
-| mod | [mod-package](contracts/mod/mod-package.md) · [prompt-surface](contracts/mod/prompt-surface.md) · [tool-bridge](contracts/mod/tool-bridge.md) · [action-faces](contracts/mod/action-faces.md) · [identity](contracts/mod/identity.md) · [testing-strategy](contracts/mod/testing-strategy.md) · [tla-models](contracts/mod/tla-models.md) · [superagent-game](contracts/mod/superagent-game.md) · [shapez-game](contracts/mod/shapez-game.md) |
-| packages | [索引](contracts/packages/README.md) · [entity](contracts/packages/entity.md) · [dialogue](contracts/packages/dialogue.md) · [quest](contracts/packages/quest.md) · [procgen](contracts/packages/procgen.md) · [assetgen](contracts/packages/assetgen.md) · [codec](contracts/packages/codec.md) · [textframe](contracts/packages/textframe.md) · [role-skill](contracts/packages/role-skill.md) |
+## 3. 与 Agent 编排的分工
 
-### 操作（`operating/`，约束「人怎么做事」）
+本仓**不做 Agent**。Agent 的协议、工具、结算、账本在另一个仓（sak）实现，它对本仓的关系只有一个：**它是若干宿主之一**，通过同一份 `ygg/1` 协议驱动世界。因此本仓里没有任何「派发」「提案」「门禁」「结算」的代码，也没有为 Agent 特化的 pack 或 runner。
 
-| 分组 | 页面 |
-| --- | --- |
-| 幕 | [prologue](operating/acts/prologue.md) · [charter](operating/acts/charter.md) · [coordinate](operating/acts/coordinate.md) · [settle](operating/acts/settle.md) · [release](operating/acts/release.md) · [retired](operating/acts/retired.md) |
-| 需求阶段 | [intake](operating/req-acts/intake.md) · [delivery](operating/req-acts/delivery.md) · [integration](operating/req-acts/integration.md) |
-| 仪式 | [dispatch](operating/rituals/dispatch.md) · [read-gate](operating/rituals/read-gate.md) · [cleanup](operating/rituals/cleanup.md) · [fallback](operating/rituals/fallback.md) |
-| 冷启动展开 | [vision](operating/cold-start/vision.md) · [vocabulary](operating/cold-start/vocabulary.md) · [principles](operating/cold-start/principles.md) · [topology](operating/cold-start/topology.md) · [system-boundaries](operating/cold-start/system-boundaries.md) |
-| 剧情 | [run-story](operating/story/run-story.md) · [requirement-story](operating/story/requirement-story.md) |
-| 文案域 | [scenes/README](operating/scenes/README.md) — 回执键索引（正文在 `data/texts/`） |
+## 4. 工作区地图
 
-## 6. 旧 `§N` 引用怎么解析
+| crate | 源码行数 | 一句话 |
+| --- | --- | --- |
+| `crates/ygg-sim` | 5439 | 列式世界、定点、哈希、RNG、快照、日志 |
+| `crates/ygg-sandbox` | 7946 | Lua 沙箱、`world` 面 17 键、装载、命令面、原子 step |
+| `crates/ygg-host` | 2263 | 协议帧、会话状态机、镜像、错误映射 |
+| `crates/ygg-lint` | 1828 | 静态规则（含 `YGG-STD` AST 检查） |
+| `crates/ygg-schema` | 1213 | manifest / 组件 / 存档的 JSON Schema |
+| `crates/ygg-modules` | 552 | 包的发现、字节锁、纯性扫描 |
+| `crates/ygg-core` | 346 | KV 与值类型 |
+| `crates/ygg-wasm` | 273 | wasm-bindgen 绑定 |
+| `crates/ygg-capi` | 240 | C ABI（6 个符号） |
 
-历史文档与回执里的 `§N` 按下表解析；映射是**跨树**的（`§1`/`§2.3`/`§2.4` 与 `§4` 落在 `operating/`，其余落在 `contracts/`）。
+配套：`packs/example`（参考包）、`hosts/h5`（零构建浏览器宿主）、`packages/schema/protocol`（协议 schema 与 parity 脚本）、`scripts/`（构建与门禁）。
 
-| 旧引用 | 现在读 |
-| --- | --- |
-| 术语速览 / §2 | [operating/cold-start/vocabulary.md](operating/cold-start/vocabulary.md) |
-| §1（产品形态与三层架构） | [operating/cold-start/system-boundaries.md](operating/cold-start/system-boundaries.md) |
-| §2 章首 + §2.1/2.2/2.5/2.9 | [contracts/kernel/state-machine.md](contracts/kernel/state-machine.md) |
-| §2.3 / §2.4 | [operating/story/run-story.md](operating/story/run-story.md) / [operating/story/requirement-story.md](operating/story/requirement-story.md) |
-| §2.6 / §2.7 + §2.8 / §2.10 | [events](contracts/kernel/events.md) / [state-surface](contracts/kernel/state-surface.md) / [lanes](contracts/host/lanes.md) |
-| §2.11 / §2.12 / §2.13 | [tool-bridge](contracts/mod/tool-bridge.md) / [prompt-surface](contracts/mod/prompt-surface.md) / [identity](contracts/mod/identity.md) |
-| §3 章题 + §3.1 / §3.2 / §3.3 / §3.4 / §3.5 / §3.6 | [lua-api](contracts/kernel/lua-api.md) / [mod-package](contracts/mod/mod-package.md) / [wire-protocol](contracts/kernel/wire-protocol.md) / [action-faces](contracts/mod/action-faces.md) / [cli-daemon](contracts/host/cli-daemon.md) / [compaction](contracts/kernel/compaction.md) |
-| §3.7 | [contracts/host/serve.md](contracts/host/serve.md) |
-| §4 | [contracts/packages/](contracts/packages/README.md)（八包各一页） |
-| DESIGN §4（文档二分） | [governance.md](governance.md) |
+## 5. 三条能力线（谁会成为宿主）
 
-## 7. 判据
+| 线 | 宿主 | 本仓提供 |
+| --- | --- | --- |
+| 单机/网页游戏 | H5、TapTap | `hosts/h5` + wasm 绑定 |
+| 引擎内嵌 | Godot、Unity | C ABI + 协议帧 |
+| 服务端权威 | 自己的服务（含 Agent 世界后端） | Rust 绑定 + 快照/回放 |
 
-① 阻断——把本页当权威（它只是地图）、按旧 `§N` 猜内容而不查映射、在 `contracts/` 与 `operating/` 之间放第三棵树。② 症状——同一主题两页各写一半、地图里的链接失效、有人拿 `AGENTS.md` 当规则全文。③ 确认——`operating/scenes/README.md` 与 `data/texts/` 七片段一一对应、`architecture/README.md` 的触碰面表与 `contracts/` 实文件相等、`scripts/wiki-consistency.sh` 为绿。
+## 6. 现在的数字
 
-维护责任 = 加页或改页结构的人；触发 = 新增 / 合并页面、`§N` 映射变化、冷启动命令变化；检查 = 地图分组与 `openwiki/` 实目录相等，示例命令在本机可复现。
+- 9 个 crate，`cargo test --workspace` **63 套全绿**；参考包自测 **12/12**。
+- 金值：50 tick 逐帧哈希钉在 `packs/example/golden.json`。
+- 长跑：10 万 tick 最终 hash `15126981819641904924`，原生 2668ms / wasm 3764ms，两载体逐帧相同。
+
+## 7. 权威顺序
+
+源码与测试 > `contracts/**`（内核/宿主/包的行为契约）> `operating/**`（怎么构建、怎么跑、怎么评）> `AGENTS.md` > 其他一切（含本页）。
+
+本页只做导航与宪法；任何具体行为以对应契约页为准，契约页与源码冲突时以源码为准并立刻改页。
+
+## 8. 维护责任
+
+- **触发**：新增/删除 crate、宪法边界变更（哪一类职责进或出内核）、能力线变化、规模数字变化。
+- **检查**：§4 行数由 `git ls-files 'crates/*/src/*.rs' | xargs wc -l` 复算；§6 的测试套数与金值来自 `cargo test --workspace` 与 `scripts/wasm-lane.mjs`。

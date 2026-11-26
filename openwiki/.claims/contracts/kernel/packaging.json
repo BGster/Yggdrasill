@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:98c02e8984d88f9e32b235834859beb466b9f2c246a9648e15d78a5807ce2127",
+  "claims": [
+    {
+      "id": "claim_6f7fa433ced44440908dad99295748d7",
+      "statement": "pack.json v2 字段：schemaVersion=2、id、version、capabilities、entry、modules、data[]、schemaFiles；manifest.json 由工具生成而非人写。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/pack.json",
+          "version": "repo-file-v1:sha256:94136a9b68ea7b948acc1b3527acd00efb38512c66d16660f66c807d755ce9ff"
+        }
+      ]
+    },
+    {
+      "id": "claim_df21e73f5c97415fa3abdbca2db3ff3d",
+      "statement": "manifest.json 由 `cargo run -p ygg-sandbox --example pack -- <包目录>` 从磁盘字节现算 sha256/byteLength 生成；code 段只在包声明了 entry/modules 时出现，单文件包零 diff。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/pack.rs",
+          "version": "repo-file-v1:sha256:bb500e83add73dd31879885b7f263afe08777a4e0270e563bef5217b77d195f3"
+        }
+      ]
+    },
+    {
+      "id": "claim_45f09e23a8da425d898456cff93ecf04",
+      "statement": "装载期对 manifest 校三件：集合一致、字节数、sha256；不合即 E_PACK；pack::assemble 把住总量 1 MiB、模块数 128、内容寻址规范化（src/a 与 src/a.lua 等价，两种拼法同时出现判重复）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/pack.rs",
+          "version": "repo-file-v1:sha256:d2417d90db612be68a977e8fee26915b6cd3ed4d31e4f13af063ae53e1e2d909"
+        }
+      ]
+    },
+    {
+      "id": "claim_0ecee39d27fa4b1aab1cc2543e450885",
+      "statement": "pack_hash 是 manifest 文本的 sha256（不是包版本号）；宿主握手时与 pack_id/pack_hash 对账。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_40b21cef728744a89d30a1901cf5ba06",
+      "statement": "装载序九步与 build 分支一一对应：资源表 fail-fast → Sandbox::new → set_sim → inject::install → host_api::install → resources::install → stdlib::install → 模块表注入 → reset_budget 后 call 入口 chunk。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_f1819d0ce1d84385839354fd8fd71b4c",
+      "statement": "入口预算在装载前重置：②–⑧ 期间跑的库代码已花预算，入口必须从满额起算才可复现。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_eb1ce76092c14a719997586d2e5c9cc4",
+      "statement": "包内 require 只查注入的 ModuleSet（src.* 与 pkg.<id>.* 两个命名空间），不做路径拼接不读文件系统；空模块表时任何 require 都被拒。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modules.rs",
+          "version": "repo-file-v1:sha256:ae8c2a2b4b110b59679f4d403d6d3668a106e165ea8be863b511df9b3d653c8e"
+        }
+      ]
+    },
+    {
+      "id": "claim_5183547f8d7645ebb454a51c1fef299e",
+      "statement": "模块 chunk 执行期 ygg 面被 ShadowBanned 遮罩，模块顶层不得写世界状态，只能返回导出表。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modules.rs",
+          "version": "repo-file-v1:sha256:ae8c2a2b4b110b59679f4d403d6d3668a106e165ea8be863b511df9b3d653c8e"
+        }
+      ]
+    },
+    {
+      "id": "claim_4e0679a7bf0d4dfd8a813e456ca57013",
+      "statement": "selftest 约定：v2 包用例放 test/*.lua 与 harness.lua 同住、引擎由 pack.json 的 entry 决定，入口 `cargo run -q --example selftest -p ygg-sandbox -- --mod <包> [--filter <子串>]`；参考包现有 12 例。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/selftest.rs",
+          "version": "repo-file-v1:sha256:551ad8dced320a7f15fd898ccbae684ab4a2bae1b2a3062a09f17458123cc5c7"
+        },
+        {
+          "resource": "repo://packs/example/test/turn.lua",
+          "version": "repo-file-v1:sha256:f04f459c40b4aa5796eba7d6430a1a45a016d41a8a6f57eea6189634036efd0d"
+        }
+      ]
+    },
+    {
+      "id": "claim_c456c14693654864a9dbfee443f275ca",
+      "statement": "capabilities 今日只是声明与 schema 校验，不存在任何装载期或调用期的 E_CAPABILITY 拒绝（台账 D-13 跟踪）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/proto.rs",
+          "version": "repo-file-v1:sha256:0be98fb65b4f327739f2480c9d8512cab5959cf08727991b7bdd4bba8f4d1f7b"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

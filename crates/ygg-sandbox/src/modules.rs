@@ -397,7 +397,7 @@ mod binding {
              原因：模块 chunk 在装载期执行，顶层写下的状态既不进世界帧也不进存档，\n  \
              还会随 require 顺序变化——拆文件或调换 require 顺序就会改装载期状态，\n  \
              重构不再安全。模块纯了以后，require 才能在别处按需调用。\n  \
-             见 openwiki/overview.md §3.2 多文件 Mod 契约",
+             见 openwiki/contracts/kernel/packaging.md 多文件包契约",
             site = call_site(lua),
             entry = crate::modload::MOD_SOURCE_FILE,
         )

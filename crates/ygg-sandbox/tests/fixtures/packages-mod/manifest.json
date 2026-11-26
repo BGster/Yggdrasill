@@ -20,14 +20,14 @@
     {
       "files": [
         {
-          "byteLength": 1163,
+          "byteLength": 1164,
           "path": "fixture/init.lua",
-          "sha256": "31bcba212196eb52a0b29e18921dd3efb52a82aa51b9d7df06ae27bbe859746c"
+          "sha256": "b27c639ac42c2e657ccdbef742fc3005cb728e11273451f609df8393d39e54b2"
         },
         {
-          "byteLength": 147,
+          "byteLength": 148,
           "path": "fixture/pkg.json",
-          "sha256": "b311b9f31438c33f37bbdc09de301afe4e560be3fd15704d57ff7d18aa90809e"
+          "sha256": "80fefbcdd58b3d77b12f4664aff5e2a8faac13c1df125a5ed4e181286da415ee"
         },
         {
           "byteLength": 567,

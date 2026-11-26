@@ -1,40 +1,94 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:964d6a246e7881a74d688fbadbbb3ba8d4f05aae05c252197f2b964b59035f88",
+  "pageVersion": "sha256:71dfbca2fc07767efc35c298d55174d766fff00423c3870bc6f6a4441ddf7c05",
   "claims": [
     {
-      "id": "claim_116c0aa66b58469b807e9f16abf5de60",
-      "statement": "The game is driven by events into a playable state machine, and the same `ygg.*` surface is shared by the game being played and the agent harness playing it.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-core/src/event.rs",
-          "version": "repo-file-v1:sha256:2796175d251218383278f7b04047c2ec9530c67462e197f7c0026f2457a0ee77"
-        }
-      ]
-    },
-    {
-      "id": "claim_648e73ade9664adf91fa0f6f3ebc3ed4",
-      "statement": "The three systems have a one-way dependency: mods and packages touch the kernel only through `ygg.*`, the kernel carries zero game semantics, and the host assembles and forwards without re-judging.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-lint/src/rules.rs",
-          "version": "repo-file-v1:sha256:2105b328f68111524911e7a2c33c6372aff011a172a40b028eaac515eadfe60e"
-        }
-      ]
-    },
-    {
-      "id": "claim_7287ff4f265d409891227e1c79b32d2a",
-      "statement": "The workspace map is the eight `ygg-*` crates plus the Lua packages, the agent-seed mod, the schema files and the run directory — the page map groups those same things as contracts and operating pages.",
+      "id": "claim_9fd6d0e885bc4c199d518859cb5853ea",
+      "statement": "工作区共 9 个 crate：ygg-core / ygg-sim / ygg-sandbox / ygg-host / ygg-lint / ygg-schema / ygg-modules / ygg-wasm / ygg-capi，其中只有 ygg-host 面向宿主。",
       "evidence": [
         {
           "resource": "repo://Cargo.toml",
-          "version": "repo-file-v1:sha256:4a9af022c1a6af0882bce191c293c49ec3d297ee35964f347de73d702fa6a260"
+          "version": "repo-file-v1:sha256:dc3c82760440f2c60e945b73f9917820faedd54886dca10e945c6a1ca5e956a2"
+        }
+      ]
+    },
+    {
+      "id": "claim_3de30a96be78487e9a4522bf86277361",
+      "statement": "内核与宿主之间只有一份 JSON 协议（ygg/1，13 个线上 tag）；宿主驱动 step，内核不回调宿主。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_d98330b3816b4866aa47a30158e7b1c8",
+      "statement": "内核负责世界权威状态、时间推进、确定性、规则沙箱、快照与回放、包格式与集成协议；不负责渲染、物理、输入音频、资源导入、网络、Agent 编排与观察面 UI。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/lib.rs",
+          "version": "repo-file-v1:sha256:aa6381314d87aabd7b5278b5a8ce79bfe04f1b278859539ddb979fd344ef7ee0"
+        }
+      ]
+    },
+    {
+      "id": "claim_daaa41d165404ee8b7e3a861caa9bfc4",
+      "statement": "边界判定法：换一个宿主引擎这段代码要不要改——不改的属内核侧，要改的属宿主侧。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_73c747a583274afe94dc05ac206deea8",
+      "statement": "本仓不做 Agent：Agent 编排、工具与结算在另一个仓（sak）实现，对本仓只是若干宿主之一，通过同一份协议驱动世界。",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:6bd54735da82f5301cfc4cfaaf20f264af55ac80522c335269c74e004a18b58a"
+        }
+      ]
+    },
+    {
+      "id": "claim_97de2a70e52b470cae839c70003aae2b",
+      "statement": "lint 只做静态规则（含 YGG-STD AST 检查），不参与运行时判定；运行时的拒绝在沙箱与内核。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-lint/src/rules.rs",
+          "version": "repo-file-v1:sha256:eb056863e1691856303dc87f39fb9104d80e8693938593fefd5cf6c8d2920ccd"
+        }
+      ]
+    },
+    {
+      "id": "claim_1b287dbd46414fbb997a6e16b31d59a0",
+      "statement": "三条能力线共用同一份协议：单机/网页（wasm）、引擎内嵌（C ABI）、服务端权威（Rust 绑定）；三载体跑同一份 parity 脚本。",
+      "evidence": [
+        {
+          "resource": "repo://packages/schema/protocol/parity-script.json",
+          "version": "repo-file-v1:sha256:64384876a45dab8c57e1679893fd041992005d0ae046404fe253be8ae008793e"
+        }
+      ]
+    },
+    {
+      "id": "claim_603fd02a53f143569d920b7b63a55251",
+      "statement": "确定性证据：参考包全值 50 tick 逐帧哈希钉在 golden.json，10 万 tick 原生与 wasm 逐帧相同。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/golden.json",
+          "version": "repo-file-v1:sha256:996c8becde9a604ea1725d536e3661503a14cddb167e50a4cb3b44cacab26031"
+        },
+        {
+          "resource": "repo://scripts/wasm-lane.mjs",
+          "version": "repo-file-v1:sha256:7f39d4521ad2107303b63b2101bba5c3e5b2826acb277eca3398cf159cacdc88"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T05:58:54.950Z"
+    "at": "2026-11-26T07:10:30.723Z"
   }
 }

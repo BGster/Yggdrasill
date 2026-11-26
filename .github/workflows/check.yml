@@ -1,15 +1,16 @@
-# 回归门禁：本地门禁的 CI 投影（读：playbook `gates` 章）。
-# crates 触改时另按 openwiki/contracts/kernel/state-machine.md §2.11 跑字面三件套。
+# 回归门禁：本地门禁的 CI 投影（读：openwiki/contracts/kernel/*）。
+# 内核契约见 openwiki/contracts/kernel/（world / determinism /
+# sandbox / lua-api / persistence / packaging / errors）。
 #
-# 与 deploy-pages 的分工：本文件只做**校验**，不产出部署物；deploy-pages 只做
-# wasm + 前端构建与 Pages 发布。两者共享同一套 toolchain 版本与供应链 pin 纪律
-# （所有 uses 按 zizmor 纪律 pin 到 commit SHA，注释保留版本号）。
+# 本文件只做**校验**，不产出部署物；浏览器宿主的产物（wasm）由本地
+# `scripts/build-wasm.sh` 产出，不随仓提交。
 #
-# 覆盖口径 = playbook `gates` 章里无需额外前置条件的必过项：
+# 覆盖口径：
 #   rust.fmt / rust.clippy / rust.test
+#   参考包自测（selftest）/ 金值（golden）/ 镜像（image）
 # 不含的项与原因：
 #   - wasm.build / wasm.determinism：需 WASI SDK + wasm-bindgen CLI，成本高，
-#     由 deploy-pages 的 build job 与本地门禁承担（其产物即 wasm 实例）。
+#     由本地门禁 `scripts/build-wasm.sh` + `scripts/wasm-lane.mjs` 承担。
 #
 # 另带一条**结构守卫**（不属于 playbook `gates` 章的门禁命令）：
 # serde_json 不得开 `preserve_order`（字节键序即线格式）。
@@ -55,6 +56,22 @@ jobs:
 
       - name: cargo test（workspace）
         run: cargo test --workspace
+
+      # 参考包是内核的活体契约：自测、逐 tick 金值、宿主镜像三件套。
+      - name: 参考包自测（packs/example）
+        run: |
+          cargo run -q --example selftest -p ygg-sandbox \
+            -- --mod packs/example
+
+      - name: 金值（逐 tick 哈希）
+        run: |
+          cargo run -q --example golden -p ygg-sandbox \
+            -- packs/example --check packs/example/golden.json
+
+      - name: 宿主镜像（pack.image.js）
+        run: |
+          cargo run -q --example image -p ygg-host \
+            -- packs/example --out hosts/h5/pack.image.js --check
 
       # 字节兼容的反向门禁：一旦给 serde_json 打开
       # preserve_order，键序就不再是字典序（语义相等、

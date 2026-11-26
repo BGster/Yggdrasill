@@ -1,30 +1,94 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:d5ab94f2c64a6d0ecdd0c6ed25f24d93fe19e3e10e834958390163485ac72a42",
+  "pageVersion": "sha256:da3c4714a0e396222b6af5e89fc43bbdc2845a473739fa18a55253a065cd7447",
   "claims": [
     {
-      "id": "claim_31b10db3072a4e5896ff51ff6a43e7ba",
-      "statement": "Understanding-only pages are registered as `reference`: they reach `readPlan` never, produce no `[READ FIRST]` block and carry no signature obligation — registering them only keeps the machine-checked links resolvable.",
+      "id": "claim_196c9927e97c42d89f0a4c459a37b063",
+      "statement": "参考包自测一行命令可跑：cargo run -q --example selftest -p ygg-sandbox -- --mod packs/example，共 12 例全过。",
       "evidence": [
         {
-          "resource": "repo://scripts/gen-scene-readfirst.py",
-          "version": "repo-file-v1:sha256:c4cb14b5c78fc91632cfc0c78e8357d9079c55447c2e403650441899477712fc"
+          "resource": "repo://packs/example/golden.json",
+          "version": "repo-file-v1:sha256:996c8becde9a604ea1725d536e3661503a14cddb167e50a4cb3b44cacab26031"
         }
       ]
     },
     {
-      "id": "claim_23dad494ac0a4567a7ece8697a33e418",
-      "statement": "Moving an id from `reference` into `scene` or `reqStage` is the single-point way to make a page gated; the generator and the gate follow automatically, so no second edit is needed anywhere.",
+      "id": "claim_bd60ad04d85340b0a747a84534180fb4",
+      "statement": "金值校验用 cargo run --example golden -- packs/example --check packs/example/golden.json；缺省种子 0x5eed，金值文件为 seed=24301、ticks=50。",
       "evidence": [
         {
-          "resource": "repo://scripts/gen-scene-readfirst.py",
-          "version": "repo-file-v1:sha256:c4cb14b5c78fc91632cfc0c78e8357d9079c55447c2e403650441899477712fc"
+          "resource": "repo://crates/ygg-sandbox/examples/golden.rs",
+          "version": "repo-file-v1:sha256:fde8009ccec4f53e7e3b144939a116cb97e6a02c325f732a40ba93bd080afefb"
+        }
+      ]
+    },
+    {
+      "id": "claim_abd7a0bc8aee4adbba77f05474df226d",
+      "statement": "镜像生成/校验必须 --out 与 --check 联用，产物 hosts/h5/pack.image.js 当前 20920 字节。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/examples/image.rs",
+          "version": "repo-file-v1:sha256:6c60b9bc90b17ab318d4c940f3cedf4c90e79db2b9f85c484158e27cecf555ff"
+        }
+      ]
+    },
+    {
+      "id": "claim_a0e1c828f2b4458ea7b1932c39e6c559",
+      "statement": "wasm 一致性两条命令：先 WASI_SDK_PATH=… bash scripts/build-wasm.sh 产 wasm，再 node scripts/wasm-lane.mjs 逐 tick 对比 50/50 并校验 replay。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/build-wasm.sh",
+          "version": "repo-file-v1:sha256:be02a8fa795c710af9f6391737c24408fad77cd5a68577ed884ebc0c15bc27b1"
+        },
+        {
+          "resource": "repo://scripts/wasm-lane.mjs",
+          "version": "repo-file-v1:sha256:7f39d4521ad2107303b63b2101bba5c3e5b2826acb277eca3398cf159cacdc88"
+        }
+      ]
+    },
+    {
+      "id": "claim_32ec596ff1fe4cfbb5b4c49ff12f147c",
+      "statement": "长跑矩阵脚本只读可反复跑，默认三档 1000/10000/100000 tick；退出码 2 表示 wasm 产物过期，应先重建而非怀疑内核。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/persist-matrix.sh",
+          "version": "repo-file-v1:sha256:38261c9c2835027d7dcd9e9f9cb874646ebc4c261d7c1a1d3a3b4d6efd2d8508"
+        }
+      ]
+    },
+    {
+      "id": "claim_74affffb0882400cbaffe31142121089",
+      "statement": "浏览器验收用 python3 -m http.server 8080 后打开 hosts/h5/index.html?seed=24301，装载后 hash 为 6492099460516690635。",
+      "evidence": [
+        {
+          "resource": "repo://hosts/h5/index.html",
+          "version": "repo-file-v1:sha256:c61487cfd4f5e26a2010fcd629f928da6ba3ebaacb46ea09345794b873054f1d"
+        }
+      ]
+    },
+    {
+      "id": "claim_db2ad37490f4481392f5e480f9791ad9",
+      "statement": "最小包结构：pack.json（schemaVersion=2、id、version、capabilities、entry）+ src/main.lua + 可选 data/，入口必须返回 { commands = … }。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/pack.json",
+          "version": "repo-file-v1:sha256:94136a9b68ea7b948acc1b3527acd00efb38512c66d16660f66c807d755ce9ff"
+        }
+      ]
+    },
+    {
+      "id": "claim_a378981f617b4f7fa536a7afb05a4f76",
+      "statement": "写包四步：world.component 声明列 → world.spawn 造实体 → world.system 注册系统 → world.seal 封盘，之后再注册报 YGG-SIM-SEALED。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/install.rs",
+          "version": "repo-file-v1:sha256:c665c0e4a45cc760c7d95f0300dbde050505d33051d7a67fb9f5d4aa431d8fb1"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T05:58:54.950Z"
+    "at": "2026-11-26T07:10:30.723Z"
   }
 }

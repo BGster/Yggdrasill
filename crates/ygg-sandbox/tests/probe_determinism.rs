@@ -12,7 +12,7 @@
 //! 4. `probe_scale_cost_baseline_documents_shard_decision`——规模成本基线
 //!    （D17 串行确定性内核决策的实证锚）：10k 实体下单步推进与全量快照的墙钟
 //!    成本，取多次运行最小值；断言为宽松 sanity 界，实测数据经 println! 落入
-//!    测试输出作为决策记录（openwiki/overview.md D17 引用）。
+//!    测试输出作为决策记录（openwiki/contracts/kernel/determinism 引用）。
 //!
 //! **引擎版本与 golden 哈希的关系（探针口径声明）**：canonical 快照字节是
 //! **内核世界帧**，**不含 engine_version**——引擎补丁版本升级若不改状态语义，
@@ -163,7 +163,7 @@ end
 
 #[test]
 fn probe_scale_cost_baseline_documents_shard_decision() {
-    // D17（openwiki/overview.md 决策表）规模实证锚：串行确定性内核在叙事规模下的
+    // 规模实证锚（openwiki/contracts/kernel/determinism）：串行确定性内核在叙事规模下的
     // 单步推进/全量快照成本量级。**口径声明**：本探针量的是成本基线（perf 记
     // 录），不是确定性；计时不确定性可接受（数据取多次运行最小值）；断言为
     // 宽松 sanity 界——只在成本悄然恶化一个数量级以上时翻红（例如 snapshot-out

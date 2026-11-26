@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:d2e47aeddb51a84ee3962380ce0e282c94a78d00fef2be5f48c12e5b462444ab",
+  "claims": [
+    {
+      "id": "claim_dad02451aba54726820da2489dd6d138",
+      "statement": "功能分支在独立 worktree 里长、主检出保持干净；一个迭代一条分支，不直接提交到 develop/master；合并到主干由人决定并用 --no-ff。",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:6bd54735da82f5301cfc4cfaaf20f264af55ac80522c335269c74e004a18b58a"
+        }
+      ]
+    },
+    {
+      "id": "claim_17bdba93a1104130b349cb6491531625",
+      "statement": "提交前门禁与 CI 等价：cargo fmt --check、cargo clippy -D warnings、cargo test --workspace；改过页面时加 wiki-ver --check 与 wiki-consistency。",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/check.yml",
+          "version": "repo-file-v1:sha256:f70f4f0c6cf409c940bf970ac32c0eab3b3c430111abb894a209adedfeacc2d0"
+        }
+      ]
+    },
+    {
+      "id": "claim_ec748e2634ae4005850882db220946de",
+      "statement": "代码与受影响的契约页必须在同一提交（AGENTS.md 的自演进条款要求约束与其实施载体同步）。",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:6bd54735da82f5301cfc4cfaaf20f264af55ac80522c335269c74e004a18b58a"
+        }
+      ]
+    },
+    {
+      "id": "claim_2324f8824e8542bbb54517ef38d0979d",
+      "statement": "零债：发现的问题只能现在实现或当场转成带验收标准的排期项；TODO/待优化/遗留 不得留在代码与交付物里。",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:6bd54735da82f5301cfc4cfaaf20f264af55ac80522c335269c74e004a18b58a"
+        }
+      ]
+    },
+    {
+      "id": "claim_fbfd47de504b4852be4c1b47a4f5a54e",
+      "statement": "单文件超 800 行是信号（先拆职责、门面收口），超 1200 行硬禁；检查用 git ls-files '*.rs' '*.lua' | xargs wc -l 过滤。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/mod.rs",
+          "version": "repo-file-v1:sha256:095b40b38bcb423524af824be2025c46e2bb049c6c291a6250dd42499bd5c6b3"
+        }
+      ]
+    },
+    {
+      "id": "claim_d63d791e196e4a65b0f4fbff3a5ce61b",
+      "statement": "测试名必须是契约名，失败时不用读实现就知道哪条契约破了；测试服从设计，不为练化而放宽断言或加 ignore。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/tests/replay_tamper.rs",
+          "version": "repo-file-v1:sha256:fc37d476d3454987989e847c95bfca659d3d49b2fc751e6c5fda55246a43ae94"
+        }
+      ]
+    },
+    {
+      "id": "claim_0389c040beef43ceaccfa62f373416cf",
+      "statement": "仓内文档面门禁只有两个脚本：scripts/wiki-ver.sh 与 scripts/wiki-consistency.sh，没有额外的文件长度脚本。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+        },
+        {
+          "resource": "repo://scripts/wiki-ver.sh",
+          "version": "repo-file-v1:sha256:4f86231f653a41d271d5d6d5eae4cd072ed1cb2365bb9ac131aef0346e0e8d65"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

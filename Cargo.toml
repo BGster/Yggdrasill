@@ -23,7 +23,7 @@ edition = "2021"
 # （⇒ 不依赖 mlua / ygg-schema / 内核 host 面）的前提下复用同一份模块判定。
 #
 # members 一次成型的第二次受控例外：`ygg-sim` 是 Tier 1 原生模拟内核的**新载体**，
-# 就是 `openwiki/contracts/kernel/sim-kernel.md` §0 表格写的那个 crate（不是第 N 个业务 crate）。
+# 就是 `openwiki/contracts/kernel/world.md` §0 表格写的那个 crate（不是第 N 个业务 crate）。
 # 它不能挂在既有 crate 下：`ygg-core` 的实体存储是行式且 `Value::Float` 是一等变体——
 # 恰是 Tier 1 明令禁止的两件事（列式 SoA、禁浮点）；`ygg-sandbox` 拥有 mlua（Tier 1 必须无 VM 可编译可基准）。依赖纯度：零内部依赖、
 # 运行时依赖仅 thiserror，且必须能编到 wasm32（经 ygg-wasm → ygg-sandbox → ygg-sim）。

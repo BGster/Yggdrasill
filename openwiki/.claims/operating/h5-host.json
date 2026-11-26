@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:7a3c0f862d9285ab58856ce3d8389965590832ff2ca4e8079e913134809288fe",
+  "claims": [
+    {
+      "id": "claim_8509ef3eec2b4520ae67d73f08a15892",
+      "statement": "hosts/h5 是零构建宿主：三个 ES module 加一个 canvas，无打包器与 node_modules；main.js 写死 PROTOCOL=ygg/1、CODEC=json、PACK_ID=ygg:example，并用 ?seed= 控制种子（默认 24301）。",
+      "evidence": [
+        {
+          "resource": "repo://hosts/h5/main.js",
+          "version": "repo-file-v1:sha256:20ffb0c791ac1b62eebde5846cccf70179ae1070fe83f1cee7ecc0b51f2382cd"
+        }
+      ]
+    },
+    {
+      "id": "claim_0f8fe54fdc2f42a5876a3aafef0a5d3d",
+      "statement": "main.js 自己手解快照二进制（decodeSnapshotEntities）并按 (eid,cid) 应用 delta（applyDelta），宿主不缓存权威状态。",
+      "evidence": [
+        {
+          "resource": "repo://hosts/h5/main.js",
+          "version": "repo-file-v1:sha256:20ffb0c791ac1b62eebde5846cccf70179ae1070fe83f1cee7ecc0b51f2382cd"
+        }
+      ]
+    },
+    {
+      "id": "claim_3eadd3629b2f426d9b0172b2ab571f30",
+      "statement": "render.js 只负责画：CELL_SIZE=56、BOARD_PAD=12、decodePos(v) 拆 x=floor(v/1000) 与 y=v%1000，命中测试按 canvas.width/rect.width 缩放。",
+      "evidence": [
+        {
+          "resource": "repo://hosts/h5/render.js",
+          "version": "repo-file-v1:sha256:b66412f7cfbc2ba96918e4630e0911c864c0013b301fd0c5076963654bd55bb1"
+        }
+      ]
+    },
+    {
+      "id": "claim_0ace925819b5483fa454befb087c55e0",
+      "statement": "四步验收基线：装载后 tick 0 hash 6492099460516690635、实体 10；合法移动后 hash 变 4206962874467499479 且 delta changed=1；非法命令报 E_STEP_REFUSED 且 tick/hash 不变；快照 tick 2 →46 tick 4 → 恢复回 tick 2。",
+      "evidence": [
+        {
+          "resource": "repo://artifacts/w2-s1-browser/evidence.txt",
+          "version": "repo-file-v1:sha256:9df0c133e5307cd005442e19314dbcb4af38dede84f0d9fcfbb6ab9a778c48fc"
+        }
+      ]
+    },
+    {
+      "id": "claim_fe4d8112c6cf40ce9dbc4da64d615fbe",
+      "statement": "确定性对照：干净会话前三 tick 的 hash 为 3894146741098379338 / 15782364623611949364 / 1588387159733934705，与 golden.json 前三条逐位相同。",
+      "evidence": [
+        {
+          "resource": "repo://packs/example/golden.json",
+          "version": "repo-file-v1:sha256:996c8becde9a604ea1725d536e3661503a14cddb167e50a4cb3b44cacab26031"
+        }
+      ]
+    },
+    {
+      "id": "claim_083998e0c9b841cfbc1302a9e0405c4d",
+      "statement": "改了包却不重生 hosts/h5/pack.image.js 会在握手时报 E_PACK，因为 pack_hash 是 manifest 文本的 sha256。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        },
+        {
+          "resource": "repo://hosts/h5/pack.image.js",
+          "version": "repo-file-v1:sha256:c323049fea554961253fcb38305cf5e1a1566dbaed567eedbc0a7e4046f34ccc"
+        }
+      ]
+    },
+    {
+      "id": "claim_e4b85fa23dd348f6aaf5a1df55ab29b3",
+      "statement": "同一套断言可在无浏览器环境跑：node scripts/wasm-lane.mjs 覆盖 50 tick 逐帧与 replay 对比。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wasm-lane.mjs",
+          "version": "repo-file-v1:sha256:7f39d4521ad2107303b63b2101bba5c3e5b2826acb277eca3398cf159cacdc88"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

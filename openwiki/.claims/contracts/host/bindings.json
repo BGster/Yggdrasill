@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:8287be54c7b4d3f0596768fb2ea5d29c92341f97e886e238a88d575382d3fd55",
+  "claims": [
+    {
+      "id": "claim_b2b5d30285674fc48bf03ead274d6011",
+      "statement": "Rust Session、WASM YggSession、C ABI 三条载体包的是同一个 Session：没有第二份状态机、校验或错误映射。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-capi/src/lib.rs",
+          "version": "repo-file-v1:sha256:703aaffc22b837a39f4072aa3c4410a959ef47f16b08b5a7d659de3ccad89f8d"
+        },
+        {
+          "resource": "repo://crates/ygg-wasm/src/lib.rs",
+          "version": "repo-file-v1:sha256:c90d300cdaf86ed76b8999cf2db6944840047b0e83b1de44157e0fd230c30442"
+        }
+      ]
+    },
+    {
+      "id": "claim_42c7e29dd9be4b229a1ae9247c10fddb",
+      "statement": "C ABI 只导出六个符号（protocol_version / session_new / session_handle / session_free / string_free / last_error），边界上没有结构体过境，返回字符串由调用方用 string_free 释放。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-capi/src/lib.rs",
+          "version": "repo-file-v1:sha256:703aaffc22b837a39f4072aa3c4410a959ef47f16b08b5a7d659de3ccad89f8d"
+        }
+      ]
+    },
+    {
+      "id": "claim_7a264e18c4834fa4b019334285ea75cc",
+      "statement": "WASM 需要 WASI shim：vendored Lua 会调用 clock_time_get 等 WASI 导入，而 wasm32-unknown-unknown 不提供实现，shim 用确定性假实现使浏览器与原生同字节。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-wasm/src/lib.rs",
+          "version": "repo-file-v1:sha256:c90d300cdaf86ed76b8999cf2db6944840047b0e83b1de44157e0fd230c30442"
+        },
+        {
+          "resource": "repo://crates/ygg-wasm/wasi-shim.js",
+          "version": "repo-file-v1:sha256:f74554a8a9006567c668343e94da00c281db301f73e354911453b4a3f61f3921"
+        }
+      ]
+    },
+    {
+      "id": "claim_bd774886a4ab4fc3b177ed379580ec4b",
+      "statement": "wasm 构建脚本在胶水的 wasm = instance.exports 之后、__wbindgen_start() 之前注入 __yggBindMemory，并断言注入点只命中一次；缺这一步 shim 拿到的 memory 为 null，首次 clock_time_get 即崩。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/build-wasm.sh",
+          "version": "repo-file-v1:sha256:be02a8fa795c710af9f6391737c24408fad77cd5a68577ed884ebc0c15bc27b1"
+        }
+      ]
+    },
+    {
+      "id": "claim_bc2bf35250ad4c02868cb43b3fbd2084",
+      "statement": "C ABI 与 WASM 两条 parity 测试 include_str! 同一份 parity-script.json，断言逐帧类型序列等于 expected_types 且逐帧 JSON 字节相同。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-capi/tests/parity.rs",
+          "version": "repo-file-v1:sha256:5fb2dfb4b624e4387a618eb49b843c90b9316a2a4f7c57a05e312f973cc9c9ad"
+        },
+        {
+          "resource": "repo://crates/ygg-wasm/tests/parity.rs",
+          "version": "repo-file-v1:sha256:5e939f4daecb214be5d2b510e12bf63ce89811bf50ffb942318ff931fa8d3bff"
+        },
+        {
+          "resource": "repo://packages/schema/protocol/parity-script.json",
+          "version": "repo-file-v1:sha256:64384876a45dab8c57e1679893fd041992005d0ae046404fe253be8ae008793e"
+        }
+      ]
+    },
+    {
+      "id": "claim_bc82dc2edd5740d5976016c8bc86f4bb",
+      "statement": "parity 脚本的 expected_types 防退化：脚本若被打空，类型序列先红，不会让三条载体互相背书。",
+      "evidence": [
+        {
+          "resource": "repo://packages/schema/protocol/parity-script.json",
+          "version": "repo-file-v1:sha256:64384876a45dab8c57e1679893fd041992005d0ae046404fe253be8ae008793e"
+        }
+      ]
+    },
+    {
+      "id": "claim_d4423c427eec454682052df59b15f84f",
+      "statement": "绑定层不得做默认值填充、字段校验或版本判断、或缓存会话状态；字段与版本判据集中在 proto::decode。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/proto.rs",
+          "version": "repo-file-v1:sha256:0be98fb65b4f327739f2480c9d8512cab5959cf08727991b7bdd4bba8f4d1f7b"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

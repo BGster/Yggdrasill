@@ -1,78 +1,112 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:ac6e02d67f994675abb686eef062f3368c3757acf75683ad1655d9ff09edb355",
+  "pageVersion": "sha256:288ea330f49f3150a02d1afbe3537663dbe43ae31a4838857cff53f33dfcffd7",
   "claims": [
     {
-      "id": "claim_fc2ef176a2da437395a4f9245308918e",
-      "statement": "沙箱 globals 是 deny-by-default 新表，只放 16 个 base 纯计算函数 + 字符串方法 + 受控 `require` + 冻结的 `ygg` 表；`string`/`table`/`utf8`/`coroutine`/`math`/`os`/`io`/`package`/`debug`/`dofile`/`loadfile`/`load`/`print`/`rawset`/`collectgarbage` 全为 `nil`（逐名断言钉死）。",
+      "id": "claim_20f45ebc54e944299c4ded920ed41fdc",
+      "statement": "全局 world 表共 17 个键：component/spawn/despawn/insert/set/get/remove/each/each_mut/ids/tick/rng/isqrt/log/system/seal 加 kv（与 ygg.kv 同一张表，world 必须先装 ygg.kv）。",
       "evidence": [
         {
-          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
-          "version": "repo-file-v1:sha256:e98fefcb31fe3956aecb63196f6e3c5e303b4419a0ec4f159029229f1145a883"
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/install.rs",
+          "version": "repo-file-v1:sha256:c665c0e4a45cc760c7d95f0300dbde050505d33051d7a67fb9f5d4aa431d8fb1"
         }
       ]
     },
     {
-      "id": "claim_f027ca4044004181a49c6c3de7432182",
-      "statement": "第二级面只由 driver 路径注入：15 个 `math` 成员 + `ygg.ticks`；裸沙箱 `Sandbox::new()` 没有这层，因此包只许用第一级。",
+      "id": "claim_9ee255cb6de24838af5a251279ccd5ac",
+      "statement": "world.component 的 kind 只能是 i64|u64|u8|bytes，同名重复声明报 YGG-SIM-SCHEMA；world.system 的 stage 只能是 pre|rules|post。",
       "evidence": [
         {
-          "resource": "repo://crates/ygg-sandbox/src/inject.rs",
-          "version": "repo-file-v1:sha256:9875a2894e75be2d5e5f08e8343f79a4c7c8bcbc23cbce40d0073c18f340234c"
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/install.rs",
+          "version": "repo-file-v1:sha256:c665c0e4a45cc760c7d95f0300dbde050505d33051d7a67fb9f5d4aa431d8fb1"
         }
       ]
     },
     {
-      "id": "claim_7264d7a108734263b1eeda1bbef5cd6c",
-      "statement": "宿主面装配按面拆分，`install` 拆为逐面薄函数，注册序为 on → emit → narrate → choice → meta → fs → tool → kv → entity → sim → codec。",
+      "id": "claim_00a6f3c8c0d244a69ae173644c6228c9",
+      "statement": "world.each 只读迭代，world.each_mut 以回调返回值回写列；world.ids 只取 id 且按规范序。",
       "evidence": [
         {
-          "resource": "repo://crates/ygg-sandbox/src/host_api/mod.rs",
-          "version": "repo-file-v1:sha256:6007d5dc870b8ffbc7340326c58afbf7df51506a58b90815fea01d01ed9cc0b9"
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/install.rs",
+          "version": "repo-file-v1:sha256:c665c0e4a45cc760c7d95f0300dbde050505d33051d7a67fb9f5d4aa431d8fb1"
         }
       ]
     },
     {
-      "id": "claim_041f076d473b4ff0a82bce84a79f8614",
-      "statement": "`ygg.sim.*` 恰好 10 个键（step/hash/snapshot/restore/spawn_batch/despawn_batch/insert_batch/status/trace/replay），键集闭集由 `sim_face` 断言；未注入实例时每个函数抛 `YGG-SIM-UNMOUNTED` 而非返回 `nil`。",
+      "id": "claim_dab8544fbeda43cbae2e735d2d7896f7",
+      "statement": "world.isqrt 是 Q32.32 定点逐位平方根，作为定量距离比较的唯一入口；math 里没有 sqrt。",
       "evidence": [
         {
-          "resource": "repo://crates/ygg-sandbox/src/host_api/sim.rs",
-          "version": "repo-file-v1:sha256:969f902e211db64d964fb14edb16f0c9d833957b47ebf63b29dc8057aabeb121"
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/install.rs",
+          "version": "repo-file-v1:sha256:c665c0e4a45cc760c7d95f0300dbde050505d33051d7a67fb9f5d4aa431d8fb1"
         },
         {
-          "resource": "repo://crates/ygg-sandbox/tests/sim_face.rs",
-          "version": "repo-file-v1:sha256:6824fdbae9dec92b7ab3df055f17b466b251af9a42f6daefb5e99612f7519519"
+          "resource": "repo://crates/ygg-sim/src/fixed.rs",
+          "version": "repo-file-v1:sha256:14c300f380c149c530a60eed78fa84aceab8a79bd8cb60f62e184826a2c06265"
         }
       ]
     },
     {
-      "id": "claim_c771770ab0614abf8b1cd88d33799077",
-      "statement": "`ygg.codec.*` 恰好 3 个键（encode/decode/sha256），无状态、无实例、无 `UNMOUNTED` 码：未注入时整表缺席，调用方直接走 Lua 路径且产出字节相等。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/src/codec_face/digest.rs",
-          "version": "repo-file-v1:sha256:1a30e9243f0ad37b6a33564be0fc8d8f2c4d800af65fa0d50896d33a6ec36272"
-        },
-        {
-          "resource": "repo://crates/ygg-sandbox/src/codec_face/mod.rs",
-          "version": "repo-file-v1:sha256:fdc7e3ff605f6e30a9313072896381c1268bdf772a4845b13cadffee388db641"
-        }
-      ]
-    },
-    {
-      "id": "claim_f48e99735f374d028d551af1c5dbe134",
-      "statement": "`require` 只查宿主注入的 `ModuleSet`（`src.*` 与 `pkg.<id>.*` 两个命名空间），不做路径拼接；沙箱内无 `package` 全局，模块顶层是纯导出面（`ShadowBanned`）。",
+      "id": "claim_38c675be07d74cc78e655f2c77471b5a",
+      "statement": "入口 chunk 返回值里带 commands 表才有命令面；命令成功只能返回 true，拒绝返回 false 加原因，其他返回值报 E_STEP_COMMAND_VALUE。",
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/src/modload.rs",
-          "version": "repo-file-v1:sha256:7592877e3d40399fa6d5967e4bcc225a364b192619cddf705625d97249390943"
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        },
+        {
+          "resource": "repo://packs/example/src/command.lua",
+          "version": "repo-file-v1:sha256:70f38d391842e4edcd173201619191088aafe06d6fe0747303c58781fed03ae1"
+        }
+      ]
+    },
+    {
+      "id": "claim_dcd69f60b3924b5e8348aa7b1a3c6108",
+      "statement": "命令拒绝必须不改状态：Loaded::command 在调用前后各做一次复原（undo 日志与快照），规则作者不需自行回滚。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_c21af54e186c4e348df7499e023b307e",
+      "statement": "没有命令面的包，宿主面入口直接答 E_STEP_NO_COMMANDS，不静默降级成空面。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_1eb19d808fbc47e7a8b6ebb2bc1c8936",
+      "statement": "world.kv（= ygg.kv）不进快照、不进 state_hash、不被 replay 复算，所以影响玩法的状态不能放 KV。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/kv.rs",
+          "version": "repo-file-v1:sha256:a9acec7bddd02beddd901d89cd377c18bc9fb0a710cc0e8847348ec7d45209d3"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_ed9ce64974bd4596953b91f2e26d327a",
+      "statement": "旧宿主面（ygg.entity.*、ygg.sim.*、ygg.on/emit、叙事/选择/工具/FS）已不存在，规则只通过 world.* 触碰世界。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_api/world/install.rs",
+          "version": "repo-file-v1:sha256:c665c0e4a45cc760c7d95f0300dbde050505d33051d7a67fb9f5d4aa431d8fb1"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T05:58:54.950Z"
+    "at": "2026-11-26T07:10:30.723Z"
   }
 }

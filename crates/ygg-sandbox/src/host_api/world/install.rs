@@ -20,7 +20,7 @@ use crate::world_ops::{self, WorldOp};
 // ---------------------------------------------------------------------------
 
 /// 装 `world` 面（全局表 `world`；须在 `ygg.kv` 之后——`world.kv` 直接复用那张表）——
-/// 一块表里 15 个键，逐个 `raw_set`。
+/// 一块表里 17 个键，逐个 `raw_set`。
 pub(crate) fn install_world(lua: &Lua, state: &Rc<RefCell<HostState>>) -> Result<(), Error> {
     let ygg: Table = lua.globals().raw_get("ygg")?;
     let world = lua.create_table()?;

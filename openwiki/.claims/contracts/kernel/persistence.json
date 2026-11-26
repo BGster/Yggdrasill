@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:b8d984935aab055eaa25d2bf390bfde72fc7caf7b56234bbe74e79745f9d8f0f",
+  "claims": [
+    {
+      "id": "claim_5e885fb5fafb436eb7e7003f32d0ca36",
+      "statement": "快照帧布局：magic 8B \"YGGSIM\\0\\x01\" / fmt_version 2B LE / flags 2B / tick 8B / next_entity 8B / comp_n 4B 加组件表（name_len 2B + name + type 1B + frac_bits 1B，按名升序）/ res_n 4B 加键升序表 / rng_seed 8B / rng_n 4B 加流表（每流 w0..w3 各 4B）/ arch_n 4B 加 archetype 段 / digest 8B。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_8c2fd259cbd94ecea5a4c22cbb7db445",
+      "statement": "三条硬性质：字节稳定（同态两次 encode 逐字节相同）、往返幂等（decode 后重编相等）、名称键控（不同注册顺序得到相同字节与哈希）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_bbc2d0e657104db1bbe1249be46ea68a",
+      "statement": "加字段必须同时升 fmt_version 与 canonical::FMT_VERSION；v1 列型 1..5，v2 新增列型 6 = F64Bits（8B 位串），其余布局不变。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/canonical.rs",
+          "version": "repo-file-v1:sha256:0b7a324a44e432b60e56dd500b60e8781b013cf9075ed75f1024f2af50ebb526"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_206d666d0eb64e9e88a4b0a1492ca27c",
+      "statement": "FMT 与 FRAME 分开：fmt_version 不被支持报 YGG-SIM-FORMAT（宿主 E_STORE_FORMAT，处置是升级存档）；magic/长度/尾 digest/列类型不符报 YGG-SIM-FRAME（处置是文件坏了）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_b5c571ba128d48cfb6b8b9ece2f0ea91",
+      "statement": "输入日志线格式 Log{header:{seed,start_tick}, frames:[{tick,dt,ops,hash}]}；start_tick 不为 0 直接答 ok:false。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/proto.rs",
+          "version": "repo-file-v1:sha256:0be98fb65b4f327739f2480c9d8512cab5959cf08727991b7bdd4bba8f4d1f7b"
+        }
+      ]
+    },
+    {
+      "id": "claim_49e8749465ea488aa3b303576de1137b",
+      "statement": "回放第一处不等即停并给 first_bad_tick（定位到帧），截断日志作为合法前缀仍 ok:true；四类篡改（未篡改/改值/改哈希/截断）各有用例。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/tests/replay_tamper.rs",
+          "version": "repo-file-v1:sha256:fc37d476d3454987989e847c95bfca659d3d49b2fc751e6c5fda55246a43ae94"
+        }
+      ]
+    },
+    {
+      "id": "claim_716077bb6e46473587416777920650b3",
+      "statement": "KV 不进快照、不进 state_hash、不被回放复算，因为影响玩法的状态必须在列存里，否则同一份日志重放出不同世界。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/kv.rs",
+          "version": "repo-file-v1:sha256:a9acec7bddd02beddd901d89cd377c18bc9fb0a710cc0e8847348ec7d45209d3"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_ba1fb7a0bd964e93b445fb8440739d0f",
+      "statement": "10 万 tick 三端（原生/wasm/墙钟）一致，最终 hash 15126981819641904924；重生成用 `cargo run -q --example golden -p ygg-sandbox -- packs/example --ticks 100000 --final-only`。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/persist-matrix.sh",
+          "version": "repo-file-v1:sha256:38261c9c2835027d7dcd9e9f9cb874646ebc4c261d7c1a1d3a3b4d6efd2d8508"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

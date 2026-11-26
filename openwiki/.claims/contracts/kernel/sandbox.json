@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:44a2812a52855b918e8ef06272d5047aa96750f5fd227b36aad7f31599d12f2c",
+  "claims": [
+    {
+      "id": "claim_4424bcb2d6f14be4933cc2268e16d34f",
+      "statement": "base 白名单恰好 14 项：assert/error/getmetatable/ipairs/next/pairs/rawequal/rawget/rawlen/select/setmetatable/tonumber/tostring/type。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_1397f729d9e14aba96d35491e697b224",
+      "statement": "显式排除 dofile/loadfile（文件系统）、load（动态编译）、print（输出走日志面）、rawset（绕过元语义）、collectgarbage（GC 干预面）；coroutine 不放。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_99a2fad4476546a2ac2b069ad3b0bc13",
+      "statement": "标准库只放 string/table/utf8；math 由 inject 从零构造，不 raw_get 原始库表，避免夹带超越函数。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_fcb0840f56ec4701a5014f2fd46840c6",
+      "statement": "pcall/xpcall 由 install_catch_shims 换成内核 shim，语义不变但预算哨兵不可被脚本吞掉。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_92c951c9709649199d8182d2bce6ff51",
+      "statement": "math 精确集为 abs/ceil/floor/fmod/modf/tointeger/ult/min/max/type 加 huge/maxinteger/mininteger 与 random；没有 sqrt 与 sin/cos/exp/log/pow，randomseed 缺席。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/inject.rs",
+          "version": "repo-file-v1:sha256:093c33d562c042ea67c0745a6d33716feab7f10c32eb5afd58e4b1a0f477dcad"
+        }
+      ]
+    },
+    {
+      "id": "claim_1522633e8728491f86140bcb3f1168ad",
+      "statement": "预算常亮：BUDGET_QUANTUM=1000 条字节码一次 hook，DEFAULT_INSTRUCTION_BUDGET=2_000_000，MAX_INSTRUCTION_BUDGET=64_000_000，SANDBOX_MEMORY_LIMIT=64 MiB。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_bf34ac3c88be4289b0ba478805073555",
+      "statement": "预算按入口重置（step/command/装载入口 chunk），不是按 tick 累计，所以 100k tick 长跑不会中途撞预算。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    },
+    {
+      "id": "claim_a50ed33ccfc148b4b9fa951bc1ce94db",
+      "statement": "预算哨兵是内核拥有的 BudgetExhausted（Lua 侧不透明 userdata），pcall/xpcall shim 按预算状态无条件重抛，脚本无法捕获后继续跑；宿主拿到类型化错误且 Display 首段是 E_BUDGET。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e03da210d6fc1989e173f744b90eed263926b1f9cc89ecca03ca3a3d5d14e69e"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

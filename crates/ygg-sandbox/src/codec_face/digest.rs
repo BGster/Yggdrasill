@@ -2,7 +2,7 @@
 
 /// `ygg.codec.sha256(bytes) -> string` 的原生计算：SHA-256 摘要的 64 位小写 hex。
 ///
-/// 契约：`openwiki/contracts/packages/codec.md` §4.1「下沉边界」表的 S19 行与
+/// 契约：`openwiki/contracts/kernel/packaging.md` §4.1「下沉边界」表的 S19 行与
 /// `openwiki/contracts/kernel/lua-api.md` §3.1.4。形状与包侧 `pkg.codec.sha256` 逐字
 /// 对齐：字节串进（原始字节，不要求 UTF-8）、64 位小写 hex 出——不用「返回
 /// raw 32 字节」的反方案，那会让包侧还得用 Lua 补 hex，热路径白下沉。

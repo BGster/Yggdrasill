@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:283647ff7b32cdc03ce1c47faac396cdb32edf168ef66e4f3df318d95d08e05c",
+  "claims": [
+    {
+      "id": "claim_8b1271391d1e4cdab149b43c9a9111dc",
+      "statement": "会话三态：Fresh 只接受 hello，Ready 接受其余消息（重复 hello 答 E_PROTOCOL），Closed 对一切消息答 E_STATE；hello 对账失败不改变状态，可改正后重试。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_8dc203f675e5467b98376ca8366f45c9",
+      "statement": "hello 对账三项：protocol 为 ygg/1、codec 为 json、pack_hash 等于已装载包的 manifest 摘要；全过后才进 Ready 并答 ready。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_cc85c6109377459db1d6311128f2c812",
+      "statement": "hello 的 seed 是可选创世种子：Some(seed) 在对账全过后按该种子重建干净世界谱系，重建失败仍留在 Fresh。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/proto.rs",
+          "version": "repo-file-v1:sha256:0be98fb65b4f327739f2480c9d8512cab5959cf08727991b7bdd4bba8f4d1f7b"
+        },
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_7fb97ce229a44691b4026eb9acd395b4",
+      "statement": "只有 step 出两帧，顺序是 events 然后 delta，两者来自同一次推进；其余消息各一帧。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_fe97795613ce4ab4812e2fb83b5a252b",
+      "statement": "拒绝分层：未知字段、浮点值、未知 type/op 在反序列化层就答 E_PROTOCOL；会话判状态与时序；内核判世界（未知命令 E_STATE、命令被拒 E_RULE、ticks=0 E_PROTOCOL）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/proto.rs",
+          "version": "repo-file-v1:sha256:0be98fb65b4f327739f2480c9d8512cab5959cf08727991b7bdd4bba8f4d1f7b"
+        }
+      ]
+    },
+    {
+      "id": "claim_937676813b3f4647b2a793866b03e1fd",
+      "statement": "未 seal 的世界上发 step 被会话拒为 E_RULE（先于内核）；宿主发送 snapshot reply 方向答 E_PROTOCOL。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_acabb7a0842049c481c407546982dcdb",
+      "statement": "replay 的判据是帧哈希：帧 tick 是该帧开跑前的时钟，复算要求当前 tick 等于 frame.tick；start_tick 非 0 直接答 ok:false，不猜起始状态。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    },
+    {
+      "id": "claim_0152f8e71b964844aa8df896a9b58eec",
+      "statement": "v1 的 replay 检测不到不改变世界的篡改（如把 dt 改小到系统无感知），这是日志面本来的强度。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

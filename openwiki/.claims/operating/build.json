@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:f6af2436060bba49d8adb1c117dd90856e25e40f8552f382d2ac4450accaa06f",
+  "claims": [
+    {
+      "id": "claim_5d2e9b8870e64da39b613d6c819ccbaf",
+      "statement": "wasm 产物唯一入口是 scripts/build-wasm.sh：cargo build --target wasm32-unknown-unknown → wasm-bindgen --target web --reference-types → 重写裸 WASI 导入并注入内存绑定 → 可选 wasm-opt，末尾自动冒烟。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/build-wasm.sh",
+          "version": "repo-file-v1:sha256:be02a8fa795c710af9f6391737c24408fad77cd5a68577ed884ebc0c15bc27b1"
+        }
+      ]
+    },
+    {
+      "id": "claim_df5fc7073d694379838d899bec9babe2",
+      "statement": "wasm-pack 不可用：它不透传 --reference-types，而 mlua 的异常处理模块要求该标志。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/build-wasm.sh",
+          "version": "repo-file-v1:sha256:be02a8fa795c710af9f6391737c24408fad77cd5a68577ed884ebc0c15bc27b1"
+        }
+      ]
+    },
+    {
+      "id": "claim_b66116dc41854c0a9540960ff42733f0",
+      "statement": "CI 只有 rust 一个 job：cargo fmt --check、cargo clippy -D warnings、cargo test --workspace，加一条 serde_json 不得开 preserve_order 的结构守卫。",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/check.yml",
+          "version": "repo-file-v1:sha256:f70f4f0c6cf409c940bf970ac32c0eab3b3c430111abb894a209adedfeacc2d0"
+        }
+      ]
+    },
+    {
+      "id": "claim_86967838a0fc4b0c83aa994ed3fb6fc1",
+      "statement": "CI 不跑 wasm 构建、浏览器泳道、golden 与 image 两条金值门禁；这些只能在本地跑，CI 绿不等于可交付。",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/check.yml",
+          "version": "repo-file-v1:sha256:f70f4f0c6cf409c940bf970ac32c0eab3b3c430111abb894a209adedfeacc2d0"
+        },
+        {
+          "resource": "repo://scripts/persist-matrix.sh",
+          "version": "repo-file-v1:sha256:38261c9c2835027d7dcd9e9f9cb874646ebc4c261d7c1a1d3a3b4d6efd2d8508"
+        }
+      ]
+    },
+    {
+      "id": "claim_6845a5c68c8d4362944ee503b847f3cc",
+      "statement": "crates/ygg-wasm/pkg/ 不入库（.gitignore），hosts/h5/pack.image.js 与 packs/example/golden.json 入库，因为它们是确定性基线与 --check 门禁的对比对象。",
+      "evidence": [
+        {
+          "resource": "repo://.gitignore",
+          "version": "repo-file-v1:sha256:f248ed0f515053a2dc4593d1b203b9e769636672bf99c60ae2f7098ddcd49ac0"
+        },
+        {
+          "resource": "repo://hosts/h5/pack.image.js",
+          "version": "repo-file-v1:sha256:c323049fea554961253fcb38305cf5e1a1566dbaed567eedbc0a7e4046f34ccc"
+        }
+      ]
+    },
+    {
+      "id": "claim_5085e12198c149b8b29a47a1e73ef499",
+      "statement": "selftest 支持 --mod/--filter/--fixture/--packages 四个参数；参考包运行是 `cargo run -q --example selftest -p ygg-sandbox -- --mod packs/example`。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/selftest.rs",
+          "version": "repo-file-v1:sha256:551ad8dced320a7f15fd898ccbae684ab4a2bae1b2a3062a09f17458123cc5c7"
+        }
+      ]
+    },
+    {
+      "id": "claim_5b845f06114a4db0b72001165eb4a050",
+      "statement": "持久化矩阵用 bash scripts/persist-matrix.sh 跑原生/wasm/墙钟三档并比对同一 hash；wasm 泳道用 node scripts/wasm-lane.mjs [--ticks N]。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/persist-matrix.sh",
+          "version": "repo-file-v1:sha256:38261c9c2835027d7dcd9e9f9cb874646ebc4c261d7c1a1d3a3b4d6efd2d8508"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

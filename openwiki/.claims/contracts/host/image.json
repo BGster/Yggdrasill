@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:3f0206bf5598c24f2424703b8ad49b6038f2334effb6bd60f1cfb942161ec031",
+  "claims": [
+    {
+      "id": "claim_2cf005104c4e4b369c893bb415030906",
+      "statement": "镜像 JSON 六个键：modSource（必填）、manifest（必填，空串=无资源）、schemas、resources、modules、chunkPaths（后四者可缺省）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        }
+      ]
+    },
+    {
+      "id": "claim_f1534f71537d4a2e97b1ee21bf0cad5f",
+      "statement": "manifest 为空串时走无资源路径，schemas 与 resources 被忽略，与 native 的 ModBundle::in_memory 同一口径。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        }
+      ]
+    },
+    {
+      "id": "claim_605094e60509417fa7bdf32608f0de77",
+      "statement": "modules 是 require 的全部可见面，键为模块路径，src/util 与 src/util.lua 等价且撞到同一模块即拒。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        }
+      ]
+    },
+    {
+      "id": "claim_3fc09e469d10471ab1e49a371fb6b9a5",
+      "statement": "镜像不碰磁盘，pack_hash 是 manifest 文本本身的摘要，所以同一份镜像在任何平台得到同一串，构成了「A 包存档读不进 B 包」的握手闸。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/modload.rs",
+          "version": "repo-file-v1:sha256:3a2acaffcce317eff0fcc60532e75c07da0de56189eab432751fde2d65579291"
+        }
+      ]
+    },
+    {
+      "id": "claim_348fbc68260f4b7699da1b8fc3138ecf",
+      "statement": "to_image 输出规范化 JSON（键字典序、modules/chunkPaths 仅非空时写出、模块名还原为相对路径），使 load(to_image(x)) 与 to_image(load(to_image(x))) 逐字节稳定。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        }
+      ]
+    },
+    {
+      "id": "claim_5c450fe6688c4608ba28ec846648dc12",
+      "statement": "缺字段与坏字段没有猜测填充，每种都返回指名前缀的报错（镜像不是合法 JSON / 模块键不是模块路径 / schemas[i] 缺 $id / resources 不是 base64 等）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/examples/image.rs",
+          "version": "repo-file-v1:sha256:6c60b9bc90b17ab318d4c940f3cedf4c90e79db2b9f85c484158e27cecf555ff"
+        },
+        {
+          "resource": "repo://crates/ygg-host/src/image.rs",
+          "version": "repo-file-v1:sha256:ab86ae6f057c1cde880e2b44a09986cd3e826b84162e712c3f82544cbf07f443"
+        }
+      ]
+    },
+    {
+      "id": "claim_ca643c1ba5eb4609847ac3d50cd0e6f6",
+      "statement": "生成物由 --example image 产出，--check 必须与 --out 联用，且以 .js 结尾时写出 ES module 常量文件。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/examples/image.rs",
+          "version": "repo-file-v1:sha256:6c60b9bc90b17ab318d4c940f3cedf4c90e79db2b9f85c484158e27cecf555ff"
+        },
+        {
+          "resource": "repo://hosts/h5/pack.image.js",
+          "version": "repo-file-v1:sha256:c323049fea554961253fcb38305cf5e1a1566dbaed567eedbc0a7e4046f34ccc"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

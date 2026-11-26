@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:d23621055ecdd338d76cf01a0ecdb85ac93c7143eb0a2b40bce7e9a7189e7b9c",
+  "claims": [
+    {
+      "id": "claim_c73497b836ab4233b0c071350d9e7720",
+      "statement": "定点是 Q32.32：Fixed=i64、FRAC_BITS=32、ONE=1<<32；mul/div 用 i128 中间量，isqrt 是整数牛顿迭代而非 f64::sqrt。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/fixed.rs",
+          "version": "repo-file-v1:sha256:14c300f380c149c530a60eed78fa84aceab8a79bd8cb60f62e184826a2c06265"
+        }
+      ]
+    },
+    {
+      "id": "claim_785a1a68efdb43d8a2dac097a4e3a2a5",
+      "statement": "协议层的 Value 没有浮点变体，小数在解码期就被拒；进状态的数值必须是 Fixed 或整数。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/proto.rs",
+          "version": "repo-file-v1:sha256:0be98fb65b4f327739f2480c9d8512cab5959cf08727991b7bdd4bba8f4d1f7b"
+        }
+      ]
+    },
+    {
+      "id": "claim_348141a471b6423a86c0d1e272ed85bd",
+      "statement": "FrameWriter/FrameReader 是定宽小端读写的唯一实现，快照与批量帧共用；帧头是 MAGIC 8 字节 + FMT_VERSION + flags，尾部是 fnv1a64 的 8 字节小端。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/canonical.rs",
+          "version": "repo-file-v1:sha256:0b7a324a44e432b60e56dd500b60e8781b013cf9075ed75f1024f2af50ebb526"
+        }
+      ]
+    },
+    {
+      "id": "claim_eecb6e189d2a4e2fad78e9bf0e84779a",
+      "statement": "state_hash(快照帧) 等于 fnv1a64(去掉尾 8 字节 digest 的 payload)，所以 restore 的校验与 hash() 取值是同一次计算。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/hash.rs",
+          "version": "repo-file-v1:sha256:6e15d67e6fc40ebb346f98723cf0716b875eeb5886144cfe35232eceb6b880c1"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_984330bf255e4b98842a6a2082d24a52",
+      "statement": "同一状态同一字节是构造性的：段序与列序由注册序/首现序决定，值定宽小端，字符串长度前置，随机流状态也在帧内。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/canonical.rs",
+          "version": "repo-file-v1:sha256:0b7a324a44e432b60e56dd500b60e8781b013cf9075ed75f1024f2af50ebb526"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_52250b472e9542d8b10cc45b86c1efc8",
+      "statement": "随机按 name 派生四状态流（w[i]=mix64(fnv64(\"{seed}/{stream}/{i}\"))），流首次使用时派生，所以系统执行顺序不影响任何流的取值；流表按名称序写入快照且可 from_parts 恢复。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/rng.rs",
+          "version": "repo-file-v1:sha256:a4914586c524a6ea2df7a030415274d27d30320ec38014304adda856c30d3173"
+        }
+      ]
+    },
+    {
+      "id": "claim_8e35d10baa334060a6163300fe65e261",
+      "statement": "Lua 的 math.random 绑到 RANDOM_STREAM、math.randomseed 缺席，种子只能由宿主经 hello.seed 给；KERNEL_RNG_SEED=0x5947_4452 是 golden 基线锚。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/inject.rs",
+          "version": "repo-file-v1:sha256:093c33d562c042ea67c0745a6d33716feab7f10c32eb5afd58e4b1a0f477dcad"
+        }
+      ]
+    },
+    {
+      "id": "claim_9973b97181f04b818a8e339870f98b97",
+      "statement": "ygg-core 的 KV 不属于列存世界：不进快照、不进 state_hash、不被 replay 复算，需要复算的状态必须放进组件。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/kv.rs",
+          "version": "repo-file-v1:sha256:a9acec7bddd02beddd901d89cd377c18bc9fb0a710cc0e8847348ec7d45209d3"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    },
+    {
+      "id": "claim_6f3ec2a4864042ecb07154066a1d721e",
+      "statement": "双端一致由三处证据钉住：golden 序列双端断言、persist-matrix 在 1k/10k/100k 三档比对最终哈希、replay_tamper 断言 first_bad_tick 指到被改的帧。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/tests/replay_tamper.rs",
+          "version": "repo-file-v1:sha256:fc37d476d3454987989e847c95bfca659d3d49b2fc751e6c5fda55246a43ae94"
+        },
+        {
+          "resource": "repo://scripts/persist-matrix.sh",
+          "version": "repo-file-v1:sha256:38261c9c2835027d7dcd9e9f9cb874646ebc4c261d7c1a1d3a3b4d6efd2d8508"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

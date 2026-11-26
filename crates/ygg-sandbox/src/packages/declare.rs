@@ -74,7 +74,7 @@ impl PackageRef {
     /// 不做范围匹配的理由：本仓无 `semver` 依赖且零新增依赖是惯例；「同一包在
     /// 两个 mod 里被不同版本需求消费」的真实场景尚未出现。范围语义等到有第二个
     /// 消费者再立，届时不新开文档，落 `packages/README.md` §5 与
-    /// `openwiki/contracts/mod/mod-package.md` 的 packages 小节。
+    /// `openwiki/contracts/kernel/packaging.md` 的 packages 小节。
     pub fn version(&self) -> &str {
         &self.version
     }
@@ -190,7 +190,7 @@ impl PackagesSpec {
 ///
 /// ```json
 /// { "schemaVersion": 1, "name": "fixture", "version": "0.1.0", "deps": [],
-///   "contract": "openwiki/contracts/packages/README.md" }
+///   "contract": "openwiki/contracts/kernel/packaging.md" }
 /// ```
 ///
 /// - `name` 必须等于目录名（一个包只有一个名字；两份名字就会分裂成两个包）；

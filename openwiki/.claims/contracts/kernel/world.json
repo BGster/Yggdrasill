@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:45dc3f473ebfc913a461db6509e5fbca231116488c227704db2e58ab046a9413",
+  "claims": [
+    {
+      "id": "claim_b653573c16c94f4cbed71419e6edc14b",
+      "statement": "组件由 registry 按名注册（ComponentDef{name,kind}），线格式 kind 为 1 字节（v1 为 1..5，v2 新增 6=F64Bits）；Lua 面只暴露 i64/u64/u8/bytes 四种，无浮点。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/component.rs",
+          "version": "repo-file-v1:sha256:76aa3460169b11ddfebe30e2de03fb1fd27600319187be42b5ee513c9e9d8fab"
+        }
+      ]
+    },
+    {
+      "id": "claim_9af8552ead2f497eb9579a4177cdad65",
+      "statement": "实体 id 为 u64 且 next_id 单调递增不复用；archetype 按升序组件名串联的字节序排序，槽位不进快照。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/store.rs",
+          "version": "repo-file-v1:sha256:e20f91de76e541f66b6631f506f37f73749040e5da874ea32851c4a2e22e8cae"
+        }
+      ]
+    },
+    {
+      "id": "claim_6a20fe16dd5d443b95dfd95459eca107",
+      "statement": "值写立即生效并记 undo 日志；结构写（spawn/despawn/insert/remove）本 tick 只入 pending 队列，tick 边界统一结算。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/sim.rs",
+          "version": "repo-file-v1:sha256:b13732b4d433a0305669467c07580ad0cbb737073688ec69fbdfe61fc09880aa"
+        }
+      ]
+    },
+    {
+      "id": "claim_215325cc0059451c945dbc5638024d15",
+      "statement": "Sim::step 是事务：取 RNG 流状态、日志长度、undo 开场；成功时先 written_cells 再 commit 再结算 pending；失败时依次回滚值写、恢复 RNG、丢本 tick 新 pending、截断日志、清空增量面。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/sim.rs",
+          "version": "repo-file-v1:sha256:b13732b4d433a0305669467c07580ad0cbb737073688ec69fbdfe61fc09880aa"
+        }
+      ]
+    },
+    {
+      "id": "claim_5db7eaf15cfd4de4a2d50661a3367fd5",
+      "statement": "查询面 for_each 只读、for_each_mut 写入立即生效并记 undo、ids 取规范序；RowSet 只能写已存在的列，类型不符报 YGG-SIM-SCHEMA 不静默扩列。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/query.rs",
+          "version": "repo-file-v1:sha256:a19d948c6723ad1bc3896f4b0659e21eca384f38496e9630bedabc228faec89a"
+        }
+      ]
+    },
+    {
+      "id": "claim_8f1931e8c871482aad719cb48145b600",
+      "statement": "调度三阶段 pre→rules→post，阶段内按注册序执行不排序；seal 六项校验（重名、组件未注册、同阶段写写冲突、after 指不存在、after 跨阶段、同阶段成环）按序先命中先返回。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/system.rs",
+          "version": "repo-file-v1:sha256:fd6149a82323b61662ddf77219d4056df9774a2cd816a9635e60499c20d0e29f"
+        }
+      ]
+    },
+    {
+      "id": "claim_d545e6a2656f4f78bec30ce7b81730a6",
+      "statement": "seal 只校验不排序且可重入；seal 后再 add 一律 YGG-SIM-SEALED，因为追加未校验声明会让 seal 结论失效。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/system.rs",
+          "version": "repo-file-v1:sha256:fd6149a82323b61662ddf77219d4056df9774a2cd816a9635e60499c20d0e29f"
+        }
+      ]
+    },
+    {
+      "id": "claim_9dadf724244848a59d5ece49e869c03c",
+      "statement": "changed 来自 written_cells，按 eid 升序与 cid 升序去重排序，只含本 tick 成功提交的写；失败或拒绝后为空。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-host/src/session.rs",
+          "version": "repo-file-v1:sha256:386dd3acbadaadeff32e1b2b24b82f24ade02b11158d0d2a56e051035f77742b"
+        },
+        {
+          "resource": "repo://crates/ygg-sim/src/store.rs",
+          "version": "repo-file-v1:sha256:e20f91de76e541f66b6631f506f37f73749040e5da874ea32851c4a2e22e8cae"
+        }
+      ]
+    },
+    {
+      "id": "claim_4a67ec15a1a04eff8ee8ecd6abb9bfce",
+      "statement": "快照按组件名而非内部 id 键控，因此注册顺序不同的两个进程同态也能得到相同字节与哈希。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sim/src/snapshot.rs",
+          "version": "repo-file-v1:sha256:17a4d1ca5c689d655ed61e3c388f58b0866e87c3a5d8253a3738f468a9ba22ad"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T07:10:30.723Z"
+  }
+}

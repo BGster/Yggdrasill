@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:767e17821bbdac226da0f8e850678fc9c2d8e15e0154472c8cd5546b0991b470",
+  "pageVersion": "sha256:a27e3c80057b9bfb3108609b68db3487e6acc51efe8259297369e6be41d355cd",
   "claims": [
     {
       "id": "claim_73c7be986ad5425c95afc8bec2638a58",
@@ -18,13 +18,83 @@
       "evidence": [
         {
           "resource": "repo://scripts/wiki-consistency.sh",
-          "version": "repo-file-v1:sha256:576d6d8d7378ceaa9788ed455217c7465a3556edea1fce36797be6b71927a583"
+          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+        }
+      ]
+    },
+    {
+      "id": "claim_42e918597eff4dd6a8cc517d62c7a269",
+      "statement": "权威顺序：源码与测试 > openwiki/contracts > openwiki/operating > AGENTS.md > 其他（含生成页）；生成 index.md 只是导航投影，不进引用不改。",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:6bd54735da82f5301cfc4cfaaf20f264af55ac80522c335269c74e004a18b58a"
+        }
+      ]
+    },
+    {
+      "id": "claim_448d3e87d750430c9fa545beedda252c",
+      "statement": "ver 账本是 openwiki/ver.json（page-id 到 6 位十六进制），page-id 取自页面四行头的 id；ver 是页面文件 git blob hash 前 6 位，页面正文不写 ver 行。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-ver.sh",
+          "version": "repo-file-v1:sha256:4f86231f653a41d271d5d6d5eae4cd072ed1cb2365bb9ac131aef0346e0e8d65"
+        }
+      ]
+    },
+    {
+      "id": "claim_5e9bb4980d584a439f05212611dec1d6",
+      "statement": "wiki-ver.sh 默认写盘、--check 只报告；输出 files/changed/missing_id/dup_id/missing_ver/broken_links/ok 三个闭包（账本、链接、id），ok=1 才允许提交。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-ver.sh",
+          "version": "repo-file-v1:sha256:4f86231f653a41d271d5d6d5eae4cd072ed1cb2365bb9ac131aef0346e0e8d65"
+        }
+      ]
+    },
+    {
+      "id": "claim_8d3cfaf4d98749a5a5c50a07125b02e1",
+      "statement": "wiki-consistency.sh 管全库相对链接、AGENTS.md 行数预算与 claims 证据闭包（证据文件存在且 sha256 与记录一致），claims_bad>0 必须清零。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+        }
+      ]
+    },
+    {
+      "id": "claim_f660da2b90cc4d99af77c9cc5d790314",
+      "statement": "wiki-consistency.sh --attest 比对事件日志里每条 doc-id 的 ver 与当前账本，给出 claims/forged/stale/ok，stale=0 才算通过。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+        }
+      ]
+    },
+    {
+      "id": "claim_e283a8a50e5d4a0290c78490d1954eab",
+      "statement": "AGENTS.md 行数预算是 160 行（AGENTS_BUDGET），超预算的做法是下沉细节而非调高预算。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+        }
+      ]
+    },
+    {
+      "id": "claim_66d5a30881e44d8fa693eb0d07494084",
+      "statement": "删页必须同时清 ver.json 条目、.claims 对应文件与所有指向它的链接；只删文件不算删页。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-ver.sh",
+          "version": "repo-file-v1:sha256:4f86231f653a41d271d5d6d5eae4cd072ed1cb2365bb9ac131aef0346e0e8d65"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T05:58:54.950Z"
+    "at": "2026-11-26T07:10:30.723Z"
   }
 }
