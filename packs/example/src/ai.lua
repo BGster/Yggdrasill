@@ -31,9 +31,14 @@ local function nearest_enemy(row, order, me)
   return best_pos
 end
 
---- 朝目标挪一格：可通行且空着的邻格里取曼哈顿距离最小者；并列时用
---- `ai.move` 流定序。四面走不动返回 nil（本回合原地不动）。
+--- 朝目标挪一格：只走**严格更近**的可通行空格；并列时用 `ai.move` 流定序。
+--- 贴身（距离 ≤ 1）不动——退让与侧移都不算「朝目标走」，僵持就站着打。
+--- 四面都不更近时返回 nil（本回合原地不动）。
 local function step_toward(host, me, taken, goal)
+  local cur_dist = board.distance(me.pos, goal)
+  if cur_dist <= 1 then
+    return nil
+  end
   local fx, fy = board.decode(me.pos)
   local best_dist, candidates = nil, {}
   for i = 1, #board.DIRECTIONS do
@@ -43,10 +48,12 @@ local function step_toward(host, me, taken, goal)
       local pos = board.encode(x, y)
       if taken[pos] == nil then
         local dist = board.distance(pos, goal)
-        if best_dist == nil or dist < best_dist then
-          best_dist, candidates = dist, { pos }
-        elseif dist == best_dist then
-          candidates[#candidates + 1] = pos
+        if dist < cur_dist then
+          if best_dist == nil or dist < best_dist then
+            best_dist, candidates = dist, { pos }
+          elseif dist == best_dist then
+            candidates[#candidates + 1] = pos
+          end
         end
       end
     end

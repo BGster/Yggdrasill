@@ -1,7 +1,8 @@
 -- 参考包的规则用例（普通 Lua + `test/harness.lua` 的世界替身）。
 --
--- 覆盖：坐标往返、相邻判定、越界/占位拒绝、攻击前提、hp 下限、end_turn 清标记、
--- 50 tick 轮转面、真实棋盘的铺子形状、两次独立装载的确定性。
+-- 覆盖：坐标往返、相邻判定、步距校验、越界/占位拒绝、攻击前提、hp 下限、
+-- end_turn 清标记、50 tick 轮转面、贴脸不后退、真实棋盘的铺子形状、
+-- 两次独立装载的确定性。
 
 local board = require("src.board")
 
@@ -235,6 +236,45 @@ check("deploy_shape", function()
   eq(pcall(function()
     world.component{ name = "late", kind = "u8" }
   end), false, "seal 后不能再声明组件")
+end)
+
+check("move_rejects_multi_step_and_diagonal", function()
+  local s = setup(lane(5), 5, 1, { { x = 0, team = 0 } })
+  local before = snapshot(s)
+  local bad = {
+    { args = { id = s.ids[1], dx = 2, dy = 0 }, what = "一次两格" },
+    { args = { id = s.ids[1], dx = 1, dy = 1 }, what = "斜着走" },
+    { args = { id = s.ids[1], dx = 0, dy = 0 }, what = "原地不动" },
+    { args = { id = s.ids[1], dx = 1.0, dy = 0 }, what = "小数步长" },
+    { args = { id = s.ids[1], dx = "1", dy = 0 }, what = "dx 不是数" },
+    { args = { id = s.ids[1] }, what = "缺 dx/dy" },
+    { args = { id = s.ids[1], dx = 1 }, what = "缺 dy" },
+  }
+  for i = 1, #bad do
+    local ok, why = s.commands.move(bad[i].args)
+    eq(ok, false, bad[i].what .. " 必须拒绝")
+    eq(type(why), "string", bad[i].what .. " 要给原因")
+    eq(snapshot(s), before, bad[i].what .. " 拒绝后状态不变")
+  end
+  -- 合法的一格正交仍然放行（别把好步子也堵死）。
+  eq(s.commands.move({ id = s.ids[1], dx = 1, dy = 0 }), true, "一格正交可走")
+  eq(s.world.get(s.ids[1], s.units.POS), board.encode(1, 0), "落点")
+end)
+
+check("ai_holds_position_when_adjacent_to_enemy", function()
+  local s = setup(lane(3), 3, 1, { { x = 0, team = 0 }, { x = 1, team = 1 } })
+  local p0, p1 = board.encode(0, 0), board.encode(1, 0)
+  s.world.step(1)
+  eq(s.world.get(s.ids[1], s.units.POS), p0, "贴脸的一方不后退")
+  eq(s.world.get(s.ids[2], s.units.POS), p1, "贴脸的一方不侧移")
+  eq(s.world.get(s.ids[1], s.units.HP), 2, "站着挨打")
+  eq(s.world.get(s.ids[2], s.units.HP), 2, "站着挨打")
+  -- 僵持到结算：hp 归零者离场。
+  s.world.step(1)
+  eq(s.world.get(s.ids[1], s.units.HP), 1, "第二轮各掉 1 点")
+  eq(s.world.get(s.ids[2], s.units.HP), 1, "第二轮各掉 1 点")
+  s.world.step(1)
+  eq(#s.units.ids(), 0, "打满三轮 hp 归零者离场")
 end)
 
 check("determinism_two_loads", function()

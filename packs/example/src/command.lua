@@ -15,15 +15,26 @@ local M = {}
 
 local field -- 装配期注入的棋盘
 
---- `{ id, dx, dy }` 挪一格。不存在 / 越界 / 撞墙 / 撞人 = 拒绝且不改状态。
+--- `{ id, dx, dy }` 挪一格。不存在 / 步距不合法 / 越界 / 撞墙 / 撞人 = 拒绝且不改状态。
 local function move(args)
   local id = args.id
+  local dx, dy = args.dx, args.dy
+  -- 步距校验先于一切世界读写：步子不是「一格正交」就谈不上落在哪一格。
+  if
+    type(dx) ~= "number"
+    or type(dy) ~= "number"
+    or math.type(dx) ~= "integer"
+    or math.type(dy) ~= "integer"
+    or math.abs(dx) + math.abs(dy) ~= 1
+  then
+    return false, "move：每次只能正交移动一格"
+  end
   local pos = world.get(id, units.POS)
   if pos == nil then
     return false, "move：单位不存在 " .. tostring(id)
   end
   local x, y = board.decode(pos)
-  local nx, ny = x + args.dx, y + args.dy
+  local nx, ny = x + dx, y + dy
   if not board.open(field, nx, ny) then
     return false, "move：目标格越界或是墙"
   end

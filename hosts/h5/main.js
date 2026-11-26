@@ -11,9 +11,15 @@ void _wasiShim;
 
 const PROTOCOL = "ygg/1";
 const CODEC = "json";
-const STEP_DT = 16;
+// 步进步长：与 packs/example/golden.json 的 dt 对齐（金值就是在 dt=1 上算出来的）。
+const STEP_DT = 1;
 // 包标识只是宿主自己的标签（内核只用 pack_hash 判包，pack_id 仅回显在错误文案里）。
 const PACK_ID = "ygg:example";
+
+// 创世种子：握手时随 `hello.seed` 交给内核，随机流从这儿开始。缺省用参考包金值的
+// 同款种子（0x5eed），页面局面就能直接与 packs/example/golden.json 对上。
+const DEFAULT_SEED = 24301;
+const U64_MAX_TEXT = "18446744073709551615";
 
 // 命令名常量（仅协议消息名，不承载规则逻辑）。
 const CMD_MOVE = "move";
@@ -21,6 +27,40 @@ const CMD_ATTACK = "attack";
 const CMD_END_TURN = "end_turn";
 
 const TRACE = new URLSearchParams(globalThis.location?.search ?? "").get("trace") === "1";
+
+/**
+ * 读 `?seed=<u64 十进制>`：缺省用参考包金值的种子；不是合法 u64 就回落到缺省。
+ * @returns {string} 十进制字面量（内核按 u64 解析，不过 JS Number 走一圈）
+ */
+function readSeedText() {
+  const raw = new URLSearchParams(globalThis.location?.search ?? "").get("seed");
+  if (raw === null || raw === "") return String(DEFAULT_SEED);
+  const text = raw.trim();
+  if (!/^[0-9]+$/.test(text)) return String(DEFAULT_SEED);
+  try {
+    if (BigInt(text) > BigInt(U64_MAX_TEXT)) return String(DEFAULT_SEED);
+  } catch {
+    return String(DEFAULT_SEED);
+  }
+  return text;
+}
+
+/**
+ * 拼 hello 帧：种子按 u64 十进制字面量写进 JSON（不经 JS Number，免精度损失）。
+ * @param {string} packHash
+ * @param {string} seedText
+ * @returns {string}
+ */
+function helloJson(packHash, seedText) {
+  const base = JSON.stringify({
+    type: "hello",
+    protocol: PROTOCOL,
+    codec: CODEC,
+    pack_id: PACK_ID,
+    pack_hash: packHash,
+  });
+  return `${base.slice(0, -1)},"seed":${seedText}}`;
+}
 
 /**
  * base64 → Uint8Array（标准浏览器 API，零依赖）。
@@ -277,6 +317,7 @@ async function boot() {
    *   selectedId: number | null,
    *   tick: number,
    *   hash: string,
+   *   seed: string,
    * }} */
   const state = {
     session: null,
@@ -286,6 +327,7 @@ async function boot() {
     selectedId: null,
     tick: 0,
     hash: "0",
+    seed: String(DEFAULT_SEED),
   };
 
   function setStatus(text, kind = "ok") {
@@ -309,7 +351,7 @@ async function boot() {
   }
 
   function render() {
-    els.meta.textContent = `tick ${state.tick} | hash ${state.hash} | 实体 ${state.entities.size}`;
+    els.meta.textContent = `tick ${state.tick} | hash ${state.hash} | 实体 ${state.entities.size} | seed ${state.seed}`;
     els.selected.textContent = state.selectedId === null ? "选中：无" : `选中：#${state.selectedId}`;
     drawBoard(els.canvas, {
       board: state.board,
@@ -338,8 +380,17 @@ async function boot() {
    * @returns {{ frames: any[], hashLiteral: string | null }}
    */
   function send(msg) {
-    const raw = state.session.handle(JSON.stringify(msg));
-    return { frames: JSON.parse(raw), hashLiteral: extractHashLiteral(raw) };
+    return sendRaw(JSON.stringify(msg));
+  }
+
+  /**
+   * 发送一段已拼好的协议 JSON（hello 的 u64 种子不经 JS Number，故走原始文本）。
+   * @param {string} raw
+   * @returns {{ frames: any[], hashLiteral: string | null }}
+   */
+  function sendRaw(raw) {
+    const out = state.session.handle(raw);
+    return { frames: JSON.parse(out), hashLiteral: extractHashLiteral(out) };
   }
 
   /** @returns {number | undefined} */
@@ -395,6 +446,21 @@ async function boot() {
     return true;
   }
 
+  /**
+   * 静默取一次快照，把 `state.hash` 刷成内核当前的真实哈希。
+   *
+   * 命令帧（move / attack / end_turn）只回 delta，不带 hash——不刷一次，页面上的
+   * hash 就停在命令之前。快照回执带 hash（u64 走字面量，不经 JS Number）。
+   * @returns {boolean} 是否刷到
+   */
+  function refreshHash() {
+    const { frames, hashLiteral } = send({ type: "snapshot", direction: "request" });
+    const reply = frames.find((f) => f.type === "snapshot" && f.direction === "reply");
+    if (!reply) return false;
+    state.hash = hashLiteral ?? String(reply.hash);
+    return true;
+  }
+
   function doStep(label = "step") {
     const { frames, hashLiteral } = send({ type: "step", ticks: 1, dt: STEP_DT });
     const ok = applyFrames(label, frames, hashLiteral, true);
@@ -416,14 +482,8 @@ async function boot() {
       render();
       return;
     }
-    const { frames: stepFrames, hashLiteral: stepHash } = send({
-      type: "step",
-      ticks: 1,
-      dt: STEP_DT,
-    });
-    if (applyFrames("step", stepFrames, stepHash, true)) {
-      setStatus(`命令 ${CMD_MOVE}(#${id}, dx=${dx}, dy=${dy}) 已落地并推进至 tick ${state.tick}`, "ok");
-    }
+    refreshHash();
+    setStatus(`命令 ${CMD_MOVE}(#${id}, dx=${dx}, dy=${dy}) 已生效（tick ${state.tick}）`, "ok");
     render();
   }
 
@@ -434,6 +494,7 @@ async function boot() {
       args: { attacker, target },
     });
     if (applyFrames(CMD_ATTACK, frames, hashLiteral, false)) {
+      refreshHash();
       setStatus(`命令 ${CMD_ATTACK}(#${attacker} -> #${target}) 已生效（由 delta 更新）`, "ok");
     }
     render();
@@ -445,6 +506,7 @@ async function boot() {
   const wasmBytes = await (await fetch(new URL("../../crates/ygg-wasm/pkg/ygg_wasm_bg.wasm", import.meta.url))).arrayBuffer();
   await initWasm({ module_or_path: wasmBytes });
   const packId = PACK_ID;
+  state.seed = readSeedText();
   const imageBytes = new TextEncoder().encode(JSON.stringify(IMAGE));
   state.session = new YggSession(imageBytes);
 
@@ -463,13 +525,7 @@ async function boot() {
     return;
   }
 
-  const readyResp = send({
-    type: "hello",
-    protocol: PROTOCOL,
-    codec: CODEC,
-    pack_id: packId,
-    pack_hash: hashMatch[0],
-  });
+  const readyResp = sendRaw(helloJson(hashMatch[0], state.seed));
   if (!applyFrames("ready", readyResp.frames, readyResp.hashLiteral, false)) return;
 
   // 默认选中第一个实体，方便直接按键或点击邻格测试
@@ -551,6 +607,7 @@ async function boot() {
       args: {},
     });
     if (applyFrames(CMD_END_TURN, frames, hashLiteral, false)) {
+      refreshHash();
       setStatus(`命令 ${CMD_END_TURN} 已生效（tick ${state.tick}）`, "ok");
     }
     render();

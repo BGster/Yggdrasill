@@ -1,9 +1,9 @@
 {
   "code": [
     {
-      "byteLength": 3390,
+      "byteLength": 3634,
       "path": "src/ai.lua",
-      "sha256": "03b84dfbf1cc29385713fa9be28da431c76bb1578909a9d03d1c9cf254a76dd8"
+      "sha256": "39b4eb7caa9d0967dd1f6e11ccef4292e3e9bc78f1e2b577ef7de19d518ab35e"
     },
     {
       "byteLength": 2571,
@@ -16,9 +16,9 @@
       "sha256": "c9a35e55fb12b021e8ab857f4286e14d568c669ae1ce04fdc4bee66fe2c77aa2"
     },
     {
-      "byteLength": 2459,
+      "byteLength": 2843,
       "path": "src/command.lua",
-      "sha256": "47d1d2eda691b2f954733c6feee45874dc15f8a268a0c9ff10be0af7b85460e5"
+      "sha256": "70f38d391842e4edcd173201619191088aafe06d6fe0747303c58781fed03ae1"
     },
     {
       "byteLength": 1581,
