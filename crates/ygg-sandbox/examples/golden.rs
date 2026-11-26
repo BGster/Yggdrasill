@@ -7,7 +7,7 @@
 //! 用法：
 //!
 //! ```bash
-//! cargo run -q --example golden -p ygg-sandbox -- <pack目录> [--seed <u64>] [--ticks <u32>] [--dt <u32>] [--check <文件>]
+//! cargo run -q --example golden -p ygg-sandbox -- <pack目录> [--seed <u64>] [--ticks <u32>] [--dt <u32>] [--check <文件>] [--final-only]
 //! ```
 //!
 //! - 缺省参数：`--seed 0x5eed`（24301）、`--ticks 50`、`--dt 1`（与 `tests/example_pack.rs`
@@ -25,10 +25,16 @@
 //!   state hash（以字符串存放，避免 JS `Number` 超过 `2^53 - 1` 时丢精度）；
 //! - `--check <文件>`：读现有金值文件，按文件中声明的 `seed` / `ticks` / `dt`（若命令行未显式覆盖）
 //!   重算后逐字节比对；不一致则打印具体差异并非 0 退出。
+//! - `--final-only`：不打印金值 JSON，只打一行 `final_hash=<十进制> tick=<N> elapsed_ms=<x>`
+//!   （`elapsed_ms` 只计逐 tick 推进，不含装载与 fork），与
+//!   `node scripts/wasm-lane.mjs --ticks <N>` 的末行同形——长跑双端矩阵
+//!   （`scripts/persist-matrix.sh`）靠这一行取数。JSON 的键按字母序输出
+//!   （`hashes` 在前），用 `tail` 取末条 hash 会随键序静默错位。
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::exit;
+use std::time::Instant;
 
 use serde_json::{json, Value as Json};
 use ygg_sandbox::modload::Loaded;
@@ -46,6 +52,7 @@ fn main() {
     let mut ticks_arg: Option<u32> = None;
     let mut dt_arg: Option<u32> = None;
     let mut check_arg: Option<PathBuf> = None;
+    let mut final_only = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -74,6 +81,7 @@ fn main() {
                     .unwrap_or_else(|| fail("--check 需要一个金值 JSON 文件路径"));
                 check_arg = Some(PathBuf::from(raw));
             }
+            "--final-only" => final_only = true,
             "-h" | "--help" => {
                 print_usage();
                 exit(0);
@@ -105,22 +113,34 @@ fn main() {
     if dt == 0 {
         fail("--dt 必须 ≥ 1");
     }
+    if final_only && check_arg.is_some() {
+        fail("--final-only 与 --check 互斥（一个是打印、一个是比对）");
+    }
 
-    let rendered = generate_golden(&dir, seed, ticks, dt);
+    let (hashes, elapsed_ms) = generate_hashes(&dir, seed, ticks, dt);
+    if final_only {
+        let Some(last) = hashes.last() else {
+            fail("--ticks ≥ 1 却没有算出任何 hash");
+        };
+        println!("final_hash={last} tick={ticks} elapsed_ms={elapsed_ms}");
+        exit(0);
+    }
+    let rendered = render_golden(seed, ticks, &hashes);
     match check_arg {
         None => print!("{rendered}"),
         Some(path) => check_file(&path, &rendered),
     }
 }
 
-/// 装载包、按 `seed` 重建并逐 tick 推进，序列化为 2 空格缩进 JSON（含尾换行）。
-fn generate_golden(dir: &Path, seed: u64, ticks: u32, dt: u32) -> String {
+/// 装载包、按 `seed` 重建并逐 tick 推进，返回逐 tick 哈希与推进耗时（毫秒）。
+fn generate_hashes(dir: &Path, seed: u64, ticks: u32, dt: u32) -> (Vec<String>, u128) {
     let base = Loaded::from_dir(dir)
         .unwrap_or_else(|err| fail(format!("装载 {} 失败：{err}", dir.display())));
     let mut world = base
         .fork_with_seed(seed)
         .unwrap_or_else(|err| fail(format!("按种子 {seed} 重建失败：{err}")));
 
+    let started = Instant::now();
     let mut hashes: Vec<String> = Vec::with_capacity(ticks as usize);
     for step in 1..=ticks {
         let report = world
@@ -128,7 +148,13 @@ fn generate_golden(dir: &Path, seed: u64, ticks: u32, dt: u32) -> String {
             .unwrap_or_else(|err| fail(format!("第 {step} tick 步进失败：{err}")));
         hashes.push(report.hash.to_string());
     }
+    let elapsed_ms = started.elapsed().as_millis();
 
+    (hashes, elapsed_ms)
+}
+
+/// 序列化为 2 空格缩进 JSON（含尾换行）。
+fn render_golden(seed: u64, ticks: u32, hashes: &[String]) -> String {
     let doc = json!({
         "seed": seed,
         "ticks": ticks,
@@ -195,10 +221,13 @@ fn parse_u32(raw: &str, flag: &str) -> u32 {
 
 fn print_usage() {
     eprintln!(
-        "用法: cargo run -q --example golden -p ygg-sandbox -- <pack目录> [--seed <u64>] [--ticks <u32>] [--dt <u32>] [--check <文件>]"
+        "用法: cargo run -q --example golden -p ygg-sandbox -- <pack目录> [--seed <u64>] [--ticks <u32>] [--dt <u32>] [--check <文件>] [--final-only]"
     );
     eprintln!("  缺省：--seed 0x5eed --ticks 50 --dt 1；向 stdout 打印 pretty JSON");
     eprintln!("  --check <文件>：与现有金值文件逐字节比对，不一致则非 0 退出");
+    eprintln!(
+        "  --final-only：只打印 final_hash=<十进制> tick=<N> elapsed_ms=<x>（长跑矩阵取数用）"
+    );
 }
 
 fn fail(msg: impl AsRef<str>) -> ! {
