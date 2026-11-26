@@ -2,7 +2,7 @@
 // WASM 双运行时金值验证车道（M3.4b）：
 // 零 npm 依赖，只用 node:fs/promises + node:path + node:url。
 //
-// 两种模式：
+// 三种模式：
 //   - 默认模式（`node scripts/wasm-lane.mjs [--image <路径>]`）：
 //     1. 读 `crates/ygg-wasm/pkg/ygg_wasm.js` + `ygg_wasm_bg.wasm`，`initSync`；
 //     2. 装载镜像（默认 `hosts/h5/pack.image.js`，也接受 `--image <json或js路径>`）；
@@ -17,8 +17,15 @@
 //   - 冒烟模式（`node scripts/wasm-lane.mjs --smoke`，供 `scripts/build-wasm.sh` 末尾调用）：
 //     用内联最小镜像跑 `hello(错指纹) → error E_PACK` + `hello(对指纹) → ready`，
 //     不依赖外部镜像文件，确保 wasm 产物与 wasi-shim 内存绑定在构建期立刻验收。
+//   - 长跑模式（`node scripts/wasm-lane.mjs --ticks <N>`，ADR-S3-6 的双端矩阵）：
+//     只做长跑证据，不碰逐 tick 金值：读 `golden.json` 的 `seed`（与 native
+//     `--example golden` 的缺省种子同源）→ 分块 `step{ticks:min(剩余,10000),dt:1}`
+//     （`STEP_TICK_BUDGET` 是**单次** `step` 的 tick 上限）→ 打印一行
+//     `final_hash=<十进制> tick=<N> elapsed_ms=<x>`，供 `scripts/persist-matrix.sh` 与原生
+//     侧最终 hash 逐字比对。进度走 stderr，stdout 只有这一行（机器可读）。
 //
-// 当 `crates/ygg-wasm/pkg/` 不存在时打印 skipped 并以 0 退出（不阻断未建 wasm 的环境）。
+// 默认 / 冒烟模式下，`crates/ygg-wasm/pkg/` 不存在时打印 skipped 并以 0 退出（不阻断未建 wasm
+// 的环境）；长跑模式不跳过——矩阵要的是一个数字，缺产物直接报错。
 
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -37,14 +44,31 @@ const SMOKE_IMAGE = {
 };
 
 const ZERO_HASH = "0".repeat(64);
+/** 单次 `step` 的 tick 上限（`crates/ygg-sandbox/src/sandbox.rs` 的 `STEP_TICK_BUDGET`；超了答 `E_STEP_BUDGET`）。 */
+const TICK_CHUNK = 10000;
+const U32_MAX = 4294967295;
 
 function parseArgs(argv) {
   let smoke = false;
   let imagePath = DEFAULT_IMAGE_PATH;
+  let ticks = null;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--smoke") {
       smoke = true;
+    } else if (arg === "--ticks") {
+      const next = argv[i + 1];
+      if (!next) {
+        throw new Error("--ticks 需要指定总 tick 数");
+      }
+      if (!/^[0-9]+$/.test(next)) {
+        throw new Error(`--ticks 需要十进制正整数，收到：${next}`);
+      }
+      ticks = Number(next);
+      if (!Number.isInteger(ticks) || ticks < 1 || ticks > U32_MAX) {
+        throw new Error(`--ticks 超出可步进范围（1..${U32_MAX}）：${next}`);
+      }
+      i += 1;
     } else if (arg === "--image") {
       const next = argv[i + 1];
       if (!next) {
@@ -53,13 +77,18 @@ function parseArgs(argv) {
       imagePath = path.resolve(REPO_ROOT, next);
       i += 1;
     } else if (arg === "-h" || arg === "--help") {
-      console.log("用法: node scripts/wasm-lane.mjs [--smoke] [--image <pack.image.js|json>]");
+      console.log(
+        "用法: node scripts/wasm-lane.mjs [--ticks <N>] [--smoke] [--image <pack.image.js|json>]",
+      );
       process.exit(0);
     } else {
       throw new Error(`未知参数：${arg}`);
     }
   }
-  return { smoke, imagePath };
+  if (smoke && ticks !== null) {
+    throw new Error("--smoke 与 --ticks 互斥");
+  }
+  return { smoke, imagePath, ticks };
 }
 
 async function exists(filePath) {
@@ -138,7 +167,7 @@ function handshake(session, packId, seed) {
         codec: "json",
         pack_id: packId,
         pack_hash: packHash,
-        ...(seed !== undefined ? { seed } : {}),
+        ...(seed === undefined ? {} : { seed }),
       }),
     ),
   );
@@ -149,7 +178,7 @@ function handshake(session, packId, seed) {
 }
 
 async function main() {
-  const { smoke, imagePath } = parseArgs(process.argv.slice(2));
+  const { smoke, imagePath, ticks: totalTicks } = parseArgs(process.argv.slice(2));
 
   if (!(await exists(GLUE_PATH)) || !(await exists(WASM_PATH))) {
     console.log("skipped: crates/ygg-wasm/pkg 缺失（先跑 scripts/build-wasm.sh）");
@@ -169,6 +198,39 @@ async function main() {
     console.log(
       `ok (smoke): pack_hash=${packHash.slice(0, 12)}... tick=${ready.tick} sealed=${ready.sealed} components=${ready.components.length}`,
     );
+    return;
+  }
+
+  if (totalTicks !== null) {
+    const { seed } = JSON.parse(await readFile(GOLDEN_PATH, "utf8"));
+    const session = new YggSession(await loadImageBytes(imagePath));
+    const { packHash, ready } = handshake(session, "ygg:example", seed);
+    if (ready.tick !== 0) {
+      throw new Error(`创世重播后世界应停在 tick 0，实际 tick=${ready.tick}`);
+    }
+    console.error(
+      `wasm-lane: pack_hash=${packHash.slice(0, 12)}... seed=${seed} ticks=${totalTicks}`,
+    );
+    const startedAt = process.hrtime.bigint();
+    let done = 0;
+    let finalHash = null;
+    while (done < totalTicks) {
+      const chunk = Math.min(totalTicks - done, TICK_CHUNK);
+      const frames = parseFramesPreservingHash(
+        session.handle(JSON.stringify({ type: "step", ticks: chunk, dt: 1 })),
+      );
+      if (frames.length !== 2 || frames[0].type !== "events" || frames[1].type !== "delta") {
+        throw new Error(`tick ${done + chunk} 回执帧形状异常：${JSON.stringify(frames)}`);
+      }
+      done += chunk;
+      if (frames[0].tick !== done) {
+        throw new Error(`step 回执 tick 不符：期望 ${done}，实际 ${frames[0].tick}`);
+      }
+      finalHash = String(frames[0].hash);
+      console.error(`  stepped ${done}/${totalTicks}`);
+    }
+    const elapsedMs = Number((process.hrtime.bigint() - startedAt) / 1000000n);
+    console.log(`final_hash=${finalHash} tick=${totalTicks} elapsed_ms=${elapsedMs}`);
     return;
   }
 
