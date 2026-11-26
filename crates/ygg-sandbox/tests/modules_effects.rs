@@ -114,13 +114,6 @@ fn every_banned_surface_is_rejected_from_a_module_top_level() {
         (r#"ygg.narrate("line")"#, "narrate"),
         (r#"ygg.choice("prompt", { "a", "b" })"#, "choice"),
         (r#"ygg.kv.set("k", 1)"#, "kv.set"),
-        (r#"ygg.entity.spawn()"#, "entity.spawn"),
-        (
-            r#"ygg.entity.set_attribute(1, "hp", 1)"#,
-            "entity.set_attribute",
-        ),
-        (r#"ygg.entity.add_tag(1, "t")"#, "entity.add_tag"),
-        (r#"ygg.entity.remove_tag(1, "t")"#, "entity.remove_tag"),
         (
             r#"ygg.fsm.define({ name = "m", initial = "a", event = "e", transitions = {} })"#,
             "fsm.define",

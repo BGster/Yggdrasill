@@ -19,19 +19,21 @@
 //!    （防 O(N)/转换成本在快照/实体结构改动时悄然恶化一个数量级以上），
 //!    实测数据经 println! 落入测试输出作为决策记录（openwiki/overview.md D17 引用）。
 //!
-//! **引擎版本与 golden 哈希的关系（探针口径声明）**：canonical 快照字节含
-//! `schema_version / revision / next_entity_id / entities`，**不含
-//! engine_version**——引擎补丁版本升级若不改实体状态语义，golden 哈希
-//! 依然成立；任何使本探针失败的改动 = 状态语义或确定性链的实际漂移，
-//! 必须作为显式事件处置（更新 fixture 并在 Design History 记录原因），
-//! 不得静默改基线。
+//! **引擎版本与 golden 哈希的关系（探针口径声明）**：canonical 快照字节是
+//! **内核世界帧**（`magic / fmt_version / tick / next_entity / 组件表按名升序 /
+//! resources rng 流 / archetype 段 / 尾 digest`），**不含 engine_version**——
+//! 引擎补丁版本升级若不改状态语义，golden 哈希依然成立；任何使本探针失败的
+//! 改动 = 状态语义或确定性链的实际漂移，必须作为显式事件处置（更新 fixture
+//! 并在 Design History 记录原因），不得静默改基线。M1-D 删除第二套实体模型
+//! （`ygg-core` 行存）时该哈希必然变一次：帧的表示从「行存 BTreeMap 序列化」
+//! 换成「列存帧」，叙事与事件序列一字未动——这正是一次显式重基线。
 //!
 //! **wasm 侧状态（FR-9，M1 C2 起）**：本文件证明的是 native 侧确定性。
 //! native/wasm 双跑哈希等价已由 node 泳道承载：`crates/ygg-wasm/verify-determinism.mjs`
 //! 把本探针的 golden-vector 四元组（同一份 fixture 文件）在 node + wasm 内核上
 //! 双跑重放，以壳导出 `YggKernel::state_hash()`（= `ygg_sandbox::hash::state_hash`
-//! 同一函数）比对 `expected_state_hash`（实证：三哈希一致，a994030a…c850）——
-//! 随 `scripts/build-wasm.sh` 构建 + smoke 后运行，门禁口径见 playbook `gates.no-wasm-pack`。
+//! 同一函数）比对 `expected_state_hash`——随 `scripts/build-wasm.sh` 构建 +
+//! smoke 后运行，门禁口径见 playbook `gates.no-wasm-pack`。
 //! 残余缺口：`wasm-bindgen-test` 浏览器泳道（真实浏览器 wasm 实例重放同一
 //! 断言）仍未实现，不得静默吸收。
 
@@ -41,15 +43,18 @@ use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::hash::state_hash;
 
-/// 探针 Mod：KV 写 + 实体写（入哈希）+ 叙事（入回放）+ 派生事件（FIFO 级联）
+/// 探针 Mod：KV 写 + 世界写（入哈希）+ 叙事（入回放）+ 派生事件（FIFO 级联）
 /// ——覆盖「同事件序列 → 同状态」链路上的全部写入面。
+///
+/// M1-D 备注：旧 mod 里的 `ygg.entity.add_tag(id, "probed")` 无对应表达——
+/// `world.component` 只接受 i64|u64|u8|bytes（零宽 tag 无声明入口），所以本探针
+/// 不再覆盖 tag 写面；tag 面本身是 M1-C 就存在的缺口，在 D1 报告中显式列出。
 const PROBE_MOD: &str = r#"
+world.component{ name = "hp", kind = "i64" }
 ygg.on("event.probe", function(p)
   local hits = (ygg.kv.get("probe.hits") or 0) + 1
   ygg.kv.set("probe.hits", hits)
-  local id = ygg.entity.spawn()
-  ygg.entity.set_attribute(id, "hp", 30 - hits)
-  ygg.entity.add_tag(id, "probed")
+  world.spawn{ hp = 30 - hits }
   ygg.narrate("hits=" .. tostring(hits))
   ygg.narrate("payload=" .. tostring(p))
   if p < 3 then
@@ -209,22 +214,21 @@ fn probe_golden_vector() {
     );
 }
 
-/// 探针 6 规模 Mod：`event.add` 每次装载 100 个实体（属性 + 标签）；
-/// `event.touch` 做 50 次 `has_tag` 读 + 1 次 KV 写——「大世界、小事件」
-/// 的典型叙事负载形态（单事件只触碰实体总体的常数个）。
+/// 探针 6 规模 Mod：`event.add` 每次装载 100 个实体（两个数值组件）；
+/// `event.touch` 做 50 次组件读 + 1 次 KV 写——「大世界、小事件」的典型
+/// 叙事负载形态（单事件只触碰实体总体的常数个）。
 const SCALE_MOD: &str = r#"
+world.component{ name = "hp", kind = "i64" }
+world.component{ name = "bench", kind = "u8" }
 ygg.on("event.add", function()
   for i = 1, 100 do
-    local e = ygg.entity.spawn()
-    ygg.entity.set_attribute(e, "hp", 10)
-    ygg.entity.set_attribute(e, "mood", "idle")
-    ygg.entity.add_tag(e, "bench")
+    world.spawn{ hp = 10, bench = 1 }
   end
 end)
 ygg.on("event.touch", function()
   local n = 0
   for id = 1, 50 do
-    if ygg.entity.has_tag(id, "bench") then n = n + 1 end
+    if world.get(id, "bench") == 1 then n = n + 1 end
   end
   ygg.kv.set("touched", n)
 end)

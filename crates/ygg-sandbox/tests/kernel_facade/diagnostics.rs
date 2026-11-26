@@ -122,11 +122,11 @@ fn host_callback_rejection_carries_mod_call_site() {
         message.contains("stack traceback") && message.contains("mod.lua:3"),
         "host-callback error must carry the mod call-site line: {reply}"
     );
-    // entity.set_attribute 同法（拒绝点在第 4 行 → mod.lua:4）。
-    const ENT_NAN_MOD: &str = r#"
+    // `world.set` 同法（拒绝点在第 4 行 → mod.lua:4）。
+    const ENT_NAN_MOD: &str = r#"world.component{ name = "hp", kind = "i64" }
 ygg.on("event.bad", function()
-  local id = ygg.entity.spawn()
-  ygg.entity.set_attribute(id, "hp", 0/0)
+  local id = world.spawn{ hp = 1 }
+  world.set(id, { hp = 0/0 })
 end)
 "#;
     let mut kernel = KernelFacade::new(ENT_NAN_MOD).expect("kernel construction");
@@ -135,7 +135,7 @@ end)
     let message = parsed["error"]["message"].as_str().expect("message");
     assert!(
         message.contains("mod.lua:4"),
-        "entity host-callback error must carry the mod call-site line: {reply}"
+        "world host-callback error must carry the mod call-site line: {reply}"
     );
 }
 

@@ -2,9 +2,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use ygg_core::bus::HandlerRegistry;
-use ygg_core::entity::EntityStore;
 use ygg_core::kv::KvStore;
 use ygg_core::save::SaveFile;
+use ygg_sim::sim::Sim;
 
 use super::{resource_error_to_kernel, KernelError, KernelFacade};
 use crate::host_api::{self, HostApi, HostHandles};
@@ -21,7 +21,6 @@ struct KernelParts {
     determinism: DeterminismHandle,
     host: HostApi,
     registry: HandlerRegistry,
-    entities: Rc<RefCell<EntityStore>>,
     kv: Rc<RefCell<KvStore>>,
 }
 
@@ -40,20 +39,23 @@ fn build_kernel(
     modules: Option<ModuleTable>,
 ) -> Result<KernelParts, KernelError> {
     // ① 沙箱构造：stdlib 裁剪 + 内存上限 + 白名单环境（ygg 占位表 + require 面就位）。
-    let sandbox = Sandbox::new().map_err(KernelError::Sandbox)?;
+    let mut sandbox = Sandbox::new().map_err(KernelError::Sandbox)?;
     let lua = sandbox.lua().clone();
     // ② 确定性注入：math 精确集 + 内核种子 random + ygg.ticks。
     let determinism = inject::install(&lua).map_err(KernelError::Sandbox)?;
-    // ③ canonical store 先建：host 桥句柄与驱动共享同一 Rc（统一 store）。
-    let entities = Rc::new(RefCell::new(EntityStore::new()));
+    // ②' 世界内核先挂：内核是「世界内核」，任何驱动实例从出生起就有世界——
+    //    `world.*` 因此不再有「宿主忘了挂载」的静默降级面。种子取内核常量
+    //    同一谱系（`KERNEL_RNG_SEED`）：世界 rng 流与 Lua `math.random` 同源，
+    //    确定性只有一条链。宿主可用 [`KernelFacade::set_sim`] 换入自己的实例
+    //    （载入特定存档、或注入测试用种子）。
+    sandbox.set_sim(Some(Box::new(Sim::new(inject::KERNEL_RNG_SEED))));
+    // ③ 持久 KV 先建：host 桥句柄与驱动共享同一 Rc（一字宙）。
     let kv = Rc::new(RefCell::new(KvStore::new()));
-    // ④ host API：装载期 ygg 完整面（on/emit/narrate/choice/kv/entity/sim）。
+    // ④ host API：装载期 ygg 完整面（on/emit/narrate/choice/kv + 并列 world.*/codec）。
     let host = host_api::install(
         &lua,
-        HostHandles {
-            kv: Rc::clone(&kv),
-            entities: Rc::clone(&entities),
-        },
+        HostHandles { kv: Rc::clone(&kv) },
+        sandbox.sim_handle(),
     )
     .map_err(KernelError::Sandbox)?;
     // ④' S11 资源步：ygg.data 只读数据面（host 之后、stdlib 之前、
@@ -92,7 +94,6 @@ fn build_kernel(
         determinism,
         host,
         registry,
-        entities,
         kv,
     })
 }
@@ -245,12 +246,12 @@ impl KernelFacade {
     /// 构件包 + 资源表 + Mod 源 → 驱动实例（字段装配单点；三个构造入口共用）。
     fn from_parts(parts: KernelParts, resources: Rc<ResourceTable>, mod_source: &str) -> Self {
         Self {
-            _sandbox: parts.sandbox,
+            sandbox: parts.sandbox,
             _determinism: parts.determinism,
             host: parts.host,
             registry: parts.registry,
-            entities: parts.entities,
             kv: parts.kv,
+            revision: 0,
             resources,
             mod_source: mod_source.to_owned(),
             pending_choice: None,

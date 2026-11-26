@@ -1,10 +1,10 @@
 use serde_json::{json, Value as Json};
 
 use ygg_core::bus::{HandlerError, PendingChoice};
-use ygg_core::entity::Value;
 use ygg_core::event::Event;
 use ygg_core::save::{SaveError, SaveFile};
 use ygg_core::transition::{run_transition, TransitionError};
+use ygg_core::value::Value;
 
 use super::{code, KernelError, KernelFacade};
 
@@ -37,13 +37,17 @@ impl KernelFacade {
         }
     }
 
-    /// `save`：完整状态快照（实体表 + KV + pending_choice，B3）序列化为
+    /// `save`：完整状态快照（世界帧 + KV + pending_choice，B3）序列化为
     /// bytes（确定性序）后原样解析回 Json 嵌入信封——信封内容与存档
     /// bytes 逐字段一致（读档方可直接把 `save` 字段作为 load payload）。
     fn cmd_save(&mut self) -> String {
+        let world = match self.sandbox.snapshot() {
+            Ok(bytes) => bytes,
+            Err(err) => return error_envelope(code::INTERNAL, err),
+        };
         let save = SaveFile::new(
             ENGINE_VERSION,
-            self.entities.borrow().clone(),
+            world,
             self.kv.borrow().clone(),
             self.pending_choice.clone(),
         );
@@ -80,16 +84,22 @@ impl KernelFacade {
         }
     }
 
-    /// `state`：诊断面——引擎/实体/KV 版本号 + 快照字节数 + 待决选择。
+    /// `state`：诊断面——引擎版本、两根钟（内核 tick / 提交序号）+ KV 版本号
+    /// + 快照字节数 + 待决选择。
     fn cmd_state(&self) -> String {
         let snapshot_bytes = match self.canonical_state_bytes() {
             Ok(bytes) => bytes,
             Err(err) => return error_envelope(code::INTERNAL, err),
         };
+        let tick = match self.sandbox.tick() {
+            Ok(tick) => tick,
+            Err(err) => return error_envelope(code::INTERNAL, err),
+        };
         json!({
             "ok": true,
             "engineVersion": ENGINE_VERSION,
-            "revision": self.entities.borrow().revision(),
+            "revision": self.revision,
+            "tick": tick,
             "kvRevision": self.kv.borrow().revision(),
             "snapshotBytes": snapshot_bytes.len(),
             "pendingChoice": self.pending_choice.as_ref().map(choice_to_json),
@@ -171,14 +181,16 @@ impl KernelFacade {
         //    （③ 日志）已落之后，转换开始之前——在此冻结 canonical
         //    的两块状态面基线。基线是 canonical 的**副本**（不是换出）：
         //    handler 的即席写经 host 桥 `Rc` 直落 canonical，而 `ygg.kv.get`
-        //    / `ygg.entity.*` 的读路径同样直读 canonical——换出会让转换期的
-        //    handler 读到空表。实体基线同时充当 `run_transition` 的
-        //    `&mut EntityStore` 形参（该形参在 facade 路径下只作 revision
-        //    记账诱饵，handler 从不持有它的引用）。借用均为语句级临时
-        //    `Ref`/`RefMut`，不跨越 `run_transition` 存活。
-        let mut baseline = self.entities.borrow().clone();
+        //    / `world.*` 的读路径同样直读 canonical——换出会让转换期的
+        //    handler 读到空世界。世界基线是**帧字节**（`Sim` 快照），恢复
+        //    靠 `Sim::restore`：先校验后改，与旧行存 clone 同样是字节级回退。
+        //    借用均为语句级临时 `Ref`/`RefMut`，不跨越 `run_transition` 存活。
+        let world_baseline = match self.sandbox.snapshot() {
+            Ok(bytes) => bytes,
+            Err(err) => return error_envelope(code::INTERNAL, err),
+        };
         let kv_baseline = self.kv.borrow().clone();
-        let outcome = run_transition(&mut baseline, &mut self.registry, event);
+        let outcome = run_transition(&mut self.registry, event);
         // ④' D1：无论转换成败都取走本次 dispatch 的警告（choice 前置丢弃
         // 面；每 dispatch 至多一条，drain 即清空，不泄漏到后续 dispatch）。
         let warning = self.host.take_dispatch_warning();
@@ -189,21 +201,21 @@ impl KernelFacade {
         //    达）或只写在成功分支，savepoint 就完全不生效。
         let result = match outcome {
             Ok(result) => {
-                drop(baseline);
-                drop(kv_baseline);
+                self.revision += 1;
                 result
             }
             Err(err) => {
-                *self.entities.borrow_mut() = baseline;
+                if let Err(restore) = self.sandbox.restore(&world_baseline) {
+                    return error_envelope(code::INTERNAL, restore);
+                }
                 *self.kv.borrow_mut() = kv_baseline;
                 return map_transition_error(err);
             }
         };
         self.pending_choice = result.pending_choice().cloned();
-        // ⑥ 信封：revision 在转换结束后从 canonical 现读
-        //    （TransitionResult.revision_after 为快照克隆的冻结诊断值，
-        //    不进信封——统一 store 代决的 revision 口径）。
-        let revision = self.entities.borrow().revision();
+        // ⑥ 信封：revision = 提交序号（本步已 +1；失败步在 ⑤ 已提前返回）
+        //    ——世界时钟在信封的 `state` 面单独报（`tick`）。
+        let revision = self.revision;
         let mut envelope = json!({
             "ok": true,
             "event": result.external().name(),

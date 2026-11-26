@@ -12,21 +12,22 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mlua::Table;
-use ygg_core::entity::EntityStore;
 use ygg_core::kv::KvStore;
 use ygg_sandbox::host_api::{self, HostApi, HostHandles};
 use ygg_sandbox::sandbox::Sandbox;
 use ygg_sim::sim::Sim;
 
 /// 装一个「真宿主面 + 已挂载内核」的沙箱（不装 Mod 包：`world` 面与包无关）。
+///
+/// M1-D 之后**时间只由宿主推**（`Sandbox::step`）：Lua 侧没有任何推进时钟的
+/// 入口（`ygg.sim.*` 面已删），所以每个用例都是「跑配置脚本 → 宿主 step →
+/// 跑断言脚本」三段。
 fn fixture(seed: u64) -> (Sandbox, HostApi) {
     let sandbox = Sandbox::new().expect("沙箱构造");
     let api = host_api::install(
         sandbox.lua(),
-        HostHandles::new(
-            Rc::new(RefCell::new(KvStore::new())),
-            Rc::new(RefCell::new(EntityStore::new())),
-        ),
+        HostHandles::new(Rc::new(RefCell::new(KvStore::new()))),
+        sandbox.sim_handle(),
     )
     .expect("host API 必须可装");
     api.set_sim(Some(Box::new(Sim::new(seed))));
@@ -242,12 +243,12 @@ return {{ seal = probe(function() return world.seal() end) }}
 /// 读写同一组件是**合法**的（`reads ∩ writes` 不是冲突，冲突只判同阶段写写）；
 /// 封盘后系统体真的跑，`ctx.each_mut` 的写回落进世界，`dt` 原样漏传。
 ///
-/// `dt` 是 Q32.32 裸值（与 `ygg.sim.step(dt)` 入参同一单位），所以这里的
-/// `4294967296` 就是整数秒的 1.0；体里不拿 `dt` 做组件算术（单位不同），只把它
-/// 写进 kv 供断言——这条注释就是单位契约的回归钉。
+/// `dt` 是 Q32.32 裸值（宿主 `step(1, 1)` 的「整数秒 1」换出来的同一个值），
+/// 体里不拿 `dt` 做组件算术（单位不同），只把它写进 kv 供断言——这条注释就是
+/// 单位契约的回归钉。
 #[test]
 fn seal_accepts_read_write_and_system_body_runs() {
-    let script = format!(
+    let setup = format!(
         r#"{HELPERS}
 world.component{{ name = "hp", kind = "i64" }}
 world.system{{
@@ -263,26 +264,33 @@ world.system{{
 }}
 local seal = probe(function() return world.seal() end)
 local id = world.spawn{{ hp = 5 }}
-local before = world.get(id, "hp")
-ygg.sim.step(4294967296)
+ygg.kv.set("id", id)
+return {{ seal = seal }}
+"#
+    );
+    let probe = format!(
+        r#"{HELPERS}
 return {{
-  seal = seal,
-  before = before,
-  after = world.get(id, "hp"),
+  after = world.get(ygg.kv.get("id"), "hp"),
   tick = world.tick(),
-  status_tick = ygg.sim.status().tick,
   seen_dt = ygg.kv.get("dt"),
   seen_tick = ygg.kv.get("tick"),
 }}
 "#
     );
-    let (sandbox, _api) = fixture(1);
-    let out = run(&sandbox, &script);
+    let (mut sandbox, _api) = fixture(1);
+    let out = run(&sandbox, &setup);
     assert_eq!(text(&out, "seal"), "ok");
-    assert_eq!(int(&out, "before"), 5);
+    let report = sandbox.step(1, 1).expect("宿主推进必须成功");
+    assert_eq!(report.tick, 1, "推进一 tick 后内核时钟是 1");
+    assert_eq!(
+        sandbox.tick().expect("世界已挂载"),
+        report.tick,
+        "推进后的时钟与步进回执同源"
+    );
+    let out = run(&sandbox, &probe);
     assert_eq!(int(&out, "after"), 4, "ctx.each_mut 的写回必须落进世界");
     assert_eq!(int(&out, "tick"), 1, "world.tick 与内核 tick 同源");
-    assert_eq!(int(&out, "status_tick"), 1, "ygg.sim.status 的 tick 也是 1");
     assert_eq!(
         int(&out, "seen_dt"),
         4_294_967_296,
@@ -313,6 +321,9 @@ return {{ seal = seal, late = late }}
 }
 
 /// 系统体内的 Lua 错误以 `YGG-SIM-STATE: 系统 `名` 执行失败：…` 上浮（点名系统）。
+///
+/// 错误从**宿主** `step` 出来（不是 Lua 侧）：这就是「宿主拿得到失败、脚本拿不到
+/// 时钟」的直接体现——脚本没有推进入口，也就没有「把推进错误吞掉」的自由。
 #[test]
 fn system_body_error_names_the_system() {
     let script = format!(
@@ -325,39 +336,46 @@ world.system{{
   run = function(dt, ctx) error("炸了") end,
 }}
 world.seal()
-return {{ step = probe(function() return ygg.sim.step(1) end) }}
+return {{ seal = "ok" }}
 "#
     );
-    let (sandbox, _api) = fixture(1);
-    let step = text(&run(&sandbox, &script), "step");
-    assert!(step.contains("YGG-SIM-STATE:"), "得到 {step}");
-    assert!(step.contains("boom"), "必须点名系统，得到 {step}");
+    let (mut sandbox, _api) = fixture(1);
+    assert_eq!(text(&run(&sandbox, &script), "seal"), "ok");
+    let err = sandbox.step(1, 1).expect_err("系统体炸了，推进必须报错");
+    let text = err.to_string();
+    assert!(text.contains("YGG-SIM-STATE:"), "得到 {text}");
+    assert!(text.contains("boom"), "必须点名系统，得到 {text}");
 }
 
 /// 系统体里再调 `world.*` ⇒ `YGG-WORLD-BUSY`（内核槽已被 `step` 独占），不是 panic。
 #[test]
 fn world_reentry_inside_system_is_busy() {
-    let script = format!(
+    let setup = format!(
         r#"{HELPERS}
 world.component{{ name = "hp", kind = "i64" }}
-local inner = "unset"
 world.system{{
   name = "reenter",
   stage = "rules",
   writes = {{ "hp" }},
   run = function(dt, ctx)
     local ok, err = pcall(function() return world.tick() end)
-    inner = ok and "ok" or first_line(err)
+    ygg.kv.set("inner", ok and "ok" or first_line(err))
   end,
 }}
 world.seal()
 world.spawn{{ hp = 1 }}
-ygg.sim.step(1)
-return {{ inner = inner }}
+return {{ seal = "ok" }}
 "#
     );
-    let (sandbox, _api) = fixture(1);
-    let inner = text(&run(&sandbox, &script), "inner");
+    let (mut sandbox, _api) = fixture(1);
+    assert_eq!(text(&run(&sandbox, &setup), "seal"), "ok");
+    sandbox
+        .step(1, 1)
+        .expect("系统体自己吞了错误，推进本身必须成功");
+    let inner = text(
+        &run(&sandbox, "return { inner = ygg.kv.get('inner') }"),
+        "inner",
+    );
     assert!(inner.contains("YGG-WORLD-BUSY:"), "得到 {inner}");
 }
 

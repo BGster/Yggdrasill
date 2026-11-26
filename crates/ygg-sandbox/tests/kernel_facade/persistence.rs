@@ -1,4 +1,4 @@
-//! 用例 11-14：存读档往返、统一 store 代决证据与外部事件日志面。
+//! 用例 11-14：存读档往返、一字宙代决证据与外部事件日志面。
 use super::*;
 
 /// 事件日志 Mod：handler 发派生事件——日志面只记外部事件。
@@ -13,27 +13,39 @@ ygg.on("evt.derived", function() end)
 
 #[test]
 fn handler_state_reaches_driver_save_and_restore_continues() {
-    // 统一 store 代决证据：handler 的实体/KV 写落 canonical store，
-    // save 快照携带之；restore 后 handler 在恢复态上续接。
+    // 一字宙代决证据：handler 的世界/KV 写落同一份内核状态，save 快照
+    // 携带它的帧字节；restore 后 handler 在恢复态上续接。
+    use ygg_sandbox::hash::state_hash;
+
     let mut kernel = KernelFacade::new(STATE_MOD).expect("kernel construction");
     let parsed = reply_ok(&kernel.dispatch("event.hit", "0"));
     assert!(
         parsed["revision"].as_u64().unwrap_or(0) >= 1,
         "handler write bumps revision"
     );
+    let hash_before = state_hash(&kernel).expect("hash");
     let save_reply = reply_ok(&kernel.dispatch("save", ""));
     let mut restored = KernelFacade::restore(
         serde_json::to_vec(&save_reply["save"]).unwrap().as_slice(),
         STATE_MOD,
     )
     .expect("restore");
+    // 读档后的世界与读档前**逐字节**同源（快照帧是世界的唯一表示）：
+    // 这比断言某个字段的 JSON 形状更强——hp=9 的任何丢失都会改帧。
+    assert_eq!(
+        state_hash(&restored).expect("hash"),
+        hash_before,
+        "restore must reproduce the saved world bit-for-bit"
+    );
     // 恢复态续接：hp=9 起点，再 hit 一次 → hp=8、hits=2（读档前累计不丢）。
     let _ = restored.dispatch("event.hit", "0");
     let restored_save = reply_ok(&restored.dispatch("save", ""));
     assert_eq!(restored_save["save"]["kv"]["entries"]["hits"], json!(2));
-    // 实体表序列化为 id 键控对象（BTreeMap<EntityId, Entity>）。
-    let entity = &restored_save["save"]["entities"]["entities"]["1"];
-    assert_eq!(entity["attributes"]["hp"], json!(8));
+    // 存档里的世界是内核快照帧字节（`save.world` = u8 数组），不是行存表。
+    let world = restored_save["save"]["world"]
+        .as_array()
+        .expect("save.world must be a byte array");
+    assert!(world.len() > 32, "帧至少包含魔数与尾 digest");
 }
 
 #[test]

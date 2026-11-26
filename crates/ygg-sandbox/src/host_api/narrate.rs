@@ -7,8 +7,8 @@ use mlua::{Error, Function, Lua, Table, Value as LuaValue};
 use ygg_core::bus::{EventHandler, HandlerError, NarrationSink, PendingChoice};
 use ygg_core::event::Event;
 
-use super::entity_decode::options_from_lua;
-use super::{value_from_lua, value_to_lua, HostCall, HostState, Phase};
+use super::marshal::{options_from_lua, value_from_lua, value_to_lua};
+use super::{HostCall, HostState, Phase};
 
 /// 运行期注册禁令的可读报错文案（seal 后 `ygg.on` 桩与 sealed 双检共用）。
 pub(super) const SEALED_MESSAGE: &str =

@@ -186,7 +186,7 @@ impl HandlerRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::Value;
+    use crate::value::Value;
     use std::cell::RefCell;
     use std::rc::Rc;
 

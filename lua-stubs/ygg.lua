@@ -4,7 +4,9 @@
 -- 本文件是**纯类型声明**（---@meta：LuaLS 不执行、不参与运行时），只服务于
 -- 独立 Lua 工具链（lua-language-server / IDE 补全与 undefined-global 静默）。
 -- 声明面与内核实际 API 一一对应，权威源（改动 API 时同步改本文件）：
---   crates/ygg-sandbox/src/host_api.rs   on / emit / narrate / choice / kv / entity
+--   crates/ygg-sandbox/src/host_api/mod.rs  on / emit / narrate / choice / kv
+--   crates/ygg-sandbox/src/host_api/world.rs  world.*（列式世界的 16 个键；
+--                                             tick 由宿主 `Sandbox::step` 驱动）
 --   crates/ygg-sandbox/src/resources.rs  data（单函数：ygg.data(id)）
 --   crates/ygg-sandbox/src/inject.rs     ticks
 --   crates/ygg-sandbox/src/sandbox.rs    engine_version（字符串字段，非函数）
@@ -17,8 +19,9 @@
 --   ✅ ygg.narrate(text)
 --   ✅ ygg.choice(prompt, options)         终结语义：必须为 handler 最后一个输出
 --   ✅ ygg.kv.get / ygg.kv.set
---   ✅ ygg.entity.spawn / get_attribute / set_attribute
---      ygg.entity.has_tag / add_tag / remove_tag
+--   ✅ world.*                             列式世界面（`world` 是**全局表**，不是 ygg 的字段；
+--                                         局部/全局都未声明——本轮只删掉了已死的 entity 面，
+--                                         完整 stub 属 docs 里程碑）
 --   ✅ ygg.data(id)                        单函数（非 .get 命名空间）
 --   ✅ ygg.fsm.define(spec)                含 when 条件边（B1）
 --   ✅ ygg.narrative.node(id, body) / ygg.narrative["goto"](id)  括号形态已注解
@@ -27,8 +30,7 @@
 --                                              stdlib.rs）
 --   ✅ ygg.ticks()                         宿主侧显式推进；Mod 内只读
 -- mod.lua 走查（packages/mods/test-adventure/mod.lua 逐行核对）：全部 ygg.* 调用点
--- （on / emit / narrate / choice / kv.get / kv.set / entity.spawn /
--- entity.get_attribute / entity.set_attribute / entity.add_tag / entity.has_tag /
+-- （on / emit / narrate / choice / kv.get / kv.set /
 -- data / fsm.define / narrative.node / narrative["goto"]）均有对应声明，无遗漏。
 --
 -- ── 接入 LuaLS ─────────────────────────────────────────────────────────
@@ -106,7 +108,6 @@
 --- 装载期与 handler 期均可读；资源是数据不是状态——不入档、restore 后不变。
 ---@field data fun(id: string): table
 ---@field kv YggKv
----@field entity YggEntity
 ---@field fsm YggFsm
 ---@field narrative YggNarrative
 --- 引擎版本（**字符串字段**，非函数）。

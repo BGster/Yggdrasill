@@ -1,11 +1,11 @@
 //! 用例 25-34：dispatch 原子性——失败步整体回滚与成功步提交面。
 use super::*;
 
-/// 半写 Mod：handler 先写实体（spawn + set_attribute）与 KV，再显式报错。
+/// 半写 Mod：handler 先写实体（spawn + set）与 KV，再显式报错。
 const DIRTY_THEN_ERROR_MOD: &str = r#"
+world.component{ name = "hp", kind = "i64" }
 ygg.on("event.bad", function()
-  local id = ygg.entity.spawn()
-  ygg.entity.set_attribute(id, "hp", 1)
+  world.spawn{ hp = 1 }
   ygg.kv.set("dirty", "yes")
   error("boom after writes")
 end)
@@ -16,15 +16,17 @@ end)
 
 #[test]
 fn failed_dispatch_rolls_back_entity_and_kv_writes() {
-    // 红绿锚（本次改造的回归点）：handler 写实体 + KV 后报错，canonical
-    // store 必须回到 dispatch 之前的基线——实体一个都不能留、两个 revision
-    // 计数器都不许涨。
+    // 红绿锚（本次改造的回归点）：handler 写实体 + KV 后报错，内核世界
+    // 必须回到 dispatch 之前的基线——世界快照帧字节一字不差（帧里含
+    // tick / next_entity / 组件段，spawn 会同时动后两项），两个计数器
+    // 都不许涨。
     let mut kernel = KernelFacade::new(DIRTY_THEN_ERROR_MOD).expect("kernel construction");
+    let world_before = saved_world(&mut kernel);
     let reply = kernel.dispatch("event.bad", "0");
     assert_eq!(reply_error_code(&reply), "VALIDATION");
     assert_eq!(
-        saved_entities(&mut kernel),
-        json!({}),
+        saved_world(&mut kernel),
+        world_before,
         "failed dispatch must not leave entities behind"
     );
     assert_eq!(
@@ -33,11 +35,7 @@ fn failed_dispatch_rolls_back_entity_and_kv_writes() {
         "failed dispatch must not leave kv writes behind"
     );
     let state = reply_ok(&kernel.dispatch("state", ""));
-    assert_eq!(
-        state["revision"],
-        json!(0),
-        "entity revision must roll back"
-    );
+    assert_eq!(state["revision"], json!(0), "commit counter must roll back");
     assert_eq!(state["kvRevision"], json!(0), "kv revision must roll back");
 }
 
@@ -70,21 +68,22 @@ fn interrupted_after_writes_rolls_back_entity_and_kv() {
     // 触发器改为「写后 Lua error 中断」——中断面无论形态，写过的 KV 与实体
     // 同样全部回滚（事务原子性覆盖保留）。
     const BURN_MOD: &str = r#"
+world.component{ name = "hp", kind = "i64" }
 ygg.on("event.burn", function()
   ygg.kv.set("burned", 1)
-  local id = ygg.entity.spawn()
-  ygg.entity.set_attribute(id, "hp", 1)
+  world.spawn{ hp = 1 }
   error("boom after writes")
 end)
 "#;
     let mut kernel = KernelFacade::new(BURN_MOD).expect("kernel construction");
+    let world_before = saved_world(&mut kernel);
     assert_eq!(
         reply_error_code(&kernel.dispatch("event.burn", "0")),
         "VALIDATION"
     );
     assert_eq!(
-        saved_entities(&mut kernel),
-        json!({}),
+        saved_world(&mut kernel),
+        world_before,
         "entities rolled back"
     );
     assert_eq!(saved_kv(&mut kernel), json!({}), "kv rolled back");
@@ -143,7 +142,11 @@ fn committed_dispatch_survives_a_later_failed_step() {
         "rollback must target the failed step only, not the committed baseline"
     );
     let state = reply_ok(&kernel.dispatch("state", ""));
-    assert_eq!(state["revision"], json!(0));
+    assert_eq!(
+        state["revision"],
+        json!(1),
+        "failed step must not bump the commit counter past the committed step"
+    );
     assert_eq!(
         state["kvRevision"],
         json!(1),
@@ -231,7 +234,7 @@ end)
 
 #[test]
 fn failed_dispatch_leaves_state_hash_and_save_bytes_unchanged() {
-    // 矩阵 #9：失败步对持久面零影响——状态哈希（实体面）与 save 字节
+    // 矩阵 #9：失败步对持久面零影响——状态哈希（世界面）与 save 字节
     // （含 kv 面）都不变，连续两次失败后仍不变。
     use ygg_sandbox::hash::state_hash;
 
@@ -239,12 +242,12 @@ fn failed_dispatch_leaves_state_hash_and_save_bytes_unchanged() {
     reply_ok(&kernel.dispatch("event.hit", "0"));
     let hash_before = state_hash(&kernel).expect("hash");
     let bytes_before = reply_ok(&kernel.dispatch("save", ""))["save"].to_string();
-    // 失败步：写实体属性 + 写 kv 后报错（同一 Mod 的命中面被包一层错误）。
+    // 失败步：写世界属性 + 写 kv 后报错（同一 Mod 的命中面被包一层错误）。
     const FAILING_HIT_MOD: &str = r#"
-local id = ygg.entity.spawn()
-ygg.entity.set_attribute(id, "hp", 10)
+world.component{ name = "hp", kind = "i64" }
+local id = world.spawn{ hp = 10 }
 ygg.on("event.hit", function()
-  ygg.entity.set_attribute(id, "hp", 99)
+  world.set(id, { hp = 99 })
   ygg.kv.set("hits", 99)
   error("boom")
 end)
@@ -261,12 +264,12 @@ end)
     assert_eq!(
         state_hash(&failing).expect("hash"),
         failing_hash,
-        "entity hash must be unchanged by failed dispatches"
+        "world hash must be unchanged by failed dispatches"
     );
     assert_eq!(
         reply_ok(&failing.dispatch("save", ""))["save"].to_string(),
         failing_bytes,
-        "save bytes (entities + kv) must be unchanged by failed dispatches"
+        "save bytes (world frame + kv) must be unchanged by failed dispatches"
     );
     // 参考内核未被扰动（对照：hash/save 抓取本身不改变状态）。
     assert_eq!(state_hash(&kernel).expect("hash"), hash_before);

@@ -30,14 +30,14 @@ ygg.on("ygg.choice_selected", function(index)
 end)
 "#;
 
-/// 状态写入 Mod：装载期生成实体（hp=10）；hit 事件扣血并计数 KV——
-/// handler 即席写经 host 桥直接落 canonical store（统一 store 代决）。
+/// 状态写入 Mod：装载期声明组件并生成实体（hp=10）；hit 事件扣血并计数 KV——
+/// handler 即席写经 `world.*` 直接落内核世界（M1-D：一字宙代决，所以不存在
+/// 「第二套实体表」需要同步）。
 const STATE_MOD: &str = r#"
-local id = ygg.entity.spawn()
-ygg.entity.set_attribute(id, "hp", 10)
+world.component{ name = "hp", kind = "i64" }
+local id = world.spawn{ hp = 10 }
 ygg.on("event.hit", function()
-  local hp = ygg.entity.get_attribute(id, "hp")
-  ygg.entity.set_attribute(id, "hp", hp - 1)
+  world.set(id, { hp = world.get(id, "hp") - 1 })
   ygg.kv.set("hits", (ygg.kv.get("hits") or 0) + 1)
 end)
 "#;
@@ -61,10 +61,14 @@ fn reply_error_code(reply: &str) -> String {
         .to_owned()
 }
 
-/// 存档里的实体表（`save.entities.entities` = id 键控对象）。
-fn saved_entities(kernel: &mut KernelFacade) -> Json {
+/// 存档里的世界快照帧（`save.world` = 内核快照帧字节的 JSON 数组）。
+///
+/// M1-D 后存档不再有行存 `entities` 段：世界状态的唯一表示就是内核快照帧，
+/// 所以「回滚了没有」只能按**字节相等**判（帧里含 tick / next_entity / 组件段，
+/// 任何一条写漏都会改帧）。
+fn saved_world(kernel: &mut KernelFacade) -> Json {
     let envelope = reply_ok(&kernel.dispatch("save", ""));
-    envelope["save"]["entities"]["entities"].clone()
+    envelope["save"]["world"].clone()
 }
 
 /// 存档里的 KV 条目（`save.kv.entries`）。

@@ -17,31 +17,32 @@
 //!   模块顶层是纯导出面（禁止面清单在 `ygg_modules::effects`，构造在
 //!   [`crate::modules`] 的影子表），所以模块的执行时机不影响 handler 派发序——
 //!   这也正是懒加载能成立的前提。
-//! - **统一 store 代决（S10）**：`entities` / `kv` 为 `Rc<RefCell<..>>`
-//!   单实例——handler 经 host 桥的即席状态写**直接落在 canonical store**；
-//!   转换输入侧以快照克隆（snapshot-out，见 `cmd_event`）喂给
-//!   `run_transition` 满足其 `&mut EntityStore` 形参，转换残余的
-//!   `TransitionResult::revision_after` 为冻结诊断值，信封 revision 一律
-//!   **转换结束后从 canonical store 现读**。读档 = canonical store 整体
-//!   覆写（`apply_save`），后续 handler 写经同一 `Rc` 即时可见。
+//! - **一字宙一代决（M1-D）**：世界状态只有一份真身——`Sandbox` 持有的
+//!   内核槽（`Rc<RefCell<Option<Box<Sim>>>>`，`world.*` 面与该槽共享）。
+//!   旧的第二套实体模型（`ygg-core` 行存）连同它的事务形参一起删除后，
+//!   `run_transition` 不再接收任何 store：handler 经 host 桥的即席状态写
+//!   直接落在 canonical 内核上，envelope 的 `revision` 改为**提交序号**
+//!   （世界时钟归内核 tick，两者语义不同：每 tick 推进一次，每提交一次）。
+//!   读档 = 内核帧整体恢复（`apply_save`），后续 handler 写经同一 `Rc` 即时可见。
 //! - **dispatch 原子性（r1 savepoint）**：一次 `cmd_event` 就是一个事务
-//!   边界——取点在「校验全过后、转换开始前」，冻结 `entities` + `kv` 的
-//!   基线副本；转换成功 = 提交（丢弃基线），转换失败 = **先整体还原
-//!   canonical、再返回错误信封**（两个 `revision` 计数器随基线一并回退）。
-//!   基线必须是 canonical 的**副本**而非换出：`ygg.kv.get` /
-//!   `ygg.entity.*` 的读路径直读 canonical，换出会让转换期的 handler
-//!   读到空表。不覆盖的旁路面：`external_log` 照记失败步（它是尝试日志，
-//!   也是回放前提）、`warnings`/`meta` 为瞬态回执面、Lua VM 全局与模块
-//!   upvalue、RNG / ticks 均不回滚（要跨步记忆只能落 KV）；panic 不在
-//!   回滚覆盖内（进程已不可继续）。core `run_transition` 的「无事务语义」
-//!   契约不变——它不持有状态所有权，事务边界归调用方（即本驱动）。
+//!   边界——取点在「校验全过后、转换开始前」，冻结**世界帧字节**（`Sim`
+//!   快照，含 tick / 实体 / rng 流）+ `kv` 的基线副本；转换成功 = 提交
+//!   （丢弃基线），转换失败 = **先整体还原 canonical、再返回错误信封**。
+//!   基线必须是 canonical 的**副本**而非换出：`ygg.kv.get` / `world.*`
+//!   的读路径直读 canonical，换出会让转换期的 handler 读到空世界。
+//!   帧恢复是字节级回退，所以失败步连 tick 与内核 rng 流一并回退
+//!   （比旧的实体面 clone 更严）；不覆盖的旁路面：`external_log` 照记
+//!   失败步（它是尝试日志，也是回放前提）、`warnings`/`meta` 为瞬态
+//!   回执面、Lua VM 全局与模块 upvalue、`math.random` 均不回滚
+//!   （要跨步记忆只能落 KV）；panic 不在回滚覆盖内（进程已不可继续）。
+//!   core `run_transition` 的「无事务语义」契约不变——它不持有状态所有权，
+//!   也不接收状态形参，事务边界归调用方（即本驱动）。
 //! - **JSON 信封（A1）**：[`KernelFacade::dispatch`] 是唯一同步入口，
 //!   成功 = `{"ok":true,...}`，域错误 = `{"ok":false,"error":{code,message}}`
 //!   ——**域错误永不 throw**（Rust 侧返回 String 信封）；只有内部编程
 //!   错误（重入、NotExternal 这类不可能路径）落 [`code::INTERNAL`]。
 //!   **错误信封的状态语义**：`{"ok":false,...}` ⇒ 本次 dispatch 对
-//!   canonical 状态（实体表 + KV + 两个 revision）**零影响**（savepoint
-//!   已整体还原）；信封**不加**任何新字段（线格式零变更），下游据
+//!   canonical 状态（世界帧 + KV + 提交序号）**零影响**（savepoint 已整体还原）；信封**不加**任何新字段（线格式零变更），下游据
 //!   `ok:false` 即可判定「本次事件无效」。旁路面例外见上条。
 //!   加性可选键 `warnings`（D1）：仅当 handler 在 `ygg.choice` 之前产生过
 //!   `ygg.emit`（将被语义丢弃）时出现，单元素字符串数组；serde_json 字典序
@@ -62,7 +63,6 @@ use std::rc::Rc;
 use serde_json::Value as Json;
 
 use ygg_core::bus::{HandlerRegistry, PendingChoice};
-use ygg_core::entity::EntityStore;
 use ygg_core::kv::KvStore;
 use ygg_core::save::SaveFile;
 
@@ -86,7 +86,10 @@ pub use error::{code, KernelError};
 /// （native 探针/测试驱动形态；wasm 壳落地后语义面不变）。
 pub struct KernelFacade {
     /// Lua 状态持有者（字段存活期 = VM 存活期；运行期经 host 桥间接使用）。
-    _sandbox: Sandbox,
+    ///
+    /// 同时是**时间的唯一驱动面**： [`Sandbox::step`] / [`Sandbox::snapshot`]
+    /// / [`Sandbox::restore`] 都挂在这里，Lua 侧没有推进时钟的入口。
+    sandbox: Sandbox,
     /// 确定性注入句柄（时钟推进当前无驱动级调用面——ticks 只增不推，
     /// 句柄持有以固定 RNG/ticks 状态生命周期；S12 探针按需消费）。
     _determinism: DeterminismHandle,
@@ -97,11 +100,14 @@ pub struct KernelFacade {
     /// handler 注册表（`register_into` 转出后的唯一派发面；驱动直有
     /// `&mut` —— 不经 `Rc`，dispatch 内独占借用无冲突）。
     registry: HandlerRegistry,
-    /// canonical 实体表（handler 即席写与存读档的唯一真身；`Rc<RefCell>`
-    /// 与 host 桥共享 = 统一 store 代决）。
-    entities: Rc<RefCell<EntityStore>>,
     /// canonical 持久 KV（同上）。
     kv: Rc<RefCell<KvStore>>,
+    /// 提交序号（每次**成功的**事件转换 +1，失败步由 savepoint 回退）。
+    ///
+    /// 与内核 tick 是两根不同的钟：tick 由宿主 [`Sandbox::step`] 推进，
+    /// 提交序号由 dispatch 推进。信封的 `revision` 取后者（旧行存时代的
+    /// 实体表版本号已随行存删除）。
+    revision: u64,
     /// 只读资源表（S11：构建后不可变；数据面非状态——不入 canonical
     /// store/存档/状态哈希，经 host 桥闭包间接消费，驱动不直接读面）。
     resources: Rc<ResourceTable>,
@@ -135,8 +141,11 @@ fn resource_error_to_kernel(err: ResourceError) -> KernelError {
 impl KernelFacade {
     /// 状态面覆写（读档语义）：engine_version 门（不符 =
     /// [`KernelError::EngineMismatch`]，存档由异版引擎写出即拒绝）后整体
-    /// 覆写 canonical 实体表 / KV / pending_choice（覆写经驱动持有的同一
-    /// `Rc`，后续 handler 写即时可见——统一 store 代决）。
+    /// 覆写世界帧 / KV / pending_choice（覆写经驱动持有的同一 `Rc`，后续
+    /// handler 写即时可见——一字宙代决）。
+    ///
+    /// 帧恢复是**先校验后改**：坏帧（长度/magic/尾 digest 不符）不产生
+    /// 半改的世界，且此时 KV 尚未动——错误信封的状态语义因此逐字成立。
     fn apply_save(&mut self, save: &SaveFile) -> Result<(), KernelError> {
         if save.engine_version() != ENGINE_VERSION {
             return Err(KernelError::EngineMismatch {
@@ -144,7 +153,7 @@ impl KernelFacade {
                 current: ENGINE_VERSION.to_owned(),
             });
         }
-        *self.entities.borrow_mut() = save.entities().clone();
+        self.sandbox.restore(save.world())?;
         *self.kv.borrow_mut() = save.kv().clone();
         self.pending_choice = save.pending_choice().cloned();
         Ok(())

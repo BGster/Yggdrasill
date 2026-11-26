@@ -1,7 +1,7 @@
 //! S9 host API（D-S9-1..D-S9-4）：`ygg.*` 完整面 + 收集-回放桥 + 装载/运行期分相。
 //!
 //! - **生命周期与分相**（D-S9-1）：[`install`] 在**装载期**安装完整 `ygg` 面
-//!   （`on / emit / narrate / choice / kv.* / entity.*`）；[`HostApi::seal`]
+//!   （`on / emit / narrate / choice / kv.*`，外加并列的 `world.*` 与 `ygg.codec.*`）；[`HostApi::seal`]
 //!   在装载结束后把 `ygg.on` **原位替换**为可读报错桩——运行期注册禁令
 //!   （D-B4 的运行时侧权威执行面）。无 mlua Scope、无线程局部存储或静态可变
 //!   全局：全部共享状态经 `Rc<RefCell<HostState>>` 单线程持有。
@@ -14,7 +14,7 @@
 //!   **等价性论证**：回放序 = 追加序 = Lua 执行序，故 emit / narrate / choose
 //!   三类输出的**相对顺序**在桥前后逐项保真——downstream handler 观察到的
 //!   FIFO 序、叙述序与 pending_choice 与「直接直通 sink」的实现逐项一致。
-//!   KV / 实体操作是**有副作用的即席状态写**，不走回放：经 `Rc<RefCell>`
+//!   KV / 世界操作是**有副作用的即席状态写**，不走回放：经 `Rc<RefCell>`
 //!   立即调用 core 把关方法，副作用时点 = Lua 执行时点（其相对输出序在
 //!   handler 内部由构造保证；门拒绝如非有限值以可读 mlua 错误浮现）。
 //! - **sentinel 机制**（D-S9-3）：`ygg.choice` 记录 `Choose` 后以
@@ -45,32 +45,27 @@ use std::rc::Rc;
 
 use mlua::{Error, Function, Lua, Table};
 use ygg_core::bus::{HandlerRegistry, PendingChoice};
-use ygg_core::entity::{EntityStore, Value};
 use ygg_core::kv::KvStore;
+use ygg_core::value::Value;
 
 use crate::inject::splitmix64;
 
 // ---- 模块化拆分 shim(S-25 批三 C1:纯搬移;既有路径逐字节不变)----
-mod entity;
-mod entity_decode;
 mod kv;
+mod marshal;
 mod narrate;
-mod selector;
-mod sim;
-mod value;
 mod world;
 
-pub use entity::*;
-pub use entity_decode::*;
 use kv::*;
+use marshal::*;
 use narrate::*;
-pub use selector::*;
-pub use sim::*;
-use value::*;
 use world::install_world;
 pub use world::*;
 
-/// 宿主相位：`ygg.sim.*` 仅在转换期（`Phase::Transition`）可写。
+/// 宿主相位（装载期 / 待机 / 转换期）。
+///
+/// M1-D 之后时间只由宿主推进（[`crate::Sandbox::step`]），Lua 侧没有任何
+/// 推进时钟的入口；相位仍用于区分「装载期注册」与「运行期派发」。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Loading,
@@ -81,13 +76,12 @@ pub enum Phase {
 /// 宿主侧状态句柄（S9 测试 / S10 驱动的注入面）。
 pub struct HostHandles {
     pub kv: Rc<RefCell<KvStore>>,
-    pub entities: Rc<RefCell<EntityStore>>,
 }
 
 impl HostHandles {
     /// 构造句柄（供需要同时挂载或替换工具执行器的宿主使用）。
-    pub fn new(kv: Rc<RefCell<KvStore>>, entities: Rc<RefCell<EntityStore>>) -> Self {
-        Self { kv, entities }
+    pub fn new(kv: Rc<RefCell<KvStore>>) -> Self {
+        Self { kv }
     }
 }
 
@@ -107,10 +101,10 @@ pub struct HostState {
     registered: Vec<(String, Function)>,
     calls: Vec<HostCall>,
     handles: HostHandles,
-    /// 宿主侧模拟内核实例（Tier 1；未注入时 `None`，`ygg.sim.*` 全部抛 `YGG-SIM-UNMOUNTED`）。
+    /// 宿主侧模拟内核实例（未注入时 `None`，`world.*` 全部抛 `YGG-SIM-UNMOUNTED`）。
     ///
-    /// **不在 `HostHandles` 里**：句柄是外部构造点，加字段会破
-    /// `crates/ygg-sandbox/tests` 与 stdlib 的既有构造；Sim 只是 `install` 自建的空槽。
+    /// 由调用方交给 [`install`]（`Sandbox` 与句柄共享同一个槽），不在这里自建：
+    /// 时间归宿主（[`crate::Sandbox::step`]），槽必须挂在宿主侧的 `Sandbox` 上。
     sim: Rc<RefCell<Option<Box<ygg_sim::Sim>>>>,
     /// 当前执行相位（装载期 `Loading`，封口后待机 `Idle`，handler 执行期间 `Transition`）。
     phase: Phase,
@@ -131,12 +125,16 @@ pub struct HostApi {
     state: Rc<RefCell<HostState>>,
 }
 
-pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
+pub fn install(
+    lua: &Lua,
+    handles: HostHandles,
+    sim: Rc<RefCell<Option<Box<ygg_sim::Sim>>>>,
+) -> Result<HostApi, Error> {
     let state = Rc::new(RefCell::new(HostState {
         registered: Vec::new(),
         calls: Vec::new(),
         handles,
-        sim: Rc::new(RefCell::new(None)),
+        sim,
         phase: Phase::Loading,
         sealed: false,
         // per-kernel sentinel：内核种子派生（splitmix64 四轮），Mod 面不可预测
@@ -159,9 +157,7 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
 
     install_narrate(lua, &state, &ygg)?;
     install_kv(lua, &state, &ygg)?;
-    install_entity(lua, &state, &ygg)?;
 
-    install_sim(lua, &state)?;
     // `ygg.codec.*`（Tier 2 pkg.codec 的原生加速面；契约 lua-api.md §3.1.4）。
     // 无状态、无实例，所以没有 `set_*` 注入面，也不需要 CLI 激活。
     crate::codec_face::install(lua)?;
@@ -236,9 +232,9 @@ impl HostApi {
             .collect()
     }
 
-    /// 注入或卸载模拟内核实例（`ygg.sim.*` 的宿主面，Tier 1）。
+    /// 注入或卸载模拟内核实例（`world.*` 的宿主面）。
     ///
-    /// 未注入时 10 个函数全部抛 `YGG-SIM-UNMOUNTED`——**不是** `nil` / `false`：
+    /// 未注入时 `world.*` 全部抛 `YGG-SIM-UNMOUNTED`——**不是** `nil` / `false`：
     /// `nil` 与「世界是空的」不可分辨，静默降级会让 Mod 把「宿主没这个能力」读成
     /// 「世界为空」并据此写下错误状态。
     ///

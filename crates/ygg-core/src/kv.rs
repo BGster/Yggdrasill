@@ -5,14 +5,14 @@
 //!   std 默认无序容器，确定性路径一律有序容器）；
 //! - 值复用 S2 `Value`（标量；构造/写入路径的浮点纪律同 S2——非有限值拒绝、
 //!   `-0.0` 入表前规范化）；
-//! - `revision` 语义与 `EntityStore` 同口径：仅**实际状态变更**计 +1
+//! - `revision` 语义与 `ygg-sim` 的 tick 同口径（仅实际变更计数）：仅**实际状态变更**计 +1
 //!   （同值覆写幂等不计），存档面（S5 `save.rs`）与状态哈希消费该边界。
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::entity::{normalize_f64, Value};
+use crate::value::{normalize_f64, Value};
 
 /// 持久 KV 错误（thiserror，白名单内）。
 #[derive(Debug, thiserror::Error)]

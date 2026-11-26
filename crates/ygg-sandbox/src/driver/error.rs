@@ -2,9 +2,9 @@ use mlua::Error as LuaError;
 use thiserror::Error as ThisError;
 
 use ygg_core::save::SaveError;
-use ygg_core::snapshot::SnapshotError;
 
 use crate::modules::ModuleError;
+use crate::sandbox::StepError;
 
 /// 信封错误码（稳定字符串契约，A1 线格式；下游按码分支不解析 message）。
 pub mod code {
@@ -31,7 +31,7 @@ pub enum KernelError {
     #[error("engine version mismatch: save written by `{saved}`, current engine `{current}`")]
     EngineMismatch { saved: String, current: String },
     #[error(transparent)]
-    Snapshot(#[from] SnapshotError),
+    Snapshot(#[from] StepError),
     /// 资源包**校验**失败伞形变体（manifest 违规 / payload 违规 / 未知
     /// schema id）；`details` 为首条违规的人读文案（含 file/pointer/code）。
     #[error("resource package rejected: {details}")]

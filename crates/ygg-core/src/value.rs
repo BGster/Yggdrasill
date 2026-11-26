@@ -1,7 +1,10 @@
-use serde::{Deserialize, Serialize};
+//! 载荷标量（`ygg.event` 载荷 / `ygg.kv` 值）——内核**唯一**的标量值类型。
+//!
+//! 本模块是 M1-D 从已删除的 `entity/value.rs` 里留下的**载荷半边**：行存实体面
+//! （`EntityStore` / 属性索引 / 选择器 DSL）随第二套实体模型整体退役，世界状态改由
+//! `ygg-sim` 的列存承载；但事件载荷与持久 KV 仍是标量，仍需要这一个类型。
 
-/// 实体 ID：内核/宿主分配的持久标识（`u64`，规范序 = 数值升序）。
-pub type EntityId = u64;
+use serde::{Deserialize, Serialize};
 
 /// 属性标量值。M0 收敛为数字 / 布尔 / 字符串（research §3 威胁 #9：
 /// 可哈希状态禁表 / userdata 键；复合结构属资源面，走 `ygg.data`，S11）。
@@ -28,10 +31,9 @@ impl Value {
     }
 }
 
-// `Serialize` 手写：`-0.0 → 0.0` 在编码侧兜底（写入路径 `set_attribute` 已先行
-// 规范化，此处覆盖反序列化旁路构造出的非规范值——纵深防御，非唯一防线）。
-// 非有限值不做规范化——`canonical_snapshot` 先行校验拒绝（非有限值是错误，
-// 不是静默改写）。
+// `Serialize` 手写：`-0.0 → 0.0` 在编码侧兜底（写入路径已先行规范化，此处覆盖
+// 反序列化旁路构造出的非规范值——纵深防御，非唯一防线）。
+// 非有限值不做规范化——写入路径先行校验拒绝（非有限值是错误，不是静默改写）。
 impl Serialize for Value {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -49,8 +51,7 @@ impl Serialize for Value {
 //   超 `i64` 范围的 `u64` 降级为 `Float`（f64 对该区间可表示但可能失精度——
 //   M0 标量场景的文档化取舍）；
 // - 浮点走 `visit_f64`：非有限值在反序列化旁路即拒绝（`Error::custom`——
-//   反序列化发生在裸 `Value` 上、无实体上下文，带定位的 `NonFiniteF64`
-//   错误在此不可得；`snapshot::validate_finite` 仍是权威层，本处为纵深防御）；
+//   反序列化发生在裸 `Value` 上、无上下文，带定位的错误在此不可得）；
 // - 布尔 / 字符串直通。
 impl<'de> Deserialize<'de> for Value {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -99,5 +100,44 @@ pub fn normalize_f64(x: f64) -> f64 {
         0.0
     } else {
         x
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn negative_zero_normalizes_on_both_sides() {
+        let encoded = serde_json::to_string(&Value::Float(-0.0)).unwrap();
+        assert_eq!(encoded, "0.0");
+        assert_eq!(
+            serde_json::from_str::<Value>("-0.0").unwrap(),
+            Value::Float(0.0)
+        );
+    }
+
+    #[test]
+    fn non_finite_float_is_rejected_on_decode() {
+        for text in ["1e400", "-1e400"] {
+            assert!(
+                serde_json::from_str::<Value>(text).is_err(),
+                "non-finite `{text}` must not decode"
+            );
+        }
+        assert!(serde_json::from_str::<Value>("null").is_err());
+    }
+
+    #[test]
+    fn untagged_scalars_round_trip() {
+        for value in [
+            Value::Int(-7),
+            Value::Float(1.5),
+            Value::Bool(true),
+            Value::Str("hi".into()),
+        ] {
+            let text = serde_json::to_string(&value).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), value);
+        }
     }
 }

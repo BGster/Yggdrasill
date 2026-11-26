@@ -54,7 +54,7 @@ use ygg_sim::sim::Sim;
 use ygg_sim::store::ArchetypeStore;
 use ygg_sim::system::{Stage, SystemCtx, SystemDecl};
 
-use super::sim::{sim_fixed_arg, sim_unmounted};
+use super::marshal::{sim_fixed_arg, sim_unmounted};
 use super::HostState;
 
 /// 重入码（`world.*` 在内核槽已被独占时被调用；与 `YGG-SIM-UNMOUNTED` 同一处置）。

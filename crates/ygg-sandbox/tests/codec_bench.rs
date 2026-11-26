@@ -36,7 +36,6 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
 
-use ygg_core::entity::EntityStore;
 use ygg_core::kv::KvStore;
 use ygg_sandbox::host_api::{self, HostHandles};
 use ygg_sandbox::modload::ModBundle;
@@ -99,9 +98,9 @@ fn bench_sandbox(tag: &str) -> Sandbox {
     sandbox
         .modules()
         .set_chunk_paths(bundle.chunk_paths.clone());
-    let entities = Rc::new(RefCell::new(EntityStore::new()));
     let kv = Rc::new(RefCell::new(KvStore::new()));
-    host_api::install(sandbox.lua(), HostHandles { kv, entities }).expect("host API 必须可装");
+    host_api::install(sandbox.lua(), HostHandles { kv }, sandbox.sim_handle())
+        .expect("host API 必须可装");
     sandbox
 }
 

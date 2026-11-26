@@ -73,10 +73,10 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
     use ygg_core::bus::HandlerRegistry;
-    use ygg_core::entity::{EntityStore, Value};
     use ygg_core::event::Event;
     use ygg_core::kv::KvStore;
     use ygg_core::transition::{run_transition, TransitionResult};
+    use ygg_core::value::Value;
 
     /// stdlib.rs 单测 harness：完整 S10 装载序（host → stdlib → Mod chunk →
     /// seal → register_into）——不依赖 driver，直接以 sealed 注册表 +
@@ -86,7 +86,6 @@ mod tests {
         _host: host_api::HostApi,
         lua: Lua,
         registry: HandlerRegistry,
-        store: EntityStore,
     }
 
     fn rig(mod_source: &str) -> Rig {
@@ -97,8 +96,8 @@ mod tests {
             &lua,
             HostHandles {
                 kv: Rc::new(RefCell::new(KvStore::new())),
-                entities: Rc::new(RefCell::new(EntityStore::new())),
             },
+            sandbox.sim_handle(),
         )
         .expect("host api install");
         install(&lua).expect("stdlib install");
@@ -111,7 +110,6 @@ mod tests {
             _host: host,
             lua,
             registry,
-            store: EntityStore::new(),
         }
     }
 
@@ -152,8 +150,8 @@ mod tests {
             end)
         "#);
         let external = Event::external("event.enter", Value::Int(0)).expect("external event");
-        let result: TransitionResult = run_transition(&mut rig.store, &mut rig.registry, external)
-            .expect("transition succeeds");
+        let result: TransitionResult =
+            run_transition(&mut rig.registry, external).expect("transition succeeds");
         // 路由序：enter → goto intro（派生 1）→ intro body 叙述并 goto
         // scene（派生 2）→ scene body 叙述。FIFO 级联序 = 叙述序。
         assert_eq!(result.narrative(), ["node:intro", "node:scene"]);

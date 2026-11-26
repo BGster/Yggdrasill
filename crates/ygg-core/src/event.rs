@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::entity::{normalize_f64, Value};
+use crate::value::{normalize_f64, Value};
 
 /// 事件来源（D-B1：回放日志仅记录外部事件）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

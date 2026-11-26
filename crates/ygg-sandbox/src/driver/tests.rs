@@ -167,23 +167,23 @@ fn engine_mismatch_is_rejected_on_restore() {
 }
 
 const SAVEPOINT_MOD: &str = r#"
+world.component{ name = "hp", kind = "i64" }
 ygg.on("event.ok", function()
   ygg.kv.set("clean", "yes")
 end)
 ygg.on("event.bad", function()
-  local id = ygg.entity.spawn()
-  ygg.entity.set_attribute(id, "hp", 1)
+  world.spawn{ hp = 1 }
   ygg.kv.set("dirty", "yes")
   error("boom")
 end)
 ygg.on("event.spawn", function()
-  ygg.narrate("id=" .. tostring(ygg.entity.spawn()))
+  ygg.narrate("id=" .. tostring(world.spawn{ hp = 0 }))
 end)
 "#;
 
 #[test]
 fn failed_dispatch_restores_the_canonical_baseline() {
-    // 驱动内部状态机：取点冻结基线 → 失败整体还原（实体面与 KV 面）。
+    // 驱动内部状态机：取点冻结基线 → 失败整体还原（世界面与 KV 面）。
     let mut kernel = KernelFacade::new(SAVEPOINT_MOD).expect("kernel construction");
     // 先提交一个非空基线（否则「还原到基线」与「清空」不可区分）。
     let ok = reply(&kernel.dispatch("event.ok", "0"));
@@ -194,7 +194,7 @@ fn failed_dispatch_restores_the_canonical_baseline() {
         reply_code(&kernel.dispatch("event.bad", "0")),
         code::VALIDATION
     );
-    // 实体面：canonical 字节逐字节回到基线（含 revision / next_entity_id）。
+    // 世界面：canonical 字节逐字节回到基线（含 tick / next_entity / 组件段）。
     assert_eq!(
         kernel.canonical_state_bytes().expect("bytes"),
         baseline_bytes
@@ -208,8 +208,8 @@ fn failed_dispatch_restores_the_canonical_baseline() {
     let state = reply(&kernel.dispatch("state", ""));
     assert_eq!(
         state["revision"],
-        Json::from(0),
-        "entity revision rolls back"
+        Json::from(1),
+        "commit counter of the committed step only"
     );
     assert_eq!(
         state["kvRevision"],
@@ -238,16 +238,16 @@ fn rollback_rewinds_next_entity_id() {
 #[test]
 fn handler_reads_its_own_writes_during_the_dispatch() {
     // savepoint 基线是**副本**而非换出：转换期间 canonical 保留原状态 +
-    // 本次写入，`ygg.kv.get` / `ygg.entity.get_attribute` 的读路径看到的
-    // 是自己的写（若改成 mem::swap 换出，此测必红——读路径直读 canonical）。
+    // 本次写入，`ygg.kv.get` / `world.get` 的读路径看到的是自己的写
+    // （若改成 mem::swap 换出，此测必红——读路径直读 canonical）。
     const READ_BACK_MOD: &str = r#"
+world.component{ name = "hp", kind = "i64" }
 ygg.on("event.rb", function()
   ygg.kv.set("k", "v")
-  local id = ygg.entity.spawn()
-  ygg.entity.set_attribute(id, "hp", 5)
-  local bumped = ygg.entity.get_attribute(id, "hp") + 1
-  ygg.entity.set_attribute(id, "hp", bumped)
-  ygg.narrate("kv=" .. tostring(ygg.kv.get("k")) .. " hp=" .. tostring(ygg.entity.get_attribute(id, "hp")))
+  local id = world.spawn{ hp = 5 }
+  local bumped = world.get(id, "hp") + 1
+  world.set(id, { hp = bumped })
+  ygg.narrate("kv=" .. tostring(ygg.kv.get("k")) .. " hp=" .. tostring(world.get(id, "hp")))
 end)
 "#;
     let mut kernel = KernelFacade::new(READ_BACK_MOD).expect("kernel construction");
@@ -257,7 +257,10 @@ end)
     let save = reply(&kernel.dispatch("save", ""));
     assert_eq!(save["save"]["kv"]["entries"]["k"], json!("v"));
     assert_eq!(
-        save["save"]["entities"]["entities"]["1"]["attributes"]["hp"],
-        json!(6)
+        save["save"]["world"]
+            .as_array()
+            .map(|frame| frame.len() > 32),
+        Some(true),
+        "存档携带世界帧（不再有行存 entities 表）"
     );
 }
