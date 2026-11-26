@@ -1,13 +1,17 @@
-//! r1 模块装载面端到端（`KernelFacade` 公共路径）。
+//! r1 模块装载面端到端（`Loaded` 装载口）。
 //!
 //! 覆盖 require 契约：同状态同 globals 共享、只经返回值跨模块、缓存与 table
 //! 身份、`nil`/无返回值 → `true` 且只执行一次、chunk 名（错误文本带真实文件
-//! 与行号）、循环与深度的可读链条、**调用时机不受装载期限制**（封的只是注册
-//! 面，见 `host.seal`）。（原「装载期独立燃料预算」覆盖项已随 S34 燃料退役删除。）
+//! 与行号）、循环与深度的可读链条、`require` 在模块代码里也永远可用（装载期
+//! 没有第二道闸）。（原「装载期独立燃料预算」覆盖项已随 S34 燃料退役删除。）
 
-use serde_json::{json, Value as Json};
-use ygg_sandbox::driver::{KernelError, KernelFacade};
+use serde_json::json;
+use ygg_sandbox::modload::LoadError;
 use ygg_sandbox::modules::ModuleSet;
+
+mod support;
+
+use support::loaded_of;
 
 /// 由 `(名字, 源码)` 构造模块表（测试便捷面）。
 fn modules(pairs: &[(&str, &str)]) -> ModuleSet {
@@ -19,9 +23,9 @@ fn modules(pairs: &[(&str, &str)]) -> ModuleSet {
     .expect("module set")
 }
 
-/// 装载失败的错误（断言必须落在 `ModLoad` 面）。
-fn load_err(mod_source: &str, set: ModuleSet) -> KernelError {
-    match KernelFacade::with_modules(mod_source, set) {
+/// 装载失败的错误（断言必须落在 chunk 拒绝面）。
+fn load_err(mod_source: &str, set: ModuleSet) -> LoadError {
+    match loaded_of(mod_source, set) {
         Ok(_) => panic!("expected the mod to fail loading"),
         Err(err) => err,
     }
@@ -31,32 +35,33 @@ fn load_err(mod_source: &str, set: ModuleSet) -> KernelError {
 fn load_err_text(mod_source: &str, set: ModuleSet) -> String {
     let err = load_err(mod_source, set);
     assert!(
-        matches!(err, KernelError::ModLoad(_)),
-        "module failures must surface as ModLoad, got: {err:?}"
+        matches!(err, LoadError::ModChunk(_)),
+        "module failures must surface as a chunk rejection, got: {err:?}"
     );
     err.to_string()
 }
 
-fn parse(reply: &str) -> Json {
-    serde_json::from_str(reply).expect("json envelope")
-}
-
-fn reply_ok(reply: &str) -> Json {
-    let parsed = parse(reply);
-    assert_eq!(parsed["ok"], json!(true), "expected ok reply: {reply}");
-    parsed
+/// 入口顶部就把观测值写进 KV，测试读回来逐字比对。
+///
+/// 观测面为什么走 KV 而不是事件：事件层（`ygg` 的 `on` / `ygg` 的 `narrate`）已随
+/// 信封层删除；入口 chunk 豁免 MOD_EFFECT，所以「装配 + 留痕」是它的事。
+fn probe_of(loaded: &ygg_sandbox::modload::Loaded, topic: &str) -> serde_json::Value {
+    let kv = loaded.kv();
+    let kv = kv.borrow();
+    match kv.get(topic) {
+        Some(ygg_core::value::Value::Str(text)) => json!(text),
+        other => panic!("观测值缺失或不是字符串：{topic} / {other:?}"),
+    }
 }
 
 #[test]
 fn module_state_is_shared_only_through_returned_values() {
     // src.util 持有一个表 + 一个顶层 local；src.user 只能经返回值拿到它。
-    let kernel = KernelFacade::with_modules(
+    let loaded = loaded_of(
         r#"
 local util = require("src.util")
 require("src.user")
-ygg.on("probe", function()
-  ygg.narrate("count=" .. tostring(util.count) .. ";hidden=" .. tostring(hidden))
-end)
+ygg.kv.set("probe", "count=" .. tostring(util.count) .. ";hidden=" .. tostring(hidden))
 "#,
         modules(&[
             (
@@ -77,22 +82,18 @@ util.bump()
     )
     .expect("multi-file mod loads");
 
-    let mut kernel = kernel;
-    let parsed = reply_ok(&kernel.dispatch("probe", "0"));
     // src.user 的 bump 经共享 table 生效（1）；src.util 的顶层 local 不跨模块
-    // 可见（handler 侧 `hidden` 是未定义全局 → nil）。
-    assert_eq!(parsed["narrative"], json!(["count=1;hidden=nil"]));
+    // 可见（入口侧 `hidden` 是未定义全局 → nil）。
+    assert_eq!(probe_of(&loaded, "probe"), json!("count=1;hidden=nil"));
 }
 
 #[test]
 fn module_runs_once_and_keeps_table_identity() {
-    let mut kernel = KernelFacade::with_modules(
+    let loaded = loaded_of(
         r#"
 local a = require("src.count")
 local b = require("src.count")
-ygg.on("probe", function()
-  ygg.narrate("execs=" .. tostring(execs) .. ";same=" .. tostring(a == b) .. ";tag=" .. a.tag)
-end)
+ygg.kv.set("probe", "execs=" .. tostring(execs) .. ";same=" .. tostring(a == b) .. ";tag=" .. a.tag)
 "#,
         modules(&[(
             "src.count",
@@ -101,31 +102,30 @@ end)
     )
     .expect("multi-file mod loads");
 
-    let parsed = reply_ok(&kernel.dispatch("probe", "0"));
     // 只执行一次；两次 require 拿到同一个 table 对象。
-    assert_eq!(parsed["narrative"], json!(["execs=1;same=true;tag=count"]));
+    assert_eq!(
+        probe_of(&loaded, "probe"),
+        json!("execs=1;same=true;tag=count")
+    );
 }
 
 #[test]
 fn nil_module_is_cached_as_true_and_runs_once() {
-    let mut kernel = KernelFacade::with_modules(
+    let loaded = loaded_of(
         r#"
 local v = require("src.side")
 local again = require("src.side")
-ygg.on("probe", function()
-  ygg.narrate("v=" .. tostring(v) .. ";runs=" .. tostring(runs)
-    .. ";nilresult_cached=" .. tostring(v == true and again == true))
-end)
+ygg.kv.set("probe", "v=" .. tostring(v) .. ";runs=" .. tostring(runs)
+  .. ";nilresult_cached=" .. tostring(v == true and again == true))
 "#,
         modules(&[("src.side", "runs = (runs or 0) + 1\n")]),
     )
     .expect("multi-file mod loads");
 
-    let parsed = reply_ok(&kernel.dispatch("probe", "0"));
     // 无返回值 → 缓存 `true`；重复 require 不重复执行。
     assert_eq!(
-        parsed["narrative"],
-        json!(["v=true;runs=1;nilresult_cached=true"])
+        probe_of(&loaded, "probe"),
+        json!("v=true;runs=1;nilresult_cached=true")
     );
 }
 
@@ -192,12 +192,7 @@ fn chain(n: usize) -> ModuleSet {
 #[test]
 fn depth_limit_is_explicit_and_sits_at_the_constant() {
     // 64 层（默认上限）正常装载。
-    let ok = KernelFacade::with_modules(
-        r#"require("m0")
-ygg.on("probe", function() ygg.narrate("deep-ok") end)
-"#,
-        chain(64),
-    );
+    let ok = loaded_of(r#"require("m0")"#, chain(64));
     assert!(
         ok.is_ok(),
         "64 nested modules must load: {}",
@@ -263,45 +258,45 @@ fn invalid_module_names_are_readable_denials() {
 }
 
 #[test]
-fn require_has_no_load_time_boundary() {
-    // r1：`require` 不再封在装载期——封的是注册面（`host.seal` 只锁 `ygg.on`），
-    // 不是模块面。这两件事共用一个开关曾经把懒加載直接封死。
-    // 完整的懒加载契约（缓存 / 只执行一次 / 反射边界）在 tests/modules_effects.rs。
-    let mut kernel = KernelFacade::with_modules(
+fn require_is_available_from_module_code_not_just_the_entry() {
+    // `require` 没有第二道闸：模块代码里（不在入口 chunk 里）照样能 require，
+    // 拿到的是同一份模块表——懒加载不需要任何额外开关。
+    let loaded = loaded_of(
         r#"
-ygg.on("probe", function()
-  local util = require("src.util")
-  ygg.narrate("late=" .. util.tag .. ";kind=" .. type(require))
-end)
+local a = require("src.a")
+ygg.kv.set("probe", "late=" .. a.tag() .. ";kind=" .. type(require))
 "#,
-        modules(&[("src.util", "return { tag = \"util\" }")]),
+        modules(&[
+            (
+                "src.a",
+                r#"local M = {}
+function M.tag() return require("src.b").tag end
+return M
+"#,
+            ),
+            ("src.b", "return { tag = \"util\" }"),
+        ]),
     )
     .expect("multi-file mod loads");
-
-    // 装载结束后（= seal 之后）的 dispatch 里 require 仍然可用。
-    let parsed = reply_ok(&kernel.dispatch("probe", "0"));
-    assert_eq!(parsed["narrative"], json!(["late=util;kind=function"]));
+    assert_eq!(probe_of(&loaded, "probe"), json!("late=util;kind=function"));
 }
 
 #[test]
 fn single_file_mod_path_is_unchanged() {
-    // 回归闸门（与 tests/kernel_facade.rs 同形的最小面）：不注入模块表的构造
-    // 路径行为不变——require 仍是可读拒绝，事件照常派发。
-    let mut kernel = KernelFacade::new(
+    // 回归闸门：不注入模块表的构造路径行为不变——require 仍是可读拒绝。
+    let loaded = loaded_of(
         r#"
-ygg.on("probe", function()
-  local ok, err = pcall(require, "src.util")
-  ygg.narrate("denied=" .. tostring(ok == false) .. ";kind=" .. type(err)
-    .. ";readable=" .. tostring(tostring(err):find("sandbox denied", 1, true) ~= nil))
-end)
+local ok, err = pcall(require, "src.util")
+ygg.kv.set("probe", "denied=" .. tostring(ok == false) .. ";kind=" .. type(err)
+  .. ";readable=" .. tostring(tostring(err):find("sandbox denied", 1, true) ~= nil))
 "#,
+        ModuleSet::new(),
     )
     .expect("single-file mod loads");
-    let parsed = reply_ok(&kernel.dispatch("probe", "0"));
     // `pcall` 拿到的错误对象是 mlua 包装的 error userdata（与旧拒绝桩同形，
     // mlua 对 Rust 侧错误的既有语义），其 `tostring` 即人读文案。
     assert_eq!(
-        parsed["narrative"],
-        json!(["denied=true;kind=userdata;readable=true"])
+        probe_of(&loaded, "probe"),
+        json!("denied=true;kind=userdata;readable=true")
     );
 }

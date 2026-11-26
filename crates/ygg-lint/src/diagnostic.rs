@@ -14,13 +14,7 @@ pub enum Severity {
 
 /// 诊断码（稳定契约，与内核 A1 稳定码纪律同构）。
 pub mod code {
-    /// R1：handler 体内 emit 先于 choice（choice 终结丢事件）。
-    pub const R1_EMIT_BEFORE_CHOICE: &str = "YGG-R1";
-    /// R2：实体句柄存 local 未落 kv（顶层 = error，handler 内未 kv 化 = warning）。
-    pub const R2_LOCAL_SPAWN: &str = "YGG-R2";
-    /// R3：`ygg.narrative.goto(` 点形态（Lua 5.4 语法错误）。
-    pub const R3_GOTO_DOT_FORM: &str = "YGG-R3";
-    /// 解析失败（非 R3 形态；message 为 full_moon 错误原文）。
+    /// 解析失败（message 为 full_moon 错误原文）。
     pub const PARSE: &str = "YGG-PARSE";
     /// `--pack`：`pack.json` 的 `code` 段形状不合法（字段缺失 / 类型不符 /
     /// 重复登记 / 入口与模块重叠）。
@@ -32,12 +26,15 @@ pub mod code {
     pub const MOD_MISSING: &str = "YGG-MOD-MISSING";
     /// `--pack`：源码 `require` 了但仍未在 `code.modules` 登记（装载期必挂）。
     pub const MOD_UNDECLARED: &str = "YGG-MOD-UNDECLARED";
-    /// `--pack`：登记了但从入口出发不可达（warning：死模块，或依赖链断了）。
-    pub const MOD_UNUSED: &str = "YGG-MOD-UNUSED";
     /// `--pack`：循环依赖（链条文本与装载期同形）。
     pub const MOD_CYCLE: &str = "YGG-MOD-CYCLE";
-    /// `--pack`：模块数 / 装载深度 / 单模块或整包字节数超限。
-    pub const MOD_LIMIT: &str = "YGG-MOD-LIMIT";
+    /// `--pack`：模块数 / 装载深度 / 单模块或整包字节数超限（`ygg_modules`
+    /// 的 `MAX_MODULES` / `MAX_DEPTH` / `MAX_CODE_BYTES` 同一份预算）。
+    ///
+    /// M1-E 前这条叫 `YGG-MOD-LIMIT`，与「不可达警告」（`YGG-MOD-UNUSED`）
+    /// 一同钉在旧的模块运行期模型上；收窄后只剩「超预算」一个语义，码随之
+    /// 改名。
+    pub const MOD_BUDGET: &str = "YGG-MOD-BUDGET";
     /// `--pack`：模块 chunk **顶层**触碰有副作用的 host API（调用或取引用）。
     ///
     /// 与 `ygg-sandbox` 装载期的影子表（`ShadowBanned`）是**同一条不变量**的

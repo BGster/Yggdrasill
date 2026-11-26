@@ -1,35 +1,5 @@
 {
-  "mod_source": "\nygg.fsm.define{\n  name = \"counter\",\n  initial = \"zero\",\n  event = \"event.probe\",\n  transitions = {\n    { from = \"zero\", to = \"one\" },\n    { from = \"one\", to = \"two\" },\n    { from = \"two\", to = \"zero\" },\n  },\n}\nworld.component{ name = \"hp\", kind = \"i64\" }\nygg.on(\"event.probe\", function(p)\n  local hits = (ygg.kv.get(\"probe.hits\") or 0) + 1\n  ygg.kv.set(\"probe.hits\", hits)\n  world.spawn{ hp = 30 - hits }\n  ygg.narrate(\"hits=\" .. tostring(hits))\n  ygg.narrate(\"payload=\" .. tostring(p))\n  ygg.narrate(\"roll=\" .. tostring(math.random(1, 100)))\nend)\n",
-  "event_sequence": [
-    {
-      "cmd": "event.probe",
-      "payload": "1"
-    },
-    {
-      "cmd": "event.probe",
-      "payload": "5"
-    },
-    {
-      "cmd": "event.probe",
-      "payload": "9"
-    }
-  ],
-  "expected_narrative": [
-    [
-      "hits=1",
-      "payload=1",
-      "roll=5"
-    ],
-    [
-      "hits=2",
-      "payload=5",
-      "roll=64"
-    ],
-    [
-      "hits=3",
-      "payload=9",
-      "roll=71"
-    ]
-  ],
+  "note": "M1-E 起的 golden 基线：装载即世界定义（事件层已退役），故 mod_source 用装载期的等价写入复现同一世界面——三个实体 hp=29/28/27、tick=0、next_entity=4。expected_state_hash 是 M1-D 事件路径下钉死的同一值（未改口径：状态哈希只覆盖世界帧，narrative / kv / math.random 从不入帧）。",
+  "mod_source": "world.component{ name = \"hp\", kind = \"i64\" }\nworld.spawn{ hp = 29 }\nworld.spawn{ hp = 28 }\nworld.spawn{ hp = 27 }\n",
   "expected_state_hash": "cbe1619410187c76bbccb4e1ef5212657583c275909da6399f643935bae85eaa"
 }

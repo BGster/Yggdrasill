@@ -1,5 +1,6 @@
--- 中间层（三层依赖的第二跳）：自己 require 两个叶子模块，并把「注册 handler」
--- 这件事做成模块函数交给入口调用——正向用例 1/3 的落点。
+-- 中间层（三层依赖的第二跳）：自己 require 两个叶子模块，并把「装配」这件事
+-- 做成模块函数交给入口调用——装配参数由入口给（`note`），模块自己不写状态。
+
 load_trace = (load_trace or "") .. ">handlers"
 
 local util = require("src.util")
@@ -19,35 +20,11 @@ function handlers.shared()
   return shared
 end
 
--- 由入口在装载期调用：这里注册的 handler 用的是模块返回 table 里的函数。
-function handlers.register()
-  ygg.on("probe.table", function()
-    ygg.narrate("handler_from_table=" .. util.label .. ";bumped=" .. util.bump(2))
-  end)
-  ygg.on("probe.bump", function()
-    ygg.narrate("util_count=" .. tostring(util.bump(3)))
-  end)
-  ygg.on("probe.stats", function()
-    ygg.narrate(
-      "util_execs="
-        .. tostring(util_execs)
-        .. ";shared_runs="
-        .. tostring(shared_runs)
-        .. ";silent_runs="
-        .. tostring(silent_runs)
-        .. ";util_count="
-        .. tostring(util.count)
-        .. ";shared_count="
-        .. tostring(shared.count)
-    )
-  end)
-end
-
--- 注册面由入口调用（顶层不碰有副作用的 host API）；调用序决定派发序。
-function handlers.register_order()
-  ygg.on("probe.order", function()
-    ygg.narrate("handlers")
-  end)
+-- 由入口在装载期调用：装配序由入口的调用序决定，模块只把名字交回给调用方。
+function handlers.register_order(note)
+  if note then
+    note("handlers")
+  end
 end
 
 return handlers

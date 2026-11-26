@@ -10,10 +10,9 @@ assert(fixture.greet("mod") == "hello, mod", "包模块没能装上或导出不�
 
 local probe = require("src.probe") -- 本 Mod 自有模块（同一张表，前缀不同）
 
--- 沙箱面：handler 里再 require 一次（懒加载走同一份缓存与索引）。
-ygg.on("probe.pkg", function()
-  ygg.narrate(fixture.greet("sandbox"))
-end)
+-- 沙箱面观测：入口豁免 MOD_EFFECT，所以这里可以直接把包函数的返回值写进 KV，
+-- 测试读 `probe.pkg` 断言"包在真沙箱里调得动"。
+ygg.kv.set("probe.pkg", fixture.greet("sandbox"))
 
--- 顺带证明包与 mod 模块共存不互相干扰。
+-- 顺带证明包与 mod 模块共存不互相干扰：模块函数由入口调用，模块只写它该写的键。
 probe.install()

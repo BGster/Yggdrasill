@@ -1,14 +1,14 @@
 {
   "code": [
     {
-      "byteLength": 1420,
+      "byteLength": 723,
       "path": "src/handlers.lua",
-      "sha256": "010e865762c58d744f56280e98acb0f02cac946ad5d9b7e9fb6b6eb847f0ca01"
+      "sha256": "4e7aeeec1114b27fd0d72db8de7b8bebaf747b4a3685c90539988cbfae8f9129"
     },
     {
-      "byteLength": 510,
+      "byteLength": 477,
       "path": "src/shared.lua",
-      "sha256": "d41371f5d63bf6dece057d2b893cd5edfd6928cd87146a2958028d2ab1b6633a"
+      "sha256": "c2006dc6100e41dbc0e9e54939deb5bec13cdbfd16b5a10cac93a8d4bd0f19b6"
     },
     {
       "byteLength": 194,
@@ -16,9 +16,9 @@
       "sha256": "01a1c5abdd8d6f1c408e3c2a2bb999120c26132785e2485bdaaede5d48e6386a"
     },
     {
-      "byteLength": 729,
+      "byteLength": 720,
       "path": "src/util.lua",
-      "sha256": "9c0f1e8a3e8af312433393726062c9ffa14ab84b1e6e2c1408e3bddbda226662"
+      "sha256": "a6aa603e8a67cb90f44748cf88af4b6bc4315b2283288a4f1951ac4731c1df6f"
     }
   ],
   "entries": [

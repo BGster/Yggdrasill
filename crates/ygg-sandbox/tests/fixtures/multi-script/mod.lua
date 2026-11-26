@@ -1,9 +1,12 @@
 -- 入口：三层依赖 entry → src.handlers → src.util（`src.shared` 由入口与
 -- `src.handlers` 两处 require，`src.silent` 无返回值）。
 --
--- 本 fixture 是 r4 测试面的**真跑对象**（不是空壳）：每个模块在装载期留痕
--- （`load_trace` / `*_execs` / `*_runs`）并注册 `probe.order` handler，测试据此
--- 断言执行顺序、执行次数、对象身份与注册序；`probe.*` 事件是给测试的观测面。
+-- 本 fixture 是模块装载面的**真跑对象**（不是空壳）：每个模块在装载期留痕
+-- （`load_trace` / `*_execs` / `*_runs`），入口把观测值写进 `ygg.kv`，测试读
+-- `probe.<topic>` 逐字比对。
+--
+-- 为什么观测写在这里而不在模块里：模块顶层受 MOD_EFFECT 约束（不得写状态），
+-- 入口 chunk 豁免。装配与观测因此只有一处来源，顺序就是本文件的行序。
 
 local handlers = require("src.handlers") -- 第二跳：→ src.util / src.shared
 local util = require("src.util") -- 与 handlers 里那次是同一份
@@ -13,69 +16,65 @@ local silent_again = require("src.silent") -- 重复 require 不得再执行
 
 local TEXTS = ygg.data("ygg:scene/texts")
 
--- 正向用例 1 的落点：模块返回的 table 里的函数被入口用来注册 handler。
-handlers.register()
+-- 次数与身份观测面。`probe.stats` 必须记在下面两次 `bump` 之前：它的口径是
+-- "装载完成、还没有人调用模块函数"时的计数。
+ygg.kv.set(
+  "probe.stats",
+  "util_execs="
+    .. tostring(util_execs)
+    .. ";shared_runs="
+    .. tostring(shared_runs)
+    .. ";silent_runs="
+    .. tostring(silent_runs)
+    .. ";util_count="
+    .. tostring(util.count)
+    .. ";shared_count="
+    .. tostring(shared.count)
+)
+ygg.kv.set("probe.trace", "trace=" .. load_trace)
+ygg.kv.set(
+  "probe.identity",
+  "util_same="
+    .. tostring(util == handlers.util())
+    .. ";shared_same="
+    .. tostring(shared == handlers.shared())
+    .. ";util_execs="
+    .. tostring(util_execs)
+    .. ";shared_runs="
+    .. tostring(shared_runs)
+)
+ygg.kv.set(
+  "probe.nil",
+  "silent="
+    .. tostring(silent)
+    .. ";again="
+    .. tostring(silent_again)
+    .. ";same="
+    .. tostring(silent == silent_again)
+    .. ";runs="
+    .. tostring(silent_runs)
+)
 
--- 派发序 = 这两行的调用序（不是上面的 require 序）：模块纯导出，装配集中在入口。
--- 把 require 顺序调换不会改变 probe.order 的派发顺序——测试据这条断言"拆文件不改行为"。
-util.register()
-shared.register()
-handlers.register_order()
+-- 装配序 = 这几行的调用序（不是上面的 require 序）：模块纯导出，装配集中在入口。
+-- 把 require 顺序调换不会改变装配序——测试据这条断言"拆文件不改行为"。
+local order = ""
+local function note(name)
+  order = (order == "") and name or (order .. "\n" .. name)
+end
+util.register(note)
+shared.register(note)
+handlers.register_order(note)
+note("entry")
+ygg.kv.set("probe.order", order)
 
--- 执行顺序（模块体进入序）与身份/次数观测面。
-ygg.on("probe.trace", function()
-  ygg.narrate("trace=" .. load_trace)
-end)
-ygg.on("probe.identity", function()
-  ygg.narrate(
-    "util_same="
-      .. tostring(util == handlers.util())
-      .. ";shared_same="
-      .. tostring(shared == handlers.shared())
-      .. ";util_execs="
-      .. tostring(util_execs)
-      .. ";shared_runs="
-      .. tostring(shared_runs)
-  )
-end)
-ygg.on("probe.nil", function()
-  ygg.narrate(
-    "silent="
-      .. tostring(silent)
-      .. ";again="
-      .. tostring(silent_again)
-      .. ";same="
-      .. tostring(silent == silent_again)
-      .. ";runs="
-      .. tostring(silent_runs)
-  )
-end)
+-- 模块函数被调用时真的写动了模块内状态（不是把常量抄进来）。
+ygg.kv.set("probe.table", "handler_from_table=" .. util.label .. ";bumped=" .. util.bump(2))
+ygg.kv.set("probe.bump", "util_count=" .. tostring(util.bump(3)))
 
 -- 存读档观测面：世界状态（KV）随存档往返，模块内状态（util.count 等）不随
 -- —— 后者属于「代码的加载产物」，读档必须重建（cache 归零、只执行一次）。
-ygg.on("probe.kv", function()
-  ygg.narrate("stage=" .. tostring(ygg.kv.get("stage")))
-end)
+ygg.kv.set("stage", "begin")
+ygg.kv.set("probe.kv", "stage=" .. tostring(ygg.kv.get("stage")))
 
--- 确定性观测面：注册序 = handler 派发序（同一事件下逐项比对）。
-ygg.on("probe.order", function()
-  ygg.narrate("entry")
-end)
-
-ygg.narrative.node("node:begin", function()
-  ygg.narrate(TEXTS.scenes.begin .. handlers.suffix())
-  ygg.kv.set("stage", "begin")
-  ygg.choice(TEXTS.prompts.door, { TEXTS.options.enter, TEXTS.options.leave })
-end)
-
-ygg.on("ygg.choice_selected", function(index)
-  if index == 1 then
-    ygg.narrate(TEXTS.endings.brave)
-  else
-    ygg.narrate(TEXTS.endings.cautious)
-  end
-end)
-
-ygg.on("event.start", function()
-  ygg.narrative["goto"]("node:begin")
-end)
+-- 资源面：`ygg.data` 是纯读，模块顶层也允许；这里再证一次入口读得到。
+ygg.kv.set("probe.texts", "scenes=" .. tostring(TEXTS.scenes ~= nil))

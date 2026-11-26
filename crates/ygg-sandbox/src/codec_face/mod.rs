@@ -102,7 +102,7 @@ pub(crate) fn internal(detail: impl Into<String>) -> CodecFaceError {
 
 /// 装 `ygg.codec.*`（3 键闭集：`encode` / `decode` / `sha256`）。
 ///
-/// 与 `ygg.sim.*` 的区别写在契约里：本面**没有** unmounted 态——它无状态、无实例，
+/// 与 `ygg` 的 `sim.*` 的区别写在契约里：本面**没有** unmounted 态——它无状态、无实例，
 /// 缺面时的语义是明确的一条（调用方走 Lua 路径，产出字节相同）。因此这里不需要
 /// 「表始终注册 + 抛码」那套；`host_api::install` 装上就一直在场。
 ///

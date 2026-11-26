@@ -32,8 +32,10 @@ mod.lua（入口，不是模块）
 | `util_execs` / `shared_runs` / `silent_runs` | 各模块体 | 执行次数（重复装载 / 重复 require 的显形面） |
 | `util.count` / `shared.count` | `util.bump` / `shared.bump` | 模块内状态（存读档后必须归零：不留旧对象） |
 
-事件面：`probe.*` 是给测试的观测面（`trace` / `identity` / `nil` / `table` /
-`bump` / `stats` / `order`）。
+观测面（M1-E 起）：入口 chunk 把装配结果写进 `ygg.kv`，键名 `probe.*`
+（`trace` / `identity` / `nil` / `table` / `bump` / `stats` / `order` /
+`texts`），测试经 `Loaded::kv` 读回。模块体仍受 MOD_EFFECT 约束（顶层只导出），
+所以「装配 + 留痕」只能发生在入口。
 
 `pack.json` 的 `code.modules` 声明序（util → handlers → silent → shared）
 **故意不等于** require 序——装载序由依赖图决定，不由声明序决定。

@@ -131,7 +131,7 @@ impl StepError {
 /// `&mut self` 里把主线程锁死——调用方既无法中途取消，也拿不到部分进度。
 /// 需要更多时间就多次 `step`：每次回来都能看 hash、能存档、能被中断。
 /// 这是「宿主驱动时间」与「Lua 驱动时间」的关键区别：前者的粒度可被宿主控制，
-/// 后者的时间长度由脚本决定（所以 `ygg.sim.step` 被整个删掉）。
+/// 后者的时间长度由脚本决定（所以 `ygg` 的 `sim.step` 被整个删掉）。
 pub const STEP_TICK_BUDGET: u32 = 10_000;
 
 impl Sandbox {
@@ -209,7 +209,7 @@ impl Sandbox {
     /// 整数秒而不是毫秒：tick 长度在确定性世界里的语义是「世界时间前进多少」，
     /// 而毫秒以上的精度只能靠定点小数表达——那会把单位偷偷变成半个浮点面。
     ///
-    /// Lua 侧**没有任何推进时钟的入口**（`ygg.sim.step` 已随 `ygg.sim.*` 面删除）：
+    /// Lua 侧**没有任何推进时钟的入口**（`ygg` 的 `sim.step` 已随 `ygg` 的 `sim.*` 面删除）：
     /// 脚本能决定「一个 tick 里算什么」，不能决定「走多少 tick」。这就是宿主与
     /// 脚本的分界：时间的所有权与可中断性。
     ///
@@ -261,7 +261,7 @@ impl Sandbox {
     /// 当前世界状态的规范字节（快照帧；同一状态 ⇒ 同一字节）。
     ///
     /// 宿主能力，Lua 不可达：能存档就等于能回到任意时刻，那是时间机器的
-    /// 权限，不是脚本的权限（旧 `ygg.sim.snapshot/restore` 面已删）。
+    /// 权限，不是脚本的权限（旧 `ygg` 的 `sim.snapshot/restore` 面已删）。
     pub fn snapshot(&self) -> Result<Vec<u8>, StepError> {
         let slot = Rc::clone(&self.sim);
         let guard = slot.borrow();

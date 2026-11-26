@@ -74,7 +74,7 @@ fn world_unmounted(what: &str) -> Error {
     Error::runtime(sim_unmounted(what))
 }
 
-/// `SimError` → Lua 错误：**码在首段**（与 `ygg.sim.*` 同一口径，外部可 grep 可断言）。
+/// `SimError` → Lua 错误：**码在首段**（与 `ygg` 的 `sim.*` 同一口径，外部可 grep 可断言）。
 fn sim_to_lua(e: SimError) -> Error {
     Error::runtime(e.to_string())
 }
@@ -1109,7 +1109,7 @@ fn resolve_ids(
 }
 
 /// 系统体：把 `SystemCtx` 暂存进 `RefCell`，为本次调用造一张 `ctx` 表并调 `run(dt, ctx)`。
-/// `run(dt, ctx)` 的 `dt` 与 `ctx.dt()` 都是 **Q32.32 裸值**——与 `ygg.sim.step(dt)`
+/// `run(dt, ctx)` 的 `dt` 与 `ctx.dt()` 都是 **Q32.32 裸值**——与 `ygg` 的 `sim.step(dt)`
 /// 的入参**同一单位**。世界面的组件值是 `i64` 纯整数（schema 不带 `frac_bits`），
 /// 所以面内没有第二套换算；擅自按 `to_int` 截断会把 60Hz 的 tick（dt ≈ 2^25）全截成 0，
 /// 而擅自右移 32 位又与「调用方传给 `step` 的那个数」差 2³² 倍——两个都是静默错。

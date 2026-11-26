@@ -1,9 +1,8 @@
 //! r1 副作用边界：**模块顶层只做纯导出**。
 //!
 //! 这一组盯的是一个不变量，而不是某条具体 API：模块 chunk 的顶层不得调用
-//! 有副作用的 host API（注册 / 状态写 / 输出）。理由在 `ygg_modules::effects`
-//! 的头注里——`ygg.on` 的注册序就是 handler 派发序，模块顶层能自由注册就等于
-//! 「文件怎么拆」决定「运行时行为」。
+//! 有副作用的 host API（状态写 / 输出）。理由在 `ygg_modules::effects` 的头注
+//! 里——模块顶层写下的状态既不进世界帧、也不进存档，还会随 require 顺序变化。
 //!
 //! 内核侧的执行面是 `modules::ShadowBanned`（模块 chunk 执行期间把禁止面换成
 //! 拒绝桩，`Drop` 恢复）。本文件逐条钉住它的四条性质：
@@ -13,14 +12,17 @@
 //! 3. 函数体内（`M.install` 里）调用**允许**——这是给作者的出口；
 //! 4. chunk 抛错后影子表**一定**恢复（否则拒绝桩会残留、污染整个会话）。
 //!
-//! 外加两条 r1 打通的能力：handler 内 `require`（懒加载）与「拒绝不污染后续
-//! 模块」。入口 chunk 不受约束——本文件所有用例的入口都在顶层调 `ygg.on`，
-//! 它们能装载起来本身就是这条豁免的证据。
+//! 入口 chunk 不受约束——本文件所有用例的观测都在入口顶部写进 KV，它们能
+//! 装载起来本身就是这条豁免的证据（事件层已随信封层删除，观测面走 KV）。
 
-use serde_json::{json, Value as Json};
-use ygg_sandbox::driver::{KernelError, KernelFacade};
+use ygg_core::value::Value;
+use ygg_sandbox::modload::{LoadError, Loaded, ModBundle};
 use ygg_sandbox::modules::{effects, ModuleSet};
 use ygg_schema::validate::sha256_hex;
+
+mod support;
+
+use support::{bundle_of, loaded_of};
 
 // ───────────────────────── 脚手架 ─────────────────────────
 
@@ -34,35 +36,24 @@ fn modules(pairs: &[(&str, &str)]) -> ModuleSet {
     .expect("module set")
 }
 
-fn parse(reply: &str) -> Json {
-    serde_json::from_str(reply).expect("json envelope")
+/// 观测行（入口顶部写进 KV 的多行字符串，逐行拆开）。
+fn narrate(loaded: &Loaded, topic: &str) -> Vec<String> {
+    let kv = loaded.kv();
+    let kv = kv.borrow();
+    let Some(Value::Str(text)) = kv.get(topic) else {
+        panic!("观测值缺失或不是字符串：{topic}");
+    };
+    text.split('\n').map(str::to_owned).collect()
 }
 
-fn reply_ok(reply: &str) -> Json {
-    let parsed = parse(reply);
-    assert_eq!(parsed["ok"], json!(true), "expected ok reply: {reply}");
-    parsed
-}
-
-/// 叙述行（每条 handler `ygg.narrate` 一行；顺序本身是契约）。
-fn narrate(kernel: &mut KernelFacade, event: &str) -> Vec<String> {
-    let parsed = reply_ok(&kernel.dispatch(event, "0"));
-    parsed["narrative"]
-        .as_array()
-        .expect("narrative array")
-        .iter()
-        .map(|line| line.as_str().expect("narrative line").to_owned())
-        .collect()
-}
-
-/// 装载失败文本（必须落在 `ModLoad` 面——影子表的拒绝经模块 chunk 错误浮出）。
+/// 装载失败文本（必须落在入口 chunk 拒绝面——影子表的拒绝经模块 chunk 错误浮出）。
 fn load_err_text(mod_source: &str, set: ModuleSet) -> String {
-    match KernelFacade::with_modules(mod_source, set) {
+    match loaded_of(mod_source, set) {
         Ok(_) => panic!("expected the mod to fail loading"),
         Err(err) => {
             assert!(
-                matches!(err, KernelError::ModLoad(_)),
-                "模块副作用拒绝必须经 ModLoad 浮出，实得：{err:?}"
+                matches!(err, LoadError::ModChunk(_)),
+                "模块副作用拒绝必须经入口 chunk 拒绝浮出，实得：{err:?}"
             );
             err.to_string()
         }
@@ -72,12 +63,12 @@ fn load_err_text(mod_source: &str, set: ModuleSet) -> String {
 // ───────────────────────── ① 禁止面在模块顶层被拒 ─────────────────────────
 
 #[test]
-fn a_module_that_registers_at_the_top_level_is_rejected_with_file_and_line() {
+fn a_module_that_writes_state_at_the_top_level_is_rejected_with_file_and_line() {
     let text = load_err_text(
         r#"require("src.handlers.release")"#,
         modules(&[(
             "src.handlers.release",
-            "-- 模块只做纯导出\nlocal M = {}\n\nygg.on(\"event.x\", function() end)\n\nreturn M\n",
+            "-- 模块只做纯导出\nlocal M = {}\n\nygg.kv.set(\"stage\", \"release\")\n\nreturn M\n",
         )]),
     );
 
@@ -87,20 +78,15 @@ fn a_module_that_registers_at_the_top_level_is_rejected_with_file_and_line() {
         "报错必须带真实文件与行号：{text}"
     );
     assert!(
-        text.contains("模块顶层不能调用 `ygg.on`"),
+        text.contains("模块顶层不能调用 `ygg.kv.set`"),
         "报错必须点名是哪个面：{text}"
     );
     // 该怎么做：模块纯导出 + 入口显式装配。
     assert!(text.contains("M.install(deps)"), "报错必须给出出口：{text}");
-    // 为什么：派发序由文件组织决定 = 重构不安全。
+    // 为什么：状态写不进存档、还会随 require 顺序漂移 = 重构不安全。
     assert!(
-        text.contains("派发序") && text.contains("重构就不再安全"),
+        text.contains("既不进世界帧也不进存档") && text.contains("重构不再安全"),
         "报错必须解释原因：{text}"
-    );
-    // 指向设计契约的多文件 Mod 章节（openwiki/overview.md §3.2）。
-    assert!(
-        text.contains("openwiki/overview.md"),
-        "报错必须指向文档：{text}"
     );
 }
 
@@ -108,46 +94,58 @@ fn a_module_that_registers_at_the_top_level_is_rejected_with_file_and_line() {
 fn every_banned_surface_is_rejected_from_a_module_top_level() {
     // 逐条覆盖 `ygg_modules::effects::BANNED_*`：清单改了而这里没跟上，
     // 下一条断言会直接指出漏了哪一项。
-    for (call, dotted) in [
-        (r#"ygg.on("event.x", function() end)"#, "on"),
-        (r#"ygg.emit("event.x", 1)"#, "emit"),
-        (r#"ygg.narrate("line")"#, "narrate"),
-        (r#"ygg.choice("prompt", { "a", "b" })"#, "choice"),
-        (r#"ygg.kv.set("k", 1)"#, "kv.set"),
-        (
-            r#"ygg.fsm.define({ name = "m", initial = "a", event = "e", transitions = {} })"#,
-            "fsm.define",
-        ),
-        (
-            r#"ygg.narrative.node("n", function() end)"#,
-            "narrative.node",
-        ),
-        // `goto` 是 Lua 5.4 保留字：只可写括号形态（点号是语法错误）。
-        (r#"ygg.narrative["goto"]("n")"#, "narrative.goto"),
-        // 别名逃逸拿到的也是拒绝桩（影子表换的是表里的成员，不是某个局部）。
-        (r#"local e = ygg.emit; e("event.x", 1)"#, "emit"),
-    ] {
-        let source = format!("local M = {{}}\n{call}\n\nreturn M\n");
+    let mut surfaces: Vec<(String, String)> = effects::BANNED_CALLS
+        .iter()
+        .map(|name| ((*name).to_owned(), (*name).to_owned()))
+        .collect();
+    surfaces.extend(
+        effects::BANNED_TABLE_MEMBERS
+            .iter()
+            .map(|(table, member)| (format!("{table}.{member}"), format!("{table}.{member}"))),
+    );
+    // 登记面随事件层退役后，直接成员全空；只靠表成员承重。清单变空是设计变更，
+    // 不是本用例失效——所以这里显式断言「至少还有一条」。
+    assert!(
+        !surfaces.is_empty(),
+        "禁止面清单不能为空，否则影子表与 lint 一起失效"
+    );
+
+    for (call, dotted) in &surfaces {
+        let call = call.replace("kv.set", "kv.set(\"k\", 1)");
+        let source = format!("local M = {{}}\nygg.{call}\n\nreturn M\n");
         let text = load_err_text(
             r#"require("src.mod")"#,
             modules(&[("src.mod", source.as_str())]),
         );
         assert!(
             text.contains(&format!("模块顶层不能调用 `ygg.{dotted}`")),
-            "`{call}` 必须被拒并点名 `ygg.{dotted}`：{text}"
+            "`ygg.{call}` 必须被拒并点名 `ygg.{dotted}`：{text}"
         );
         assert!(
             text.contains("src/mod.lua:2"),
-            "`{call}` 的报错必须指向模块自己那一行：{text}"
+            "`ygg.{call}` 的报错必须指向模块自己那一行：{text}"
         );
         // 清单同源：报错点的名字必须能在 `effects` 里查出来。
         let path: Vec<&str> = dotted.split('.').collect();
         assert_eq!(
             effects::banned(&path).as_deref(),
-            Some(dotted),
+            Some(dotted.as_str()),
             "`{dotted}` 必须在 ygg_modules::effects 的禁止面清单里"
         );
     }
+
+    // 别名逃逸拿到的也是拒绝桩（影子表换的是表里的成员，不是某个局部）。
+    let text = load_err_text(
+        r#"require("src.mod")"#,
+        modules(&[(
+            "src.mod",
+            "local M = {}\nlocal e = ygg.kv.set\ne(\"k\", 1)\n\nreturn M\n",
+        )]),
+    );
+    assert!(
+        text.contains("模块顶层不能调用 `ygg.kv.set`"),
+        "别名逃逸也必须被拒：{text}"
+    );
 }
 
 // ───────────────────────── ② 纯读面放行 ─────────────────────────
@@ -178,38 +176,38 @@ fn manifest() -> String {
 
 #[test]
 fn module_top_level_is_allowed_to_read() {
-    let kernel = KernelFacade::with_resources_and_modules(
+    let mut bundle: ModBundle = bundle_of(
         r#"
 local probe = require("src.readonly")
-ygg.on("probe", function()
-  ygg.narrate("kv_absent=" .. tostring(probe.kv_absent))
-  ygg.narrate("resource=" .. probe.resource)
-  ygg.narrate("ticks=" .. tostring(probe.ticks_ok))
-end)
+ygg.kv.set("probe", "kv_absent=" .. tostring(probe.kv_absent)
+  .. "\nresource=" .. probe.resource
+  .. "\ndigest=" .. probe.digest)
 "#,
         modules(&[(
             "src.readonly",
-            // 顶层只读：KV miss、资源表、时钟。三者都不写状态、不产生输出。
+            // 顶层只读：KV miss、资源表、摘要。三者都不写状态、不产生输出。
             r#"local missing = ygg.kv.get("absent")
 local loot = ygg.data("ygg:data/probe.loot")
-local ticks = ygg.ticks()
 return {
   kv_absent = (missing == nil),
   resource = loot.name,
-  ticks_ok = (type(ticks) == "number"),
+  digest = ygg.codec.sha256("probe"),
 }
 "#,
         )]),
-        manifest().as_bytes(),
-        &[(SCHEMA_ID.to_owned(), SCHEMA.to_owned())],
-        &[(RES_PATH.to_owned(), RES_PAYLOAD.as_bytes().to_vec())],
-    )
-    .expect("纯读模块必须能装载");
+    );
+    bundle.manifest_bytes = manifest().into_bytes();
+    bundle.schemas = vec![(SCHEMA_ID.to_owned(), SCHEMA.to_owned())];
+    bundle.resources = vec![(RES_PATH.to_owned(), RES_PAYLOAD.as_bytes().to_vec())];
 
-    let mut kernel = kernel;
+    let loaded = Loaded::from_bundle(&bundle).expect("纯读模块必须能装载");
     assert_eq!(
-        narrate(&mut kernel, "probe"),
-        ["kv_absent=true", "resource=probe", "ticks=true"]
+        narrate(&loaded, "probe"),
+        [
+            "kv_absent=true".to_owned(),
+            "resource=probe".to_owned(),
+            format!("digest={}", sha256_hex(b"probe")),
+        ]
     );
 }
 
@@ -246,14 +244,12 @@ fn the_banned_list_never_contains_a_pure_read() {
 // ───────────────────────── ③ 函数体内调用允许 ─────────────────────────
 
 #[test]
-fn a_module_may_install_into_the_host_when_the_entry_asks_it_to() {
-    let mut kernel = KernelFacade::with_modules(
+fn a_module_may_write_state_when_the_entry_asks_it_to() {
+    let loaded = loaded_of(
         r#"
 local m = require("src.installable")
-m.install()            -- 装配点：派发序由这一行决定，不由 require 序决定
-ygg.on("readback", function()
-  ygg.narrate("flag=" .. tostring(ygg.kv.get("installed")))
-end)
+m.install()            -- 装配点：写状态由这一行决定，不由 require 序决定
+ygg.kv.set("probe", "flag=" .. tostring(ygg.kv.get("installed")))
 "#,
         modules(&[(
             "src.installable",
@@ -263,9 +259,6 @@ end)
 -- 而这段代码由入口在装载期显式调用（运行时同理）。
 function M.install()
   ygg.kv.set("installed", "yes")
-  ygg.on("installed", function()
-    ygg.narrate("installed-handler")
-  end)
 end
 
 return M
@@ -274,35 +267,28 @@ return M
     )
     .expect("M.install 形态必须能装载");
 
-    // 模块在函数体里注册的 handler 真的进了派发表。
-    assert_eq!(narrate(&mut kernel, "installed"), ["installed-handler"]);
-    assert_eq!(narrate(&mut kernel, "readback"), ["flag=yes"]);
+    // 模块在函数体里写下的状态真的进了 KV。
+    assert_eq!(narrate(&loaded, "probe"), ["flag=yes"]);
 }
 
 // ───────────────────────── ④ Drop guard：拒绝后一定恢复 ─────────────────────────
 
 #[test]
 fn a_throwing_module_chunk_restores_the_shadowed_surface() {
-    // 模块顶层写状态 → chunk 抛错；入口 pcall 掉它，然后自己照常注册。
-    // 如果影子表没恢复，第二条 ygg.on 会撞上残留的拒绝桩（装载期直接失败），
-    // 而 handler 里的 ygg.kv.set / ygg.narrate 也会炸——这条用例一次性盯住。
-    let mut kernel = KernelFacade::with_modules(
+    // 模块顶层写状态 → chunk 抛错；入口 pcall 掉它，然后自己照常写 KV。
+    // 如果影子表没恢复，入口这一句 ygg.kv.set 会撞上残留的拒绝桩（装载期直接
+    // 失败）——这条用例一次性盯住「错误可读 + 影子表已还原」。
+    let loaded = loaded_of(
         r#"
 local ok, err = pcall(require, "src.boom")
-ygg.on("probe", function()
-  ygg.kv.set("restored", "yes")
-  ygg.narrate("ok=" .. tostring(ok))
-  ygg.narrate(tostring(err))
-end)
-ygg.on("readback", function()
-  ygg.narrate("restored=" .. tostring(ygg.kv.get("restored")))
-end)
+ygg.kv.set("probe", "ok=" .. tostring(ok) .. "\n" .. tostring(err))
+ygg.kv.set("restored", "yes")
 "#,
         modules(&[("src.boom", "local M = {}\nygg.kv.set(\"k\", 1)\nreturn M\n")]),
     )
     .expect("抛错的模块不能把整包装载拖垮（入口 pcall 得住）");
 
-    let lines = narrate(&mut kernel, "probe");
+    let lines = narrate(&loaded, "probe");
     assert_eq!(lines[0], "ok=false", "模块顶层写状态必须失败：{lines:?}");
     assert!(
         lines[1].contains("模块顶层不能调用 `ygg.kv.set`"),
@@ -312,64 +298,65 @@ end)
         lines[1].contains("src/boom.lua:2"),
         "pcall 住的错误必须带模块自己的行号：{lines:?}"
     );
-    // 真恢复的三重证据：handler 里的 kv.set 写进去了、narrate 出得来、
-    // 后面还能再注册 handler（上面两条 ygg.on 已经成立）。
-    assert_eq!(narrate(&mut kernel, "readback"), ["restored=yes"]);
+    assert_eq!(
+        narrate(&loaded, "restored"),
+        ["yes"],
+        "影子表必须还原，否则入口自己的写会被拒绝桩挡住"
+    );
 }
 
-// ───────────────────────── ⑤ 懒加载：handler 内 require ─────────────────────────
+// ───────────────────────── ⑤ 懒加载：模块代码里的 require ─────────────────────────
 
 #[test]
-fn a_module_can_be_required_from_inside_a_handler() {
-    let mut kernel = KernelFacade::with_modules(
+fn a_module_can_be_required_lazily_from_another_module() {
+    let loaded = loaded_of(
         r#"
-ygg.on("lazy", function()
+local lib = require("src.host")
+ygg.kv.set("probe", lib.report())
+"#,
+        modules(&[
+            (
+                "src.host",
+                r#"local M = {}
+function M.report()
   local lib = require("src.lazy")
   local again = require("src.lazy")
-  ygg.narrate("tag=" .. lib.tag)
-  ygg.narrate("execs=" .. tostring(execs) .. ";same=" .. tostring(lib == again))
-end)
+  return "tag=" .. lib.tag .. "\nexecs=" .. tostring(execs) .. ";same=" .. tostring(lib == again)
+end
+return M
 "#,
-        modules(&[(
-            "src.lazy",
-            "execs = (execs or 0) + 1\nreturn { tag = \"lazy\" }\n",
-        )]),
+            ),
+            (
+                "src.lazy",
+                "execs = (execs or 0) + 1\nreturn { tag = \"lazy\" }\n",
+            ),
+        ]),
     )
     .expect("多文件 Mod 装载");
 
-    // 装载期没 require 过它：第一次发生在 handler 里（require 不再有装载期边界）。
+    // 装载期没 require 过它：第一次发生在模块自己的函数里（require 没有第二道闸）。
     assert_eq!(
-        narrate(&mut kernel, "lazy"),
+        narrate(&loaded, "probe"),
         ["tag=lazy", "execs=1;same=true"],
-        "handler 内 require 正常工作，且同模块只执行一次、对象同一"
-    );
-    // 再触发一次也还是同一份缓存（不是每次都重新装载）。
-    assert_eq!(
-        narrate(&mut kernel, "lazy"),
-        ["tag=lazy", "execs=1;same=true"],
-        "跨事件复用缓存，不重复执行"
+        "模块内 require 正常工作，且同模块只执行一次、对象同一"
     );
 }
 
 #[test]
 fn a_lazy_module_is_still_subject_to_the_effect_boundary() {
-    // 懒加载放开的是**时机**，不是**约束**：handler 里 require 到的模块，
-    // 顶层照样是纯导出面。
-    let mut kernel = KernelFacade::with_modules(
+    // 懒加载放开的是**时机**，不是**约束**：任何模块被 require 到时，
+    // 它的顶层照样是纯导出面。
+    let loaded = loaded_of(
         r#"
-ygg.on("lazy", function()
-  local ok = pcall(require, "src.greedy")
-  ygg.narrate("ok=" .. tostring(ok))
-end)
+local ok = pcall(require, "src.greedy")
+ygg.kv.set("probe", "ok=" .. tostring(ok))
 "#,
         modules(&[(
             "src.greedy",
-            "local M = {}\nygg.narrate(\"sneaky\")\nreturn M\n",
+            "local M = {}\nygg.kv.set(\"sneaky\", 1)\nreturn M\n",
         )]),
     )
     .expect("入口本身不受约束");
 
-    // handler 里 pcall 住 BadModule 的 chunk 错误 → dispatch 成功、ok=false。
-    // （handler 报错会变成 VALIDATION；这里不报错说明拒绝是 chunk 级的。）
-    assert_eq!(narrate(&mut kernel, "lazy"), ["ok=false"]);
+    assert_eq!(narrate(&loaded, "probe"), ["ok=false"]);
 }

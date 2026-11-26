@@ -1,38 +1,71 @@
-//! Mod 目录 → 内核的**唯一装载口**（r3）：读盘、声明对账、构造驱动三件事收在一处。
+//! Mod 目录 → 已装载内核的**唯一装载口**（r3；M1-E 收敛为 [`Loaded`]）：读盘、
+//! 声明对账、装载序三件事收在一处。
 //!
 //! # 为什么必须有这一层
 //!
 //! 「把 `<mod目录>` 装成内核」曾经散在三处：读盘、声明对账、组装内核各写一遍，
 //! 于是同一条语义在三处各自漂移（典型症状：读盘不看 `pack.json` 的 `code` 段，
 //! 多文件 Mod 被当单文件装，入口 `require("src.util")` 对空模块表得到可读拒绝，
-//! 或跑到一半才炸）。现在只有这一条路径：读盘 + 声明对账 + 构造驱动收在一处，
+//! 或跑到一半才炸）。现在只有这一条路径：读盘 + 声明对账 + 装载序收在一处，
 //! 谁装 Mod 都吃同一份装载语义。
 //!
 //! # 与「内核零 IO」纪律的关系
 //!
-//! 本模块**属于宿主侧**：只有它做文件系统读取。`driver` / `sandbox` / `modules`
-//! 依旧零 IO（装载器拿到的只是 [`ModuleSet`] 字节表）——纪律没有放宽，只是把
-//! 「宿主读盘」只在这一处。
+//! 本模块**属于宿主侧**：只有它做文件系统读取。`sandbox` / `modules` 依旧零 IO
+//! （装载器拿到的只是 [`ModuleSet`] 字节表）——纪律没有放宽，只是把「宿主读盘」
+//! 只放在这一处。
+//!
+//! # 装载序（唯一一份）
+//!
+//! ① 资源表 fail-fast（预算 / 寻址 / 校验，任何 Lua 状态之前）→ ② `Sandbox::new`
+//! （stdlib 裁剪 + 内存上限 + 白名单环境）→ ③ `inject::install`（math 精确集 +
+//! 内核种子 random）→ ④ 世界内核挂上（`Sim::new(KERNEL_RNG_SEED)`，与
+//!   `math.random` 同源）→ ⑤ `host_api::install`（`ygg.kv` / `ygg.codec` /
+//!   `world.*`）→ ⑥ `resources::install`（`ygg.data`）→ ⑦ `stdlib::install`
+//!   （版本面）→ ⑧ 模块表注入（入口 chunk 之前，入口顶层即可 `require`）→
+//!   ⑨ 入口 chunk（失败 = [`LoadError::ModChunk`]）。
+//!
+//! 装载完的内核**不再有派发面**：时间只由宿主经 [`Loaded::step`] 推进，
+//! 存档面只有世界帧字节（[`Loaded::snapshot`] / [`Loaded::restore`]）。
 //!
 //! # 失败面
 //!
-//! 读盘与声明错误的错误类型是 `String`（人读文案，带目录与文件路径）——这一层
-//! 的错误直接进调用方的报告，不需要机器分支；内核构造错误仍是
-//! [`KernelError`]（有稳定码映射面），由调用方决定怎么呈现。
+//! 读盘与声明错误的错误类型是 [`LoadError::Bundle`]（人读文案，带目录与文件
+//! 路径）——这一层的错误直接进调用方的报告，不需要机器分支；内核构造错误按
+//! 来源分变体（资源包 / manifest / Lua 状态 / 入口 chunk / 步进），调用方按变体
+//! 决定怎么呈现，不解析 message。
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::rc::Rc;
 
 use serde_json::Value as Json;
+use thiserror::Error as ThisError;
 
-use crate::driver::{KernelError, KernelFacade};
+use ygg_core::kv::KvStore;
+use ygg_schema::manifest::{parse_manifest, Manifest};
+use ygg_schema::validate::SchemaError;
+use ygg_sim::Sim;
+
+use crate::host_api::{self, HostApi, HostHandles};
+use crate::inject;
 use crate::modules::{ModuleSet, ModuleTable};
 use crate::pack::{self, CodeSpec};
 use crate::packages::{self, PackagesSpec};
+use crate::resources::{self, ResourceError, ResourceTable};
+use crate::sandbox::{Sandbox, StepError, StepReport};
+use crate::stdlib;
 
 /// Mod 包内的声明文件名（`entries` / `schemaFiles` / `code` / `packages`）。
 pub const PACK_FILE: &str = "pack.json";
+
+/// 无资源路径的最小 manifest（`schemaVersion` + 空 `entries` 是仅有的必填字段）。
+///
+/// 内存装载参数（wasm 壳、单文件夹具）总得给 manifest：资源表构建是无条件
+/// 的一步，没有 manifest 就没有「装载」这回事。这一份是它的最小合法值。
+pub const MINIMAL_MANIFEST: &str = r#"{"schemaVersion":1,"entries":[]}"#;
 
 /// Mod 包内的资源内容寻址清单（`entries` + `code` 的 sha256 / byteLength）。
 pub const MANIFEST_FILE: &str = "manifest.json";
@@ -40,10 +73,33 @@ pub const MANIFEST_FILE: &str = "manifest.json";
 /// 单文件 Mod 的入口文件名（`code.entry` 缺省时的回落）。
 pub const MOD_SOURCE_FILE: &str = "mod.lua";
 
+/// 装载失败（读盘 / 对账 / 构造 / 步进 / 快照，单点出口）。
+#[derive(Debug, ThisError)]
+pub enum LoadError {
+    /// 读盘与声明对账失败（`pack.json` / `manifest.json` / 模块三方对账）。
+    #[error("{0}")]
+    Bundle(String),
+    /// `manifest.json` 不合契约（内容寻址清单本身无法解析）。
+    #[error(transparent)]
+    Manifest(#[from] SchemaError),
+    /// Lua 状态构造 / 注入 / 资源面安装失败（结构面错误，非作者可修复）。
+    #[error(transparent)]
+    Sandbox(#[from] mlua::Error),
+    /// 入口 chunk 拒绝（含入口顶层的 `require` 失败；文本带 `mod.lua:<line>`）。
+    #[error("mod chunk rejected: {0}")]
+    ModChunk(String),
+    /// 资源包拒绝（预算 / 寻址 / payload schema）。
+    #[error(transparent)]
+    Resources(#[from] ResourceError),
+    /// 步进 / 快照 / 恢复失败（世界内核错误）。
+    #[error(transparent)]
+    Step(#[from] StepError),
+}
+
 /// 一个 Mod 目录装出来的全部装载参数（五件套 + 模块表 + chunk 覆盖表）。
 ///
 /// 字段是「装载参数的完整集合」：入口源码、manifest 字节、schema 文本、资源
-/// 字节、代码模块表、chunk 名覆盖表。持有它就能反复构造驱动（热载重读、读档
+/// 字节、代码模块表、chunk 名覆盖表。持有它就能反复构造内核（热载重读、读档
 /// 重建），不必再碰文件系统——这也是宿主侧「签名变了才重读」的实现基础。
 #[derive(Debug, Clone)]
 pub struct ModBundle {
@@ -68,6 +124,21 @@ pub struct ModBundle {
 }
 
 impl ModBundle {
+    /// 无资源路径的内存装载参数（wasm 壳与单文件夹具的最小形态）。
+    ///
+    /// 不读盘、不携带资源：manifest 取 [`MINIMAL_MANIFEST`]，模块表为空
+    /// （入口顶层的 `require` 得到可读拒绍——要模块就自己填 `modules`）。
+    pub fn in_memory(mod_source: impl Into<String>) -> Self {
+        Self {
+            mod_source: mod_source.into(),
+            manifest_bytes: MINIMAL_MANIFEST.as_bytes().to_vec(),
+            schemas: Vec::new(),
+            resources: Vec::new(),
+            modules: ModuleSet::new(),
+            chunk_paths: BTreeMap::new(),
+        }
+    }
+
     /// 读盘装载一个 Mod 目录（`pack.json` 是声明入口，缺失即失败）。
     ///
     /// 顺序即语义：① `pack.json` 解析 → ② `code` 段校验（可选；存在即多文件
@@ -119,7 +190,7 @@ impl ModBundle {
         // 读同一份登记（分头解析会留下两套失败文案与两次校验开销）。
         let manifest = if code.is_some() || packages_spec.is_some() {
             Some(
-                ygg_schema::manifest::parse_manifest(&manifest_bytes)
+                parse_manifest(&manifest_bytes)
                     .map_err(|err| format!("{}/{MANIFEST_FILE} 不合契约：{err}", dir.display()))?,
             )
         } else {
@@ -181,69 +252,177 @@ impl ModBundle {
         })
     }
 
-    /// 按本包构造驱动（资源表 fail-fast 先于任何 Lua 状态）。
-    ///
-    /// 有模块表走多文件变体（入口顶层即可 `require`），否则走单文件变体——
-    /// 两条路径的差别只在「模块表注不注入」，装载序其余部分完全相同。
-    pub fn kernel(&self) -> Result<KernelFacade, KernelError> {
-        if self.modules.is_empty() {
-            KernelFacade::with_resources(
-                &self.mod_source,
-                &self.manifest_bytes,
-                &self.schemas,
-                &self.resources,
-            )
-        } else {
-            KernelFacade::with_resources_and_module_table(
-                &self.mod_source,
-                self.module_table(),
-                &self.manifest_bytes,
-                &self.schemas,
-                &self.resources,
-            )
-        }
-    }
-
     /// 装载期代码面（模块表 + chunk 覆盖表；两者同进同出，见 [`ModuleTable`]）。
     fn module_table(&self) -> ModuleTable {
         ModuleTable::with_chunk_paths(self.modules.clone(), self.chunk_paths.clone())
     }
+}
 
-    /// 读档重建（热载 / 续局路径）：与 [`ModBundle::kernel`] 同一分派。
+/// 已装载的内核：世界面 + 资源面 + KV，**没有派发面**。
+///
+/// 宿主拿到的就是这个类型：推进时间（[`step`](Self::step)）、取世界帧
+/// （[`snapshot`](Self::snapshot)）、按帧重建（[`restore`](Self::restore)）、
+/// 读诊断面（[`take_world_log`](Self::take_world_log) / [`mod_source`](Self::mod_source)）。
+pub struct Loaded {
+    /// Mod 声明（`manifest.json` 的解析形态；内容寻址的「声明面」）。
+    pub manifest: Manifest,
+    /// Lua 状态持有者：字段存活期 = VM 存活期，同时是时间的唯一驱动面
+    /// （`step` / `snapshot` / `restore` 都挂在这里，Lua 侧没有推进时钟的入口）。
+    pub sandbox: Sandbox,
+    /// 世界内核槽（与 `sandbox` / `world.*` 共享**同一个** `Rc`——见下）。
     ///
-    /// 必须与 `kernel` 同分派：模块文件变了而入口没变时，热载签名会变并走到
-    /// 这里；若这里丢掉模块表，跑起来的仍是旧代码或入口 `require` 直接失败。
-    pub fn restore(&self, save_bytes: &[u8]) -> Result<KernelFacade, KernelError> {
-        if self.modules.is_empty() {
-            KernelFacade::restore_with_resources(
-                save_bytes,
-                &self.mod_source,
-                &self.manifest_bytes,
-                &self.schemas,
-                &self.resources,
-            )
-        } else {
-            KernelFacade::restore_with_resources_and_module_table(
-                save_bytes,
-                &self.mod_source,
-                self.module_table(),
-                &self.manifest_bytes,
-                &self.schemas,
-                &self.resources,
-            )
+    /// 为什么是句柄而不是 `Sim` 值：`world.*` 的闭包装在 Lua 状态里，它们必须
+    /// 与宿主操作**同一个**世界，而这个槽的所有权在 `Sandbox` 上（自引用结构
+    /// 无法用值字段表达，也不许 `unsafe`）。因此这里给的是同一个 `Rc`——写穿过
+    /// 它就是写穿到内核，与 `sandbox.sim_handle()` 逐字节同一。
+    pub sim: Rc<RefCell<Option<Box<Sim>>>>,
+    /// host 控制柄（KV / world 日志 / 内核句柄的宿主面）。
+    host: HostApi,
+    /// 只读资源表（数据面非状态：不入世界帧 / 状态哈希）。
+    resources: Rc<ResourceTable>,
+    /// 装载的 Mod 源码（诊断只读面）。
+    mod_source: String,
+}
+
+impl Loaded {
+    /// 读盘装载 `<mod目录>`（`pack.json` 声明 + manifest 对账 + 全序装载）。
+    pub fn from_dir(dir: &Path) -> Result<Self, LoadError> {
+        Self::from_dir_with_packages(dir, None)
+    }
+
+    /// [`from_dir`](Self::from_dir) 的显式包根变体（CLI `--packages` 路径）。
+    pub fn from_dir_with_packages(
+        dir: &Path,
+        packages_root: Option<&Path>,
+    ) -> Result<Self, LoadError> {
+        let bundle =
+            ModBundle::load_with_packages_root(dir, packages_root).map_err(LoadError::Bundle)?;
+        Self::from_bundle(&bundle)
+    }
+
+    /// 已读盘的装载参数 → 内核（本模块唯一的组装点；`from_dir*` 与内存夹具共用）。
+    ///
+    /// 资源表构建**先于任何 Lua 状态**（fail-fast：预算 / 寻址 / 校验失败零 Lua
+    /// 侧副作用）；空模块表跳过模块注入（`require` 面对任何名字可读拒绝）。
+    pub fn from_bundle(bundle: &ModBundle) -> Result<Self, LoadError> {
+        // ① 资源表 fail-fast（manifest 解析也在这里，失败先于 VM）。
+        let table =
+            ResourceTable::build(&bundle.manifest_bytes, &bundle.schemas, &bundle.resources)?;
+        let manifest = parse_manifest(&bundle.manifest_bytes)?;
+        // ② 沙箱：stdlib 裁剪 + 内存上限 + 白名单环境。
+        let mut sandbox = Sandbox::new()?;
+        let lua = sandbox.lua().clone();
+        // ③ 确定性注入：math 精确集 + 内核种子 random（时间不在这里）。
+        let _determinism = inject::install(&lua)?;
+        // ④ 世界内核挂上：任何内核实例出生起就有世界（`world.*` 无静默降级面），
+        //    种子取内核常量同一谱系——世界 rng 流与 math.random 同源。
+        sandbox.set_sim(Some(Box::new(Sim::new(inject::KERNEL_RNG_SEED))));
+        let sim = sandbox.sim_handle();
+        // ⑤ host API：ygg.kv / ygg.codec / world.*（与 VM 共享 KV 句柄）。
+        let host = host_api::install(
+            &lua,
+            HostHandles::new(Rc::new(RefCell::new(KvStore::new()))),
+            Rc::clone(&sim),
+        )?;
+        // ⑥ 资源：ygg.data 只读数据面（host 之后、入口 chunk 之前）。
+        resources::install(&lua, &table)?;
+        // ⑦ stdlib：版本面（Mod 顶层即可读）。
+        stdlib::install(&lua)?;
+        // ⑧ 模块表注入：入口 chunk 之前（入口顶层即可 require）；chunk 覆盖表
+        //    与模块表同一时机（首次 require 的 traceback 就要是真路径）。
+        if !bundle.modules.is_empty() {
+            let (set, chunk_paths) = bundle.module_table().into_parts();
+            sandbox.modules().set_modules(set);
+            sandbox.modules().set_chunk_paths(chunk_paths);
         }
+        // ⑨ 入口 chunk：`@mod.lua` 命名让 traceback 携带 mod 侧位置。
+        lua.load(&bundle.mod_source)
+            .set_name("@mod.lua")
+            .exec()
+            .map_err(|err| LoadError::ModChunk(err.to_string()))?;
+        Ok(Self {
+            manifest,
+            sandbox,
+            sim,
+            host,
+            resources: Rc::new(table),
+            mod_source: bundle.mod_source.clone(),
+        })
+    }
+
+    /// **宿主推进时间**：推进 `ticks` 个 tick，每 tick `dt` 整数秒。
+    ///
+    /// 逐 T 委派 [`Sandbox::step`]（单次上限与错误码同源）；脚本决定一个 tick
+    /// 里算什么，宿主决定走多少 tick——这就是可中断性与时间所有权的分界。
+    pub fn step(&mut self, ticks: u32, dt: u32) -> Result<StepReport, LoadError> {
+        self.sandbox.step(ticks, dt).map_err(LoadError::from)
+    }
+
+    /// 世界帧规范字节（同一状态 ⇒ 同一字节；哈希与存档共用这一个序列化面）。
+    ///
+    /// 帧里只有世界面（tick / 实体 / 组件 / rng 流）；**KV 不在帧内**——它不是
+    /// 世界状态，读回走 [`kv`](Self::kv) 的宿主面。引擎版本也不在帧内
+    /// （golden-vector 基线跨引擎补丁版本稳定）。
+    pub fn snapshot(&self) -> Result<Vec<u8>, LoadError> {
+        self.sandbox.snapshot().map_err(LoadError::from)
+    }
+
+    /// 按世界帧重建内核：`from_dir(dir)` 全序装载（脚本即世界定义来源）后整体
+    /// 覆写世界面。坏帧（长度 / magic / 尾 digest 不符）先校验后改，不产生半改
+    /// 的世界；KV 不随帧恢复（重建后的 KV 是「装载期写下的值」）。
+    pub fn restore(dir: &Path, bytes: &[u8]) -> Result<Self, LoadError> {
+        let bundle = ModBundle::load(dir).map_err(LoadError::Bundle)?;
+        Self::restore_from_bundle(&bundle, bytes)
+    }
+
+    /// [`restore`](Self::restore) 的内存侧（已有装载参数）：wasm 壳与热载宿主走
+    /// 这条——帧只含世界面，脚本依旧是世界定义来源。
+    pub fn restore_from_bundle(bundle: &ModBundle, bytes: &[u8]) -> Result<Self, LoadError> {
+        let mut loaded = Self::from_bundle(bundle)?;
+        loaded.sandbox.restore(bytes)?;
+        Ok(loaded)
+    }
+
+    /// 当前世界时钟（内核 tick）。
+    pub fn tick(&self) -> Result<u64, StepError> {
+        self.sandbox.tick()
+    }
+
+    /// 装载的 Mod 源码（诊断只读面）。
+    pub fn mod_source(&self) -> &str {
+        &self.mod_source
+    }
+
+    /// 只读资源表（资源不可变，无写面外溢）。
+    pub fn resources(&self) -> &ResourceTable {
+        &self.resources
+    }
+
+    /// 持久 KV 句柄（宿主读回脚本写入的 KV）。
+    pub fn kv(&self) -> Rc<RefCell<KvStore>> {
+        self.host.kv()
+    }
+
+    /// 取走 `world.log` 累积的日志行（环形缓冲，满则丢最旧）。
+    pub fn take_world_log(&self) -> Vec<String> {
+        self.host.take_world_log()
+    }
+
+    /// 换入另一个世界内核实例（宿主面：载入特定存档、或换测试种子）。
+    ///
+    /// 写穿的是与 `sandbox` / `world.*` 共享的同一个槽。
+    pub fn set_sim(&mut self, sim: Option<Box<Sim>>) {
+        self.host.set_sim(sim);
     }
 }
 
-/// `<mod目录>` → 已装载的内核（读盘 + 构造一步到位）。
+/// `<mod目录>` → 已装载内核（读盘 + 组装一步到位）。
 ///
-/// 只需要「装上就能派发」的调用方（走查、探针脚本）走这条；需要反复重建的
-/// 宿主（热载 / 读档）先 [`ModBundle::load`] 拿到参数再自行调
-/// [`ModBundle::kernel`] / [`ModBundle::restore`]。
-pub fn load_mod(dir: &Path) -> Result<KernelFacade, String> {
-    ModBundle::load(dir)?
-        .kernel()
-        .map_err(|err| err.to_string())
+/// 只需要「装上就能步进」的调用方（走查、探针脚本、wasm `open`）走这条；
+/// 需要反复重建的宿主（热载 / 读档）先 [`ModBundle::load`] 拿到参数再
+/// [`Loaded::from_bundle`]。
+pub fn load_mod(dir: &Path) -> Result<Loaded, LoadError> {
+    Loaded::from_dir(dir)
 }
 
 /// 多文件 Mod 的模块表：声明 → manifest 登记 → 实际字节三者对账。
@@ -253,7 +432,7 @@ pub fn load_mod(dir: &Path) -> Result<KernelFacade, String> {
 fn load_code_modules(
     dir: &Path,
     spec: &CodeSpec,
-    manifest: &ygg_schema::manifest::Manifest,
+    manifest: &Manifest,
 ) -> Result<ModuleSet, String> {
     let module_bytes = pack::collect_bytes(spec, |rel| fs::read(dir.join(rel)))
         .map_err(|err| format!("{}/code 段读取失败：{err}", dir.display()))?;
@@ -269,7 +448,7 @@ fn load_code_modules(
 fn load_packages(
     dir: &Path,
     spec: &PackagesSpec,
-    manifest: &ygg_schema::manifest::Manifest,
+    manifest: &Manifest,
     mod_modules: &ModuleSet,
     explicit: Option<&Path>,
 ) -> Result<(ModuleSet, BTreeMap<String, String>), String> {

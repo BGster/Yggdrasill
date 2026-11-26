@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value as Json};
 use sha2::{Digest, Sha256};
 
-use ygg_sandbox::driver::KernelFacade;
-use ygg_sandbox::modload::ModBundle;
+use ygg_core::value::Value;
+use ygg_sandbox::modload::{LoadError, Loaded, ModBundle};
+use ygg_sandbox::modules::ModuleSet;
 
 /// 小写十六进制 SHA-256（与 `ygg_schema::validate::sha256_hex` / 打包工具同口径）。
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -161,11 +162,23 @@ pub fn write_package(dir: &Path, entry_source: &str, modules: &[(String, String)
     reseal(dir);
 }
 
-// ───────────────────────── 派发与观测面 ─────────────────────────
+// ───────────────────────── 装载与观测面 ─────────────────────────
 
 /// 装载入库 fixture 并返回内核（失败文案带上下文，比裸 unwrap 可读）。
-pub fn fixture_kernel() -> KernelFacade {
-    fixture_bundle().kernel().expect("fixture 内核构造")
+pub fn fixture_loaded() -> Loaded {
+    Loaded::from_bundle(&fixture_bundle()).expect("fixture 内核构造")
+}
+
+/// 内联 Mod 包：入口源码 + 模块表（manifest 取最小合法清单，资源面留空）。
+pub fn bundle_of(mod_source: impl Into<String>, set: ModuleSet) -> ModBundle {
+    let mut bundle = ModBundle::in_memory(mod_source);
+    bundle.modules = set;
+    bundle
+}
+
+/// [`bundle_of`] → 装载。失败返回 [`LoadError`]，负例据此断言装载期拒绝。
+pub fn loaded_of(mod_source: impl Into<String>, set: ModuleSet) -> Result<Loaded, LoadError> {
+    Loaded::from_bundle(&bundle_of(mod_source, set))
 }
 
 /// 装载入库 fixture 的 [`ModBundle`]（读档 / 热载用例要反复重建驱动）。
@@ -173,22 +186,19 @@ pub fn fixture_bundle() -> ModBundle {
     ModBundle::load(&fixture_dir()).expect("fixture 必须可装载")
 }
 
-/// 派发一个事件并取回叙事行（信封必须 ok，叙事必须是字符串数组）。
+/// 读一个 `probe.<topic>` 观测值（KV 里的字符串），按行拆开。
+///
+/// 观测面为什么是 KV：模块顶层受 MOD_EFFECT 约束、不得写状态，入口豁免；所以
+/// 「装配 + 留痕」只能发生在入口，而入口写进 KV 是测试唯一不需要事件层就能读到
+/// 的通道。返回值按 `\n` 拆行，保持「一行一条断言」的比对口径。
 #[track_caller]
-pub fn narrate(kernel: &mut KernelFacade, event: &str) -> Vec<String> {
-    let reply: Json = serde_json::from_str(&kernel.dispatch(event, "0"))
-        .unwrap_or_else(|err| panic!("{event} 的回执不是 JSON：{err}"));
-    assert_eq!(reply["ok"], json!(true), "{event} 派发失败：{reply}");
-    reply["narrative"]
-        .as_array()
-        .unwrap_or_else(|| panic!("{event} 的 narrative 不是数组：{reply}"))
-        .iter()
-        .map(|line| {
-            line.as_str()
-                .unwrap_or_else(|| panic!("叙事行不是字符串：{line:?}"))
-                .to_owned()
-        })
-        .collect()
+pub fn narrate(loaded: &Loaded, topic: &str) -> Vec<String> {
+    let store = loaded.kv();
+    let store = store.borrow();
+    let Some(Value::Str(text)) = store.get(topic) else {
+        panic!("观测值缺失或不是字符串：{topic}");
+    };
+    text.split('\n').map(str::to_owned).collect()
 }
 
 /// `pack.json` 的 `code.modules` 声明序（与装载序对照用）。

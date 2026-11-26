@@ -39,9 +39,7 @@ use ygg_modules::{
 
 use crate::diagnostic::{code, Diagnostic, Severity};
 use crate::locate::line_col;
-use crate::rules::{
-    call_path, effects_for_ast, parse_gate, rules_for_ast, string_argument, string_literal_value,
-};
+use crate::rules::{call_path, effects_for_ast, parse_gate, string_argument, string_literal_value};
 
 /// 整包检查结果：要么这本来就是个单文件 Mod，要么有一份报告。
 #[derive(Debug)]
@@ -185,16 +183,12 @@ pub fn lint_pack_with_packages(
     let mut declared: BTreeMap<String, String> = BTreeMap::new(); // 规范名 → 声明路径
     let mut sources: BTreeMap<String, String> = BTreeMap::new(); // 声明路径 → 源码
     let mut seen_paths: BTreeSet<String> = BTreeSet::new();
-    // 已经报过错的声明：不再叠一条「不可达」警告（那是同一个问题的回声）。
-    let mut failed_paths: BTreeSet<String> = BTreeSet::new();
-
-    let count_over_limit = raw_modules.len() > MAX_MODULES;
-    if count_over_limit {
+    if raw_modules.len() > MAX_MODULES {
         diagnostics.push(decl_diagnostic(
             pack_label,
             pack_json,
             0,
-            code::MOD_LIMIT,
+            code::MOD_BUDGET,
             Severity::Error,
             format!(
                 "`code.modules` 声明了 {} 个模块（上限 {MAX_MODULES}）",
@@ -240,7 +234,6 @@ pub fn lint_pack_with_packages(
         let name = match name_of_path(path) {
             Ok(name) => name,
             Err(cause) => {
-                failed_paths.insert(path.clone());
                 diagnostics.push(decl_diagnostic(
                     pack_label,
                     pack_json,
@@ -257,7 +250,6 @@ pub fn lint_pack_with_packages(
         declared.insert(name, path.clone());
 
         let Some(source) = read(path) else {
-            failed_paths.insert(path.clone());
             diagnostics.push(Diagnostic {
                 file: path.clone(),
                 offset: 0,
@@ -272,14 +264,13 @@ pub fn lint_pack_with_packages(
             continue;
         };
         if source.len() > MAX_CODE_BYTES {
-            failed_paths.insert(path.clone());
             diagnostics.push(Diagnostic {
                 file: path.clone(),
                 offset: 0,
                 end_offset: 0,
                 line: 1,
                 column: 1,
-                code: code::MOD_LIMIT,
+                code: code::MOD_BUDGET,
                 severity: Severity::Error,
                 message: format!(
                     "模块 `{path}` 源码 {} 字节（上限 {MAX_CODE_BYTES}）",
@@ -295,10 +286,12 @@ pub fn lint_pack_with_packages(
 
     if report.total_bytes > MAX_CODE_BYTES {
         // 整包上限与单模块上限共用一份 1 MiB 预算（打包期同判，见 pack.rs）。
-        diagnostics.push(decl_error(
+        diagnostics.push(decl_diagnostic(
             pack_label,
             pack_json,
             0,
+            code::MOD_BUDGET,
+            Severity::Error,
             format!(
                 "模块源码合计 {} 字节（上限 {MAX_CODE_BYTES}）",
                 report.total_bytes
@@ -329,7 +322,7 @@ pub fn lint_pack_with_packages(
         sources.insert(path.to_owned(), source.to_owned());
     }
 
-    // ⑤ 逐文件：独立 parse（不拼接）→ 规则面（R1/R2/R3/PARSE）+ 依赖面。
+    // ⑤ 逐文件：独立 parse（不拼接）→ 解析门 + 副作用面 + 依赖面。
     //
     // L1 主防线（`YGG-MOD-EFFECT`）**只对模块**：模块 chunk 顶层是「装载期就会
     // 执行的面」，而入口本来就是装配清单（注册 / 初始化是它的职责）。哪边是
@@ -340,7 +333,6 @@ pub fn lint_pack_with_packages(
         let mut unit = Unit::default();
         match parse_gate(path, source) {
             Ok(ast) => {
-                diagnostics.extend(rules_for_ast(path, source, &ast));
                 if entry.as_deref() != Some(path.as_str()) {
                     diagnostics.extend(effects_for_ast(path, source, &ast));
                 }
@@ -403,26 +395,10 @@ pub fn lint_pack_with_packages(
         }
     }
 
-    // ⑧ 登记了但不可达：warning（死模块，或依赖链在某处断了——后者上文已有 error）。
-    // 规模已超限时不再叠「不可达」警告：一个超限的模块表，逐条可达性提示只是噪音。
-    for (name, path) in &declared {
-        if !count_over_limit && !visited.contains(name) && !failed_paths.contains(path) {
-            let span = span_of(pack_json, &format!("\"{path}\""));
-            diagnostics.push(decl_diagnostic(
-                pack_label,
-                pack_json,
-                span.0,
-                code::MOD_UNUSED,
-                Severity::Warning,
-                format!(
-                    "模块 `{path}` 已登记，但从入口 `{}` 出发不可达",
-                    entry.as_deref().unwrap_or("?")
-                ),
-                "从入口或上层模块 require 它；确实不用就从 code.modules 删掉（装载期仍会登记它，只是永远不被装载）"
-                    .to_owned(),
-            ));
-        }
-    }
+    // ⑧ 登记了但不可达：**不再报**（M1-E）。`YGG-MOD-UNUSED` 随事件层退役——
+    // 死模块只是「多登记了一份字节」，装载期照样登记、照样不装载，没有可观测
+    // 差异；在包里逐条提示它，噪音大于收益。可达性仍被 ⑦ 的遍历用到（见
+    // `walk_edges` 的 `visited` 备忘），只是不再由它产诊断。
 
     report.modules = declared.len();
     report.diagnostics = diagnostics;
@@ -474,7 +450,7 @@ fn walk_edges(
         if let Err(err) = stack.push(&name) {
             let (code_str, severity) = match &err {
                 ModuleError::Circular { .. } => (code::MOD_CYCLE, Severity::Error),
-                _ => (code::MOD_LIMIT, Severity::Error),
+                _ => (code::MOD_BUDGET, Severity::Error),
             };
             diagnostics.push(span_diagnostic(
                 from_path,

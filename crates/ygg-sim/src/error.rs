@@ -11,7 +11,7 @@
 
 /// 七个稳定错误码。外部（Lua 面、门禁、报告）只认这些字符串。
 pub mod codes {
-    /// 宿主未注入 [`crate::Sim`] 实例（`ygg.sim.*` 全部函数）。
+    /// 宿主未注入 [`crate::Sim`] 实例（`ygg` 的 `sim.*` 全部函数）。
     pub const UNMOUNTED: &str = "YGG-SIM-UNMOUNTED";
     /// 定点面拒绝：非整数值过 Lua 面，或除零。
     pub const FIXED: &str = "YGG-SIM-FIXED";

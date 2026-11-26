@@ -1,7 +1,7 @@
 //! 装载口回归：[`ygg_sandbox::modload`] 是 Mod 目录 → 内核的唯一装载语义。
 //!
 //! 本文件锁的是**没有第二条读盘路径**：多文件 Mod（`pack.json` 带 `code` 段）
-//! 只经 `ModBundle` 装载，`load_mod` 与 `ModBundle::kernel` 对外都只暴露同一份
+//! 只经 `ModBundle` 装载，`load_mod` 与 `Loaded::from_bundle` 对外都只暴露同一份
 //! 对账后的模块表——一处读盘实现、一处声明对账。
 //!
 //! Mod 五件套 + 模块文件全部运行期写入临时目录（manifest 现算，与 pack.rs 同法）。
@@ -12,27 +12,15 @@ use std::path::PathBuf;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use ygg_sandbox::modload::ModBundle;
+use ygg_core::value::Value;
+use ygg_sandbox::modload::{Loaded, ModBundle};
 
 /// 入口：顶层即 `require`（模块表必须在入口 chunk 之前就位）。
 const ENTRY: &str = r#"
 local T = ygg.data("ygg:scene/texts")
 local util = require("src.util")
-ygg.narrative.node("node:begin", function()
-  ygg.narrate(T.scenes.begin .. util.suffix)
-  ygg.kv.set("stage", "begin")
-  ygg.choice(T.prompts.door, { T.options.enter, T.options.leave })
-end)
-ygg.on("ygg.choice_selected", function(index)
-  if index == 1 then
-    ygg.narrate(T.endings.brave)
-  else
-    ygg.narrate(T.endings.cautious)
-  end
-end)
-ygg.on("event.start", function()
-  ygg.narrative["goto"]("node:begin")
-end)
+ygg.kv.set("stage", "begin")
+ygg.kv.set("scene", T.scenes.begin .. util.suffix)
 "#;
 
 /// 子模块：跨模块共享只经返回值（`local` 不跨 chunk）。
@@ -43,23 +31,35 @@ return util
 
 #[test]
 fn restore_keeps_the_module_table() {
-    // 热载/续局重建若丢模块表，跑起来的仍是旧代码或入口 require 直接失败。
+    // 热载/续局重建若丢模块表，入口的 `require` 会直接失败——读档重建的每一步
+    // 都要再跑一遍入口，模块表必须在位。
     let dir = write_multi_file_mod("modload-restore");
     let bundle = ModBundle::load(&dir).expect("bundle loads");
-    let mut kernel = bundle.kernel().expect("kernel");
-    let save: serde_json::Value =
-        serde_json::from_str(&kernel.dispatch("save", "")).expect("save envelope");
-    let save_text = save["save"].to_string();
-    let mut restored = bundle
-        .restore(save_text.as_bytes())
-        .expect("restore with modules");
-    let reply: serde_json::Value =
-        serde_json::from_str(&restored.dispatch("event.start", "0")).expect("json envelope");
-    assert_eq!(reply["ok"], json!(true), "{reply}");
-    assert!(
-        reply["narrative"].to_string().contains("（模块）"),
-        "读档重建后模块表仍须在位：{reply}"
+    let mut loaded = Loaded::from_bundle(&bundle).expect("kernel");
+    let frame = loaded.snapshot().expect("快照");
+    let report = loaded.step(2, 1).expect("推进");
+    assert_eq!(report.tick, 2);
+    let mut restored = Loaded::restore_from_bundle(&bundle, &frame).expect("restore with modules");
+    assert_eq!(
+        restored.tick().expect("已挂载"),
+        report.tick - 2,
+        "读档回到快照时钟"
     );
+    // 入口在重建时又跑了一遍：`require("src.util")` 通了才有这条观测值。
+    let kv = restored.kv();
+    let kv = kv.borrow();
+    let Some(Value::Str(scene)) = kv.get("scene") else {
+        panic!("读档重建后入口未留痕：模块表丢了");
+    };
+    assert!(
+        scene.contains("（模块）"),
+        "初跳文本里必须带模块后缀：{scene}"
+    );
+    assert!(
+        scene.len() > "（模块）".len(),
+        "资源文本必须真的读到：{scene}"
+    );
+    let _ = restored.step(1, 1).expect("读档后可继续推进");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -151,21 +151,6 @@ fn write_multi_file_mod(tag: &str) -> PathBuf {
             "schemaFiles": ["schemas/scene-texts.json"],
             // r2：多文件 Mod 的代码声明面（入口不是模块）。
             "code": { "entry": "mod.lua", "modules": ["src/util.lua"] },
-            "agent": {
-                "entryEvent": "event.start",
-                "choiceEvent": "ygg.choice_selected",
-                "summaryEvent": "agent.summary",
-                "endingPrefix": "【结局",
-                "metaKey": "summary",
-                "rejectionPrefixes": ["【拒绝】"],
-                "replayPrefix": "【重放】",
-                "defaultPayload": "0",
-            },
-            "inboxRoutes": {
-                "externalIdField": "external_id",
-                "payloadField": "payload",
-                "extMarker": "@ext=",
-            },
         }))
         .expect("pack"),
     )

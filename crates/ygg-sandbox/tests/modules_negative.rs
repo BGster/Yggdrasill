@@ -14,11 +14,10 @@ mod support;
 use std::fs;
 use std::path::Path;
 
-use ygg_sandbox::driver::{KernelError, KernelFacade};
-use ygg_sandbox::modload::ModBundle;
+use ygg_sandbox::modload::{LoadError, Loaded, ModBundle};
 use ygg_sandbox::modules::{ModuleSet, MAX_DEPTH, MAX_MODULES};
 
-use support::{modules, read_json, temp_dir, write_json, write_package};
+use support::{loaded_of, modules, read_json, temp_dir, write_json, write_package};
 
 // ───────────────────────── 断言脚手架 ─────────────────────────
 
@@ -44,26 +43,26 @@ fn assert_lacks(text: &str, needles: &[&str]) {
     }
 }
 
-/// 磁盘包的装载失败文本（`ModBundle::load` 或内核构造，两者都算"装载期"）。
+/// 磁盘包的装载失败文本（`ModBundle::load` 或装载口，两者都算"装载期"）。
 fn load_err_text(dir: &Path) -> String {
     match ModBundle::load(dir) {
         Err(message) => message,
-        Ok(bundle) => match bundle.kernel() {
+        Ok(bundle) => match Loaded::from_bundle(&bundle) {
             Err(err) => err.to_string(),
             Ok(_) => panic!("期望装载失败，实际装载成功：{}", dir.display()),
         },
     }
 }
 
-/// 模块表装载失败文本（`KernelFacade::with_modules` 路径）。
+/// 模块表装载失败文本（`Loaded::from_bundle` 路径）。
 #[track_caller]
 fn loader_err_text(mod_source: &str, set: ModuleSet) -> String {
-    match KernelFacade::with_modules(mod_source, set) {
+    match loaded_of(mod_source, set) {
         Ok(_) => panic!("期望装载失败，实际装载成功"),
         Err(err) => {
             assert!(
-                matches!(err, KernelError::ModLoad(_)),
-                "模块面失败必须浮出为 ModLoad，实际：{err:?}"
+                matches!(err, LoadError::ModChunk(_)),
+                "模块面失败必须浮出为入口 chunk 拒绝，实际：{err:?}"
             );
             err.to_string()
         }
@@ -345,7 +344,7 @@ fn a_dependency_chain_deeper_than_the_limit_is_rejected_with_the_chain() {
 
     // 上限内（64 层）正常装载——拒绝必须是显式判栈，不是"碰巧能跑 64"。
     assert!(
-        KernelFacade::with_modules("require(\"m0\")\n", chain(MAX_DEPTH)).is_ok(),
+        loaded_of("require(\"m0\")\n", chain(MAX_DEPTH)).is_ok(),
         "{MAX_DEPTH} 层嵌套必须能装载"
     );
 
@@ -409,7 +408,7 @@ fn invalid_module_names_are_all_rejected_readably() {
 
     // 反例锚：`src.a.b` 是**合法**规范名（三段），不得被误伤（双射面的正向侧）。
     assert!(
-        KernelFacade::with_modules(
+        loaded_of(
             "require(\"src.a.b\")\n",
             module_set(&[("src.a.b", "return true\n")])
         )

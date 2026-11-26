@@ -1,8 +1,8 @@
 //! M1-D 宿主推进入口 `Sandbox::step` 的门禁：闸门（0 / 超预算）、时钟与哈希、
-//! 快照往返、坏帧 fail-closed，以及「Lua 侧不再有任何时钟或实体面」这条
-//! 结构性断言。
+//! 快照往返、坏帧 fail-closed，以及「Lua 侧不再有任何时钟、实体面或事件面」
+//! 这条结构性断言。
 //!
-//! 原 `tests/sim_face.rs` 测的是 `ygg.sim.*` 这 10 个 Lua 键——那个面随 M1-D
+//! 原 `tests/sim_face.rs` 测的是 `ygg` 的 `sim.*` 这 10 个 Lua 键——那个面随 M1-D
 //! 整体删除（时间只能由宿主推），所以本文件把其中仍然成立的**行为**（推进、
 //! 哈希口径、快照往返、坏帧拒绝）迁到宿主侧，把已经消失的**接口形态**
 //! （键集、`pcall` 文案、逐键 UNMOUNTED）连同被测接口一起删除。
@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use mlua::Value as LuaValue;
 use ygg_core::kv::KvStore;
-use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::host_api::{self, HostHandles};
+use ygg_sandbox::modload::{Loaded, ModBundle};
 use ygg_sandbox::sandbox::{Sandbox, StepError, STEP_TICK_BUDGET};
 use ygg_sim::canonical::FrameWriter;
 use ygg_sim::component::ComponentDef;
@@ -148,7 +148,7 @@ fn bad_frames_fail_closed_without_moving_the_world() {
 
 #[test]
 fn lua_has_no_time_or_entity_surface_left() {
-    // Lua 不能驱动时间：`ygg.sim` / `ygg.entity` 两面整体消失，推进只在宿主侧。
+    // Lua 不能驱动时间：`ygg` 的 `sim` / `ygg` 的 `entity` 两面整体消失，推进只在宿主侧。
     // 同时 `world.*` 在场（M1-C 的唯一 Lua 世界面，是**全局表**不是 `ygg.world`）。
     let sandbox = Sandbox::new().expect("沙箱构造");
     let api = host_api::install(
@@ -165,15 +165,21 @@ fn lua_has_no_time_or_entity_surface_left() {
         .expect("ygg 全局必须存在");
     assert!(
         matches!(ygg.get::<LuaValue>("sim").expect("sim 键"), LuaValue::Nil),
-        "ygg.sim 必须不存在（时间只能由宿主推）"
+        "`ygg` 的 `sim` 面必须不存在（时间只能由宿主推）"
     );
     assert!(
         matches!(
             ygg.get::<LuaValue>("entity").expect("entity 键"),
             LuaValue::Nil
         ),
-        "ygg.entity 必须不存在（第二套实体模型已删除）"
+        "`ygg` 的 `entity` 面必须不存在（第二套实体模型已删除）"
     );
+    for gone in ["on", "emit", "narrate", "choice", "meta", "rt"] {
+        assert!(
+            matches!(ygg.get::<LuaValue>(gone).expect("键"), LuaValue::Nil),
+            "ygg.{gone} 必须不存在（事件 / 信封层已删除）"
+        );
+    }
     let world = sandbox
         .lua()
         .globals()
@@ -194,25 +200,28 @@ fn lua_has_no_time_or_entity_surface_left() {
 }
 
 #[test]
-fn facade_step_and_save_share_one_world() {
-    // 宿主推进与存读档是同一个世界：step 之后的存档带着新时钟，读回仍是它。
+fn step_and_snapshot_share_one_world() {
+    // 宿主推进与快照是同一个世界：step 之后的帧带着新时钟，读回仍是它。
     const MOD: &str = r#"
 world.component{ name = "hp", kind = "i64" }
-ygg.on("event.spawn", function()
-  world.spawn{ hp = 7 }
-end)
+world.spawn{ hp = 7 }
 "#;
-    let mut kernel = KernelFacade::new(MOD).expect("kernel construction");
-    kernel.dispatch("event.spawn", "0");
-    let report = kernel.step(4, 1).expect("推进必须成功");
+    let bundle = ModBundle::in_memory(MOD);
+    let mut loaded = Loaded::from_bundle(&bundle).expect("kernel construction");
+    let report = loaded.step(4, 1).expect("推进必须成功");
     assert_eq!(report.tick, 4);
-    assert_eq!(kernel.tick().expect("已挂载"), 4);
-    let saved = kernel.dispatch("save", "");
-    let save: serde_json::Value = serde_json::from_str(&saved).expect("save reply json");
-    assert_eq!(save["ok"], serde_json::json!(true), "{saved}");
+    assert_eq!(loaded.tick().expect("已挂载"), 4);
+    let frame = loaded.snapshot().expect("快照");
+    assert!(
+        frame.len() > 32,
+        "快照必须携带世界帧（不是行存表）：{} 字节",
+        frame.len()
+    );
+    let restored = Loaded::restore_from_bundle(&bundle, &frame).expect("读档重建");
+    assert_eq!(restored.tick().expect("已挂载"), 4, "读档回到快照时的时钟");
     assert_eq!(
-        save["save"]["world"].as_array().map(|a| a.len() > 32),
-        Some(true),
-        "存档必须携带世界帧（不是行存表）"
+        restored.snapshot().expect("快照"),
+        frame,
+        "帧往返逐字节不变"
     );
 }

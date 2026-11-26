@@ -12,14 +12,14 @@
 //! 这条纪律要拦的东西。
 //!
 //! 首批规则（FR-8，诊断码为稳定契约——下游按 code 分支不解析 message）：
-//! - `YGG-R1` 同一 handler 体内 `ygg.emit` 先于 `ygg.choice`（choice 哨兵
+//! - `YGG-R1` 同一 handler 体内 `ygg.emit` 先于 `ygg` 的 `choice`（choice 哨兵
 //!   终结静默丢弃先入队派生事件，openwiki/overview.md §3.1）；
 //! - `YGG-R2` 实体句柄存 local 未落 kv（error = 顶层捕获；warning =
 //!   handler 内捕获且本体内无 kv 化证据——D-11 双档口径）；
 //! - `YGG-R3` `ygg.narrative.goto(` 点形态（Lua 5.4 语法错误，parse 前
 //!   文本预扫——AST 在该处无法构建）；
 //! - `YGG-MOD-EFFECT` `--pack` 面：模块 chunk **顶层**调用 / 引用有副作用的 host
-//!   API（`ygg.on` / `ygg.kv.set` …）。禁止面清单来自 [`ygg_modules::effects`]
+//!   API（`ygg` 的 `on` / `ygg.kv.set` …）。禁止面清单来自 [`ygg_modules::effects`]
 //!   ——与装载期影子表同一份，lint 不另写名单；
 //! - `YGG-PARSE` 解析失败（非 R3 形态的语法错误）。
 

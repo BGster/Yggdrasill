@@ -2,14 +2,14 @@
 //!
 //! 覆盖三件事：① 声明校验（路径规则 / 形状 / 规模）② 三方对账（声明 ↔ manifest
 //! 登记 ↔ 实际字节）③ 装载前失败（内容寻址、总量预算先于装载）。正例走
-//! `KernelFacade::with_resources_and_modules` 端到端——模块表真的能被入口
+//! `Loaded` 端到端——模块表真的能被入口
 //! `require` 到，而不是「校验过了但装不进去」。
 //!
 //! 缺省兼容（旧单文件 Mod）另有一组：`code` 缺失即 `Ok(None)`，manifest 无
 //! `code` 数组时 schema 照过——现有三个 Mod 零迁移的回归锚。
 
 use serde_json::{json, Value as Json};
-use ygg_sandbox::driver::KernelFacade;
+use ygg_sandbox::modload::{Loaded, ModBundle};
 use ygg_sandbox::modules::{MAX_MODULES, MODULE_EXTENSION};
 use ygg_sandbox::pack::{assemble, collect_bytes, entries_for, CodeSpec, MAX_TOTAL_CODE_BYTES};
 use ygg_schema::manifest::{parse_manifest, ManifestCodeEntry};
@@ -305,7 +305,7 @@ fn code_mod_boots_and_requires_its_modules() {
     // 端到端：入口 require 模块 → 模块表真的注入了内核（不只是「校验通过」）。
     let mod_source = r#"
 local util = require("src.util")
-ygg.on("probe", function() ygg.narrate("count=" .. tostring(util.count)) end)
+ygg.kv.set("probe", "count=" .. tostring(util.count))
 "#;
     let bytes = vec![module("src/util.lua", "return { count = 42 }")];
     let spec = spec(&code("mod.lua", &["src/util.lua"]));
@@ -326,12 +326,16 @@ ygg.on("probe", function() ygg.narrate("count=" .. tostring(util.count)) end)
     let manifest = parse_manifest(&manifest_bytes).expect("manifest");
     let modules = assemble(&spec, manifest.code(), &bytes).expect("assemble");
 
-    let mut kernel =
-        KernelFacade::with_resources_and_modules(mod_source, modules, &manifest_bytes, &[], &[])
-            .expect("code mod must load");
-    let reply: Json = serde_json::from_str(&kernel.dispatch("probe", "0")).expect("json envelope");
-    assert_eq!(reply["ok"], json!(true), "dispatch failed: {reply}");
-    assert_eq!(reply["narrative"][0], json!("count=42"), "reply: {reply}");
+    let mut bundle = ModBundle::in_memory(mod_source);
+    bundle.manifest_bytes = manifest_bytes;
+    bundle.modules = modules;
+    let kernel = Loaded::from_bundle(&bundle).expect("code mod must load");
+    let kv = kernel.kv();
+    let kv = kv.borrow();
+    let Some(ygg_core::value::Value::Str(observed)) = kv.get("probe") else {
+        panic!("入口必须把观测值写进 KV");
+    };
+    assert_eq!(observed, "count=42");
 }
 
 #[test]
@@ -341,16 +345,12 @@ fn code_mod_with_unregistered_module_is_denied_before_it_runs() {
     let bytes = vec![module("src/util.lua", "return {}")];
     let spec = spec(&code("mod.lua", &["src/util.lua"]));
     let modules = assemble(&spec, &entries(&bytes), &bytes).expect("assemble");
-    let err = KernelFacade::with_resources_and_modules(
-        mod_source,
-        modules,
-        br#"{"schemaVersion": 1, "entries": []}"#,
-        &[],
-        &[],
-    )
-    .err()
-    .expect("unregistered module must fail loading")
-    .to_string();
+    let mut bundle = ModBundle::in_memory(mod_source);
+    bundle.modules = modules;
+    let err = Loaded::from_bundle(&bundle)
+        .err()
+        .expect("unregistered module must fail loading")
+        .to_string();
     assert!(err.contains("src.ghost"), "got: {err}");
     assert!(err.contains("sandbox denied"), "got: {err}");
 }

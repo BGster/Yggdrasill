@@ -1,12 +1,12 @@
 //! ygg-sandbox：mlua Lua 5.4 确定性沙箱
-//! （host API 白名单、ygg stdlib 嵌入、KernelFacade JSON 信封 API；原燃料
-//! 计量面已于 S34 整体退役）。
+//! （host API 白名单 + ygg stdlib + 世界面 `world.*`；原燃料计量面已于 S34 退役，
+//! 事件 / 信封 / 派发面已于 M1-E 退役——内核只由宿主经 [`modload::Loaded::step`]
+//! 推进时间，存档面只有世界帧字节）。
 //!
 //! S1 空壳占位（D-补充-2）；S7–S12 逐 slice 扩展模块声明。
-//! S7 填充 `sandbox`（沙箱构造 + 负例）；S8 填充 `inject`（确定性注入；
-//! 同 slice 落地的正式燃料模块后于 S34 整体退役）；S9 填充 `host_api`（收集-回放桥 + 分相）；
-//! S10 填充 `driver`（KernelFacade：装载序 + 事件转换 + 存读档信封面）与
-//! `stdlib`（include_dir 嵌入 + 语义装载序）；S11 填充 `resources`
+//! S7 填充 `sandbox`（沙箱构造 + 负例）；S8 填充 `inject`（确定性注入）；
+//! S9 填充 `host_api`（`ygg.kv` / `ygg.codec` / `world.*` 的安装面）；
+//! S10 填充 `stdlib`（版本面）；S11 填充 `resources`
 //! 【S11 改名说明：原拟名 `data`，避让 Lua 侧 `ygg.data` API 名——模块名
 //! 采用资源面本名，Rust 侧不再出现与 API 同名的模块】；S12 填充 `hash`
 //! （状态哈希，D-继承-5 归位；探针在 tests/probe_determinism.rs）；
@@ -17,7 +17,6 @@
 //! 宿主侧 IO 只在这里，调用方拿到的是已对账的内核）。
 
 pub mod codec_face;
-pub mod driver;
 pub mod hash;
 pub mod host_api;
 pub mod inject;

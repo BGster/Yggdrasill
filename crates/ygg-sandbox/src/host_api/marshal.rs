@@ -1,9 +1,9 @@
-//! Lua ↔ core 的标量闸门：payload 双向 marshal、`ygg.choice` 的 options 形状校验、
-//! 定点闸门与两个面共用的拒绝码。
+//! Lua ↔ core 的标量闸门：payload 双向 marshal、定点闸门与两面共用的拒绝码。
 //!
 //! M1-D 把第二套实体模型（`ygg-core` 行存 + 选择器 DSL）连同它的 Lua 面
-//! （`ygg.entity.*` / `ygg.sim.*`）一起删掉之后，这些函数仍然被 `ygg.narrate` /
-//! `ygg.kv` / `world.*` 三面共用：它们约束的是**值进出的形状**，与世界怎么存无关。
+//! （`ygg` 的 `entity.*` / `sim.*` 两面）一起删掉；M1-E 再把事件层（`ygg` 的 `narrate` /
+//! `ygg` 的 `choice`）连同选项序列校验一起删掉。留下来的是 `ygg.kv` / `world.*` 两面
+//! 共用的部分：它们约束的是**值进出的形状**，与世界怎么存、时间怎么走无关。
 //! 于是从原来的 `value.rs`（实体批式形状校验的宿主）与 `sim.rs`（定点闸门的宿主）
 //! 收拢到本文件，只留活下来的部分。
 use mlua::{Error, Lua, Value as LuaValue};
@@ -17,7 +17,7 @@ pub const SIM_FIXED: &str = "YGG-SIM-FIXED";
 /// 未挂载时的统一表述（`why` 是能力面名，如 `world.spawn`）。
 pub(super) fn sim_unmounted(what: &str) -> String {
     format!(
-        "{}: 宿主未注入模拟内核，`{what}` 不可用（注入面见 `KernelFacade::set_sim`）",
+        "{}: 宿主未注入模拟内核，`{what}` 不可用（注入面见 `Loaded::set_sim`）",
         SIM_UNMOUNTED
     )
 }
@@ -68,8 +68,7 @@ pub(super) fn value_to_lua(lua: &Lua, value: &Value) -> Result<LuaValue, Error> 
 
 /// mlua `Value` → core `Value`（Lua→core 方向）：四个标量直通；
 /// table / function / 其他 → 可读 `unsupported payload type` 拒绝。
-/// NaN / ±∞ 在此放行为 `Value::Float`，由调用点的 core 门拒绝（事件构造 /
-/// KvStore::set 均带定位）。
+/// NaN / ±∞ 在此放行为 `Value::Float`，由调用点（`KvStore::set`）自己拒绝。
 pub(super) fn value_from_lua(value: &LuaValue) -> Result<Value, Error> {
     Ok(match value {
         LuaValue::Integer(v) => Value::Int(*v),
@@ -83,34 +82,4 @@ pub(super) fn value_from_lua(value: &LuaValue) -> Result<Value, Error> {
             )))
         }
     })
-}
-
-/// `ygg.choice` 的 options：必须是字符串的 Lua 序列。
-///
-/// 逐项报错（`options[{i}]`）而不是「形状不对」一句：调用方要能定位到哪一项。
-pub(super) fn options_from_lua(options: &LuaValue) -> Result<Vec<String>, Error> {
-    let table = match options {
-        LuaValue::Table(t) => t,
-        other => {
-            return Err(Error::runtime(format!(
-                "ygg.choice options must be a sequence of strings, got {}",
-                lua_type_name(other)
-            )))
-        }
-    };
-    let len = table.raw_len();
-    let mut out = Vec::with_capacity(len);
-    for i in 1..=len {
-        let item: LuaValue = table.raw_get(i)?;
-        match &item {
-            LuaValue::String(s) => out.push(s.to_str()?.to_owned()),
-            other => {
-                return Err(Error::runtime(format!(
-                    "ygg.choice options[{i}] must be a string, got {}",
-                    lua_type_name(other)
-                )))
-            }
-        }
-    }
-    Ok(out)
 }

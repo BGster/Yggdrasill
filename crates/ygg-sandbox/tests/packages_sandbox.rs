@@ -28,8 +28,6 @@ mod support;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Value as Json};
-use ygg_sandbox::driver::KernelFacade;
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::sandbox::Sandbox;
 
@@ -92,126 +90,11 @@ fn product_packages() -> Vec<String> {
     ids
 }
 
-/// `pack.json` 的 `packages[].id`（升序）。
-fn declared_packages(mod_dir: &Path) -> Vec<String> {
-    let pack = support::read_json(&mod_dir.join("pack.json"));
-    let mut ids: Vec<String> = pack["packages"]
-        .as_array()
-        .unwrap_or_else(|| panic!("{}/pack.json 缺 packages 段", mod_dir.display()))
-        .iter()
-        .map(|item| item["id"].as_str().expect("packages[].id").to_owned())
-        .collect();
-    ids.sort();
-    ids
-}
-
-/// 派发一个事件并取回整份信封（`ok` 必须为真，否则 panic 带原文）。
-#[track_caller]
-fn dispatch(kernel: &mut KernelFacade, event: &str) -> Json {
-    let reply: Json = serde_json::from_str(&kernel.dispatch(event, "0"))
-        .unwrap_or_else(|err| panic!("{event} 的回执不是 JSON：{err}"));
-    assert_eq!(reply["ok"], json!(true), "{event} 派发失败：{reply}");
-    reply
-}
-
-/// 信封里的叙事行。
-fn lines_of(reply: &Json) -> Vec<String> {
-    reply["narrative"]
-        .as_array()
-        .unwrap_or_else(|| panic!("narrative 不是数组：{reply}"))
-        .iter()
-        .map(|line| {
-            line.as_str()
-                .unwrap_or_else(|| panic!("叙事行不是字符串：{line:?}"))
-                .to_owned()
-        })
-        .collect()
-}
-
-// ── 用例 ①：生产真值（driver 路径）─────────────────────────────────────────
-
 /// `codec.sha256("abc")` 的已知答案向量（FIPS 180-4 附录 B），driver 与裸沙箱
 /// 两边都拿它当锚点。
 const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
-/// 冒烟叙述行（**逐字**）。六行一包一行，最后一行是收尾。
-///
-/// 它们与 r2 计划 §6.5 的原文逐字节相同（含 `sha=ba7816bf…15ad`、
-/// `next32=726839672`、`hash=14b44f969c391c53`）
-/// ——改口径等价于改契约，必须同提交改这份清单。
-fn smoke_lines() -> Vec<String> {
-    [
-        "pkg.entity ok id=1 hp=2.5 ref_reject=true".to_owned(),
-        format!(
-            "pkg.codec ok array=[1,2,3] obj={{\"f\":1.5,\"i\":1}} roundtrip=true sha={SHA256_ABC}"
-        ),
-        "pkg.quest ok id=1 state=open step=2".to_owned(),
-        "pkg.dialogue ok history=1".to_owned(),
-        "pkg.role-skill ok granted=true has=true atk=3".to_owned(),
-        "pkg.procgen ok next32=726839672 hash=14b44f969c391c53".to_owned(),
-        "pkg.smoke packages=6".to_owned(),
-    ]
-    .into_iter()
-    .collect()
-}
-
-// M1-D：本用例暂时不可执行，原因在**夹具**不在机制。
-//
-// `packages/mods/pkg-selftest` 的 `pkg.smoke` 要跑 `pkg.entity`，而 `pkg.entity`
-// 的宿主面就是本步删掉的 `ygg.entity` 行存（`packages/libs/entity/base.lua` 的
-// `h.entity.*`）。把它挪到 `world.*` 上不是搬砖：① 属性是**动态形状**
-// （schema 声明 per-attribute，值域含 number/string/bool/ref），而 `world.component`
-// 是**静态名字 + 静态 kind**（`i64|u64|u8|bytes`）；② 标签在 Lua 面**根本没有创建通道**
-// （`Kind::parse` 不收 tag，未声明名字过不了 `slot_of` 的 `id_of`），于是
-// `add_tag`/`has_tag` 无对应物；③ 本用例还断言 `#PACKAGES` 与 `pack.json`、
-// `packages/libs/` 目录三者两两相等（R9），把 entity 从清单里摘掉就是削弱不变式。
-//
-// 重启条件（验收）：`world.*` 能表达动态形状属性与标签，且 `pkg.entity` 已按
-// `artifacts/w2-m1-world-plan.md` §3 步 4（列式 `WorldQuery`）迁到 `world.*`；
-// 届时删掉本 `#[ignore]`，并把 `expected_lines` 的 `pkg.entity` 行改回新叙述。
-#[ignore = "M1-D：pkg.entity 仍绑在已删除的 ygg.entity 行存面；待 w2-m1-world-plan.md §3 步 4（列式 WorldQuery）+ world.component 支持动态形状与标签后重启"]
-#[test]
-fn packages_load_and_run_in_the_real_sandbox() {
-    let tree = Tree::new("driver");
-    let bundle = tree.load();
-    let mut kernel = bundle.kernel().expect("内核构造");
-
-    let reply = dispatch(&mut kernel, "pkg.smoke");
-    assert_eq!(
-        reply["pendingChoice"],
-        Json::Null,
-        "冒烟不得留下待选（pendingChoice 必须是 nil）：{reply}"
-    );
-    // 派生事件真的走到了内核：entity.created / entity.attr_changed ×4 /
-    // quest.opened / quest.advanced / role.granted。它们全经 `ygg.emit` →
-    // 派生队列 → 空订阅 handler，所以这个数字是「载荷过了 value_from_lua」
-    // 的直接证据（表载荷会在这里之前就红）。
-    assert_eq!(
-        reply["eventsDerived"],
-        json!(8),
-        "派生事件数不对（载荷被拒或 emit 没入队）：{reply}"
-    );
-
-    let lines = lines_of(&reply);
-    let expected = smoke_lines();
-    assert_eq!(lines, expected, "冒烟叙述必须逐字相等：{lines:#?}");
-
-    // R9：收尾行的 N 与声明面、与目录面三方对照——「加包忘改冒烟」与
-    // 「冒烟里多写一个不存在的包」两个方向都会红。
-    let declared = declared_packages(&tree.mod_dir());
-    let products = product_packages();
-    assert_eq!(
-        declared, products,
-        "pack.json 的 packages[] 必须与 packages/libs 下的产品目录恰好相等"
-    );
-    assert_eq!(
-        lines[expected.len() - 1],
-        format!("pkg.smoke packages={}", products.len()),
-        "收尾行的包数必须等于声明闭包（由 PACKAGES 表长度现算）"
-    );
-}
-
-// ── 用例 ②：无注入面（裸 `Sandbox::new()`，没有 `inject::install`）────────
+// ── 用例 ①：无注入面（裸 `Sandbox::new()`，没有 `inject::install`）────────
 
 #[test]
 fn packages_load_in_a_bare_sandbox_without_determinism_injection() {

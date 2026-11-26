@@ -1,127 +1,61 @@
-//! S9 host API（D-S9-1..D-S9-4）：`ygg.*` 完整面 + 收集-回放桥 + 装载/运行期分相。
+//! S9 host API（M1-E 后只剩「世界 + KV + codec」三块面）。
 //!
-//! - **生命周期与分相**（D-S9-1）：[`install`] 在**装载期**安装完整 `ygg` 面
-//!   （`on / emit / narrate / choice / kv.*`，外加并列的 `world.*` 与 `ygg.codec.*`）；[`HostApi::seal`]
-//!   在装载结束后把 `ygg.on` **原位替换**为可读报错桩——运行期注册禁令
-//!   （D-B4 的运行时侧权威执行面）。无 mlua Scope、无线程局部存储或静态可变
-//!   全局：全部共享状态经 `Rc<RefCell<HostState>>` 单线程持有。
-//! - **收集-回放桥**（D-S9-2）：`ygg.emit / narrate / choice` 在 Lua 执行期间
-//!   只向 [`HostState::calls`] **按序追加** [`HostCall`]；LuaHandler
-//!   （core `EventHandler` 反转面实现）在每次 handler 调用前清空调用缓冲，
-//!   以事件 payload（core `Value` → mlua `Value` marshal）调用装载期存下的
-//!   Lua 函数，随后把缓冲**按原序回放**进 sink（emit→`sink.emit`、
-//!   narrate→`sink.narrate`、choose→`sink.choose`）。
-//!   **等价性论证**：回放序 = 追加序 = Lua 执行序，故 emit / narrate / choose
-//!   三类输出的**相对顺序**在桥前后逐项保真——downstream handler 观察到的
-//!   FIFO 序、叙述序与 pending_choice 与「直接直通 sink」的实现逐项一致。
-//!   KV / 世界操作是**有副作用的即席状态写**，不走回放：经 `Rc<RefCell>`
-//!   立即调用 core 把关方法，副作用时点 = Lua 执行时点（其相对输出序在
-//!   handler 内部由构造保证；门拒绝如非有限值以可读 mlua 错误浮现）。
-//! - **sentinel 机制**（D-S9-3）：`ygg.choice` 记录 `Choose` 后以
-//!   install 时从内核种子派生的 **per-kernel sentinel**（[`HostState::sentinel`]，
-//!   不可预测 token）错误终止当前 Lua 执行（后续代码不得运行——
-//!   choice-as-state：挂起即数据）；桥把首行恰好等于 sentinel 的 mlua 错误识别为
-//!   **正常终止**（继续回放缓冲），其余错误包成 core [`HandlerError`]。
-//!   Mod 面无法预测该 token（错误伪造只会成为普通错误浮出，不会被哨兵吞掉）。
-//! - **choice 前置输出丢弃的运行期警告**（M0 迭代 D1）：`ygg.choice` 被调用时
-//!   统计调用缓冲中已有的 `Emit` 条目（这些派生事件将因 `pending_choice`
-//!   终结清空 FIFO 而被语义丢弃）；replay 后若计数非零，记一条人读警告到
-//!   [`HostState::warning`]（每次 dispatch 至多一条，首个胜出，由驱动经
-//!   [`HostApi::take_dispatch_warning`] drain 进信封加性 `warnings` 键）。
-//!   只计 `Emit` 不计 `Narrate`：narrate 直进叙述缓冲、不随 FIFO 丢弃——
-//!   把它计入警告会与信封 `narrative` 字段自相矛盾。静态 ygg-lint 仍挂账 M1。
-//! - **注册序**（D-S9-4）：`ygg.on` 调用序 = `Vec` 追加序；
-//!   [`HostApi::register_into`] 在 seal 后按该序逐条
-//!   `HandlerRegistry::register`（每条一个 LuaHandler），注册序即派发序。
-//! - **结构化 meta 通道已删除**（TD1 退役）：本 crate 不再有回执 meta 面。
+//! - **安装面**：[`install`] 在装载期把 Mod 可见的能力装到 Lua 全局面上——
+//!   `ygg.kv.*`（持久 KV）、`ygg.codec.*`（原生加速面）、`world.*`（列存世界
+//!   facade，装 `ygg.kv` 之后：`world.kv` 直接复用那张表）。事件面（`on / emit /
+//!   narrate / choice`）随事件-信封层整体删除（M1-E，D2）：规则层按 M2 计划在
+//!   `world.*` 上重建，因此本模块不再有收集缓冲、回放桥、相位与 sentinel。
+//! - **状态归属**：全部共享状态经 `Rc<RefCell<HostState>>` 单线程持有——
+//!   无 mlua Scope、无线程局部存储、无静态可变全局。
+//! - **世界内核槽**：`Rc<RefCell<Option<Box<Sim>>>>` 由调用方交给 [`install`]
+//!   （`Sandbox` 与句柄共享同一个槽），不在本模块自建：时间归宿主
+//!   （[`crate::Sandbox::step`]），槽必须挂在宿主侧的 `Sandbox` 上。
+//! - **诊断面**：`world.log` 进环形缓冲，只由宿主经
+//!   [`HostApi::take_world_log`] drain（日志不进任何「状态 = 输出」的对账面）。
 //! - **payload 双向 marshal**：Integer↔`Int`、Number↔`Float`、String↔`Str`、
 //!   Boolean↔`Bool`；Lua→core 遇 NaN/±∞ 由 core 门拒绝（可读 mlua 错误）、
-//!   `-0.0` 由 core 规范化；`nil` 仅在 get 类miss 上作为 Lua `nil` 返回；
+//!   `-0.0` 由 core 规范化；`nil` 仅在 get 类 miss 上作为 Lua `nil` 返回；
 //!   table / function / 其他类型 → 可读 `unsupported payload type: {lua_type}`。
-//!   `ygg.choice` 的 options 必须是字符串的 Lua 序列，否则可读报错。
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mlua::{Error, Function, Lua, Table};
-use ygg_core::bus::{HandlerRegistry, PendingChoice};
+use mlua::{Error, Lua, Table};
 use ygg_core::kv::KvStore;
-use ygg_core::value::Value;
 
-use crate::inject::splitmix64;
-
-// ---- 模块化拆分 shim(S-25 批三 C1:纯搬移;既有路径逐字节不变)----
+// ---- 模块化拆分 shim（既有路径逐字节不变）----
 mod kv;
 mod marshal;
-mod narrate;
 mod world;
 
 use kv::*;
 use marshal::*;
-use narrate::*;
 use world::install_world;
 pub use world::*;
 
-/// 宿主相位（装载期 / 待机 / 转换期）。
-///
-/// M1-D 之后时间只由宿主推进（[`crate::Sandbox::step`]），Lua 侧没有任何
-/// 推进时钟的入口；相位仍用于区分「装载期注册」与「运行期派发」。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Phase {
-    Loading,
-    Idle,
-    Transition,
-}
-
-/// 宿主侧状态句柄（S9 测试 / S10 驱动的注入面）。
+/// 宿主侧状态句柄（宿主与 host API 共享同一份 KV 的唯一凭据）。
 pub struct HostHandles {
     pub kv: Rc<RefCell<KvStore>>,
 }
 
 impl HostHandles {
-    /// 构造句柄（供需要同时挂载或替换工具执行器的宿主使用）。
+    /// 构造句柄（宿主持有同一 `Rc` 即可读回脚本写入的 KV）。
     pub fn new(kv: Rc<RefCell<KvStore>>) -> Self {
         Self { kv }
     }
 }
 
-/// 单条待回放的 host 调用（D-S9-2 收集面的载体，按追加序回放）。
-pub enum HostCall {
-    /// `ygg.emit(name, payload)` → 回放为 `sink.emit(Event::derived(..))`。
-    Emit { name: String, payload: Value },
-    /// `ygg.narrate(line)` → 回放为 `sink.narrate(line)`。
-    Narrate(String),
-    /// `ygg.choice(prompt, options)` → 回放为 `sink.choose(..)`（first-wins 在驱动层）。
-    Choose(PendingChoice),
-}
-
-/// 桥共享状态：注册序缓冲 + 调用缓冲 + 宿主句柄 + 相位标志 + per-kernel
-/// choice sentinel（D-S9-1 / D-S9-3）。
+/// 共享状态：宿主句柄 + 世界内核槽 + `world` 面的宿主侧状态。
 pub struct HostState {
-    registered: Vec<(String, Function)>,
-    calls: Vec<HostCall>,
     handles: HostHandles,
     /// 宿主侧模拟内核实例（未注入时 `None`，`world.*` 全部抛 `YGG-SIM-UNMOUNTED`）。
-    ///
-    /// 由调用方交给 [`install`]（`Sandbox` 与句柄共享同一个槽），不在这里自建：
-    /// 时间归宿主（[`crate::Sandbox::step`]），槽必须挂在宿主侧的 `Sandbox` 上。
     sim: Rc<RefCell<Option<Box<ygg_sim::Sim>>>>,
-    /// 当前执行相位（装载期 `Loading`，封口后待机 `Idle`，handler 执行期间 `Transition`）。
-    phase: Phase,
-    sealed: bool,
-    sentinel: String,
-    /// 本次 handler 调用中，`ygg.choice` 之前已入缓冲的 `Emit` 条目数
-    /// （D1：这些条目将被 pending_choice 终结丢弃；每 handler 调用重置）。
-    pre_choice_emits: u64,
-    /// 本次 dispatch 的人读警告（D1；至多一条，首个胜出，驱动 drain 后清空）。
-    warning: Option<String>,
     /// `world` 面的宿主侧状态（kind 表 + 日志环；M1-C）。
     world: WorldState,
 }
 
-/// 宿主 API 的 Rust 侧控制柄：seal / 注册进注册表。
+/// 宿主 API 的 Rust 侧控制柄（诊断面：world 日志 drain、KV / 内核句柄）。
 pub struct HostApi {
-    lua: Lua,
     state: Rc<RefCell<HostState>>,
 }
 
@@ -131,31 +65,13 @@ pub fn install(
     sim: Rc<RefCell<Option<Box<ygg_sim::Sim>>>>,
 ) -> Result<HostApi, Error> {
     let state = Rc::new(RefCell::new(HostState {
-        registered: Vec::new(),
-        calls: Vec::new(),
         handles,
         sim,
-        phase: Phase::Loading,
-        sealed: false,
-        // per-kernel sentinel：内核种子派生（splitmix64 四轮），Mod 面不可预测
-        //（S9 审计代决：伪造首行只会成为普通错误浮出，不会被哨兵吞掉）。
-        sentinel: {
-            let mut s = crate::inject::KERNEL_RNG_SEED ^ 0x5345_4E54_5E4C_u64;
-            let mut token = String::from("\u{1}__ygg_choice_");
-            for _ in 0..4 {
-                token.push_str(&format!("{:016x}", splitmix64(&mut s)));
-            }
-            token.push_str("__\u{1}");
-            token
-        },
-        pre_choice_emits: 0,
-        warning: None,
         world: WorldState::default(),
     }));
 
     let ygg: Table = lua.globals().raw_get("ygg")?;
 
-    install_narrate(lua, &state, &ygg)?;
     install_kv(lua, &state, &ygg)?;
 
     // `ygg.codec.*`（Tier 2 pkg.codec 的原生加速面；契约 lua-api.md §3.1.4）。
@@ -164,55 +80,10 @@ pub fn install(
     // `world.*`（M1-C）：须在 `ygg.kv` 之后——`world.kv` 直接复用那张表。
     install_world(lua, &state)?;
 
-    Ok(HostApi {
-        lua: lua.clone(),
-        state,
-    })
+    Ok(HostApi { state })
 }
 
 impl HostApi {
-    /// 分相收口（D-S9-1）：置 sealed 标志并把 `ygg.on` 原位替换为可读报错桩
-    /// （运行期注册禁令）。重复 seal 为可读错误。
-    pub fn seal(&self, lua: &Lua) -> Result<(), Error> {
-        {
-            let mut s = self.state.borrow_mut();
-            if s.sealed {
-                return Err(Error::runtime("host api is already sealed"));
-            }
-            s.sealed = true;
-            s.phase = Phase::Idle;
-        }
-        let ygg: Table = lua.globals().raw_get("ygg")?;
-        let stub = lua.create_function(|_, _: (String, Function)| -> Result<(), Error> {
-            Err(Error::runtime(SEALED_MESSAGE))
-        })?;
-        ygg.raw_set("on", stub)?;
-        Ok(())
-    }
-
-    /// 把装载期收集的注册按 `ygg.on` 调用序逐条装入注册表（D-S9-4；
-    /// 每条一个 [`LuaHandler`]，注册序 = 派发序）。在 seal 之后调用。
-    pub fn register_into(&self, registry: &mut HandlerRegistry, mod_id: &str) {
-        let entries: Vec<(String, Function)> = self.state.borrow().registered.clone();
-        for (event_name, function) in entries {
-            registry.register(
-                mod_id,
-                event_name.clone(),
-                Box::new(LuaHandler {
-                    lua: self.lua.clone(),
-                    function,
-                    state: Rc::clone(&self.state),
-                }),
-            );
-        }
-    }
-
-    /// 取走本次 dispatch 累积的人读警告（D1；驱动在事件路径结束时 drain，
-    /// 每次 dispatch 至多一条，信封仅在非空时加 `warnings` 键）。
-    pub fn take_dispatch_warning(&self) -> Option<String> {
-        self.state.borrow_mut().warning.take()
-    }
-
     /// 取走 `world.log` 累积的日志行（M1-C；环形缓冲，满则丢最旧）。
     ///
     /// 只由宿主 drain：日志不进叙述流、不进事件流（混进去会让「输出 = 状态」
@@ -222,14 +93,10 @@ impl HostApi {
         state.world.take_logs()
     }
 
-    /// 装载期收集的事件名（按注册序；诊断面）。
-    pub fn registered_event_names(&self) -> Vec<String> {
-        self.state
-            .borrow()
-            .registered
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect()
+    /// 取持久 KV 句柄（宿主面：读回脚本写入的 KV；KV 不是世界帧的一部分，
+    /// 所以这一面不经过快照字节）。
+    pub fn kv(&self) -> Rc<RefCell<KvStore>> {
+        Rc::clone(&self.state.borrow().handles.kv)
     }
 
     /// 注入或卸载模拟内核实例（`world.*` 的宿主面）。
@@ -244,7 +111,7 @@ impl HostApi {
         *self.state.borrow().sim.borrow_mut() = sim;
     }
 
-    /// 取模拟内核句柄（驱动层共享；宿主批量帧走这条，不经 Lua 边界）。
+    /// 取模拟内核句柄（宿主层共享；宿主批量帧走这条，不经 Lua 边界）。
     pub fn sim_handle(&self) -> Rc<RefCell<Option<Box<ygg_sim::Sim>>>> {
         Rc::clone(&self.state.borrow().sim)
     }

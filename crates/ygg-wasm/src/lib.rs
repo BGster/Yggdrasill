@@ -1,32 +1,25 @@
-//! ygg-wasm：wasm 壳（B1 实装）——[`KernelFacade`] 的 wasm-bindgen 同步导出面。
+//! ygg-wasm：wasm 壳（B1 实装）——[`Loaded`] 的 wasm-bindgen 同步导出面。
 //!
-//! 对外契约（D-A1 线格式，语义面单一镜像 `crates/ygg-sandbox/src/driver.rs`）：
-//! - **唯一同步入口** [`YggKernel::dispatch`]：`dispatch(cmd, payload) -> String`
-//!   返回 A1 JSON 信封原文——成功 `{"ok":true,...}`；域错误
-//!   `{"ok":false,"error":{"code","message"}}`，稳定码 `SANDBOX_DENIED /
-//!   VALIDATION / KV_LIMIT / INTERNAL`（原燃料耗尽码已随 S34 燃料退役从
-//!   稳定码清单收缩）。**域错误永不 throw**
-//!   （返回值即信封）。空壳注记的 `kernel_drain_events()` 自由函数导出面由
-//!   `dispatch("drain","")` 承载（保留命令，线格式不变）。
-//! - **便捷镜像** [`YggKernel::save`] / [`YggKernel::load`] /
-//!   [`YggKernel::state`]：保留命令的一行镜像（= dispatch 同名命令），
-//!   语义零新增，仅为 JS 侧提供可发现的类型面。
-//! - **哈希度量面** [`YggKernel::state_hash`]：FR-9 wasm 侧确定性度量——
-//!   `hex(SHA-256(canonical_state_bytes))`（native `ygg_sandbox::hash::state_hash`
-//!   同一函数同一字节序），A1 信封承载；node 侧 `verify-determinism.mjs` 以此
-//!   比对 golden-vector fixture 的 expected_state_hash，证 native/wasm 双跑
-//!   哈希等价（M1 C2）。
-//! - **构造面** [`YggKernel::new`]：`manifest_json` 为空串 →
-//!   `KernelFacade::new`（无资源路径）；否则 → `KernelFacade::with_resources`。
-//!   `schemas_json` = schema 文本 JSON 数组（壳逐文本解析 `$id` 作注册 id，
-//!   与 `ValidatorSet::from_texts` 的 `(id, text)` 对齐）；`resources_json` =
-//!   `path → base64(bytes)` JSON 对象（壳内置 base64 解码，标准字母表 + 结尾
-//!   padding）。manifest 为空串时两资源参数被忽略（无资源装载路径）。
-//! - **错误跨界双通道（A1）**：构造期的 marshal 失败（坏 base64 / 缺 `$id` /
-//!   非法 JSON）与域失败（ModLoad / 资源包拒绝）**throw**——构造无信封回程
-//!   通道，域失败抛出的值仍是 A1 错误信封 JSON 文本（消费方在 init 处
-//!   catch 一次即可统一按信封分支）；`dispatch` / `save` / `load` / `state`
-//!   **永不 throw**。
+//! 对外契约（M1-E 收紧：**只有装载 / 推进 / 快照三件事**，没有事件面）：
+//! - **装载** [`YggWorld::open`]：`open(image_bytes) -> world`。`image_bytes` 是
+//!   Mod 镜像的 JSON 文本（无文件系统的 wasm 侧没有「目录」可读，四件装载参数
+//!   只能随字节一起过界）：
+//!   `{"modSource": "<Lua 源码>", "manifest": "<manifest.json 文本；空串 = 无资源>",
+//!     "schemas": ["<schema 文本>", ...], "resources": {"<path>": "<base64>", ...}}`。
+//!   `manifest` 空串走无资源路径（资源参数被忽略）——与 native
+//!   `ModBundle::in_memory` 同一口径。
+//! - **推进时间** [`YggWorld::step`]：`step(ticks, dt) -> "<64 位小写 hex>"`，
+//!   即推进后的状态哈希 `hex(SHA-256(世界帧字节))`（与 native
+//!   `ygg_sandbox::hash::state_hash` 同一函数同一字节序）——时间只由宿主推进，
+//!   脚本里没有任何时钟入口。
+//! - **快照** [`YggWorld::snapshot`]：`snapshot() -> Uint8Array`，世界帧规范字节；
+//!   **重建** [`YggWorld::restore`]：`restore(image_bytes, frame) -> world`——帧只含
+//!   世界面，脚本依旧是世界定义来源，所以重建必须同时给出镜像（对应 native
+//!   `Loaded::restore(dir, bytes)` 的两个参数）。
+//! - **没有** `submit` / `events` / `drive` / `dispatch` 导出面：协议层（ygg/1）在
+//!   M3 落成后才经类型化接口加回来，现在不留占位壳。
+//! - **错误跨界单通道**：装载失败 / 步进失败 / 坏帧一律 throw（构造与推进都没有
+//!   信封回程通道，也还没有一个稳定的错误线格式值得钉死——信封是 M3 协议层的事）。
 //! - **wasm32 构建链**（mlua-rs/mlua docs/wasm32 recipe，mlua@ff96ed7
 //!   tests/wasm 同型）：`wasi_alloc` 模块提供委托 WASI libc 的全局分配器
 //!   （Rust 与 wasi-libc 必须共享线性内存管理）；JS 宿主须提供 WASI
@@ -38,7 +31,7 @@
 //!   的旗面一致）。
 //!
 //! host 目标（rlib，`cargo test --workspace` 门禁面）下同构编译：分配器与
-//! wasm 专属面全部 `cfg(target_arch = "wasm32")` 门控；[`YggKernel`] 及其
+//! wasm 专属面全部 `cfg(target_arch = "wasm32")` 门控；[`YggWorld`] 及其
 //! 解析/编解码面在 host 上可测（本文件 `tests` 模块）。
 
 #[cfg(target_arch = "wasm32")]
@@ -84,99 +77,56 @@ mod wasi_alloc {
 use serde_json::Value as Json;
 use wasm_bindgen::prelude::*;
 
-use ygg_sandbox::driver::{KernelError, KernelFacade};
+use ygg_sandbox::hash::state_hash;
+use ygg_sandbox::modload::{Loaded, ModBundle};
 
-/// wasm 壳导出结构：持有一个 [`KernelFacade`]（语义面全部委托）。
+/// wasm 壳导出结构：持有一个 [`Loaded`]（语义面全部委托）。
 #[wasm_bindgen]
-pub struct YggKernel {
-    inner: KernelFacade,
+pub struct YggWorld {
+    inner: Loaded,
 }
 
 #[wasm_bindgen]
-impl YggKernel {
-    /// 构造内核：装载 Mod + （可选）资源包。装载序与语义面 =
-    /// `KernelFacade::new` / `KernelFacade::with_resources`（S10/S11 锁定序）。
+impl YggWorld {
+    /// 装载镜像（`image_bytes` 形状见模块文档）：读镜像 → 对账 → 全序装载。
     ///
-    /// - `mod_source`：Lua Mod 源码全文；
-    /// - `manifest_json`：资源 manifest JSON 文本；**空串 = 无资源路径**
-    ///   （此时 `schemas_json` / `resources_json` 被忽略）；
-    /// - `schemas_json`：schema 文本 JSON 数组（注册 id 取自各文本的 `$id`）；
-    /// - `resources_json`：`path → base64` JSON 对象（path = manifest
-    ///   `entry.path` 查找键）。
-    ///
-    /// throw 通道：marshal 失败（非法 JSON / 元素非字符串 / 缺 `$id` /
-    /// 坏 base64）携带定位文案；装载域失败（ModLoad / 资源包拒绝）携带
-    /// A1 错误信封 JSON 文本（`{"ok":false,"error":{code,message}}`）。
+    /// throw 通道：镜像非法（坏 JSON / 缺 `modSource` / 元素类型不符 / 坏 base64）
+    /// 与装载域失败（manifest / 资源包 / 入口 chunk / 模块表）一律携带定位文案。
     #[wasm_bindgen(constructor)]
-    pub fn new(
-        mod_source: String,
-        manifest_json: String,
-        schemas_json: String,
-        resources_json: String,
-    ) -> Result<YggKernel, JsValue> {
-        let outcome = if manifest_json.is_empty() {
-            KernelFacade::new(&mod_source)
-        } else {
-            let schemas = parse_schemas(&schemas_json).map_err(|message| throw_value(&message))?;
-            let resources =
-                parse_resources(&resources_json).map_err(|message| throw_value(&message))?;
-            KernelFacade::with_resources(
-                &mod_source,
-                manifest_json.as_bytes(),
-                &schemas,
-                &resources,
-            )
-        };
-        // 域失败（构造期）→ throw A1 错误信封文本：构造无信封回程通道，
-        // 信封内容与 dispatch 面逐字段一致，消费方 catch 后按码分支不变。
-        let inner = outcome.map_err(|err| throw_value(&kernel_error_envelope(&err)))?;
-        Ok(YggKernel { inner })
+    pub fn open(image_bytes: Vec<u8>) -> Result<YggWorld, JsValue> {
+        let bundle = decode_image(&image_bytes).map_err(|message| throw_value(&message))?;
+        let inner = Loaded::from_bundle(&bundle).map_err(|err| throw_value(&err.to_string()))?;
+        Ok(YggWorld { inner })
     }
 
-    /// 唯一同步入口（A1）：命令分发，返回信封 JSON 原文。**永不 throw**。
-    pub fn dispatch(&mut self, cmd: String, payload: String) -> String {
-        self.inner.dispatch(&cmd, &payload)
+    /// 推进 `ticks` 个 tick（每 tick `dt` 整数秒），返回推进后的状态哈希
+    /// （64 位小写十六进制；与 native `hash::state_hash` 同一字节序）。
+    pub fn step(&mut self, ticks: u32, dt: u32) -> Result<String, JsValue> {
+        self.inner
+            .step(ticks, dt)
+            .map_err(|err| throw_value(&err.to_string()))?;
+        state_hash(&self.inner).map_err(|err| throw_value(&err.to_string()))
     }
 
-    /// `save` 镜像（= `dispatch("save","")`）：完整状态快照信封。
-    pub fn save(&mut self) -> String {
-        self.dispatch("save".to_owned(), String::new())
+    /// 世界帧规范字节（同一状态 ⇒ 同一字节；存档与哈希共用这一个序列化面）。
+    pub fn snapshot(&self) -> Result<Vec<u8>, JsValue> {
+        self.inner
+            .snapshot()
+            .map_err(|err| throw_value(&err.to_string()))
     }
 
-    /// `load` 镜像（= `dispatch("load", save_json)`）：存档 JSON 载入，
-    /// 返回 `{"ok":true,"restored":true,"pendingChoice":...}` 信封或
-    /// VALIDATION 错误信封。
-    pub fn load(&mut self, save_json: String) -> String {
-        self.dispatch("load".to_owned(), save_json)
-    }
-
-    /// `state` 镜像（= `dispatch("state","")`）：诊断信封（引擎/实体/KV
-    /// 版本号 + 快照字节数 + 待决选择）。
-    pub fn state(&mut self) -> String {
-        self.dispatch("state".to_owned(), String::new())
-    }
-
-    /// 状态哈希（FR-9 wasm 侧度量面）：`hex(SHA-256(canonical_state_bytes))`，
-    /// 与 native 侧 `ygg_sandbox::hash::state_hash` 同一函数、同一字节序。
-    /// node 侧 `verify-determinism.mjs` 以此比对 golden-vector fixture 的
-    /// `expected_state_hash`（native 钉死基线），证 native/wasm 双跑哈希等价。
-    ///
-    /// A1 信封承载：成功 `{"ok":true,"stateHash":"<64 位小写 hex>"}`；失败
-    /// 路径（快照序列化错误，驱动 bug 面）= `SnapshotError` 经 `KernelError`
-    /// 单点码映射的 INTERNAL 错误信封（与 dispatch 错误信封同构）。**永不
-    /// throw**（与 dispatch / save / load / state 同约）。
-    pub fn state_hash(&self) -> String {
-        match ygg_sandbox::hash::state_hash(&self.inner) {
-            Ok(hash) => serde_json::json!({ "ok": true, "stateHash": hash }).to_string(),
-            Err(err) => kernel_error_envelope(&KernelError::from(err)),
-        }
+    /// 按世界帧重建：镜像（世界定义来源）+ 帧 → 新世界。坏帧先校验后改。
+    pub fn restore(image_bytes: Vec<u8>, frame: Vec<u8>) -> Result<YggWorld, JsValue> {
+        let bundle = decode_image(&image_bytes).map_err(|message| throw_value(&message))?;
+        let inner = Loaded::restore_from_bundle(&bundle, &frame)
+            .map_err(|err| throw_value(&err.to_string()))?;
+        Ok(YggWorld { inner })
     }
 }
 
-/// marshal 失败 → throw 值（构造期输入契约违反：非域错误，不进信封）。
-/// 非 wasm 目标无 JS 值空间（`JsValue::from_str` 在 host 上 panic）——host
-/// 返回 NULL 占位（构造失败面为 Err 本身；信封文本内容由下方纯函数单测 +
-/// node smoke 在真 wasm 上验证）。
+/// throw 值（wasm 侧是 JS 字符串；host 无 JS 值空间——`JsValue::from_str`
+/// 在 host 上 panic，故返回 NULL 占位。构造失败面为 `Err` 本身，文案内容由
+/// 下方纯函数单测覆盖）。
 fn throw_value(text: &str) -> JsValue {
     #[cfg(target_arch = "wasm32")]
     {
@@ -189,13 +139,30 @@ fn throw_value(text: &str) -> JsValue {
     }
 }
 
-/// 构造期域失败 → A1 错误信封 JSON 文本（码 = `KernelError::code` 单点映射）。
-fn kernel_error_envelope(err: &KernelError) -> String {
-    serde_json::json!({
-        "ok": false,
-        "error": {"code": err.code(), "message": err.to_string()},
+/// 镜像 → 装载参数（唯一的镜像解析面；字段形状见模块文档）。
+fn decode_image(bytes: &[u8]) -> Result<ModBundle, String> {
+    let text =
+        std::str::from_utf8(bytes).map_err(|err| format!("image is not valid UTF-8: {err}"))?;
+    let image: Json =
+        serde_json::from_str(text).map_err(|err| format!("image is not valid JSON: {err}"))?;
+    let mod_source = image
+        .get("modSource")
+        .and_then(Json::as_str)
+        .ok_or("image has no string `modSource`")?;
+    let manifest = image.get("manifest").and_then(Json::as_str).unwrap_or("");
+    if manifest.is_empty() {
+        // 无资源路径：schema / resources 参数被忽略（与 native 同口径）。
+        return Ok(ModBundle::in_memory(mod_source));
+    }
+    let schemas = parse_schemas(&image["schemas"].to_string())?;
+    let resources = parse_resources(&image["resources"].to_string())?;
+    Ok(ModBundle {
+        mod_source: mod_source.to_owned(),
+        manifest_bytes: manifest.as_bytes().to_vec(),
+        schemas,
+        resources,
+        ..ModBundle::in_memory(String::new())
     })
-    .to_string()
 }
 
 /// `schemas_json` 解析：JSON 字符串数组 → `(schema id, schema 文本)` 对，
@@ -290,14 +257,20 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ygg_sandbox::modload::MINIMAL_MANIFEST;
 
-    fn reply_code(reply: &str) -> String {
-        let parsed: Json = serde_json::from_str(reply).unwrap();
-        parsed["error"]["code"].as_str().unwrap_or("").to_owned()
+    /// 空转 Mod：不声明组件、不生成实体——世界帧就是空世界。
+    const IDLE_MOD: &str = "-- idle mod: no world declarations";
+
+    fn image(mod_source: &str) -> Vec<u8> {
+        serde_json::json!({ "modSource": mod_source, "manifest": "" })
+            .to_string()
+            .into_bytes()
     }
 
-    /// 空转 Mod：无任何注册——事件无 handler，转换空跑即成功。
-    const IDLE_MOD: &str = "-- idle mod: no handlers";
+    fn state_hash_of(world: &YggWorld) -> String {
+        state_hash(&world.inner).expect("hash on live world")
+    }
 
     #[test]
     fn base64_decode_matches_standard_vectors() {
@@ -389,134 +362,79 @@ mod tests {
     }
 
     #[test]
-    fn constructor_empty_manifest_ignores_resource_args_and_dispatches() {
-        // 空串 manifest = 无资源路径；资源参数占位被忽略（契约口径）。
-        // 派发面用已注册事件证明内核可用（fail-closed 后未注册名不再有
-        // 成功信封——那是对预检语义的断言，不属本测）。
-        const NOOP_MOD: &str = "ygg.on(\"event.any\", function() end)";
-        let mut kernel = YggKernel::new(
-            NOOP_MOD.to_owned(),
-            String::new(),
-            "[]".to_owned(),
-            "{}".to_owned(),
-        )
-        .unwrap();
-        let reply = kernel.dispatch("event.any".to_owned(), "0".to_owned());
-        let parsed: Json = serde_json::from_str(&reply).unwrap();
-        assert_eq!(parsed["ok"], Json::Bool(true));
-        assert_eq!(parsed["event"], Json::String("event.any".to_owned()));
-    }
-
-    #[test]
-    fn constructor_mod_load_failure_returns_err() {
-        // 域失败（ModLoad）：构造 Err（host 上 throw 值为 NULL 占位——无 JS
-        // 值空间；信封文本格式由 kernel_error_envelope 单测锁定，真 wasm 上的
-        // throw 内容由 node smoke 实证）。
-        let outcome = YggKernel::new(
-            "syntax error here (((".to_owned(),
-            String::new(),
-            "[]".to_owned(),
-            "{}".to_owned(),
-        );
-        assert!(outcome.is_err(), "broken mod source must fail construction");
-    }
-
-    #[test]
-    fn kernel_error_envelope_carries_stable_code_and_message() {
-        let err = match KernelFacade::new("syntax error (((") {
-            Err(err) => err,
-            Ok(_) => panic!("broken mod source must fail construction"),
-        };
-        let parsed: Json = serde_json::from_str(&kernel_error_envelope(&err)).unwrap();
-        assert_eq!(parsed["ok"], Json::Bool(false));
-        assert_eq!(parsed["error"]["code"], Json::String("INTERNAL".to_owned()));
+    fn decode_image_requires_mod_source_and_takes_empty_manifest_as_no_resources() {
+        let bundle = decode_image(&image(IDLE_MOD)).unwrap();
+        assert_eq!(bundle.mod_source, IDLE_MOD);
+        assert_eq!(bundle.manifest_bytes, MINIMAL_MANIFEST.as_bytes());
+        assert!(bundle.schemas.is_empty() && bundle.resources.is_empty());
         assert!(
-            parsed["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("mod load failed"),
-            "message must carry the kernel error text"
+            decode_image(br#"{"manifest":""}"#).is_err(),
+            "missing modSource must be rejected"
+        );
+        assert!(decode_image(b"not json").is_err());
+    }
+
+    #[test]
+    fn open_rejects_broken_mod_source() {
+        assert!(
+            YggWorld::open(image("syntax error here (((")).is_err(),
+            "broken mod source must fail loading"
         );
     }
 
     #[test]
-    fn save_load_helpers_roundtrip_through_reserved_commands() {
-        let mut kernel = YggKernel::new(
-            IDLE_MOD.to_owned(),
-            String::new(),
-            "[]".to_owned(),
-            "{}".to_owned(),
-        )
-        .unwrap();
-        let save_reply = kernel.save();
-        let parsed: Json = serde_json::from_str(&save_reply).unwrap();
-        assert_eq!(parsed["ok"], Json::Bool(true));
-        let save_json = parsed["save"].to_string();
-        let load_reply = kernel.load(save_json);
-        let parsed: Json = serde_json::from_str(&load_reply).unwrap();
-        assert_eq!(parsed["restored"], Json::Bool(true));
-        let state_reply = kernel.state();
-        let parsed: Json = serde_json::from_str(&state_reply).unwrap();
-        assert_eq!(parsed["engineVersion"], parsed["engineVersion"]);
-        assert!(parsed["snapshotBytes"].is_number());
+    fn step_advances_and_returns_stable_hash() {
+        let mut world = YggWorld::open(image(IDLE_MOD)).unwrap();
+        let before = state_hash_of(&world);
+        let after = world.step(1, 1).unwrap();
+        assert_ne!(after, before, "one tick must move the world frame");
+        assert_eq!(world.step(1, 1).unwrap().len(), 64, "hex sha-256");
+        assert!(
+            world.step(0, 1).is_err(),
+            "zero ticks must be rejected (same gate as native)"
+        );
     }
 
     #[test]
-    fn state_hash_envelope_reproduces_golden_hash_on_host() {
-        // FR-9 壳面锚（host 同构编译）：壳 state_hash() 经 golden-vector
-        // fixture（同一份文件、include_str 编译期嵌入）必须复现钉死的
-        // expected_state_hash——本测试锁的是**壳方法的信封与委托面**
-        // （native 等值本身由 probe_golden_vector 承载）；真 wasm 上的同一
-        // 断言由 node verify-determinism.mjs 在 pkg 产物上活链承载（M1 C2）。
+    fn snapshot_restore_roundtrip_preserves_state_hash() {
+        let mut world = YggWorld::open(image(
+            "world.component{ name = \"hp\", kind = \"i64\" }\nworld.spawn{ hp = 7 }",
+        ))
+        .unwrap();
+        world.step(2, 1).unwrap();
+        let frame = world.snapshot().unwrap();
+        let restored = YggWorld::restore(
+            image("world.component{ name = \"hp\", kind = \"i64\" }\nworld.spawn{ hp = 7 }"),
+            frame,
+        )
+        .unwrap();
+        assert_eq!(state_hash_of(&restored), state_hash_of(&world));
+        assert!(
+            YggWorld::restore(image(IDLE_MOD), vec![0u8; 4]).is_err(),
+            "坏帧必须被拒"
+        );
+    }
+
+    #[test]
+    fn step_reproduces_golden_state_hash_on_host() {
+        // FR-9 壳面锚（host 同构编译）：壳的装载 + 步进经 golden-vector fixture
+        // （同一份文件、include_str 编译期嵌入）必须复现钉死的 expected_state_hash
+        // ——本测试锁的是**壳方法的委托面**（native 等值本身由
+        // probe_determinism 承载）。
         let golden: Json = serde_json::from_str(include_str!(
             "../../ygg-sandbox/tests/fixtures/golden_vector.json"
         ))
         .unwrap();
-        let mut kernel = YggKernel::new(
-            golden["mod_source"].as_str().unwrap().to_owned(),
-            String::new(),
-            "[]".to_owned(),
-            "{}".to_owned(),
-        )
-        .unwrap();
-        for step in golden["event_sequence"].as_array().unwrap() {
-            let reply = kernel.dispatch(
-                step["cmd"].as_str().unwrap().to_owned(),
-                step["payload"].as_str().unwrap().to_owned(),
-            );
-            let parsed: Json = serde_json::from_str(&reply).unwrap();
-            assert_eq!(
-                parsed["ok"],
-                Json::Bool(true),
-                "golden step must succeed: {reply}"
-            );
-        }
-        let reply = kernel.state_hash();
-        let parsed: Json = serde_json::from_str(&reply).unwrap();
+        let mut world = YggWorld::open(image(golden["mod_source"].as_str().unwrap())).unwrap();
         assert_eq!(
-            parsed["ok"],
-            Json::Bool(true),
-            "state_hash envelope: {reply}"
+            state_hash_of(&world),
+            golden["expected_state_hash"].as_str().unwrap(),
+            "shell must reproduce the pinned golden hash"
         );
         assert_eq!(
-            parsed["stateHash"],
-            Json::String(golden["expected_state_hash"].as_str().unwrap().to_owned()),
-            "shell state_hash must reproduce the pinned golden hash"
+            world.step(1, 1).unwrap(),
+            state_hash_of(&world),
+            "step returns the state hash it just produced"
         );
-    }
-
-    #[test]
-    fn dispatch_invalid_payload_returns_envelope_never_throws() {
-        let mut kernel = YggKernel::new(
-            IDLE_MOD.to_owned(),
-            String::new(),
-            "[]".to_owned(),
-            "{}".to_owned(),
-        )
-        .unwrap();
-        let reply = kernel.dispatch("event.x".to_owned(), "{\"nested\":{}}".to_owned());
-        assert_eq!(reply_code(&reply), "VALIDATION");
-        let reply = kernel.load("not json".to_owned());
-        assert_eq!(reply_code(&reply), "VALIDATION");
     }
 }

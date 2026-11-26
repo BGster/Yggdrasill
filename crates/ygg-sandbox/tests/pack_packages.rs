@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde_json::{json, Value as Json};
-use ygg_sandbox::modload::ModBundle;
+use ygg_sandbox::modload::{Loaded, ModBundle};
 use ygg_sandbox::modules::ModuleSet;
 use ygg_sandbox::packages::{self, PackagesSpec};
 
@@ -117,14 +117,14 @@ fn require_pkg_succeeds_and_calls_the_export_in_the_real_sandbox() {
     assert_eq!(bundle.chunk_paths["pkg.fixture"], "fixture/init.lua");
     assert_eq!(bundle.chunk_paths["pkg.fixture.words"], "fixture/words.lua");
 
-    let mut kernel = bundle.kernel().expect("内核构造");
-    let lines = support::narrate(&mut kernel, "probe.pkg");
+    let kernel = Loaded::from_bundle(&bundle).expect("装载");
+    let lines = support::narrate(&kernel, "probe.pkg");
     assert!(
         lines.iter().any(|line| line.contains("hello, sandbox")),
         "handler 里 require 包并调用导出没有产生叙事行：{lines:?}"
     );
     // 同一张表里 mod 自有模块也照旧可用。
-    let lines = support::narrate(&mut kernel, "probe.mod");
+    let lines = support::narrate(&kernel, "probe.mod");
     assert!(
         lines.iter().any(|line| line == "mod module ok"),
         "mod 自有模块被包面挤掉：{lines:?}"
@@ -239,9 +239,9 @@ fn package_module_top_level_effects_are_refused_and_named_by_real_path() {
     // 改包内容必须重算 manifest，否则会先撞内容寻址（那是另一条用例的被测面）。
     support::reseal_with_packages(&scenario.mod_dir(), &scenario.libs());
     // 纯度拒绝发生在**执行**面（入口 chunk 里的 require），不在读盘面：
-    // `ModBundle::load` 只做 I/O 与对账，Lua 到 `kernel()` 才跑。
+    // `ModBundle::load` 只做 I/O 与对账，Lua 到 `Loaded::from_bundle` 才跑。
     let bundle = ModBundle::load(&scenario.mod_dir()).expect("装载（I/O 面）应通过");
-    let err = match bundle.kernel() {
+    let err = match Loaded::from_bundle(&bundle) {
         Ok(_) => panic!("包模块顶层副作用必须被拒，但内核构造成功了"),
         Err(err) => err.to_string(),
     };

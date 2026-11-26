@@ -2,11 +2,11 @@
 //!
 //! 每个用例都从**入库 fixture**装载（不是内联字符串）：fixture 是三层依赖
 //! `entry → src.handlers → src.util` + 一处重复 require + 一个 `return nil`
-//! 模块的真跑包，装载后能一路派发到【结局】——「装载通过但跑不起来」这类假绿在这里
+//! 模块的真跑包，装载期就把观测值写进 KV——「装载通过但装配没跑」这类假绿在这里
 //! 无处藏身。
 //!
 //! 断言口径：**对象身份与执行次数**用模块自己留的痕（`util_execs` / `runs` /
-//! `load_trace`）观测，不靠"看起来对"；叙事逐条比对，不用 `contains` 糊过去
+//! `load_trace`）观测，不靠"看起来对"；观测值逐条比对，不用 `contains` 糊过去
 //! （顺序本身是契约）。
 
 mod support;
@@ -15,7 +15,7 @@ use std::fs;
 
 use ygg_sandbox::modload::ModBundle;
 
-use support::{declared_modules, fixture_dir, fixture_kernel, narrate};
+use support::{declared_modules, fixture_dir, fixture_loaded, narrate};
 
 #[test]
 fn fixture_declares_four_modules_and_the_entry_is_not_one_of_them() {
@@ -41,24 +41,24 @@ fn fixture_declares_four_modules_and_the_entry_is_not_one_of_them() {
 
 #[test]
 fn a_module_can_export_a_table_and_the_entry_registers_handlers_from_it() {
-    // 正向 1：模块返回 table，入口能用其中的函数注册 handler。
-    let mut kernel = fixture_kernel();
+    // 正向 1：模块返回 table，入口能拿其中的函数做装配并调用。
+    let kernel = fixture_loaded();
     assert_eq!(
-        narrate(&mut kernel, "probe.table"),
+        narrate(&kernel, "probe.table"),
         ["handler_from_table=util;bumped=2"],
-        "handler 由 src.handlers 调 src.util 表里的函数注册并执行"
+        "入口经 src.handlers 取到 src.util 表里的函数并调用"
     );
     // 模块内状态真的被写动（不是把常量抄进 handler）。
-    assert_eq!(narrate(&mut kernel, "probe.bump"), ["util_count=5"]);
+    assert_eq!(narrate(&kernel, "probe.bump"), ["util_count=5"]);
 }
 
 #[test]
 fn three_layer_dependencies_run_in_a_deterministic_order() {
     // 正向 2：entry → src.handlers → src.util（另含 src.shared / src.silent）都执行，
     // 且执行序由依赖图决定。
-    let mut kernel = fixture_kernel();
+    let kernel = fixture_loaded();
     assert_eq!(
-        narrate(&mut kernel, "probe.trace"),
+        narrate(&kernel, "probe.trace"),
         ["trace=>handlers>util>shared>silent"],
         "模块体执行序：handlers 先进入，再是它 require 的两个叶子，最后是入口的 silent"
     );
@@ -72,7 +72,7 @@ fn three_layer_dependencies_run_in_a_deterministic_order() {
         Some("src/util.lua"),
         "fixture 的声明序（{declared:?}）必须与执行序不同，否则本用例失去意义"
     );
-    let trace = narrate(&mut kernel, "probe.trace").remove(0);
+    let trace = narrate(&kernel, "probe.trace").remove(0);
     let first_executed = trace.trim_start_matches("trace=>").split('>').next();
     assert_eq!(first_executed, Some("handlers"), "实际首跳：{trace}");
 }
@@ -81,9 +81,9 @@ fn three_layer_dependencies_run_in_a_deterministic_order() {
 fn one_module_required_from_two_sites_runs_once_and_keeps_table_identity() {
     // 正向 3：入口与 src.handlers 分别 require src.util / src.shared——只执行一次，
     // 且返回同一个 table 对象（table 身份，不是"内容相等"）。
-    let mut kernel = fixture_kernel();
+    let kernel = fixture_loaded();
     assert_eq!(
-        narrate(&mut kernel, "probe.identity"),
+        narrate(&kernel, "probe.identity"),
         ["util_same=true;shared_same=true;util_execs=1;shared_runs=1"],
         "三处 require 同一模块：执行一次、身份同一"
     );
@@ -92,9 +92,9 @@ fn one_module_required_from_two_sites_runs_once_and_keeps_table_identity() {
 #[test]
 fn a_nil_module_is_cached_as_true_and_never_runs_twice() {
     // 正向 4：`return nil` 的模块只执行一次（缓存 `true`），重复 require 不重跑。
-    let mut kernel = fixture_kernel();
+    let kernel = fixture_loaded();
     assert_eq!(
-        narrate(&mut kernel, "probe.nil"),
+        narrate(&kernel, "probe.nil"),
         ["silent=true;again=true;same=true;runs=1"]
     );
 }

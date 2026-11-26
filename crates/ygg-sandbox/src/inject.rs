@@ -1,5 +1,4 @@
-//! 确定性注入（D-B5 / research §3）：M0 白名单 math 表 + 内核种子化 random +
-//! 显式推进时钟。
+//! 确定性注入（D-B5 / research §3）：M0 白名单 math 表 + 内核种子化 random。
 //!
 //! 沙箱 globals 已被 `Sandbox::build` 整体替换（ALL_SAFE 加载的旧 math 库自此
 //! 不可达），本模块**从零构造** `math` 表——绝不 raw_get 旧库（替换后不可达，
@@ -13,10 +12,12 @@
 //!   种子 = 内核常量 [`KERNEL_RNG_SEED`]（与 `luai_makeseed` 覆盖同源的
 //!   "YGDR"）；同种子序列跨平台位相同（S12 golden-vector 固定序列锚——
 //!   修改种子常量即破坏 golden 基线）；`randomseed` 不暴露（B5：Mod 禁调
-//!   randomseed——结构性缺席）；
-//! - **显式推进时钟**（FRD：时间由内核事件注入）：`ygg.ticks()` 返回单调
-//!   u64 计数器，唯一推进路径是宿主侧 [`DeterminismHandle::advance_ticks`]
-//!   （S10 驱动在转换边界调用）——零时间源依赖（不读任何 wall clock）。
+//!   randomseed——结构性缺席）。
+//!
+//! **时间不在这里**（M1-E，D2）：Lua 侧没有推进时钟的入口，tick 只由宿主经
+//! `crate::Sandbox::step` 推进；`ygg.ticks` / `DeterminismHandle::advance_ticks`
+//! 随事件-信封层一并删除。本模块剩下的唯一职责是「同种子 ⇒ 同位序列，
+//! native / wasm 一致」。
 //!
 //! 语义保真说明：floor/ceil 按 Lua 5.4 在结果可表示为 integer 时返回
 //! integer、否则 float；abs 对 `mininteger` 返回包装负值（Lua 5.4 wraparound
@@ -25,7 +26,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use mlua::{Error, Lua, MultiValue, Table, Value};
+use mlua::{Error, Lua, MultiValue, Value};
 
 /// 内核随机种子常量（"YGDR" 的 ASCII，与 `.cargo/config.toml` 的
 /// luai_makeseed 覆盖同源）。**S12 golden-vector 锚**：修改即破坏基线。
@@ -83,39 +84,28 @@ fn to_integer_or_float(r: f64) -> Value {
     }
 }
 
-/// 确定性注入句柄：宿主侧推进/重置面（Lua 侧只读消费）。
+/// 确定性注入句柄：内核种子 rng 的持有面（Lua 侧经 `math.random` 只读消费）。
+///
+/// 句柄只需被持有：它把 `Cell<u64>` 的存活期钉在装载体上（丢弃句柄会让
+/// Lua 闭包持有唯一一份引用——行为不变，但「谁拥有确定性」就说不清了）。
 pub struct DeterminismHandle {
     rng: Rc<Cell<u64>>,
-    ticks: Rc<Cell<u64>>,
 }
 
 impl DeterminismHandle {
-    /// 推进时钟一格并返回新值（唯一推进路径；S10 驱动在转换边界调用）。
-    pub fn advance_ticks(&self) -> u64 {
-        let next = self.ticks.get().wrapping_add(1);
-        self.ticks.set(next);
-        next
-    }
-
-    /// 当前 tick 计数（诊断面）。
-    pub fn ticks(&self) -> u64 {
-        self.ticks.get()
-    }
-
-    /// 重置随机状态（M0 恒为内核常量种子；本能力供测试与日后「种子 =
-    /// 内核常量 + 转换计数」演进预留，golden-vector 基线按常量种子固定）。
+    /// 重置随机状态（本能力供测试与「换种子重放」诊断面使用；golden-vector
+    /// 基线按内核常量种子固定）。
     pub fn reseed_random(&self, seed: u64) {
         self.rng.set(seed);
     }
 }
 
-/// 安装确定性注入：从零构造 `math` 白名单表 + 扩展 `ygg` 表（`ygg.ticks`）。
+/// 安装确定性注入：从零构造 `math` 白名单表（唯一产物）。
 ///
-/// 必须在 `Sandbox` 构造之后调用（依赖 build 已创建的 `ygg` 占位表；
-/// 缺失时 raw_get 直接报错，失败即暴露接线顺序问题）。
+/// 必须在 `Sandbox` 构造之后调用（依赖 build 已替换掉的 globals）；不触碰
+/// `ygg` 表——`ygg.*` 的安装面归 [`crate::host_api`]。
 pub fn install(lua: &Lua) -> Result<DeterminismHandle, Error> {
     let rng: Rc<Cell<u64>> = Rc::new(Cell::new(KERNEL_RNG_SEED));
-    let ticks: Rc<Cell<u64>> = Rc::new(Cell::new(0));
 
     let math = lua.create_table()?;
 
@@ -277,14 +267,7 @@ pub fn install(lua: &Lua) -> Result<DeterminismHandle, Error> {
 
     lua.globals().raw_set("math", math)?;
 
-    // ---- ygg.ticks：显式推进时钟（唯一推进路径在宿主侧句柄）----
-    let ygg: Table = lua.globals().raw_get("ygg")?;
-    ygg.raw_set("ticks", {
-        let t = Rc::clone(&ticks);
-        lua.create_function(move |_, ()| Ok(t.get()))?
-    })?;
-
-    Ok(DeterminismHandle { rng, ticks })
+    Ok(DeterminismHandle { rng })
 }
 
 #[cfg(test)]
@@ -503,21 +486,15 @@ mod tests {
     }
 
     #[test]
-    fn ygg_ticks_advances_only_via_host_handle() {
-        let (sb, handle) = sandbox_with_inject();
+    fn no_lua_side_clock_survives_injection() {
+        // M1-E：时间只由宿主推进（`Sandbox::step`）——注入面不得重建
+        // 任何 Lua 侧可读/可写的时钟（`ygg.ticks` 随事件-信封层删除）。
+        let (sb, _) = sandbox_with_inject();
         let lua = sb.lua();
-        let t0: u64 = lua.load("return ygg.ticks()").eval().unwrap();
-        assert_eq!(t0, 0, "clock starts at zero");
-        assert_eq!(handle.advance_ticks(), 1);
-        assert_eq!(handle.advance_ticks(), 2);
-        let t: u64 = lua.load("return ygg.ticks()").eval().unwrap();
-        assert_eq!(t, 2, "Lua side reads, only the host handle advances");
-        assert_eq!(handle.ticks(), 2);
-        // Lua 侧无任何推进入口（结构性：ticks 是无参只读闭包）。
         let absent: bool = lua
-            .load("return ygg.advance == nil and ygg.set_ticks == nil")
+            .load("return ygg.ticks == nil and ygg.advance == nil and ygg.set_ticks == nil")
             .eval()
             .unwrap();
-        assert!(absent, "no Lua-side advance path may exist");
+        assert!(absent, "no Lua-side clock may exist");
     }
 }

@@ -66,16 +66,18 @@ pub const MODULE_EXTENSION: &str = ".lua";
 
 /// Mod 模块的**副作用边界**（单一事实源）。
 ///
-/// 新不变量：**模块 chunk 的顶层是纯导出面**——只允许 `local` / 函数定义 /
-/// `require` 其它纯模块 / 纯读。任何**注册进内核**（`ygg.on` / `fsm.define` /
-/// `narrative.node`）、**写宿主状态**（`kv.set` / `entity.*` 写类 / `fs.write`）或
-/// **产生输出**（`narrate` / `emit` / `choice` / `meta` / `narrative.goto`）的
-/// 调用都必须发生在函数体内，由入口显式装配调用。
+/// **模块 chunk 的顶层是纯导出面**——只允许 `local` / 函数定义 / `require`
+/// 其它纯模块 / 纯读。任何**写宿主状态**（`kv.set`）的调用都必须发生在函数体
+/// 内，由入口显式装配调用。
 ///
-/// **为什么**：`ygg.on` 的注册序就是 handler 的派发序。模块顶层能自由注册，
-/// 等于让「文件怎么拆」决定「运行时行为」——重构（把函数挪到另一个文件、
-/// 调换 require 顺序）就不再安全。模块纯了以后，`require` 才可以在任何时机
-/// 调用（包括事件 handler 内部），懒加载与按需装载才成立。
+/// **为什么**：模块顶层写状态，等于让「文件怎么拆 / require 顺序」决定装载期
+/// 状态——重构（把函数挪到另一个文件、调换 require 顺序）就不再安全，而且这类
+/// 写入发生在任何 tick 之外，既不进世界帧也不进存档。模块纯了以后，`require`
+/// 才可以在任何时机调用，懒加载与按需装载才成立。
+///
+/// **M1-E 收窄**：事件层（`ygg` 的 `on` / `emit` / `narrate` / `choice` / `meta`）、
+/// `ygg.fsm` / `ygg.narrative` 与 `ygg.fs` / `ygg.tool` 已随宿主面删除，清单
+/// 只剩仍存在的 `ygg` 子表成员。
 ///
 /// **入口 chunk 不受这份清单约束**：入口本来就是装配清单，要注册、要初始化。
 ///
@@ -87,31 +89,17 @@ pub const MODULE_EXTENSION: &str = ".lua";
 pub mod effects {
     /// 顶层调用即违规的 `ygg` 直系成员。
     ///
-    /// `on` 是注册；`narrate` / `emit` / `choice` 是输出；`meta` 是宿主回执
-    /// 通道（宿主据此判定，属输出类）。
-    pub const BANNED_CALLS: &[&str] = &["on", "emit", "narrate", "choice", "meta"];
+    /// 当前为空：`ygg` 的直系成员只剩**值字段**（`engine_version` /
+    /// `stdlib_version`）与纯读函数（`data`），没有一调用就落副作用的直系
+    /// 函数。清单保留是因为影子表与 lint 都遍历它——事件层若以 `world.*`
+    /// 形态回来，加名字就能生效。
+    pub const BANNED_CALLS: &[&str] = &[];
 
     /// 顶层调用即违规的 `ygg` 子表成员：(子表名, 成员名)。
     ///
-    /// `fsm` / `narrative` **不是** Rust 侧 `raw_set` 的成员——它们是 stdlib
-    /// 在装载期用 Lua 声明出来的表（`stdlib/init.lua` 建命名空间，`fsm.lua` /
-    /// `narrative.lua` 挂成员）。影子表与 lint 一样按「子表 + 成员」处理，
-    /// 不把它当成 `ygg` 的直系函数。
-    ///
-    /// `narrative` 的 `goto` 走 `ygg.narrative["goto"](id)`（`goto` 是 Lua 5.4
-    /// 保留字，点号形态是语法错误）。它经 `ygg.emit` 发派生事件，与 `emit`
-    /// 同属输出面；单独列出是为了让报错落在**调用点**（否则错误只报
-    /// `ygg.emit`、位置落在 stdlib 的 `goto` 体内，作者看不出自己写了什么）。
-    pub const BANNED_TABLE_MEMBERS: &[(&str, &str)] = &[
-        ("kv", "set"),
-        // 写宿主状态（与 `kv.set` 同类：一次调用就产生跨事件的副作用）；
-        // `fs.read` / `fs.stat` / `fs.list` 是纯读，不列（见下面 PURE_READ 表）。
-        ("fs", "write"),
-        ("tool", "call"),
-        ("fsm", "define"),
-        ("narrative", "node"),
-        ("narrative", "goto"),
-    ];
+    /// `kv.set` 是唯一一条：一次调用就写跨 tick 的宿主状态，且写在任何 tick
+    /// 之外——既不进世界帧也不进存档。
+    pub const BANNED_TABLE_MEMBERS: &[(&str, &str)] = &[("kv", "set")];
 
     /// `BANNED_TABLE_MEMBERS` 的同义导出（兼容嵌套调用命名）。
     pub const BANNED_NESTED_CALLS: &[(&str, &str)] = BANNED_TABLE_MEMBERS;
@@ -121,28 +109,28 @@ pub mod effects {
     /// 未列进禁止面的名字一律放行；这里只钉住「顶层读它不改变任何状态」的
     /// 那几个，免得作者的合法写法被误判。
     ///
-    /// 注意 `ygg.stdlib_version` / `ygg.engine_version` 是**值字段**不是函数
-    /// （见 `stdlib.rs` / `sandbox.rs`），读字段天然无副作用，不需要列进
+    /// 注意 `ygg.engine_version` / `ygg.stdlib_version` 是**值字段**不是函数
+    /// （见 `sandbox.rs` / `stdlib.rs`），读字段天然无副作用，不需要列进
     /// 「可调用面」。
-    pub const PURE_READ_CALLS: &[&str] = &["data", "ticks"];
+    pub const PURE_READ_CALLS: &[&str] = &["data"];
 
-    /// 纯读的子表成员（**允许**在顶层调用；miss 返回 `nil` / `false`，不写状态）。
+    /// 纯读的子表成员（**允许**在顶层调用；不写状态、不产生输出）。
+    ///
+    /// `ygg.codec` 三键都是纯函数（字节进、字节/值出，无实例无缓存）；列在
+    /// 这里是为了让 `YGG-MOD-EFFECT` 的报错能点名「这些在顶层是合法的」，
+    /// 免得作者把合法写法当成违规自己改掉。
     pub const PURE_READ_TABLE_MEMBERS: &[(&str, &str)] = &[
         ("kv", "get"),
-        // `ygg.fs` 的读面（这三条不列进 `banned()` 也已是放行态；列在这里是为了
-        // 让 `YGG-MOD-EFFECT` 的报错能点名「这些在顶层是合法的」，免得作者把
-        // 合法写法当成违规自己改掉）。`fs.write` 不在其中——它列进了禁止面。
-        ("fs", "read"),
-        ("fs", "stat"),
-        ("fs", "list"),
+        ("codec", "encode"),
+        ("codec", "decode"),
+        ("codec", "sha256"),
     ];
 
     /// 禁止面判定（**唯一查询面**，内核影子表与 lint 共用）。
     ///
-    /// `path` = `ygg` 之后的成员路径：`["on"]` 命中直系成员，
-    /// `["kv", "set"]` 命中子表成员。命中返回规范访问形态（`on` /
-    /// `kv.set`，供报错文案直接拼成 `ygg.kv.set`），未命中 = `None`
-    /// （含纯读面与一切未列出的名字）。
+    /// `path` = `ygg` 之后的成员路径：`["kv", "set"]` 命中子表成员。命中返回
+    /// 规范访问形态（`kv.set`，供报错文案直接拼成 `ygg.kv.set`），未命中 =
+    /// `None`（含纯读面与一切未列出的名字）。
     pub fn banned(path: &[&str]) -> Option<String> {
         match path {
             [name] => BANNED_CALLS.contains(name).then(|| (*name).to_owned()),
@@ -542,11 +530,23 @@ mod tests {
     use super::effects;
 
     #[test]
-    fn tool_call_is_banned_at_module_top_level() {
-        assert!(effects::BANNED_NESTED_CALLS.contains(&("tool", "call")));
-        assert_eq!(
-            effects::banned(&["tool", "call"]).as_deref(),
-            Some("tool.call")
-        );
+    fn kv_set_is_banned_at_module_top_level() {
+        assert!(effects::BANNED_NESTED_CALLS.contains(&("kv", "set")));
+        assert_eq!(effects::banned(&["kv", "set"]).as_deref(), Some("kv.set"));
+    }
+
+    #[test]
+    fn pure_read_face_is_not_banned() {
+        // 清单收窄到 M1-E 后的存活面：纯读一律放行，禁止面只有 kv.set。
+        for name in effects::PURE_READ_CALLS {
+            assert_eq!(effects::banned(&[name]), None, "ygg.{name} 是纯读面");
+        }
+        for (table, member) in effects::PURE_READ_TABLE_MEMBERS {
+            assert_eq!(
+                effects::banned(&[table, member]),
+                None,
+                "ygg.{table}.{member} 是纯读面"
+            );
+        }
     }
 }

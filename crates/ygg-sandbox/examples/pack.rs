@@ -38,10 +38,11 @@
 //!   模块数 128 / 内容寻址）。缺失该段 = 单文件 Mod，manifest 与此前逐字节
 //!   一致（不给旧 Mod 制造无意义的 diff）。
 //!
-//! **host 契约的可选前置校验**：`pack.json` 若声明了 `agent` / `inboxRoutes`
-//! 段，打包期即按运行期同一套规则解析（字段必填、
-//! 类型 / 形状校验，错误文案与运行时一致）。段缺失**不算错**——本工具服务所有
-//! Mod（含不吃 host 契约的冒险类 Mod），但**写坏了**必须在此拦下，别等装载期。
+//! **declaration scope**：打包期只认 `entries` / `schemaFiles` / `code` /
+//! `packages` 四段（装载期读的也正是这四段）。`agent` / `inboxRoutes` 这类
+//! agent 期声明随事件层一起退役（M1-E）——本工具既不校验也不改写它们，读到就
+//! 原样留在 `pack.json` 里；重新引入时必须先在装载期有读它的代码，否则不得
+//! 在打包期单方面「校验」。
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};

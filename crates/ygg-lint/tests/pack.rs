@@ -181,7 +181,9 @@ fn cycle_chain_matches_the_loader_wording() {
 }
 
 #[test]
-fn unreachable_module_is_a_warning() {
+fn unreachable_module_is_not_reported() {
+    // `YGG-MOD-UNUSED` 随事件层退役（M1-E）：死模块只是「多登记了一份字节」，
+    // 装载期照样登记、照样不装载，没有可观测差异——逐条提示它噪音大于收益。
     let report = check(
         &pack_json("mod.lua", &["src/util.lua", "src/unused.lua"]),
         &[
@@ -190,10 +192,7 @@ fn unreachable_module_is_a_warning() {
             ("src/unused.lua", "return {}\n"),
         ],
     );
-    let diagnostic = only(&report, code::MOD_UNUSED);
-    assert_eq!(diagnostic.severity, Severity::Warning);
-    assert_eq!(diagnostic.file, "pack.json");
-    assert!(diagnostic.message.contains("src/unused.lua"));
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
 }
 
 #[test]
@@ -229,7 +228,7 @@ fn missing_entry_and_missing_modules_field_are_reported() {
 }
 
 #[test]
-fn too_many_modules_is_a_limit_error() {
+fn too_many_modules_is_a_budget_error() {
     let paths: Vec<String> = (0..=ygg_modules::MAX_MODULES)
         .map(|index| format!("src/m{index}.lua"))
         .collect();
@@ -238,7 +237,7 @@ fn too_many_modules_is_a_limit_error() {
         .chain(paths.iter().map(|path| (path.as_str(), "return {}\n")))
         .collect();
     let report = check(&pack_json("mod.lua", &refs), &files);
-    let limit = only(&report, code::MOD_LIMIT);
+    let limit = only(&report, code::MOD_BUDGET);
     assert!(
         limit
             .message
@@ -311,7 +310,7 @@ fn chain_deeper_than_the_load_limit_is_reported() {
     }
 
     let report = check_owned(&pack_json("mod.lua", &refs), files);
-    let diagnostic = only(&report, code::MOD_LIMIT);
+    let diagnostic = only(&report, code::MOD_BUDGET);
     assert!(
         diagnostic.message.contains("require depth exceeded"),
         "depth rejection must come from the loader's wording: {}",
@@ -347,7 +346,7 @@ fn module_top_level_effect_call_is_reported_with_position() {
     let report = effect_report(
         "local util = {}\n\
          \n\
-         ygg.on(\"probe\", function() end)\n\
+         ygg.kv.set(\"probe\", 1)\n\
          \n\
          return util\n",
     );
@@ -356,14 +355,15 @@ fn module_top_level_effect_call_is_reported_with_position() {
     assert_eq!(diagnostic.line, 3);
     assert_eq!(diagnostic.column, 1);
     assert_eq!(diagnostic.severity, Severity::Error);
-    // 文案要同时说清「做了什么」（顶层调用 ygg.on）/「为什么」（注册序即派发序）。
+    // 文案要同时说清「做了什么」（顶层调用 ygg.kv.set）/「为什么」（装载期写状态
+    // 既不进帧也不进档，还随 require 顺序变化）。
     assert!(
-        diagnostic.message.contains("`ygg.on`"),
+        diagnostic.message.contains("`ygg.kv.set`"),
         "message must name what was touched: {}",
         diagnostic.message
     );
     assert!(
-        diagnostic.message.contains("注册序就是派发序"),
+        diagnostic.message.contains("既不进世界帧也不进存档"),
         "message must explain why: {}",
         diagnostic.message
     );
@@ -383,16 +383,16 @@ fn effect_inside_a_function_body_is_allowed() {
         "local util = {}\n\
          \n\
          function util.install(deps)\n\
-         \x20 ygg.on(\"probe\", function() ygg.narrate(\"x\") end)\n\
          \x20 ygg.kv.set(\"k\", 1)\n\
+         \x20 local bytes = ygg.codec.sha256(\"x\")\n\
          end\n\
          \n\
          local function helper()\n\
-         \x20 ygg.fsm.define({})\n\
+         \x20 ygg.kv.set(\"k\", 2)\n\
          end\n\
          \n\
          local install_alias = function()\n\
-         \x20 ygg.narrative.node(\"n\", function() end)\n\
+         \x20 ygg.kv.set(\"k\", 3)\n\
          end\n\
          \n\
          return util\n",
@@ -402,15 +402,15 @@ fn effect_inside_a_function_body_is_allowed() {
 
 #[test]
 fn entry_is_exempt_from_the_effect_rule() {
-    // 入口就是装配清单：顶层的 ygg.on / ygg.narrative.node 是它的职责。
+    // 入口就是装配清单：顶层建组件 / 生成实体 / 写 kv 是它的职责。
     let report = check(
         &pack_json("mod.lua", &["src/util.lua"]),
         &[
             (
                 "mod.lua",
                 "local util = require(\"src.util\")\n\
-                 ygg.on(\"probe\", function() end)\n\
-                 ygg.narrative.node(\"n\", function() end)\n\
+                 world.component{ name = \"hp\", kind = \"i64\" }\n\
+                 ygg.kv.set(\"probe\", 1)\n\
                  return util\n",
             ),
             ("src/util.lua", "return { install = function() end }\n"),
@@ -421,12 +421,12 @@ fn entry_is_exempt_from_the_effect_rule() {
 
 #[test]
 fn reference_and_bracket_forms_are_reported() {
-    // 取引用也算（顶层拿到 `ygg.on` 的下一步必然是注册）；
-    // 字符串下标形态与点形态同一判定（`narrative.goto` 只有这种写法能过解析）。
+    // 取引用也算（顶层拿到写入口的下一步必然是写状态）；
+    // 字符串下标形态与点形态同一判定（`ygg["kv"]["set"]` 在 AST 上同形）。
     let report = effect_report(
         "local util = {}\n\
-         local register = ygg.on\n\
-         local write = ygg[\"kv\"][\"set\"]\n\
+         local write = ygg.kv.set\n\
+         local write_bracket = ygg[\"kv\"][\"set\"]\n\
          return util\n",
     );
     let hits: Vec<&Diagnostic> = report
@@ -435,14 +435,14 @@ fn reference_and_bracket_forms_are_reported() {
         .filter(|d| d.code == code::MOD_EFFECT)
         .collect();
     assert_eq!(hits.len(), 2, "{:?}", report.diagnostics);
-    // 定位到 `ygg.on` 本身（第 2 行第 18 列），不是整条语句。
-    assert_eq!((hits[0].line, hits[0].column), (2, 18));
+    // 两条都定位到取引用的那一行，不是整条语句。
+    assert_eq!(hits[0].line, 2);
     assert!(
         hits[0].message.contains("取用"),
         "reference form must read as a reference, not a call: {}",
         hits[0].message
     );
-    assert_eq!((hits[1].line, hits[1].column), (3, 15));
+    assert_eq!(hits[1].line, 3);
     assert!(
         hits[1].message.contains("`ygg.kv.set`"),
         "{}",
@@ -456,10 +456,8 @@ fn pure_reads_and_unlisted_members_stay_allowed() {
     let report = effect_report(
         "local util = {}\n\
          local texts = ygg.data(\"ygg:scene/texts\")\n\
-         local ticks = ygg.ticks()\n\
          local stage = ygg.kv.get(\"stage\")\n\
-         local tagged = ygg.entity.has_tag(\"e\", \"t\")\n\
-         local attribute = ygg.entity.get_attribute(\"e\", \"a\")\n\
+         local digest = ygg.codec.sha256(\"x\")\n\
          local version = ygg.stdlib_version\n\
          return util\n",
     );
@@ -469,6 +467,11 @@ fn pure_reads_and_unlisted_members_stay_allowed() {
 #[test]
 fn every_name_in_the_shared_ban_list_is_reported() {
     use ygg_modules::effects;
+
+    // 禁令表在 M1-E 收窄到 `kv.set` 一条：直接成员面为空，子表面不能空——
+    // 否则下面两个循环会「全部跳过」而静默通过。
+    assert!(effects::BANNED_CALLS.is_empty());
+    assert!(!effects::BANNED_TABLE_MEMBERS.is_empty());
 
     for &name in effects::BANNED_CALLS {
         let report = effect_report(&format!("ygg.{name}(1)\n"));
@@ -481,8 +484,8 @@ fn every_name_in_the_shared_ban_list_is_reported() {
         );
     }
     for &(table, member) in effects::BANNED_TABLE_MEMBERS {
-        // 统一走括号形态：`narrative.goto` 的点形态在 Lua 5.4 是语法错误
-        // （YGG-R3），点形态与括号形态本是同一条静态路径。
+        // 统一走括号形态：点形态与括号形态本是同一条静态路径
+        // （`ygg["kv"]["set"]` 与 `ygg.kv.set` 在 AST 上同形）。
         let report = effect_report(&format!("ygg.{table}[\"{member}\"](1)\n"));
         let diagnostic = only(&report, code::MOD_EFFECT);
         assert!(
@@ -514,11 +517,10 @@ fn every_name_in_the_shared_ban_list_is_reported() {
 #[test]
 fn alias_escape_is_not_tracked_by_the_ast_walk() {
     // 已知局限（**不是**遗漏）：`local y = ygg` 之后静态不可判 `y` 就是 ygg。
-    // 运行时影子表是这一层的兜底——模块执行期间 `ygg.on` 已被换成拒绝桩，
+    // 运行时影子表是这一层的兜底——模块执行期间 `ygg.kv.set` 已被换成拒绝桩，
     // 别名拿到的是同一张表上的同一个桩，装载期仍会失败。
-    let report = effect_report(
-        "local util = {}\nlocal y = ygg\ny.on(\"probe\", function() end)\nreturn util\n",
-    );
+    let report =
+        effect_report("local util = {}\nlocal y = ygg\ny.kv.set(\"probe\", 1)\nreturn util\n");
     assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
 }
 

@@ -75,7 +75,7 @@ pub struct ResourceTable {
 }
 
 impl ResourceTable {
-    /// 空资源表（无资源装载路径的驱动基线，`KernelFacade::new` 复用）。
+    /// 空资源表（无资源声明的单文件 Mod 装载路径复用）。
     pub fn empty() -> Self {
         Self {
             entries: BTreeMap::new(),

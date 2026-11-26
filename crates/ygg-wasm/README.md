@@ -1,20 +1,23 @@
 # ygg-wasm
 
-wasm 壳（B1 实装）：[`ygg-sandbox`](../ygg-sandbox) `KernelFacade` 的
-wasm-bindgen 同步导出面（D-A1 线格式）。
+wasm 壳（B1 实装）：[`ygg-sandbox`](../ygg-sandbox) `Loaded` 的
+wasm-bindgen 同步导出面（M1-E 收紧：**只有装载 / 推进 / 快照**，没有事件面）。
 
 ## 导出面
 
 | 成员 | 说明 |
 | --- | --- |
-| `new YggKernel(modSource, manifestJson, schemasJson, resourcesJson)` | 构造内核。`manifestJson` 空串 = 无资源路径（此时资源参数被忽略）；否则资源包装载（schema 文本数组取 `$id` 注册、`path → base64` 资源对象解码） |
-| `dispatch(cmd, payload) -> string` | 唯一同步入口，返回 A1 JSON 信封原文。**永不 throw**；域错误码 `FUEL_EXHAUSTED / SANDBOX_DENIED / VALIDATION / KV_LIMIT / INTERNAL` |
-| `save() / load(saveJson) / state()` | 保留命令一行镜像（= `dispatch` 同名命令） |
-| `stateHash() -> string` | 状态哈希度量面（FR-9）：`hex(SHA-256(canonical_state_bytes))`，A1 信封承载（`{"ok":true,"stateHash":"…"}` / INTERNAL 错误信封）。**永不 throw**（M1 C2） |
+| `new YggWorld(imageBytes)` | 装载 Mod 镜像。`imageBytes` 是镜像 JSON 的字节：`{"modSource": "<Lua 源码>", "manifest": "<manifest.json 文本；空串 = 无资源>", "schemas": ["<schema 文本>", …], "resources": {"<path>": "<base64>", …}}`（无文件系统的 wasm 侧没有目录可读，四件装载参数只能随字节过界） |
+| `step(ticks, dt) -> string` | 推进 `ticks` 个 tick（每 tick `dt` 整数秒），返回推进后的状态哈希（64 位小写 hex；与 native `hash::state_hash` 同一字节序）。时间只由宿主推进 |
+| `snapshot() -> Uint8Array` | 世界帧规范字节（同一状态 ⇒ 同一字节；哈希与存档共用这一个序列化面） |
+| `YggWorld.restore(imageBytes, frame) -> YggWorld` | 按世界帧重建：镜像（世界定义来源）+ 帧（世界面）两个参数，对应 native `Loaded::restore(dir, bytes)`。坏帧先校验后改 |
 
-构造期失败经 throw 交付：marshal 失败（坏 base64 / 缺 `$id` / 非法 JSON）带
-定位文案；装载域失败（ModLoad / 资源包拒绝）抛 **A1 错误信封 JSON 文本**
-（消费方在 init 处 catch 一次即可统一按信封分支）。
+**没有** `submit` / `events` / `drive` / `dispatch` 导出面：协议层（ygg/1）在 M3
+落成后才经类型化接口加回来，现在不留占位壳。
+
+失败一律 throw（构造、推进、坏帧都是）：现在没有稳定的错误线格式值得钉死，
+信封是 M3 协议层的事。构造期输入失败（坏 JSON / 坏 base64 / 缺 `$id`）与装载域
+失败（manifest / 资源包 / 入口 chunk / 模块表）都携带定位文案。
 
 ## 构建
 
@@ -44,8 +47,12 @@ import { installWasiShim } from "./wasi-shim.js";
 installWasiShim();                       // 必须先于 pkg 胶水 init
 const ygg = await import("<pkg>/ygg_wasm.js");
 await ygg.default(wasmBytes);            // 或无参（浏览器 fetch 相对路径）
-const kernel = new ygg.YggKernel(modSource, manifestJson, schemasJson, resourcesJson);
-const envelope = kernel.dispatch("event.start", "0");
+const world = new ygg.YggWorld(new TextEncoder().encode(JSON.stringify({
+  modSource, manifest, schemas, resources,
+})));
+const stateHash = world.step(1, 16);      // 推进一个 tick，取状态哈希
+const frame = world.snapshot();          // 世界帧字节
+const rebuilt = ygg.YggWorld.restore(image, frame);
 ```
 
 宿主自带 WASI 实现时，shim 不覆盖已存在的 `wasi_snapshot_preview1` 键。
@@ -61,8 +68,7 @@ cargo test -p ygg-wasm
 
 ## 体积快照（M1 C2 时点）
 
-- `ygg_wasm_bg.wasm` ≈ 2.9 MB raw（Lua 5.4 VM + mlua + jsonschema/fancy-regex
-  + ygg stdlib 嵌入；lto=fat + opt-level=s）。
+- `ygg_wasm_bg.wasm` ≈ 2.9 MB raw（Lua 5.4 VM + mlua + jsonschema/fancy-regex；lto=fat + opt-level=s）。
 - **wasm-opt 已兼容（M1 C2 实证）**：wasm-bindgen 剥掉 target-features 元
   数据，须显式传特性旗（脚本头注有实测集）；binaryen 117（wasm-pack 缓存
   版）优化必崩（DCE 对 try_table 未实现路径），binaryen 133 -Oz 成功：

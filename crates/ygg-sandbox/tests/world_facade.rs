@@ -20,7 +20,7 @@ use ygg_sim::sim::Sim;
 /// 装一个「真宿主面 + 已挂载内核」的沙箱（不装 Mod 包：`world` 面与包无关）。
 ///
 /// M1-D 之后**时间只由宿主推**（`Sandbox::step`）：Lua 侧没有任何推进时钟的
-/// 入口（`ygg.sim.*` 面已删），所以每个用例都是「跑配置脚本 → 宿主 step →
+/// 入口（`ygg` 的 `sim.*` 面已删），所以每个用例都是「跑配置脚本 → 宿主 step →
 /// 跑断言脚本」三段。
 fn fixture(seed: u64) -> (Sandbox, HostApi) {
     let sandbox = Sandbox::new().expect("沙箱构造");
