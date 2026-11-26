@@ -9,12 +9,12 @@
 | 成员 | 说明 |
 | --- | --- |
 | `new YggSession(packBytes)` | 包镜像 → 未握手会话。`packBytes` 是镜像 JSON 的字节：`{"modSource": "<Lua 源码>", "manifest": "<manifest.json 文本；空串 = 无资源>", "schemas": ["<schema 文本>", …], "resources": {"<path>": "<base64>", …}}`（形状由 `ygg_host::image` 定义；wasm 侧没有目录可读，四件装载参数只能随字节过界）。**装载失败 throw**——镜像不在协议面上，没有帧可答 |
-| `handle(msgJson) -> string` | 一条消息 JSON → **一个 JSON 数组**的帧流（`step` 两帧 `events` + `delta`，其余一帧） | 
+| `handle(msgJson) -> string` | 一条消息 JSON → **一个 JSON 数组**的帧流（`step` 两帧 `events` + `delta`，其余一帧） |
 | `snapshot() -> Uint8Array` | 当前世界帧字节（`snapshot` 消息的字节近路；失败答空数组——要「为什么」就走 `snapshot` 消息，那里有 `error` 帧） |
 
 `handle` **永不 throw**：坏 JSON、状态不符、`pack_hash` 不符都答一帧
 `error{code,msg}`。错误码决定宿主的动作（`E_PROTOCOL` 宿主自己的 bug、`E_PACK` 换包、
-`E_RULE`/`E_BUDGET` 报给包作者、`E_STATE` 回滚重试）——所以错也是协议的一部分，JS 侧
+`E_STORE_FORMAT` 提示升级存档、`E_RULE`/`E_BUDGET` 报给包作者、`E_STATE` 回滚重试）——所以错也是协议的一部分，JS 侧
 不需要 `try/catch` 才能继续下一步。
 
 消息表与字段见 [`packages/schema/protocol/README.md`](../../packages/schema/protocol/README.md)。

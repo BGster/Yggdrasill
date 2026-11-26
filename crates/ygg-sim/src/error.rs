@@ -5,7 +5,7 @@
 //! 本 crate 沿用同一处置：码是**稳定字符串**（外部可 grep、可断言），`Display` 的第一段
 //! 逐字就是它。
 //!
-//! **七码的共同性质：失败不改状态**。取值不产生半改的模拟态，所以调用方拿到错误后
+//! **八码的共同性质：失败不改状态**。取值不产生半改的模拟态，所以调用方拿到错误后
 //! 不需要回滚，也无需猜「改到哪一步了」。这条性质比错误分类本身更重要：它让「错误处理」
 //! 退化成一句 `?`，而不必在 Lua 侧写补偿逻辑。
 //!
@@ -27,7 +27,7 @@
 //! （如 `entity_index` 与列长不符）——那是缺陷、不是用户输入问题；`world_mut` 的裸列写
 //! 也不经过日志，同样不在本保证内。
 
-/// 七个稳定错误码。外部（Lua 面、门禁、报告）只认这些字符串。
+/// 八个稳定错误码。外部（Lua 面、门禁、报告）只认这些字符串。
 pub mod codes {
     /// 宿主未注入 [`crate::Sim`] 实例（`ygg` 的 `sim.*` 全部函数）。
     pub const UNMOUNTED: &str = "YGG-SIM-UNMOUNTED";
@@ -35,6 +35,9 @@ pub mod codes {
     pub const FIXED: &str = "YGG-SIM-FIXED";
     /// 帧格式拒绝：magic / 版本 / 长度 / 尾 digest / 列类型不符（含坏快照）。
     pub const FRAME: &str = "YGG-SIM-FRAME";
+    /// 帧格式**不被支持**：magic / `fmt_version` / flags 不是我们能读的那一版。
+    /// 与 [`FRAME`] 分开是因为宿主处置不同：前者提示升级存档，后者提示文件损坏。
+    pub const FORMAT: &str = "YGG-SIM-FORMAT";
     /// 组件 schema 拒绝：未知组件名、同帧重复组件名、类型与列不符。
     pub const SCHEMA: &str = "YGG-SIM-SCHEMA";
     /// 实体面拒绝：未知实体 id、`insert` 目标不存在、`next_id` 溢出。
@@ -62,6 +65,9 @@ pub enum SimError {
     /// [`codes::FRAME`]：帧格式拒绝。
     #[error("YGG-SIM-FRAME: {0}")]
     Frame(String),
+    /// [`codes::FORMAT`]：帧格式不被支持（魔数 / 版本 / flags）。
+    #[error("YGG-SIM-FORMAT: {0}")]
+    Format(String),
     /// [`codes::SCHEMA`]：组件 schema 拒绝。
     #[error("YGG-SIM-SCHEMA: {0}")]
     Schema(String),
@@ -83,6 +89,7 @@ impl SimError {
             SimError::Unmounted(_) => codes::UNMOUNTED,
             SimError::Fixed(_) => codes::FIXED,
             SimError::Frame(_) => codes::FRAME,
+            SimError::Format(_) => codes::FORMAT,
             SimError::Schema(_) => codes::SCHEMA,
             SimError::Entity(_) => codes::ENTITY,
             SimError::State(_) => codes::STATE,
@@ -98,6 +105,11 @@ impl SimError {
     /// 构造 `YGG-SIM-FRAME`。
     pub fn frame(detail: impl Into<String>) -> Self {
         SimError::Frame(detail.into())
+    }
+
+    /// 构造 `YGG-SIM-FORMAT`。
+    pub fn format(detail: impl Into<String>) -> Self {
+        SimError::Format(detail.into())
     }
 
     /// 构造 `YGG-SIM-SCHEMA`。
@@ -135,6 +147,7 @@ mod tests {
             SimError::Unmounted("x".into()),
             SimError::fixed("x"),
             SimError::frame("x"),
+            SimError::format("x"),
             SimError::schema("x"),
             SimError::entity("x"),
             SimError::state("x"),

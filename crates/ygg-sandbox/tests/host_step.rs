@@ -139,8 +139,8 @@ fn bad_frames_fail_closed_without_moving_the_world() {
         .restore(&[0u8, 1, 2, 3, 4, 5, 6, 7])
         .expect_err("坏帧必须拒");
     assert!(
-        error.to_string().contains("YGG-SIM-FRAME"),
-        "坏帧必须 YGG-SIM-FRAME：{error}"
+        error.to_string().contains("YGG-SIM-FORMAT"),
+        "魔数不符是「格式不被支持」：{error}"
     );
     assert_eq!(sandbox.tick().expect("已挂载"), before.tick, "先校验后改");
     assert_eq!(sandbox.hash().expect("已挂载"), before.hash);

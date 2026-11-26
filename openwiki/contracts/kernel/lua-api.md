@@ -100,7 +100,7 @@ Lua 5.4 沙箱的 globals 是 deny-by-default 的全新表：14 个 base 纯计�
 - **数值过面只有一个闸门**：只接受「值上等于整数的 Lua number」（`n.fract() == 0.0` 且 `|n| ≤ 2^53`），其余一律 `YGG-SIM-FIXED`——静默取整会把「调用方算错了」变成「内核算错了」；定点除零同码（不给 `i64::MAX`，那会把除零藏成数值异常）。
 - **字节帧形状**（列式；与快照列编码**共用同一个读写器**）：`spawn_batch: u32 n | u16 comp_n | [u16 len | name]×comp_n | 每组件一列载荷`；`insert_batch` 在 `n` 后多 `u64 ids[n]`；`despawn_batch: u32 n | u64 ids[n]`；每帧尾部 `u64 digest = FNV-1a 64(前面全部字节)`。
 - **未挂载降级**：表**始终**在场，宿主没注入实例时**每个**函数抛 `YGG-SIM-UNMOUNTED`——`nil` 与「状态为空」不可分辨，静默降级会让 Mod 把「宿主不支持」读成「世界是空的」。
-- **错误码六枚**：`YGG-SIM-UNMOUNTED` / `YGG-SIM-FIXED` / `YGG-SIM-FRAME` / `YGG-SIM-SCHEMA` / `YGG-SIM-ENTITY` / `YGG-SIM-STATE`。六者的共同性质：**状态未变**（先校验后改）。
+- **错误码八枚**：`YGG-SIM-UNMOUNTED` / `YGG-SIM-FIXED` / `YGG-SIM-FRAME` / `YGG-SIM-FORMAT` / `YGG-SIM-SCHEMA` / `YGG-SIM-ENTITY` / `YGG-SIM-STATE` / `YGG-SIM-SEALED`。八者的共同性质：**状态未变**（先校验后改）。`FORMAT` 只指「这份帧不是我们能读的那一版」（魔数 / `fmt_version` / flags），截断与 digest 不符仍是 `FRAME`。
 - **确定性是内核性质，不是本面的纪律**：随机只来自 seed 流派生（与 `pkg.procgen.rng` 位级同源、同一份向量表双向断言）；结构操作 tick 内只入队、tick 边界按 FIFO 应用；`hash` = FNV-1a 64(快照字节去尾 digest)，与 `snapshot` 同源。
 
 ## 5. `ygg.codec.*`（Tier 2 确定性 JSON 加速面，宿主注入）

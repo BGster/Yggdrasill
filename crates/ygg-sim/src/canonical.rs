@@ -121,6 +121,10 @@ pub struct FrameReader<'a> {
 impl<'a> FrameReader<'a> {
     /// 打开帧并校验魔数与版本（写入器只产出 [`FMT_VERSION`]；读取器收历史版本集
     /// {1, 2}——旧档原语义兼容，更老/更新的版本一律拒：静默兼容会让旧档读成新世界）。
+    ///
+    /// 头三类不过报 [`SimError::format`]（「这不是我们能读的帧」），与后续的
+    /// 截断 / 长度 / digest 不符（[`SimError::frame`]，「帧坏了」）分开：宿主对
+    /// 两者的处置不同。
     pub fn open(buf: &'a [u8]) -> SimResult<Self> {
         let mut reader = Self {
             buf,
@@ -129,20 +133,20 @@ impl<'a> FrameReader<'a> {
         };
         let magic = reader.raw(8)?;
         if magic != MAGIC {
-            return Err(SimError::frame(format!(
+            return Err(SimError::format(format!(
                 "魔数不符：得到 {magic:02X?}，期望 {MAGIC:02X?}"
             )));
         }
         let version = reader.u16()?;
         if version != 1 && version != 2 {
-            return Err(SimError::frame(format!(
+            return Err(SimError::format(format!(
                 "帧格式版本不符：得到 {version}，可读 {{1, 2}}（本写入器产出 {FMT_VERSION}）"
             )));
         }
         reader.version = version;
         let flags = reader.u16()?;
         if flags != 0 {
-            return Err(SimError::frame(format!(
+            return Err(SimError::format(format!(
                 "未知 flags：{flags}（保留位必须为 0）"
             )));
         }

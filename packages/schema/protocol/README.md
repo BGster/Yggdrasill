@@ -68,6 +68,10 @@
 | --- | --- | --- |
 | `bytes` | base64 string | 存档字节，协议层不解码，只搬运 |
 
+存档被拒分两码：**帧头**（魔数 / `fmt_version` / flags）不是本内核能读的那一版 →
+`E_STORE_FORMAT`（提示升级）；**帧体**（截断 / 长度 / 尾 digest）坏掉 → `E_STATE`（提示文件
+损坏）。两者都是先校验后改，不产生半改的世界。
+
 ### `submit` H→K
 
 | 字段 | 类型 | 说明 |
@@ -172,12 +176,14 @@ v1 没有独立的 `submit_result` 标签：`delta` 本来就是「本次被写�
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `code` | `E_PROTOCOL` `E_PACK` `E_BUDGET` `E_RULE` `E_STATE` | 决定宿主的反应 |
+| `code` | `E_PROTOCOL` `E_PACK` `E_BUDGET` `E_RULE` `E_STATE` `E_STORE_FORMAT` | 决定宿主的反应 |
 | `msg` | string | 人类可读；不参与任何判定 |
 
-五类错误码对应五种宿主动作，合并会把「重连」「换包」「报给包作者」「回滚重试」搅成一句
-「出错了」：`E_PROTOCOL` 是宿主自己的 bug，`E_PACK` 换包或换档，`E_BUDGET`/`E_RULE` 报给
-包作者，`E_STATE` 回滚并重试。
+六类错误码对应六种宿主动作，合并会把「重连」「换包」「升级存档」「报给包作者」「回滚重试」搅成一句
+「出错了」：`E_PROTOCOL` 是宿主自己的 bug，`E_PACK` 换包或换档，`E_STORE_FORMAT` 是存档格式不被
+支持（提示升级），`E_BUDGET`/`E_RULE` 报给包作者，`E_STATE` 回滚并重试。`E_STORE_FORMAT` 与
+`E_STATE` 的分界落在「帧头」与「帧体」：魔数 / `fmt_version` / flags 不过属前者，截断 / 长度不符 /
+尾 digest 不符属后者。
 
 ## 绑定层的回执形状（一请求一数组）
 

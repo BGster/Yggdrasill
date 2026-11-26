@@ -598,6 +598,8 @@ fn sim_code(err: &SimError) -> ErrorCode {
             ErrorCode::ERule
         }
         SimError::Frame(_) | SimError::State(_) | SimError::Unmounted(_) => ErrorCode::EState,
+        // 存档格式不被支持单独成码：宿主的话术是「升级存档」而不是「文件损坏」。
+        SimError::Format(_) => ErrorCode::EStoreFormat,
     }
 }
 

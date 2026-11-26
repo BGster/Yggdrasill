@@ -48,7 +48,7 @@
         },
         "errorCode": {
             "type": "string",
-            "enum": ["E_PROTOCOL", "E_PACK", "E_BUDGET", "E_RULE", "E_STATE"]
+            "enum": ["E_PROTOCOL", "E_PACK", "E_BUDGET", "E_RULE", "E_STATE", "E_STORE_FORMAT"]
         },
 
         "component": {

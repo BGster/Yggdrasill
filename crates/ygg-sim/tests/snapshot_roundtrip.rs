@@ -167,19 +167,26 @@ fn corrupt_bytes_are_rejected_not_panicked() {
     broken[mid] ^= 0xFF;
     let err = snapshot::decode(&broken).unwrap_err();
     assert_eq!(err.code(), codes::FRAME, "坏字节必须 YGG-SIM-FRAME：{err}");
-    // magic 坏
+    // magic 坏：这一格是「帧不是我们能读的那一版」，与帧体损坏分码（ADR-S3-2）。
     let mut no_magic = bytes.clone();
     no_magic[0] = b'X';
     assert_eq!(
         snapshot::decode(&no_magic).unwrap_err().code(),
-        codes::FRAME
+        codes::FORMAT
     );
-    // 版本坏
+    // 版本坏（同一码：头三类只说明格式不被支持）
     let mut bad_version = bytes.clone();
     bad_version[8] = 99;
     assert_eq!(
         snapshot::decode(&bad_version).unwrap_err().code(),
-        codes::FRAME
+        codes::FORMAT
+    );
+    // flags 坏
+    let mut bad_flags = bytes.clone();
+    bad_flags[10] = 1;
+    assert_eq!(
+        snapshot::decode(&bad_flags).unwrap_err().code(),
+        codes::FORMAT
     );
     // 截断（少一个字节 → 尾 digest 不足）
     let truncated = &bytes[..bytes.len() - 1];

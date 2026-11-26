@@ -417,6 +417,76 @@ fn replay_detects_a_tampered_frame() {
     }
 }
 
+#[test]
+fn unsupported_frame_format_is_not_frame_corruption() {
+    // ADR-S3-2：帧头（魔数 / `fmt_version` / flags）不是本内核能读的那一版 →
+    // `E_STORE_FORMAT`（提示用户升级）；帧体（截断 / 长度 / 尾 digest）坏掉 → 其他码。
+    // 两类混成一码，宿主就只能对「存档是别的版本」和「文件损坏」说同一句话。
+    let mut live = session();
+    live.handle(Message::Submit {
+        ops: vec![spawn(1, &[9])],
+    });
+    live.handle_all(Message::Step { ticks: 1, dt: 1 });
+    let raw = live.snapshot_bytes().expect("存档字节");
+
+    // 帧头：magic 8 | fmt_version u16 | flags u16；写入器只产出 1/2，9 是「更晚的版本」。
+    let mut unsupported = raw.clone();
+    unsupported[8..10].copy_from_slice(&9u16.to_le_bytes());
+    match session_from("").handle(Message::Open {
+        bytes: b64(&unsupported),
+    }) {
+        Message::Error(err) => {
+            assert_eq!(
+                err.code,
+                ErrorCode::EStoreFormat,
+                "帧头版本不可读必须 E_STORE_FORMAT：{err}"
+            );
+            assert_eq!(err.code.as_str(), "E_STORE_FORMAT");
+        }
+        other => panic!("open 应得 error，得到 {other:?}"),
+    }
+
+    // 同一份存档只少最后一个字节：帧体坏了，码必须与上面不同。
+    let truncated = &raw[..raw.len() - 1];
+    match session_from("").handle(Message::Open {
+        bytes: b64(truncated),
+    }) {
+        Message::Error(err) => assert_ne!(
+            err.code,
+            ErrorCode::EStoreFormat,
+            "截断不是「格式不被支持」：{err}"
+        ),
+        other => panic!("open 应得 error，得到 {other:?}"),
+    }
+}
+
+/// 标准 base64 编码（`open` 只收 base64，而 `ygg_host` 的编解码器是私有实现）。
+fn b64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 /// 未握手的会话（快照字节要在一个**新连接**上打开）。
 fn session_from(_bytes: &str) -> Session {
     let loaded = loaded();

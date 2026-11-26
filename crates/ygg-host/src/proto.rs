@@ -59,11 +59,12 @@ pub type ComponentId = u32;
 // 错误面
 // ---------------------------------------------------------------------------
 
-/// `ygg/1` 的五类错误码（线上字面量 = `SCREAMING_SNAKE_CASE`）。
+/// `ygg/1` 的六类错误码（线上字面量 = `SCREAMING_SNAKE_CASE`）。
 ///
-/// 五类而不是一个大 `E`，因为宿主对它们的反应不同：`E_PROTOCOL` 是宿主自己的 bug
-/// （重连无意义），`E_PACK` 是包与存档不匹配（换包或换档），`E_BUDGET` / `E_RULE`
-/// 是规则代码的问题（报给包作者），`E_STATE` 是内核拒绝（回滚并重试）。
+/// 六类而不是一个大 `E`，因为宿主对它们的反应不同：`E_PROTOCOL` 是宿主自己的 bug
+/// （重连无意义），`E_PACK` 是包与存档不匹配（换包或换档），`E_STORE_FORMAT` 是
+/// 存档格式不被支持（提示用户升级），`E_BUDGET` / `E_RULE` 是规则代码的问题
+/// （报给包作者），`E_STATE` 是内核拒绝（回滚并重试）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
@@ -77,6 +78,9 @@ pub enum ErrorCode {
     EBudget,
     /// 规则代码运行期失败（Lua 报错、系统返回错误）。
     ERule,
+    /// 存档格式不被支持：魔数 / `fmt_version` / flags 不是本内核能读的那一版。
+    /// 与 `E_STATE` 分开是因为宿主的话术不同：前者提示用户升级存档，后者提示文件损坏。
+    EStoreFormat,
     /// 内核状态拒绝：越界 tick、未 `seal`、结构操作与实体现状冲突。
     EState,
 }
@@ -92,6 +96,7 @@ impl ErrorCode {
             ErrorCode::EPack => "E_PACK",
             ErrorCode::EBudget => "E_BUDGET",
             ErrorCode::ERule => "E_RULE",
+            ErrorCode::EStoreFormat => "E_STORE_FORMAT",
             ErrorCode::EState => "E_STATE",
         }
     }
