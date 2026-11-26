@@ -3,36 +3,12 @@
   "pageVersion": "sha256:061b079235bd91c033ec4d450ca8b342a099c317bbc2b0faf454377fc0cdf460",
   "claims": [
     {
-      "id": "claim_e94a3699241942afae33c26a850e4125",
-      "statement": "契约树按四个一级子目录组织（kernel / host / mod / packages）；出现平铺 Markdown 文件或软链会被 surface-tree.lua 的树索引用例判红，因此不允许留兼容壳。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/tests/surface-tree.lua#L47-L70",
-          "version": "repo-file-v1:sha256:5ddf3ed2fe32b56f82dfe53831dd19ec959bf1a78e99b1ca10db9cb812d15e01"
-        }
-      ]
-    },
-    {
-      "id": "claim_7b03a6475a1549ea9017f67bfa559b32",
-      "statement": "契约索引页的链接集合与树内实文件集合双向相等由纯 Lua 树索引用例断言：新增或删除契约页必须同批改索引，否则用例转红。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/tests/surface-tree.lua#L86-L130",
-          "version": "repo-file-v1:sha256:5ddf3ed2fe32b56f82dfe53831dd19ec959bf1a78e99b1ca10db9cb812d15e01"
-        }
-      ]
-    },
-    {
       "id": "claim_123a4c63f74d46bf8d8bb6652d1dc591",
       "statement": "AGENTS.md 的契约路由表由 modpkg.lua 校验：路由行数量固定，且目标路径的一级目录必须在 kernel/host/mod（或 README.md）白名单内。",
       "evidence": [
         {
-          "resource": "repo://.ygg/mods/agent-seed/tests/modpkg.lua#L90-L115",
-          "version": "repo-file-v1:sha256:62daa616515c190147f202429c05a1daca561137e0d38c79b145b508a246bdc1"
-        },
-        {
           "resource": "repo://AGENTS.md",
-          "version": "repo-file-v1:sha256:cb3a9b153f675543dd4c5f3984d071f6d67156feafc189101a9e7e1201d501d4"
+          "version": "repo-file-v1:sha256:0e7e183b9735ac5d432a7b6bb9bda74c22ca88a75150cfca89e1342ab868d2dd"
         }
       ]
     },
@@ -41,16 +17,12 @@
       "statement": "三组不是文档分类而是物理边界：内核语义在 crates/ygg-core 与 crates/ygg-sandbox 本体，host 面是 egg CLI 与 serve/rt，mod 面是 .ygg/mods/agent-seed 的 Lua 面。",
       "evidence": [
         {
-          "resource": "repo://.ygg/mods/agent-seed/mod.lua",
-          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
-        },
-        {
           "resource": "repo://crates/ygg-core/src/lib.rs",
           "version": "repo-file-v1:sha256:d03d81542da24b3985df9e8f1a8444f271cc61959757ebee2e99039d78602732"
         },
         {
           "resource": "repo://crates/ygg-sandbox/src/lib.rs",
-          "version": "repo-file-v1:sha256:5f64699eef5bec0d081aa6d4a0a88c443bdbed4635bbfe48616bb61555ec6818"
+          "version": "repo-file-v1:sha256:29ccc21da46768db549af4bc38d3e78384813ee113a0c655b742dd04528f3366"
         }
       ]
     }

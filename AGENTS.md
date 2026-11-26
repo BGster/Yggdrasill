@@ -1,145 +1,100 @@
-# Yggdrasill · Agent Harness — Hard Constraints and Cold Start
+# Yggdrasill · Kernel SDK — Hard Constraints and Cold Start
 
-> This file is **cold start only**: what must be in the first context (irreversible damage, hard refusal) plus the
-> commands you cannot guess. Process, acts and contracts live in `openwiki/` — route through §3 and read the body; a
-> summary or "last batch did this" is a route, never the rule.
+> This file is **cold start only**: irreversible damage, hard refusal, and the commands you cannot guess. Subsystem
+> contracts and operating detail live in `openwiki/` — route through §3 and read the body; a summary is a route, never
+> the rule.
 
 ## 0. Data red line
 Never read real business data (`*.xlsx` / `*.xls` / `*.csv`, or anything under a classified mount) into the
 repository or context, and never take metadata readings of its directories (`ls` / `stat` / `find` / `du` / `wc` —
 row counts, column names and enumerations are also classified). The user runs real-data verification and pastes the
 output; synthetic data under `/tmp` is unrestricted.
+
 ## 1. Non-negotiable constraints
 
-**1.1 serve is read-only — never add a run-state write endpoint.** The `/api/roots` exception and its proof live in
-`openwiki/contracts/host/serve.md`; read it before touching serve.
+**1.1 The kernel is host-free.** No HTTP server, no filesystem, no clock, no subprocess, no rendering, audio or input
+in `crates/**`. A host owns its engine, its loop and its I/O; the kernel owns world state and the protocol that drives
+it. Test for a boundary violation: *would this code change if the host engine changed?* Then it does not belong here.
 
-**1.2 Scene gate — read the authoritative body before acting in a scene** (prologue / charter / coordinate / settle /
-release / retired, or a requirement stage). Re-entering a scene, a rejected-and-replanned requirement and a new batch
-each need a **fresh signature**; one older than the scope entry is expired. On-disk `ver` differs from the one you last
-read → **body read, then sign**; same `ver` inside `readGate.window` → version check (`was=/now=`) suffices, and a
-version check never extends the window. **Unreadable = stop** — a missing page or a body contradicting the index has
-no licence to proceed from memory (`openwiki/operating/rituals/read-gate.md`).
+**1.2 Determinism is the product.** State carries no `f64` (fixed-point and integers only); ordered containers only
+(`BTreeMap`, never `HashMap`/`HashSet` in `src/**`); time enters only through `step(ticks, dt_ms)`; randomness only from
+world streams; the tick hash is computed from canonical bytes through **one** composition path — adding a second one is
+a violation. Two runs of the same command log must produce identical bytes, hashes and snapshots, native and wasm.
 
-**1.3 Every in-run artifact must be carried by an event first** — before a file write, a code change or a deliverable,
-an event must bring it into the state machine (`requirement.dispatch` → proposal → gate); the verdict looks at events,
-not where bytes landed (`~/tmp` and chat count too).
+**1.3 One world model.** The columnar ECS in `ygg-sim` is the only thing that decides what exists. Packs are Lua data
+and scripts; native systems are registered by the host. A second entity store, a row-shaped shadow of the world, or a
+pack reaching around `world.*` is a violation.
 
-**1.4 The main agent does only four coordination-layer things**: dispatch work, accept proposals serially, pass the
-two mandatory gates, declare batch release; it never implements lane work, and after filing a requirement its first
-action is `requirement.dispatch`. **1.5 Render receipts in full, never parse-and-truncate** — no sliced narratives,
-first-line reads, `startswith` filters or grep summaries: print every narrative line and hand raw `pendingChoice` to
-the user.
-**1.6 One dispatch per process, one real action per turn.** The host exposes exactly one `--event`; batching flags,
-timeline replay scripts, settlement loops and wrapper entrypoints are forbidden, and `autosave.json` / `events.jsonl`
-are never edited by hand. A violation is an event history produced without receipt review.
+**1.4 Rules are sandboxed and budgeted.** Packs get no `os`, `io`, `debug`, `package`, `load*` or `coroutine`, and no
+float math; every host→Lua entry runs under an instruction budget, so a runaway script is an error, not a hang; a
+failed entry leaves world bytes unchanged (rollback, never half-applied state).
 
-**1.7 Stop on violation**: stop everything, list what you dispatched, what you did yourself and which output has no
-event, then wait for the user. Never back-fill the process first.
+**1.5 Read the authoritative body before touching a subsystem.** Contracts in `openwiki/contracts/**` are the rule for
+that subsystem; a receipt, a summary, a previous session's habit or this file is a route. A missing page, a moved file
+or a body contradicting the index is a **stop-and-report** — never a licence to proceed from memory. Pages that still
+name `egg` / `serve` / `agent-seed` are historical: the kernel SDK rewrite is tracked as its own milestone.
 
-**1.8 Credentials live only in `.env` / `.env.local`**: resources, configuration and reports name keys only, never values.
+**1.6 Stop on violation.** When a constraint was bypassed, stop everything and list what you changed, what you ran and
+which output is unverified; then wait for the user. Never back-fill the record first.
 
-**1.9 Self-evolution has exactly two exits — `AGENTS.md` (cold-start ruling) or the Mod (machine enforcement,
-`.ygg/mods/agent-seed/`) — no side scripts, no CLI source changes.** Scripts may only perform read-only queries. Every
-evolution needs all three: the action blocked, the violation symptom, one runnable confirmation. New capability lands in
-`crates/ygg-*/` (kernel semantics) or `packages/libs/<name>/` (pure Lua over `ygg.*`) with its contract, `selftest`
-cases and perf numbers (`openwiki/contracts/packages/README.md`).
+**1.7 Credentials live only in `.env` / `.env.local`**: resources, configuration and reports name keys only, never values.
 
-**1.10 No claim without its method — absence and counts included.** A negative claim ("never existed") and a quantity
-claim ("16 occurrences") are unproven until a method that could have returned the opposite produced them; run it, paste
-the output, name the method. An unsupported "does not exist" reports "I did not look there"
-(`openwiki/operating/rituals/dispatch.md`).
+**1.8 Self-evolution has exactly two exits: this file (cold-start ruling) or the code (machine enforcement)** — no side
+scripts, no wrappers, no checkers shipped as patches; scripts may only perform read-only queries. Every evolution needs
+all three: the action blocked, the visible violation symptom, one runnable confirmation. New capability lands in
+`crates/ygg-*/` (kernel semantics) or `packages/libs/<name>/` (pure Lua over `world.*`) in the same commit as its
+contract, its tests and its perf numbers (`openwiki/contracts/packages/README.md`).
 
-**1.11 Every prompt-surface edit accounts for the full producer/consumer lifecycle.** One normative rule, one
+**1.9 No claim without its method — absence and counts included.** "Never existed" and "16 occurrences" are unproven
+until a method that could have returned the opposite produced them: run it, paste the output, name the method. An
+unsupported "does not exist" reports "I did not look there".
+
+**1.10 Every prompt-surface edit accounts for the full producer/consumer lifecycle.** One normative rule, one
 authoritative carrier; other carriers are pointers or labelled projections. Answer Q1 consumer moment (cold-start /
-phase-entry / before-action / subsystem-touch), Q2 cost of missing it (irreversible / hard-refusal / silent-drift /
-none), Q3 producer (owner, triggering action, check catching a missed rewrite). Keep a line here only for Q1=cold-start
-with Q2∈{irreversible,hard-refusal} (`openwiki/governance.md`).
+subsystem-touch / before-action), Q2 cost of missing it (irreversible / hard-refusal / silent-drift / none), Q3 producer
+(owner, triggering change, check catching a missed rewrite). Keep a line here only for Q1=cold-start with
+Q2∈{irreversible,hard-refusal}; `scripts/wiki-consistency.sh` enforces this file's 160-line budget
+(`openwiki/governance.md`).
 
-**1.12 Zero debt.** Every discovered defect, optimisation or worth-building capability has exactly two legal endings —
-implement it now, or convert it on the spot into a scheduled requirement with acceptance criteria; "deferred / future
-work / 待优化 / 遗留" without a schedule ID is an unfinished deliverable.
+**1.11 Zero debt.** Every discovered defect or worth-building capability has exactly two legal endings: implement it
+now, or turn it into a scheduled item with acceptance criteria. "Deferred / future work / 待优化 / 遗留" without a
+schedule ID is an unfinished deliverable.
 
 ## 2. Cold start
 
-### Build and install
-
 ```bash
-YGGDRASILL_ROOT="${YGGDRASILL_ROOT:-.}"
-"$YGGDRASILL_ROOT/scripts/install-egg.sh"  # build + install copy + global symlink (idempotent)
+cargo build --workspace
+cargo test --workspace          # the executable surface of this repo
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-On macOS the installed copy must be ad-hoc signed or the kernel kills it on first exec (`exit 137`, no error text):
-`codesign --sign - --force .ygg/bin/egg`. Sign **the copy** — a signature on `target/release/examples/egg` does not
-survive `cp`. `.ygg/mods/agent-seed` is the single Mod source; `./scripts/sync-seed-mod.sh` recalculates its manifest
-(`--check` verifies it plus the package symlink).
-
-### Start
+Wasm target (needs a WASI SDK; `/opt/wasi-sdk` is the config default, this machine keeps it under `~/.local`):
 
 ```bash
-ROOT="$(.ygg/bin/egg new --mod .ygg/mods/agent-seed --in .ygg/runs --event event.start | tail -1 | sed 's/^run-root: //')"
-A=".ygg/bin/egg open $ROOT"
-$A --event charter.set --payload '"<title>|<goal>|<success>"'
-$A --event run.begin
+W="$HOME/.local/wasi-sdk-34.0-arm64-macos"
+CC_wasm32_unknown_unknown="$W/bin/clang" CXX_wasm32_unknown_unknown="$W/bin/clang++" \
+AR_wasm32_unknown_unknown="$W/bin/llvm-ar" \
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-Ctarget-feature=+reference-types \
+ -Lnative=$W/share/wasi-sysroot/lib/wasm32-wasip1/eh \
+ -Lnative=$W/share/wasi-sysroot/lib/wasm32-wasip1 \
+ -lstatic=c++abi -lstatic=unwind -lstatic=wasi-emulated-process-clocks -lstatic=c" \
+cargo build --target wasm32-unknown-unknown -p ygg-wasm
 ```
-
-`charter.set` is editable until `run.begin`; project build/check commands are in `openwiki/overview.md` §2 and the
-entry ritual in `openwiki/operating/acts/charter.md`.
-
-### Serve (read-only observation)
-
-```bash
-.ygg/bin/egg serve  # 127.0.0.1:7800; empty-root start; Ctrl-C stops
-curl -X POST http://127.0.0.1:7800/api/roots -H 'Content-Type: application/json' -d '{"root": "<repo>/.ygg/runs"}'
-```
-
-### Continue
-
-```bash
-A=".ygg/bin/egg open <run-root>"
-$A --drive stdin                                     # interactive: human chooses (default)
-$A --event config.set --payload '"goal.authorization=<one-line authorization note>"'
-$A --event config.set --payload '"play.mode=goal"'   # only after user authorization
-$A --event config.set --payload '"tools.root=<checkout>/.pi/tools"'
-$A --event config.set --payload '"tools.session=<main-session-id>"'
-$A --drive none                                      # observe without advancing
-$A --event map.show                                  # operation view + all-chapter index
-.ygg/bin/egg open <run-root> --requirement '<title>|<description>'  # async inbox only
-```
-
-### Pause
-
-Type `q` or end stdin. `HUMAN[:reason]`, timeout, non-zero exit, invalid output or an out-of-range index pauses safely
-without advancing; re-run Continue to resume (`openwiki/contracts/host/lanes.md`).
-
-### Settle and finish
-
-Drain the queue → `coordinate.submit` → `verify.submit` → `settlement.evolution` → release declaration → `review.note`
-(settles the batch); `config.set run.retire=true` arms the only ending. Payloads, evidence standards and upgrade
-discipline (new run-id per batch boundary; old runs never migrated): `openwiki/operating/acts/settle.md`,
-`release.md`, `retired.md`, `openwiki/operating/rituals/cleanup.md`.
 
 ## 3. Prompt-surface index
 
 | Moment | Authoritative route |
 | --- | --- |
-| Entry — which page for this moment | `openwiki/overview.md` (whole tree) + `openwiki/quickstart.md` (time point → page) |
-| Contract tree entry / touch surface | `openwiki/architecture/README.md` → `openwiki/contracts/**` |
-| Cold-start vocabulary / topology / principles | `openwiki/operating/cold-start/vocabulary.md`, `topology.md`, `principles.md` |
-| Charter / coordinate / settle / release / retired | `openwiki/operating/acts/charter.md`, `coordinate.md`, `settle.md`, `release.md`, `retired.md` |
-| Requirement stage (draft → done) | `openwiki/operating/req-acts/intake.md`, `delivery.md`, `integration.md` |
-| Dispatch / submit / integration ritual | `openwiki/operating/rituals/dispatch.md` |
-| Verification / evidence / cleanup / read gate | `openwiki/operating/acts/settle.md`, `openwiki/operating/rituals/cleanup.md`, `openwiki/operating/rituals/read-gate.md` |
-| No egg / no mod fallback | `openwiki/operating/rituals/fallback.md` |
-| Mod / host / tool touch | `openwiki/contracts/mod/mod-package.md`, `openwiki/contracts/mod/tool-bridge.md` |
-| serve / lanes / CLI / identity | `openwiki/contracts/host/serve.md`, `openwiki/contracts/host/lanes.md`, `openwiki/contracts/host/cli-daemon.md`, `openwiki/contracts/mod/identity.md` |
-| Kernel semantics / storage surface | `openwiki/contracts/kernel/state-machine.md`, `openwiki/contracts/kernel/events.md`, `openwiki/contracts/kernel/state-surface.md`, `openwiki/contracts/kernel/wire-protocol.md` |
-| Game-side mods / runtime faces | `openwiki/contracts/mod/action-faces.md` |
-| Capability carrier (kernel vs package) | `openwiki/contracts/packages/README.md` |
+| Entry — whole tree / time point → page | `openwiki/overview.md`, `openwiki/quickstart.md` |
+| Contract tree / what a subsystem must not change | `openwiki/architecture/README.md` → `openwiki/contracts/**` |
+| World model, hash and replay | `openwiki/contracts/kernel/sim-kernel.md` |
+| Events, state surface, compaction | `openwiki/contracts/kernel/events.md`, `state-surface.md`, `compaction.md` |
+| Lua facade and protocol | `openwiki/contracts/kernel/lua-api.md`, `openwiki/contracts/kernel/wire-protocol.md` |
+| Capability carrier (kernel crate vs Lua package) | `openwiki/contracts/packages/README.md` |
 | Why a ruling exists / how to add one | the 「设计依据」 section of the page the ruling governs (`openwiki/governance.md`) |
-| Repository topology / walk-through | `openwiki/operating/cold-start/topology.md`, `openwiki/operating/story/run-story.md` |
 
-`openwiki/ver.json` is the single ver ledger (`scripts/wiki-ver.sh`); a page carries no `ver` line. Closure and
+`openwiki/ver.json` is the single ver ledger (`scripts/wiki-ver.sh`); a page carries no `ver` line. Closure, link and
 line-budget checks: `scripts/wiki-consistency.sh`.
 
 <!-- OPENWIKI:START -->
@@ -155,6 +110,5 @@ This repository has a generated `openwiki/` evidence index. It is optional just-
 - Treat source code and tests as authoritative. A brief's unknowns and review items are verification gaps, not automatic requirements.
 - Prefer the narrowest quiet validation that proves the changed behavior. Preserve complete failure output.
 
-Use the repository's documented maintenance process to refresh generated pages after source changes. Check its configuration and completed runs before relying on automatic updates. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
-
+Use the repository's documented maintenance process to refresh generated pages after source changes. Check its configuration and completed runs before relying on automatic updates. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and let OpenWiki regenerate.
 <!-- OPENWIKI:END -->

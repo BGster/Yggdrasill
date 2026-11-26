@@ -3,16 +3,6 @@
   "pageVersion": "sha256:bc21b45f877704a4c3f2d038abf04b9486e5950c2b996e48f7f73437221707b8",
   "claims": [
     {
-      "id": "claim_245fa140268944fdbfef191bf4c0ebd7",
-      "statement": "Session cleanup is declared through `settlement.sessions` with `moved|remaining|destination`; `remaining` must be 0 and `destination` non-empty, and a missing declaration keeps the run unsettled rather than counting as cleaned.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire/settlement.lua",
-          "version": "repo-file-v1:sha256:57b1456c18bf05ad44528847b7f7a1beb62a4e0b7bcd9f6dc13a9a475b22bee4"
-        }
-      ]
-    },
-    {
       "id": "claim_796d1c065c2a464ebe947a4c93755770",
       "statement": "Cleanup scope is strictly this run: sessions the run spawned are moved to a trash destination, a count of 0 moved is a legitimate honest result, and the main session and unrelated sessions must never be touched.",
       "evidence": [
@@ -33,23 +23,9 @@
       ]
     },
     {
-      "id": "claim_7eb45b13fe774739b297677e1836a32a",
-      "statement": "Uncleaned state is machine-blocking: `review.note` is refused while `[SESSIONS CLEANUP PENDING]` holds, so an undeclared cleanup blocks closing instead of being silently skipped.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/src/host_contract/settlement.rs",
-          "version": "repo-file-v1:sha256:4cd6d2a286f0753c9614f3bd50158575c5b717d81b624e46cc83c9e2f73bfa37"
-        }
-      ]
-    },
-    {
       "id": "claim_497c8c352f6143eb9141e7a2297aecd3",
       "statement": "Without egg the two cleanups are performed by the main session on its own discipline and recorded in the batch settlement; only the machine block disappears, never the policy.",
       "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire/settlement.lua",
-          "version": "repo-file-v1:sha256:57b1456c18bf05ad44528847b7f7a1beb62a4e0b7bcd9f6dc13a9a475b22bee4"
-        },
         {
           "resource": "repo://.pi/tools/sessions-count.sh",
           "version": "repo-file-v1:sha256:263c3a4f0a5f86d9e4a874bbd1594e597fd2cc910aad72ccbf35199d15061c9e"

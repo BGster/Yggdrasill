@@ -23,42 +23,12 @@
       ]
     },
     {
-      "id": "claim_2a4a452673094899bffab13bfa7db6fc",
-      "statement": "One process dispatches exactly one event (`--event`), and there is deliberately no `--events`, timeline replay script or settlement loop: read the receipt, then decide.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/main.rs",
-          "version": "repo-file-v1:sha256:9f43cb524964c329c11c2b30156979adae8c581086671acae53e44a59bd91c6d"
-        }
-      ]
-    },
-    {
-      "id": "claim_5221187110204b3d8427372c06304f87",
-      "statement": "`egg serve` starts on 127.0.0.1:7800 with an empty root registry, accepts roots via `POST /api/roots`, and is observation only — never a write channel into run state.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/serve/roots.rs",
-          "version": "repo-file-v1:sha256:6358e0167babc774f39aa14ec284a4eba677af3f815eb72e21cda8ffb067e63b"
-        }
-      ]
-    },
-    {
-      "id": "claim_5dd13c666e7341efbce69e68273f3cf4",
-      "statement": "The harness rules and all receipt copy live in `.ygg/mods/agent-seed/`, whose `pack.json` declares the config, texts and tool faces the host loads.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/pack.json",
-          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
-        }
-      ]
-    },
-    {
       "id": "claim_7287ff4f265d409891227e1c79b32d2a",
       "statement": "The workspace map is the eight `ygg-*` crates plus the Lua packages, the agent-seed mod, the schema files and the run directory — the page map groups those same things as contracts and operating pages.",
       "evidence": [
         {
           "resource": "repo://Cargo.toml",
-          "version": "repo-file-v1:sha256:7ce7b9f3cea20c4ffc523a058abb4f0904e1e1fa754b1e18e28ab05c2c9b9683"
+          "version": "repo-file-v1:sha256:4a9af022c1a6af0882bce191c293c49ec3d297ee35964f347de73d702fa6a260"
         }
       ]
     }

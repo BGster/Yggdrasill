@@ -3,66 +3,12 @@
   "pageVersion": "sha256:a111eb3c54abec4d634a53ed707153037201f33c37e5c1f3688ae0195344ab08",
   "claims": [
     {
-      "id": "claim_07e5ccaff6f04c03a9da175c18822482",
-      "statement": "文案全部存在 `data/texts/` 片段（418 个 beats 键 + core 的 options/tuning/endings 36 键 = 454 个唯一键），由 `mod.lua` 装配回 TEXTS；宿主零改动。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
-          "version": "repo-file-v1:sha256:032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
-        },
-        {
-          "resource": "repo://.ygg/mods/agent-seed/mod.lua",
-          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
-        }
-      ]
-    },
-    {
-      "id": "claim_4f0e6c6c172b4f12b257f9c3be9f1f79",
-      "statement": "`beats-requirements.json` 承载需求族 144 个键（派发 / 提案 / 门禁 / 打回 / 依赖校验 / 九幕行文），`beats-settlement.json` 承载盘点、批结算、退役与 tools 机证 54 键。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-requirements.json",
-          "version": "repo-file-v1:sha256:c387347f689ce14871bf90b877f7f7315e77348d35aad8966ff42b1858aea35f"
-        }
-      ]
-    },
-    {
-      "id": "claim_7de0e498404d4cdfb3b2a1a01f6961fb",
-      "statement": "闭环纪律：handler / view 代码引用的文案键必须是静态文案表中的子集；动态拼接键（`<phase>_common`、`map_note_*`、`*_misplaced`）按拼接与数据链核销。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/view/guide.lua",
-          "version": "repo-file-v1:sha256:2082ef1b572723ef5cfb1f9a74825f4edab7d3e7c593ae716ad198404a65f5af"
-        }
-      ]
-    },
-    {
       "id": "claim_c0a0c6000ecd491ba46e57400105d00c",
       "statement": "幕台词收缩为「状态前缀 + 权威文档指针」，`scenes.*` 值尾带脚本生成的 `[READ FIRST]` 必读块（`scripts/gen-scene-readfirst.py`），不是手写。",
       "evidence": [
         {
           "resource": "repo://scripts/gen-scene-readfirst.py",
           "version": "repo-file-v1:sha256:c4cb14b5c78fc91632cfc0c78e8357d9079c55447c2e403650441899477712fc"
-        }
-      ]
-    },
-    {
-      "id": "claim_efd6486dd8cf404e986f09fbd51d767f",
-      "statement": "指针锚点存在性由 `selftest` 的 `narrative_pointer_anchors_exist_in_docs_context` 用例机器闭环，逐域键集由 `copy_contract_domain_fragments_cover_every_text_key` 闭环；缺键、死链或计数漂移不得验收。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/tests/surface.lua",
-          "version": "repo-file-v1:sha256:99f199fc31200d24a63c8f379c6de082c7033a17cfe8907afd9ff125ff47dd30"
-        }
-      ]
-    },
-    {
-      "id": "claim_5145ff9879c144adbf4e60d7e7a9c2a3",
-      "statement": "配置面板、身份注册、工具桥提示与 `subagent_submit_cmd` 模板归 `beats-harness.json`（83 键）；派发仪式 3 键与清理政策 2 键只保留事实头 + 指针。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-harness.json",
-          "version": "repo-file-v1:sha256:f4668324db3f7a38379a970e57e48cfa83be2530a7a9a56a9502f57322144aed"
         }
       ]
     }

@@ -71,16 +71,6 @@
           "version": "repo-file-v1:sha256:b9e3d8d734c3af807b6aea5ff338a374d3e4c0af972914050186e20e82bb9b9e"
         }
       ]
-    },
-    {
-      "id": "claim_6a24652ef7684ca59b720266c87da376",
-      "statement": "The host-facing entity face is exactly `exists` and `destroy` plus the six structural keys, matching the kernel's eight-key `entity_table`; query results are validated against the contract cases rather than against prose.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/tests/host_contract/entity_face.rs",
-          "version": "repo-file-v1:sha256:67ad298335788a98d67adb44e5dc372e381fe53e28e5065ce82956122c5a082b"
-        }
-      ]
     }
   ],
   "verification": {

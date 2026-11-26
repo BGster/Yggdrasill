@@ -1,68 +1,7 @@
 {
   "schemaVersion": 1,
   "pageVersion": "sha256:6eb0f3d67d8fa03509908ecfea2a568086d9411703fa377aceb499f2ac1c5d96",
-  "claims": [
-    {
-      "id": "claim_6521d2de05384c94b8aa4403ab28c3ae",
-      "statement": "The system has three bounded layers — Layer 2 the harness/presentation shell, Layer 1 the mod package, Layer 0 the deterministic kernel, sandbox and store — and the only downward channel is Layer 1 emitting a self-contained `HarnessAction` that Layer 0 executes inline.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/src/host_contract/agent.rs",
-          "version": "repo-file-v1:sha256:7ec3f76b35f0ace53ada339cabe4173b2533ae6e1498f1d45af65395ad8560cf"
-        }
-      ]
-    },
-    {
-      "id": "claim_6daaddf5e6114926858ed6b1baebd975",
-      "statement": "Because the mod ships a brief plus a submit command as plain data in `meta.summary`, any coding-agent host can drive the harness at whatever tier it supports; nothing in the mod hard-codes a specific dispatcher.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/src/playtest.rs",
-          "version": "repo-file-v1:sha256:dd007ab84f17618578a7db3d71d69d5e106ba0459c5c585f7eb15c72f19d10de"
-        }
-      ]
-    },
-    {
-      "id": "claim_cbb0f42b8421478d9dc30e3679913ed1",
-      "statement": "The adapter contract is asserted, not merely documented: a dispatch whose prompt lacks the line-anchored `Mandatory references:` and `Submit:` lines is reported as `[ADAPTER CONTRACT]` and the job is not spawned.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/src/host_contract/settlement.rs",
-          "version": "repo-file-v1:sha256:4cd6d2a286f0753c9614f3bd50158575c5b717d81b624e46cc83c9e2f73bfa37"
-        }
-      ]
-    },
-    {
-      "id": "claim_b730211483284e56bc22e4809e2958da",
-      "statement": "The two anchors must be line-start prefixes rather than substring tests, because `job.description` is multi-line prose in which the literal words `Mandatory references:` can occur — an `includes` check would be trivially bypassed.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/verify.rs",
-          "version": "repo-file-v1:sha256:41383259bedbcb8999bfc1cd0a6b4debea53c2a0e72ca10bcbbaceee8b232804"
-        }
-      ]
-    },
-    {
-      "id": "claim_e681446ef05043c08f5aeec350cbb151",
-      "statement": "Every dispatched brief must be persisted byte-for-byte at `artifacts/<rN>-<stage>-brief.md`; a refusal surfaces as `[BRIEF REFUSED]` in the receipt and counts toward `degraded`.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/readset.lua",
-          "version": "repo-file-v1:sha256:df76356f64895385ef32e93f53b138a0e95e0885f371388b99f2ff5f95a7e860"
-        }
-      ]
-    },
-    {
-      "id": "claim_6ccb58ae82f3425ba05ce465504df139",
-      "statement": "A brief closes with a resume-handover section so the next executor — possibly another harness or context window — knows why the previous one stopped; the equivalent of `resume` is the artifact plus its gate evidence.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/readsig.lua",
-          "version": "repo-file-v1:sha256:9237f057c27b24313b3eb14034fee45f274563ff16ecb1b7de50c187e062aea9"
-        }
-      ]
-    }
-  ],
+  "claims": [],
   "verification": {
     "by": "openwiki/0.9.0",
     "at": "2026-11-26T05:58:54.950Z"

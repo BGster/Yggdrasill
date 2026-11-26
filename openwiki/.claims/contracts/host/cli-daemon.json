@@ -3,80 +3,16 @@
   "pageVersion": "sha256:a99a03393a72408a6b21e3bafc4781b5c31cd13e1e95ea8fc536d7e45661e648",
   "claims": [
     {
-      "id": "claim_19ec883a4aad40498c936c19902bc292",
-      "statement": "单发回执的渲染形态按 `--raw` > 环境变量 `YGG_FORMAT`（text|json）> 缺省 text 的链解析；`--raw` 输出与历史缺省逐字节一致的单行 JSON。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/args.rs#L300-L320",
-          "version": "repo-file-v1:sha256:1590f0c1dcc84bd424dda16cbfff109f75f77098af6d2245e6ad33ca7fdd8e50"
-        },
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/args.rs#L55-L60",
-          "version": "repo-file-v1:sha256:1590f0c1dcc84bd424dda16cbfff109f75f77098af6d2245e6ad33ca7fdd8e50"
-        }
-      ]
-    },
-    {
-      "id": "claim_e394d80d5f6042dbb43bfe15035b3d49",
-      "statement": "派发未在 Mod registry 注册的事件时，在零副作用前提下拒绝（不进回放日志、不动状态基线），回执 `ok:false`、`error.code=VALIDATION`、退出码 1。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/single_shot.rs",
-          "version": "repo-file-v1:sha256:4268dcbbb741c8cc3b87aa42d5686105ee4692baaa1b96d485a4063a1ec1d6d8"
-        }
-      ]
-    },
-    {
       "id": "claim_bf41a105b6af4e83b9ff51bfd91dc7b2",
       "statement": "默认 build 启用 `store-sqlite`，`run.json` 的 `store` 一旦写入即权威，`--store` 只是开局断言；不匹配时 fail-closed 且零写入。",
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/Cargo.toml",
-          "version": "repo-file-v1:sha256:c2c3218b039e3d43af621c14c530e327f828a5b220f39399000e2515c44e9df7"
+          "version": "repo-file-v1:sha256:445b0cda91184c198433cc4ebdc48e73dd94f62736eea975dd914bdd2374f85f"
         },
         {
           "resource": "repo://crates/ygg-store/src/lib.rs",
-          "version": "repo-file-v1:sha256:f0b65e9853e903812a383c624a7d685a7ce9d579541fdf121047e38a09a493bb"
-        }
-      ]
-    },
-    {
-      "id": "claim_b0306642fe0340d4bd4adbfb43fd7d47",
-      "statement": "daemon 模式是行分隔 JSON-RPC：stdin 每行一个请求，stdout 每行一个响应，支持 ping/summary/dispatch/vfs_put/vfs_get/vfs_list/settle/shutdown 八个 op。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/daemon.rs",
-          "version": "repo-file-v1:sha256:71645874e3297443a4b14e6cd62f47579769e1da160fb8301064510a4099ce18"
-        }
-      ]
-    },
-    {
-      "id": "claim_84d14b67a72b4eb28af1e2fb0af27f8c",
-      "statement": "跨进程写操作由 `coordination.lock` + `coordination.json` 的 phase（running/closing/finalized）协议保护：closing 中写命令退出码 3，finalized 拒绝并要求新局，心跳过期后可被接管以从崩溃恢复。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/coordination.rs",
-          "version": "repo-file-v1:sha256:31af92f095595a3c2ade01157a1a522190f870fede07fc9de15b8c26853e88a1"
-        }
-      ]
-    },
-    {
-      "id": "claim_3cfcd12e6b29443e827f7651335f1d76",
-      "statement": "`--drive cmd:<path>` 的决策命令只有一行输出（选项序号或 `HUMAN[:reason]`），超时/非零退出/非法输出/越界索引全部 fail-closed 安全暂停且状态不变。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/drive.rs",
-          "version": "repo-file-v1:sha256:f0b926a44438370550abdd441d941a9ddd18eb5ed35152d42151ad6262fbb417"
-        }
-      ]
-    },
-    {
-      "id": "claim_7083ac92894e4272af3a458ebc523fa9",
-      "statement": "`MountStore::attach` 实现挂载三态幂等：不存在则建、已存在且与声明一致则静默通过、不一致则 `YGG-FS-MOUNT` 硬拒且零写入。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-store/src/mounts/store.rs#L47-L90",
-          "version": "repo-file-v1:sha256:87cea2bb40e8cd9a90877fb219cb8537be4d23f1c1cb3175a8070a7977b09f66"
+          "version": "repo-file-v1:sha256:53dc4ab9bc7c54a034bbdfe821074a2c1a21b468c2518a39903ea120c20e0012"
         }
       ]
     }

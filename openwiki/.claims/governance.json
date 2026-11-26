@@ -3,16 +3,6 @@
   "pageVersion": "sha256:767e17821bbdac226da0f8e850678fc9c2d8e15e0154472c8cd5546b0991b470",
   "claims": [
     {
-      "id": "claim_d8d9beb30ebb4dcabba4a47d711ce95c",
-      "statement": "A refreshed page has one text authority: whatever a receipt or beat renders is a projection of mod text, so editing the page and the mod text independently creates two writers of one sentence.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
-          "version": "repo-file-v1:sha256:032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
-        }
-      ]
-    },
-    {
       "id": "claim_73c7be986ad5425c95afc8bec2638a58",
       "statement": "The ver is a version fingerprint, not an integrity proof: it blanks the token and hashes the rest, so a 6-hex prefix detects change but never proves the reader read the body.",
       "evidence": [
@@ -23,62 +13,12 @@
       ]
     },
     {
-      "id": "claim_a0d0be1634c143db96f762fbdedcdd3e",
-      "statement": "Signature enforcement has four dimensions — coverage, freshness, forgetting, per-person — and dropping any one makes the gate decorative.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/readsig.lua",
-          "version": "repo-file-v1:sha256:9237f057c27b24313b3eb14034fee45f274563ff16ecb1b7de50c187e062aea9"
-        }
-      ]
-    },
-    {
-      "id": "claim_67199fb04ef54ba895e7188a9a780a04",
-      "statement": "The read gate is embedded state (`readGate.window`, default 80 dispatches), not policy read from disk, because the mod has no IO: the ledger records the ver, the window counts the distance, and only a full body read resets it.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
-          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
-        }
-      ]
-    },
-    {
       "id": "claim_fac0e6f73f8d4b3ca71a7948cbbe52f9",
       "statement": "The cold-start surface has a hard line budget reported on every run — `agents=<current>/500` today, 160 after the cutover — because an auto-injected surface that grows dilutes every constraint it carries.",
       "evidence": [
         {
           "resource": "repo://scripts/wiki-consistency.sh",
           "version": "repo-file-v1:sha256:576d6d8d7378ceaa9788ed455217c7465a3556edea1fce36797be6b71927a583"
-        }
-      ]
-    },
-    {
-      "id": "claim_a44dcce0aee04e6597700c9b43aa352e",
-      "statement": "Batch settlement sets `docs.maintenance.due=<batch>` inside the same handler transaction as the settled marker, and the next `coordinate.submit` refuses until the obligation is cleared with the equal batch id.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/review.lua",
-          "version": "repo-file-v1:sha256:f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
-        }
-      ]
-    },
-    {
-      "id": "claim_cac2eeb7cff64b36b2c74f1c8abca892",
-      "statement": "Clearing the obligation is `config.set docs.maintenance.done=<batch>`, and only an equal batch id clears it — an older id cannot, and an empty value is an explicit waiver the writer carries.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/system/config.lua",
-          "version": "repo-file-v1:sha256:e80f0c83d14a339f02f6a5ff690055a9d0e8f9ee348317590f98b4dc6392eacf"
-        }
-      ]
-    },
-    {
-      "id": "claim_2fc84141567141b08f3e0a6fa14cafde",
-      "statement": "`governance` is registered in the `reference` block of the scene table, not in any readPlan, so the rule about how to sign never needs a signature to be read.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
-          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
         }
       ]
     }

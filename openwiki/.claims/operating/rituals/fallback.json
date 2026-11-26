@@ -11,36 +11,6 @@
           "version": "repo-file-v1:sha256:c4cb14b5c78fc91632cfc0c78e8357d9079c55447c2e403650441899477712fc"
         }
       ]
-    },
-    {
-      "id": "claim_410f3d612e844e478a6fdcfcd014c47c",
-      "statement": "Gate enforcement is machine fail-closed only when the mod runs; without egg the same gate semantics must be applied by the main session and checked by the reviewer against the same list, never silently relaxed.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
-          "version": "repo-file-v1:sha256:c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
-        }
-      ]
-    },
-    {
-      "id": "claim_e19edeca9ef3472c9fc4294476f92ded",
-      "statement": "What degrades is the tool, not the discipline: the dispatch → proposal → two gates → batch settlement order and the per-step evidence standard survive unchanged when the harness is absent.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/src/host_contract/settlement.rs",
-          "version": "repo-file-v1:sha256:4cd6d2a286f0753c9614f3bd50158575c5b717d81b624e46cc83c9e2f73bfa37"
-        }
-      ]
-    },
-    {
-      "id": "claim_89936fb35da74ca5a7ef1d2d945ee788",
-      "statement": "A resumed or handed-over stage gets one `Resume context:` line naming the prior executor; it is a context hint only and does not change accountability, which stays with the executor ledger.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-harness.json",
-          "version": "repo-file-v1:sha256:f4668324db3f7a38379a970e57e48cfa83be2530a7a9a56a9502f57322144aed"
-        }
-      ]
     }
   ],
   "verification": {

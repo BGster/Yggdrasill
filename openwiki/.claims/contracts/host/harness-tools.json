@@ -47,30 +47,6 @@
       ]
     },
     {
-      "id": "claim_ce156356bea3432c97e6f7021f49bf63",
-      "statement": "三层参数来源中 argv 是唯一跨层事实：L1 mod handler 从局 KV `settings.tools.*` 拼 argv，L2 宿主 tool 桥只认 argv，L3 无 egg 环境按文档参数约定直接拼命令行。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
-          "version": "repo-file-v1:sha256:d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
-        },
-        {
-          "resource": "repo://.ygg/mods/agent-seed/mod.lua",
-          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
-        }
-      ]
-    },
-    {
-      "id": "claim_5c5e417aed8d48b7b40c0d57d6c75e3c",
-      "statement": "结算 cross-check 在 apply 前同步调 harness 工具：机证与人证矛盾即 reject_payload 零状态写入；未注册或脚本不可执行时回退人证旧路径而不拒绝结算；机证不高于人证。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire/settlement.lua",
-          "version": "repo-file-v1:sha256:57b1456c18bf05ad44528847b7f7a1beb62a4e0b7bcd9f6dc13a9a475b22bee4"
-        }
-      ]
-    },
-    {
       "id": "claim_0a9b368b072040d8897787f0867e2456",
       "statement": "跨 harness 冻结面 = 脚本名 + argv 旗标表 + 输出方言 + exit 码表 + 注册键名 + 参数约定；演进只增不改名。本次知识面迁移把这两个文档工具改名为 `wiki-consistency.sh` / `scripts/wiki-ver.sh`，索引改读 `openwiki/overview.md`、版本改读 `openwiki/ver.json`。",
       "evidence": [

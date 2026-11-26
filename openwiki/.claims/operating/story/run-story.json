@@ -1,68 +1,7 @@
 {
   "schemaVersion": 1,
   "pageVersion": "sha256:a347eb014333aa166fcb9fabf0b8a2532d13e90b01be1d6cb018eaa6493067cd",
-  "claims": [
-    {
-      "id": "claim_1b6532a8c56b4a65949f134cc1623a8a",
-      "statement": "The run-level machine is five micro-states — 立局, 协调, 盘点, 发布, retired — and retires only on an armed `review.note`; every other transition is an effect-driven self-loop or a phase advance.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/runtime/flow.lua",
-          "version": "repo-file-v1:sha256:c4e68ff43a5da46bb48165396bb2a16621a7048321c690b140938cd862b1442a"
-        }
-      ]
-    },
-    {
-      "id": "claim_822cb413b69d432ca05b044b3fabd673",
-      "statement": "`charter.set` is available only while the charter phase is open and may be revised repeatedly; after `run.begin` it is refused readably, which is what locks the charter for the rest of the run.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/intake/charter.lua",
-          "version": "repo-file-v1:sha256:56b12aeed0960ad30686abe26fad60e77946df98ef4e6e20e6245bedae007acc"
-        }
-      ]
-    },
-    {
-      "id": "claim_cf474dea9a3445569f30048d64308912",
-      "statement": "`verify.submit(false)` returns the whole batch to coordination and clears the settlement and release keys, so rework is a full re-pass rather than an in-place reversal.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
-          "version": "repo-file-v1:sha256:c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
-        }
-      ]
-    },
-    {
-      "id": "claim_40255b1ee81f40d3b9c4bb75f8a96cb2",
-      "statement": "Once the four settlement steps are complete the run enters release by effect, without a new event, and `review.note` requires a release declaration first — a confirmed merge or an explicit skip reason.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/release.lua",
-          "version": "repo-file-v1:sha256:f6f79e07101987e574888d8e85e83adaec7fa2c45b992ee87115938cb0ea02e6"
-        }
-      ]
-    },
-    {
-      "id": "claim_3d8c317e183442e9974e23f1a1f80222",
-      "statement": "An unarmed `review.note` settles the batch — clearing the release keys and incrementing the batch counter — while an armed one retires the run; the two endings are distinguished by the `run.retire` flag, not by wording.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/review.lua",
-          "version": "repo-file-v1:sha256:f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
-        }
-      ]
-    },
-    {
-      "id": "claim_2fbe82614b22458eaed2b053b3bb0df2",
-      "statement": "Batch settlement registers `docs.maintenance.due=<batch>` in the same handler transaction and creates no requirement row; the obligation closes only by `config.set docs.maintenance.done=<batch>` or the next `coordinate.submit` blocks.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/review.lua",
-          "version": "repo-file-v1:sha256:f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
-        }
-      ]
-    }
-  ],
+  "claims": [],
   "verification": {
     "by": "openwiki/0.9.0",
     "at": "2026-11-26T05:58:54.950Z"

@@ -50,11 +50,11 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/pkg-selftest/mod.lua",
-          "version": "repo-file-v1:sha256:7103b2c248abcf636483819d30dca262da2c335a9f5d3dd59fd72b6fc7ebd2f2"
+          "version": "repo-file-v1:sha256:9191be1418fb0e9ad04299996f57274fb9a3a483a045435daf8d44c9d3b1e384"
         },
         {
           "resource": "repo://packages/mods/pkg-selftest/pack.json",
-          "version": "repo-file-v1:sha256:5c9d21b750324699a1bef03f6b5bd11564359d29ec69cb8a5d04f53d82749070"
+          "version": "repo-file-v1:sha256:1cb510e54ae9b9be810b08f8a9d1e0b5daf5f8bd9347d8454cb18da49bc21e41"
         }
       ]
     },
@@ -64,7 +64,7 @@
       "evidence": [
         {
           "resource": "repo://packages/mods/pkg-selftest/mod.lua",
-          "version": "repo-file-v1:sha256:7103b2c248abcf636483819d30dca262da2c335a9f5d3dd59fd72b6fc7ebd2f2"
+          "version": "repo-file-v1:sha256:9191be1418fb0e9ad04299996f57274fb9a3a483a045435daf8d44c9d3b1e384"
         }
       ]
     },
@@ -83,20 +83,6 @@
       ]
     },
     {
-      "id": "claim_c0441245728e4812ac4b713186049e33",
-      "statement": "依赖图是数据形状依赖：`textframe` 零入边零出边（孤点，有意）；`assetgen` 只用 `procgen` 的 rng 面（不调 `define`/`run`/`hash`），`procgen` 只借 codec 的确定性编码口径。",
-      "evidence": [
-        {
-          "resource": "repo://packages/libs/assetgen/pkg.json",
-          "version": "repo-file-v1:sha256:3a5d545104906bcf6b1e08fa44e13ce442ae3714b4a29f6b8b90624d34a67a11"
-        },
-        {
-          "resource": "repo://packages/libs/textframe/pkg.json",
-          "version": "repo-file-v1:sha256:7f4eb2916fa368cd07319997617c231bad7fcd9961aba53431c35e4e152087b9"
-        }
-      ]
-    },
-    {
       "id": "claim_9f5ec219d0cb429d8d1d95eeb7e51005",
       "statement": "manifest 门禁：`pack` example 要求资源包 `entries` 非空（夹具靠 `data/probe.json` 满足），重算后 `manifest-verify.sh --mod <mod>` 复核 `pkg_drift=0`，两份清单偏移不会静默通过。",
       "evidence": [
@@ -106,7 +92,7 @@
         },
         {
           "resource": "repo://crates/ygg-sandbox/examples/pack.rs",
-          "version": "repo-file-v1:sha256:af3c2bf4c932ff38eb7d78e5f9cbaa61d83593039ef3b37d81d81ad24c1b77be"
+          "version": "repo-file-v1:sha256:c91291a9b6a6df45abf9477d96bb29462d1cf298e73f9aff48385f58708c0d6c"
         }
       ]
     }

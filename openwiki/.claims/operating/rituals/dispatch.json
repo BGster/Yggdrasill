@@ -33,36 +33,6 @@
       ]
     },
     {
-      "id": "claim_7746029f38984bd485132b02b7982cbd",
-      "statement": "The executor ledger is a self-declared audit trail, not an identity check: `proposal.submit` does not consult it, an unregistered id only shows as unregistered in `requirement.list`, and a handover must carry `<id>|<reason>`.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/executor.lua",
-          "version": "repo-file-v1:sha256:892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
-        }
-      ]
-    },
-    {
-      "id": "claim_ab2524fc99224731b4b6cabcf17821f0",
-      "statement": "The brief text emitted at runtime is a projection: the fact head keeps state variables while the policy body is a pointer to the operating page, so the page stays the single authority and the JSON never restates the rules.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/data/texts/beats-harness.json",
-          "version": "repo-file-v1:sha256:f4668324db3f7a38379a970e57e48cfa83be2530a7a9a56a9502f57322144aed"
-        }
-      ]
-    },
-    {
-      "id": "claim_f01c92264d40425bb14a794537917651",
-      "statement": "A negative or quantitative claim is only evidence when a method that could have returned the opposite produced it: `command -v` proves a missing PATH command, while `ls scripts/*lint*` can never prove a missing cargo crate.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/review.lua",
-          "version": "repo-file-v1:sha256:f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
-        }
-      ]
-    },
-    {
       "id": "claim_3d24f3bda7d34620bccb7c3d32d20cf2",
       "statement": "Each subagent task runs in the background and the main session does not wait on it; a synchronous wait is allowed only when the next action strictly depends on the result and nothing else can be advanced.",
       "evidence": [

@@ -55,16 +55,6 @@
           "version": "repo-file-v1:sha256:8bdaef5df9bc8921dd7b34877958e31bef196bc98ac1a80c64e3f396ba59123a"
         }
       ]
-    },
-    {
-      "id": "claim_8dee7f00997646248fd64637750b4988",
-      "statement": "Mod 的 registry 声明了剧情/操作/基础设施三类事件（含 `ygg.narrative.goto` 渲染事件）；运行期 registry 是 fail-closed 的运行时唯一事实。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/mod.lua",
-          "version": "repo-file-v1:sha256:ac1589e0f5c4812e05d439b897a85b391d36feb6973dbb0bc33eee0c067c03cf"
-        }
-      ]
     }
   ],
   "verification": {

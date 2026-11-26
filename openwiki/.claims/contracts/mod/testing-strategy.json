@@ -7,12 +7,8 @@
       "statement": "agent-seed 的行为用例住在 `.ygg/mods/agent-seed/tests/*.lua`（随 Mod 版本化），由 `examples/selftest.rs` 以普通 Lua（非沙箱）执行，`tests/harness.lua` 提供 mock `ygg` 面，`fire(event,payload)` 直接调 handler。",
       "evidence": [
         {
-          "resource": "repo://.ygg/mods/agent-seed/tests/harness.lua",
-          "version": "repo-file-v1:sha256:85a5f20d8c428316385436efabcf45f5dce2d077f7aba4e33e24f113e4066f0c"
-        },
-        {
           "resource": "repo://crates/ygg-sandbox/examples/selftest.rs",
-          "version": "repo-file-v1:sha256:1e5b3e4ad932cbaedeae6d80f972fb5c88ddb292e57510d2fc9d05d5bbe99ccb"
+          "version": "repo-file-v1:sha256:65d5a2c615278dda1f98270356244bab833145e2516f150ab7341b7226e3a78a"
         }
       ]
     },
@@ -22,37 +18,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/examples/selftest.rs",
-          "version": "repo-file-v1:sha256:1e5b3e4ad932cbaedeae6d80f972fb5c88ddb292e57510d2fc9d05d5bbe99ccb"
-        }
-      ]
-    },
-    {
-      "id": "claim_f3291a84a41245a1a7c6c4bd258ef953",
-      "statement": "Rust 侧只留一个门禁薄壳 `tests/agent_seed_semantics.rs`：不重复行为断言，只断言 Lua 套件仍存在且非空；宿主门禁命令与它同包同名。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/tests/agent_seed_semantics.rs",
-          "version": "repo-file-v1:sha256:8e68e11fca27b592554ff54cf2d48026baae95df9be2ae052fea0e4e5db2b5d5"
-        }
-      ]
-    },
-    {
-      "id": "claim_98f34f4e71d1417c86cf366595ecbec9",
-      "statement": "宿主三套门禁的第三条被硬编码为 `cargo test -p ygg-sandbox --test agent_seed_semantics`，所以门禁薄壳必须保留且名字不可改。",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/verify.rs",
-          "version": "repo-file-v1:sha256:41383259bedbcb8999bfc1cd0a6b4debea53c2a0e72ca10bcbbaceee8b232804"
-        }
-      ]
-    },
-    {
-      "id": "claim_948ffdcccc8444e7957a08a310ce5a04",
-      "statement": "白盒边界：`fire()` 不经 driver 的 FIFO / 事务 / `ygg.choice` 哨兵，所以断言对象是 handler 与 effect 的行为；用例以 `fresh()` 重置，断言 KV 终态优先于叙述文本。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/tests/gates.lua",
-          "version": "repo-file-v1:sha256:76ed57d05efe3af440a596b4985697796dbd3e5311a602905a3adbeb50fda961"
+          "version": "repo-file-v1:sha256:65d5a2c615278dda1f98270356244bab833145e2516f150ab7341b7226e3a78a"
         }
       ]
     },
@@ -63,16 +29,6 @@
         {
           "resource": "repo://packages/libs/entity/test/pkg-entity-paths.lua",
           "version": "repo-file-v1:sha256:6e268f580c4534b4a0df79747a163cfdfbf9a1a708caa840121f06b91bbd5575"
-        }
-      ]
-    },
-    {
-      "id": "claim_d4825b3417194e2696cd3c44aad93309",
-      "statement": "`--fixture <tag>` 由宿主复制 mod 到临时目录并改写 `data/config.json`，一次只跑一个 tag，「全绿」= 无 fixture 一次 + bare/armed/plan2/inert/nostrict 各一次。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/tests/fixtures.lua",
-          "version": "repo-file-v1:sha256:ad7b70199ca44c7270d8d57119170e3cff7f90fa8143c53d928ffcbb56553576"
         }
       ]
     }

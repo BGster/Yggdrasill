@@ -1,76 +1,7 @@
 {
   "schemaVersion": 1,
   "pageVersion": "sha256:b1e190505445d2405aea5d98447137a14379ab78434b0b079647783bb8257cbc",
-  "claims": [
-    {
-      "id": "claim_c452164178cb4d7c941d667f622f1bf7",
-      "statement": "认领（worktree-claim）分配 `<pool-root>/<repo>-lane-<k>` 并在目录已存在时原地复用，执行 `checkout --force -B` + `reset --hard` + `clean -fd`（不带 `-x`）；释放（worktree-release）停放为 detached 且不删目录与构建缓存。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/lanes.lua",
-          "version": "repo-file-v1:sha256:4e18502d655d90dbb2bc784176320ba27b9b538fae0b2212b31433770ad3255c"
-        }
-      ]
-    },
-    {
-      "id": "claim_321e824e54704be8a5f69c87d1481bdd",
-      "statement": "台账以池为一级键：默认池沿用旧键 `lane.<k>.*`（字节级兼容），具名池为 `lane.<label>.<k>.*`，label 形状 `^[a-z][a-z0-9-]{0,23}$`，并行度按池计，自动派活只从默认池取道。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/lanes.lua",
-          "version": "repo-file-v1:sha256:4e18502d655d90dbb2bc784176320ba27b9b538fae0b2212b31433770ad3255c"
-        }
-      ]
-    },
-    {
-      "id": "claim_568c3cbfcc24400f890f6f3093bfaa58",
-      "statement": "泳道分支必须满足 `feature/{4位uuid}-{语义词段}`（小写 4 位 uuid + ≥3 连续字母、非纯数字、总长 ≤48）；lane.claim 与 git.worktree_claim 两条入口同规则，未自报名即拒绝，不生成默认名。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/lanes.lua",
-          "version": "repo-file-v1:sha256:4e18502d655d90dbb2bc784176320ba27b9b538fae0b2212b31433770ad3255c"
-        },
-        {
-          "resource": "repo://.ygg/mods/agent-seed/tests/lanes.lua",
-          "version": "repo-file-v1:sha256:b6eb4249833ad85a73762b08eae6a1f2c9bb4cd14a43a5f0f523bfdb43ad2d75"
-        }
-      ]
-    },
-    {
-      "id": "claim_6b7e709f258f4b2f82c1f03e5106a0c0",
-      "statement": "泳道在「待开发 → 开发中」认领，保持到集成 confirm/reject、验收门禁 reject、交付受理 reject 或 done 才释放；交付受理→验收门禁→集成三幕期间不释放。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/lanes.lua",
-          "version": "repo-file-v1:sha256:4e18502d655d90dbb2bc784176320ba27b9b538fae0b2212b31433770ad3255c"
-        }
-      ]
-    },
-    {
-      "id": "claim_6076226b74dd4ad7970962f4b830c476",
-      "statement": "requirement.list 与 summary.jobs[] 每行需求投影 worktreeStatus / subagentStatus / probeStatus 三条实时状态串，取值域为 n/a、pending、ready/bound/dispatched/delivered/verified 形态。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/lanes.lua",
-          "version": "repo-file-v1:sha256:4e18502d655d90dbb2bc784176320ba27b9b538fae0b2212b31433770ad3255c"
-        },
-        {
-          "resource": "repo://.ygg/mods/agent-seed/tests/tools.lua",
-          "version": "repo-file-v1:sha256:36eeab68935fa388e204ae282de4091d3d7fff1e21854249b8e4ecf844e7a176"
-        }
-      ]
-    },
-    {
-      "id": "claim_19bbd8dd8d8e4f69863bf099ea50a3f0",
-      "statement": "工具桥分池三件（worktree_claim_pool / worktree_release_pool / lane_probe_pool）的池归属从请求快照 `tool.<id>.args` 的 repo 段反查，反查失败 fail-closed 拒绝且账本不动。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/lanes.lua",
-          "version": "repo-file-v1:sha256:4e18502d655d90dbb2bc784176320ba27b9b538fae0b2212b31433770ad3255c"
-        }
-      ]
-    }
-  ],
+  "claims": [],
   "verification": {
     "by": "openwiki/0.9.0",
     "at": "2026-11-26T05:58:54.950Z"

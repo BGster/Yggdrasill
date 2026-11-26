@@ -28,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/Cargo.toml",
-          "version": "repo-file-v1:sha256:c2c3218b039e3d43af621c14c530e327f828a5b220f39399000e2515c44e9df7"
+          "version": "repo-file-v1:sha256:445b0cda91184c198433cc4ebdc48e73dd94f62736eea975dd914bdd2374f85f"
         }
       ]
     },
@@ -49,26 +49,6 @@
         {
           "resource": "repo://packages/schema/schemas/manifest.json",
           "version": "repo-file-v1:sha256:fac476463ec0557c0113809aa6c9ada86f3228d67fcdbd8025214f22a168ffbd"
-        }
-      ]
-    },
-    {
-      "id": "claim_42defa4e9b1d432a9c9489a24e81a870",
-      "statement": "The canonical workflow mod lives physically only at `.ygg/mods/agent-seed`; `packages/mods/agent-seed` is a relative symbolic link to it, so a second physical copy under `packages/mods/` is a violation.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/pack.json",
-          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
-        }
-      ]
-    },
-    {
-      "id": "claim_725fedadbf894878a2d694d00d03cef4",
-      "statement": "The native host binary lives at `crates/ygg-sandbox/examples/egg/`, which is the only place where the store and its dev-dependencies are linked.",
-      "evidence": [
-        {
-          "resource": "repo://crates/ygg-sandbox/examples/egg/main.rs",
-          "version": "repo-file-v1:sha256:9f43cb524964c329c11c2b30156979adae8c581086671acae53e44a59bd91c6d"
         }
       ]
     }

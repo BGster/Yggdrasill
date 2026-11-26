@@ -1,58 +1,7 @@
 {
   "schemaVersion": 1,
   "pageVersion": "sha256:0f3451046fd657c3ff0113142a86756cbfeffbdc0250e5ad8e95151a705e2dbe",
-  "claims": [
-    {
-      "id": "claim_ceb66359d3ff43fcb25ff23947f647f0",
-      "statement": "A requirement is created with `requirement.add \"<title>|<description>\"` (optionally with an external idempotency id and a deps segment) and enters `draft`; dependencies and counts are rendered back in the `[REQ ADDED]` receipt.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
-          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
-        }
-      ]
-    },
-    {
-      "id": "claim_509cfed7b18742d594764f854bd35929",
-      "statement": "Dispatch is gated on dependencies being done and on a free job slot and lane; otherwise the receipt explains which of capacity, readiness or lane occupancy blocked it instead of silently no-opping.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/requirement_ops.lua",
-          "version": "repo-file-v1:sha256:e7e020d146871cc99d3807f9e1347c345799722d240741ecd8d0a42aedd958ca"
-        }
-      ]
-    },
-    {
-      "id": "claim_b290fad22e264880b29f7ad037b705c9",
-      "statement": "A submitted plan proposal needs no separate acceptance step: it escalates directly into the plan gate, which is why delivery counts as the gate.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/proposals.lua",
-          "version": "repo-file-v1:sha256:bc1968de25c6cd923a459414b7fcddc2db93c5040c4d4cb37aaa88a30ef7f408"
-        }
-      ]
-    },
-    {
-      "id": "claim_b6c32e5e35674c808a2312f5d1578e8a",
-      "statement": "Granularity is judged before creation: changes sharing one goal, one subsystem, or one plan and one acceptance evidence set must be merged; a new requirement whose description omits the non-mergeable reason is treated as mergeable.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
-          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
-        }
-      ]
-    },
-    {
-      "id": "claim_a9f6811c6e194d528e338785b3e68137",
-      "statement": "A newly made architectural decision takes no number and no ledger row: it is written into the decision table of the document that governs it in the same commit, and lanes editing the same decision merge in place on top of the existing paragraph.",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/gate_actions.lua",
-          "version": "repo-file-v1:sha256:57a7afcbd359ec03a13cd5ee177463c825fb987fac080e029b3efbb067bbd51e"
-        }
-      ]
-    }
-  ],
+  "claims": [],
   "verification": {
     "by": "openwiki/0.9.0",
     "at": "2026-11-26T05:58:54.950Z"

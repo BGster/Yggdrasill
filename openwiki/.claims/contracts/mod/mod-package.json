@@ -3,26 +3,12 @@
   "pageVersion": "sha256:166828e7944189b540ed443fea54c7d9ff27f4facb5d12bb94397a5c4eaa38cb",
   "claims": [
     {
-      "id": "claim_ff6b4b1d0fee4a2a961a8d6b14a9ca86",
-      "statement": "`pack.json` 的 `agent` 段八个必填字段（entryEvent / choiceEvent / summaryEvent / endingPrefix / metaKey / rejectionPrefixes / replayPrefix / defaultPayload）；缺段、缺字段、类型错或非正整数一律加载失败（fail-closed）。",
-      "evidence": [
-        {
-          "resource": "repo://.ygg/mods/agent-seed/pack.json",
-          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
-        }
-      ]
-    },
-    {
       "id": "claim_781d6a4579a94130aa014c649202e5c5",
       "statement": "`code.{entry,modules[]}` 显式枚举全部 Lua 模块，`entry` 不得出现在 `modules` 中；缺 `code` 段 = 单文件 Mod；每个模块 chunk 顶层由 `ygg_modules::effects` 强制为纯（顶层注册/写状态即 `YGG-MOD-EFFECT`）。",
       "evidence": [
         {
-          "resource": "repo://.ygg/mods/agent-seed/pack.json",
-          "version": "repo-file-v1:sha256:8a931da14a38aa7eb92d70abfa76d34ba6ed4d8255bdaa6b6805a8f4ccd81426"
-        },
-        {
           "resource": "repo://crates/ygg-sandbox/src/modload.rs",
-          "version": "repo-file-v1:sha256:2f56be31bfe2605a1a53eaed09b45539bb75442ab339bfe8f121812b9662e12e"
+          "version": "repo-file-v1:sha256:7592877e3d40399fa6d5967e4bcc225a364b192619cddf705625d97249390943"
         }
       ]
     },
@@ -32,17 +18,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/src/pack.rs",
-          "version": "repo-file-v1:sha256:e844db8d3f543a0c416ad26834f5ad55691dc0e0df829df0591cf25c6272553c"
-        }
-      ]
-    },
-    {
-      "id": "claim_c97a4df10771498faa44b7cf4e0c20ad",
-      "statement": "`.ygg/mods/agent-seed` 是唯一事实源，`packages/mods/agent-seed` 是指向它的相对软链；`sync-seed-mod.sh --check` 同时核验软链与 manifest 漂移，绕开单源在软链另一端独立修改属双源漂移、禁止验收。",
-      "evidence": [
-        {
-          "resource": "repo://scripts/sync-seed-mod.sh",
-          "version": "repo-file-v1:sha256:1b0b2ef079ec71ab3bf86e81e769f88e74e50da02fdf7dc29b06accaf56cfb8d"
+          "version": "repo-file-v1:sha256:3298b20968fa5c2eee90a34e07287a40d8a787a79d841eaec3c5bd421a8ff56f"
         }
       ]
     },
@@ -52,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/src/pack.rs",
-          "version": "repo-file-v1:sha256:e844db8d3f543a0c416ad26834f5ad55691dc0e0df829df0591cf25c6272553c"
+          "version": "repo-file-v1:sha256:3298b20968fa5c2eee90a34e07287a40d8a787a79d841eaec3c5bd421a8ff56f"
         }
       ]
     },
@@ -82,7 +58,7 @@
       "evidence": [
         {
           "resource": "repo://crates/ygg-sandbox/src/modload.rs",
-          "version": "repo-file-v1:sha256:2f56be31bfe2605a1a53eaed09b45539bb75442ab339bfe8f121812b9662e12e"
+          "version": "repo-file-v1:sha256:7592877e3d40399fa6d5967e4bcc225a364b192619cddf705625d97249390943"
         }
       ]
     }
