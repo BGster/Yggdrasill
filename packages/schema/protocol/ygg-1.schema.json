@@ -1,0 +1,370 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://yggdrasill.dev/schemas/protocol/ygg-1.json",
+    "title": "Yggdrasill ygg/1 wire protocol",
+    "description": "宿主与内核之间的消息联合。判别键 type（snake_case）；snapshot 的请求/回执靠内层 direction 判别。整数一律为 JSON integer——小数（含 1.0）不在本契约内，见 README 不变式 1。",
+    "oneOf": [
+        { "$ref": "#/$defs/hello" },
+        { "$ref": "#/$defs/ready" },
+        { "$ref": "#/$defs/open" },
+        { "$ref": "#/$defs/submit" },
+        { "$ref": "#/$defs/step" },
+        { "$ref": "#/$defs/events" },
+        { "$ref": "#/$defs/delta" },
+        { "$ref": "#/$defs/snapshot" },
+        { "$ref": "#/$defs/replay" },
+        { "$ref": "#/$defs/replayResult" },
+        { "$ref": "#/$defs/error" }
+    ],
+    "$defs": {
+        "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "u64": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "i64": { "type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807 },
+        "base64": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+            "description": "base64；协议层不解码，只搬运。长度是否是 4 的倍数由解码方判定。"
+        },
+        "componentName": { "type": "string" },
+        "entityId": { "$ref": "#/$defs/u64" },
+        "componentId": { "$ref": "#/$defs/u32" },
+        "tick": { "$ref": "#/$defs/u64" },
+        "hash": { "$ref": "#/$defs/u64" },
+
+        "componentKind": {
+            "type": "string",
+            "enum": ["number", "string", "boolean", "ref", "tag", "f64bits"],
+            "description": "与 ygg-sim 的 AttrType::label 逐字相同：宿主据它决定用哪种编码写值。"
+        },
+        "stage": {
+            "type": "string",
+            "enum": ["pre", "rules", "post"],
+            "description": "序即执行序：pre → rules → post。"
+        },
+        "logLevel": {
+            "type": "string",
+            "enum": ["debug", "info", "warn", "error"]
+        },
+        "errorCode": {
+            "type": "string",
+            "enum": ["E_PROTOCOL", "E_PACK", "E_BUDGET", "E_RULE", "E_STATE"]
+        },
+
+        "component": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "kind"],
+            "properties": {
+                "id": { "$ref": "#/$defs/componentId" },
+                "name": { "$ref": "#/$defs/componentName" },
+                "kind": { "$ref": "#/$defs/componentKind" }
+            }
+        },
+        "systemInfo": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "stage"],
+            "properties": {
+                "name": { "type": "string" },
+                "stage": { "$ref": "#/$defs/stage" }
+            }
+        },
+        "logLine": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["level", "text"],
+            "properties": {
+                "level": { "$ref": "#/$defs/logLevel" },
+                "text": { "type": "string" }
+            }
+        },
+        "protocolError": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "msg"],
+            "properties": {
+                "code": { "$ref": "#/$defs/errorCode" },
+                "msg": { "type": "string" }
+            }
+        },
+        "value": {
+            "description": "一格世界值。没有浮点变体（不变式 1）；四个变体按列宽分类，类型语义由 componentKind 补足。外部标签：一个键既是判别式又是载荷。",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["int"],
+                    "properties": { "int": { "$ref": "#/$defs/i64" } }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["uint"],
+                    "properties": { "uint": { "$ref": "#/$defs/u64" } }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["str"],
+                    "properties": { "str": { "type": "string" } }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["bool"],
+                    "properties": { "bool": { "type": "boolean" } }
+                }
+            ]
+        },
+        "componentValues": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cid", "values"],
+            "properties": {
+                "cid": { "$ref": "#/$defs/componentId" },
+                "values": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/value" },
+                    "description": "逐列值，列序 = 组件声明序；tag 组件为空数组。长度是否等于该组件的列数由内核判定（E_STATE）。"
+                }
+            }
+        },
+        "op": {
+            "description": "一条世界变更操作。判别键是 op（不是 type）：一个对象里只允许一条判别轴。",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["op", "n", "comps"],
+                    "properties": {
+                        "op": { "const": "spawn" },
+                        "n": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+                        "comps": { "type": "array", "items": { "$ref": "#/$defs/componentValues" } }
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["op", "ids"],
+                    "properties": {
+                        "op": { "const": "despawn" },
+                        "ids": { "type": "array", "items": { "$ref": "#/$defs/entityId" } }
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["op", "id", "comps"],
+                    "properties": {
+                        "op": { "const": "set" },
+                        "id": { "$ref": "#/$defs/entityId" },
+                        "comps": { "type": "array", "items": { "$ref": "#/$defs/componentValues" } }
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["op", "id", "comps"],
+                    "properties": {
+                        "op": { "const": "insert" },
+                        "id": { "$ref": "#/$defs/entityId" },
+                        "comps": { "type": "array", "items": { "$ref": "#/$defs/componentValues" } }
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["op", "id", "cids"],
+                    "properties": {
+                        "op": { "const": "remove" },
+                        "id": { "$ref": "#/$defs/entityId" },
+                        "cids": { "type": "array", "items": { "$ref": "#/$defs/componentId" } }
+                    }
+                }
+            ]
+        },
+        "changed": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["eid", "comps"],
+            "properties": {
+                "eid": { "$ref": "#/$defs/entityId" },
+                "comps": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/componentValues" },
+                    "description": "只列本步被写过的组件，不是全部组件。"
+                }
+            }
+        },
+        "frame": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tick", "dt", "ops", "hash"],
+            "properties": {
+                "tick": { "$ref": "#/$defs/tick" },
+                "dt": { "$ref": "#/$defs/u32" },
+                "ops": { "type": "array", "items": { "$ref": "#/$defs/op" } },
+                "hash": { "$ref": "#/$defs/hash" }
+            }
+        },
+        "logHeader": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["seed", "start_tick"],
+            "properties": {
+                "seed": { "$ref": "#/$defs/u64" },
+                "start_tick": {
+                    "$ref": "#/$defs/tick",
+                    "description": "回放起点：0 = 从创世，否则 = 快照所在 tick。"
+                }
+            }
+        },
+        "log": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["header", "frames"],
+            "properties": {
+                "header": { "$ref": "#/$defs/logHeader" },
+                "frames": { "type": "array", "items": { "$ref": "#/$defs/frame" } }
+            }
+        },
+
+        "hello": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "protocol", "codec", "pack_id", "pack_hash"],
+            "properties": {
+                "type": { "const": "hello" },
+                "protocol": { "const": "ygg/1" },
+                "codec": { "const": "json" },
+                "pack_id": { "type": "string" },
+                "pack_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "包内容摘要（与 manifest 的内容寻址同口径）。不符即拒：防 A 包存档进 B 包。"
+                }
+            }
+        },
+        "ready": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "tick", "hash", "sealed", "components", "systems"],
+            "properties": {
+                "type": { "const": "ready" },
+                "tick": { "$ref": "#/$defs/tick" },
+                "hash": { "$ref": "#/$defs/hash" },
+                "sealed": { "type": "boolean" },
+                "components": { "type": "array", "items": { "$ref": "#/$defs/component" } },
+                "systems": { "type": "array", "items": { "$ref": "#/$defs/systemInfo" } }
+            }
+        },
+        "open": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "bytes"],
+            "properties": {
+                "type": { "const": "open" },
+                "bytes": { "$ref": "#/$defs/base64" }
+            }
+        },
+        "submit": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "ops"],
+            "properties": {
+                "type": { "const": "submit" },
+                "ops": { "type": "array", "items": { "$ref": "#/$defs/op" } }
+            }
+        },
+        "step": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "ticks", "dt"],
+            "properties": {
+                "type": { "const": "step" },
+                "ticks": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+                "dt": { "$ref": "#/$defs/u32" }
+            }
+        },
+        "events": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "tick", "hash", "log", "errors"],
+            "properties": {
+                "type": { "const": "events" },
+                "tick": { "$ref": "#/$defs/tick" },
+                "hash": { "$ref": "#/$defs/hash" },
+                "log": { "type": "array", "items": { "$ref": "#/$defs/logLine" } },
+                "errors": { "type": "array", "items": { "$ref": "#/$defs/protocolError" } }
+            }
+        },
+        "delta": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "tick", "changed"],
+            "properties": {
+                "type": { "const": "delta" },
+                "tick": { "$ref": "#/$defs/tick" },
+                "changed": { "type": "array", "items": { "$ref": "#/$defs/changed" } }
+            }
+        },
+        "snapshot": {
+            "description": "双向同名消息：请求无载荷，回执带 tick/hash/bytes。两支各自 additionalProperties:false，所以「请求带字节」两侧都拒。",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["type", "direction"],
+                    "properties": {
+                        "type": { "const": "snapshot" },
+                        "direction": { "const": "request" }
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["type", "direction", "tick", "hash", "bytes"],
+                    "properties": {
+                        "type": { "const": "snapshot" },
+                        "direction": { "const": "reply" },
+                        "tick": { "$ref": "#/$defs/tick" },
+                        "hash": { "$ref": "#/$defs/hash" },
+                        "bytes": { "$ref": "#/$defs/base64" }
+                    }
+                }
+            ]
+        },
+        "replay": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "log"],
+            "properties": {
+                "type": { "const": "replay" },
+                "log": { "$ref": "#/$defs/log" }
+            }
+        },
+        "replayResult": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "ok"],
+            "properties": {
+                "type": { "const": "replay_result" },
+                "ok": { "type": "boolean" },
+                "first_bad_tick": {
+                    "$ref": "#/$defs/tick",
+                    "description": "首个不符的 tick；ok 为真时整个字段缺省（不写 null）。"
+                }
+            }
+        },
+        "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "code", "msg"],
+            "properties": {
+                "type": { "const": "error" },
+                "code": { "$ref": "#/$defs/errorCode" },
+                "msg": { "type": "string" }
+            }
+        }
+    }
+}

@@ -1053,6 +1053,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ygg-host"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "ygg-schema",
+]
+
+[[package]]
 name = "ygg-lint"
 version = "0.1.0"
 dependencies = [

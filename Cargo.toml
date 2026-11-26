@@ -10,6 +10,7 @@ members = [
     "crates/ygg-wasm",
     "crates/ygg-store",
     "crates/ygg-sim",
+    "crates/ygg-host",
 ]
 
 [workspace.package]
@@ -35,6 +36,14 @@ edition = "2021"
 # `ygg-sandbox` 拥有 mlua（Tier 1 必须无 VM 可编译可基准）。依赖纯度：零内部依赖、
 # 运行时依赖仅 thiserror，且必须能编到 wasm32（经 ygg-wasm → ygg-sandbox → ygg-sim）。
 # 理由与取证见 sim-kernel.md §1 与 topology.md 不变量 5。
+#
+# members 一次成型的第四次受控例外：`ygg-host` 是 `ygg/1` 线协议的**信封载体**
+# （artifacts/w2-m3-protocol-plan.md §0 决策 4：「协议层不持有世界」）。它不是第 N 个
+# 业务 crate，也不能挂在既有 crate 下：`ygg-sim` 明令禁 serde（快照是自写规范二进制），
+# 而信封恰恰只有 serde；`ygg-sandbox` 拥有 mlua（信封必须能被宿主侧非 Rust 语言手写）；
+# `ygg-core` 是值/事件/KV 的语义面（信封没有语义，只有字段）。依赖纯度：运行时仅
+# serde / serde_json / thiserror，**不依赖任何内部 crate**（连 ygg-sim 都不依赖 id 别名），
+# 且当前**不被任何 crate 依赖**——绑定层（M3.3）才是第一个消费方。
 
 # B1：wasm 体积预算面（research §7）：fat LTO + 体积级优化 + 单 codegen unit
 # + strip。仅作用 release（wasm-pack 默认 release 出 pkg/）；门禁

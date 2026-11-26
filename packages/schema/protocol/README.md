@@ -1,0 +1,192 @@
+# `ygg/1` 线协议
+
+宿主与内核之间只有这一层信封。它**搬运世界状态，但不理解世界**：所有 `if` 都在内核与
+沙箱里，协议层只做「字段在这、宽度合不合、判别键认不认」三件事（计划稿 §0 决策 4）。
+
+同一份契约有两个载体，缺一不可：
+
+| 载体 | 位置 | 谁用 |
+| --- | --- | --- |
+| JSON Schema（draft 2020-12） | `packages/schema/protocol/ygg-1.schema.json` | 非 Rust 宿主（C ABI、WASM、H5 侧手写） |
+| Rust 类型 | `crates/ygg-host/src/proto.rs` | 内核侧实现与所有 Rust 宿主 |
+
+两者不靠人工比对保持同步：`crates/ygg-host/tests/schema_conformance.rs` 把每个变体编成
+线上字节喂给 schema，schema 说「不认」就是分叉。
+
+## 判别面
+
+一条消息只有**一根**判别轴，避免两套判别互相打架：
+
+| 层 | 判别键 | 取值 |
+| --- | --- | --- |
+| 消息 | `type` | `hello` `ready` `open` `submit` `step` `events` `delta` `snapshot` `replay` `replay_result` `error` |
+| `snapshot` | `direction` | `request`（无载荷） / `reply`（带 `tick`/`hash`/`bytes`） |
+| 操作 | `op` | `spawn` `despawn` `set` `insert` `remove` |
+| 世界值 | 唯一的键 | `int` `uint` `str` `bool`（外部标签：键既是判别式又是载荷） |
+
+`snapshot` 与 `replay` 各有两个方向，但两者的线上形态不同：`snapshot` 是**一条消息名**的
+两个方向（靠 `direction` 分），`replay` 的回执必须换标签成 `replay_result`（同一个枚举里
+两个变体不能共用一个 `type`）。
+
+## 消息表
+
+方向：H→K 宿主发给内核，K→H 内核回宿主。
+
+### `hello` H→K
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `protocol` | `const "ygg/1"` | 版本面；别的值在解码处即拒 |
+| `codec` | `const "json"` | v1 只有 JSON；CBOR 走同一套协商（计划稿 §0 决策 2） |
+| `pack_id` | string | 包 id（`ygg:…` 或包名） |
+| `pack_hash` | 64 位小写十六进制 | 包内容摘要，与 `manifest.json` 的内容寻址同口径 |
+
+`pack_hash` **格式**不合 → `E_PROTOCOL`（写错了字节）；格式合但与本地包不符 → `E_PACK`
+（拿错了包）。这道闸防的是「A 包的存档读进 B 包」。
+
+### `ready` K→H
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `tick` | u64 | 当前 tick |
+| `hash` | u64 | 当前状态 hash |
+| `sealed` | bool | 世界是否已封版（封版后才能推进） |
+| `components` | `[{id:u32, name:string, kind:kind}]` | 组件表，`id` 是后文 `cid` 的唯一来源 |
+| `systems` | `[{name:string, stage:stage}]` | 系统表；序即执行序 `pre → rules → post` |
+
+`kind` 取值与 `ygg_sim::AttrType::label` 逐字相同：`number` `string` `boolean` `ref`
+`tag` `f64bits`。宿主据它决定往 `values` 里塞哪种编码；`open` 成功后回同一条形状。
+
+### `open` H→K
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `bytes` | base64 string | 存档字节，协议层不解码，只搬运 |
+
+### `submit` H→K
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `ops` | `[op]` | 见下；**整批原子**（不变式 2） |
+
+| `op` | 其余字段 | 语义 |
+| --- | --- | --- |
+| `spawn` | `n:u32 ≥ 1`、`comps:[{cid,values}]` | 生成 `n` 个实体，共用同一套组件值 |
+| `despawn` | `ids:[u64]` | 按 id 删除 |
+| `set` | `id:u64`、`comps` | 改已有实体的组件值 |
+| `insert` | `id:u64`、`comps` | 给已有实体加组件 |
+| `remove` | `id:u64`、`cids:[u32]` | 从实体上摘组件 |
+
+回执：**v1 不回执 `submit`**（`spawn` 出来的新 id 因此不在任何回执里；宿主从随后的
+`delta` 认领）。这条空缺由计划稿 §3 第 2 步（M3.2 会话状态机）裁决，落定后本表与 schema
+同批改。
+
+### `step` H→K
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `ticks` | u32 ≥ 1 | 推进几步；`0` 是无效指令，两侧都拒 |
+| `dt` | u32 | 每 tick 步长（定点的整数原值，不是浮点秒）；`0` 合法（暂停推进） |
+
+### `events` K→H
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `tick` | u64 | 推进后的 tick |
+| `hash` | u64 | 推进后的状态 hash |
+| `log` | `[{level, text}]` | `level` ∈ `debug` `info` `warn` `error`；只映射世界的 `world.log` |
+| `errors` | `[{code, msg}]` | 本步里的规则错误（`E_RULE` / `E_BUDGET`），不中断推进 |
+
+### `delta` K→H
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `tick` | u64 | 本批结果的 tick |
+| `changed` | `[{eid:u64, comps:[{cid, values}]}]` | **只列本步被写过的组件**（不变式 3） |
+
+### `snapshot`（双向同名）
+
+| 方向 | 字段 |
+| --- | --- |
+| `direction:"request"`（H→K） | 只有 `type` 与 `direction`，多一个字段即拒 |
+| `direction:"reply"`（K→H） | `tick`、`hash`、`bytes`（base64） |
+
+### `replay` H→K / `replay_result` K→H
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `log.header.seed` | u64 | 世界种子 |
+| `log.header.start_tick` | u64 | `0` = 从创世回放；否则 = 快照所在 tick |
+| `log.frames[].tick` | u64 | 该帧到期后的 tick |
+| `log.frames[].dt` | u32 | 该帧步长。**不能省**：回放要复现这一 tick 就必须复现它 |
+| `log.frames[].ops` | `[op]` | 该帧的操作 |
+| `log.frames[].hash` | u64 | 该帧期望的 hash |
+| `ok` | bool | 整段回放是否逐帧对上 |
+| `first_bad_tick` | u64，可缺省 | 首个不符的 tick；`ok` 为真时**整个字段不写**（不写 `null`） |
+
+逐帧比对、首个不符即停：`first_bad_tick` 是定位用的第一个分歧点，不是全部分歧点。
+
+### `error`（双向同形）
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `code` | `E_PROTOCOL` `E_PACK` `E_BUDGET` `E_RULE` `E_STATE` | 决定宿主的反应 |
+| `msg` | string | 人类可读；不参与任何判定 |
+
+五类错误码对应五种宿主动作，合并会把「重连」「换包」「报给包作者」「回滚重试」搅成一句
+「出错了」：`E_PROTOCOL` 是宿主自己的 bug，`E_PACK` 换包或换档，`E_BUDGET`/`E_RULE` 报给
+包作者，`E_STATE` 回滚并重试。
+
+## 三条不变式
+
+### 1. 世界值不含浮点
+
+`values` 只有 `int` / `uint` / `str` / `bool` 四种编码。定点数按其整数原值走 `int`
+（`Fixed` = Q32.32 的 `i64`），`f64bits` 组件按 IEEE-754 的位型走 `uint`——位型是整数，
+浮点是解释。
+
+理由是同步性：浮点求和在不同 ISA、不同优化级别、不同 libm 下结果不同，两个宿主各算一遍
+就会漂移，而漂移在回放里表现为「同一份日志两个 hash」，无从定位。
+
+**这一格只有边界能守。** JSON Schema 的数据模型只有一种数，「`1.0`」与「`1`」在它眼里
+同为整数，所以 schema 收 `1.0` 而 crate 拒——`schema_cannot_tell_one_from_one_point_zero`
+把这条不对称显式钉住，免得日后被当成 bug 去「修」。防线在 `crates/ygg-host/src/proto.rs`
+的 `strict` 模块：它按 `serde_json::Number` 的**形态**判（`as_u64`/`as_i64` 命中才算整数），
+f64 一律拒，且**不四舍五入**——四舍五入会把「对端算错了」变成「对端算得差不多」。
+
+### 2. `submit` 整批原子
+
+一批 `ops` 要么全落，要么全不落：中途任何一个 op 被内核拒（`E_STATE`）或规则报错
+（`E_RULE`），整批回滚，世界回到提交前的 tick 与 hash。宿主因此不需要知道「前三条成了、
+第四条没成」这种中间态。
+
+### 3. `delta` 只报被写过的组件
+
+`changed[].comps` 不是实体的全部组件，而是本步**被写过**的那些。全量 delta 会让
+「本步没碰的东西」与「本步碰成原样的东西」无法区分，也让带宽随实体宽度而不是随变更量增长。
+宿主侧因此必须用 `insert`/`set` 的语义**合并**，不能整实体覆盖。
+
+## 与计划稿消息表的偏差
+
+以下字段/形状是表里没写、实现时必须定的（都在 `crates/ygg-host/src/proto.rs` 的 doc 里
+就地说明）：
+
+| 偏差 | 为什么 |
+| --- | --- |
+| `spawn.n` | 内核 `spawn_columns(n, …)` 本来就是批量；50 个棋子用 50 条 op 是 50 倍信封开销 |
+| `frames[].dt` | `ygg_sim::input::TickRecord` 是 `{tick, dt, hash, ops}`；不带 `dt` 回放不出这一 tick |
+| `log.header.{seed, start_tick}` | 与 `ReplayLog` 的字段一一对应；`start_tick` 区分「从创世」与「从快照」 |
+| `LogLevel` 枚举 | 表里只写 `{level, text}`；级别不枚举的话宿主无法按级别过滤 |
+| `changed[].comps` 而非 `{cids, values}` | 一个组件有多列，平行数组无法表达「第 i 个值属于哪个 cid」；JSON Schema 也难便宜地约束两数组等长 |
+| `replay_result` 独立标签 | serde 的 `type` 判别要求同枚举内标签唯一，两个方向不能共用 `replay` |
+| `ProtocolError` 既是消息也是 `errors` 条目 | 两个位置的形状本来就相同，分成两个类型等于允许它们慢慢分叉 |
+
+## 改这份契约的流程
+
+1. 先改 `ygg-1.schema.json` 与 `proto.rs`（同一笔改动）；
+2. `cargo test -p ygg-host` —— 样本往返、schema 校验、成对拒收三条会同时表态；
+3. schema 的 `$defs` 名、判别面、`PROTOCOL`/`CODEC` 常量都已被测试钉住，改它们就得动测试，
+   动测试的人会看见这张表。
+
+`packages/schema/protocol/` 只放**线协议**。包清单（`pack.json`）、存档格式这类「盘上字节」
+的 schema 仍在 `packages/schema/schemas/`，两者不共用 `$id` 空间。
