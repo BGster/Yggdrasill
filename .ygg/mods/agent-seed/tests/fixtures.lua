@@ -300,7 +300,7 @@ test("读签上膛：原版台账逐条等于文档头（单一事实源）", fu
   local n = 0
   for doc, ver in pairs(ledger) do
     n = n + 1
-    local text = read_file(__REPO_ROOT .. "/docs/context/" .. doc .. ".md")
+    local text = read_file(__REPO_ROOT .. "/openwiki/operating/" .. doc .. ".md")
     local declared = nil
     for line in text:gmatch("[^\n]+") do
       if line:find("**ver**", 1, true) then

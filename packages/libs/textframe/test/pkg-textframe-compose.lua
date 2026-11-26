@@ -1,5 +1,5 @@
 -- `pkg.textframe.*` 自测（二）：分层 / 块拼接 / 与 r4 适配器的对照 / 纯度。
--- 契约 `docs/design/packages/textframe.md` §3 I1–I4、§7 的用例 8–13、16–17。
+-- 契约 `openwiki/contracts/packages/textframe.md` §3 I1–I4、§7 的用例 8–13、16–17。
 --
 -- # 参照实现 `oracle_compose` 是**逐字复刻**，不是从被测代码 import
 --

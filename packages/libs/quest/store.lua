@@ -27,7 +27,7 @@
 -- reset() 后条目数恒为 1），也是 `open_ids` 的成员判据——ids 连续不等于「还在
 -- 索引里」，两件事分开存，断言才有意义。
 --
--- 前缀单写者：本包只写 `quest.` 前缀（`docs/design/mod/mod-package.md` §3.2.3）。
+-- 前缀单写者：本包只写 `quest.` 前缀（`openwiki/contracts/mod/mod-package.md` §3.2.3）。
 
 local S = {}
 

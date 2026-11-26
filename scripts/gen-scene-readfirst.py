@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # gen-scene-readfirst.py —— 幕必读块（[READ FIRST]）生成器：docs/context 固定头 → core.json 的 scenes.<node>。
 #
-# 定位：**投影生成器**，不是纪律检查器。输入 = docs/context/scenes.json（场景→doc-id 表）
+# 定位：**投影生成器**，不是纪律检查器。输入 = openwiki/operating/scenes.json（场景→doc-id 表）
 #       + 各文件固定头（id / 触发 / 读不到代价 / ver）；输出 = mod 台词里可直接打印的必读块。
 #       「谁该读什么」的规则在 AGENTS.md §0c（权威）；本脚本只保证「打印出来的东西 == 磁盘上的文档头」。
 #
@@ -81,17 +81,34 @@ def parse_json(text: str, source: str) -> Any:
         die(4, f"{source} 不是合法 JSON：{err}")
 
 
-# ── 固定头解析 ────────────────────────────────────────────────────────────────
+# ── ver 账本（页面不写 ver；唯一落点 = openwiki/ver.json）──────────
+LEDGER_REL = "openwiki/ver.json"
+VER_MAP: dict[str, str] = {}
+
+
+def load_ver_map(root: str) -> dict[str, str]:
+    path = os.path.join(root, LEDGER_REL)
+    if not os.path.isfile(path):
+        return {}
+    data = parse_json(read_text(path), path)
+    pages = data.get("pages") if isinstance(data, dict) else None
+    return {str(k): str(v) for k, v in (pages or {}).items()}
+
+
+# ── 固定头解析 ─────────────────────────────────────────├───────────────────────────────
 def read_header(ctx_dir: str, doc_id: str) -> dict[str, str] | None:
-    """返回 {id, trigger, cost, ver}；文件缺失/头不全/id 不符 → None（调用方记 missing）。"""
+    """返回 {id, trigger, cost, ver}；文件缺失/头不全/id 不符/账本无条目 → None（调用方记 missing）。
+
+    ver 不写在页面上（一个 ver 只能有一个落点），来源是 `openwiki/ver.json` 账本（scripts/wiki-ver.sh 产出）。
+    """
     path = os.path.join(ctx_dir, f"{doc_id}.md")
     if not os.path.isfile(path):
         return None
-    head = "\n".join(read_text(path).splitlines()[:8])
-    ident = re.search(r"\*\*id\*\*\s+([^\s·]+)", head)
+    head = "\n".join(read_text(path).splitlines()[:120])  # 页面带 YAML frontmatter，头块不在前 8 行
+    ident = re.search(r"^> \*\*id\*\*\s+([^\s·]+)", head, re.M)
     trigger = re.search(r"\*\*触发\*\*\s+(.*?)\s*(?:·\s*\*\*|$)", head, re.M)
     cost = re.search(r"\*\*读不到代价\*\*\s+(.*?)\s*(?:·\s*\*\*|$)", head, re.M)
-    ver = re.search(r"\*\*ver\*\*\s+([0-9a-f]{6})\b", head)
+    ver = VER_MAP.get(doc_id)
     if not (ident and ver):
         return None
     if ident.group(1) != doc_id:  # r1 scenes.json 一致性规则②：文件头 id 必须与表里的 id 逐字相等
@@ -100,7 +117,7 @@ def read_header(ctx_dir: str, doc_id: str) -> dict[str, str] | None:
         "id": doc_id,
         "trigger": trigger.group(1).strip() if trigger else "",
         "cost": cost.group(1).strip() if cost else "none",
-        "ver": ver.group(1),
+        "ver": ver,
     }
 
 
@@ -130,7 +147,7 @@ def render_block(node: str, docs: list[dict[str, str]], signature: str) -> str:
     for doc in docs:
         gloss = short_trigger(doc["trigger"])
         tail = f"—— {gloss}" if gloss else ""
-        lines.append(f"  · docs/context/{doc['id']}.md (ver {doc['ver']}) {tail}｜读不到：{cost_key(doc['cost'])}")
+        lines.append(f"  · openwiki/operating/{doc['id']}.md (ver {doc['ver']}) {tail}｜读不到：{cost_key(doc['cost'])}")
     if signature == "read":
         for doc in docs:
             lines.append(f"  → 读毕签名：config.set read.{doc['id']}={doc['ver']}")
@@ -339,7 +356,9 @@ def main(argv: list[str]) -> int:
     if root is None:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     root = os.path.abspath(root)
-    ctx_dir = os.path.join(root, "docs/context")
+    global VER_MAP
+    VER_MAP = load_ver_map(root)
+    ctx_dir = os.path.join(root, "openwiki/operating")
     scenes_path = os.path.join(ctx_dir, "scenes.json")
     core_path = os.path.join(root, ".ygg/mods/agent-seed/data/texts/core.json")
     if not os.path.isdir(ctx_dir) or not os.path.isfile(core_path):
@@ -390,7 +409,7 @@ def main(argv: list[str]) -> int:
 
     if check:
         if drift:
-            sys.stderr.write("漂移：core.json 的 scenes.* 块与 docs/context 固定头不一致（重跑本脚本可刷新）\n")
+            sys.stderr.write("漂移：core.json 的 scenes.* 块与 openwiki/operating 固定头不一致（重跑本脚本可刷新）\n")
         if key_drift:
             # fail-closed 必须点名到键（r4 用户约束①②）：先说键，再说怎么修。
             for key in key_drift:

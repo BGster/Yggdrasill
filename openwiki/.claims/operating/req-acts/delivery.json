@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:d349499c872449949a5875824c2a71d50763db4318572ff150080fad5d966904",
+  "claims": [
+    {
+      "id": "claim_b9ca1bc631ff487d9036f110b8d03a91",
+      "statement": "A plan proposal escalates straight into the plan gate on submission (delivery is the gate), while `proposal.accept` only handles development proposals — so accepting a plan proposal is refused with a hint to use `gate.approve`.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/proposals.lua",
+          "version": "repo-file-v1:sha256:74cadcd7eee714f26e61cc180b0205acfc7c8bb165c75389f2175ac943f70898"
+        }
+      ]
+    },
+    {
+      "id": "claim_febd0c2b5ebc4a0cba5cd1ff89545822",
+      "statement": "`gate.approve` requires the gate revision to equal the requirement revision (`gate_rev == req.rev`); a mismatch is reported as stale and blocks approval, so an amend always forces re-verification.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
+          "version": "repo-file-v1:sha256:e8ed1a1e4f56fdfe79b3f5155d9e9673fce94a4c468b13d527d2a6a9651c8710"
+        }
+      ]
+    },
+    {
+      "id": "claim_9d9119df2ad047aa9b47ca8610643242",
+      "statement": "All three rejections — proposal, gate and integration — land the requirement back in `ready` with `plan_ok` preserved and the lane released; only an amend that invalidates `plan_ok` forces the plan gate to be re-run.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/proposals.lua",
+          "version": "repo-file-v1:sha256:bc1968de25c6cd923a459414b7fcddc2db93c5040c4d4cb37aaa88a30ef7f408"
+        }
+      ]
+    },
+    {
+      "id": "claim_b954366cda9249a68f853e033a59d53b",
+      "statement": "Green means literal evidence: the workspace tests, the `egg` example tests and the `selftest` run must each be run verbatim with their exit codes recorded; a member-equivalent run such as `cargo check` or an `--filter` selection proves only that substitute, never the suite.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/check.yml",
+          "version": "repo-file-v1:sha256:73bb54a153a430b88328ccead9046db0f6dfce865534d209f1aee1f5da678b60"
+        }
+      ]
+    },
+    {
+      "id": "claim_69e094e8236e493ca6ceec30fb4e8ee1",
+      "statement": "A gate is not trusted until a mutation probe shows it can go red: putting the old semantics back must fail the assertion, otherwise the assertion is vacuous.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/tests/gates.lua",
+          "version": "repo-file-v1:sha256:76ed57d05efe3af440a596b4985697796dbd3e5311a602905a3adbeb50fda961"
+        }
+      ]
+    },
+    {
+      "id": "claim_d5fbada6768b4742b66f5e6bcbbfc6c2",
+      "statement": "The wasm build deliberately avoids wasm-pack because it cannot pass `wasm-bindgen --reference-types`; the chain is fixed as cargo plus the wasm-bindgen CLI in two steps.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/build-wasm.sh",
+          "version": "repo-file-v1:sha256:d163bb9759dc77befd226c2619a5b55702ea8dc50753086cb06ad4746438b904"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

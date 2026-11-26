@@ -1,4 +1,4 @@
--- `pkg.textframe.perf` —— 契约 `docs/design/packages/textframe.md` §5 的五指标 / 九键。
+-- `pkg.textframe.perf` —— 契约 `openwiki/contracts/packages/textframe.md` §5 的五指标 / 九键。
 --
 -- # 基准集（固定，不是可调旋钮）
 --

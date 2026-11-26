@@ -1,13 +1,13 @@
 -- `packages/libs/role-skill/actors.lua` —— 角色 / 技能定义表 + 实体记录（授予、撤销、查询）。
 --
--- 契约：`docs/design/packages/role-skill.md` §2 / §4 / I1（薄层）/ I3（授予幂等）/
+-- 契约：`openwiki/contracts/packages/role-skill.md` §2 / §4 / I1（薄层）/ I3（授予幂等）/
 -- I7（只看引用面）。
 --
 -- # 记录里只有引用与计数
 --
 -- `role.actor.<id>` 的载荷恰好三个键：`role`（角色名）、`skills`（技能名 → `{ rank,
 -- charges }`）、`counters`（事件名 → 次数）。属性值一个字节都不存——属性袋的真源是
--- [entity](../../docs/design/packages/entity.md)，本包只在读时**合成**（I2）。
+-- [entity](../../openwiki/contracts/packages/entity.md)，本包只在读时**合成**（I2）。
 --
 -- # 同 spec 判定 = 规范化后编码字节相同
 --

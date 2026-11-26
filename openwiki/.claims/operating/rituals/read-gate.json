@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:4e352fb0f9fda02bc551ae78cc7f4be8aa4b45b1b393a2e476a721e6fcb44096",
+  "claims": [
+    {
+      "id": "claim_673732ba9f374e458d161c29446160aa",
+      "statement": "Signatures are keyed by doc id and checked per actor; an empty signer (legacy save) skips the per-actor dimension, and a human menu click degrades to any-signer with the receipt saying so.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/readsig.lua",
+          "version": "repo-file-v1:sha256:9237f057c27b24313b3eb14034fee45f274563ff16ecb1b7de50c187e062aea9"
+        }
+      ]
+    },
+    {
+      "id": "claim_dbed70b4b24a4ee19178ee4d9d25b897",
+      "statement": "The gate checks exactly four dimensions — coverage, freshness, forgetting and per-actor — and refuses with `read_gate_missing`, `read_gate_stale`, `read_gate_forgotten` and `read_gate_other_actor`.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/gates.lua",
+          "version": "repo-file-v1:sha256:e8ed1a1e4f56fdfe79b3f5155d9e9673fce94a4c468b13d527d2a6a9651c8710"
+        }
+      ]
+    },
+    {
+      "id": "claim_529dde3ecaad48acb369585aceff2f50",
+      "statement": "The forgetting window is `readGate.window` (default 80 dispatches); a version check at the same version never extends it, because only a body read resets the distance.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
+          "version": "repo-file-v1:sha256:23263ec07b27ed3687a4f81132bf8dfaacc01a2fbf657ea3ea615dbb383921e4"
+        }
+      ]
+    },
+    {
+      "id": "claim_3e37461d5a89422f9300a62666907cb3",
+      "statement": "A `ver` is the first six hex digits of the page body hash, so it detects change but proves nothing about integrity, and it lives in one ledger file — never in the page body, which keeps exactly one home.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/readset.lua",
+          "version": "repo-file-v1:sha256:b0324022fe2412cb1402340f48855b281dd0e6b96d4a62f1c10958567f54a915"
+        }
+      ]
+    },
+    {
+      "id": "claim_028e8e117fb1453189576e13e0ef11fb",
+      "statement": "Amendments and both push-back routes advance `rev` and zero the signatures in the same transaction, so the next sweep reports missing coverage rather than a stale signature — a signature older than the new rev is not a reachable state.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/readsig.lua",
+          "version": "repo-file-v1:sha256:9237f057c27b24313b3eb14034fee45f274563ff16ecb1b7de50c187e062aea9"
+        }
+      ]
+    },
+    {
+      "id": "claim_ddc5d5201ac04cd8a80d25775ec3eaef",
+      "statement": "An unreadable page — missing path, moved file, body contradicting the index — is a stop-and-report, never a licence to proceed from memory or from a single grep hit.",
+      "evidence": [
+        {
+          "resource": "repo://scripts/gen-scene-readfirst.py",
+          "version": "repo-file-v1:sha256:2df05b925a13b695809e365659eb349cfb696718aa6d757a18fdbc3d2fc74b0b"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

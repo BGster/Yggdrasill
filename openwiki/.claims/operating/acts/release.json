@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:860cb0efdef59d06069b60738e09ccd085e59016cc11a76ae97cd4a0d0f48e55",
+  "claims": [
+    {
+      "id": "claim_cbb4a7a2bfbc4dd79e891dfe5191fab6",
+      "statement": "`release.confirm` and `release.skip` are the only two declarations, and either one satisfies the release precondition; without one, `review.note` refuses to close the batch.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/release.lua",
+          "version": "repo-file-v1:sha256:f6f79e07101987e574888d8e85e83adaec7fa2c45b992ee87115938cb0ea02e6"
+        }
+      ]
+    },
+    {
+      "id": "claim_844951bfffcc4e119f6a2f9e28a15334",
+      "statement": "The release act is entered without spending an event once the four settle items are complete — the phase advances as an effect of `settlement.todo`, which is why release never appears as a payload of its own.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/release.lua",
+          "version": "repo-file-v1:sha256:f6f79e07101987e574888d8e85e83adaec7fa2c45b992ee87115938cb0ea02e6"
+        }
+      ]
+    },
+    {
+      "id": "claim_75a7858db62744c1bc3eba445ccf1e3f",
+      "statement": "`review.note` is the single closing action: unarmed it settles the batch and increments `run.batch`; armed with `run.retire` it stamps the ending instead, and the same payload cannot do both.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/operate/review.lua",
+          "version": "repo-file-v1:sha256:f43825c305391209f69f1cd710672add885851cc71e3eeb4f2a61b5768ee6c1e"
+        }
+      ]
+    },
+    {
+      "id": "claim_9a4fab5e08a24e60958df47266d11d51",
+      "statement": "The two-stage merge discipline — iteration integration on develop and the round-level develop→master merge — must never run in the same step, because a master merge before every feature has landed merges a state that was never verified end to end.",
+      "evidence": [
+        {
+          "resource": "repo://docs/context/acts/release.md",
+          "version": "repo-file-v1:sha256:a5bdf17c4622c70b36c87359af06ca26d6f98a68b615e2281b8089e4d62065a5"
+        }
+      ]
+    },
+    {
+      "id": "claim_bdddbd19503e4d95a7362f013718b4c7",
+      "statement": "`develop` and `master` synchronise by reset only (`git reset --hard master` then `--force-with-lease`), never by rebasing develop or merging master back into it: the no-fast-forward topology is the rollback history.",
+      "evidence": [
+        {
+          "resource": "repo://docs/context/acts/release.md",
+          "version": "repo-file-v1:sha256:a5bdf17c4622c70b36c87359af06ca26d6f98a68b615e2281b8089e4d62065a5"
+        }
+      ]
+    },
+    {
+      "id": "claim_98212d5b133746c2b4260fd7f518b0da",
+      "statement": "The merge ritual ends with `git push origin master` and an unpushed trunk counts as an incomplete merge — a local merge that never reached origin is not a release.",
+      "evidence": [
+        {
+          "resource": "repo://docs/context/acts/release.md",
+          "version": "repo-file-v1:sha256:a5bdf17c4622c70b36c87359af06ca26d6f98a68b615e2281b8089e4d62065a5"
+        }
+      ]
+    },
+    {
+      "id": "claim_7ae5ead4a98d4946a45d39009097ff6c",
+      "statement": "Deployment accepts master refs only and every deployment is reported and approved before it runs; there is no override switch, because deployment is the one write that leaves this machine.",
+      "evidence": [
+        {
+          "resource": "repo://docs/context/acts/release.md",
+          "version": "repo-file-v1:sha256:a5bdf17c4622c70b36c87359af06ca26d6f98a68b615e2281b8089e4d62065a5"
+        }
+      ]
+    },
+    {
+      "id": "claim_40924cf3e77a4423888eeddf8e7ac4a9",
+      "statement": "A Mod or host binary upgrade lands after settlement and starts a new run id — old run directories are never migrated or adopted, so a failed load is answered with a new run rather than a repair attempt.",
+      "evidence": [
+        {
+          "resource": "repo://docs/context/acts/settle.md",
+          "version": "repo-file-v1:sha256:6ff5eae4f17b486d30c83bddc70960af932b09f7b3828ba3e94046a6d7ed2e9e"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

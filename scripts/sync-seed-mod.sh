@@ -12,7 +12,7 @@
 #   scripts/sync-seed-mod.sh --no-pack        # 只校验软链/目录，不重算 manifest
 #
 # 除 manifest 外，本脚本还刷新一处**投影**：core.json 的 scenes.<node> 必读块
-# （docs/context/scenes.json + 各文件固定头 → 幕转场台词；由 scripts/gen-scene-readfirst.py 生成）。
+# （openwiki/operating/scenes.json + 各文件固定头 → 幕转场台词；由 scripts/gen-scene-readfirst.py 生成）。
 # 该块不在任何文案键账里（键账只覆盖 beats + core 的 options/tuning/endings），
 # 所以 --check 里的块比对是它唯一的漂移防线：不一致即 fail-closed。
 

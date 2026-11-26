@@ -1,7 +1,8 @@
--- surface-tree.lua —— S32 纯搬移自 surface.lua L302-564（docs/design 树索引 + texts/src 指针账 + goal 授权门；自包含分组，test() 载入即跑与拆分前同序）。
+-- surface-tree.lua —— S32 纯搬移自 surface.lua L302-564（契约树索引 + texts/src 指针账 + goal 授权门；自包含分组，test() 载入即跑与拆分前同序）。
 
-local CONTEXT_DIR = __REPO_ROOT .. "/docs/context"
-local DESIGN_DIR = __REPO_ROOT .. "/docs/design"
+local CONTEXT_DIR = __REPO_ROOT .. "/openwiki/operating"
+local DESIGN_DIR = __REPO_ROOT .. "/openwiki/contracts"
+local DESIGN_INDEX = __REPO_ROOT .. "/openwiki/architecture/README.md"
 local function list_entries(path)
   local dirs, files = {}, {}
   local pipe = io.popen(('ls -1a "%s"'):format(path))
@@ -39,27 +40,26 @@ local function normalize_repo_path(p)
   return table.concat(parts, "/")
 end
 
-test("docs/design 树索引：四模块 + 30 份文件 + README 双向相等 + id 双射", function()
+test("契约树索引：四模块 + 30 份文件 + 索引双向相等 + id 双射", function()
   local dir = DESIGN_DIR
 
-  -- ④ 一级子目录恰好四模块；平铺只允许树入口 README.md。
+  -- ④ 一级子目录恰好四模块；平铺零文件（索引已搬到 architecture/README.md）。
   local dirs, flat = list_entries(dir)
   table.sort(dirs)
   table.sort(flat)
-  assert_eq(#dirs, 4, "docs/design 一级子目录必须是四模块，实得：" .. table.concat(dirs, ","))
+  assert_eq(#dirs, 4, "openwiki/contracts 一级子目录必须是四模块，实得：" .. table.concat(dirs, ","))
   assert_eq(dirs[1], "host", "一级子目录 1")
   assert_eq(dirs[2], "kernel", "一级子目录 2")
   assert_eq(dirs[3], "mod", "一级子目录 3")
   assert_eq(dirs[4], "packages", "一级子目录 4")
-  assert_eq(#flat, 1, "docs/design/*.md 只允许 README.md，实得：" .. table.concat(flat, ","))
-  assert_eq(flat[1], "README.md", "平铺文件或软链 = 留了兼容壳")
+  assert_eq(#flat, 0, "openwiki/contracts/*.md 不允许平铺文件，实得：" .. table.concat(flat, ","))
 
-  -- ① 实文件集合（相对 docs/design，排除 README.md）。
+  -- ① 实文件集合（相对 openwiki/contracts，排除生成的 index.md）。
   local actual = {}
   local prefix = dir .. "/"
   for _, path in ipairs(list_files(dir, "md")) do
     local rel = path:sub(#prefix + 1)
-    if rel ~= "README.md" then
+    if rel ~= "index.md" then
       actual[#actual + 1] = rel
     end
   end
@@ -67,15 +67,15 @@ test("docs/design 树索引：四模块 + 30 份文件 + README 双向相等 + i
   assert_eq(#actual, 30, "契约面应为 30 份文件：" .. table.concat(actual, ","))
 
   -- ① 索引里的链接集合必须与实文件集合双向相等。
-  local readme = read_file(dir .. "/README.md")
+  local readme = read_file(DESIGN_INDEX)
   local indexed, seen_idx = {}, {}
   for target in readme:gmatch("%]%(([^%)]+)%)") do
     local bare = target:match("^([^#]*)")
     if bare ~= nil and bare ~= "" and not bare:match("^https?://")
       and not bare:match("^mailto:") and bare:sub(-3) == ".md" then
-      local resolved = normalize_repo_path("docs/design/" .. bare)
-      local rel = resolved:match("^docs/design/(.+)$")
-      if rel ~= nil and rel ~= "README.md" and not seen_idx[rel] then
+      local resolved = normalize_repo_path("openwiki/architecture/" .. bare)
+      local rel = resolved:match("^openwiki/contracts/(.+)$")
+      if rel ~= nil and not seen_idx[rel] then
         seen_idx[rel] = true
         indexed[#indexed + 1] = rel
       end
@@ -83,7 +83,7 @@ test("docs/design 树索引：四模块 + 30 份文件 + README 双向相等 + i
   end
   table.sort(indexed)
   assert_eq(#indexed, #actual,
-    "docs/design/README.md 的索引与实文件集合必须双向相等，索引实得："
+    "openwiki/architecture/README.md 的索引与实文件集合必须双向相等，索引实得："
       .. table.concat(indexed, ","))
   for i = 1, #actual do
     assert_eq(indexed[i], actual[i], "索引与实文件集合逐项相等")
@@ -131,7 +131,7 @@ test("scenes 表 reference 段：4 个理解性文档可解析，且不进 scene
 
   for _, id in ipairs(reference) do
     local path = CONTEXT_DIR .. "/" .. id .. ".md"
-    assert_true(exists(path), "reference id 解析不到文件：docs/context/" .. id .. ".md")
+    assert_true(exists(path), "reference id 解析不到文件：openwiki/operating/" .. id .. ".md")
 
     local text = read_file(path)
     local declared = nil
@@ -141,8 +141,8 @@ test("scenes 表 reference 段：4 个理解性文档可解析，且不进 scene
         break
       end
     end
-    assert_true(declared ~= nil, "docs/context/" .. id .. ".md 缺 `> **id**` 固定头")
-    assert_eq(declared, id, "docs/context/" .. id .. ".md 的 id 与 scenes 表不一致")
+    assert_true(declared ~= nil, "openwiki/operating/" .. id .. ".md 缺 `> **id**` 固定头")
+    assert_eq(declared, id, "openwiki/operating/" .. id .. ".md 的 id 与 scenes 表不一致")
 
     assert_true(not scene_ids[id],
       id .. " 是理解性文档，不得进 scenes.scene（那会进 [READ FIRST] 并产生签名义务）")
@@ -173,7 +173,7 @@ local function pointer_paths_trim(value, prefix)
   return out
 end
 
-test("texts 与 src 的 docs/context 指针：逐来源账 34 守恒 + 锚点全部存在", function()
+test("texts 与 src 的 openwiki/operating 指针：逐来源账 34 守恒 + 锚点全部存在", function()
   local items = {}
 
   for _, asset in ipairs({
@@ -208,7 +208,7 @@ test("texts 与 src 的 docs/context 指针：逐来源账 34 守恒 + 锚点全
 
   local ledger, total, violations = {}, 0, {}
   for _, item in ipairs(items) do
-    for _, file in ipairs(pointer_paths_trim(item[3], "docs/context/")) do
+    for _, file in ipairs(pointer_paths_trim(item[3], "openwiki/operating/")) do
       total = total + 1
       ledger[item[1]] = (ledger[item[1]] or 0) + 1
       local illegal = false
@@ -219,9 +219,9 @@ test("texts 与 src 的 docs/context 指针：逐来源账 34 守恒 + 锚点全
         end
       end
       if illegal then
-        violations[#violations + 1] = ("%s.%s -> docs/context/%s (illegal)"):format(item[1], item[2], file)
+        violations[#violations + 1] = ("%s.%s -> openwiki/operating/%s (illegal)"):format(item[1], item[2], file)
       elseif not exists(CONTEXT_DIR .. "/" .. file) then
-        violations[#violations + 1] = ("%s.%s -> docs/context/%s (missing)"):format(item[1], item[2], file)
+        violations[#violations + 1] = ("%s.%s -> openwiki/operating/%s (missing)"):format(item[1], item[2], file)
       end
     end
   end
@@ -243,13 +243,13 @@ test("texts 与 src 的 docs/context 指针：逐来源账 34 守恒 + 锚点全
     ek[#ek + 1] = k
   end
   table.sort(ek)
-  assert_eq(#keys, #ek, "docs/context 指针账漂移（来源数）：实得 " .. table.concat(keys, ","))
+  assert_eq(#keys, #ek, "openwiki/operating 指针账漂移（来源数）：实得 " .. table.concat(keys, ","))
   for i = 1, #ek do
     assert_eq(keys[i], ek[i], "来源名漂移")
     assert_eq(ledger[keys[i]], expected[ek[i]], ("来源 `%s` 的指针数漂移"):format(ek[i]))
   end
-  assert_eq(total, 34, ("docs/context 指针总数漂移：期望 34，实得 %d"):format(total))
-  assert_eq(#violations, 0, "docs/context 指针锚点不存在：" .. table.concat(violations, ", "))
+  assert_eq(total, 34, ("openwiki/operating 指针总数漂移：期望 34，实得 %d"):format(total))
+  assert_eq(#violations, 0, "openwiki/operating 指针锚点不存在：" .. table.concat(violations, ", "))
 end)
 
 test("goal 授权门：无授权给可读警告，登记后放行", function()

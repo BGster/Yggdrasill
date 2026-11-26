@@ -1,4 +1,4 @@
--- `pkg.procgen.*` 自测。契约 `docs/design/packages/procgen.md` §7。
+-- `pkg.procgen.*` 自测。契约 `openwiki/contracts/packages/procgen.md` §7。
 --
 -- # 为什么自带计数垫片与 mock
 --

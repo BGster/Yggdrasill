@@ -1,6 +1,6 @@
 //! rt 渲染面缓冲（S31 R2）：FrameFace 位图缓冲 + 帧 digest + PPM 编码。
 //!
-//! 契约 `docs/design/host/rt-face.md` 渲染面节。职责边界：
+//! 契约 `openwiki/contracts/host/rt-face.md` 渲染面节。职责边界：
 //! - 本文件 = **纯 Rust 缓冲面**（无 mlua）：像素直写语义（零混色）、越界
 //!   钳制、脏区并集、全幅 digest 规范序、PPM 字节。
 //! - Lua 面（`ygg.rt.frame.*` 五键）住 `host_api/frame.rs`——与 rt 引擎

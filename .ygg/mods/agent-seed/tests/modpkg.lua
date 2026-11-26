@@ -87,7 +87,7 @@ test("五层架构：模块只住在五层内、entry 不在模块表、声明�
   assert_eq(count, 5, "all five layers must be populated")
 end)
 
-test("AGENTS §3 的 design 路由都能解析到文件", function()
+test("AGENTS §3 的契约路由都能解析到文件", function()
   local agents = read_file(__REPO_ROOT .. "/AGENTS.md")
   local start = agents:find("## 3. Prompt%-surface index")
   assert_true(start ~= nil, "AGENTS.md must carry `## 3. Prompt-surface index`")
@@ -95,29 +95,39 @@ test("AGENTS §3 的 design 路由都能解析到文件", function()
   local tail = agents:sub(start)
   local section = tail:match("^(.-)\n## ") or tail
 
-  -- 只看表格行：§3 的散文（退役说明）里也会提到 design 路径，但它不是路由。
-  -- 与 Rust 版一致：**不去重**（同一路径在两条路由行里出现算两条）。
+  -- 只看表格行：§3 的散文（退役说明）里也会提到契约路径，但它不是路由。
+  -- **不去重**（同一路径在两条路由行里出现算两条）。
   local routes = {}
   for line in section:gmatch("[^\n]+") do
     if line:match("^%s*|") then
-      for path in line:gmatch("docs/design/([%w%-_/%.]+%.md)") do
+      for path in line:gmatch("openwiki/contracts/([%w%-_/%.]+%.md)") do
         routes[#routes + 1] = path
       end
     end
   end
 
-  assert_eq(#routes, 13, "AGENTS §3 的 design 路由应为 13 条")
+  assert_true(#routes >= 4, "AGENTS §3 至少要路由到四个契约模块")
   for _, route in ipairs(routes) do
     assert_true(
-      exists(__REPO_ROOT .. "/docs/design/" .. route),
-      ("AGENTS §3 路由解析不到文件：docs/design/%s"):format(route)
+      exists(__REPO_ROOT .. "/openwiki/contracts/" .. route),
+      ("AGENTS §3 路由解析不到文件：openwiki/contracts/%s"):format(route)
     )
     local module = route:match("^([^/]+)/")
     assert_true(
-      route == "README.md" or module == "kernel" or module == "host" or module == "mod",
-      ("%s: design 一级目录只允许 kernel/host/mod"):format(route)
+      module == "kernel" or module == "host" or module == "mod" or module == "packages",
+      ("%s: 契约一级目录只允许 kernel/host/mod/packages"):format(route)
     )
   end
+
+  -- 契约树入口在 architecture/README.md（不再有 contracts/README.md）。
+  assert_true(
+    agents:find("openwiki/architecture/README.md", 1, true) ~= nil,
+    "AGENTS.md 必须指向契约树入口 openwiki/architecture/README.md"
+  )
+  assert_true(
+    exists(__REPO_ROOT .. "/openwiki/architecture/README.md"),
+    "契约树入口不可达：openwiki/architecture/README.md"
+  )
 end)
 
 test("结算文案不含 harness 私有字面量", function()

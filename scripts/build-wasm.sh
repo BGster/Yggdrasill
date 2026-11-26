@@ -6,7 +6,7 @@
 # 时强制要求 externref 表，该表由其 CLI 旗 `--reference-types` 开启的 externref
 # pass 创建；wasm-pack 0.15 不透传 bindgen 旗——故为两步链（cargo 出裸 wasm，
 # 再调 wasm-bindgen CLI）。playbook `gates.no-wasm-pack` 的门禁以本脚本为唯一入口
-# （决策正文见 docs/context/archive/decisions-engine.md，勿恢复 wasm-pack 旁路）。
+# （决策正文见 openwiki/operating/cold-start/vision.md，勿恢复 wasm-pack 旁路）。
 #
 # 前置：
 #   1. rustup target add wasm32-unknown-unknown

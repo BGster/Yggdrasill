@@ -1,13 +1,13 @@
 -- surface：叙述面与 docs 树的指针账（迁移自 Rust 对照套件）。
 
-local CONTEXT_DIR = __REPO_ROOT .. "/docs/context"
+local CONTEXT_DIR = __REPO_ROOT .. "/openwiki/operating"
 
---- 从一个文案值里取出所有 `docs/context/<相对路径>.md` 指针。
+--- 从一个文案值里取出所有 `openwiki/operating/<相对路径>.md` 指针。
 --- 允许 `/`（子目录形），仍要求 `.md` 结尾：目录指针 `acts/`、通配 `acts/*.md` 与空串都不算。
 local function context_pointer_paths(value)
   local out = {}
   local at = 1
-  local prefix = "docs/context/"
+  local prefix = "openwiki/operating/"
   while true do
     local s = value:find(prefix, at, true)
     if s == nil then
@@ -37,15 +37,15 @@ local function check_pointer(acc, ns, key, value)
     end
     if illegal then
       acc.violations[#acc.violations + 1] =
-        ("%s.%s -> docs/context/%s (illegal path segment)"):format(ns, key, file)
+        ("%s.%s -> openwiki/operating/%s (illegal path segment)"):format(ns, key, file)
     elseif not exists(CONTEXT_DIR .. "/" .. file) then
       acc.violations[#acc.violations + 1] =
-        ("%s.%s -> docs/context/%s (missing)"):format(ns, key, file)
+        ("%s.%s -> openwiki/operating/%s (missing)"):format(ns, key, file)
     end
   end
 end
 
-test("叙述面的 docs/context 指针：锚点全部存在，且指针账守恒在 33", function()
+test("叙述面的 openwiki/operating 指针：锚点全部存在，且指针账守恒在 33", function()
   local acc = { count = 0, violations = {} }
 
   for _, asset in ipairs({
@@ -77,20 +77,20 @@ test("叙述面的 docs/context 指针：锚点全部存在，且指针账守恒
     local value = flow[key]
     assert_eq(type(value), "string", ("收缩键 `%s` 必须是字符串"):format(key))
     assert_true(
-      value:find("docs/context/", 1, true) ~= nil,
-      ("收缩键 `%s` 必须携带 docs/context 指针"):format(key)
+      value:find("openwiki/operating/", 1, true) ~= nil,
+      ("收缩键 `%s` 必须携带 openwiki/operating 指针"):format(key)
     )
   end
 
   assert_eq(
     acc.count,
     33,
-    ("docs/context 指针账漂移：期望 33，实得 %d"):format(acc.count)
+    ("openwiki/operating 指针账漂移：期望 33，实得 %d"):format(acc.count)
   )
   assert_eq(
     #acc.violations,
     0,
-    "docs/context 下的叙述指针锚点缺失：" .. table.concat(acc.violations, ", ")
+    "openwiki/operating 下的叙述指针锚点缺失：" .. table.concat(acc.violations, ", ")
   )
 end)
 
@@ -103,29 +103,29 @@ end
 
 test("解析器漏检防线：子目录被识别、缺失锚点转红、`..` 穿越违规", function()
   -- ① 子目录指针必须被识别为 1 条（旧实现：0 条）。
-  local one = context_pointer_paths("正文见 docs/context/acts/charter.md（立局幕）。")
+  local one = context_pointer_paths("正文见 openwiki/operating/acts/charter.md（立局幕）。")
   assert_eq(#one, 1, "子目录指针必须被识别")
   assert_eq(one[1], "acts/charter.md", "路径原样")
 
   -- ② 两层子目录 + 紧邻中文标点 / `§` / `；` 不得吞掉路径。
   local two = context_pointer_paths(
-    "政策见 docs/context/rituals/cleanup.md §2；叙事 docs/context/story/run-story.md。"
+    "政策见 openwiki/operating/rituals/cleanup.md §2；叙事 openwiki/operating/story/run-story.md。"
   )
   assert_eq(#two, 2, "两个子目录指针")
   assert_eq(two[1], "rituals/cleanup.md", "第一个")
   assert_eq(two[2], "story/run-story.md", "第二个")
 
   -- ③ 目录指针 / 通配不算文件指针。
-  local none = context_pointer_paths("见 docs/context/acts/ 与 docs/context/acts/*.md")
+  local none = context_pointer_paths("见 openwiki/operating/acts/ 与 openwiki/operating/acts/*.md")
   assert_eq(#none, 0, "目录指针与通配都不算文件指针")
 
   -- ④ 存在的子目录锚点：计数 1、零违规。
-  local ok = pointer_violations("t", "ok", "docs/context/acts/charter.md")
+  local ok = pointer_violations("t", "ok", "openwiki/operating/acts/charter.md")
   assert_eq(ok.count, 1, "子目录指针必须计入 pointer_count")
   assert_eq(#ok.violations, 0, "存在的锚点零违规")
 
   -- ⑤ 不存在的子目录锚点：必须计数 1 且产生 1 条 violation（旧实现：0 条 = 漏检）。
-  local missing = pointer_violations("t", "missing", "docs/context/acts/definitely-no-such-doc.md")
+  local missing = pointer_violations("t", "missing", "openwiki/operating/acts/definitely-no-such-doc.md")
   assert_eq(missing.count, 1, "缺失锚点也必须计数")
   assert_eq(#missing.violations, 1, "指向不存在子目录文件的指针必须转红")
   assert_true(
@@ -134,17 +134,17 @@ test("解析器漏检防线：子目录被识别、缺失锚点转红、`..` 穿
   )
 
   -- ⑥ `..` 穿越必须判违规。
-  local escape = pointer_violations("t", "escape", "docs/context/acts/../README.md")
+  local escape = pointer_violations("t", "escape", "openwiki/operating/acts/../README.md")
   assert_eq(#escape.violations, 1, "`..` 穿越必须违规：" .. table.concat(escape.violations, ", "))
 end)
 
-local DESIGN_DIR = __REPO_ROOT .. "/docs/design"
+local DESIGN_DIR = __REPO_ROOT .. "/openwiki/contracts"
 
---- 指向 `docs/design/` 的文件指针（允许多级子目录；尾部多余的点与斜杠被 trim 掉）。
+--- 指向 `openwiki/contracts/` 的文件指针（允许多级子目录；尾部多余的点与斜杠被 trim 掉）。
 local function design_pointer_paths(value)
   local out = {}
   local at = 1
-  local prefix = "docs/design/"
+  local prefix = "openwiki/contracts/"
   while true do
     local s = value:find(prefix, at, true)
     if s == nil then
@@ -174,15 +174,15 @@ local function design_pointer_violations(acc, ns, key, value)
     end
     if illegal then
       acc.violations[#acc.violations + 1] =
-        ("%s.%s -> docs/design/%s (illegal path segment)"):format(ns, key, file)
+        ("%s.%s -> openwiki/contracts/%s (illegal path segment)"):format(ns, key, file)
     elseif not exists(DESIGN_DIR .. "/" .. file) then
       acc.violations[#acc.violations + 1] =
-        ("%s.%s -> docs/design/%s (missing)"):format(ns, key, file)
+        ("%s.%s -> openwiki/contracts/%s (missing)"):format(ns, key, file)
     end
   end
 end
 
-test("叙述面与源码的 docs/design 指针：逐来源账守恒 + 锚点全部存在", function()
+test("叙述面与源码的 openwiki/contracts 指针：逐来源账守恒 + 锚点全部存在", function()
   local items = {}
 
   -- ① 文案（texts/*.json）：beats + scenes/prompts 两命名空间。
@@ -231,7 +231,7 @@ test("叙述面与源码的 docs/design 指针：逐来源账守恒 + 锚点全�
     end
   end
 
-  local expected = { ["beats-settlement.json"] = 3, ["reactive.lua"] = 2 } -- S32：tools.lua 拆分后，原 tools.lua 的两处 docs/design 指针随 reactive_deps/receipt_deps 注释迁入 reactive.lua，账目不变仅换载体名。
+  local expected = { ["beats-settlement.json"] = 3, ["reactive.lua"] = 2 } -- S32：tools.lua 拆分后，原 tools.lua 的两处 openwiki/contracts 指针随 reactive_deps/receipt_deps 注释迁入 reactive.lua，账目不变仅换载体名。
   local keys = {}
   for k in pairs(ledger) do
     keys[#keys + 1] = k
@@ -242,14 +242,14 @@ test("叙述面与源码的 docs/design 指针：逐来源账守恒 + 锚点全�
     ek[#ek + 1] = k
   end
   table.sort(ek)
-  assert_eq(#keys, #ek, "docs/design 指针账漂移（来源数）：实得 " .. table.concat(keys, ","))
+  assert_eq(#keys, #ek, "openwiki/contracts 指针账漂移（来源数）：实得 " .. table.concat(keys, ","))
   for i = 1, #ek do
-    assert_eq(keys[i], ek[i], "docs/design 指针账漂移（来源名）")
+    assert_eq(keys[i], ek[i], "openwiki/contracts 指针账漂移（来源名）")
     assert_eq(ledger[keys[i]], expected[ek[i]],
       ("来源 `%s` 的指针数漂移"):format(ek[i]))
   end
-  assert_eq(total, 5, ("docs/design 指针总数漂移：期望 5，实得 %d"):format(total))
-  assert_eq(#violations, 0, "docs/design 指针锚点不存在：" .. table.concat(violations, ", "))
+  assert_eq(total, 5, ("openwiki/contracts 指针总数漂移：期望 5，实得 %d"):format(total))
+  assert_eq(#violations, 0, "openwiki/contracts 指针锚点不存在：" .. table.concat(violations, ", "))
 end)
 
 --- 公开包装：design 指针解析与核销（漏检防线用例用）。
@@ -265,13 +265,13 @@ end
 
 test("design 解析器漏检防线：子目录 / 句末点 / 通配 / `..` 六段", function()
   -- ① 一层子目录。
-  local one = design_ptr_paths("见 docs/design/kernel/state-machine.md（状态机）。")
+  local one = design_ptr_paths("见 openwiki/contracts/kernel/state-machine.md（状态机）。")
   assert_eq(#one, 1, "子目录指针必须识别")
   assert_eq(one[1], "kernel/state-machine.md", "路径原样")
 
   -- ② 句末多点一个也不吞；紧邻中文标点 / `；` 不吞路径。
   local two = design_ptr_paths(
-    "改 harness-tools 前读 docs/design/host/harness-tools.md. 再看 docs/design/mod/tool-bridge.md；"
+    "改 harness-tools 前读 openwiki/contracts/host/harness-tools.md. 再看 openwiki/contracts/mod/tool-bridge.md；"
   )
   assert_eq(#two, 2, "两个指针")
   assert_eq(two[1], "host/harness-tools.md", "句末多余的点被 trim")
@@ -279,22 +279,22 @@ test("design 解析器漏检防线：子目录 / 句末点 / 通配 / `..` 六�
 
   -- ③ 目录指针 / 通配 / 占位都不算文件指针。
   local none = design_ptr_paths(
-    "目录 docs/design/kernel/ 与通配 docs/design/*.md 与占位 docs/design/<module>/<topic>.md"
+    "目录 openwiki/contracts/kernel/ 与通配 openwiki/contracts/*.md 与占位 openwiki/contracts/<module>/<topic>.md"
   )
   assert_eq(#none, 0, "目录、通配、占位都不算文件指针")
 
   -- ④ 存在的子目录锚点：计数 1、零违规。
-  local ok = design_ptr_violations("t", "ok", "docs/design/kernel/state-machine.md")
+  local ok = design_ptr_violations("t", "ok", "openwiki/contracts/kernel/state-machine.md")
   assert_eq(ok.count, 1, "子目录指针必须计入 pointer_count")
   assert_eq(#ok.violations, 0, "存在的锚点零违规")
 
   -- ⑤ 不存在的子目录锚点：计数 1 且 1 条违规。
-  local missing = design_ptr_violations("t", "missing", "docs/design/kernel/definitely-no-such-doc.md")
+  local missing = design_ptr_violations("t", "missing", "openwiki/contracts/kernel/definitely-no-such-doc.md")
   assert_eq(missing.count, 1, "缺失锚点也计数")
   assert_eq(#missing.violations, 1, "指向不存在子目录文件的指针必须转红")
 
   -- ⑥ `..` 穿越必须违规。
-  local escape = design_ptr_violations("t", "escape", "docs/design/kernel/../README.md")
+  local escape = design_ptr_violations("t", "escape", "openwiki/contracts/kernel/../README.md")
   assert_eq(#escape.violations, 1, "`..` 穿越必须违规：" .. table.concat(escape.violations, ", "))
 end)
 

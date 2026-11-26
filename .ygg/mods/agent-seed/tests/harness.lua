@@ -5,7 +5,7 @@
 -- 边界：这里跑的是**普通 Lua**，不是内核沙箱。`ygg.*` 是可观测的替身，
 -- 因此断言能覆盖 mod 的业务语义，但覆盖不到 driver 层（事务回滚 /
 -- save receipt / 事件路由；原列举中的燃料项已随 S34 燃料退役不复存在）。
--- 见 docs/design/mod/testing-strategy.md。
+-- 见 openwiki/contracts/mod/testing-strategy.md。
 
 ------------------------------------------------------------------------------
 -- 1. 收集面

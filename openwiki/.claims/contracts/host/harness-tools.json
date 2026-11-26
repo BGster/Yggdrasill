@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:a15abb083be6081ae98bd0d7a812f5212707d30b0e83d17f382dc5fc7d90a0a8",
+  "claims": [
+    {
+      "id": "claim_906d858a71524fe6a00fa426ab9da999",
+      "statement": "`.pi/tools/<name>.sh` 是自足 POSIX sh 程序：不读 config、不读局 KV、不依赖 egg，输入面为 argv 主 + 进程环境次。",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/sessions-count.sh",
+          "version": "repo-file-v1:sha256:263c3a4f0a5f86d9e4a874bbd1594e597fd2cc910aad72ccbf35199d15061c9e"
+        },
+        {
+          "resource": "repo://.pi/tools/todo-check.sh",
+          "version": "repo-file-v1:sha256:64046b70f8b2454da70f83d557568af533cef5ff2b4a082c6490279823ae4934"
+        }
+      ]
+    },
+    {
+      "id": "claim_cb7a6edaa308403889d4958674f32204",
+      "statement": "输出面分两个亚家族：harness 四件 + 仓库级文档工具缺省单行 k=v（`--json` 切单行 JSON），git 亚家族五件缺省单行 JSON 三段式 `ok`/`data`/`error`（`--text` 切人读）。",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/git-delivery-check.sh",
+          "version": "repo-file-v1:sha256:1992c3628a1b4475c985c6c229e9b8aaa7c41a59dc6ca3b87e89aa28eee819a3"
+        }
+      ]
+    },
+    {
+      "id": "claim_b3a66f9390334e54a149e6dce6ab1528",
+      "statement": "exit 码全脚本统一：`0` 正常（结论在 ok=1/0）、`2` 用法错、`3` 环境缺失、`4` 目标资源不可读、`≥5` malfunction；「检测发现问题」永远 exit 0 + ok=0，与 malfunction 严格区分。",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/git-delivery-check.sh",
+          "version": "repo-file-v1:sha256:1992c3628a1b4475c985c6c229e9b8aaa7c41a59dc6ca3b87e89aa28eee819a3"
+        }
+      ]
+    },
+    {
+      "id": "claim_8743825e953440d5be81ef6b96e46c79",
+      "statement": "`git-delivery-check.sh` 的 `ok` = dirty/unpushed/stash/conflict_debris/fmt 五项 count 全 0；无 upstream 或 detached HEAD 时 unpushed 记 -1 计为失败，使「本地干净、远端没有」的半交付可分辨。",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/git-delivery-check.sh",
+          "version": "repo-file-v1:sha256:1992c3628a1b4475c985c6c229e9b8aaa7c41a59dc6ca3b87e89aa28eee819a3"
+        }
+      ]
+    },
+    {
+      "id": "claim_ce156356bea3432c97e6f7021f49bf63",
+      "statement": "三层参数来源中 argv 是唯一跨层事实：L1 mod handler 从局 KV `settings.tools.*` 拼 argv，L2 宿主 tool 桥只认 argv，L3 无 egg 环境按文档参数约定直接拼命令行。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/config.json",
+          "version": "repo-file-v1:sha256:23263ec07b27ed3687a4f81132bf8dfaacc01a2fbf657ea3ea615dbb383921e4"
+        },
+        {
+          "resource": "repo://.ygg/mods/agent-seed/mod.lua",
+          "version": "repo-file-v1:sha256:93bac2ec2ef9f3c15ac523b38dd7284bb0d6c65d583d88fb72c7890527054898"
+        }
+      ]
+    },
+    {
+      "id": "claim_5c5e417aed8d48b7b40c0d57d6c75e3c",
+      "statement": "结算 cross-check 在 apply 前同步调 harness 工具：机证与人证矛盾即 reject_payload 零状态写入；未注册或脚本不可执行时回退人证旧路径而不拒绝结算；机证不高于人证。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire/settlement.lua",
+          "version": "repo-file-v1:sha256:57b1456c18bf05ad44528847b7f7a1beb62a4e0b7bcd9f6dc13a9a475b22bee4"
+        }
+      ]
+    },
+    {
+      "id": "claim_0a9b368b072040d8897787f0867e2456",
+      "statement": "跨 harness 冻结面 = 脚本名 + argv 旗标表 + 输出方言 + exit 码表 + 注册键名 + 参数约定；演进只增不改名。本次知识面迁移把这两个文档工具改名为 `wiki-consistency.sh` / `scripts/wiki-ver.sh`，索引改读 `openwiki/overview.md`、版本改读 `openwiki/ver.json`。",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/docs-consistency.sh",
+          "version": "repo-file-v1:sha256:fb5e7dab9080d2bc7c2036aebac759721c02b9303f4869c8e5d1ef198d860414"
+        },
+        {
+          "resource": "repo://scripts/docs-ver.sh",
+          "version": "repo-file-v1:sha256:84dd07f7d86dda772602d237e08021954a457f9255af1dc617a5c22ea7d2b804"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

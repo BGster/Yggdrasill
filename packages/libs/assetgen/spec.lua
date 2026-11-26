@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/spec.lua` —— 错误码 / `fail` / 参数三段值域 / spec 归一。
 --
--- 契约：`docs/design/packages/assetgen.md` §3 I8（值域三段）/ §4（`ERRORS` 五键）。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §3 I8（值域三段）/ §4（`ERRORS` 五键）。
 --
 -- # 为什么单开这一个叶子
 --

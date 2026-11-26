@@ -1,6 +1,6 @@
 -- `packages/libs/role-skill/init.lua` —— 包根模块 `pkg.role_skill`：**纯导出面**。
 --
--- 契约：`docs/design/packages/role-skill.md`。顶层只有 `local` / `require` / 函数
+-- 契约：`openwiki/contracts/packages/role-skill.md`。顶层只有 `local` / `require` / 函数
 -- 定义（I8）；定义、注册与订阅一律在 `M.install(deps)` 或调用期。
 --
 -- 目录形状与命名（`packages/README.md` §5）：目录名 `role-skill`，模块名里的连字符

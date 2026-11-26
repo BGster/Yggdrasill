@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:72aa07f243fb4a9c875b2a93951da92bd85a5e7f289952ff0938099da9e2113b",
+  "claims": [
+    {
+      "id": "claim_ac1b6cfafa7944829f659866812f2d7d",
+      "statement": "tla-models 是零 `crates/ygg-*` 改动的多文件 Mod：六个 `src/**` 模块（gol / twophase / klotski / ewd998 / replay / inv）全经 `pkg.*` 与 `ygg.*` 面消费，`mod.lua` 只装配。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/tla-models/mod.lua",
+          "version": "repo-file-v1:sha256:bf5c60455277f45a794527218e71b0e4839bb45b35c268716bf0cd183e7ae1c5"
+        },
+        {
+          "resource": "repo://packages/mods/tla-models/pack.json",
+          "version": "repo-file-v1:sha256:4c874b680df64fbf3bb5fffcaee2a76d36bfb70771d2cf46da5409c181610f69"
+        }
+      ]
+    },
+    {
+      "id": "claim_c14bdd8908624d3c87f58a0491f8cd63",
+      "statement": "轨道驱动：reset 建规范初态，step 执行一个动作（`\\E` 非确定性显式化为动作选择输入，stutter 为显式步型），auto 用 `f(seed,tick,state)` 纯选步，双局同 seed 逐锚必等。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/tla-models/src/replay.lua",
+          "version": "repo-file-v1:sha256:e3a680c49d0d42161443ffc4910767c4c903d881a673db55356879f6b0bee475"
+        }
+      ]
+    },
+    {
+      "id": "claim_8c94aa2816e44cb2beab840f1dc4b5e2",
+      "statement": "哈希是**纯状态指纹**：每拍 `procgen.hash(snapshot())` 落 `tla.hash.<m>.<tick>`，每 4 拍落 `tla.anchor.<m>.<tick>`；不掺 tick / 前值，否则 stutter 步哈希必变、`[][Next]_v` 失去同态同哈希对账面。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/tla-models/data/traces/gol.json",
+          "version": "repo-file-v1:sha256:a26dbe5a947b0615ab3042f766e3df117cc2be909fd30470cd3f68a04471a5a0"
+        },
+        {
+          "resource": "repo://packages/mods/tla-models/src/replay.lua",
+          "version": "repo-file-v1:sha256:e3a680c49d0d42161443ffc4910767c4c903d881a673db55356879f6b0bee475"
+        }
+      ]
+    },
+    {
+      "id": "claim_414b84de4bcf41c5b880b94f9466ee34",
+      "statement": "不变量注册表在 `src/inv.lua`，`inv.check` 返回违例清单（空 = 绿）；断言抛错 fail-closed 记违例，不伪装绿。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/tla-models/src/inv.lua",
+          "version": "repo-file-v1:sha256:b5571b42b93c5e1d701c61829cb4cb47c8534ac2d00528f2d6dccef18eeb9ad5"
+        }
+      ]
+    },
+    {
+      "id": "claim_8cef2e17835a4c628835628ba00c2175",
+      "statement": "实体映射：gol 每格一 `tla.cell`、klotski 十件 `tla.piece`（cells 由 kind 偏移展开）、ewd998 每节点 `tla.node`；快照规范序（cells 按 (y,x)、pieces 按 (ox,oy,kind)）就是哈希 KAT 面。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/tla-models/src/gol.lua",
+          "version": "repo-file-v1:sha256:fab1834b040fdcad0bb7e87b7e85ce426816b4bb795e48d51682749bd3d7f689"
+        },
+        {
+          "resource": "repo://packages/mods/tla-models/src/klotski.lua",
+          "version": "repo-file-v1:sha256:6a0d62bc11b973f43157270aeec1ecc8c5d6cad955371292e1c6fe5248e78313"
+        }
+      ]
+    },
+    {
+      "id": "claim_1a8014d4438b4abcb5751a1806e4c59a",
+      "statement": "黄金轨道 JSON 存动作向量 + 16 hex 冻结哈希 + 锚表 + 终态快照（method=\"KAT\"）；TLC 官方 jar 双 URL 实测 404，故不在契约里谎称 TLC 对账，而用 Python 独立推导 + 手算双推的 KAT 步表。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/tla-models/data/traces/ewd998.json",
+          "version": "repo-file-v1:sha256:3ea6d7bd4a9725b984ba59c03c0af995ea95136183517707383123e9513de8f7"
+        },
+        {
+          "resource": "repo://packages/mods/tla-models/data/traces/twophase.json",
+          "version": "repo-file-v1:sha256:f37c96ca204adc969c24904152f308d8140d91f7b4b3fd3766bafc06759fcc70"
+        }
+      ]
+    },
+    {
+      "id": "claim_469b63149d04493490fcd2a83ad2647a",
+      "statement": "验收断言两线分离：实现状态 == 手算 KAT 表（语义正确性）∧ 实现哈希 == 冻结值（漂移检出）；`replay.tamper` 的 hash1 / final / anchor 三变异面各断言对账必败，同参不篡改 = 绿。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/tla-models/src/replay.lua",
+          "version": "repo-file-v1:sha256:e3a680c49d0d42161443ffc4910767c4c903d881a673db55356879f6b0bee475"
+        }
+      ]
+    },
+    {
+      "id": "claim_3284ea3516f54f348e8c0193aede2571",
+      "statement": "语义子集边界：仅移植「有限态 + 显式 Next 析取 + 安全不变量」，WF/SF 公平性、活性、TLAPS 证明一律裁剪；TypeOK 在运行期加强两处（同格双实体、件重叠），CHOOSE 命中数 ≠ 1 报 `YGG-MOD-TLA-CHOOSE` 而非静默取首个。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/tla-models/src/ewd998.lua",
+          "version": "repo-file-v1:sha256:93d5eea024ef179215966d968d5ac100b4115f026b02b59e6bb863e7cb6c7864"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

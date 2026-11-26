@@ -6,7 +6,7 @@
 -- 体相同（契约 §4.1 下沉边界表）——旧宿主只有 encode/decode 两键或裸沙箱
 -- 无面时，摘要仍由这里产出，逐字节不变。
 --
--- 契约：`docs/design/packages/codec.md` §4「checksum 的 sha256 来源」（D11 已回写：
+-- 契约：`openwiki/contracts/packages/codec.md` §4「checksum 的 sha256 来源」（D11 已回写：
 -- P0 的「FNV-1a 降级路径」退役——纯 Lua sha256 就位 + P1 挂载桥已落地，宿主
 -- `fs.write` 的 sha256 由「来源」变「互校」）。
 --

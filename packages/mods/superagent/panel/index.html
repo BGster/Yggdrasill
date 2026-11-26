@@ -31,7 +31,7 @@
   var err = document.getElementById("err");
   document.getElementById("meta").textContent = "run: " + (runId || "未知") + "（只读观察；写路径一律走 CLI/daemon）";
 
-  // 对话/任务行的判定：本 mod 的机器可读投影事件名（docs/design/mod/superagent-game.md §3）。
+  // 对话/任务行的判定：本 mod 的机器可读投影事件名（openwiki/contracts/mod/superagent-game.md §3）。
   function cls(name) {
     if (name === "agent.dialogue") return "evt dialogue";
     if (name.indexOf("quest.") === 0 || name.indexOf("agent.recorded") === 0) return "evt quest";

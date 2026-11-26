@@ -1,6 +1,6 @@
 -- `packages/libs/procgen/algos/layout.lua` —— 布局生成器（整数域，两张产物）。
 --
--- 契约：`docs/design/packages/procgen.md` I5（参数化而非分支）/ §2。本模块只产出
+-- 契约：`openwiki/contracts/packages/procgen.md` I5（参数化而非分支）/ §2。本模块只产出
 -- 内容：`algo` 与 `v` 由 `registry.run` 统一附着。
 --
 -- # 组合不新增 API

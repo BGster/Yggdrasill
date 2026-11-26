@@ -1,6 +1,6 @@
 -- `packages/libs/role-skill/window.lua` —— 近期流的滑动窗口（有界 ring + 计数读面）。
 --
--- 契约：`docs/design/packages/role-skill.md` §2（`role.window.<id>` 键族）/
+-- 契约：`openwiki/contracts/packages/role-skill.md` §2（`role.window.<id>` 键族）/
 -- §3 I10（窗口与计数器分工）/ §4（`window_push` / `window`）。
 --
 -- # 为什么是独立存储（D12）

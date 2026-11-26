@@ -1,7 +1,7 @@
 //! rt 预览端口（S31 R2）：内嵌 HTTP/SSE 推帧 + 输入回注。
 //!
 //! **为什么不挂 serve**（D5 裁定）：serve 契约 = 零内核不连运行进程
-//! （`docs/design/host/serve.md`）；推帧的数据源在 rt 进程内，挂 serve 须
+//! （`openwiki/contracts/host/serve.md`）；推帧的数据源在 rt 进程内，挂 serve 须
 //! 先造 serve↔rt IPC 桥 = 破坏观察面架构。故预览端口**内嵌本文件**：
 //! std TcpListener + HTTP/SSE（仿 serve/http.rs 先例，依赖零新增）。
 //!

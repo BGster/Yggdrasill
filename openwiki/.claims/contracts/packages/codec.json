@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:3e69daaa2a7eaec9c2e9a225ac2be346c94c4253d9e60d28b925f95225b7acc3",
+  "claims": [
+    {
+      "id": "claim_bbd6a9a8595246ea9d6db11b3c920a88",
+      "statement": "bundle 形状固定五字段：`codec_version`(\"1\") / `exported_from`(调用方传入的 `ns.mod`，缺省空串) / `entities` / `kv`(扁平 key→scalar，只含显式点名的键) / `checksum`（`\"\"` = 未封签）。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/codec/bundle.lua",
+          "version": "repo-file-v1:sha256:5bf691c09c4c592ef1bad61517184feb0b2ef4b28da134b0dc1bc0c9d353453b"
+        },
+        {
+          "resource": "repo://packages/libs/codec/jsonenc.lua",
+          "version": "repo-file-v1:sha256:65d0550a487dc04870da61fa7ca7f97bc78d3f980c28efb703aeda98e216c24c"
+        }
+      ]
+    },
+    {
+      "id": "claim_12c7373771c34fd5962cea2c0af82a6f",
+      "statement": "I1 确定性字节：对象键按字节序排序、数字用最短往返表示、无多余空格与尾逗号；判据是两次 encode 逐字节相等，不是「能解析」。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/codec/jsonenc.lua",
+          "version": "repo-file-v1:sha256:65d0550a487dc04870da61fa7ca7f97bc78d3f980c28efb703aeda98e216c24c"
+        }
+      ]
+    },
+    {
+      "id": "claim_b2c669fc2bc046fca7d28cd971c88cf8",
+      "statement": "I3 冲突策略显式且必选：`on_conflict ∈ {skip,overwrite,rename}`，**没有缺省值**，缺失或非法一律 `YGG-PKG-CODEC-CONFLICT`（退路默认值会让一次误调用静默丢整份档的差异）。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/codec/importing.lua",
+          "version": "repo-file-v1:sha256:913473408b61eacad53c4ca5b0fa12523e42be0d0d533066a4f21019de7ad275"
+        }
+      ]
+    },
+    {
+      "id": "claim_0b18cc3f696c49438492bdaad15c7223",
+      "statement": "I4 校验和先行且原子：封签 bundle 导入前先算 checksum，不符即拒 `YGG-PKG-CODEC-CHECKSUM`，且不做部分导入——校验先于任何写（用例用 mock 写计数为证）。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/codec/bundle.lua",
+          "version": "repo-file-v1:sha256:5bf691c09c4c592ef1bad61517184feb0b2ef4b28da134b0dc1bc0c9d353453b"
+        },
+        {
+          "resource": "repo://packages/libs/codec/importing.lua",
+          "version": "repo-file-v1:sha256:913473408b61eacad53c4ca5b0fa12523e42be0d0d533066a4f21019de7ad275"
+        }
+      ]
+    },
+    {
+      "id": "claim_fbd109694ba54a52a516683a16e7b9c3",
+      "statement": "封签不在 `export` 里做：`checksum = \"\"` 是「从未封过」的显式第二态而非「脸证通过」，越过信任边界的档一律经 `read` 必封必校，`import` 的 `verified` 把区别显式交给调用方。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/codec/bundle.lua",
+          "version": "repo-file-v1:sha256:5bf691c09c4c592ef1bad61517184feb0b2ef4b28da134b0dc1bc0c9d353453b"
+        }
+      ]
+    },
+    {
+      "id": "claim_d83c9d9f18d54fcaae3d39286e9b8bea",
+      "statement": "原生加速面 `ygg.codec.{encode,decode,sha256}` 是包内 Lua 实现的**符合实现**（唯一判据是逐字节相等）；面缺席时走 Lua，两个错误码边界为 UNSUPPORTED ⇒ 回退重跑、INTERNAL ⇒ 报 `YGG-PKG-CODEC-HOST` 且**不回退**。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/codec_face/digest.rs",
+          "version": "repo-file-v1:sha256:ac5a2a1af1c798048e89ef734cfd4fa22ca79f8d0ff13e7879f162b62101f1dc"
+        },
+        {
+          "resource": "repo://packages/libs/codec/runtime.lua",
+          "version": "repo-file-v1:sha256:4964cd02d6484887b3a5c0b9c2eef3d2e0ee03574d601639378755ba56a85839"
+        }
+      ]
+    },
+    {
+      "id": "claim_de3ffb4dbebb4a148afee51646f4c26c",
+      "statement": "sha256 由包内纯 Lua FIPS 180-4 算法为主源（宿主 `ygg.fs.write` 回的 sha256 是它自己对写出文本的记录，两份字节永不相同，所以不互校，写侧只校回执字节数——S16）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/codec_face/digest.rs",
+          "version": "repo-file-v1:sha256:ac5a2a1af1c798048e89ef734cfd4fa22ca79f8d0ff13e7879f162b62101f1dc"
+        },
+        {
+          "resource": "repo://packages/libs/codec/sha256.lua",
+          "version": "repo-file-v1:sha256:18ab3f5295befc4f1f1fcc6af7ee3ddd6baf704705c81bce5efc9a9382f2b119"
+        }
+      ]
+    },
+    {
+      "id": "claim_373fe67c0f6e493ea43cb32c0962751f",
+      "statement": "sha256 验收靠已知答案向量（空串 / \"abc\" / 55 / 56 / 64 / 65 字节 / 448-bit 双块）与 `shasum -a 256` 对拍；只断「算出 64 位 hex」不向量对拍，视同没测。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/codec/sha256.lua",
+          "version": "repo-file-v1:sha256:18ab3f5295befc4f1f1fcc6af7ee3ddd6baf704705c81bce5efc9a9382f2b119"
+        },
+        {
+          "resource": "repo://packages/libs/codec/test/pkg-codec.lua",
+          "version": "repo-file-v1:sha256:3189317b38113398b27d3bb8725a12e0c6aae99767c4f99c9c16e1df73d51dbb"
+        }
+      ]
+    },
+    {
+      "id": "claim_51a5cabbeba445b7918c7ec89b463950",
+      "statement": "Lua 侧拆为 `init`(装配转口) + `runtime`(错误码/版本/deps) + `jsonenc` + `jsondec` + `bundle` + `importing` 六文件，依赖无环；`init` 导出 12 键逐键不变，deps 记位落 `runtime` 的 `installed` 座并同步 `M.deps` 别名。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/codec/importing.lua",
+          "version": "repo-file-v1:sha256:913473408b61eacad53c4ca5b0fa12523e42be0d0d533066a4f21019de7ad275"
+        },
+        {
+          "resource": "repo://packages/libs/codec/runtime.lua",
+          "version": "repo-file-v1:sha256:4964cd02d6484887b3a5c0b9c2eef3d2e0ee03574d601639378755ba56a85839"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

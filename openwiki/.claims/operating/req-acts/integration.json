@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:f6936cf5507877b94b57068aae5976bfe3964e6ff07dc6adf229a515de9b5450",
+  "claims": [
+    {
+      "id": "claim_66b899794d7544659524d4135439430a",
+      "statement": "Acceptance needs artifacts: a summary-only development proposal is rejected with `req_gate_no_evidence`, so approval requires a non-empty archived artifact plus a matching revision.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/gate_actions.lua",
+          "version": "repo-file-v1:sha256:57a7afcbd359ec03a13cd5ee177463c825fb987fac080e029b3efbb067bbd51e"
+        }
+      ]
+    },
+    {
+      "id": "claim_cf50a93462e94809ac4ee559b049d500",
+      "statement": "Integration is the development executor's job inside its own lane: it aligns with `origin/develop`, merges with `--no-ff`, re-verifies in the integration state, and only then pushes; the main session never integrates an iteration.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/lanes.lua",
+          "version": "repo-file-v1:sha256:4e18502d655d90dbb2bc784176320ba27b9b538fae0b2212b31433770ad3255c"
+        }
+      ]
+    },
+    {
+      "id": "claim_daf9c284fd4949188ab5163fdac422ac",
+      "statement": "A requirement closes only when the artifact carries a `develop@<sha>`; a bare feature-branch push is not a closeout, and a SHA mismatch is rejected as `integration_bad_sha`.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/integration.lua",
+          "version": "repo-file-v1:sha256:a70506ba126f783958cd413fe46644af8c0bc5d36a212deb7e52626ab12752a5"
+        }
+      ]
+    },
+    {
+      "id": "claim_5b4b3b6d07eb4fc391bf80d2098ca9b8",
+      "statement": "Green on a feature branch does not transfer: the post-merge integration state must be verified again before `develop` is pushed.",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/host_contract/settlement.rs",
+          "version": "repo-file-v1:sha256:4cd6d2a286f0753c9614f3bd50158575c5b717d81b624e46cc83c9e2f73bfa37"
+        }
+      ]
+    },
+    {
+      "id": "claim_17ec9c9c06f94fbd9bd9ed1e4f9d0ad1",
+      "statement": "An amend on a `done` requirement does not mutate history — it derives a new requirement whose receipt names the origin id, rev and closed reason.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_2cd91510db50489fa18564071d1d8e25",
+      "statement": "Switching a capability on is a separate assertion from its existence: `*_ships_armed_*` cases pin that a config value is actually effective, because schema validates shape only and a required key may legally be `false` while the protection silently fails.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/tests/gates.lua",
+          "version": "repo-file-v1:sha256:76ed57d05efe3af440a596b4985697796dbd3e5311a602905a3adbeb50fda961"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

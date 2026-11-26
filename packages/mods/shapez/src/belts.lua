@@ -1,6 +1,6 @@
 -- `src/belts.lua` —— 传送带路径与定点推进（v1 核心循环的热路径）。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §3）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §3）
 --
 -- 源 BeltPath/belt 系统（belt_path.js 1,661 行 + systems/belt.js）的 v1 等价面：
 -- 路径 = 传送带链；物品 = shortkey 串；推进 = Q32.32 整数定点（Lua 64 位整数）。

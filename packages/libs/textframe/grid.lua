@@ -1,6 +1,6 @@
 -- `packages/libs/textframe/grid.lua` —— 帧缓冲的全部实现：建帧 / 单格写 / 分层 / 行装配 / 块拼接。
 --
--- 契约：`docs/design/packages/textframe.md` §2 / §3 / §4。
+-- 契约：`openwiki/contracts/packages/textframe.md` §2 / §3 / §4。
 --
 -- # 形状
 --

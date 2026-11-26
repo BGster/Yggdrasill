@@ -1,6 +1,6 @@
 -- `packages/libs/procgen/digest.lua` —— 稳定十六进制摘要面（`procgen.hash`）。
 --
--- 契约：`docs/design/packages/procgen.md` §4 / I6。
+-- 契约：`openwiki/contracts/packages/procgen.md` §4 / I6。
 --
 -- # 为什么借 codec 的编码而不自己写一份
 --

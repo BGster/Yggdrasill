@@ -1,6 +1,6 @@
 -- `packages/libs/procgen/rng.lua` —— 命名流派生 + xoshiro128** 取数原语。
 --
--- 契约：`docs/design/packages/procgen.md`（I1 确定性 / I2 流隔离 / I3 无外部熵 /
+-- 契约：`openwiki/contracts/packages/procgen.md`（I1 确定性 / I2 流隔离 / I3 无外部熵 /
 -- I7 顶层纯度）。本文件是包的**最底层叶子**：其它模块都 require 它，它谁也不
 -- require——所以错误码表与 `fail` 住在这里（为一个常数表多开第七个模块，不如
 -- 让它跟着唯一被所有人依赖的叶子走）。

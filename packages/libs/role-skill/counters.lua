@@ -1,11 +1,11 @@
 -- `packages/libs/role-skill/counters.lua` —— 事件计数（订阅面 + 显式清零）。
 --
--- 契约：`docs/design/packages/role-skill.md` §3 I5（只增）/ I6（无时钟）/ §4。
+-- 契约：`openwiki/contracts/packages/role-skill.md` §3 I5（只增）/ I6（无时钟）/ §4。
 --
 -- # 冷却不是时间
 --
 -- 包内**零时间源**：宿主的时间面（`ticks()`）有 API 无推进者（生产路径恒 0，见
--- `docs/design/kernel/state-surface.md` §2.8.1），拿它做冷却等于冷却永不过期；`os`
+-- `openwiki/contracts/kernel/state-surface.md` §2.8.1），拿它做冷却等于冷却永不过期；`os`
 -- 与 `io` 在沙箱里本就不可达。
 --
 -- 冷却 = **事件计数**：订阅的事件每来一次 `counters[event] + 1`，mod 用

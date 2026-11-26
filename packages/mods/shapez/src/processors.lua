@@ -1,6 +1,6 @@
 -- `src/processors.lua` —— 处理器：miner / cutter / stacker / rotater / trash。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §4）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §4）
 --
 -- 源 item_processor.js（642 行）+ miner/hub 系统 + ejector 系统的 v1 等价面。
 -- 每台处理器 = `sz.processor` 实体（attrs：kind/in1/in2/progress/out1/out2）；

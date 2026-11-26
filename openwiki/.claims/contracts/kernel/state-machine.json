@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:1c8ec3cf6d6bb72c68b8e5a199ac69c6c16ed725ce7f3d250b0082f5787cb8cc",
+  "claims": [
+    {
+      "id": "claim_f7aa500171c04bdb99ebde094f76be90",
+      "statement": "内核转换是全有或全无：事件是唯一写入口，`(state, event) -> state'`；一旦处理器发出 choice，队列剩余部分被丢弃。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-core/src/transition.rs",
+          "version": "repo-file-v1:sha256:3c371e1e065a8009854f69bd2bc9466b9bca03e51311c1b21f878b164ea89904"
+        }
+      ]
+    },
+    {
+      "id": "claim_fc89f7bdf857436d959a5dc8de58c1d4",
+      "statement": "运行级与需求级微状态由两个函数（`run_phase` / `req_phase`）单一来源派生，判定序即优先级：`integrating` 先于一切，`plan_ok` 先于计划门禁与计划中。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_6bf852551a7d42e5ab5943f1bdfe6033",
+      "statement": "外层真状态压缩到 4 个：`fsm.stage` 只有 live/retired，`req.<i>.status` 只有 open/done；`split`/`merged`/`dropped` 降为 `closed_reason` 字段而非状态。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    },
+    {
+      "id": "claim_0f6b66e52fe64a77a34deebe1de17ad6",
+      "statement": "响应式效应在发出唯一 `pendingChoice` 之前按注册序冲刷，最多 `MAX_PASSES = 4`，不收敛即硬错；效应不得调用 `render()` / `ygg.choice`。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/core/hooks.lua",
+          "version": "repo-file-v1:sha256:a24d868371da8fe0bfead2f5ba0b71731933be2d44fa878421c824049ee78242"
+        }
+      ]
+    },
+    {
+      "id": "claim_c6409a50f8234731baa93d4e3c65a903",
+      "statement": "`auto_dispatch` 只标记刚就绪的需求（`mark_auto_dispatch`），仅在本回合无待决提案/门禁、无冲突且有空闲 job 槽时派发这一条；draft 永不自动派发。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/core/hooks.lua",
+          "version": "repo-file-v1:sha256:a24d868371da8fe0bfead2f5ba0b71731933be2d44fa878421c824049ee78242"
+        },
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/requirements/gate_actions.lua",
+          "version": "repo-file-v1:sha256:57a7afcbd359ec03a13cd5ee177463c825fb987fac080e029b3efbb067bbd51e"
+        }
+      ]
+    },
+    {
+      "id": "claim_f8a66f2e8dae42f5b9121dbaa3981f15",
+      "statement": "`proposal.submit` 保留尾段允许 `exec=<id>[:<reason>]` 在同一事务内登记执行者；位置错位由 Mod 以 `req_prop_exec_misplaced` / `req_prop_actor_misplaced` / `req_prop_actor_session_misplaced` 分别拒绍。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/wire/intake.lua",
+          "version": "repo-file-v1:sha256:103e925562f7a3cfa448e70967899d7a49a70a125611e7629b7bf28314b97d10"
+        }
+      ]
+    },
+    {
+      "id": "claim_d35f47e23739471b918ad6f9a288c112",
+      "statement": "宿主侧身份段不可伪造：`actor=` / `actor_session=` 只由宿主机在声明路由上注入，调用方自带即以 `ACTOR_FORGED` 拒绍、不 dispatch、不持久化。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/egg/identity/tests.rs",
+          "version": "repo-file-v1:sha256:16baf94c4787d3eca6b84465b9d504c6409fa0e689e5707c09ca323dbb57e763"
+        }
+      ]
+    },
+    {
+      "id": "claim_35b81bbfb2484543b11d1656995d51ba",
+      "statement": "宿主三套门禁由 `verify_gates` 硬编码为 `cargo test --workspace`、`cargo test --example egg -p ygg-sandbox`、`cargo test -p ygg-sandbox --test agent_seed_semantics`；workspace 不编译 example target。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/egg/verify.rs",
+          "version": "repo-file-v1:sha256:41383259bedbcb8999bfc1cd0a6b4debea53c2a0e72ca10bcbbaceee8b232804"
+        }
+      ]
+    },
+    {
+      "id": "claim_1ee1b72acdf6476fb3d93e52f4c0d288",
+      "statement": "`agent_seed_semantics` 只断言「Lua 套件还在、用例数够多」元事实，不承载行为断言；Mod 行为验收必须跑 `cargo run -q --example selftest -- --mod .ygg/mods/agent-seed`。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/tests/agent_seed_semantics.rs",
+          "version": "repo-file-v1:sha256:8e68e11fca27b592554ff54cf2d48026baae95df9be2ae052fea0e4e5db2b5d5"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

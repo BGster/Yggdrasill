@@ -1,7 +1,7 @@
 -- `pkg.entity.base` —— entity 的共享座：KV 键唯一出处、错误码、词典 util、
 -- `installed` 状态座与 `host()`。
 --
--- 契约：`docs/design/packages/entity.md`。批十一拆分的叶子模块：`fail` / `E_*` /
+-- 契约：`openwiki/contracts/packages/entity.md`。批十一拆分的叶子模块：`fail` / `E_*` /
 -- `K` / 词典 util 只住这一处（共享 local 禁止抄第二份），schema / record / query
 -- 经 `require("pkg.entity.base")` 取用。与原单文件的唯一差异（计划 §2 授权项）：
 -- `M.install` 的记位函数落座本模块（init.lua 的 `M.install` 转发），返回表由包表

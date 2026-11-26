@@ -1,6 +1,6 @@
 -- `pkg.codec.jsondec` —— decode：递归下降 + 位置化报错（`at byte N`）。
 --
--- 契约：`docs/design/packages/codec.md` §4.1。批十一拆分（纯搬移）：原生面委托与
+-- 契约：`openwiki/contracts/packages/codec.md` §4.1。批十一拆分（纯搬移）：原生面委托与
 -- 回退随本文件走，对偶规则（对象 null 丢弃 / 数组 null 报错 / 顶层 null = nil）
 -- 见 `M.decode` 头注。解析器骨架（NULL / parse_error / skip_space / utf8_char /
 -- parse_string / parse_number / parse_value）全部住本文件。

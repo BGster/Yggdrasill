@@ -1,6 +1,6 @@
 -- `pkg.codec.bundle` —— checksum / export / write / read / roundtrip（存档往返）。
 --
--- 契约：`docs/design/packages/codec.md` §4。批十一拆分（纯搬移）：`checksum` 的
+-- 契约：`openwiki/contracts/packages/codec.md` §4。批十一拆分（纯搬移）：`checksum` 的
 -- sha256 与 encode 分别取自 runtime / jsonenc（单源，不抄第二份）；`export` 的
 -- 记录取自 `pkg.entity` 的 API（包间依赖边，同原单文件 top-level require）。
 -- 字节纪律（键序 / checksum 置空 / 只校回执字节数）见各函数头注与契约 I4。

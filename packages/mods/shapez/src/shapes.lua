@@ -1,6 +1,6 @@
 -- `src/shapes.lua` —— 形状规范形：shortkey 编解码 + 切割/堆叠/旋转纯函数。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §2）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §2）
 --
 -- shortkey 字符串**就是**规范形（源 `serialize() == getHash()` 的同位语义）：
 -- 层自下而上以 `:` 相接，每层 8 字符 = 4 象限 ×（子形 + 颜色），

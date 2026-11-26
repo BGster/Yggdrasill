@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e1471dddb75b6a33353a97b7cd8928f4dd651da6eb3826e356854a6710c94dcd",
+  "claims": [
+    {
+      "id": "claim_e8294cee478f4ae882cf280dd1045199",
+      "statement": "包 id = 目录名（`^[a-z][a-z0-9_-]*$`），模块名 `pkg.<name>` 把 id 里的 `-` 折叠为 `_`（`role-skill` → `pkg.role_skill`），因为模块名段字符集只有 `[A-Za-z0-9_]`；文件名段同样禁连字符。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/entity/pkg.json",
+          "version": "repo-file-v1:sha256:5cd9d1faba637a37afc9725852af8e2ebcc9689e2bb70c02ddd054e31b0be310"
+        },
+        {
+          "resource": "repo://packages/libs/role-skill/pkg.json",
+          "version": "repo-file-v1:sha256:f3bc9859d7c126c7695052a7b4aca8aca1ba71122858b77690df643b8b888c1e"
+        }
+      ]
+    },
+    {
+      "id": "claim_b068ed1bb04c40d6bf90af3a9fcc7d5b",
+      "statement": "`pkg.json` 必存：`{schemaVersion:1,name,version,deps?,contract}`；version 是精确 pin（mod 的 `packages[]` 与本包 `deps[]` 都是字符串相等），contract 是仓内相对路径且必须存在。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/codec/pkg.json",
+          "version": "repo-file-v1:sha256:d51fb876bcf1caf84f7c0a935e7a880b54789c3a7c0941ac89865b21f08aeb4f"
+        },
+        {
+          "resource": "repo://packages/libs/procgen/pkg.json",
+          "version": "repo-file-v1:sha256:b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
+        }
+      ]
+    },
+    {
+      "id": "claim_9d0258198f674f30b09cb41788521983",
+      "statement": "纯度纪律：包模块顶层只允许纯导出（函数与常量），注册 / 写状态 / 输出一律在 `M.install(deps)` 或调用期；包内除 `test/**` 外每个文件都必须被 manifest 的 `packages` 段纳管。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/entity/init.lua",
+          "version": "repo-file-v1:sha256:a75c2e749c3b8b4c0551051ce95d749e23b778c63fbe41b4dfc085c87e2853a1"
+        },
+        {
+          "resource": "repo://packages/libs/entity/pkg.json",
+          "version": "repo-file-v1:sha256:5cd9d1faba637a37afc9725852af8e2ebcc9689e2bb70c02ddd054e31b0be310"
+        }
+      ]
+    },
+    {
+      "id": "claim_3c567ef4ebda49edbecaa3f1706466fa",
+      "statement": "`pkg-selftest` 是声明了 `packages` 段的 Mod（八包精确 pin），唯一职责是让包自测被收集；生产 mod `agent-seed` 不声明包，所以它的 `cases passed=` 看不到 `pkg.*`——那条计数就是回归钉。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/pkg-selftest/mod.lua",
+          "version": "repo-file-v1:sha256:7103b2c248abcf636483819d30dca262da2c335a9f5d3dd59fd72b6fc7ebd2f2"
+        },
+        {
+          "resource": "repo://packages/mods/pkg-selftest/pack.json",
+          "version": "repo-file-v1:sha256:5c9d21b750324699a1bef03f6b5bd11564359d29ec69cb8a5d04f53d82749070"
+        }
+      ]
+    },
+    {
+      "id": "claim_7e841aa303064fcc93e6f0e7a79a59b6",
+      "statement": "用例名前缀 `pkg.<name>.`，采集面只看 `test/*.lua` 主件（非递归 read_dir）；主件可把用例拆进兄弟件 `test/<主件名>/<theme>.lua`，计数与拆分前守恒。",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/pkg-selftest/mod.lua",
+          "version": "repo-file-v1:sha256:7103b2c248abcf636483819d30dca262da2c335a9f5d3dd59fd72b6fc7ebd2f2"
+        }
+      ]
+    },
+    {
+      "id": "claim_6920fea9b3534bb5a849589420f1070a",
+      "statement": "沙箱两级面：第一级 = 16 个 base 纯计算函数 + 字符串方法 + 受控 `require` + `ygg`（包与 mod 都可用）；第二级 = 15 个 `math` 成员 + `ygg.ticks`（只在 driver 路径注入，**仅 mod 可用**）；`table` / `string` 方法外的 `os` / `io` / `package` / `dofile` 全为 nil。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/inject.rs",
+          "version": "repo-file-v1:sha256:9875a2894e75be2d5e5f08e8343f79a4c7c8bcbc23cbce40d0073c18f340234c"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e98fefcb31fe3956aecb63196f6e3c5e303b4419a0ec4f159029229f1145a883"
+        }
+      ]
+    },
+    {
+      "id": "claim_c0441245728e4812ac4b713186049e33",
+      "statement": "依赖图是数据形状依赖：`textframe` 零入边零出边（孤点，有意）；`assetgen` 只用 `procgen` 的 rng 面（不调 `define`/`run`/`hash`），`procgen` 只借 codec 的确定性编码口径。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/assetgen/pkg.json",
+          "version": "repo-file-v1:sha256:b33e4227f13cb64108807b51c8db289ab4c0c3c5de8d04eac138b6085536a5ec"
+        },
+        {
+          "resource": "repo://packages/libs/textframe/pkg.json",
+          "version": "repo-file-v1:sha256:743f4e43990f2abdff9dfbda84b6caa787241557987f5b5ef9e078a524a90b22"
+        }
+      ]
+    },
+    {
+      "id": "claim_9f5ec219d0cb429d8d1d95eeb7e51005",
+      "statement": "manifest 门禁：`pack` example 要求资源包 `entries` 非空（夹具靠 `data/probe.json` 满足），重算后 `manifest-verify.sh --mod <mod>` 复核 `pkg_drift=0`，两份清单偏移不会静默通过。",
+      "evidence": [
+        {
+          "resource": "repo://.pi/tools/manifest-verify.sh",
+          "version": "repo-file-v1:sha256:b71b3ed259af3a4ad18915b1b51af03e260d8f1c1da25f47291339ada59ca804"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/pack.rs",
+          "version": "repo-file-v1:sha256:af3c2bf4c932ff38eb7d78e5f9cbaa61d83593039ef3b37d81d81ad24c1b77be"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

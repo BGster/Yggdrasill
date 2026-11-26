@@ -3,5 +3,5 @@
     "name": "fixture",
     "version": "0.1.0",
     "deps": [],
-    "contract": "docs/design/packages/README.md"
+    "contract": "openwiki/contracts/packages/README.md"
 }

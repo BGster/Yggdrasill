@@ -26,9 +26,9 @@
       "sha256": "892f8391e1cd03613907c4e805ef6bf367567f0841a07eef2dae2d232501d995"
     },
     {
-      "byteLength": 16468,
+      "byteLength": 16474,
       "path": "src/domain/gates.lua",
-      "sha256": "e8ed1a1e4f56fdfe79b3f5155d9e9673fce94a4c468b13d527d2a6a9651c8710"
+      "sha256": "c28344aed53b317e9a7c7153e3f2d52346789a058f8eac26976abe903f4e82d5"
     },
     {
       "byteLength": 12496,
@@ -41,9 +41,9 @@
       "sha256": "74cadcd7eee714f26e61cc180b0205acfc7c8bb165c75389f2175ac943f70898"
     },
     {
-      "byteLength": 7498,
+      "byteLength": 7502,
       "path": "src/domain/readset.lua",
-      "sha256": "b0324022fe2412cb1402340f48855b281dd0e6b96d4a62f1c10958567f54a915"
+      "sha256": "df76356f64895385ef32e93f53b138a0e95e0885f371388b99f2ff5f95a7e860"
     },
     {
       "byteLength": 8733,
@@ -156,9 +156,9 @@
       "sha256": "c4e68ff43a5da46bb48165396bb2a16621a7048321c690b140938cd862b1442a"
     },
     {
-      "byteLength": 9297,
+      "byteLength": 9303,
       "path": "src/runtime/tools.lua",
-      "sha256": "b76f57e095b7f0792a56e350dc9d49894c284d8e2db8f8b6ad975744333a0764"
+      "sha256": "a7ee0231f81750fe8a804f05e516496e5fb1e11f4f3e7b82c92096ebe942755e"
     },
     {
       "byteLength": 5645,
@@ -176,9 +176,9 @@
       "sha256": "44b5ffd847018621d93730b1e960f6e4fa084547464f2e1db9cfc092d440cc47"
     },
     {
-      "byteLength": 17736,
+      "byteLength": 17750,
       "path": "src/runtime/tools/reactive.lua",
-      "sha256": "82c8994c0ae2cbd2db9176cdbbc787aef2205c529d0ff76f45fa2e934912ee5d"
+      "sha256": "08c83b00d843f6c1f7fb8cbed0c519e9c09dd97124119baec7ab6c5b327ea7c1"
     },
     {
       "byteLength": 153,
@@ -191,9 +191,9 @@
       "sha256": "c44449a03b08cbe2278b4dbccb2174b7e66532530831df4e10d2d3e3631f9791"
     },
     {
-      "byteLength": 1875,
+      "byteLength": 1879,
       "path": "src/view/guide.lua",
-      "sha256": "96a816d8897425354b6a2ce849b756d2d2c10f93f1f5dc2496db018b5d95fe57"
+      "sha256": "2082ef1b572723ef5cfb1f9a74825f4edab7d3e7c593ae716ad198404a65f5af"
     },
     {
       "byteLength": 15806,
@@ -228,20 +228,20 @@
   ],
   "entries": [
     {
-      "byteLength": 7115,
+      "byteLength": 7223,
       "id": "ygg:scene/texts",
       "kind": "scene-texts-fragment",
       "path": "data/texts/core.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "fc153c67709cf5d7b6dc2a9dddbb50061b7e4effd324455f052e51cc0fec1279"
+      "sha256": "032f7d834e29b07f98f4132ed3dfaddc8457308681d9b88396b2820ae605ec8b"
     },
     {
-      "byteLength": 7338,
+      "byteLength": 7386,
       "id": "ygg:scene/beats/flow",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-flow.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "130c904e9692fa9297059747165927cccd90b30865da92157ceb51b2888a568f"
+      "sha256": "b3960df31e107dc6ad43718d1507936e124ff9d441c0bbed5dd9d0a45182fbe7"
     },
     {
       "byteLength": 13913,
@@ -268,20 +268,20 @@
       "sha256": "61b121af6dc8f2f27159adb1ea63628d11db1c9e1524dc4484c88a2db7fff614"
     },
     {
-      "byteLength": 9578,
+      "byteLength": 9616,
       "id": "ygg:scene/beats/settlement",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-settlement.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "2bb6b98d8475714dad5c74284e917cf3dcfe1c59fffaf092401750ebce4cd604"
+      "sha256": "d777378318474bcd55d09a322c339bdfecb95ceb922d08d48820a4998680ad8d"
     },
     {
-      "byteLength": 12281,
+      "byteLength": 12324,
       "id": "ygg:scene/beats/harness",
       "kind": "scene-texts-fragment",
       "path": "data/texts/beats-harness.json",
       "schema": "https://yggdrasill.dev/schemas/v1/scene-texts-fragment.json",
-      "sha256": "84588d31f24905bf517eb588354122abc773e8f2ccfcd01327b89edcbb7252df"
+      "sha256": "f4668324db3f7a38379a970e57e48cfa83be2530a7a9a56a9502f57322144aed"
     },
     {
       "byteLength": 1918,
@@ -289,7 +289,7 @@
       "kind": "agent-config",
       "path": "data/config.json",
       "schema": "https://yggdrasill.dev/schemas/v1/agent-config.json",
-      "sha256": "23263ec07b27ed3687a4f81132bf8dfaacc01a2fbf657ea3ea615dbb383921e4"
+      "sha256": "d460e36287146fe3b47ccfa8b6697bae6b5f9da38ab38df7e46c6edc9c321cb1"
     }
   ],
   "schemaVersion": 1

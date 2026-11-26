@@ -113,7 +113,7 @@ local function handle_call(payload)
 end
 
 function M.register()
-  -- 机器动作（外部派发），不是人类里程碑动作：不进菜单、不占票据（docs/context/acts/coordinate.md 协调幕）。
+  -- 机器动作（外部派发），不是人类里程碑动作：不进菜单、不占票据（openwiki/operating/acts/coordinate.md 协调幕）。
   ygg.on("tool.call", handle_call)
   ygg.on("tool.result", function(payload)
     if stage() == STAGE.retired then

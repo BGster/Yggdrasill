@@ -1,0 +1,116 @@
+---
+type: "Reference"
+title: "Superagent Game（多 agent 示例 Mod）"
+openwiki_generated: true
+verified:
+  - by: openwiki/0.9.0
+    at: 2026-11-26T05:58:54.950Z
+sources:
+  - id: openwiki-source-2a11e4a157949f9f91222793
+    resource: repo://packages/mods/superagent/data/envelope.json
+  - id: openwiki-source-11a5287bcb31187b8a68f77a
+    resource: repo://packages/mods/superagent/mod.lua
+  - id: openwiki-source-179d0fa21b3ebab9eb814468
+    resource: repo://packages/mods/superagent/pack.json
+  - id: openwiki-source-c11776e00f3fc66835c87b1b
+    resource: repo://packages/mods/superagent/panel/index.html
+  - id: openwiki-source-c0e93de54319bb1bb40f9ee1
+    resource: repo://packages/mods/superagent/src/agents.lua
+  - id: openwiki-source-25f9f78511e625d9b7622067
+    resource: repo://packages/mods/superagent/src/clock.lua
+  - id: openwiki-source-145f658160685c5c1a134547
+    resource: repo://packages/mods/superagent/src/quests.lua
+  - id: openwiki-source-5a1ee50a84adaeb60124cebc
+    resource: repo://packages/mods/superagent/src/simframe.lua
+  - id: openwiki-source-8559d5352bbe93133c10ea48
+    resource: repo://packages/mods/superagent/test/final-verify.sh
+generated: { by: "pi", at: "2026-11-26T05:58:54.950Z" }
+---
+
+# Superagent Game（多 agent 示例 Mod）
+
+> **id** mod/superagent-game · **模块** ③ mod 载体 · **触发** 改 `packages/mods/superagent/**` 任一行之前
+> **读不到代价** silent-drift（信封形状 / 路由表 / 门禁口径漂移，重放断言失效）
+> **replaces**：DESIGN §3.x superagent 节（搬运基线 `3a2536f`）
+> **上游**：[mod-package.md](mod-package.md) · [tool-bridge.md](tool-bridge.md) · **相关**：[../host/serve.md](../host/serve.md) · [../kernel/sim-kernel.md](../kernel/sim-kernel.md) · [../packages/quest.md](../packages/quest.md) · [testing-strategy.md](testing-strategy.md)
+
+## 1. 它证明什么
+
+《超级中介局》是**可运行的多 agent 游戏**：mod 五件套 + `egg new/open` 即开局可玩——不是脚本、不是服务。它把「入向信封 → inbox 路由 → 出向工具调用 → 回执落账 → 任务推进」整条链压在宿主契约里，**零 `crates/ygg-*` 改动**，且「同信封序列重放 `sim.hash` 逐字节相等」可复算。
+
+**核心循环（委托 → 执行 → 交付）**：
+
+1. **开局** `event.start`：世界种子 `pkg.procgen.hash(seedText)` → 世界规模批帧进 sim（`ygg.sim.spawn_batch`，裸实体批）→ NPC / 道具铺场（`pkg.entity` + `pkg.role_skill`）→ NPC 委托方 `quest.open` 发布委托 → 任务板待选。
+2. **委托** `commission.take`（assign taker）→ 任务板可观察（`quest.open_ids`）。
+3. **执行**：在局文员 = 游戏内动作 + 挂载点业务文件读写（`ygg.fs.*` 写穿 `mounts/biz`）；外线 agent = 出向 `agent_call`（`ygg.meta("tool_calls")` → `superagent.agent_call`）→ 回执信封下行。
+4. **交付**：回执落账 → `quest.advance` 至 done（`quest.completed` 恰一次）→ 报酬 = `grant_skill` / `recharge` 技能成长 → 下一单。
+
+**业务钟**：一个动作 = 一个业务日 = `ygg.sim.step(1)` + KV `sg.day` +1。sim 是进程内状态（egg 常量种子重建），**日的真源是 KV**；`sim.step` 的职责是让 Tier 1 状态哈希随进度移动。委托限期 = 开单日 + `deadlineDays`，逾期自动 `quest.abandon`。
+
+| 事件 | 载荷 | 语义 |
+| --- | --- | --- |
+| `commission.take` | `"<key>\|clerk:<文员key>"` 或 `"<key>\|ext:<agent-id>"` | 接单；taker 是实体 ref（外部 agent 首触 spawn 占位实体，字符串身份留台账） |
+| `commission.work` | `"<key>"`（缺省 = 第一个在办单） | 干活：写 `mounts/biz/<prefix>-<key>.txt` + 回读逐字节校验 + advance；降级写 `artifacts/biz/` 并叙述 `[FS-DEGRADED]` |
+| `commission.deliver` | `"<key>\|<备注>"` | advance 至 done（恰一次）+ 报酬成长 + `sg.completed` 名表投影 |
+
+载荷必须是 **JSON 标量**：`--event commission.take --payload '"c1|clerk:clerk-mo"'`。
+
+**降级诚实账**：裸 `KernelFacade`（playtest / selftest）未挂 sim / fs 桥——叙述一行 `[SIM-UNMOUNTED]`，KV 语义照走，绝不静默假装（工具桥 `[VFS LEDGER ONLY]` 同款纪律）。
+
+## 2. 信封接口（多 Agent Harness，不绑死一家）
+
+全标量字段的通用 JSON 信封（声明账 = `data/envelope.json`，与 `pack.json` `inboxRoutes` 逐条对账；**wire 段序统一 `externalId,agent,text,session,refs`**——text 第三段，宿主 named 写命令按「首段 = agent、余段 = text」填记录，`--requirement 'agent-7|正文'` 直接可用）：
+
+```json
+{"v":1,"kind":"agent.chat","externalId":"<唯一幂等键>","agent":"<agent-id>","session":"<opaque>","text":"<单行正文>","refs":"<逗号分隔实体/任务ref>","ts":<int毫秒>}
+```
+
+| kind | 语义 | 入口 |
+| --- | --- | --- |
+| `agent.chat` | agent 经对话通道发言 | `--requirement`（named 写绑定）或适配器直写 JSONL |
+| `agent.action` | agent 申报游戏动作（接单意向） | JSONL / 适配器 |
+| `quest.delivery` | 交付回执（refs 首段 = 委托 key） | JSONL / 适配器 |
+| `quest.custom` | 自定义任务模板描述符（text = 模板串） | JSONL / 适配器 |
+| `harness.ping` | 存活探测（只记台账） | JSONL / 适配器 |
+| `agent.error` | 错误上报（入对话线程记账） | JSONL / 适配器 + mod 内失败记账 |
+
+**自定义任务描述符**：`<type-name>|<step-id>:<guide>|…`；类型名 `^[a-z][a-z0-9-]{2,31}$`、1..=8 步、guide 非空 ≤ 64 字节；非法拒 `YGG-MOD-CUSTOM-FORMAT`，异 spec 重定义由包面拒（`YGG-PKG-QUEST-TYPE`）。翻译器 = `src/custom.lua`。
+
+**入向裁决**：输入走 inbox（持久、幂等、带 `actor` / `actor_session` 身份位，宿主注入）；观察走 serve **只读**面；`--drive cmd:` 只作冒烟回归的脚本决策通道。
+
+**幂等**：`sg.seen.<externalId> = kind`；同 externalId 再入 → 叙述 `【重放】` 行、零状态变更。**cursor「dispatch 成功且存档后才前移」由宿主 drain 语义承载**，mod 只做键级去重。
+
+**出向**：`pack.json tools.superagent.agent_call`（cli、`program=adapter/superagent-convert`、`{{text}}/{{agent}}/{{session}}` 占位、`resultEvent="harness.replied"`、`inlineWaitMs=5000` 同进程就地回投）。回执线形 `<call_id>|<tool_id>|<status>|<code>|<output>|<external_id>`；调用登记 `sg.call.<call_id> = ext|questKey`，回执按登记落账。**超时不自动重试**：失败 = `agent.error` 记账 + 对话线程一行，重试是 harness 侧策略。
+
+**适配器**：`adapter/superagent-convert`（信封 ↔ stub harness CLI 语法）+ `stub-harness`（确定性 echo agent，只读零副作用）。multica / herdr 只留文档示例（§5 那 5 行伪码），不写死任何一家 SDK——契约面是信封与 resultWire。
+
+## 3. 路由与观察面
+
+- **面板**：`pack.json panel.entry = panel/index.html`；serve iframe 托管于 `/panel/<run-id>/index.html`，页面拉 `/api/runs/<id>/events` 渲染对话 / 任务事件行 + `/api/stream` SSE 触发刷新。**serve 零写端点**——对话绝不经 serve 下行。
+- **机器可读投影**：对话行 / 台账双写 `ygg.emit`（`agent.dialogue` / `agent.recorded` / `item.transferred`，载荷全标量）。带 `ygg.choice` 的 handler 不 emit（choice 前的派生事件被丢弃）——板面动作的对话行落 `pkg.dialogue` 线程 KV，经 `agent.summary` 的 `meta.dlg = {threads, lines}` 读出；入向 handler（无 choice）的行走事件页。**派生事件不落盘**（两后端只记顶层步），持久投影走 KV 名表 + summary meta。
+- **线程键约定**：NPC = `cast.<npc key>`，外线 agent = `agent.<agent-id>`，委托 = `q.<quest key>`；外部 agent 台账 `sg.agent.<id> = chats|deliveries`。
+
+## 4. 验收映射
+
+**一键终验**：`YGG_PACKAGES_ROOT=packages/libs packages/mods/superagent/test/final-verify.sh`（四条冒烟脚本化，全绿 EXIT=0；**执行序 ① 开局 → ② headless 任务流 → ④ 挂载 → 重放对账 → ③ 全链 + serve**——共享挂载写序敏感，④ 必须先于重放局）。
+
+| 验收 | 冒烟 |
+| --- | --- |
+| 开一局 | `egg new --mod packages/mods/superagent --in /tmp/ygg-p4-runs --event event.start` EXIT=0 |
+| 完整任务流 | `commission.take/work/deliver` 序列 → `quest.completed` 在场 ∧ 重放 `sim.hash` 逐字节相等 |
+| agent 对话参与 | `--requirement` 注入 → `--wait-tools` drain → 线程增行 + 回执落账；serve 面板可见 |
+| 挂载点读写 | `fs.write` → `fs.read` 逐字节相等 ∧ `<run>/mounts/biz` 在场 ∧ `fs.jsonl` 审计在场 |
+
+## 5. 设计依据（为什么这样落）
+
+- **世界铺场走「sim 裸实体批 + KV 实体面」双层**：sim 批帧让世界规模进 Tier 1 状态哈希（重放断言因此非常数）；人物 / 道具的语义数据落 KV 面的三系统包。带列 sim 帧（Number/Str/Bool/Ref/Tag）不用——三系统数据形状全落 KV / entity / 派生事件面，且沙箱方言里手写列载荷编码只添第二份编解码器风险。
+- **`quest.delivery` 与工具回执分线**：`harness.replied` 是出向工具的 `resultEvent`（宿主 inline 回投事件），不是 inbox kind；两条线在 `src/agents.lua` 汇合到同一套交付落账。
+- **确定性优先**：出向工具用 `inlineWaitMs > 0`（同进程就地回投）而非脱体 worker（墙上时钟序）；业务钟由事件序决定——「同信封序列重放 `sim.hash` 逐字节相等」因此可复算。
+- **sim 世界归钟单点所有**：每个进程的**首拍**把世界重建到「名册 9 + 在办单数」，结算（交付 / 弃单）再注销一个记录实体；`sim.hash` 因此携带 (tick, 世界规模)，交付局 `8eac2573…` ≠ 空世界常数 `2ac4f679…`，双跑逐字节相等——重放断言被实证为**非常数**。
+- **mod 层组织（三系统 × 包复用）**：人物 = `pkg.entity` + `pkg.role_skill` + `pkg.dialogue`；道具 = 属性袋 + 转移语义 + `pkg.codec` 往返；任务 = `pkg.quest` 模板 / 实例 / 推进 + `pkg.dialogue` 节点文案单副本。全部 mod 层，**零新包**（判据：每能力恰一用点不立包）。
+
+## 6. 已知间歇红：selftest 182/1 的定性（S27）
+
+现象：多线并作窗口内四连链式 selftest 2/5 次出现 `cases passed=182 failed=1`，两次都只剩计数、无失败例名；隔离重跑 4/4 绿。定性：① 182/1 是**行为用例失败**形状（mod 32 条 + 六包 151 条 = 183；perf 失败是另一形状 `failed=0` + `file FAIL`，不可混淆）；② 行为面无进程内非确定性源——随机、墙钟、`pairs` 序、GC 逐项排除；③ 安静环境不复现（隔离 1/1 + 链式 10/10）。结论：**环境层嫌疑最重；名字未到手前不盲改任何行为用例**——若再现，按 [testing-strategy.md](testing-strategy.md) 取证规约拿到 `FAIL <name>` 后定向修复。另案：`codec.import` 阈值链式 30 样本最差 3051 对 3000 仅 1.7% 余量，已放宽至 1500（见 [codec](../packages/codec.md)）。
+
+维护责任 = 改 `packages/mods/superagent/**` 的执行者；触发 = 任一相关 commit；检查 = `tests/` 自测用例 + 终验四条冒烟。

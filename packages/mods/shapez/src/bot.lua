@@ -1,6 +1,6 @@
 -- `src/bot.lua` —— v3 自动局压测台（长局 / 高频创销 / 决策流 KAT）。
 --
--- # 契约定位（docs/design/mod/shapez-game.md §2.7）
+-- # 契约定位（openwiki/contracts/mod/shapez-game.md §2.7）
 --
 -- 计划即规格（r1 rev 1，/tmp/s26c-plan.md §1）：决策源 = 逐拍独立 procgen 流
 -- `bot.<tick>`（流隔离 = 无跨拍 rng 状态；流种子 = `sz.seed`）⇒

@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:be3d825d6a596f03544151dfec5591212fe5983af4416a00c2add017968b59eb",
+  "claims": [
+    {
+      "id": "claim_64c64eb4c9a243c8b1b0188ed6894d99",
+      "statement": "The package ships its own xoshiro128** PRNG (`rng.next32` is the only cross-language primitive) rather than using `math.random`: the host seed is a single global state, so a shared generator would make map generation perturb monster generation and break 'same seed, same product'.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/procgen/rng.lua",
+          "version": "repo-file-v1:sha256:74e223a782333a5dd89c229c5f2e6ff63a367e4f7396402ca73ad6340430770c"
+        }
+      ]
+    },
+    {
+      "id": "claim_2e844877d6a9403c8f51e6536cc4324b",
+      "statement": "Named streams isolate purposes: each stream derives its four state words via `mix64(fnv64(seed .. \"/\" .. stream .. \"/\" .. i))`, so adding a new stream never perturbs an existing one, and an all-zero state is replaced by `0x9E3779B9`.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/procgen/rng.lua",
+          "version": "repo-file-v1:sha256:74e223a782333a5dd89c229c5f2e6ff63a367e4f7396402ca73ad6340430770c"
+        }
+      ]
+    },
+    {
+      "id": "claim_484900ffcd444419a8cf6e7f8c88a4c9",
+      "statement": "Generators are declared as data (`{ algo, params }`) and must not branch on which game is running: algorithm differences enter only through `params`, so a new generator shape is one data row and a new algorithm is one implementation plus the contract's use-point table.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/procgen/algos/layout.lua",
+          "version": "repo-file-v1:sha256:31c7918e6783b185eb5fcac0b074bb9e1e09ea9e7d71b2db8b0b99578690f8f3"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f07fc588b1d411d91d12b2af28a31ff",
+      "statement": "Generator definitions live only in memory (install-time `defs` plus runtime `define`), so a runtime `define`d definition does not survive a save; anything that must cross a save has to come from pack data.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/procgen/registry.lua",
+          "version": "repo-file-v1:sha256:0acc45a8b037fad86347dd2bfce991fa6375f302ecfa0ebe4c305bdfc0462ef7"
+        }
+      ]
+    },
+    {
+      "id": "claim_ccbdff9a031242569a8a21d6aeda0c50",
+      "statement": "The 25-case count (`--filter pkg-procgen`) is pinned by the fixture: 22 behaviour cases plus three digest-carrier cases, and the carrier cases are where the cross-process byte agreement is checked.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/procgen/test/pkg-procgen.lua",
+          "version": "repo-file-v1:sha256:080041d95b0b5ed05cd6c2b86359754724683fda9aad6931fc221c29ceb54e4a"
+        }
+      ]
+    },
+    {
+      "id": "claim_cd9b69ad9cb443468607fdf90bb0d9ca",
+      "statement": "Smoke files are file-level assertions rather than counted cases; they catch the `--filter` mod-side filter and pin the load surface and canon-line format, so a package that loads but produces the wrong line still fails `ok=0`.",
+      "evidence": [
+        {
+          "resource": "repo://packages/mods/pkg-selftest/tests/pkg-procgen-smoke.lua",
+          "version": "repo-file-v1:sha256:026f743fc0391290dcae57d240679143490fff387b6be9957de5031daaa5c62c"
+        }
+      ]
+    },
+    {
+      "id": "claim_30764259551241d18915dc1530599b48",
+      "statement": "`procgen.install` does not take a `host` handle and the package never touches KV, emits events or registers handlers: keeping `run` pure is what lets the never-touch-host assertion be a proxy for 'zero writes'.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/procgen/init.lua",
+          "version": "repo-file-v1:sha256:a70dbe771d50af18760ea518e9dcecb7c02a607bea687eedea89030ed3b21a0e"
+        }
+      ]
+    },
+    {
+      "id": "claim_c44a244877e540219f03ea64b7d4d7c1",
+      "statement": "`procgen.hash` borrows codec's encoding contract (same value encodes to identical bytes twice) and hashes it with fnv1a64; it is a change detector, not a cryptographic digest, and the version `v` rides inside the product rather than the hash input.",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/procgen/digest.lua",
+          "version": "repo-file-v1:sha256:6ca1a556bb1bbf429fbcb1edffdb19aaad68c3be13402ef25cd7ed4a0aaef097"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

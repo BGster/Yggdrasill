@@ -1,6 +1,6 @@
 -- `packages/libs/assetgen/texture.lua` —— 纹理产物：标量场 → 像素行 → 连续字节。
 --
--- 契约：`docs/design/packages/assetgen.md` §2（a）/ §3 I8。
+-- 契约：`openwiki/contracts/packages/assetgen.md` §2（a）/ §3 I8。
 --
 -- # 一个形状，七个算法
 --

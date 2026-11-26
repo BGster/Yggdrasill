@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "owner": "docs/context 召回结构（按召回时点切分；判据见 docs/wiki-governance.md）",
+  "note": "id = 相对 docs/context/ 的路径去掉 .md；ver 不在此文件（单一来源在各文件固定头，由 scripts/docs-ver.sh 生成）",
+  "scene": {
+    "prologue": [
+      "cold-start/vocabulary"
+    ],
+    "charter": [
+      "acts/charter"
+    ],
+    "coordinate": [
+      "acts/coordinate",
+      "req-acts/intake"
+    ],
+    "settle": [
+      "acts/settle",
+      "rituals/cleanup"
+    ],
+    "release": [
+      "acts/release",
+      "acts/retired"
+    ]
+  },
+  "reqStage": {
+    "draft": "req-acts/intake",
+    "planning": "req-acts/intake",
+    "plan_gate": "req-acts/intake",
+    "ready": "req-acts/delivery",
+    "developing": "req-acts/delivery",
+    "accept": "req-acts/delivery",
+    "accept_gate": "req-acts/delivery",
+    "integrating": "req-acts/integration",
+    "done": "req-acts/integration"
+  },
+  "reference": {
+    "note": "理解性文档：登记 id 以便机检可达，但【不是必读集】——不进 readPlan、不出 [READ FIRST] 块、不产生签名义务。要纳入必读就把 id 挪进 scene / reqStage（单点生效，生成器与门禁自动跟随）。判据见 openwiki/governance.md。",
+    "story": [
+      "story/run-story",
+      "story/requirement-story"
+    ],
+    "cold-start": [
+      "cold-start/system-boundaries"
+    ],
+    "rituals": [
+      "rituals/read-gate"
+    ]
+  }
+}

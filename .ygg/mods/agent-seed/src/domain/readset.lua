@@ -8,7 +8,7 @@
 -- 这样 gates 是唯一裁判，本模块可被 render / 菜单 / 测试单独复用。
 --
 -- 数据来源（全部**内嵌在 data/config.json 的生成区**，由 scripts/gen-scene-readfirst.py
--- 与文档固定头同一批产出；Mod 无 IO，永远不读 docs/）：
+-- 与文档固定头同一批产出；Mod 无 IO，永远不读 openwiki/）：
 --   readPlan            { "<幕>": ["<幕段>/<slug>", …] }        幕维度（r2/r3 已定契约）
 --   readGate.ver        { "<doc-id>": "<6hex>" }                版本台账（r4：文档改版即作废签名）
 --   readGate.reqActs    { "<阶段>": ["<doc-id>", …] }           需求阶段维度（源 = scenes.json reqStage）

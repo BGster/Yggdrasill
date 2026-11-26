@@ -1,7 +1,7 @@
 -- packages/mods/superagent/mod.lua
 -- 《超级中介局》——P4「superagent game」的可运行多 agent 游戏 Mod（装配入口）。
 --
--- 契约：docs/design/mod/superagent-game.md（循环 / 信封 / 路由 / 验收映射）。
+-- 契约：openwiki/contracts/mod/superagent-game.md（循环 / 信封 / 路由 / 验收映射）。
 -- 形态：egg new --mod packages/mods/superagent 开局可玩；核心循环 =
 -- 委托（NPC quest.open）→ 执行（游戏内动作 + 挂载点业务文件）→ 交付
 -- （回执信封 → quest.advance → 报酬成长）→ 下一单。

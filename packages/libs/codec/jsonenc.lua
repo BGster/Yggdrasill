@@ -1,6 +1,6 @@
 -- `pkg.codec.jsonenc` —— encode：确定性 JSON 编码（键序 = 字节序，无多余空白）。
 --
--- 契约：`docs/design/packages/codec.md` §4.1。批十一拆分（纯搬移）：原生面委托与
+-- 契约：`openwiki/contracts/packages/codec.md` §4.1。批十一拆分（纯搬移）：原生面委托与
 -- 回退随本文件走——面在场 ⇒ `pcall` 调原生，`YGG-CODEC-UNSUPPORTED` ⇒ 落回 Lua
 -- 路径产出规范字节与规范文案。骨架工具（join / sort_names / is_integer）住这里，
 -- 是兄弟模块的唯一取用点（禁止抄第二份）。

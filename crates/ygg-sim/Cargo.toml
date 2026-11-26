@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Yggdrasill Tier 1 原生模拟内核：确定性 tick / 列式 ECS / 快照 / 回放 / state hash"
 
-# 依赖纯度（契约：docs/design/kernel/sim-kernel.md §1 + I2/I5，topology.md 不变量 5）。
+# 依赖纯度（契约：openwiki/contracts/kernel/sim-kernel.md §1 + I2/I5，topology.md 不变量 5）。
 # 运行时**只有** thiserror——这一条被 tests/determinism_scan.rs 的 R4 用例逐键断言
 # （[dependencies] 键集必须 == {thiserror}）。四条禁令各自的理由：
 # - 不引 serde/serde_json：快照是自写的**规范二进制**编码器，字节可逐条断言；

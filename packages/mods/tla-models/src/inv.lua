@@ -1,6 +1,6 @@
 -- `src/inv.lua` —— TLA 不变量注册表（`Inv` → inv.check 的映射落点）。
 --
--- 契约：docs/design/mod/tla-models.md §映射表。四个模型的 `TypeOK` / `Inv` /
+-- 契约：openwiki/contracts/mod/tla-models.md §映射表。四个模型的 `TypeOK` / `Inv` /
 -- `KlotskiGoal` / `TerminationDetection` 全部注册在这里，`inv.check(model)`
 -- 返回违例清单（空 = 绿）——TLA 的「不变量在每状态断言」翻译成「每步后可查」。
 --

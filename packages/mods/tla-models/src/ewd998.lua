@@ -1,6 +1,6 @@
 -- `src/ewd998.lua` —— EWD998（Safra 环上终止检测；分布式计数 + 令牌有界）。
 --
--- 契约：docs/design/mod/tla-models.md §映射表。源：tlaplus/Examples
+-- 契约：openwiki/contracts/mod/tla-models.md §映射表。源：tlaplus/Examples
 -- `specifications/ewd998/EWD998.tla` + `EWD998.cfg`（N=4 档 TLC 实测
 -- 4097/53271/14 系源仓 manifest 对 AsyncTerminationDetection 的记录，引用如实）。
 -- 本移植取 N=2 小轨道（KAT 手算口径）。

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:f78750aeab8cc6979f73d7ab706bafd171960136c97a4e03d6ecf7b87ec8c798",
+  "claims": [
+    {
+      "id": "claim_54d191bf84d7429dbf35e2fd2600369a",
+      "statement": "The prologue is a narrative act: `event.start` establishes the run and changes no state, so reading it late costs drift rather than a refusal.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/runtime/flow.lua",
+          "version": "repo-file-v1:sha256:c4e68ff43a5da46bb48165396bb2a16621a7048321c690b140938cd862b1442a"
+        }
+      ]
+    },
+    {
+      "id": "claim_0f563c667fd24c2a9cf68154c7bca7e2",
+      "statement": "The boot narration says engine version, phase and evolution preference are narration only and resources are never rewritten automatically, which is why nobody may act on them.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/data/texts/core.json",
+          "version": "repo-file-v1:sha256:fc153c67709cf5d7b6dc2a9dddbb50061b7e4effd324455f052e51cc0fec1279"
+        }
+      ]
+    },
+    {
+      "id": "claim_b8c4a2b14da14f42bf99cd46bc74ea9f",
+      "statement": "`--requirement` / `--proposal` only enter the inbox and never trigger a dispatch — a run can start with work queued and nothing running.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/handlers/intake/actions.lua",
+          "version": "repo-file-v1:sha256:ba92a43121d9be93e32114620d03772d4cc8ad099252d47b29dff80503b298ab"
+        }
+      ]
+    },
+    {
+      "id": "claim_a2dade67a72245038db22be5c48e2699",
+      "statement": "The nine-phase requirement walk and the coordinator's four jobs (dispatch, serial acceptance, both gates, batch boundary) are the same under guide and goal: the mode changes who decides, never what must happen.",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/src/domain/requirements.lua",
+          "version": "repo-file-v1:sha256:80d8e55cfb000a4827424afd85aa546d63b21a60dfe4bccca1d7deb6dd3caf6d"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

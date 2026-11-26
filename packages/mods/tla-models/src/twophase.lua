@@ -1,6 +1,6 @@
 -- `src/twophase.lua` —— TwoPhase 握手（交替同步 + 抽象参数实例化）。
 --
--- 契约：docs/design/mod/tla-models.md §映射表。源：tlaplus/Examples
+-- 契约：openwiki/contracts/mod/tla-models.md §映射表。源：tlaplus/Examples
 -- `specifications/TwoPhase/{TwoPhase,Alternate,MCTwoPhase}.tla`（TLC 实测
 -- MCTwoPhase 4/5/4，引自源仓 manifest.json）。
 --

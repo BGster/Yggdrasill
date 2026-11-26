@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:4a36ef545b9cd29568d506e785859a625853830f5714ac2635a1cbdf04bcae86",
+  "claims": [
+    {
+      "id": "claim_1a9c52dceb044e04baad9b16f55cbda2",
+      "statement": "三类产物共用一套字段（`kind`/`algo`/`v`/`bytes`/`canon`/`seed`/`stream`），`v` 是单一常量、字节形状一改就 +1；`spec = {algo, params}`，未知 algo 报 `-ALGO` 不静默回退。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/assetgen/init.lua",
+          "version": "repo-file-v1:sha256:7fd6ed3b440082ab9397d1c5a52a404c6c3dadf5bb0c5f2c6895176d23a61e48"
+        },
+        {
+          "resource": "repo://packages/libs/assetgen/spec.lua",
+          "version": "repo-file-v1:sha256:3ab3e7d3d22f5d77d8405a496c1de4d8ad4ee8beef6d46b2e6868215eb120f28"
+        }
+      ]
+    },
+    {
+      "id": "claim_ec652340008f45d98807d837e76352ea",
+      "statement": "纹理 `bytes` 是 `w*h*ch` 个 u8 行主序无头连续字节（`w*h*ch ≤ 4194304` = 挂载桥单件帽）；音频 `bytes` 是 44 字节 WAV 头 + s16 小端交织 `pcm`，`sr` 走白名单，`frames ≤ 400000`。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/assetgen/sound.lua",
+          "version": "repo-file-v1:sha256:af87b3a5a2a9ef5bad4f9c823569f899530b32850ea2791d2ef0a1240facad36"
+        },
+        {
+          "resource": "repo://packages/libs/assetgen/texture.lua",
+          "version": "repo-file-v1:sha256:f32eb7978c82607c366b4ca663498c539dad4bad73213423ebc2bd7d4f5f791d"
+        }
+      ]
+    },
+    {
+      "id": "claim_49940e1813a04bb9911e45558dd49fe9",
+      "statement": "值域两档：资源维度（像素 / 细分 / 站点 / 帧数）超上界报 `-CAP`，语义值（`ch` / 角度 / 千分比 / 坐标）越界一律 `-PARAM`；越界**不截断**（截断会把半个素材交出去）。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/assetgen/spec.lua",
+          "version": "repo-file-v1:sha256:3ab3e7d3d22f5d77d8405a496c1de4d8ad4ee8beef6d46b2e6868215eb120f28"
+        }
+      ]
+    },
+    {
+      "id": "claim_439a997442264f63a5b83dce96094701",
+      "statement": "包面是 `install` + `texture`/`mesh`/`sound`/`raster`/`encode`/`bundle`/`canon`/`streams`/`algo_list`/`perf_keys`；除 `install` 外全纯（只读入参、返回新表，不写 KV、不发事件、不落盘）。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/assetgen/encode.lua",
+          "version": "repo-file-v1:sha256:17663008f111628e5ccc1b40ad6d05d0ffabbff7db4c12e199fd8a6a8fd7c858"
+        },
+        {
+          "resource": "repo://packages/libs/assetgen/init.lua",
+          "version": "repo-file-v1:sha256:7fd6ed3b440082ab9397d1c5a52a404c6c3dadf5bb0c5f2c6895176d23a61e48"
+        }
+      ]
+    },
+    {
+      "id": "claim_569d795899d348f48e2818ca03f24e4e",
+      "statement": "产物的可重复性靠整段整数域：沙箱 globals 里 `math`/`string`/`table` 全为 nil，三角与开方用 Q15 有理近似 + 整数牛顿开方（`mathx`），产物路径不出现 `/` 与浮点字面量。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/src/sandbox.rs",
+          "version": "repo-file-v1:sha256:e98fefcb31fe3956aecb63196f6e3c5e303b4419a0ec4f159029229f1145a883"
+        },
+        {
+          "resource": "repo://packages/libs/assetgen/mathx.lua",
+          "version": "repo-file-v1:sha256:4133c3719792595148415a6cd19fb84dfe982d19bb8625b51e17b7480944cb75"
+        }
+      ]
+    },
+    {
+      "id": "claim_563b40dd036e49ba82d095fce0f3879a",
+      "statement": "与 procgen 共享的是 rng 契约而非算法：只用 `procgen.rng(seed, stream)`/`next32`，不调 `define`/`run`/`hash`；静态用例扫 xoshiro 常量、fnv64 与混淆常量，出现在小包源码即红。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/assetgen/init.lua",
+          "version": "repo-file-v1:sha256:7fd6ed3b440082ab9397d1c5a52a404c6c3dadf5bb0c5f2c6895176d23a61e48"
+        },
+        {
+          "resource": "repo://packages/libs/procgen/pkg.json",
+          "version": "repo-file-v1:sha256:b11cf80694bca4666fc7e09c6fbdb0036597b61a343cee5bf65085fb5c8e7f19"
+        }
+      ]
+    },
+    {
+      "id": "claim_e5b5ff41aa84438aaf0a5aca0036cf23",
+      "statement": "包内不实现哈希也不写第二份编码：`canon` 是 `k=v` 单行 ASCII 描述串（不含散列/压缩），字节摘要一律由宿主给（`ygg.fs.write` 返回 sha256）。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/assetgen/bytes.lua",
+          "version": "repo-file-v1:sha256:3ec697a4347aa203800b1389665f0af48289d7188a65622b862c8f7225fcd02f"
+        }
+      ]
+    },
+    {
+      "id": "claim_fe17544528544aa4ac54345069516b6a",
+      "statement": "验收 28 条用例（`--filter pkg-assetgen` 实测 `cases passed=28`），含 `texture-same-seed-same-bytes`、`sound-wav-header`、`no-float-static`、`rng-not-copied`、`leak-100-rounds` 与跨进程 `cross-process-canon`；只断「长度相同」视同没测 I1。",
+      "evidence": [
+        {
+          "resource": "repo://packages/libs/assetgen/test/pkg-assetgen-digest.lua",
+          "version": "repo-file-v1:sha256:f1d4256a638a07fe24195b3e84e5fd62c0c0340f0abb5c96a07df76df05ce0c7"
+        },
+        {
+          "resource": "repo://packages/libs/assetgen/test/pkg-assetgen.lua",
+          "version": "repo-file-v1:sha256:29f138d83c21a3882fafe4dde5cdcaf8dce4089ba2f0d6b7e065416177612f7e"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

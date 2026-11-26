@@ -157,7 +157,7 @@ end
 local function sign_command(doc, ver)
   local shown = ver
   if shown == "" then
-    shown = "<ver 抄自 docs/context/" .. tostring(doc) .. ".md 文件头>"
+    shown = "<ver 抄自 openwiki/operating/" .. tostring(doc) .. ".md 文件头>"
   end
   return "config.set read." .. tostring(doc) .. "=" .. shown
 end

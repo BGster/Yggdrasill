@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:061b079235bd91c033ec4d450ca8b342a099c317bbc2b0faf454377fc0cdf460",
+  "claims": [
+    {
+      "id": "claim_e94a3699241942afae33c26a850e4125",
+      "statement": "契约树按四个一级子目录组织（kernel / host / mod / packages）；出现平铺 Markdown 文件或软链会被 surface-tree.lua 的树索引用例判红，因此不允许留兼容壳。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/tests/surface-tree.lua#L47-L70",
+          "version": "repo-lines-v1:sha256:6e3c777ac2de02817f62d44cb03ccdc30c488c75e997d0dd26bf9556b3993881:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2NjIyZjc1NzFmOWM2ODYzNzdmZmU5NzE4NzUzZmIwNGE0YWFiYTNlNmVlNmFiMDNkMDQ5Y2EyOWI3YzU1MmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkNTA5MzU5MDdkM2Y0Zjk4YjZlNGEyMDM0Y2M2ZDI5ZDQ0YmFmZDRlMGYxODg3MTJkMTQwYzdhZTM2OTIwNWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA4YzExZTM1NTNjYWVmN2IyZGRkMzBlZDEyNDhlZTBmZjkzOTQzMDVmM2ViZjE2NzFjNjU2ZTJlOThhZDljYmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ3N2JlNmQ2ODg3MzEyYzNhM2U5MDhlZDczNWY4MDQwNDNmZDAwYjQzNGQ5MDQ3NTQxOGQ1NmI0MjVlYjA0OTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7b03a6475a1549ea9017f67bfa559b32",
+      "statement": "契约索引页的链接集合与树内实文件集合双向相等由纯 Lua 树索引用例断言：新增或删除契约页必须同批改索引，否则用例转红。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/tests/surface-tree.lua#L86-L130",
+          "version": "repo-lines-v1:sha256:0ad19b977f31f512cfccb186cfb861d344ac92de705a60cdc9fadef82a843fee:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlNmM5MmRmZjhlNDJkNWRiNGVjMmZmZDQ4OWRlMzNjMGEzNzBiZTVmNWIyNzY1YjhkNGE2MWJhZmM0OTI4NTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI3ZDI5MTY0MTBhMDVjYzcwOWY1OGM2Zjc1NjY0MzlmYzIwZDA4YmI1ZThkNmVmYzVhZGZlNmFjMTA4YjJkNzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRmNzY3ZWI3YTc1OTEwOGI5ZmRiYjFhMDU5ZjdjNmY2ZThlOWI0Mjc4NzdlYjBiN2YwZTA3NDFlOGQ4ZjlkMWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZmZDdhNDZlYmVlMThkNmZjN2E1ZjdmNzA5NGVlYzVlMDhhYzFjMjZlY2RhZDE3ODhlNTc3YzIxMWVjOTNkOGMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_123a4c63f74d46bf8d8bb6652d1dc591",
+      "statement": "AGENTS.md 的契约路由表由 modpkg.lua 校验：路由行数量固定，且目标路径的一级目录必须在 kernel/host/mod（或 README.md）白名单内。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/tests/modpkg.lua#L90-L115",
+          "version": "repo-lines-v1:sha256:bf31e3af5a828b731def2b8466402e452ea8bbc7d0c3f10795f81cdd2cc0e63a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5YTRkODA1ODM0NGYxZjRhYTRiN2NjODc1YmQ3NzRlYzY3ZTY0M2ViZmQ3ZTAxMWMzMzQzNDI5MTMyMzNiMjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhODYxMjcyNzY1ZWQxZWI4NGJhZGE3ZjQyMjUzNjcwZGZkNDQ5NDVmNGVkZTY3OWI1YTNlOGM2YTMxZWM4NzIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdjOWE3MmQ5MGJjNjkxNjY4MzNjNDg0YWU5YTgzN2EzNmJlYmU5NjA3ZDc4OTEyZjRkZTVmOTA0OTdmZWFlOGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjllMDFjYTJiMmIwOTMyNjA2MmM1NzdlNzYzODEwZDUwMTk5NGQyYTA4Y2E0MGZjYzc4ZDA5ZThmOTE3MGExNWUifQ"
+        },
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:0c7eef7205c9320195791fb02dae7a094f164c7b677d34d430c2daffaac5feec"
+        }
+      ]
+    },
+    {
+      "id": "claim_7b124e30832e4f5981e7ca67ad083118",
+      "statement": "三组不是文档分类而是物理边界：内核语义在 crates/ygg-core 与 crates/ygg-sandbox 本体，host 面是 egg CLI 与 serve/rt，mod 面是 .ygg/mods/agent-seed 的 Lua 面。",
+      "evidence": [
+        {
+          "resource": "repo://.ygg/mods/agent-seed/mod.lua",
+          "version": "repo-file-v1:sha256:93bac2ec2ef9f3c15ac523b38dd7284bb0d6c65d583d88fb72c7890527054898"
+        },
+        {
+          "resource": "repo://crates/ygg-core/src/lib.rs",
+          "version": "repo-file-v1:sha256:d03d81542da24b3985df9e8f1a8444f271cc61959757ebee2e99039d78602732"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/src/lib.rs",
+          "version": "repo-file-v1:sha256:5f64699eef5bec0d081aa6d4a0a88c443bdbed4635bbfe48616bb61555ec6818"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

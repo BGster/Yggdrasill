@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:35b6be4dd85353b013cf140f7c729b5c2093a5bf7a6063c98ba8a431e4f99418",
+  "claims": [
+    {
+      "id": "claim_80eccdd4f06949379bb2318b41fd326a",
+      "statement": "serve 空根启动，观察根经 `POST /api/roots` 注册、`DELETE /api/roots` 注销，注册表仅进程内有效（重启为空）；注册/注销只改 `RwLock` 注册表、不删盘上字节，`registry_writes_nothing_on_disk` 锁住操作前后目录树逐字节一致。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/roots.rs",
+          "version": "repo-file-v1:sha256:6358e0167babc774f39aa14ec284a4eba677af3f815eb72e21cda8ffb067e63b"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/tests_registry_sse.rs",
+          "version": "repo-file-v1:sha256:470d92264360c9f07b1cf4d9f07d62117826045942e657a1973c3e14bcf37111"
+        }
+      ]
+    },
+    {
+      "id": "claim_21345552ac54495e8f4eaf50af735003",
+      "statement": "serve 绑定 `127.0.0.1` 常量；数据面方法白名单 GET-only（非 GET 返回 405），唯一例外是 `/api/roots` 的 POST/DELETE；响应一律 `Cache-Control: no-store` + `X-Content-Type-Options: nosniff`。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/http.rs",
+          "version": "repo-file-v1:sha256:973f5842c4e7c3d025972b0297f71b5e927329dceef9a2bc094cc003a2ea82f0"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/tests_http.rs",
+          "version": "repo-file-v1:sha256:da96a548a5405265bd3d9b44d8ab1d52900f9b5d67fb8451725592b76124194f"
+        }
+      ]
+    },
+    {
+      "id": "claim_d3dc76bf4d5949e79aeefb8a40d6a31c",
+      "statement": "run 寻址跨根定位：0 命中 404，1 命中服务，>1 命中（跨根撞名）返回 409 `run_id_ambiguous` 并在 error 内附 roots 列表，不静默任选一份。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/locate.rs",
+          "version": "repo-file-v1:sha256:573e7c2b0d070292802e3c593983c57983ceb70d7c835c490ecb325df0f7a685"
+        }
+      ]
+    },
+    {
+      "id": "claim_fae96b9e05be4de190b0e53e962dc06a",
+      "statement": "SSE 单一端点 `/api/stream`：watcher 检测到变更后全局 version += 1 并广播 `event: change` + `data:{version,run,root}` 帧，帧内无数据载荷；每 15s 发 `: ping` 保活，无 `Last-Event-ID`。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/sse.rs",
+          "version": "repo-file-v1:sha256:1936bfebbb7e7932c663db24399fbc52cbd60d8ff7fb931df4e68cea392ac498"
+        }
+      ]
+    },
+    {
+      "id": "claim_1a4c637c32a3401289744daaf0a08617",
+      "statement": "`pack.json` 的 `panel.entry` 是可选项：不以 `/` 开头、不含 `..`、以 `.html` 结尾，违规时 `panel.available=false` 而非装载错误；托管时运行期现读 + canonicalize 与前缀双重守卫。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/panels.rs",
+          "version": "repo-file-v1:sha256:416d9ea61ef58e2c29cb4a33d75a285fcfd8f4361953016a6c86ccb28cadc97f"
+        }
+      ]
+    },
+    {
+      "id": "claim_fa1960efc1dd4ed19b067224b462f3f7",
+      "statement": "`serve_source_has_no_write_path` 扫描全部生产面源文件禁写路径，serve 不装载 ModBundle/kernel/mlua、不构造 Session（零内核）。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/mod.rs",
+          "version": "repo-file-v1:sha256:b943fff303341d0ca9b551f27048199ce5ed309be37d766ea40a00339aca6ff4"
+        },
+        {
+          "resource": "repo://crates/ygg-sandbox/examples/serve/tests_registry_sse.rs",
+          "version": "repo-file-v1:sha256:470d92264360c9f07b1cf4d9f07d62117826045942e657a1973c3e14bcf37111"
+        }
+      ]
+    },
+    {
+      "id": "claim_34e7e322552e43ce879b4f3f0568a92a",
+      "statement": "观察面零写：以 `query_only` 只读打开、不 migrate、先探测后连接，`observe_creates_nothing` / `observe_writes_nothing` 测试锁保证读取不创建也不写入任何文件。",
+      "evidence": [
+        {
+          "resource": "repo://crates/ygg-store/src/observe/mod.rs",
+          "version": "repo-file-v1:sha256:bbc597c0ca19c23ea98ae213136f5669954b264c723dd07375cbeea191873126"
+        },
+        {
+          "resource": "repo://crates/ygg-store/src/observe/tests.rs",
+          "version": "repo-file-v1:sha256:7a4bfe3a21e65a9ff023720a04414666e615db2cd9fd8a1b0ba538f7217f63ab"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-26T05:58:54.950Z"
+  }
+}

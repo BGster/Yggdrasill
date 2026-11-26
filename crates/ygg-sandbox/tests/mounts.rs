@@ -1,4 +1,4 @@
-//! r1 `mounts` 面的 Lua 端 e2e（验收五点，`docs/design/kernel/lua-api.md` §3.1.2）。
+//! r1 `mounts` 面的 Lua 端 e2e（验收五点，`openwiki/contracts/kernel/lua-api.md` §3.1.2）。
 //!
 //! 每个用例在 `std::env::temp_dir()` 里现造一个 Mod 包（不落 fixture 文件、不碰
 //! 任何业务目录）与一个 run 目录，把 `ygg_store::MountStore` 经 `MountFs` 注入

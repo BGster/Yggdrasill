@@ -1,6 +1,6 @@
 -- `packages/libs/role-skill/skills.lua` —— 技能槽位（`rank` / `charges`）与充能语义。
 --
--- 契约：`docs/design/packages/role-skill.md` §4 / I4（引用建立即事件）/ I7。
+-- 契约：`openwiki/contracts/packages/role-skill.md` §4 / I4（引用建立即事件）/ I7。
 --
 -- # 槽位是引用，不是效果
 --

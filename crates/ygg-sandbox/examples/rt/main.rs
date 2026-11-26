@@ -1,4 +1,4 @@
-//! `rt` —— 实时宿主常驻进程（S31 R1；契约 `docs/design/host/rt-face.md`）。
+//! `rt` —— 实时宿主常驻进程（S31 R1；契约 `openwiki/contracts/host/rt-face.md`）。
 //!
 //! 与 `playtest` / `serve` 同先例：逻辑在 `src/rt.rs`（引擎面），本文件只是
 //! 参数解析 + 实时节拍的薄壳——与 egg 单派发模式**并存不共享进程**

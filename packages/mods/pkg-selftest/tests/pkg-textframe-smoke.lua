@@ -2,7 +2,7 @@
 --
 -- # 为什么不计数
 --
--- 包用例的计数口径在 `docs/design/packages/README.md` §5（逐包复算），本文件是
+-- 包用例的计数口径在 `openwiki/contracts/packages/README.md` §5（逐包复算），本文件是
 -- **载体的**冒烟，不是包的行为用例；计入就会把全量抬高。判定一样硬：
 -- `error` ⇒ `file FAIL` ⇒ 命令 exit 1（`ok=0`）。
 --
