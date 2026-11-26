@@ -1,23 +1,41 @@
 # ygg-wasm
 
-wasm 壳（B1 实装）：[`ygg-sandbox`](../ygg-sandbox) `Loaded` 的
-wasm-bindgen 同步导出面（M1-E 收紧：**只有装载 / 推进 / 快照**，没有事件面）。
+`ygg/1` 协议的 WASM 绑定（wasm-bindgen）——**只搬字节，不碰语义**。协议逻辑全在
+[`ygg-host`](../ygg-host)：镜像解析（`image`）、状态机（`Session`）、帧切分与帧流打包
+（`proto::encode_frames`）。本 crate 的方法体只有 `self.inner.<method>`。
 
 ## 导出面
 
 | 成员 | 说明 |
 | --- | --- |
-| `new YggWorld(imageBytes)` | 装载 Mod 镜像。`imageBytes` 是镜像 JSON 的字节：`{"modSource": "<Lua 源码>", "manifest": "<manifest.json 文本；空串 = 无资源>", "schemas": ["<schema 文本>", …], "resources": {"<path>": "<base64>", …}}`（无文件系统的 wasm 侧没有目录可读，四件装载参数只能随字节过界） |
-| `step(ticks, dt) -> string` | 推进 `ticks` 个 tick（每 tick `dt` 整数秒），返回推进后的状态哈希（64 位小写 hex；与 native `hash::state_hash` 同一字节序）。时间只由宿主推进 |
-| `snapshot() -> Uint8Array` | 世界帧规范字节（同一状态 ⇒ 同一字节；哈希与存档共用这一个序列化面） |
-| `YggWorld.restore(imageBytes, frame) -> YggWorld` | 按世界帧重建：镜像（世界定义来源）+ 帧（世界面）两个参数，对应 native `Loaded::restore(dir, bytes)`。坏帧先校验后改 |
+| `new YggSession(packBytes)` | 包镜像 → 未握手会话。`packBytes` 是镜像 JSON 的字节：`{"modSource": "<Lua 源码>", "manifest": "<manifest.json 文本；空串 = 无资源>", "schemas": ["<schema 文本>", …], "resources": {"<path>": "<base64>", …}}`（形状由 `ygg_host::image` 定义；wasm 侧没有目录可读，四件装载参数只能随字节过界）。**装载失败 throw**——镜像不在协议面上，没有帧可答 |
+| `handle(msgJson) -> string` | 一条消息 JSON → **一个 JSON 数组**的帧流（`step` 两帧 `events` + `delta`，其余一帧） | 
+| `snapshot() -> Uint8Array` | 当前世界帧字节（`snapshot` 消息的字节近路；失败答空数组——要「为什么」就走 `snapshot` 消息，那里有 `error` 帧） |
 
-**没有** `submit` / `events` / `drive` / `dispatch` 导出面：协议层（ygg/1）在 M3
-落成后才经类型化接口加回来，现在不留占位壳。
+`handle` **永不 throw**：坏 JSON、状态不符、`pack_hash` 不符都答一帧
+`error{code,msg}`。错误码决定宿主的动作（`E_PROTOCOL` 宿主自己的 bug、`E_PACK` 换包、
+`E_RULE`/`E_BUDGET` 报给包作者、`E_STATE` 回滚重试）——所以错也是协议的一部分，JS 侧
+不需要 `try/catch` 才能继续下一步。
 
-失败一律 throw（构造、推进、坏帧都是）：现在没有稳定的错误线格式值得钉死，
-信封是 M3 协议层的事。构造期输入失败（坏 JSON / 坏 base64 / 缺 `$id`）与装载域
-失败（manifest / 资源包 / 入口 chunk / 模块表）都携带定位文案。
+消息表与字段见 [`packages/schema/protocol/README.md`](../../packages/schema/protocol/README.md)。
+三条载体（Rust `Session` / WASM `YggSession` / C ABI）跑**同一份**脚本
+（`packages/schema/protocol/parity-script.json`），回执必须逐帧相同：
+[`tests/parity.rs`](tests/parity.rs)。
+
+握手一步（之后才接受世界面消息）：
+
+```js
+const session = new ygg.YggSession(new TextEncoder().encode(JSON.stringify({
+  modSource, manifest, schemas, resources,
+})));
+const hello = session.handle(JSON.stringify({
+  type: "hello", protocol: "ygg/1", codec: "json",
+  pack_id: "ygg:demo", pack_hash: manifestHash,   // manifest 文本的 SHA-256
+}));
+const [ready] = JSON.parse(hello);                // ready.tick / ready.hash / ready.sealed
+const frames = JSON.parse(session.handle('{"type":"step","ticks":1,"dt":16}'));
+// frames[0].type === "events"，frames[1].type === "delta"（只含本步被写过的组件）
+```
 
 ## 构建
 
@@ -47,24 +65,21 @@ import { installWasiShim } from "./wasi-shim.js";
 installWasiShim();                       // 必须先于 pkg 胶水 init
 const ygg = await import("<pkg>/ygg_wasm.js");
 await ygg.default(wasmBytes);            // 或无参（浏览器 fetch 相对路径）
-const world = new ygg.YggWorld(new TextEncoder().encode(JSON.stringify({
-  modSource, manifest, schemas, resources,
-})));
-const stateHash = world.step(1, 16);      // 推进一个 tick，取状态哈希
-const frame = world.snapshot();          // 世界帧字节
-const rebuilt = ygg.YggWorld.restore(image, frame);
+const session = new ygg.YggSession(imageBytes);
+const reply = session.handle(JSON.stringify({ type: "hello", /* … */ }));
+const frame = session.snapshot();        // 世界帧字节（存档面）
 ```
 
 宿主自带 WASI 实现时，shim 不覆盖已存在的 `wasi_snapshot_preview1` 键。
 
 ## 活链验证
 
-捆绑模块（`wasm-pack` 产物）由宿主侧用例驱动；跨端哈希等价用例随 M4.3 双端矩阵落地。
-目前在仓库内可跑的验证是 crate 自身用例：
-
 ```sh
-cargo test -p ygg-wasm
+cargo test -p ygg-wasm           # host 同构编译：透传面 + golden 向量 + parity
 ```
+
+`tests/parity.rs` 在本机（host 目标）跑三载体脚本的 WASM 一支；浏览器侧的双端矩阵
+随 M4 落地。
 
 ## 体积快照（M1 C2 时点）
 

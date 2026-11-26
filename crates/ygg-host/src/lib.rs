@@ -15,6 +15,9 @@
 //! - [`session`]：`ygg/1` 会话状态机（M3.2），**必须持有内核**——一个会话 = 一个世界
 //!   实例（决策 5），于是它依赖 `ygg-sandbox`（[`Loaded`](ygg_sandbox::modload::Loaded)）
 //!   与 `ygg-sim`（列 / 值类型）。绑定层（计划 §3 步 3）是它第一个外部消费方。
+//! - `base64` / [`image`]：两条**共用设施**。镜像解析（包字节 → 装载参数）不能住在
+//!   绑定层（绑定层只搬字节），于是它上提成内核面的第二条入口；base64 编解码就被
+//!   快照帧与镜像资源两个消费方共用。
 //!
 //! # 一条铁律：协议层不持有世界（决策 4）
 //!
@@ -26,20 +29,26 @@
 //!
 //! # 从哪读起
 //!
-//! - [`proto`]：消息联合、支撑类型、[`proto::decode`] / [`proto::encode`]、严格整数面。
+//! - [`proto`]：消息联合、支撑类型、[`proto::decode`] / [`proto::encode`] / 帧流打包
+//!   （[`proto::encode_frames`]）、严格整数面。
 //! - [`session`]：`Fresh → Ready → Closed` 状态机、帧切分（`step` 答 `events` + `delta`）、
-//!   `submit` → `WorldOp` 批量写、`replay` 复算比对。
+//!   `submit` → `WorldOp` 批量写、`replay` 复算比对、文本入口
+//!   （[`Session::handle_json`]）。
+//! - [`image`]：包镜像（`modSource` / `manifest` / `schemas` / `resources`）→ 装载。
 //! - `packages/schema/protocol/README.md`：字段表 + 三条不变式（面向非 Rust 宿主）。
 //! - `packages/schema/protocol/ygg-1.schema.json`：draft 2020-12 schema（跨语言事实源）。
 
 #![forbid(unsafe_code)]
 
+mod base64;
+
+pub mod image;
 pub mod proto;
 pub mod session;
 
 pub use proto::{
-    decode, encode, Changed, Component, ComponentId, ComponentKind, ComponentValues, EntityId,
-    ErrorCode, Frame, Log, LogHeader, LogLevel, LogLine, Message, Op, ProtocolError, Snapshot,
-    Stage, SystemInfo, Value, CODEC, PROTOCOL,
+    decode, encode, encode_frames, Changed, Component, ComponentId, ComponentKind, ComponentValues,
+    EntityId, ErrorCode, Frame, Log, LogHeader, LogLevel, LogLine, Message, Op, ProtocolError,
+    Snapshot, Stage, SystemInfo, Value, CODEC, PROTOCOL,
 };
 pub use session::{Session, State};

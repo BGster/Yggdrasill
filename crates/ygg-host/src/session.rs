@@ -28,7 +28,17 @@
 //! - **复算从日志头开始**：`replay` 用 `header.seed` 另起一条内核谱系，逐帧比对
 //!   `hash`；第一处不符即答 `replay_result{ok:false, first_bad_tick}` 并停止。
 //!
-//! # v1 已知缺口（M3.3 要补的，写在这里免得被当成 bug）
+//! # 绑定面（M3.3）：文本进、文本出
+//!
+//! 非 Rust 宿主不接触 [`Message`]，只走两条入口：[`Session::from_image`]（包镜像 →
+//! 会话）与 [`Session::handle_json`]（一段 JSON → 一段 JSON 数组）。绑定层
+//! （`ygg-wasm` / `ygg-capi`）因此一行判断都没有：镜像解析在
+//! [`crate::image`]，帧流打包在 [`crate::proto::encode_frames`]，而「这条消息
+//! 该不该接受」本来就在本模块的状态门里。
+//!
+//! 绑定层写 `if` 的那一刻就是把协议语义劈成了三份——要加判断，加在这里。
+//!
+//! # v1 已知缺口（写在这里免得被当成 bug）
 //!
 //! - `replay` 消息不带起始快照：`header.start_tick != 0` 的日志无法复算（明确拒绝）。
 //! - `submit` 没有回执帧：新实体 id 只能靠随后 `step` 的 `delta` 侧看，协议 v1 没有
@@ -46,9 +56,11 @@ use ygg_sim::component::{AttrType, ComponentId, EntityId, Registry};
 use ygg_sim::error::SimError;
 use ygg_sim::system::Stage as SimStage;
 
+use crate::base64::{base64_decode, base64_encode};
 use crate::proto::{
-    Changed, Component, ComponentKind, ComponentValues, ErrorCode, Log, LogLevel, LogLine, Message,
-    Op, ProtocolError, Snapshot, Stage, SystemInfo, Value, CODEC, PROTOCOL,
+    decode, encode_frames, Changed, Component, ComponentKind, ComponentValues, ErrorCode, Log,
+    LogLevel, LogLine, Message, Op, ProtocolError, Snapshot, Stage, SystemInfo, Value, CODEC,
+    PROTOCOL,
 };
 
 /// 会话状态：`Fresh` 未握手 / `Ready` 可调用 / `Closed` 已关闭。
@@ -131,6 +143,48 @@ impl Session {
             },
             State::Ready => self.call(msg),
         }
+    }
+
+    // ---------------------------------------------------------------- 绑定面
+
+    /// 用一份**包镜像**装载内核并开一条未握手会话（三条绑定共用的唯一入口）。
+    ///
+    /// 镜像形状见 [`crate::image`]；装载失败答 `Err(文案)`——镜像不是线上消息，
+    /// 所以这里没有协议帧可答（握手之后的一切失败才走 `error` 帧）。
+    pub fn from_image(image: &[u8]) -> Result<Self, String> {
+        crate::image::open(image)
+    }
+
+    /// 文本进、文本出的一次往返：解码 → [`handle_all`](Self::handle_all) → 帧流 JSON。
+    ///
+    /// 回执是**一个 JSON 数组**（线上帧序：`step` 两帧，其余一帧）。坏 JSON 不
+    /// 抛错也不答 `null`，答一帧 `error`——绑定层因此不必（也不许）自己判断消息
+    /// 语义，它只负责把这段文本搬到对端。
+    pub fn handle_json(&mut self, text: &str) -> String {
+        let mut frames = match decode(text) {
+            Ok(msg) => self.handle_all(msg),
+            Err(err) => vec![Message::Error(err)],
+        };
+        if frames.is_empty() {
+            // 构造上不可达（`handle_all` 永远至少一帧）；兜底与 `handle` 同一句话。
+            frames.push(error(
+                ErrorCode::EState,
+                "会话未产生答案帧（内部不变量破坏）",
+            ));
+        }
+        encode_frames(&frames)
+    }
+
+    /// 当前世界帧字节（`snapshot` 消息的字节面）。
+    ///
+    /// 绑定层的 `snapshot()` 近路走这里：失败映射成 `error{load_code}`（与
+    /// `snapshot` 消息同一分类）。**协议入口仍是 `snapshot` 消息**——这条只是给
+    /// 「我要一份存档字节」的宿主省一次 base64 往返。名字带 `_bytes` 是为了与
+    /// 消息处理面 `snapshot(request)` 分开：一个是字节近路，一个是线上消息。
+    pub fn snapshot_bytes(&self) -> Result<Vec<u8>, ProtocolError> {
+        self.loaded
+            .snapshot()
+            .map_err(|err| ProtocolError::new(load_code(&err), err.to_string()))
     }
 
     // ---------------------------------------------------------------- 门与回执
@@ -691,104 +745,4 @@ fn column_of(
         // `payload` 已经把 tag 分流出去了：走到这里说明调用方漏判，按协议错答。
         AttrType::Tag => return Err(protocol(format!("组件 id {cid} 是 tag，没有列"))),
     })
-}
-
-// -------------------------------------------------------------------- base64
-
-/// 标准 base64 字母表（`+/`，带 `=` 填充）。
-const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/// 字节 → 标准 base64（快照帧可能几 MB，一次线性扫描，不引依赖）。
-fn base64_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = u32::from(chunk[0]);
-        let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
-        let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
-        let n = (b0 << 16) | (b1 << 8) | b2;
-        out.push(B64[(n >> 18) as usize & 63] as char);
-        out.push(B64[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            B64[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            B64[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-/// 标准 base64 → 字节（严格：长度、填充位置、字母表都校验）。
-fn base64_decode(text: &str) -> Result<Vec<u8>, ProtocolError> {
-    let bytes = text.as_bytes();
-    if !bytes.len().is_multiple_of(4) {
-        return Err(protocol("base64 长度必须是 4 的倍数"));
-    }
-    let quads = bytes.len() / 4;
-    let mut out = Vec::with_capacity(quads * 3);
-    for (index, quad) in bytes.chunks(4).enumerate() {
-        let last = index + 1 == quads;
-        let mut n = 0u32;
-        let mut pad = 0usize;
-        for (slot, &byte) in quad.iter().enumerate() {
-            if byte == b'=' {
-                if !last || slot < 2 {
-                    return Err(protocol("base64 填充位置非法"));
-                }
-                pad += 1;
-                n <<= 6;
-                continue;
-            }
-            // 填充只能落在末尾：`ab=c` 这种「中间挖洞」不是合法 base64。
-            if pad > 0 {
-                return Err(protocol("base64 填充必须在末尾"));
-            }
-            n = (n << 6) | base64_value(byte).ok_or_else(|| protocol("base64 含非法字符"))?;
-        }
-        out.push((n >> 16) as u8);
-        if pad < 2 {
-            out.push((n >> 8) as u8);
-        }
-        if pad < 1 {
-            out.push(n as u8);
-        }
-    }
-    Ok(out)
-}
-
-fn base64_value(byte: u8) -> Option<u32> {
-    let value = match byte {
-        b'A'..=b'Z' => byte - b'A',
-        b'a'..=b'z' => byte - b'a' + 26,
-        b'0'..=b'9' => byte - b'0' + 52,
-        b'+' => 62,
-        b'/' => 63,
-        _ => return None,
-    };
-    Some(u32::from(value))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{base64_decode, base64_encode};
-
-    #[test]
-    fn base64_round_trips_every_tail_length() {
-        for len in 0..=32usize {
-            let bytes: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(37)).collect();
-            let text = base64_encode(&bytes);
-            assert_eq!(base64_decode(&text).unwrap(), bytes, "len={len}");
-        }
-    }
-
-    #[test]
-    fn base64_rejects_bad_input() {
-        for bad in ["a", "a===", "=AAA", "ab=c", "ab$d", "AAAA="] {
-            assert!(base64_decode(bad).is_err(), "{bad}");
-        }
-    }
 }

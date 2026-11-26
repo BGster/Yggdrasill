@@ -3,11 +3,13 @@ name = "ygg-wasm"
 version.workspace = true
 edition.workspace = true
 
-# B1 实装：wasm-bindgen 导出面（YggWorld wrapping `modload::Loaded`）。
+# M3.3：wasm 壳改薄成 `ygg/1` 协议的绑定（`YggSession` wrapping
+# `ygg_host::Session`）。壳里没有任何协议逻辑——装载、状态门、帧切分、错误分类
+# 全在 ygg-host（三绑定共用的同一份实现）。
 # [lib] crate-type：playbook `gates.no-wasm-pack` 要求 cdylib 出 wasm 产物；
-# rlib 并存使 cargo test --workspace 仍可在 host 上对壳（解析/编解码/信封
-# 透传面）收集单测——wasm-bindgen 在 host 目标同构编译，分配器等 wasm 专属
-# 面 cfg(target_arch = "wasm32") 门控。
+# rlib 并存使 cargo test --workspace 仍可在 host 上对壳（镜像透传、回执透传、
+# 快照字节）收集单测与 parity 用例——wasm-bindgen 在 host 目标同构编译，
+# 分配器等 wasm 专属面 cfg(target_arch = "wasm32") 门控。
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -15,8 +17,13 @@ crate-type = ["cdylib", "rlib"]
 # 壳导出宏（版本与 wasm-pack 下载的 wasm-bindgen-cli 锁定一致——wasm-pack 按
 # Cargo.lock 的 wasm-bindgen 版本取 CLI，二者不匹配会在 build 期报错）。
 wasm-bindgen = "0.2"
-# marshal 面解析（schemas/resources JSON）+ 构造期域失败信封封装（无 serde
-# derive 需求——壳不做结构化建模，语义面在 sandbox/driver）。
+# 协议面单一来源：镜像解析（`ygg_host::image`）、会话（`Session`）、帧流打包
+# （`proto::encode_frames`）。壳不再直接依赖 ygg-sandbox：它连 `Loaded` 都不碰。
+ygg-host = { path = "../ygg-host" }
+
+[dev-dependencies]
+# parity 脚本（编译期嵌入 JSON）与三载体比对；只在测试面用。
 serde_json = "1"
-# 语义面单一来源（`modload::Loaded` + `StepReport`）。
+# golden 向量用例要算原生状态哈希（`ygg_sandbox::hash::state_hash`）——壳经
+# `Session::loaded()` 把它交出来，锁的是「壳没有换掉装载路径」。
 ygg-sandbox = { path = "../ygg-sandbox" }

@@ -11,6 +11,7 @@ members = [
     "crates/ygg-store",
     "crates/ygg-sim",
     "crates/ygg-host",
+    "crates/ygg-capi",
 ]
 
 [workspace.package]
@@ -42,8 +43,15 @@ edition = "2021"
 # 业务 crate，也不能挂在既有 crate 下：`ygg-sim` 明令禁 serde（快照是自写规范二进制），
 # 而信封恰恰只有 serde；`ygg-sandbox` 拥有 mlua（信封必须能被宿主侧非 Rust 语言手写）；
 # `ygg-core` 是值/事件/KV 的语义面（信封没有语义，只有字段）。依赖纯度：运行时仅
-# serde / serde_json / thiserror，**不依赖任何内部 crate**（连 ygg-sim 都不依赖 id 别名），
-# 且当前**不被任何 crate 依赖**——绑定层（M3.3）才是第一个消费方。
+# serde / serde_json / thiserror + 两个内核 crate（`session` 模块要持有 `Loaded`），
+# M3.3 起被两条绑定依赖：`ygg-wasm`（WASM）与 `ygg-capi`（C ABI）。
+#
+# members 一次成型的第五次受控例外：`ygg-capi` 是 ygg/1 协议的 **C ABI 载体**
+# （artifacts/w2-m3-protocol-plan.md §3 步 3），不是第 N 个业务 crate。它不能挂在
+# `ygg-wasm` 下：crate-type 与链接面完全不同（`cdylib`/`staticlib`，无 wasm-bindgen），
+# 且 C 宿主不该为了用 C 面而被拉进一个 wasm 壳。依赖纯度：**只** `ygg-host`——镜像
+# 解析、会话状态机、帧流打包全在内核面，绑定层一个判断都不加；零第三方运行时依赖
+# （`std::ffi` 就够），所以它不会给 wasm/宿主树添任何新库。
 
 # B1：wasm 体积预算面（research §7）：fat LTO + 体积级优化 + 单 codegen unit
 # + strip。仅作用 release（wasm-pack 默认 release 出 pkg/）；门禁

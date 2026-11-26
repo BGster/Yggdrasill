@@ -22,11 +22,11 @@
 //! 事件层又变过一次（帧里不再有事件队列 / pending choice），两次都是显式重基线。
 //!
 //! **wasm 侧状态（FR-9，M1 C2 起）**：本文件证明的是 native 侧确定性。
-//! native/wasm 双跑哈希等价由 node 泳道承载：`crates/ygg-wasm/verify-determinism.mjs`
-//! 把本探针的 golden-vector 二元组（同一份 fixture 文件）在 node + wasm 内核上
-//! 双跑，以壳导出 `YggWorld::snapshot()` / `step()`（= `ygg_sandbox::hash::state_hash`
-//! 同一条链）比对 `expected_state_hash`——随 `scripts/build-wasm.sh` 构建 + smoke
-//! 后运行，门禁口径见 playbook `gates.no-wasm-pack`。
+//! 壳侧的同一锚现在由 `crates/ygg-wasm/src/lib.rs` 的 `load_path_is_the_native_one`
+//! 用例承载（host 同构编译）：壳装载同一份 golden fixture 后经
+//! `Session::loaded()` 拿出原生状态哈希，与 `expected_state_hash` 对比——壳换成协议
+//! 绑定之后仍走同一条装载链。参考包（`packs/example`）与 C ABI 三载体等价见
+//! `artifacts/w2-m3-example-pack.md` 与 `packages/schema/protocol/parity-script.json`。
 //! 残余缺口：`wasm-bindgen-test` 浏览器泳道（真实浏览器 wasm 实例重放同一断言）
 //! 仍未实现，不得静默吸收。
 

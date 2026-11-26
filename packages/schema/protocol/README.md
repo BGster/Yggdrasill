@@ -77,9 +77,12 @@
 | `insert` | `id:u64`、`comps` | 给已有实体加组件 |
 | `remove` | `id:u64`、`cids:[u32]` | 从实体上摘组件 |
 
-回执：**v1 不回执 `submit`**（`spawn` 出来的新 id 因此不在任何回执里；宿主从随后的
-`delta` 认领）。这条空缺由计划稿 §3 第 2 步（M3.2 会话状态机）裁决，落定后本表与 schema
-同批改。
+`comps[].values` 的行数必须等于本次操作的行数：`spawn` 是 `n`（每个实体一行），
+`set` / `insert` 是 `1`。少一行不是「广播到每一行」，而是 `E_PROTOCOL`。
+
+回执：答**一条 `delta`**（本次写入的组件终值）。`spawn` 出来的新 id 不在任何专属回执里——
+宿主从这条 `delta` 的 `eid` 认领。整批失败时零写入，答 `error`，世界 hash 不变（不变式 2）。
+v1 没有独立的 `submit_result` 标签：`delta` 本来就是「本次被写过的组件」这一个面。
 
 ### `step` H→K
 
@@ -136,6 +139,29 @@
 五类错误码对应五种宿主动作，合并会把「重连」「换包」「报给包作者」「回滚重试」搅成一句
 「出错了」：`E_PROTOCOL` 是宿主自己的 bug，`E_PACK` 换包或换档，`E_BUDGET`/`E_RULE` 报给
 包作者，`E_STATE` 回滚并重试。
+
+## 绑定层的回执形状（一请求一数组）
+
+C ABI 与 WASM 的边界只过字符缓冲区：一次 `handle(msg_json)` 进去、一段 JSON 出来，没有
+「一帧一行」的流式通道。所以绑定面把**帧流**包成一个 JSON 数组（顺序即线上顺序）：
+
+```text
+handle('{"type":"step","ticks":1,"dt":1}')
+→ [{"type":"events",…},{"type":"delta",…}]      // step 两帧
+handle('{"type":"submit","ops":[…]}')
+→ [{"type":"delta",…}]                            // 其余一帧
+handle('not json')
+→ [{"type":"error","code":"E_PROTOCOL",…}]       // 错也是帧，不是异常/NULL
+```
+
+- **数组不改变逐消息语义**：它只是把同一段帧序装进一段文本；每条消息答什么仍由上一节
+  的消息表决定。
+- **打包规则住在内核侧**（`crates/ygg-host/src/proto.rs` 的 `encode_frames`），绑定层只搬
+  字符串——它若自己拼数组，就等于多一份与 Rust 宿主的帧序实现。
+- **三条载体逐帧等价**：Rust `Session`、WASM `YggSession`、C ABI 跑同一份脚本
+  `packages/schema/protocol/parity-script.json`（hello → ready、submit → delta、
+  step → events + delta、snapshot → reply），回执规范化后逐字节相同
+  （`crates/ygg-capi/tests/parity.rs`、`crates/ygg-wasm/tests/parity.rs`）。
 
 ## 三条不变式
 

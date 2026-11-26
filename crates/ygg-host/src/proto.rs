@@ -257,17 +257,19 @@ pub enum Value {
     Bool(bool),
 }
 
-/// 一份组件在一组实体上的列值（`cid` + 逐列值）。
+/// 一份组件在一组实体上的列值（`cid` + 逐行值）。
 ///
-/// `values` 的长度必须等于该组件的列数（`tag` 为 0）；协议层不校验这一条——
-/// 列数只有内核的 registry 知道，越界/缺列由 `submit` 在事务里拒（回 `E_STATE`）。
+/// `values` 的**行数**必须等于本次操作的行数：`spawn` 是 `n`（每个实体一行），
+/// `set` / `insert` 是 `1`。少一行不是「广播到每一行」，而是 `E_PROTOCOL`（
+/// `session::column_of` 当场拒）；`tag` 组件没有列，`values` 必须为空。
+/// 协议层不校验行数与内核列的对应关系——那是 `submit` 在事务里的事（回 `E_STATE`）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentValues {
     /// 组件 id。
     #[serde(deserialize_with = "strict::u32")]
     pub cid: ComponentId,
-    /// 逐列值（列序 = 该组件的声明序）。
+    /// 逐行值（一个实体一行；`spawn` 时行数 = `n`）。
     pub values: Vec<Value>,
 }
 
@@ -553,6 +555,36 @@ pub fn decode(text: &str) -> Result<Message, ProtocolError> {
 /// 编一条消息（规范序 = serde 的声明序，`type` 在首）。
 pub fn encode(message: &Message) -> Result<String, ProtocolError> {
     serde_json::to_string(message).map_err(|e| ProtocolError::protocol(e.to_string()))
+}
+
+/// 一帧或多帧 → 线上回执：**一个 JSON 数组**，顺序即线上顺序（`step` 两帧）。
+///
+/// 绑定层（WASM / C ABI）只有一条回执通道：一次请求一段文本，于是帧序必须装
+/// 进同一段文本——数组而不是「一行一帧」。这条约定是协议的一部分，所以它住在
+/// 信封层：绑定层拿到的永远是一段可直接回给宿主的 JSON，不需要知道里面有
+/// 几帧、也不参与拼接。
+///
+/// 空帧流答 `[]`（结构合法）；真正的「至少一帧」由 [`Session::handle_all`]
+/// 保证。单帧编码失败也不让线上闭嘴：退化成那一帧的 `error{E_STATE}`。
+///
+/// [`Session::handle_all`]: crate::Session::handle_all
+pub fn encode_frames(frames: &[Message]) -> String {
+    let mut out = String::from("[");
+    for (index, frame) in frames.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        match encode(frame) {
+            Ok(text) => out.push_str(&text),
+            Err(err) => {
+                let fallback = Message::Error(ProtocolError::new(ErrorCode::EState, err.msg));
+                // 兜底帧走同一台 encoder：它再失败只可能是内存耗尽。
+                out.push_str(&encode(&fallback).unwrap_or_default());
+            }
+        }
+    }
+    out.push(']');
+    out
 }
 
 // ---------------------------------------------------------------------------

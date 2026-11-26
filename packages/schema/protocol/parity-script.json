@@ -1,0 +1,21 @@
+{
+  "$comment": "ygg/1 三绑定等价性脚本：Session（Rust）/ YggSession（WASM）/ C ABI 三条载体跑同一份字节，回执必须逐帧相同。`<manifest-hash>` 是占位符，由各载体用自己的 `manifest_hash()` 替换（同一份镜像必然同值，否则填充后就会分叉）。`expected_types` 钉住这段脚本确实打到了 hello→ready、submit→delta、step→events+delta、snapshot 四个面——脚本退化成空转时它会先红。",
+  "pack_id": "ygg:parity",
+  "image": {
+    "manifest": "",
+    "modSource": "world.component{ name = \"hp\", kind = \"i64\" }\nworld.system{\n  name = \"damage\", stage = \"rules\", reads = {\"hp\"}, writes = {\"hp\"},\n  run = function(dt, ctx)\n    ctx.each_mut({\"hp\"}, function(id, hp) return hp - 1 end)\n  end,\n}\nworld.spawn{ hp = 3 }\nworld.seal()\n"
+  },
+  "script": [
+    "{\"type\":\"hello\",\"protocol\":\"ygg/1\",\"codec\":\"json\",\"pack_id\":\"ygg:parity\",\"pack_hash\":\"<manifest-hash>\"}",
+    "{\"type\":\"submit\",\"ops\":[{\"op\":\"spawn\",\"n\":2,\"comps\":[{\"cid\":0,\"values\":[{\"int\":5},{\"int\":5}]}]}]}",
+    "{\"type\":\"step\",\"ticks\":1,\"dt\":1}",
+    "{\"type\":\"snapshot\",\"direction\":\"request\"}"
+  ],
+  "expected_types": [
+    ["ready"],
+    ["delta"],
+    ["events", "delta"],
+    ["snapshot"]
+  ],
+  "manifest_hash_placeholder": "<manifest-hash>"
+}

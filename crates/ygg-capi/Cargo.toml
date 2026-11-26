@@ -1,0 +1,22 @@
+[package]
+name = "ygg-capi"
+version.workspace = true
+edition.workspace = true
+description = "Yggdrasill ygg/1 协议的 C ABI：字符缓冲区进出，协议逻辑一行不写"
+
+# 依赖纪律（artifacts/w2-m3-protocol-plan.md §3 步 3）：
+# - **只依赖 ygg-host**：镜像解析（`ygg_host::image`）、会话状态机（`ygg_host::Session`）、
+#   帧流打包（`ygg_host::proto::encode_frames`）全在内核面。本 crate 一个判断都不加——
+#   它若能自己装载内核，就等于把协议语义劈成第二份。
+# - **零第三方运行时依赖**：`std::ffi` 就够（NUL 结尾字符串的所有权在 C 侧）。
+#   `serde_json` 只进测试面（parity 用例要规范化回执做逐字节比对）。
+# - `rlib` 也在 crate-type 里：`tests/parity.rs` 要链接本 crate 才能调 C 面（`cdylib`
+#   不能作为测试依赖被链接）。产物面不受影响：`cdylib` / `staticlib` 照旧产出。
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+ygg-host = { path = "../ygg-host" }
+
+[dev-dependencies]
+serde_json = "1"
