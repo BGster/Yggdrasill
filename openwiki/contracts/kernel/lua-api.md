@@ -58,7 +58,7 @@ Lua 5.4 沙箱的 globals 是 deny-by-default 的全新表：14 个 base 纯计�
 | `ygg.choice(prompt, options)` | 写 `pending_choice` 并以哨兵错误**立即**终止处理器；玩家选择以新外部事件 `ygg.choice_selected`（1 基索引）到达。 | 顶层禁用 |
 | `ygg.meta(key, json)` | 向当前 dispatch 回执的临时 `meta` 映射写结构化元数据（`summary` / `tool_calls` / `harness_actions`）。 | 顶层禁用 |
 | `ygg.data(resource_id)` | 纯读取 `pack.json` `entries` 声明的资源，返回深度 Lua 表副本。 | 顶层允许 |
-| `ygg.kv.get` / `.set` | 持久 KV，可写值只有四个标量（`nil` / `boolean` / `number` / `string`），表一律拒；复合结构 = 一个键 + 一条确定性编码字符串（口径归 `pkg.codec`）。处理器失败时回滚。 | `get` 允许 / `set` 顶层禁用 |
+| `ygg.kv.get` / `.set` | **进程内** KV，不是世界状态：不进 tick 哈希、不随快照恢复（跨存档的值必须写世界组件）。可写值只有四个标量（`nil` / `boolean` / `number` / `string`），表一律拒；复合结构 = 一个键 + 一条确定性编码字符串（口径归 `pkg.codec`）。处理器失败时回滚。 | `get` 允许 / `set` 顶层禁用 |
 | `ygg.entity.*` | **单条六面** `spawn` / `get_attribute` / `set_attribute` / `add_tag` / `remove_tag` / `has_tag`；**批式五面** `spawn_batch` / `attr_apply` / `attr_fetch` / `tag_batch` / `scan`；**控制面两键** `exists` / `destroy`（幂等、零事件）；**查询面** `query(selector)`（`tag` / `where` / `select` / `order` 四键，缺 `order` 时 id 升序，不分页不 JOIN）。键集闭集 = 14，**一个逐实体 getter 都没有**。错误码三族只属批式面：`YGG-ENTITY-FRAME`（形状）/ `YGG-ENTITY-VALUE`（非有限值或非标量）/ `YGG-ENTITY-ID`（未知 id）——整批先校验后改，拒绍零副作用。 | 查询允许 / 变更顶层禁用 |
 | `ygg.fsm.*` / `ygg.narrative.*` | 内嵌辅助库：`fsm.define` / `fsm.current` / `fsm.on_event`，`narrative.node` / `narrative["goto"]`（点形式是 Lua 5.4 语法错误，由 `YGG-R3` 捕获）。 | 顶层禁用 |
 | `ygg.fs.{write,read,stat,list}` | 一个面两个根：`artifacts/<file>`（内存 VFS，dispatch 级回滚）与 `mounts/<name>/<rel>`（挂载桥，写穿磁盘）。见 §3。 | 变更调用顶层禁用 |

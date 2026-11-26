@@ -63,6 +63,36 @@ fn restore_keeps_the_module_table() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn restore_does_not_carry_kv_across() {
+    // ADR-S3-3：帧里只有世界面，KV 不在帧内。读档重建 = 重跑一遍装载，所以 KV 是
+    // **装载期写下的值**——既不是拍快照那刻的 7，也不是改完的 99。跨存档的状态
+    // 只能写世界组件；把 KV 当存档面用，读档后会静默丢掉一切。
+    let dir = write_multi_file_mod("kv-not-persisted");
+    let bundle = ModBundle::load(&dir).expect("bundle loads");
+    let loaded = Loaded::from_bundle(&bundle).expect("kernel");
+    let kv = loaded.kv();
+    kv.borrow_mut().set("k", Value::Int(7)).expect("kv set");
+    let frame = loaded.snapshot().expect("快照");
+    kv.borrow_mut().set("k", Value::Int(99)).expect("kv set");
+
+    let restored = Loaded::restore_from_bundle(&bundle, &frame).expect("restore");
+    let kv = restored.kv();
+    let kv = kv.borrow();
+    assert_eq!(kv.get("k"), None, "帧不含 KV：读档后 7 / 99 都不该在");
+    assert_eq!(
+        kv.get("stage"),
+        Some(&Value::Str(String::from("begin"))),
+        "KV 只能是装载期写下的值"
+    );
+    assert_eq!(
+        kv.len(),
+        2,
+        "帧没把任何键带过来：只剩入口写的 stage / scene"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// 多文件 Mod 五件套 + `src/util.lua`（manifest 现算：entries 与 code 两段）。
 fn write_multi_file_mod(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("ygg-{tag}-{}", std::process::id()));
