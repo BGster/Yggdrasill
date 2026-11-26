@@ -37,12 +37,12 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::Value as Json;
+use serde_json::{Map, Value as Json};
 
-use ygg_sandbox::modload::{LoadError, Loaded, ModBundle};
-use ygg_sandbox::modules::{name_of_path, ModuleSet, MODULE_EXTENSION};
+use ygg_sandbox::modload::{LoadError, Loaded, ModBundle, MINIMAL_MANIFEST};
+use ygg_sandbox::modules::{name_of_path, path_of, ModuleSet, MODULE_EXTENSION};
 
-use crate::base64::base64_decode;
+use crate::base64::{base64_decode, base64_encode};
 use crate::session::Session;
 
 /// 镜像 → 已装载内核（会话尚未握手）。
@@ -52,6 +52,80 @@ use crate::session::Session;
 pub fn load(image: &[u8]) -> Result<Loaded, String> {
     let bundle = decode_image(image)?;
     Loaded::from_bundle(&bundle).map_err(|err| load_error(&err))
+}
+
+/// 已装载内核 → 镜像 JSON（[`load`] 的逆，用于打包给 wasm / C 等无盘宿主）。
+///
+/// 输出是规范化 JSON（`serde_json::Map` 按键字典序、不依赖遍历顺序）：
+/// - `manifest` 等于 [`MINIMAL_MANIFEST`] 且无 `schemas` / `resources` 时写出空串 `""`
+///   （与 `decode_image` 的无资源路径一一对应），否则保留 `manifest_bytes` 原文（UTF-8）
+///   并输出 `schemas`（数组序 = 注册序）与 `resources`（`path → base64`，按 path 字典序）；
+/// - `modules` / `chunkPaths` 仅在非空时写出，键均由 [`path_of`] 还原为模块相对路径
+///   （`src.util` → `src/util.lua`），确保 `load(to_image(x))` 与 `to_image(load(to_image(x)))`
+///   逐字节稳定。
+pub fn to_image(loaded: &Loaded) -> Result<String, String> {
+    encode_bundle(loaded.bundle())
+}
+
+/// 装载参数 → 镜像 JSON 文本（[`decode_image`] 的逆）。
+fn encode_bundle(bundle: &ModBundle) -> Result<String, String> {
+    let mut obj = Map::new();
+    obj.insert(
+        "modSource".to_owned(),
+        Json::String(bundle.mod_source.clone()),
+    );
+
+    let no_resources = bundle.manifest_bytes == MINIMAL_MANIFEST.as_bytes()
+        && bundle.schemas.is_empty()
+        && bundle.resources.is_empty();
+    if no_resources {
+        obj.insert("manifest".to_owned(), Json::String(String::new()));
+    } else {
+        let manifest = std::str::from_utf8(&bundle.manifest_bytes)
+            .map_err(|err| format!("manifest 不是合法 UTF-8，无法写入镜像：{err}"))?;
+        obj.insert("manifest".to_owned(), Json::String(manifest.to_owned()));
+
+        let schemas: Vec<Json> = bundle
+            .schemas
+            .iter()
+            .map(|(_, text)| Json::String(text.clone()))
+            .collect();
+        obj.insert("schemas".to_owned(), Json::Array(schemas));
+
+        let mut resources = Map::new();
+        for (path, bytes) in &bundle.resources {
+            resources.insert(path.clone(), Json::String(base64_encode(bytes)));
+        }
+        obj.insert("resources".to_owned(), Json::Object(resources));
+    }
+
+    if !bundle.modules.is_empty() {
+        let mut modules = Map::new();
+        for name in bundle.modules.names() {
+            let bytes = bundle
+                .modules
+                .get(name)
+                .ok_or_else(|| format!("模块表缺条目 {name:?}"))?;
+            let text = std::str::from_utf8(bytes)
+                .map_err(|err| format!("模块 {name:?} 不是合法 UTF-8，无法写入镜像：{err}"))?;
+            let path =
+                path_of(name).map_err(|err| format!("模块名 {name:?} 无法还原路径：{err}"))?;
+            modules.insert(path, Json::String(text.to_owned()));
+        }
+        obj.insert("modules".to_owned(), Json::Object(modules));
+    }
+
+    if !bundle.chunk_paths.is_empty() {
+        let mut chunk_paths = Map::new();
+        for (name, rel) in &bundle.chunk_paths {
+            let path = path_of(name)
+                .map_err(|err| format!("chunkPaths 键 {name:?} 无法还原路径：{err}"))?;
+            chunk_paths.insert(path, Json::String(rel.clone()));
+        }
+        obj.insert("chunkPaths".to_owned(), Json::Object(chunk_paths));
+    }
+
+    serde_json::to_string(&Json::Object(obj)).map_err(|err| format!("镜像 JSON 序列化失败：{err}"))
 }
 
 /// 镜像 → 未握手会话（[`Session::from_image`] 的实现面）。
@@ -208,10 +282,13 @@ fn parse_resources(resources_json: &str) -> Result<Vec<(String, Vec<u8>)>, Strin
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{
         decode_image, load, open, parse_chunk_paths, parse_modules, parse_resources, parse_schemas,
+        to_image,
     };
-    use ygg_sandbox::modload::MINIMAL_MANIFEST;
+    use ygg_sandbox::modload::{Loaded, MINIMAL_MANIFEST};
 
     /// 空转 Mod：不声明组件、不生成实体——世界帧就是空世界。
     const IDLE_MOD: &str = "-- idle mod: no world declarations";
@@ -360,5 +437,54 @@ mod tests {
             "路径必须是字符串"
         );
         assert!(parse_chunk_paths(None).expect("缺省即空表").is_empty());
+    }
+
+    /// 互逆与稳定性（单文件 + 模块 + chunkPaths）：
+    /// `load(to_image(x))` 与 `x` 同 tick / 同 hash / 同 manifest_hash，
+    /// 再 `to_image` 一次字节完全一致。
+    #[test]
+    fn to_image_round_trips_in_memory_and_is_byte_stable() {
+        let raw = serde_json::json!({
+            "modSource": "local util = require('src.util')\nworld.component{ name = 'hp', kind = 'u8' }\nworld.spawn{ hp = util.hp }\nworld.seal()\n",
+            "manifest": "",
+            "modules": { "src/util": "return { hp = 7 }\n" },
+            "chunkPaths": { "src/util": "packs/two/src/util.lua" }
+        })
+        .to_string()
+        .into_bytes();
+
+        let first = load(&raw).expect("首次装载");
+        let img1 = to_image(&first).expect("首次导出镜像");
+        let second = load(img1.as_bytes()).expect("镜像二次装载");
+        assert_eq!(second.tick().unwrap(), first.tick().unwrap());
+        assert_eq!(second.hash().unwrap(), first.hash().unwrap());
+        assert_eq!(second.manifest_hash(), first.manifest_hash());
+
+        let img2 = to_image(&second).expect("二次导出镜像");
+        assert_eq!(img1, img2, "连续两次 to_image 必须逐字节稳定");
+    }
+
+    /// 真实多文件参考包 `packs/example` 往返：
+    /// 带 manifest / schemas / resources / 6 个 Lua 模块的目录装载 → `to_image` → `load`
+    /// 后 tick、hash、manifest_hash 全部一致，且再 `to_image` 字节相同。
+    #[test]
+    fn to_image_round_trips_example_pack_with_stable_bytes() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packs/example");
+        let mut from_dir = Loaded::from_dir(&dir).expect("装载 packs/example");
+        let img1 = to_image(&from_dir).expect("导出 packs/example 镜像");
+
+        let mut from_img = load(img1.as_bytes()).expect("从镜像装载 packs/example");
+        assert_eq!(from_img.tick().unwrap(), from_dir.tick().unwrap());
+        assert_eq!(from_img.hash().unwrap(), from_dir.hash().unwrap());
+        assert_eq!(from_img.manifest_hash(), from_dir.manifest_hash());
+
+        // 推进几步也必须保持完全一致（证明模块/资源/规则全部等价装入）。
+        let r1 = from_dir.step(5, 1).expect("目录装载步进");
+        let r2 = from_img.step(5, 1).expect("镜像装载步进");
+        assert_eq!(r1.tick, r2.tick);
+        assert_eq!(r1.hash, r2.hash);
+
+        let img2 = to_image(&from_img).expect("二次导出镜像");
+        assert_eq!(img1, img2, "再导出一次镜像必须逐字节相同");
     }
 }
