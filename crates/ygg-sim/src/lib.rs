@@ -43,6 +43,7 @@ pub mod error;
 pub mod fixed;
 pub mod hash;
 pub mod input;
+pub mod query;
 pub mod rng;
 pub mod sim;
 pub mod snapshot;
@@ -54,6 +55,7 @@ pub use component::{AttrType, CompSet, ComponentDef, ComponentId, EntityId, Regi
 pub use error::SimError;
 pub use fixed::Fixed;
 pub use input::ReplayLog;
+pub use query::{Bits, ColIter, ColIterMut, ColumnKind, RowSet};
 pub use rng::RngRegistry;
 pub use sim::{InsertReport, ReplayReport, Sim, SimState, SpawnReport};
 pub use store::ArchetypeStore;

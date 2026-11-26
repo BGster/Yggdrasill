@@ -249,25 +249,55 @@ impl ArchetypeStore {
     ) -> SimResult<usize> {
         let set = self.check_batch(ids.len(), cols, tags)?;
         // ① 全量校验（先校验后改）：实体存在、组件尚未在场、无重复 id。
-        let mut plan: Vec<(EntityId, u32, u32, u32)> = Vec::with_capacity(ids.len());
-        let mut seen: Vec<EntityId> = Vec::with_capacity(ids.len());
+        //
+        // 重复检测用「排序 + 相邻扫描」而不是 `Vec::contains`（后者是 O(n²)：10⁴ 行约
+        // 5·10⁷ 次比较，而行数由调用方的帧决定、没有上界）。但**报错口径不变**：仍在
+        // 输入序的循环里、`locate` 之后抛出——「未知 id 先于重复 id」的优先级与此前逐字相同。
+        let mut sorted: Vec<EntityId> = ids.to_vec();
+        sorted.sort_unstable();
+        let mut dups: Vec<EntityId> = sorted
+            .windows(2)
+            .filter(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+            .collect();
+        dups.dedup();
+        // 已见过一次的重复候选（只有真的重复时非空，量级是个位数）。
+        let mut repeated: Vec<EntityId> = Vec::new();
+        let mut plan: Vec<(EntityId, CompSet)> = Vec::with_capacity(ids.len());
         for id in ids.iter() {
-            let (arch_idx, local_row) = self.locate(*id)?;
-            if seen.contains(id) {
-                return Err(SimError::entity(format!("同一帧里实体 id {id} 出现两次")));
+            let (arch_idx, _) = self.locate(*id)?;
+            if !dups.is_empty() && dups.binary_search(id).is_ok() {
+                if repeated.contains(id) {
+                    return Err(SimError::entity(format!("同一帧里实体 id {id} 出现两次")));
+                }
+                repeated.push(*id);
             }
-            seen.push(*id);
             let key = self.archetypes[arch_idx as usize].key;
             if key & set != 0 {
                 return Err(SimError::schema(format!(
                     "实体 {id} 已有所插入的组件（insert 只加列，不覆盖）"
                 )));
             }
-            let target = self.ensure_archetype(key | set)?;
-            plan.push((*id, arch_idx, local_row, target));
+            plan.push((*id, key | set));
+        }
+        // ①b 建目标桶：**校验全部通过之后**才落笔。
+        //
+        // `ensure_archetype` 是写操作（新建桶）；把它留在①的循环里，一个注定被拒的帧
+        // （重复 id / 未知 id）也会留下空桶——那是本文件头注不变量 3「拒绍不产生半改的
+        // 模拟态」的反例。桶键不变，只是晚一个循环。
+        let mut targets: Vec<(EntityId, u32)> = Vec::with_capacity(plan.len());
+        for (id, target_key) in plan {
+            let target = self.ensure_archetype(target_key)?;
+            targets.push((id, target));
         }
         // ② 逐实体迁移（借两个不相交的桶：源桶读 + 目标桶写，零临时分配）。
-        for (row_idx, (id, arch_idx, local_row, target)) in plan.into_iter().enumerate() {
+        //
+        // 行号必须在本步**重新查** `entity_index`：① 只给目标桶，不给行号——因为第一次
+        // `swap_remove` 之后行号就会错位（末行填洞会把一个尚未迁移的实体搬进空洞，
+        // 10⁴ 行批量迁移时旧行号必然越出缩小的源桶）。行号是 `entity_index` 的唯一
+        // 真相，本步不另存一份（否则就是第二条行序说法）。
+        for (row_idx, (id, target)) in targets.into_iter().enumerate() {
+            let (arch_idx, local_row) = self.locate(id)?;
             if arch_idx == target {
                 return Err(SimError::state(format!(
                     "insert 的目标桶与源桶相同（实体 {id}）——位集应当严格增长"

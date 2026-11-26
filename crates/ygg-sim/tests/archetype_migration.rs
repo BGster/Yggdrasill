@@ -235,3 +235,89 @@ fn row_values_survive_fixed_point_math() {
         .unwrap();
     assert_eq!(as_i64(&w.store, ids[0], w.hp), 4 * ONE + ONE / 2);
 }
+
+/// 一帧迁移**多行**（`insert_many` 的真实形态）：行号必须在每次 `swap_remove` 之后重查。
+///
+/// 这条用例是缺陷回归：曾经的 plan 在①校验阶段把行号固化下来，于是第一次迁移的末行填洞
+/// 就把后续行号弄错位——缩小的源桶会越界 panic，或者迁走错行的值（静默错值）。
+/// 发现路径是 10⁴ 行的基准（`tests/perf_query.rs` 的 `op=insert_columns`）。
+#[test]
+fn insert_columns_migrates_many_rows_in_one_frame() {
+    let mut w = world();
+    let ids = w
+        .store
+        .spawn_columns(
+            6,
+            &[(
+                w.pos,
+                i64_col(&[ONE, 2 * ONE, 3 * ONE, 4 * ONE, 5 * ONE, 6 * ONE]),
+            )],
+            &[],
+        )
+        .unwrap();
+    let payload = i64_col(&[10, 20, 30, 40, 50, 60]);
+    let written = w
+        .store
+        .insert_columns(&ids, &[(w.vel, payload)], &[])
+        .unwrap();
+    assert_eq!(written, 6);
+    assert_eq!(w.store.entity_count(), 6);
+    assert_eq!(
+        w.store.archetype_count(),
+        2,
+        "源桶被清空后仍保留（桶不回收）"
+    );
+    for (k, id) in ids.iter().enumerate() {
+        assert_eq!(
+            as_i64(&w.store, *id, w.vel),
+            (k as i64 + 1) * 10,
+            "载荷必须落到对的实体上（k={k}）"
+        );
+        assert_eq!(
+            as_i64(&w.store, *id, w.pos),
+            (k as i64 + 1) * ONE,
+            "旧列值随行搬走"
+        );
+    }
+    let mut out = Vec::new();
+    w.store.collect_ids(&[w.pos, w.vel], &mut out);
+    assert_eq!(out, ids, "目标桶行序 = 帧内 id 序");
+}
+
+/// 去重快路径（排序 + 相邻扫描）必须保留**报错口径**：重复 id 与未知 id 都是 entity 错，
+/// 且「输入序里先出现的那个」优先（`locate` 先于重复判定，与 O(n²) 版逐字相同）。
+#[test]
+fn insert_columns_rejects_duplicates_and_unknown_ids_with_unchanged_precedence() {
+    let mut w = world();
+    let ids = w
+        .store
+        .spawn_columns(3, &[(w.pos, i64_col(&[ONE, 2 * ONE, 3 * ONE]))], &[])
+        .unwrap();
+    let before = w.store.clone();
+
+    let payload = i64_col(&[7, 8]);
+    let err = w
+        .store
+        .insert_columns(&[ids[1], ids[1]], &[(w.vel, payload)], &[])
+        .unwrap_err();
+    assert_eq!(err.code(), codes::ENTITY);
+    assert!(
+        err.to_string()
+            .contains(&format!("实体 id {} 出现两次", ids[1])),
+        "重复报错必须仍旧指向该 id：{err}"
+    );
+
+    // 未知 id 在输入序里靠前 ⇒ 先报未知（不是先报后面的重复）。
+    let payload = i64_col(&[7, 8, 9]);
+    let err = w
+        .store
+        .insert_columns(&[999, ids[1], ids[1]], &[(w.vel, payload)], &[])
+        .unwrap_err();
+    assert_eq!(err.code(), codes::ENTITY);
+    assert!(
+        err.to_string().contains("未知实体 id：999"),
+        "输入序优先：{err}"
+    );
+
+    assert_eq!(w.store, before, "拒绍不改状态（不含多余空桶）");
+}

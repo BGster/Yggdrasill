@@ -150,6 +150,58 @@ impl Column {
         }
     }
 
+    /// 写第 `row` 行的值（[`crate::query`] 的 `set_many` / `RowSet::set_fixed` 的唯一写入口）。
+    ///
+    /// 校验与 [`Column::push_value`] 同一套（类型、`U8` 值域、位串归一）；差别只有一条：
+    /// **只改值，不改行序**——行序是回放契约（本文件头注「行序」段）。
+    pub fn set_value(
+        &mut self,
+        row: usize,
+        value: &ValueRef<'_>,
+        comp: ComponentId,
+    ) -> SimResult<()> {
+        if row >= self.len() {
+            return Err(SimError::state(format!(
+                "组件 id {comp} 的行号越界：{row} ≥ {}",
+                self.len()
+            )));
+        }
+        match (self, value) {
+            (Column::I64(v), ValueRef::I64(x)) => v[row] = *x,
+            (Column::U64(v), ValueRef::U64(x)) => v[row] = *x,
+            (Column::U8(v), ValueRef::U8(x)) => {
+                if *x > 1 {
+                    return Err(SimError::schema(format!(
+                        "组件 id {comp} 是 boolean 列，值必须是 0/1，得到 {x}"
+                    )));
+                }
+                v[row] = *x;
+            }
+            (Column::Bytes { off, buf }, ValueRef::Bytes(bytes)) => {
+                let (start, end) = (off[row] as usize, off[row + 1] as usize);
+                buf.splice(start..end, bytes.iter().copied());
+                let delta = bytes.len() as isize - (end - start) as isize;
+                for entry in off.iter_mut().skip(row + 1) {
+                    *entry = (*entry as isize + delta) as u32;
+                }
+            }
+            // 写入边界归一（与 `push_value` 同一条：±0→+0、任意 NaN→NAN_BITS）。
+            (Column::F64Bits(v), ValueRef::Bits(raw)) => {
+                let bits = pack(unpack(*raw));
+                debug_assert!(is_canonical(bits));
+                v[row] = bits;
+            }
+            (column, value) => {
+                return Err(SimError::schema(format!(
+                    "组件 id {comp} 的列类型与值不符：列={} 值={}",
+                    column.kind_name(),
+                    value.kind_name()
+                )))
+            }
+        }
+        Ok(())
+    }
+
     /// `swap_remove`：末行填洞（行数 −1）。
     pub fn swap_remove(&mut self, row: usize) {
         match self {
