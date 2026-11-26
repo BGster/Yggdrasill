@@ -346,10 +346,10 @@ fn resolve_hyphenated_id_becomes_an_underscore_module_prefix() {
 fn resolve_reports_a_missing_package_with_the_ids_it_found() {
     let root = temp_root("resolve-unknown");
     write_pkg(&root, "fixture", "0.1.0", &[], &[("init.lua", "return {}")]);
-    let err = resolve(&root, &spec_of(&[("quest", "0.1.0")])).unwrap_err();
+    let err = resolve(&root, &spec_of(&[("alpha", "0.1.0")])).unwrap_err();
     let text = err.to_string();
     assert!(
-        text.contains("package \"quest\" is not a package under"),
+        text.contains("package \"alpha\" is not a package under"),
         "{text}"
     );
     // 「找不到」必须告诉作者有哪些——否则只能猜目录名。
@@ -369,24 +369,24 @@ fn resolve_rejects_version_drift_and_requires_the_full_closure() {
     );
     assert!(text.contains("declares 0.2.0"), "{text}");
 
-    // 传递依赖未声明：quest 依赖 codec，但 packages 段只列了 quest。
+    // 传递依赖未声明：alpha 依赖 beta，但 packages 段只列了 alpha。
     let root = temp_root("resolve-closure");
     write_pkg(
         &root,
-        "quest",
+        "alpha",
         "0.1.0",
-        &[("codec", "0.1.0")],
+        &[("beta", "0.1.0")],
         &[("init.lua", "return {}")],
     );
-    write_pkg(&root, "codec", "0.1.0", &[], &[("init.lua", "return {}")]);
-    let err = resolve(&root, &spec_of(&[("quest", "0.1.0")])).unwrap_err();
+    write_pkg(&root, "beta", "0.1.0", &[], &[("init.lua", "return {}")]);
+    let err = resolve(&root, &spec_of(&[("alpha", "0.1.0")])).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "package \"quest\" depends on \"codec\" which the mod's `packages` section \
+        "package \"alpha\" depends on \"beta\" which the mod's `packages` section \
              does not declare (declare the full closure)"
     );
     // 声明完整闭包即通过。
-    let resolved = resolve(&root, &spec_of(&[("quest", "0.1.0"), ("codec", "0.1.0")]))
+    let resolved = resolve(&root, &spec_of(&[("alpha", "0.1.0"), ("beta", "0.1.0")]))
         .expect("full closure resolves");
     assert_eq!(resolved.len(), 2);
 }

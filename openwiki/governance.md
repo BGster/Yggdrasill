@@ -65,7 +65,8 @@ generated: { by: "pi", at: "2026-11-26T07:10:30.723Z" }
 | --- | --- | --- |
 | `scripts/wiki-ver.sh --check` | 账本与页面是否同步、页内相对链接是否解析、id 是否唯一 | `files/changed/missing_id/dup_id/missing_ver/broken_links/ok` |
 | `scripts/wiki-consistency.sh` | 全库相对链接、`AGENTS.md` 行数预算、**claims 证据闭包**（证据文件存在且 sha256 与 claim 记录一致） | `links/broken/agents/claims/claims_bad/ok` |
-| `scripts/wiki-consistency.sh --attest` | 代码侧签名证据（事件日志里每条 doc-id 的 ver 与当前账本比对） | `claims/forged/stale/ok` |
+
+代码侧的事件日志签名核验（旧 `--attest` 模式）随 egg / agent-seed 一起删除：本仓不再有 run 目录，签名语义只作为**产品行为**活在 `openwiki/operating/*` 的历史页里。
 
 `claims_bad>0` 意味着「页面在说一件没有证据支撑的事」——这比链接断更严重，必须清零才能提交。
 
@@ -92,4 +93,4 @@ generated: { by: "pi", at: "2026-11-26T07:10:30.723Z" }
 ## 9. 维护责任
 
 - **触发**：任何 openwiki 页的增删改、`AGENTS.md` 改动、ver 账本或 claims 结构变化、门禁脚本改动。
-- **检查**：`bash scripts/wiki-ver.sh --check; bash scripts/wiki-consistency.sh`（双 `ok=1`），以及 `bash scripts/wiki-consistency.sh --attest`（`stale=0`）。
+- **检查**：`bash scripts/wiki-ver.sh --check; bash scripts/wiki-consistency.sh`（双 `ok=1`）。

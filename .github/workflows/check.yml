@@ -57,6 +57,16 @@ jobs:
       - name: cargo test（workspace）
         run: cargo test --workspace
 
+      # 文档面：ver 账本、链接闭包、claims 证据闭包、AGENTS 行数预算。
+      # 两个脚本「发现问题」也 exit 0（口径同 .pi/tools），故这里查 ok=1。
+      - name: 文档闭包（wiki-ver + wiki-consistency）
+        run: |
+          set -eu
+          scripts/wiki-ver.sh --check | tee /tmp/ver.txt
+          grep -q 'ok=1' /tmp/ver.txt
+          scripts/wiki-consistency.sh | tee /tmp/cons.txt
+          grep -q 'ok=1' /tmp/cons.txt
+
       # 参考包是内核的活体契约：自测、逐 tick 金值、宿主镜像三件套。
       - name: 参考包自测（packs/example）
         run: |
@@ -83,3 +93,48 @@ jobs:
             echo "::error::preserve_order breaks byte key order" >&2
             exit 1
           fi
+
+  # wasm 面：产物不进仓，所以必须在这里重建一次并跑双端一致。
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+
+      # vendored Lua 要走 clang + sysroot；`wasm32-wasip1/eh` 是 RUSTFLAGS
+      # 的锚点（不存在就说明装错了 SDK）。
+      - name: 安装 WASI SDK 33.0
+        run: |
+          set -eu
+          base=https://github.com/WebAssembly/wasi-sdk/releases/download
+          curl -sSL -o /tmp/wasi.tar.gz \
+            "$base/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz"
+          sudo tar xzf /tmp/wasi.tar.gz -C /opt
+          sudo mv /opt/wasi-sdk-33.0-x86_64-linux /opt/wasi-sdk
+          test -d /opt/wasi-sdk/share/wasi-sysroot/lib/wasm32-wasip1/eh
+
+      - name: 安装 wasm-bindgen CLI（版本对齐 Cargo.lock）
+        run: |
+          set -eu
+          v=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock \
+            | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
+          cargo install wasm-bindgen-cli --version "$v" --locked
+
+      - name: 构建 wasm 产物
+        env:
+          WASI_SDK_PATH: /opt/wasi-sdk
+        run: bash scripts/build-wasm.sh
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: 双端一致（50 tick + replay）
+        run: node scripts/wasm-lane.mjs

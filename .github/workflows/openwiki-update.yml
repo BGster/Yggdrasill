@@ -1,9 +1,14 @@
 name: OpenWiki Update
 
+# 维护通道：OpenWiki 的生成页只能由 `openwiki code --update` 重写（governance §2
+# 禁止手改生成页）。默认每周一次，只开 PR，不直接推 master。
+# 依赖仓 secret `OPENAI_API_KEY`（缺失时本工作流会红——这是有意的：静默跳过会让
+# 页面悄悄变旧）。`add-paths` 已限在 openwiki/、AGENTS.md 与本文件，CLAUDE.md
+# 只在存在时加入。
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 8 * * *"
+    - cron: "0 8 * * 1"
 
 permissions:
   contents: write
@@ -27,7 +32,7 @@ jobs:
           node-version: "22"
 
       - name: Install OpenWiki
-        # mermaid + jsdom are optional; they add high-fidelity validation of Mermaid diagrams. Remove if your wiki has none.
+        # mermaid + jsdom 可选：给 Mermaid 图做高保真校验（本仓无图可删）
         run: npm install --global openwiki@0.9.0 mermaid@11.16.0 jsdom@29.1.1
 
       - name: Run OpenWiki
@@ -38,9 +43,8 @@ jobs:
           OPENWIKI_PROVIDER: openai
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENWIKI_MODEL_ID: "gpt-5.6-terra"
-          # Required for the LangSmith connector's code-mode pull to authenticate.
-          # For extra workspaces, add OPENWIKI_LANGSMITH_API_KEY_2, _3, ... as repo
-          # secrets and env entries here.
+          # LangSmith 连接器的 code-mode 拉取需要它；多 workspace 时
+          # 追加 OPENWIKI_LANGSMITH_API_KEY_2、_3 … 与对应 env 条目。
           OPENWIKI_LANGSMITH_API_KEY: ${{ secrets.OPENWIKI_LANGSMITH_API_KEY }}
           # Optional: also trace this workflow's own OpenWiki run to LangSmith.
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
@@ -64,7 +68,7 @@ jobs:
       - name: Create OpenWiki update pull request
         id: create-pr
         if: ${{ !cancelled() }}
-        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676  # yamllint disable-line rule:line-length
         with:
           add-paths: ${{ steps.paths.outputs.list }}
           branch: openwiki/update
@@ -75,13 +79,16 @@ jobs:
 
             OpenWiki result: ${{ steps.openwiki.outcome }}
 
-            When the result is `failure`, this PR intentionally preserves only the
-            pages completed before the failure. Merge it to make that progress the
-            baseline for the next scheduled run.
+            When the result is `failure`, this PR keeps only the pages
+            completed before the failure. Merge it to make that progress
+            the baseline for the next scheduled run.
 
       - name: Annotate OpenWiki update pull request
-        if: ${{ !cancelled() && steps.create-pr.outputs.pull-request-url != '' }}
-        run: echo "::notice title=OpenWiki update pull request::${{ steps.create-pr.outputs.pull-request-url }}"
+        if: ${{ !cancelled() && steps.create-pr.outputs.pull-request-url != '' }}  # yamllint disable-line rule:line-length
+        env:
+          PR_URL: ${{ steps.create-pr.outputs.pull-request-url }}
+        run: |
+          echo "::notice title=OpenWiki update pull request::$PR_URL"
 
       - name: Propagate OpenWiki failure
         if: ${{ steps.openwiki.outcome == 'failure' }}

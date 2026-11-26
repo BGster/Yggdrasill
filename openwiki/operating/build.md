@@ -83,13 +83,18 @@ bash scripts/persist-matrix.sh                                                  
 | `packs/example/golden.json` | 是 | 确定性基线，改动必须是有意的 |
 | `target/` | 否 | — |
 
-## 5. CI 覆盖了什么、为什么不够
+## 5. CI 覆盖了什么、仍然不覆盖什么
 
-`.github/workflows/check.yml` 只有 `rust` 一个 job：`cargo fmt --check`、`cargo clippy -D warnings`、`cargo test --workspace`，外加一条结构守卫「`serde_json` 不得开 `preserve_order`」（键序即线格式）。
+`.github/workflows/check.yml` 两个 job：
 
-**CI 不跑**：wasm 构建（需 WASI SDK + wasm-bindgen CLI，成本高）、浏览器泳道（需真浏览器）、⑤⑥ 两条金值门禁。这三样必须在本地跑——「CI 绿」不等于可交付。
+| job | 跑什么 |
+| --- | --- |
+| `rust` | `cargo fmt --check`、`cargo clippy -D warnings`、`cargo test --workspace`；文档闭包（`wiki-ver --check` 与 `wiki-consistency` 双 `ok=1`）；参考包三件套（`selftest`、`golden --check`、`image --check`）；一条结构守卫（`serde_json` 不得开 `preserve_order` —— 键序即线格式） |
+| `wasm` | 装 WASI SDK 33.0 与 `wasm-bindgen-cli`（版本对齐 `Cargo.lock`）→ `scripts/build-wasm.sh` → `node scripts/wasm-lane.mjs`（50 tick 逐位 == `golden.json` + replay 全等） |
+
+**CI 仍然不跑**：真实浏览器泳道（`hosts/h5` 要人眼与人手）、10 万 tick 的 `scripts/persist-matrix.sh`（成本高，本地跑）、GPU/音频类宿主侧行为。这三样必须在本地跑——「CI 绿」不等于可交付。
 
 ## 6. 维护责任
 
 - **触发**：加/删 crate、改工具链版本、改 `scripts/build-wasm.sh`、改 CI 步骤、改门禁清单。
-- **检查**：§2 六条全绿 + §3 三条全绿；CI 文件改动后本地先跑一遍同样的三条命令。
+- **检查**：`bash scripts/wiki-ver.sh --check; bash scripts/wiki-consistency.sh`（双 `ok=1`），再加本地 `node scripts/wasm-lane.mjs` 与浏览器四步（CI 的 `wasm` job 跑前者，不跑后者）。

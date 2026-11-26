@@ -41,13 +41,18 @@ generated: { by: "pi", at: "2026-11-26T07:10:30.723Z" }
 - 提交信息首行是「做了什么」，不是「改了哪些文件」；正文写**为什么**与**代价**（迁移数字、性能变化、被否掉的替代方案）；
 - 一个提交必须能独立通过门禁；不通过就不许提交，不许「下一个提交修」。
 
-## 3. 提交前门禁（与 CI 等价）
+## 3. 提交前门禁（与 CI 等价，除浏览器与 10 万 tick）
 
 ```bash
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+cargo run -q --example selftest -p ygg-sandbox -- --mod packs/example
+cargo run -q --example golden -p ygg-sandbox -- packs/example --check packs/example/golden.json
+cargo run -q --example image -p ygg-host -- packs/example --out hosts/h5/pack.image.js --check
 git ls-files '*.rs' '*.lua' | xargs wc -l | awk '$1>800 && $2!="total"'   # 单文件 ≤800 软、>1200 硬禁
 bash scripts/wiki-ver.sh --check && bash scripts/wiki-consistency.sh   # 文档面（改过页面时）
 ```
+
+改过 wasm 相关代码时再加两步：`bash scripts/build-wasm.sh`（需 `WASI_SDK_PATH`）与 `node scripts/wasm-lane.mjs`——CI 的 `wasm` job 也跑这两步，先在本地跑能省一轮来回。
 
 `.rs` 单文件超 800 行是**信号**：先问「是不是混了两个职责」，再用门面拆分（`mod.rs` 收口 + 子模块各管一件事），不要按行数机械切分。超 1200 行是**硬禁**。
 
