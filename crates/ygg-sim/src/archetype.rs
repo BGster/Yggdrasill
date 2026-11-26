@@ -178,12 +178,7 @@ impl Column {
                 v[row] = *x;
             }
             (Column::Bytes { off, buf }, ValueRef::Bytes(bytes)) => {
-                let (start, end) = (off[row] as usize, off[row + 1] as usize);
-                buf.splice(start..end, bytes.iter().copied());
-                let delta = bytes.len() as isize - (end - start) as isize;
-                for entry in off.iter_mut().skip(row + 1) {
-                    *entry = (*entry as isize + delta) as u32;
-                }
+                replace_bytes(off, buf, row, bytes);
             }
             // 写入边界归一（与 `push_value` 同一条：±0→+0、任意 NaN→NAN_BITS）。
             (Column::F64Bits(v), ValueRef::Bits(raw)) => {
@@ -246,6 +241,19 @@ impl Column {
             Column::Bytes { .. } => "bytes",
             Column::F64Bits(_) => "f64bits",
         }
+    }
+}
+
+/// 原地改写字符串列的整行（`splice` + 偏移重算）。
+///
+/// 两处共用这一份：写入边界 [`Column::set_value`] 与 step 事务的回滚（[`crate::journal`]）。
+/// 长度上限已由写入边界（`push_value` 的 4 GiB 检查）把住，这里与 `set_value` 同口径不做二次检查。
+pub(crate) fn replace_bytes(off: &mut [u32], buf: &mut Vec<u8>, row: usize, bytes: &[u8]) {
+    let (start, end) = (off[row] as usize, off[row + 1] as usize);
+    buf.splice(start..end, bytes.iter().copied());
+    let delta = bytes.len() as isize - (end - start) as isize;
+    for entry in off.iter_mut().skip(row + 1) {
+        *entry = (*entry as isize + delta) as u32;
     }
 }
 

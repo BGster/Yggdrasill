@@ -133,6 +133,19 @@ impl RngRegistry {
             .map(|(name, state)| (name.as_str(), *state))
     }
 
+    /// 流状态快照（step 事务开场用；`restore_streams` 的逆）。
+    ///
+    /// 代价 = 流数 × `(名称, 16B)`，一般是 1–3 条——比 `world clone` 便宜三个数量级，
+    /// 而它换来的是「失败的 step 不推进随机序列」这条强保证。
+    pub(crate) fn snapshot_streams(&self) -> BTreeMap<String, [u32; 4]> {
+        self.streams.clone()
+    }
+
+    /// 整份写回流状态（step 失败回滚用；`snapshot_streams` 的逆）。
+    pub(crate) fn restore_streams(&mut self, streams: BTreeMap<String, [u32; 4]>) {
+        self.streams = streams;
+    }
+
     /// 取一个 32 位随机数（首次使用该流时按 `(seed, stream)` 派生）。
     pub fn next32(&mut self, stream: &str) -> u32 {
         let state = self

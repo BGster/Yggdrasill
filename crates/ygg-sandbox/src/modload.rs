@@ -275,7 +275,11 @@ pub struct Loaded {
     /// 与宿主操作**同一个**世界，而这个槽的所有权在 `Sandbox` 上（自引用结构
     /// 无法用值字段表达，也不许 `unsafe`）。因此这里给的是同一个 `Rc`——写穿过
     /// 它就是写穿到内核，与 `sandbox.sim_handle()` 逐字节同一。
-    pub sim: Rc<RefCell<Option<Box<Sim>>>>,
+    ///
+    /// **私有**：`Rc` 交到外部就能被 `*slot.borrow_mut() = 另一个 Sim`，于是
+    /// 「`Loaded` 是时间的唯一驱动面」立刻失效（宿主推进 A 世界、`world.*` 看见 B 世界）。
+    /// 外部只需读（hash / 快照 / 诊断），走 [`Loaded::sim`] 借一个 `Ref`。
+    sim: Rc<RefCell<Option<Box<Sim>>>>,
     /// host 控制柄（KV / world 日志 / 内核句柄的宿主面）。
     host: HostApi,
     /// 只读资源表（数据面非状态：不入世界帧 / 状态哈希）。
@@ -353,6 +357,15 @@ impl Loaded {
             resources: Rc::new(table),
             mod_source: bundle.mod_source.clone(),
         })
+    }
+
+    /// 世界内核槽的只读视图（诊断与断言用：`sim().as_ref()` 给 `&Sim`）。
+    ///
+    /// 给 `Ref` 而不给 `Rc`，是为了让「换掉内核」这件事只能发生在 `Loaded` 内部
+    /// （见字段 `sim` 的注释）；需要写世界的宿主走 [`step`](Self::step) /
+    /// [`restore`](Self::restore)，那两条是时间所有权的一部分。
+    pub fn sim(&self) -> std::cell::Ref<'_, Option<Box<Sim>>> {
+        self.sim.borrow()
     }
 
     /// **宿主推进时间**：推进 `ticks` 个 tick，每 tick `dt` 整数秒。

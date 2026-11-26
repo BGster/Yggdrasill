@@ -21,11 +21,11 @@
 //!    （同一声明再调一次给出同一答案）。于是「注册完忘了封盘」不会被漏检。
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use crate::archetype::Column;
-use crate::component::{ComponentId, EntityId, Registry};
+use crate::component::{CompSet, ComponentId, EntityId, Registry};
 use crate::error::{SimError, SimResult};
 use crate::fixed::Fixed;
 use crate::query::RowSet;
@@ -469,6 +469,121 @@ impl StructuralOp {
             }
         }
         Ok(())
+    }
+}
+
+/// 队列的**只读预检**：不碰列、不分配 id、不建桶，只跟「哪个 id 存在、桶键是什么」。
+///
+/// # 为什么需要它
+///
+/// 结构操作改的是桶、行序与 `entity_index`——那是**不可逐格撤销**的写面（step 事务的
+/// undo 日志只盖值写入，见 [`crate::journal`]）。而 [`Sim::step`] 的承诺是「失败不改状态」，
+/// 于是只剩两条路：克隆整个世界（O(世界大小)，违背 M2-B 的成本约束），或**先把整队预检
+/// 完、全绿才落笔**（O(队列长度)）。这里走第二条。
+///
+/// 预检必须**逐队列累积**，不能每条 op 单独对着原世界验：`despawn [5]` 之后的
+/// `insert [5]` 是真会失败的一条，而单看原世界它是合法的。所以影子状态要模拟三件事：
+///
+/// - 队列里新建的实体区间（`spawned`，按 `[start, end)` 记——不逐行登记，否则一次
+///   `spawn(10⁶)` 就要写 10⁶ 条）；
+/// - 队列里被删掉（`None`）或被加宽（`Some(key)`）的实体；
+/// - 下一次分配会给出哪个 id（`cursor`），用它判 id 空间溢出。
+///
+/// # 为什么允许「过度拒绝」
+///
+/// 预检精度只需两个方向：真会失败的一律拒（否则状态被半改），会成功的**绝不能**拒
+/// （否则合法 tick 变错）。两边冲突时取保守——把一段本来能跑通的队列判成非法，是可见的
+/// 行为变化；把一段会失败的队列放过去，是不可见的状态损坏。
+#[derive(Debug)]
+pub(crate) struct QueuePreview<'a> {
+    store: &'a ArchetypeStore,
+    /// 队列内新建的实体区间：`[start, end)` → 桶键（追加序；逆序查 = 后建的优先）。
+    spawned: Vec<(EntityId, EntityId, CompSet)>,
+    /// 队列内被删掉（`None`）或被加宽（`Some(key)`）的实体。
+    keys: BTreeMap<EntityId, Option<CompSet>>,
+    /// 队列跑完后的下一个可用 id。
+    cursor: EntityId,
+}
+
+impl<'a> QueuePreview<'a> {
+    /// 以当前世界为起点开一份影子状态。
+    pub(crate) fn new(store: &'a ArchetypeStore) -> Self {
+        Self {
+            store,
+            spawned: Vec::new(),
+            keys: BTreeMap::new(),
+            cursor: store.next_id(),
+        }
+    }
+
+    /// 本队列跑到此位置时，实体 `id` 的桶键；`None` = 已被队列里更早的 op 删掉。
+    fn key_of(&self, id: EntityId) -> SimResult<Option<CompSet>> {
+        if let Some(overlay) = self.keys.get(&id) {
+            return Ok(*overlay);
+        }
+        for (start, end, key) in self.spawned.iter().rev() {
+            if id >= *start && id < *end {
+                return Ok(Some(*key));
+            }
+        }
+        // 世界里也没有 ⇒ 实体错（与 `locate` 同一口径：未知 id 即 YGG-SIM-ENTITY）。
+        self.store.key_of(id).map(Some)
+    }
+
+    /// 预检一条 op；通过即把它对影子状态的修正写完。
+    pub(crate) fn check(&mut self, op: &StructuralOp) -> SimResult<()> {
+        match op {
+            StructuralOp::Spawn { rows, cols, tags } => {
+                let key = self.store.check_batch(*rows, cols, tags)?;
+                // id 空间：`rows` 次分配需要 `rows - 1 ≤ u64::MAX - cursor`（同
+                // `take_next_id` 的逐个 `checked_add`，只是用算术一次算出结论）。
+                if *rows > 0 && (*rows as u64) - 1 > u64::MAX - self.cursor {
+                    return Err(SimError::entity("实体 id 空间耗尽（next_id 溢出）"));
+                }
+                let start = self.cursor;
+                let end = start + *rows as u64;
+                if *rows > 0 {
+                    self.spawned.push((start, end, key));
+                }
+                self.cursor = end;
+                Ok(())
+            }
+            StructuralOp::Despawn { ids } => {
+                for id in ids {
+                    if self.key_of(*id)?.is_some() {
+                        self.keys.insert(*id, None);
+                    }
+                    // 队列内已被更早的 op 删掉 ⇒ 幂等落空（`despawn_ids` 同义）。
+                }
+                Ok(())
+            }
+            StructuralOp::Insert { ids, cols, tags } => {
+                let set = self.store.check_batch(ids.len(), cols, tags)?;
+                if set == 0 {
+                    // 零组件 insert 在 `insert_columns` 里会走到「目标桶 = 源桶」的 STATE 错；
+                    // 在边界外先拒，错误码从 STATE 换成 SCHEMA（这是用户载荷错，不是内核缺陷）。
+                    return Err(SimError::schema(
+                        "insert 帧没有任何组件（空位集不是「什么都不做」）",
+                    ));
+                }
+                let mut seen: BTreeSet<EntityId> = BTreeSet::new();
+                for id in ids {
+                    if !seen.insert(*id) {
+                        return Err(SimError::entity(format!("同一帧里实体 id {id} 出现两次")));
+                    }
+                    let Some(key) = self.key_of(*id)? else {
+                        return Err(SimError::entity(format!("未知实体 id：{id}")));
+                    };
+                    if key & set != 0 {
+                        return Err(SimError::schema(format!(
+                            "实体 {id} 已有所插入的组件（insert 只加列，不覆盖）"
+                        )));
+                    }
+                    self.keys.insert(*id, Some(key | set));
+                }
+                Ok(())
+            }
+        }
     }
 }
 

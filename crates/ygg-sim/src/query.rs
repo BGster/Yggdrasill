@@ -35,6 +35,7 @@ use std::slice;
 use crate::archetype::{Archetype, Column, ValueRef};
 use crate::component::{CompSet, ComponentId, EntityId};
 use crate::error::{SimError, SimResult};
+use crate::journal::{CellValue, Journal};
 use crate::store::ArchetypeStore;
 
 /// 一次查询的组件数上界（= [`CompSet`] 的位宽：位集装不下的集合根本不存在）。
@@ -173,6 +174,10 @@ impl ColsRef<'_> {
 }
 
 /// 一行 + 本次查询已解析的列位置（一个桶一个实例，行号在桶内推进）。
+///
+/// `journal` 是 step 事务的 undo 日志（[`crate::journal`]）：“值写入唯一入口”
+/// [`Column::set_value`] 不知道自己在哪一格，所以**位置由本视图在写前登记**；不在 step 里（宿主
+/// 侧写世界、单元测试）时为 `None`，登记成为空操作。
 pub struct RowSet<'a> {
     ids: &'a [EntityId],
     cols: ColsRef<'a>,
@@ -183,6 +188,10 @@ pub struct RowSet<'a> {
     /// `set` 的有效长度。
     n: u8,
     row: usize,
+    /// 本视图所属的桶下标（undo 日志条目的一半）。
+    arch: u32,
+    /// step 事务的 undo 日志；`None` = 不在 step 里。
+    journal: Option<&'a mut Journal>,
 }
 
 impl RowSet<'_> {
@@ -238,6 +247,8 @@ impl RowSet<'_> {
     }
 
     /// 写 `set[k]` 的定点整数值（只改值，**不改行序**）。
+    ///
+    /// step 事务内会被 [`Self::record_old`] 在写前登记旧值；失败回滚时复原。
     pub fn set_fixed(&mut self, k: u8, value: i64) -> SimResult<()> {
         let slot = self.slot(k).ok_or_else(|| {
             SimError::schema(format!("列下标 {k} 越界：本次查询只有 {} 列", self.n))
@@ -250,8 +261,15 @@ impl RowSet<'_> {
             )));
         }
         let (row, comp) = (self.row, self.comps[slot]);
+        if self.cols.get_mut(pos as usize).is_none() {
+            return Err(SimError::schema(
+                "只读遍历（for_each）不能写入：结构外写入请走 for_each_mut",
+            ));
+        }
+        self.record_old(pos, row);
         match self.cols.get_mut(pos as usize) {
             Some(col) => col.set_value(row, &ValueRef::I64(value), comp),
+            // 上一行刚探过一次：`ColsRef` 只有共享/独占两种，没有第二种「不可写」。
             None => Err(SimError::schema(
                 "只读遍历（for_each）不能写入：结构外写入请走 for_each_mut",
             )),
@@ -280,12 +298,33 @@ impl RowSet<'_> {
         } else {
             ValueRef::U64(value)
         };
+        if self.cols.get_mut(pos as usize).is_none() {
+            return Err(SimError::schema(
+                "只读遍历（for_each）不能写入：结构外写入请走 for_each_mut",
+            ));
+        }
+        self.record_old(pos, row);
         match self.cols.get_mut(pos as usize) {
             Some(col) => col.set_value(row, &value, comp),
             None => Err(SimError::schema(
                 "只读遍历（for_each）不能写入：结构外写入请走 for_each_mut",
             )),
         }
+    }
+
+    /// 事务内写前登记：把 `pos` 列第 `row` 行的旧值记进 undo 日志。
+    ///
+    /// 不在 step 里（`journal == None`）⇒ 空操作；只读视图（`for_each`）没有日志可记。
+    fn record_old(&mut self, pos: u32, row: usize) {
+        let Some(journal) = self.journal.as_deref_mut() else {
+            return;
+        };
+        journal.record(
+            self.arch,
+            pos,
+            row as u32,
+            CellValue::read(self.cols.get(pos as usize), row),
+        );
     }
 
     /// `k` → 槽位（越界 ⇒ `None`）。
@@ -413,7 +452,10 @@ impl ArchetypeStore {
             return Ok(0);
         }
         let mut visited = 0u64;
-        for arch in self.archetypes_mut() {
+        // 写面拆分：`&mut archetypes` 与 `&mut journal` 不相交，于是每个 `RowSet`
+        // 都能同时拿到「写哪一列」与「把旧值记到哪」。
+        let (archetypes, mut journal) = self.split_write();
+        for (arch_idx, arch) in archetypes.iter_mut().enumerate() {
             if arch.key & bits != bits || arch.ids.is_empty() {
                 continue;
             }
@@ -430,6 +472,9 @@ impl ArchetypeStore {
                 comps,
                 n: set.len() as u8,
                 row: 0,
+                arch: arch_idx as u32,
+                // 逐桶重借：一个 `RowSet` 只活一个桶的时间，日志不需要跨桶持有。
+                journal: journal.as_deref_mut(),
             };
             for row in 0..rs.ids.len() {
                 rs.row = row;
@@ -467,6 +512,8 @@ impl ArchetypeStore {
                 comps,
                 n: set.len() as u8,
                 row: 0,
+                arch: 0,
+                journal: None,
             };
             for row in 0..rs.ids.len() {
                 rs.row = row;
@@ -515,6 +562,7 @@ impl ArchetypeStore {
     /// 批量写：`values` 的第 `i` 行写到 `ids[i]`（**行序不变**，只改值）。
     ///
     /// 先全量校验（id 可定位 / 桶内有该列 / 列型与载荷一致）再落笔：拒绍不留半改。
+    /// step 事务内每一格写前登记旧值（[`crate::journal`]），失败回滚时逐格复原。
     pub fn set_many(
         &mut self,
         comp: ComponentId,
@@ -550,14 +598,24 @@ impl ArchetypeStore {
             }
             plan.push((arch_idx, row));
         }
+        // 写面拆分：同 `for_each_mut`。
+        let (archetypes, mut journal) = self.split_write();
         for (i, (arch_idx, row)) in plan.into_iter().enumerate() {
-            let arch = &mut self.archetypes_mut()[arch_idx as usize];
+            let arch = &mut archetypes[arch_idx as usize];
             let pos = arch.col_pos(comp).ok_or_else(|| {
                 SimError::schema(format!(
                     "实体 {} 所在 archetype 没有组件 id {comp} 的列",
                     ids[i]
                 ))
             })?;
+            if let Some(journal) = journal.as_deref_mut() {
+                journal.record(
+                    arch_idx,
+                    pos as u32,
+                    row,
+                    CellValue::read(&arch.cols[pos], row as usize),
+                );
+            }
             arch.cols[pos].set_value(row as usize, &values.value_at(i), comp)?;
         }
         Ok(ids.len())

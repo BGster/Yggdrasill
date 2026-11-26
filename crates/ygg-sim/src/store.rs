@@ -12,7 +12,10 @@
 //!    **组件名**排序（[`crate::component::Registry::names_in_byte_order`]），于是「两种注册
 //!    顺序、同一世界」给出相同字节与相同 hash。
 //! 3. **先校验后改**。所有面（spawn / insert / despawn）先做完整校验再落笔：拒绍不产生
-//!    半改的模拟态，调用方拿到错误后不需要补偿逻辑。
+//!    半改的模拟态，调用方拿到错误后不需要补偿逻辑。唯一做不到「零改动」的面是 spawn 的
+//!    id 分配与 insert 的逐实体迁移（它们是纯结构写，不可逐格撤销）——所以 step 里的结构
+//!    操作先经 [`crate::system::QueuePreview`] 只读预检、全绿才落笔；值写入则由本结构持有
+//!    的 [`Journal`] 逐格记旧值，step 失败时逆序回放（[`crate::journal`]）。
 //!
 //! # 为什么 `by_key` 是 `BTreeMap` 而不是 `HashMap`
 //!
@@ -25,6 +28,7 @@ use std::collections::BTreeMap;
 use crate::archetype::{Archetype, Column, ValueRef};
 use crate::component::{AttrType, CompSet, ComponentDef, ComponentId, EntityId, Registry};
 use crate::error::{SimError, SimResult};
+use crate::journal::Journal;
 
 /// 一个组件类型对应的空列（`Tag` 没有列 ⇒ `None`）。
 fn column_for(ty: AttrType) -> Option<Column> {
@@ -52,6 +56,12 @@ pub struct ArchetypeStore {
     /// 下一个可用实体 id（从 1 起、单调、**不复用**）。
     next_id: EntityId,
     registry: Registry,
+    /// step 事务的 undo 日志（`None` = 不在 step 里；`Some` = 值写入逐格登记）。
+    ///
+    /// 为什么挂在存储上而不是当参数层层传：唯一需要在 step 中途拿到它的是
+    /// [`crate::query::RowSet`]，而它已经从存储借走了 `&mut [Archetype]`——把日志放进
+    /// 同一结构，`query.rs` 才能用一次字段拆分同时拿到两者（不引入第二把锁、不加 `Rc`）。
+    journal: Option<Journal>,
 }
 
 impl ArchetypeStore {
@@ -111,6 +121,52 @@ impl ArchetypeStore {
             .ok_or_else(|| SimError::entity(format!("未知实体 id：{id}")))
     }
 
+    /// 实体所在的桶键（未知 id 即 [`SimError::entity`]）。
+    ///
+    /// [`crate::system::QueuePreview`] 用它判断「加宽后的位集是否已经是一个桶」——
+    /// 预检要模拟 `ensure_archetype` 的建桶决策，否则「先建桶、后迁移失败」会留下空桶。
+    pub(crate) fn key_of(&self, id: EntityId) -> SimResult<CompSet> {
+        let (arch_idx, _) = self.locate(id)?;
+        Ok(self.archetypes[arch_idx as usize].key)
+    }
+
+    // ---- step 事务：undo 日志的生命周期（`crate::journal`） ----
+
+    /// 开事务：此后本 step 的每一次值写入都逐格登记旧值。
+    ///
+    /// 只在 [`crate::sim::Sim::step`] 里调用一次；`debug_assert` 钉死不可嵌套。
+    pub(crate) fn begin_tx(&mut self) {
+        debug_assert!(self.journal.is_none(), "step 事务不可嵌套");
+        self.journal = Some(Journal::default());
+    }
+
+    /// 提交：step 成功，日志直接丢弃（不为回滚付任何代价）。
+    pub(crate) fn commit_tx(&mut self) {
+        self.journal = None;
+    }
+
+    /// 回滚：逆序复原本 step 写过的每个 cell，然后丢弃日志。
+    pub(crate) fn rollback_tx(&mut self) {
+        if let Some(journal) = self.journal.take() {
+            journal.rewind(&mut self.archetypes);
+        }
+    }
+
+    /// 日志条目数（= 本 step 到目前为止写过的 cell 数；不在事务里即 0）。
+    #[cfg(test)]
+    pub(crate) fn journal_len(&self) -> usize {
+        self.journal.as_ref().map_or(0, Journal::len)
+    }
+
+    /// 写面拆分：`(桶, 事务日志)`。
+    ///
+    /// [`crate::query`] 的写路径要同时拿两样东西：写哪一列（`&mut [Archetype]`）与
+    /// 把旧值记到哪（`&mut Journal`）。两者是本结构的两个不相交字段，拆开借用即可，
+    /// 不需要 `Rc`/`RefCell`/`unsafe`；字段私有，所以只能由本方法拆。
+    pub(crate) fn split_write(&mut self) -> (&mut [Archetype], Option<&mut Journal>) {
+        (&mut self.archetypes, self.journal.as_mut())
+    }
+
     /// 取某实体某组件的值（只读；`Tag` 无值 ⇒ [`SimError::schema`]）。
     pub fn value_of(&self, id: EntityId, comp: ComponentId) -> SimResult<ValueRef<'_>> {
         let (arch_idx, row) = self.locate(id)?;
@@ -157,7 +213,7 @@ impl ArchetypeStore {
     /// 为什么 tag 要单列一个参数而不是「带一个空列」：`tag` 在存储里**没有列**（只进位集），
     /// 给它伪造一个空列会让「列数 = 有值组件数」这条不变量在解码侧消失——而快照与批量帧
     /// 共用同一个列编解码器，那条不变量是它们能互通的前提。
-    fn check_batch(
+    pub(crate) fn check_batch(
         &self,
         rows: usize,
         cols: &[(ComponentId, Column)],
@@ -369,6 +425,7 @@ impl ArchetypeStore {
             entity_index: BTreeMap::new(),
             next_id,
             registry,
+            journal: None,
         };
         let mut seen = 0usize;
         for (idx, arch) in store.archetypes.iter().enumerate() {

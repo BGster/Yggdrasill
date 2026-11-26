@@ -43,6 +43,7 @@ pub mod error;
 pub mod fixed;
 pub mod hash;
 pub mod input;
+mod journal;
 pub mod query;
 pub mod rng;
 pub mod sim;

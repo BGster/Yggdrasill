@@ -225,3 +225,37 @@ world.spawn{ hp = 7 }
         "帧往返逐字节不变"
     );
 }
+
+/// M2-B：`Loaded` 只给**只读**的内核视图 + 唯一的推进入口。
+///
+/// 为什么要一条行为断言而不是只看签名：`Loaded.sim` 曾经是 `pub Rc<RefCell<..>>`，
+/// 宿主一句 `*loaded.sim.borrow_mut() = 另一个 Sim` 就绕过了 `Sandbox::step` 的
+/// `STEP_TICK_BUDGET` 与「时间只从宿主走」，而**签名看上去完全正常**。现在外部拿到的是
+/// `Ref`：观察期间另一个借用方（包括宿主自己从 `Sandbox` 取到的同一句柄）拿不到 `RefMut`。
+/// 这条断言把“不得中途换掉内核”钉成可执行事实，而不是注释里的承诺。
+#[test]
+fn loaded_hands_out_a_read_only_kernel_and_the_only_clock() {
+    const MOD: &str = r#"
+world.component{ name = "hp", kind = "i64" }
+"#;
+    let bundle = ModBundle::in_memory(MOD);
+    let mut loaded = Loaded::from_bundle(&bundle).expect("kernel construction");
+
+    // ① 时钟只能经 `Loaded::step` 前进：观察面看得到，推不动。
+    assert_eq!(loaded.sim().as_ref().expect("装载即挂世界").tick(), 0);
+    loaded.step(1, 1).expect("推进必须成功");
+    assert_eq!(loaded.sim().as_ref().expect("装载即挂世界").tick(), 1);
+
+    // ② 观察期间内核槽不可替换（同一个 `Rc`，只是外部只能拿 `Ref`）。
+    let observed = loaded.sim();
+    let handle = loaded.sandbox.sim_handle();
+    assert!(
+        handle.try_borrow_mut().is_err(),
+        "观察期间不得换掉内核（否则 `Loaded` 不再是时间的唯一驱动面）"
+    );
+    drop(observed);
+    assert!(
+        handle.try_borrow_mut().is_ok(),
+        "观察结束后句柄仍归 `Sandbox`"
+    );
+}

@@ -12,6 +12,20 @@
 //! 4. `tick += 1`。
 //! 5. 算 state hash（= 快照尾 digest），进 trace / 录制日志。
 //!
+//! # 五步是一笔事务（M2-B）
+//!
+//! 任何一步返回 `Err`，模拟态必须回到调用前的样子——`tick`、世界（值 + 结构 + 实体数）、
+//! `rng` 流位置、输入日志长度全不变。所以 [`Sim::step`] 在开场取三份便宜的快照，
+//! 失败时按三个通道各自复原：
+//!
+//! - **值写入**：逐格 undo 日志（[`crate::journal`]），回滚代价 ≈ 本 tick 写过的 cell 数；
+//! - **结构操作**：落笔前先用只读影子状态整队预检（[`QueuePreview`]），"可能失败" 的队列根本不落笔，
+//!   失败时整队丢弃（同时丢掉本 tick 系统新投的那几条）；
+//! - **随机流与日志**：流状态拷贝（每流一个 `[u32;4]`）与日志长度，回退到开场值。
+//!
+//! 三份都不含"整个世界"：undo 日志随写入量走，流数量一般是 1–3，日志长度是一个 `usize`。
+//! 所以原子化不改变 tick 的复杂度量级（不用 world clone）。
+//!
 //! # 为什么 hash 每次都真的编码一遍快照
 //!
 //! 「一条等式统摄快照与哈希」（`hash == fnv(快照字节)`）只有在**真的编码一次**时才是
@@ -36,7 +50,9 @@ use crate::input::{OpKind, ReplayLog};
 use crate::rng::RngRegistry;
 use crate::snapshot;
 use crate::store::ArchetypeStore;
-use crate::system::{Resources, Stage, StructuralOp, SystemCtx, SystemDecl, SystemSet};
+use crate::system::{
+    QueuePreview, Resources, Stage, StructuralOp, SystemCtx, SystemDecl, SystemSet,
+};
 
 /// `spawn_batch` 的回执。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,7 +197,39 @@ impl Sim {
     }
 
     /// 推进一 tick，返回该 tick 结束时的 state hash。
+    ///
+    /// # 失败 = 什么都没发生
+    ///
+    /// 本方法是模拟态唯一的可失败写面，也是唯一的事务边界：返回 `Err` 时 `tick`、世界
+    /// （值 + 结构 + 实体数）、`rng` 流位置、输入日志都与调用前逐字节相等，调用方不需要
+    /// 任何补偿逻辑（[`crate::error`] 头注「这条性质是怎么被满足的」三类写面）。
     pub fn step(&mut self, dt: Fixed) -> SimResult<u64> {
+        // 事务开场：三份便宜的快照（结构队列与值写入走 undo 日志 + 预检）。
+        let rng_mark = self.rng.snapshot_streams();
+        let log_mark = self.recorder.as_ref().map_or(0, |log| log.records().len());
+        self.state.world.begin_tx();
+        match self.step_inner(dt) {
+            Ok(digest) => {
+                self.state.world.commit_tx();
+                Ok(digest)
+            }
+            Err(err) => {
+                // 顺序不重要（三个通道各自独立），但先收值、再收结构、最后收随机与日志，
+                // 使「回滚做了什么」与「开场取快照的顺序」读起来对称。
+                self.state.world.rollback_tx();
+                self.rng.restore_streams(rng_mark);
+                // 本 tick 系统新投的延迟操作随这次失败一起丢：它们只对「没发生的那一 tick」有意义。
+                self.pending.clear();
+                if let Some(log) = &mut self.recorder {
+                    log.truncate_records(log_mark);
+                }
+                Err(err)
+            }
+        }
+    }
+
+    /// `step` 的事务体：五步全在这里，任何一步失败直接上抛，复原统一由 [`Sim::step`] 做。
+    fn step_inner(&mut self, dt: Fixed) -> SimResult<u64> {
         // ① 上个边界留下的操作（宿主批量帧已在调用时立即应用；这里只可能是内部排队）。
         self.apply_pending()?;
         // ② 系统按序执行。
@@ -212,9 +260,20 @@ impl Sim {
     }
 
     /// 按 FIFO 应用延迟结构操作（**唯一**改 archetype 的入口之一）。
+    ///
+    /// 「全绿才落笔」：先用只读影子状态 ([`QueuePreview`]) 把整队预检一遍，任何一条会失败就
+    /// 整队拒绍。结构写（建桶 / 行序 / `next_id` / `entity_index`）不可逐格撤销，所以
+    /// 原子化的唯一手段是「落笔之前就知道会成功」。（剩余漏洞：预检过后 apply 仍可能撞到
+    /// 内核内部 `YGG-SIM-STATE`——那是内核缺陷，不是载荷错。）
     fn apply_pending(&mut self) -> SimResult<()> {
         if self.pending.is_empty() {
             return Ok(());
+        }
+        {
+            let mut preview = QueuePreview::new(&self.state.world);
+            for op in &self.pending {
+                preview.check(op)?;
+            }
         }
         let ops = std::mem::take(&mut self.pending);
         for op in ops {

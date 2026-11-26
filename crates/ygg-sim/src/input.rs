@@ -120,6 +120,15 @@ impl ReplayLog {
         &mut self.records
     }
 
+    /// 截到前 `len` 条（step 失败回滚用：本 tick 没发生，就不该留下它的记录）。
+    ///
+    /// 只截 `records`，不碰 `pending`：待归属操作是本 tick **之前**投的（`spawn_batch` 类
+    /// 宿主帧立即生效），它们与失败的那一 tick 无关。（`push_tick` 只在 step 成功后才调，
+    /// 所以失败路径上不会把 `pending` 收编进 `records`。）
+    pub(crate) fn truncate_records(&mut self, len: usize) {
+        self.records.truncate(len);
+    }
+
     /// 录一条结构操作（归属到下一个被录的 tick）。
     pub fn push_op(&mut self, kind: OpKind, frame: Vec<u8>) {
         self.pending.push(OpRecord { kind, frame });
