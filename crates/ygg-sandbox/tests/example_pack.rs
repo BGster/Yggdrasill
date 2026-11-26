@@ -8,11 +8,15 @@
 //! 1. 50 tick 能跑完且 `tick == 50`（规则不越界、不在系统里摸 `world.*`）；
 //! 2. **同种子两次数装载 ⇒ 同哈希**（规则里的 `rng` 只走 `world.rng(stream)`）；
 //! 3. 一个 tick 的 `changed` 只报这一 tick 真写过的组件（内核不认识格子，
-//!    它只认识列；这条断言就是「规则写在哪里」的可观测证据）。
+//!    它只认识列；这条断言就是「规则写在哪里」的可观测证据）；
+//! 4. **逐 tick 哈希序列 == `packs/example/golden.json`**（native 侧对金值向量的断言，
+//!    与 `scripts/wasm-lane.mjs` 共同钉住「双运行时、同一份规则、同一段历史」）。
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::PathBuf;
 
+use serde_json::Value as Json;
 use ygg_sandbox::modload::Loaded;
 
 /// 组件 id 是**声明序**（`src/units.lua` 的 `declare()`）：pos=0 hp=1 team=2 moved=3。
@@ -79,5 +83,41 @@ fn one_tick_reports_only_the_components_that_tick_wrote() {
         assert_eq!(written, expected, "tick {} 的写面", report.tick);
         // 显式再断言一次：战斗与分组这一 tick 没被碰过（它们没写就不该报）。
         assert!(!written.iter().any(|(_, c)| *c == HP || *c == TEAM));
+    }
+}
+
+#[test]
+fn native_per_tick_hashes_match_golden_vector() {
+    let golden_path = example_dir().join("golden.json");
+    let raw = fs::read_to_string(&golden_path).expect("读取 packs/example/golden.json");
+    let doc: Json = serde_json::from_str(&raw).expect("解析 golden.json");
+
+    let seed = doc["seed"].as_u64().expect("golden.json 缺 seed");
+    let ticks = doc["ticks"].as_u64().expect("golden.json 缺 ticks");
+    let expected: Vec<&str> = doc["hashes"]
+        .as_array()
+        .expect("golden.json 缺 hashes 数组")
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .expect("golden.json 的 hash 项应为十进制字符串")
+        })
+        .collect();
+    assert_eq!(
+        expected.len() as u64,
+        ticks,
+        "golden.json 的 hashes 长度必须等于 ticks"
+    );
+
+    let mut world = load(seed);
+    for (idx, exp_hash) in expected.iter().enumerate() {
+        let report = world.step(1, 1).expect("逐 tick 步进");
+        let tick = (idx + 1) as u64;
+        assert_eq!(report.tick, tick);
+        assert_eq!(
+            report.hash.to_string(),
+            *exp_hash,
+            "tick {tick}（seed={seed}）的 native 哈希与 golden.json 不一致"
+        );
     }
 }
