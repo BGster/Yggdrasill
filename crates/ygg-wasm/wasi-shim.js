@@ -30,6 +30,14 @@
 // memory 捕获：preview-1 写内存调用（clock/environ/fd_write 等）通过
 // runtime.memory 惰性取用；`__wbindgen_start` 由胶水在 instantiate 完成
 // 后调用，先于任何 wasi 调用——捕获时序安全。
+//
+// 两条捕获路径，按消费方式各走一条：
+// ① 静态导入直连：**宿主胶水必须主动交内存**——构造期调用
+//    import1.__yggBindMemory(wasm.memory)（scripts/build-wasm.sh 在
+//    `wasm = instance.exports` 之后注入该行）。此路径上 installWasiShim 没有
+//    被调用，捕获只能由这一行兑现（实证缺陷：缺它时 clock_time_get 在
+//    runtime.memory === null 上崩，而 native 侧全绿）。
+// ② installWasiShim()：靠补丁 WebAssembly.instantiate 捕获，无需宿主额外动作。
 
 const ERRNO_SUCCESS = 0;
 const ERRNO_BADF = 8;
@@ -37,6 +45,15 @@ const ERRNO_NOSYS = 52;
 
 /** 实例化完成后捕获的模块导出 memory（需写内存的 preview-1 调用消费）。 */
 const runtime = { memory: null };
+
+/** 方式① 的捕获入口：宿主胶水在实例化完成后交内存（见文件头 memory 捕获段）。
+ *
+ * 独立成导出而不是让宿主直接改 runtime：runtime 是本模块私有状态，曝光它等于
+ * 把「哪一处能改内存」变成每个宿主的自由发挥。
+ */
+export function __yggBindMemory(memory) {
+  runtime.memory = memory ?? null;
+}
 
 const dataView = () => new DataView(runtime.memory.buffer);
 

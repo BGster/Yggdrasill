@@ -100,6 +100,22 @@ if grep -q 'from "wasi_snapshot_preview1"' crates/ygg-wasm/pkg/ygg_wasm.js; then
   exit 1
 fi
 
+# ---- 胶水内存绑定注入 -----------------------------------------------------
+# 静态导入路径上没有人调 installWasiShim()，shim 的 runtime.memory 因此恒为
+# null——实测：node 里 new YggSession(image) 在第一个 WASI 调用（
+# clock_time_get，wasi-libc 初始化路径）就崩在 dataView(runtime.memory.buffer)。
+# 捕获必须发生在实例化之后、__wbindgen_start() 之前；胶水只在
+# `wasm = instance.exports;` 之后紧跟 __wbindgen_start()，那是唯一合法注入点。
+# 导入名固定为 import1：重写后**每个** importN 都指向 ../wasi-shim.js（命名导出
+# 承载全部函数），用第一个即可。
+perl -0pi -e 's{^(\s*)wasm = instance\.exports;\n}{$1wasm = instance.exports;\n$1import1.__yggBindMemory(wasm.memory);\n}m' crates/ygg-wasm/pkg/ygg_wasm.js
+BIND_SITES="$(grep -c '__yggBindMemory(wasm.memory)' crates/ygg-wasm/pkg/ygg_wasm.js || true)"
+if [ "$BIND_SITES" != "1" ]; then
+  echo "error: glue memory bind injection matched $BIND_SITES site(s), expected exactly 1" >&2
+  echo "       wasm-bindgen output shape changed — update the injection point here" >&2
+  exit 1
+fi
+
 # ---- wasm-opt 后处理（可选；binaryen ≥118 才能优化本 EH 模块）------------
 # M1 C2 兼容性实证（EH 模块 = wasi-libc setjmp/longjmp 变体，产物含 try_table/throw）：
 #   1. wasm-bindgen（walrus 重写）剥掉 LLVM target-features 元数据，wasm-opt
