@@ -272,8 +272,8 @@ pub struct StepReport {
 /// 宿主推进面的唯一错误类型。
 ///
 /// 码是**稳定字符串**（外部可 grep、可断言），与 `YGG-SIM-*` 一族同形：
-/// `E_STEP_TICKS` / `E_STEP_BUDGET` 是本面自有的两个参数拒绝，其余直接沿用
-/// 内核的 `YGG-SIM-*` 码（`code()` 直通）。
+/// `E_STEP_*` 是本面自有的参数拒绝与命令面拒绝，其余直接沿用内核的 `YGG-SIM-*` 码
+/// （`code()` 直通）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StepError {
     /// [`Sandbox::step`] 的 `ticks` 为 0：推进 0 tick 没有语义，且会让
@@ -286,6 +286,24 @@ pub enum StepError {
     /// 内核拒绝（未挂载 / 推进中出错）。
     #[error(transparent)]
     Sim(#[from] SimError),
+    /// 命令面缺失：入口 chunk 的返回值里没有 `commands` 表。
+    ///
+    /// 刻意与「命令名不存在」分开：前者是包的问题（作者没导出面），后者是宿主的
+    /// 问题（名字写错了）；合成一个码会让宿主无法判断该改哪一边。
+    #[error("E_STEP_NO_COMMANDS: Mod 未导出命令面（入口 chunk 的返回值里没有 commands 表）")]
+    NoCommandSurface,
+    /// 命令面里没有这个名字。名字是宿主的字符串，内核不解释它。
+    #[error("E_STEP_UNKNOWN_COMMAND: 命令面里没有 `{name}`")]
+    UnknownCommand { name: String },
+    /// Mod 主动拒绝：命令返回 `false, <原因>`，世界零写入。
+    #[error("E_STEP_REFUSED: {name} 被 Mod 拒绝：{reason}")]
+    Refused { name: String, reason: String },
+    /// Mod 抛出 Lua 错误（含参数转换失败），世界零写入。
+    #[error("E_STEP_RAISED: {name} 抛出 Lua 错误：{reason}")]
+    Raised { name: String, reason: String },
+    /// 返回值不符合命令面契约：既不是 `true`，也不是 `false, <原因>`。
+    #[error("E_STEP_COMMAND_VALUE: {name} 的返回值不是 true / (false, 原因)：{got}")]
+    CommandValue { name: String, got: String },
 }
 
 impl StepError {
@@ -295,6 +313,11 @@ impl StepError {
             StepError::ZeroTicks => "E_STEP_TICKS",
             StepError::Budget { .. } => "E_STEP_BUDGET",
             StepError::Sim(err) => err.code(),
+            StepError::NoCommandSurface => "E_STEP_NO_COMMANDS",
+            StepError::UnknownCommand { .. } => "E_STEP_UNKNOWN_COMMAND",
+            StepError::Refused { .. } => "E_STEP_REFUSED",
+            StepError::Raised { .. } => "E_STEP_RAISED",
+            StepError::CommandValue { .. } => "E_STEP_COMMAND_VALUE",
         }
     }
 }

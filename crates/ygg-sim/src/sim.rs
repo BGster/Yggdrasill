@@ -282,6 +282,46 @@ impl Sim {
         }
     }
 
+    /// 宿主命令面的事务边界：**开**。
+    ///
+    /// [`Sim::transact`] 把闭包里的写折成一个事务，代价是闭包期间持有 `&mut self`；
+    /// 命令面的多次写却发生在**互不相邻的调用**里（一条命令里的每次 `world.*` 自己
+    /// 走一层嵌套 `transact`，其间宿主还要借同一个内核读组件表），闭包形态在那里
+    /// 直接撞上 `YGG-WORLD-BUSY`。开合因此拆成三个显式方法：`begin_write_tx` →
+    /// 若干次写 → `commit_write_tx` / `rollback_write_tx`，共用**同一本** undo 日志。
+    ///
+    /// **undo 日志只盖值写入**：结构操作（建桶 / 行序 / `next_id`）与随机流位置不在
+    /// 日志里，需要连同这两面一起复原的调用方自己取快照——宿主命令面就是这么叠的：
+    /// 快照盖结构与随机，日志盖值。
+    ///
+    /// # Panics
+    ///
+    /// 事务已开时再开会撞上 `ArchetypeStore::begin_tx` 的嵌套检查（debug 断言）。
+    /// 命令面的写入发生在 `step` 之外，正常路径上不会嵌套。
+    pub fn begin_write_tx(&mut self) {
+        self.state.world.begin_tx();
+    }
+
+    /// 宿主命令面的事务边界：**收**，给出整段写过的格（升序去重）。
+    ///
+    /// 与 [`Sim::step`] 同一口径：增量面必须在 `commit_tx` 之前取，那一步会丢掉整本
+    /// undo 日志；这也是嵌套 `transact` 每次都能刷新 [`Sim::changed`] 的原因。
+    pub fn commit_write_tx(&mut self) -> Vec<(EntityId, ComponentId)> {
+        let cells = self.state.world.written_cells();
+        self.state.world.commit_tx();
+        self.changed = cells.clone();
+        cells
+    }
+
+    /// 宿主命令面的事务边界：**回**（值写入逐格复原，[`Sim::changed`] 清空）。
+    ///
+    /// 结构写与随机流位置不经 undo 日志：要求「什么都没发生」覆盖这两面的调用方
+    /// 自己叠一层 [`Sim::restore`]（宿主命令面在失败路径上就是这么做的）。
+    pub fn rollback_write_tx(&mut self) {
+        self.state.world.rollback_tx();
+        self.changed.clear();
+    }
+
     /// `step` 的事务体：五步全在这里，任何一步失败直接上抛，复原统一由 [`Sim::step`] 做。
     fn step_inner(&mut self, dt: Fixed) -> SimResult<u64> {
         // ① 上个边界留下的操作（宿主批量帧已在调用时立即应用；这里只可能是内部排队）。

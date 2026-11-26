@@ -241,6 +241,7 @@ impl Session {
     fn call(&mut self, msg: Message) -> Vec<Message> {
         match msg {
             Message::Submit { ops } => self.submit(&ops),
+            Message::Command { name, args } => self.command(&name, &args),
             Message::Step { ticks, dt } => self.step(ticks, dt),
             Message::Open { bytes } => self.open(&bytes),
             Message::Snapshot(request) => self.snapshot(request),
@@ -285,6 +286,38 @@ impl Session {
                     changed: self.changed_of(&cells),
                 }]
             }
+            Err(err) => vec![error(step_code(&err), err.to_string())],
+        }
+    }
+
+    /// `command`：宿主**表达意图**，写什么由 Mod 的命令面决定。
+    ///
+    /// 与 `submit` 的分界是「谁决定规则」：`submit` 直接交结构变更，规则在宿主
+    /// 手里；`command` 只说要做什么，规则在包里。内核因此不认识任何命令名——它
+    /// 只把 `args` 换成 Lua 表递进去，再按 `true` / `(false, 原因)` 解读结果。
+    ///
+    /// 回执：成功答 `delta`（与 `submit` 同一份 `Changed` 面，值取写后终值），
+    /// 拒绝 / 名字不存在 / 命令面缺失答 `error`，世界零写入（`tick` 与 `hash` 不动）。
+    fn command(
+        &mut self,
+        name: &str,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> Vec<Message> {
+        // `args` 原样过界：它是包的词汇，内核不读（也不该读）其中任何键。
+        let args_json = match serde_json::to_string(args) {
+            Ok(text) => text,
+            Err(err) => {
+                return vec![error(
+                    ErrorCode::EProtocol,
+                    format!("command.args 不能序列化：{err}"),
+                )]
+            }
+        };
+        match self.loaded.command(name, &args_json) {
+            Ok(cells) => vec![Message::Delta {
+                tick: self.tick(),
+                changed: self.changed_of(&cells),
+            }],
             Err(err) => vec![error(step_code(&err), err.to_string())],
         }
     }
@@ -507,6 +540,7 @@ fn name_of(msg: &Message) -> &'static str {
         Message::Ready { .. } => "ready",
         Message::Open { .. } => "open",
         Message::Submit { .. } => "submit",
+        Message::Command { .. } => "command",
         Message::Step { .. } => "step",
         Message::Events { .. } => "events",
         Message::Delta { .. } => "delta",
@@ -536,9 +570,14 @@ fn load_code(err: &LoadError) -> ErrorCode {
 
 fn step_code(err: &StepError) -> ErrorCode {
     match err {
-        StepError::ZeroTicks => ErrorCode::EProtocol,
+        // 消息本身不合契约（含命令返回值不是 `true` / `(false, 原因)`）。
+        StepError::ZeroTicks | StepError::CommandValue { .. } => ErrorCode::EProtocol,
         StepError::Budget { .. } => ErrorCode::EBudget,
         StepError::Sim(err) => sim_code(err),
+        // 调用与包对不上：包没导出命令面，或名字不在面上——宿主侧要改的是名字。
+        StepError::NoCommandSurface | StepError::UnknownCommand { .. } => ErrorCode::EState,
+        // Mod 的规则拒绝或运行期报错：世界规则说了算。
+        StepError::Refused { .. } | StepError::Raised { .. } => ErrorCode::ERule,
     }
 }
 

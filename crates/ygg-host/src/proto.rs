@@ -482,6 +482,22 @@ pub enum Message {
         /// 按序应用的操作（整批一个事务）。
         ops: Vec<Op>,
     },
+    /// H→K：**表达意图**——按名字调用 Mod 导出的命令面；不推进时间。
+    ///
+    /// 与 [`Message::Submit`] 的分界是「谁决定规则」：`submit` 提交的是宿主自己
+    /// 算出来的结构变更，规则在宿主手里；`command` 只说要做什么，**写什么由包里的
+    /// 命令函数决定**。内核**不解释 `name`**——它只是命令面这张表的键，`args` 只是
+    /// 原样转成 Lua 表的一段参数；信封与内核两侧都没有任何游戏词。
+    ///
+    /// 回 [`Message::Delta`]（与 `submit` 同一份 `Changed` 面）或 [`Message::Error`]
+    /// （Mod 拒绝 / 名字不在命令面上 / 包未导出命令面）；每次调用一个事务，失败时
+    /// `tick` / `hash` / 世界逐字节不变。
+    Command {
+        /// 命令名：Mod 入口 chunk 返回值里 `commands` 表的键（内核不认识它）。
+        name: String,
+        /// 命令参数：任意 JSON 对象，原样递进命令函数（键与值都是包的词汇，内核不读）。
+        args: serde_json::Map<String, serde_json::Value>,
+    },
     /// H→K：推进时间；回 [`Message::Events`] + [`Message::Delta`]。
     Step {
         /// 推进多少个 tick（≥ 1；0 是无效指令）。

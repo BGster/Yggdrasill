@@ -41,13 +41,14 @@ use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 
+use mlua::{Function, Lua, MultiValue, RegistryKey, Table, Value as LuaValue};
 use serde_json::Value as Json;
 use thiserror::Error as ThisError;
 
 use ygg_core::kv::KvStore;
 use ygg_schema::manifest::{parse_manifest, Manifest};
 use ygg_schema::validate::SchemaError;
-use ygg_sim::Sim;
+use ygg_sim::{Sim, SimError};
 
 use crate::host_api::{self, HostApi, HostHandles};
 use crate::inject;
@@ -313,6 +314,13 @@ pub struct Loaded {
     /// 不动它。宿主能比对的是「我载的是不是你以为的那份声明」；脚本身份由装载
     /// 参数本身（源码 + 模块表 + 资源）承载。
     manifest_hash: String,
+    /// 命令面：入口 chunk **返回值**里 `commands` 那一张表（注册表引用）。
+    ///
+    /// 为什么是返回值而不是全局表：返回值是作者写下的声明，全局变量不是——
+    /// 前者在 chunk 结束时就定死，后者任何后续代码都能改写，内核无从分辨
+    /// 「这是声明还是副作用」。没有返回值（或返回值里没有 `commands` 表）就是
+    /// 没有命令面：宿主面入口直接答 `E_STEP_NO_COMMANDS`，不静默降级成空面。
+    commands: Option<RegistryKey>,
 }
 
 impl Loaded {
@@ -380,11 +388,14 @@ impl Loaded {
         // ⑨ 入口 chunk：`@mod.lua` 命名让 traceback 携带 mod 侧位置。
         //    预算先重置：装载面是**第一个**宿主入口，之前 build 里装 hook 之后
         //    跑的库代码已经花掉一些余额，入口从满额起算才可复现。
+        //    用 `call` 而不是 `exec`：chunk 的返回值就是声明面（命令面在这里找）。
         sandbox.reset_budget();
-        lua.load(&bundle.mod_source)
+        let entry: LuaValue = lua
+            .load(&bundle.mod_source)
             .set_name("@mod.lua")
-            .exec()
+            .call(())
             .map_err(|err| LoadError::ModChunk(err.to_string()))?;
+        let commands = command_surface(&lua, &entry)?;
         Ok(Self {
             manifest,
             sandbox,
@@ -394,6 +405,7 @@ impl Loaded {
             mod_source: bundle.mod_source.clone(),
             bundle: bundle.clone(),
             manifest_hash: crate::hash::hex_sha256(&bundle.manifest_bytes),
+            commands,
         })
     }
 
@@ -495,6 +507,102 @@ impl Loaded {
         self.sandbox.apply(ops)
     }
 
+    /// **宿主表达意图**：按名字调用 Mod 导出的命令面（协议 `command` 帧）。
+    ///
+    /// 内核不认识任何命令名——`name` 只是命令面这张表的键，`args_json` 只是一段
+    /// 待转换的 JSON。规则在包里（命令函数由包作者写），内核只负责三件事：把参数
+    /// 递进去、按 `true` / `(false, 原因)` 解读结果、把整次调用折成一个事务。
+    ///
+    /// 成功返回**本次被写过的格**（升序去重，与 [`changed`](Self::changed) 同形）。
+    ///
+    /// # 原子边界
+    ///
+    /// 两条通道叠在一起，各自盖不同的面：
+    ///
+    /// | 通道 | 盖住什么 |
+    /// | --- | --- |
+    /// | undo 日志（[`Sim::begin_write_tx`]） | 本命令写过的组件值 |
+    /// | 世界帧快照（[`Sim::snapshot`] / [`Sim::restore`]） | 结构（建桶 / 行序 / 实体数）、随机流位置、`tick` |
+    ///
+    /// 为什么不能只取一条：命令是**宿主入口**，物理上拿不到 `step` 那种「闭包里持
+    /// `&mut Sim`」的形态（`world.*` 每次写要借同一个槽，见 [`Sandbox::step`]）；
+    /// undo 日志因此只能由本方法在外层开合，而它只盖值写入；结构写与随机流位置
+    /// 只有快照盖得住。代价是每条命令一次 `O(世界)` 编码——命令是人手粒度的，
+    /// 不是 tick 粒度的。
+    ///
+    /// 拒绝（`false, 原因`）、Lua 报错、返回值不合契约三条路径走同一条复原，所以
+    /// 「失败 ⇒ `tick` / `hash` / 世界逐字节不变」是可断言的事实，而不是约定。
+    pub fn command(&mut self, name: &str, args_json: &str) -> Result<Vec<(u64, u32)>, StepError> {
+        let func = self.resolve_command(name)?;
+        let args = command_args(self.sandbox.lua(), name, args_json)?;
+        // 事务开场：快照在前（结构 + 随机流 + tick），undo 日志在后（值写入）。
+        let frame = self.slot("Loaded::command", |sim| sim.snapshot())?;
+        self.slot("Loaded::command", |sim| sim.begin_write_tx())?;
+        // 宿主的**每个**入口都从满额预算起算（与 `step` / 装载同一条规矩）。
+        self.sandbox.reset_budget();
+        let result = match func.call::<MultiValue>(args) {
+            Ok(values) => command_outcome(name, values),
+            Err(err) => Err(StepError::Raised {
+                name: name.to_owned(),
+                reason: err.to_string(),
+            }),
+        };
+        match result {
+            Ok(()) => self.slot("Loaded::command", |sim| sim.commit_write_tx()),
+            Err(err) => {
+                self.abort_command(&frame)?;
+                Err(err)
+            }
+        }
+    }
+
+    /// 命令面的解析：注册表 → 入口表 → `commands` 表 → `name`。
+    ///
+    /// 一律 `raw_get`（不触发 `__index`）：返回值是作者写下的声明，元表查找会把
+    /// 「没写」变成「有」，内核就分不清是声明还是派生了。
+    fn resolve_command(&self, name: &str) -> Result<Function, StepError> {
+        let lua = self.sandbox.lua();
+        let key = self.commands.as_ref().ok_or(StepError::NoCommandSurface)?;
+        let raised = |err: mlua::Error| StepError::Raised {
+            name: name.to_owned(),
+            reason: format!("命令面读取失败：{err}"),
+        };
+        let surface: Table = lua.registry_value(key).map_err(raised)?;
+        match surface.raw_get::<LuaValue>(name) {
+            Ok(LuaValue::Function(func)) => Ok(func),
+            Ok(_) => Err(StepError::UnknownCommand {
+                name: name.to_owned(),
+            }),
+            Err(err) => Err(raised(err)),
+        }
+    }
+
+    /// 失败路径的唯一复原：值走 undo 日志，结构 / 随机流 / tick 走快照。
+    ///
+    /// 两步都要：日志只盖值写入，快照才盖得住「命令里新建了一个桶」这类结构写；
+    /// 反过来，快照是整帧编码，单靠它也拿不到 [`Sim::commit_write_tx`] 那份增量面。
+    fn abort_command(&self, frame: &[u8]) -> Result<(), StepError> {
+        let restored = self.slot("Loaded::command", |sim| {
+            sim.rollback_write_tx();
+            sim.restore(frame)
+        })?;
+        restored.map_err(StepError::from)
+    }
+
+    /// 借内核槽做一次访问（与 [`Sandbox::apply`] 同一句「未挂载」口径）。
+    ///
+    /// 为什么给闭包而不是借出 `RefMut`：`Rc` 是本方法内的克隆，借出物离开本栈帧
+    /// 就没有所有者了。一条命令要分几次碰内核（取帧 / 开事务 / 收事务），每次各自
+    /// 借、各自还，中间不持任何借用。
+    fn slot<R>(&self, what: &str, work: impl FnOnce(&mut Sim) -> R) -> Result<R, StepError> {
+        let slot = Rc::clone(&self.sim);
+        let mut guard = slot.borrow_mut();
+        let sim = guard
+            .as_mut()
+            .ok_or_else(|| StepError::Sim(SimError::Unmounted(String::from(what))))?;
+        Ok(work(sim))
+    }
+
     /// 只读资源表（资源不可变，无写面外溢）。
     pub fn resources(&self) -> &ResourceTable {
         &self.resources
@@ -525,6 +633,76 @@ impl Loaded {
 /// [`Loaded::from_bundle`]。
 pub fn load_mod(dir: &Path) -> Result<Loaded, LoadError> {
     Loaded::from_dir(dir)
+}
+
+/// 入口 chunk 返回值 → 命令面引用。
+///
+/// 只认 `commands` 表：不是表（含根本没有返回值、返回值不是表）一律「没有命令面」，
+/// 不是错误——单文件 Mod 本来就不必导出命令面。**不读全局**：全局表是副作用，
+/// 内核无法把它与代码里的临时变量区分开；声明只能是返回值。
+fn command_surface(lua: &Lua, entry: &LuaValue) -> Result<Option<RegistryKey>, LoadError> {
+    let LuaValue::Table(module) = entry else {
+        return Ok(None);
+    };
+    let surface = module
+        .raw_get::<LuaValue>("commands")
+        .map_err(|err| LoadError::ModChunk(err.to_string()))?;
+    match surface {
+        LuaValue::Table(surface) => lua
+            .create_registry_value(surface)
+            .map(Some)
+            .map_err(|err| LoadError::ModChunk(err.to_string())),
+        _ => Ok(None),
+    }
+}
+
+/// 命令参数：JSON 文本 → Lua 值，全程走 [`resources`] 那一份 JSON↔Lua 转换面
+/// （再写一份就会出现「同一段 JSON 两条语义」的裂缝）。
+///
+/// 空串与 `null` 都按空对象收：`args` 在协议层必填，但在宿主面可以省成 `{}`；
+/// 而「没参数」在 Lua 侧应是可索引的表而不是 `nil`——`nil` 会让 `args.id` 在
+/// 包里报错，错的地方就不对了。
+fn command_args(lua: &Lua, name: &str, args_json: &str) -> Result<LuaValue, StepError> {
+    let raised = |err: String| StepError::Raised {
+        name: name.to_owned(),
+        reason: err,
+    };
+    let text = args_json.trim();
+    let value = if text.is_empty() {
+        Json::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str::<Json>(text)
+            .map_err(|err| raised(format!("参数不是合法 JSON：{err}")))?
+    };
+    let value = match value {
+        Json::Null => Json::Object(serde_json::Map::new()),
+        other => other,
+    };
+    resources::json_to_lua(lua, &value).map_err(|err| raised(format!("参数转 Lua 失败：{err}")))
+}
+
+/// 命令面返回值 → 结果。**契约只有两种合法形状**：`true`（成功，写了什么由
+/// undo 日志说）与 `false, <原因>`（拒绝，零写入）。
+///
+/// 其余形状一律当契约错误报出去：把「返回了别的东西」当成成功或当成拒绝，都会让
+/// 包作者的笔误变成一个安静的行为——命令是宿主唯一能表达意图的通道，安静的成功
+/// 比报错贵得多。
+fn command_outcome(name: &str, values: MultiValue) -> Result<(), StepError> {
+    let count = values.len();
+    let mut values = values.into_iter();
+    match (values.next(), values.next(), values.next()) {
+        (Some(LuaValue::Boolean(true)), None, None) => Ok(()),
+        (Some(LuaValue::Boolean(false)), Some(LuaValue::String(reason)), None) => {
+            Err(StepError::Refused {
+                name: name.to_owned(),
+                reason: reason.to_string_lossy(),
+            })
+        }
+        _ => Err(StepError::CommandValue {
+            name: name.to_owned(),
+            got: format!("{count} 个返回值"),
+        }),
+    }
 }
 
 /// 多文件 Mod 的模块表：声明 → manifest 登记 → 实际字节三者对账。

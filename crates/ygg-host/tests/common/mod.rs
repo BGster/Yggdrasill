@@ -70,6 +70,15 @@ fn message_samples() -> Vec<Message> {
                 },
             ],
         },
+        Message::Command {
+            name: "nudge".to_owned(),
+            args: [
+                ("id".to_owned(), serde_json::json!(7)),
+                ("hp".to_owned(), serde_json::json!(9)),
+            ]
+            .into_iter()
+            .collect(),
+        },
         Message::Step { ticks: 1, dt: 16 },
         Message::Events {
             tick: 1,

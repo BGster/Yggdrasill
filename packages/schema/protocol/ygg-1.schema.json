@@ -8,6 +8,7 @@
         { "$ref": "#/$defs/ready" },
         { "$ref": "#/$defs/open" },
         { "$ref": "#/$defs/submit" },
+        { "$ref": "#/$defs/command" },
         { "$ref": "#/$defs/step" },
         { "$ref": "#/$defs/events" },
         { "$ref": "#/$defs/delta" },
@@ -274,6 +275,19 @@
             "properties": {
                 "type": { "const": "submit" },
                 "ops": { "type": "array", "items": { "$ref": "#/$defs/op" } }
+            }
+        },
+        "command": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "name", "args"],
+            "properties": {
+                "type": { "const": "command" },
+                "name": { "type": "string" },
+                "args": {
+                    "type": "object",
+                    "description": "命令参数：任意 JSON 对象，原样转成 Lua 表递交命令函数。键与值都是包的词汇：信封与内核都不解释，也不读其中任何键。"
+                }
             }
         },
         "step": {

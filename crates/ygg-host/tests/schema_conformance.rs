@@ -89,6 +89,7 @@ fn sample_set_covers_every_wire_tag() {
     assert_eq!(
         tags,
         [
+            "command",
             "delta",
             "error",
             "events",

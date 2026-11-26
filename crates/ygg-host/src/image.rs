@@ -7,14 +7,24 @@
 //! {"modSource": "<Lua 源码>",
 //!  "manifest": "<manifest.json 文本；空串 = 无资源>",
 //!  "schemas":  ["<schema 文本>", ...],
-//!  "resources": {"<path>": "<base64>", ...}}
+//!  "resources": {"<path>": "<base64>", ...},
+//!  "modules":  {"<模块路径>": "<Lua 源码>", ...},
+//!  "chunkPaths": {"<模块路径>": "<包内相对路径>", ...}}
 //! ```
 //!
 //! - `manifest` 空串走无资源路径（与 native [`ModBundle::in_memory`] 同一口径），
 //!   此时 `schemas` / `resources` 被忽略；
 //! - `schemas` 的注册 id 取自各 schema 文本的 `$id`（与 `ValidatorSet::from_texts`
 //!   入参对齐，注册序 = 数组序）；
-//! - `resources` 按 path 字典序装载（serde_json 默认 Map = `BTreeMap`，与书写序无关）。
+//! - `resources` 按 path 字典序装载（serde_json 默认 Map = `BTreeMap`，与书写序无关）；
+//! - `modules` 是 `require` 的**全部**可见面（登记期判名字规范 / 重复 / 单模块与
+//!   总数上限，与 native `pack.json` 的 `code` 段同一套判定）；`chunkPaths` 只喂
+//!   traceback 诊断，两者都不进内容寻址。两个键的**键是模块路径**：`src/util`
+//!   与 `src/util.lua` 指同一个模块（`pack.json.modules` 写后者），规范名只有
+//!   一个，两种拼法撞到同一个模块即拒。
+//!
+//! **两个新键都可缺省**：缺省与空对象等价——单文件包的装载参数与没有镜像功能时
+//! 逐字节相同。
 //!
 //! 本模块**不碰磁盘**：`ModBundle` 在内存里成型后直接 [`Loaded::from_bundle`]。
 //! 因此内容寻址的 `pack_hash`（[`Loaded::manifest_hash`]）是 manifest 文本本身的
@@ -25,9 +35,12 @@
 //! 而绑定层的规矩是**只搬字节**。三条绑定（Rust / WASM / C ABI）共用这一份实现，
 //! 才有 [`parity`](crate) 可言。
 
+use std::collections::BTreeMap;
+
 use serde_json::Value as Json;
 
 use ygg_sandbox::modload::{LoadError, Loaded, ModBundle};
+use ygg_sandbox::modules::{name_of_path, ModuleSet, MODULE_EXTENSION};
 
 use crate::base64::base64_decode;
 use crate::session::Session;
@@ -61,9 +74,17 @@ fn decode_image(bytes: &[u8]) -> Result<ModBundle, String> {
         .and_then(Json::as_str)
         .ok_or("镜像缺字符串字段 `modSource`")?;
     let manifest = image.get("manifest").and_then(Json::as_str).unwrap_or("");
+    // 模块表与诊断覆盖表在两条路径上都生效：它们与 manifest 无关（单文件包也能带）。
+    let modules = parse_modules(image.get("modules"))?;
+    let chunk_paths = parse_chunk_paths(image.get("chunkPaths"))?;
     if manifest.is_empty() {
         // 无资源路径：schema / resources 参数被忽略（与 native 同口径）。
-        return Ok(ModBundle::in_memory(mod_source));
+        return Ok(ModBundle {
+            mod_source: mod_source.to_owned(),
+            modules,
+            chunk_paths,
+            ..ModBundle::in_memory(String::new())
+        });
     }
     let schemas = parse_schemas(&image["schemas"].to_string())?;
     let resources = parse_resources(&image["resources"].to_string())?;
@@ -72,8 +93,72 @@ fn decode_image(bytes: &[u8]) -> Result<ModBundle, String> {
         manifest_bytes: manifest.as_bytes().to_vec(),
         schemas,
         resources,
-        ..ModBundle::in_memory(String::new())
+        modules,
+        chunk_paths,
     })
+}
+
+/// 镜像里的模块键 → 规范名（`require` 用的就是它）。
+///
+/// 两种写法都收：`pack.json.modules` 写的是路径（`src/util.lua`），而手写或浏览器
+/// 侧生成的镜像常只写 `src/util`。两者落到同一个规范名，因此两种拼法指向同一模块时
+/// 会被 [`ModuleSet`] / [`parse_chunk_paths`] 当重复拒掉——不静默取后者。
+fn module_name(key: &str) -> Result<String, String> {
+    let path = if key.ends_with(MODULE_EXTENSION) {
+        key.to_owned()
+    } else {
+        format!("{key}{MODULE_EXTENSION}")
+    };
+    name_of_path(&path).map_err(|err| format!("镜像的模块键 {key:?} 不是模块路径：{err}"))
+}
+
+/// `modules` 解析：`模块路径 → Lua 源码` 对象 → [`ModuleSet`]（登记期校验名字 / 重复 / 上限）。
+///
+/// 缺省与空对象等价：单文件包不必为了「能不能进浏览器」多写一个键。
+fn parse_modules(modules: Option<&Json>) -> Result<ModuleSet, String> {
+    let Some(value) = modules else {
+        return Ok(ModuleSet::new());
+    };
+    let entries = value
+        .as_object()
+        .ok_or("镜像的 `modules` 必须是 模块路径 → Lua 源码 文本的对象")?;
+    let pairs = entries
+        .iter()
+        .map(|(name, item)| {
+            let text = item
+                .as_str()
+                .ok_or_else(|| format!("镜像的 `modules[{name:?}]` 不是字符串"))?;
+            Ok((module_name(name)?, text.as_bytes().to_vec()))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    ModuleSet::from_pairs(pairs).map_err(|err| format!("镜像的 `modules` 登记失败：{err}"))
+}
+
+/// `chunkPaths` 解析：`模块路径 → 包内路径` 对象 → traceback 覆盖表（键插到规范名）。
+///
+/// 为什么要规范化：`require` 按规范名查覆盖表，作者若写 `src/util` 而表里存
+/// `src.util` 就会静默不命中，traceback 退回推导路径。
+fn parse_chunk_paths(paths: Option<&Json>) -> Result<BTreeMap<String, String>, String> {
+    let Some(value) = paths else {
+        return Ok(BTreeMap::new());
+    };
+    let entries = value
+        .as_object()
+        .ok_or("镜像的 `chunkPaths` 必须是 模块路径 → 路径 文本的对象")?;
+    let mut table: BTreeMap<String, String> = BTreeMap::new();
+    for (name, item) in entries {
+        let path = item
+            .as_str()
+            .ok_or_else(|| format!("镜像的 `chunkPaths[{name:?}]` 不是字符串"))?;
+        let canonical = module_name(name)?;
+        if table.contains_key(&canonical) {
+            return Err(format!(
+                "镜像的 `chunkPaths` 里 {name:?} 与另一个键同指模块 {canonical:?}"
+            ));
+        }
+        table.insert(canonical, path.to_owned());
+    }
+    Ok(table)
 }
 
 /// `schemas` 解析：JSON 字符串数组 → `(schema id, schema 文本)` 对。
@@ -123,7 +208,9 @@ fn parse_resources(resources_json: &str) -> Result<Vec<(String, Vec<u8>)>, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_image, load, open, parse_resources, parse_schemas};
+    use super::{
+        decode_image, load, open, parse_chunk_paths, parse_modules, parse_resources, parse_schemas,
+    };
     use ygg_sandbox::modload::MINIMAL_MANIFEST;
 
     /// 空转 Mod：不声明组件、不生成实体——世界帧就是空世界。
@@ -219,5 +306,59 @@ mod tests {
             "broken mod source must fail loading"
         );
         assert!(open(&image(IDLE_MOD)).is_ok());
+    }
+
+    /// 两个模块的镜像：第二个模块能 `require` 到（wasm / C 侧的唯一装载路径）。
+    ///
+    /// 探针走命令面：`require` 到的值只在 VM 内可见，能观察它的通道就是「入口把
+    /// 结果交给命令面」——顺带把 `modules` 与 `commands` 两条新增面串起来测。
+    #[test]
+    fn load_injects_the_module_table_so_a_second_module_is_requireable() {
+        let image = serde_json::json!({
+            "modSource": "local util = require('src.util')\nreturn { commands = { probe = function(_) return util.size == 2 end } }\n",
+            "manifest": "",
+            "modules": { "src/util": "return { size = 2 }\n" },
+            "chunkPaths": { "src/util": "packs/two/src/util.lua" }
+        })
+        .to_string()
+        .into_bytes();
+        let mut loaded = load(&image).expect("两模块镜像应装载成功");
+        assert_eq!(loaded.bundle().modules.len(), 1);
+        assert_eq!(
+            loaded
+                .bundle()
+                .chunk_paths
+                .get("src.util")
+                .map(String::as_str),
+            Some("packs/two/src/util.lua"),
+            "chunkPaths 的键应规范化为 require 用的名字"
+        );
+        assert_eq!(
+            loaded.command("probe", "{}").expect("命令面应可达"),
+            Vec::new(),
+            "probe 只断言、不写世界"
+        );
+    }
+
+    #[test]
+    fn module_entries_are_validated_before_the_loader_sees_them() {
+        assert!(
+            parse_modules(Some(&serde_json::json!(7))).is_err(),
+            "不是对象"
+        );
+        assert!(
+            parse_modules(Some(&serde_json::json!({ "src/a": 1 }))).is_err(),
+            "源码必须是字符串"
+        );
+        assert!(
+            parse_modules(Some(&serde_json::json!({ "../a": "return {}" }))).is_err(),
+            "名字必须可规范化"
+        );
+        assert!(parse_modules(None).expect("缺省即空表").is_empty());
+        assert!(
+            parse_chunk_paths(Some(&serde_json::json!({ "src/a": 1 }))).is_err(),
+            "路径必须是字符串"
+        );
+        assert!(parse_chunk_paths(None).expect("缺省即空表").is_empty());
     }
 }

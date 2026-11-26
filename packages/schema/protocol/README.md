@@ -19,7 +19,7 @@
 
 | 层 | 判别键 | 取值 |
 | --- | --- | --- |
-| 消息 | `type` | `hello` `ready` `open` `submit` `step` `events` `delta` `snapshot` `replay` `replay_result` `error` |
+| 消息 | `type` | `hello` `ready` `open` `submit` `command` `step` `events` `delta` `snapshot` `replay` `replay_result` `error` |
 | `snapshot` | `direction` | `request`（无载荷） / `reply`（带 `tick`/`hash`/`bytes`） |
 | 操作 | `op` | `spawn` `despawn` `set` `insert` `remove` |
 | 世界值 | 唯一的键 | `int` `uint` `str` `bool`（外部标签：键既是判别式又是载荷） |
@@ -83,6 +83,40 @@
 回执：答**一条 `delta`**（本次写入的组件终值）。`spawn` 出来的新 id 不在任何专属回执里——
 宿主从这条 `delta` 的 `eid` 认领。整批失败时零写入，答 `error`，世界 hash 不变（不变式 2）。
 v1 没有独立的 `submit_result` 标签：`delta` 本来就是「本次被写过的组件」这一个面。
+
+### `command` H→K
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `name` | string | 命令名：包入口 chunk 返回值里 `commands` 表的键 |
+| `args` | object | 命令参数：任意 JSON 对象，原样转成 Lua 表递给命令函数 |
+
+**这一帧是「意图」过界的唯一通道。** 它与 `submit` 的分界只有一条：谁决定规则。
+
+| 帧 | 宿主给出什么 | 规则在谁手里 |
+| --- | --- | --- |
+| `submit` | 已经算好的结构变更（`ops`） | 宿主 |
+| `command` | 只想做的一件事（`name` + `args`） | 包（命令函数由包作者写） |
+
+**内核不解释 `name`**：它只是命令面这张表的键。协议层与内核都不认识任何具体命令名，也不读
+`args` 里的任何键。命令集合、参数形状、允不允许，全在包里；`packs/example/src/command.lua`
+的 `move` / `attack` / `end_turn` 是**示例**，不是协议的一部分。
+
+回执：成功答**一条 `delta`**（与 `submit` 同一份 `Changed` 面），失败答 `error`：
+
+| 情形 | `code` |
+| --- | --- |
+| 命令返回 `false, <原因>`（Mod 拒绝） | `E_RULE` |
+| 命令抛出 Lua 错误（含参数转 Lua 失败） | `E_RULE` |
+| 名字不在命令面上 | `E_STATE` |
+| 包没有导出命令面（入口返回值的 `commands` 不是表） | `E_STATE` |
+| 返回值既不是 `true` 也不是 `(false, 原因)` | `E_PROTOCOL` |
+
+每次调用**一个事务**：失败时 `tick`、`hash` 与世界逐字节不变——拒绝不会写一半。
+
+`args` 是**不透明参数袋**：信封只要求它是一个 JSON 对象，键与值都是包的词汇。转换用的是
+`ygg.data` 同一份 JSON→Lua 映射（对象按键序插入、数组 1..n、整数优先 i64），因此同一段
+`args` 在任何宿主上都得到同一张 Lua 表。
 
 ### `step` H→K
 
@@ -160,7 +194,7 @@ handle('not json')
   字符串——它若自己拼数组，就等于多一份与 Rust 宿主的帧序实现。
 - **三条载体逐帧等价**：Rust `Session`、WASM `YggSession`、C ABI 跑同一份脚本
   `packages/schema/protocol/parity-script.json`（hello → ready、submit → delta、
-  step → events + delta、snapshot → reply），回执规范化后逐字节相同
+  command → delta、step → events + delta、snapshot → reply），回执规范化后逐字节相同
   （`crates/ygg-capi/tests/parity.rs`、`crates/ygg-wasm/tests/parity.rs`）。
 
 ## 三条不变式

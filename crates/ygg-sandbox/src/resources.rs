@@ -203,7 +203,10 @@ pub fn install(lua: &Lua, table: &ResourceTable) -> Result<(), LuaError> {
 /// 对象 → 表（BTreeMap **排序键序**插入，native/wasm 序一致）；
 /// 数组 → 表（1..n）；字符串 / 布尔直通；数字整数优先 i64（其余 f64）；
 /// null → Lua nil。递归深度受 serde_json 128 层解析上限约束（构造期即拒）。
-fn json_to_lua(lua: &Lua, value: &Json) -> Result<LuaValue, LuaError> {
+///
+/// 全 crate 只此一份 JSON→Lua 转换：`ygg.data` 与命令面参数共用它，
+/// 再长一份就会出现「同一段 JSON 两条语义」的裂缝。
+pub(crate) fn json_to_lua(lua: &Lua, value: &Json) -> Result<LuaValue, LuaError> {
     Ok(match value {
         Json::Null => LuaValue::Nil,
         Json::Bool(b) => LuaValue::Boolean(*b),
