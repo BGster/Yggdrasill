@@ -59,3 +59,4 @@ pub use query::{Bits, ColIter, ColIterMut, ColumnKind, RowSet};
 pub use rng::RngRegistry;
 pub use sim::{InsertReport, ReplayReport, Sim, SimState, SpawnReport};
 pub use store::ArchetypeStore;
+pub use system::{Stage, SystemDecl, SystemSet};

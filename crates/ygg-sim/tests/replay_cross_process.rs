@@ -16,6 +16,7 @@ use ygg_sim::component::ComponentDef;
 use ygg_sim::fixed::{self, ONE};
 use ygg_sim::hash::fnv1a64;
 use ygg_sim::sim::Sim;
+use ygg_sim::system::{Stage, SystemDecl};
 
 const CHILD_ENV: &str = "YGG_SIM_CHILD";
 const OUT_ENV: &str = "YGG_SIM_OUT";
@@ -29,26 +30,23 @@ fn fixture_trace() -> String {
     let vel = sim.register("Vel", ComponentDef::number()).unwrap();
     let label = sim.register("Label", ComponentDef::string()).unwrap();
 
-    sim.add_system("integrate", move |ctx| {
-        let dt = ctx.dt();
-        for archetype in ctx.store_mut().archetypes_mut() {
-            let (Some(pos_at), Some(vel_at)) = (archetype.col_pos(pos), archetype.col_pos(vel))
-            else {
-                continue;
-            };
-            let rows = archetype.ids.len();
-            for row in 0..rows {
-                let velocity = match archetype.cols[vel_at].value_at(row) {
-                    ygg_sim::archetype::ValueRef::I64(value) => value,
-                    _ => continue,
+    sim.add_system(
+        SystemDecl::new("integrate")
+            .reads(&[pos, vel])
+            .writes(&[pos]),
+        Stage::Rules,
+        move |ctx| {
+            let dt = ctx.dt();
+            ctx.query_mut(&[pos, vel], |row| {
+                let (Some(position), Some(velocity)) = (row.fixed(0), row.fixed(1)) else {
+                    return Ok(());
                 };
-                if let ygg_sim::archetype::Column::I64(values) = &mut archetype.cols[pos_at] {
-                    values[row] = fixed::add(values[row], fixed::mul(velocity, dt));
-                }
-            }
-        }
-        Ok(())
-    });
+                row.set_fixed(0, fixed::add(position, fixed::mul(velocity, dt)))
+            })?;
+            Ok(())
+        },
+    )
+    .unwrap();
     let _ = label;
 
     // 初始 4 个实体（Pos / Vel / Label）

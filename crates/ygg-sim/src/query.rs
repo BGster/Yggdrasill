@@ -258,6 +258,36 @@ impl RowSet<'_> {
         }
     }
 
+    /// 写 `set[k]` 的 `u64` 值（`ref` 列与位串列；其余列型 ⇒ schema 错）。
+    ///
+    /// 位串列写回走 [`Column::set_value`] 的写入归一（±0→+0、NaN→NAN_BITS），
+    /// 于是「读得到位串、写不回去」不会成为一个洞：`u64v` 与 `set_u64` 对称。
+    pub fn set_u64(&mut self, k: u8, value: u64) -> SimResult<()> {
+        let slot = self.slot(k).ok_or_else(|| {
+            SimError::schema(format!("列下标 {k} 越界：本次查询只有 {} 列", self.n))
+        })?;
+        let pos = self.pos[slot];
+        if pos == NO_COL {
+            return Err(SimError::schema(format!(
+                "组件 id {} 在本 archetype 没有列（tag），不能写入",
+                self.comps[slot]
+            )));
+        }
+        let (row, comp) = (self.row, self.comps[slot]);
+        let is_bits = matches!(self.cols.get(pos as usize), Column::F64Bits(_));
+        let value = if is_bits {
+            ValueRef::Bits(value)
+        } else {
+            ValueRef::U64(value)
+        };
+        match self.cols.get_mut(pos as usize) {
+            Some(col) => col.set_value(row, &value, comp),
+            None => Err(SimError::schema(
+                "只读遍历（for_each）不能写入：结构外写入请走 for_each_mut",
+            )),
+        }
+    }
+
     /// `k` → 槽位（越界 ⇒ `None`）。
     fn slot(&self, k: u8) -> Option<usize> {
         let slot = k as usize;

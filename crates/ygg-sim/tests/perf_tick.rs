@@ -19,11 +19,12 @@
 
 use std::time::Instant;
 
-use ygg_sim::archetype::{Column, ValueRef};
+use ygg_sim::archetype::Column;
 use ygg_sim::canonical::FrameWriter;
 use ygg_sim::component::{ComponentDef, ComponentId};
 use ygg_sim::fixed::{self, ONE};
 use ygg_sim::sim::Sim;
+use ygg_sim::system::{Stage, SystemDecl};
 
 /// workload 的属性类型档（§5.1 回填表：I64 档 = 基线，F64Bits 档 = R1′ 对照）。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -115,105 +116,99 @@ fn bench_world(kind: AttrKind) -> Sim {
 
     // 系统 1：pos += vel * dt（A、B 两桶）；F64Bits 档 = 位串搬运
     let (pos, vel, kind) = (layout.pos, layout.vel, kind);
-    sim.add_system("integrate", move |ctx| {
-        let dt = ctx.dt();
-        for archetype in ctx.store_mut().archetypes_mut() {
-            let (Some(pos_at), Some(vel_at)) = (archetype.col_pos(pos), archetype.col_pos(vel))
-            else {
-                continue;
-            };
-            let rows = archetype.ids.len();
+    sim.add_system(
+        SystemDecl::new("integrate")
+            .reads(&[pos, vel])
+            .writes(&[pos]),
+        Stage::Rules,
+        move |ctx| {
+            let dt = ctx.dt();
             match kind {
                 AttrKind::Number => {
-                    for row in 0..rows {
-                        let velocity = match archetype.cols[vel_at].value_at(row) {
-                            ValueRef::I64(value) => value,
-                            _ => continue,
+                    ctx.query_mut(&[pos, vel], |row| {
+                        let (Some(position), Some(velocity)) = (row.fixed(0), row.fixed(1)) else {
+                            return Ok(());
                         };
-                        if let Column::I64(values) = &mut archetype.cols[pos_at] {
-                            values[row] = fixed::add(values[row], fixed::mul(velocity, dt));
-                        }
-                    }
+                        row.set_fixed(0, fixed::add(position, fixed::mul(velocity, dt)))
+                    })?;
                 }
                 AttrKind::F64Bits => {
-                    for row in 0..rows {
-                        let carried = match archetype.cols[vel_at].value_at(row) {
-                            ValueRef::Bits(raw) => ygg_sim::bits::pack(ygg_sim::bits::unpack(raw)),
-                            _ => continue,
+                    ctx.query_mut(&[pos, vel], |row| {
+                        let Some(raw) = row.u64v(1) else {
+                            return Ok(());
                         };
-                        if let Column::F64Bits(values) = &mut archetype.cols[pos_at] {
-                            values[row] = carried;
-                        }
-                    }
+                        row.set_u64(0, ygg_sim::bits::pack(ygg_sim::bits::unpack(raw)))
+                    })?;
                 }
             }
-        }
-        Ok(())
-    });
+            Ok(())
+        },
+    )
+    .unwrap();
 
     // 系统 2：每 10 tick，hp -= 1（A、C 两桶）；F64Bits 档 = 全列写 canonical 位串
     let (hp, kind) = (layout.hp, kind);
-    sim.add_system("decay", move |ctx| {
-        if ctx.tick() % 10 != 0 {
-            return Ok(());
-        }
-        for archetype in ctx.store_mut().archetypes_mut() {
-            let Some(hp_at) = archetype.col_pos(hp) else {
-                continue;
-            };
+    sim.add_system(
+        SystemDecl::new("decay").reads(&[hp]).writes(&[hp]),
+        Stage::Rules,
+        move |ctx| {
+            if ctx.tick() % 10 != 0 {
+                return Ok(());
+            }
             match kind {
                 AttrKind::Number => {
-                    if let Column::I64(values) = &mut archetype.cols[hp_at] {
-                        for value in values.iter_mut() {
-                            *value = fixed::sub(*value, ONE);
-                        }
-                    }
+                    ctx.query_mut(&[hp], |row| {
+                        let hp = row.fixed(0).unwrap_or(0);
+                        row.set_fixed(0, fixed::sub(hp, ONE))
+                    })?;
                 }
                 AttrKind::F64Bits => {
-                    if let Column::F64Bits(values) = &mut archetype.cols[hp_at] {
-                        for value in values.iter_mut() {
-                            // canonical 常量位串：写路径零归一分支（pack 输入已是 canonical）
-                            *value = ygg_sim::bits::pack(f64::from_bits(0x3FF0_0000_0000_0000));
-                        }
-                    }
+                    // canonical 常量位串：写路径零归一分支（pack 输入已是 canonical）
+                    let seeded = ygg_sim::bits::pack(f64::from_bits(0x3FF0_0000_0000_0000));
+                    ctx.query_mut(&[hp], |row| row.set_u64(0, seeded))?;
                 }
             }
-        }
-        Ok(())
-    });
+            Ok(())
+        },
+    )
+    .unwrap();
 
-    // 系统 3：每 10 tick，换掉 D 桶的 1%（10 个）——走延迟队列与 archetype 复用路径
-    let (pos_only, pos_for_churn, kind) = (1u128 << layout.pos, layout.pos, kind);
-    sim.add_system("churn", move |ctx| {
-        if ctx.tick() % 10 != 0 {
-            return Ok(());
-        }
-        let mut victims = Vec::new();
-        for archetype in ctx.store_mut().archetypes_mut() {
-            if archetype.key == pos_only {
-                victims.extend(archetype.ids.iter().copied().take(10));
+    // 系统 3：每 10 tick，换掉 D 桶的 1%（10 个）——走延迟队列与 archetype 复用路径。
+    // D 桶是 Pos-only，查询面里它就是遍历序的末段（桶按创建序排，它最后创建），
+    // 所以「最后 10 行」恰好是从 D 桶拿人——不靠列位置、不靠结构入口。
+    let (pos_for_churn, kind) = (layout.pos, kind);
+    sim.add_system(
+        SystemDecl::new("churn").reads(&[pos_for_churn]),
+        Stage::Rules,
+        move |ctx| {
+            if ctx.tick() % 10 != 0 {
+                return Ok(());
             }
-        }
-        if !victims.is_empty() {
-            ctx.defer_despawn(victims);
-        }
-        let rows = 10usize;
-        let frame_column = match kind {
-            AttrKind::Number => {
-                let column: Vec<i64> = (0..rows).map(|index| (index as i64) * ONE).collect();
-                Column::I64(column)
+            let mut ids = Vec::new();
+            ctx.query(&[pos_for_churn], |row| ids.push(row.id()));
+            let victims = ids.split_off(ids.len().saturating_sub(10));
+            if !victims.is_empty() {
+                ctx.defer_despawn(victims);
             }
-            AttrKind::F64Bits => {
-                // 尾数域 or index → 全 canonical（指数域恒 0x3FF）
-                let column: Vec<u64> = (0..rows)
-                    .map(|index| 0x3FF0_0000_0000_0000 | index as u64)
-                    .collect();
-                Column::F64Bits(column)
-            }
-        };
-        ctx.defer_spawn(rows, vec![(pos_for_churn, frame_column)], Vec::new());
-        Ok(())
-    });
+            let rows = 10usize;
+            let frame_column = match kind {
+                AttrKind::Number => {
+                    let column: Vec<i64> = (0..rows).map(|index| (index as i64) * ONE).collect();
+                    Column::I64(column)
+                }
+                AttrKind::F64Bits => {
+                    // 尾数域 or index → 全 canonical（指数域恒 0x3FF）
+                    let column: Vec<u64> = (0..rows)
+                        .map(|index| 0x3FF0_0000_0000_0000 | index as u64)
+                        .collect();
+                    Column::F64Bits(column)
+                }
+            };
+            ctx.defer_spawn(rows, vec![(pos_for_churn, frame_column)], Vec::new());
+            Ok(())
+        },
+    )
+    .unwrap();
 
     // 四桶：A=5000（Pos+Vel+Hp）、B=2500（Pos+Vel）、C=1500（Pos+Hp+Enemy）、D=1000（Pos）
     if kind == AttrKind::Number {

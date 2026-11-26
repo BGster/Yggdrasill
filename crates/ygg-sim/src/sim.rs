@@ -6,7 +6,7 @@
 //!
 //! 1. 应用**上一个 tick 边界**留下的结构操作（FIFO）——正常情况下这一步是空的；
 //!    它存在是为了「宿主在两次 step 之间投了批量帧」与「系统内部投了延迟操作」共用一个入口。
-//! 2. 按 `systems` 的**下标序**逐个执行，每个系统拿到同一份 `SystemCtx`。
+//! 2. 按 `systems` 的**阶段序 → 阶段内注册序**逐个执行，每个系统拿到同一份 `SystemCtx`。
 //! 3. 应用系统在本 tick 内提交的延迟结构操作（FIFO）——**只有**这里会改 archetype，
 //!    所以系统看到的行集与行序在整帧内稳定。
 //! 4. `tick += 1`。
@@ -36,7 +36,7 @@ use crate::input::{OpKind, ReplayLog};
 use crate::rng::RngRegistry;
 use crate::snapshot;
 use crate::store::ArchetypeStore;
-use crate::system::{Resources, StructuralOp, SystemCtx, SystemId, SystemSet};
+use crate::system::{Resources, Stage, StructuralOp, SystemCtx, SystemDecl, SystemSet};
 
 /// `spawn_batch` 的回执。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,12 +114,25 @@ impl Sim {
         self.state.world.register(name, def)
     }
 
-    /// 注册一条系统（顺序即执行序）。
-    pub fn add_system<F>(&mut self, name: &str, func: F) -> SystemId
+    /// 注册一条系统（`decl` + 阶段；插入序即阶段内执行序，不排序）。
+    ///
+    /// `seal()` 之后一律 `YGG-SIM-SEALED`：声明表已校验，追加等于让它失效。
+    pub fn add_system<F>(&mut self, decl: SystemDecl, stage: Stage, func: F) -> SimResult<()>
     where
         F: FnMut(&mut SystemCtx<'_>) -> SimResult<()> + 'static,
     {
-        self.systems.add(name, func)
+        self.systems.add(decl, stage, func)
+    }
+
+    /// 封盘：**只校验，不排序**（重复名 / 未注册组件 / 同阶段写写冲突 / 跨阶段 `after` /
+    /// 未知 `after` / 同阶段 `after` 成环）。可重入：再调给出同一答案。
+    pub fn seal(&mut self) -> SimResult<()> {
+        self.systems.seal(self.state.world.registry())
+    }
+
+    /// 注册表是否已封盘。
+    pub fn is_sealed(&self) -> bool {
+        self.systems.is_sealed()
     }
 
     /// 当前 tick。
@@ -152,7 +165,7 @@ impl Sim {
         &mut self.state.resources
     }
 
-    /// 系统名（执行序；诊断用）。
+    /// 系统名（**执行序**：阶段序 → 阶段内注册序；诊断用）。
     pub fn system_names(&self) -> Vec<&str> {
         self.systems.names()
     }

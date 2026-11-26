@@ -9,6 +9,7 @@ use ygg_sim::canonical::FrameWriter;
 use ygg_sim::component::{AttrType, ComponentDef};
 use ygg_sim::error::codes;
 use ygg_sim::sim::Sim;
+use ygg_sim::system::{Stage, SystemDecl};
 
 /// `f64` 位串常量（tests 面不受 R1′ 限，直接写 hex 便于对账）。
 const NAN_BITS: u64 = 0x7FF8_0000_0000_0000;
@@ -247,38 +248,25 @@ fn bits_relay_world(seed: u64) -> Sim {
     let dst = sim.register("Dst", ComponentDef::f64_bits()).unwrap();
     // 系统：每 tick 把 Src 的位串搬进 Dst（仅搬运不算术）；每 7 tick 用 rng 派生一个
     // 次正规位型全列写入 Src（尾数域掩码内任意 u64 都是 canonical 次正规）。
-    sim.add_system("relay", move |ctx| {
-        for archetype in ctx.store_mut().archetypes_mut() {
-            let (Some(src_at), Some(dst_at)) = (archetype.col_pos(src), archetype.col_pos(dst))
-            else {
-                continue;
-            };
-            let rows = archetype.ids.len();
-            for row in 0..rows {
-                let carried = match archetype.cols[src_at].value_at(row) {
-                    ValueRef::Bits(bits) => bits,
-                    _ => continue,
+    sim.add_system(
+        SystemDecl::new("relay").reads(&[src]).writes(&[src, dst]),
+        Stage::Rules,
+        move |ctx| {
+            ctx.query_mut(&[src, dst], |row| {
+                let Some(carried) = row.u64v(0) else {
+                    return Ok(());
                 };
-                if let ArchColumn::F64Bits(values) = &mut archetype.cols[dst_at] {
-                    values[row] = carried;
-                }
+                row.set_u64(1, carried)
+            })?;
+            if ctx.tick() % 7 == 0 {
+                let draw = ctx.rng32(&stream_name("seed_bits", 0)) as u64;
+                let seeded = draw & 0x000F_FFFF_FFFF_FFFF;
+                ctx.query_mut(&[src], |row| row.set_u64(0, seeded))?;
             }
-        }
-        if ctx.tick() % 7 == 0 {
-            let draw = ctx.rng32(&stream_name("seed_bits", 0)) as u64;
-            let seeded = draw & 0x000F_FFFF_FFFF_FFFF;
-            for archetype in ctx.store_mut().archetypes_mut() {
-                if let Some(src_at) = archetype.col_pos(src) {
-                    if let ArchColumn::F64Bits(values) = &mut archetype.cols[src_at] {
-                        for value in values.iter_mut() {
-                            *value = seeded;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    });
+            Ok(())
+        },
+    )
+    .unwrap();
     sim.spawn_batch(&spawn_bits_frame(
         3,
         &["Src", "Dst"],

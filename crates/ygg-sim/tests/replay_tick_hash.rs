@@ -12,6 +12,7 @@ use ygg_sim::fixed::{self, ONE};
 use ygg_sim::input::ReplayLog;
 use ygg_sim::rng::stream_name;
 use ygg_sim::sim::Sim;
+use ygg_sim::system::{Stage, SystemDecl};
 
 const SEED: u64 = 20_261_120;
 
@@ -29,60 +30,47 @@ fn scenario() -> Scenario {
     let hp = sim.register("Hp", ComponentDef::number()).unwrap();
     // 系统 1：pos += vel * dt（只看有 Pos+Vel 的桶）
     let (p, v) = (pos, vel);
-    sim.add_system("integrate", move |ctx| {
-        let dt = ctx.dt();
-        for archetype in ctx.store_mut().archetypes_mut() {
-            let (Some(pos_at), Some(vel_at)) = (archetype.col_pos(p), archetype.col_pos(v)) else {
-                continue;
-            };
-            let rows = archetype.ids.len();
-            for row in 0..rows {
-                let velocity = match archetype.cols[vel_at].value_at(row) {
-                    ygg_sim::archetype::ValueRef::I64(value) => value,
-                    _ => continue,
+    sim.add_system(
+        SystemDecl::new("integrate").reads(&[p, v]).writes(&[p]),
+        Stage::Rules,
+        move |ctx| {
+            let dt = ctx.dt();
+            ctx.query_mut(&[p, v], |row| {
+                let (Some(pos), Some(velocity)) = (row.fixed(0), row.fixed(1)) else {
+                    return Ok(());
                 };
-                if let ygg_sim::archetype::Column::I64(values) = &mut archetype.cols[pos_at] {
-                    values[row] = fixed::add(values[row], fixed::mul(velocity, dt));
-                }
-            }
-        }
-        Ok(())
-    });
+                row.set_fixed(0, fixed::add(pos, fixed::mul(velocity, dt)))
+            })?;
+            Ok(())
+        },
+    )
+    .unwrap();
     // 系统 2：每 10 tick 抽一次随机数并消耗 Hp（顺带把 rng 状态推进，让回放必须复现它）
     let h = hp;
-    sim.add_system("decay", move |ctx| {
-        if ctx.tick() % 10 != 0 {
-            return Ok(());
-        }
-        let stream = stream_name("decay", 0);
-        // 借用顺序：先读布局（行数与 Hp 列位置），再一次性取够随机数，最后拿列写面。
-        // 行数由**上一个** tick 的行集决定——它在整帧内稳定，所以先读后写是安全的。
-        let plan: Vec<(Option<usize>, usize)> = ctx
-            .store_mut()
-            .archetypes_mut()
-            .iter()
-            .map(|archetype| (archetype.col_pos(h), archetype.ids.len()))
-            .collect();
-        let total: usize = plan.iter().map(|(_, rows)| *rows).sum();
-        let draws: Vec<u32> = (0..total).map(|_| ctx.rng32(&stream)).collect();
-        let mut cursor = 0usize;
-        for (archetype, (hp_at, rows)) in
-            ctx.store_mut().archetypes_mut().iter_mut().zip(plan.iter())
-        {
-            let Some(hp_at) = hp_at else {
-                cursor += rows;
-                continue;
-            };
-            for row in 0..*rows {
-                let damage = i64::from(draws[cursor + row] % 3);
-                if let ygg_sim::archetype::Column::I64(values) = &mut archetype.cols[*hp_at] {
-                    values[row] = fixed::sub(values[row], damage * ONE);
-                }
+    sim.add_system(
+        SystemDecl::new("decay").reads(&[h]).writes(&[h]),
+        Stage::Rules,
+        move |ctx| {
+            if ctx.tick() % 10 != 0 {
+                return Ok(());
             }
-            cursor += rows;
-        }
-        Ok(())
-    });
+            let stream = stream_name("decay", 0);
+            // 行数由**上一 tick** 的行集决定——它在整帧内稳定；先取够随机数，再一次性写入。
+            // （随机流是 `ctx` 的可变借用，闭包里拿不到：这是「一个系统一个借用」的直接结果。）
+            let mut rows = 0usize;
+            ctx.query(&[h], |_row| rows += 1);
+            let draws: Vec<u32> = (0..rows).map(|_| ctx.rng32(&stream)).collect();
+            let mut cursor = 0usize;
+            ctx.query_mut(&[h], |row| {
+                let damage = i64::from(draws[cursor] % 3);
+                cursor += 1;
+                let hp = row.fixed(0).unwrap_or(0);
+                row.set_fixed(0, fixed::sub(hp, damage * ONE))
+            })?;
+            Ok(())
+        },
+    )
+    .unwrap();
     Scenario { sim, pos, vel, hp }
 }
 

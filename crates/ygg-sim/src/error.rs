@@ -5,11 +5,11 @@
 //! 本 crate 沿用同一处置：码是**稳定字符串**（外部可 grep、可断言），`Display` 的第一段
 //! 逐字就是它。
 //!
-//! **六码的共同性质：状态未变**。所有面都是「先校验后改」——拒绍不产生半改的模拟态，
+//! **七码的共同性质：状态未变**。所有面都是「先校验后改」——拒绍不产生半改的模拟态，
 //! 所以调用方拿到错误后不需要回滚，也无需猜「改到哪一步了」。这条性质比错误分类本身
 //! 更重要：它让「错误处理」退化成一句 `?`，而不必在 Lua 侧写补偿逻辑。
 
-/// 六个稳定错误码。外部（Lua 面、门禁、报告）只认这些字符串。
+/// 七个稳定错误码。外部（Lua 面、门禁、报告）只认这些字符串。
 pub mod codes {
     /// 宿主未注入 [`crate::Sim`] 实例（`ygg.sim.*` 全部函数）。
     pub const UNMOUNTED: &str = "YGG-SIM-UNMOUNTED";
@@ -23,6 +23,8 @@ pub mod codes {
     pub const ENTITY: &str = "YGG-SIM-ENTITY";
     /// 内部不变量破坏（`entity_index` 与列行数不符等）——出现即缺陷，不是用户输入问题。
     pub const STATE: &str = "YGG-SIM-STATE";
+    /// 调度器已 `seal`：再注册系统即拒绝（先改声明、重开一次 run，而不是偷偷追加）。
+    pub const SEALED: &str = "YGG-SIM-SEALED";
 }
 
 /// 模拟内核的唯一错误类型。
@@ -51,6 +53,9 @@ pub enum SimError {
     /// [`codes::STATE`]：内部不变量破坏。
     #[error("YGG-SIM-STATE: {0}")]
     State(String),
+    /// [`codes::SEALED`]：`seal` 之后再注册系统。
+    #[error("YGG-SIM-SEALED: {0}")]
+    Sealed(String),
 }
 
 impl SimError {
@@ -63,6 +68,7 @@ impl SimError {
             SimError::Schema(_) => codes::SCHEMA,
             SimError::Entity(_) => codes::ENTITY,
             SimError::State(_) => codes::STATE,
+            SimError::Sealed(_) => codes::SEALED,
         }
     }
 
@@ -90,6 +96,11 @@ impl SimError {
     pub fn state(detail: impl Into<String>) -> Self {
         SimError::State(detail.into())
     }
+
+    /// 构造 `YGG-SIM-SEALED`。
+    pub fn sealed(detail: impl Into<String>) -> Self {
+        SimError::Sealed(detail.into())
+    }
 }
 
 /// 面侧的 `Result` 别名（少写一层尖括号，读起来更像一句契约）。
@@ -109,6 +120,7 @@ mod tests {
             SimError::schema("x"),
             SimError::entity("x"),
             SimError::state("x"),
+            SimError::sealed("x"),
         ];
         for err in all {
             let shown = err.to_string();
