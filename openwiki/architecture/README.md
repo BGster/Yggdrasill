@@ -4,7 +4,7 @@ title: "架构总览 — 模块与契约页索引"
 openwiki_generated: true
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-26T07:10:30.723Z
+    at: 2026-11-26T17:33:41.429Z
 sources:
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
@@ -24,7 +24,7 @@ sources:
     resource: repo://scripts/wiki-consistency.sh
   - id: openwiki-source-219a851abf50e3acdd3f032c
     resource: repo://scripts/wiki-ver.sh
-generated: { by: "pi", at: "2026-11-26T07:10:30.723Z" }
+generated: { by: "pi", at: "2026-11-26T17:33:41.429Z" }
 ---
 
 # 架构总览 — 模块与契约页索引
@@ -48,59 +48,33 @@ generated: { by: "pi", at: "2026-11-26T07:10:30.723Z" }
 
 | crate | 行数（源码） | 一句话职责 | 契约页 |
 | --- | --- | --- | --- |
-<!-- openwiki: broken internal link [contracts/kernel/world.md] file "contracts/kernel/world.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [contracts/kernel/determinism.md] file "contracts/kernel/determinism.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [contracts/kernel/persistence.md] file "contracts/kernel/persistence.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 | `ygg-sim` | 5.4k | 列存世界：组件/查询/调度/tick/快照/回放/哈希 | [world](../contracts/kernel/world.md) · [determinism](../contracts/kernel/determinism.md) · [persistence](../contracts/kernel/persistence.md) |
-<!-- openwiki: broken internal link [contracts/kernel/sandbox.md] file "contracts/kernel/sandbox.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [contracts/kernel/lua-api.md] file "contracts/kernel/lua-api.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [contracts/kernel/packaging.md] file "contracts/kernel/packaging.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 | `ygg-sandbox` | 6.6k | 规则运行时：Lua 沙箱、`world.*` 面、包装载、命令面 | [sandbox](../contracts/kernel/sandbox.md) · [lua-api](../contracts/kernel/lua-api.md) · [packaging](../contracts/kernel/packaging.md) |
-<!-- openwiki: broken internal link [contracts/host/protocol.md] file "contracts/host/protocol.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [contracts/host/image.md] file "contracts/host/image.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 | `ygg-host` | 2.3k | 协议信封：`ygg/1` 消息、会话状态机、包镜像 | [protocol](../contracts/host/protocol.md) · [image](../contracts/host/image.md) |
-<!-- openwiki: broken internal link [contracts/host/bindings.md] file "contracts/host/bindings.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 | `ygg-capi` / `ygg-wasm` | 0.5k | 同一会话的 C ABI 与 WASM 绑定，零协议逻辑 | [bindings](../contracts/host/bindings.md) |
-<!-- openwiki: broken internal link [contracts/kernel/determinism.md] file "contracts/kernel/determinism.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 | `ygg-core` | 0.35k | 不属于列存世界的标量状态（环境 KV + 四型值），不进 tick 哈希 | [determinism](../contracts/kernel/determinism.md) §5 |
-<!-- openwiki: broken internal link [contracts/kernel/packaging.md] file "contracts/kernel/packaging.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 | `ygg-lint` / `ygg-modules` / `ygg-schema` | 3.6k | Lua 静态检查、模块名/路径解析、JSON Schema 校验 | [packaging](../contracts/kernel/packaging.md) §6 |
 
 ## 3. 契约页索引
 
 **kernel**（改内核语义前必读）
 
-<!-- openwiki: broken internal link [contracts/kernel/world.md] file "contracts/kernel/world.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [world](../contracts/kernel/world.md) — 组件、archetype、槽位、查询面、结构延迟、调度与 seal
-<!-- openwiki: broken internal link [contracts/kernel/determinism.md] file "contracts/kernel/determinism.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [determinism](../contracts/kernel/determinism.md) — 定点、canonical 字节、状态哈希输入面、随机流
-<!-- openwiki: broken internal link [contracts/kernel/sandbox.md] file "contracts/kernel/sandbox.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [sandbox](../contracts/kernel/sandbox.md) — 白名单、math 收窄、指令预算、内存上限
-<!-- openwiki: broken internal link [contracts/kernel/lua-api.md] file "contracts/kernel/lua-api.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [lua-api](../contracts/kernel/lua-api.md) — `world.*` 签名与命令返回值契约
-<!-- openwiki: broken internal link [contracts/kernel/persistence.md] file "contracts/kernel/persistence.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [persistence](../contracts/kernel/persistence.md) — 快照帧、`E_STORE_FORMAT`、日志与回放定位
-<!-- openwiki: broken internal link [contracts/kernel/packaging.md] file "contracts/kernel/packaging.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [packaging](../contracts/kernel/packaging.md) — `pack.json` v2、manifest 锁、装载序
-<!-- openwiki: broken internal link [contracts/kernel/errors.md] file "contracts/kernel/errors.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [errors](../contracts/kernel/errors.md) — 三层错误码与映射
 
 **host**（接宿主前必读）
 
-<!-- openwiki: broken internal link [contracts/host/protocol.md] file "contracts/host/protocol.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [protocol](../contracts/host/protocol.md) — `ygg/1` 消息、状态机、拒绝规则
-<!-- openwiki: broken internal link [contracts/host/bindings.md] file "contracts/host/bindings.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [bindings](../contracts/host/bindings.md) — Rust / WASM / C ABI 三载体等价
-<!-- openwiki: broken internal link [contracts/host/image.md] file "contracts/host/image.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [image](../contracts/host/image.md) — 无文件系统宿主的包镜像
 
 **operating**（怎么跑、怎么写）
 
-<!-- openwiki: broken internal link [operating/build.md] file "operating/build.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [operating/example-pack.md] file "operating/example-pack.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [operating/h5-host.md] file "operating/h5-host.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [operating/dev-workflow.md] file "operating/dev-workflow.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-<!-- openwiki: broken internal link [operating/vocabulary.md] file "operating/vocabulary.md" does not exist. Fix the href or restore the target, then delete this comment. -->
 - [build](../operating/build.md) · [example-pack](../operating/example-pack.md) · [h5-host](../operating/h5-host.md) · [dev-workflow](../operating/dev-workflow.md) · [vocabulary](../operating/vocabulary.md)
 
 ## 4. 索引与实文件的关系

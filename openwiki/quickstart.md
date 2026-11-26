@@ -20,8 +20,6 @@ sources:
     resource: repo://packs/example/pack.json
   - id: openwiki-source-6a5d7b301b84949a383f444c
     resource: repo://scripts/build-wasm.sh
-  - id: openwiki-source-da9af83703d953f139bc0632
-    resource: repo://scripts/gen-scene-readfirst.py
   - id: openwiki-source-b0d308427c9d0c9eb125b7ed
     resource: repo://scripts/persist-matrix.sh
   - id: openwiki-source-c105d9c13b085511821f0969

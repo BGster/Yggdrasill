@@ -4,7 +4,7 @@ title: "开发纪律 — 分支、门禁、零债与提交"
 openwiki_generated: true
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-26T07:10:30.723Z
+    at: 2026-11-26T17:33:41.429Z
 sources:
   - id: openwiki-source-e05e3253cc972e8bd548b5cf
     resource: repo://.github/workflows/check.yml

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:9e54aad3ef266787c4f26961e9cf82461a662bf6705d001e7ca96ffc2c40728e",
+  "pageVersion": "sha256:9a00b31b47ab761f4426ee7d891150a3640f7c95769b67e06d54489fe2ad10d2",
   "claims": [
     {
       "id": "claim_c1dee170086b4d8b9a876d40da0c45bc",
@@ -45,12 +45,12 @@
       ]
     },
     {
-      "id": "claim_d78becfcaa774749aa1dae1b05ed910c",
-      "statement": "wiki-ver.sh 校验每页 id 唯一、ver 与 openwiki/ver.json 账本一致、站内链接可解析；wiki-consistency.sh 校验 AGENTS.md 行数预算、路由目标存在与 claims 证据可解析。",
+      "id": "claim_f25f682aa20444248adf8f5e20040426",
+      "statement": "两道文档门禁分工：wiki-ver.sh 管页 id 唯一、ver 与 openwiki/ver.json 同步、页内相对链接可解析；wiki-consistency.sh 管全库链接、AGENTS.md 行数预算（160）、路由目标存在与 claims 证据闭包。",
       "evidence": [
         {
           "resource": "repo://scripts/wiki-consistency.sh",
-          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+          "version": "repo-file-v1:sha256:8fbb3b718c5244bade13a897cb70d786a65ff45bd92e4ee6d93bd0c05e453d2a"
         },
         {
           "resource": "repo://scripts/wiki-ver.sh",
@@ -59,8 +59,8 @@
       ]
     },
     {
-      "id": "claim_adbfd5488bf64b3b98c46aa14bb93d67",
-      "statement": "新增契约页必须同时更新本索引页与 AGENTS.md 的提示面路由表，两处都是消费者实际会读到的入口。",
+      "id": "claim_57418ee638ed46f49d8db1d1db55a3c4",
+      "statement": "新增或改名契约页必须同时更新本索引页与 AGENTS.md §3 的提示面路由表——两处都是消费者实际会读到的入口，漏一处等于页面不存在（wiki-consistency 的 broken 计数会因此非零）。",
       "evidence": [
         {
           "resource": "repo://AGENTS.md",
@@ -68,13 +68,13 @@
         },
         {
           "resource": "repo://scripts/wiki-consistency.sh",
-          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+          "version": "repo-file-v1:sha256:8fbb3b718c5244bade13a897cb70d786a65ff45bd92e4ee6d93bd0c05e453d2a"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T07:10:30.723Z"
+    "at": "2026-11-26T17:33:41.429Z"
   }
 }

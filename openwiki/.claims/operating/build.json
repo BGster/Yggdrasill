@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:f6af2436060bba49d8adb1c117dd90856e25e40f8552f382d2ac4450accaa06f",
+  "pageVersion": "sha256:87b869f643a3cc435c9c506451c2db2c67953c63d9b79f69dafde58a91d13ab4",
   "claims": [
     {
       "id": "claim_5d2e9b8870e64da39b613d6c819ccbaf",
@@ -19,30 +19,6 @@
         {
           "resource": "repo://scripts/build-wasm.sh",
           "version": "repo-file-v1:sha256:be02a8fa795c710af9f6391737c24408fad77cd5a68577ed884ebc0c15bc27b1"
-        }
-      ]
-    },
-    {
-      "id": "claim_b66116dc41854c0a9540960ff42733f0",
-      "statement": "CI 只有 rust 一个 job：cargo fmt --check、cargo clippy -D warnings、cargo test --workspace，加一条 serde_json 不得开 preserve_order 的结构守卫。",
-      "evidence": [
-        {
-          "resource": "repo://.github/workflows/check.yml",
-          "version": "repo-file-v1:sha256:f70f4f0c6cf409c940bf970ac32c0eab3b3c430111abb894a209adedfeacc2d0"
-        }
-      ]
-    },
-    {
-      "id": "claim_86967838a0fc4b0c83aa994ed3fb6fc1",
-      "statement": "CI 不跑 wasm 构建、浏览器泳道、golden 与 image 两条金值门禁；这些只能在本地跑，CI 绿不等于可交付。",
-      "evidence": [
-        {
-          "resource": "repo://.github/workflows/check.yml",
-          "version": "repo-file-v1:sha256:f70f4f0c6cf409c940bf970ac32c0eab3b3c430111abb894a209adedfeacc2d0"
-        },
-        {
-          "resource": "repo://scripts/persist-matrix.sh",
-          "version": "repo-file-v1:sha256:38261c9c2835027d7dcd9e9f9cb874646ebc4c261d7c1a1d3a3b4d6efd2d8508"
         }
       ]
     },
@@ -79,10 +55,34 @@
           "version": "repo-file-v1:sha256:38261c9c2835027d7dcd9e9f9cb874646ebc4c261d7c1a1d3a3b4d6efd2d8508"
         }
       ]
+    },
+    {
+      "id": "claim_84702434c05649e6bcc66c7bde9c0710",
+      "statement": "CI 两个 job：`rust`（cargo fmt --check、clippy -D warnings、cargo test --workspace，加文档闭包与参考包三件套与 preserve_order 结构守卫）与 `wasm`（WASI SDK + wasm-bindgen-cli → `scripts/build-wasm.sh` → `node scripts/wasm-lane.mjs`）。",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/check.yml",
+          "version": "repo-file-v1:sha256:91bd290dc1740c4f6120b588e41f0485f5f5c208649037a4473f1766f2141ae3"
+        }
+      ]
+    },
+    {
+      "id": "claim_d97239b48f284807856c710e4be184f9",
+      "statement": "CI 不跑真实浏览器泳道、10 万 tick 的 `scripts/persist-matrix.sh` 与 GPU/音频宿主面；这三样只能在本地跑，CI 绿不等于可交付。",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/check.yml",
+          "version": "repo-file-v1:sha256:91bd290dc1740c4f6120b588e41f0485f5f5c208649037a4473f1766f2141ae3"
+        },
+        {
+          "resource": "repo://scripts/persist-matrix.sh",
+          "version": "repo-file-v1:sha256:38261c9c2835027d7dcd9e9f9cb874646ebc4c261d7c1a1d3a3b4d6efd2d8508"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T07:10:30.723Z"
+    "at": "2026-11-26T17:33:41.429Z"
   }
 }

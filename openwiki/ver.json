@@ -2,7 +2,7 @@
   "generated_by": "scripts/wiki-ver.sh",
   "note": "ver = first 6 hex of the page blob hash; pages carry no ver line",
   "pages": {
-    "`architecture`": "82eb3a",
+    "`architecture`": "9c3965",
     "`contracts/host/bindings`": "2295fa",
     "`contracts/host/image`": "3c7199",
     "`contracts/host/protocol`": "24b749",
@@ -13,13 +13,13 @@
     "`contracts/kernel/persistence`": "1c87fa",
     "`contracts/kernel/sandbox`": "f426a3",
     "`contracts/kernel/world`": "1e79b6",
-    "`governance`": "95c9c6",
-    "`operating/build`": "89d096",
-    "`operating/dev-workflow`": "3e93d6",
+    "`governance`": "73f0ac",
+    "`operating/build`": "a44af2",
+    "`operating/dev-workflow`": "cce98f",
     "`operating/example-pack`": "4d5f8d",
     "`operating/h5-host`": "b00a50",
     "`operating/vocabulary`": "9ef9a3",
     "`overview`": "f9cf5a",
-    "`quickstart`": "6640fb"
+    "`quickstart`": "b677d9"
   }
 }

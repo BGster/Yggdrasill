@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:a27e3c80057b9bfb3108609b68db3487e6acc51efe8259297369e6be41d355cd",
+  "pageVersion": "sha256:19b77c30dafbf574863d2101c80ea3e1a551376dea7e5f23e63f90553f46a26d",
   "claims": [
     {
       "id": "claim_73c7be986ad5425c95afc8bec2638a58",
@@ -9,16 +9,6 @@
         {
           "resource": "repo://scripts/wiki-ver.sh",
           "version": "repo-file-v1:sha256:4f86231f653a41d271d5d6d5eae4cd072ed1cb2365bb9ac131aef0346e0e8d65"
-        }
-      ]
-    },
-    {
-      "id": "claim_fac0e6f73f8d4b3ca71a7948cbbe52f9",
-      "statement": "The cold-start surface has a hard line budget reported on every run — `agents=<current>/500` today, 160 after the cutover — because an auto-injected surface that grows dilutes every constraint it carries.",
-      "evidence": [
-        {
-          "resource": "repo://scripts/wiki-consistency.sh",
-          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
         }
       ]
     },
@@ -58,17 +48,7 @@
       "evidence": [
         {
           "resource": "repo://scripts/wiki-consistency.sh",
-          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
-        }
-      ]
-    },
-    {
-      "id": "claim_f660da2b90cc4d99af77c9cc5d790314",
-      "statement": "wiki-consistency.sh --attest 比对事件日志里每条 doc-id 的 ver 与当前账本，给出 claims/forged/stale/ok，stale=0 才算通过。",
-      "evidence": [
-        {
-          "resource": "repo://scripts/wiki-consistency.sh",
-          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+          "version": "repo-file-v1:sha256:8fbb3b718c5244bade13a897cb70d786a65ff45bd92e4ee6d93bd0c05e453d2a"
         }
       ]
     },
@@ -78,7 +58,7 @@
       "evidence": [
         {
           "resource": "repo://scripts/wiki-consistency.sh",
-          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+          "version": "repo-file-v1:sha256:8fbb3b718c5244bade13a897cb70d786a65ff45bd92e4ee6d93bd0c05e453d2a"
         }
       ]
     },
@@ -91,10 +71,34 @@
           "version": "repo-file-v1:sha256:4f86231f653a41d271d5d6d5eae4cd072ed1cb2365bb9ac131aef0346e0e8d65"
         }
       ]
+    },
+    {
+      "id": "claim_c43f1262a0c440a7a1ad2b5f7a6d9cc8",
+      "statement": "冷启动面有硬行数预算并在每次核验里报告（`agents=<当前>/160`）：自动注入的规则面一旦膨胀，会直接摊薄它携带的每一条约束。",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:6bd54735da82f5301cfc4cfaaf20f264af55ac80522c335269c74e004a18b58a"
+        },
+        {
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:8fbb3b718c5244bade13a897cb70d786a65ff45bd92e4ee6d93bd0c05e453d2a"
+        }
+      ]
+    },
+    {
+      "id": "claim_9dfe9681b9774f0d9c8de5e962f34a07",
+      "statement": "代码侧的事件日志签名核验（旧 `--attest` 模式）已随 egg / agent-seed 删除：脚本只保留三个静态闭包，仓内不再有 run 目录可核。",
+      "evidence": [
+        {
+          "resource": "repo://scripts/wiki-consistency.sh",
+          "version": "repo-file-v1:sha256:8fbb3b718c5244bade13a897cb70d786a65ff45bd92e4ee6d93bd0c05e453d2a"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T07:10:30.723Z"
+    "at": "2026-11-26T17:33:41.429Z"
   }
 }

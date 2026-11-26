@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:d2e47aeddb51a84ee3962380ce0e282c94a78d00fef2be5f48c12e5b462444ab",
+  "pageVersion": "sha256:78d990adf05eae341137535ed330b2e3411674b268f0f726d0a925fdd6376e1a",
   "claims": [
     {
       "id": "claim_dad02451aba54726820da2489dd6d138",
@@ -9,16 +9,6 @@
         {
           "resource": "repo://AGENTS.md",
           "version": "repo-file-v1:sha256:6bd54735da82f5301cfc4cfaaf20f264af55ac80522c335269c74e004a18b58a"
-        }
-      ]
-    },
-    {
-      "id": "claim_17bdba93a1104130b349cb6491531625",
-      "statement": "提交前门禁与 CI 等价：cargo fmt --check、cargo clippy -D warnings、cargo test --workspace；改过页面时加 wiki-ver --check 与 wiki-consistency。",
-      "evidence": [
-        {
-          "resource": "repo://.github/workflows/check.yml",
-          "version": "repo-file-v1:sha256:f70f4f0c6cf409c940bf970ac32c0eab3b3c430111abb894a209adedfeacc2d0"
         }
       ]
     },
@@ -63,12 +53,22 @@
       ]
     },
     {
-      "id": "claim_0389c040beef43ceaccfa62f373416cf",
-      "statement": "仓内文档面门禁只有两个脚本：scripts/wiki-ver.sh 与 scripts/wiki-consistency.sh，没有额外的文件长度脚本。",
+      "id": "claim_df6bf7bf89c24a6193341890b9291352",
+      "statement": "提交前门禁与 CI 的 `rust` job 等价：cargo fmt --check、cargo clippy -D warnings、cargo test --workspace、参考包三件套（selftest / golden / image），改过页面时加 wiki-ver --check 与 wiki-consistency。",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/check.yml",
+          "version": "repo-file-v1:sha256:91bd290dc1740c4f6120b588e41f0485f5f5c208649037a4473f1766f2141ae3"
+        }
+      ]
+    },
+    {
+      "id": "claim_d3c2c0ca82c04518828b4052b650ec03",
+      "statement": "仓内文档面门禁只有两个脚本：scripts/wiki-ver.sh（账本与页内链接）与 scripts/wiki-consistency.sh（全库链接、AGENTS 预算、claims 证据）；文件长度检查不在仓内，靠提交前 `wc -l` 一行命令。",
       "evidence": [
         {
           "resource": "repo://scripts/wiki-consistency.sh",
-          "version": "repo-file-v1:sha256:aec0a2205f2354e262e21367df60f85a9a5cb4edf3bd147bb9c84d378ded209e"
+          "version": "repo-file-v1:sha256:8fbb3b718c5244bade13a897cb70d786a65ff45bd92e4ee6d93bd0c05e453d2a"
         },
         {
           "resource": "repo://scripts/wiki-ver.sh",
@@ -79,6 +79,6 @@
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-26T07:10:30.723Z"
+    "at": "2026-11-26T17:33:41.429Z"
   }
 }

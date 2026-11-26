@@ -4,7 +4,7 @@ title: "知识库治理 — 权威、生命周期、账本与维护义务"
 openwiki_generated: true
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-26T07:10:30.723Z
+    at: 2026-11-26T17:33:41.429Z
 sources:
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
