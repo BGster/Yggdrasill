@@ -9,7 +9,7 @@
 //     3. `hello` 错指纹 → 校验 `E_PACK` 并从中提取真实 `pack_hash`；
 //     4. `hello` 对指纹 → 校验 `ready`；
 //     5. 跑 `packs/example/golden.json` 指定的 seed / ticks：
-//        a) 通过 `open` 把 tick-0 快照的 `rng_seed` 对齐到 `golden.seed`（重算 FNV-1a 64 尾摘要），
+//        a) 握手时把 `golden.seed` 作为 `hello.seed` 交给内核（创世重播），
 //           再逐 tick 发 `step{ticks:1,dt:1}`，逐条核对 `events.hash` == `golden.hashes[i]`，
 //           同时核对每步回执第二帧是 `delta`；
 //        b) 再发一条完整 `replay` 帧（带 `golden.seed` 与全部 50 帧哈希）校验 `replay_result.ok === true`；
@@ -37,9 +37,6 @@ const SMOKE_IMAGE = {
 };
 
 const ZERO_HASH = "0".repeat(64);
-const FNV_OFFSET = 0xcbf29ce484222325n;
-const FNV_PRIME = 0x100000001b3n;
-const U64_MASK = 0xffffffffffffffffn;
 
 function parseArgs(argv) {
   let smoke = false;
@@ -107,8 +104,12 @@ async function loadImageBytes(imagePath) {
   return new Uint8Array(await readFile(imagePath));
 }
 
-/** 握手两步：错指纹拿真实 `pack_hash`，再用真实 `pack_hash` 换回 `ready`。 */
-function handshake(session, packId) {
+/**
+ * 握手两步：错指纹拿真实 `pack_hash`，再用真实 `pack_hash` 换回 `ready`。
+ * `seed` 是创世重播的种子：缺省时内核沿用默认种子；给了就在进入 ready 之前
+ * 按该种子重建干净世界谱系（`hello.seed`，见 `crates/ygg-host/src/proto.rs`）。
+ */
+function handshake(session, packId, seed) {
   const badReply = parseFramesPreservingHash(
     session.handle(
       JSON.stringify({
@@ -137,6 +138,7 @@ function handshake(session, packId) {
         codec: "json",
         pack_id: packId,
         pack_hash: packHash,
+        ...(seed !== undefined ? { seed } : {}),
       }),
     ),
   );
@@ -144,35 +146,6 @@ function handshake(session, packId) {
     throw new Error(`对指纹 hello 期望单帧 ready，实际收到：${JSON.stringify(readyReply)}`);
   }
   return { packHash, ready: readyReply[0] };
-}
-
-/**
- * 覆写 tick-0 世界帧里的 `rng_seed` 并重算尾 8 字节 FNV-1a 64 摘要。
- * 帧布局定义在 `crates/ygg-sim/src/snapshot.rs`（magic 8B | fmt 2B | flags 2B |
- * tick 8B | next_entity 8B | comp_table | res_table | rng_seed 8B | ... | digest 8B）。
- */
-function reseedSnapshot(snapshotBytes, seed) {
-  const bytes = new Uint8Array(snapshotBytes);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let off = 8 + 2 + 2 + 8 + 8;
-  const compCount = view.getUint32(off, true);
-  off += 4;
-  for (let i = 0; i < compCount; i += 1) {
-    const nameLen = view.getUint16(off, true);
-    off += 2 + nameLen + 1 + 1;
-  }
-  const resCount = view.getUint32(off, true);
-  off += 4 + resCount * 16;
-
-  view.setBigUint64(off, BigInt(seed), true);
-
-  let hash = FNV_OFFSET;
-  const payloadEnd = bytes.length - 8;
-  for (let i = 0; i < payloadEnd; i += 1) {
-    hash = ((hash ^ BigInt(bytes[i])) * FNV_PRIME) & U64_MASK;
-  }
-  view.setBigUint64(payloadEnd, hash, true);
-  return bytes;
 }
 
 async function main() {
@@ -187,7 +160,7 @@ async function main() {
     import(pathToFileURL(GLUE_PATH).href),
     readFile(WASM_PATH),
   ]);
-  initSync(wasmBytes);
+  initSync({ module: wasmBytes });
 
   if (smoke) {
     const smokeBytes = new TextEncoder().encode(JSON.stringify(SMOKE_IMAGE));
@@ -210,20 +183,9 @@ async function main() {
   }
 
   const session = new YggSession(imageBytes);
-  const { packHash, ready } = handshake(session, "ygg:example");
-
-  // 把 tick-0 快照的 rng_seed 对齐到 golden.seed，通过协议 `open` 帧恢复后逐 tick 步进。
-  const reseeded = reseedSnapshot(session.snapshot(), seed);
-  const openReply = parseFramesPreservingHash(
-    session.handle(
-      JSON.stringify({
-        type: "open",
-        bytes: Buffer.from(reseeded).toString("base64"),
-      }),
-    ),
-  );
-  if (openReply.length !== 1 || openReply[0].type !== "ready" || openReply[0].tick !== 0) {
-    throw new Error(`open 对齐种子失败：${JSON.stringify(openReply)}`);
+  const { packHash, ready } = handshake(session, "ygg:example", seed);
+  if (ready.tick !== 0) {
+    throw new Error(`创世重播后世界应停在 tick 0，实际 tick=${ready.tick}`);
   }
 
   console.log(

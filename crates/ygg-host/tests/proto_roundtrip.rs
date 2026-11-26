@@ -200,3 +200,57 @@ fn handshake_versions_are_judged_at_decode() {
 
     assert!(ygg_host::proto::decode(&hello("ygg/1", "json", &hash)).is_ok());
 }
+
+/// `hello.seed`（创世种子）是**可选**的：字段不在 = 沿用内核默认种子；显式给出则
+/// 往返逐字节稳定。四种坏形状一律在解码期拒为 `E_PROTOCOL`。
+#[test]
+fn hello_seed_is_optional_and_strictly_typed() {
+    let hash = "0".repeat(64);
+    let bare = format!(
+        r#"{{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"{hash}"}}"#
+    );
+
+    // 缺省：解得出来，回写时也不长出 `seed` 这一格。
+    let plain = ygg_host::proto::decode(&bare).expect("缺省 seed 应可解");
+    assert_eq!(
+        ygg_host::proto::encode(&plain).expect("序列化应成功"),
+        bare,
+        "缺省的 seed 不许在线上留痕"
+    );
+
+    // 显式给出：往返逐字节稳定。
+    let seeded = round_trip(&Message::Hello {
+        protocol: "ygg/1".to_owned(),
+        codec: "json".to_owned(),
+        pack_id: "ygg:demo".to_owned(),
+        pack_hash: hash.clone(),
+        seed: Some(24301),
+    });
+    assert!(
+        seeded.contains(r#""seed":24301"#),
+        "种子必须在线上：{seeded}"
+    );
+
+    // 显式 null 不是缺省；浮点 / 负数 / 越界同理。
+    for bad in [
+        format!(
+            r#"{{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"{hash}","seed":null}}"#
+        ),
+        format!(
+            r#"{{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"{hash}","seed":1.0}}"#
+        ),
+        format!(
+            r#"{{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"{hash}","seed":-1}}"#
+        ),
+        format!(
+            r#"{{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"{hash}","seed":18446744073709551616}}"#
+        ),
+    ] {
+        let err = ygg_host::proto::decode(&bad).unwrap_err();
+        assert_eq!(
+            err.code,
+            ErrorCode::EProtocol,
+            "坏 seed 应被拒：{bad}：{err}"
+        );
+    }
+}

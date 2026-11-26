@@ -31,6 +31,30 @@ fn loaded() -> Loaded {
     Loaded::from_bundle(&ModBundle::in_memory(PACK)).expect("内存包应装载成功")
 }
 
+/// 带随机出口的包：世界哈希随种子变（没有随机出口就测不出「换谱系」）。
+///
+/// `ctx.rng` 必须先取再写：`ctx.each_mut` 期间上下文槽已被占，此时再取随机会撞借用。
+const RANDOM_PACK: &str = r#"
+world.component{ name = "hp", kind = "i64" }
+world.system{
+  name = "roll",
+  stage = "rules",
+  reads = { "hp" },
+  writes = { "hp" },
+  run = function(dt, ctx)
+    local r = ctx.rng("roll")
+    ctx.each_mut({ "hp" }, function(id, hp)
+      return hp + r
+    end)
+  end,
+}
+world.seal()
+"#;
+
+fn random_loaded() -> Loaded {
+    Loaded::from_bundle(&ModBundle::in_memory(RANDOM_PACK)).expect("内存包应装载成功")
+}
+
 /// 已握手会话（顺带断言 `ready` 的静态面：sealed / 组件表 / 系统表）。
 fn session() -> Session {
     let loaded = loaded();
@@ -70,7 +94,29 @@ fn hello(pack_hash: &str) -> Message {
         codec: CODEC.to_string(),
         pack_id: "session-test".to_string(),
         pack_hash: pack_hash.to_string(),
+        seed: None,
     }
+}
+
+/// 带创世种子的握手（种子在握手时定谱系，之后不能再改）。
+fn hello_seeded(pack_hash: &str, seed: u64) -> Message {
+    Message::Hello {
+        protocol: PROTOCOL.to_string(),
+        codec: CODEC.to_string(),
+        pack_id: "session-test".to_string(),
+        pack_hash: pack_hash.to_string(),
+        seed: Some(seed),
+    }
+}
+
+/// 内核当前种子（谱系的唯一随机源入口）。
+fn kernel_seed(session: &Session) -> u64 {
+    session
+        .loaded()
+        .sim()
+        .as_ref()
+        .map(|sim| sim.seed())
+        .expect("内核已挂载")
 }
 
 fn hp(values: &[i64]) -> ComponentValues {
@@ -145,6 +191,93 @@ fn wrong_pack_hash_is_rejected_and_state_stays_fresh() {
         matches!(session.handle(hello(&real)), Message::Ready { .. }),
         "改正后应能重试握手"
     );
+}
+
+/// `hello.seed` 是创世种子：它定的是**内核的随机流源头**。
+#[test]
+fn seed_becomes_the_kernel_seed_and_absent_seed_keeps_the_default() {
+    // 不给种子 ⇒ 沿用内核默认种子（老宿主一行不改，行为也不变）。
+    let loaded = random_loaded();
+    let pack_hash = loaded.manifest_hash().to_string();
+    let mut session = Session::new(loaded);
+    assert!(matches!(
+        session.handle(hello(&pack_hash)),
+        Message::Ready { .. }
+    ));
+    assert_eq!(kernel_seed(&session), ygg_sandbox::inject::KERNEL_RNG_SEED);
+
+    // 给种子 ⇒ 内核种子就是那颗种子。
+    let loaded = random_loaded();
+    let pack_hash = loaded.manifest_hash().to_string();
+    let mut session = Session::new(loaded);
+    assert!(matches!(
+        session.handle(hello_seeded(&pack_hash, 4242)),
+        Message::Ready { .. }
+    ));
+    assert_eq!(kernel_seed(&session), 4242);
+}
+
+/// 换种子 = 换一条世界谱系：同种子同谱系，不同种子不同谱系。
+#[test]
+fn seed_rebuilds_a_clean_world_lineage() {
+    // 同种子 ⇒ 同一 tick 的哈希逐字相同。
+    assert_eq!(rolled_hash(Some(4242)), rolled_hash(Some(4242)));
+    // 不同种子 ⇒ 谱系分岔。
+    assert_ne!(rolled_hash(Some(4242)), rolled_hash(Some(4243)));
+    // 不给种子 ⇒ 两条默认会话彼此相同（默认种子也是一颗确定的种子）。
+    assert_eq!(rolled_hash(None), rolled_hash(None));
+}
+
+/// 指纹不符时**不许**换谱系：握手被拒 ⇒ 世界原封不动，种子也没换。
+#[test]
+fn wrong_pack_hash_with_seed_stays_fresh_and_keeps_the_default_seed() {
+    let loaded = random_loaded();
+    let real = loaded.manifest_hash().to_string();
+    let mut session = Session::new(loaded);
+    let wrong = "0".repeat(real.len());
+    match session.handle(hello_seeded(&wrong, 4242)) {
+        Message::Error(err) => assert_eq!(err.code, ErrorCode::EPack, "{err:?}"),
+        other => panic!("指纹不符应得 E_PACK，得到 {other:?}"),
+    }
+    assert_eq!(session.state(), State::Fresh, "指纹不符不使会话可用");
+    assert_eq!(
+        kernel_seed(&session),
+        ygg_sandbox::inject::KERNEL_RNG_SEED,
+        "指纹不符不许换谱系"
+    );
+    // 改正后重试（带种子）⇒ 谱系换成那颗种子。
+    assert!(matches!(
+        session.handle(hello_seeded(&real, 4242)),
+        Message::Ready { .. }
+    ));
+    assert_eq!(kernel_seed(&session), 4242);
+}
+
+/// 一条谱系跑到 tick 2，取 (tick, hash)。
+fn rolled_hash(seed: Option<u64>) -> (u64, u64) {
+    let loaded = random_loaded();
+    let pack_hash = loaded.manifest_hash().to_string();
+    let mut session = Session::new(loaded);
+    let reply = session.handle(match seed {
+        Some(seed) => hello_seeded(&pack_hash, seed),
+        None => hello(&pack_hash),
+    });
+    assert!(
+        matches!(reply, Message::Ready { .. }),
+        "握手应得 ready，得到 {reply:?}"
+    );
+    session.handle(Message::Submit {
+        ops: vec![spawn(1, &[0])],
+    });
+    session.handle_all(Message::Step { ticks: 2, dt: 1 });
+    let tick = session
+        .loaded()
+        .sim()
+        .as_ref()
+        .map(|sim| sim.tick())
+        .expect("内核已挂载");
+    let hash = session.loaded().hash().expect("内核已挂载");
+    (tick, hash)
 }
 
 #[test]

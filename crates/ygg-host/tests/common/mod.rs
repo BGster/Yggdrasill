@@ -16,6 +16,7 @@ fn message_samples() -> Vec<Message> {
             codec: CODEC.to_owned(),
             pack_id: "ygg:draughts".to_owned(),
             pack_hash: "0".repeat(64),
+            seed: None,
         },
         Message::Ready {
             tick: 0,

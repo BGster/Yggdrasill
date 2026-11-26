@@ -243,6 +243,10 @@
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$",
                     "description": "包内容摘要（与 manifest 的内容寻址同口径）。不符即拒：防 A 包存档进 B 包。"
+                },
+                "seed": {
+                    "$ref": "#/$defs/u64",
+                    "description": "可选：创世随机流种子；缺省沿用内核默认种子，显式提供则在进入 ready 前按该种子重建干净世界谱系。"
                 }
             }
         },

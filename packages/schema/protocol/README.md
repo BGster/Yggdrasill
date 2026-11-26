@@ -40,9 +40,14 @@
 | `codec` | `const "json"` | v1 只有 JSON；CBOR 走同一套协商（计划稿 §0 决策 2） |
 | `pack_id` | string | 包 id（`ygg:…` 或包名） |
 | `pack_hash` | 64 位小写十六进制 | 包内容摘要，与 `manifest.json` 的内容寻址同口径 |
+| `seed` | u64（可选） | 创世随机流种子；缺省沿用内核默认种子，显式提供则在进入 `ready` 前按该种子重建干净世界谱系 |
 
 `pack_hash` **格式**不合 → `E_PROTOCOL`（写错了字节）；格式合但与本地包不符 → `E_PACK`
 （拿错了包）。这道闸防的是「A 包的存档读进 B 包」。
+
+`seed` **不在** `required` 里：字段不在 = 沿用默认种子（老宿主一行不改）。显式 `null`
+不是缺省而是错（与 `replay_result.first_bad_tick` 同口径）；浮点 / 负数 / 超 `u64` 一律
+解码期拒为 `E_PROTOCOL`。
 
 ### `ready` K→H
 

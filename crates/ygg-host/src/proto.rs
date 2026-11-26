@@ -456,6 +456,20 @@ pub enum Message {
         /// 格式不合在解码处即拒）。
         #[serde(deserialize_with = "strict::sha256_hex")]
         pack_hash: String,
+        /// 可选：创世随机流种子。
+        ///
+        /// 缺省（字段不在）沿用内核默认种子；显式给出则进入 `ready` **之前**按该
+        /// 种子重建一条干净世界谱系（创世重播）。只在 `Fresh` 态有意义——握手是
+        /// 唯一的 `Fresh → Ready` 边，`Ready` 之后再发 `hello` 照旧被拒。
+        ///
+        /// 显式 `null` 不是缺省而是错（`strict::opt_u64`），与 schema 的 `integer`
+        /// 口径一致：浮点 / 负数 / 超 `u64` 一律在解码期拒为 `E_PROTOCOL`。
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "strict::opt_u64"
+        )]
+        seed: Option<u64>,
     },
     /// K→H：世界自述；`open` 成功后同样回这一条（带新的 tick / hash）。
     Ready {

@@ -135,7 +135,8 @@ impl Session {
                     codec,
                     pack_id,
                     pack_hash,
-                } => self.hello(&protocol, &codec, &pack_id, &pack_hash),
+                    seed,
+                } => self.hello(&protocol, &codec, &pack_id, &pack_hash, seed),
                 other => vec![error(
                     ErrorCode::EProtocol,
                     format!("未握手：先发送 hello 再发 {}", name_of(&other)),
@@ -190,12 +191,15 @@ impl Session {
     // ---------------------------------------------------------------- 门与回执
 
     /// 握手：对账协议名 / 编码 / 声明指纹；不符**不改变状态**（仍可重试握手）。
+    /// `seed` 是可选的**创世种子**：`None` 沿用内核默认种子；`Some(seed)` 在对账全过后、
+    /// 进入 `Ready` 前按该种子重建一条干净世界谱系，重建失败不改变状态（仍可重试握手）。
     fn hello(
         &mut self,
         protocol: &str,
         codec: &str,
         pack_id: &str,
         pack_hash: &str,
+        seed: Option<u64>,
     ) -> Vec<Message> {
         // `proto` 的严格词面已在解码期拒绝这两项；此处仍判定一次——会话可能被
         // 进程内调用方手搓消息喂进来，状态门不能依赖「上游一定会校验」。
@@ -220,6 +224,13 @@ impl Session {
                     self.loaded.manifest_hash()
                 ),
             )];
+        }
+        // 创世重播：对账全过之后才换种子——换谱系是一次装载，失败要能重试握手。
+        if let Some(seed) = seed {
+            match self.loaded.fork_with_seed(seed) {
+                Ok(loaded) => self.loaded = loaded,
+                Err(err) => return vec![error(load_code(&err), err.to_string())],
+            }
         }
         self.state = State::Ready;
         vec![self.ready()]

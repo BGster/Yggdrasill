@@ -43,6 +43,7 @@ fn handshake(loaded: Loaded, pack_id: &str) -> Session {
         codec: CODEC.to_owned(),
         pack_id: pack_id.to_owned(),
         pack_hash,
+        seed: None,
     });
     assert!(
         matches!(reply, Message::Ready { .. }),

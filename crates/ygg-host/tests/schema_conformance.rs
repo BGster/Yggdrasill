@@ -158,7 +158,7 @@ fn walk_refs(value: &serde_json::Value, visit: &mut impl FnMut(&str)) {
 #[test]
 fn schema_and_rust_reject_the_same_shape() {
     let set = set();
-    let cases: [(&str, &str, &str); 18] = [
+    let cases: [(&str, &str, &str); 21] = [
         (
             "未知 type",
             r#"{"type":"teleport","to":3}"#,
@@ -249,6 +249,21 @@ fn schema_and_rust_reject_the_same_shape() {
             r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"abc"}"#,
             r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000"}"#,
         ),
+        (
+            "hello 的 seed 是 null",
+            r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":null}"#,
+            r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":24301}"#,
+        ),
+        (
+            "hello 的 seed 是负数",
+            r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":-1}"#,
+            r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":0}"#,
+        ),
+        (
+            "hello 的 seed 是小数",
+            r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":1.5}"#,
+            r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":1}"#,
+        ),
     ];
 
     for (label, broken, fixed) in cases {
@@ -267,6 +282,19 @@ fn schema_and_rust_reject_the_same_shape() {
     }
 }
 
+/// `hello.seed` 是**可选**的：字段不在（沿用默认种子）与显式给整数，两侧都得收下。
+#[test]
+fn hello_seed_is_optional_on_both_sides() {
+    let set = set();
+    let bare = r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000"}"#;
+    accept(&set, "hello 不带 seed", bare);
+    assert!(decode(bare).is_ok(), "Rust 侧也必须收下不带 seed 的 hello");
+
+    let seeded = r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":24301}"#;
+    accept(&set, "hello 带 seed", seeded);
+    assert!(decode(seeded).is_ok(), "Rust 侧也必须收下带 seed 的 hello");
+}
+
 /// 已知不对称之一：JSON Schema 的 `integer` 指「数值上无小数部分」，`1.0` 算整数；
 /// `serde_json` 记得的是 f64 形态，所以 crate 边界能把它拒在门外。这一格只能由边界守。
 #[test]
@@ -282,5 +310,16 @@ fn schema_cannot_tell_one_from_one_point_zero() {
     assert!(
         decode(r#"{"type":"step","ticks":1.0,"dt":16}"#).is_err(),
         "crate 边界必须拒 1.0"
+    );
+    // `hello.seed` 同形：schema 收 1.0，crate 边界拒。
+    accept(
+        &set,
+        "seed=1.0 被 schema 收下",
+        r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":1.0}"#,
+    );
+    assert!(
+        decode(r#"{"type":"hello","protocol":"ygg/1","codec":"json","pack_id":"ygg:demo","pack_hash":"0000000000000000000000000000000000000000000000000000000000000000","seed":1.0}"#)
+            .is_err(),
+        "crate 边界必须拒 seed=1.0"
     );
 }
