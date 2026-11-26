@@ -7,8 +7,7 @@
 /// 对齐：字节串进（原始字节，不要求 UTF-8）、64 位小写 hex 出——不用「返回
 /// raw 32 字节」的反方案，那会让包侧还得用 Lua 补 hex，热路径白下沉。
 ///
-/// 实现复用 `sha2`（RustCrypto，纯 Rust 无 C 依赖，`ygg-store` 的
-/// `artifact.rs::sha256_hex` 同 crate 先例），hex 编码复用 [`crate::hash::
+/// 实现复用 `sha2`（RustCrypto，纯 Rust 无 C 依赖），hex 编码复用 [`crate::hash::
 /// hex_sha256`]——crate 内单一 hex 源，不引入第二个编码器。**批式铁律**：整串
 /// 进出，不做 streaming / incremental。
 ///

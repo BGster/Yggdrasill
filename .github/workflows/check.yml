@@ -11,9 +11,8 @@
 #   - wasm.build / wasm.determinism：需 WASI SDK + wasm-bindgen CLI，成本高，
 #     由 deploy-pages 的 build job 与本地门禁承担（其产物即 wasm 实例）。
 #
-# 另带两条**结构守卫**（不属于 playbook `gates` 章的门禁命令）：
-# ① ygg-store 必须留在 dev-dependencies（wasm/lint 的依赖面保持干净）；
-# ② serde_json 不得开 `preserve_order`（字节键序即线格式）。
+# 另带一条**结构守卫**（不属于 playbook `gates` 章的门禁命令）：
+# serde_json 不得开 `preserve_order`（字节键序即线格式）。
 name: check
 
 on:
@@ -57,23 +56,13 @@ jobs:
       - name: cargo test（workspace）
         run: cargo test --workspace
 
-      - name: "Guard — wasm/lint 不得间接依赖 store"
-        run: |
-          fail=0
-          for pkg in ygg-wasm ygg-lint; do
-            if cargo tree -p "$pkg" -e normal | grep -Eq 'ygg-store v'; then
-              echo "::error::$pkg must not depend on ygg-store" >&2
-              fail=1
-            fi
-          done
-          exit "$fail"
-
       # 字节兼容的反向门禁：一旦给 serde_json 打开
       # preserve_order，键序就不再是字典序（语义相等、
       # 字节全变）。
       - name: "Guard — 不得启用 preserve_order"
         run: |
-          if cargo tree -p ygg-store -e features | grep -q preserve_order; then
+          if cargo tree -e features --workspace |
+             grep -q 'serde_json feature "preserve_order"'; then
             echo "::error::preserve_order breaks byte key order" >&2
             exit 1
           fi

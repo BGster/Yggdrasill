@@ -8,7 +8,6 @@ members = [
     "crates/ygg-sandbox",
     "crates/ygg-lint",
     "crates/ygg-wasm",
-    "crates/ygg-store",
     "crates/ygg-sim",
     "crates/ygg-host",
     "crates/ygg-capi",
@@ -23,22 +22,14 @@ edition = "2021"
 # crates/ygg-modules/src/lib.rs 头注——lint 必须能在不依赖 ygg-sandbox
 # （⇒ 不依赖 mlua / ygg-schema / 内核 host 面）的前提下复用同一份模块判定。
 #
-# members 一次成型的第二次受控例外：`ygg-store` 是持久化面的**端口下沉**
-# （`RunStore` trait + JSON 后端），不是第 N 个业务 crate。理由：「状态事实」
-# 必须先收敛成端口，否则每个消费方只能各自复制一遍读写协议。它刻意**只**承接
-# 状态事实（run.json / settlement.json / coordination.* 都留在别处），依赖面仅
-# serde_json，不被任何业务 crate 依赖（ygg-sandbox 只在 dev-dependencies 里引用，
-# 故 wasm/lint 的结构面不受影响）。
-#
-# members 一次成型的第三次受控例外：`ygg-sim` 是 Tier 1 原生模拟内核的**新载体**，
+# members 一次成型的第二次受控例外：`ygg-sim` 是 Tier 1 原生模拟内核的**新载体**，
 # 就是 `openwiki/contracts/kernel/sim-kernel.md` §0 表格写的那个 crate（不是第 N 个业务 crate）。
 # 它不能挂在既有 crate 下：`ygg-core` 的实体存储是行式且 `Value::Float` 是一等变体——
-# 恰是 Tier 1 明令禁止的两件事（列式 SoA、禁浮点）；`ygg-store` 是持久化端口（Tier 1 零 IO）；
-# `ygg-sandbox` 拥有 mlua（Tier 1 必须无 VM 可编译可基准）。依赖纯度：零内部依赖、
+# 恰是 Tier 1 明令禁止的两件事（列式 SoA、禁浮点）；`ygg-sandbox` 拥有 mlua（Tier 1 必须无 VM 可编译可基准）。依赖纯度：零内部依赖、
 # 运行时依赖仅 thiserror，且必须能编到 wasm32（经 ygg-wasm → ygg-sandbox → ygg-sim）。
 # 理由与取证见 sim-kernel.md §1 与 topology.md 不变量 5。
 #
-# members 一次成型的第四次受控例外：`ygg-host` 是 `ygg/1` 线协议的**信封载体**
+# members 一次成型的第三次受控例外：`ygg-host` 是 `ygg/1` 线协议的**信封载体**
 # （artifacts/w2-m3-protocol-plan.md §0 决策 4：「协议层不持有世界」）。它不是第 N 个
 # 业务 crate，也不能挂在既有 crate 下：`ygg-sim` 明令禁 serde（快照是自写规范二进制），
 # 而信封恰恰只有 serde；`ygg-sandbox` 拥有 mlua（信封必须能被宿主侧非 Rust 语言手写）；
@@ -46,7 +37,7 @@ edition = "2021"
 # serde / serde_json / thiserror + 两个内核 crate（`session` 模块要持有 `Loaded`），
 # M3.3 起被两条绑定依赖：`ygg-wasm`（WASM）与 `ygg-capi`（C ABI）。
 #
-# members 一次成型的第五次受控例外：`ygg-capi` 是 ygg/1 协议的 **C ABI 载体**
+# members 一次成型的第四次受控例外：`ygg-capi` 是 ygg/1 协议的 **C ABI 载体**
 # （artifacts/w2-m3-protocol-plan.md §3 步 3），不是第 N 个业务 crate。它不能挂在
 # `ygg-wasm` 下：crate-type 与链接面完全不同（`cdylib`/`staticlib`，无 wasm-bindgen），
 # 且 C 宿主不该为了用 C 面而被拉进一个 wasm 壳。依赖纯度：**只** `ygg-host`——镜像

@@ -45,9 +45,3 @@ ygg-sim = { path = "../ygg-sim" }
 # S12 填充：sha2（状态哈希——D-继承-5：状态哈希归 sandbox、内容寻址归 ygg-schema，
 # ygg-core 零哈希；状态哈希 = SHA-256(canonical_state_bytes)，D-继承-5 归位）。
 sha2 = "0.10"
-
-# r-store 填充：`ygg-store` 是持久化面的端口。
-# **必须留在 dev-dependencies**：examples 能见到 dev-deps，而 dev-deps **不向
-# 依赖者传播**——所以 ygg-wasm / ygg-lint 的依赖树里不会出现 ygg-store。
-[dev-dependencies]
-ygg-store = { path = "../ygg-store" }
