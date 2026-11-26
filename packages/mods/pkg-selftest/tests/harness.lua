@@ -47,7 +47,7 @@ end
 --
 -- 第三条是有意的严格：普通 Lua 的 mock 若吃表，role-skill 那类「表载荷」缺陷在这一面
 -- 就永远测不出来（真内核报 `unsupported payload type: table`）。真值面仍然是
--- `packages_sandbox.rs` 的用例 ①——这个替身只是在装载期给 `ygg.on` 一个落点。
+-- `pack_packages.rs` 的真沙箱用例——这个替身只是在装载期给 `ygg.on` 一个落点。
 
 local __ygg_handlers = {}
 local __ygg_narrated = {}

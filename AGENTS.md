@@ -42,8 +42,9 @@ which output is unverified; then wait for the user. Never back-fill the record f
 **1.8 Self-evolution has exactly two exits: this file (cold-start ruling) or the code (machine enforcement)** — no side
 scripts, no wrappers, no checkers shipped as patches; scripts may only perform read-only queries. Every evolution needs
 all three: the action blocked, the visible violation symptom, one runnable confirmation. New capability lands in
-`crates/ygg-*/` (kernel semantics) or `packages/libs/<name>/` (pure Lua over `world.*`) in the same commit as its
-contract, its tests and its perf numbers (`openwiki/contracts/packages/README.md`).
+`crates/ygg-*/` (kernel semantics) or `<pack-root>/<name>/` (pure Lua over `world.*`) in the same commit as its
+contract, its tests and its perf numbers (`openwiki/contracts/packages/README.md`). The in-repo `packages/libs`
+corpus retired in M2.5; a package capability now lands in the pack that consumes it, not in this repo.
 
 **1.9 No claim without its method — absence and counts included.** "Never existed" and "16 occurrences" are unproven
 until a method that could have returned the opposite produced them: run it, paste the output, name the method. An

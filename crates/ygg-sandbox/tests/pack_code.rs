@@ -50,10 +50,10 @@ fn code_section_is_optional_so_single_file_mods_need_no_migration() {
     // 旧 Mod 的 pack.json：没有 code 段 → None（走单文件路径，行为逐字节不变）。
     let legacy = json!({
         "schemaVersion": 1,
-        "entries": [{ "id": "ygg:scene/texts", "kind": "scene-texts",
-                      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-                      "path": "data/scenes.json" }],
-        "schemaFiles": ["schemas/scene-texts.json"]
+        "entries": [{ "id": "ygg:probe/state", "kind": "probe",
+                      "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
+                      "path": "data/probe.json" }],
+        "schemaFiles": ["schemas/probe.json"]
     });
     assert!(CodeSpec::parse(&legacy).expect("parse").is_none());
 

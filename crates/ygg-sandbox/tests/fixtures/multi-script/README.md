@@ -34,7 +34,7 @@ mod.lua（入口，不是模块）
 
 观测面（M1-E 起）：入口 chunk 把装配结果写进 `ygg.kv`，键名 `probe.*`
 （`trace` / `identity` / `nil` / `table` / `bump` / `stats` / `order` /
-`texts`），测试经 `Loaded::kv` 读回。模块体仍受 MOD_EFFECT 约束（顶层只导出），
+`data`），测试经 `Loaded::kv` 读回。模块体仍受 MOD_EFFECT 约束（顶层只导出），
 所以「装配 + 留痕」只能发生在入口。
 
 `pack.json` 的 `code.modules` 声明序（util → handlers → silent → shared）
@@ -44,12 +44,12 @@ mod.lua（入口，不是模块）
 
 | 文件 | 是否内容寻址 | 说明 |
 | --- | --- | --- |
-| `pack.json` | 否（声明面） | `entries` / `schemaFiles` / `code` / `agent` / `inboxRoutes` |
+| `pack.json` | 否（声明面） | `entries` / `schemaFiles` / `code` |
 | `manifest.json` | 否（清单本身） | `entries` 与 `code` 的 sha256 + byteLength |
 | `mod.lua` | 否（入口） | 宿主作为 Mod 源读取，不登记为模块 |
 | `src/*.lua` | 是（`code`） | 可 `require` 的模块 |
-| `data/scenes.json` | 是（`entries`） | 资源 |
-| `schemas/scene-texts.json` | 否（按 `$id` 注册） | 资源 schema |
+| `data/probe.json` | 是（`entries`） | 资源 |
+| `schemas/probe.json` | 否（按 `$id` 注册） | 资源 schema |
 | `data/config.json` | 否（宿主侧） | `drive` / `settlement`（agent 宿主直读，非内核资源） |
 
 改任何一个模块文件后必须重算 `manifest.json`（测试侧由

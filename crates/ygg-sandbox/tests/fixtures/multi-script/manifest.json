@@ -23,12 +23,12 @@
   ],
   "entries": [
     {
-      "byteLength": 441,
-      "id": "ygg:scene/texts",
-      "kind": "scene-texts",
-      "path": "data/scenes.json",
-      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "sha256": "5d2df9c03232e6151d912205a1944f11ee5ee99fb511a0986775fc531303de17"
+      "byteLength": 28,
+      "id": "ygg:probe/state",
+      "kind": "probe",
+      "path": "data/probe.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
+      "sha256": "04d00a61a043eb5e36f3b4df47aeb4df21e2512e947dc6a9003d824ae789ca28"
     }
   ],
   "schemaVersion": 1

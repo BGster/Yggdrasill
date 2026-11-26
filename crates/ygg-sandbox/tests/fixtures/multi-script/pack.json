@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "entries": [
     {
-      "id": "ygg:scene/texts",
-      "kind": "scene-texts",
-      "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-      "path": "data/scenes.json"
+      "id": "ygg:probe/state",
+      "kind": "probe",
+      "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
+      "path": "data/probe.json"
     }
   ],
-  "schemaFiles": ["schemas/scene-texts.json"],
+  "schemaFiles": ["schemas/probe.json"],
   "code": {
     "entry": "mod.lua",
     "modules": [

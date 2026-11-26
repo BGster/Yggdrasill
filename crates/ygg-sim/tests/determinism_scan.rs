@@ -370,40 +370,7 @@ fn section_keys(manifest: &str, section: &str) -> Vec<String> {
     keys
 }
 
-/// 类型词汇单源：`AttrType::label()` 与 `packages/libs/entity/init.lua` 的四类型字面量逐字相同。
-///
-/// 这条让「同源形状」不再是口头承诺：改一侧即红（assetgen 的 `rng-not-copied` 同范式）。
-#[test]
-fn type_vocabulary_matches_entity_package() {
-    use ygg_sim::component::AttrType;
-
-    let entity_lua = crate_dir()
-        .parent()
-        .and_then(|crates| crates.parent())
-        .map(|root| root.join("packages/libs/entity/schema.lua"))
-        .expect("仓根可解析");
-    let text = std::fs::read_to_string(&entity_lua)
-        .unwrap_or_else(|err| panic!("读不到 {}：{err}", entity_lua.display()));
-    let mut checked = 0usize;
-    for ty in [
-        AttrType::Number { frac_bits: 32 },
-        AttrType::Str,
-        AttrType::Bool,
-        AttrType::Ref,
-        AttrType::Tag,
-    ] {
-        let label = ty.label();
-        let quoted = format!("\"{label}\"");
-        // `tag` 只在 Tier 1 有词汇（Tier 2 侧写作 `tags.<name>`），故只要求四类型对齐。
-        if ty == AttrType::Tag {
-            continue;
-        }
-        assert!(
-            text.contains(&quoted),
-            "entity/schema.lua 里找不到类型字面量 {quoted}（Tier 1 与 Tier 2 词汇已分叉）"
-        );
-        checked += 1;
-    }
-    println!("determinism_scan.vocab checked={checked} tag=Tier1-only hits=0");
-    assert_eq!(checked, 4);
-}
+// 类型词汇单源曾在这里钉住：`AttrType::label()` 与 entity 包的 Lua 字面量逐字相同
+// （`packages/libs/entity/schema.lua`，M2.5 随包层删除）。该保证随 Lua 侧消失而
+// 失去对照物——Tier 1 词汇现在只有一处真源（`AttrType::label()` 本身），故这条
+// 用例退役而不是改成自比。

@@ -1,42 +1,42 @@
 {
-    "code": [
+  "code": [
+    {
+      "byteLength": 396,
+      "path": "src/probe.lua",
+      "sha256": "fb14c46fa53d367ff9e7c2911b1a0f2f8dc871067553ba624e54cf3f2001bd78"
+    }
+  ],
+  "entries": [
+    {
+      "byteLength": 30,
+      "id": "ygg:probe/state",
+      "kind": "probe",
+      "path": "data/probe.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
+      "sha256": "c2a724581bffd8589c5f175a11d77d68d0da8f1482539405606766964613efdc"
+    }
+  ],
+  "packages": [
+    {
+      "files": [
         {
-            "byteLength": 396,
-            "path": "src/probe.lua",
-            "sha256": "fb14c46fa53d367ff9e7c2911b1a0f2f8dc871067553ba624e54cf3f2001bd78"
-        }
-    ],
-    "entries": [
+          "byteLength": 1163,
+          "path": "fixture/init.lua",
+          "sha256": "31bcba212196eb52a0b29e18921dd3efb52a82aa51b9d7df06ae27bbe859746c"
+        },
         {
-            "byteLength": 30,
-            "id": "ygg:probe/state",
-            "kind": "probe",
-            "path": "data/probe.json",
-            "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
-            "sha256": "c2a724581bffd8589c5f175a11d77d68d0da8f1482539405606766964613efdc"
-        }
-    ],
-    "packages": [
+          "byteLength": 147,
+          "path": "fixture/pkg.json",
+          "sha256": "b311b9f31438c33f37bbdc09de301afe4e560be3fd15704d57ff7d18aa90809e"
+        },
         {
-            "files": [
-                {
-                    "byteLength": 1163,
-                    "path": "fixture/init.lua",
-                    "sha256": "31bcba212196eb52a0b29e18921dd3efb52a82aa51b9d7df06ae27bbe859746c"
-                },
-                {
-                    "byteLength": 147,
-                    "path": "fixture/pkg.json",
-                    "sha256": "b311b9f31438c33f37bbdc09de301afe4e560be3fd15704d57ff7d18aa90809e"
-                },
-                {
-                    "byteLength": 574,
-                    "path": "fixture/words.lua",
-                    "sha256": "6129eb4d4287e1796cd26f3907d67450ae6c46d18f645c0bb8d26e6526a303c7"
-                }
-            ],
-            "id": "fixture"
+          "byteLength": 567,
+          "path": "fixture/words.lua",
+          "sha256": "697facd0f34ce90812ee48a0eee3956de070e4ca24e2c1c0bd76bda2f3f0f2e7"
         }
-    ],
-    "schemaVersion": 1
+      ],
+      "id": "fixture"
+    }
+  ],
+  "schemaVersion": 1
 }

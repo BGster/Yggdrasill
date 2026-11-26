@@ -1,7 +1,0 @@
-{
-    "schemaVersion": 1,
-    "name": "codec",
-    "version": "0.1.0",
-    "deps": [{ "id": "entity", "version": "0.1.0" }],
-    "contract": "openwiki/contracts/packages/codec.md"
-}

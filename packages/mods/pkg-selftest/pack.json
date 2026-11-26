@@ -11,30 +11,5 @@
     "schemaFiles": [
         "schemas/probe.json"
     ],
-    "packages": [
-        {
-            "id": "entity",
-            "version": "0.1.0"
-        },
-        {
-            "id": "codec",
-            "version": "0.1.0"
-        },
-        {
-            "id": "quest",
-            "version": "0.1.0"
-        },
-        {
-            "id": "dialogue",
-            "version": "0.1.0"
-        },
-        {
-            "id": "procgen",
-            "version": "0.1.0"
-        },
-        {
-            "id": "role-skill",
-            "version": "0.1.0"
-        }
-    ]
+    "packages": []
 }

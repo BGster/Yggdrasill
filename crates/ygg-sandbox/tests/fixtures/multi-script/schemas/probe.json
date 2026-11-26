@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yggdrasill.dev/schemas/v1/probe.json",
+  "title": "multi-script 夹具的资源探针",
+  "description": "资源面不是本夹具的被测面，只需要一个合法条目（`ygg.data` 纯读可达）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tag"],
+  "properties": {
+    "tag": { "type": "string", "minLength": 1 }
+  }
+}

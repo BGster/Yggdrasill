@@ -1,7 +1,0 @@
-{
-    "schemaVersion": 1,
-    "name": "dialogue",
-    "version": "0.1.0",
-    "deps": [{ "id": "quest", "version": "0.1.0" }],
-    "contract": "openwiki/contracts/packages/dialogue.md"
-}

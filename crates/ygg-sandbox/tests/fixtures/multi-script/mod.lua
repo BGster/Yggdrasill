@@ -14,7 +14,7 @@ local shared = require("src.shared") -- 同上（第三处 require 同一模块�
 local silent = require("src.silent") -- 无返回值 → 缓存 true
 local silent_again = require("src.silent") -- 重复 require 不得再执行
 
-local TEXTS = ygg.data("ygg:scene/texts")
+local DATA = ygg.data("ygg:probe/state")
 
 -- 次数与身份观测面。`probe.stats` 必须记在下面两次 `bump` 之前：它的口径是
 -- "装载完成、还没有人调用模块函数"时的计数。
@@ -77,4 +77,4 @@ ygg.kv.set("stage", "begin")
 ygg.kv.set("probe.kv", "stage=" .. tostring(ygg.kv.get("stage")))
 
 -- 资源面：`ygg.data` 是纯读，模块顶层也允许；这里再证一次入口读得到。
-ygg.kv.set("probe.texts", "scenes=" .. tostring(TEXTS.scenes ~= nil))
+ygg.kv.set("probe.data", "tag=" .. tostring(DATA.tag))

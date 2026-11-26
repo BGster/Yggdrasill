@@ -214,9 +214,12 @@ pub fn declared_modules() -> Vec<String> {
 
 // ───────────────────────── packages 面（r3） ─────────────────────────
 
-/// 入库夹具包目录（`<repo>/packages/libs/fixture`）。
+/// 入库夹具包目录（`<repo>/crates/ygg-sandbox/tests/fixtures/package-fixture`）。
+///
+/// 包根是外部输入（一个 Mod 可以消费任意包根），所以夹具源码住在测试树里，
+/// 由各用例复制到临时根的 `<R>/packages/libs/fixture` 下再装载。
 pub fn fixture_package_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/libs/fixture")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/package-fixture")
 }
 
 /// 入库 packages 夹具 Mod（`tests/fixtures/packages-mod`）。

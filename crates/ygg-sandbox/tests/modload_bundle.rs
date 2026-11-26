@@ -17,10 +17,10 @@ use ygg_sandbox::modload::{Loaded, ModBundle};
 
 /// 入口：顶层即 `require`（模块表必须在入口 chunk 之前就位）。
 const ENTRY: &str = r#"
-local T = ygg.data("ygg:scene/texts")
+local T = ygg.data("ygg:probe/state")
 local util = require("src.util")
 ygg.kv.set("stage", "begin")
-ygg.kv.set("scene", T.scenes.begin .. util.suffix)
+ygg.kv.set("scene", T.tag .. util.suffix)
 "#;
 
 /// 子模块：跨模块共享只经返回值（`local` 不跨 chunk）。
@@ -71,37 +71,22 @@ fn write_multi_file_mod(tag: &str) -> PathBuf {
     fs::create_dir_all(dir.join("schemas")).expect("mkdir schemas");
     fs::create_dir_all(dir.join("src")).expect("mkdir src");
 
-    let scenes = json!({
-        "scenes": { "begin": "起点" },
-        "endings": { "brave": "【结局X】勇闯。", "cautious": "【结局Y】折返。" },
-        "prompts": { "door": "推门吗？" },
-        "options": { "enter": "推门", "leave": "离开" },
-        "beats": {},
-        "tuning": {},
-    });
-    let scenes_text = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&scenes).expect("scenes")
-    );
-    fs::write(dir.join("data/scenes.json"), &scenes_text).expect("write scenes");
+    let probe = json!({ "tag": "multi-script" });
+    let probe_text = format!("{}\n", serde_json::to_string_pretty(&probe).expect("probe"));
+    fs::write(dir.join("data/probe.json"), &probe_text).expect("write probe");
 
     let schema = json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
+        "$id": "https://yggdrasill.dev/schemas/v1/probe.json",
         "type": "object",
         "additionalProperties": false,
-        "required": ["scenes", "endings", "prompts", "options", "beats", "tuning"],
+        "required": ["tag"],
         "properties": {
-            "scenes": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
-            "endings": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
-            "prompts": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
-            "options": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
-            "beats": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
-            "tuning": { "type": "object", "additionalProperties": { "type": "integer" } },
+            "tag": { "type": "string", "minLength": 1 },
         },
     });
     fs::write(
-        dir.join("schemas/scene-texts.json"),
+        dir.join("schemas/probe.json"),
         format!(
             "{}\n",
             serde_json::to_string_pretty(&schema).expect("schema")
@@ -114,12 +99,12 @@ fn write_multi_file_mod(tag: &str) -> PathBuf {
 
     let manifest = json!({
         "entries": [{
-            "byteLength": scenes_text.len(),
-            "id": "ygg:scene/texts",
-            "kind": "scene-texts",
-            "path": "data/scenes.json",
-            "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-            "sha256": sha256_hex(scenes_text.as_bytes()),
+            "byteLength": probe_text.len(),
+            "id": "ygg:probe/state",
+            "kind": "probe",
+            "path": "data/probe.json",
+            "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
+            "sha256": sha256_hex(probe_text.as_bytes()),
         }],
         // r2：模块的内容寻址（路径序；此处仅一条）。
         "code": [{
@@ -143,12 +128,12 @@ fn write_multi_file_mod(tag: &str) -> PathBuf {
         serde_json::to_string_pretty(&json!({
             "schemaVersion": 1,
             "entries": [{
-                "id": "ygg:scene/texts",
-                "kind": "scene-texts",
-                "schema": "https://yggdrasill.dev/schemas/v1/scene-texts.json",
-                "path": "data/scenes.json",
+                "id": "ygg:probe/state",
+                "kind": "probe",
+                "schema": "https://yggdrasill.dev/schemas/v1/probe.json",
+                "path": "data/probe.json",
             }],
-            "schemaFiles": ["schemas/scene-texts.json"],
+            "schemaFiles": ["schemas/probe.json"],
             // r2：多文件 Mod 的代码声明面（入口不是模块）。
             "code": { "entry": "mod.lua", "modules": ["src/util.lua"] },
         }))
