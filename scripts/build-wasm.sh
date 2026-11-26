@@ -160,6 +160,15 @@ if [ "$YGG_WASM_OPT" != "off" ]; then
 fi
 
 ls -la crates/ygg-wasm/pkg/
+
+# ---- 构建期冒烟：用真实产物验证胶水 + wasi-shim 内存绑定 + hello→ready ----
+if command -v node >/dev/null 2>&1; then
+  echo "==> [smoke] node scripts/wasm-lane.mjs --smoke"
+  node scripts/wasm-lane.mjs --smoke
+else
+  echo "skipped: node 缺失，跳过 scripts/wasm-lane.mjs --smoke"
+fi
+
 echo "==> done. wasm module built: crates/ygg-wasm/pkg/"
 
 
