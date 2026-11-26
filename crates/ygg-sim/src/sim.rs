@@ -145,6 +145,16 @@ impl Sim {
         self.seed
     }
 
+    /// 取一个 32 位随机数（流名进 `RngRegistry`，与系统内的 [`crate::system::SystemCtx::rng32`]
+    /// 同一条流：宿主面与系统面用同一个名字 ⇒ 同一个序列，不会出现第二条随机源）。
+    ///
+    /// 这是 `world.rng` 的宿主面入口：宿主在 tick 之外也要能取数（例如装载期决定初始分布），
+    /// 而**不能**在沙箱侧另起一个 `RngRegistry`——那份状态不进 `snapshot` / 回放，
+    /// 会让「同种子同操作序两次运行」在第一次取随机数时分成两条历史。
+    pub fn rng32(&mut self, stream: &str) -> u32 {
+        self.rng.next32(stream)
+    }
+
     /// 世界（只读）。
     pub fn world(&self) -> &ArchetypeStore {
         &self.state.world

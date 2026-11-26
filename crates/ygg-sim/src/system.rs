@@ -149,6 +149,12 @@ impl<'a> SystemCtx<'a> {
         self.dt
     }
 
+    /// 组件注册表（只读）。系统体要按组件名解析（Lua 面 `ctx.each` 一类）时用：
+    /// 名字与 id 的唯一权威在注册表里，沙箱侧另存一份「名字 → id」就是第二份 schema。
+    pub fn registry(&self) -> &Registry {
+        self.store.registry()
+    }
+
     /// 按组件集遍历匹配行并**写入**（`ArchetypeStore::for_each_mut` 的系统面）。
     ///
     /// 遍历序 = 桶下标升序 → 行号升序；闭包拿不到结构入口，结构变更只能走 `defer_*`。

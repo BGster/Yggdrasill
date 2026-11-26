@@ -58,6 +58,7 @@ mod narrate;
 mod selector;
 mod sim;
 mod value;
+mod world;
 
 pub use entity::*;
 pub use entity_decode::*;
@@ -66,6 +67,8 @@ use narrate::*;
 pub use selector::*;
 pub use sim::*;
 use value::*;
+use world::install_world;
+pub use world::*;
 
 /// 宿主相位：`ygg.sim.*` 仅在转换期（`Phase::Transition`）可写。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +121,8 @@ pub struct HostState {
     pre_choice_emits: u64,
     /// 本次 dispatch 的人读警告（D1；至多一条，首个胜出，驱动 drain 后清空）。
     warning: Option<String>,
+    /// `world` 面的宿主侧状态（kind 表 + 日志环；M1-C）。
+    world: WorldState,
 }
 
 /// 宿主 API 的 Rust 侧控制柄：seal / 注册进注册表。
@@ -147,6 +152,7 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
         },
         pre_choice_emits: 0,
         warning: None,
+        world: WorldState::default(),
     }));
 
     let ygg: Table = lua.globals().raw_get("ygg")?;
@@ -159,6 +165,8 @@ pub fn install(lua: &Lua, handles: HostHandles) -> Result<HostApi, Error> {
     // `ygg.codec.*`（Tier 2 pkg.codec 的原生加速面；契约 lua-api.md §3.1.4）。
     // 无状态、无实例，所以没有 `set_*` 注入面，也不需要 CLI 激活。
     crate::codec_face::install(lua)?;
+    // `world.*`（M1-C）：须在 `ygg.kv` 之后——`world.kv` 直接复用那张表。
+    install_world(lua, &state)?;
 
     Ok(HostApi {
         lua: lua.clone(),
@@ -207,6 +215,15 @@ impl HostApi {
     /// 每次 dispatch 至多一条，信封仅在非空时加 `warnings` 键）。
     pub fn take_dispatch_warning(&self) -> Option<String> {
         self.state.borrow_mut().warning.take()
+    }
+
+    /// 取走 `world.log` 累积的日志行（M1-C；环形缓冲，满则丢最旧）。
+    ///
+    /// 只由宿主 drain：日志不进叙述流、不进事件流（混进去会让「输出 = 状态」
+    /// 的对账多出一类噪声）。
+    pub fn take_world_log(&self) -> Vec<String> {
+        let mut state = self.state.borrow_mut();
+        state.world.take_logs()
     }
 
     /// 装载期收集的事件名（按注册序；诊断面）。

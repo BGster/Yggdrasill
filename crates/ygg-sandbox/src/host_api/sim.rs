@@ -7,7 +7,7 @@ use std::rc::Rc;
 /// （依赖 build 创建的 `ygg` 占位表；inject 之后再装本面不冲突——
 /// 各自 raw_set 不同成员）。
 /// 未挂载时的统一表述（码在首段，与 `YGG-FS-UNMOUNTED` 同一处置）。
-fn sim_unmounted(what: &str) -> String {
+pub(super) fn sim_unmounted(what: &str) -> String {
     format!(
         "{}: 宿主未注入模拟内核，`{what}` 不可用（注入面见 `KernelFacade::set_sim`）",
         SIM_UNMOUNTED
@@ -24,7 +24,7 @@ pub const SIM_FIXED: &str = "YGG-SIM-FIXED";
 /// 这是 Tier 2 双精度与 Tier 1 定点之间唯一的闸门：静默取整会把「调用方算错了」变成
 /// 「内核算错了」，而后者无法在回放证据里查出来。上限 2^53 是双精度可精确表示的整数边界
 /// （超过它「值上等于整数」这个判断本身就不成立了）。
-fn sim_fixed_arg(value: LuaValue, what: &str) -> Result<i64, Error> {
+pub(super) fn sim_fixed_arg(value: LuaValue, what: &str) -> Result<i64, Error> {
     const MAX_EXACT: f64 = 9_007_199_254_740_992.0;
     match value {
         LuaValue::Integer(v) => Ok(v),
