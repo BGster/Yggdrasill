@@ -471,6 +471,9 @@ impl Sandbox {
         // 借用在整个循环里不放：这是 `WORLD_BUSY` 的物理来源。
         let mut changed: Vec<(EntityId, ComponentId)> = Vec::new();
         for _ in 0..ticks {
+            // 预算是「一次宿主入口」的上限，不是沙箱生命周期的累计配额：不重置的
+            // 话，同一世界会因宿主切多 tick 还是少 tick 而崩在不同 tick。
+            self.budget.reset();
             sim.step(dt)?;
             // 每 tick 一拍：内核的 `changed` 只描述刚刚完成的那次事务。
             changed.extend_from_slice(sim.changed());

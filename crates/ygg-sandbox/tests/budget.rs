@@ -14,8 +14,10 @@
 //! 1000 条一次 Rust 回调，机器负载差异远大于那个量级；真正要钉的是「有限时间
 //! 内结束」，而 release 数字在 evidence 里单独记。
 
+use std::path::PathBuf;
 use std::time::Instant;
 
+use ygg_sandbox::modload::Loaded;
 use ygg_sandbox::sandbox::{
     budget_exhausted, Sandbox, CODE_BUDGET, DEFAULT_INSTRUCTION_BUDGET, MAX_INSTRUCTION_BUDGET,
 };
@@ -104,6 +106,25 @@ fn retrying_inside_pcall_still_terminates() {
         elapsed < WALL_CLOCK_LIMIT_MS,
         "捕获-重试不得把墙钟拖长，实际 {elapsed} ms"
     );
+}
+
+#[test]
+fn budget_resets_per_tick_so_long_runs_do_not_drift() {
+    // ADR-S3-1 的回归：预算是「一次宿主入口」的上限，不是沙箱生命周期的累计
+    // 配额。`step` 不重置时，参考包的 `ai.move` 会把余额一点点花光，第 1586
+    // tick 就把世界截断——同一世界崩在不同 tick 取决于宿主怎么切 tick。
+    // 连跑两轮 3000 tick：只要有一次跨 tick 累计，第一轮就过不去。
+    // 另两条断言（失控循环在毫秒级被截断、`pcall` 吞不掉）分别在
+    // `runaway_loop_is_cut_by_the_budget` / `pcall_cannot_swallow_the_budget`。
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packs/example");
+    let loaded = Loaded::from_dir(&dir).expect("装载 packs/example");
+    let mut loaded = loaded.fork_with_seed(0x5eed).expect("按种子重建");
+    for round in 1..=2u32 {
+        let report = loaded.step(3_000, 1).unwrap_or_else(|err| {
+            panic!("第 {round} 轮 3000 tick 必须跑得完（旧代码在第 1586 tick 崩）：{err}")
+        });
+        assert_eq!(report.tick, u64::from(round) * 3_000);
+    }
 }
 
 #[test]
