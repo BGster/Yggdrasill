@@ -177,6 +177,9 @@ struct Probe {
     text: Vec<String>,
 }
 
+/// 数值段的两个半域：整数段（闭区间）与浮点位序段（闭区间）。
+type NumericSpans = (Option<(i64, i64)>, Option<(u64, u64)>);
+
 impl Probe {
     /// 并（`in` 的元素之间）。
     fn union(&self, other: &Self) -> Self {
@@ -217,7 +220,7 @@ impl Probe {
     /// 浮点段的二分域必须裁到 **`[bits(-∞), bits(+∞)]`**：位序化把 NaN 模式推到全域两端
     /// （`Float(u64::MAX)` 是 NaN 位型），全 u64 域上真值区的单调查性不成立。写入路径
     /// 本就拒非有限值 ⇒ 可达键全在这个闭区间内。
-    fn numeric_spans(value: &Value, want: Want) -> (Option<(i64, i64)>, Option<(u64, u64)>) {
+    fn numeric_spans(value: &Value, want: Want) -> NumericSpans {
         let hit = |stored: &Value| value_compare(stored, value).is_some_and(|ord| want.holds(ord));
         let num = monotone_span(i64::MIN as i128, i64::MAX as i128, |raw| {
             hit(&Value::Int(raw as i64))

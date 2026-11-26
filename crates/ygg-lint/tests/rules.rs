@@ -1,12 +1,12 @@
 //! 规则回归：三反例逐条报错带位置 + 正例/边界零告警 + golden
-//! （test-adventure）零诊断（FRD 验收锚；lint 落地后 R1/R2/R3 的静态门
-//! 与内核运行期警告/内容寻址校验构成双保险）。
+//! （pkg-selftest）零诊断（lint 落地后 R1/R2/R3 的静态门与内核运行期
+//! 警告/内容寻址校验构成双保险）。
 
 use ygg_lint::diagnostic::{code, Severity};
 use ygg_lint::{lint_source, Diagnostic};
 
-/// golden few-shot 种子（零诊断回归锚；路径相对 tests/ 到仓库根）。
-const GOLDEN_MOD: &str = include_str!("../../../packages/mods/test-adventure/mod.lua");
+/// golden 真实 Mod（零诊断回归锚；路径相对 tests/ 到仓库根）。
+const GOLDEN_MOD: &str = include_str!("../../../packages/mods/pkg-selftest/mod.lua");
 
 fn codes(diagnostics: &[Diagnostic]) -> Vec<&'static str> {
     diagnostics.iter().map(|d| d.code).collect()
@@ -123,10 +123,10 @@ fn parse_error_is_reported() {
 }
 
 #[test]
-fn golden_test_adventure_is_clean() {
+fn golden_pkg_selftest_is_clean() {
     assert!(
         lint_source("mod.lua", GOLDEN_MOD).is_empty(),
-        "golden few-shot 种子必须零告警（FRD 验收锚）"
+        "golden 真实 Mod 必须零告警"
     );
 }
 

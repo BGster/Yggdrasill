@@ -127,7 +127,6 @@ pub fn number_text(value: f64) -> Result<String, CodecFaceError> {
     if !text.contains('.') && !text.contains('e') {
         text.push_str(".0");
     }
-    let mut text = text;
     if value < 0.0 {
         text.insert(0, '-');
     }

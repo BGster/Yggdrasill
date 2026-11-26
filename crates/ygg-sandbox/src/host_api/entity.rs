@@ -6,7 +6,9 @@ use std::rc::Rc;
 use mlua::{Error, Lua, Table, Value as LuaValue};
 use ygg_core::entity::{EntityStore, Value};
 
-use super::entity_decode::{entity_attr_ops, entity_fetch_queries, entity_rows, entity_tag_ops};
+use super::entity_decode::{
+    entity_attr_ops, entity_fetch_queries, entity_rows, entity_tag_ops, EntityAttrRows,
+};
 use super::selector::entity_query_selector;
 use super::{value_from_lua, value_to_lua, HostState};
 
@@ -213,7 +215,7 @@ pub(super) fn install_entity(
         lua.create_function(move |lua, queries: Table| -> Result<Table, Error> {
             let parsed = entity_fetch_queries(&queries)?;
             // 先把数据拷出来再建表：不在 create_* 期间持 RefCell 借用（借用纪律同 ygg.sim）。
-            let rows: Vec<(Vec<(String, Value)>, Vec<String>)> = {
+            let rows: EntityAttrRows = {
                 let store = entities_of(&ent_attr_fetch);
                 let store = store.borrow();
                 parsed

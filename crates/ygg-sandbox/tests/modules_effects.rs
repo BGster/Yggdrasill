@@ -98,7 +98,10 @@ fn a_module_that_registers_at_the_top_level_is_rejected_with_file_and_line() {
         "报错必须解释原因：{text}"
     );
     // 指向设计契约的多文件 Mod 章节（openwiki/overview.md §3.2）。
-    assert!(text.contains("openwiki/overview.md"), "报错必须指向文档：{text}");
+    assert!(
+        text.contains("openwiki/overview.md"),
+        "报错必须指向文档：{text}"
+    );
 }
 
 #[test]
@@ -110,7 +113,6 @@ fn every_banned_surface_is_rejected_from_a_module_top_level() {
         (r#"ygg.emit("event.x", 1)"#, "emit"),
         (r#"ygg.narrate("line")"#, "narrate"),
         (r#"ygg.choice("prompt", { "a", "b" })"#, "choice"),
-        (r#"ygg.meta("k", 1)"#, "meta"),
         (r#"ygg.kv.set("k", 1)"#, "kv.set"),
         (r#"ygg.entity.spawn()"#, "entity.spawn"),
         (

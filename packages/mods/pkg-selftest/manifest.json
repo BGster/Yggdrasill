@@ -13,76 +13,6 @@
     {
       "files": [
         {
-          "byteLength": 2438,
-          "path": "assetgen/bytes.lua",
-          "sha256": "a71f040ae2052eb01b6c62a74d8679b5b1a133b7a93ceff9025dae8ce54abaea"
-        },
-        {
-          "byteLength": 1911,
-          "path": "assetgen/color.lua",
-          "sha256": "58199c9bc33480b1f0f9daa20f9afcc89a0dffee0acd1277de15d745978ef9b2"
-        },
-        {
-          "byteLength": 5712,
-          "path": "assetgen/encode.lua",
-          "sha256": "fec656b42c87e91bc02dcc71fb1c3d9c25896c6ad75afc07e2231da03d90c187"
-        },
-        {
-          "byteLength": 10801,
-          "path": "assetgen/init.lua",
-          "sha256": "37bf5c0762d5ea3738261ce1df693341be9af694db502f09c95ef425e9b84521"
-        },
-        {
-          "byteLength": 1239,
-          "path": "assetgen/join.lua",
-          "sha256": "6a9fd05e5080cbdab8c804006d85b478429398bd6d5faa3cce2c9241bfa64128"
-        },
-        {
-          "byteLength": 4680,
-          "path": "assetgen/mathx.lua",
-          "sha256": "972e32a20e8d515885ffff619cd6953d3cba7887aee92a3bed37d27a7fe33d93"
-        },
-        {
-          "byteLength": 11128,
-          "path": "assetgen/mesh.lua",
-          "sha256": "0d77f8dce2223e3b380a64474c223225952d993a7424cad5bcaac5838f39486d"
-        },
-        {
-          "byteLength": 189,
-          "path": "assetgen/pkg.json",
-          "sha256": "3a5d545104906bcf6b1e08fa44e13ce442ae3714b4a29f6b8b90624d34a67a11"
-        },
-        {
-          "byteLength": 5826,
-          "path": "assetgen/raster.lua",
-          "sha256": "61b3909d6744a89e4b954ec557b4126bd1c2dbb1d9140ebf4ab494783da7e5ad"
-        },
-        {
-          "byteLength": 10992,
-          "path": "assetgen/sound.lua",
-          "sha256": "911eeb17ee159e190a4358aea497a0f57b8eb79563dbe500a8bc4fe4e50236f6"
-        },
-        {
-          "byteLength": 5644,
-          "path": "assetgen/spec.lua",
-          "sha256": "afd9605a398ca9ac9223aa477c3e25d66e38e49330f6242db9bf6f421f19d70b"
-        },
-        {
-          "byteLength": 10251,
-          "path": "assetgen/texture.lua",
-          "sha256": "0d159899715ef9bc31852ea1f64063ffd4cf41fde3ef475cedecc7326c9b99f0"
-        },
-        {
-          "byteLength": 1483,
-          "path": "assetgen/wave.lua",
-          "sha256": "45301e3a86d9e28a777e8301beb62aec6fb3e99ca3e957add540b5fa1bd7d3bf"
-        }
-      ],
-      "id": "assetgen"
-    },
-    {
-      "files": [
-        {
           "byteLength": 9290,
           "path": "codec/bundle.lua",
           "sha256": "d287dd320a99e492800e1f0fb7eb8254de92607d6c7ec757a659d6b6f8f84058"
@@ -309,26 +239,6 @@
         }
       ],
       "id": "role-skill"
-    },
-    {
-      "files": [
-        {
-          "byteLength": 8013,
-          "path": "textframe/grid.lua",
-          "sha256": "2771b32d62ae2f86fd0f2ba3a3372e011508fae02ab8388db3c118ef4b06f057"
-        },
-        {
-          "byteLength": 2137,
-          "path": "textframe/init.lua",
-          "sha256": "54dedce77091857aedfb26f2c119d0732bbe34b1f706bc2765399c01281824ca"
-        },
-        {
-          "byteLength": 136,
-          "path": "textframe/pkg.json",
-          "sha256": "7f4eb2916fa368cd07319997617c231bad7fcd9961aba53431c35e4e152087b9"
-        }
-      ],
-      "id": "textframe"
     }
   ],
   "schemaVersion": 1

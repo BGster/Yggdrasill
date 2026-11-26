@@ -1,6 +1,0 @@
-{
-    "schemaVersion": 1,
-    "name": "textframe",
-    "version": "0.1.0",
-    "contract": "openwiki/contracts/packages/textframe.md"
-}

@@ -316,10 +316,7 @@ impl Sim {
     }
 
     /// 解码「`u32 n` 之后」的通用列式载荷（spawn 与 insert 共用）。
-    fn decode_batch(
-        &self,
-        frame: &[u8],
-    ) -> SimResult<(usize, Vec<(ComponentId, Column)>, Vec<ComponentId>)> {
+    fn decode_batch(&self, frame: &[u8]) -> SimResult<DecodedBatch> {
         let mut reader = FrameReader::open(frame)?;
         let rows = reader.u32()? as usize;
         let parsed = frame_from_reader(&mut reader, rows, &self.state.world)?;
@@ -387,12 +384,15 @@ impl Sim {
 /// 读「`u32 n` 之后」的列式载荷：`u16 comp_n | [u16 len | name]×comp_n | 每有列组件一列`。
 ///
 /// `tag` 只出现在名单里、没有载荷——所以「名单 → 有列 / 零宽」的分派必须查注册表，
+/// 一帧解码结果：行数 × （组件列，声明序） × （本帧出现的组件 id，升序）。
+type DecodedBatch = (usize, Vec<(ComponentId, Column)>, Vec<ComponentId>);
+
 /// 而注册表是解析的唯一权威（帧里不重复写类型）。
 fn frame_from_reader(
     reader: &mut FrameReader<'_>,
     rows: usize,
     world: &ArchetypeStore,
-) -> SimResult<(usize, Vec<(ComponentId, Column)>, Vec<ComponentId>)> {
+) -> SimResult<DecodedBatch> {
     // 帧布局是**两段式**：先把全部组件名读完，再按同一顺序读载荷。逐名读载荷会错位——
     // 因为载荷紧跟在整张名单之后（这条在 `tests/snapshot_roundtrip.rs` 的帧往返里钉住）。
     let comp_n = reader.u16()? as usize;

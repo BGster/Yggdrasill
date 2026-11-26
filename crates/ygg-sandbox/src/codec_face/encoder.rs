@@ -106,7 +106,7 @@ impl Encoder {
 
     /// 一张表 → 字节：先查环/深度/元方法，再分类（array / object），再发射。
     fn table(&mut self, table: &mlua::Table, depth: usize) -> Result<(), CodecFaceError> {
-        let pointer = table.to_pointer() as *const std::ffi::c_void;
+        let pointer = table.to_pointer();
         if self.stack.contains(&pointer) {
             return Err(unsupported("表循环引用"));
         }

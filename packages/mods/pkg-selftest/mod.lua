@@ -11,8 +11,8 @@
 -- 它不写 KV、不注册业务 handler：包自测自带 mock `ygg`（`packages/README.md`
 -- §5「包测试不依赖消费 mod 的 harness」），入口只做装配。
 --
--- 为什么必须存在这一层：生产 Mod（`agent-seed`）**不声明包**，所以它的
--- `cases passed=` 永远看不到 `pkg.*`。夹具把「包装载面」变成一条可复算的命令：
+-- 为什么必须存在这一层：包本身不做真沙箱装载，所以包自测的 `cases passed=`
+-- 永远看不到 `pkg.*`。夹具把「包装载面」变成一条可复算的命令：
 --   cargo run -q --example selftest -p ygg-sandbox -- \
 --     --mod packages/mods/pkg-selftest --packages packages/libs --filter pkg-
 
@@ -22,8 +22,6 @@ local quest = require("pkg.quest")
 local dialogue = require("pkg.dialogue")
 local procgen = require("pkg.procgen")
 local role_skill = require("pkg.role_skill")
-local assetgen = require("pkg.assetgen")
-local textframe = require("pkg.textframe")
 
 -- 声明闭包的同构清单：装配顺序即本表顺序，`#PACKAGES` 就是冒烟收尾行里的 N。
 -- 它刻意**不是**一份手抄的数字——加一个包 = 表里加一项，冒烟收尾行自动跟上一格，
@@ -36,12 +34,10 @@ local PACKAGES = {
   dialogue,
   procgen,
   role_skill,
-  assetgen,
-  textframe,
 }
 
 -- 装配：包的 `install` 都只记 deps / 注注册表（不预读、不预写，契约 I7 / I8）。
--- procgen / assetgen 不接宿主面（不写 KV、不发事件、不注册 handler），所以
+-- procgen 不接宿主面（不写 KV、不发事件、不注册 handler），所以
 -- `install()` 无参；其余四包在缺 `deps` 时回落到 `ygg` 全局（真沙箱里就在场）。
 for i = 1, #PACKAGES do
   PACKAGES[i].install()
@@ -170,23 +166,6 @@ ygg.on("pkg.smoke", function()
   local next32 = procgen.next32(handle)
   local digest = procgen.hash({ "a", 1 })
   lines[#lines + 1] = "pkg.procgen ok next32=" .. tostring(next32) .. " hash=" .. tostring(digest)
-
-  -- ── assetgen：纯导出（自省面 + 产物 canon 行）───────────────────────────
-  local algos = assetgen.algo_list("texture")
-  local texture = assetgen.texture({ algo = "texture.fbm", params = { w = 4, h = 4, ch = 1 } }, "smoke")
-  lines[#lines + 1] = "pkg.assetgen ok algos="
-    .. tostring(#algos)
-    .. " canon="
-    .. assetgen.canon(texture)
-
-  -- ── textframe：字符网格 → 行（纯导出，不接宿主面）────────────────────────
-  -- 空格换 `_` 再叙述：断言串里带尾空格是不可见的脆断言。
-  local tf = textframe.frame(4, 2)
-  textframe.put(tf, 1, 1, "A")
-  textframe.put(tf, 4, 2, "Z")
-  local rows = textframe.stack({ textframe.to_lines(tf), { "HUD" } })
-  local probe = (rows[1] .. "|" .. rows[2] .. "|" .. rows[3]):gsub(" ", "_")
-  lines[#lines + 1] = "pkg.textframe ok rows=" .. tostring(#rows) .. " cells=" .. probe
 
   lines[#lines + 1] = "pkg.smoke packages=" .. tostring(#PACKAGES)
   for i = 1, #lines do

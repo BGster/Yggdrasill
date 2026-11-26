@@ -1,46 +1,29 @@
-//! 只读观察面：给 `serve` 这类**不持 run 锁的观察者**读取状态事实。
+//! 只读观察面：给宿主这类**不持 run 锁的观察者**读取状态事实。
 //!
 //! # 为什么不进 [`crate::RunStore`]
 //!
-//! trait 方法带着「调用方已持有 run 锁」的前提，而 [`crate::SqliteStore::open`]
-//! 还带 migrate 写面（建表 + `journal_mode=WAL`）——观察者两个都不满足/不需要：
-//! 它与宿主进程无关，只看盘上既成事实。存档历史（sqlite `snapshot` 表 vs JSON
-//! 单档）是**后端知识**，必须住在这个端口 crate 里，不能泄进宿主。
+//! trait 方法带着「调用方已持有 run 锁」的前提；观察者不满足也不需要——
+//! 它与宿主进程无关，只看盘上既成事实。存档历史是**后端知识**，必须住在这个
+//! 端口 crate 里，不能泄进宿主。
 //!
 //! # 零写入纪律（每条都有测试锁，见 `tests`）
 //!
-//! - **先探测后连接**：库文件缺失 → 空探针 / 空列表 / `None`，**绝不建库**；
-//! - sqlite 连接用 `SQLITE_OPEN_NO_CREATE`（防探测-连接之间的 TOCTOU 建库）+
-//!   `PRAGMA query_only = 1`（封死写面）+ `busy_timeout(5000)`，**不跑
-//!   migrate**（对残缺库会写、对无库目录会建库）；
-//! - 为什么以读写方式连接而非 `SQLITE_OPEN_READ_ONLY`：已收口的局 `-wal/-shm`
-//!   缺席时只读打开会因缺 shm 失败；`query_only` 已封死写面，连接可能创建的
-//!   `-wal/-shm` 属**连接级产物**（宿主 `cleanup_stale` 语义已把该文件类定义为
-//!   活文件），不是状态事实；
-//! - JSON 路径全部纯读：[`crate::JsonFileStore::open`] 只记路径不落盘，
-//!   `steps()` / `next_seq()` / `artifact_*` 均为只读方法。
+//! JSON 路径全部纯读：[`crate::JsonFileStore::open`] 只记路径不落盘，
+//! `steps()` / `next_seq()` / `artifact_*` 均为只读方法。
 //!
 //! # 并发论证（观察者不持锁为什么安全）
 //!
-//! sqlite：WAL 并发读者安全，写者冲突由 `busy_timeout` 等待；JSON：tmp+rename
-//! 原子替换保证读者只见旧或新整代。此论证与宿主 watcher 读 `latest_save()`
-//! 同源——本模块把「观察者读」收口成唯一形态。
+//! JSON：tmp+rename 原子替换保证读者只见旧或新整代。
 //!
 //! # 写面归属
 //!
-//! 写面仍归 [`crate::RunStore`]（锁内）。本模块没有任何写方法，也没有暴露
-//! `Connection`——后端知识不外泄。
+//! 写面仍归 [`crate::RunStore`]（锁内）。本模块没有任何写方法。
 
 use std::path::Path;
 
 use crate::{
     ArtifactMeta, ArtifactRecord, Backend, RunStore, StepRecord, StoreError, AUTOSAVE_FILE,
 };
-
-#[cfg(feature = "sqlite")]
-use crate::SQLITE_FILE_NAME;
-#[cfg(feature = "sqlite")]
-use rusqlite::OptionalExtension;
 
 /// 存档列表的缺省条数（`save_list` 的 `limit == 0` 时生效）。
 pub const SAVE_LIST_DEFAULT_LIMIT: usize = 50;
@@ -56,13 +39,13 @@ pub const EVENT_PAGE_MAX_LIMIT: u32 = 500;
 /// 存档元信息（第二级列表的一行）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveMeta {
-    /// sqlite：十进制 `snapshot.id`；json：恒 `"latest"`（单档后端没有历史）。
+    /// json：恒 `"latest"`（单档后端没有历史）。
     pub id: String,
-    /// sqlite：`snapshot.generation`；json：`None`（无代概念）。
+    /// json：`None`（无代概念）。
     pub generation: Option<i64>,
-    /// 该存档对应的步（sqlite：`snapshot.seq`；json：events 非空行数）。
+    /// 该存档对应的步（json：events 非空行数）。
     pub seq: u64,
-    /// unix 秒（sqlite：`snapshot.created_at`；json：autosave mtime，读不到 = 0）。
+    /// unix 秒（json：autosave mtime，读不到 = 0）。
     pub created_at: u64,
     pub bytes: usize,
     /// 是否当前代最新档。
@@ -89,17 +72,13 @@ pub struct EventPage {
 }
 
 // ============================================================================
-// §入口（按后端分派；`--no-default-features` 下 sqlite 面 fail-closed）
+// §入口（按后端分派）
 // ============================================================================
 
 /// watcher 变更探针：当前代最新档 + 存档总数。
 pub fn save_probe(run_dir: &Path, backend: Backend) -> Result<SaveProbe, StoreError> {
     match backend {
         Backend::Json => json_probe(run_dir),
-        #[cfg(feature = "sqlite")]
-        Backend::Sqlite => sqlite_probe(run_dir),
-        #[cfg(not(feature = "sqlite"))]
-        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -113,14 +92,10 @@ pub fn save_list(
     let limit = clamp_save_limit(limit);
     match backend {
         Backend::Json => json_save_list(run_dir, limit),
-        #[cfg(feature = "sqlite")]
-        Backend::Sqlite => sqlite_save_list(run_dir, limit),
-        #[cfg(not(feature = "sqlite"))]
-        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
-/// 取一份存档原文。`"latest"` = 当前代最新档；sqlite 另认十进制 `snapshot.id`；
+/// 取一份存档原文。`"latest"` = 当前代最新档。
 /// 其余形状（含 JSON 局的数字 id）→ `Ok(None)`（语法门在调用方，端口不报错）。
 pub fn save_get(
     run_dir: &Path,
@@ -129,10 +104,6 @@ pub fn save_get(
 ) -> Result<Option<(SaveMeta, Vec<u8>)>, StoreError> {
     match backend {
         Backend::Json => json_save_get(run_dir, id),
-        #[cfg(feature = "sqlite")]
-        Backend::Sqlite => sqlite_save_get(run_dir, id),
-        #[cfg(not(feature = "sqlite"))]
-        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -147,10 +118,6 @@ pub fn event_page(
     let limit = limit.min(EVENT_PAGE_MAX_LIMIT);
     match backend {
         Backend::Json => json_event_page(run_dir, since, limit),
-        #[cfg(feature = "sqlite")]
-        Backend::Sqlite => sqlite_event_page(run_dir, since, limit),
-        #[cfg(not(feature = "sqlite"))]
-        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -161,10 +128,6 @@ pub fn artifact_list_view(
 ) -> Result<Vec<ArtifactMeta>, StoreError> {
     match backend {
         Backend::Json => crate::json::JsonFileStore::open(run_dir)?.artifact_list(),
-        #[cfg(feature = "sqlite")]
-        Backend::Sqlite => sqlite_artifact_list(run_dir),
-        #[cfg(not(feature = "sqlite"))]
-        Backend::Sqlite => Err(unavailable_sqlite()),
     }
 }
 
@@ -176,21 +139,6 @@ pub fn artifact_get_view(
 ) -> Result<Option<ArtifactRecord>, StoreError> {
     match backend {
         Backend::Json => crate::json::JsonFileStore::open(run_dir)?.artifact_get(path),
-        #[cfg(feature = "sqlite")]
-        Backend::Sqlite => sqlite_artifact_get(run_dir, path),
-        #[cfg(not(feature = "sqlite"))]
-        Backend::Sqlite => Err(unavailable_sqlite()),
-    }
-}
-
-/// `--no-default-features` 构建（无 sqlite）下，sqlite 观察面 fail-closed。
-#[cfg(not(feature = "sqlite"))]
-fn unavailable_sqlite() -> StoreError {
-    StoreError::Unavailable {
-        detail: "本构建未启用 sqlite 后端（sqlite 是编译期面：宿主 `cargo build \
-                 --example agent` 默认带上，`--no-default-features` 会关掉它；\
-                 ygg-store 自身需 `--features sqlite`）"
-            .to_owned(),
     }
 }
 
@@ -279,375 +227,6 @@ fn json_mtime_secs(meta: &std::fs::Metadata) -> u64 {
         .ok()
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |elapsed| elapsed.as_secs())
-}
-
-// ============================================================================
-// §sqlite 路径（先探测后连接；NO_CREATE + query_only + busy_timeout；不 migrate）
-// ============================================================================
-
-#[cfg(feature = "sqlite")]
-fn sqlite_connect(run_dir: &Path) -> Result<Option<rusqlite::Connection>, StoreError> {
-    let db_path = run_dir.join(SQLITE_FILE_NAME);
-    if !db_path.exists() {
-        // 无库 = 无存档事实（空探针 / 空列表 / None），**绝不建库**。
-        return Ok(None);
-    }
-    // 不带 SQLITE_OPEN_CREATE：库文件若在探测后被删（TOCTOU），open 直接失败而
-    // 不是静默建空库（SQLite 无独立的 NO_CREATE 旗标——CREATE 是 opt-in）。
-    let flags =
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let conn = rusqlite::Connection::open_with_flags(&db_path, flags).map_err(|err| {
-        StoreError::corrupt(format!("打开 {} 失败", db_path.display()), err.to_string())
-    })?;
-    conn.busy_timeout(std::time::Duration::from_millis(
-        crate::sqlite::DEFAULT_BUSY_TIMEOUT_MS,
-    ))
-    .map_err(|err| {
-        StoreError::corrupt(
-            format!("设置 busy_timeout 失败（{}）", db_path.display()),
-            err.to_string(),
-        )
-    })?;
-    // 封死写面：query_only 之后的任何写语句（含 DDL/PRAGMA 写面）都报错。
-    // **不跑 migrate**：migrate 会建表 + 写 schema_version（观察者零写入红线）。
-    conn.execute_batch("PRAGMA query_only = 1;")
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("设置 query_only 失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    Ok(Some(conn))
-}
-
-/// 当前代（与宿主 `current_generation` 同一判定：`MAX(generation)`，空表 = 0）。
-#[cfg(feature = "sqlite")]
-fn sqlite_current_generation(
-    conn: &rusqlite::Connection,
-    db_path: &Path,
-) -> Result<i64, StoreError> {
-    conn.query_row(
-        "SELECT COALESCE(MAX(generation), 0) FROM generation",
-        [],
-        |row| row.get(0),
-    )
-    .map_err(|err| {
-        StoreError::corrupt(
-            format!("读取 generation 失败（{}）", db_path.display()),
-            err.to_string(),
-        )
-    })
-}
-
-#[cfg(feature = "sqlite")]
-const SAVE_COLUMNS: &str = "id, generation, seq, LENGTH(save), created_at";
-
-#[cfg(feature = "sqlite")]
-fn sqlite_row_to_meta(row: &rusqlite::Row<'_>, latest: bool) -> rusqlite::Result<SaveMeta> {
-    let id: i64 = row.get(0)?;
-    let generation: i64 = row.get(1)?;
-    let seq: i64 = row.get(2)?;
-    let bytes: i64 = row.get(3)?;
-    let created_at: i64 = row.get(4)?;
-    Ok(SaveMeta {
-        id: id.to_string(),
-        generation: Some(generation),
-        seq: seq.max(0) as u64,
-        created_at: created_at.max(0) as u64,
-        bytes: bytes.max(0) as usize,
-        latest,
-    })
-}
-
-#[cfg(feature = "sqlite")]
-fn sqlite_probe(run_dir: &Path) -> Result<SaveProbe, StoreError> {
-    let db_path = run_dir.join(SQLITE_FILE_NAME);
-    let Some(conn) = sqlite_connect(run_dir)? else {
-        return Ok(SaveProbe::default());
-    };
-    let generation = sqlite_current_generation(&conn, &db_path)?;
-    let probe = conn
-        .query_row(
-            "SELECT COUNT(*), COALESCE(MAX(id), 0), \
-             COALESCE(MAX(CASE WHEN id = (SELECT MAX(id) FROM snapshot WHERE generation = ?1) \
-             THEN created_at END), 0) FROM snapshot WHERE generation = ?1",
-            [generation],
-            |row| {
-                let count: i64 = row.get(0)?;
-                let max_id: i64 = row.get(1)?;
-                Ok(SaveProbe {
-                    generation: Some(generation),
-                    latest_id: (max_id > 0).then(|| max_id.to_string()),
-                    latest_created_at: row.get::<_, i64>(2)?.max(0) as u64,
-                    count: count.max(0) as u64,
-                })
-            },
-        )
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("读取存档探针失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    Ok(probe)
-}
-
-#[cfg(feature = "sqlite")]
-fn sqlite_save_list(run_dir: &Path, limit: usize) -> Result<Vec<SaveMeta>, StoreError> {
-    let db_path = run_dir.join(SQLITE_FILE_NAME);
-    let Some(conn) = sqlite_connect(run_dir)? else {
-        return Ok(Vec::new());
-    };
-    let generation = sqlite_current_generation(&conn, &db_path)?;
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {SAVE_COLUMNS} FROM snapshot WHERE generation = ?1 ORDER BY id DESC LIMIT ?2"
-        ))
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("准备存档列表查询失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    let rows = stmt
-        .query_map([generation, limit as i64], |row| {
-            // latest 由行序决定：`ORDER BY id DESC` 的第一行即当前代最新档。
-            sqlite_row_to_meta(row, false)
-        })
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("读取存档列表失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    let mut out = Vec::new();
-    for (index, row) in rows.enumerate() {
-        let mut meta = row.map_err(|err| {
-            StoreError::corrupt(
-                format!("读取存档列表失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-        meta.latest = index == 0;
-        out.push(meta);
-    }
-    Ok(out)
-}
-
-#[cfg(feature = "sqlite")]
-fn sqlite_save_get(run_dir: &Path, id: &str) -> Result<Option<(SaveMeta, Vec<u8>)>, StoreError> {
-    let db_path = run_dir.join(SQLITE_FILE_NAME);
-    let Some(conn) = sqlite_connect(run_dir)? else {
-        return Ok(None);
-    };
-    let generation = sqlite_current_generation(&conn, &db_path)?;
-    // "latest" 别名 = 当前代 MAX(id)；数字 id 精确匹配（限当前代）；
-    // 其余形状 → None（语法门在调用方，端口不报错）。
-    let numeric = id.parse::<i64>().ok();
-    if id != "latest" && numeric.is_none() {
-        return Ok(None);
-    }
-    let sql = if id == "latest" {
-        format!(
-            "SELECT {SAVE_COLUMNS}, save FROM snapshot WHERE generation = ?1 \
-             ORDER BY id DESC LIMIT 1"
-        )
-    } else {
-        format!(
-            "SELECT {SAVE_COLUMNS}, save FROM snapshot WHERE generation = ?1 AND id = ?2 LIMIT 1"
-        )
-    };
-    let mut stmt = conn.prepare(&sql).map_err(|err| {
-        StoreError::corrupt(
-            format!("准备存档读取失败（{}）", db_path.display()),
-            err.to_string(),
-        )
-    })?;
-    let query = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(SaveMeta, Vec<u8>)> {
-        let mut meta = sqlite_row_to_meta(row, false)?;
-        let save: Vec<u8> = row.get(5)?;
-        meta.bytes = save.len();
-        Ok((meta, save))
-    };
-    let result = if id == "latest" {
-        stmt.query_row([generation], query).optional()
-    } else {
-        stmt.query_row([generation, numeric.unwrap_or(0)], query)
-            .optional()
-    };
-    let latest_id: Option<i64> = conn
-        .query_row(
-            "SELECT MAX(id) FROM snapshot WHERE generation = ?1",
-            [generation],
-            |row| row.get(0),
-        )
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("读取最新档 id 失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    result
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("读取存档失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })
-        .map(|found| {
-            found.map(|(mut meta, bytes)| {
-                meta.latest = latest_id == Some(meta.id.parse::<i64>().unwrap_or(-1));
-                (meta, bytes)
-            })
-        })
-}
-
-#[cfg(feature = "sqlite")]
-fn sqlite_event_page(run_dir: &Path, since: u64, limit: u32) -> Result<EventPage, StoreError> {
-    let db_path = run_dir.join(SQLITE_FILE_NAME);
-    let Some(conn) = sqlite_connect(run_dir)? else {
-        return Ok(EventPage::default());
-    };
-    let generation = sqlite_current_generation(&conn, &db_path)?;
-    let latest: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(seq) + 1, 0) FROM step WHERE generation = ?1",
-            [generation],
-            |row| row.get(0),
-        )
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("读取事件步数失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT seq, event, payload, ok, narrative_count, timestamp, ending, ending_line \
-             FROM step WHERE generation = ?1 AND seq >= ?2 ORDER BY seq LIMIT ?3",
-        )
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("准备事件查询失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    let rows = stmt
-        .query_map([generation, since as i64, i64::from(limit)], |row| {
-            Ok(StepRecord {
-                seq: row.get::<_, i64>(0)?.max(0) as u64,
-                event: row.get(1)?,
-                payload: row.get(2)?,
-                ok: row.get::<_, i64>(3)? != 0,
-                narrative_count: row.get::<_, i64>(4)?.max(0) as usize,
-                timestamp: row.get::<_, i64>(5)?.max(0) as u64,
-                ending: row.get::<_, i64>(6)? != 0,
-                ending_line: row.get(7)?,
-            })
-        })
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("读取事件记录失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    let mut records = Vec::new();
-    for record in rows {
-        records.push(record.map_err(|err| {
-            StoreError::corrupt(
-                format!("读取事件记录失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?);
-    }
-    Ok(EventPage {
-        records,
-        latest: latest.max(0) as u64,
-    })
-}
-
-#[cfg(feature = "sqlite")]
-fn sqlite_artifact_list(run_dir: &Path) -> Result<Vec<ArtifactMeta>, StoreError> {
-    let db_path = run_dir.join(SQLITE_FILE_NAME);
-    let Some(conn) = sqlite_connect(run_dir)? else {
-        return Ok(Vec::new());
-    };
-    let generation = sqlite_current_generation(&conn, &db_path)?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT path, bytes, sha256, updated_at FROM artifact \
-             WHERE generation = ?1 ORDER BY path",
-        )
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("准备制品查询失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    let rows = stmt
-        .query_map([generation], |row| {
-            let path: String = row.get(0)?;
-            let bytes: i64 = row.get(1)?;
-            Ok(ArtifactMeta {
-                path,
-                bytes: bytes.max(0) as usize,
-                sha256: row.get(2)?,
-                updated_at: row.get::<_, i64>(3)?.max(0) as u64,
-            })
-        })
-        .map_err(|err| {
-            StoreError::corrupt(
-                format!("读取制品列表失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?;
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|err| {
-            StoreError::corrupt(
-                format!("读取制品列表失败（{}）", db_path.display()),
-                err.to_string(),
-            )
-        })?);
-    }
-    Ok(out)
-}
-
-#[cfg(feature = "sqlite")]
-fn sqlite_artifact_get(run_dir: &Path, path: &str) -> Result<Option<ArtifactRecord>, StoreError> {
-    crate::validate_artifact_path(path)?;
-    let db_path = run_dir.join(SQLITE_FILE_NAME);
-    let Some(conn) = sqlite_connect(run_dir)? else {
-        return Ok(None);
-    };
-    let generation = sqlite_current_generation(&conn, &db_path)?;
-    conn.query_row(
-        "SELECT sha256, bytes, content, updated_at FROM artifact \
-         WHERE generation = ?1 AND path = ?2",
-        rusqlite::params![generation, path],
-        |row| {
-            let sha256: String = row.get(0)?;
-            let bytes: i64 = row.get(1)?;
-            let content: Vec<u8> = row.get(2)?;
-            let updated_at: i64 = row.get(3)?;
-            Ok(ArtifactRecord {
-                meta: ArtifactMeta {
-                    path: path.to_owned(),
-                    bytes: bytes.max(0) as usize,
-                    sha256,
-                    updated_at: updated_at.max(0) as u64,
-                },
-                content,
-            })
-        },
-    )
-    .optional()
-    .map_err(|err| {
-        StoreError::corrupt(
-            format!("读取制品失败（{}）", db_path.display()),
-            err.to_string(),
-        )
-    })
 }
 
 #[cfg(test)]

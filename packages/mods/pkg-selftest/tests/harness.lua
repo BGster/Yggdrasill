@@ -4,7 +4,7 @@
 -- 否则「包不依赖消费它的 mod」那条纪律当场破（`packages/README.md` §5）。这份
 -- harness 只服务夹具自己的两条冒烟用例。
 --
--- 与 `agent-seed` 的 harness 有刻意的三处不同：
+-- 与业务 Mod 的 harness 有刻意的三处不同：
 --   1. 不注册业务 handler、不 mock 业务域（夹具没有业务域）；只补一个**只够装配**
 --      的 `ygg` 替身（见文件末「最小 ygg 替身」）；
 --   2. 不读盘、不起子进程（`io.popen` / `os.getenv` 一概不用）——夹具要在任何

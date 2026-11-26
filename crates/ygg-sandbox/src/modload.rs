@@ -2,27 +2,22 @@
 //!
 //! # 为什么必须有这一层
 //!
-//! 在这之前，「把 `<mod目录>` 装成内核」有三份独立实现：`driver` 侧的
-//! `build_kernel`（组装序）、`playtest` 侧的 `read_mod_bundle`（读盘）、
-//! `examples/egg.rs` 的 `ModBundle`（读盘 + 热载重读）。前两者本应完全一致，
-//! 实际差了一处**静默**：playtest 读盘时不看 `pack.json` 的 `code` 段，于是
-//! 多文件 Mod 在走查里被当成单文件跑——入口 `require("src.util")` 对空模块表
-//! 直接得到可读拒绝，或（入口自己有兜底时）跑到一半才炸。这类偏差的症状是
-//! 「playtest 全绿、实跑必挂」或反过来，而两边日志都不指向根因。
-//!
-//! 所以读盘 + 声明对账 + 构造驱动只有一条路径：**走查与实跑吃同一份装载语义**，
-//! 差异只可能来自事件驱动策略（那是 playtest 的本职，不是装载面）。
+//! 「把 `<mod目录>` 装成内核」曾经散在三处：读盘、声明对账、组装内核各写一遍，
+//! 于是同一条语义在三处各自漂移（典型症状：读盘不看 `pack.json` 的 `code` 段，
+//! 多文件 Mod 被当单文件装，入口 `require("src.util")` 对空模块表得到可读拒绝，
+//! 或跑到一半才炸）。现在只有这一条路径：读盘 + 声明对账 + 构造驱动收在一处，
+//! 谁装 Mod 都吃同一份装载语义。
 //!
 //! # 与「内核零 IO」纪律的关系
 //!
 //! 本模块**属于宿主侧**：只有它做文件系统读取。`driver` / `sandbox` / `modules`
 //! 依旧零 IO（装载器拿到的只是 [`ModuleSet`] 字节表）——纪律没有放宽，只是把
-//! 「宿主读盘」从三个 example/走查实现里收成一份。
+//! 「宿主读盘」只在这一处。
 //!
 //! # 失败面
 //!
 //! 读盘与声明错误的错误类型是 `String`（人读文案，带目录与文件路径）——这一层
-//! 的错误直接进 CLI 报告 / 走查报告，不需要机器分支；内核构造错误仍是
+//! 的错误直接进调用方的报告，不需要机器分支；内核构造错误仍是
 //! [`KernelError`]（有稳定码映射面），由调用方决定怎么呈现。
 
 use std::collections::BTreeMap;
@@ -36,7 +31,7 @@ use crate::modules::{ModuleSet, ModuleTable};
 use crate::pack::{self, CodeSpec};
 use crate::packages::{self, PackagesSpec};
 
-/// Mod 包内的声明文件名（`entries` / `schemaFiles` / `code` / `agent` / `inboxRoutes`）。
+/// Mod 包内的声明文件名（`entries` / `schemaFiles` / `code` / `packages`）。
 pub const PACK_FILE: &str = "pack.json";
 
 /// Mod 包内的资源内容寻址清单（`entries` + `code` 的 sha256 / byteLength）。

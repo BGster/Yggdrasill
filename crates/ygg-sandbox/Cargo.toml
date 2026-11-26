@@ -3,8 +3,7 @@ name = "ygg-sandbox"
 version.workspace = true
 edition.workspace = true
 
-# 示例双目标炸点已由 examples/serve/mod.rs 目录化根治（r2）：子目录模块
-# 不会被自动发现为独立 example，autoexamples 保持默认值即绿。
+# 示例目录化（r2）：子目录模块不会被自动发现为独立 example，autoexamples 保持默认值即绿。
 
 # 依赖纪律（白名单制，逐 slice 填充）：
 # - S7 填充：mlua git pin（features = ["lua54", "vendored"]；wasm32 支持未进 crates.io，
@@ -47,25 +46,8 @@ ygg-sim = { path = "../ygg-sim" }
 # ygg-core 零哈希；状态哈希 = SHA-256(canonical_state_bytes)，D-继承-5 归位）。
 sha2 = "0.10"
 
-# r-store 填充：`ygg-store` 是宿主 CLI（examples/egg.rs）持久化面的端口。
+# r-store 填充：`ygg-store` 是持久化面的端口。
 # **必须留在 dev-dependencies**：examples 能见到 dev-deps，而 dev-deps **不向
-# 依赖者传播**——所以 ygg-wasm / ygg-lint 的依赖树里不会出现 ygg-store，更不会
-# 出现 rusqlite（`default` 只转发到这里的 feature，见下）。
+# 依赖者传播**——所以 ygg-wasm / ygg-lint 的依赖树里不会出现 ygg-store。
 [dev-dependencies]
 ygg-store = { path = "../ygg-store" }
-
-# r-evo 填充：sqlite 后端是宿主的**默认**——`cargo build --example egg` 不带任何
-# 旗标即编入 sqlite，新局默认后端见 `ygg_store::DEFAULT_BACKEND`。
-# 回退构建（关掉 sqlite）走 `--no-default-features`；此时 `--store sqlite` 必须
-# fail-closed 报「本构建未启用 sqlite 后端」。
-#
-# `default = ["store-sqlite"]` 能成立的两个前提（别顺手改掉）：
-# - `ygg-store` 不是 optional（也不可能是：dev-dependencies 不允许 optional），
-#   所以只能用「转发到依赖 feature」这种写法，`dep:ygg-store` 不适用；
-# - 转发目标落在 **dev-dependencies** 上，对「无 dev 图」的构建是**空指向**：
-#   ygg-wasm / ygg-lint 的图里没有 ygg-store，于是不拉包、不编 C。
-#   **一旦把 ygg-store 挪进 [dependencies]，这行就会真把 rusqlite 灌进 wasm32**
-#   ——CI 的 `cargo tree -e normal` 守卫专拦这条。
-[features]
-default = ["store-sqlite"]
-store-sqlite = ["ygg-store/sqlite"]

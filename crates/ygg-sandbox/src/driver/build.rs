@@ -7,7 +7,7 @@ use ygg_core::kv::KvStore;
 use ygg_core::save::SaveFile;
 
 use super::{resource_error_to_kernel, KernelError, KernelFacade};
-use crate::host_api::{self, HostApi, HostHandles, VfsStore};
+use crate::host_api::{self, HostApi, HostHandles};
 use crate::inject::{self, DeterminismHandle};
 use crate::modules::{ModuleSet, ModuleTable};
 use crate::resources::ResourceTable;
@@ -23,8 +23,6 @@ struct KernelParts {
     registry: HandlerRegistry,
     entities: Rc<RefCell<EntityStore>>,
     kv: Rc<RefCell<KvStore>>,
-    /// `ygg.fs` 的内存态 VFS（`host_api::install` 自建，这里只接管同一个 `Rc`）。
-    vfs: Rc<RefCell<VfsStore>>,
 }
 
 /// 装载序单一管线（S10 锁定序 + S11 资源步 + r1 模块表 + r2 chunk 覆盖表；`new` /
@@ -49,7 +47,7 @@ fn build_kernel(
     // ③ canonical store 先建：host 桥句柄与驱动共享同一 Rc（统一 store）。
     let entities = Rc::new(RefCell::new(EntityStore::new()));
     let kv = Rc::new(RefCell::new(KvStore::new()));
-    // ④ host API：装载期 ygg 完整面（on/emit/narrate/choice/kv/entity/fs）。
+    // ④ host API：装载期 ygg 完整面（on/emit/narrate/choice/kv/entity/sim）。
     let host = host_api::install(
         &lua,
         HostHandles {
@@ -58,9 +56,6 @@ fn build_kernel(
         },
     )
     .map_err(KernelError::Sandbox)?;
-    // ④'' VFS：`install` 自建、与 Lua 阴面同一个 `Rc`。驱动必须拿它才能做
-    //       dispatch 级 savepoint（失败步里 `ygg.fs.write` 过的文件不得漏到盘上）。
-    let vfs = host.vfs_handle();
     // ④' S11 资源步：ygg.data 只读数据面（host 之后、stdlib 之前、
     // Mod chunk 之前——Mod 顶层即可读资源）。
     if let Some(table) = resources {
@@ -99,7 +94,6 @@ fn build_kernel(
         registry,
         entities,
         kv,
-        vfs,
     })
 }
 
@@ -257,7 +251,6 @@ impl KernelFacade {
             registry: parts.registry,
             entities: parts.entities,
             kv: parts.kv,
-            vfs: parts.vfs,
             resources,
             mod_source: mod_source.to_owned(),
             pending_choice: None,

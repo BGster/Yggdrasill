@@ -8,7 +8,9 @@
             "path": "data/probe.json"
         }
     ],
-    "schemaFiles": ["schemas/probe.json"],
+    "schemaFiles": [
+        "schemas/probe.json"
+    ],
     "packages": [
         {
             "id": "entity",
@@ -32,14 +34,6 @@
         },
         {
             "id": "role-skill",
-            "version": "0.1.0"
-        },
-        {
-            "id": "assetgen",
-            "version": "0.1.0"
-        },
-        {
-            "id": "textframe",
             "version": "0.1.0"
         }
     ]

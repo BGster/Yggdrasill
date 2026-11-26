@@ -30,12 +30,11 @@
 mod support;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use ygg_sandbox::driver::{KernelError, KernelFacade};
 use ygg_sandbox::modload::ModBundle;
 use ygg_sandbox::modules::ModuleSet;
-use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 
 use support::{copy_fixture, fixture_kernel, narrate, reseal};
 
@@ -481,50 +480,4 @@ fn the_old_style_module_cannot_sneak_back_in_and_reorder_dispatch() {
     );
 
     let _ = fs::remove_dir_all(&dir);
-}
-
-// ───────────────── ⑦ 回归：无 code 段的 Mod 行为不变 ─────────────────
-
-/// 仓库里剩下的单文件 Mod（`pack.json` 没有 `code` 段）。
-/// 两套 agent-seed（`.ygg/mods/agent-seed` / `packages/mods/agent-seed`）已迁成多文件，
-/// 不再是本用例的对象——它们的机制面由 `ygg-lint --pack` + playtest + 骨架守卫覆盖。
-const SINGLE_FILE_MODS: [&str; 1] = ["packages/mods/test-adventure"];
-
-#[test]
-fn mods_without_a_code_segment_still_load_and_play_through() {
-    // 本轮改造只动多文件装背面：单文件 Mod 的 `pack.json` 没有 `code` 段，
-    // 模块表为空——它们必须逐字节照旧。这里每个包都真装载 + 真走查到【结局】，
-    // 而不是只看"能不能解析"。
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for relative in SINGLE_FILE_MODS {
-        let dir = root.join(relative);
-        assert!(dir.is_dir(), "仓库 Mod 目录缺失：{}", dir.display());
-        let pack = support::read_json(&dir.join("pack.json"));
-        assert!(
-            pack.get("code").is_none(),
-            "{relative} 不该有 code 段（有的话它就不是单文件 Mod，本用例前提不成立）"
-        );
-
-        let bundle =
-            ModBundle::load(&dir).unwrap_or_else(|err| panic!("{relative} 装载失败：{err}"));
-        assert_eq!(bundle.modules.len(), 0, "{relative} 的模块表必须为空");
-        assert!(
-            bundle.mod_source.contains("ygg.on"),
-            "{relative} 的入口必须是入口（顶层注册正是它该做的事）"
-        );
-
-        let report = playtest(&dir, &PlaytestOptions::default());
-        assert!(
-            report.ok && report.reached == Some(Reached::Ending),
-            "{relative} 走查必须到【结局】：reached={:?} errors={:?}",
-            report.reached,
-            report.errors
-        );
-        assert!(report.errors.is_empty(), "{relative}：{:?}", report.errors);
-        assert!(
-            report.warnings.is_empty(),
-            "{relative} 不该出现装载/派发告警：{:?}",
-            report.warnings
-        );
-    }
 }

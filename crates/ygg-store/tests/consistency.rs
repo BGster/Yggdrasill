@@ -1,21 +1,15 @@
-//! 跨后端一致性：同一个场景跑两个后端，断言**语义**等价。
+//! 后端语义一致性：`JsonFileStore` 的提交序列语义（`StepRecord`、seq 规则、
+//! 「失败步不落存档」、「reset 归档但不删证据」）都在这里钉住。
 //!
-//! 这里刻意不做字节比较——sqlite 不产 `autosave.json` / `events.jsonl`，字节面
-//! 只对 `JsonFileStore` 有定义（见 `golden_bytes.rs`）。本文件断言的是：
-//! 同样的提交序列在两边得到同样的 `StepRecord`、同样的 seq 规则、同样的
-//! 「失败步不落存档」、同样的「reset 归档但不删证据」。
-//!
-//! 崩溃承诺**不**写成一条两边都成立的弱断言：JSON 是两步写（允许「事件有、
-//! 存档旧」），sqlite 是单事务（全或无）。两条分列：
-//! - JSON 侧：`json_partial_commit_leaves_event_without_save`；
-//! - sqlite 侧：`src/sqlite.rs` 的 crate 内单测（需要直接持有连接注入故障）。
+//! 崩溃承诺写成一条弱断言而不是两边都弱的强断言：JSON 是两步写（允许
+//! 「事件有、存档旧」），见 `json_partial_commit_leaves_event_without_save`。
 
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use serde_json::json;
-use ygg_store::{open, Backend, JsonFileStore, RunStore, StepDraft, StepRecord, Tick, EVENTS_FILE};
+use ygg_store::{open, Backend, JsonFileStore, RunStore, StepDraft, Tick, EVENTS_FILE};
 
 const TICK: Tick = Tick {
     secs: 1_700_000_000,
@@ -47,78 +41,6 @@ fn draft<'a>(event: &'a str, payload: &'a str, ok: bool, save: Option<&'a [u8]>)
 /// 共用场景：3 个成功步 + 1 个失败步，返回该代全部记录。
 ///
 /// 覆盖：seq 由后端分配且连续、失败步**有行无档**、`next_seq` 与非空行数一致、
-/// 存档永远取「最后一个成功步」。
-fn happy_and_failed_steps(store: &mut dyn RunStore) -> Vec<StepRecord> {
-    for index in 0..3u64 {
-        let save = format!("{{\"revision\":{index}}}");
-        let committed = store
-            .commit_step(draft(
-                "step.ok",
-                &index.to_string(),
-                true,
-                Some(save.as_bytes()),
-            ))
-            .expect("成功步必须提交成功");
-        assert_eq!(committed.seq, index, "seq 必须连续分配");
-        assert!(
-            committed.warnings.is_empty(),
-            "正常行不该有告警：{:?}",
-            committed.warnings
-        );
-        assert_eq!(
-            store.latest_save().expect("读存档"),
-            Some(save.into_bytes()),
-            "成功步必须落存档"
-        );
-    }
-
-    let before = store.latest_save().expect("读存档");
-    let failed = store
-        .commit_step(draft("step.failed", "x", false, None))
-        .expect("失败步的事件行仍要写");
-    assert_eq!(failed.seq, 3, "失败步同样占 seq");
-    assert_eq!(
-        store.latest_save().expect("读存档"),
-        before,
-        "失败步不得改存档（有行无档）"
-    );
-    assert_eq!(store.next_seq().expect("seq"), 4);
-
-    let log = store.steps().expect("读记录");
-    assert_eq!(log.skipped, 0);
-    assert_eq!(log.records.len(), 4);
-    assert_eq!(
-        log.records.iter().map(|r| r.seq).collect::<Vec<_>>(),
-        vec![0, 1, 2, 3],
-        "seq 必须无洞"
-    );
-    assert!(!log.records[3].ok, "第 4 条必须是失败步");
-    log.records
-}
-
-#[test]
-fn backends_agree_on_step_records() {
-    let json_dir = temp_dir("agree-json");
-    let mut json_store = JsonFileStore::open(&json_dir).expect("打开 JSON 后端");
-    let from_json = happy_and_failed_steps(&mut json_store);
-
-    #[cfg(feature = "sqlite")]
-    {
-        let sqlite_dir = temp_dir("agree-sqlite");
-        let mut sqlite_store =
-            open(Backend::Sqlite, &sqlite_dir, TICK).expect("打开 sqlite 后端（feature 已开）");
-        let from_sqlite = happy_and_failed_steps(sqlite_store.as_mut());
-        assert_eq!(
-            from_json, from_sqlite,
-            "两后端的 StepRecord 必须逐字段相等（语义等价）"
-        );
-    }
-    #[cfg(not(feature = "sqlite"))]
-    {
-        // 未开 feature 时至少把 JSON 侧的形状钉住（sqlite 侧由 CI 的 sqlite job 覆盖）。
-        assert_eq!(from_json.len(), 4);
-    }
-}
 
 #[test]
 fn seqs_stay_gapless_over_many_steps() {
@@ -221,58 +143,6 @@ fn reset_archives_but_never_deletes_evidence() {
     assert_eq!(archives, 2, "两次重置各归档一份，旧的不得被删");
 }
 
-#[test]
-fn reset_switches_generation_on_sqlite() {
-    #[cfg(feature = "sqlite")]
-    {
-        let dir = temp_dir("reset-sqlite");
-        let mut store = open(Backend::Sqlite, &dir, TICK).expect("打开 sqlite 后端");
-        store
-            .commit_step(draft("step", "0", true, Some(b"{\"rev\":0}")))
-            .expect("提交");
-
-        let info = store
-            .reset(b"{\"initial\":true}", "explicit-new-game", TICK)
-            .expect("重置必须成功");
-        assert!(info.had_old);
-        assert_eq!(
-            info.archive.as_deref(),
-            Some("generation=1"),
-            "归档载体是代"
-        );
-        assert_eq!(store.next_seq().expect("seq"), 0);
-        assert!(store.steps().expect("读记录").records.is_empty());
-        assert_eq!(
-            store.latest_save().expect("读存档").expect("有存档"),
-            b"{\"initial\":true}".to_vec()
-        );
-        // 空 run 目录第一次 reset：had_old 必须是 false（不能凭空报旧产物）。
-        let fresh = temp_dir("reset-sqlite-fresh");
-        let mut fresh_store = open(Backend::Sqlite, &fresh, TICK).expect("打开 sqlite 后端");
-        let info = fresh_store
-            .reset(b"{}", "explicit-new-game", TICK)
-            .expect("重置必须成功");
-        assert!(!info.had_old, "空库不得报旧产物（会误导回执文案）");
-        assert!(
-            info.archive.is_none(),
-            "空库重置不归档（不凭空多出一代，也不会在回执里报「已归档」）"
-        );
-        assert_eq!(
-            fresh_store.next_seq().expect("seq"),
-            0,
-            "空库重置后仍是 0 步"
-        );
-    }
-    #[cfg(not(feature = "sqlite"))]
-    {
-        let dir = temp_dir("reset-sqlite-off");
-        let mut store = JsonFileStore::open(&dir).expect("打开 JSON 后端");
-        store
-            .reset(b"{}", "explicit-new-game", TICK)
-            .expect("重置必须成功");
-    }
-}
-
 /// inbox 面：行数 / 位移 / 重置后证据保留，且位移不会凭空越过已有行数。
 #[test]
 fn inbox_cursor_tracks_lines_and_survives_reset() {
@@ -316,36 +186,13 @@ fn inbox_cursor_tracks_lines_and_survives_reset() {
     store.reset(b"{}", "explicit-new-game", TICK).expect("重置");
     assert_eq!(store.inbox_len().expect("行数"), 3, "重置不得删 inbox 证据");
     assert_eq!(store.inbox_cursor().expect("位移"), 1);
-
-    #[cfg(feature = "sqlite")]
-    {
-        let sqlite_dir = temp_dir("inbox-sqlite");
-        let mut sqlite_store = open(Backend::Sqlite, &sqlite_dir, TICK).expect("打开 sqlite 后端");
-        for index in 0..3 {
-            sqlite_store
-                .inbox_push(
-                    &json!({"kind": "add", "external_id": format!("ext-{index}")}),
-                    TICK,
-                )
-                .expect("追加 inbox 行");
-        }
-        assert_eq!(sqlite_store.inbox_len().expect("行数"), 3);
-        assert_eq!(sqlite_store.inbox_cursor().expect("位移"), 0);
-        sqlite_store.set_inbox_cursor(2, TICK).expect("前移位移");
-        assert_eq!(sqlite_store.inbox_cursor().expect("位移"), 2);
-        assert_eq!(
-            sqlite_store.inbox_lines().expect("读行").len(),
-            3,
-            "位移前移不得删行"
-        );
-    }
 }
 
 /// JSON 后端的**弱承诺**：事件行先落、存档后写，两步之间可以被打破。
 ///
 /// 注入手法：把 `autosave.json` 换成目录 → 原子替换的 `rename` 必败。此时事件
 /// 行已经在盘上（seq 前移），存档仍是上一版——这正是 JSON 后端允许的状态，
-/// 也是 sqlite 后端（单事务）**不允许**的状态（见 `src/sqlite.rs` 的 crate 内单测）。
+/// 不是更强承诺——单事务后端会整步回滚。
 #[test]
 fn json_partial_commit_leaves_event_without_save() {
     let dir = temp_dir("json-partial");
@@ -395,25 +242,9 @@ fn open_reports_its_own_backend() {
         "JSON 的定位串是存档路径：{}",
         store.locator()
     );
-
-    #[cfg(feature = "sqlite")]
-    {
-        let sqlite_dir = temp_dir("open-sqlite");
-        let store = open(Backend::Sqlite, &sqlite_dir, TICK).expect("打开 sqlite 后端");
-        assert_eq!(store.backend(), Backend::Sqlite);
-        assert!(
-            store.locator().ends_with("run.sqlite#latest"),
-            "sqlite 的定位串是 <db>#latest：{}",
-            store.locator()
-        );
-        assert!(
-            sqlite_dir.join("run.sqlite").exists(),
-            "sqlite 后端必须在 run 目录里建库"
-        );
-    }
 }
 
-/// `cleanup_stale` 的差别：JSON 清陈旧 tmp，sqlite 恒 no-op（绝不碰 -wal/-shm）。
+/// `cleanup_stale`：JSON 清陈旧 tmp。
 #[test]
 fn cleanup_stale_is_json_only() {
     let dir = temp_dir("cleanup");
@@ -437,23 +268,6 @@ fn cleanup_stale_is_json_only() {
     assert_eq!(warnings.len(), 1, "陈旧 tmp 必须被清理并告警");
     assert!(warnings[0].contains("清理残留 tmp"));
     assert!(!stale.exists());
-
-    #[cfg(feature = "sqlite")]
-    {
-        let sqlite_dir = temp_dir("cleanup-sqlite");
-        let mut sqlite_store = open(Backend::Sqlite, &sqlite_dir, TICK).expect("打开 sqlite 后端");
-        sqlite_store
-            .commit_step(draft("step", "0", true, Some(b"{}")))
-            .expect("提交");
-        assert!(
-            sqlite_store.cleanup_stale(0).is_empty(),
-            "sqlite 的清理必须是 no-op"
-        );
-        assert!(
-            sqlite_dir.join("run.sqlite").exists(),
-            "no-op 之后库文件必须还在（清理不是删库）"
-        );
-    }
 }
 
 /// `run.json` 的 `store` 字段解析（端口只给枚举，不碰 run.json 本身）。
@@ -469,140 +283,3 @@ fn backend_names_round_trip() {
 // ============================================================================
 // §制品面的跨后端一致性（语义等价，不比较存储形态）
 // ============================================================================
-
-/// 同一写入序列在两个后端得到**逐字节相同**的 `path|bytes|sha256` 序列。
-///
-/// 这是 `ygg.fs.list` 确定性的锤子：回执字节随后端变就是漂移。
-/// `updated_at` **不**入比较——sqlite 存宿主 `Tick`、JSON 无 sidecar 只能回
-/// mtime（`ArtifactMeta::updated_at` 已声明这条差异），而 `ygg.fs.list` 的
-/// 回执本来就只有 path / bytes / sha256。
-#[test]
-fn backends_agree_on_artifact_meta() {
-    fn write_all(store: &mut dyn RunStore) -> Vec<String> {
-        let puts = [
-            ("artifacts/z.md", b"last".to_vec()),
-            ("artifacts/a.md", b"first".to_vec()),
-            ("artifacts/notes/m.md", b"\xe4\xb8\xad\xe6\x96\x87".to_vec()),
-        ];
-        for (path, content) in &puts {
-            let meta = store.artifact_put(path, content, TICK).expect("写入制品");
-            assert_eq!(meta.sha256.len(), 64, "小写十六进制 64 字符");
-        }
-        // 渲染成「可比较的字符串向量」，避开结构体类型本身。
-        store
-            .artifact_list()
-            .expect("列表")
-            .into_iter()
-            .map(|m| format!("{}|{}|{}", m.path, m.bytes, m.sha256))
-            .collect()
-    }
-
-    let json_dir = temp_dir("artifact-json");
-    let mut json_store = JsonFileStore::open(&json_dir).expect("打开 JSON 后端");
-    let from_json = write_all(&mut json_store);
-    assert_eq!(from_json.len(), 3);
-
-    #[cfg(feature = "sqlite")]
-    {
-        let sqlite_dir = temp_dir("artifact-sqlite");
-        let mut sqlite_store =
-            open(Backend::Sqlite, &sqlite_dir, TICK).expect("打开 sqlite 后端（feature 已开）");
-        let from_sqlite = write_all(sqlite_store.as_mut());
-        assert_eq!(
-            from_json, from_sqlite,
-            "两后端的 path/bytes/sha256 必须逐字段相等（含顺序）"
-        );
-        // sqlite 的 `updated_at` 可重放：就是写入那次 `Tick.secs`。
-        assert!(
-            sqlite_store
-                .artifact_list()
-                .expect("列表")
-                .iter()
-                .all(|m| m.updated_at == TICK.secs),
-            "sqlite 的 updated_at 必须回宿主 Tick（不得取时钟）"
-        );
-    }
-}
-
-/// reset 之后两后端的**当前代**都空，旧件仍可取回（sqlite = 旧代可查；
-/// JSON = `artifacts.reset.*` 目录）。
-#[test]
-fn backends_agree_on_artifact_reset_semantics() {
-    fn put_then_reset(store: &mut dyn RunStore) -> usize {
-        store
-            .artifact_put("artifacts/keep.md", b"evidence", TICK)
-            .expect("写入制品");
-        store
-            .reset(b"{\"initial\":true}", "explicit-new-game", TICK)
-            .expect("重置");
-        assert!(
-            store
-                .artifact_get("artifacts/keep.md")
-                .expect("读当前代")
-                .is_none(),
-            "当前代必须看不到旧制品"
-        );
-        store.artifact_list().expect("列表").len()
-    }
-
-    let json_dir = temp_dir("artifact-reset-json");
-    let mut json_store = JsonFileStore::open(&json_dir).expect("打开 JSON 后端");
-    assert_eq!(put_then_reset(&mut json_store), 0);
-    // JSON 侧的归档载体是目录（证据不丢）。
-    let archived = fs::read_dir(&json_dir)
-        .expect("读 run 目录")
-        .flatten()
-        .any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("artifacts.reset.")
-        });
-    assert!(archived, "JSON 后端必须把旧代制品归档成 artifacts.reset.*");
-
-    #[cfg(feature = "sqlite")]
-    {
-        let sqlite_dir = temp_dir("artifact-reset-sqlite");
-        let mut sqlite_store = open(Backend::Sqlite, &sqlite_dir, TICK).expect("打开 sqlite 后端");
-        // 推一代需要旧代有步（端口既有语义：空代重置不归档）。
-        sqlite_store
-            .commit_step(draft("step", "0", true, Some(b"{}")))
-            .expect("提交一步");
-        assert_eq!(put_then_reset(sqlite_store.as_mut()), 0);
-    }
-}
-
-/// 门在两个后端完全同规则：同一批坏路径两边都报 `Invalid`。
-#[test]
-fn backends_agree_on_artifact_path_gate() {
-    let bad = [
-        "artifacts/",
-        "artifacts//x",
-        "artifacts/../x",
-        "artifact/x",
-        "/artifacts/x",
-        "artifacts/a b.md",
-        "",
-    ];
-    let mut json_store = JsonFileStore::open(&temp_dir("gate-json")).expect("打开 JSON 后端");
-    for path in bad {
-        assert!(
-            json_store.artifact_put(path, b"x", TICK).is_err(),
-            "JSON 后端必须拒绍 `{path}`"
-        );
-        assert!(json_store.artifact_get(path).is_err(), "读面同样拒绍");
-    }
-
-    #[cfg(feature = "sqlite")]
-    {
-        let mut sqlite_store =
-            open(Backend::Sqlite, &temp_dir("gate-sqlite"), TICK).expect("打开 sqlite 后端");
-        for path in bad {
-            assert!(
-                sqlite_store.artifact_put(path, b"x", TICK).is_err(),
-                "sqlite 后端必须拒绍 `{path}`"
-            );
-            assert!(sqlite_store.artifact_get(path).is_err(), "读面同样拒绍");
-        }
-    }
-}

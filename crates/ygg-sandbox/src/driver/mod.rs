@@ -46,10 +46,6 @@
 //!   加性可选键 `warnings`（D1）：仅当 handler 在 `ygg.choice` 之前产生过
 //!   `ygg.emit`（将被语义丢弃）时出现，单元素字符串数组；serde_json 字典序
 //!   键序下确定性不变（同输入 → 同警告 → 同字节）。
-//!   加性可选键 `meta`（TD1）：仅当 handler 调用过 `ygg.meta`（结构化回执面）
-//!   时出现，内容为 `BTreeMap` 序的对象——与 `narrative` 完全分离，宿主不再
-//!   从人读文本里剖结构化数据。**瞬态**：每次 dispatch 入口 clear、转换后
-//!   take，不入 canonical snapshot / 存档 / 状态哈希。
 //! - **payload 口径（A3）**：事件路径 payload 必填且须为 JSON 标量——
 //!   空串、嵌套对象/数组/null 均为 VALIDATION（空 payload 放宽与否后续
 //!   有真实需求再议，当前不放宽）；保留命令（save/load/state/log/drain）
@@ -70,7 +66,7 @@ use ygg_core::entity::EntityStore;
 use ygg_core::kv::KvStore;
 use ygg_core::save::SaveFile;
 
-use crate::host_api::{HostApi, VfsStore};
+use crate::host_api::HostApi;
 use crate::inject::DeterminismHandle;
 use crate::resources::{ResourceError, ResourceTable};
 use crate::sandbox::{Sandbox, ENGINE_VERSION};
@@ -106,12 +102,6 @@ pub struct KernelFacade {
     entities: Rc<RefCell<EntityStore>>,
     /// canonical 持久 KV（同上）。
     kv: Rc<RefCell<KvStore>>,
-    /// `ygg.fs` 的内存态 VFS（与 host 桥共享 = 同一份内容面）。
-    ///
-    /// **不进 canonical 存档**：`SaveFile` / `ENGINE_VERSION` /
-    /// `canonical_state_bytes` 零改动。VFS 是宿主侧的旁路面（落 `RunStore`
-    /// 的制品面，开局由宿主回灌），它的代可以独立于事件代（reset 归档）。
-    vfs: Rc<RefCell<VfsStore>>,
     /// 只读资源表（S11：构建后不可变；数据面非状态——不入 canonical
     /// store/存档/状态哈希，经 host 桥闭包间接消费，驱动不直接读面）。
     resources: Rc<ResourceTable>,

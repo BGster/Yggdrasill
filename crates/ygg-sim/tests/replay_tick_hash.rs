@@ -123,8 +123,11 @@ fn despawn_frame(ids: &[u64]) -> Vec<u8> {
     writer.finish()
 }
 
+/// 一次录制：场景 + 第 50 tick 快照 + 之后的事件日志 + 逐步哈希。
+type Recording = (Scenario, Vec<u8>, Vec<u8>, Vec<(u64, u64)>);
+
 /// 跑 200 tick，第 50 tick 取快照并把之后的日志录下来。
-fn run_with_recording() -> (Scenario, Vec<u8>, Vec<u8>, Vec<(u64, u64)>) {
+fn run_with_recording() -> Recording {
     let mut world = scenario();
     world.sim.trace(true);
     // 初始实体：Pos/Vel/Hp 三列

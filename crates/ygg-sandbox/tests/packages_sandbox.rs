@@ -134,23 +134,22 @@ fn lines_of(reply: &Json) -> Vec<String> {
 /// 两边都拿它当锚点。
 const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
-/// 冒烟叙述行（**逐字**）。八行一包一行，最后一行是收尾。
+/// 冒烟叙述行（**逐字**）。六行一包一行，最后一行是收尾。
 ///
-/// 它们与 r2 计划 §6.5 的六包原文逐字节相同（含 `sha=ba7816bf…15ad`、
-/// `next32=726839672`、`hash=14b44f969c391c53`），只多了 assetgen / textframe
-/// 两行与 N=8
+/// 它们与 r2 计划 §6.5 的原文逐字节相同（含 `sha=ba7816bf…15ad`、
+/// `next32=726839672`、`hash=14b44f969c391c53`）
 /// ——改口径等价于改契约，必须同提交改这份清单。
 fn smoke_lines() -> Vec<String> {
     [
         "pkg.entity ok id=1 hp=2.5 ref_reject=true".to_owned(),
-        format!("pkg.codec ok array=[1,2,3] obj={{\"f\":1.5,\"i\":1}} roundtrip=true sha={SHA256_ABC}"),
+        format!(
+            "pkg.codec ok array=[1,2,3] obj={{\"f\":1.5,\"i\":1}} roundtrip=true sha={SHA256_ABC}"
+        ),
         "pkg.quest ok id=1 state=open step=2".to_owned(),
         "pkg.dialogue ok history=1".to_owned(),
         "pkg.role-skill ok granted=true has=true atk=3".to_owned(),
         "pkg.procgen ok next32=726839672 hash=14b44f969c391c53".to_owned(),
-        "pkg.assetgen ok algos=7 canon=kind=texture algo=texture.fbm v=1 seed=smoke stream=assetgen/texture/fbm w=4 h=4 ch=1 bytes=16".to_owned(),
-        "pkg.textframe ok rows=3 cells=A___|___Z|HUD".to_owned(),
-        "pkg.smoke packages=8".to_owned(),
+        "pkg.smoke packages=6".to_owned(),
     ]
     .into_iter()
     .collect()
@@ -322,9 +321,9 @@ fn collect_lua(dir: &Path, id: &str, out: &mut Vec<(String, PathBuf)>) {
 /// 调用形态：`(行号, 形态)`。
 ///
 /// 为什么要一个小词法器而不是逐行 `find`：注释与字符串里出现这些名字是**合法的**
-/// ——`assetgen/spec.lua` 写着「不用 `math.type`」、`join.lua` 写着「`table.concat`
-/// 不可达」、`mod-package.md` 这个文档路径里就含 `package.`。逐行文本匹配会把这
-/// 八处**正确**的叙述判成违规，于是门禁只能靠加例外活着——那比没有门禁更糟。
+/// ——包源码里写着「不用 `math.type`」、「`table.concat` 不可达」这类叙述，
+/// `mod-package.md` 这个文档路径里就含 `package.`。逐行文本匹配会把这些
+/// **正确**的叙述判成违规，于是门禁只能靠加例外活着——那比没有门禁更糟。
 ///
 /// 判据：命名空间名后面紧跟 `.`、函数名后面紧跟 `(`；前置字符是 `.` / `:` 的视为
 /// 字段访问（`a.b`、`a:b`），不算全局。

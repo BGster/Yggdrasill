@@ -2,7 +2,7 @@
 //!
 //! 每个用例都从**入库 fixture**装载（不是内联字符串）：fixture 是三层依赖
 //! `entry → src.handlers → src.util` + 一处重复 require + 一个 `return nil`
-//! 模块的真跑包，走查能跑到【结局】——「装载通过但跑不起来」这类假绿在这里
+//! 模块的真跑包，装载后能一路派发到【结局】——「装载通过但跑不起来」这类假绿在这里
 //! 无处藏身。
 //!
 //! 断言口径：**对象身份与执行次数**用模块自己留的痕（`util_execs` / `runs` /
@@ -14,7 +14,6 @@ mod support;
 use std::fs;
 
 use ygg_sandbox::modload::ModBundle;
-use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
 
 use support::{declared_modules, fixture_dir, fixture_kernel, narrate};
 
@@ -97,36 +96,6 @@ fn a_nil_module_is_cached_as_true_and_never_runs_twice() {
     assert_eq!(
         narrate(&mut kernel, "probe.nil"),
         ["silent=true;again=true;same=true;runs=1"]
-    );
-}
-
-#[test]
-fn the_fixture_really_plays_through_to_an_ending() {
-    // "能真跑"的判据：走查（与宿主实跑同一份装载语义）走到【结局】，且序章叙事
-    // 里带着**模块**返回的值——证明模块真的被 require 了，不是空壳 fixture。
-    let report = playtest(&fixture_dir(), &PlaytestOptions::default());
-    assert!(
-        report.ok,
-        "走查必须成功：reached={:?} errors={:?}",
-        report.reached, report.errors
-    );
-    assert_eq!(report.reached, Some(Reached::Ending));
-    assert!(report.errors.is_empty(), "errors: {:?}", report.errors);
-    assert!(
-        report
-            .narrative_sample
-            .iter()
-            .any(|line| line.contains("（多文件 Mod）")),
-        "序章叙事必须含模块返回的串（模块真的装载了）：{:?}",
-        report.narrative_sample
-    );
-    assert!(
-        report
-            .narrative_sample
-            .iter()
-            .any(|line| line.starts_with("【结局")),
-        "必须出现结局行：{:?}",
-        report.narrative_sample
     );
 }
 

@@ -1,10 +1,8 @@
-//! r3 统一装载口回归：[`ygg_sandbox::modload`] 是走查与宿主实跑共用的唯一装载语义。
+//! 装载口回归：[`ygg_sandbox::modload`] 是 Mod 目录 → 内核的唯一装载语义。
 //!
-//! 本文件锁的是**分叉本身**：多文件 Mod（`pack.json` 带 `code` 段）在
-//! `playtest` 里曾经不带模块表装载（走查自己读盘、不看 `code`），于是入口的
-//! `require("src.util")` 对空模块表得到可读拒绝——「playtest 红、实跑绿」
-//! 或者反过来，而两份日志都不指向根因。现在两者都走 `ModBundle`：
-//! playtest 能跑到结局、`load_mod` 能派发，就是这条语义真的统一了的证据。
+//! 本文件锁的是**没有第二条读盘路径**：多文件 Mod（`pack.json` 带 `code` 段）
+//! 只经 `ModBundle` 装载，`load_mod` 与 `ModBundle::kernel` 对外都只暴露同一份
+//! 对账后的模块表——一处读盘实现、一处声明对账。
 //!
 //! Mod 五件套 + 模块文件全部运行期写入临时目录（manifest 现算，与 pack.rs 同法）。
 
@@ -14,8 +12,7 @@ use std::path::PathBuf;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use ygg_sandbox::modload::{load_mod, ModBundle};
-use ygg_sandbox::playtest::{playtest, PlaytestOptions, Reached};
+use ygg_sandbox::modload::ModBundle;
 
 /// 入口：顶层即 `require`（模块表必须在入口 chunk 之前就位）。
 const ENTRY: &str = r#"
@@ -43,36 +40,6 @@ const UTIL: &str = r#"
 local util = { suffix = "（模块）" }
 return util
 "#;
-
-#[test]
-fn playtest_and_load_mod_share_one_multi_file_loading_path() {
-    let dir = write_multi_file_mod("modload-shared");
-    let bundle = ModBundle::load(&dir).expect("bundle loads");
-    assert_eq!(bundle.modules.len(), 1, "code 段的模块必须进模块表");
-    assert!(bundle.mod_source.contains("src.util"), "入口取 code.entry");
-
-    // ① 宿主实跑路径：装载后派发（require 在入口顶层即被解析）。
-    let mut kernel = load_mod(&dir).expect("load_mod");
-    let reply: serde_json::Value =
-        serde_json::from_str(&kernel.dispatch("event.start", "0")).expect("json envelope");
-    assert_eq!(reply["ok"], json!(true), "{reply}");
-    let narrative = reply["narrative"].to_string();
-    assert!(
-        narrative.contains("（模块）"),
-        "入口必须真的 require 到模块里的值：{narrative}"
-    );
-
-    // ② 走查路径：同一份装载语义 → 走到结局（不是「入口 require 失败」）。
-    let report = playtest(&dir, &PlaytestOptions::default());
-    assert!(
-        report.ok && report.reached == Some(Reached::Ending),
-        "走查必须与实跑同样装载模块：errors={:?} reached={:?}",
-        report.errors,
-        report.reached
-    );
-
-    let _ = fs::remove_dir_all(&dir);
-}
 
 #[test]
 fn restore_keeps_the_module_table() {

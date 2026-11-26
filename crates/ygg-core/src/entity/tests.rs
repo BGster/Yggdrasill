@@ -352,7 +352,7 @@ fn where_op_semantics_cover_all_ops() {
     let entity = store.get(id).unwrap();
     assert!(Predicate::new("boss", CompareOp::Is(IsTest::True)).matches(entity));
     assert!(!Predicate::new("hp", CompareOp::Is(IsTest::True)).matches(entity));
-    assert!(Predicate::new("hp", CompareOp::Is(IsTest::False)).matches(entity) == false);
+    assert!(!Predicate::new("hp", CompareOp::Is(IsTest::False)).matches(entity));
 }
 
 /// 缺属性：除 `is` 外一律假——**含 `neq`**（v1 §2.3 的裁断）

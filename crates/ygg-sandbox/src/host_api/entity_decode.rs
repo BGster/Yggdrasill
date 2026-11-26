@@ -4,6 +4,15 @@ use super::value_from_lua;
 use mlua::{Error, Table, Value as LuaValue};
 use ygg_core::entity::Value;
 
+/// `attr_fetch` 的回执行：属性袋与 tag 名单已成对（`entity_rows` 的读侧形状）。
+pub type EntityAttrRow = (Vec<(String, Value)>, Vec<String>);
+
+/// 一批 `attr_fetch` 回执行。
+pub type EntityAttrRows = Vec<EntityAttrRow>;
+
+/// `attr_apply(ops)` 的一条：目标 id + 属性袋。
+pub type EntityAttrOp = (u64, Vec<(String, Value)>);
+
 /// 一个待造的行：属性袋 + tag 名单（都是可选的）。
 #[derive(Clone, Debug, Default)]
 pub struct EntityRowSpec {
@@ -98,7 +107,7 @@ pub fn entity_rows(rows: &Table) -> Result<Vec<EntityRowSpec>, Error> {
 }
 
 /// `attr_apply(ops)`：每个元素 `{ id = n, attrs = {k = v} }`。
-pub fn entity_attr_ops(ops: &Table) -> Result<Vec<(u64, Vec<(String, Value)>)>, Error> {
+pub fn entity_attr_ops(ops: &Table) -> Result<Vec<EntityAttrOp>, Error> {
     let mut out = Vec::new();
     for (index, item) in entity_array(ops, "ops")?.iter().enumerate() {
         let LuaValue::Table(op) = item else {

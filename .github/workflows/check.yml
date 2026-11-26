@@ -6,16 +6,14 @@
 # （所有 uses 按 zizmor 纪律 pin 到 commit SHA，注释保留版本号）。
 #
 # 覆盖口径 = playbook `gates` 章里无需额外前置条件的必过项：
-#   rust.fmt / rust.clippy / rust.test / rust.agent.test
-#   ts.typecheck / ts.test
+#   rust.fmt / rust.clippy / rust.test
 # 不含的项与原因：
 #   - wasm.build / wasm.determinism：需 WASI SDK + wasm-bindgen CLI，成本高，
 #     由 deploy-pages 的 build job 与本地门禁承担（其产物即 wasm 实例）。
-#   - ts.build：deploy-pages 已构建 client-web，重复无增益。
 #
-# 另有一条**结构守卫**（不属于 playbook `gates` 章的门禁命令）：seed Mod 与项目 Mod 的
-# 骨架文件（`mod.lua` + `src/**` + `schemas/`，以及 `pack.json` 的 `code` 段）必须一致——
-# `data/` 与 `pack.json` 的 `agent`/`inboxRoutes` 是各自实例数据，允许不同。
+# 另带两条**结构守卫**（不属于 playbook `gates` 章的门禁命令）：
+# ① ygg-store 必须留在 dev-dependencies（wasm/lint 的依赖面保持干净）；
+# ② serde_json 不得开 `preserve_order`（字节键序即线格式）。
 name: check
 
 on:
@@ -41,60 +39,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # 骨架一致性守卫（最先跑：只用 diff，不需要工具链，失败最快）。
-      # 两个 Mod 分工——骨架面（机制）逐字节一致，实例面（data/）各自维护：
-      #   packages/mods/agent-seed  = 对外分发的种子模板
-      #   .ygg/mods/agent-seed      = 本项目实际装载的实例
-      # 只校验 mod.lua 与 schemas/，**不校验 data/**（playbook 等必然不同）。
-      - name: "Guard — seed/project mod skeleton must match"
-        run: |
-          seed=packages/mods/agent-seed
-          proj=.ygg/mods/agent-seed
-          fail=0
-          if ! diff -u "$seed/mod.lua" "$proj/mod.lua"; then
-            MSG="::error::mod.lua 两侧不一致——请运行"
-            echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
-            fail=1
-          fi
-          if ! diff -ru "$seed/src" "$proj/src"; then
-            MSG="::error::src/ 两侧不一致——请运行"
-            echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
-            fail=1
-          fi
-          if ! diff -ru "$seed/schemas" "$proj/schemas"; then
-            MSG="::error::schemas/ 两侧不一致——请运行"
-            echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
-            fail=1
-          fi
-          # 资源格式契约是三处同源：packages/schema/schemas/ 是单一事实源（D15），
-          # 两份 Mod 的 schemas/ 必须与它逐字节一致。只比 Mod 声明的那几份
-          # （schema 包另有 manifest.json，不是 Mod 资源，不参与）。
-          for f in "$seed"/schemas/*.json; do
-            [ -e "$f" ] || continue
-            name=$(basename "$f")
-            if ! diff -u "packages/schema/schemas/$name" "$f"; then
-              MSG="::error::${name} 与 packages/schema/schemas/ 不一致"
-              echo "$MSG——schema 是单一事实源（D15）" >&2
-              fail=1
-            fi
-          done
-          # pack.json 的 `code` 段与 `tools` 段属骨架（agent / inboxRoutes 属实例，允许不同）。
-          # `tools` 是**机制面**：哪些程序能被 spawn。两侧漂移等于两个 Mod 跑两套能力，
-          # 所以它和 `code` 一样必须逐字节同构（`agent` / `inboxRoutes` 才是随文案变的实例面）。
-          if ! python3 - "$seed/pack.json" "$proj/pack.json" <<'PY'
-          import json, sys
-          keys = ("code", "tools")
-          a = json.load(open(sys.argv[1], encoding="utf-8"))
-          b = json.load(open(sys.argv[2], encoding="utf-8"))
-          sys.exit(0 if all(a.get(k) == b.get(k) for k in keys) else 1)
-          PY
-          then
-            MSG="::error::pack.json 的 code / tools 段两侧不一致——请运行"
-            echo "$MSG scripts/sync-seed-mod.sh --from project" >&2
-            fail=1
-          fi
-          exit "$fail"
-
       # dtolnay/rust-toolchain（moving branch stable，pin 到当时 head）。
       # fmt/clippy 必须显式声明 components：rustup 默认 profile 不含它们。
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
@@ -113,72 +57,12 @@ jobs:
       - name: cargo test（workspace）
         run: cargo test --workspace
 
-      # `cargo test --workspace` 不覆盖 example 内的 #[cfg(test)]；
-      # `--examples` 在本仓会跑出 0 tests，必须用 `--example egg` 指定目标。
-      - name: cargo test（egg example）
-        run: cargo test --example egg -p ygg-sandbox
-
-  # 存储后端的独立门禁：r-evo 起默认特征已含 sqlite（主 rust job
-  # 会编 rusqlite），本 job 补主 job 覆盖不到的两件事：
-  #   ① ygg-store 自身的 `--features sqlite` 包级测试（crate 的
-  #      default 仍是空，不显式开就不编 sqlite 那半边）；
-  #   ② **回退构建**（`--no-default-features`）必须仍可编译，且
-  #      `--store sqlite` fail-closed——默认值翻面后的新风险面。
-  # 另加结构守卫（dev-dep 纪律 / preserve_order）。缓存按 key 与
-  # rust job 分开，否则两套 target/ 产物会互踩。
-  store-sqlite:
-    runs-on: ubuntu-latest
-    steps:
-      # actions/checkout v4.2.2
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-
-      # dtolnay/rust-toolchain（与 rust job 同一 pin）
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
-        with:
-          key: store-sqlite
-
-      - name: cargo fmt --check
-        run: cargo fmt --all -- --check
-
-      - name: cargo test（ygg-store · sqlite 后端）
-        run: cargo test -p ygg-store --features sqlite
-
-      - name: cargo clippy（ygg-store · sqlite 后端）
-        run: |
-          cargo clippy -p ygg-store --features sqlite \
-            --all-targets -- -D warnings
-
-      # r-evo 前这里是 `--features store-sqlite`：默认值翻面后它与不带
-      # 旗标等价（恒真、不再有信息量）。真正的新风险面反过来是**关掉**
-      # sqlite 的回退构建，所以守卫翻转：能编，且 example 单测（含 r10f
-      # 的 fail-closed 断言）能跑。
-      - name: "Guard — 宿主 example 在 --no-default-features 下可编译"
-        run: cargo build -p ygg-sandbox --example egg --no-default-features
-
-      - name: "Guard — 回退构建的默认后端必须 fail-closed（r10f）"
-        run: cargo test --example egg -p ygg-sandbox --no-default-features
-
-      # 结构守卫（不是 playbook 门禁命令）：ygg-store 必须
-      # 留在 dev-dependencies。挪进 [dependencies] 会让依赖者
-      # （wasm/lint）间接吃到 rusqlite，wasm 体积与 lint 的
-      # 纯净面同时破——这条守卫让它在 PR 时立刻红。
-      # r-evo 加强：-e normal 才是「运行期依赖」的准确语义
-      # （-e features 会把 `ygg-sandbox feature "store-sqlite"`
-      # 这类标签当噪声命中），并把包名 `ygg-store` 一并守住
-      # （默认特征转发到 dev-dep 合法，但只能**空指向**）。
-      - name: "Guard — wasm/lint 不得间接依赖 store/sqlite"
+      - name: "Guard — wasm/lint 不得间接依赖 store"
         run: |
           fail=0
           for pkg in ygg-wasm ygg-lint; do
-            if cargo tree -p "$pkg" -e normal \
-              | grep -Eq 'rusqlite|libsqlite3-sys|ygg-store v'; then
-              echo "::error::$pkg must not depend on ygg-store/rusqlite" >&2
+            if cargo tree -p "$pkg" -e normal | grep -Eq 'ygg-store v'; then
+              echo "::error::$pkg must not depend on ygg-store" >&2
               fail=1
             fi
           done
@@ -193,40 +77,3 @@ jobs:
             echo "::error::preserve_order breaks byte key order" >&2
             exit 1
           fi
-
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      # actions/checkout v4.2.2
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-
-      # pnpm/action-setup v4.1.0（版本取自根 package.json 的 packageManager）。
-      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
-
-      # actions/setup-node v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-          cache: pnpm
-
-      # 哨兵：锁文件 tarball 必须全部指向公网 registry（与 deploy-pages 一致）。
-      - name: "Guard — lockfile tarballs must use public registry"
-        run: |
-          BAD=$(grep 'tarball:' pnpm-lock.yaml \
-            | grep -vc 'registry.npmjs.org' || true)
-          if [ "${BAD:-0}" -gt 0 ]; then
-            MSG="pnpm-lock.yaml 含内网镜像 tarball URL"
-            echo "::error::${MSG}——请在仓库根（有 .npmrc）重跑 pnpm install 重新生成" >&2
-            exit 1
-          fi
-
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: pnpm typecheck
-        run: pnpm typecheck
-
-      - name: pnpm test
-        run: pnpm test

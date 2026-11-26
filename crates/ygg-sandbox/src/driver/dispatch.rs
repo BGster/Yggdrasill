@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use serde_json::{json, Map as JsonMap, Value as Json};
+use serde_json::{json, Value as Json};
 
 use ygg_core::bus::{HandlerError, PendingChoice};
 use ygg_core::entity::Value;
@@ -27,11 +25,7 @@ impl KernelFacade {
 
     /// 命令分发（保留名 `save/load/state/log/drain`；其余一律按外部事件名
     /// 进入转换路径 [`KernelFacade::cmd_event`]）。
-    ///
-    /// TD1：入口先清空结构化 meta——上一条回执的 meta 不得残留到本条
-    /// （尤其不得让保留命令的回执带上上一条事件的 meta）。
     fn dispatch_inner(&mut self, cmd: &str, payload_json: &str) -> String {
-        self.host.clear_meta();
         match cmd {
             "save" => self.cmd_save(),
             "load" => self.cmd_load(payload_json),
@@ -97,11 +91,6 @@ impl KernelFacade {
             "engineVersion": ENGINE_VERSION,
             "revision": self.entities.borrow().revision(),
             "kvRevision": self.kv.borrow().revision(),
-            // 加性诊断键（同 `kvRevision` 的性质，不是状态）：VFS 的写代数与
-            // 件数。`state` 信封的消费方（`agent.rs::print_state` / 测试）都按
-            // 键取值，没有严格键集比较，所以加键不破线格式。
-            "vfsRevision": self.vfs.borrow().revision(),
-            "vfsFiles": self.vfs.borrow().len(),
             "snapshotBytes": snapshot_bytes.len(),
             "pendingChoice": self.pending_choice.as_ref().map(choice_to_json),
         })
@@ -189,17 +178,10 @@ impl KernelFacade {
         //    `Ref`/`RefMut`，不跨越 `run_transition` 存活。
         let mut baseline = self.entities.borrow().clone();
         let kv_baseline = self.kv.borrow().clone();
-        // VFS 与 kv 同法：基线是 canonical 的**副本**，不是换出（换出会让转换期的
-        // `ygg.fs.read` 读到空表）；`VfsStore` 自身 `Clone`，`dirty` 集也随基线
-        // 克隆，所以失败 dispatch 里 `ygg.fs.write` 过的路径不会漏进下一次 flush。
-        let vfs_baseline = self.vfs.borrow().clone();
         let outcome = run_transition(&mut baseline, &mut self.registry, event);
         // ④' D1：无论转换成败都取走本次 dispatch 的警告（choice 前置丢弃
         // 面；每 dispatch 至多一条，drain 即清空，不泄漏到后续 dispatch）。
         let warning = self.host.take_dispatch_warning();
-        // ④'' TD1：meta 同样无论成败都 drain（两条路径不留残渣），但只在
-        // 成功信封里露出——错误信封不夹带 Mod 侧数据。
-        let meta = self.host.take_meta();
         // ⑤ 裁定：成功 = **提交**（丢弃基线——canonical 保留本次全部写入）；
         //    失败 = **先还原 canonical、再返回信封**。还原语句必须落在错误
         //    分支内、且先于该分支的返回（`map_transition_error` 只把错误映射
@@ -214,9 +196,6 @@ impl KernelFacade {
             Err(err) => {
                 *self.entities.borrow_mut() = baseline;
                 *self.kv.borrow_mut() = kv_baseline;
-                // 必须落在错误分支内、且先于该分支的返回：失败步的文件不能
-                // 出现在 `ygg.fs.list` 里，否则 Mod 会拿半个状态上的产物做判定。
-                *self.vfs.borrow_mut() = vfs_baseline;
                 return map_transition_error(err);
             }
         };
@@ -239,12 +218,6 @@ impl KernelFacade {
         // 不变：同输入 → 同警告 → 同字节）。
         if let Some(warning) = warning {
             envelope["warnings"] = json!([warning]);
-        }
-        // TD1：加性可选键——结构化 meta（Mod 自报数据，与叙事分离）。
-        // 键序 = BTreeMap 遍历序 → serde_json 默认 Map（BTreeMap）序：
-        // 同输入同字节，不依赖 Mod 的写入次序。
-        if !meta.is_empty() {
-            envelope["meta"] = meta_to_json(&meta);
         }
         envelope.to_string()
     }
@@ -318,16 +291,6 @@ fn value_to_json(value: &Value) -> Json {
         Value::Bool(b) => (*b).into(),
         Value::Str(s) => s.as_str().into(),
     }
-}
-
-/// 结构化 meta → JSON 对象（TD1）：键序 = `BTreeMap` 序遍历（确定性；
-/// serde_json 默认无 `preserve_order`，`Map` 也是 `BTreeMap`，两重保险）。
-fn meta_to_json(meta: &BTreeMap<String, Json>) -> Json {
-    let mut map = JsonMap::new();
-    for (key, value) in meta {
-        map.insert(key.clone(), value.clone());
-    }
-    Json::Object(map)
 }
 
 /// 待决选择 → JSON（prompt + options 序保真）。

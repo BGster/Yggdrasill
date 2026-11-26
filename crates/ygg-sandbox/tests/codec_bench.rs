@@ -205,18 +205,18 @@ fn codec_native_before_after_on_the_same_surface() {
         .expect("挂 TEXT");
 
     let mut encode_native_samples = [0.0f64; 3];
-    for round in 0..3 {
+    for slot in encode_native_samples.iter_mut() {
         let began = Instant::now();
         encode_native
             .call::<mlua::LuaString>(())
             .expect("原生 encode");
-        encode_native_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
+        *slot = began.elapsed().as_secs_f64() * 1000.0;
     }
     let mut decode_native_samples = [0.0f64; 3];
-    for round in 0..3 {
+    for slot in decode_native_samples.iter_mut() {
         let began = Instant::now();
         decode_native.call::<mlua::Value>(()).expect("原生 decode");
-        decode_native_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
+        *slot = began.elapsed().as_secs_f64() * 1000.0;
     }
     // sha256（S19 第三键）：同一份 bundle 文本的摘要，同面同进程。
     let sha256_native: mlua::Function = lua
@@ -225,10 +225,10 @@ fn codec_native_before_after_on_the_same_surface() {
         .expect("sha256 闭包（原生）");
     let mut sha256_native_samples = [0.0f64; 3];
     let mut sha256_native_hex = String::new();
-    for round in 0..3 {
+    for slot in sha256_native_samples.iter_mut() {
         let began = Instant::now();
         sha256_native_hex = sha256_native.call::<String>(()).expect("原生 sha256");
-        sha256_native_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
+        *slot = began.elapsed().as_secs_f64() * 1000.0;
     }
     assert_eq!(
         sha256_native_hex.len(),
@@ -260,17 +260,17 @@ fn codec_native_before_after_on_the_same_surface() {
 
     let mut encode_lua_samples = [0.0f64; 3];
     let mut lua_bytes = Vec::new();
-    for round in 0..3 {
+    for slot in encode_lua_samples.iter_mut() {
         let began = Instant::now();
         let encoded: mlua::LuaString = encode_lua.call(()).expect("Lua encode");
-        encode_lua_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
+        *slot = began.elapsed().as_secs_f64() * 1000.0;
         lua_bytes = encoded.as_bytes().to_vec();
     }
     let mut decode_lua_samples = [0.0f64; 3];
-    for round in 0..3 {
+    for slot in decode_lua_samples.iter_mut() {
         let began = Instant::now();
         decode_lua.call::<mlua::Value>(()).expect("Lua decode");
-        decode_lua_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
+        *slot = began.elapsed().as_secs_f64() * 1000.0;
     }
     let sha256_lua: mlua::Function = lua
         .load("local codec = require('pkg.codec'); return function() return codec.sha256(TEXT) end")
@@ -278,10 +278,10 @@ fn codec_native_before_after_on_the_same_surface() {
         .expect("sha256 闭包（lua）");
     let mut sha256_lua_samples = [0.0f64; 3];
     let mut sha256_lua_hex = String::new();
-    for round in 0..3 {
+    for slot in sha256_lua_samples.iter_mut() {
         let began = Instant::now();
         sha256_lua_hex = sha256_lua.call::<String>(()).expect("Lua sha256");
-        sha256_lua_samples[round] = began.elapsed().as_secs_f64() * 1000.0;
+        *slot = began.elapsed().as_secs_f64() * 1000.0;
     }
 
     // ── 字节相等（before/after 必须同一份字节，否则「快」没有意义）──────────

@@ -427,11 +427,11 @@ fn sha256_matches_the_lua_path_byte_for_byte() {
         .collect();
     // 64 KiB 伪随机（LCG，确定性）：整块多轮 + 非对齐尾，覆盖差分门禁的
     // 「≤ 64 KiB 保 Lua 径可跑」上限。
-    let mut state: u64 = 0x519_2_0_2_6;
+    let mut state: u64 = 0x0519_2026;
     let mut random = Vec::with_capacity(65_536);
     for _ in 0..65_536 {
         state = state
-            .wrapping_mul(6_364_136_223_846_79_3005)
+            .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
         random.push((state >> 33) as u8);
     }

@@ -2,7 +2,7 @@
 
 一个**真跑**的多文件 Mod（不是空壳），被 `tests/modules_e2e.rs` /
 `tests/modules_negative.rs` / `tests/modules_lifecycle.rs` /
-`tests/modules_pure_export.rs` 与 `examples/egg.rs` 的测试直接装载。
+`tests/modules_pure_export.rs` 直接装载。
 
 后者的用法最容易误导未来的读者：`tests/modules_pure_export.rs` 把它复制到临时
 目录后**只改入口**（调换 require 序 / install 序），断言「模块体执行序变了、
@@ -33,8 +33,7 @@ mod.lua（入口，不是模块）
 | `util.count` / `shared.count` | `util.bump` / `shared.bump` | 模块内状态（存读档后必须归零：不留旧对象） |
 
 事件面：`probe.*` 是给测试的观测面（`trace` / `identity` / `nil` / `table` /
-`bump` / `stats` / `order`）；`event.start` + `ygg.choice_selected` 是给
-playtest 的推进面（走到【结局）。
+`bump` / `stats` / `order`）。
 
 `pack.json` 的 `code.modules` 声明序（util → handlers → silent → shared）
 **故意不等于** require 序——装载序由依赖图决定，不由声明序决定。

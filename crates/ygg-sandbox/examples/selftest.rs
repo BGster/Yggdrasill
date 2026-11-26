@@ -1,4 +1,4 @@
-//! `selftest` —— agent-seed Mod 的纯 Lua 自检入口。
+//! `selftest` —— Mod 自带的纯 Lua 自检入口（跑 `<mod>/tests/*.lua`）。
 //!
 //! 设计边界（见 `openwiki/contracts/mod/testing-strategy.md`）：
 //!
@@ -9,7 +9,7 @@
 //!   state_hash、事件路由 fail-closed。这几类由真实跑局暴露，属已知缺口。
 //! - 不修改宿主源码：只读 mod 目录、注入资源、执行 Lua。
 //!
-//! 用法：`cargo run -q --example selftest -- --mod .ygg/mods/agent-seed [--filter <substr>]`
+//! 用法：`cargo run -q --example selftest -- --mod packages/mods/pkg-selftest [--filter <substr>]`
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -359,7 +359,7 @@ fn install_assets(lua: &Lua, mod_dir: &Path, anchor: &Path) -> Result<usize, Str
     // 锚点是 mod 目录向上的第一个 `.git`，**不是**固定的 `../../..`：后者只在
     // `<repo>/.ygg/mods/<name>` 这个深度成立，对 `tests/fixtures/<name>` 这种浅层
     // 夹具会算到 `crates/` 上去（`openwiki/operating/scenes.json` 直接读不到）。
-    let repo_root = ancestor_with_git(&anchor)
+    let repo_root = ancestor_with_git(anchor)
         .ok_or_else(|| format!("从 {} 向上找不到仓库根（.git）", anchor.display()))?;
     lua.globals()
         .set("__REPO_ROOT", repo_root.display().to_string())
@@ -375,7 +375,7 @@ fn install_assets(lua: &Lua, mod_dir: &Path, anchor: &Path) -> Result<usize, Str
 
     // openwiki/operating/scenes.json：reference / scene / reqStage 的 id 解析与读签模拟都要它。
     // 但它是**本仓自有的 doc 索引**：外部仓（装载别人的 Mod，如 PokeRogue-YGG）没有这份
-    // 文件是常态，而唯一消费方是 agent-seed 的读签用例（外部仓不跑它）⇒ 有则注入、无则跳过。
+    // 文件是常态，而唯一消费方是读签用例（外部仓不跑它）⇒ 有则注入、无则跳过。
     // 「没有」≠「坏了」：文件存在却读不动 / 不是合法 JSON 仍然硬失败（那是真损坏）。
     let scenes_path = repo_root.join("openwiki/operating/scenes.json");
     if scenes_path.is_file() {

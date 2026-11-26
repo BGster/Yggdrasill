@@ -8,7 +8,6 @@
 use serde_json::{json, Value as Json};
 use ygg_sandbox::driver::{KernelError, KernelFacade};
 use ygg_sandbox::modules::ModuleSet;
-use ygg_sandbox::sandbox::Sandbox;
 
 /// 由 `(名字, 源码)` 构造模块表（测试便捷面）。
 fn modules(pairs: &[(&str, &str)]) -> ModuleSet {

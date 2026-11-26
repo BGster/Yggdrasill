@@ -1,14 +1,12 @@
-//! 持久化端口：run 目录里**状态事实**的读写面（`RunStore` trait + 两个后端）。
+//! 持久化端口：run 目录里**状态事实**的读写面（`RunStore` trait + JSON 后端）。
 //!
 //! # 为什么有这个 crate
 //!
-//! 宿主 CLI（`crates/ygg-sandbox/examples/egg.rs`）原来把「存档 / 事件日志 /
-//! inbox / 位移 / 重置」全部写死在文件操作里。要让第二个后端（sqlite）可选接入，
-//! 必须先把这个面**收敛成一个端口**：既有的 JSON 文件行为逐字节不变，新的后端
-//! 只实现同一个 trait。本 crate 因此只承接「状态事实」，**不承接**任何宿主协议
+//! 宿主的持久化面原来把「存档 / 事件日志 / inbox / 位移 / 重置」全部写死在
+//! 文件操作里。要让后端可选接入，必须先把这个面**收敛成一个端口**：既有的 JSON
+//! 文件行为逐字节不变。本 crate 因此只承接「状态事实」，**不承接**任何宿主协议
 //! （`run.json` / `settlement.json` / `coordination.*` / `decide-input.json` 都留
-//! 在宿主：它们是跨进程共识与报告面，两后端必须完全一致，搬进来只会把互斥一起
-//! 搬走）。
+//! 在宿主：它们是跨进程共识与报告面）。
 //!
 //! # 三条硬约束（读代码前先记住）
 //!
@@ -18,22 +16,17 @@
 //! 2. **端口不取时钟**。`timestamp` / `Tick` 一律由宿主传入——否则黄金样本测试
 //!    永远对不上（字节面必须可重放）。
 //! 3. **JSON 后端的字节就是兼容面**：紧凑 JSON、键序字典序、`autosave.json`
-//!    无尾随换行、`events.jsonl` 每行以 `\n` 结尾。sqlite 后端只承诺**语义**
-//!    等价（`steps()` 反序列化后逐字段相等），不产这些文件。
+//!    无尾随换行、`events.jsonl` 每行以 `\n` 结尾。
 //!
-//! # 两个后端对崩溃的承诺不同（测试必须分列断言）
+//! # 崩溃承诺
 //!
-//! - JSON：先追加事件行、再原子替换存档（两步）——可以只完成前一步，于是
-//!   「事件有第 N 行、存档还是第 N-1 版」是**允许**的（弱承诺）；
-//! - sqlite：单事务写 `step` + `snapshot`（必全或无），不存在半提交（强承诺）。
+//! JSON：先追加事件行、再原子替换存档（两步）——可以只完成前一步，于是
+//! 「事件有第 N 行、存档还是第 N-1 版」是**允许**的（弱承诺）。
 //!
 //! # 默认后端
 //!
-//! 新局（目录里没有任何后端产物）落 [`DEFAULT_BACKEND`] = sqlite；既有 JSON 局
-//! 按**产物**推断仍落 `json`（[`resolve`] 的向后兼容分支），**绝不**隐式迁移。
-//!
-//! 混用两个后端**一律 fail-closed**（见 [`resolve`]）：同目录同时有 JSON 产物与
-//! sqlite 库时无法判定谁是权威，宿主不会替你删证据。
+//! 新局（目录里没有任何后端产物）落 [`DEFAULT_BACKEND`] = json；既有 JSON 局
+//! 按**产物**推断同样落 `json`（[`resolve`] 的向后兼容分支）。
 //!
 //! # 用法
 //!
@@ -63,22 +56,11 @@ use std::fmt;
 use std::path::Path;
 
 pub mod json;
-/// 文件挂载桥的宿主侧端口（`pack.json` 的 `mounts` 段 → `<run-dir>/mounts/`）：
-/// 声明解析 · 路径狱 · 尺寸帽 · `fs.jsonl` 审计行 · 磁盘 IO。
-/// 规范正文见 `openwiki/contracts/kernel/lua-api.md` §3.1.2。
-pub mod mounts;
-/// 只读观察面（serve 这类不持锁观察者的读取面；写面仍归 `RunStore`）。
+/// 只读观察面（不持锁观察者的读取面；写面仍归 `RunStore`）。
 /// 函数集与零写入纪律的文档见模块头；测试锁见 `observe::tests`。
 pub mod observe;
-#[cfg(feature = "sqlite")]
-pub mod sqlite;
 
 pub use json::{JsonFileStore, AUTOSAVE_FILE, EVENTS_FILE, INBOX_CURSOR_FILE, INBOX_FILE};
-pub use mounts::{
-    MountEntry, MountError, MountKind, MountMode, MountSpec, MountStat, MountStore, MountWritten,
-};
-#[cfg(feature = "sqlite")]
-pub use sqlite::{SqliteStore, SQLITE_FILE};
 
 // 制品面 / 后端裁决为私有子模块：`pub use` 转口把符号留在 crate 根——
 // 外部可见面零新增公共路径（比批七 pub mod 更严）。
@@ -91,13 +73,6 @@ pub use artifact::{
 };
 pub use resolve::{detect, resolve, resolve_with, Products};
 
-/// sqlite 后端固定文件名（后端探测 / 错误文案 / 建库共用的**唯一字面量**）。
-///
-/// `sqlite::SQLITE_FILE` 由它派生（不是第二份 `"run.sqlite"`）：`detect()` 用本
-/// 常量、`SqliteStore` 用派生常量，两处漂移会让「探测到有库」与「实际建的库」
-/// 静默失配。
-pub const SQLITE_FILE_NAME: &str = "run.sqlite";
-
 // ============================================================================
 // §后端标识
 // ============================================================================
@@ -105,21 +80,18 @@ pub const SQLITE_FILE_NAME: &str = "run.sqlite";
 /// 存储后端。`run.json` 的 `store` 字段是**权威**，`--store` 旗标只是开局断言。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Backend {
-    /// 兼容后端 / 旧局默认：`autosave.json` + `events.jsonl` + `inbox.jsonl`。
+    /// `autosave.json` + `events.jsonl` + `inbox.jsonl`。
     Json,
-    /// 默认后端（新局）：`<run-dir>/run.sqlite`（WAL）；旧局**绝不**隐式切到它。
-    Sqlite,
 }
 
 impl Backend {
     /// 全部取值（用法提示 / 旗标解析共用一份，避免各处硬编码）。
-    pub const NAMES: [&'static str; 2] = ["json", "sqlite"];
+    pub const NAMES: [&'static str; 1] = ["json"];
 
     /// `run.json` 的 `store` 字段值 / `--store` 取值。
     pub fn as_str(self) -> &'static str {
         match self {
             Backend::Json => "json",
-            Backend::Sqlite => "sqlite",
         }
     }
 
@@ -130,7 +102,6 @@ impl Backend {
             .copied()
             .find_map(|name| match (name, text) {
                 ("json", "json") => Some(Backend::Json),
-                ("sqlite", "sqlite") => Some(Backend::Sqlite),
                 _ => None,
             })
     }
@@ -144,10 +115,8 @@ impl fmt::Display for Backend {
 
 /// 新局默认后端（`run.json` 无 `store` 事实，且目录里没有任何后端产物）。
 ///
-/// 宿主与命令文案都从这里取，别在第二个地方写字面量：`Backend::Sqlite` 是「新局
-/// 默认」，`Backend::Json` 是「兼容后端 / 旧局默认」——两者不可互换（旧局靠
-/// [`detect`] 的产物探针保住，不靠这里的默认值）。
-pub const DEFAULT_BACKEND: Backend = Backend::Sqlite;
+/// 宿主与命令文案都从这里取，别在第二个地方写字面量。
+pub const DEFAULT_BACKEND: Backend = Backend::Json;
 
 // ============================================================================
 // §数据形状（全部不含锁、不含路径）
@@ -430,24 +399,12 @@ pub trait RunStore {
 }
 
 /// 按后端打开端口（宿主唯一入口）。
-pub fn open(backend: Backend, run_dir: &Path, tick: Tick) -> Result<Box<dyn RunStore>, StoreError> {
+pub fn open(
+    backend: Backend,
+    run_dir: &Path,
+    _tick: Tick,
+) -> Result<Box<dyn RunStore>, StoreError> {
     match backend {
         Backend::Json => Ok(Box::new(JsonFileStore::open(run_dir)?)),
-        Backend::Sqlite => open_sqlite(run_dir, tick),
     }
-}
-
-#[cfg(feature = "sqlite")]
-fn open_sqlite(run_dir: &Path, tick: Tick) -> Result<Box<dyn RunStore>, StoreError> {
-    Ok(Box::new(SqliteStore::open(run_dir, tick)?))
-}
-
-#[cfg(not(feature = "sqlite"))]
-fn open_sqlite(_run_dir: &Path, _tick: Tick) -> Result<Box<dyn RunStore>, StoreError> {
-    Err(StoreError::Unavailable {
-        detail: "本构建未启用 sqlite 后端（sqlite 是编译期面：宿主 `cargo build \
-                 --example egg` 默认带上，`--no-default-features` 会关掉它；\
-                 ygg-store 自身需 `--features sqlite`）"
-            .to_owned(),
-    })
 }

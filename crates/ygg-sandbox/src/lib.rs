@@ -14,24 +14,17 @@
 //! 解析面下沉到 `ygg-modules` 后本 crate 只留 Lua 注入半段并全量再导出）；
 //! r2 填充 `pack`（`pack.json` 的 `code` 段声明 + manifest `code` 数组的内容寻址，
 //! 装载前收口成 `ModuleSet`）；r3 填充 `modload`（Mod 目录 → 内核的**唯一装载口**：
-//! 走查与实跑共用同一份读盘/对账/构造语义，宿主侧 IO 只在这里）。
+//! 宿主侧 IO 只在这里，调用方拿到的是已对账的内核）。
 
-pub mod audio;
 pub mod codec_face;
 pub mod driver;
-pub mod frame;
 pub mod hash;
 pub mod host_api;
-pub mod host_contract;
 pub mod inject;
 pub mod modload;
 pub mod modules;
 pub mod pack;
 pub mod packages;
-pub mod playtest;
 pub mod resources;
-pub mod rt;
 pub mod sandbox;
 pub mod stdlib;
-
-pub use host_api::{HostToolRunner, MountEntry, MountFs, MountKind, MountStat, MountWritten};

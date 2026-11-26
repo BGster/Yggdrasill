@@ -103,15 +103,6 @@ fn spawn_frame(rows: usize, names: &[&str], columns: &[Vec<i64>]) -> Vec<u8> {
     writer.finish()
 }
 
-fn despawn_frame(ids: &[u64]) -> Vec<u8> {
-    let mut writer = FrameWriter::new();
-    writer.u32(ids.len() as u32);
-    for id in ids {
-        writer.u64(*id);
-    }
-    writer.finish()
-}
-
 /// 10⁴ 实体的固定构成（A/B/C/D 四桶）。
 ///
 /// `Number` 分支与 A1 §1.7 基线逐字同构（tick 数字与在案 0.553 ms 可对账）；
