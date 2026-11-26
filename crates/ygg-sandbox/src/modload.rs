@@ -167,9 +167,27 @@ impl ModBundle {
             .map_err(|err| format!("读取 {}/{PACK_FILE} 失败：{err}", dir.display()))?;
         let pack: Json = serde_json::from_str(&pack_text)
             .map_err(|err| format!("{}/{PACK_FILE} 不是合法 JSON：{err}", dir.display()))?;
-        let entries = pack["entries"]
+        // 数据条目段：v2 叫 `data`，v1 叫 `entries`（同一份声明，只是名字换了）。
+        // 两段同时出现 = 声明面年代不明，报错而不是猜。
+        let entries = match (pack.get("data"), pack.get("entries")) {
+            (Some(_), Some(_)) => {
+                return Err(format!(
+                    "{}/{PACK_FILE} 同时声明了 data 与 entries（二选一）",
+                    dir.display()
+                ))
+            }
+            (Some(data), None) => data,
+            (None, Some(legacy)) => legacy,
+            (None, None) => {
+                return Err(format!(
+                    "{}/{PACK_FILE} 缺少 data 数组（v1 叫 entries）",
+                    dir.display()
+                ))
+            }
+        };
+        let entries = entries
             .as_array()
-            .ok_or_else(|| format!("{}/{PACK_FILE} 缺少 entries 数组", dir.display()))?;
+            .ok_or_else(|| format!("{}/{PACK_FILE} 的 data 必须是数组", dir.display()))?;
         let schema_files = pack["schemaFiles"]
             .as_array()
             .ok_or_else(|| format!("{}/{PACK_FILE} 缺少 schemaFiles 数组", dir.display()))?;

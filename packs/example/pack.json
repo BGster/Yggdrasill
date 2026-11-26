@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "id": "example",
+  "version": "0.1.0",
+  "capabilities": ["world"],
+  "entry": "src/main.lua",
+  "modules": [
+    "src/ai.lua",
+    "src/board.lua",
+    "src/combat.lua",
+    "src/command.lua",
+    "src/turn.lua",
+    "src/units.lua"
+  ],
+  "data": [
+    {
+      "id": "ygg:example/board",
+      "kind": "board",
+      "schema": "https://yggdrasill.dev/schemas/v1/board.json",
+      "path": "data/board.json"
+    }
+  ],
+  "schemaFiles": ["schemas/board.json"]
+}

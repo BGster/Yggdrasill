@@ -275,6 +275,9 @@ impl ArchetypeStore {
             ids.push(self.take_next_id()?);
         }
         let arch = &mut self.archetypes[idx as usize];
+        // 坑位起点：同一个桶里已有行时，本批行号从 `base` 开始——行号是 `entity_index` 的
+        // 唯一真相，写错一次后面所有 `locate` 都指到别人的行（`world.spawn` 连调两次就能踩）。
+        let base = arch.ids.len();
         // 桶内列序（升序组件 id）与载荷序无关：建一次位置映射，避免每行线性搜索。
         let mut order = Vec::with_capacity(arch.cols.len());
         for comp in &arch.col_ids {
@@ -291,7 +294,7 @@ impl ArchetypeStore {
                 arch.cols[p].push_value(&src.value_at(row), comp)?;
             }
             arch.ids.push(*id);
-            self.entity_index.insert(*id, (idx, row as u32));
+            self.entity_index.insert(*id, (idx, (base + row) as u32));
         }
         Ok(ids)
     }

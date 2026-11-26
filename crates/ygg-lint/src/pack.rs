@@ -2,7 +2,8 @@
 //!
 //! 单文件模式检查一份源码；多文件 Mod 的检查面多出三层，本模块负责它们：
 //!
-//! 1. **声明**：`pack.json` 的 `code` 段（`entry` + `modules[]`）形状与内容
+//! 1. **声明**：`pack.json` 的代码声明面（v1 嵌在 `code` 段的 `entry` + `modules[]`，
+//!    v2 在顶层 `entry` + `modules[]`）形状与内容
 //!    ——逐条报，不在第一处错误就停（作者一轮就能看完所有问题）。
 //! 2. **每个模块独立 parse**：**不拼接**。Lua 的 `local` 本就不跨 chunk，
 //!    装载器也是一个模块一个 `lua.load(...).call()`，所以「逐模块独立编译」
@@ -115,8 +116,36 @@ pub fn lint_pack_with_packages(
         }
     };
 
-    // ① `code` 段缺失 = 单文件 Mod（旧路径零迁移；这里只给模式信号，不算错）。
-    let Some(raw_code) = pack.get("code") else {
+    // ① 代码声明面：v1 嵌在 `code` 段，v2 搬到顶层 `entry`/`modules`。
+    //    两段同时出现 = 声明面年代不明（打包期同样拒绝），报错而不是猜。
+    let (entry_label, modules_label, raw_code) = match (pack.get("code"), pack.get("entry")) {
+        (Some(_), Some(_)) => {
+            diagnostics.push(decl_error(
+                pack_label,
+                pack_json,
+                0,
+                "pack.json 同时声明了 `code` 段与顶层 `entry`（二选一：v2 用顶层 entry）"
+                    .to_owned(),
+                "删掉其中一处；两处并存会让「代码面在哪」有两个答案".to_owned(),
+            ));
+            report.diagnostics = diagnostics;
+            return PackOutcome::Modules(report);
+        }
+        (Some(raw), None) => ("code.entry", "code.modules", Some(raw.clone())),
+        (None, Some(entry)) => {
+            // v2 的 `{entry, modules}` 在顶层：拼成同一张对象，让下游 ②③ 的逐字段
+            // 校验两版共用**一套**判定。**缺 `modules` 就不塞**——②要照旧报缺。
+            let mut code = serde_json::Map::new();
+            code.insert("entry".to_owned(), entry.clone());
+            if let Some(modules) = pack.get("modules") {
+                code.insert("modules".to_owned(), modules.clone());
+            }
+            ("entry", "modules", Some(Json::Object(code)))
+        }
+        // 没有代码声明面 = 单文件 Mod（`mod.lua` 是隐含入口，不算错）。
+        (None, None) => ("code.entry", "code.modules", None),
+    };
+    let Some(raw_code) = raw_code else {
         return PackOutcome::SingleFile;
     };
     if !raw_code.is_object() {
@@ -140,7 +169,7 @@ pub fn lint_pack_with_packages(
                 pack_label,
                 pack_json,
                 0,
-                "pack.json 的 `code.entry` 必须是字符串".to_owned(),
+                format!("pack.json 的 `{entry_label}` 必须是字符串"),
                 "写入入口文件名（包内相对路径，如 \"mod.lua\"）".to_owned(),
             ));
             None
@@ -150,8 +179,9 @@ pub fn lint_pack_with_packages(
                 pack_label,
                 pack_json,
                 0,
-                "pack.json 的 `code` 段缺少 `entry`".to_owned(),
-                "补上 `\"entry\": \"mod.lua\"`（入口由宿主直接装载，不登记为模块）".to_owned(),
+                format!("pack.json 缺少 `{entry_label}`"),
+                "补上入口（包内相对路径，如 \"mod.lua\"；入口由宿主直接装载，不登记为模块）"
+                    .to_owned(),
             ));
             None
         }
@@ -164,7 +194,7 @@ pub fn lint_pack_with_packages(
                 pack_label,
                 pack_json,
                 0,
-                "pack.json 的 `code.modules` 必须是字符串数组".to_owned(),
+                format!("pack.json 的 `{modules_label}` 必须是字符串数组"),
                 "逐条列出可 require 的模块路径（没有就写空数组）".to_owned(),
             ));
             Vec::new()
@@ -174,7 +204,7 @@ pub fn lint_pack_with_packages(
                 pack_label,
                 pack_json,
                 0,
-                "pack.json 的 `code` 段缺少 `modules`".to_owned(),
+                format!("pack.json 缺少 `{modules_label}`"),
                 "补上 `\"modules\": []`（显式空数组才表示「只有入口」）".to_owned(),
             ));
             Vec::new()
@@ -193,7 +223,7 @@ pub fn lint_pack_with_packages(
             code::MOD_BUDGET,
             Severity::Error,
             format!(
-                "`code.modules` 声明了 {} 个模块（上限 {MAX_MODULES}）",
+                "`{modules_label}` 声明了 {} 个模块（上限 {MAX_MODULES}）",
                 raw_modules.len()
             ),
             "拆包或合并模块；模块表规模上限是装载期硬约束".to_owned(),
@@ -206,7 +236,7 @@ pub fn lint_pack_with_packages(
                 pack_label,
                 pack_json,
                 0,
-                format!("`code.modules[{index}]` 必须是字符串"),
+                format!("`{modules_label}[{index}]` 必须是字符串"),
                 "模块路径写成字符串（包内相对路径，`.lua` 结尾）".to_owned(),
             ));
             continue;
@@ -217,7 +247,7 @@ pub fn lint_pack_with_packages(
                 pack_label,
                 pack_json,
                 span.0,
-                format!("`code.modules` 重复声明 `{path}`"),
+                format!("`{modules_label}` 重复声明 `{path}`"),
                 "同一路径只登记一次（重复登记会让装载表的 key 含义不明）".to_owned(),
             ));
             continue;
@@ -228,7 +258,7 @@ pub fn lint_pack_with_packages(
                 pack_json,
                 span.0,
                 format!("入口 `{path}` 同时被登记为模块"),
-                "入口由宿主按 `code.entry` 装载，不要放进 `code.modules`".to_owned(),
+                format!("入口由宿主按 `{entry_label}` 装载，不要放进 `{modules_label}`"),
             ));
             continue;
         }
@@ -242,7 +272,7 @@ pub fn lint_pack_with_packages(
                     span.0,
                     code::MOD_NAME,
                     Severity::Error,
-                    format!("`code.modules` 的 `{path}` 不是合法模块路径：{cause}"),
+                    format!("`{modules_label}` 的 `{path}` 不是合法模块路径：{cause}"),
                     "模块路径须为包内相对路径、`.lua` 结尾、每段仅 A-Z a-z 0-9 _（文件名段不得含点）"
                         .to_owned(),
                 ));
@@ -260,8 +290,8 @@ pub fn lint_pack_with_packages(
                 column: 1,
                 code: code::MOD_MISSING,
                 severity: Severity::Error,
-                message: format!("`code.modules` 声明了 `{path}`，但包内读不到该文件"),
-                fix: "补上模块文件，或从 pack.json 的 code.modules 里删掉这条声明".to_owned(),
+                message: format!("`{modules_label}` 声明了 `{path}`，但包内读不到该文件"),
+                fix: format!("补上模块文件，或从 pack.json 的 {modules_label} 里删掉这条声明"),
             });
             continue;
         };

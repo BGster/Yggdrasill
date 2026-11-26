@@ -1,0 +1,101 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://yggdrasill.dev/schemas/v2/pack.json",
+    "title": "Yggdrasill pack.json v2 declaration",
+    "description": "作者手写的 pack.json 声明面（schemaVersion 2）：身份（id/version）、能力面（capabilities）、代码面（entry/modules）、数据面（data）、随包 schema（schemaFiles）。与线格式 manifest.json 分工不同——后者是打包期按实际字节生成的产物（sha256/byteLength），仍是 v1 形状，不随本文件改版。v1 声明（code 段 + entries）继续由内核直读，两版并存。",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "schemaVersion",
+        "id",
+        "version",
+        "capabilities",
+        "entry",
+        "modules",
+        "data",
+        "schemaFiles"
+    ],
+    "properties": {
+        "schemaVersion": { "const": 2 },
+        "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "maxLength": 64
+        },
+        "version": {
+            "type": "string",
+            "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$",
+            "maxLength": 32
+        },
+        "capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "enum": ["world"] }
+        },
+        "entry": { "$ref": "#/$defs/modulePath" },
+        "modules": {
+            "type": "array",
+            "maxItems": 128,
+            "items": { "$ref": "#/$defs/modulePath" }
+        },
+        "data": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/dataEntry" }
+        },
+        "schemaFiles": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9/._-]*[.]json$",
+                "maxLength": 256
+            }
+        },
+        "packages": { "$ref": "#/$defs/packages" }
+    },
+    "$defs": {
+        "modulePath": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_/]*[.]lua$",
+            "maxLength": 256
+        },
+        "dataEntry": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "schema", "path"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^ygg:[a-z0-9][a-z0-9/._-]*$",
+                    "maxLength": 128
+                },
+                "kind": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "schema": {
+                    "type": "string",
+                    "pattern": "^https://yggdrasill[.]dev/schemas/v1/[a-z0-9-]+[.]json$"
+                },
+                "path": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9/._-]*$",
+                    "maxLength": 256
+                }
+            }
+        },
+        "packages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "version"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_-]*$",
+                        "maxLength": 64
+                    },
+                    "version": { "type": "string", "minLength": 1, "maxLength": 32 }
+                }
+            }
+        }
+    }
+}

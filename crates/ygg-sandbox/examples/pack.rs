@@ -109,11 +109,25 @@ fn main() {
         Err(err) => fail(format!("{} 不是合法 JSON: {err}", pack_path.display())),
     };
 
+    // ②'' v2 声明面：形状交给 ygg-schema 的**同一份** schema（schema 测试与
+    //      `ygg-lint --pack` 也用这份）——少于两处调用就会分叉。
+    let v2 = pack.get("schemaVersion").and_then(Json::as_u64) == Some(2);
+    let declaration = if v2 {
+        ygg_schema::manifest::validate_pack_v2(&pack)
+    } else {
+        Ok(())
+    };
+    if let Err(err) = declaration {
+        fail(format!("{} 不合 v2 声明面: {err}", pack_path.display()));
+    }
+    // 代码面在 v1 叫 `code.entry`，在 v2 搬到顶层 `entry`——报错文案跟着变。
+    let code_label = if v2 { "entry" } else { "code.entry" };
+
     // ③ 条目声明解析（逐字段可读校验；id / path 重复拒绝）。
     let entries = parse_entries(&pack, &pack_path);
     if entries.is_empty() {
         fail(format!(
-            "{} 的 entries 为空：资源包至少需要一个数据条目",
+            "{} 的数据条目为空：资源包至少需要一个数据条目",
             pack_path.display()
         ));
     }
@@ -145,15 +159,15 @@ fn main() {
     //      哈希——漏算 = 装载期内容寻址失败；不声明则 manifest 与此前逐字节一致。
     let code_spec = match CodeSpec::parse(&pack) {
         Ok(spec) => spec,
-        Err(err) => fail(format!("pack.json 的 code 段非法：{err}")),
+        Err(err) => fail(format!("pack.json 的代码声明面非法：{err}")),
     };
     let mut manifest_code: Vec<Json> = Vec::new();
     if let Some(spec) = &code_spec {
-        // 入口文件必须存在：宿主按 `code.entry` 读 Mod 源，缺了要到装载期才发现。
+        // 入口文件必须存在：宿主按声明的入口读 Mod 源，缺了要到装载期才发现。
         let entry_path = dir.join(spec.entry());
         if !entry_path.is_file() {
             fail(format!(
-                "code.entry 声明的入口文件缺失: {}（pack.json code.entry）",
+                "{code_label} 声明的入口文件缺失: {}（pack.json {code_label}）",
                 entry_path.display()
             ));
         }
@@ -161,13 +175,13 @@ fn main() {
         // 字节按声明清单读（缺文件 / 不可读 → 可读退出，文案带路径）。
         let bytes = match pack::collect_bytes(spec, |rel| fs::read(dir.join(rel))) {
             Ok(bytes) => bytes,
-            Err(err) => fail(format!("code 段读取失败：{err}")),
+            Err(err) => fail(format!("代码声明面读取失败：{err}")),
         };
         let code_entries = pack::entries_for(&bytes);
         // 打包期复用**装载期同一套**判定（集合一致 / 总量与数量上限 / 内容寻址）
         // ——「打包过了但装载不过」这类分叉在这里就断掉。
         if let Err(err) = pack::assemble(spec, &code_entries, &bytes) {
-            fail(format!("code 段校验失败：{err}"));
+            fail(format!("代码声明面校验失败：{err}"));
         }
         for entry in &code_entries {
             println!(
@@ -348,16 +362,27 @@ fn ancestor_with_git(start: &Path) -> Option<PathBuf> {
     }
 }
 
-/// 解析 entries 声明（字段缺失 / 类型不符 / id 或 path 重复 → 可读错误退出）。
+/// 解析数据条目声明（字段缺失 / 类型不符 / id 或 path 重复 → 可读错误退出）。
+///
+/// 段名随声明面版本变：v2 叫 `data`，v1 叫 `entries`（同一份声明，只是换了名字；
+/// 改名而不复用是为了让「这份 pack.json 是哪一代」在不读 schemaVersion 时也看得出来）。
 fn parse_entries(pack: &Json, pack_path: &Path) -> Vec<EntryDecl> {
-    let raw = match pack.get("entries") {
-        Some(Json::Array(items)) => items,
-        Some(_) => fail(format!("{} 的 entries 必须是数组", pack_path.display())),
-        None => fail(format!(
-            "{} 缺少 entries 字段（形如 \
-             {{\"entries\": [{{\"id\", \"kind\", \"schema\", \"path\"}}]}}）",
+    let (key, raw) = match (pack.get("data"), pack.get("entries")) {
+        (Some(_), Some(_)) => fail(format!(
+            "{} 同时声明了 data 与 entries（二选一：v2 用 data）",
             pack_path.display()
         )),
+        (Some(raw), None) => ("data", raw),
+        (None, Some(raw)) => ("entries", raw),
+        (None, None) => fail(format!(
+            "{} 缺少 data 数组（v1 叫 entries，形如 \
+             {{\"data\": [{{\"id\", \"kind\", \"schema\", \"path\"}}]}}）",
+            pack_path.display()
+        )),
+    };
+    let raw = match raw {
+        Json::Array(items) => items,
+        _ => fail(format!("{} 的 {key} 必须是数组", pack_path.display())),
     };
     let mut entries = Vec::with_capacity(raw.len());
     let mut seen_ids: Vec<String> = Vec::new();
@@ -366,8 +391,8 @@ fn parse_entries(pack: &Json, pack_path: &Path) -> Vec<EntryDecl> {
         let field = |name: &str| -> String {
             match item.get(name) {
                 Some(Json::String(s)) if !s.is_empty() => s.clone(),
-                Some(_) => fail(format!("entries[{index}].{name} 必须是非空字符串")),
-                None => fail(format!("entries[{index}] 缺少字段 `{name}`")),
+                Some(_) => fail(format!("{key}[{index}].{name} 必须是非空字符串")),
+                None => fail(format!("{key}[{index}] 缺少字段 `{name}`")),
             }
         };
         let entry = EntryDecl {
@@ -377,13 +402,10 @@ fn parse_entries(pack: &Json, pack_path: &Path) -> Vec<EntryDecl> {
             path: field("path"),
         };
         if seen_ids.contains(&entry.id) {
-            fail(format!("entries[{index}] 的 id `{}` 重复声明", entry.id));
+            fail(format!("{key}[{index}] 的 id `{}` 重复声明", entry.id));
         }
         if seen_paths.contains(&entry.path) {
-            fail(format!(
-                "entries[{index}] 的 path `{}` 重复声明",
-                entry.path
-            ));
+            fail(format!("{key}[{index}] 的 path `{}` 重复声明", entry.path));
         }
         seen_ids.push(entry.id.clone());
         seen_paths.push(entry.path.clone());

@@ -13,12 +13,23 @@ use serde::{Deserialize, Serialize};
 use crate::validate::{sha256_hex, SchemaError, ValidationIssue, ValidatorSet};
 
 /// manifest schema 的契约 id（registry 与 `$ref` 解析面）。
+/// 打包期生成的线格式 manifest（v1）：作者面改版后它仍不变。
+///
+/// 为什么不跟着 v2 一起改：manifest 按**实际字节**现算 sha256/byteLength，是
+/// 产物而非声明；改动它等于让每個已发布包的 manifest 失效重签。作者面
+/// （`pack.json`）另有一份 v2 schema 见 [`PACK_V2_SCHEMA`]。
 pub const MANIFEST_SCHEMA_ID: &str = "https://yggdrasill.dev/schemas/v1/manifest.json";
 
 /// manifest schema（draft 2020-12）——单一事实源是
 /// `packages/schema/schemas/manifest.json`（D15 跨语言契约源），本常量编译期
 /// include_str! 同一文件，禁止在此另写内联副本（铁律 2：不双写 Schema）。
 pub const MANIFEST_SCHEMA: &str = include_str!("../../../packages/schema/schemas/manifest.json");
+
+/// 作者手写的 `pack.json` v2 声明面（身份 / 能力 / entry / data / schemaFiles）。
+pub const PACK_V2_SCHEMA_ID: &str = "https://yggdrasill.dev/schemas/v2/pack.json";
+
+/// 内嵌的 v2 声明 schema 文本（`include_str!` 绑定：换文件不改代码）。
+pub const PACK_V2_SCHEMA: &str = include_str!("../../../packages/schema/schemas/manifest-v2.json");
 
 /// manifest 条目引用的资源 payload schema id 前缀（kind→schema 分发面）。
 pub const RESOURCE_SCHEMA_PREFIX: &str = "https://yggdrasill.dev/schemas/v1/";
@@ -274,6 +285,31 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, SchemaError> {
         });
     }
     Ok(serde_json::from_value(value)?)
+}
+
+/// 校验 `pack.json` 的 **v2 声明面**（`schemaVersion: 2`）。
+///
+/// 与 [`parse_manifest`] 分工：manifest.json 是打包期按实际字节生成的线格式
+/// （v1 不变），pack.json 是作者手写的声明面（v2 起有 id/version/capabilities/
+/// entry）。两个消费点（打包工具与 `ygg-lint --pack`）跑同一份 schema，所以
+/// 「打包过了但装载不过」不会在声明面这一层发生。
+///
+/// v1 声明（`code` 段 + `entries`）不走这里——它的形状由内核的 `CodeSpec::parse`
+/// 与打包工具逐字段校，两版并存（迁移不会打断旧包）。
+pub fn validate_pack_v2(value: &serde_json::Value) -> Result<(), SchemaError> {
+    let set = ValidatorSet::from_texts([(PACK_V2_SCHEMA_ID, PACK_V2_SCHEMA)])?;
+    let issues: Vec<ValidationIssue> = set.issues(PACK_V2_SCHEMA_ID, "pack.json", value)?;
+    if issues.is_empty() {
+        return Ok(());
+    }
+    Err(SchemaError::InvalidManifest {
+        count: issues.len(),
+        first: issues
+            .first()
+            .map(std::string::ToString::to_string)
+            .unwrap_or_else(|| "unknown".to_owned()),
+        issues,
+    })
 }
 
 /// 内容寻址校验（D-A2）：先 byteLength 廉价预检，再 sha256 摘要比对。
@@ -624,5 +660,52 @@ mod tests {
             panic!("expected ContentMismatch");
         };
         assert_eq!(file, "fixture/init.lua");
+    }
+
+    // ── pack.json v2 声明面（M3.4a）────────────────────────────────────────
+    // 两版并存的分工：manifest.json 是打包期生成的线格式（v1 不变），pack.json
+    // 是作者手写的声明面（v2 起有 id/version/capabilities/entry）。
+
+    /// 参考包自己就是 v2 声明面的活样本：作者手写的那份必须过 schema。
+    const EXAMPLE_PACK: &str = include_str!("../../../packs/example/pack.json");
+
+    fn example_pack() -> serde_json::Value {
+        serde_json::from_str(EXAMPLE_PACK).unwrap()
+    }
+
+    #[test]
+    fn pack_v2_reference_pack_validates() {
+        assert!(validate_pack_v2(&example_pack()).is_ok());
+    }
+
+    #[test]
+    fn pack_v2_rejects_undeclared_capability() {
+        let mut value = example_pack();
+        value["capabilities"] = serde_json::json!(["world", "net"]);
+        let err = validate_pack_v2(&value).unwrap_err();
+        assert!(matches!(err, SchemaError::InvalidManifest { .. }), "{err}");
+    }
+
+    #[test]
+    fn pack_v2_rejects_v1_code_segment_and_v1_schema_version() {
+        // v2 声明面里 `code` 是多余字段（additionalProperties: false）——代码面
+        // 在 v2 搬到顶层 entry/modules，两处并存会让「代码面」有两个权威。
+        let mut value = example_pack();
+        value["code"] = serde_json::json!({"entry": "mod.lua", "modules": []});
+        assert!(validate_pack_v2(&value).is_err());
+        let mut value = example_pack();
+        value["schemaVersion"] = serde_json::json!(1);
+        assert!(validate_pack_v2(&value).is_err());
+    }
+
+    /// 同一份字节不会被两边同时接受：v1 manifest 过 parse_manifest 而 v2 拒绝，
+    /// pack.json 反之。谁都能「验证通过」等于谁都没验证。
+    #[test]
+    fn v1_manifest_and_v2_declaration_stay_disjoint() {
+        let manifest = r#"{"schemaVersion": 1, "entries": []}"#;
+        assert!(parse_manifest(manifest.as_bytes()).is_ok());
+        let value: serde_json::Value = serde_json::from_str(manifest).unwrap();
+        assert!(validate_pack_v2(&value).is_err());
+        assert!(parse_manifest(EXAMPLE_PACK.as_bytes()).is_err());
     }
 }

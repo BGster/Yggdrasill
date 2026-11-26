@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yggdrasill.dev/schemas/v1/board.json",
+  "title": "Yggdrasill 棋盘声明（参考包 example）",
+  "description": "行优先格子表；0 = 可通行，1 = 墙。数据面只给格子，坐标编码（x*1000+y）与规则全在包的 Lua 里——内核不认识「格子」。cells 的长度必须等于 width*height，这一条由包的 Lua 侧校验（JSON Schema 无跨字段算术）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["width", "height", "cells"],
+  "properties": {
+    "width": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "height": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": { "enum": [0, 1] }
+    },
+    "legend": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "0": { "type": "string", "minLength": 1 },
+        "1": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

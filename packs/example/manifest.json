@@ -1,0 +1,45 @@
+{
+  "code": [
+    {
+      "byteLength": 3390,
+      "path": "src/ai.lua",
+      "sha256": "03b84dfbf1cc29385713fa9be28da431c76bb1578909a9d03d1c9cf254a76dd8"
+    },
+    {
+      "byteLength": 2571,
+      "path": "src/board.lua",
+      "sha256": "337148f7ab5014e2b2a12c2fbd3eee6be08c66f6075859fb7df08947701c8fc3"
+    },
+    {
+      "byteLength": 1667,
+      "path": "src/combat.lua",
+      "sha256": "c9a35e55fb12b021e8ab857f4286e14d568c669ae1ce04fdc4bee66fe2c77aa2"
+    },
+    {
+      "byteLength": 2459,
+      "path": "src/command.lua",
+      "sha256": "47d1d2eda691b2f954733c6feee45874dc15f8a268a0c9ff10be0af7b85460e5"
+    },
+    {
+      "byteLength": 1581,
+      "path": "src/turn.lua",
+      "sha256": "51fce3c3cbbf9e6369194e8cf5b40b45f1f393e856b9949d3a8693034ea17d51"
+    },
+    {
+      "byteLength": 3095,
+      "path": "src/units.lua",
+      "sha256": "e39dea40a3ff8a96dea5275c2a67df9eab6e7346a81e9e57cc169d3270d5fdba"
+    }
+  ],
+  "entries": [
+    {
+      "byteLength": 272,
+      "id": "ygg:example/board",
+      "kind": "board",
+      "path": "data/board.json",
+      "schema": "https://yggdrasill.dev/schemas/v1/board.json",
+      "sha256": "ab4e7792f436fbbc79a2744817660282d0e3c67a81bc96b9d4077f4dd756c5e5"
+    }
+  ],
+  "schemaVersion": 1
+}

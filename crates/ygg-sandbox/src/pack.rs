@@ -71,13 +71,33 @@ pub struct CodeSpec {
 }
 
 impl CodeSpec {
-    /// 解析 `pack.json` 的 `code` 段（`None` = 单文件 Mod 的旧路径）。
+    /// 解析 `pack.json` 的代码声明面（`None` = 单文件 Mod 的旧路径）。
     ///
-    /// 段存在即**全量校验**：不允许「写了个 code 但字段缺一半」这种半声明。
+    /// 两种形状，择一：
+    ///
+    /// - **v1**：`code: { entry, modules }`（历史形状，零迁移）；
+    /// - **v2**：顶层 `entry` / `modules`，且 `schemaVersion: 2`（
+    ///   `packages/schema/schemas/manifest-v2.json` 描述的声明面）。
+    ///
+    /// 两种同时出现 = [`PackError::AmbiguousCode`]；v2 形状缺 `schemaVersion: 2`
+    /// 说明声明面的年代没对齐（v1 包不该突然多出一个顶层 `entry`）。
     pub fn parse(pack: &Json) -> Result<Option<Self>, PackError> {
-        let Some(raw) = pack.get("code") else {
-            return Ok(None);
+        let raw = match (pack.get("code"), pack.get("entry")) {
+            (Some(_), Some(_)) => return Err(PackError::AmbiguousCode),
+            (Some(raw), None) => raw,
+            (None, Some(_)) => {
+                if pack.get("schemaVersion").and_then(Json::as_u64) != Some(2) {
+                    return Err(PackError::EntryNotInV2);
+                }
+                pack
+            }
+            (None, None) => return Ok(None),
         };
+        Self::from_declaration(raw).map(Some)
+    }
+
+    /// 从一个声明对象里取 `{ entry, modules }`（两种形状字段同名，判定只有一处）。
+    fn from_declaration(raw: &Json) -> Result<Self, PackError> {
         if !raw.is_object() {
             return Err(PackError::CodeNotObject);
         }
@@ -113,10 +133,10 @@ impl CodeSpec {
             }
             seen.push(path.clone());
         }
-        Ok(Some(Self {
+        Ok(Self {
             entry,
             modules: seen,
-        }))
+        })
     }
 
     /// 入口文件名（包内相对路径，如 `mod.lua`）。
@@ -306,6 +326,18 @@ pub enum PackError {
          {{\"entry\": \"mod.lua\", \"modules\": [\"src/util.lua\"]}}"
     )]
     CodeNotObject,
+    /// 同时声明了 v1 `code` 段与 v2 顶层 `entry`。
+    #[error(
+        "pack.json declares both `code` (v1 shape) and top-level `entry` (v2 shape): \
+         pick one declaration shape"
+    )]
+    AmbiguousCode,
+    /// 顶层 `entry` 出现在非 v2 声明里。
+    #[error(
+        "pack.json top-level `entry` requires `\"schemaVersion\": 2` \
+         (v1 packs declare their code under `code`)"
+    )]
+    EntryNotInV2,
     /// `code.entry` 缺失。
     #[error(
         "pack.json `code.entry` is required (the entry file name inside the package, \

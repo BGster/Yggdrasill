@@ -1,4 +1,7 @@
-//! `selftest` —— Mod 自带的纯 Lua 自检入口（跑 `<mod>/tests/*.lua`）。
+//! `selftest` —— Mod 自带的纯 Lua 自检入口（跑用例文件）。
+//!
+//! 布局两种（按 `pack.json` 的声明面版本）：v1 → `<mod>/tests/*.lua` + `mod.lua`；
+//! v2 → `<mod>/test/*.lua` + `pack.json` 声明的 `entry`。
 //!
 //! 设计边界（见 `openwiki/contracts/mod/testing-strategy.md`）：
 //!
@@ -84,15 +87,19 @@ fn main() {
         package_tests.retain(|path| file_label(path).contains(needle.as_str()));
     }
 
-    // 资源注入：pack.json entries 的 id → 解析后的 JSON（转成 Lua 值）。
+    // 资源注入：pack.json data/entries 的 id → 解析后的 JSON（转成 Lua 值）。
     // 沙箱里由宿主负责这一步；自检里由本文件负责，语义等同「ygg.data(id) 拿到表」。
-    match install_assets(&lua, &mod_dir, &source_mod_dir) {
-        Ok(n) => println!("assets: {n} entries"),
+    // 顺带得到目录布局：v1 用 `tests/` + `mod.lua`，v2 用 `test/` + 声明的 entry。
+    let layout = match install_assets(&lua, &mod_dir, &source_mod_dir) {
+        Ok((n, layout)) => {
+            println!("assets: {n} entries");
+            layout
+        }
         Err(err) => {
             eprintln!("资源装载失败：{err}");
             std::process::exit(1);
         }
-    }
+    };
 
     // mod 的 src/** 走文件 require（普通 Lua 的 package.path）。
     let pattern = format!("{}/?.lua", mod_dir.display());
@@ -115,8 +122,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    let tests_dir = mod_dir.join("tests");
-    let harness = tests_dir.join("harness.lua");
+    let tests_dir = layout.tests_dir;
+    let harness = layout.harness;
     if !harness.is_file() {
         eprintln!("缺少 {}", harness.display());
         std::process::exit(1);
@@ -126,10 +133,10 @@ fn main() {
         std::process::exit(1);
     }
 
-    // mod.lua 是装配入口：装完 handlers 才谈得上断言。
-    let entry = mod_dir.join("mod.lua");
+    // 入口是装配点：装完系统才谈得上断言。
+    let entry = layout.entry;
     if let Err(err) = run_file(&lua, &entry) {
-        eprintln!("mod 装载失败：{err}");
+        eprintln!("入口装载失败（{}）：{err}", entry.display());
         std::process::exit(1);
     }
 
@@ -327,14 +334,47 @@ fn counters(lua: &Lua) -> (i64, i64) {
     (pass, fail)
 }
 
+/// 自检的目录布局（随声明面版本变，与装载器同一判据）。
+///
+/// - v1：入口是约定的 `mod.lua`，用例在 `tests/`；
+/// - v2：入口在 `pack.json` 里声明（`entry`），用例与 `harness.lua` 同住 `test/`
+///   （单目录：harness 不参与用例枚举，靠文件名排除）。
+struct Layout {
+    tests_dir: PathBuf,
+    harness: PathBuf,
+    entry: PathBuf,
+}
+
 /// 把 `pack.json` 声明的资源按 id 注入成 Lua 表：`ygg.data(id)` 直接取到它。
-fn install_assets(lua: &Lua, mod_dir: &Path, anchor: &Path) -> Result<usize, String> {
+fn install_assets(lua: &Lua, mod_dir: &Path, anchor: &Path) -> Result<(usize, Layout), String> {
     let pack_text = std::fs::read_to_string(mod_dir.join("pack.json"))
         .map_err(|err| format!("read pack.json: {err}"))?;
     let pack: Json = serde_json::from_str(&pack_text).map_err(|err| format!("pack.json: {err}"))?;
-    let entries = pack["entries"]
+    // 数据条目段：v2 叫 `data`，v1 叫 `entries`（同一份声明换了个名字）。
+    let entries = if let Some(data) = pack.get("data") {
+        if pack.get("entries").is_some() {
+            return Err("pack.json 同时声明了 data 与 entries（二选一）".to_owned());
+        }
+        data
+    } else {
+        pack.get("entries")
+            .ok_or_else(|| "pack.json 缺少 data 数组（v1 叫 entries）".to_owned())?
+    };
+    let entries = entries
         .as_array()
-        .ok_or_else(|| "pack.json 缺少 entries".to_owned())?;
+        .ok_or_else(|| "pack.json 的 data 必须是数组".to_owned())?;
+    let v2 = pack.get("schemaVersion").and_then(Json::as_u64) == Some(2);
+    let tests_dir = mod_dir.join(if v2 { "test" } else { "tests" });
+    let entry = match (v2, pack.get("entry").and_then(Json::as_str)) {
+        (false, _) => mod_dir.join("mod.lua"),
+        (true, Some(entry)) => mod_dir.join(entry),
+        (true, None) => return Err("v2 声明面缺少 entry".to_owned()),
+    };
+    let layout = Layout {
+        harness: tests_dir.join("harness.lua"),
+        tests_dir,
+        entry,
+    };
 
     let assets = lua.create_table().map_err(|e| e.to_string())?;
     let mut count = 0usize;
@@ -396,7 +436,7 @@ fn install_assets(lua: &Lua, mod_dir: &Path, anchor: &Path) -> Result<usize, Str
     lua.globals()
         .set("__PACK", pack_lua)
         .map_err(|e| e.to_string())?;
-    Ok(count)
+    Ok((count, layout))
 }
 
 /// JSON → Lua 值。手写而非 `LuaSerdeExt`：mlua 的 serialize feature 未启用，

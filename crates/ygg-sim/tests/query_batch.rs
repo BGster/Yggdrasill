@@ -398,3 +398,43 @@ fn u64_ref_column_reads_and_writes_through_both_faces() {
     w.store.get_many(w.link, &ids, &mut out).unwrap();
     assert_eq!(out, u64_col(&[10, 20]));
 }
+
+/// 同一桶的第二批 `spawn_columns`：行号必须从桶尾继续数。
+///
+/// 回归点：`entity_index` 是「id → (桶, 行)」的唯一真相，而行号只在对的起点上才成立。
+/// 首批之后桶里已有行时，第二批若仍从 0 数，`locate` 会把每个新实体都指到首批的行——
+/// 查询面（逐行读桶）看不出问题，`world.set` / `despawn`（走 `locate`）却会写到别人身上。
+#[test]
+fn second_spawn_batch_keeps_entity_index_rows_aligned() {
+    let mut w = world();
+    let first = w
+        .store
+        .spawn_columns(2, &[(w.hp, i64_col(&[11, 12]))], &[])
+        .unwrap();
+    let second = w
+        .store
+        .spawn_columns(2, &[(w.hp, i64_col(&[21, 22]))], &[])
+        .unwrap();
+
+    assert_eq!(w.store.locate(first[0]).unwrap(), (0, 0), "首批行号从 0 起");
+    assert_eq!(
+        w.store.locate(second[0]).unwrap(),
+        (0, 2),
+        "第二批行号接在桶尾（不是回到 0）"
+    );
+    assert_eq!(w.store.locate(second[1]).unwrap(), (0, 3));
+
+    // 走 `locate` 的写面必须落在正确的行上。
+    w.store
+        .set_many(w.hp, &[second[0]], &i64_col(&[99]))
+        .unwrap();
+    let mut out = Column::I64(Vec::new());
+    w.store.get_many(w.hp, &second, &mut out).unwrap();
+    assert_eq!(out, i64_col(&[99, 22]));
+
+    // 删除第二批的第一个：末行（second[1]）被搬进它的行，索引随之同步。
+    w.store.despawn_ids(&[second[0]]).unwrap();
+    assert!(w.store.locate(second[0]).is_err(), "被删的实体不再可定位");
+    assert_eq!(w.store.locate(second[1]).unwrap(), (0, 2));
+    assert_eq!(w.store.locate(first[1]).unwrap(), (0, 1));
+}
