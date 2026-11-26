@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yggdrasill · H5 零构建宿主</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #11161d;
+      --panel: #19212b;
+      --border: #2c3847;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --err: #f85149;
+      --ok: #3fb950;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background: var(--bg);
+      color: var(--text);
+    }
+    main { max-width: 960px; margin: 0 auto; display: grid; gap: 14px; }
+    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+    h1 { margin: 0; font-size: 16px; }
+    .meta { color: var(--muted); font-size: 12px; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    button, .file-btn {
+      font: inherit;
+      color: var(--text);
+      background: #233040;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    button:hover, .file-btn:hover { border-color: var(--accent); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .file-btn input { display: none; }
+    .status {
+      padding: 8px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .status.error { border-color: var(--err); color: #ffb4ae; }
+    .status.ok { border-color: var(--ok); }
+    .workspace { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; }
+    @media (max-width: 820px) { .workspace { grid-template-columns: 1fr; } }
+    canvas#board {
+      display: block;
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .panel h2 { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    tr.selected { background: rgba(88, 166, 255, 0.16); }
+    tr { cursor: pointer; }
+    .hint { color: var(--muted); font-size: 12px; margin: 0; }
+    #trace-box { display: none; }
+    #trace-box.active { display: block; }
+    #trace-log {
+      margin: 0;
+      max-height: 220px;
+      overflow: auto;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Yggdrasill · H5 零构建宿主（ygg/1）</h1>
+      <div id="session-meta" class="meta">初始化中…</div>
+    </header>
+
+    <section class="toolbar">
+      <button id="btn-step" type="button">Step (+1 tick)</button>
+      <button id="btn-end-turn" type="button">End turn</button>
+      <button id="btn-snapshot" type="button">Snapshot</button>
+      <label class="file-btn">Open snapshot<input id="file-open" type="file" accept=".bin,application/octet-stream"></label>
+      <span id="selected-info" class="meta">选中：无</span>
+    </section>
+
+    <div id="status" class="status">正在加载 WASM 内核…</div>
+
+    <section class="workspace">
+      <canvas id="board" width="560" height="280"></canvas>
+      <div class="panel">
+        <h2>组件表（由 ready.components 驱动，只读呈现）</h2>
+        <table id="comp-table">
+          <thead><tr id="comp-head"></tr></thead>
+          <tbody id="comp-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="hint">操作：点己方/任意单位选中 → 点空格或按方向键/WASD 发 move 并步进 1 tick；点另一单位发 attack；点 End turn 发 end_turn；点 Snapshot 下载 snapshot.bin，Open snapshot 发 open 续跑。加 ?trace=1 查看每帧 delta.changed。</p>
+
+    <section id="trace-box" class="panel">
+      <h2>Trace（?trace=1：每帧 delta.changed）</h2>
+      <pre id="trace-log"></pre>
+    </section>
+  </main>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
