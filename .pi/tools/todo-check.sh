@@ -108,11 +108,41 @@ tasks = {}
 order = []
 # 宿主 id 分配器的复刻：会话内单调递增，clear 重置为 0，delete 不回收号段。
 # 不能用位置编号（1..n）——create 的 tasks[] 不带 id，位置与真实 id 无关。
+# used = 本会话分配过的全部 id（含已 delete 的）：无 id 的 create 分配时必须跳过它们，
+# 否则「删过任务 / 带显式 id 的 create」之后 seq 会撞上历史 id，把老任务覆盖回 pending。
 seq = 0
+used = set()
 saw_todo = False
 
 def norm_status(s):
     return str(s or '').lower()
+
+def _apply_create(new):
+    global seq
+    if not isinstance(new, list):
+        return
+    for t in new:
+        tid = None
+        st = 'pending'
+        if isinstance(t, dict):
+            tid = t.get('id')
+            st = norm_status(t.get('status','pending'))
+        if tid is None:
+            seq += 1
+            while seq in used:
+                seq += 1
+            tid = seq
+        else:
+            try:
+                iv = int(tid)
+            except (TypeError, ValueError):
+                iv = None
+            if iv is not None and iv > seq:
+                seq = iv
+        used.add(tid)
+        if tid not in tasks:
+            order.append(tid)
+        tasks[tid] = st
 
 def apply_call(args):
     global saw_todo, seq
@@ -121,19 +151,8 @@ def apply_call(args):
     saw_todo = True
     action = str(args.get('action','') or '').lower()
     if action == 'create' or (not action and isinstance(args.get('tasks'), list)):
-        # 建/替换整表：tasks[] 每项可带 id/status；缺 id 用递增 seq（= 宿主分配的真实 id 口径）
-        new = args.get('tasks')
-        if isinstance(new, list):
-            for t in new:
-                seq += 1
-                if isinstance(t, dict):
-                    tid = t.get('id', seq)
-                    st = norm_status(t.get('status','pending'))
-                else:
-                    tid = seq; st = 'pending'
-                if tid not in tasks:
-                    order.append(tid)
-                tasks[tid] = st
+        # 建/替换整表：tasks[] 每项可带 id/status；缺 id 用分配器取下一个未用 id
+        _apply_create(args.get('tasks'))
     elif action == 'update':
         tid = args.get('id')
         st = norm_status(args.get('status',''))
@@ -148,23 +167,14 @@ def apply_call(args):
             del tasks[tid]
             if tid in order:
                 order.remove(tid)
+        # used 保留：宿主 delete 不回收号段，重放同样不重发该 id
     elif action == 'clear':
-        tasks.clear(); order.clear(); seq = 0
+        tasks.clear(); order.clear(); used.clear(); seq = 0
     elif action == 'list':
         pass  # 查询不改状态
     else:
-        # 未知 action：若带 tasks[] 按替换处理（id 口径同 create：递增 seq，不用位置编号）
-        new = args.get('tasks')
-        if isinstance(new, list):
-            for t in new:
-                seq += 1
-                if isinstance(t, dict):
-                    tid = t.get('id', seq); st = norm_status(t.get('status','pending'))
-                else:
-                    tid = seq; st = 'pending'
-                if tid not in tasks:
-                    order.append(tid)
-                tasks[tid] = st
+        # 未知 action：若带 tasks[] 按替换处理（id 口径同 create：分配器取未用 id，不用位置编号）
+        _apply_create(args.get('tasks'))
 
 try:
     with open(path, 'r', encoding='utf-8', errors='replace') as fh:
