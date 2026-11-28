@@ -1,7 +1,7 @@
 #!/bin/sh
 # wiki-ver.sh —— openwiki 页面的 ver 账本生成 / 验真 / 链接闭包（只读或就地刷新）。
 #
-# 纯命令行契约（同 .pi/tools 风格）：不读局 KV、不依赖 egg。
+# 纯命令行契约（同仓 scripts/* 风格）：不读局 KV、不依赖运行时状态。
 #
 # ver 定义：页面正文（整文件字节）的 git blob 哈希取前 6 位十六进制。页面本身**不写 ver**
 # ——一个 ver 只有一个落点，写进页面就会出现两个。账本 = openwiki/ver.json。
@@ -28,7 +28,7 @@
 #   ok             1 当且仅当 changed=missing_id=missing_ver=broken_links=0
 #
 # 退出码：0 正常执行（结论在 ok 键）；2 用法错；3 环境缺失（git/python3）；4 目录不可读或无 md。
-# 「检测发现问题」永远 exit 0 + ok=0（与 .pi/tools/* 同口径）。
+# 「检测发现问题」永远 exit 0 + ok=0（与同仓 scripts/* 同口径）。
 
 set -eu
 

@@ -62,7 +62,7 @@
       "evidence": [
         {
           "resource": "repo://.github/workflows/check.yml",
-          "version": "repo-file-v1:sha256:91bd290dc1740c4f6120b588e41f0485f5f5c208649037a4473f1766f2141ae3"
+          "version": "repo-file-v1:sha256:091749041fe056e38590ec49430134d48b07206318fdb01d080f1437f92f6f9b"
         }
       ]
     },
@@ -72,7 +72,7 @@
       "evidence": [
         {
           "resource": "repo://.github/workflows/check.yml",
-          "version": "repo-file-v1:sha256:91bd290dc1740c4f6120b588e41f0485f5f5c208649037a4473f1766f2141ae3"
+          "version": "repo-file-v1:sha256:091749041fe056e38590ec49430134d48b07206318fdb01d080f1437f92f6f9b"
         },
         {
           "resource": "repo://scripts/persist-matrix.sh",

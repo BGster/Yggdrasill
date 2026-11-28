@@ -58,7 +58,7 @@ jobs:
         run: cargo test --workspace
 
       # 文档面：ver 账本、链接闭包、claims 证据闭包、AGENTS 行数预算。
-      # 两个脚本「发现问题」也 exit 0（口径同 .pi/tools），故这里查 ok=1。
+      # 两个脚本「发现问题」也 exit 0（口径同 dev-tools 的 *_check），故这里查 ok=1。
       - name: 文档闭包（wiki-ver + wiki-consistency）
         run: |
           set -eu
